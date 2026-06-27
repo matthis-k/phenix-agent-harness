@@ -34,6 +34,18 @@
         "expect": { "status": 0 }
       },
       {
+        "id": "deadnix-check",
+        "description": "Find and report dead Nix code",
+        "phase": "verify",
+        "kind": "command",
+        "mutates": false,
+        "sandbox_safe": true,
+        "profiles": ["git-hook", "pre-push", "manual", "nix-check"],
+        "tags": ["nix", "cleanup"],
+        "command": ["deadnix", "--fail", "--no-lambda-arg", "--no-lambda-pattern-names"],
+        "expect": { "status": 0 }
+      },
+      {
         "id": "nix-flake-check",
         "description": "Full Nix flake evaluation check",
         "phase": "verify",
@@ -44,6 +56,39 @@
         "sandbox_safe": false,
         "mutates": false,
         "interactive": false
+      },
+      {
+        "id": "nixfmt-fix",
+        "description": "Auto-format Nix files",
+        "phase": "fix",
+        "kind": "command",
+        "command": ["bash", "-c", "find . -name '*.nix' -not -path './.git/*' -print0 | xargs -0 -r nixfmt"],
+        "profiles": ["fix"],
+        "tags": ["nix", "format", "fix"],
+        "sandbox_safe": false,
+        "mutates": true
+      },
+      {
+        "id": "statix-fix",
+        "description": "Auto-fix statix warnings where safe",
+        "phase": "fix",
+        "kind": "command",
+        "command": ["statix", "fix"],
+        "profiles": ["fix"],
+        "tags": ["nix", "lint", "fix"],
+        "sandbox_safe": false,
+        "mutates": true
+      },
+      {
+        "id": "deadnix-fix",
+        "description": "Remove dead Nix code",
+        "phase": "fix",
+        "kind": "command",
+        "command": ["deadnix", "--no-lambda-arg", "--no-lambda-pattern-names"],
+        "profiles": ["fix"],
+        "tags": ["nix", "cleanup", "fix"],
+        "sandbox_safe": false,
+        "mutates": true
       }
     ]
   }
