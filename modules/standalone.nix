@@ -25,9 +25,6 @@
         "$schema" = "https://opencode.ai/config.json";
         autoupdate = false;
 
-        prompts = "${promptsDir}";
-        commands = "${commandsDir}";
-
         mcp = {
           tend-mcp = mkMcpServer "tend-mcp" "tend-mcp";
           stitch-mcp = mkMcpServer "stitch-mcp" "stitch-mcp";
