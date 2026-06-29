@@ -5,12 +5,6 @@
       inherit (inputs) nix-wrapper-modules;
       codebase-memory-mcp = inputs.nixpkgs-unstable.legacyPackages.${system}.codebase-memory-mcp;
 
-      mkMcpServer = name: pkgAttr: {
-        type = "local";
-        command = [ "${inputs.phenix-tools.packages.${system}."${pkgAttr}"}/bin/${name}" ];
-        enabled = true;
-      };
-
       promptsDir = ../prompts;
       commandsDir = ../commands;
       knowledgeDir = ../knowledge;
@@ -47,8 +41,16 @@
         };
 
         mcp = {
-          tend-mcp = mkMcpServer "tend-mcp" "tend-mcp";
-          stitch-mcp = mkMcpServer "stitch-mcp" "stitch-mcp";
+          tend-mcp = {
+            type = "local";
+            command = [ "${inputs.phenix-tend.packages.${system}."tend-mcp"}/bin/tend-mcp" ];
+            enabled = true;
+          };
+          stitch-mcp = {
+            type = "local";
+            command = [ "${inputs.phenix-stitch.packages.${system}."stitch-mcp"}/bin/stitch-mcp" ];
+            enabled = true;
+          };
           codebase_memory = {
             type = "local";
             command = [ "${codebase-memory-mcp}/bin/codebase-memory-mcp" ];
