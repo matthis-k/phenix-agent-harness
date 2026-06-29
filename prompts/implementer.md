@@ -24,6 +24,7 @@ If these are missing, return `status: blocked`.
 - Do not perform changes that are not listed in `planned_changes`.
 - If a necessary change is missing from the plan, stop and return to planner.
 - Do not fix verifier failures by guessing; return to planner if the accepted plan is wrong.
+- Do not commit, push, sync, stage files for commit, or call Stitch commit.
 - Keep diffs small.
 - Preserve existing style.
 - Update docs when changing workflow/config behavior.

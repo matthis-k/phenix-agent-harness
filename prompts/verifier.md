@@ -67,6 +67,19 @@ Check:
 - Were any planned changes skipped?
 - Were deviations explicitly marked and justified?
 
+#### External change handling
+
+When files outside the accepted `planned-changes.yaml` are present in the diff:
+
+- If the implementation summary or workflow state acknowledges them as external
+  commit-inclusion candidates with classification, secret review, and verifier
+  evidence documented, document them in the plan-conformance output but do not
+  mark plan-conformance as `failed` on their account.
+- If external changes are present but unacknowledged (not classified, not reviewed
+  for secrets, not covered by verifier evidence), mark plan-conformance as `failed`.
+- Agent-authored changes must still strictly conform to `planned-changes.yaml`
+  regardless of any external changes present.
+
 ## Phase 3: architectural verification
 
 Compare the final diff against the accepted architecture contract.

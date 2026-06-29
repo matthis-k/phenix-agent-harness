@@ -3,38 +3,35 @@ description: Run full Phenix plan -> architecture -> implementation -> verificat
 agent: workflow
 ---
 
-Run the full Phenix workflow for this request:
+Run the Phenix workflow for this request:
 
 $ARGUMENTS
 
-1. Save original request to `.opencodestate/request.md`.
-2. Ask planner for a full structured plan.
-3. Save full planner output to `.opencodestate/planner-output.yaml`.
-4. Extract and save:
-   - `.opencodestate/implementation-plan.yaml`
-   - `.opencodestate/planned-changes.yaml`
-5. Ask architect to review the plan.
-6. Save full architecture review to `.opencodestate/architecture-review.yaml`.
-7. Save accepted architecture contract to `.opencodestate/architecture-contract.yaml`.
-8. If architecture is rejected, return to planner.
-9. Ask implementer to apply only accepted planned changes.
-10. Save implementer output to `.opencodestate/implementation-summary.yaml`.
-11. Ask verifier to verify:
-    - mechanical checks
-    - plan conformance against original plan artifacts
-    - architecture conformance against original architecture contract
-12. Save verifier output to `.opencodestate/verification-report.yaml`.
-13. If verifier fails, ask failure-analyzer and save `.opencodestate/failure-analysis.yaml`.
-14. Return to planner with failure analysis.
-
-Before starting, discover repo contracts:
-
-- `AGENTS.md`
-- `docs/*`
-- `CLAUDE.md` or `.claude/`
-- `knowledge/`
-- `CONTRIBUTING.md`
-
-Do not skip architecture review. Do not edit tracked source files. Do not mark complete until verifier returns `status: passed`.
+1. Save the original request to `.opencodestate/request.md` when a stateful workflow is needed.
+2. Classify workflow depth:
+   - read-only
+   - trivial edit
+   - standard edit
+   - full workflow
+3. Discover optional repo contracts if present:
+   - `AGENTS.md`
+   - `docs/*`
+   - `CLAUDE.md` or `.claude/`
+   - `knowledge/`
+   - `CONTRIBUTING.md`
+   - `.opencode/agents/*`
+4. Do not fail only because these optional files are absent.
+5. Invoke only the agents required by the routing predicates in `workflow.md`.
+6. For tracked edits, route writes through `implementer`; workflow must not edit tracked files directly.
+7. For user-facing UI/UX changes, invoke `uiux-designer` before implementation.
+8. Verify all tracked edits before completion.
+9. On verification failure, invoke `failure-analyzer` and re-run only the required planning/architecture/implementation path.
+10. Do not commit by default. If `$ARGUMENTS` explicitly requests `local commit`, `commit`, `commit and push`, `sync`, `sync commit`, or `synced commit`, treat that as an explicit post-verification commit policy.
+11. Run any requested commit policy only after verifier success across mechanical, plan-conformance, and architecture checks, and only through Stitch-safe routes or delegated `review-committer` review.
+12. If the working tree contains pre-existing or user-authored dirty changes
+    outside the planned changes ("external changes"), route them through the
+    external-change commit-inclusion pipeline (acknowledgement, classification,
+    secret review, verifier evidence, commit-summary documentation, Stitch-only)
+    after verifier success and before any commit route executes.
 
 !`git status --short`
