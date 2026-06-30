@@ -2,9 +2,9 @@
   "$schema": "https://phenix.local/schemas/tend.schema.json",
   "version": 1,
   "node": {
-    "id": "phenix-opencode",
-    "description": "Phenix OpenCode wrapper checks",
-    "tags": ["opencode", "mcp"],
+    "id": "phenix-agent-harness",
+    "description": "Phenix agent harness wrapper checks",
+    "tags": ["opencode", "pi", "mcp", "lsp"],
     "context": {
       "workdir": "."
     },

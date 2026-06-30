@@ -1,5 +1,5 @@
 {
-  description = "Wrapped opencode with Phenix MCP and workflow configuration";
+  description = "Phenix agent harness wrappers for OpenCode and Pi";
 
   inputs = {
     flake-parts.url = "github:hercules-ci/flake-parts";

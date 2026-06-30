@@ -1,0 +1,16 @@
+{
+  "name": "@matthis-k/phenix-pi",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Phenix workflow resources and read-only LSP tools for Pi.",
+  "keywords": ["pi-package", "phenix", "lsp"],
+  "pi": {
+    "extensions": ["./pi/extensions"],
+    "skills": ["./pi/skills"],
+    "prompts": ["./pi/prompts"]
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.2",
+    "typebox": "^1.0.59"
+  }
+}

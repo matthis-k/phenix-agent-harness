@@ -8,6 +8,10 @@
       promptsDir = ../prompts;
       commandsDir = ../commands;
       knowledgeDir = ../knowledge;
+      piDir = ../pi;
+      piPromptsDir = piDir + "/prompts";
+      piSkillsDir = piDir + "/skills";
+      piExtensionsDir = piDir + "/extensions";
 
       promptPath = name: builtins.toString promptsDir + "/${name}.md";
       promptCheckPath =
@@ -19,6 +23,7 @@
         glob = "allow";
         grep = "allow";
         list = "allow";
+        lsp = "allow";
         edit = "deny";
         bash = {
           "*" = "ask";
@@ -43,6 +48,7 @@
         glob = "allow";
         grep = "allow";
         list = "allow";
+        lsp = "allow";
         edit = "allow";
         bash = {
           "*" = "ask";
@@ -87,6 +93,25 @@
         default_agent = "phenix-workflow";
         instructions = [ (builtins.toString knowledgeDir + "/glossary.md") ];
 
+        lsp = {
+          typescript = {
+            command = [
+              "typescript-language-server"
+              "--stdio"
+            ];
+            extensions = [
+              ".ts"
+              ".tsx"
+              ".js"
+              ".jsx"
+            ];
+          };
+          nix = {
+            command = [ "nil" ];
+            extensions = [ ".nix" ];
+          };
+        };
+
         command = {
           flow = {
             description = "Run full Phenix plan -> architecture -> implementation -> verification workflow";
@@ -125,6 +150,7 @@
               glob = "allow";
               grep = "allow";
               list = "allow";
+              lsp = "allow";
               edit = "deny";
               bash = {
                 "*" = "ask";
@@ -272,17 +298,79 @@
 
       generatedConfig = pkgs.writeText "phenix-opencode.json" (builtins.toJSON settings);
 
+      piSettings = {
+        defaultProjectTrust = "ask";
+        enableInstallTelemetry = false;
+        extensions = [ (builtins.toString piExtensionsDir + "/lsp.ts") ];
+        skills = [ (builtins.toString piSkillsDir) ];
+        prompts = [ (builtins.toString piPromptsDir) ];
+      };
+
+      piPackageManifest = {
+        name = "@matthis-k/phenix-pi";
+        version = "0.1.0";
+        private = false;
+        description = "Phenix workflow resources and read-only LSP tools for Pi.";
+        keywords = [
+          "pi-package"
+          "phenix"
+          "lsp"
+        ];
+        pi = {
+          extensions = [ "./pi/extensions" ];
+          skills = [ "./pi/skills" ];
+          prompts = [ "./pi/prompts" ];
+        };
+        dependencies = {
+          "@earendil-works/pi-coding-agent" = "^0.80.2";
+          typebox = "^1.0.59";
+        };
+      };
+
+      generatedPiSettings = pkgs.writeText "phenix-pi-settings.json" (builtins.toJSON piSettings);
+      generatedPiPackageJson = pkgs.writeText "phenix-pi-package.json" (
+        builtins.toJSON piPackageManifest
+      );
+      generatedPiConfigDir = pkgs.runCommand "phenix-pi-config" { } ''
+        mkdir -p $out
+        cp ${generatedPiSettings} $out/settings.json
+      '';
+
       wrappedOpencode = nix-wrapper-modules.wrappers.opencode.wrap {
         inherit pkgs;
 
         inherit settings;
 
         envDefault.OPENCODE_DISABLE_AUTOUPDATE = "1";
+        envDefault.PATH = lib.makeBinPath [
+          pkgs.nil
+          pkgs.typescript-language-server
+        ];
+      };
+
+      wrappedPi = pkgs.writeShellApplication {
+        name = "pi";
+        runtimeInputs = [
+          pkgs.pi-coding-agent
+          pkgs.nil
+          pkgs.typescript-language-server
+        ];
+        text = ''
+          export PI_CODING_AGENT_DIR="''${PI_CODING_AGENT_DIR:-${generatedPiConfigDir}}"
+          export PI_PACKAGE_DIR="''${PI_PACKAGE_DIR:-$HOME/.cache/phenix-pi/packages}"
+          export PI_SKIP_VERSION_CHECK="''${PI_SKIP_VERSION_CHECK:-1}"
+          export PI_TELEMETRY="''${PI_TELEMETRY:-0}"
+          exec pi "$@"
+        '';
       };
     in
     {
       packages.default = wrappedOpencode;
+      packages.opencode = wrappedOpencode;
+      packages.pi = wrappedPi;
       packages.generated-config = generatedConfig;
+      packages.generated-pi-settings = generatedPiSettings;
+      packages.generated-pi-package-json = generatedPiPackageJson;
 
       checks.generated-config =
         pkgs.runCommand "phenix-opencode-generated-config-check"
@@ -299,9 +387,14 @@
             jq -e 'has("prompts") | not' ${generatedConfig}
             jq -e '.instructions | type == "array" and length >= 1' ${generatedConfig}
             jq -e '.instructions[0] | type == "string" and test("glossary\\.md$")' ${generatedConfig}
+            jq -e '.lsp.typescript.command == ["typescript-language-server", "--stdio"]' ${generatedConfig}
+            jq -e '.lsp.typescript.extensions == [".ts", ".tsx", ".js", ".jsx"]' ${generatedConfig}
+            jq -e '.lsp.nix.command == ["nil"]' ${generatedConfig}
+            jq -e '.lsp.nix.extensions == [".nix"]' ${generatedConfig}
 
             jq -e '.agent."phenix-workflow".mode == "primary"' ${generatedConfig}
             jq -e '.agent."phenix-workflow".permission.edit == "deny"' ${generatedConfig}
+            jq -e '.agent."phenix-workflow".permission.lsp == "allow"' ${generatedConfig}
             jq -e '.agent."phenix-workflow".permission."tend-mcp_*" == "allow"' ${generatedConfig}
             jq -e '.agent."phenix-workflow".permission."stitch-mcp_*" == "allow"' ${generatedConfig}
             jq -e '.agent."phenix-workflow".permission.bash."tend *" == "allow"' ${generatedConfig}
@@ -317,6 +410,7 @@
             jq -e '.agent."uiux-designer".mode == "subagent"' ${generatedConfig}
 
             jq -e '.agent."phenix-worker".permission.edit == "allow"' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.lsp == "allow"' ${generatedConfig}
             jq -e '.agent."phenix-worker".permission.bash."cargo check*" == "allow"' ${generatedConfig}
             jq -e '.agent."phenix-worker".permission.bash."git commit*" == "ask"' ${generatedConfig}
             jq -e '.agent."phenix-planner".permission.edit == "deny"' ${generatedConfig}
@@ -376,6 +470,32 @@
             check_prompt ${promptCheckPath "commit-sync"} 'stitch-mcp_stitch_commit'
             check_prompt ${promptCheckPath "commit-sync"} 'Never manually walk repositories'
             check_prompt ${promptCheckPath "verifier"} 'tend_stitch_evidence'
+
+            touch $out
+          '';
+
+      checks.generated-pi-resources =
+        pkgs.runCommand "phenix-pi-generated-resources-check"
+          {
+            nativeBuildInputs = [
+              pkgs.jq
+              pkgs.gnugrep
+            ];
+          }
+          ''
+            jq -e 'has("lsp") | not' ${generatedPiSettings}
+            jq -e '.extensions[0] | test("pi/extensions/lsp\\.ts$")' ${generatedPiSettings}
+            jq -e '.skills[0] | test("pi/skills$")' ${generatedPiSettings}
+            jq -e '.prompts[0] | test("pi/prompts$")' ${generatedPiSettings}
+            jq -e '.pi.extensions == ["./pi/extensions"]' ${generatedPiPackageJson}
+            jq -e '.pi.skills == ["./pi/skills"]' ${generatedPiPackageJson}
+            jq -e '.pi.prompts == ["./pi/prompts"]' ${generatedPiPackageJson}
+            jq -e '.dependencies."@earendil-works/pi-coding-agent" | type == "string"' ${generatedPiPackageJson}
+
+            grep -F -q 'name: "lsp_diagnostics"' ${piExtensionsDir}/lsp.ts
+            grep -F -q 'name: "lsp_hover"' ${piExtensionsDir}/lsp.ts
+            grep -F -q 'read-only' ${piExtensionsDir}/lsp.ts
+            ! grep -E -q 'codeAction|rename|workspace/applyEdit' ${piExtensionsDir}/lsp.ts
 
             touch $out
           '';
