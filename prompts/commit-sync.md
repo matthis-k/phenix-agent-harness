@@ -38,6 +38,10 @@ Never manually walk repositories with raw git commands. Raw `git status`, `git
 diff`, and `git log` are allowed for local inspection only. Raw `git commit` or
 `git push` must not replace stitch-backed DAG behavior.
 
+Stitch remains the orchestrator for multi-repo, DAG-aware, sync, and structural commit flows. Single-repo commit policies may be narrower, but destructive or
+irreversible operations such as force push, hard reset, clean, or destructive
+branch deletion require explicit approval and must not be defaulted to allow.
+
 ## Commit semantics
 
 - `local commit`: commit only the current node/repository; do not push.

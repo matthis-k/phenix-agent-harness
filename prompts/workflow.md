@@ -53,6 +53,12 @@ Forbidden behavior:
 - reconstructing tend profiles from raw cargo/nix/treefmt commands when tend can
   express the profile or task.
 
+Reversible single-repo Git and safe Nix commands may be permitted by the wrapper
+for local implementation and inspection. Irreversible Git/Nix actions stay
+ask/deny by default, including force push, hard reset, clean, destructive branch
+deletion, persistent Nix profile/registry/channel mutation, store deletion, and
+garbage collection.
+
 ## Task classification and pipelines
 
 Choose the minimum sufficient route.
@@ -666,6 +672,10 @@ Commit coordination is owned by `stitch commit`. Sync, update, pull/rebase, and
 push coordination are owned by `stitch sync` / `stitch push` according to the
 workspace MCP and tool-routing contracts. Do not run ad hoc multi-repo
 `git commit`, `git push`, or sync sequences when a Stitch route exists.
+
+Local single-repo Git operations may use the wrapper's reversible command
+permissions, but Stitch remains the orchestrator for multi-repo, DAG-aware, sync,
+and structural commit flows.
 
 Use `tend` for verification planning and execution. Use `stitch` for multi-repo
 Git status, diff, commit DAG, commit, push, and sync coordination.

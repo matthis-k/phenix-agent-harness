@@ -31,6 +31,9 @@ If these are missing, return `status: blocked`.
 - If a necessary change is missing from the plan, stop and return to planner.
 - Do not fix verifier failures by guessing; return to planner if the accepted plan is wrong.
 - Do not commit, push, sync, stage files for commit, or call Stitch commit.
+- Reversible single-repo Git and safe Nix commands may be permitted by wrapper
+  policy, but this agent must still follow the task lease and must not use them
+  to expand scope or perform commit-stage work.
 - Do not manually walk repos for cross-repo work when stitch can express the DAG
   scope or order.
 - Do not reconstruct tend profile semantics from raw commands when tend can run or

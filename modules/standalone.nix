@@ -4,6 +4,7 @@
     let
       inherit (inputs) nix-wrapper-modules;
       codebase-memory-mcp = inputs.nixpkgs-unstable.legacyPackages.${system}.codebase-memory-mcp;
+      inherit (pkgs) github-mcp-server;
 
       promptsDir = ../prompts;
       commandsDir = ../commands;
@@ -18,6 +19,75 @@
         name:
         pkgs.writeText "phenix-opencode-${name}-prompt.md" (builtins.readFile (promptsDir + "/${name}.md"));
 
+      safeInspectionBashPermissions = {
+        "git status*" = "allow";
+        "git diff*" = "allow";
+        "git log*" = "allow";
+        "git show*" = "allow";
+        "nix flake check*" = "allow";
+        "nix flake show*" = "allow";
+        "nix flake metadata*" = "allow";
+        "nix eval*" = "allow";
+        "nix build*" = "allow";
+        "nix develop*" = "allow";
+        "nix shell*" = "allow";
+        "nix run*" = "allow";
+        "nix repl*" = "allow";
+        "nix path-info*" = "allow";
+        "nix store ls*" = "allow";
+        "nix store cat*" = "allow";
+        "nix store diff-closures*" = "allow";
+        "nix why-depends*" = "allow";
+        "nix derivation show*" = "allow";
+        "nix-build*" = "allow";
+        "nix-shell*" = "allow";
+        "nix-instantiate*" = "allow";
+      };
+
+      reversibleSingleRepoGitPermissions = {
+        "git branch --show-current*" = "allow";
+        "git branch --list*" = "allow";
+        "git branch -m*" = "allow";
+        "git switch -c*" = "allow";
+        "git add*" = "allow";
+        "git reset HEAD*" = "allow";
+        "git reset --soft*" = "allow";
+        "git stash*" = "allow";
+        "git fetch*" = "allow";
+        "git pull --ff-only*" = "allow";
+      };
+
+      destructiveGitSafeguards = {
+        "git commit*" = "ask";
+        "git push*" = "ask";
+        "git tag*" = "ask";
+        "git merge*" = "ask";
+        "git rebase*" = "ask";
+        "git cherry-pick*" = "ask";
+        "git revert*" = "ask";
+        "git reset --hard*" = "ask";
+        "git clean*" = "deny";
+        "git branch -D*" = "ask";
+        "git push --force*" = "ask";
+        "git push --delete*" = "ask";
+      };
+
+      destructiveNixSafeguards = {
+        "nix flake update*" = "ask";
+        "nix flake lock*" = "ask";
+        "nix profile*" = "ask";
+        "nix registry add*" = "ask";
+        "nix registry remove*" = "ask";
+        "nix channel*" = "ask";
+        "nix-env*" = "ask";
+        "nix store delete*" = "ask";
+        "nix store optimise*" = "ask";
+        "nix-collect-garbage*" = "ask";
+        "nix copy*" = "ask";
+        "nix store sign*" = "ask";
+        "nix key*" = "ask";
+      };
+
       readOnlyAgentPermissions = {
         read = "allow";
         glob = "allow";
@@ -25,19 +95,19 @@
         list = "allow";
         lsp = "allow";
         edit = "deny";
-        bash = {
-          "*" = "ask";
-          "git status*" = "allow";
-          "git diff*" = "allow";
-          "git log*" = "allow";
-          "rg *" = "allow";
-          "find *" = "allow";
-          "tend *" = "allow";
-          "stitch status*" = "allow";
-          "stitch exec*" = "allow";
-          "stitch plan*" = "allow";
-          "stitch dag*" = "allow";
-        };
+        bash =
+          safeInspectionBashPermissions
+          // destructiveNixSafeguards
+          // {
+            "*" = "ask";
+            "rg *" = "allow";
+            "find *" = "allow";
+            "tend *" = "allow";
+            "stitch status*" = "allow";
+            "stitch exec*" = "allow";
+            "stitch plan*" = "allow";
+            "stitch dag*" = "allow";
+          };
         "tend-mcp_*" = "allow";
         "stitch-mcp_*" = "allow";
         "codebase_memory_*" = "allow";
@@ -50,29 +120,26 @@
         list = "allow";
         lsp = "allow";
         edit = "allow";
-        bash = {
-          "*" = "ask";
-          "tend *" = "allow";
-          "stitch status*" = "allow";
-          "stitch exec*" = "allow";
-          "stitch plan*" = "allow";
-          "stitch dag*" = "allow";
-          "cargo check*" = "allow";
-          "cargo test*" = "allow";
-          "nix flake check*" = "allow";
-          "nix build*" = "allow";
-          "treefmt*" = "allow";
-          "statix*" = "allow";
-          "deadnix*" = "allow";
-          "git status*" = "allow";
-          "git diff*" = "allow";
-          "git log*" = "allow";
-          "git add*" = "ask";
-          "git commit*" = "ask";
-          "git push*" = "ask";
-          "stitch commit*" = "ask";
-          "stitch sync*" = "ask";
-        };
+        bash =
+          safeInspectionBashPermissions
+          // reversibleSingleRepoGitPermissions
+          // destructiveGitSafeguards
+          // destructiveNixSafeguards
+          // {
+            "*" = "ask";
+            "tend *" = "allow";
+            "stitch status*" = "allow";
+            "stitch exec*" = "allow";
+            "stitch plan*" = "allow";
+            "stitch dag*" = "allow";
+            "cargo check*" = "allow";
+            "cargo test*" = "allow";
+            "treefmt*" = "allow";
+            "statix*" = "allow";
+            "deadnix*" = "allow";
+            "stitch commit*" = "ask";
+            "stitch sync*" = "ask";
+          };
         "tend-mcp_*" = "allow";
         "stitch-mcp_*" = "allow";
         "codebase_memory_*" = "ask";
@@ -137,6 +204,11 @@
             enabled = true;
             timeout = 10000;
           };
+          github = {
+            type = "local";
+            command = [ "${github-mcp-server}/bin/github-mcp-server" ];
+            enabled = true;
+          };
         };
 
         agent = {
@@ -152,22 +224,22 @@
               list = "allow";
               lsp = "allow";
               edit = "deny";
-              bash = {
-                "*" = "ask";
-                "git status*" = "allow";
-                "git diff*" = "allow";
-                "git log*" = "allow";
-                "rg *" = "allow";
-                "find *" = "allow";
-                "mkdir -p .opencodestate*" = "allow";
-                "tee .opencodestate/*" = "allow";
-                "rm -f .opencodestate/*" = "allow";
-                "tend *" = "allow";
-                "stitch status*" = "allow";
-                "stitch exec*" = "allow";
-                "stitch plan*" = "allow";
-                "stitch dag*" = "allow";
-              };
+              bash =
+                safeInspectionBashPermissions
+                // destructiveNixSafeguards
+                // {
+                  "*" = "ask";
+                  "rg *" = "allow";
+                  "find *" = "allow";
+                  "mkdir -p .opencodestate*" = "allow";
+                  "tee .opencodestate/*" = "allow";
+                  "rm -f .opencodestate/*" = "allow";
+                  "tend *" = "allow";
+                  "stitch status*" = "allow";
+                  "stitch exec*" = "allow";
+                  "stitch plan*" = "allow";
+                  "stitch dag*" = "allow";
+                };
               task = {
                 "*" = "deny";
                 "phenix-planner" = "allow";
@@ -356,7 +428,14 @@
           pkgs.typescript-language-server
         ];
         text = ''
-          export PI_CODING_AGENT_DIR="''${PI_CODING_AGENT_DIR:-${generatedPiConfigDir}}"
+          if [ -z "''${PI_CODING_AGENT_DIR:-}" ]; then
+            PI_CODING_AGENT_DIR="''${XDG_CONFIG_HOME:-$HOME/.config}/phenix-pi"
+          fi
+          export PI_CODING_AGENT_DIR
+          mkdir -p "$PI_CODING_AGENT_DIR"
+          if [ ! -e "$PI_CODING_AGENT_DIR/settings.json" ] || [ ${generatedPiConfigDir}/settings.json -nt "$PI_CODING_AGENT_DIR/settings.json" ]; then
+            cp ${generatedPiConfigDir}/settings.json "$PI_CODING_AGENT_DIR/settings.json"
+          fi
           export PI_PACKAGE_DIR="''${PI_PACKAGE_DIR:-$HOME/.cache/phenix-pi/packages}"
           export PI_SKIP_VERSION_CHECK="''${PI_SKIP_VERSION_CHECK:-1}"
           export PI_TELEMETRY="''${PI_TELEMETRY:-0}"
@@ -394,6 +473,11 @@
             jq -e '.lsp.nix.command == ["nil"]' ${generatedConfig}
             jq -e '.lsp.nix.extensions == [".nix"]' ${generatedConfig}
 
+            jq -e '.mcp.github.type == "local"' ${generatedConfig}
+            jq -e '.mcp.github.enabled == true' ${generatedConfig}
+            jq -e '.mcp.github.command | type == "array" and length == 1 and (.[0] | test("/bin/github-mcp-server$"))' ${generatedConfig}
+            jq -e '.mcp.github | has("environment") | not' ${generatedConfig}
+
             jq -e '.agent."phenix-workflow".mode == "primary"' ${generatedConfig}
             jq -e '.agent."phenix-workflow".permission.edit == "deny"' ${generatedConfig}
             jq -e '.agent."phenix-workflow".permission.lsp == "allow"' ${generatedConfig}
@@ -414,7 +498,28 @@
             jq -e '.agent."phenix-worker".permission.edit == "allow"' ${generatedConfig}
             jq -e '.agent."phenix-worker".permission.lsp == "allow"' ${generatedConfig}
             jq -e '.agent."phenix-worker".permission.bash."cargo check*" == "allow"' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash."git add*" == "allow"' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash."git branch --show-current*" == "allow"' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash."git branch --list*" == "allow"' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash."git branch -m*" == "allow"' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash."git switch -c*" == "allow"' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash."git reset HEAD*" == "allow"' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash."git reset --soft*" == "allow"' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash | has("git branch*") | not' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash | has("git switch*") | not' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash | has("git reset*") | not' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash."git reset --hard*" == "ask"' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash."git clean*" == "deny"' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash."git branch -D*" == "ask"' ${generatedConfig}
             jq -e '.agent."phenix-worker".permission.bash."git commit*" == "ask"' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash."git push*" == "ask"' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash."git push --force*" == "ask"' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash."git push --delete*" == "ask"' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash."nix eval*" == "allow"' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash."nix develop*" == "allow"' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash."nix store ls*" == "allow"' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash."nix flake update*" == "ask"' ${generatedConfig}
+            jq -e '.agent."phenix-worker".permission.bash."nix store delete*" == "ask"' ${generatedConfig}
             jq -e '.agent."phenix-planner".permission.edit == "deny"' ${generatedConfig}
             jq -e '.agent."phenix-architect".permission.edit == "deny"' ${generatedConfig}
             jq -e '.agent."phenix-verifier".permission.edit == "deny"' ${generatedConfig}
@@ -465,12 +570,15 @@
             check_prompt ${promptCheckPath "workflow"} 'full_complete_test'
             check_prompt ${promptCheckPath "workflow"} 'Record `transport: mcp` or `transport: cli`'
             check_prompt ${promptCheckPath "workflow"} 'manually looping through repos'
+            check_prompt ${promptCheckPath "workflow"} 'Reversible single-repo Git and safe Nix commands may be permitted'
+            check_prompt ${promptCheckPath "workflow"} 'Irreversible Git/Nix actions stay'
             check_prompt ${promptCheckPath "planner"} 'task_dag:'
             check_prompt ${promptCheckPath "planner"} 'required_verification_profile'
             check_prompt ${promptCheckPath "planner"} 'mcp_preferred_cli_allowed'
             check_prompt ${promptCheckPath "architecture-verifier"} 'manual_repo_loop_found'
             check_prompt ${promptCheckPath "commit-sync"} 'stitch-mcp_stitch_commit'
             check_prompt ${promptCheckPath "commit-sync"} 'Never manually walk repositories'
+            check_prompt ${promptCheckPath "commit-sync"} 'Stitch remains the orchestrator for multi-repo, DAG-aware, sync, and structural commit flows'
             check_prompt ${promptCheckPath "verifier"} 'tend_stitch_evidence'
 
             touch $out
@@ -493,6 +601,10 @@
             jq -e '.pi.skills == ["./pi/skills"]' ${generatedPiPackageJson}
             jq -e '.pi.prompts == ["./pi/prompts"]' ${generatedPiPackageJson}
             jq -e '.dependencies."@earendil-works/pi-coding-agent" | type == "string"' ${generatedPiPackageJson}
+
+            grep -F -q 'PI_CODING_AGENT_DIR="''${XDG_CONFIG_HOME:-$HOME/.config}/phenix-pi"' ${wrappedPi}/bin/pi
+            grep -F -q '${generatedPiConfigDir}/settings.json' ${wrappedPi}/bin/pi
+            ! grep -F -q 'PI_CODING_AGENT_DIR="${generatedPiConfigDir}"' ${wrappedPi}/bin/pi
 
             grep -F -q 'name: "lsp_diagnostics"' ${piExtensionsDir}/lsp.ts
             grep -F -q 'name: "lsp_hover"' ${piExtensionsDir}/lsp.ts
