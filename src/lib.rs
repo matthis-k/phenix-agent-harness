@@ -71,7 +71,12 @@ pub struct AgentCommRepository {
 impl AgentCommRepository {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let conn = Connection::open(path)?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+        // Set busy timeout BEFORE any SQL operations. This ensures that
+        // PRAGMA journal_mode=WAL (which may need to acquire a lock to
+        // checkpoint the existing journal) will retry on SQLITE_BUSY
+        // instead of immediately failing and crashing the MCP at boot.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         let repo = Self { conn };
         repo.init()?;
         Ok(repo)
@@ -84,7 +89,24 @@ impl AgentCommRepository {
         Ok(repo)
     }
 
+    /// Initialize or migrate the database schema.
+    ///
+    /// Uses `PRAGMA user_version` to detect the current schema version.
+    /// Version 0 (uninitialized) runs the full schema creation.
+    /// Future versions should add migration steps here.
     pub fn init(&self) -> Result<()> {
+        let version: i64 = self
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap_or(0);
+        if version < 1 {
+            self.migrate_v1()?;
+        }
+        Ok(())
+    }
+
+    /// Schema version 1: initial table creation.
+    fn migrate_v1(&self) -> Result<()> {
         self.conn.execute_batch(
             "PRAGMA foreign_keys = ON;
              CREATE TABLE IF NOT EXISTS sessions (
@@ -149,7 +171,8 @@ impl AgentCommRepository {
                agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
                title TEXT NOT NULL, rationale TEXT NOT NULL, outcome TEXT NOT NULL, metadata TEXT NOT NULL,
                created_at TEXT NOT NULL
-             );",
+             );
+             PRAGMA user_version = 1;",
         )?;
         Ok(())
     }
@@ -428,6 +451,41 @@ impl AgentCommRepository {
     }
 }
 
+/// Process a single JSON-RPC request against the repository.
+///
+/// Handles the MCP lifecycle methods (`initialize`, `ping`, `tools/list`,
+/// `tools/call`) and routes tool tool calls to the repository. Returns
+/// `Value::Null` for notifications so the caller can suppress the response.
+pub fn handle_json_rpc(repo: &AgentCommRepository, request: Value) -> Value {
+    let id = request.get("id").cloned().unwrap_or(Value::Null);
+    let method = request.get("method").and_then(Value::as_str).unwrap_or("");
+    let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
+    let is_notification = method.starts_with("notifications/");
+    let result: std::result::Result<Value, String> = match method {
+        "initialize" => Ok(json!({
+            "protocolVersion": "2024-11-05",
+            "serverInfo": {"name": "phenix-agent-comm-mcp", "version": env!("CARGO_PKG_VERSION")},
+            "capabilities": {"tools": {}}
+        })),
+        "ping" => Ok(json!({})),
+        "tools/list" => Ok(json!({"tools": tool_descriptions()})),
+        "tools/call" => {
+            let name = params.get("name").and_then(Value::as_str).unwrap_or("");
+            let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            repo.call_tool(name, args).map(|value| json!({
+                "content": [{"type": "text", "text": serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string())}],
+                "isError": false
+            })).map_err(|err| err.to_string())
+        }
+        _ if is_notification => return Value::Null,
+        _ => Err(format!("method not found: {method}")),
+    };
+    match result {
+        Ok(result) => json!({"jsonrpc":"2.0", "id": id, "result": result}),
+        Err(err) => json!({"jsonrpc":"2.0", "id": id, "error": {"code": -32000, "message": err.to_string()}}),
+    }
+}
+
 fn str_arg<'a>(a: &'a serde_json::Map<String, Value>, name: &'static str) -> Result<&'a str> { a.get(name).and_then(Value::as_str).ok_or(AgentCommError::Missing(name)) }
 fn opt_str<'a>(a: &'a serde_json::Map<String, Value>, name: &str) -> Option<&'a str> { a.get(name).and_then(Value::as_str) }
 fn opt_str_array(a: &serde_json::Map<String, Value>, name: &'static str) -> Result<Vec<String>> {
@@ -539,5 +597,91 @@ mod tests {
         let current = repo2.call_tool("comm_task_list_for_agent", json!({"agent_id":a1["id"]})).unwrap();
         assert_eq!(current[0]["claimed_by"], a1["id"]);
         assert_eq!(current[0]["status"], "in_progress");
+    }
+
+    #[test]
+    fn mcp_handshake_full_sequence() {
+        let repo = AgentCommRepository::open_memory().unwrap();
+
+        // initialize
+        let resp = handle_json_rpc(&repo, json!({"jsonrpc":"2.0", "id":1, "method":"initialize"}));
+        assert_eq!(resp["jsonrpc"], "2.0");
+        assert_eq!(resp["id"], 1);
+        assert_eq!(resp["result"]["serverInfo"]["name"], "phenix-agent-comm-mcp");
+        assert_eq!(resp["result"]["protocolVersion"], "2024-11-05");
+        assert!(resp["result"]["capabilities"]["tools"].is_object());
+
+        // notifications/initialized → should return Value::Null (suppressed)
+        let resp = handle_json_rpc(&repo, json!({"jsonrpc":"2.0", "method":"notifications/initialized"}));
+        assert!(resp.is_null(), "notifications must return Null");
+
+        // ping
+        let resp = handle_json_rpc(&repo, json!({"jsonrpc":"2.0", "id":2, "method":"ping"}));
+        assert_eq!(resp["result"], json!({}));
+
+        // tools/list
+        let resp = handle_json_rpc(&repo, json!({"jsonrpc":"2.0", "id":3, "method":"tools/list"}));
+        let tools = &resp["result"]["tools"];
+        assert!(tools.is_array());
+        assert!(tools.as_array().unwrap().len() >= 30, "expected at least 30 tools");
+        assert!(tools[0]["name"].is_string());
+
+        // tools/call — comm_session_init
+        let resp = handle_json_rpc(&repo, json!({
+            "jsonrpc":"2.0", "id":4, "method":"tools/call",
+            "params": {"name": "comm_session_init", "arguments": {"name": "mcp-test"}}
+        }));
+        assert_eq!(resp["result"]["isError"], false, "session init should succeed");
+        let content = &resp["result"]["content"];
+        assert!(content.is_array());
+        assert_eq!(content[0]["type"], "text");
+
+        // unknown method returns error
+        let resp = handle_json_rpc(&repo, json!({"jsonrpc":"2.0", "id":5, "method":"unknown"}));
+        assert!(resp.get("error").is_some(), "unknown method should return error");
+        assert_eq!(resp["error"]["code"], -32000);
+
+        // notifications/anything also suppressed
+        let resp = handle_json_rpc(&repo, json!({"jsonrpc":"2.0", "method":"notifications/foo"}));
+        assert!(resp.is_null());
+
+        // notifications/cancelled is also suppressed
+        let resp = handle_json_rpc(&repo, json!({"jsonrpc":"2.0", "method":"notifications/cancelled"}));
+        assert!(resp.is_null(), "notifications/* must return Null regardless of path");
+    }
+
+    #[test]
+    fn schema_migration_sets_user_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("schema-version.sqlite3");
+        let repo = AgentCommRepository::open(&db).unwrap();
+        // After open+init, user_version should be 1
+        let version: i64 = repo.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, 1, "schema should be at version 1 after init");
+
+        // Open again — should not fail or reset
+        let repo2 = AgentCommRepository::open(&db).unwrap();
+        let version: i64 = repo2.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, 1, "re-opening should preserve user_version");
+    }
+
+    #[test]
+    fn busy_timeout_set_before_sql_operations() {
+        // Verify that the busy_timeout pragma was set properly by checking
+        // the connection's busy timeout setting.
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("busy-test.sqlite3");
+        let repo = AgentCommRepository::open(&db).unwrap();
+        let timeout: i64 = repo.conn.query_row("PRAGMA busy_timeout", [], |r| r.get(0)).unwrap();
+        // rusqlite's busy_timeout sets it in milliseconds. We set 5000ms.
+        assert_eq!(timeout, 5000, "busy_timeout should be 5000ms");
+    }
+
+    #[test]
+    fn open_memory_is_usable() {
+        let repo = AgentCommRepository::open_memory().unwrap();
+        let s = repo.call_tool("comm_session_init", json!({"name":"mem-test"})).unwrap();
+        assert_eq!(s["name"], "mem-test");
+        assert_eq!(s["status"], "open");
     }
 }

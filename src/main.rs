@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use directories::ProjectDirs;
-use phenix_agent_comm::{tool_descriptions, AgentCommRepository};
+use phenix_agent_comm::{handle_json_rpc, AgentCommRepository};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
@@ -19,7 +19,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Init,
-    Tool { name: String, #[arg(long, default_value = "{}") ] args: Value },
+    Tool { name: String, #[arg(long, default_value = "{}")] args: String },
     StdioMcp,
 }
 
@@ -32,7 +32,11 @@ fn main() -> Result<()> {
     let repo = AgentCommRepository::open(&db_path).with_context(|| format!("opening {}", db_path.display()))?;
     match cli.command {
         Command::Init => print_json(json!({ "db": db_path, "initialized": true })),
-        Command::Tool { name, args } => print_json(repo.call_tool(&name, args)?),
+        Command::Tool { name, args } => {
+        let parsed_args: serde_json::Value = serde_json::from_str(&args)
+            .map_err(|e| anyhow::anyhow!("invalid JSON for --args: {} (got: {})", e, args))?;
+        print_json(repo.call_tool(&name, parsed_args)?)
+    },
         Command::StdioMcp => run_mcp(&repo),
     }
 }
@@ -48,36 +52,6 @@ fn run_mcp(repo: &AgentCommRepository) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn handle_json_rpc(repo: &AgentCommRepository, request: Value) -> Value {
-    let id = request.get("id").cloned().unwrap_or(Value::Null);
-    let method = request.get("method").and_then(Value::as_str).unwrap_or("");
-    let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
-    let is_notification = method.starts_with("notifications/");
-    let result: std::result::Result<Value, String> = match method {
-        "initialize" => Ok(json!({
-            "protocolVersion": "2024-11-05",
-            "serverInfo": {"name": "phenix-agent-comm-mcp", "version": env!("CARGO_PKG_VERSION")},
-            "capabilities": {"tools": {}}
-        })),
-        "ping" => Ok(json!({})),
-        "tools/list" => Ok(json!({"tools": tool_descriptions()})),
-        "tools/call" => {
-            let name = params.get("name").and_then(Value::as_str).unwrap_or("");
-            let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
-            repo.call_tool(name, args).map(|value| json!({
-                "content": [{"type": "text", "text": serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string())}],
-                "isError": false
-            })).map_err(|err| err.to_string())
-        }
-        _ if is_notification => return Value::Null,
-        _ => Err(format!("method not found: {method}")),
-    };
-    match result {
-        Ok(result) => json!({"jsonrpc":"2.0", "id": id, "result": result}),
-        Err(err) => json!({"jsonrpc":"2.0", "id": id, "error": {"code": -32000, "message": err.to_string()}}),
-    }
 }
 
 fn read_message(input: &mut impl BufRead) -> Result<Option<Value>> {

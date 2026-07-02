@@ -451,6 +451,59 @@
       checks = {
         agent-comm = agentComm;
 
+        agent-comm-smoke =
+          pkgs.runCommand "phenix-agent-comm-smoke-test"
+            {
+              nativeBuildInputs = [
+                agentComm
+                pkgs.jq
+              ];
+            }
+            ''
+              # Smoke test 1: boot the binary with a temp DB and verify it initializes
+              echo "=== agent-comm init smoke test ==="
+              DB=$(mktemp)
+              ${agentComm}/bin/phenix-agent-comm-mcp init --db "$DB" > /dev/null 2>&1 || {
+                echo "FAIL: agent-comm init boot failed"
+                exit 1
+              }
+              echo "init: OK"
+
+              # Smoke test 2: call a tool directly via the CLI subcommand
+              echo "=== agent-comm tool call smoke test ==="
+              TOOL_OUT=$(${agentComm}/bin/phenix-agent-comm-mcp tool \
+                comm_session_init \
+                --args '{"name":"smoke-test"}' \
+                --db "$DB" 2>&1) || {
+                echo "FAIL: agent-comm tool call failed"
+                echo "$TOOL_OUT"
+                exit 1
+              }
+              echo "$TOOL_OUT" | jq -e '.status == "open"' > /dev/null 2>&1 || {
+                echo "FAIL: session status is not open"
+                echo "$TOOL_OUT"
+                exit 1
+              }
+              echo "tool call: OK"
+
+              # Smoke test 3: session list works
+              echo "=== session list smoke test ==="
+              LIST_OUT=$(${agentComm}/bin/phenix-agent-comm-mcp tool \
+                comm_session_list \
+                --args '{}' \
+                --db "$DB" 2>&1) || {
+                echo "FAIL: agent-comm session list failed"
+                echo "$LIST_OUT"
+                exit 1
+              }
+              echo "session list: OK"
+
+              # Clean up
+              rm -f "$DB"
+
+              touch $out
+            '';
+
         generated-config =
           pkgs.runCommand "phenix-opencode-generated-config-check"
             {
