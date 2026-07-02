@@ -88,38 +88,8 @@
         "nix key*" = "ask";
       };
 
-      agentStateWriteBashPermissions = {
-        "mkdir .phenix-agent-state*" = "allow";
-        "mkdir -p .phenix-agent-state*" = "allow";
-        "cat > .phenix-agent-state/*" = "allow";
-        "tee .phenix-agent-state/*" = "allow";
-        "tee -a .phenix-agent-state/*" = "allow";
-        "printf * > .phenix-agent-state/*" = "allow";
-        "printf * >> .phenix-agent-state/*" = "allow";
-        "python -c *.phenix-agent-state/*" = "allow";
-        "python3 -c *.phenix-agent-state/*" = "allow";
-        "chmod * .phenix-agent-state/*" = "deny";
-        "cat > .phenix-agent-state/*..*" = "deny";
-        "cat > .phenix-agent-state/*.env*" = "deny";
-        "cat > .phenix-agent-state/*secrets*" = "deny";
-        "tee .phenix-agent-state/*..*" = "deny";
-        "tee .phenix-agent-state/*.env*" = "deny";
-        "tee .phenix-agent-state/*secrets*" = "deny";
-        "tee -a .phenix-agent-state/*..*" = "deny";
-        "tee -a .phenix-agent-state/*.env*" = "deny";
-        "tee -a .phenix-agent-state/*secrets*" = "deny";
-        "printf * > .phenix-agent-state/*..*" = "deny";
-        "printf * > .phenix-agent-state/*.env*" = "deny";
-        "printf * > .phenix-agent-state/*secrets*" = "deny";
-        "printf * >> .phenix-agent-state/*..*" = "deny";
-        "printf * >> .phenix-agent-state/*.env*" = "deny";
-        "printf * >> .phenix-agent-state/*secrets*" = "deny";
-        "python -c *.phenix-agent-state/*..*" = "deny";
-        "python -c *.phenix-agent-state/*.env*" = "deny";
-        "python -c *.phenix-agent-state/*secrets*" = "deny";
-        "python3 -c *.phenix-agent-state/*..*" = "deny";
-        "python3 -c *.phenix-agent-state/*.env*" = "deny";
-        "python3 -c *.phenix-agent-state/*secrets*" = "deny";
+      agentCommPermissions = {
+        "agent_comm_*" = "allow";
       };
 
       readOnlyAgentPermissions = {
@@ -132,7 +102,6 @@
         bash =
           safeInspectionBashPermissions
           // destructiveNixSafeguards
-          // agentStateWriteBashPermissions
           // {
             "*" = "ask";
             "rg *" = "allow";
@@ -146,7 +115,8 @@
         "tend-mcp_*" = "allow";
         "stitch-mcp_*" = "allow";
         "codebase_memory_*" = "allow";
-      };
+      }
+      // agentCommPermissions;
 
       workerPermissions = {
         read = "allow";
@@ -160,7 +130,6 @@
           // reversibleSingleRepoGitPermissions
           // destructiveGitSafeguards
           // destructiveNixSafeguards
-          // agentStateWriteBashPermissions
           // {
             "*" = "ask";
             "tend *" = "allow";
@@ -179,7 +148,8 @@
         "tend-mcp_*" = "allow";
         "stitch-mcp_*" = "allow";
         "codebase_memory_*" = "ask";
-      };
+      }
+      // agentCommPermissions;
 
       commitSyncPermissions = readOnlyAgentPermissions // {
         bash = readOnlyAgentPermissions.bash // {
@@ -240,6 +210,14 @@
             enabled = true;
             timeout = 10000;
           };
+          agent_comm = {
+            type = "local";
+            command = [
+              "${agentComm}/bin/phenix-agent-comm-mcp"
+              "stdio-mcp"
+            ];
+            enabled = true;
+          };
           github = {
             type = "local";
             command = [
@@ -267,7 +245,6 @@
               bash =
                 safeInspectionBashPermissions
                 // destructiveNixSafeguards
-                // agentStateWriteBashPermissions
                 // {
                   "*" = "ask";
                   "rg *" = "allow";
@@ -292,37 +269,13 @@
               "tend-mcp_*" = "allow";
               "codebase_memory_*" = "allow";
               "stitch-mcp_*" = "allow";
-            };
-          };
-          workflow = {
-            mode = "primary";
-            hidden = true;
-            description = "Compatibility alias for phenix-workflow.";
-            prompt = "{file:${promptPath "workflow"}}";
-            permission = {
-              edit = "deny";
-              task = {
-                "*" = "deny";
-                "phenix-planner" = "allow";
-                "phenix-architect" = "allow";
-                "phenix-worker" = "allow";
-                "phenix-verifier" = "allow";
-                "phenix-architecture-verifier" = "allow";
-                "phenix-commit-sync" = "allow";
-              };
-            };
+            }
+            // agentCommPermissions;
           };
           "phenix-planner" = {
             mode = "subagent";
             hidden = true;
             description = "Creates and refines task DAGs, acceptance criteria, verification profiles, and handoff memory without editing files.";
-            prompt = "{file:${promptPath "planner"}}";
-            permission = readOnlyAgentPermissions;
-          };
-          planner = {
-            mode = "subagent";
-            hidden = true;
-            description = "Compatibility alias for phenix-planner.";
             prompt = "{file:${promptPath "planner"}}";
             permission = readOnlyAgentPermissions;
           };
@@ -333,13 +286,6 @@
             prompt = "{file:${promptPath "architect"}}";
             permission = readOnlyAgentPermissions;
           };
-          architect = {
-            mode = "subagent";
-            hidden = true;
-            description = "Compatibility alias for phenix-architect.";
-            prompt = "{file:${promptPath "architect"}}";
-            permission = readOnlyAgentPermissions;
-          };
           "phenix-worker" = {
             mode = "subagent";
             hidden = true;
@@ -347,24 +293,10 @@
             prompt = "{file:${promptPath "implementer"}}";
             permission = workerPermissions;
           };
-          implementer = {
-            mode = "subagent";
-            hidden = true;
-            description = "Compatibility alias for phenix-worker.";
-            prompt = "{file:${promptPath "implementer"}}";
-            permission = workerPermissions;
-          };
           "phenix-verifier" = {
             mode = "subagent";
             hidden = true;
             description = "Verifies the actual diff, required tend/stitch evidence, profile/scope/order, and task-packet conformance without editing files.";
-            prompt = "{file:${promptPath "verifier"}}";
-            permission = readOnlyAgentPermissions;
-          };
-          verifier = {
-            mode = "subagent";
-            hidden = true;
-            description = "Compatibility alias for phenix-verifier.";
             prompt = "{file:${promptPath "verifier"}}";
             permission = readOnlyAgentPermissions;
           };
@@ -379,13 +311,6 @@
             mode = "subagent";
             hidden = true;
             description = "Guarded executor for explicit commit/sync operations. Uses stitch MCP first and stitch CLI fallback; never manually walks repositories.";
-            prompt = "{file:${promptPath "commit-sync"}}";
-            permission = commitSyncPermissions;
-          };
-          "review-committer" = {
-            mode = "subagent";
-            hidden = true;
-            description = "Compatibility alias for phenix-commit-sync.";
             prompt = "{file:${promptPath "commit-sync"}}";
             permission = commitSyncPermissions;
           };
@@ -502,8 +427,8 @@
         '';
       };
 
-      workflowState = pkgs.rustPlatform.buildRustPackage {
-        pname = "phenix-workflow-state";
+      agentComm = pkgs.rustPlatform.buildRustPackage {
+        pname = "phenix-agent-comm";
         version = "0.1.0";
         src = ../.;
         cargoLock.lockFile = ../Cargo.lock;
@@ -516,14 +441,14 @@
         default = opencodeWithGithubToken;
         opencode = opencodeWithGithubToken;
         pi = wrappedPi;
-        workflow-state = workflowState;
+        agent-comm = agentComm;
         generated-config = generatedConfig;
         generated-pi-settings = generatedPiSettings;
         generated-pi-package-json = generatedPiPackageJson;
       };
 
       checks = {
-        workflow-state = workflowState;
+        agent-comm = agentComm;
 
         generated-config =
           pkgs.runCommand "phenix-opencode-generated-config-check"
@@ -549,25 +474,21 @@
               jq -e '.mcp.github.enabled == true' ${generatedConfig}
               jq -e '.mcp.github.command | type == "array" and length == 2 and (.[0] | test("/bin/github-mcp-server$")) and .[1] == "stdio"' ${generatedConfig}
               jq -e '.mcp.github.environment.GITHUB_PERSONAL_ACCESS_TOKEN == "{env:GITHUB_PERSONAL_ACCESS_TOKEN}"' ${generatedConfig}
+              jq -e '.mcp.agent_comm.type == "local"' ${generatedConfig}
+              jq -e '.mcp.agent_comm.command | type == "array" and length == 2 and (.[0] | test("/bin/phenix-agent-comm-mcp$")) and .[1] == "stdio-mcp"' ${generatedConfig}
 
               jq -e '.agent."phenix-workflow".mode == "primary"' ${generatedConfig}
               jq -e '.agent."phenix-workflow".permission.edit == "deny"' ${generatedConfig}
               jq -e '.agent."phenix-workflow".permission.lsp == "allow"' ${generatedConfig}
               jq -e '.agent."phenix-workflow".permission."tend-mcp_*" == "allow"' ${generatedConfig}
               jq -e '.agent."phenix-workflow".permission."stitch-mcp_*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission."agent_comm_*" == "allow"' ${generatedConfig}
+              denied_permission="comm""_*"
+              jq -e --arg denied "$denied_permission" '[paths(scalars) as $p | {key: ($p[-1] | tostring), value: getpath($p)}] | all(.key != $denied and .value != $denied)' ${generatedConfig}
               jq -e '.agent."phenix-workflow".permission.bash."tend *" == "allow"' ${generatedConfig}
               jq -e '.agent."phenix-workflow".permission.bash."stitch exec*" == "allow"' ${generatedConfig}
-              jq -e '.agent."phenix-workflow".permission.bash."mkdir -p .phenix-agent-state*" == "allow"' ${generatedConfig}
-              jq -e '.agent."phenix-workflow".permission.bash."cat > .phenix-agent-state/*" == "allow"' ${generatedConfig}
-              jq -e '.agent."phenix-workflow".permission.bash."tee -a .phenix-agent-state/*" == "allow"' ${generatedConfig}
-              jq -e '.agent."phenix-workflow".permission.bash."python -c *.phenix-agent-state/*" == "allow"' ${generatedConfig}
-              jq -e '.agent."phenix-workflow".permission.bash."chmod * .phenix-agent-state/*" == "deny"' ${generatedConfig}
-              jq -e '.agent."phenix-workflow".permission.bash."tee -a .phenix-agent-state/*secrets*" == "deny"' ${generatedConfig}
-              jq -e '.agent."phenix-workflow".permission.bash."tee -a .phenix-agent-state/*.env*" == "deny"' ${generatedConfig}
-              jq -e '.agent."phenix-workflow".permission.bash."tee -a .phenix-agent-state/*..*" == "deny"' ${generatedConfig}
-              jq -e '.agent."phenix-workflow".permission.bash."python -c *.phenix-agent-state/*secrets*" == "deny"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.bash | keys | all(contains("agent-state") | not)' ${generatedConfig}
               jq -e '.agent."phenix-workflow".permission.bash | has("mkdir -p .opencodestate*") | not' ${generatedConfig}
-              jq -e '.agent."phenix-workflow".permission.bash | has("rm -f .phenix-agent-state/*") | not' ${generatedConfig}
               jq -e '.agent."phenix-workflow".permission.bash | has("python -c *flake.nix*") | not' ${generatedConfig}
 
               jq -e '.agent."phenix-planner".mode == "subagent"' ${generatedConfig}
@@ -604,10 +525,8 @@
               jq -e '.agent."phenix-worker".permission.bash."nix store ls*" == "allow"' ${generatedConfig}
               jq -e '.agent."phenix-worker".permission.bash."nix flake update*" == "ask"' ${generatedConfig}
               jq -e '.agent."phenix-worker".permission.bash."nix store delete*" == "ask"' ${generatedConfig}
-              jq -e '.agent."phenix-worker".permission.bash."mkdir -p .phenix-agent-state*" == "allow"' ${generatedConfig}
-              jq -e '.agent."phenix-worker".permission.bash."python -c *.phenix-agent-state/*" == "allow"' ${generatedConfig}
-              jq -e '.agent."phenix-worker".permission.bash."chmod * .phenix-agent-state/*" == "deny"' ${generatedConfig}
-              jq -e '.agent."phenix-planner".permission.bash."mkdir -p .phenix-agent-state*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission."agent_comm_*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-planner".permission."agent_comm_*" == "allow"' ${generatedConfig}
               jq -e '.agent."phenix-planner".permission.edit == "deny"' ${generatedConfig}
               jq -e '.agent."phenix-architect".permission.edit == "deny"' ${generatedConfig}
               jq -e '.agent."phenix-verifier".permission.edit == "deny"' ${generatedConfig}
@@ -627,6 +546,14 @@
               jq -e '.agent."phenix-workflow".permission.task."phenix-commit-sync" == "allow"' ${generatedConfig}
               jq -e '.agent."phenix-workflow".permission.task."failure-analyzer" == "allow"' ${generatedConfig}
               jq -e '.agent."phenix-workflow".permission.task."uiux-designer" == "allow"' ${generatedConfig}
+
+              jq -e '.agent | has("workflow") | not' ${generatedConfig}
+              jq -e '.agent | has("planner") | not' ${generatedConfig}
+              jq -e '.agent | has("architect") | not' ${generatedConfig}
+              jq -e '.agent | has("implementer") | not' ${generatedConfig}
+              jq -e '.agent | has("verifier") | not' ${generatedConfig}
+              denied_review="review""-committer"
+              jq -e --arg denied "$denied_review" '.agent | has($denied) | not' ${generatedConfig}
 
               jq -e '.agent."phenix-workflow".description | type == "string" and length > 0' ${generatedConfig}
               jq -e '.agent."phenix-planner".description | type == "string" and length > 0' ${generatedConfig}

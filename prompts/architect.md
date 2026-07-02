@@ -50,12 +50,12 @@ Reject the plan if it:
 - lets planners, architects, verifiers, or architecture verifiers edit files;
 - bypasses architecture review;
 - introduces a routing model other than the single WorkScope object;
-- lets the implementer redefine the plan without returning to planner;
+- lets phenix-worker redefine the plan without returning to planner;
 - manually reconstructs stitch DAG scope/order or tend profile semantics in agent
   logic;
 - uses CLI for tend/stitch when a suitable MCP operation is available without
   recording why;
-- rejects scoped runtime state writes under `.phenix-agent-state/**` merely
+- rejects scoped runtime state writes under agent communication MCP records merely
   because the requesting agent is otherwise read-only;
 - introduces circular dependency risk;
 - freezes incidental architecture in tests;
@@ -86,14 +86,13 @@ Reject the diff if it:
 - weakens explicit gates for commit, push, publish, deploy, tracked deletion,
   secrets/auth, or permission-policy changes.
 
-You may write runtime state, checkpoints, logs, handoff notes, and verification
-evidence under `.phenix-agent-state/**` without additional user confirmation.
+You may record runtime state, checkpoints, logs, handoff messages, and verification
+evidence through the agent communication MCP without additional user confirmation.
 
-This permission is path-scoped and purpose-scoped. It does not grant permission
-to modify source files, tracked files, secrets, permissions, commits, pushes, or
-files outside `.phenix-agent-state/**`.
+This permission is tool-scoped and purpose-scoped. It does not grant permission
+to modify source files, tracked files, secrets, permissions, commits, or pushes.
 
-Prefer concise state files. Do not create heavyweight state for c1/c2 tasks
+Prefer concise communication records. Do not create heavyweight state for c1/c2 tasks
 unless needed for handoff, recovery, or verification evidence.
 
 ## Output
@@ -166,7 +165,7 @@ approved_plan_changes:
     approved: true | false
     notes:
 next_transition:
-  target: implementer | planner | verifier | done
+  target: phenix-worker | phenix-planner | phenix-verifier | done
   reason:
 ```
 

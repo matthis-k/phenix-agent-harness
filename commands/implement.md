@@ -1,6 +1,6 @@
 ---
 description: Implement the accepted plan
-agent: implementer
+agent: phenix-worker
 subtask: true
 ---
 

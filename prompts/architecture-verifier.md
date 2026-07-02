@@ -22,16 +22,10 @@ edit files.
 You must consume the accepted architecture contract and final workflow state when
 present:
 
-```text
-.phenix-agent-state/architecture-review.yaml
-.phenix-agent-state/architecture-contract.yaml
-.phenix-agent-state/verification-report.yaml
-.phenix-agent-state/tasks/<task-id>/task.yaml
-.phenix-agent-state/tasks/<task-id>/dag.yaml
-.phenix-agent-state/tasks/<task-id>/handoff-memory.yaml
-.phenix-agent-state/tasks/<task-id>/checkpoints/
-.phenix-agent-state/tasks/<task-id>/operations/
-```
+Use the `agent_comm` MCP to retrieve architecture-review,
+architecture-contract, verification-report, task DAG, handoff memory,
+checkpoints, and operation records. These are MCP records, not repository file
+paths or shell-readable pseudo-files.
 
 If the architecture contract is required but missing, return `status: failed`.
 
@@ -41,7 +35,7 @@ Reject the final state if it:
 
 - expands scope beyond the accepted task packet without a recorded escalation;
 - introduces routing or permission models outside the single WorkScope;
-- requires heavyweight `.phenix-agent-state/` for `c1`/`c2` without recovery/handoff;
+- requires heavyweight agent communication MCP for `c1`/`c2` without recovery/handoff;
 - bypasses strict `c4` planner/architect/worker/verifier handling for
   workflow/control-plane changes;
 - changes dependency direction or repo boundaries unexpectedly;

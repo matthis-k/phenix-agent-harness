@@ -21,7 +21,7 @@ not edit files.
 - Use tend MCP/CLI to inspect local tasks/profiles when available; do not
   reconstruct tend profiles from raw cargo/nix/treefmt commands.
 - Identify architecture intent for the architect to validate.
-- Keep the implementer from needing to invent architecture.
+- Keep phenix-worker from needing to invent architecture.
 - Keep the verifier able to compare implementation against the original plan.
 
 ## Contract discovery
@@ -63,12 +63,11 @@ Read repo-specific contracts from the following locations when present:
   classify it as complex and require architecture review.
 - Prefer the minimum sufficient pipeline. Do not request full DAG verification for
   a localized low-risk task.
-- You may write runtime state, checkpoints, logs, handoff notes, and verification
-  evidence under `.phenix-agent-state/**` without additional user confirmation.
-- This permission is path-scoped and purpose-scoped. It does not grant permission
-  to modify source files, tracked files, secrets, permissions, commits, pushes, or
-  files outside `.phenix-agent-state/**`.
-- Prefer concise state files. Do not create heavyweight state for c1/c2 tasks
+- You may record runtime state, checkpoints, logs, handoff messages, and verification
+  evidence through the agent communication MCP without additional user confirmation.
+- This permission is tool-scoped and purpose-scoped. It does not grant permission
+  to modify source files, tracked files, secrets, permissions, commits, or pushes.
+- Prefer concise communication records. Do not create heavyweight state for c1/c2 tasks
   unless needed for handoff, recovery, or verification evidence.
 - Escalate verification to full when public APIs/config, flake inputs/overlays,
   shared modules, tend/stitch semantics, or downstream consumers may be affected.

@@ -1,6 +1,6 @@
 ---
 description: Verify current diff against the accepted architecture contract
-agent: architect
+agent: phenix-architecture-verifier
 subtask: true
 ---
 
@@ -25,13 +25,7 @@ Current diff:
 
 Workflow state:
 
-!`for f in .phenix-agent-state/planner-output.yaml .phenix-agent-state/implementation-plan.yaml .phenix-agent-state/planned-changes.yaml .phenix-agent-state/architecture-review.yaml .phenix-agent-state/architecture-contract.yaml .phenix-agent-state/implementation-summary.yaml; do if test -f "$f"; then echo "PRESENT $f"; else echo "MISSING $f"; fi; done`
-
-Read artifacts:
-
-!`test -f .phenix-agent-state/architecture-contract.yaml && cat .phenix-agent-state/architecture-contract.yaml || true`
-!`test -f .phenix-agent-state/implementation-summary.yaml && cat .phenix-agent-state/implementation-summary.yaml || true`
-!`test -f .phenix-agent-state/planned-changes.yaml && cat .phenix-agent-state/planned-changes.yaml || true`
+Use the `agent_comm` MCP to list/read required architecture contract, planned changes, and implementation summary records. Do not fake MCP artifact reads through file paths or shell snippets.
 
 Rules:
 

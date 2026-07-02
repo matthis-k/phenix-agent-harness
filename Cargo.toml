@@ -1,8 +1,8 @@
 [package]
-name = "phenix-workflow-state"
+name = "phenix-agent-comm"
 version = "0.1.0"
 edition = "2021"
-description = "Generic workflow state service for Phenix agent workflows"
+description = "Generic durable agent communication MCP server"
 license = "MIT"
 
 [dependencies]
@@ -20,9 +20,9 @@ uuid = { version = "1.10", features = ["serde", "v7"] }
 tempfile = "3.12"
 
 [lib]
-name = "phenix_workflow_state"
+name = "phenix_agent_comm"
 path = "src/lib.rs"
 
 [[bin]]
-name = "phenix-workflow-state"
+name = "phenix-agent-comm-mcp"
 path = "src/main.rs"

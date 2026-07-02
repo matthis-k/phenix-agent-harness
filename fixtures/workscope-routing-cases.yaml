@@ -5,7 +5,7 @@ cases:
       class: inspect
       complexity: c0
       risk: trivial
-      capabilities: {edit: false, agent_state_write: true}
+      capabilities: {edit: false, agent_comm: true}
       routing: {planner: skip, architect: skip, worker: skip, verifier: optional}
       heavyweight_agent_state_required: false
     notes: c0 inspect/default schema semantics should not invoke implementation.
@@ -15,7 +15,7 @@ cases:
       class: maintenance
       complexity: c1
       risk: trivial
-      capabilities: {edit: true, agent_state_write: true}
+      capabilities: {edit: true, agent_comm: true}
       routing: {planner: skip, architect: skip, worker: direct, verifier: optional}
       heavyweight_agent_state_required: false
     notes: c1 trivial maintenance dispatches directly to worker after minimal preflight.
@@ -25,7 +25,7 @@ cases:
       class: maintenance
       complexity: c2
       risk: low
-      capabilities: {edit: true, agent_state_write: true}
+      capabilities: {edit: true, agent_comm: true}
       routing: {planner: skip, architect: skip, worker: direct, verifier: optional}
       heavyweight_agent_state_required: false
     notes: c2 mechanical maintenance remains direct when no ambiguity or architecture boundary is named.
@@ -35,7 +35,7 @@ cases:
       class: change
       complexity: c3
       risk: medium
-      capabilities: {edit: true, agent_state_write: true}
+      capabilities: {edit: true, agent_comm: true}
       routing: {planner: required, architect: skip, worker: after_plan, verifier: required}
     notes: Named ambiguity requires planner; no architect unless an architecture boundary is named.
   - id: c4_workflow_permission_model
@@ -44,7 +44,7 @@ cases:
       class: change
       complexity: c4
       risk: high
-      capabilities: {edit: true, agent_state_write: true}
+      capabilities: {edit: true, agent_comm: true}
       routing: {planner: required, architect: required, worker: after_explicit_approval, verifier: required_strict}
     notes: Control-plane workflow/permission changes require strict gates and explicit approval before worker execution.
   - id: explicit_commit_gate
@@ -53,7 +53,7 @@ cases:
       class: release
       complexity: c4
       risk: high
-      capabilities: {edit: false_by_default, agent_state_write: true, commit: true, push: false, publish: false}
+      capabilities: {edit: false_by_default, agent_comm: true, commit: true, push: false, publish: false}
       routing: {committer: only_after_explicit_user_request}
     notes: Commit requires explicit request and post-verifier evidence.
   - id: publish_delete_secret_gate
@@ -62,20 +62,21 @@ cases:
       class: release
       complexity: c4
       risk: high
-      capabilities: {edit: false_by_default, agent_state_write: true, publish: true, delete_tracked: true}
+      capabilities: {edit: false_by_default, agent_comm: true, publish: true, delete_tracked: true}
       routing: {planner: required, architect: required, worker: after_explicit_approval, verifier: required_strict}
     notes: Publish, tracked deletion, and secrets/auth surfaces require explicit c4 handling.
-  - id: c2_compact_agent_state_dispatch
-    request: "Perform a localized c2 maintenance edit with a compact WorkScope note."
+  - id: c2_compact_agent_comm_dispatch
+    request: "Perform a localized c2 maintenance edit with a compact WorkScope record."
     expected_work_scope:
       class: maintenance
       complexity: c2
       risk: low
-      capabilities: {edit: true, agent_state_write: true}
+      capabilities: {edit: true, agent_comm: true}
       routing: {planner: skip, architect: skip, worker: direct, verifier: optional}
-      state_artifacts:
+      communication_records:
         allowed:
-          - .phenix-agent-state/tasks/123/workscope.yaml
-          - .phenix-agent-state/tasks/123/dispatch.md
+          - comm_session_init
+          - comm_task_create
+          - comm_message_send
         heavyweight_scaffolding_required: false
-    notes: Workflow may write compact WorkScope/dispatch state for c1/c2, but must still hand off directly to worker instead of creating heavyweight orchestration state.
+    notes: Workflow may record compact WorkScope/dispatch communication for c1/c2, but must still hand off directly to worker instead of creating heavyweight orchestration state.

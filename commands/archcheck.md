@@ -1,6 +1,6 @@
 ---
 description: Review plan or diff against architecture rules
-agent: architect
+agent: phenix-architect
 subtask: true
 ---
 

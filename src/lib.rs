@@ -1,94 +1,74 @@
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::path::Path;
 use thiserror::Error;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Debug, Error)]
-pub enum WorkflowStateError {
+pub enum AgentCommError {
     #[error("sqlite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("task not found: {0}")]
-    TaskNotFound(Uuid),
+    #[error("missing required argument: {0}")]
+    Missing(&'static str),
+    #[error("invalid argument: {0}")]
+    Invalid(String),
+    #[error("unknown tool: {0}")]
+    UnknownTool(String),
 }
 
-pub type Result<T> = std::result::Result<T, WorkflowStateError>;
+pub type Result<T> = std::result::Result<T, AgentCommError>;
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct WorkflowSession {
-    pub id: Uuid,
-    pub name: String,
-    pub created_at: OffsetDateTime,
-}
+pub const TOOLS: &[&str] = &[
+    "comm_session_init",
+    "comm_session_resume",
+    "comm_session_get",
+    "comm_session_list",
+    "comm_session_close",
+    "comm_agent_register",
+    "comm_agent_heartbeat",
+    "comm_agent_update_status",
+    "comm_agent_list",
+    "comm_message_send",
+    "comm_message_list",
+    "comm_message_read",
+    "comm_message_ack",
+    "comm_message_reply",
+    "comm_graph_create",
+    "comm_graph_get",
+    "comm_graph_summary",
+    "comm_task_create",
+    "comm_task_update",
+    "comm_task_add_dependency",
+    "comm_task_add_child",
+    "comm_task_claim",
+    "comm_task_release",
+    "comm_task_complete",
+    "comm_task_fail",
+    "comm_task_block",
+    "comm_task_list_ready",
+    "comm_task_list_for_agent",
+    "comm_event_list",
+    "comm_event_recent",
+    "comm_artifact_record",
+    "comm_artifact_list",
+    "comm_decision_record",
+    "comm_decision_list",
+];
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct WorkflowTask {
-    pub id: Uuid,
-    pub session_id: Uuid,
-    pub title: String,
-    pub status: TaskStatus,
-    pub created_at: OffsetDateTime,
-    pub updated_at: OffsetDateTime,
-}
+const AGENT_STATUSES: &[&str] = &["available", "busy", "waiting", "offline"];
+const TASK_STATUSES: &[&str] = &["pending", "in_progress", "blocked", "completed", "failed"];
+const MESSAGE_FORMATS: &[&str] = &["text", "markdown", "json", "yaml"];
+const MESSAGE_SEVERITIES: &[&str] = &["info", "notice", "warning", "error"];
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskStatus {
-    Pending,
-    InProgress,
-    Blocked,
-    Done,
-}
-
-impl TaskStatus {
-    fn as_str(&self) -> &'static str {
-        match self {
-            TaskStatus::Pending => "pending",
-            TaskStatus::InProgress => "in_progress",
-            TaskStatus::Blocked => "blocked",
-            TaskStatus::Done => "done",
-        }
-    }
-
-    fn from_str(value: &str) -> Self {
-        match value {
-            "in_progress" => TaskStatus::InProgress,
-            "blocked" => TaskStatus::Blocked,
-            "done" => TaskStatus::Done,
-            _ => TaskStatus::Pending,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct WorkflowEvent {
-    pub id: Uuid,
-    pub task_id: Uuid,
-    pub kind: String,
-    pub message: String,
-    pub payload: serde_json::Value,
-    pub created_at: OffsetDateTime,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct WorkflowSummary {
-    pub session_id: Uuid,
-    pub task_count: usize,
-    pub event_count: usize,
-    pub pending: usize,
-    pub in_progress: usize,
-    pub blocked: usize,
-    pub done: usize,
-}
-
-pub struct WorkflowRepository {
+pub struct AgentCommRepository {
     conn: Connection,
 }
 
-impl WorkflowRepository {
+impl AgentCommRepository {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let conn = Connection::open(path)?;
         let repo = Self { conn };
@@ -105,169 +85,372 @@ impl WorkflowRepository {
 
     pub fn init(&self) -> Result<()> {
         self.conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS workflow_sessions (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
+            "PRAGMA foreign_keys = ON;
+             CREATE TABLE IF NOT EXISTS sessions (
+               id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL,
+               metadata TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+               closed_at TEXT
+             );
+              CREATE TABLE IF NOT EXISTS agents (
+                id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                name TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL, metadata TEXT NOT NULL,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_heartbeat_at TEXT NOT NULL,
+                UNIQUE(session_id, name)
+              );
+             CREATE TABLE IF NOT EXISTS graphs (
+               id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+               name TEXT NOT NULL, metadata TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS tasks (
+               id TEXT PRIMARY KEY, graph_id TEXT NOT NULL REFERENCES graphs(id) ON DELETE CASCADE,
+               parent_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+               title TEXT NOT NULL, description TEXT NOT NULL, status TEXT NOT NULL,
+               assigned_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+               claimed_by TEXT REFERENCES agents(id) ON DELETE SET NULL, claim_expires_at TEXT,
+               metadata TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS task_dependencies (
+               task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+               depends_on_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+               PRIMARY KEY(task_id, depends_on_task_id), CHECK(task_id <> depends_on_task_id)
+             );
+              CREATE TABLE IF NOT EXISTS messages (
+                id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                from_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+                task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+                parent_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+                to_kind TEXT, format TEXT NOT NULL, severity TEXT NOT NULL,
+                subject TEXT NOT NULL, body TEXT NOT NULL, metadata TEXT NOT NULL,
                 created_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS workflow_tasks (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL REFERENCES workflow_sessions(id),
-                title TEXT NOT NULL,
-                status TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS workflow_events (
-                id TEXT PRIMARY KEY,
-                task_id TEXT NOT NULL REFERENCES workflow_tasks(id),
-                kind TEXT NOT NULL,
-                message TEXT NOT NULL,
-                payload TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );",
+              );
+              CREATE TABLE IF NOT EXISTS message_recipients (
+                message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+                agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+                delivered_at TEXT NOT NULL, read_at TEXT, acked_at TEXT,
+                PRIMARY KEY(message_id, agent_id)
+              );
+             CREATE TABLE IF NOT EXISTS events (
+               id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+               agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+               task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+               kind TEXT NOT NULL, message TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS artifacts (
+               id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+               task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+               agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+               name TEXT NOT NULL, kind TEXT NOT NULL, uri TEXT, content_ref TEXT, metadata TEXT NOT NULL,
+               created_at TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS decisions (
+               id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+               task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+               agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+               title TEXT NOT NULL, rationale TEXT NOT NULL, outcome TEXT NOT NULL, metadata TEXT NOT NULL,
+               created_at TEXT NOT NULL
+             );",
         )?;
         Ok(())
     }
 
-    pub fn create_session(&self, name: &str) -> Result<WorkflowSession> {
-        let session = WorkflowSession {
-            id: Uuid::now_v7(),
-            name: name.to_owned(),
-            created_at: OffsetDateTime::now_utc(),
-        };
-        self.conn.execute(
-            "INSERT INTO workflow_sessions (id, name, created_at) VALUES (?1, ?2, ?3)",
-            params![session.id, session.name, session.created_at],
-        )?;
-        Ok(session)
-    }
-
-    pub fn create_task(&self, session_id: Uuid, title: &str) -> Result<WorkflowTask> {
-        let now = OffsetDateTime::now_utc();
-        let task = WorkflowTask {
-            id: Uuid::now_v7(),
-            session_id,
-            title: title.to_owned(),
-            status: TaskStatus::Pending,
-            created_at: now,
-            updated_at: now,
-        };
-        self.conn.execute(
-            "INSERT INTO workflow_tasks (id, session_id, title, status, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                task.id,
-                task.session_id,
-                task.title,
-                task.status.as_str(),
-                task.created_at,
-                task.updated_at
-            ],
-        )?;
-        Ok(task)
-    }
-
-    pub fn list_tasks(&self, session_id: Option<Uuid>) -> Result<Vec<WorkflowTask>> {
-        let mut tasks = Vec::new();
-        if let Some(session_id) = session_id {
-            let mut stmt = self.conn.prepare(
-                "SELECT id, session_id, title, status, created_at, updated_at
-                 FROM workflow_tasks WHERE session_id = ?1 ORDER BY created_at",
-            )?;
-            let rows = stmt.query_map(params![session_id], Self::map_task)?;
-            for row in rows {
-                tasks.push(row?);
-            }
-        } else {
-            let mut stmt = self.conn.prepare(
-                "SELECT id, session_id, title, status, created_at, updated_at
-                 FROM workflow_tasks ORDER BY created_at",
-            )?;
-            let rows = stmt.query_map([], Self::map_task)?;
-            for row in rows {
-                tasks.push(row?);
-            }
+    pub fn call_tool(&self, tool: &str, args: Value) -> Result<Value> {
+        let a = args.as_object().ok_or_else(|| AgentCommError::Invalid("arguments must be an object".into()))?;
+        match tool {
+            "comm_session_init" => self.session_init(str_arg(a, "name")?, opt_value(a, "metadata")),
+            "comm_session_resume" | "comm_session_get" => self.get_by_id("sessions", str_arg(a, "session_id")?),
+            "comm_session_list" => self.list_sessions(),
+            "comm_session_close" => self.close_session(str_arg(a, "session_id")?),
+            "comm_agent_register" => self.agent_register(str_arg(a, "session_id")?, str_arg(a, "name")?, opt_str(a, "kind").unwrap_or("agent"), opt_value(a, "metadata")),
+            "comm_agent_heartbeat" => self.agent_touch(str_arg(a, "agent_id")?, "heartbeat"),
+            "comm_agent_update_status" => self.agent_status(str_arg(a, "agent_id")?, str_arg(a, "status")?, opt_value(a, "metadata")),
+            "comm_agent_list" => self.list_where("agents", "session_id", str_arg(a, "session_id")?),
+            "comm_message_send" => self.message_send(str_arg(a, "session_id")?, opt_str(a, "from_agent_id"), opt_str(a, "to_agent_id"), opt_str_array(a, "to_agent_ids")?, opt_str(a, "to_kind"), opt_str(a, "task_id"), None, opt_str(a, "format").unwrap_or("markdown"), opt_str(a, "severity").unwrap_or("info"), opt_str(a, "subject").unwrap_or(""), str_arg(a, "body")?, opt_value(a, "metadata")),
+            "comm_message_list" => self.message_list(str_arg(a, "session_id")?, opt_str(a, "agent_id"), opt_str(a, "task_id")),
+            "comm_message_read" => self.mark_message(str_arg(a, "message_id")?, str_arg(a, "agent_id")?, "read_at", "message.read"),
+            "comm_message_ack" => self.mark_message(str_arg(a, "message_id")?, str_arg(a, "agent_id")?, "acked_at", "message.ack"),
+            "comm_message_reply" => self.message_reply(str_arg(a, "message_id")?, opt_str(a, "from_agent_id"), str_arg(a, "body")?, opt_value(a, "metadata")),
+            "comm_graph_create" => self.graph_create(str_arg(a, "session_id")?, str_arg(a, "name")?, opt_value(a, "metadata")),
+            "comm_graph_get" => self.get_by_id("graphs", str_arg(a, "graph_id")?),
+            "comm_graph_summary" => self.graph_summary(str_arg(a, "graph_id")?),
+            "comm_task_create" => self.task_create(str_arg(a, "graph_id")?, opt_str(a, "parent_id"), str_arg(a, "title")?, opt_str(a, "description").unwrap_or(""), opt_str(a, "assigned_agent_id"), opt_value(a, "metadata")),
+            "comm_task_update" => self.task_update(str_arg(a, "task_id")?, &args),
+            "comm_task_add_dependency" => self.task_add_dependency(str_arg(a, "task_id")?, str_arg(a, "depends_on_task_id")?),
+            "comm_task_add_child" => self.task_create(str_arg(a, "graph_id")?, Some(str_arg(a, "parent_id")?), str_arg(a, "title")?, opt_str(a, "description").unwrap_or(""), opt_str(a, "assigned_agent_id"), opt_value(a, "metadata")),
+            "comm_task_claim" => self.task_claim(str_arg(a, "task_id")?, str_arg(a, "agent_id")?, opt_str(a, "claim_expires_at")),
+            "comm_task_release" => self.task_release(str_arg(a, "task_id")?, opt_str(a, "agent_id")),
+            "comm_task_complete" => self.task_complete(str_arg(a, "task_id")?, bool_arg(a, "override_incomplete_dependencies")),
+            "comm_task_fail" => self.task_terminal(str_arg(a, "task_id")?, "failed", opt_str(a, "reason").unwrap_or("")),
+            "comm_task_block" => self.task_terminal(str_arg(a, "task_id")?, "blocked", opt_str(a, "reason").unwrap_or("")),
+            "comm_task_list_ready" => self.task_list_ready(str_arg(a, "graph_id")?),
+            "comm_task_list_for_agent" => self.task_list_for_agent(str_arg(a, "agent_id")?),
+            "comm_event_list" => self.event_list(str_arg(a, "session_id")?, opt_str(a, "task_id"), opt_i64(a, "limit").unwrap_or(100)),
+            "comm_event_recent" => self.event_recent(opt_i64(a, "limit").unwrap_or(25)),
+            "comm_artifact_record" => self.artifact_record(str_arg(a, "session_id")?, opt_str(a, "task_id"), opt_str(a, "agent_id"), str_arg(a, "name")?, str_arg(a, "kind")?, opt_str(a, "uri"), opt_str(a, "content_ref"), opt_value(a, "metadata")),
+            "comm_artifact_list" => self.list_where("artifacts", "session_id", str_arg(a, "session_id")?),
+            "comm_decision_record" => self.decision_record(str_arg(a, "session_id")?, opt_str(a, "task_id"), opt_str(a, "agent_id"), str_arg(a, "title")?, str_arg(a, "rationale")?, str_arg(a, "outcome")?, opt_value(a, "metadata")),
+            "comm_decision_list" => self.list_where("decisions", "session_id", str_arg(a, "session_id")?),
+            _ => Err(AgentCommError::UnknownTool(tool.to_owned())),
         }
-        Ok(tasks)
     }
 
-    pub fn record_event(
-        &self,
-        task_id: Uuid,
-        kind: &str,
-        message: &str,
-        payload: serde_json::Value,
-    ) -> Result<WorkflowEvent> {
-        let exists = self
-            .conn
-            .query_row(
-                "SELECT 1 FROM workflow_tasks WHERE id = ?1",
-                params![task_id],
-                |_| Ok(()),
-            )
-            .optional()?;
-        if exists.is_none() {
-            return Err(WorkflowStateError::TaskNotFound(task_id));
-        }
+    fn session_init(&self, name: &str, metadata: Value) -> Result<Value> {
+        let id = uuid(); let now = now(); let meta = metadata.to_string();
+        self.conn.execute("INSERT INTO sessions VALUES (?1,?2,'open',?3,?4,?4,NULL)", params![id, name, meta, now])?;
+        self.event(&id, None, None, "session.init", name, json!({"session_id": id}))?;
+        self.get_by_id("sessions", &id)
+    }
 
-        let event = WorkflowEvent {
-            id: Uuid::now_v7(),
-            task_id,
-            kind: kind.to_owned(),
-            message: message.to_owned(),
-            payload,
-            created_at: OffsetDateTime::now_utc(),
+    fn close_session(&self, session_id: &str) -> Result<Value> {
+        let now = now();
+        self.conn.execute("UPDATE sessions SET status='closed', closed_at=?2, updated_at=?2 WHERE id=?1", params![session_id, now])?;
+        self.event(session_id, None, None, "session.close", "closed", json!({}))?;
+        self.get_by_id("sessions", session_id)
+    }
+
+    fn list_sessions(&self) -> Result<Value> { self.query_json("SELECT * FROM sessions ORDER BY created_at DESC LIMIT 200", []) }
+
+    fn agent_register(&self, session_id: &str, name: &str, kind: &str, metadata: Value) -> Result<Value> {
+        let id = uuid(); let now = now();
+        self.conn.execute("INSERT INTO agents VALUES (?1,?2,?3,?4,'available',?5,?6,?6,?6)", params![id, session_id, name, kind, metadata.to_string(), now])?;
+        self.event(session_id, Some(&id), None, "agent.register", name, json!({"kind": kind}))?;
+        self.get_by_id("agents", &id)
+    }
+
+    fn agent_touch(&self, agent_id: &str, kind: &str) -> Result<Value> {
+        let now = now();
+        self.conn.execute("UPDATE agents SET last_heartbeat_at=?2, updated_at=?2 WHERE id=?1", params![agent_id, now])?;
+        let session_id = self.scalar("SELECT session_id FROM agents WHERE id=?1", params![agent_id])?;
+        self.event(&session_id, Some(agent_id), None, kind, "", json!({}))?;
+        self.get_by_id("agents", agent_id)
+    }
+
+    fn agent_status(&self, agent_id: &str, status: &str, metadata: Value) -> Result<Value> {
+        validate("agent status", status, AGENT_STATUSES)?;
+        let now = now();
+        self.conn.execute("UPDATE agents SET status=?2, metadata=?3, updated_at=?4 WHERE id=?1", params![agent_id, status, metadata.to_string(), now])?;
+        let session_id = self.scalar("SELECT session_id FROM agents WHERE id=?1", params![agent_id])?;
+        self.event(&session_id, Some(agent_id), None, "agent.status", status, json!({}))?;
+        self.get_by_id("agents", agent_id)
+    }
+
+    fn graph_create(&self, session_id: &str, name: &str, metadata: Value) -> Result<Value> {
+        let id = uuid(); let now = now();
+        self.conn.execute("INSERT INTO graphs VALUES (?1,?2,?3,?4,?5,?5)", params![id, session_id, name, metadata.to_string(), now])?;
+        self.event(session_id, None, None, "graph.create", name, json!({"graph_id": id}))?;
+        self.get_by_id("graphs", &id)
+    }
+
+    fn graph_summary(&self, graph_id: &str) -> Result<Value> {
+        let rows = self.query_json("SELECT status, COUNT(*) AS count FROM tasks WHERE graph_id=?1 GROUP BY status", params![graph_id])?;
+        let deps: i64 = self.conn.query_row("SELECT COUNT(*) FROM task_dependencies d JOIN tasks t ON t.id=d.task_id WHERE t.graph_id=?1", params![graph_id], |r| r.get(0))?;
+        Ok(json!({"graph_id": graph_id, "statuses": rows, "dependency_count": deps}))
+    }
+
+    fn task_create(&self, graph_id: &str, parent_id: Option<&str>, title: &str, description: &str, assigned_agent_id: Option<&str>, metadata: Value) -> Result<Value> {
+        let id = uuid(); let now = now();
+        self.conn.execute("INSERT INTO tasks VALUES (?1,?2,?3,?4,?5,'pending',?6,NULL,NULL,?7,?8,?8)", params![id, graph_id, parent_id, title, description, assigned_agent_id, metadata.to_string(), now])?;
+        let session_id = self.scalar("SELECT session_id FROM graphs WHERE id=?1", params![graph_id])?;
+        self.event(&session_id, assigned_agent_id, Some(&id), "task.create", title, json!({"parent_id": parent_id}))?;
+        self.get_by_id("tasks", &id)
+    }
+
+    fn task_update(&self, task_id: &str, args: &Value) -> Result<Value> {
+        let obj = args.as_object().unwrap();
+        if let Some(v) = obj.get("title").and_then(Value::as_str) { self.conn.execute("UPDATE tasks SET title=?2, updated_at=?3 WHERE id=?1", params![task_id, v, now()])?; }
+        if let Some(v) = obj.get("description").and_then(Value::as_str) { self.conn.execute("UPDATE tasks SET description=?2, updated_at=?3 WHERE id=?1", params![task_id, v, now()])?; }
+        if let Some(v) = obj.get("status").and_then(Value::as_str) { validate("task status", v, TASK_STATUSES)?; self.conn.execute("UPDATE tasks SET status=?2, updated_at=?3 WHERE id=?1", params![task_id, v, now()])?; }
+        if let Some(v) = obj.get("assigned_agent_id").and_then(Value::as_str) { self.conn.execute("UPDATE tasks SET assigned_agent_id=?2, updated_at=?3 WHERE id=?1", params![task_id, v, now()])?; }
+        if let Some(v) = obj.get("metadata") { self.conn.execute("UPDATE tasks SET metadata=?2, updated_at=?3 WHERE id=?1", params![task_id, v.to_string(), now()])?; }
+        self.task_event(task_id, "task.update", "updated", json!({}))?;
+        self.get_by_id("tasks", task_id)
+    }
+
+    fn task_add_dependency(&self, task_id: &str, dep: &str) -> Result<Value> {
+        if self.reaches(dep, task_id)? { return Err(AgentCommError::Invalid("dependency would create a cycle".into())); }
+        self.conn.execute("INSERT INTO task_dependencies VALUES (?1,?2)", params![task_id, dep])?;
+        self.task_event(task_id, "task.dependency.add", dep, json!({"depends_on_task_id": dep}))?;
+        self.get_by_id("tasks", task_id)
+    }
+
+    fn task_claim(&self, task_id: &str, agent_id: &str, expires: Option<&str>) -> Result<Value> {
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        let changed = self.conn.execute("UPDATE tasks SET claimed_by=?2, claim_expires_at=?3, status='in_progress', updated_at=?4 WHERE id=?1 AND status IN ('pending','in_progress') AND (claimed_by IS NULL OR claimed_by=?2)", params![task_id, agent_id, expires, now()]);
+        let changed = match changed {
+            Ok(changed) => changed,
+            Err(err) => { let _ = self.conn.execute_batch("ROLLBACK"); return Err(err.into()); }
         };
-        self.conn.execute(
-            "INSERT INTO workflow_events (id, task_id, kind, message, payload, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                event.id,
-                event.task_id,
-                event.kind,
-                event.message,
-                serde_json::to_string(&event.payload)?,
-                event.created_at
-            ],
-        )?;
-        Ok(event)
+        if changed != 1 { let _ = self.conn.execute_batch("ROLLBACK"); return Err(AgentCommError::Invalid("task already has an active claim or is not claimable".into())); }
+        self.conn.execute_batch("COMMIT")?;
+        self.task_event(task_id, "task.claim", agent_id, json!({}))?;
+        self.get_by_id("tasks", task_id)
     }
 
-    pub fn summarize(&self, session_id: Uuid) -> Result<WorkflowSummary> {
-        let tasks = self.list_tasks(Some(session_id))?;
-        let event_count = self.conn.query_row(
-            "SELECT COUNT(*) FROM workflow_events e
-             JOIN workflow_tasks t ON t.id = e.task_id
-             WHERE t.session_id = ?1",
-            params![session_id],
-            |row| row.get::<_, i64>(0),
-        )? as usize;
-        Ok(WorkflowSummary {
-            session_id,
-            task_count: tasks.len(),
-            event_count,
-            pending: tasks.iter().filter(|task| task.status == TaskStatus::Pending).count(),
-            in_progress: tasks
-                .iter()
-                .filter(|task| task.status == TaskStatus::InProgress)
-                .count(),
-            blocked: tasks.iter().filter(|task| task.status == TaskStatus::Blocked).count(),
-            done: tasks.iter().filter(|task| task.status == TaskStatus::Done).count(),
-        })
+    fn task_release(&self, task_id: &str, agent_id: Option<&str>) -> Result<Value> {
+        if let Some(agent_id) = agent_id {
+            let current: Option<String> = self.conn.query_row("SELECT claimed_by FROM tasks WHERE id=?1", params![task_id], |r| r.get(0)).optional()?;
+            if current.as_deref().is_some_and(|c| c != agent_id) { return Err(AgentCommError::Invalid("agent does not own the active claim".into())); }
+        }
+        self.conn.execute("UPDATE tasks SET claimed_by=NULL, claim_expires_at=NULL, status=CASE WHEN status='in_progress' THEN 'pending' ELSE status END, updated_at=?2 WHERE id=?1", params![task_id, now()])?;
+        self.task_event(task_id, "task.release", "released", json!({}))?;
+        self.get_by_id("tasks", task_id)
     }
 
-    fn map_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowTask> {
-        let status: String = row.get(3)?;
-        Ok(WorkflowTask {
-            id: row.get(0)?,
-            session_id: row.get(1)?,
-            title: row.get(2)?,
-            status: TaskStatus::from_str(&status),
-            created_at: row.get(4)?,
-            updated_at: row.get(5)?,
-        })
+    fn task_complete(&self, task_id: &str, override_deps: bool) -> Result<Value> {
+        let incomplete: i64 = self.conn.query_row("SELECT COUNT(*) FROM task_dependencies d JOIN tasks t ON t.id=d.depends_on_task_id WHERE d.task_id=?1 AND t.status != 'completed'", params![task_id], |r| r.get(0))?;
+        if incomplete > 0 && !override_deps { return Err(AgentCommError::Invalid("task has incomplete dependencies".into())); }
+        self.task_terminal(task_id, "completed", "completed")
     }
+
+    fn task_terminal(&self, task_id: &str, status: &str, reason: &str) -> Result<Value> {
+        validate("task status", status, TASK_STATUSES)?;
+        self.conn.execute("UPDATE tasks SET status=?2, claimed_by=NULL, claim_expires_at=NULL, updated_at=?3 WHERE id=?1", params![task_id, status, now()])?;
+        self.task_event(task_id, &format!("task.{status}"), reason, json!({}))?;
+        self.get_by_id("tasks", task_id)
+    }
+
+    fn task_list_ready(&self, graph_id: &str) -> Result<Value> {
+        self.query_json("SELECT * FROM tasks t WHERE graph_id=?1 AND status='pending' AND NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks dep ON dep.id=d.depends_on_task_id WHERE d.task_id=t.id AND dep.status != 'completed') ORDER BY created_at", params![graph_id])
+    }
+
+    fn task_list_for_agent(&self, agent_id: &str) -> Result<Value> {
+        self.query_json("SELECT * FROM tasks WHERE assigned_agent_id=?1 OR claimed_by=?1 ORDER BY updated_at DESC", params![agent_id])
+    }
+
+    fn message_send(&self, session_id: &str, from: Option<&str>, to: Option<&str>, mut tos: Vec<String>, to_kind: Option<&str>, task: Option<&str>, parent: Option<&str>, format: &str, severity: &str, subject: &str, body: &str, metadata: Value) -> Result<Value> {
+        validate("message format", format, MESSAGE_FORMATS)?;
+        validate("message severity", severity, MESSAGE_SEVERITIES)?;
+        if let Some(to) = to { tos.push(to.to_owned()); }
+        if let Some(kind) = to_kind {
+            let mut stmt = self.conn.prepare("SELECT id FROM agents WHERE session_id=?1 AND kind=?2 ORDER BY created_at")?;
+            for row in stmt.query_map(params![session_id, kind], |r| r.get::<_, String>(0))? { tos.push(row?); }
+        }
+        tos.sort(); tos.dedup();
+        let id = uuid(); let now = now();
+        self.conn.execute("INSERT INTO messages VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)", params![id, session_id, from, task, parent, to_kind, format, severity, subject, body, metadata.to_string(), now])?;
+        for agent_id in &tos { self.conn.execute("INSERT OR IGNORE INTO message_recipients VALUES (?1,?2,?3,NULL,NULL)", params![id, agent_id, now])?; }
+        self.event(session_id, from, task, "message.send", subject, json!({"message_id": id, "to_agent_ids": tos, "to_kind": to_kind, "format": format, "severity": severity}))?;
+        self.get_by_id("messages", &id)
+    }
+
+    fn message_reply(&self, message_id: &str, from: Option<&str>, body: &str, metadata: Value) -> Result<Value> {
+        let (session_id, to, task, subject): (String, Option<String>, Option<String>, String) = self.conn.query_row("SELECT session_id, from_agent_id, task_id, subject FROM messages WHERE id=?1", params![message_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+        self.message_send(&session_id, from, to.as_deref(), Vec::new(), None, task.as_deref(), Some(message_id), "markdown", "info", &subject, body, metadata)
+    }
+
+    fn message_list(&self, session_id: &str, agent_id: Option<&str>, task_id: Option<&str>) -> Result<Value> {
+        match (agent_id, task_id) {
+            (Some(a), _) => self.query_json("SELECT m.*, r.agent_id AS recipient_agent_id, r.delivered_at, r.read_at, r.acked_at FROM messages m LEFT JOIN message_recipients r ON r.message_id=m.id AND r.agent_id=?2 WHERE m.session_id=?1 AND (m.from_agent_id=?2 OR r.agent_id=?2) ORDER BY m.created_at", params![session_id, a]),
+            (_, Some(t)) => self.query_json("SELECT * FROM messages WHERE session_id=?1 AND task_id=?2 ORDER BY created_at", params![session_id, t]),
+            _ => self.query_json("SELECT * FROM messages WHERE session_id=?1 ORDER BY created_at", params![session_id]),
+        }
+    }
+
+    fn mark_message(&self, message_id: &str, agent_id: &str, column: &str, kind: &str) -> Result<Value> {
+        self.conn.execute(&format!("UPDATE message_recipients SET {column}=?3 WHERE message_id=?1 AND agent_id=?2"), params![message_id, agent_id, now()])?;
+        let (session_id, task_id): (String, Option<String>) = self.conn.query_row("SELECT session_id, task_id FROM messages WHERE id=?1", params![message_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        self.event(&session_id, Some(agent_id), task_id.as_deref(), kind, message_id, json!({"agent_id": agent_id}))?;
+        self.get_by_id("messages", message_id)
+    }
+
+    fn event_list(&self, session_id: &str, task_id: Option<&str>, limit: i64) -> Result<Value> {
+        if let Some(task_id) = task_id { self.query_json("SELECT * FROM events WHERE session_id=?1 AND task_id=?2 ORDER BY created_at DESC LIMIT ?3", params![session_id, task_id, limit]) }
+        else { self.query_json("SELECT * FROM events WHERE session_id=?1 ORDER BY created_at DESC LIMIT ?2", params![session_id, limit]) }
+    }
+
+    fn event_recent(&self, limit: i64) -> Result<Value> { self.query_json("SELECT * FROM events ORDER BY created_at DESC LIMIT ?1", params![limit]) }
+
+    fn artifact_record(&self, session_id: &str, task_id: Option<&str>, agent_id: Option<&str>, name: &str, kind: &str, uri: Option<&str>, content_ref: Option<&str>, metadata: Value) -> Result<Value> {
+        let id = uuid(); let now = now();
+        self.conn.execute("INSERT INTO artifacts VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)", params![id, session_id, task_id, agent_id, name, kind, uri, content_ref, metadata.to_string(), now])?;
+        self.event(session_id, agent_id, task_id, "artifact.record", name, json!({"artifact_id": id, "kind": kind}))?;
+        self.get_by_id("artifacts", &id)
+    }
+
+    fn decision_record(&self, session_id: &str, task_id: Option<&str>, agent_id: Option<&str>, title: &str, rationale: &str, outcome: &str, metadata: Value) -> Result<Value> {
+        let id = uuid(); let now = now();
+        self.conn.execute("INSERT INTO decisions VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)", params![id, session_id, task_id, agent_id, title, rationale, outcome, metadata.to_string(), now])?;
+        self.event(session_id, agent_id, task_id, "decision.record", title, json!({"decision_id": id, "outcome": outcome}))?;
+        self.get_by_id("decisions", &id)
+    }
+
+    fn get_by_id(&self, table: &str, id: &str) -> Result<Value> { self.query_one_json(&format!("SELECT * FROM {table} WHERE id=?1"), params![id]) }
+    fn list_where(&self, table: &str, column: &str, value: &str) -> Result<Value> { self.query_json(&format!("SELECT * FROM {table} WHERE {column}=?1 ORDER BY created_at"), params![value]) }
+
+    fn scalar<P: rusqlite::Params>(&self, sql: &str, params: P) -> Result<String> { Ok(self.conn.query_row(sql, params, |r| r.get(0))?) }
+
+    fn task_event(&self, task_id: &str, kind: &str, message: &str, payload: Value) -> Result<()> {
+        let session_id = self.scalar("SELECT g.session_id FROM graphs g JOIN tasks t ON t.graph_id=g.id WHERE t.id=?1", params![task_id])?;
+        self.event(&session_id, None, Some(task_id), kind, message, payload)
+    }
+
+    fn event(&self, session_id: &str, agent_id: Option<&str>, task_id: Option<&str>, kind: &str, message: &str, payload: Value) -> Result<()> {
+        self.conn.execute("INSERT INTO events VALUES (?1,?2,?3,?4,?5,?6,?7,?8)", params![uuid(), session_id, agent_id, task_id, kind, message, payload.to_string(), now()])?;
+        Ok(())
+    }
+
+    fn reaches(&self, from: &str, target: &str) -> Result<bool> {
+        let mut seen = HashSet::new();
+        let mut stack = vec![from.to_owned()];
+        while let Some(id) = stack.pop() {
+            if id == target { return Ok(true); }
+            if !seen.insert(id.clone()) { continue; }
+            let mut stmt = self.conn.prepare("SELECT depends_on_task_id FROM task_dependencies WHERE task_id=?1")?;
+            for row in stmt.query_map(params![id], |r| r.get::<_, String>(0))? { stack.push(row?); }
+        }
+        Ok(false)
+    }
+
+    fn query_one_json<P: rusqlite::Params>(&self, sql: &str, params: P) -> Result<Value> {
+        let values = self.query_json(sql, params)?;
+        values.as_array().and_then(|v| v.first()).cloned().ok_or_else(|| AgentCommError::Invalid("record not found".into()))
+    }
+
+    fn query_json<P: rusqlite::Params>(&self, sql: &str, params: P) -> Result<Value> {
+        let mut stmt = self.conn.prepare(sql)?;
+        let names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+        let rows = stmt.query_map(params, |row| {
+            let mut obj = serde_json::Map::new();
+            for (idx, name) in names.iter().enumerate() {
+                let cell: Option<String> = row.get(idx)?;
+                let value = match cell {
+                    Some(s) if name == "metadata" || name == "payload" => serde_json::from_str(&s).unwrap_or(Value::String(s)),
+                    Some(s) => Value::String(s),
+                    None => Value::Null,
+                };
+                obj.insert(name.clone(), value);
+            }
+            Ok(Value::Object(obj))
+        })?;
+        let mut out = Vec::new();
+        for row in rows { out.push(row?); }
+        Ok(Value::Array(out))
+    }
+}
+
+fn str_arg<'a>(a: &'a serde_json::Map<String, Value>, name: &'static str) -> Result<&'a str> { a.get(name).and_then(Value::as_str).ok_or(AgentCommError::Missing(name)) }
+fn opt_str<'a>(a: &'a serde_json::Map<String, Value>, name: &str) -> Option<&'a str> { a.get(name).and_then(Value::as_str) }
+fn opt_str_array(a: &serde_json::Map<String, Value>, name: &'static str) -> Result<Vec<String>> {
+    match a.get(name) {
+        None => Ok(Vec::new()),
+        Some(Value::Array(items)) => items.iter().map(|item| item.as_str().map(str::to_owned).ok_or_else(|| AgentCommError::Invalid(format!("{name} must contain only strings")))).collect(),
+        Some(_) => Err(AgentCommError::Invalid(format!("{name} must be an array"))),
+    }
+}
+fn opt_value(a: &serde_json::Map<String, Value>, name: &str) -> Value { a.get(name).cloned().unwrap_or_else(|| json!({})) }
+fn bool_arg(a: &serde_json::Map<String, Value>, name: &str) -> bool { a.get(name).and_then(Value::as_bool).unwrap_or(false) }
+fn opt_i64(a: &serde_json::Map<String, Value>, name: &str) -> Option<i64> { a.get(name).and_then(Value::as_i64) }
+fn validate(kind: &str, value: &str, allowed: &[&str]) -> Result<()> {
+    if allowed.contains(&value) { Ok(()) } else { Err(AgentCommError::Invalid(format!("invalid {kind}: {value}"))) }
+}
+fn uuid() -> String { Uuid::now_v7().to_string() }
+fn now() -> String { OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).expect("rfc3339") }
+
+pub fn tool_descriptions() -> Value {
+    Value::Array(TOOLS.iter().map(|name| json!({
+        "name": name,
+        "description": format!("Agent communication tool {name}"),
+        "inputSchema": {"type":"object", "additionalProperties": true}
+    })).collect())
 }
 
 #[cfg(test)]
@@ -275,32 +458,85 @@ mod tests {
     use super::*;
 
     #[test]
-    fn records_event_and_summarizes_session() {
-        let repo = WorkflowRepository::open_memory().expect("repository opens");
-        let session = repo.create_session("demo").expect("session created");
-        let task = repo.create_task(session.id, "implement slice").expect("task created");
-
-        repo.record_event(
-            task.id,
-            "note",
-            "started",
-            serde_json::json!({ "source": "test" }),
-        )
-        .expect("event recorded");
-
-        let summary = repo.summarize(session.id).expect("summary produced");
-        assert_eq!(summary.task_count, 1);
-        assert_eq!(summary.event_count, 1);
-        assert_eq!(summary.pending, 1);
+    fn task_graph_rejects_cycles_and_incomplete_completion() {
+        let repo = AgentCommRepository::open_memory().unwrap();
+        let session = repo.call_tool("comm_session_init", json!({"name":"demo"})).unwrap();
+        let session_id = session["id"].as_str().unwrap();
+        let graph = repo.call_tool("comm_graph_create", json!({"session_id":session_id,"name":"g"})).unwrap();
+        let graph_id = graph["id"].as_str().unwrap();
+        let a = repo.call_tool("comm_task_create", json!({"graph_id":graph_id,"title":"a"})).unwrap();
+        let b = repo.call_tool("comm_task_create", json!({"graph_id":graph_id,"title":"b"})).unwrap();
+        repo.call_tool("comm_task_add_dependency", json!({"task_id":b["id"],"depends_on_task_id":a["id"]})).unwrap();
+        assert!(repo.call_tool("comm_task_add_dependency", json!({"task_id":a["id"],"depends_on_task_id":b["id"]})).is_err());
+        assert!(repo.call_tool("comm_task_complete", json!({"task_id":b["id"]})).is_err());
+        repo.call_tool("comm_task_complete", json!({"task_id":a["id"]})).unwrap();
+        repo.call_tool("comm_task_complete", json!({"task_id":b["id"]})).unwrap();
     }
 
     #[test]
-    fn opens_file_database_in_temp_dir() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let db_path = dir.path().join("workflow-state.sqlite3");
-        let repo = WorkflowRepository::open(&db_path).expect("repository opens");
-        let session = repo.create_session("file-db").expect("session created");
-        let tasks = repo.list_tasks(Some(session.id)).expect("tasks listed");
-        assert!(tasks.is_empty());
+    fn claim_does_not_overwrite_active_claim() {
+        let repo = AgentCommRepository::open_memory().unwrap();
+        let s = repo.call_tool("comm_session_init", json!({"name":"demo"})).unwrap();
+        let sid = s["id"].as_str().unwrap();
+        let agent1 = repo.call_tool("comm_agent_register", json!({"session_id":sid,"name":"a1"})).unwrap();
+        let agent2 = repo.call_tool("comm_agent_register", json!({"session_id":sid,"name":"a2"})).unwrap();
+        let g = repo.call_tool("comm_graph_create", json!({"session_id":sid,"name":"g"})).unwrap();
+        let t = repo.call_tool("comm_task_create", json!({"graph_id":g["id"],"title":"t"})).unwrap();
+        repo.call_tool("comm_task_claim", json!({"task_id":t["id"],"agent_id":agent1["id"]})).unwrap();
+        assert!(repo.call_tool("comm_task_claim", json!({"task_id":t["id"],"agent_id":agent2["id"]})).is_err());
+    }
+
+    #[test]
+    fn agents_use_kind_and_stable_statuses() {
+        let repo = AgentCommRepository::open_memory().unwrap();
+        let s = repo.call_tool("comm_session_init", json!({"name":"demo"})).unwrap();
+        let sid = s["id"].as_str().unwrap();
+        let agent = repo.call_tool("comm_agent_register", json!({"session_id":sid,"name":"planner","kind":"phenix-planner"})).unwrap();
+        assert_eq!(agent["kind"], "phenix-planner");
+        let old_field = ["ro", "le"].concat();
+        assert!(agent.get(&old_field).is_none());
+        assert!(repo.call_tool("comm_agent_update_status", json!({"agent_id":agent["id"],"status":"busy"})).is_ok());
+        assert!(repo.call_tool("comm_agent_update_status", json!({"agent_id":agent["id"],"status":"done"})).is_err());
+        let graph = repo.call_tool("comm_graph_create", json!({"session_id":sid,"name":"g"})).unwrap();
+        let task = repo.call_tool("comm_task_create", json!({"graph_id":graph["id"],"title":"t"})).unwrap();
+        assert!(repo.call_tool("comm_task_update", json!({"task_id":task["id"],"status":"done"})).is_err());
+    }
+
+    #[test]
+    fn messages_have_format_severity_kind_delivery_and_per_recipient_state() {
+        let repo = AgentCommRepository::open_memory().unwrap();
+        let s = repo.call_tool("comm_session_init", json!({"name":"demo"})).unwrap();
+        let sid = s["id"].as_str().unwrap();
+        let from = repo.call_tool("comm_agent_register", json!({"session_id":sid,"name":"planner","kind":"phenix-planner"})).unwrap();
+        let to1 = repo.call_tool("comm_agent_register", json!({"session_id":sid,"name":"worker-1","kind":"phenix-worker"})).unwrap();
+        let to2 = repo.call_tool("comm_agent_register", json!({"session_id":sid,"name":"worker-2","kind":"phenix-worker"})).unwrap();
+        let msg = repo.call_tool("comm_message_send", json!({"session_id":sid,"from_agent_id":from["id"],"to_kind":"phenix-worker","format":"json","severity":"warning","subject":"work","body":"{}"})).unwrap();
+        assert_eq!(msg["to_kind"], "phenix-worker");
+        assert_eq!(msg["format"], "json");
+        assert_eq!(msg["severity"], "warning");
+        repo.call_tool("comm_message_read", json!({"message_id":msg["id"],"agent_id":to1["id"]})).unwrap();
+        let l1 = repo.call_tool("comm_message_list", json!({"session_id":sid,"agent_id":to1["id"]})).unwrap();
+        let l2 = repo.call_tool("comm_message_list", json!({"session_id":sid,"agent_id":to2["id"]})).unwrap();
+        assert!(l1[0]["read_at"].is_string());
+        assert!(l2[0]["read_at"].is_null());
+    }
+
+    #[test]
+    fn atomic_claim_conflict_is_stable_across_connections() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("agent-comm.sqlite3");
+        let repo1 = AgentCommRepository::open(&db).unwrap();
+        let repo2 = AgentCommRepository::open(&db).unwrap();
+        let s = repo1.call_tool("comm_session_init", json!({"name":"demo"})).unwrap();
+        let sid = s["id"].as_str().unwrap();
+        let a1 = repo1.call_tool("comm_agent_register", json!({"session_id":sid,"name":"a1"})).unwrap();
+        let a2 = repo1.call_tool("comm_agent_register", json!({"session_id":sid,"name":"a2"})).unwrap();
+        let g = repo1.call_tool("comm_graph_create", json!({"session_id":sid,"name":"g"})).unwrap();
+        let t = repo1.call_tool("comm_task_create", json!({"graph_id":g["id"],"title":"t"})).unwrap();
+        repo1.call_tool("comm_task_claim", json!({"task_id":t["id"],"agent_id":a1["id"]})).unwrap();
+        assert!(repo2.call_tool("comm_task_claim", json!({"task_id":t["id"],"agent_id":a2["id"]})).is_err());
+        let current = repo2.call_tool("comm_task_list_for_agent", json!({"agent_id":a1["id"]})).unwrap();
+        assert_eq!(current[0]["claimed_by"], a1["id"]);
+        assert_eq!(current[0]["status"], "in_progress");
     }
 }

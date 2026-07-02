@@ -14,7 +14,7 @@ Follow the Phenix structured workflow:
   radius.
 - For clear `c1`/`c2` maintenance/change work, do minimal preflight and dispatch
   directly to worker; do not require planner, architect, or heavyweight
-  `.phenix-agent-state/` unless recovery/handoff is needed.
+  the agent communication MCP unless recovery/handoff is needed.
 - Use planner for `c3`/`c4` or named ambiguity. Use architect only for repo
   topology, public API/config, flake outputs, permission model, agent routing,
   CI/deployment, or module ownership boundaries.

@@ -7,7 +7,7 @@ Run the adaptive Phenix task-DAG workflow for this request:
 
 $ARGUMENTS
 
-1. Save the original request to `.phenix-agent-state/request.md` and `.phenix-agent-state/tasks/<task-id>/task.yaml` when a stateful workflow is needed.
+1. Save the original request and workflow records through the `agent_comm` MCP when a stateful workflow is needed; do not emulate MCP artifacts with files or shell snippets.
 2. Classify task complexity and select the minimum sufficient pipeline:
    - simple_local
    - medium_local_verified

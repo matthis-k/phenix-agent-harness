@@ -1,6 +1,6 @@
 ---
 description: Get a cheap architecture/codebase overview through codebase-memory MCP
-agent: architect
+agent: phenix-architect
 subtask: true
 ---
 

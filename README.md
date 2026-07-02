@@ -2,31 +2,29 @@
 
 This flake packages the Phenix OpenCode and Pi agent harness resources.
 
-## Workflow state binary
+## Agent communication MCP
 
-`phenix-workflow-state` is a small generic Rust binary for storing workflow
-sessions, tasks, and task events in SQLite. It is intentionally a minimal
-vertical slice: it provides local CLI commands and newline-delimited JSON over
-stdio, but it does not implement MCP, HTTP, socket, or daemon transports.
+`phenix-agent-comm-mcp` is a generic local MCP server for durable agent
+communication. It stores sessions, agents, messages, task graphs, events,
+artifacts, and decisions in SQLite under the user's XDG data directory.
 
-Useful commands:
+The Rust core is intentionally policy-free: it records communication and
+references/results only. It does not run shell commands, edit source files, or
+duplicate Tend/Stitch behavior. Tend remains responsible for verification; Stitch
+remains responsible for DAG-aware repository coordination.
+
+Useful debug commands:
 
 ```sh
-phenix-workflow-state init
-phenix-workflow-state create-session "example"
-phenix-workflow-state create-task <session-id> "task title"
-phenix-workflow-state list-tasks [session-id]
-phenix-workflow-state record-event <task-id> note "message"
-phenix-workflow-state summarize <session-id>
-phenix-workflow-state stdio-json
+phenix-agent-comm-mcp init
+phenix-agent-comm-mcp tool comm_session_init --args '{"name":"example"}'
+phenix-agent-comm-mcp stdio-mcp
 ```
 
-The `stdio-json` mode reads one JSON request per line and writes one JSON
-response per line. Example request:
-
-```json
-{"id":1,"method":"list_tasks","session_id":null}
-```
-
-The core model is intentionally generic and does not encode Tend, Stitch, or
-OpenCode-specific semantics.
+OpenCode is configured with a local `agent_comm` MCP server and canonical
+`agent_comm_*` permissions. The MCP tool names themselves currently use the
+`comm_` prefix (for example `comm_session_init`, `comm_agent_register`,
+`comm_message_send`, `comm_task_create`, `comm_event_recent`,
+`comm_artifact_record`, and `comm_decision_record`), but OpenCode permissions
+must always use the server namespace. Agents should use MCP records rather than
+writing handoff state into the repository.

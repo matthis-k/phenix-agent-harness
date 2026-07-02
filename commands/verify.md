@@ -1,6 +1,6 @@
 ---
 description: Verify mechanical checks, plan conformance, and architecture of the current working tree
-agent: verifier
+agent: phenix-verifier
 subtask: true
 ---
 
@@ -54,15 +54,7 @@ Current diff:
 
 Workflow state:
 
-!`for f in .phenix-agent-state/request.md .phenix-agent-state/planner-output.yaml .phenix-agent-state/implementation-plan.yaml .phenix-agent-state/planned-changes.yaml .phenix-agent-state/architecture-review.yaml .phenix-agent-state/architecture-contract.yaml .phenix-agent-state/implementation-summary.yaml; do if test -f "$f"; then echo "PRESENT $f"; else echo "MISSING $f"; fi; done`
-
-Read plan artifacts if present:
-
-!`test -f .phenix-agent-state/request.md && echo "REQUEST:" && cat .phenix-agent-state/request.md || true`
-!`test -f .phenix-agent-state/implementation-plan.yaml && echo "PLAN:" && cat .phenix-agent-state/implementation-plan.yaml || true`
-!`test -f .phenix-agent-state/planned-changes.yaml && echo "CHANGES:" && cat .phenix-agent-state/planned-changes.yaml || true`
-!`test -f .phenix-agent-state/architecture-contract.yaml && echo "CONTRACT:" && cat .phenix-agent-state/architecture-contract.yaml || true`
-!`test -f .phenix-agent-state/implementation-summary.yaml && echo "SUMMARY:" && cat .phenix-agent-state/implementation-summary.yaml || true`
+Use the `agent_comm` MCP to list/read required request, plan, architecture, implementation, and verification records. Do not fake MCP artifact reads through file paths or shell snippets.
 
 Relevant rules:
 

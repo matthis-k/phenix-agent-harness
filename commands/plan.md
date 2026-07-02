@@ -1,6 +1,6 @@
 ---
 description: Produce a structured implementation plan
-agent: planner
+agent: phenix-planner
 subtask: true
 ---
 

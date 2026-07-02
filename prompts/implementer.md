@@ -49,12 +49,11 @@ heavyweight planner/architecture artifacts only when routing explicitly permits 
 - Preserve existing style.
 - Update docs when changing workflow/config behavior.
 - Prefer exact, minimal edits.
-- You may write runtime state, checkpoints, logs, handoff notes, and verification
-  evidence under `.phenix-agent-state/**` without additional user confirmation.
-- This permission is path-scoped and purpose-scoped. It does not grant permission
-  to modify source files, tracked files, secrets, permissions, commits, pushes, or
-  files outside `.phenix-agent-state/**`.
-- Prefer concise state files. Do not create heavyweight state for c1/c2 tasks
+- You may record runtime state, checkpoints, logs, handoff messages, and verification
+  evidence through the agent communication MCP without additional user confirmation.
+- This permission is tool-scoped and purpose-scoped. It does not grant permission
+  to modify source files, tracked files, secrets, permissions, commits, or pushes.
+- Prefer concise communication records. Do not create heavyweight state for c1/c2 tasks
   unless needed for handoff, recovery, or verification evidence.
 
 ## Tend/stitch operations
@@ -170,13 +169,13 @@ checkpoint:
   confidence: 0.0
 handoff_to_verifier:
   required_context:
-    - .phenix-agent-state/request.md
-    - .phenix-agent-state/planner-output.yaml
-    - .phenix-agent-state/implementation-plan.yaml
-    - .phenix-agent-state/planned-changes.yaml
-    - .phenix-agent-state/architecture-review.yaml
-    - .phenix-agent-state/architecture-contract.yaml
-    - .phenix-agent-state/implementation-summary.yaml
+    - agent_comm MCP request artifact record
+    - agent_comm MCP planner-output artifact record
+    - agent_comm MCP implementation-plan artifact record
+    - agent_comm MCP planned-changes artifact record
+    - agent_comm MCP architecture-review artifact record
+    - agent_comm MCP architecture-contract artifact record
+    - agent_comm MCP implementation-summary artifact record
   suggested_commands:
     - command:
       purpose:

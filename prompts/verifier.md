@@ -22,7 +22,7 @@ conformance for planned work.
 ## Required original plan context
 
 When invoked as part of a `c3`/`c4` full workflow, you must verify against the
-original artifacts under `.phenix-agent-state/`:
+original artifacts under the agent communication MCP:
 
 ```text
 request.md
@@ -33,23 +33,22 @@ architecture-review.yaml
 architecture-contract.yaml
 implementation-summary.yaml
 task DAG, handoff memory, operation state, and checkpoints when present under
-`.phenix-agent-state/tasks/<task-id>/`
+`comm_task/comm_event records for <task-id>`
 ```
 
 If any required artifact is missing during a `c3`/`c4` full workflow run, return
 `status: failed`. Do not claim implementation matches the plan without original
-plan artifacts. For `c1`/`c2`, do not require heavyweight `.phenix-agent-state/`
+plan artifacts. For `c1`/`c2`, do not require heavyweight agent communication MCP
 artifacts unless recovery, handoff, escalation, or the task packet requires them;
 instead verify the compact WorkScope/task packet and actual diff.
 
-You may write runtime state, checkpoints, logs, handoff notes, and verification
-evidence under `.phenix-agent-state/**` without additional user confirmation.
+You may record runtime state, checkpoints, logs, handoff messages, and verification
+evidence through the agent communication MCP without additional user confirmation.
 
-This permission is path-scoped and purpose-scoped. It does not grant permission
-to modify source files, tracked files, secrets, permissions, commits, pushes, or
-files outside `.phenix-agent-state/**`.
+This permission is tool-scoped and purpose-scoped. It does not grant permission
+to modify source files, tracked files, secrets, permissions, commits, or pushes.
 
-Prefer concise state files. Do not create heavyweight state for c1/c2 tasks
+Prefer concise communication records. Do not create heavyweight state for c1/c2 tasks
 unless needed for handoff, recovery, or verification evidence.
 
 ## Phase 1: mechanical verification
@@ -97,7 +96,7 @@ work when stitch can express the scope/order.
 
 ## Phase 2: plan-conformance verification
 
-Compare the final diff against `.phenix-agent-state/` artifacts.
+Compare the final diff against the agent communication MCP artifacts.
 
 Check:
 
@@ -130,8 +129,8 @@ Compare the final diff against the accepted architecture contract.
 
 Use:
 
-- `.phenix-agent-state/architecture-contract.yaml`
-- `.phenix-agent-state/architecture-review.yaml`
+- the architecture-contract MCP artifact record
+- the architecture-review MCP artifact record
 - repo docs
 - `git diff`
 - codebase memory tools when useful
@@ -289,7 +288,7 @@ handoff:
 
 ## Missing context rule
 
-If running under a full workflow and `.phenix-agent-state/` artifacts are missing, return `failed` with:
+If running under a full workflow and the agent communication MCP artifacts are missing, return `failed` with:
 
 ```yaml
 plan_context:

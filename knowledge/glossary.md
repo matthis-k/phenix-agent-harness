@@ -7,9 +7,9 @@
   complexity (`c0`..`c4`), risk, capabilities, routing, invariants, boundaries,
   verification expectations, and escalation triggers.
 - **c0**: Inspect/read-only work. No tracked-file edits; minimal preflight; no
-  heavyweight `.phenix-agent-state/` unless recovery or handoff is needed.
+  heavyweight agent communication MCP unless recovery or handoff is needed.
 - **c1**: Trivial mechanical maintenance with obvious intent and tiny blast radius.
-  Minimal preflight; no heavyweight `.phenix-agent-state/` unless recovery or handoff
+  Minimal preflight; no heavyweight agent communication MCP unless recovery or handoff
   is needed.
 - **c2**: Localized low-risk edit with clear intent. Route directly to worker when
   capabilities and invariants allow it and no architecture/release/destructive or
@@ -56,3 +56,10 @@ single-node `commit` rather than DAG-wide `synced commit`, unless the user menti
   subflakes and coordinates verification; it is not a child dependency provider.
 - **Retired repo**: A former repo or role kept only for historical notes and not
   included in active topology, root inputs, hooks, or normal verification.
+
+## Agent communication
+
+Phenix workflow communication is MCP-only. The `agent_comm` MCP server is the
+durable store for sessions, agents, messages, tasks, events, artifacts, and
+decisions. OpenCode permissions use the canonical `agent_comm_*` namespace even
+when individual MCP tool names use a `comm_` prefix.

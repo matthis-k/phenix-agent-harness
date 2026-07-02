@@ -11,7 +11,7 @@ implementation → verification workflow while using Pi.
   radius.
 - Use minimal preflight for `c1`/`c2`; route directly to worker when the request is
   clear, capabilities allow it, and no architecture/release/destructive/security
-  trigger is present. Do not require heavyweight `.phenix-agent-state/` for c1/c2
+  trigger is present. Do not require heavyweight agent communication MCP for c1/c2
   unless recovery or handoff needs it.
 - Invoke planner only for `c3`/`c4` or a named ambiguity. Invoke architect only for
   repo topology, public API/config, flake outputs, permission model, agent routing,

@@ -1,15 +1,14 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use directories::ProjectDirs;
-use phenix_workflow_state::WorkflowRepository;
-use serde::{Deserialize, Serialize};
-use serde_json::json;
+use phenix_agent_comm::{tool_descriptions, AgentCommRepository};
+use serde::Serialize;
+use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
-use uuid::Uuid;
 
 #[derive(Debug, Parser)]
-#[command(about = "Generic workflow state storage service")]
+#[command(about = "Generic durable agent communication MCP")]
 struct Cli {
     #[arg(long, global = true)]
     db: Option<PathBuf>,
@@ -20,61 +19,8 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Init,
-    CreateSession { name: String },
-    CreateTask { session_id: Uuid, title: String },
-    ListTasks { session_id: Option<Uuid> },
-    RecordEvent {
-        task_id: Uuid,
-        kind: String,
-        message: String,
-        #[arg(long, default_value = "{}")]
-        payload: serde_json::Value,
-    },
-    Summarize { session_id: Uuid },
-    StdioJson,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "method", rename_all = "snake_case")]
-enum StdioRequestMethod {
-    Init,
-    CreateSession {
-        name: String,
-    },
-    CreateTask {
-        session_id: Uuid,
-        title: String,
-    },
-    ListTasks {
-        session_id: Option<Uuid>,
-    },
-    RecordEvent {
-        task_id: Uuid,
-        kind: String,
-        message: String,
-        #[serde(default = "empty_object")]
-        payload: serde_json::Value,
-    },
-    Summarize {
-        session_id: Uuid,
-    },
-}
-
-#[derive(Debug, Deserialize)]
-struct StdioRequest {
-    id: Option<serde_json::Value>,
-    #[serde(flatten)]
-    method: StdioRequestMethod,
-}
-
-#[derive(Debug, Serialize)]
-struct StdioResponse {
-    id: Option<serde_json::Value>,
-    ok: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
+    Tool { name: String, #[arg(long, default_value = "{}") ] args: Value },
+    StdioMcp,
 }
 
 fn main() -> Result<()> {
@@ -83,82 +29,84 @@ fn main() -> Result<()> {
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
-    let repo = WorkflowRepository::open(&db_path).with_context(|| format!("opening {}", db_path.display()))?;
-
+    let repo = AgentCommRepository::open(&db_path).with_context(|| format!("opening {}", db_path.display()))?;
     match cli.command {
         Command::Init => print_json(json!({ "db": db_path, "initialized": true })),
-        Command::CreateSession { name } => print_json(repo.create_session(&name)?),
-        Command::CreateTask { session_id, title } => print_json(repo.create_task(session_id, &title)?),
-        Command::ListTasks { session_id } => print_json(repo.list_tasks(session_id)?),
-        Command::RecordEvent {
-            task_id,
-            kind,
-            message,
-            payload,
-        } => print_json(repo.record_event(task_id, &kind, &message, payload)?),
-        Command::Summarize { session_id } => print_json(repo.summarize(session_id)?),
-        Command::StdioJson => run_stdio_json(&repo),
+        Command::Tool { name, args } => print_json(repo.call_tool(&name, args)?),
+        Command::StdioMcp => run_mcp(&repo),
     }
 }
 
-fn run_stdio_json(repo: &WorkflowRepository) -> Result<()> {
+fn run_mcp(repo: &AgentCommRepository) -> Result<()> {
     let stdin = io::stdin();
-    let mut stdout = io::stdout().lock();
-    for line in stdin.lock().lines() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
+    let mut input = stdin.lock();
+    let mut output = io::stdout().lock();
+    while let Some(request) = read_message(&mut input)? {
+        let response = handle_json_rpc(repo, request);
+        if !response.is_null() {
+            write_message(&mut output, &response)?;
         }
-        let response = match serde_json::from_str::<StdioRequest>(&line) {
-            Ok(request) => handle_stdio_request(repo, request),
-            Err(err) => StdioResponse {
-                id: None,
-                ok: false,
-                result: None,
-                error: Some(err.to_string()),
-            },
-        };
-        serde_json::to_writer(&mut stdout, &response)?;
-        writeln!(stdout)?;
-        stdout.flush()?;
     }
     Ok(())
 }
 
-fn handle_stdio_request(repo: &WorkflowRepository, request: StdioRequest) -> StdioResponse {
-    let id = request.id;
-    let result = match request.method {
-        StdioRequestMethod::Init => Ok(json!({ "initialized": true })),
-        StdioRequestMethod::CreateSession { name } => repo.create_session(&name).map(|value| json!(value)),
-        StdioRequestMethod::CreateTask { session_id, title } => {
-            repo.create_task(session_id, &title).map(|value| json!(value))
+fn handle_json_rpc(repo: &AgentCommRepository, request: Value) -> Value {
+    let id = request.get("id").cloned().unwrap_or(Value::Null);
+    let method = request.get("method").and_then(Value::as_str).unwrap_or("");
+    let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
+    let result: std::result::Result<Value, String> = match method {
+        "initialize" => Ok(json!({
+            "protocolVersion": "2024-11-05",
+            "serverInfo": {"name": "phenix-agent-comm-mcp", "version": env!("CARGO_PKG_VERSION")},
+            "capabilities": {"tools": {}}
+        })),
+        "notifications/initialized" => return Value::Null,
+        "tools/list" => Ok(json!({"tools": tool_descriptions()})),
+        "tools/call" => {
+            let name = params.get("name").and_then(Value::as_str).unwrap_or("");
+            let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            repo.call_tool(name, args).map(|value| json!({
+                "content": [{"type": "text", "text": serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string())}],
+                "structuredContent": value,
+                "isError": false
+            })).map_err(|err| err.to_string())
         }
-        StdioRequestMethod::ListTasks { session_id } => repo.list_tasks(session_id).map(|value| json!(value)),
-        StdioRequestMethod::RecordEvent {
-            task_id,
-            kind,
-            message,
-            payload,
-        } => repo
-            .record_event(task_id, &kind, &message, payload)
-            .map(|value| json!(value)),
-        StdioRequestMethod::Summarize { session_id } => repo.summarize(session_id).map(|value| json!(value)),
+        _ => Err(format!("method not found: {method}")),
     };
-
     match result {
-        Ok(value) => StdioResponse {
-            id,
-            ok: true,
-            result: Some(value),
-            error: None,
-        },
-        Err(err) => StdioResponse {
-            id,
-            ok: false,
-            result: None,
-            error: Some(err.to_string()),
-        },
+        Ok(result) => json!({"jsonrpc":"2.0", "id": id, "result": result}),
+        Err(err) => json!({"jsonrpc":"2.0", "id": id, "error": {"code": -32000, "message": err.to_string()}}),
     }
+}
+
+fn read_message(input: &mut impl BufRead) -> Result<Option<Value>> {
+    let mut content_length = None;
+    loop {
+        let mut line = String::new();
+        let read = input.read_line(&mut line)?;
+        if read == 0 {
+            return Ok(None);
+        }
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        if trimmed.is_empty() {
+            break;
+        }
+        if let Some(value) = trimmed.strip_prefix("Content-Length:") {
+            content_length = Some(value.trim().parse::<usize>()?);
+        }
+    }
+    let len = content_length.context("missing Content-Length header")?;
+    let mut body = vec![0_u8; len];
+    input.read_exact(&mut body)?;
+    Ok(Some(serde_json::from_slice(&body)?))
+}
+
+fn write_message(output: &mut impl Write, value: &Value) -> Result<()> {
+    let body = serde_json::to_vec(value)?;
+    write!(output, "Content-Length: {}\r\n\r\n", body.len())?;
+    output.write_all(&body)?;
+    output.flush()?;
+    Ok(())
 }
 
 fn print_json(value: impl Serialize) -> Result<()> {
@@ -168,11 +116,17 @@ fn print_json(value: impl Serialize) -> Result<()> {
 }
 
 fn default_db_path() -> PathBuf {
-    ProjectDirs::from("local", "phenix", "workflow-state")
-        .map(|dirs| dirs.data_local_dir().join("workflow-state.sqlite3"))
-        .unwrap_or_else(|| PathBuf::from("workflow-state.sqlite3"))
+    ProjectDirs::from("local", "phenix", "agent-comm")
+        .map(|dirs| dirs.data_local_dir().join("agent-comm.sqlite3"))
+        .unwrap_or_else(|| {
+            std::env::var_os("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("phenix-agent-comm/agent-comm.sqlite3")
+        })
 }
 
-fn empty_object() -> serde_json::Value {
-    json!({})
+#[allow(dead_code)]
+fn never_shell() -> Result<()> {
+    bail!("this MCP records communication only and does not execute shell commands")
 }
