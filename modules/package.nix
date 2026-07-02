@@ -476,192 +476,206 @@
           exec pi "$@"
         '';
       };
+
+      workflowState = pkgs.rustPlatform.buildRustPackage {
+        pname = "phenix-workflow-state";
+        version = "0.1.0";
+        src = ../.;
+        cargoLock.lockFile = ../Cargo.lock;
+        nativeBuildInputs = [ pkgs.pkg-config ];
+        buildInputs = [ pkgs.sqlite ];
+      };
     in
     {
       packages = {
         default = wrappedOpencode;
         opencode = wrappedOpencode;
         pi = wrappedPi;
+        workflow-state = workflowState;
         generated-config = generatedConfig;
         generated-pi-settings = generatedPiSettings;
         generated-pi-package-json = generatedPiPackageJson;
       };
 
-      checks.generated-config =
-        pkgs.runCommand "phenix-opencode-generated-config-check"
-          {
-            nativeBuildInputs = [
-              pkgs.jq
-              pkgs.gnugrep
-            ];
-          }
-          ''
-            jq -e '.default_agent == "phenix-workflow"' ${generatedConfig}
-            jq -e '.command.flow.agent == "phenix-workflow"' ${generatedConfig}
-            jq -e 'has("commands") | not' ${generatedConfig}
-            jq -e 'has("prompts") | not' ${generatedConfig}
-            jq -e '.instructions | type == "array" and length >= 1' ${generatedConfig}
-            jq -e '.instructions[0] | type == "string" and test("glossary\\.md$")' ${generatedConfig}
-            jq -e '.lsp.typescript.command == ["typescript-language-server", "--stdio"]' ${generatedConfig}
-            jq -e '.lsp.typescript.extensions == [".ts", ".tsx", ".js", ".jsx"]' ${generatedConfig}
-            jq -e '.lsp.nix.command == ["nil"]' ${generatedConfig}
-            jq -e '.lsp.nix.extensions == [".nix"]' ${generatedConfig}
+      checks = {
+        workflow-state = workflowState;
 
-            jq -e '.mcp.github.type == "local"' ${generatedConfig}
-            jq -e '.mcp.github.enabled == true' ${generatedConfig}
-            jq -e '.mcp.github.command | type == "array" and length == 1 and (.[0] | test("/bin/github-mcp-server$"))' ${generatedConfig}
-            jq -e '.mcp.github | has("environment") | not' ${generatedConfig}
-
-            jq -e '.agent."phenix-workflow".mode == "primary"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.edit == "deny"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.lsp == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission."tend-mcp_*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission."stitch-mcp_*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.bash."tend *" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.bash."stitch exec*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.bash."mkdir -p .phenix-agent-state*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.bash."cat > .phenix-agent-state/*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.bash."tee -a .phenix-agent-state/*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.bash."python -c *.phenix-agent-state/*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.bash."chmod * .phenix-agent-state/*" == "deny"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.bash."tee -a .phenix-agent-state/*secrets*" == "deny"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.bash."tee -a .phenix-agent-state/*.env*" == "deny"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.bash."tee -a .phenix-agent-state/*..*" == "deny"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.bash."python -c *.phenix-agent-state/*secrets*" == "deny"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.bash | has("mkdir -p .opencodestate*") | not' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.bash | has("rm -f .phenix-agent-state/*") | not' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.bash | has("python -c *flake.nix*") | not' ${generatedConfig}
-
-            jq -e '.agent."phenix-planner".mode == "subagent"' ${generatedConfig}
-            jq -e '.agent."phenix-architect".mode == "subagent"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".mode == "subagent"' ${generatedConfig}
-            jq -e '.agent."phenix-verifier".mode == "subagent"' ${generatedConfig}
-            jq -e '.agent."phenix-architecture-verifier".mode == "subagent"' ${generatedConfig}
-            jq -e '.agent."phenix-commit-sync".mode == "subagent"' ${generatedConfig}
-            jq -e '.agent."failure-analyzer".mode == "subagent"' ${generatedConfig}
-            jq -e '.agent."uiux-designer".mode == "subagent"' ${generatedConfig}
-
-            jq -e '.agent."phenix-worker".permission.edit == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.lsp == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."cargo check*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."git add*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."git branch --show-current*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."git branch --list*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."git branch -m*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."git switch -c*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."git reset HEAD*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."git reset --soft*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash | has("git branch*") | not' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash | has("git switch*") | not' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash | has("git reset*") | not' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."git reset --hard*" == "ask"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."git clean*" == "deny"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."git branch -D*" == "ask"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."git commit*" == "ask"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."git push*" == "ask"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."git push --force*" == "ask"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."git push --delete*" == "ask"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."nix eval*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."nix develop*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."nix store ls*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."nix flake update*" == "ask"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."nix store delete*" == "ask"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."mkdir -p .phenix-agent-state*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."python -c *.phenix-agent-state/*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-worker".permission.bash."chmod * .phenix-agent-state/*" == "deny"' ${generatedConfig}
-            jq -e '.agent."phenix-planner".permission.bash."mkdir -p .phenix-agent-state*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-planner".permission.edit == "deny"' ${generatedConfig}
-            jq -e '.agent."phenix-architect".permission.edit == "deny"' ${generatedConfig}
-            jq -e '.agent."phenix-verifier".permission.edit == "deny"' ${generatedConfig}
-            jq -e '.agent."phenix-architecture-verifier".permission.edit == "deny"' ${generatedConfig}
-            jq -e '.agent."phenix-commit-sync".permission.edit == "deny"' ${generatedConfig}
-            jq -e '.agent."phenix-commit-sync".permission."stitch-mcp_*" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-commit-sync".permission.bash."stitch commit*" == "ask"' ${generatedConfig}
-            jq -e '.agent."phenix-commit-sync".permission.bash."stitch sync*" == "ask"' ${generatedConfig}
-            jq -e '.agent."failure-analyzer".permission.edit == "deny"' ${generatedConfig}
-            jq -e '.agent."uiux-designer".permission.edit == "deny"' ${generatedConfig}
-
-            jq -e '.agent."phenix-workflow".permission.task."phenix-planner" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.task."phenix-architect" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.task."phenix-worker" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.task."phenix-verifier" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.task."phenix-architecture-verifier" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.task."phenix-commit-sync" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.task."failure-analyzer" == "allow"' ${generatedConfig}
-            jq -e '.agent."phenix-workflow".permission.task."uiux-designer" == "allow"' ${generatedConfig}
-
-            jq -e '.agent."phenix-workflow".description | type == "string" and length > 0' ${generatedConfig}
-            jq -e '.agent."phenix-planner".description | type == "string" and length > 0' ${generatedConfig}
-            jq -e '.agent."phenix-architect".description | type == "string" and length > 0' ${generatedConfig}
-            jq -e '.agent."phenix-worker".description | type == "string" and length > 0' ${generatedConfig}
-            jq -e '.agent."phenix-verifier".description | type == "string" and length > 0' ${generatedConfig}
-            jq -e '.agent."phenix-architecture-verifier".description | type == "string" and length > 0' ${generatedConfig}
-            jq -e '.agent."phenix-commit-sync".description | type == "string" and length > 0' ${generatedConfig}
-            jq -e '.agent."failure-analyzer".description | type == "string" and length > 0' ${generatedConfig}
-            jq -e '.agent."uiux-designer".description | type == "string" and length > 0' ${generatedConfig}
-
-            jq -e '[.agent[] | .description] | all(type == "string" and length > 0)' ${generatedConfig}
-            jq -e '[.agent[] | .mode] | all(. == "primary" or . == "subagent")' ${generatedConfig}
-            jq -e '[.agent[] | select(.mode == "subagent") | .hidden] | all(. == true)' ${generatedConfig}
-
-            check_prompt() {
-              file="$1"
-              pattern="$2"
-              grep -F -q -- "$pattern" "$file" || {
-                echo "missing prompt assertion: $pattern in $file" >&2
-                exit 1
-              }
+        generated-config =
+          pkgs.runCommand "phenix-opencode-generated-config-check"
+            {
+              nativeBuildInputs = [
+                pkgs.jq
+                pkgs.gnugrep
+              ];
             }
+            ''
+              jq -e '.default_agent == "phenix-workflow"' ${generatedConfig}
+              jq -e '.command.flow.agent == "phenix-workflow"' ${generatedConfig}
+              jq -e 'has("commands") | not' ${generatedConfig}
+              jq -e 'has("prompts") | not' ${generatedConfig}
+              jq -e '.instructions | type == "array" and length >= 1' ${generatedConfig}
+              jq -e '.instructions[0] | type == "string" and test("glossary\\.md$")' ${generatedConfig}
+              jq -e '.lsp.typescript.command == ["typescript-language-server", "--stdio"]' ${generatedConfig}
+              jq -e '.lsp.typescript.extensions == [".ts", ".tsx", ".js", ".jsx"]' ${generatedConfig}
+              jq -e '.lsp.nix.command == ["nil"]' ${generatedConfig}
+              jq -e '.lsp.nix.extensions == [".nix"]' ${generatedConfig}
 
-            check_prompt ${promptCheckPath "workflow"} 'Execution is task-DAG driven'
-            check_prompt ${promptCheckPath "workflow"} 'simple_local'
-            check_prompt ${promptCheckPath "workflow"} 'medium_local_verified'
-            check_prompt ${promptCheckPath "workflow"} 'dag_full_verified'
-            check_prompt ${promptCheckPath "workflow"} 'full_complete_test'
-            check_prompt ${promptCheckPath "workflow"} 'Record `transport: mcp` or `transport: cli`'
-            check_prompt ${promptCheckPath "workflow"} 'manually looping through repos'
-            check_prompt ${promptCheckPath "workflow"} 'Reversible single-repo Git and safe Nix commands may be permitted'
-            check_prompt ${promptCheckPath "workflow"} 'Irreversible Git/Nix actions stay'
-            check_prompt ${promptCheckPath "planner"} 'task_dag:'
-            check_prompt ${promptCheckPath "planner"} 'required_verification_profile'
-            check_prompt ${promptCheckPath "planner"} 'mcp_preferred_cli_allowed'
-            check_prompt ${promptCheckPath "architecture-verifier"} 'manual_repo_loop_found'
-            check_prompt ${promptCheckPath "commit-sync"} 'stitch-mcp_stitch_commit'
-            check_prompt ${promptCheckPath "commit-sync"} 'Never manually walk repositories'
-            check_prompt ${promptCheckPath "commit-sync"} 'Stitch remains the orchestrator for multi-repo, DAG-aware, sync, and structural commit flows'
-            check_prompt ${promptCheckPath "verifier"} 'tend_stitch_evidence'
+              jq -e '.mcp.github.type == "local"' ${generatedConfig}
+              jq -e '.mcp.github.enabled == true' ${generatedConfig}
+              jq -e '.mcp.github.command | type == "array" and length == 1 and (.[0] | test("/bin/github-mcp-server$"))' ${generatedConfig}
+              jq -e '.mcp.github | has("environment") | not' ${generatedConfig}
 
-            touch $out
-          '';
+              jq -e '.agent."phenix-workflow".mode == "primary"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.edit == "deny"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.lsp == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission."tend-mcp_*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission."stitch-mcp_*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.bash."tend *" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.bash."stitch exec*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.bash."mkdir -p .phenix-agent-state*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.bash."cat > .phenix-agent-state/*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.bash."tee -a .phenix-agent-state/*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.bash."python -c *.phenix-agent-state/*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.bash."chmod * .phenix-agent-state/*" == "deny"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.bash."tee -a .phenix-agent-state/*secrets*" == "deny"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.bash."tee -a .phenix-agent-state/*.env*" == "deny"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.bash."tee -a .phenix-agent-state/*..*" == "deny"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.bash."python -c *.phenix-agent-state/*secrets*" == "deny"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.bash | has("mkdir -p .opencodestate*") | not' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.bash | has("rm -f .phenix-agent-state/*") | not' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.bash | has("python -c *flake.nix*") | not' ${generatedConfig}
 
-      checks.generated-pi-resources =
-        pkgs.runCommand "phenix-pi-generated-resources-check"
-          {
-            nativeBuildInputs = [
-              pkgs.jq
-              pkgs.gnugrep
-            ];
-          }
-          ''
-            jq -e 'has("lsp") | not' ${generatedPiSettings}
-            jq -e '.extensions[0] | test("pi/extensions/lsp\\.ts$")' ${generatedPiSettings}
-            jq -e '.skills[0] | test("pi/skills$")' ${generatedPiSettings}
-            jq -e '.prompts[0] | test("pi/prompts$")' ${generatedPiSettings}
-            jq -e '.pi.extensions == ["./pi/extensions"]' ${generatedPiPackageJson}
-            jq -e '.pi.skills == ["./pi/skills"]' ${generatedPiPackageJson}
-            jq -e '.pi.prompts == ["./pi/prompts"]' ${generatedPiPackageJson}
-            jq -e '.dependencies."@earendil-works/pi-coding-agent" | type == "string"' ${generatedPiPackageJson}
+              jq -e '.agent."phenix-planner".mode == "subagent"' ${generatedConfig}
+              jq -e '.agent."phenix-architect".mode == "subagent"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".mode == "subagent"' ${generatedConfig}
+              jq -e '.agent."phenix-verifier".mode == "subagent"' ${generatedConfig}
+              jq -e '.agent."phenix-architecture-verifier".mode == "subagent"' ${generatedConfig}
+              jq -e '.agent."phenix-commit-sync".mode == "subagent"' ${generatedConfig}
+              jq -e '.agent."failure-analyzer".mode == "subagent"' ${generatedConfig}
+              jq -e '.agent."uiux-designer".mode == "subagent"' ${generatedConfig}
 
-            grep -F -q 'PI_CODING_AGENT_DIR="''${XDG_CONFIG_HOME:-$HOME/.config}/phenix-pi"' ${wrappedPi}/bin/pi
-            grep -F -q '${generatedPiConfigDir}/settings.json' ${wrappedPi}/bin/pi
-            ! grep -F -q 'PI_CODING_AGENT_DIR="${generatedPiConfigDir}"' ${wrappedPi}/bin/pi
+              jq -e '.agent."phenix-worker".permission.edit == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.lsp == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."cargo check*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."git add*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."git branch --show-current*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."git branch --list*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."git branch -m*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."git switch -c*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."git reset HEAD*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."git reset --soft*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash | has("git branch*") | not' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash | has("git switch*") | not' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash | has("git reset*") | not' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."git reset --hard*" == "ask"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."git clean*" == "deny"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."git branch -D*" == "ask"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."git commit*" == "ask"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."git push*" == "ask"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."git push --force*" == "ask"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."git push --delete*" == "ask"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."nix eval*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."nix develop*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."nix store ls*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."nix flake update*" == "ask"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."nix store delete*" == "ask"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."mkdir -p .phenix-agent-state*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."python -c *.phenix-agent-state/*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."chmod * .phenix-agent-state/*" == "deny"' ${generatedConfig}
+              jq -e '.agent."phenix-planner".permission.bash."mkdir -p .phenix-agent-state*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-planner".permission.edit == "deny"' ${generatedConfig}
+              jq -e '.agent."phenix-architect".permission.edit == "deny"' ${generatedConfig}
+              jq -e '.agent."phenix-verifier".permission.edit == "deny"' ${generatedConfig}
+              jq -e '.agent."phenix-architecture-verifier".permission.edit == "deny"' ${generatedConfig}
+              jq -e '.agent."phenix-commit-sync".permission.edit == "deny"' ${generatedConfig}
+              jq -e '.agent."phenix-commit-sync".permission."stitch-mcp_*" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-commit-sync".permission.bash."stitch commit*" == "ask"' ${generatedConfig}
+              jq -e '.agent."phenix-commit-sync".permission.bash."stitch sync*" == "ask"' ${generatedConfig}
+              jq -e '.agent."failure-analyzer".permission.edit == "deny"' ${generatedConfig}
+              jq -e '.agent."uiux-designer".permission.edit == "deny"' ${generatedConfig}
 
-            grep -F -q 'name: "lsp_diagnostics"' ${piExtensionsDir}/lsp.ts
-            grep -F -q 'name: "lsp_hover"' ${piExtensionsDir}/lsp.ts
-            grep -F -q 'read-only' ${piExtensionsDir}/lsp.ts
-            ! grep -E -q 'codeAction|rename|workspace/applyEdit' ${piExtensionsDir}/lsp.ts
+              jq -e '.agent."phenix-workflow".permission.task."phenix-planner" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.task."phenix-architect" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.task."phenix-worker" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.task."phenix-verifier" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.task."phenix-architecture-verifier" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.task."phenix-commit-sync" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.task."failure-analyzer" == "allow"' ${generatedConfig}
+              jq -e '.agent."phenix-workflow".permission.task."uiux-designer" == "allow"' ${generatedConfig}
 
-            touch $out
-          '';
+              jq -e '.agent."phenix-workflow".description | type == "string" and length > 0' ${generatedConfig}
+              jq -e '.agent."phenix-planner".description | type == "string" and length > 0' ${generatedConfig}
+              jq -e '.agent."phenix-architect".description | type == "string" and length > 0' ${generatedConfig}
+              jq -e '.agent."phenix-worker".description | type == "string" and length > 0' ${generatedConfig}
+              jq -e '.agent."phenix-verifier".description | type == "string" and length > 0' ${generatedConfig}
+              jq -e '.agent."phenix-architecture-verifier".description | type == "string" and length > 0' ${generatedConfig}
+              jq -e '.agent."phenix-commit-sync".description | type == "string" and length > 0' ${generatedConfig}
+              jq -e '.agent."failure-analyzer".description | type == "string" and length > 0' ${generatedConfig}
+              jq -e '.agent."uiux-designer".description | type == "string" and length > 0' ${generatedConfig}
+
+              jq -e '[.agent[] | .description] | all(type == "string" and length > 0)' ${generatedConfig}
+              jq -e '[.agent[] | .mode] | all(. == "primary" or . == "subagent")' ${generatedConfig}
+              jq -e '[.agent[] | select(.mode == "subagent") | .hidden] | all(. == true)' ${generatedConfig}
+
+              check_prompt() {
+                file="$1"
+                pattern="$2"
+                grep -F -q -- "$pattern" "$file" || {
+                  echo "missing prompt assertion: $pattern in $file" >&2
+                  exit 1
+                }
+              }
+
+              check_prompt ${promptCheckPath "workflow"} 'Execution is task-DAG driven'
+              check_prompt ${promptCheckPath "workflow"} 'simple_local'
+              check_prompt ${promptCheckPath "workflow"} 'medium_local_verified'
+              check_prompt ${promptCheckPath "workflow"} 'dag_full_verified'
+              check_prompt ${promptCheckPath "workflow"} 'full_complete_test'
+              check_prompt ${promptCheckPath "workflow"} 'Record `transport: mcp` or `transport: cli`'
+              check_prompt ${promptCheckPath "workflow"} 'manually looping through repos'
+              check_prompt ${promptCheckPath "workflow"} 'Reversible single-repo Git and safe Nix commands may be permitted'
+              check_prompt ${promptCheckPath "workflow"} 'Irreversible Git/Nix actions stay'
+              check_prompt ${promptCheckPath "planner"} 'task_dag:'
+              check_prompt ${promptCheckPath "planner"} 'required_verification_profile'
+              check_prompt ${promptCheckPath "planner"} 'mcp_preferred_cli_allowed'
+              check_prompt ${promptCheckPath "architecture-verifier"} 'manual_repo_loop_found'
+              check_prompt ${promptCheckPath "commit-sync"} 'stitch-mcp_stitch_commit'
+              check_prompt ${promptCheckPath "commit-sync"} 'Never manually walk repositories'
+              check_prompt ${promptCheckPath "commit-sync"} 'Stitch remains the orchestrator for multi-repo, DAG-aware, sync, and structural commit flows'
+              check_prompt ${promptCheckPath "verifier"} 'tend_stitch_evidence'
+
+              touch $out
+            '';
+
+        generated-pi-resources =
+          pkgs.runCommand "phenix-pi-generated-resources-check"
+            {
+              nativeBuildInputs = [
+                pkgs.jq
+                pkgs.gnugrep
+              ];
+            }
+            ''
+              jq -e 'has("lsp") | not' ${generatedPiSettings}
+              jq -e '.extensions[0] | test("pi/extensions/lsp\\.ts$")' ${generatedPiSettings}
+              jq -e '.skills[0] | test("pi/skills$")' ${generatedPiSettings}
+              jq -e '.prompts[0] | test("pi/prompts$")' ${generatedPiSettings}
+              jq -e '.pi.extensions == ["./pi/extensions"]' ${generatedPiPackageJson}
+              jq -e '.pi.skills == ["./pi/skills"]' ${generatedPiPackageJson}
+              jq -e '.pi.prompts == ["./pi/prompts"]' ${generatedPiPackageJson}
+              jq -e '.dependencies."@earendil-works/pi-coding-agent" | type == "string"' ${generatedPiPackageJson}
+
+              grep -F -q 'PI_CODING_AGENT_DIR="''${XDG_CONFIG_HOME:-$HOME/.config}/phenix-pi"' ${wrappedPi}/bin/pi
+              grep -F -q '${generatedPiConfigDir}/settings.json' ${wrappedPi}/bin/pi
+              ! grep -F -q 'PI_CODING_AGENT_DIR="${generatedPiConfigDir}"' ${wrappedPi}/bin/pi
+
+              grep -F -q 'name: "lsp_diagnostics"' ${piExtensionsDir}/lsp.ts
+              grep -F -q 'name: "lsp_hover"' ${piExtensionsDir}/lsp.ts
+              grep -F -q 'read-only' ${piExtensionsDir}/lsp.ts
+              ! grep -E -q 'codeAction|rename|workspace/applyEdit' ${piExtensionsDir}/lsp.ts
+
+              touch $out
+            '';
+      };
     };
 }

@@ -58,6 +58,30 @@
         "interactive": false
       },
       {
+        "id": "cargo-check",
+        "description": "Check the Rust workflow-state crate",
+        "phase": "verify",
+        "kind": "command",
+        "mutates": false,
+        "sandbox_safe": false,
+        "profiles": ["git-hook", "pre-push", "manual", "rust-check"],
+        "tags": ["rust", "workflow-state"],
+        "command": ["bash", "-c", "sqlite_out=$(nix eval --raw nixpkgs#sqlite.out.outPath); export LIBRARY_PATH=\"$sqlite_out/lib${LIBRARY_PATH:+:$LIBRARY_PATH}\"; cargo check"],
+        "expect": { "status": 0 }
+      },
+      {
+        "id": "cargo-test",
+        "description": "Run Rust workflow-state tests",
+        "phase": "verify",
+        "kind": "command",
+        "mutates": false,
+        "sandbox_safe": false,
+        "profiles": ["pre-push", "manual", "rust-check"],
+        "tags": ["rust", "workflow-state"],
+        "command": ["bash", "-c", "sqlite_out=$(nix eval --raw nixpkgs#sqlite.out.outPath); export LIBRARY_PATH=\"$sqlite_out/lib${LIBRARY_PATH:+:$LIBRARY_PATH}\"; cargo test"],
+        "expect": { "status": 0 }
+      },
+      {
         "id": "nixfmt-fix",
         "description": "Auto-format Nix files",
         "phase": "fix",

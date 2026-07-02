@@ -1,0 +1,28 @@
+[package]
+name = "phenix-workflow-state"
+version = "0.1.0"
+edition = "2021"
+description = "Generic workflow state service for Phenix agent workflows"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+directories = "5.0"
+rusqlite = { version = "0.32", features = ["time", "uuid"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+time = { version = "0.3", features = ["formatting", "macros", "parsing", "serde"] }
+uuid = { version = "1.10", features = ["serde", "v7"] }
+
+[dev-dependencies]
+tempfile = "3.12"
+
+[lib]
+name = "phenix_workflow_state"
+path = "src/lib.rs"
+
+[[bin]]
+name = "phenix-workflow-state"
+path = "src/main.rs"
