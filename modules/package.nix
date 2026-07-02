@@ -217,6 +217,7 @@
               "stdio-mcp"
             ];
             enabled = true;
+            timeout = 10000;
           };
           github = {
             type = "local";

@@ -54,23 +54,24 @@ fn handle_json_rpc(repo: &AgentCommRepository, request: Value) -> Value {
     let id = request.get("id").cloned().unwrap_or(Value::Null);
     let method = request.get("method").and_then(Value::as_str).unwrap_or("");
     let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
+    let is_notification = method.starts_with("notifications/");
     let result: std::result::Result<Value, String> = match method {
         "initialize" => Ok(json!({
             "protocolVersion": "2024-11-05",
             "serverInfo": {"name": "phenix-agent-comm-mcp", "version": env!("CARGO_PKG_VERSION")},
             "capabilities": {"tools": {}}
         })),
-        "notifications/initialized" => return Value::Null,
+        "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({"tools": tool_descriptions()})),
         "tools/call" => {
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
             let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
             repo.call_tool(name, args).map(|value| json!({
                 "content": [{"type": "text", "text": serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string())}],
-                "structuredContent": value,
                 "isError": false
             })).map_err(|err| err.to_string())
         }
+        _ if is_notification => return Value::Null,
         _ => Err(format!("method not found: {method}")),
     };
     match result {
