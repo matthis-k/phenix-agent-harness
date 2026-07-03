@@ -19,7 +19,11 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Init,
-    Tool { name: String, #[arg(long, default_value = "{}")] args: String },
+    Tool {
+        name: String,
+        #[arg(long, default_value = "{}")]
+        args: String,
+    },
     StdioMcp,
 }
 
@@ -27,16 +31,18 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let db_path = cli.db.unwrap_or_else(default_db_path);
     if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
     }
-    let repo = AgentCommRepository::open(&db_path).with_context(|| format!("opening {}", db_path.display()))?;
+    let repo = AgentCommRepository::open(&db_path)
+        .with_context(|| format!("opening {}", db_path.display()))?;
     match cli.command {
         Command::Init => print_json(json!({ "db": db_path, "initialized": true })),
         Command::Tool { name, args } => {
-        let parsed_args: serde_json::Value = serde_json::from_str(&args)
-            .map_err(|e| anyhow::anyhow!("invalid JSON for --args: {} (got: {})", e, args))?;
-        print_json(repo.call_tool(&name, parsed_args)?)
-    },
+            let parsed_args: serde_json::Value = serde_json::from_str(&args)
+                .map_err(|e| anyhow::anyhow!("invalid JSON for --args: {} (got: {})", e, args))?;
+            print_json(repo.call_tool(&name, parsed_args)?)
+        }
         Command::StdioMcp => run_mcp(&repo),
     }
 }

@@ -178,72 +178,222 @@ impl AgentCommRepository {
     }
 
     pub fn call_tool(&self, tool: &str, args: Value) -> Result<Value> {
-        let a = args.as_object().ok_or_else(|| AgentCommError::Invalid("arguments must be an object".into()))?;
+        let a = args
+            .as_object()
+            .ok_or_else(|| AgentCommError::Invalid("arguments must be an object".into()))?;
         match tool {
             "comm_session_init" => self.session_init(str_arg(a, "name")?, opt_value(a, "metadata")),
-            "comm_session_resume" | "comm_session_get" => self.get_by_id("sessions", str_arg(a, "session_id")?),
+            "comm_session_resume" | "comm_session_get" => {
+                self.get_by_id("sessions", str_arg(a, "session_id")?)
+            }
             "comm_session_list" => self.list_sessions(),
             "comm_session_close" => self.close_session(str_arg(a, "session_id")?),
-            "comm_agent_register" => self.agent_register(str_arg(a, "session_id")?, str_arg(a, "name")?, opt_str(a, "kind").unwrap_or("agent"), opt_value(a, "metadata")),
+            "comm_agent_register" => self.agent_register(
+                str_arg(a, "session_id")?,
+                str_arg(a, "name")?,
+                opt_str(a, "kind").unwrap_or("agent"),
+                opt_value(a, "metadata"),
+            ),
             "comm_agent_heartbeat" => self.agent_touch(str_arg(a, "agent_id")?, "heartbeat"),
-            "comm_agent_update_status" => self.agent_status(str_arg(a, "agent_id")?, str_arg(a, "status")?, opt_value(a, "metadata")),
+            "comm_agent_update_status" => self.agent_status(
+                str_arg(a, "agent_id")?,
+                str_arg(a, "status")?,
+                opt_value(a, "metadata"),
+            ),
             "comm_agent_list" => self.list_where("agents", "session_id", str_arg(a, "session_id")?),
-            "comm_message_send" => self.message_send(str_arg(a, "session_id")?, opt_str(a, "from_agent_id"), opt_str(a, "to_agent_id"), opt_str_array(a, "to_agent_ids")?, opt_str(a, "to_kind"), opt_str(a, "task_id"), None, opt_str(a, "format").unwrap_or("markdown"), opt_str(a, "severity").unwrap_or("info"), opt_str(a, "subject").unwrap_or(""), str_arg(a, "body")?, opt_value(a, "metadata")),
-            "comm_message_list" => self.message_list(str_arg(a, "session_id")?, opt_str(a, "agent_id"), opt_str(a, "task_id")),
-            "comm_message_read" => self.mark_message(str_arg(a, "message_id")?, str_arg(a, "agent_id")?, "read_at", "message.read"),
-            "comm_message_ack" => self.mark_message(str_arg(a, "message_id")?, str_arg(a, "agent_id")?, "acked_at", "message.ack"),
-            "comm_message_reply" => self.message_reply(str_arg(a, "message_id")?, opt_str(a, "from_agent_id"), str_arg(a, "body")?, opt_value(a, "metadata")),
-            "comm_graph_create" => self.graph_create(str_arg(a, "session_id")?, str_arg(a, "name")?, opt_value(a, "metadata")),
+            "comm_message_send" => self.message_send(
+                str_arg(a, "session_id")?,
+                opt_str(a, "from_agent_id"),
+                opt_str(a, "to_agent_id"),
+                opt_str_array(a, "to_agent_ids")?,
+                opt_str(a, "to_kind"),
+                opt_str(a, "task_id"),
+                None,
+                opt_str(a, "format").unwrap_or("markdown"),
+                opt_str(a, "severity").unwrap_or("info"),
+                opt_str(a, "subject").unwrap_or(""),
+                str_arg(a, "body")?,
+                opt_value(a, "metadata"),
+            ),
+            "comm_message_list" => self.message_list(
+                str_arg(a, "session_id")?,
+                opt_str(a, "agent_id"),
+                opt_str(a, "task_id"),
+            ),
+            "comm_message_read" => self.mark_message(
+                str_arg(a, "message_id")?,
+                str_arg(a, "agent_id")?,
+                "read_at",
+                "message.read",
+            ),
+            "comm_message_ack" => self.mark_message(
+                str_arg(a, "message_id")?,
+                str_arg(a, "agent_id")?,
+                "acked_at",
+                "message.ack",
+            ),
+            "comm_message_reply" => self.message_reply(
+                str_arg(a, "message_id")?,
+                opt_str(a, "from_agent_id"),
+                str_arg(a, "body")?,
+                opt_value(a, "metadata"),
+            ),
+            "comm_graph_create" => self.graph_create(
+                str_arg(a, "session_id")?,
+                str_arg(a, "name")?,
+                opt_value(a, "metadata"),
+            ),
             "comm_graph_get" => self.get_by_id("graphs", str_arg(a, "graph_id")?),
             "comm_graph_summary" => self.graph_summary(str_arg(a, "graph_id")?),
-            "comm_task_create" => self.task_create(str_arg(a, "graph_id")?, opt_str(a, "parent_id"), str_arg(a, "title")?, opt_str(a, "description").unwrap_or(""), opt_str(a, "assigned_agent_id"), opt_value(a, "metadata")),
+            "comm_task_create" => self.task_create(
+                str_arg(a, "graph_id")?,
+                opt_str(a, "parent_id"),
+                str_arg(a, "title")?,
+                opt_str(a, "description").unwrap_or(""),
+                opt_str(a, "assigned_agent_id"),
+                opt_value(a, "metadata"),
+            ),
             "comm_task_update" => self.task_update(str_arg(a, "task_id")?, &args),
-            "comm_task_add_dependency" => self.task_add_dependency(str_arg(a, "task_id")?, str_arg(a, "depends_on_task_id")?),
-            "comm_task_add_child" => self.task_create(str_arg(a, "graph_id")?, Some(str_arg(a, "parent_id")?), str_arg(a, "title")?, opt_str(a, "description").unwrap_or(""), opt_str(a, "assigned_agent_id"), opt_value(a, "metadata")),
-            "comm_task_claim" => self.task_claim(str_arg(a, "task_id")?, str_arg(a, "agent_id")?, opt_str(a, "claim_expires_at")),
-            "comm_task_release" => self.task_release(str_arg(a, "task_id")?, opt_str(a, "agent_id")),
-            "comm_task_complete" => self.task_complete(str_arg(a, "task_id")?, bool_arg(a, "override_incomplete_dependencies")),
-            "comm_task_fail" => self.task_terminal(str_arg(a, "task_id")?, "failed", opt_str(a, "reason").unwrap_or("")),
-            "comm_task_block" => self.task_terminal(str_arg(a, "task_id")?, "blocked", opt_str(a, "reason").unwrap_or("")),
+            "comm_task_add_dependency" => {
+                self.task_add_dependency(str_arg(a, "task_id")?, str_arg(a, "depends_on_task_id")?)
+            }
+            "comm_task_add_child" => self.task_create(
+                str_arg(a, "graph_id")?,
+                Some(str_arg(a, "parent_id")?),
+                str_arg(a, "title")?,
+                opt_str(a, "description").unwrap_or(""),
+                opt_str(a, "assigned_agent_id"),
+                opt_value(a, "metadata"),
+            ),
+            "comm_task_claim" => self.task_claim(
+                str_arg(a, "task_id")?,
+                str_arg(a, "agent_id")?,
+                opt_str(a, "claim_expires_at"),
+            ),
+            "comm_task_release" => {
+                self.task_release(str_arg(a, "task_id")?, opt_str(a, "agent_id"))
+            }
+            "comm_task_complete" => self.task_complete(
+                str_arg(a, "task_id")?,
+                bool_arg(a, "override_incomplete_dependencies"),
+            ),
+            "comm_task_fail" => self.task_terminal(
+                str_arg(a, "task_id")?,
+                "failed",
+                opt_str(a, "reason").unwrap_or(""),
+            ),
+            "comm_task_block" => self.task_terminal(
+                str_arg(a, "task_id")?,
+                "blocked",
+                opt_str(a, "reason").unwrap_or(""),
+            ),
             "comm_task_list_ready" => self.task_list_ready(str_arg(a, "graph_id")?),
             "comm_task_list_for_agent" => self.task_list_for_agent(str_arg(a, "agent_id")?),
-            "comm_event_list" => self.event_list(str_arg(a, "session_id")?, opt_str(a, "task_id"), opt_i64(a, "limit").unwrap_or(100)),
+            "comm_event_list" => self.event_list(
+                str_arg(a, "session_id")?,
+                opt_str(a, "task_id"),
+                opt_i64(a, "limit").unwrap_or(100),
+            ),
             "comm_event_recent" => self.event_recent(opt_i64(a, "limit").unwrap_or(25)),
-            "comm_artifact_record" => self.artifact_record(str_arg(a, "session_id")?, opt_str(a, "task_id"), opt_str(a, "agent_id"), str_arg(a, "name")?, str_arg(a, "kind")?, opt_str(a, "uri"), opt_str(a, "content_ref"), opt_value(a, "metadata")),
-            "comm_artifact_list" => self.list_where("artifacts", "session_id", str_arg(a, "session_id")?),
-            "comm_decision_record" => self.decision_record(str_arg(a, "session_id")?, opt_str(a, "task_id"), opt_str(a, "agent_id"), str_arg(a, "title")?, str_arg(a, "rationale")?, str_arg(a, "outcome")?, opt_value(a, "metadata")),
-            "comm_decision_list" => self.list_where("decisions", "session_id", str_arg(a, "session_id")?),
+            "comm_artifact_record" => self.artifact_record(
+                str_arg(a, "session_id")?,
+                opt_str(a, "task_id"),
+                opt_str(a, "agent_id"),
+                str_arg(a, "name")?,
+                str_arg(a, "kind")?,
+                opt_str(a, "uri"),
+                opt_str(a, "content_ref"),
+                opt_value(a, "metadata"),
+            ),
+            "comm_artifact_list" => {
+                self.list_where("artifacts", "session_id", str_arg(a, "session_id")?)
+            }
+            "comm_decision_record" => self.decision_record(
+                str_arg(a, "session_id")?,
+                opt_str(a, "task_id"),
+                opt_str(a, "agent_id"),
+                str_arg(a, "title")?,
+                str_arg(a, "rationale")?,
+                str_arg(a, "outcome")?,
+                opt_value(a, "metadata"),
+            ),
+            "comm_decision_list" => {
+                self.list_where("decisions", "session_id", str_arg(a, "session_id")?)
+            }
             _ => Err(AgentCommError::UnknownTool(tool.to_owned())),
         }
     }
 
     fn session_init(&self, name: &str, metadata: Value) -> Result<Value> {
-        let id = uuid(); let now = now(); let meta = metadata.to_string();
-        self.conn.execute("INSERT INTO sessions VALUES (?1,?2,'open',?3,?4,?4,NULL)", params![id, name, meta, now])?;
-        self.event(&id, None, None, "session.init", name, json!({"session_id": id}))?;
+        let id = uuid();
+        let now = now();
+        let meta = metadata.to_string();
+        self.conn.execute(
+            "INSERT INTO sessions VALUES (?1,?2,'open',?3,?4,?4,NULL)",
+            params![id, name, meta, now],
+        )?;
+        self.event(
+            &id,
+            None,
+            None,
+            "session.init",
+            name,
+            json!({"session_id": id}),
+        )?;
         self.get_by_id("sessions", &id)
     }
 
     fn close_session(&self, session_id: &str) -> Result<Value> {
         let now = now();
-        self.conn.execute("UPDATE sessions SET status='closed', closed_at=?2, updated_at=?2 WHERE id=?1", params![session_id, now])?;
+        self.conn.execute(
+            "UPDATE sessions SET status='closed', closed_at=?2, updated_at=?2 WHERE id=?1",
+            params![session_id, now],
+        )?;
         self.event(session_id, None, None, "session.close", "closed", json!({}))?;
         self.get_by_id("sessions", session_id)
     }
 
-    fn list_sessions(&self) -> Result<Value> { self.query_json("SELECT * FROM sessions ORDER BY created_at DESC LIMIT 200", []) }
+    fn list_sessions(&self) -> Result<Value> {
+        self.query_json(
+            "SELECT * FROM sessions ORDER BY created_at DESC LIMIT 200",
+            [],
+        )
+    }
 
-    fn agent_register(&self, session_id: &str, name: &str, kind: &str, metadata: Value) -> Result<Value> {
-        let id = uuid(); let now = now();
-        self.conn.execute("INSERT INTO agents VALUES (?1,?2,?3,?4,'available',?5,?6,?6,?6)", params![id, session_id, name, kind, metadata.to_string(), now])?;
-        self.event(session_id, Some(&id), None, "agent.register", name, json!({"kind": kind}))?;
+    fn agent_register(
+        &self,
+        session_id: &str,
+        name: &str,
+        kind: &str,
+        metadata: Value,
+    ) -> Result<Value> {
+        let id = uuid();
+        let now = now();
+        self.conn.execute(
+            "INSERT INTO agents VALUES (?1,?2,?3,?4,'available',?5,?6,?6,?6)",
+            params![id, session_id, name, kind, metadata.to_string(), now],
+        )?;
+        self.event(
+            session_id,
+            Some(&id),
+            None,
+            "agent.register",
+            name,
+            json!({"kind": kind}),
+        )?;
         self.get_by_id("agents", &id)
     }
 
     fn agent_touch(&self, agent_id: &str, kind: &str) -> Result<Value> {
         let now = now();
-        self.conn.execute("UPDATE agents SET last_heartbeat_at=?2, updated_at=?2 WHERE id=?1", params![agent_id, now])?;
-        let session_id = self.scalar("SELECT session_id FROM agents WHERE id=?1", params![agent_id])?;
+        self.conn.execute(
+            "UPDATE agents SET last_heartbeat_at=?2, updated_at=?2 WHERE id=?1",
+            params![agent_id, now],
+        )?;
+        let session_id = self.scalar(
+            "SELECT session_id FROM agents WHERE id=?1",
+            params![agent_id],
+        )?;
         self.event(&session_id, Some(agent_id), None, kind, "", json!({}))?;
         self.get_by_id("agents", agent_id)
     }
@@ -251,48 +401,144 @@ impl AgentCommRepository {
     fn agent_status(&self, agent_id: &str, status: &str, metadata: Value) -> Result<Value> {
         validate("agent status", status, AGENT_STATUSES)?;
         let now = now();
-        self.conn.execute("UPDATE agents SET status=?2, metadata=?3, updated_at=?4 WHERE id=?1", params![agent_id, status, metadata.to_string(), now])?;
-        let session_id = self.scalar("SELECT session_id FROM agents WHERE id=?1", params![agent_id])?;
-        self.event(&session_id, Some(agent_id), None, "agent.status", status, json!({}))?;
+        self.conn.execute(
+            "UPDATE agents SET status=?2, metadata=?3, updated_at=?4 WHERE id=?1",
+            params![agent_id, status, metadata.to_string(), now],
+        )?;
+        let session_id = self.scalar(
+            "SELECT session_id FROM agents WHERE id=?1",
+            params![agent_id],
+        )?;
+        self.event(
+            &session_id,
+            Some(agent_id),
+            None,
+            "agent.status",
+            status,
+            json!({}),
+        )?;
         self.get_by_id("agents", agent_id)
     }
 
     fn graph_create(&self, session_id: &str, name: &str, metadata: Value) -> Result<Value> {
-        let id = uuid(); let now = now();
-        self.conn.execute("INSERT INTO graphs VALUES (?1,?2,?3,?4,?5,?5)", params![id, session_id, name, metadata.to_string(), now])?;
-        self.event(session_id, None, None, "graph.create", name, json!({"graph_id": id}))?;
+        let id = uuid();
+        let now = now();
+        self.conn.execute(
+            "INSERT INTO graphs VALUES (?1,?2,?3,?4,?5,?5)",
+            params![id, session_id, name, metadata.to_string(), now],
+        )?;
+        self.event(
+            session_id,
+            None,
+            None,
+            "graph.create",
+            name,
+            json!({"graph_id": id}),
+        )?;
         self.get_by_id("graphs", &id)
     }
 
     fn graph_summary(&self, graph_id: &str) -> Result<Value> {
-        let rows = self.query_json("SELECT status, COUNT(*) AS count FROM tasks WHERE graph_id=?1 GROUP BY status", params![graph_id])?;
+        let rows = self.query_json(
+            "SELECT status, COUNT(*) AS count FROM tasks WHERE graph_id=?1 GROUP BY status",
+            params![graph_id],
+        )?;
         let deps: i64 = self.conn.query_row("SELECT COUNT(*) FROM task_dependencies d JOIN tasks t ON t.id=d.task_id WHERE t.graph_id=?1", params![graph_id], |r| r.get(0))?;
         Ok(json!({"graph_id": graph_id, "statuses": rows, "dependency_count": deps}))
     }
 
-    fn task_create(&self, graph_id: &str, parent_id: Option<&str>, title: &str, description: &str, assigned_agent_id: Option<&str>, metadata: Value) -> Result<Value> {
-        let id = uuid(); let now = now();
-        self.conn.execute("INSERT INTO tasks VALUES (?1,?2,?3,?4,?5,'pending',?6,NULL,NULL,?7,?8,?8)", params![id, graph_id, parent_id, title, description, assigned_agent_id, metadata.to_string(), now])?;
-        let session_id = self.scalar("SELECT session_id FROM graphs WHERE id=?1", params![graph_id])?;
-        self.event(&session_id, assigned_agent_id, Some(&id), "task.create", title, json!({"parent_id": parent_id}))?;
+    fn task_create(
+        &self,
+        graph_id: &str,
+        parent_id: Option<&str>,
+        title: &str,
+        description: &str,
+        assigned_agent_id: Option<&str>,
+        metadata: Value,
+    ) -> Result<Value> {
+        let id = uuid();
+        let now = now();
+        self.conn.execute(
+            "INSERT INTO tasks VALUES (?1,?2,?3,?4,?5,'pending',?6,NULL,NULL,?7,?8,?8)",
+            params![
+                id,
+                graph_id,
+                parent_id,
+                title,
+                description,
+                assigned_agent_id,
+                metadata.to_string(),
+                now
+            ],
+        )?;
+        let session_id = self.scalar(
+            "SELECT session_id FROM graphs WHERE id=?1",
+            params![graph_id],
+        )?;
+        self.event(
+            &session_id,
+            assigned_agent_id,
+            Some(&id),
+            "task.create",
+            title,
+            json!({"parent_id": parent_id}),
+        )?;
         self.get_by_id("tasks", &id)
     }
 
     fn task_update(&self, task_id: &str, args: &Value) -> Result<Value> {
         let obj = args.as_object().unwrap();
-        if let Some(v) = obj.get("title").and_then(Value::as_str) { self.conn.execute("UPDATE tasks SET title=?2, updated_at=?3 WHERE id=?1", params![task_id, v, now()])?; }
-        if let Some(v) = obj.get("description").and_then(Value::as_str) { self.conn.execute("UPDATE tasks SET description=?2, updated_at=?3 WHERE id=?1", params![task_id, v, now()])?; }
-        if let Some(v) = obj.get("status").and_then(Value::as_str) { validate("task status", v, TASK_STATUSES)?; self.conn.execute("UPDATE tasks SET status=?2, updated_at=?3 WHERE id=?1", params![task_id, v, now()])?; }
-        if let Some(v) = obj.get("assigned_agent_id").and_then(Value::as_str) { self.conn.execute("UPDATE tasks SET assigned_agent_id=?2, updated_at=?3 WHERE id=?1", params![task_id, v, now()])?; }
-        if let Some(v) = obj.get("metadata") { self.conn.execute("UPDATE tasks SET metadata=?2, updated_at=?3 WHERE id=?1", params![task_id, v.to_string(), now()])?; }
+        if let Some(v) = obj.get("title").and_then(Value::as_str) {
+            self.conn.execute(
+                "UPDATE tasks SET title=?2, updated_at=?3 WHERE id=?1",
+                params![task_id, v, now()],
+            )?;
+        }
+        if let Some(v) = obj.get("description").and_then(Value::as_str) {
+            self.conn.execute(
+                "UPDATE tasks SET description=?2, updated_at=?3 WHERE id=?1",
+                params![task_id, v, now()],
+            )?;
+        }
+        if let Some(v) = obj.get("status").and_then(Value::as_str) {
+            validate("task status", v, TASK_STATUSES)?;
+            self.conn.execute(
+                "UPDATE tasks SET status=?2, updated_at=?3 WHERE id=?1",
+                params![task_id, v, now()],
+            )?;
+        }
+        if let Some(v) = obj.get("assigned_agent_id").and_then(Value::as_str) {
+            self.conn.execute(
+                "UPDATE tasks SET assigned_agent_id=?2, updated_at=?3 WHERE id=?1",
+                params![task_id, v, now()],
+            )?;
+        }
+        if let Some(v) = obj.get("metadata") {
+            self.conn.execute(
+                "UPDATE tasks SET metadata=?2, updated_at=?3 WHERE id=?1",
+                params![task_id, v.to_string(), now()],
+            )?;
+        }
         self.task_event(task_id, "task.update", "updated", json!({}))?;
         self.get_by_id("tasks", task_id)
     }
 
     fn task_add_dependency(&self, task_id: &str, dep: &str) -> Result<Value> {
-        if self.reaches(dep, task_id)? { return Err(AgentCommError::Invalid("dependency would create a cycle".into())); }
-        self.conn.execute("INSERT INTO task_dependencies VALUES (?1,?2)", params![task_id, dep])?;
-        self.task_event(task_id, "task.dependency.add", dep, json!({"depends_on_task_id": dep}))?;
+        if self.reaches(dep, task_id)? {
+            return Err(AgentCommError::Invalid(
+                "dependency would create a cycle".into(),
+            ));
+        }
+        self.conn.execute(
+            "INSERT INTO task_dependencies VALUES (?1,?2)",
+            params![task_id, dep],
+        )?;
+        self.task_event(
+            task_id,
+            "task.dependency.add",
+            dep,
+            json!({"depends_on_task_id": dep}),
+        )?;
         self.get_by_id("tasks", task_id)
     }
 
@@ -301,9 +547,17 @@ impl AgentCommRepository {
         let changed = self.conn.execute("UPDATE tasks SET claimed_by=?2, claim_expires_at=?3, status='in_progress', updated_at=?4 WHERE id=?1 AND status IN ('pending','in_progress') AND (claimed_by IS NULL OR claimed_by=?2)", params![task_id, agent_id, expires, now()]);
         let changed = match changed {
             Ok(changed) => changed,
-            Err(err) => { let _ = self.conn.execute_batch("ROLLBACK"); return Err(err.into()); }
+            Err(err) => {
+                let _ = self.conn.execute_batch("ROLLBACK");
+                return Err(err.into());
+            }
         };
-        if changed != 1 { let _ = self.conn.execute_batch("ROLLBACK"); return Err(AgentCommError::Invalid("task already has an active claim or is not claimable".into())); }
+        if changed != 1 {
+            let _ = self.conn.execute_batch("ROLLBACK");
+            return Err(AgentCommError::Invalid(
+                "task already has an active claim or is not claimable".into(),
+            ));
+        }
         self.conn.execute_batch("COMMIT")?;
         self.task_event(task_id, "task.claim", agent_id, json!({}))?;
         self.get_by_id("tasks", task_id)
@@ -311,8 +565,19 @@ impl AgentCommRepository {
 
     fn task_release(&self, task_id: &str, agent_id: Option<&str>) -> Result<Value> {
         if let Some(agent_id) = agent_id {
-            let current: Option<String> = self.conn.query_row("SELECT claimed_by FROM tasks WHERE id=?1", params![task_id], |r| r.get(0)).optional()?;
-            if current.as_deref().is_some_and(|c| c != agent_id) { return Err(AgentCommError::Invalid("agent does not own the active claim".into())); }
+            let current: Option<String> = self
+                .conn
+                .query_row(
+                    "SELECT claimed_by FROM tasks WHERE id=?1",
+                    params![task_id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if current.as_deref().is_some_and(|c| c != agent_id) {
+                return Err(AgentCommError::Invalid(
+                    "agent does not own the active claim".into(),
+                ));
+            }
         }
         self.conn.execute("UPDATE tasks SET claimed_by=NULL, claim_expires_at=NULL, status=CASE WHEN status='in_progress' THEN 'pending' ELSE status END, updated_at=?2 WHERE id=?1", params![task_id, now()])?;
         self.task_event(task_id, "task.release", "released", json!({}))?;
@@ -321,7 +586,11 @@ impl AgentCommRepository {
 
     fn task_complete(&self, task_id: &str, override_deps: bool) -> Result<Value> {
         let incomplete: i64 = self.conn.query_row("SELECT COUNT(*) FROM task_dependencies d JOIN tasks t ON t.id=d.depends_on_task_id WHERE d.task_id=?1 AND t.status != 'completed'", params![task_id], |r| r.get(0))?;
-        if incomplete > 0 && !override_deps { return Err(AgentCommError::Invalid("task has incomplete dependencies".into())); }
+        if incomplete > 0 && !override_deps {
+            return Err(AgentCommError::Invalid(
+                "task has incomplete dependencies".into(),
+            ));
+        }
         self.task_terminal(task_id, "completed", "completed")
     }
 
@@ -340,28 +609,100 @@ impl AgentCommRepository {
         self.query_json("SELECT * FROM tasks WHERE assigned_agent_id=?1 OR claimed_by=?1 ORDER BY updated_at DESC", params![agent_id])
     }
 
-    fn message_send(&self, session_id: &str, from: Option<&str>, to: Option<&str>, mut tos: Vec<String>, to_kind: Option<&str>, task: Option<&str>, parent: Option<&str>, format: &str, severity: &str, subject: &str, body: &str, metadata: Value) -> Result<Value> {
+    fn message_send(
+        &self,
+        session_id: &str,
+        from: Option<&str>,
+        to: Option<&str>,
+        mut tos: Vec<String>,
+        to_kind: Option<&str>,
+        task: Option<&str>,
+        parent: Option<&str>,
+        format: &str,
+        severity: &str,
+        subject: &str,
+        body: &str,
+        metadata: Value,
+    ) -> Result<Value> {
         validate("message format", format, MESSAGE_FORMATS)?;
         validate("message severity", severity, MESSAGE_SEVERITIES)?;
-        if let Some(to) = to { tos.push(to.to_owned()); }
-        if let Some(kind) = to_kind {
-            let mut stmt = self.conn.prepare("SELECT id FROM agents WHERE session_id=?1 AND kind=?2 ORDER BY created_at")?;
-            for row in stmt.query_map(params![session_id, kind], |r| r.get::<_, String>(0))? { tos.push(row?); }
+        if let Some(to) = to {
+            tos.push(to.to_owned());
         }
-        tos.sort(); tos.dedup();
-        let id = uuid(); let now = now();
-        self.conn.execute("INSERT INTO messages VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)", params![id, session_id, from, task, parent, to_kind, format, severity, subject, body, metadata.to_string(), now])?;
-        for agent_id in &tos { self.conn.execute("INSERT OR IGNORE INTO message_recipients VALUES (?1,?2,?3,NULL,NULL)", params![id, agent_id, now])?; }
+        if let Some(kind) = to_kind {
+            let mut stmt = self.conn.prepare(
+                "SELECT id FROM agents WHERE session_id=?1 AND kind=?2 ORDER BY created_at",
+            )?;
+            for row in stmt.query_map(params![session_id, kind], |r| r.get::<_, String>(0))? {
+                tos.push(row?);
+            }
+        }
+        tos.sort();
+        tos.dedup();
+        let id = uuid();
+        let now = now();
+        self.conn.execute(
+            "INSERT INTO messages VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+            params![
+                id,
+                session_id,
+                from,
+                task,
+                parent,
+                to_kind,
+                format,
+                severity,
+                subject,
+                body,
+                metadata.to_string(),
+                now
+            ],
+        )?;
+        for agent_id in &tos {
+            self.conn.execute(
+                "INSERT OR IGNORE INTO message_recipients VALUES (?1,?2,?3,NULL,NULL)",
+                params![id, agent_id, now],
+            )?;
+        }
         self.event(session_id, from, task, "message.send", subject, json!({"message_id": id, "to_agent_ids": tos, "to_kind": to_kind, "format": format, "severity": severity}))?;
         self.get_by_id("messages", &id)
     }
 
-    fn message_reply(&self, message_id: &str, from: Option<&str>, body: &str, metadata: Value) -> Result<Value> {
-        let (session_id, to, task, subject): (String, Option<String>, Option<String>, String) = self.conn.query_row("SELECT session_id, from_agent_id, task_id, subject FROM messages WHERE id=?1", params![message_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
-        self.message_send(&session_id, from, to.as_deref(), Vec::new(), None, task.as_deref(), Some(message_id), "markdown", "info", &subject, body, metadata)
+    fn message_reply(
+        &self,
+        message_id: &str,
+        from: Option<&str>,
+        body: &str,
+        metadata: Value,
+    ) -> Result<Value> {
+        let (session_id, to, task, subject): (String, Option<String>, Option<String>, String) =
+            self.conn.query_row(
+                "SELECT session_id, from_agent_id, task_id, subject FROM messages WHERE id=?1",
+                params![message_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )?;
+        self.message_send(
+            &session_id,
+            from,
+            to.as_deref(),
+            Vec::new(),
+            None,
+            task.as_deref(),
+            Some(message_id),
+            "markdown",
+            "info",
+            &subject,
+            body,
+            metadata,
+        )
     }
 
-    fn message_list(&self, session_id: &str, agent_id: Option<&str>, task_id: Option<&str>) -> Result<Value> {
+    fn message_list(
+        &self,
+        session_id: &str,
+        agent_id: Option<&str>,
+        task_id: Option<&str>,
+    ) -> Result<Value> {
         match (agent_id, task_id) {
             (Some(a), _) => self.query_json("SELECT m.*, r.agent_id AS recipient_agent_id, r.delivered_at, r.read_at, r.acked_at FROM messages m LEFT JOIN message_recipients r ON r.message_id=m.id AND r.agent_id=?2 WHERE m.session_id=?1 AND (m.from_agent_id=?2 OR r.agent_id=?2) ORDER BY m.created_at", params![session_id, a]),
             (_, Some(t)) => self.query_json("SELECT * FROM messages WHERE session_id=?1 AND task_id=?2 ORDER BY created_at", params![session_id, t]),
@@ -369,46 +710,173 @@ impl AgentCommRepository {
         }
     }
 
-    fn mark_message(&self, message_id: &str, agent_id: &str, column: &str, kind: &str) -> Result<Value> {
-        self.conn.execute(&format!("UPDATE message_recipients SET {column}=?3 WHERE message_id=?1 AND agent_id=?2"), params![message_id, agent_id, now()])?;
-        let (session_id, task_id): (String, Option<String>) = self.conn.query_row("SELECT session_id, task_id FROM messages WHERE id=?1", params![message_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
-        self.event(&session_id, Some(agent_id), task_id.as_deref(), kind, message_id, json!({"agent_id": agent_id}))?;
+    fn mark_message(
+        &self,
+        message_id: &str,
+        agent_id: &str,
+        column: &str,
+        kind: &str,
+    ) -> Result<Value> {
+        self.conn.execute(
+            &format!(
+                "UPDATE message_recipients SET {column}=?3 WHERE message_id=?1 AND agent_id=?2"
+            ),
+            params![message_id, agent_id, now()],
+        )?;
+        let (session_id, task_id): (String, Option<String>) = self.conn.query_row(
+            "SELECT session_id, task_id FROM messages WHERE id=?1",
+            params![message_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        self.event(
+            &session_id,
+            Some(agent_id),
+            task_id.as_deref(),
+            kind,
+            message_id,
+            json!({"agent_id": agent_id}),
+        )?;
         self.get_by_id("messages", message_id)
     }
 
     fn event_list(&self, session_id: &str, task_id: Option<&str>, limit: i64) -> Result<Value> {
-        if let Some(task_id) = task_id { self.query_json("SELECT * FROM events WHERE session_id=?1 AND task_id=?2 ORDER BY created_at DESC LIMIT ?3", params![session_id, task_id, limit]) }
-        else { self.query_json("SELECT * FROM events WHERE session_id=?1 ORDER BY created_at DESC LIMIT ?2", params![session_id, limit]) }
+        if let Some(task_id) = task_id {
+            self.query_json("SELECT * FROM events WHERE session_id=?1 AND task_id=?2 ORDER BY created_at DESC LIMIT ?3", params![session_id, task_id, limit])
+        } else {
+            self.query_json(
+                "SELECT * FROM events WHERE session_id=?1 ORDER BY created_at DESC LIMIT ?2",
+                params![session_id, limit],
+            )
+        }
     }
 
-    fn event_recent(&self, limit: i64) -> Result<Value> { self.query_json("SELECT * FROM events ORDER BY created_at DESC LIMIT ?1", params![limit]) }
+    fn event_recent(&self, limit: i64) -> Result<Value> {
+        self.query_json(
+            "SELECT * FROM events ORDER BY created_at DESC LIMIT ?1",
+            params![limit],
+        )
+    }
 
-    fn artifact_record(&self, session_id: &str, task_id: Option<&str>, agent_id: Option<&str>, name: &str, kind: &str, uri: Option<&str>, content_ref: Option<&str>, metadata: Value) -> Result<Value> {
-        let id = uuid(); let now = now();
-        self.conn.execute("INSERT INTO artifacts VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)", params![id, session_id, task_id, agent_id, name, kind, uri, content_ref, metadata.to_string(), now])?;
-        self.event(session_id, agent_id, task_id, "artifact.record", name, json!({"artifact_id": id, "kind": kind}))?;
+    fn artifact_record(
+        &self,
+        session_id: &str,
+        task_id: Option<&str>,
+        agent_id: Option<&str>,
+        name: &str,
+        kind: &str,
+        uri: Option<&str>,
+        content_ref: Option<&str>,
+        metadata: Value,
+    ) -> Result<Value> {
+        let id = uuid();
+        let now = now();
+        self.conn.execute(
+            "INSERT INTO artifacts VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+            params![
+                id,
+                session_id,
+                task_id,
+                agent_id,
+                name,
+                kind,
+                uri,
+                content_ref,
+                metadata.to_string(),
+                now
+            ],
+        )?;
+        self.event(
+            session_id,
+            agent_id,
+            task_id,
+            "artifact.record",
+            name,
+            json!({"artifact_id": id, "kind": kind}),
+        )?;
         self.get_by_id("artifacts", &id)
     }
 
-    fn decision_record(&self, session_id: &str, task_id: Option<&str>, agent_id: Option<&str>, title: &str, rationale: &str, outcome: &str, metadata: Value) -> Result<Value> {
-        let id = uuid(); let now = now();
-        self.conn.execute("INSERT INTO decisions VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)", params![id, session_id, task_id, agent_id, title, rationale, outcome, metadata.to_string(), now])?;
-        self.event(session_id, agent_id, task_id, "decision.record", title, json!({"decision_id": id, "outcome": outcome}))?;
+    fn decision_record(
+        &self,
+        session_id: &str,
+        task_id: Option<&str>,
+        agent_id: Option<&str>,
+        title: &str,
+        rationale: &str,
+        outcome: &str,
+        metadata: Value,
+    ) -> Result<Value> {
+        let id = uuid();
+        let now = now();
+        self.conn.execute(
+            "INSERT INTO decisions VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            params![
+                id,
+                session_id,
+                task_id,
+                agent_id,
+                title,
+                rationale,
+                outcome,
+                metadata.to_string(),
+                now
+            ],
+        )?;
+        self.event(
+            session_id,
+            agent_id,
+            task_id,
+            "decision.record",
+            title,
+            json!({"decision_id": id, "outcome": outcome}),
+        )?;
         self.get_by_id("decisions", &id)
     }
 
-    fn get_by_id(&self, table: &str, id: &str) -> Result<Value> { self.query_one_json(&format!("SELECT * FROM {table} WHERE id=?1"), params![id]) }
-    fn list_where(&self, table: &str, column: &str, value: &str) -> Result<Value> { self.query_json(&format!("SELECT * FROM {table} WHERE {column}=?1 ORDER BY created_at"), params![value]) }
+    fn get_by_id(&self, table: &str, id: &str) -> Result<Value> {
+        self.query_one_json(&format!("SELECT * FROM {table} WHERE id=?1"), params![id])
+    }
+    fn list_where(&self, table: &str, column: &str, value: &str) -> Result<Value> {
+        self.query_json(
+            &format!("SELECT * FROM {table} WHERE {column}=?1 ORDER BY created_at"),
+            params![value],
+        )
+    }
 
-    fn scalar<P: rusqlite::Params>(&self, sql: &str, params: P) -> Result<String> { Ok(self.conn.query_row(sql, params, |r| r.get(0))?) }
+    fn scalar<P: rusqlite::Params>(&self, sql: &str, params: P) -> Result<String> {
+        Ok(self.conn.query_row(sql, params, |r| r.get(0))?)
+    }
 
     fn task_event(&self, task_id: &str, kind: &str, message: &str, payload: Value) -> Result<()> {
-        let session_id = self.scalar("SELECT g.session_id FROM graphs g JOIN tasks t ON t.graph_id=g.id WHERE t.id=?1", params![task_id])?;
+        let session_id = self.scalar(
+            "SELECT g.session_id FROM graphs g JOIN tasks t ON t.graph_id=g.id WHERE t.id=?1",
+            params![task_id],
+        )?;
         self.event(&session_id, None, Some(task_id), kind, message, payload)
     }
 
-    fn event(&self, session_id: &str, agent_id: Option<&str>, task_id: Option<&str>, kind: &str, message: &str, payload: Value) -> Result<()> {
-        self.conn.execute("INSERT INTO events VALUES (?1,?2,?3,?4,?5,?6,?7,?8)", params![uuid(), session_id, agent_id, task_id, kind, message, payload.to_string(), now()])?;
+    fn event(
+        &self,
+        session_id: &str,
+        agent_id: Option<&str>,
+        task_id: Option<&str>,
+        kind: &str,
+        message: &str,
+        payload: Value,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO events VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![
+                uuid(),
+                session_id,
+                agent_id,
+                task_id,
+                kind,
+                message,
+                payload.to_string(),
+                now()
+            ],
+        )?;
         Ok(())
     }
 
@@ -416,17 +884,29 @@ impl AgentCommRepository {
         let mut seen = HashSet::new();
         let mut stack = vec![from.to_owned()];
         while let Some(id) = stack.pop() {
-            if id == target { return Ok(true); }
-            if !seen.insert(id.clone()) { continue; }
-            let mut stmt = self.conn.prepare("SELECT depends_on_task_id FROM task_dependencies WHERE task_id=?1")?;
-            for row in stmt.query_map(params![id], |r| r.get::<_, String>(0))? { stack.push(row?); }
+            if id == target {
+                return Ok(true);
+            }
+            if !seen.insert(id.clone()) {
+                continue;
+            }
+            let mut stmt = self
+                .conn
+                .prepare("SELECT depends_on_task_id FROM task_dependencies WHERE task_id=?1")?;
+            for row in stmt.query_map(params![id], |r| r.get::<_, String>(0))? {
+                stack.push(row?);
+            }
         }
         Ok(false)
     }
 
     fn query_one_json<P: rusqlite::Params>(&self, sql: &str, params: P) -> Result<Value> {
         let values = self.query_json(sql, params)?;
-        values.as_array().and_then(|v| v.first()).cloned().ok_or_else(|| AgentCommError::Invalid("record not found".into()))
+        values
+            .as_array()
+            .and_then(|v| v.first())
+            .cloned()
+            .ok_or_else(|| AgentCommError::Invalid("record not found".into()))
     }
 
     fn query_json<P: rusqlite::Params>(&self, sql: &str, params: P) -> Result<Value> {
@@ -439,9 +919,12 @@ impl AgentCommRepository {
                 let value = match cell {
                     ValueRef::Null => Value::Null,
                     ValueRef::Integer(i) => Value::Number(i.into()),
-                    ValueRef::Real(f) => serde_json::Number::from_f64(f).map(Value::Number).unwrap_or(Value::Null),
+                    ValueRef::Real(f) => serde_json::Number::from_f64(f)
+                        .map(Value::Number)
+                        .unwrap_or(Value::Null),
                     ValueRef::Text(s) => {
-                        let s = std::str::from_utf8(s).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                        let s = std::str::from_utf8(s)
+                            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
                         if name == "metadata" || name == "payload" {
                             serde_json::from_str(s).unwrap_or(Value::String(s.to_owned()))
                         } else {
@@ -455,7 +938,9 @@ impl AgentCommRepository {
             Ok(Value::Object(obj))
         })?;
         let mut out = Vec::new();
-        for row in rows { out.push(row?); }
+        for row in rows {
+            out.push(row?);
+        }
         Ok(Value::Array(out))
     }
 }
@@ -472,7 +957,10 @@ pub fn handle_json_rpc(repo: &AgentCommRepository, request: Value) -> Value {
     let is_notification = method.starts_with("notifications/");
     let result: std::result::Result<Value, String> = match method {
         "initialize" => {
-            let client_version = params.get("protocolVersion").and_then(Value::as_str).unwrap_or("2025-06-18");
+            let client_version = params
+                .get("protocolVersion")
+                .and_then(Value::as_str)
+                .unwrap_or("2025-06-18");
             Ok(json!({
                 "protocolVersion": client_version,
                 "serverInfo": {"name": "phenix-agent-comm-mcp", "version": env!("CARGO_PKG_VERSION")},
@@ -483,7 +971,10 @@ pub fn handle_json_rpc(repo: &AgentCommRepository, request: Value) -> Value {
         "tools/list" => Ok(json!({"tools": tool_descriptions()})),
         "tools/call" => {
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
-            let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            let args = params
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
             repo.call_tool(name, args).map(|value| json!({
                 "content": [{"type": "text", "text": serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string())}],
                 "isError": false
@@ -494,37 +985,71 @@ pub fn handle_json_rpc(repo: &AgentCommRepository, request: Value) -> Value {
     };
     match result {
         Ok(result) => json!({"jsonrpc":"2.0", "id": id, "result": result}),
-        Err(err) => json!({"jsonrpc":"2.0", "id": id, "error": {"code": -32000, "message": err.to_string()}}),
+        Err(err) => {
+            json!({"jsonrpc":"2.0", "id": id, "error": {"code": -32000, "message": err.to_string()}})
+        }
     }
 }
 
-fn str_arg<'a>(a: &'a serde_json::Map<String, Value>, name: &'static str) -> Result<&'a str> { a.get(name).and_then(Value::as_str).ok_or(AgentCommError::Missing(name)) }
-fn opt_str<'a>(a: &'a serde_json::Map<String, Value>, name: &str) -> Option<&'a str> { a.get(name).and_then(Value::as_str) }
+fn str_arg<'a>(a: &'a serde_json::Map<String, Value>, name: &'static str) -> Result<&'a str> {
+    a.get(name)
+        .and_then(Value::as_str)
+        .ok_or(AgentCommError::Missing(name))
+}
+fn opt_str<'a>(a: &'a serde_json::Map<String, Value>, name: &str) -> Option<&'a str> {
+    a.get(name).and_then(Value::as_str)
+}
 fn opt_str_array(a: &serde_json::Map<String, Value>, name: &'static str) -> Result<Vec<String>> {
     match a.get(name) {
         None => Ok(Vec::new()),
-        Some(Value::Array(items)) => items.iter().map(|item| item.as_str().map(str::to_owned).ok_or_else(|| AgentCommError::Invalid(format!("{name} must contain only strings")))).collect(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| {
+                item.as_str().map(str::to_owned).ok_or_else(|| {
+                    AgentCommError::Invalid(format!("{name} must contain only strings"))
+                })
+            })
+            .collect(),
         Some(_) => Err(AgentCommError::Invalid(format!("{name} must be an array"))),
     }
 }
-fn opt_value(a: &serde_json::Map<String, Value>, name: &str) -> Value { a.get(name).cloned().unwrap_or_else(|| json!({})) }
-fn bool_arg(a: &serde_json::Map<String, Value>, name: &str) -> bool { a.get(name).and_then(Value::as_bool).unwrap_or(false) }
-fn opt_i64(a: &serde_json::Map<String, Value>, name: &str) -> Option<i64> { a.get(name).and_then(Value::as_i64) }
-fn validate(kind: &str, value: &str, allowed: &[&str]) -> Result<()> {
-    if allowed.contains(&value) { Ok(()) } else { Err(AgentCommError::Invalid(format!("invalid {kind}: {value}"))) }
+fn opt_value(a: &serde_json::Map<String, Value>, name: &str) -> Value {
+    a.get(name).cloned().unwrap_or_else(|| json!({}))
 }
-fn uuid() -> String { Uuid::now_v7().to_string() }
-fn now() -> String { OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).expect("rfc3339") }
+fn bool_arg(a: &serde_json::Map<String, Value>, name: &str) -> bool {
+    a.get(name).and_then(Value::as_bool).unwrap_or(false)
+}
+fn opt_i64(a: &serde_json::Map<String, Value>, name: &str) -> Option<i64> {
+    a.get(name).and_then(Value::as_i64)
+}
+fn validate(kind: &str, value: &str, allowed: &[&str]) -> Result<()> {
+    if allowed.contains(&value) {
+        Ok(())
+    } else {
+        Err(AgentCommError::Invalid(format!("invalid {kind}: {value}")))
+    }
+}
+fn uuid() -> String {
+    Uuid::now_v7().to_string()
+}
+fn now() -> String {
+    OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("rfc3339")
+}
 
 pub fn tool_descriptions() -> Value {
-    let tools: Vec<Value> = TOOLS.iter().map(|name| {
-        let (description, schema) = tool_meta(name);
-        json!({
-            "name": name,
-            "description": description,
-            "inputSchema": schema,
+    let tools: Vec<Value> = TOOLS
+        .iter()
+        .map(|name| {
+            let (description, schema) = tool_meta(name);
+            json!({
+                "name": name,
+                "description": description,
+                "inputSchema": schema,
+            })
         })
-    }).collect();
+        .collect();
     Value::Array(tools)
 }
 
@@ -678,63 +1203,166 @@ mod tests {
     #[test]
     fn task_graph_rejects_cycles_and_incomplete_completion() {
         let repo = AgentCommRepository::open_memory().unwrap();
-        let session = repo.call_tool("comm_session_init", json!({"name":"demo"})).unwrap();
+        let session = repo
+            .call_tool("comm_session_init", json!({"name":"demo"}))
+            .unwrap();
         let session_id = session["id"].as_str().unwrap();
-        let graph = repo.call_tool("comm_graph_create", json!({"session_id":session_id,"name":"g"})).unwrap();
+        let graph = repo
+            .call_tool(
+                "comm_graph_create",
+                json!({"session_id":session_id,"name":"g"}),
+            )
+            .unwrap();
         let graph_id = graph["id"].as_str().unwrap();
-        let a = repo.call_tool("comm_task_create", json!({"graph_id":graph_id,"title":"a"})).unwrap();
-        let b = repo.call_tool("comm_task_create", json!({"graph_id":graph_id,"title":"b"})).unwrap();
-        repo.call_tool("comm_task_add_dependency", json!({"task_id":b["id"],"depends_on_task_id":a["id"]})).unwrap();
-        assert!(repo.call_tool("comm_task_add_dependency", json!({"task_id":a["id"],"depends_on_task_id":b["id"]})).is_err());
-        assert!(repo.call_tool("comm_task_complete", json!({"task_id":b["id"]})).is_err());
-        repo.call_tool("comm_task_complete", json!({"task_id":a["id"]})).unwrap();
-        repo.call_tool("comm_task_complete", json!({"task_id":b["id"]})).unwrap();
+        let a = repo
+            .call_tool("comm_task_create", json!({"graph_id":graph_id,"title":"a"}))
+            .unwrap();
+        let b = repo
+            .call_tool("comm_task_create", json!({"graph_id":graph_id,"title":"b"}))
+            .unwrap();
+        repo.call_tool(
+            "comm_task_add_dependency",
+            json!({"task_id":b["id"],"depends_on_task_id":a["id"]}),
+        )
+        .unwrap();
+        assert!(repo
+            .call_tool(
+                "comm_task_add_dependency",
+                json!({"task_id":a["id"],"depends_on_task_id":b["id"]})
+            )
+            .is_err());
+        assert!(repo
+            .call_tool("comm_task_complete", json!({"task_id":b["id"]}))
+            .is_err());
+        repo.call_tool("comm_task_complete", json!({"task_id":a["id"]}))
+            .unwrap();
+        repo.call_tool("comm_task_complete", json!({"task_id":b["id"]}))
+            .unwrap();
     }
 
     #[test]
     fn claim_does_not_overwrite_active_claim() {
         let repo = AgentCommRepository::open_memory().unwrap();
-        let s = repo.call_tool("comm_session_init", json!({"name":"demo"})).unwrap();
+        let s = repo
+            .call_tool("comm_session_init", json!({"name":"demo"}))
+            .unwrap();
         let sid = s["id"].as_str().unwrap();
-        let agent1 = repo.call_tool("comm_agent_register", json!({"session_id":sid,"name":"a1"})).unwrap();
-        let agent2 = repo.call_tool("comm_agent_register", json!({"session_id":sid,"name":"a2"})).unwrap();
-        let g = repo.call_tool("comm_graph_create", json!({"session_id":sid,"name":"g"})).unwrap();
-        let t = repo.call_tool("comm_task_create", json!({"graph_id":g["id"],"title":"t"})).unwrap();
-        repo.call_tool("comm_task_claim", json!({"task_id":t["id"],"agent_id":agent1["id"]})).unwrap();
-        assert!(repo.call_tool("comm_task_claim", json!({"task_id":t["id"],"agent_id":agent2["id"]})).is_err());
+        let agent1 = repo
+            .call_tool("comm_agent_register", json!({"session_id":sid,"name":"a1"}))
+            .unwrap();
+        let agent2 = repo
+            .call_tool("comm_agent_register", json!({"session_id":sid,"name":"a2"}))
+            .unwrap();
+        let g = repo
+            .call_tool("comm_graph_create", json!({"session_id":sid,"name":"g"}))
+            .unwrap();
+        let t = repo
+            .call_tool("comm_task_create", json!({"graph_id":g["id"],"title":"t"}))
+            .unwrap();
+        repo.call_tool(
+            "comm_task_claim",
+            json!({"task_id":t["id"],"agent_id":agent1["id"]}),
+        )
+        .unwrap();
+        assert!(repo
+            .call_tool(
+                "comm_task_claim",
+                json!({"task_id":t["id"],"agent_id":agent2["id"]})
+            )
+            .is_err());
     }
 
     #[test]
     fn agents_use_kind_and_stable_statuses() {
         let repo = AgentCommRepository::open_memory().unwrap();
-        let s = repo.call_tool("comm_session_init", json!({"name":"demo"})).unwrap();
+        let s = repo
+            .call_tool("comm_session_init", json!({"name":"demo"}))
+            .unwrap();
         let sid = s["id"].as_str().unwrap();
-        let agent = repo.call_tool("comm_agent_register", json!({"session_id":sid,"name":"planner","kind":"phenix-planner"})).unwrap();
+        let agent = repo
+            .call_tool(
+                "comm_agent_register",
+                json!({"session_id":sid,"name":"planner","kind":"phenix-planner"}),
+            )
+            .unwrap();
         assert_eq!(agent["kind"], "phenix-planner");
         let old_field = ["ro", "le"].concat();
         assert!(agent.get(&old_field).is_none());
-        assert!(repo.call_tool("comm_agent_update_status", json!({"agent_id":agent["id"],"status":"busy"})).is_ok());
-        assert!(repo.call_tool("comm_agent_update_status", json!({"agent_id":agent["id"],"status":"done"})).is_err());
-        let graph = repo.call_tool("comm_graph_create", json!({"session_id":sid,"name":"g"})).unwrap();
-        let task = repo.call_tool("comm_task_create", json!({"graph_id":graph["id"],"title":"t"})).unwrap();
-        assert!(repo.call_tool("comm_task_update", json!({"task_id":task["id"],"status":"done"})).is_err());
+        assert!(repo
+            .call_tool(
+                "comm_agent_update_status",
+                json!({"agent_id":agent["id"],"status":"busy"})
+            )
+            .is_ok());
+        assert!(repo
+            .call_tool(
+                "comm_agent_update_status",
+                json!({"agent_id":agent["id"],"status":"done"})
+            )
+            .is_err());
+        let graph = repo
+            .call_tool("comm_graph_create", json!({"session_id":sid,"name":"g"}))
+            .unwrap();
+        let task = repo
+            .call_tool(
+                "comm_task_create",
+                json!({"graph_id":graph["id"],"title":"t"}),
+            )
+            .unwrap();
+        assert!(repo
+            .call_tool(
+                "comm_task_update",
+                json!({"task_id":task["id"],"status":"done"})
+            )
+            .is_err());
     }
 
     #[test]
     fn messages_have_format_severity_kind_delivery_and_per_recipient_state() {
         let repo = AgentCommRepository::open_memory().unwrap();
-        let s = repo.call_tool("comm_session_init", json!({"name":"demo"})).unwrap();
+        let s = repo
+            .call_tool("comm_session_init", json!({"name":"demo"}))
+            .unwrap();
         let sid = s["id"].as_str().unwrap();
-        let from = repo.call_tool("comm_agent_register", json!({"session_id":sid,"name":"planner","kind":"phenix-planner"})).unwrap();
-        let to1 = repo.call_tool("comm_agent_register", json!({"session_id":sid,"name":"worker-1","kind":"phenix-worker"})).unwrap();
-        let to2 = repo.call_tool("comm_agent_register", json!({"session_id":sid,"name":"worker-2","kind":"phenix-worker"})).unwrap();
+        let from = repo
+            .call_tool(
+                "comm_agent_register",
+                json!({"session_id":sid,"name":"planner","kind":"phenix-planner"}),
+            )
+            .unwrap();
+        let to1 = repo
+            .call_tool(
+                "comm_agent_register",
+                json!({"session_id":sid,"name":"worker-1","kind":"phenix-worker"}),
+            )
+            .unwrap();
+        let to2 = repo
+            .call_tool(
+                "comm_agent_register",
+                json!({"session_id":sid,"name":"worker-2","kind":"phenix-worker"}),
+            )
+            .unwrap();
         let msg = repo.call_tool("comm_message_send", json!({"session_id":sid,"from_agent_id":from["id"],"to_kind":"phenix-worker","format":"json","severity":"warning","subject":"work","body":"{}"})).unwrap();
         assert_eq!(msg["to_kind"], "phenix-worker");
         assert_eq!(msg["format"], "json");
         assert_eq!(msg["severity"], "warning");
-        repo.call_tool("comm_message_read", json!({"message_id":msg["id"],"agent_id":to1["id"]})).unwrap();
-        let l1 = repo.call_tool("comm_message_list", json!({"session_id":sid,"agent_id":to1["id"]})).unwrap();
-        let l2 = repo.call_tool("comm_message_list", json!({"session_id":sid,"agent_id":to2["id"]})).unwrap();
+        repo.call_tool(
+            "comm_message_read",
+            json!({"message_id":msg["id"],"agent_id":to1["id"]}),
+        )
+        .unwrap();
+        let l1 = repo
+            .call_tool(
+                "comm_message_list",
+                json!({"session_id":sid,"agent_id":to1["id"]}),
+            )
+            .unwrap();
+        let l2 = repo
+            .call_tool(
+                "comm_message_list",
+                json!({"session_id":sid,"agent_id":to2["id"]}),
+            )
+            .unwrap();
         assert!(l1[0]["read_at"].is_string());
         assert!(l2[0]["read_at"].is_null());
     }
@@ -745,15 +1373,37 @@ mod tests {
         let db = dir.path().join("agent-comm.sqlite3");
         let repo1 = AgentCommRepository::open(&db).unwrap();
         let repo2 = AgentCommRepository::open(&db).unwrap();
-        let s = repo1.call_tool("comm_session_init", json!({"name":"demo"})).unwrap();
+        let s = repo1
+            .call_tool("comm_session_init", json!({"name":"demo"}))
+            .unwrap();
         let sid = s["id"].as_str().unwrap();
-        let a1 = repo1.call_tool("comm_agent_register", json!({"session_id":sid,"name":"a1"})).unwrap();
-        let a2 = repo1.call_tool("comm_agent_register", json!({"session_id":sid,"name":"a2"})).unwrap();
-        let g = repo1.call_tool("comm_graph_create", json!({"session_id":sid,"name":"g"})).unwrap();
-        let t = repo1.call_tool("comm_task_create", json!({"graph_id":g["id"],"title":"t"})).unwrap();
-        repo1.call_tool("comm_task_claim", json!({"task_id":t["id"],"agent_id":a1["id"]})).unwrap();
-        assert!(repo2.call_tool("comm_task_claim", json!({"task_id":t["id"],"agent_id":a2["id"]})).is_err());
-        let current = repo2.call_tool("comm_task_list_for_agent", json!({"agent_id":a1["id"]})).unwrap();
+        let a1 = repo1
+            .call_tool("comm_agent_register", json!({"session_id":sid,"name":"a1"}))
+            .unwrap();
+        let a2 = repo1
+            .call_tool("comm_agent_register", json!({"session_id":sid,"name":"a2"}))
+            .unwrap();
+        let g = repo1
+            .call_tool("comm_graph_create", json!({"session_id":sid,"name":"g"}))
+            .unwrap();
+        let t = repo1
+            .call_tool("comm_task_create", json!({"graph_id":g["id"],"title":"t"}))
+            .unwrap();
+        repo1
+            .call_tool(
+                "comm_task_claim",
+                json!({"task_id":t["id"],"agent_id":a1["id"]}),
+            )
+            .unwrap();
+        assert!(repo2
+            .call_tool(
+                "comm_task_claim",
+                json!({"task_id":t["id"],"agent_id":a2["id"]})
+            )
+            .is_err());
+        let current = repo2
+            .call_tool("comm_task_list_for_agent", json!({"agent_id":a1["id"]}))
+            .unwrap();
         assert_eq!(current[0]["claimed_by"], a1["id"]);
         assert_eq!(current[0]["status"], "in_progress");
     }
@@ -763,15 +1413,24 @@ mod tests {
         let repo = AgentCommRepository::open_memory().unwrap();
 
         // initialize
-        let resp = handle_json_rpc(&repo, json!({"jsonrpc":"2.0", "id":1, "method":"initialize"}));
+        let resp = handle_json_rpc(
+            &repo,
+            json!({"jsonrpc":"2.0", "id":1, "method":"initialize"}),
+        );
         assert_eq!(resp["jsonrpc"], "2.0");
         assert_eq!(resp["id"], 1);
-        assert_eq!(resp["result"]["serverInfo"]["name"], "phenix-agent-comm-mcp");
+        assert_eq!(
+            resp["result"]["serverInfo"]["name"],
+            "phenix-agent-comm-mcp"
+        );
         assert_eq!(resp["result"]["protocolVersion"], "2025-06-18");
         assert!(resp["result"]["capabilities"]["tools"].is_object());
 
         // notifications/initialized → should return Value::Null (suppressed)
-        let resp = handle_json_rpc(&repo, json!({"jsonrpc":"2.0", "method":"notifications/initialized"}));
+        let resp = handle_json_rpc(
+            &repo,
+            json!({"jsonrpc":"2.0", "method":"notifications/initialized"}),
+        );
         assert!(resp.is_null(), "notifications must return Null");
 
         // ping
@@ -779,34 +1438,58 @@ mod tests {
         assert_eq!(resp["result"], json!({}));
 
         // tools/list
-        let resp = handle_json_rpc(&repo, json!({"jsonrpc":"2.0", "id":3, "method":"tools/list"}));
+        let resp = handle_json_rpc(
+            &repo,
+            json!({"jsonrpc":"2.0", "id":3, "method":"tools/list"}),
+        );
         let tools = &resp["result"]["tools"];
         assert!(tools.is_array());
-        assert!(tools.as_array().unwrap().len() >= 30, "expected at least 30 tools");
+        assert!(
+            tools.as_array().unwrap().len() >= 30,
+            "expected at least 30 tools"
+        );
         assert!(tools[0]["name"].is_string());
 
         // tools/call — comm_session_init
-        let resp = handle_json_rpc(&repo, json!({
-            "jsonrpc":"2.0", "id":4, "method":"tools/call",
-            "params": {"name": "comm_session_init", "arguments": {"name": "mcp-test"}}
-        }));
-        assert_eq!(resp["result"]["isError"], false, "session init should succeed");
+        let resp = handle_json_rpc(
+            &repo,
+            json!({
+                "jsonrpc":"2.0", "id":4, "method":"tools/call",
+                "params": {"name": "comm_session_init", "arguments": {"name": "mcp-test"}}
+            }),
+        );
+        assert_eq!(
+            resp["result"]["isError"], false,
+            "session init should succeed"
+        );
         let content = &resp["result"]["content"];
         assert!(content.is_array());
         assert_eq!(content[0]["type"], "text");
 
         // unknown method returns error
         let resp = handle_json_rpc(&repo, json!({"jsonrpc":"2.0", "id":5, "method":"unknown"}));
-        assert!(resp.get("error").is_some(), "unknown method should return error");
+        assert!(
+            resp.get("error").is_some(),
+            "unknown method should return error"
+        );
         assert_eq!(resp["error"]["code"], -32000);
 
         // notifications/anything also suppressed
-        let resp = handle_json_rpc(&repo, json!({"jsonrpc":"2.0", "method":"notifications/foo"}));
+        let resp = handle_json_rpc(
+            &repo,
+            json!({"jsonrpc":"2.0", "method":"notifications/foo"}),
+        );
         assert!(resp.is_null());
 
         // notifications/cancelled is also suppressed
-        let resp = handle_json_rpc(&repo, json!({"jsonrpc":"2.0", "method":"notifications/cancelled"}));
-        assert!(resp.is_null(), "notifications/* must return Null regardless of path");
+        let resp = handle_json_rpc(
+            &repo,
+            json!({"jsonrpc":"2.0", "method":"notifications/cancelled"}),
+        );
+        assert!(
+            resp.is_null(),
+            "notifications/* must return Null regardless of path"
+        );
     }
 
     #[test]
@@ -815,12 +1498,18 @@ mod tests {
         let db = dir.path().join("schema-version.sqlite3");
         let repo = AgentCommRepository::open(&db).unwrap();
         // After open+init, user_version should be 1
-        let version: i64 = repo.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let version: i64 = repo
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(version, 1, "schema should be at version 1 after init");
 
         // Open again — should not fail or reset
         let repo2 = AgentCommRepository::open(&db).unwrap();
-        let version: i64 = repo2.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let version: i64 = repo2
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(version, 1, "re-opening should preserve user_version");
     }
 
@@ -831,7 +1520,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = dir.path().join("busy-test.sqlite3");
         let repo = AgentCommRepository::open(&db).unwrap();
-        let timeout: i64 = repo.conn.query_row("PRAGMA busy_timeout", [], |r| r.get(0)).unwrap();
+        let timeout: i64 = repo
+            .conn
+            .query_row("PRAGMA busy_timeout", [], |r| r.get(0))
+            .unwrap();
         // rusqlite's busy_timeout sets it in milliseconds. We set 5000ms.
         assert_eq!(timeout, 5000, "busy_timeout should be 5000ms");
     }
@@ -839,7 +1531,9 @@ mod tests {
     #[test]
     fn open_memory_is_usable() {
         let repo = AgentCommRepository::open_memory().unwrap();
-        let s = repo.call_tool("comm_session_init", json!({"name":"mem-test"})).unwrap();
+        let s = repo
+            .call_tool("comm_session_init", json!({"name":"mem-test"}))
+            .unwrap();
         assert_eq!(s["name"], "mem-test");
         assert_eq!(s["status"], "open");
     }
