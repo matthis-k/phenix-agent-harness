@@ -1,0 +1,7 @@
+id: replay-read-only-inspection
+request: "Show me what's changed in the workspace."
+expected:
+  route: no_worker
+  lease: ReadOnly
+  approvals_expected: 0
+  checkpoints: []

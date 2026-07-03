@@ -1,0 +1,11 @@
+id: replay-scoped-commit
+request: "Commit changes only in phenix-tend and verify."
+expected:
+  commit_scope:
+    - phenix-tend
+  route: committer
+  lease: LocalCommit
+  approvals_expected: 1
+  stitch_tool_params:
+    scope: [phenix-tend]
+  notes: Stitch commit must accept scope parameter and only commit listed repos.

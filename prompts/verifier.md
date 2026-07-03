@@ -169,11 +169,49 @@ approval. Classify failures as implementation, test, environment, architecture,
 scope, or tend/stitch evidence failures. Do not fix anything or re-plan from
 scratch.
 
+### Phase-specific verification taxonomy
+
+Replace flat "passed/failed" summaries with phase-specific status to prevent
+"tend passed but commit failed" ambiguity:
+
+```yaml
+verification:
+  mechanical: passed | failed | skipped
+  formatting: passed | failed | skipped
+  architecture: passed | failed | skipped
+  scope: passed | failed | skipped
+  reproducibility: passed | blocked
+  reason: description of blocking condition if reproducibility is blocked
+  blocking_for_current_chunk: true | false
+  blocking_for_sync_or_push: true | false
+```
+
+### Reproducibility blocking rules
+
+- `reproducibility: blocked` when: dirty local dependency, unpushed submodule
+  commit, uncommitted generated file, or stale lockfile
+- `blocking_for_current_chunk: false` if the current edit chunk is complete
+  and verifiable despite the reproducibility issue
+- `blocking_for_sync_or_push: true` if the reproducibility issue would cause
+  a remote eval failure (e.g., submodule rev not pushed)
+
+This allows the workflow to declare "mechanical checks passed, but sync/push
+requires fixing reproducibility first."
+
 ## Output
 
 ```yaml
 status: passed | failed
 summary:
+  phase_specific:
+    mechanical: passed | failed | skipped
+    formatting: passed | failed | skipped
+    architecture: passed | failed | skipped
+    scope: passed | failed | skipped
+    reproducibility: passed | blocked
+    reason:
+    blocking_for_current_chunk: true | false
+    blocking_for_sync_or_push: true | false
 plan_context:
   available: true | false
   required_for_flow: true | false

@@ -2,3 +2,4 @@
 .phenix-agent-state/
 result
 target/
+.pre-commit-config.yaml

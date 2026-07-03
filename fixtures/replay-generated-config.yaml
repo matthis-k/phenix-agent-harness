@@ -1,0 +1,9 @@
+id: replay-generated-config
+request: "Setup pre-commit hooks in all submodules."
+expected:
+  generated_file_handling:
+    file: .pre-commit-config.yaml
+    policy: ignored_by_gitignore
+    commit_required: false
+    not_meaningful: true
+  notes: Stitch classify_dirty_node must report has_meaningful_changes=false when only .pre-commit-config.yaml is dirty.

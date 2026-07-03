@@ -264,6 +264,196 @@ lease:
     - subagent cannot produce a coherent checkpoint
 ```
 
+## Permission lease system
+
+Permission leases are the mechanism to reduce manual approval prompts. A single lease covers a bounded set of operations across declared paths and expires on session end or explicit revocation.
+
+### Core concepts
+
+```yaml
+OperationClass:
+  - RepoRead          # ls, pwd, read file, git status, git diff, git log, git show, git rev-parse
+  - RepoSearch        # rg, grep, find-like inspection
+  - WorkspacePatch    # patch tracked files inside repo paths
+  - WorkspaceCreateFile # create new files inside allowed paths
+  - WorkspaceMkdir    # mkdir -p inside allowed paths
+  - FormatFix         # nixfmt, statix fix, deadnix fix, treefmt fix
+  - Verify            # run tend verify/plan, nix flake check (read-only checks)
+  - StageNewFiles     # git add for new files needed by Nix flake source visibility
+  - StageTrackedChanges # git add for tracked file changes
+  - LocalCommit       # git commit (with hooks)
+  - LocalCommitNoVerify # git commit --no-verify (local DAG mode only)
+  - LockUpdate        # nix flake lock --update-input
+  - SyncNoPush        # stitch commit --no-push, git add + git commit
+  - Push              # git push, stitch sync with push
+  - Dangerous         # sudo, rm -rf tracked, chmod outside repo, force push, branch delete
+}
+
+LeaseKind:
+  - ReadOnly          # RepoRead + RepoSearch only
+  - BoundedWorkspaceEdit # WorkspacePatch + WorkspaceCreateFile + WorkspaceMkdir + FormatFix + StageNewFiles + Verify
+  - Verification      # RepoRead + Verify
+  - LocalCommit       # StageTrackedChanges + LocalCommit + (LocalCommitNoVerify only in local DAG mode)
+  - SyncNoPush        # StageTrackedChanges + LocalCommit + LockUpdate
+  - Push              # Push only (always requires explicit approval)
+
+Role:
+  - Frontend
+  - Planner
+  - Architect
+  - Worker
+  - Verifier
+  - Committer
+```
+
+### Role-bound capabilities
+
+Enforce these default capability boundaries:
+
+| Role | Allowed | Denied |
+|------|---------|--------|
+| Frontend | RepoRead, create_workflow, delegate | WorkspacePatch, StageTrackedChanges, LocalCommit, Push |
+| Planner | RepoRead, create_plan | WorkspacePatch, LocalCommit, Push |
+| Architect | RepoRead, architecture_review | WorkspacePatch, LocalCommit, Push |
+| Worker | RepoRead, WorkspacePatch, WorkspaceCreateFile, WorkspaceMkdir, FormatFix, StageNewFiles | LocalCommit, Push |
+| Verifier | RepoRead, Verify | WorkspacePatch, FormatFix, LocalCommit, Push |
+| Committer | RepoRead, StageTrackedChanges, LocalCommit, LocalCommitNoVerify, SyncNoPush | Push (unless explicit push lease exists) |
+
+### Auto-allow commands (no approval needed)
+
+These are always allowed for any role without prompting:
+
+```text
+ls, pwd, read file contents
+rg/grep/find-like inspection
+git status, git diff, git log, git show, git rev-parse
+stitch status, stitch diff, stitch dag (read-only)
+tend status, tend plan (read-only)
+```
+
+### Ask-once commands (covered by single lease)
+
+A single `BoundedWorkspaceEdit` lease covers:
+
+```text
+mkdir -p inside declared repo paths
+create new files inside declared repo paths
+patch tracked files inside declared repo paths
+run nixfmt/statix/deadnix fix inside declared repo paths
+stage newly created files needed for Nix flake source visibility
+run nix flake check --no-write-lock-file
+run tend verify/fix for the changed scope
+```
+
+### Always-ask commands
+
+These always require explicit approval:
+
+```text
+git push
+stitch sync with push
+sudo
+rm/rmdir of tracked paths
+chmod/chown outside repo
+editing secrets / private keys / tokens
+networked lock updates
+deleting branches
+force push
+```
+
+### Local DAG commit mode
+
+When a submodule commit exists locally but not remotely, and pre-commit hooks fail because Nix cannot fetch the remote commit:
+
+```yaml
+LocalDagMode:
+  disabled
+  enabled:
+    allow_no_verify_commits: true
+    reason_required: true
+    reason_template: "Local DAG mode: {submodule} commit exists locally ({rev}) but not pushed; remote flake fetch in pre-commit cannot resolve it yet"
+    requires_push_before_remote_eval: true
+```
+
+Use `LocalCommitNoVerify` only when:
+1. LocalDagMode is enabled
+2. A reason is recorded explaining the local-DAG situation
+3. The commit will be pushed before remote consumers try to evaluate
+
+## Workflow presets
+
+These presets define common permission configurations for normal sessions:
+
+```yaml
+inspect_only:
+  lease_kind: ReadOnly
+  roles: [frontend, planner, verifier]
+  commits: false
+  expected_user_approvals: 0
+
+medium_local_verified:
+  lease_kind: BoundedWorkspaceEdit
+  roles: [worker, verifier]
+  allowed:
+    - patch/create inside declared paths
+    - format/fix
+    - stage new files for Nix visibility
+    - verify
+  commits: false
+  expected_user_approvals: 1
+
+local_commit_no_push:
+  lease_kind: LocalCommit
+  roles: [committer]
+  allowed:
+    - git add tracked changes
+    - git commit (with hooks)
+    - git commit --no-verify (only in local DAG mode with recorded reason)
+    - stitch commit --no-push
+  push: false
+  expected_user_approvals: 1
+
+sync_no_push:
+  lease_kind: SyncNoPush
+  roles: [committer, verifier]
+  allowed:
+    - lock updates if dependencies changed
+    - stitch sync --no-push
+  push: false
+  expected_user_approvals: 1
+
+push:
+  lease_kind: Push
+  requires_explicit_user_approval: true
+  expected_user_approvals: 1
+```
+
+### Expected approval counts
+
+| Workflow | Approvals |
+|----------|-----------|
+| inspect-only | 0 |
+| bounded local edit + verify | 1 |
+| bounded edit + local commits/no-push | 2 |
+| sync/push | 1 extra explicit approval |
+| dangerous/destructive | always ask |
+
+## `go on` continuation semantics
+
+When the user says "go on", "continue", "resume", or an equivalent:
+
+1. Resume the current workflow session if one is open
+2. Continue from the last blocked or incomplete task in the DAG
+3. Reuse still-valid permission leases - do not re-ask for already-granted permissions
+4. Do not re-plan unless the previous plan is missing or invalid
+5. Do not repeat questions already answered
+
+Implementation:
+- Check for an active session with a non-completed graph
+- Find the most recently blocked/in-progress task
+- If the last blockage was permission-related, retry the next blocked operation under existing or newly-granted lease
+- If the session is complete or no DAG exists, start a new session
+
 Subagents may request escalation, but only you rewrite the task DAG.
 
 ## Durable state and handoff memory
