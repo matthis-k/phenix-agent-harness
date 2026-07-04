@@ -650,12 +650,19 @@ when the `/flow` invocation includes an explicit commit policy. Delegated
 `phenix-commit-sync` is used when an independent final review is desired or when
 the workflow should remain orchestration-only.
 
-Commit semantics follow the Phenix glossary:
+Commit semantics follow the canonical semantics:
 
-* `local commit` commits only the current node/repository and does not push.
-* `commit` or `commit and push` may push the current node/repository.
-* `sync`, `sync commit`, or `synced commit` is DAG-aware, propagates downstream
-  flake inputs as needed, and may push affected nodes.
+| Term | Creates commits | Pushes | Propagates downstream inputs |
+|------|:---:|:---:|:---:|
+| `local commit` | ✅ | ❌ | ❌ |
+| `commit and push` | ✅ | ✅ | ❌ |
+| `sync` | ✅ | ✅ | ✅ |
+| `sync --no-push` | ✅ | ❌ | ✅ |
+| `update submodules to remote` | maybe | ❌ | maybe |
+
+Plain `commit` alone always means `local commit` — never push.
+`sync` is DAG-aware: update flake inputs, commit, push.
+Raw `git submodule update --remote` is forbidden; use `stitch update-submodules --remote --dry-run`.
 
 All commit routes must use Stitch-safe tooling. Do not run ad hoc multi-repo
 `git commit`, `git push`, or sync sequences when a Stitch route exists.
