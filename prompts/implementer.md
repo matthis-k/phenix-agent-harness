@@ -20,6 +20,9 @@ You must receive:
 - preferred tend/stitch transport policy
 - active WorkScope with capabilities, invariants, boundaries, routing, and
   escalation triggers
+- routing context with mode, difficulty, secrecy, change kind, target state, and
+  main-bound flag
+- planner contract (when external plan was provided)
 
 If these are missing for a `c3`/`c4` leased task, return `status: blocked`. For a
 direct `c1`/`c2` worker task, accept a compact WorkScope/task packet instead of
@@ -55,6 +58,20 @@ heavyweight planner/architecture artifacts only when routing explicitly permits 
   to modify source files, tracked files, secrets, permissions, commits, or pushes.
 - Prefer concise communication records. Do not create heavyweight state for c1/c2 tasks
   unless needed for handoff, recovery, or verification evidence.
+
+## Routing scope constraints
+
+- If the routing context has `difficulty: D0`, keep changes trivial and mechanical.
+  Do not refactor or reorganize.
+- If the routing context has `secrecy: Private` or `secrecy: Secret`, verify the
+  routing mode is not `free` (free mode is unsafe for private/secret work).
+- If the routing context has `main_bound: true`, exercise extra care. Changes may
+  affect the main branch directly.
+- If a planner contract was provided (external plan), treat it as the binding
+  implementation specification. Do not deviate from the contract's scope, steps,
+  or validation expectations.
+- If the contract's recommended implementer slot conflicts with the actual model
+  being used, note it but do not block on it.
 
 ## Tend/stitch operations
 
@@ -104,6 +121,11 @@ cannot be produced.
 status: implemented | blocked
 summary:
 task_id:
+routing:
+  mode: mixed | go | plus | free | manual
+  difficulty: D0 | D1 | D2 | D3
+  secrecy: Public | Private | Secret
+  contract_received: true | false
 lease:
   allowed_scope:
     - item:

@@ -87,6 +87,27 @@
         "type": "github"
       }
     },
+    "home-manager": {
+      "inputs": {
+        "nixpkgs": [
+          "phenix-pins",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1783005591,
+        "narHash": "sha256-NcLHV5uBAeggDUE2wPbKszjfyaSLsoqaYt7izOphkZw=",
+        "owner": "nix-community",
+        "repo": "home-manager",
+        "rev": "f469c79b955609d6a8fdd9e689be76a93b1621d7",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "home-manager",
+        "type": "github"
+      }
+    },
     "import-tree": {
       "locked": {
         "lastModified": 1778781969,
@@ -235,17 +256,19 @@
       "inputs": {
         "flake-file": "flake-file",
         "flake-parts": "flake-parts_2",
+        "home-manager": "home-manager",
         "import-tree": "import-tree",
         "nixpkgs": "nixpkgs",
         "nixpkgs-stable": "nixpkgs-stable",
-        "nixpkgs-unstable": "nixpkgs-unstable"
+        "nixpkgs-unstable": "nixpkgs-unstable",
+        "sops-nix": "sops-nix"
       },
       "locked": {
-        "lastModified": 1782929457,
-        "narHash": "sha256-iUeKA0qVMkaK3pnP1511PYXK5LvwaxG9UbiiGLj1t0E=",
+        "lastModified": 1783061003,
+        "narHash": "sha256-nlp08E64zbBXSomsKBNnFljgWs5a6JaSvOl9YOTD7pc=",
         "owner": "matthis-k",
         "repo": "phenix-pins",
-        "rev": "685a05f5fa55ed1c84ae20e45e0e8394c11d8424",
+        "rev": "cc036e78d8c024fddb43d8254302ddabff4f462f",
         "type": "github"
       },
       "original": {
@@ -267,11 +290,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1782984773,
-        "narHash": "sha256-M+tXso0GzHYZuLBTYzK8kcXu2Y9Dgei5O8N1dy049Bg=",
+        "lastModified": 1783155088,
+        "narHash": "sha256-Fbh9hjLHaDFu0TgsfYJMyVj7P2rrN9ax9PDNpAFZ+Yo=",
         "owner": "matthis-k",
         "repo": "phenix-stitch",
-        "rev": "972be382e013331ab503cfd32d16fa792e211e4f",
+        "rev": "893bf00bbbddd550fe6bae11b1407eca853584c5",
         "type": "github"
       },
       "original": {
@@ -293,11 +316,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1782929548,
-        "narHash": "sha256-OaXoAFSIPthuSONqDfO3r0VOEKQlOzfef2RGHL73RSw=",
+        "lastModified": 1783060700,
+        "narHash": "sha256-0uM3G7zOZyH2vePlFp9WqLNdiYpgr8S49tIPATA8wRo=",
         "owner": "matthis-k",
         "repo": "phenix-tend",
-        "rev": "6aea38eb79dd829b0cc5918d293f6893807f7f05",
+        "rev": "20c3c00bc54ae7500177aa43a2e8a134c7d05951",
         "type": "github"
       },
       "original": {
@@ -321,6 +344,27 @@
         "phenix-pins": "phenix-pins",
         "phenix-stitch": "phenix-stitch",
         "phenix-tend": "phenix-tend"
+      }
+    },
+    "sops-nix": {
+      "inputs": {
+        "nixpkgs": [
+          "phenix-pins",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1782165805,
+        "narHash": "sha256-478kKQBvK6SYTOdN2h9jhKJv94nbXRbFMfuL1WshErg=",
+        "owner": "Mic92",
+        "repo": "sops-nix",
+        "rev": "56b24064fdcaedca53553b1a6d607fd23b613a24",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Mic92",
+        "repo": "sops-nix",
+        "type": "github"
       }
     }
   },

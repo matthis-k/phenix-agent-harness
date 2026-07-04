@@ -72,6 +72,135 @@ Read repo-specific contracts from the following locations when present:
 - Escalate verification to full when public APIs/config, flake inputs/overlays,
   shared modules, tend/stitch semantics, or downstream consumers may be affected.
 
+## External-plan acceptance
+
+The planner must detect whether the user prompt is already a usable plan. If it is,
+normalize it minimally instead of rewriting from scratch.
+
+### Plan classifier
+
+Classify the user prompt into one of:
+
+```yaml
+NotAPlan:
+  - Mostly asks a question.
+  - Contains only a desired outcome.
+  - Contains broad architecture intent without actionable steps.
+  - Requires design decisions before implementation.
+
+PartialPlan:
+  - Has a clear objective and some steps.
+  - Missing one or more of: invariants, scope boundaries, tests, stop conditions,
+    architecture compatibility requirements.
+
+CompletePlan:
+  - Has explicit implementation objective.
+  - Names files, modules, commands, or architectural areas.
+  - Contains ordered steps or a clear task breakdown.
+  - Contains constraints or invariants.
+  - Contains validation/test expectations.
+  - Contains enough information for an implementer to start without reinterpreting
+    the architecture.
+```
+
+### External plan handling
+
+**If CompletePlan:**
+- Preserve the user/external plan as the primary source of truth.
+- Do not rewrite it stylistically.
+- Add only a short normalized header with: inferred difficulty, inferred change kind,
+  inferred secrecy, target state, required verifier strictness.
+- Pass the plan to the implementer.
+
+**If PartialPlan:**
+- Preserve the original plan.
+- Add a "Planner normalization" section.
+- Fill only missing architectural contract fields.
+- Do not change the plan's intent unless it conflicts with repository architecture.
+- If there is a conflict, state the conflict and produce the smallest compatible
+  adjustment.
+
+**If NotAPlan:**
+- Run the normal planner.
+- Produce a full Phenix planner contract.
+
+### CLI flags
+
+Respect these flags when present in the task packet:
+
+- `--external-plan auto`: Classify the prompt (default).
+- `--external-plan force`: Treat the user prompt as at least a partial plan and
+  normalize it.
+- `--external-plan off`: Always run normal internal planning.
+
+### Architecture compliance check
+
+When normalizing an external plan, check for Phenix architecture compliance:
+
+- Does the plan preserve existing module boundaries?
+- Does it avoid hardcoding concrete model names into workflow logic?
+- Does it keep model routing declarative?
+- Does it preserve main/dev separation?
+- Does it avoid free models for private/secret-sensitive work?
+- Does it avoid bypassing tend/stitch validation where relevant?
+- Does it avoid direct main promotion for D2/D3 work?
+- Does it leave handoff/wallet state when work is incomplete?
+
+If a user/external plan conflicts with architecture, do not discard it. Normalize
+it minimally. Example:
+
+```markdown
+## Architecture compatibility adjustment
+
+The external plan asks to hardcode concrete model names in the workflow. Instead,
+implement semantic model slots and put concrete model names in provider config.
+The rest of the plan remains valid.
+```
+
+### Planner contract format
+
+Normalize all plans into this shape before implementation:
+
+```markdown
+# Planner Contract
+
+## Source
+- `external-complete`
+- `external-normalized`
+- `internal-generated`
+
+## Intent
+What must change.
+
+## Scope
+Allowed files/modules/areas.
+
+## Non-goals
+What must not be changed.
+
+## Architecture constraints
+Project-specific invariants that must be preserved.
+
+## Steps
+1. ...
+2. ...
+3. ...
+
+## Validation
+Commands/tests/checks to run.
+
+## Stop conditions
+Stop or escalate if any of these happen.
+
+## Routing metadata
+- difficulty:
+- secrecy:
+- change kind:
+- target state:
+- recommended implementer slot:
+- recommended verifier slot:
+```
+
 ## MCP-first planning
 
 Prefer MCP tools for structured tend/stitch discovery:
@@ -102,6 +231,20 @@ classification:
 preferred_transport:
   tend: mcp_preferred_cli_allowed
   stitch: mcp_preferred_cli_allowed
+routing_context:
+  mode: mixed | go | plus | free | manual
+  difficulty: D0 | D1 | D2 | D3
+  secrecy: Public | Private | Secret
+  change_kind: Docs | Nix | Rust | Qml | Workflow | RepoArchitecture | Secrets | Auth | Ci | Unknown
+  target_state: Scratch | DevWallet | MainBound
+  main_bound: true | false
+  user_forced_mode: true | false
+external_plan:
+  status: not_a_plan | partial_plan | complete_plan
+  source: external | normalized | internal
+  architecture_adjustment:
+    required: true | false
+    description:
 codebase_memory:
   used: true | false
   reason:

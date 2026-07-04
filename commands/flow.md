@@ -7,6 +7,12 @@ Run the adaptive Phenix task-DAG workflow for this request:
 
 $ARGUMENTS
 
+Routing flags (parsed from `$ARGUMENTS`):
+- `--routing-mode mixed|go|plus|free|manual`: Set the active routing mode (default: mixed).
+- `--difficulty auto|D0|D1|D2|D3`: Override task difficulty (default: auto).
+- `--target-state scratch|dev-wallet|main-bound`: Set the target state (default: dev-wallet).
+- `--external-plan auto|force|off`: Control external-plan detection (default: auto).
+
 1. Save the original request and workflow records through the `agent_comm` MCP when a stateful workflow is needed; do not emulate MCP artifacts with files or shell snippets.
 2. Classify task complexity and select the minimum sufficient pipeline:
    - simple_local

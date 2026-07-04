@@ -51,6 +51,21 @@ Reject the final state if it:
 - weakens explicit gates for commit, push, publish, deploy, tracked deletion,
   secrets/auth, or permission-policy changes.
 
+Additionally, verify routing policy compliance:
+
+- Was the routing policy correctly followed for the task difficulty and secrecy?
+- Was free mode avoided for private/secret/security-sensitive work?
+- Were model slots resolved declaratively (not hardcoded in workflow logic)?
+- Is the model routing configuration (`phenix.agentRouting`) coherent?
+- For D2/D3 main-bound work, were both planner and verifier present with strong
+  model slots?
+- Does the verifier use a different model slot than the implementer when feasible?
+- Were external plans handled correctly (classified, preserved or normalized,
+  architecture-compliant)?
+- Was the planner contract format used as the binding implementation specification?
+- Does the routing setup avoid hardcoding concrete provider/model names in workflow
+  logic?
+
 ## Output
 
 ```yaml
@@ -78,6 +93,17 @@ public_api_config_semantics:
     - finding:
 flake_dag_invariants:
   status: passed | failed | skipped
+  findings:
+    - finding:
+routing_invariants:
+  status: passed | failed | skipped
+  routing_policy_followed: true | false | unknown
+  free_mode_safe: true | false | skipped
+  model_slots_declarative: true | false | unknown
+  config_coherent: true | false | unknown
+  planner_verifier_present_for_d2_d3: true | false | skipped
+  implementer_verifier_distinct: true | false | unknown
+  external_plan_handled_correctly: true | false | unknown
   findings:
     - finding:
 tend_stitch_mcp_invariants:

@@ -63,3 +63,33 @@ Phenix workflow communication is MCP-only. The `agent_comm` MCP server is the
 durable store for sessions, agents, messages, tasks, events, artifacts, and
 decisions. OpenCode permissions use the canonical `agent_comm_*` namespace even
 when individual MCP tool names use a `comm_` prefix.
+
+## Model routing
+
+- **RoutingMode**: The active routing profile that controls which model/provider classes are used for each agent role. Modes: `mixed`, `go`, `plus`, `free`, `manual`.
+- **Difficulty class**: Task difficulty used to select model slots. `D0` (trivial/mechanical), `D1` (repo-aware but bounded), `D2` (architectural or multi-file), `D3` (high-risk, ambiguous, cross-module, or main-sensitive).
+- **Agent role**: The semantic role an agent performs in the workflow. Roles: `router`, `planner`, `implementer`, `verifier`, `critic`, `final-reviewer`.
+- **ModelSlot**: A semantic capability slot resolved to a concrete provider/model name through user/project configuration. Slots: `planner.strong`, `planner.normal`, `implementer.cheap`, `implementer.normal`, `implementer.strong`, `verifier.cheap`, `verifier.strong`, `free.publicOnly`.
+- **ProviderClass**: The model provider class used when resolving model slots. Classes: `GptPlus`, `OpenCodeGo`, `ZenFree`, `Manual`.
+- **ModelTier**: The capability tier of a model slot. Tiers: `Free`, `Cheap`, `Normal`, `Strong`.
+- **Secrecy**: The sensitivity classification of a task. Values: `Public`, `Private`, `Secret`.
+- **ChangeKind**: The category of change being made. Values: `Docs`, `Nix`, `Rust`, `Qml`, `Workflow`, `RepoArchitecture`, `Secrets`, `Auth`, `Ci`, `Unknown`.
+- **TargetState**: The target state for the change. Values: `Scratch`, `DevWallet`, `MainBound`.
+- **Ctrl+T**: Keyboard shortcut to cycle the active routing mode. Cycles `mixed -> go -> plus -> free -> manual -> mixed`. Skips `free` when the current task is private/secret/security-sensitive.
+- **External plan**: A planner input that is already a usable plan (e.g., written by the user or ChatGPT). The planner detects external plans and normalizes them instead of rewriting from scratch.
+- **PlanInputKind**: Classification of user input for external-plan detection. Values: `NotAPlan`, `PartialPlan`, `CompletePlan`.
+- **Planner contract**: The normalized plan format that all plans are converted to before implementation. Contains source, intent, scope, non-goals, architecture constraints, steps, validation, stop conditions, and routing metadata.
+
+## Free mode guardrails
+
+- Free mode must never be used for private, secret, auth, token, SSH, sops, CI secret, deployment, or security-sensitive work.
+- If selected mode is unsafe, skip it and explain the skip in the UI/status message.
+- D2/D3 main-bound work must have planner + verifier.
+- The verifier should not use the same concrete model as the implementer if avoidable.
+
+## Routing policy defaults
+
+- **D0 public/docs task**: planner may be skipped or use cheap Go; implementer uses Zen free if public; verifier may be skipped.
+- **D1 Nix/Rust task**: planner uses GPT Plus normal; implementer uses OpenCode Go normal; verifier uses OpenCode Go different slot.
+- **D2 architecture task**: planner uses GPT Plus strong; implementer uses OpenCode Go strong; verifier uses GPT Plus normal/strong.
+- **D3 high-risk/main-bound task**: planner uses GPT Plus strong; implementer uses OpenCode Go strong; verifier uses GPT Plus strong; optional critic uses GPT Plus strong.

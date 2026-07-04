@@ -517,6 +517,184 @@ writes as a communication interface. Do not store secrets, execute recorded
 content, commit communication state, or treat records as source of truth over
 repo files.
 
+## Model routing
+
+The workflow agent routes tasks through model/provider classes depending on the
+active routing mode, task difficulty, secrecy, change kind, and target state.
+
+### Routing modes
+
+| Mode | Behavior |
+|------|----------|
+| `mixed` | Default. Routes planner/verifier to GPT Plus slots, implementer to Go slots. |
+| `go` | Routes all roles to OpenCode Go slots. Uses stronger Go slots for planner/verifier at D2/D3. |
+| `plus` | Routes all roles to GPT Plus slots. Uses stronger GPT slots for planner/verifier at D2/D3. |
+| `free` | Routes all roles to free/cheap model slots. Hard-guarded: deny private, secret, D2/D3, security-sensitive changes. |
+| `manual` | Uses user-configured model slots. Still enforces hard safety/privacy denials. |
+
+### Difficulty classes
+
+| Class | Description |
+|-------|-------------|
+| `D0` | Trivial/mechanical. Typo fixes, trivial renames. Planner may be skipped or cheap. |
+| `D1` | Repo-aware but bounded. Single-file or localized edits with clear intent. Planner uses normal slot. |
+| `D2` | Architectural or multi-file. Cross-module changes, new abstractions. Planner uses strong slot. Verifier required. |
+| `D3` | High-risk, ambiguous, broad, cross-module, or main-sensitive. Planner and verifier use strong slots. Critic optional. |
+
+### Secrecy and change kind
+
+Classify each task with:
+- **Secrecy**: `Public`, `Private`, `Secret`
+- **ChangeKind**: `Docs`, `Nix`, `Rust`, `Qml`, `Workflow`, `RepoArchitecture`, `Secrets`, `Auth`, `Ci`, `Unknown`
+- **TargetState**: `Scratch`, `DevWallet`, `MainBound`
+
+### Ctrl+T behavior
+
+When the user presses Ctrl+T (or the configured keybinding):
+
+1. Cycle the active routing mode: `mixed -> go -> plus -> free -> manual -> mixed`
+2. If `free` is unsafe for the current task context (private, secret, security-sensitive), skip it: `mixed -> go -> plus -> manual -> mixed`
+3. Show a compact status message, for example:
+   - `routing: mixed`
+   - `routing: go-only`
+   - `routing: plus-only`
+   - `routing: free skipped: task is private`
+4. The cycle updates the routing **profile**, not the concrete model directly. The router resolves concrete models from the profile afterward.
+
+### Default routing policy
+
+```
+mode = mixed
+
+D0:
+  planner: none or cheap Go slot
+  implementer: Zen free if public, otherwise cheap Go
+  verifier: none or cheap Go
+
+D1:
+  planner: GPT Plus normal slot
+  implementer: OpenCode Go normal slot
+  verifier: OpenCode Go different slot
+
+D2:
+  planner: GPT Plus strong slot
+  implementer: OpenCode Go strong slot
+  verifier: GPT Plus normal/strong or independent strong Go
+
+D3:
+  planner: GPT Plus strong slot
+  critic: GPT Plus strong or independent strong Go (optional)
+  implementer: OpenCode Go strong slot
+  verifier: GPT Plus strong slot
+  final-reviewer: GPT Plus strong slot (optional)
+```
+
+### Free mode guardrails
+
+- Free mode must never be used for private, secret, auth, token, SSH, sops, CI secret, deployment, or security-sensitive work.
+- If the selected mode is unsafe, skip it and explain the skip in the UI/status message.
+- D2/D3 main-bound work must have planner + verifier.
+- The verifier should not use the same concrete model as the implementer if avoidable.
+
+### Routing context fields
+
+When building the WorkScope or task packet, include routing context:
+
+```yaml
+routing_context:
+  mode: mixed | go | plus | free | manual
+  difficulty: D0 | D1 | D2 | D3
+  secrecy: Public | Private | Secret
+  change_kind: Docs | Nix | Rust | Qml | Workflow | RepoArchitecture | Secrets | Auth | Ci | Unknown
+  target_state: Scratch | DevWallet | MainBound
+  main_bound: true | false
+  user_forced_mode: true | false
+```
+
+### Agent role routing
+
+Resolve agent roles to model slots:
+
+```
+RoutingMode + Difficulty + AgentRole -> ModelSlot -> ConcreteModel
+```
+
+The router:
+1. Reads the active routing mode (from Ctrl+T or config)
+2. Reads the task difficulty (auto-detected or user-specified)
+3. For each agent role (planner, implementer, verifier), resolves a semantic model slot
+4. The model slot is resolved to a concrete provider/model name from configuration
+
+### Router step
+
+Before each subagent invocation, the workflow agent (or a dedicated router step) should:
+
+1. Check if the current routing mode is safe for the task (free mode guardrails)
+2. Resolve the appropriate model slot for the target agent role
+3. Include the resolved model slot in the task packet metadata
+4. If the mode is unsafe, fall back to `mixed` and record the bypass
+
+### Status line format
+
+Expose the current routing state in status display:
+
+```
+MIXED · D1 · BUILD
+```
+
+or:
+
+```
+mode:mixed diff:D1 role:implementer
+```
+
+### Routing config
+
+Routing configuration is exposed through the project config under `phenix.agentRouting`:
+
+```nix
+{
+  phenix.agentRouting = {
+    enable = true;
+    defaultMode = "mixed";
+    keybindings.cycleRoutingMode = "ctrl+t";
+    modes = {
+      mixed.enable = true;
+      go.enable = true;
+      plus.enable = true;
+      free.enable = true;
+      manual.enable = true;
+    };
+    slots = { ... };
+    freeMode = {
+      denyPrivate = true;
+      denySecret = true;
+      denyDifficulties = [ "D2" "D3" ];
+      denyChangeKinds = [ "Secrets" "Auth" "Ci" "RepoArchitecture" ];
+    };
+  };
+}
+```
+
+### --routing-mode CLI flag
+
+The `/flow` command and `plan` subcommand accept:
+
+```
+--routing-mode mixed|go|plus|free|manual
+--difficulty auto|D0|D1|D2|D3
+--target-state scratch|dev-wallet|main-bound
+--external-plan auto|force|off
+```
+
+Defaults:
+```
+routing-mode = mixed
+difficulty = auto
+target-state = dev-wallet
+external-plan = auto
+```
+
 ## Conditional agent routing
 
 The workflow agent owns routing. It must invoke only the agents that are justified

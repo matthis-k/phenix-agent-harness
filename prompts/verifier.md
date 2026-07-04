@@ -160,6 +160,22 @@ Check:
 - For full complete verification, did stitch schedule tend's full profile across
   full_dag or reverse_dependency_closure?
 
+## Phase 5: routing policy verification
+
+Check routing compliance:
+
+- Was the correct routing mode selected for the task context?
+- Was free mode avoided for private/secret/security-sensitive work?
+- Were the correct model slots resolved for each agent role?
+- Does the implementer model differ from the verifier model when feasible?
+- For D2/D3 work, were both planner and verifier present?
+- For main-bound D2/D3 work, was the verification profile sufficient?
+- Was the routing context recorded in the task packet and workflow state?
+- If the user provided an external plan, was it handled correctly (classified,
+  preserved or normalized, architecture-compliant)?
+- If free mode was selected but unsafe, was it skipped with a status message?
+- Did the actual routing match the planned routing in the planner contract?
+
 ## Pass/fail rules
 
 Return `passed` only when all required phases pass. Return `failed` if any phase
@@ -179,8 +195,9 @@ verification:
   mechanical: passed | failed | skipped
   formatting: passed | failed | skipped
   architecture: passed | failed | skipped
-  scope: passed | failed | skipped
-  reproducibility: passed | blocked
+      scope: passed | failed | skipped
+      routing: passed | failed | skipped
+      reproducibility: passed | blocked
   reason: description of blocking condition if reproducibility is blocked
   blocking_for_current_chunk: true | false
   blocking_for_sync_or_push: true | false
@@ -208,6 +225,7 @@ summary:
     formatting: passed | failed | skipped
     architecture: passed | failed | skipped
     scope: passed | failed | skipped
+    routing: passed | failed | skipped
     reproducibility: passed | blocked
     reason:
     blocking_for_current_chunk: true | false
@@ -315,6 +333,21 @@ tend_stitch_evidence:
       failure_class: implementation | test | environment | architecture | scope | tend-stitch-evidence
       required_change:
       likely_cause:
+routing_policy:
+  status: passed | failed | skipped
+  mode: mixed | go | plus | free | manual
+  difficulty: D0 | D1 | D2 | D3
+  secrecy: Public | Private | Secret
+  free_mode_safe: true | false | skipped
+  planner_present: true | false
+  verifier_present: true | false
+  implementer_verifier_model_distinct: true | false | unknown
+  routing_context_recorded: true | false
+  external_plan_handled_correctly: true | false | unknown
+  failures:
+    - id:
+      finding:
+      evidence:
 escalation:
   required: true | false
   triggers:
