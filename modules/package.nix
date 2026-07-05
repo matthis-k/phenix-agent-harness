@@ -352,61 +352,7 @@
         };
       };
 
-      settingsWithRouting = settings // {
-        phenix = {
-          agentRouting = {
-            enable = true;
-            defaultMode = "mixed";
-            keybindings = {
-              cycleRoutingMode = "ctrl+t";
-            };
-            modes = {
-              mixed.enable = true;
-              go.enable = true;
-              plus.enable = true;
-              free.enable = true;
-              manual.enable = true;
-            };
-            slots = {
-              planner = {
-                normal = "gpt-plus/medium";
-                strong = "gpt-plus/high";
-              };
-              implementer = {
-                cheap = "opencode-go/cheap";
-                normal = "opencode-go/coding";
-                strong = "opencode-go/strong";
-              };
-              verifier = {
-                cheap = "opencode-go/different-cheap";
-                strong = "gpt-plus/high";
-              };
-              free = {
-                publicOnly = "zen-free/default";
-              };
-            };
-            freeMode = {
-              denyPrivate = true;
-              denySecret = true;
-              denyDifficulties = [ "D2" "D3" ];
-              denyChangeKinds = [
-                "Secrets"
-                "Auth"
-                "Ci"
-                "RepoArchitecture"
-              ];
-            };
-            externalPlans = {
-              enable = true;
-              normalizePartialPlans = true;
-              preserveCompletePlans = true;
-              requireArchitectureCompliance = true;
-            };
-          };
-        };
-      };
-
-      generatedConfig = pkgs.writeText "phenix-opencode.json" (builtins.toJSON settingsWithRouting);
+      generatedConfig = pkgs.writeText "phenix-opencode.json" (builtins.toJSON settings);
 
       piSettings = {
         defaultProjectTrust = "ask";
@@ -449,7 +395,7 @@
       wrappedOpencode = nix-wrapper-modules.wrappers.opencode.wrap {
         inherit pkgs;
 
-        settings = settingsWithRouting;
+        settings = settings;
 
         envDefault.OPENCODE_DISABLE_AUTOUPDATE = "1";
         envDefault.PATH = lib.makeBinPath [
@@ -723,35 +669,6 @@
               check_prompt ${promptCheckPath "commit-sync"} 'Never manually walk repositories'
               check_prompt ${promptCheckPath "commit-sync"} 'Stitch remains the orchestrator for multi-repo, DAG-aware, sync, and structural commit flows'
               check_prompt ${promptCheckPath "verifier"} 'tend_stitch_evidence'
-
-              # Routing configuration checks
-              jq -e '.phenix.agentRouting.enable == true' ${generatedConfig}
-              jq -e '.phenix.agentRouting.defaultMode == "mixed"' ${generatedConfig}
-              jq -e '.phenix.agentRouting.keybindings.cycleRoutingMode == "ctrl+t"' ${generatedConfig}
-              jq -e '.phenix.agentRouting.modes.mixed.enable == true' ${generatedConfig}
-              jq -e '.phenix.agentRouting.modes.go.enable == true' ${generatedConfig}
-              jq -e '.phenix.agentRouting.modes.plus.enable == true' ${generatedConfig}
-              jq -e '.phenix.agentRouting.modes.free.enable == true' ${generatedConfig}
-              jq -e '.phenix.agentRouting.modes.manual.enable == true' ${generatedConfig}
-              jq -e '.phenix.agentRouting.slots.planner.normal == "gpt-plus/medium"' ${generatedConfig}
-              jq -e '.phenix.agentRouting.slots.planner.strong == "gpt-plus/high"' ${generatedConfig}
-              jq -e '.phenix.agentRouting.slots.implementer.cheap == "opencode-go/cheap"' ${generatedConfig}
-              jq -e '.phenix.agentRouting.slots.implementer.normal == "opencode-go/coding"' ${generatedConfig}
-              jq -e '.phenix.agentRouting.slots.implementer.strong == "opencode-go/strong"' ${generatedConfig}
-              jq -e '.phenix.agentRouting.slots.verifier.cheap == "opencode-go/different-cheap"' ${generatedConfig}
-              jq -e '.phenix.agentRouting.slots.verifier.strong == "gpt-plus/high"' ${generatedConfig}
-              jq -e '.phenix.agentRouting.slots.free.publicOnly == "zen-free/default"' ${generatedConfig}
-              jq -e '.phenix.agentRouting.freeMode.denyPrivate == true' ${generatedConfig}
-              jq -e '.phenix.agentRouting.freeMode.denySecret == true' ${generatedConfig}
-              jq -e '.phenix.agentRouting.freeMode.denyDifficulties == ["D2", "D3"]' ${generatedConfig}
-              jq -e '.phenix.agentRouting.freeMode.denyChangeKinds | index("Secrets") != null' ${generatedConfig}
-              jq -e '.phenix.agentRouting.freeMode.denyChangeKinds | index("Auth") != null' ${generatedConfig}
-              jq -e '.phenix.agentRouting.freeMode.denyChangeKinds | index("Ci") != null' ${generatedConfig}
-              jq -e '.phenix.agentRouting.freeMode.denyChangeKinds | index("RepoArchitecture") != null' ${generatedConfig}
-              jq -e '.phenix.agentRouting.externalPlans.enable == true' ${generatedConfig}
-              jq -e '.phenix.agentRouting.externalPlans.normalizePartialPlans == true' ${generatedConfig}
-              jq -e '.phenix.agentRouting.externalPlans.preserveCompletePlans == true' ${generatedConfig}
-              jq -e '.phenix.agentRouting.externalPlans.requireArchitectureCompliance == true' ${generatedConfig}
 
               # Route command checks
               jq -e '.command.route.agent == "phenix-workflow"' ${generatedConfig}

@@ -56,7 +56,7 @@ Additionally, verify routing policy compliance:
 - Was the routing policy correctly followed for the task difficulty and secrecy?
 - Was free mode avoided for private/secret/security-sensitive work?
 - Were model slots resolved declaratively (not hardcoded in workflow logic)?
-- Is the model routing configuration (`phenix.agentRouting`) coherent?
+- Is the model routing configuration coherent (matching the routing docs in the workflow prompt)?
 - For D2/D3 main-bound work, were both planner and verifier present with strong
   model slots?
 - Does the verifier use a different model slot than the implementer when feasible?

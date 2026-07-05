@@ -650,31 +650,16 @@ mode:mixed diff:D1 role:implementer
 
 ### Routing config
 
-Routing configuration is exposed through the project config under `phenix.agentRouting`:
+The routing configuration defines how agent roles map to model slots:
 
-```nix
-{
-  phenix.agentRouting = {
-    enable = true;
-    defaultMode = "mixed";
-    keybindings.cycleRoutingMode = "ctrl+t";
-    modes = {
-      mixed.enable = true;
-      go.enable = true;
-      plus.enable = true;
-      free.enable = true;
-      manual.enable = true;
-    };
-    slots = { ... };
-    freeMode = {
-      denyPrivate = true;
-      denySecret = true;
-      denyDifficulties = [ "D2" "D3" ];
-      denyChangeKinds = [ "Secrets" "Auth" "Ci" "RepoArchitecture" ];
-    };
-  };
-}
-```
+- **defaultMode**: `mixed` (planner/verifier → GPT Plus, implementer → Go)
+- **modes**: `mixed`, `go`, `plus`, `free`, `manual`
+- **slots**:
+  - planner: `normal=gpt-plus/medium`, `strong=gpt-plus/high`
+  - implementer: `cheap=opencode-go/cheap`, `normal=opencode-go/coding`, `strong=opencode-go/strong`
+  - verifier: `cheap=opencode-go/different-cheap`, `strong=gpt-plus/high`
+  - free: `publicOnly=zen-free/default`
+- **free mode guardrails**: deny private, secret, D2/D3 difficulties, and Secrets/Auth/Ci/RepoArchitecture change kinds
 
 ### --routing-mode CLI flag
 
