@@ -395,7 +395,7 @@
       wrappedOpencode = nix-wrapper-modules.wrappers.opencode.wrap {
         inherit pkgs;
 
-        settings = settings;
+        inherit settings;
 
         envDefault.OPENCODE_DISABLE_AUTOUPDATE = "1";
         envDefault.PATH = lib.makeBinPath [
