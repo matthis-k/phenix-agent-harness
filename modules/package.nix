@@ -19,7 +19,7 @@
       promptPath = name: builtins.toString promptsDir + "/${name}.md";
       promptCheckPath =
         name:
-        pkgs.writeText "phenix-opencode-${name}-prompt.md" (builtins.readFile (promptsDir + "/${name}.md"));
+        pkgs.writeText "phenix-agent-harness-${name}-prompt.md" (builtins.readFile (promptsDir + "/${name}.md"));
 
       safeInspectionBashPermissions = {
         "git status*" = "allow";
@@ -352,7 +352,7 @@
         };
       };
 
-      generatedConfig = pkgs.writeText "phenix-opencode.json" (builtins.toJSON settings);
+      generatedConfig = pkgs.writeText "phenix-agent-harness.json" (builtins.toJSON settings);
 
       piSettings = {
         defaultProjectTrust = "ask";
@@ -525,7 +525,7 @@
             '';
 
         generated-config =
-          pkgs.runCommand "phenix-opencode-generated-config-check"
+          pkgs.runCommand "phenix-agent-harness-generated-config-check"
             {
               nativeBuildInputs = [
                 pkgs.jq
