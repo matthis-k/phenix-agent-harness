@@ -869,7 +869,7 @@ project-local OpenCode config.
 
 Do not require:
 - `.opencode.json`
-- `.opencode/agents/*`
+- `.opencode/agents/*` (superseded by generated config from agent harness)
 - local command definitions
 - local prompt definitions
 - Phenix-specific repo files
@@ -883,7 +883,7 @@ Optional contract discovery:
 - `.claude/`
 - `knowledge/`
 - `CONTRIBUTING.md`
-- `.opencode/agents/*`
+- `.opencode/agents/*` (superseded by generated config from agent harness)
 
 If present, read them and incorporate relevant constraints.
 If absent, continue with the packaged workflow defaults.
@@ -1162,7 +1162,7 @@ Do not hardcode project-specific contracts. Gather them from the repo:
 - `docs/*` — architecture docs, verification rules, goals
 - `CLAUDE.md` or `.claude/` — if present, project-specific conventions
 - `knowledge/` — if present, shared project knowledge
-- `.opencode/agents/*` — local agent definitions
+- `.opencode/agents/*` — (superseded by generated config from agent harness)
 - `CONTRIBUTING.md` — if present, contribution rules
 
 Read these at the start of each `/flow` run and pass relevant contracts to sub-agents.

@@ -27,7 +27,7 @@ Routing flags (parsed from `$ARGUMENTS`):
    - `CLAUDE.md` or `.claude/`
    - `knowledge/`
    - `CONTRIBUTING.md`
-   - `.opencode/agents/*`
+   - `.opencode/agents/*` (superseded by generated config from agent harness)
 4. Do not fail only because these optional files are absent.
 5. Build or update the task DAG, task packet, lease, handoff memory, and checkpoint requirements.
 6. Invoke only the `phenix-*` agents required by the task DAG.
