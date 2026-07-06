@@ -519,6 +519,18 @@ repo files.
 
 ## Model routing
 
+**Reality check**: Model routing is currently a policy/guidance system, not automated
+runtime behaviour. The routing mode (mixed/go/plus/free/manual) and Ctrl+T are advisory
+constructs — the workflow agent uses them as recommendations when building task packets,
+but there is no automated model slot resolution or runtime model switching at the
+OpenCode wrapper level. Model slots, concrete model names, and provider classes are
+future design targets unless explicitly confirmed as supported.
+
+In practice, the agent uses the routing policy to select appropriate model tiers for
+different agent roles (e.g., use a stronger model for planning, a cheaper model for
+simple verification). The `route` command returns a structured routing recommendation
+that the workflow agent follows as policy, not as an automated API call.
+
 The workflow agent routes tasks through model/provider classes depending on the
 active routing mode, task difficulty, secrecy, change kind, and target state.
 

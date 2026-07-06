@@ -175,6 +175,7 @@ Check routing compliance:
   preserved or normalized, architecture-compliant)?
 - If free mode was selected but unsafe, was it skipped with a status message?
 - Did the actual routing match the planned routing in the planner contract?
+- Verify routing policy compliance (`routing_policy_` check) — the routing metadata recorded in the checkpoint and output must match the expected routing context.
 
 ## Pass/fail rules
 

@@ -103,6 +103,28 @@ CompletePlan:
     the architecture.
 ```
 
+### PlanInputKind
+
+PlanInputKind is the classification of user input for external-plan detection:
+
+- **NotAPlan**: Questions, broad intent, missing actionable steps.
+- **PartialPlan**: Has objective and some steps, missing one or more of: invariants, scope boundaries, tests, stop conditions, architecture compatibility.
+- **CompletePlan**: Explicit implementation objective with named files, modules, commands, ordered steps, constraints, invariants, and validation expectations.
+
+### Planner Contract
+
+All plans — whether external or internal — are normalized into a standard **Planner Contract** format before being passed to the implementer. The contract contains:
+
+- source (origin of the plan)
+- intent
+- scope
+- non-goals
+- architecture constraints
+- steps
+- validation expectations
+- stop conditions
+- routing metadata
+
 ### External plan handling
 
 **If CompletePlan:**

@@ -19,76 +19,232 @@
       promptPath = name: builtins.toString promptsDir + "/${name}.md";
       promptCheckPath =
         name:
-        pkgs.writeText "phenix-agent-harness-${name}-prompt.md" (builtins.readFile (promptsDir + "/${name}.md"));
+        pkgs.writeText "phenix-agent-harness-${name}-prompt.md" (
+          builtins.readFile (promptsDir + "/${name}.md")
+        );
 
-      safeInspectionBashPermissions = {
-        "git status*" = "allow";
-        "git diff*" = "allow";
-        "git log*" = "allow";
-        "git show*" = "allow";
-        "nix flake check*" = "allow";
-        "nix flake show*" = "allow";
-        "nix flake metadata*" = "allow";
-        "nix eval*" = "allow";
-        "nix build*" = "allow";
-        "nix develop*" = "allow";
-        "nix shell*" = "allow";
-        "nix run*" = "allow";
-        "nix repl*" = "allow";
-        "nix path-info*" = "allow";
-        "nix store ls*" = "allow";
-        "nix store cat*" = "allow";
-        "nix store diff-closures*" = "allow";
-        "nix why-depends*" = "allow";
-        "nix derivation show*" = "allow";
-        "nix-build*" = "allow";
-        "nix-shell*" = "allow";
-        "nix-instantiate*" = "allow";
+      operationClasses = {
+        RepoRead = {
+          allow = [
+            "git status*"
+            "git diff*"
+            "git log*"
+            "git show*"
+          ];
+        };
+
+        RepoSearch = {
+          allow = [
+            "rg *"
+            "grep *"
+            "find *"
+          ];
+        };
+
+        SafeNixInspect = {
+          allow = [
+            "nix flake check*"
+            "nix flake show*"
+            "nix flake metadata*"
+            "nix eval*"
+            "nix build*"
+            "nix develop*"
+            "nix shell*"
+            "nix run*"
+            "nix repl*"
+            "nix path-info*"
+            "nix store ls*"
+            "nix store cat*"
+            "nix store diff-closures*"
+            "nix why-depends*"
+            "nix derivation show*"
+            "nix-build*"
+            "nix-shell*"
+            "nix-instantiate*"
+          ];
+        };
+
+        ReversibleGit = {
+          allow = [
+            "git branch --show-current*"
+            "git branch --list*"
+            "git branch -m*"
+            "git switch -c*"
+            "git add*"
+            "git reset HEAD*"
+            "git reset --soft*"
+            "git stash*"
+            "git fetch*"
+            "git pull --ff-only*"
+          ];
+        };
+
+        VerifyTools = {
+          allow = [
+            "tend *"
+            "stitch status*"
+            "stitch exec*"
+            "stitch plan*"
+            "stitch dag*"
+            "cargo check*"
+            "cargo test*"
+            "cargo fmt --check*"
+          ];
+        };
+
+        FormatFix = {
+          allow = [
+            "treefmt*"
+            "statix*"
+            "deadnix*"
+            "nixfmt*"
+          ];
+        };
+
+        DestructiveGit = {
+          ask = [
+            "git commit*"
+            "git push*"
+            "git push --force*"
+            "git push --delete*"
+            "git tag*"
+            "git merge*"
+            "git rebase*"
+            "git cherry-pick*"
+            "git revert*"
+            "git reset --hard*"
+            "git branch -D*"
+          ];
+          deny = [
+            "git clean*"
+          ];
+        };
+
+        DestructiveNix = {
+          ask = [
+            "nix flake update*"
+            "nix flake lock*"
+            "nix profile*"
+            "nix registry add*"
+            "nix registry remove*"
+            "nix channel*"
+            "nix-env*"
+            "nix store delete*"
+            "nix store optimise*"
+            "nix-collect-garbage*"
+            "nix copy*"
+            "nix store sign*"
+            "nix key*"
+          ];
+        };
+
+        StitchCommitSync = {
+          ask = [
+            "stitch commit*"
+            "stitch sync*"
+          ];
+        };
       };
 
-      reversibleSingleRepoGitPermissions = {
-        "git branch --show-current*" = "allow";
-        "git branch --list*" = "allow";
-        "git branch -m*" = "allow";
-        "git switch -c*" = "allow";
-        "git add*" = "allow";
-        "git reset HEAD*" = "allow";
-        "git reset --soft*" = "allow";
-        "git stash*" = "allow";
-        "git fetch*" = "allow";
-        "git pull --ff-only*" = "allow";
-      };
+      # Build allow-only permission set from a list of operation class names
+      mkAllowOnly =
+        classNames:
+        let
+          classes = {
+            inherit (operationClasses)
+              RepoRead
+              RepoSearch
+              SafeNixInspect
+              ReversibleGit
+              VerifyTools
+              FormatFix
+              ;
+            inherit (operationClasses) DestructiveGit DestructiveNix StitchCommitSync;
+          };
+          result = builtins.foldl' (
+            acc: name:
+            let
+              cls = classes.${name} or { };
+              hasAllow = builtins.hasAttr "allow" cls;
+            in
+            if hasAllow then
+              acc
+              // (builtins.listToAttrs (
+                map (p: {
+                  name = p;
+                  value = "allow";
+                }) cls.allow
+              ))
+            else
+              acc
+          ) { } classNames;
+        in
+        result;
 
-      destructiveGitSafeguards = {
-        "git commit*" = "ask";
-        "git push*" = "ask";
-        "git tag*" = "ask";
-        "git merge*" = "ask";
-        "git rebase*" = "ask";
-        "git cherry-pick*" = "ask";
-        "git revert*" = "ask";
-        "git reset --hard*" = "ask";
-        "git clean*" = "deny";
-        "git branch -D*" = "ask";
-        "git push --force*" = "ask";
-        "git push --delete*" = "ask";
-      };
+      # Build ask-only permission set (destructive operations)
+      mkAskOnly =
+        classNames:
+        let
+          classes = {
+            inherit (operationClasses) DestructiveGit DestructiveNix StitchCommitSync;
+          };
+          result = builtins.foldl' (
+            acc: name:
+            let
+              cls = classes.${name} or { };
+              hasAsk = builtins.hasAttr "ask" cls;
+            in
+            if hasAsk then
+              acc
+              // (builtins.listToAttrs (
+                map (p: {
+                  name = p;
+                  value = "ask";
+                }) cls.ask
+              ))
+            else
+              acc
+          ) { } classNames;
+        in
+        result;
 
-      destructiveNixSafeguards = {
-        "nix flake update*" = "ask";
-        "nix flake lock*" = "ask";
-        "nix profile*" = "ask";
-        "nix registry add*" = "ask";
-        "nix registry remove*" = "ask";
-        "nix channel*" = "ask";
-        "nix-env*" = "ask";
-        "nix store delete*" = "ask";
-        "nix store optimise*" = "ask";
-        "nix-collect-garbage*" = "ask";
-        "nix copy*" = "ask";
-        "nix store sign*" = "ask";
-        "nix key*" = "ask";
-      };
+      # Build deny-only permission set
+      mkDenyOnly =
+        classNames:
+        let
+          classes = {
+            inherit (operationClasses) DestructiveGit;
+          };
+          result = builtins.foldl' (
+            acc: name:
+            let
+              cls = classes.${name} or { };
+              hasDeny = builtins.hasAttr "deny" cls;
+            in
+            if hasDeny then
+              acc
+              // (builtins.listToAttrs (
+                map (p: {
+                  name = p;
+                  value = "deny";
+                }) cls.deny
+              ))
+            else
+              acc
+          ) { } classNames;
+        in
+        result;
+
+      safeInspectionBashPermissions = mkAllowOnly [
+        "RepoRead"
+        "SafeNixInspect"
+      ];
+
+      reversibleSingleRepoGitPermissions = mkAllowOnly [ "ReversibleGit" ];
+
+      destructiveGitSafeguards = (mkAskOnly [ "DestructiveGit" ]) // (mkDenyOnly [ "DestructiveGit" ]);
+
+      destructiveNixSafeguards = mkAskOnly [ "DestructiveNix" ];
 
       agentCommPermissions = {
         "agent_comm_*" = "allow";
