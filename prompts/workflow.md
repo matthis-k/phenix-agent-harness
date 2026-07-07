@@ -531,6 +531,13 @@ different agent roles (e.g., use a stronger model for planning, a cheaper model 
 simple verification). The `route` command returns a structured routing recommendation
 that the workflow agent follows as policy, not as an automated API call.
 
+> **Advisory note**: The routing sections below (modes, classes, policy, context,
+> resolution) describe the **design intent and policy guidance** for how routing
+> *should* work once automated resolution is supported. Currently, these are
+> prompt/policy-level recommendations that the workflow agent follows manually
+> when constructing task packets. Model slots, provider classes, and automated
+> resolution are future targets unless explicitly confirmed as supported.
+
 The workflow agent routes tasks through model/provider classes depending on the
 active routing mode, task difficulty, secrecy, change kind, and target state.
 
