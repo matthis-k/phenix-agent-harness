@@ -6,6 +6,8 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+pub mod routing;
+
 #[derive(Debug, Error)]
 pub enum AgentCommError {
     #[error("sqlite error: {0}")]

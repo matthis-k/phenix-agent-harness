@@ -54,7 +54,7 @@ Reject the final state if it:
 Additionally, verify routing policy compliance:
 
 - Was the routing policy correctly followed for the task difficulty and secrecy?
-- Was free mode avoided for private/secret/security-sensitive work?
+- Was `free-only` avoided for private/secret/security-sensitive work?
 - Were model slots resolved declaratively (not hardcoded in workflow logic)?
 - Is the model routing configuration coherent (matching the routing docs in the workflow prompt)?
 - For D2/D3 main-bound work, were both planner and verifier present with strong

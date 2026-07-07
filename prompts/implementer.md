@@ -64,7 +64,7 @@ heavyweight planner/architecture artifacts only when routing explicitly permits 
 - If the routing context has `difficulty: D0`, keep changes trivial and mechanical.
   Do not refactor or reorganize.
 - If the routing context has `secrecy: Private` or `secrecy: Secret`, verify the
-  routing mode is not `free` (free mode is unsafe for private/secret work).
+  routing mode is not `free-only` (`free-only` is unsafe for private/secret work).
 - If the routing context has `main_bound: true`, exercise extra care. Changes may
   affect the main branch directly.
 - If a planner contract was provided (external plan), treat it as the binding
@@ -122,7 +122,7 @@ status: implemented | blocked
 summary:
 task_id:
 routing:
-  mode: mixed | go | plus | free | manual
+  mode: mixed | gpt-only | go-only | free-only | manual
   difficulty: D0 | D1 | D2 | D3
   secrecy: Public | Private | Secret
   contract_received: true | false

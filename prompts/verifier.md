@@ -148,6 +148,11 @@ Check:
 
 ## Phase 4: tend/stitch evidence verification
 
+For routing-policy work, verify `routing_policy_` conformance against the accepted
+routing packet and the persisted process-start route state. Check that docs and
+implementation say route changes require a restart unless hot reload is separately
+proven, and that no repo-local runtime state is introduced.
+
 Check:
 
 - Was the selected verification profile sufficient for the task classification?
@@ -165,7 +170,7 @@ Check:
 Check routing compliance:
 
 - Was the correct routing mode selected for the task context?
-- Was free mode avoided for private/secret/security-sensitive work?
+- Was `free-only` avoided for Private, Secret, D2, D3, Secrets, Auth, Ci, Security, MainBound, and commit/sync/push contexts?
 - Were the correct model slots resolved for each agent role?
 - Does the implementer model differ from the verifier model when feasible?
 - For D2/D3 work, were both planner and verifier present?
@@ -173,7 +178,7 @@ Check routing compliance:
 - Was the routing context recorded in the task packet and workflow state?
 - If the user provided an external plan, was it handled correctly (classified,
   preserved or normalized, architecture-compliant)?
-- If free mode was selected but unsafe, was it skipped with a status message?
+- If cycle encountered unsafe `free-only`, was it skipped with a status message; if resolver was explicitly asked for unsafe `free-only`, did it return JSON `status: denied`?
 - Did the actual routing match the planned routing in the planner contract?
 - Verify routing policy compliance (`routing_policy_` check) — the routing metadata recorded in the checkpoint and output must match the expected routing context.
 
@@ -336,10 +341,10 @@ tend_stitch_evidence:
       likely_cause:
 routing_policy:
   status: passed | failed | skipped
-  mode: mixed | go | plus | free | manual
+  mode: mixed | gpt-only | go-only | free-only | manual
   difficulty: D0 | D1 | D2 | D3
   secrecy: Public | Private | Secret
-  free_mode_safe: true | false | skipped
+  free_only_safe: true | false | skipped
   planner_present: true | false
   verifier_present: true | false
   implementer_verifier_model_distinct: true | false | unknown

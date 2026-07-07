@@ -26,3 +26,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "phenix-agent-comm-mcp"
 path = "src/main.rs"
+
+[[bin]]
+name = "phenix-route"
+path = "src/bin/phenix-route.rs"

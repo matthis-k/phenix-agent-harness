@@ -66,7 +66,7 @@ when individual MCP tool names use a `comm_` prefix.
 
 ## Model routing
 
-- **RoutingMode**: The active routing profile that controls which model/provider classes are used for each agent role. Modes: `mixed`, `go`, `plus`, `free`, `manual`.
+- **RoutingMode**: The active routing profile that controls which model/provider classes are used for each agent role. Modes: `mixed`, `gpt-only`, `go-only`, `free-only`, `manual`.
 - **Difficulty class**: Task difficulty used to select model slots. `D0` (trivial/mechanical), `D1` (repo-aware but bounded), `D2` (architectural or multi-file), `D3` (high-risk, ambiguous, cross-module, or main-sensitive).
 - **Agent role**: The semantic role an agent performs in the workflow. Roles: `router`, `planner`, `implementer`, `verifier`, `critic`, `final-reviewer`.
 - **ModelSlot**: A semantic capability slot resolved to a concrete provider/model name through user/project configuration. Slots: `planner.strong`, `planner.normal`, `implementer.cheap`, `implementer.normal`, `implementer.strong`, `verifier.cheap`, `verifier.strong`, `free.publicOnly`.
@@ -75,7 +75,7 @@ when individual MCP tool names use a `comm_` prefix.
 - **Secrecy**: The sensitivity classification of a task. Values: `Public`, `Private`, `Secret`.
 - **ChangeKind**: The category of change being made. Values: `Docs`, `Nix`, `Rust`, `Qml`, `Workflow`, `RepoArchitecture`, `Secrets`, `Auth`, `Ci`, `Unknown`.
 - **TargetState**: The target state for the change. Values: `Scratch`, `DevWallet`, `MainBound`.
-- **Ctrl+T**: Keyboard shortcut to cycle the active routing mode. Cycles `mixed -> go -> plus -> free -> manual -> mixed`. Skips `free` when the current task is private/secret/security-sensitive.
+- **Ctrl+T**: Keyboard shortcut to cycle the active routing mode. Cycles `mixed -> gpt-only -> go-only -> free-only -> manual -> mixed`. Skips `free-only` when the current task is private/secret/security-sensitive.
 - **External plan**: A planner input that is already a usable plan (e.g., written by the user or ChatGPT). The planner detects external plans and normalizes them instead of rewriting from scratch.
 - **PlanInputKind**: Classification of user input for external-plan detection. Values: `NotAPlan`, `PartialPlan`, `CompletePlan`.
 - **Planner contract**: The normalized plan format that all plans are converted to before implementation. Contains source, intent, scope, non-goals, architecture constraints, steps, validation, stop conditions, and routing metadata.

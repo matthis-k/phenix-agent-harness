@@ -585,7 +585,10 @@
 
       opencodeWithGithubToken = pkgs.writeShellApplication {
         name = "opencode";
-        runtimeInputs = [ pkgs.coreutils ];
+        runtimeInputs = [
+          pkgs.coreutils
+          agentComm
+        ];
         text = ''
           if [ -z "''${GITHUB_PERSONAL_ACCESS_TOKEN:-}" ] && [ -r /run/secrets/github_token ]; then
             token="$(< /run/secrets/github_token)"
@@ -598,6 +601,16 @@
             export GH_TOKEN="$token"
             export GITHUB_TOKEN="$token"
             export GITHUB_PERSONAL_ACCESS_TOKEN="$token"
+          fi
+
+          # Runtime routing is intentionally process-start only. The route state
+          # lives in XDG state and is converted
+          # into an OpenCode config overlay before this OpenCode process starts.
+          if [ -z "''${OPENCODE_CONFIG_CONTENT:-}" ]; then
+            route_config="$(phenix-route resolve --json --opencode-config 2>/dev/null || true)"
+            if [ -n "$route_config" ]; then
+              export OPENCODE_CONFIG_CONTENT="$route_config"
+            fi
           fi
 
           exec ${wrappedOpencode}/bin/opencode "$@"
@@ -642,6 +655,7 @@
         opencode = opencodeWithGithubToken;
         pi = wrappedPi;
         agent-comm = agentComm;
+        phenix-route = agentComm;
         generated-config = generatedConfig;
         generated-pi-settings = generatedPiSettings;
         generated-pi-package-json = generatedPiPackageJson;
@@ -703,6 +717,49 @@
               touch $out
             '';
 
+        phenix-route-smoke =
+          pkgs.runCommand "phenix-route-smoke-test"
+            {
+              nativeBuildInputs = [
+                agentComm
+                pkgs.jq
+              ];
+            }
+            ''
+              STATE="$TMPDIR/phenix-route/state.json"
+
+              phenix-route --state "$STATE" show --json \
+                | jq -e '.routing.mode == "mixed" and .restart_required == true and .hot_switching_supported == false'
+
+              phenix-route --state "$STATE" set gpt-only --difficulty D3 --secrecy Private --change-kind Workflow \
+                | jq -e '.routing.mode == "gpt-only"'
+              phenix-route --state "$STATE" cycle --json \
+                | jq -e '.new_mode == "go-only" and .free_skipped == false and .restart_required == true'
+              phenix-route --state "$STATE" cycle --json \
+                | jq -e '.new_mode == "manual" and .free_skipped == true and .restart_required == true'
+
+              printf '{' > "$STATE"
+              phenix-route --state "$STATE" show --json \
+                | jq -e '.routing.mode == "mixed" and (.warning | test("invalid route state JSON"))'
+
+              phenix-route --state "$STATE" resolve --json --opencode-config \
+                | jq -e '.agent."phenix-worker".model == "opencode-go" and (.agent | has("phenix-workflow") | not) and (has("mcp") | not)'
+
+              phenix-route --state "$STATE" set free-only --difficulty D1 --secrecy Private --change-kind Workflow \
+                > /dev/null
+              phenix-route --state "$STATE" resolve --json \
+                | jq -e '.status == "denied" and (.denial_reason | test("Private|Secret"))'
+
+              phenix-route --state "$STATE" set manual > /dev/null
+              phenix-route --state "$STATE" resolve --json \
+                | jq -e '.status == "incomplete" and (.missing_manual_slots | length > 0)'
+
+              grep -F -q 'OPENCODE_CONFIG_CONTENT' ${opencodeWithGithubToken}/bin/opencode
+              grep -F -q 'process-start only' ${opencodeWithGithubToken}/bin/opencode
+
+              touch $out
+            '';
+
         generated-config =
           pkgs.runCommand "phenix-agent-harness-generated-config-check"
             {
@@ -743,6 +800,10 @@
               jq -e '.agent."phenix-workflow".permission.bash | keys | all(contains("agent-state") | not)' ${generatedConfig}
               jq -e '.agent."phenix-workflow".permission.bash | has("mkdir -p .opencodestate*") | not' ${generatedConfig}
               jq -e '.agent."phenix-workflow".permission.bash | has("python -c *flake.nix*") | not' ${generatedConfig}
+              ${agentComm}/bin/phenix-route resolve --json --opencode-config \
+                | jq -e '.agent."phenix-worker".model | type == "string"'
+              ${agentComm}/bin/phenix-route --state "$TMPDIR/route-state.json" set mixed --difficulty D3 --secrecy Private --change-kind Workflow \
+                | jq -e '.selected_slots.selected_slots.worker == "opencode-go-strong" and .selected_slots.selected_slots.verifier == "gpt-strong"'
 
               jq -e '.agent."phenix-planner".mode == "subagent"' ${generatedConfig}
               jq -e '.agent."phenix-architect".mode == "subagent"' ${generatedConfig}
@@ -835,6 +896,42 @@
                 }
               }
 
+              assert_absent() {
+                file="$1"
+                pattern="$2"
+                if grep -E -q -- "$pattern" "$file"; then
+                  echo "forbidden routing vocabulary found: $pattern in $file" >&2
+                  exit 1
+                fi
+              }
+
+              active_routing_files=(
+                ${../src/routing.rs}
+                ${../src/bin/phenix-route.rs}
+                ${../docs/routing.md}
+                ${promptCheckPath "workflow"}
+                ${promptCheckPath "planner"}
+                ${promptCheckPath "verifier"}
+                ${promptCheckPath "implementer"}
+                ${promptCheckPath "architecture-verifier"}
+                ${promptCheckPath "commit-sync"}
+                ${../commands/flow.md}
+                ${../commands/route.md}
+                ${../knowledge/glossary.md}
+              )
+
+              for file in "''${active_routing_files[@]}"; do
+                route_state_prefix="PHENIX"
+                route_state_forbidden="$route_state_prefix"_ROUTE_STATE
+                old_mode_schema="mode: mixed \| ""go \| plus \| free \| manual"
+                old_mode_sentence="Modes: \`mixed\`, \`""go\`, \`plus\`, \`free\`, \`manual\`"
+                old_mode_cycle="mixed -> ""go -> plus -> free -> manual"
+                assert_absent "$file" "$route_state_forbidden"
+                assert_absent "$file" "$old_mode_schema"
+                assert_absent "$file" "$old_mode_sentence"
+                assert_absent "$file" "$old_mode_cycle"
+              done
+
               check_prompt ${promptCheckPath "workflow"} 'Execution is task-DAG driven'
               check_prompt ${promptCheckPath "workflow"} 'simple_local'
               check_prompt ${promptCheckPath "workflow"} 'medium_local_verified'
@@ -860,11 +957,16 @@
               # Routing prompt content checks
               check_prompt ${promptCheckPath "workflow"} '## Model routing'
               check_prompt ${promptCheckPath "workflow"} 'RoutingMode + Difficulty'
+              check_prompt ${promptCheckPath "workflow"} 'runtime_enforced: process_start_expected'
+              check_prompt ${promptCheckPath "workflow"} 'Restart OpenCode to apply a changed route state'
               check_prompt ${promptCheckPath "workflow"} 'Ctrl+T'
               check_prompt ${promptCheckPath "planner"} '## External-plan acceptance'
               check_prompt ${promptCheckPath "planner"} 'PlanInputKind'
               check_prompt ${promptCheckPath "planner"} 'Planner Contract'
+              check_prompt ${promptCheckPath "planner"} 'phenix-route show'
               check_prompt ${promptCheckPath "verifier"} 'routing_policy_'
+              check_prompt ${promptCheckPath "verifier"} 'process-start route state'
+              check_prompt ${promptCheckPath "commit-sync"} 'free-only routing is denied'
               check_prompt ${promptCheckPath "architecture-verifier"} 'routing_invariants'
 
               touch $out

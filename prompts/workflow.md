@@ -519,24 +519,40 @@ repo files.
 
 ## Model routing
 
-**Reality check**: Model routing is currently a policy/guidance system, not automated
-runtime behaviour. The routing mode (mixed/go/plus/free/manual) and Ctrl+T are advisory
-constructs — the workflow agent uses them as recommendations when building task packets,
-but there is no automated model slot resolution or runtime model switching at the
-OpenCode wrapper level. Model slots, concrete model names, and provider classes are
-future design targets unless explicitly confirmed as supported.
+RoutingMode + Difficulty are part of the WorkScope routing packet. Persist the
+active mode with `phenix-route` when runtime state is available, and include the
+effective packet in delegated task packets:
 
-In practice, the agent uses the routing policy to select appropriate model tiers for
-different agent roles (e.g., use a stronger model for planning, a cheaper model for
-simple verification). The `route` command returns a structured routing recommendation
-that the workflow agent follows as policy, not as an automated API call.
+```yaml
+routing_packet:
+  mode: mixed | gpt-only | go-only | free-only | manual
+  difficulty: D0 | D1 | D2 | D3
+  secrecy: Public | Private | Secret
+  change_kind: Docs | Nix | Rust | Qml | Workflow | RepoArchitecture | Secrets | Auth | Ci | Unknown
+  target_state: Scratch | DevWallet | MainBound
+  runtime_enforced: process_start_expected
+  selected_slots: {}
+  denied_slots: {}
+```
 
-> **Advisory note**: The routing sections below (modes, classes, policy, context,
-> resolution) describe the **design intent and policy guidance** for how routing
-> *should* work once automated resolution is supported. Currently, these are
-> prompt/policy-level recommendations that the workflow agent follows manually
-> when constructing task packets. Model slots, provider classes, and automated
-> resolution are future targets unless explicitly confirmed as supported.
+The OpenCode wrapper reads XDG route state at process start from
+`$XDG_STATE_HOME/phenix-agent-harness/routing.json` (fallback
+`$HOME/.local/state/phenix-agent-harness/routing.json`) and injects the effective
+generated config. Hot switching is not supported. Restart OpenCode to apply a
+changed route state. Do not write repo-local route state.
+
+Restart OpenCode to apply a changed route state.
+
+**Reality check**: Model routing is automated only at OpenCode process start. The
+`phenix-route` CLI persists route state and resolves logical slots; the wrapper
+injects the resulting config overlay before launching OpenCode. The running
+OpenCode process is not hot-reloaded, so Ctrl+T or `phenix-route cycle` affects
+the next process start and the workflow packet immediately, but not already-loaded
+agent model config.
+
+In practice, the workflow agent uses the persisted route packet to select
+appropriate model tiers for different agent roles, while the wrapper applies those
+slots when OpenCode starts.
 
 The workflow agent routes tasks through model/provider classes depending on the
 active routing mode, task difficulty, secrecy, change kind, and target state.
@@ -546,10 +562,10 @@ active routing mode, task difficulty, secrecy, change kind, and target state.
 | Mode | Behavior |
 |------|----------|
 | `mixed` | Default. Routes planner/verifier to GPT Plus slots, implementer to Go slots. |
-| `go` | Routes all roles to OpenCode Go slots. Uses stronger Go slots for planner/verifier at D2/D3. |
-| `plus` | Routes all roles to GPT Plus slots. Uses stronger GPT slots for planner/verifier at D2/D3. |
-| `free` | Routes all roles to free/cheap model slots. Hard-guarded: deny private, secret, D2/D3, security-sensitive changes. |
-| `manual` | Uses user-configured model slots. Still enforces hard safety/privacy denials. |
+| `gpt-only` | Routes all roles to GPT slots. Uses `gpt-strong` at D2/D3. |
+| `go-only` | Routes all roles to OpenCode Go slots. Uses stronger Go slots at D2/D3. |
+| `free-only` | Routes all roles to free slots. Hard-guarded: deny Private, Secret, D2/D3, Secrets, Auth, Ci, Security, MainBound, and commit/sync/push. |
+| `manual` | Uses persisted `manual_slots`; returns incomplete until required slots are present. |
 
 ### Difficulty classes
 
@@ -564,20 +580,20 @@ active routing mode, task difficulty, secrecy, change kind, and target state.
 
 Classify each task with:
 - **Secrecy**: `Public`, `Private`, `Secret`
-- **ChangeKind**: `Docs`, `Nix`, `Rust`, `Qml`, `Workflow`, `RepoArchitecture`, `Secrets`, `Auth`, `Ci`, `Unknown`
+- **ChangeKind**: `Docs`, `Nix`, `Rust`, `Qml`, `Workflow`, `RepoArchitecture`, `Secrets`, `Auth`, `Ci`, `Security`, `Unknown`
 - **TargetState**: `Scratch`, `DevWallet`, `MainBound`
 
 ### Ctrl+T behavior
 
 When the user presses Ctrl+T (or the configured keybinding):
 
-1. Cycle the active routing mode: `mixed -> go -> plus -> free -> manual -> mixed`
-2. If `free` is unsafe for the current task context (private, secret, security-sensitive), skip it: `mixed -> go -> plus -> manual -> mixed`
+1. Cycle the active routing mode: `mixed -> gpt-only -> go-only -> free-only -> manual -> mixed`
+2. If `free-only` is unsafe for the current task context, skip it: `mixed -> gpt-only -> go-only -> manual -> mixed`
 3. Show a compact status message, for example:
    - `routing: mixed`
+   - `routing: gpt-only`
    - `routing: go-only`
-   - `routing: plus-only`
-   - `routing: free skipped: task is private`
+   - `routing: free-only skipped: task is private`
 4. The cycle updates the routing **profile**, not the concrete model directly. The router resolves concrete models from the profile afterward.
 
 ### Default routing policy
@@ -608,10 +624,11 @@ D3:
   final-reviewer: GPT Plus strong slot (optional)
 ```
 
-### Free mode guardrails
+### Free-only guardrails
 
-- Free mode must never be used for private, secret, auth, token, SSH, sops, CI secret, deployment, or security-sensitive work.
-- If the selected mode is unsafe, skip it and explain the skip in the UI/status message.
+- Free-only must never be used for Private, Secret, D2, D3, Secrets, Auth, Ci, Security, MainBound, commit, sync, push, token, SSH, sops, deployment, or security-sensitive work.
+- If cycle encounters an unsafe free-only context, skip it and explain the skip in the UI/status message.
+- If resolver is asked to use unsafe free-only directly, return JSON `status: denied`; do not silently fall back.
 - D2/D3 main-bound work must have planner + verifier.
 - The verifier should not use the same concrete model as the implementer if avoidable.
 
@@ -621,10 +638,10 @@ When building the WorkScope or task packet, include routing context:
 
 ```yaml
 routing_context:
-  mode: mixed | go | plus | free | manual
+  mode: mixed | gpt-only | go-only | free-only | manual
   difficulty: D0 | D1 | D2 | D3
   secrecy: Public | Private | Secret
-  change_kind: Docs | Nix | Rust | Qml | Workflow | RepoArchitecture | Secrets | Auth | Ci | Unknown
+  change_kind: Docs | Nix | Rust | Qml | Workflow | RepoArchitecture | Secrets | Auth | Ci | Security | Unknown
   target_state: Scratch | DevWallet | MainBound
   main_bound: true | false
   user_forced_mode: true | false
@@ -648,10 +665,10 @@ The router:
 
 Before each subagent invocation, the workflow agent (or a dedicated router step) should:
 
-1. Check if the current routing mode is safe for the task (free mode guardrails)
+1. Check if the current routing mode is safe for the task (free-only guardrails)
 2. Resolve the appropriate model slot for the target agent role
 3. Include the resolved model slot in the task packet metadata
-4. If the mode is unsafe, fall back to `mixed` and record the bypass
+4. If cycle would hit unsafe free-only, skip it; if resolver is explicitly asked for unsafe free-only, return `status: denied`
 
 ### Status line format
 
@@ -672,20 +689,20 @@ mode:mixed diff:D1 role:implementer
 The routing configuration defines how agent roles map to model slots:
 
 - **defaultMode**: `mixed` (planner/verifier → GPT Plus, implementer → Go)
-- **modes**: `mixed`, `go`, `plus`, `free`, `manual`
+- **modes**: `mixed`, `gpt-only`, `go-only`, `free-only`, `manual`
 - **slots**:
-  - planner: `normal=gpt-plus/medium`, `strong=gpt-plus/high`
-  - implementer: `cheap=opencode-go/cheap`, `normal=opencode-go/coding`, `strong=opencode-go/strong`
-  - verifier: `cheap=opencode-go/different-cheap`, `strong=gpt-plus/high`
-  - free: `publicOnly=zen-free/default`
-- **free mode guardrails**: deny private, secret, D2/D3 difficulties, and Secrets/Auth/Ci/RepoArchitecture change kinds
+  - GPT: `normal=gpt-normal`, `strong=gpt-strong`
+  - Go: `normal=opencode-go`, `strong=opencode-go-strong`
+  - free: `publicOnly=free-normal`
+- **free-only guardrails**: deny Private, Secret, D2/D3, Secrets/Auth/Ci/Security, MainBound, and commit/sync/push
+- `phenix-workflow` is user-facing and special: route state may recommend a slot, but the generated overlay must not set `phenix-workflow.model` unless explicitly justified.
 
 ### --routing-mode CLI flag
 
 The `/flow` command and `plan` subcommand accept:
 
 ```
---routing-mode mixed|go|plus|free|manual
+--routing-mode mixed|gpt-only|go-only|free-only|manual
 --difficulty auto|D0|D1|D2|D3
 --target-state scratch|dev-wallet|main-bound
 --external-plan auto|force|off

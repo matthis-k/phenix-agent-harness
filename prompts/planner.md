@@ -125,6 +125,11 @@ All plans — whether external or internal — are normalized into a standard **
 - stop conditions
 - routing metadata
 
+When routing affects implementation, inspect or request the `phenix-route show`
+packet when available. Treat it as process-start route state: it may guide task
+packets and slot selection, but a changed state requires restarting OpenCode before
+the wrapper-enforced model config is active.
+
 ### External plan handling
 
 **If CompletePlan:**
@@ -163,7 +168,7 @@ When normalizing an external plan, check for Phenix architecture compliance:
 - Does it avoid hardcoding concrete model names into workflow logic?
 - Does it keep model routing declarative?
 - Does it preserve main/dev separation?
-- Does it avoid free models for private/secret-sensitive work?
+- Does it avoid `free-only` for Private, Secret, D2, D3, Secrets, Auth, Ci, Security, MainBound, and commit/sync/push contexts?
 - Does it avoid bypassing tend/stitch validation where relevant?
 - Does it avoid direct main promotion for D2/D3 work?
 - Does it leave handoff/wallet state when work is incomplete?
@@ -254,10 +259,10 @@ preferred_transport:
   tend: mcp_preferred_cli_allowed
   stitch: mcp_preferred_cli_allowed
 routing_context:
-  mode: mixed | go | plus | free | manual
+  mode: mixed | gpt-only | go-only | free-only | manual
   difficulty: D0 | D1 | D2 | D3
   secrecy: Public | Private | Secret
-  change_kind: Docs | Nix | Rust | Qml | Workflow | RepoArchitecture | Secrets | Auth | Ci | Unknown
+  change_kind: Docs | Nix | Rust | Qml | Workflow | RepoArchitecture | Secrets | Auth | Ci | Security | Unknown
   target_state: Scratch | DevWallet | MainBound
   main_bound: true | false
   user_forced_mode: true | false
