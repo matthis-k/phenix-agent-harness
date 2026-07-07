@@ -86,6 +86,9 @@
             "stitch exec*"
             "stitch plan*"
             "stitch dag*"
+            "stitch graph*"
+            "stitch workspace*"
+            "stitch verify*"
             "cargo check*"
             "cargo test*"
             "cargo fmt --check*"
@@ -648,6 +651,12 @@
         nativeBuildInputs = [ pkgs.pkg-config ];
         buildInputs = [ pkgs.sqlite ];
       };
+
+      phenixRoute = agentComm.overrideAttrs (old: {
+        meta = (old.meta or { }) // {
+          mainProgram = "phenix-route";
+        };
+      });
     in
     {
       packages = {
@@ -655,7 +664,7 @@
         opencode = opencodeWithGithubToken;
         pi = wrappedPi;
         agent-comm = agentComm;
-        phenix-route = agentComm;
+        phenix-route = phenixRoute;
         generated-config = generatedConfig;
         generated-pi-settings = generatedPiSettings;
         generated-pi-package-json = generatedPiPackageJson;

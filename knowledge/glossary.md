@@ -55,7 +55,10 @@ single-node `commit` rather than DAG-wide `synced commit`, unless the user menti
 - **Root workspace**: The top-level `phenix` repo that aggregates active
   subflakes and coordinates verification; it is not a child dependency provider.
 - **Retired repo**: A former repo or role kept only for historical notes and not
-  included in active topology, root inputs, hooks, or normal verification.
+  included in active locked graph inputs, hooks, or normal verification.
+- **LocalWorkspaceMode**: A Stitch developer mode that maps locked remote flake
+  inputs to local working trees through XDG workspace state. It replaces the old
+  submodule-oriented LocalDagMode and does not relax commit/push gates.
 
 ## Agent communication
 

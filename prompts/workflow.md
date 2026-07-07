@@ -361,23 +361,25 @@ deleting branches
 force push
 ```
 
-### Local DAG commit mode
+### Local workspace mode
 
-When a submodule commit exists locally but not remotely, and pre-commit hooks fail because Nix cannot fetch the remote commit:
+When a workspace repo has local commits that are not yet available to locked
+remote flake evaluation, Stitch may use local XDG workspace mappings for
+developer operations while keeping commit/push explicit-ask gated:
 
 ```yaml
-LocalDagMode:
+LocalWorkspaceMode:
   disabled
   enabled:
     allow_no_verify_commits: true
     reason_required: true
-    reason_template: "Local DAG mode: {submodule} commit exists locally ({rev}) but not pushed; remote flake fetch in pre-commit cannot resolve it yet"
+    reason_template: "Local workspace mode: {repo} commit exists locally ({rev}) but not pushed; remote flake fetch in pre-commit cannot resolve it yet"
     requires_push_before_remote_eval: true
 ```
 
 Use `LocalCommitNoVerify` only when:
-1. LocalDagMode is enabled
-2. A reason is recorded explaining the local-DAG situation
+1. LocalWorkspaceMode is enabled
+2. A reason is recorded explaining the local workspace situation
 3. The commit will be pushed before remote consumers try to evaluate
 
 ## Workflow presets
@@ -857,11 +859,11 @@ Commit semantics follow the canonical semantics:
 | `commit and push` | ✅ | ✅ | ❌ |
 | `sync` | ✅ | ✅ | ✅ |
 | `sync --no-push` | ✅ | ❌ | ✅ |
-| `update submodules to remote` | maybe | ❌ | maybe |
+| `update workspace repos to remote` | maybe | ❌ | maybe |
 
 Plain `commit` alone always means `local commit` — never push.
 `sync` is DAG-aware: update flake inputs, commit, push.
-Raw `git submodule update --remote` is forbidden; use `stitch update-submodules --remote --dry-run`.
+Raw multi-repo checkout updates are forbidden; use Stitch workspace/sync planning first.
 
 All commit routes must use Stitch-safe tooling. Do not run ad hoc multi-repo
 `git commit`, `git push`, or sync sequences when a Stitch route exists.

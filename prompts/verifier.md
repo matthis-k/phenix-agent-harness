@@ -211,12 +211,12 @@ verification:
 
 ### Reproducibility blocking rules
 
-- `reproducibility: blocked` when: dirty local dependency, unpushed submodule
+- `reproducibility: blocked` when: dirty local dependency, unpushed workspace repo
   commit, uncommitted generated file, or stale lockfile
 - `blocking_for_current_chunk: false` if the current edit chunk is complete
   and verifiable despite the reproducibility issue
 - `blocking_for_sync_or_push: true` if the reproducibility issue would cause
-  a remote eval failure (e.g., submodule rev not pushed)
+  a remote eval failure (e.g., workspace repo rev not pushed)
 
 This allows the workflow to declare "mechanical checks passed, but sync/push
 requires fixing reproducibility first."
