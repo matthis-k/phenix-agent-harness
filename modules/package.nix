@@ -144,6 +144,16 @@
             "stitch sync*"
           ];
         };
+        ShellWrapper = {
+          ask = [
+            "bash -c *"
+            "sh -c *"
+            "zsh -c *"
+            "python -c *"
+            "node -e *"
+            "perl -e *"
+          ];
+        };
       };
 
       # Build allow-only permission set from a list of operation class names
@@ -159,7 +169,12 @@
               VerifyTools
               FormatFix
               ;
-            inherit (operationClasses) DestructiveGit DestructiveNix StitchCommitSync;
+            inherit (operationClasses)
+              DestructiveGit
+              DestructiveNix
+              StitchCommitSync
+              ShellWrapper
+              ;
           };
           result = builtins.foldl' (
             acc: name:
@@ -186,7 +201,12 @@
         classNames:
         let
           classes = {
-            inherit (operationClasses) DestructiveGit DestructiveNix StitchCommitSync;
+            inherit (operationClasses)
+              DestructiveGit
+              DestructiveNix
+              StitchCommitSync
+              ShellWrapper
+              ;
           };
           result = builtins.foldl' (
             acc: name:
@@ -245,6 +265,7 @@
       destructiveGitSafeguards = (mkAskOnly [ "DestructiveGit" ]) // (mkDenyOnly [ "DestructiveGit" ]);
 
       destructiveNixSafeguards = mkAskOnly [ "DestructiveNix" ];
+      shellWrapperSafeguards = mkAskOnly [ "ShellWrapper" ];
 
       agentCommPermissions = {
         "agent_comm_*" = "allow";
@@ -260,6 +281,7 @@
         bash =
           safeInspectionBashPermissions
           // destructiveNixSafeguards
+          // shellWrapperSafeguards
           // {
             "*" = "ask";
             "rg *" = "allow";
@@ -288,6 +310,7 @@
           // reversibleSingleRepoGitPermissions
           // destructiveGitSafeguards
           // destructiveNixSafeguards
+          // shellWrapperSafeguards
           // {
             "*" = "ask";
             "tend *" = "allow";
@@ -755,6 +778,10 @@
               jq -e '.agent."phenix-worker".permission.bash."nix store ls*" == "allow"' ${generatedConfig}
               jq -e '.agent."phenix-worker".permission.bash."nix flake update*" == "ask"' ${generatedConfig}
               jq -e '.agent."phenix-worker".permission.bash."nix store delete*" == "ask"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."bash -c *" == "ask"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."sh -c *" == "ask"' ${generatedConfig}
+              jq -e '.agent."phenix-worker".permission.bash."python -c *" == "ask"' ${generatedConfig}
+              jq -e '.agent."phenix-planner".permission.bash."bash -c *" == "ask"' ${generatedConfig}
               jq -e '.agent."phenix-worker".permission."agent_comm_*" == "allow"' ${generatedConfig}
               jq -e '.agent."phenix-planner".permission."agent_comm_*" == "allow"' ${generatedConfig}
               jq -e '.agent."phenix-planner".permission.edit == "deny"' ${generatedConfig}
