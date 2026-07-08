@@ -1,68 +1,70 @@
-# Phenix agent routing
+# Phenix Agent Model Config
 
-Phenix routing is represented by one WorkScope routing packet plus persisted route
-state for the OpenCode wrapper.
+Phenix agent model selection is static OpenCode configuration.
 
-## State location
+There is no `phenix-route` command, no Rust routing module, no generated routing
+overlay, and no routing MCP server. OpenCode receives concrete model assignments
+through `agent.<name>.model` in the generated OpenCode config.
 
-By default, `phenix-route` stores runtime route state in XDG state only:
+## Static launcher profiles
 
-- `$XDG_STATE_HOME/phenix-agent-harness/routing.json`; or
-- `$HOME/.local/state/phenix-agent-harness/routing.json`.
+The harness exposes separate static launcher/config package variants named
+`go`, `gpt`, `mixed`, and `free`. Each variant is built by Nix and writes
+concrete `agent.<name>.model` strings into the generated OpenCode config before
+OpenCode starts:
 
-Tests and checks that need an isolated state file must pass explicit `--state`.
+- `opencode-gpt` / `generated-config-gpt`: all workflow agents use GPT through
+  OpenCode auth. This is also the default `opencode` package and preserves the
+  current all-GPT behavior.
+- `opencode-go` / `generated-config-go`: workflow agents use OpenCode Go model
+  IDs.
+- `opencode-mixed` / `generated-config-mixed`: GPT-family planning and
+  verification with an OpenCode Go worker.
+- `opencode-free` / `generated-config-free`: free OpenCode model IDs. Use only
+  for public, low-risk work; Phenix policy still denies free-model routing for
+  private, secret, security-sensitive, D2/D3, commit, sync, push, or main-bound
+  work.
 
-The harness must not write repo-local route state.
+The default GPT profile currently emits:
 
-## Runtime behavior
-
-The `opencode` wrapper reads the persisted state at process start, generates an
-OpenCode config overlay with resolved agent model slots, and exports it through
-`OPENCODE_CONFIG_CONTENT` when that variable is not already set.
-
-Hot switching is not supported. After changing route state, quit and restart
-OpenCode before expecting model-slot changes to apply.
-
-## CLI
-
-```sh
-phenix-route show
-phenix-route show --json
-phenix-route set mixed --difficulty D1 --secrecy Public --change-kind Workflow
-phenix-route cycle --json --difficulty D1 --secrecy Public --change-kind Workflow
-phenix-route resolve --json --difficulty D1 --secrecy Public --change-kind Workflow
-phenix-route reset
+```json
+{
+  "agent": {
+    "phenix-workflow": { "model": "openai/gpt-5.5" },
+    "phenix-planner": { "model": "openai/gpt-5.5" },
+    "phenix-architect": { "model": "openai/gpt-5.5" },
+    "phenix-worker": { "model": "openai/gpt-5.5" },
+    "phenix-verifier": { "model": "openai/gpt-5.5" },
+    "phenix-architecture-verifier": { "model": "openai/gpt-5.5" },
+    "phenix-commit-sync": { "model": "openai/gpt-5.5" },
+    "failure-analyzer": { "model": "openai/gpt-5.5" },
+    "uiux-designer": { "model": "openai/gpt-5.5" }
+  }
+}
 ```
 
-Valid modes are exactly `mixed`, `gpt-only`, `go-only`, `free-only`, and
-`manual`. `cycle` follows `mixed -> gpt-only -> go-only -> free-only -> manual
--> mixed`. When `free-only` is unsafe, cycle skips it:
-`mixed -> gpt-only -> go-only -> manual -> mixed`.
+## Boundary
 
-The state JSON schema contains `version`, `mode`, `updated_at`, `updated_by`,
-`manual_slots`, and `last_context`. Missing state defaults to `mixed`; invalid
-JSON warns and falls back; unknown modes fail validation.
+Valid:
 
-`resolve --json` returns `status: denied` for unsafe `free-only` rather than
-silently falling back. Unsafe contexts include Private, Secret, D2, D3, Secrets,
-Auth, Ci, Security, MainBound, and commit/sync/push operations. `manual` uses
-persisted `manual_slots` and returns `status: incomplete` until all required
-role slots are present.
+```text
+modules/package.nix settings.agent.<name>.model
+  -> generated OpenCode config
+  -> OpenCode loads config
+```
 
-## Slot vocabulary
+Invalid:
 
-The resolver uses logical slot identifiers, not private account-specific model IDs:
+```text
+Rust resolves routing modes
+MCP server selects models
+Wrapper shell mutates model config from route state
+Unknown custom top-level OpenCode keys such as phenix_agent_routing
+```
 
-- `gpt-normal`, `gpt-strong`
-- `opencode-go`, `opencode-go-strong`
-- `free-normal`
-- `denied-until-explicit-user-request` for commit/sync until the WorkScope and user
-  request explicitly permit it
+The large `phenix_agent_routing` YAML policy is useful design material, but it is
+not valid as a top-level OpenCode config key. OpenCode validates config strictly,
+so Phenix stores only schema-valid OpenCode model fields in generated config.
 
-The workflow agent is special: routing may report a workflow recommendation, but
-the generated overlay does not set `phenix-workflow.model`, so the wrapper does
-not unexpectedly change the user-facing entrypoint model.
-
-The WorkScope remains the semantic source of truth for capabilities, invariants,
-boundaries, and escalation. Routing only selects agent slots and records denied
-routes; it does not grant edit, commit, push, publish, deploy, or secret access.
+Changing profile means launching a different Nix package/config variant and then
+restarting OpenCode. Runtime hot-swap is not supported.

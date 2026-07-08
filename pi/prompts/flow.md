@@ -22,6 +22,13 @@ implementation → verification workflow while using Pi.
 - Use Stitch for multi-repository status, DAG, commit, and sync operations.
 - Use reversible single-repo Git and safe Nix commands only inside the accepted
   task scope; keep irreversible Git/Nix actions ask/deny by default.
+- Prefer Pi's Phenix provider-first frontend IDs when model routing is needed:
+  `phenix/auto`, `phenix/mixed`, `phenix/openai-plus`, `phenix/opencode-go`,
+  and `phenix/free`. Use `/router status|profile|mode|explain|routes|reload|reset`
+  to inspect or adjust routing state.
+- Keep route configuration in trusted Pi config (`~/.pi/agent/extensions/phenix-router.routes.json`
+  and trusted project `.pi/phenix-router.routes.json`); do not route through Tend,
+  Stitch, MCP servers, or credential defaults.
 - Do not manually loop through repositories when Stitch can express the DAG.
 - Keep Stitch as orchestrator for multi-repo, DAG-aware, sync, and structural
   commit flows.

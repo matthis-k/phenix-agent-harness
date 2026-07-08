@@ -53,18 +53,16 @@ Reject the final state if it:
 
 Additionally, verify routing policy compliance:
 
-- Was the routing policy correctly followed for the task difficulty and secrecy?
-- Was `free-only` avoided for private/secret/security-sensitive work?
-- Were model slots resolved declaratively (not hardcoded in workflow logic)?
-- Is the model routing configuration coherent (matching the routing docs in the workflow prompt)?
-- For D2/D3 main-bound work, were both planner and verifier present with strong
-  model slots?
-- Does the verifier use a different model slot than the implementer when feasible?
+- Was the workflow policy correctly followed for the task difficulty and secrecy?
+- Was `free` avoided for private/secret/security-sensitive work?
+- Does model selection remain in static OpenCode `agent.<name>.model` config?
+- Is the model configuration coherent with the workflow prompt and routing docs?
+- For D2/D3 main-bound work, were both planner and verifier present?
+- Does the verifier remain independent in role from the implementer?
 - Were external plans handled correctly (classified, preserved or normalized,
   architecture-compliant)?
 - Was the planner contract format used as the binding implementation specification?
-- Does the routing setup avoid hardcoding concrete provider/model names in workflow
-  logic?
+- Does the setup avoid hardcoding concrete provider/model names in workflow logic?
 
 ## Output
 
@@ -99,7 +97,7 @@ routing_invariants:
   status: passed | failed | skipped
   routing_policy_followed: true | false | unknown
   free_mode_safe: true | false | skipped
-  model_slots_declarative: true | false | unknown
+  static_opencode_model_config: true | false | unknown
   config_coherent: true | false | unknown
   planner_verifier_present_for_d2_d3: true | false | skipped
   implementer_verifier_distinct: true | false | unknown

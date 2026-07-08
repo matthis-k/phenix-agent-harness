@@ -27,3 +27,9 @@ Follow the Phenix structured workflow:
 - Keep Stitch as the orchestrator for multi-repo, DAG-aware, sync, and structural
   commit flows.
 - Preserve root as an aggregator; implementation logic belongs in the owning subflake.
+- For Pi model routing, use the Phenix provider-first frontend IDs
+  `phenix/auto`, `phenix/mixed`, `phenix/openai-plus`, `phenix/opencode-go`, and
+  `phenix/free`; inspect routing with `/router status|profile|mode|explain|routes|reload|reset`.
+- Keep routing config in `~/.pi/agent/extensions/phenix-router.routes.json` or a
+  trusted project `.pi/phenix-router.routes.json`. Do not route through Tend,
+  Stitch, MCP servers, credential defaults, or a fake final `setModel` facade.

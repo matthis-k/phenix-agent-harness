@@ -125,10 +125,8 @@ All plans — whether external or internal — are normalized into a standard **
 - stop conditions
 - routing metadata
 
-When routing affects implementation, inspect or request the `phenix-route show`
-packet when available. Treat it as process-start route state: it may guide task
-packets and slot selection, but a changed state requires restarting OpenCode before
-the wrapper-enforced model config is active.
+When model selection matters, treat the generated OpenCode config as the source
+of truth. Do not depend on route state, a route command, or Rust-side routing.
 
 ### External plan handling
 
@@ -166,9 +164,9 @@ When normalizing an external plan, check for Phenix architecture compliance:
 
 - Does the plan preserve existing module boundaries?
 - Does it avoid hardcoding concrete model names into workflow logic?
-- Does it keep model routing declarative?
+- Does it keep model selection in static OpenCode config?
 - Does it preserve main/dev separation?
-- Does it avoid `free-only` for Private, Secret, D2, D3, Secrets, Auth, Ci, Security, MainBound, and commit/sync/push contexts?
+- Does it avoid `free` for Private, Secret, D2, D3, Secrets, Auth, Ci, Security, MainBound, and commit/sync/push contexts?
 - Does it avoid bypassing tend/stitch validation where relevant?
 - Does it avoid direct main promotion for D2/D3 work?
 - Does it leave handoff/wallet state when work is incomplete?
@@ -179,9 +177,9 @@ it minimally. Example:
 ```markdown
 ## Architecture compatibility adjustment
 
-The external plan asks to hardcode concrete model names in the workflow. Instead,
-implement semantic model slots and put concrete model names in provider config.
-The rest of the plan remains valid.
+The external plan asks to hardcode concrete model names in workflow logic.
+Instead, update static OpenCode `agent.<name>.model` config. The rest of the
+plan remains valid.
 ```
 
 ### Planner contract format
@@ -259,13 +257,13 @@ preferred_transport:
   tend: mcp_preferred_cli_allowed
   stitch: mcp_preferred_cli_allowed
 routing_context:
-  mode: mixed | gpt-only | go-only | free-only | manual
+  model_source: opencode_static_config
   difficulty: D0 | D1 | D2 | D3
   secrecy: Public | Private | Secret
   change_kind: Docs | Nix | Rust | Qml | Workflow | RepoArchitecture | Secrets | Auth | Ci | Security | Unknown
   target_state: Scratch | DevWallet | MainBound
   main_bound: true | false
-  user_forced_mode: true | false
+  user_forced_difficulty: true | false
 external_plan:
   status: not_a_plan | partial_plan | complete_plan
   source: external | normalized | internal

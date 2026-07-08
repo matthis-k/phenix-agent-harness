@@ -1,266 +1,42 @@
-# Test fixtures for model routing policy
-# These document expected routing behavior for different task contexts.
+# Test fixtures for static Phenix agent model config.
 
 cases:
-  - id: routing-d0-docs-mixed
-    request: "Fix a typo in a documentation file."
-    routing_context:
-      mode: mixed
-      difficulty: D0
-      secrecy: Public
-      change_kind: Docs
-      target_state: DevWallet
-      main_bound: false
+  - id: static-model-config-all-phenix-agents
+    request: "Verify generated OpenCode config model fields."
     expected:
-      planner: optional_cheap
-      implementer: zen_free_or_cheap_go
-      verifier: optional_cheap
-      free_mode_allowed: true
-    notes: D0 public docs in mixed mode may use Zen free or cheap Go slots.
+      model_source: opencode_static_config
+      model: openai/gpt-5.5
+      agents:
+        - phenix-workflow
+        - phenix-planner
+        - phenix-architect
+        - phenix-worker
+        - phenix-verifier
+        - phenix-architecture-verifier
+        - phenix-commit-sync
+        - failure-analyzer
+        - uiux-designer
+    notes: All Phenix agents use schema-valid OpenCode model fields.
 
-  - id: routing-d1-nix-mixed
-    request: "Update a Nix module configuration."
-    routing_context:
-      mode: mixed
-      difficulty: D1
-      secrecy: Public
-      change_kind: Nix
-      target_state: DevWallet
-      main_bound: false
+  - id: no-rust-routing-debt
+    request: "Ensure routing is not implemented in Rust."
+    expected_absent:
+      - src/routing.rs
+      - src/bin/phenix-route.rs
+      - Cargo.toml bin phenix-route
+    notes: Rust must not own routing modes, model slots, or resolvers.
+
+  - id: no-custom-route-command
+    request: "Ensure OpenCode config has no custom route command."
     expected:
-      planner: gpt_plus_normal
-      implementer: opencode_go_normal
-      verifier: opencode_go_different
-      free_mode_allowed: true
-    notes: D1 Nix in mixed mode uses GPT/stronger planner and Go implementer.
+      command_route_present: false
+      wrapper_route_overlay: false
+    notes: No Ctrl-T route command or wrapper state helper is part of the final architecture.
 
-  - id: routing-d2-architecture-mixed
-    request: "Design and implement a new module boundary."
-    routing_context:
-      mode: mixed
-      difficulty: D2
-      secrecy: Public
-      change_kind: RepoArchitecture
-      target_state: DevWallet
-      main_bound: false
-    expected:
-      planner: gpt_plus_strong
-      implementer: opencode_go_strong
-      verifier: gpt_plus_normal_or_strong
-      planner_required: true
-      verifier_required: true
-      free_mode_allowed: false
-    notes: D2 architecture in mixed mode requires planner and verifier. Free mode denied.
-
-  - id: routing-d3-main-bound-mixed
-    request: "Promote workflow changes to the main branch."
-    routing_context:
-      mode: mixed
-      difficulty: D3
-      secrecy: Public
-      change_kind: Workflow
-      target_state: MainBound
-      main_bound: true
-    expected:
-      planner: gpt_plus_strong
-      implementer: opencode_go_strong
-      verifier: gpt_plus_strong
-      planner_required: true
-      verifier_required: true
-      verifier_distinct_from_implementer: true
-      critic_optional: true
-      free_mode_allowed: false
-    notes: D3 main-bound workflow requires strong planner and strong verifier, distinct models.
-
-  - id: routing-free-rejects-private
-    request: "Edit a secrets configuration file."
-    routing_context:
-      mode: free
-      difficulty: D1
-      secrecy: Secret
-      change_kind: Secrets
-      target_state: DevWallet
-      main_bound: false
-    expected:
-      allowed: false
-      skip_reason: free mode denied for Secret/security-sensitive work
-      fallback_mode: mixed
-    notes: Free mode rejects private/secret tasks.
-
-  - id: routing-free-rejects-d2
-    request: "Redesign the module dependency graph."
-    routing_context:
-      mode: free
-      difficulty: D2
-      secrecy: Public
-      change_kind: RepoArchitecture
-      target_state: DevWallet
-      main_bound: false
-    expected:
-      allowed: false
-      skip_reason: free mode denies D2 difficulty
-      fallback_mode: mixed
-    notes: Free mode rejects D2/D3 difficulty tasks.
-
-  - id: routing-ctrlt-cycles-modes
-    request: "Cycle routing mode with Ctrl+T."
-    routing_context:
-      mode: mixed
-      current_cycle_step: 0
-    expected_cycle:
-      - mixed
-      - go
-      - plus
-      - free
-      - manual
-    notes: Ctrl+T cycles modes in expected order.
-
-  - id: routing-ctrlt-skips-free-when-private
-    request: "Cycle routing mode with Ctrl+T while task is private."
-    routing_context:
-      mode: mixed
-      secrecy: Private
-      current_cycle_step: 0
-    expected_cycle:
-      - mixed
-      - go
-      - plus
-      - manual
-    notes: Ctrl+T skips free when current task is private/secret-sensitive.
-
-  - id: routing-external-plan-complete-pass-through
-    request: |
-      Implement a new verification profile.
-      
-      Objective: Add a 'precommit' verification profile to the tend system.
-      
-      Files:
-      - crates/tend/src/profiles.rs: Add Precommit variant to Profile enum
-      - crates/tend/src/config.rs: Add precommit profile configuration
-      
-      Steps:
-      1. Add Precommit variant to Profile enum in profiles.rs
-      2. Add validation logic for precommit profile in config.rs
-      3. Add tests for precommit profile
-      
-      Validation:
-      - cargo test in tend crate passes
-      - tend plan --profile precommit works
-      
-      Constraints:
-      - Precommit should skip slow checks (>30s)
-      - Must not modify existing profile behavior
-    routing_context:
-      mode: mixed
-      difficulty: D2
-      secrecy: Public
-      change_kind: Workflow
-      target_state: DevWallet
-    expected:
-      classification: CompletePlan
-      action: preserve_and_normalize
-      normalized_header_added: true
-      plan_not_rewritten: true
-    notes: Complete external plan is passed through with only metadata normalization.
-
-  - id: routing-external-plan-partial-normalized
-    request: |
-      Refactor the tend error handling.
-      
-      Steps:
-      1. Create a unified error type
-      2. Update all functions to use it
-      
-      I need better error handling in tend.
-    routing_context:
-      mode: mixed
-      difficulty: D2
-      secrecy: Public
-      change_kind: Rust
-      target_state: DevWallet
-    expected:
-      classification: PartialPlan
-      action: normalize
-      fields_added:
-        - invariants
-        - tests
-        - scope_boundaries
-      intent_preserved: true
-    notes: Partial external plan gets missing contract fields added.
-
-  - id: routing-external-plan-not-a-plan
-    request: "How does the verification system work?"
-    routing_context:
-      mode: mixed
-      difficulty: D0
-      secrecy: Public
-      change_kind: Docs
-      target_state: Scratch
-    expected:
-      classification: NotAPlan
-      action: internal_planning
-    notes: Not-a-plan input triggers normal planner or direct answer.
-
-  - id: routing-external-plan-hardcoded-models
-    request: |
-      Use gpt-4o for planning and claude-sonnet for implementation.
-      
-      Objective: Add a cache layer.
-      Steps:
-      1. Create caching module
-      2. Wire it into the data layer
-    routing_context:
-      mode: mixed
-      difficulty: D2
-      secrecy: Public
-      change_kind: Rust
-      target_state: DevWallet
-    expected:
-      classification: PartialPlan
-      action: normalize
-      architecture_adjustment:
-        required: true
-        description: Replace hardcoded model names with semantic model slots
-      intent_preserved: true
-    notes: External plan that hardcodes model names is normalized to semantic slots.
-
-  - id: routing-implementer-receives-contract
-    request: "Fix the Nix build for the agent harness."
-    routing_context:
-      mode: mixed
-      difficulty: D1
-      secrecy: Public
-      change_kind: Nix
-      target_state: DevWallet
-    expected:
-      planner_contract_produced: true
-      implementer_receives:
-        - source
-        - intent
-        - scope
-        - non_goals
-        - steps
-        - validation
-        - routing_metadata
-    notes: Implementer receives normalized contract with all required fields.
-
-  - id: routing-verifier-checks-contract
-    request: "Update the workflow permissions."
-    routing_context:
-      mode: mixed
-      difficulty: D2
-      secrecy: Public
-      change_kind: Workflow
-      target_state: DevWallet
-    expected:
-      verifier_checks:
-        - mechanical
-        - plan_conformance
-        - architecture
-        - routing_policy
-      routing_policy_items:
-        - mode_selected_correctly
-        - free_mode_safe
-        - model_slots_resolved
-        - external_plan_handled
-    notes: Verifier checks contract compliance including routing policy.
+  - id: reject-custom-top-level-routing-key
+    request: "Ensure custom routing YAML is not injected into OpenCode config."
+    expected_absent:
+      - phenix_agent_routing
+      - routing_matrix
+      - model_slots
+    notes: OpenCode rejects unknown top-level config keys; only schema-valid fields are generated.

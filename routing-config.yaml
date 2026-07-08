@@ -1,0 +1,472 @@
+phenix_agent_routing:
+  version: 1
+
+  defaults:
+    mode: mixed
+    difficulty: auto
+    target_state: dev-wallet
+    external_plan: auto
+    main_bound_requires_verifier: true
+
+  keybindings:
+    cycle_routing_mode: ctrl+t
+    cycle_difficulty_hint: alt+t
+    switch_primary_agent: tab
+
+  modes:
+    cycle_order:
+      - mixed
+      - go
+      - plus
+      - free
+      - manual
+
+    mixed:
+      description: "GPT-family planning, OpenCode Go implementation, independent verification."
+      enabled: true
+
+    go:
+      description: "Only OpenCode Go models."
+      enabled: true
+
+    plus:
+      description: "Only GPT-family models available through OpenCode/OpenAI auth."
+      enabled: true
+
+    free:
+      description: "Only free OpenCode Zen models; public/mechanical work only."
+      enabled: true
+
+    manual:
+      description: "Use explicit user-selected slots while preserving hard safety guards."
+      enabled: true
+
+  model_slots:
+    # GPT-family / ChatGPT Plus-Pro compatible via OpenCode OpenAI auth.
+    gpt:
+      fast: openai/gpt-5.4-mini
+      normal: openai/gpt-5.5
+      strong: openai/gpt-5.5
+      strongest: openai/gpt-5.5
+
+    # OpenCode Go model IDs.
+    # Format: opencode-go/<model-id>
+    go:
+      cheap: opencode-go/deepseek-v4-flash
+      normal: opencode-go/kimi-k2.7-code
+      coding: opencode-go/kimi-k2.7-code
+      verifier: opencode-go/qwen3.7-plus
+      strong: opencode-go/glm-5.2
+      strongest: opencode-go/qwen3.7-max
+
+    # Free OpenCode Zen model IDs.
+    # These are deliberately restricted by policy below.
+    free_zen:
+      cheap: opencode/deepseek-v4-flash-free
+      normal: opencode/mimo-v2.5-free
+      coding: opencode/north-mini-code-free
+      verifier: opencode/nemotron-3-ultra-free
+      fallback: opencode/big-pickle
+
+  routing_matrix:
+    mixed:
+      D0:
+        planner: null
+        implementer: go.cheap
+        verifier: null
+        fallback_public_implementer: free_zen.cheap
+
+      D1:
+        planner: gpt.normal
+        implementer: go.coding
+        verifier: go.verifier
+
+      D2:
+        planner: gpt.strong
+        critic: go.strong
+        implementer: go.coding
+        verifier: gpt.strong
+
+      D3:
+        planner: gpt.strong
+        critic: gpt.strong
+        implementer: go.strong
+        verifier: gpt.strong
+        final_reviewer: gpt.strong
+
+    go:
+      D0:
+        planner: null
+        implementer: go.cheap
+        verifier: null
+
+      D1:
+        planner: go.normal
+        implementer: go.coding
+        verifier: go.verifier
+
+      D2:
+        planner: go.strong
+        critic: go.verifier
+        implementer: go.coding
+        verifier: go.strong
+
+      D3:
+        planner: go.strong
+        critic: go.strongest
+        implementer: go.coding
+        verifier: go.strongest
+        final_reviewer: go.strongest
+
+    plus:
+      D0:
+        planner: null
+        implementer: gpt.fast
+        verifier: null
+
+      D1:
+        planner: gpt.normal
+        implementer: gpt.fast
+        verifier: gpt.normal
+
+      D2:
+        planner: gpt.strong
+        critic: gpt.normal
+        implementer: gpt.normal
+        verifier: gpt.strong
+
+      D3:
+        planner: gpt.strong
+        critic: gpt.strong
+        implementer: gpt.normal
+        verifier: gpt.strong
+        final_reviewer: gpt.strong
+
+    free:
+      D0:
+        planner: null
+        implementer: free_zen.cheap
+        verifier: null
+
+      D1:
+        planner: free_zen.normal
+        implementer: free_zen.coding
+        verifier: free_zen.verifier
+
+      D2:
+        denied: true
+        reason: "free mode is denied for D2 architectural work"
+
+      D3:
+        denied: true
+        reason: "free mode is denied for D3 high-risk work"
+
+    manual:
+      D0:
+        planner: manual.planner
+        implementer: manual.implementer
+        verifier: manual.verifier
+
+      D1:
+        planner: manual.planner
+        implementer: manual.implementer
+        verifier: manual.verifier
+
+      D2:
+        planner: manual.planner
+        critic: manual.critic
+        implementer: manual.implementer
+        verifier: manual.verifier
+
+      D3:
+        planner: manual.planner
+        critic: manual.critic
+        implementer: manual.implementer
+        verifier: manual.verifier
+        final_reviewer: manual.final_reviewer
+
+  manual_slots:
+    planner: openai/gpt-5.5
+    critic: opencode-go/qwen3.7-max
+    implementer: opencode-go/kimi-k2.7-code
+    verifier: openai/gpt-5.5
+    final_reviewer: openai/gpt-5.5
+
+  difficulty_classifier:
+    D0:
+      description: "Trivial, reversible, mechanical."
+      examples:
+        - typo fix
+        - formatting
+        - docs wording
+        - obvious import fix
+        - simple rename
+
+    D1:
+      description: "Bounded repo-aware change."
+      examples:
+        - add Nix option plumbing
+        - add existing-pattern tests
+        - small Rust refactor
+        - small QML policy addition
+        - docs plus validation command
+
+    D2:
+      description: "Architectural or multi-file change."
+      examples:
+        - routing policy implementation
+        - agent state redesign
+        - tend/stitch behavior change
+        - flake-parts module restructuring
+        - MCP integration
+
+    D3:
+      description: "High-risk, ambiguous, broad, main-sensitive, or cross-repo."
+      examples:
+        - newxos migration chunk
+        - secrets/sops/auth work
+        - CI/release policy
+        - repo-wide Nix restructuring
+        - jj wallet/handoff architecture
+
+  secrecy_classifier:
+    public:
+      allowed_free: true
+
+    private:
+      allowed_free: false
+
+    secret:
+      allowed_free: false
+
+  change_kind_guards:
+    deny_free_for:
+      - secrets
+      - sops
+      - auth
+      - ssh
+      - tokens
+      - ci
+      - github_actions
+      - deployment
+      - permissions
+      - security
+      - repo_architecture
+      - host_config
+
+    require_verifier_for:
+      - nix
+      - rust
+      - qml
+      - workflow
+      - tend
+      - stitch
+      - mcp
+      - ci
+      - repo_architecture
+
+    require_strong_planner_for:
+      - workflow
+      - tend
+      - stitch
+      - mcp
+      - repo_architecture
+      - secrets
+      - permissions
+
+  ctrl_t_behavior:
+    action: cycle_routing_mode
+    cycles:
+      normal:
+        - mixed
+        - go
+        - plus
+        - free
+        - manual
+
+      free_unsafe:
+        - mixed
+        - go
+        - plus
+        - manual
+
+    skip_rules:
+      free:
+        if_any:
+          - secrecy != public
+          - difficulty in [D2, D3]
+          - "change_kind in ${phenix_agent_routing.change_kind_guards.deny_free_for}"
+
+    status_messages:
+      mode_changed: "routing: {mode}"
+      skipped: "routing: {mode} skipped: {reason}"
+
+  external_plan:
+    enabled: true
+    default: auto
+
+    modes:
+      auto:
+        description: "Classify prompt as not-a-plan, partial-plan, or complete-plan."
+
+      force:
+        description: "Treat prompt as at least a partial external plan and normalize it."
+
+      off:
+        description: "Ignore external plan detection and run the normal planner."
+
+    classifier:
+      complete_plan:
+        requires:
+          - explicit_intent
+          - bounded_scope
+          - ordered_steps_or_task_breakdown
+          - constraints_or_invariants
+          - validation_expectations
+          - sufficient_context_for_implementer
+
+      partial_plan:
+        requires_any:
+          - explicit_intent
+          - bounded_scope
+          - ordered_steps_or_task_breakdown
+        missing_allowed:
+          - invariants
+          - validation
+          - stop_conditions
+          - target_state
+          - routing_metadata
+
+      not_a_plan:
+        signals:
+          - mostly_question
+          - broad_goal_only
+          - asks_for_design_decision
+          - lacks_actionable_steps
+
+    handling:
+      complete_plan:
+        source: external-complete
+        preserve_original: true
+        rewrite_style: false
+        add_metadata_header: true
+        normalize_contract: minimal
+
+      partial_plan:
+        source: external-normalized
+        preserve_original: true
+        rewrite_style: false
+        add_planner_normalization: true
+        normalize_contract: fill_missing_fields_only
+
+      not_a_plan:
+        source: internal-generated
+        run_internal_planner: true
+
+    architecture_compliance:
+      enabled: true
+      normalize_incompatible_external_plan: true
+      checks:
+        - preserve_existing_module_boundaries
+        - keep_model_names_out_of_workflow_logic
+        - use_semantic_slots_in_policy
+        - keep_concrete_models_in_config
+        - preserve_main_dev_separation
+        - forbid_free_models_for_private_or_secret_work
+        - require_tend_or_stitch_validation_when_relevant
+        - avoid_direct_main_promotion_for_D2_D3
+        - leave_wallet_or_handoff_state_if_incomplete
+
+    normalized_contract_template:
+      required_sections:
+        - source
+        - intent
+        - scope
+        - non_goals
+        - architecture_constraints
+        - steps
+        - validation
+        - stop_conditions
+        - routing_metadata
+
+  planner_contract:
+    emit_format: markdown
+
+    routing_metadata:
+      include:
+        - difficulty
+        - secrecy
+        - change_kind
+        - target_state
+        - mode
+        - planner_model
+        - implementer_model
+        - verifier_model
+
+    implementer_rules:
+      - do_not_expand_scope
+      - stop_on_contract_violation
+      - stop_if_private_data_reaches_free_model
+      - escalate_after_two_same_test_failures
+      - escalate_if_unrelated_modules_become_necessary
+
+    verifier_rules:
+      - verify_contract_satisfaction
+      - verify_external_plan_adjustments_are_minimal
+      - verify_routing_policy_was_followed
+      - verify_architecture_constraints
+      - verify_tests_match_difficulty
+      - require_strict_checks_for_main_bound_work
+
+  target_state_policy:
+    scratch:
+      allow_incomplete: true
+      verifier_required: false
+      strict_checks: false
+
+    dev-wallet:
+      allow_incomplete: true
+      verifier_required: true
+      strict_checks: false
+      require_handoff_state: true
+
+    main-bound:
+      allow_incomplete: false
+      verifier_required: true
+      strict_checks: true
+      require_clean_state: true
+      deny_D2_D3_direct_main_commit: true
+
+  validation_profiles:
+    fast:
+      commands:
+        - nix flake check --no-build
+
+    normal:
+      commands:
+        - nix flake check
+        - cargo test --all
+
+    strict:
+      commands:
+        - nix flake check
+        - cargo test --all
+        - cargo clippy --all-targets --all-features -- -D warnings
+        - cargo fmt --all --check
+
+  tests:
+    required_cases:
+      - "D0 public docs task in mixed may use free Zen or cheap Go."
+      - "D1 Nix task in mixed uses GPT planner and Go implementer."
+      - "D2 architecture task in mixed requires planner and verifier."
+      - "D3 main-bound task requires strong planner and strong verifier."
+      - "Free mode rejects private tasks."
+      - "Free mode rejects D2 and D3 tasks."
+      - "Ctrl+T cycles modes in order."
+      - "Ctrl+T skips free when unsafe."
+      - "Complete external plan is passed through with metadata normalization only."
+      - "Partial external plan gets missing planner-contract fields."
+      - "Not-a-plan input triggers internal planner."
+      - "External plan hardcoding model names is normalized to semantic slots."
+      - "Implementer receives normalized contract."
+      - "Verifier checks routing and architecture compliance."

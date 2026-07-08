@@ -19,7 +19,7 @@ Conceptual layers:
 - subagents: execute typed DAG nodes under explicit task packets and leases;
 - tend: canonical per-repo/per-module capability and verification profile
   provider;
-- stitch: canonical workspace DAG scheduler and multi-repo orchestration layer;
+- stitch: workspace-first DAG scheduler and multi-repo orchestration layer with init/add/remove/discover/status/dag/run/verify/lock-update top-level commands;
 - MCP: preferred structured control plane for tend/stitch;
 - CLI: allowed fallback, debugging surface, and reproduction path.
 
@@ -36,9 +36,15 @@ Current MCP tools exposed by the wrapper include:
 
 - tend: `tend-mcp_tend_status`, `tend-mcp_tend_plan`, `tend-mcp_tend_run`,
   `tend-mcp_tend_explain`;
-- stitch: `stitch-mcp_stitch_status`, `stitch-mcp_stitch_diff`,
-  `stitch-mcp_stitch_dag`, `stitch-mcp_stitch_commit_template`,
-  `stitch-mcp_stitch_commit`, `stitch-mcp_stitch_sync`.
+- stitch: `stitch-mcp_stitch_workspace_discover`,
+  `stitch-mcp_stitch_workspace_dag_plan`, `stitch-mcp_stitch_workspace_verify_plan`,
+  `stitch-mcp_stitch_workspace_lock_status`, `stitch-mcp_stitch_status`,
+  `stitch-mcp_stitch_diff`, `stitch-mcp_stitch_dag`,
+  `stitch-mcp_stitch_commit_template`, `stitch-mcp_stitch_commit`,
+  `stitch-mcp_stitch_sync`, `stitch-mcp_stitch_loop_checkpoint`,
+  `stitch-mcp_stitch_loop_create_rc`, `stitch-mcp_stitch_loop_current_change`,
+  `stitch-mcp_stitch_loop_detect`, `stitch-mcp_stitch_loop_finalize_candidate`,
+  `stitch-mcp_stitch_loop_publish`, `stitch-mcp_stitch_loop_snapshot`.
 
 If a conceptual operation such as `run_tend_profile_across_dag` is not exposed as
 a single MCP tool, use the closest structured MCP plan/status/dag operation and
@@ -282,7 +288,6 @@ OperationClass:
   - StageNewFiles     # git add for new files needed by Nix flake source visibility
   - StageTrackedChanges # git add for tracked file changes
   - LocalCommit       # git commit (with hooks)
-  - LocalCommitNoVerify # git commit --no-verify (local DAG mode only)
   - LockUpdate        # nix flake lock --update-input
   - SyncNoPush        # stitch commit --no-push, git add + git commit
   - Push              # git push, stitch sync with push
@@ -293,7 +298,7 @@ LeaseKind:
   - ReadOnly          # RepoRead + RepoSearch only
   - BoundedWorkspaceEdit # WorkspacePatch + WorkspaceCreateFile + WorkspaceMkdir + FormatFix + StageNewFiles + Verify
   - Verification      # RepoRead + Verify
-  - LocalCommit       # StageTrackedChanges + LocalCommit + (LocalCommitNoVerify only in local DAG mode)
+  - LocalCommit       # StageTrackedChanges + LocalCommit
   - SyncNoPush        # StageTrackedChanges + LocalCommit + LockUpdate
   - Push              # Push only (always requires explicit approval)
 
@@ -317,7 +322,7 @@ Enforce these default capability boundaries:
 | Architect | RepoRead, architecture_review | WorkspacePatch, LocalCommit, Push |
 | Worker | RepoRead, WorkspacePatch, WorkspaceCreateFile, WorkspaceMkdir, FormatFix, StageNewFiles | LocalCommit, Push |
 | Verifier | RepoRead, Verify | WorkspacePatch, FormatFix, LocalCommit, Push |
-| Committer | RepoRead, StageTrackedChanges, LocalCommit, LocalCommitNoVerify, SyncNoPush | Push (unless explicit push lease exists) |
+| Committer | RepoRead, StageTrackedChanges, LocalCommit, SyncNoPush | Push (unless explicit push lease exists) |
 
 ### Auto-allow commands (no approval needed)
 
@@ -361,27 +366,6 @@ deleting branches
 force push
 ```
 
-### Local workspace mode
-
-When a workspace repo has local commits that are not yet available to locked
-remote flake evaluation, Stitch may use local XDG workspace mappings for
-developer operations while keeping commit/push explicit-ask gated:
-
-```yaml
-LocalWorkspaceMode:
-  disabled
-  enabled:
-    allow_no_verify_commits: true
-    reason_required: true
-    reason_template: "Local workspace mode: {repo} commit exists locally ({rev}) but not pushed; remote flake fetch in pre-commit cannot resolve it yet"
-    requires_push_before_remote_eval: true
-```
-
-Use `LocalCommitNoVerify` only when:
-1. LocalWorkspaceMode is enabled
-2. A reason is recorded explaining the local workspace situation
-3. The commit will be pushed before remote consumers try to evaluate
-
 ## Workflow presets
 
 These presets define common permission configurations for normal sessions:
@@ -410,7 +394,6 @@ local_commit_no_push:
   allowed:
     - git add tracked changes
     - git commit (with hooks)
-    - git commit --no-verify (only in local DAG mode with recorded reason)
     - stitch commit --no-push
   push: false
   expected_user_approvals: 1
@@ -519,55 +502,62 @@ writes as a communication interface. Do not store secrets, execute recorded
 content, commit communication state, or treat records as source of truth over
 repo files.
 
-## Model routing
+## Model routing — architecture and boundary
 
-RoutingMode + Difficulty are part of the WorkScope routing packet. Persist the
-active mode with `phenix-route` when runtime state is available, and include the
-effective packet in delegated task packets:
+Model selection is **static OpenCode config**, not runtime MCP routing. The
+following boundary is strict:
 
-```yaml
-routing_packet:
-  mode: mixed | gpt-only | go-only | free-only | manual
-  difficulty: D0 | D1 | D2 | D3
-  secrecy: Public | Private | Secret
-  change_kind: Docs | Nix | Rust | Qml | Workflow | RepoArchitecture | Secrets | Auth | Ci | Unknown
-  target_state: Scratch | DevWallet | MainBound
-  runtime_enforced: process_start_expected
-  selected_slots: {}
-  denied_slots: {}
+```text
+agent-harness wrapper:
+  owns OpenCode config generation
+  owns explicit agent definitions
+  owns provider/model configuration
+  owns permissions
+  owns MCP server wiring
+  owns static provider/model configuration
+
+MCP servers (tend-mcp, stitch-mcp, agent_comm, codebase_memory, etc.):
+  expose tools/resources/prompts only
+  do not configure OpenCode
+  do not choose models
+  do not mutate model configuration
+
+agent_comm MCP:
+  durable communication store only
+  never responsible for routing or config
 ```
 
-The OpenCode wrapper reads XDG route state at process start from
-`$XDG_STATE_HOME/phenix-agent-harness/routing.json` (fallback
-`$HOME/.local/state/phenix-agent-harness/routing.json`) and injects the effective
-generated config. Hot switching is not supported. Restart OpenCode to apply a
-changed route state. Do not write repo-local route state.
+### Model config
 
-Restart OpenCode to apply a changed route state.
+Phenix agent model selection is static OpenCode configuration. Do not create a
+route command, route state file, routing MCP server, wrapper resolver, or Rust
+routing policy.
 
-**Reality check**: Model routing is automated only at OpenCode process start. The
-`phenix-route` CLI persists route state and resolves logical slots; the wrapper
-injects the resulting config overlay before launching OpenCode. The running
-OpenCode process is not hot-reloaded, so Ctrl+T or `phenix-route cycle` affects
-the next process start and the workflow packet immediately, but not already-loaded
-agent model config.
+```text
+modules/package.nix settings.agent.<name>.model
+  -> generated OpenCode config
+  -> OpenCode loads the concrete model assignments
+```
 
-In practice, the workflow agent uses the persisted route packet to select
-appropriate model tiers for different agent roles, while the wrapper applies those
-slots when OpenCode starts.
+Invalid:
 
-The workflow agent routes tasks through model/provider classes depending on the
-active routing mode, task difficulty, secrecy, change kind, and target state.
+```text
+Rust resolves routing modes
+MCP selects models
+Wrapper shell mutates model config from route state
+Unknown custom top-level OpenCode keys are added to config
+```
+
+All Phenix workflow agents currently use `openai/gpt-5.5`. If the model must
+change, update OpenCode agent `model` fields in package config.
+
+The workflow agent records task difficulty and secrecy for safety and planning
+only. No wrapper, route state, or MCP server selects models or generates config.
 
 ### Routing modes
 
-| Mode | Behavior |
-|------|----------|
-| `mixed` | Default. Routes planner/verifier to GPT Plus slots, implementer to Go slots. |
-| `gpt-only` | Routes all roles to GPT slots. Uses `gpt-strong` at D2/D3. |
-| `go-only` | Routes all roles to OpenCode Go slots. Uses stronger Go slots at D2/D3. |
-| `free-only` | Routes all roles to free slots. Hard-guarded: deny Private, Secret, D2/D3, Secrets, Auth, Ci, Security, MainBound, and commit/sync/push. |
-| `manual` | Uses persisted `manual_slots`; returns incomplete until required slots are present. |
+There are no runtime routing modes in the harness. Planning may still classify
+difficulty and secrecy for workflow safety, but model selection is not dynamic.
 
 ### Difficulty classes
 
@@ -585,54 +575,11 @@ Classify each task with:
 - **ChangeKind**: `Docs`, `Nix`, `Rust`, `Qml`, `Workflow`, `RepoArchitecture`, `Secrets`, `Auth`, `Ci`, `Security`, `Unknown`
 - **TargetState**: `Scratch`, `DevWallet`, `MainBound`
 
-### Ctrl+T behavior
+### Safety guardrails
 
-When the user presses Ctrl+T (or the configured keybinding):
-
-1. Cycle the active routing mode: `mixed -> gpt-only -> go-only -> free-only -> manual -> mixed`
-2. If `free-only` is unsafe for the current task context, skip it: `mixed -> gpt-only -> go-only -> manual -> mixed`
-3. Show a compact status message, for example:
-   - `routing: mixed`
-   - `routing: gpt-only`
-   - `routing: go-only`
-   - `routing: free-only skipped: task is private`
-4. The cycle updates the routing **profile**, not the concrete model directly. The router resolves concrete models from the profile afterward.
-
-### Default routing policy
-
-```
-mode = mixed
-
-D0:
-  planner: none or cheap Go slot
-  implementer: Zen free if public, otherwise cheap Go
-  verifier: none or cheap Go
-
-D1:
-  planner: GPT Plus normal slot
-  implementer: OpenCode Go normal slot
-  verifier: OpenCode Go different slot
-
-D2:
-  planner: GPT Plus strong slot
-  implementer: OpenCode Go strong slot
-  verifier: GPT Plus normal/strong or independent strong Go
-
-D3:
-  planner: GPT Plus strong slot
-  critic: GPT Plus strong or independent strong Go (optional)
-  implementer: OpenCode Go strong slot
-  verifier: GPT Plus strong slot
-  final-reviewer: GPT Plus strong slot (optional)
-```
-
-### Free-only guardrails
-
-- Free-only must never be used for Private, Secret, D2, D3, Secrets, Auth, Ci, Security, MainBound, commit, sync, push, token, SSH, sops, deployment, or security-sensitive work.
-- If cycle encounters an unsafe free-only context, skip it and explain the skip in the UI/status message.
-- If resolver is asked to use unsafe free-only directly, return JSON `status: denied`; do not silently fall back.
 - D2/D3 main-bound work must have planner + verifier.
-- The verifier should not use the same concrete model as the implementer if avoidable.
+- The verifier should be independent in role even when the same static model is configured.
+- Do not route private or secret content to free/public-only models.
 
 ### Routing context fields
 
@@ -640,71 +587,45 @@ When building the WorkScope or task packet, include routing context:
 
 ```yaml
 routing_context:
-  mode: mixed | gpt-only | go-only | free-only | manual
+  model_source: opencode_static_config
   difficulty: D0 | D1 | D2 | D3
   secrecy: Public | Private | Secret
   change_kind: Docs | Nix | Rust | Qml | Workflow | RepoArchitecture | Secrets | Auth | Ci | Security | Unknown
   target_state: Scratch | DevWallet | MainBound
   main_bound: true | false
-  user_forced_mode: true | false
+  user_forced_difficulty: true | false
 ```
 
-### Agent role routing
+### Agent model source
 
-Resolve agent roles to model slots:
-
-```
-RoutingMode + Difficulty + AgentRole -> ModelSlot -> ConcreteModel
-```
-
-The router:
-1. Reads the active routing mode (from Ctrl+T or config)
-2. Reads the task difficulty (auto-detected or user-specified)
-3. For each agent role (planner, implementer, verifier), resolves a semantic model slot
-4. The model slot is resolved to a concrete provider/model name from configuration
-
-### Router step
-
-Before each subagent invocation, the workflow agent (or a dedicated router step) should:
-
-1. Check if the current routing mode is safe for the task (free-only guardrails)
-2. Resolve the appropriate model slot for the target agent role
-3. Include the resolved model slot in the task packet metadata
-4. If cycle would hit unsafe free-only, skip it; if resolver is explicitly asked for unsafe free-only, return `status: denied`
+The workflow agent only records task difficulty and secrecy. It does not resolve
+concrete models. Concrete provider/model strings are OpenCode config fields.
 
 ### Status line format
 
-Expose the current routing state in status display:
+Expose workflow state in status display:
 
 ```
-MIXED · D1 · BUILD
+D1 · BUILD
 ```
 
 or:
 
 ```
-mode:mixed diff:D1 role:implementer
+diff:D1 role:implementer
 ```
 
-### Routing config
+### Model config
 
-The routing configuration defines how agent roles map to model slots:
+All concrete models are declared as OpenCode `agent.<name>.model` fields. Do not
+add `phenix_agent_routing` to OpenCode config; OpenCode rejects unknown top-level
+keys.
 
-- **defaultMode**: `mixed` (planner/verifier → GPT Plus, implementer → Go)
-- **modes**: `mixed`, `gpt-only`, `go-only`, `free-only`, `manual`
-- **slots**:
-  - GPT: `normal=gpt-normal`, `strong=gpt-strong`
-  - Go: `normal=opencode-go`, `strong=opencode-go-strong`
-  - free: `publicOnly=free-normal`
-- **free-only guardrails**: deny Private, Secret, D2/D3, Secrets/Auth/Ci/Security, MainBound, and commit/sync/push
-- `phenix-workflow` is user-facing and special: route state may recommend a slot, but the generated overlay must not set `phenix-workflow.model` unless explicitly justified.
-
-### --routing-mode CLI flag
+### Workflow CLI flags
 
 The `/flow` command and `plan` subcommand accept:
 
 ```
---routing-mode mixed|gpt-only|go-only|free-only|manual
 --difficulty auto|D0|D1|D2|D3
 --target-state scratch|dev-wallet|main-bound
 --external-plan auto|force|off
@@ -712,7 +633,6 @@ The `/flow` command and `plan` subcommand accept:
 
 Defaults:
 ```
-routing-mode = mixed
 difficulty = auto
 target-state = dev-wallet
 external-plan = auto

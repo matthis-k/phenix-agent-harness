@@ -7,18 +7,13 @@ Run the adaptive Phenix task-DAG workflow for this request:
 
 $ARGUMENTS
 
-Routing flags (parsed from `$ARGUMENTS`):
-- `--routing-mode mixed|gpt-only|go-only|free-only|manual`: Set the active routing mode (default: mixed).
+Workflow flags (parsed from `$ARGUMENTS`):
 - `--difficulty auto|D0|D1|D2|D3`: Override task difficulty (default: auto).
 - `--target-state scratch|dev-wallet|main-bound`: Set the target state (default: dev-wallet).
 - `--external-plan auto|force|off`: Control external-plan detection (default: auto).
 
-Routing state:
-- Use `phenix-route show` as the persisted-state source when available.
-- If route flags are provided, include them in the task packet and update/record the
-  route packet; do not claim in-process hot switching.
-- `runtime_enforced: process_start_expected` means the wrapper applies slots on the
-  next OpenCode process start. Restart OpenCode to apply a changed route state.
+Model selection is static OpenCode config. There is no route command or Rust
+routing state.
 
 1. Save the original request and workflow records through the `agent_comm` MCP when a stateful workflow is needed; do not emulate MCP artifacts with files or shell snippets.
 2. Classify task complexity and select the minimum sufficient pipeline:

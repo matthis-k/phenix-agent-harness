@@ -9,6 +9,10 @@ Verify the active change against the accepted plan:
 4. Prefer Stitch MCP/CLI for workspace DAG/status/diff evidence.
 5. Confirm changes map to planned change IDs for `c3`/`c4`; for `c1`/`c2`, confirm
    the compact WorkScope/task packet permits the diff without heavyweight state.
-6. Fail if commit, push, publish, deploy, tracked deletion, secrets/auth changes,
+6. For Pi routing changes, confirm the public frontend IDs remain provider-first
+   (`phenix/auto`, `phenix/mixed`, `phenix/openai-plus`, `phenix/opencode-go`,
+   `phenix/free`), `/router` reports config/state, and no fake final `setModel`
+   facade or Tend/Stitch/MCP routing path was introduced.
+7. Fail if commit, push, publish, deploy, tracked deletion, secrets/auth changes,
    or permission weakening occurred without explicit `c4` approval.
-7. Report mechanical, WorkScope, plan-conformance, and architecture evidence.
+8. Report mechanical, WorkScope, plan-conformance, and architecture evidence.

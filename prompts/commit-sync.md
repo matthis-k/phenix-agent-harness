@@ -49,7 +49,7 @@ Publish/deploy, tracked deletion, secrets/auth mutation, and permission weakenin
 are not implicit commit-sync behavior; block unless explicitly approved in the
 WorkScope and routed through `c4`.
 
-Model routing does not grant commit authority. In particular, free-only routing is denied
+Model routing does not grant commit authority. In particular, free routing is denied
 for Private, Secret, D2, D3, Secrets, Auth, Ci, Security, MainBound, release, or
 commit/sync/push work; block rather than committing from an unsafe free route.
 
