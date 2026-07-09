@@ -12,10 +12,12 @@ import {
 } from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { classifyAndRoute, resolveRouting, type RoutingResult } from "../lib/phenix-routing-matrix";
 
-type Difficulty = "D0" | "D1" | "D2" | "D3";
-type Secrecy = "Public" | "Private" | "Secret";
-type Mode = "auto" | "free" | "mixed" | "opencode-go" | "gpt";
+// Frontend model IDs — the user's model selection IS the routing.
+// Selecting phenix/free routes to opencode/deepseek-v4-flash-free.
+// Selecting phenix/opencode-go routes to opencode/deepseek-v4-flash.
+type FrontendModel = "auto" | "free" | "mixed" | "opencode-go" | "gpt";
 
 interface ConcreteModelRef {
 	provider: string;
@@ -26,52 +28,25 @@ interface SlotModels {
 	planner: ConcreteModelRef;
 	worker: ConcreteModelRef;
 	verifier: ConcreteModelRef;
-	critic?: ConcreteModelRef;
 }
 
 interface RouterConfig {
 	version: 1;
 	enabled: boolean;
-	mode: Mode;
-	maxFollowUpRetries: number;
-	slots: Record<Mode, SlotModels>;
-}
-
-interface RouterState {
-	enabled: boolean;
-	mode: Mode;
-	retryCount: number;
-	lastRoute?: ResolvedRoute;
-	lastFailure?: FailureEvidence;
-}
-
-interface RouteInput {
-	difficulty: Difficulty;
-	secrecy: Secrecy;
-	changeKind: string;
-	mainBound: boolean;
+	slots: Record<FrontendModel, SlotModels>;
 }
 
 interface ResolvedRoute {
-	frontend: `phenix/${Mode}`;
-	targetName: string;
+	frontend: `phenix/${string}`;
 	target: ConcreteModelRef;
-	reason: string;
 	valid: boolean;
 	validationMessage?: string;
-}
-
-interface FailureEvidence {
-	providerErrors: string[];
-	toolErrors: string[];
-	assistantErrors: string[];
-	turnErrors: string[];
 }
 
 const PHENIX_PROVIDER = "phenix";
 const ROUTER_API = "phenix-router-api" as Api;
 
-const FRONTEND_MODELS: readonly Mode[] = ["auto", "free", "mixed", "opencode-go", "gpt"] as const;
+const FRONTEND_MODELS: readonly FrontendModel[] = ["auto", "free", "mixed", "opencode-go", "gpt"] as const;
 
 const FREE_MODEL: ConcreteModelRef = { provider: "opencode", model: "deepseek-v4-flash-free" };
 const GO_MODEL: ConcreteModelRef = { provider: "opencode", model: "deepseek-v4-flash" };
@@ -79,8 +54,6 @@ const GO_MODEL: ConcreteModelRef = { provider: "opencode", model: "deepseek-v4-f
 const defaultConfig: RouterConfig = {
 	version: 1,
 	enabled: true,
-	mode: "free",
-	maxFollowUpRetries: 1,
 	slots: {
 		auto: { planner: FREE_MODEL, worker: FREE_MODEL, verifier: FREE_MODEL },
 		free: { planner: FREE_MODEL, worker: FREE_MODEL, verifier: FREE_MODEL },
@@ -102,19 +75,9 @@ const defaultConfig: RouterConfig = {
 	},
 };
 
-const MODE_DESCRIPTIONS: Record<Mode, string> = {
-	auto: "auto-detect (currently free deepseek)",
-	free: "free deepseek via Zen provider",
-	mixed: "GPT for planning/verification, Go for workers",
-	"opencode-go": "all roles use OpenCode Go slots",
-	gpt: "all roles use GPT via OpenCode auth",
-};
-
-const emptyEvidence = (): FailureEvidence => ({ providerErrors: [], toolErrors: [], assistantErrors: [], turnErrors: [] });
-
 let config: RouterConfig = defaultConfig;
-let state: RouterState = { enabled: defaultConfig.enabled, mode: "free", retryCount: 0 };
-let evidence = emptyEvidence();
+let activeContext: ExtensionContext | undefined;
+let piRef: ExtensionAPI | undefined;
 
 function readJson(path: string): Partial<RouterConfig> | undefined {
 	if (!existsSync(path)) return undefined;
@@ -133,8 +96,8 @@ function loadConfig(ctx?: ExtensionContext): RouterConfig {
 	const globalOverride = readJson(globalPath);
 	if (globalOverride?.slots) {
 		for (const mode of Object.keys(globalOverride.slots)) {
-			if (cfg.slots[mode as Mode]) {
-				cfg.slots[mode as Mode] = mergeSlotOverrides(cfg.slots[mode as Mode], globalOverride.slots[mode as Mode]);
+			if (cfg.slots[mode as FrontendModel]) {
+				cfg.slots[mode as FrontendModel] = mergeSlotOverrides(cfg.slots[mode as FrontendModel], globalOverride.slots[mode as FrontendModel]);
 			}
 		}
 	}
@@ -142,50 +105,31 @@ function loadConfig(ctx?: ExtensionContext): RouterConfig {
 		const projectOverride = readJson(projectPath);
 		if (projectOverride?.slots) {
 			for (const mode of Object.keys(projectOverride.slots)) {
-				if (cfg.slots[mode as Mode]) {
-					cfg.slots[mode as Mode] = mergeSlotOverrides(cfg.slots[mode as Mode], projectOverride.slots[mode as Mode]);
+				if (cfg.slots[mode as FrontendModel]) {
+					cfg.slots[mode as FrontendModel] = mergeSlotOverrides(cfg.slots[mode as FrontendModel], projectOverride.slots[mode as FrontendModel]);
 				}
 			}
 		}
 	}
-	if (globalOverride?.mode) cfg.mode = globalOverride.mode;
-	if (projectPath) {
-		const projectOverride = readJson(projectPath);
-		if (projectOverride?.mode) cfg.mode = projectOverride.mode;
-	}
 	return cfg;
 }
 
-function inferInput(prompt: string): RouteInput {
-	const lower = prompt.toLowerCase();
-	const difficulty: Difficulty = lower.includes("d3") ? "D3" : lower.includes("d2") ? "D2" : lower.includes("d0") ? "D0" : "D1";
-	const secrecy: Secrecy = lower.includes("secret") ? "Secret" : lower.includes("private") ? "Private" : "Public";
-	const mainBound = lower.includes("main-bound") || lower.includes("main_bound") || lower.includes("main branch");
-	const changeKind = lower.includes("workflow") ? "Workflow" : lower.includes("nix") ? "Nix" : lower.includes("auth") ? "Auth" : "Unknown";
-	return { difficulty, secrecy, changeKind, mainBound };
-}
-
-function pickTarget(mode: Mode, _input: RouteInput): { target: ConcreteModelRef; name: string; reason: string } {
-	const slots = config.slots[mode];
-	// For now, all roles use the worker model (single-model routing).
-	// Multi-role routing (planner vs worker vs verifier) will be used
-	// by the flow/phenix-runtime orchestrator.
-	const target = slots?.worker ?? FREE_MODEL;
-	const name = mode;
-	const reason = `routing_mode:${mode}`;
-	return { target, name, reason };
-}
-
-function resolveRoute(mode: Mode, input: RouteInput, ctx?: ExtensionContext): ResolvedRoute {
-	const { target, name, reason } = pickTarget(mode, input);
+/**
+ * Resolve a frontend model ID to a concrete backend model.
+ * Unknown frontend models fall through to the free slot.
+ */
+function resolveRoute(frontendId: string, ctx?: ExtensionContext): ResolvedRoute {
+	// Unknown frontend IDs default to the free slot (graceful fallback)
+	const resolvedId = config.slots[frontendId as FrontendModel] ? frontendId : "free";
+	const slots = config.slots[resolvedId as FrontendModel];
+	const target = slots.worker;
 	const concrete = ctx?.modelRegistry?.find(target.provider, target.model);
+	const valid = Boolean(concrete);
 	return {
-		frontend: `phenix/${mode}`,
-		targetName: name,
+		frontend: `phenix/${frontendId}` as const,
 		target,
-		reason,
-		valid: Boolean(concrete),
-		validationMessage: concrete ? undefined : `target model not found in Pi registry: ${target.provider}/${target.model}`,
+		valid,
+		validationMessage: valid ? undefined : `target model not found in Pi registry: ${target.provider}/${target.model}`,
 	};
 }
 
@@ -197,12 +141,22 @@ function persist(customType: string, data: unknown): void {
 	}
 }
 
-let piRef: ExtensionAPI | undefined;
-let activeContext: ExtensionContext | undefined;
-
 function renderRoute(route: ResolvedRoute): string {
 	const status = route.valid ? "valid" : `invalid (${route.validationMessage})`;
-	return `${route.frontend} -> ${route.target.provider}/${route.target.model} [${status}; ${route.reason}]`;
+	return `${route.frontend} -> ${route.target.provider}/${route.target.model} [${status}; routing:${route.frontend.replace("phenix/", "")}]`;
+}
+
+/** Render the full routing matrix result for display */
+function renderMatrixResult(matrix: RoutingResult): string {
+	const lines: string[] = [];
+	const roleList = Object.entries(matrix.roles)
+		.filter(([, active]) => active)
+		.map(([role]) => role);
+	lines.push(`${matrix.modelRef} | roles: ${roleList.join(", ") || "none"}`);
+	if (matrix.warnings.length > 0) {
+		lines.push(`warnings: ${matrix.warnings.join("; ")}`);
+	}
+	return lines.join("\n");
 }
 
 function routerStream(model: Model<Api>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream {
@@ -218,12 +172,8 @@ function routerStream(model: Model<Api>, context: Context, options?: SimpleStrea
 			stopReason: "error",
 			timestamp: Date.now(),
 		};
-		const lastUser = [...context.messages].reverse().find((message) => message.role === "user");
-		const prompt = typeof lastUser?.content === "string" ? lastUser.content : "";
 		const ctx = activeContext;
-		const input = inferInput(prompt);
-		const route = resolveRoute(model.id as Mode, input, ctx);
-		state.lastRoute = route;
+		const route = resolveRoute(model.id, ctx);
 		persist("phenix-router-route", route);
 
 		try {
@@ -274,47 +224,46 @@ function registerPhenixProvider(pi: ExtensionAPI): void {
 	});
 }
 
-function showStatus(ctx: ExtensionContext): string {
-	const lines = [
-		`enabled: ${state.enabled}`,
-		`mode: ${state.mode} (${MODE_DESCRIPTIONS[state.mode] ?? "?"})`,
-		`config: global ${join(getAgentDir(), "extensions", "phenix-router.routes.json")}; project ${join(ctx.cwd, CONFIG_DIR_NAME, "phenix-router.routes.json")}`,
-	];
-	if (state.lastRoute) lines.push(`last_route: ${renderRoute(state.lastRoute)}`);
-	if (state.lastFailure) lines.push(`last_failure: ${JSON.stringify(state.lastFailure)}`);
-	return lines.join("\n");
-}
-
 function handleRouterCommand(args: string, ctx: ExtensionContext): void {
 	const [sub = "status", value] = args.trim().split(/\s+/, 2);
-	if (sub === "status") ctx.ui.notify(showStatus(ctx), "info");
-	else if (sub === "profile" || sub === "mode") {
-		if (value && FRONTEND_MODELS.includes(value as Mode)) {
-			state.mode = value as Mode;
-			persist("phenix-router-state", state);
-		}
-		ctx.ui.notify(`phenix router mode: ${state.mode} (${MODE_DESCRIPTIONS[state.mode] ?? "?"})`, "info");
+	if (sub === "status") {
+		const currentModel = ctx.model?.id ?? "unknown";
+		const route = resolveRoute(currentModel, ctx);
+		const prompt = ctx.sessionManager?.getEntries()
+			?.reverse()
+			?.find((e) => e.type === "user")?.content ?? "";
+		const matrix = classifyAndRoute(prompt, currentModel);
+		const lines = [
+			`enabled: ${config.enabled}`,
+			`model: phenix/${currentModel}`,
+			`route: ${renderRoute(route)}`,
+			`matrix: ${renderMatrixResult(matrix)}`,
+		];
+		ctx.ui.notify(lines.join("\n"), route.valid ? "info" : "warning");
 	} else if (sub === "routes") {
 		const lines = FRONTEND_MODELS.map((m) => {
 			const slots = config.slots[m];
-			return `  ${m}: planner=${slots.planner.provider}/${slots.planner.model} worker=${slots.worker.provider}/${slots.worker.model} verifier=${slots.verifier.provider}/${slots.verifier.model}`;
+			return `  phenix/${m} -> ${slots.worker.provider}/${slots.worker.model}`;
 		});
-		ctx.ui.notify(`Available routing profiles:\n${lines.join("\n")}`, "info");
+		ctx.ui.notify(`Available routes:\n${lines.join("\n")}`, "info");
 	} else if (sub === "explain") {
-		const route = resolveRoute(state.mode, inferInput(value ?? ""), ctx);
-		state.lastRoute = route;
-		persist("phenix-router-route", route);
-		ctx.ui.notify(renderRoute(route), route.valid ? "info" : "warning");
+		const modelId = value && FRONTEND_MODELS.includes(value as FrontendModel) ? value : (ctx.model?.id ?? "free");
+		const route = resolveRoute(modelId, ctx);
+		const matrix = classifyAndRoute(value ?? "", modelId);
+		const lines = [
+			renderRoute(route),
+			`matrix: ${renderMatrixResult(matrix)}`,
+		];
+		ctx.ui.notify(lines.join("\n"), route.valid ? "info" : "warning");
 	} else if (sub === "reload") {
 		config = loadConfig(ctx);
 		ctx.ui.notify("phenix router config reloaded", "info");
 	} else if (sub === "reset") {
 		config = defaultConfig;
-		state = { enabled: defaultConfig.enabled, mode: defaultConfig.mode, retryCount: 0 };
-		persist("phenix-router-state", state);
+		persist("phenix-router-config", config);
 		ctx.ui.notify("phenix router reset to defaults", "info");
 	} else {
-		ctx.ui.notify("usage: /router status|profile|mode|routes|explain|reload|reset", "warning");
+		ctx.ui.notify("usage: /router status|routes|explain|reload|reset", "warning");
 	}
 }
 
@@ -326,60 +275,24 @@ export default function phenixRouter(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		activeContext = ctx;
 		config = loadConfig(ctx);
-		for (const entry of ctx.sessionManager.getEntries()) {
-			if (entry.type === "custom" && entry.customType === "phenix-router-state" && entry.data) {
-				const loaded = entry.data as Partial<RouterState>;
-				if (loaded.mode && FRONTEND_MODELS.includes(loaded.mode)) state.mode = loaded.mode;
-			}
-		}
 	});
 
 	pi.on("before_agent_start", (event, ctx) => {
 		activeContext = ctx;
-		if (!state.enabled) return;
-		const input = inferInput(event.prompt);
-		const route = resolveRoute(state.mode, input, ctx);
-		state.lastRoute = route;
-		state.retryCount = 0;
-		evidence = emptyEvidence();
+		if (!config.enabled) return;
+		const modelId = ctx.model?.id ?? "free";
+		const route = resolveRoute(modelId, ctx);
+		const matrix = classifyAndRoute(event.prompt, modelId);
 		persist("phenix-router-route", route);
-		return { message: { customType: "phenix-router-route", content: renderRoute(route), display: true, details: route } };
-	});
-
-	pi.on("tool_result", (event) => {
-		if (event.isError) evidence.toolErrors.push(`${event.toolName}: ${event.content.map((item) => item.type === "text" ? item.text : "[image]").join(" ")}`.slice(0, 500));
-	});
-
-	pi.on("after_provider_response", (event) => {
-		if (event.status >= 400) evidence.providerErrors.push(`http ${event.status}: ${JSON.stringify(event.headers)}`.slice(0, 500));
-	});
-
-	pi.on("message_end", (event) => {
-		if (event.message.role === "assistant" && event.message.stopReason === "error") evidence.assistantErrors.push(event.message.errorMessage ?? "assistant error");
-	});
-
-	pi.on("turn_end", (event) => {
-		if (event.message.role === "assistant" && event.message.stopReason === "error") evidence.turnErrors.push(event.message.errorMessage ?? "turn error");
-	});
-
-	pi.on("agent_end", (_event, ctx) => {
-		const hasFailure = evidence.providerErrors.length + evidence.toolErrors.length + evidence.assistantErrors.length + evidence.turnErrors.length > 0;
-		state.lastFailure = hasFailure ? evidence : undefined;
-		persist("phenix-router-state", state);
-		// Check for active phenix-flow workflow via session state (canonical cross-extension mechanism)
-		let flowActive = false;
-		try {
-			for (const entry of ctx.sessionManager.getEntries()) {
-				if (entry.type === "custom" && entry.customType === "phenix-flow-state" && entry.data && (entry.data as any).active === true) {
-					flowActive = true;
-					break;
-				}
-			}
-		} catch { /* best-effort */ }
-		if (hasFailure && !flowActive && state.retryCount < config.maxFollowUpRetries) {
-			state.retryCount += 1;
-			pi.sendMessage({ customType: "phenix-router-retry", content: `Phenix router observed failure evidence and queued bounded follow-up retry ${state.retryCount}/${config.maxFollowUpRetries}.`, display: true, details: evidence }, { deliverAs: "followUp", triggerTurn: true });
-		}
+		persist("phenix-routing-matrix", matrix);
+		return {
+			message: {
+				customType: "phenix-router-route",
+				content: `${renderRoute(route)}\n${renderMatrixResult(matrix)}`,
+				display: true,
+				details: { route, matrix },
+			},
+		};
 	});
 
 	pi.on("model_select", (event, ctx) => {
@@ -387,7 +300,7 @@ export default function phenixRouter(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("router", {
-		description: "Inspect or adjust the Phenix provider-first model router",
+		description: "Inspect the Phenix provider-first model router",
 		handler: async (args, ctx) => handleRouterCommand(args, ctx),
 	});
 }

@@ -25,6 +25,42 @@ const SERVERS: ServerSpec[] = [
     languageId: "typescript",
     extensions: [".ts", ".tsx", ".js", ".jsx"],
   },
+  {
+    command: "rust-analyzer",
+    args: [],
+    languageId: "rust",
+    extensions: [".rs"],
+  },
+  {
+    command: "lua-language-server",
+    args: ["--stdio"],
+    languageId: "lua",
+    extensions: [".lua"],
+  },
+  {
+    command: "taplo",
+    args: ["lsp"],
+    languageId: "toml",
+    extensions: [".toml"],
+  },
+  {
+    command: "pyright-langserver",
+    args: ["--stdio"],
+    languageId: "python",
+    extensions: [".py"],
+  },
+  {
+    command: "vscode-json-language-server",
+    args: ["--stdio"],
+    languageId: "json",
+    extensions: [".json", ".jsonc"],
+  },
+  {
+    command: "yaml-language-server",
+    args: ["--stdio"],
+    languageId: "yaml",
+    extensions: [".yaml", ".yml"],
+  },
 ];
 
 type LspResponse = { id?: number; result?: unknown; error?: unknown; method?: string; params?: unknown };
@@ -103,8 +139,8 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "lsp_diagnostics",
     label: "LSP Diagnostics",
-    description: "Run a read-only language server diagnostics request for a Nix, TypeScript, or JavaScript file.",
-    promptSnippet: "Read-only LSP diagnostics for Nix and TypeScript/JavaScript files.",
+    description: "Run a read-only language server diagnostics request for supported file types (Nix, TypeScript, JavaScript, Rust, Lua, TOML, Python, JSON, YAML).",
+    promptSnippet: "Read-only LSP diagnostics for Nix, TypeScript/JavaScript, Rust, Lua, TOML, Python, JSON, YAML files.",
     promptGuidelines: ["Use lsp_diagnostics only for read-only diagnostics; it never edits files."],
     parameters: Type.Object({ path: Type.String({ description: "File path to inspect" }) }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -128,8 +164,8 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "lsp_hover",
     label: "LSP Hover",
-    description: "Run a read-only language server hover request for a Nix, TypeScript, or JavaScript file position.",
-    promptSnippet: "Read-only LSP hover lookup for Nix and TypeScript/JavaScript files.",
+    description: "Run a read-only language server hover request for a supported file type (Nix, TypeScript, JavaScript, Rust, Lua, TOML, Python, JSON, YAML).",
+    promptSnippet: "Read-only LSP hover lookup for Nix, TypeScript/JavaScript, Rust, Lua, TOML, Python, JSON, YAML files.",
     promptGuidelines: ["Use lsp_hover only for read-only symbol information; it never edits files."],
     parameters: Type.Object({
       path: Type.String({ description: "File path to inspect" }),

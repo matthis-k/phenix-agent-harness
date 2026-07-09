@@ -2,7 +2,10 @@
  * lsp tool — unified LSP operations: diagnostics, hover, definition, references, document_symbols.
  *
  * Read-only only. Defers write operations (rename, code_action, workspace/applyEdit).
- * Uses nil for Nix files and typescript-language-server for TypeScript/JavaScript.
+ * Supports: Nix (nil), TypeScript/JavaScript (typescript-language-server),
+ * Rust (rust-analyzer), Lua (lua-language-server), TOML (taplo),
+ * Python (pyright-langserver), JSON/JSONC (vscode-json-language-server),
+ * YAML (yaml-language-server).
  *
  * This is the unified tool; the existing lsp.ts extension (lsp_diagnostics, lsp_hover)
  * remains available for backward compatibility.
@@ -40,6 +43,12 @@ type ServerSpec = {
 const SERVERS: ServerSpec[] = [
   { command: "nil", args: [], languageId: "nix", extensions: [".nix"] },
   { command: "typescript-language-server", args: ["--stdio"], languageId: "typescript", extensions: [".ts", ".tsx", ".js", ".jsx"] },
+  { command: "rust-analyzer", args: [], languageId: "rust", extensions: [".rs"] },
+  { command: "lua-language-server", args: ["--stdio"], languageId: "lua", extensions: [".lua"] },
+  { command: "taplo", args: ["lsp"], languageId: "toml", extensions: [".toml"] },
+  { command: "pyright-langserver", args: ["--stdio"], languageId: "python", extensions: [".py"] },
+  { command: "vscode-json-language-server", args: ["--stdio"], languageId: "json", extensions: [".json", ".jsonc"] },
+  { command: "yaml-language-server", args: ["--stdio"], languageId: "yaml", extensions: [".yaml", ".yml"] },
 ];
 
 function serverFor(path: string): ServerSpec | undefined {
@@ -159,7 +168,7 @@ export function registerLsp(pi: ExtensionAPI): void {
     promptSnippet: "Code intelligence via LSP: diagnostics, hover, go-to-definition, references, document symbols.",
     promptGuidelines: [
       "Use lsp for code intelligence: diagnostics, hover info, go-to-definition, find references, document symbols.",
-      "Requires language server (nil for Nix, typescript-language-server for TS/JS).",
+      "Requires language server (nil for Nix, typescript-language-server for TS/JS, rust-analyzer for Rust, etc.).",
       "Read-only operation. For edits, use edit + resolve.",
       "line/character are zero-based."
     ],

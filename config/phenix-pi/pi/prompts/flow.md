@@ -2,17 +2,64 @@
 
 Use the **`/flow`** command to launch automatic multi-agent workflows:
 
-- **/flow <prompt>** — Classifies, plans, executes, and verifies your request through the pipeline.
+- **/flow <prompt>** — Classifies, scouts, plans, executes, and verifies through the pipeline.
 - **/flow --difficulty <D0|D1|D2|D3> <prompt>** — Override difficulty classification.
-- **/flow status** — Show current workflow stage.
+- **/flow --scout auto|force|skip <prompt>** — Control repo scout behavior.
+- **/flow status** — Show current workflow stage, model set, and scout status.
 - **/flow cancel** — Cancel active workflow.
 
-Simple requests (D0, D1) run as a single-agent implementation step.
-Complex requests (D2, D3) run through: 🏷️ Classify → 📋 Plan → 🔧 Execute → ✅ Verify → 📊 Synthesize. If verification fails, the pipeline loops through 🔄 Revise → 🔧 Execute → ✅ Verify up to 3 times.
+## Stage pipeline
+
+**D0 mechanical tasks** (typo, format, obvious rename):
+🔧 Execute → (optional ✅ Verify) → done
+
+**D1+ repo changes** (non-trivial edits, multi-file, config, workflow):
+🔍 Classify → 🔎 Scout (real subagent) → 📋 Plan → 🔧 Execute → ✅ Verify → 📊 Synthesize
+
+If verification fails: 🔄 Revise → 🔧 Execute → ✅ Verify (up to 3 loops).
+
+## Scouting
+
+For D1+ tasks, a real `repo_scout` subagent runs before the planner. The scout:
+
+- Is a separate model invocation (not a staged turn of the main agent)
+- Is read-only: finds files, searches content, reads ranges
+- Produces a compact `EvidencePacket` (summary, relevant files, symbols, edit points, risks)
+- Returns high/medium/low confidence
+- The planner receives and consumes the EvidencePacket rather than exploring the repo from scratch
+
+Use `--scout force` to always run a scout (even for D0).
+Use `--scout skip` to skip the scout (even for D1+).
+
+## Model sets
+
+The selected Phenix frontend model determines the model set for subagents:
+
+| Frontend | scout model | worker model | verifier model |
+|----------|-------------|--------------|----------------|
+| `phenix/free` | opencode/deepseek-v4-flash-free | opencode/deepseek-v4-flash-free | opencode/deepseek-v4-flash-free |
+| `phenix/mixed` | opencode/deepseek-v4-flash-free | opencode/deepseek-v4-flash-free | openai/gpt-5.5 |
+| `phenix/opencode-go` | opencode/deepseek-v4-flash | opencode/deepseek-v4-flash | opencode/deepseek-v4-flash |
+| `phenix/gpt` | openai/gpt-5.5 | openai/gpt-5.5 | openai/gpt-5.5 |
+
+## Terminology
+
+- **TaskRecord / TaskNode**: State/metadata record only — does NOT execute a subagent
+- **SubagentRun**: Actual child agent model execution via `runSubagent()`
+- **Scout**: A real read-only repo_scout subagent run that produces EvidencePacket
+- **Worker**: Real worker subagent (edit-capable) — planned but not fully implemented in this version
+
+## Known limitations (Pi v0.80.3)
+
+- Pi ExtensionAPI does not expose `spawnAgent`/`createSession` for isolated child agents
+- SubagentExecutor uses direct model invocation via `streamSimple` + `ctx.modelRegistry`
+- Tool policy is prompt-only, not runtime-enforced by Pi's tool system
+- Multi-turn tool-using subagents (workers with edit tools) are not yet available
+- Scout is single-turn model call with rich context (not multi-turn tool loop)
 
 ---
 
-# Phenix Pi workflow
+# Phenix Pi workflow (advanced)
 
 Use this prompt template to run the Phenix WorkScope-driven request → route →
 implementation → verification workflow while using Pi.

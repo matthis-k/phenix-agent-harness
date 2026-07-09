@@ -1,15 +1,21 @@
 /**
- * phenix-flow.ts — Dynamic Multi-Agent Workflow Orchestrator
+ * phenix-flow.ts — Multi-Agent Workflow Orchestrator with Real Subagent Execution
  *
  * Registers the `/flow` command and manages a Plan → Execute → Verify → Replan
  * workflow state machine. Each stage is a separate agent turn with role-specific
  * system prompt instructions.
  *
  * Stages:
- *   classifying → planning → executing → verifying → synthesizing → done
+ *   classifying → [scouting] → planning → executing → verifying → synthesizing → done
  *   verifying (fail) → replanning → executing (revised) → verifying ...
  *
- * For simple tasks (D0/D1) the pipeline collapses to single-agent execution.
+ * For D0 mechanical tasks the pipeline collapses to single-agent execution.
+ * For D1+ tasks, a real repo_scout subagent runs before planning.
+ *
+ * Terminology:
+ *   TaskNode / TaskRecord = state/metadata record
+ *   SubagentRun          = actual child agent model execution (via SubagentExecutor)
+ *   scouting             = real subagent run for evidence gathering
  *
  * Based on multi-agent workflow research: Planner/Architect decomposes tasks,
  * Developer/Worker implements, Verifier/Critic inspects, Orchestrator manages flow.
@@ -54,14 +60,36 @@ import {
   RECURSIVE_DELEGATION_DEFAULTS,
   MCP_TOOLS,
 } from "./phenix-runtime";
-
-// ──────────────────────────────────────────────
-// Types
-// ──────────────────────────────────────────────
+import {
+  shouldRunRepoScout,
+  runSubagent,
+  runPhenixSubagent,
+  runPhenixSubagentsParallel,
+  buildScoutContextPack,
+  detectFrontendModelSet,
+  resolveSubagentModel,
+  resolveRoleModel,
+  ensureCommChannelDir,
+  writeCommMessage,
+  writeSubagentResult,
+  listCommMessages,
+  readSubagentResult,
+  type SubagentRunResult,
+  type EvidencePacket as ExecEvidencePacket,
+  type SubagentRunRequest,
+  type RunPhenixSubagentResult,
+  type RunPhenixSubagentInput,
+  type PhenixSubagentRole,
+  RECURSION_DEFAULTS,
+  SUBAGENT_PROFILES,
+  ROLE_TOOL_DEFAULTS,
+  PARALLEL_DEFAULTS,
+} from "./phenix-subagent-executor";
 
 type FlowStage =
   | "idle"
   | "classifying"
+  | "scouting"        // real repo_scout subagent run
   | "planning"
   | "executing"
   | "verifying"
@@ -90,6 +118,18 @@ interface FlowWorkflow {
   rootTaskId: string | null;
   sessionId: string | null;
   graphId: string | null;
+  /** Scout evidence packet stored after scouting stage */
+  scoutEvidence: EvidencePacket | ExecEvidencePacket | null;
+  /** Status tracking for the scout subagent run */
+  scoutResult: SubagentRunResult | null;
+  /** Whether we ran a real subagent scout (vs skipped) */
+  ranRealSubagentScout: boolean;
+  /** Unique run ID for this flow invocation */
+  runId: string;
+  /** Comm channel directory for inter-subagent communication */
+  commDir: string | null;
+  /** Worker/planner/verifier subagent results */
+  subagentResults: Record<string, RunPhenixSubagentResult>;
 }
 
 interface FlowState {
@@ -121,6 +161,12 @@ const DEFAULT_WORKFLOW: FlowWorkflow = {
   rootTaskId: null,
   sessionId: null,
   graphId: null,
+  scoutEvidence: null,
+  runId: "",
+  commDir: null,
+  subagentResults: {},
+  scoutResult: null,
+  ranRealSubagentScout: false,
 };
 
 const DEFAULT_STATE: FlowState = {
@@ -156,14 +202,19 @@ function classifyDifficulty(prompt: string): Difficulty {
   return "D1";
 }
 
+/**
+ * D0 is the only difficulty that always skips the scout.
+ * D1+ always runs a scout for non-trivial repo changes.
+ */
 function isSimpleTask(difficulty: Difficulty): boolean {
-  return difficulty === "D0" || difficulty === "D1";
+  return difficulty === "D0";
 }
 
 function stageEmoji(stage: FlowStage): string {
   const map: Record<FlowStage, string> = {
     idle: "⏸️",
     classifying: "🔍",
+    scouting: "🔎",
     planning: "📋",
     executing: "🔧",
     verifying: "✅",
@@ -179,6 +230,7 @@ function stageLabel(stage: FlowStage): string {
   const map: Record<FlowStage, string> = {
     idle: "Idle",
     classifying: "Classification",
+    scouting: "Repo Scouting",
     planning: "Planning",
     executing: "Execution",
     verifying: "Verification",
@@ -199,80 +251,20 @@ function getStageInstruction(stage: FlowStage, _wf: FlowWorkflow): string | null
     case "classifying":
       return [
         "",
-        "## 🏷️ Flow Stage: Task Classification",
+        "## \ud83c\udff7\ufe0f Flow Stage: Task Classification",
         "",
-        "Analyze the user's request and classify it by:",
-        "- **Difficulty**: D0 (trivial/mechanical — typo, format, obvious rename), D1 (bounded repo-aware — single-file or localized edit), D2 (architectural/multi-file — new abstraction, cross-module change), D3 (high-risk/ambiguous — security, release, cross-repo, secret)",
+        "Analyze the user\u2019s request and classify it by:",
+        "- **Difficulty**: D0 (trivial/mechanical), D1 (bounded repo-aware), D2 (architectural/multi-file), D3 (high-risk/ambiguous)",
         "- **Secrecy**: public, private, or secret",
         "- **Change kind**: code, config, docs, workflow, nix, rust, tests, ci, or other",
         "",
-        'End your response with a JSON classification block:\n```json\n{"difficulty": "D0|D1|D2|D3", "secrecy": "public|private|secret", "change_kind": "...", "reasoning": "..."}\n```',
-      ].join("\n");
-
-    case "planning":
-      return [
-        "",
-        "## 📋 Flow Stage: Planning / Architecture",
-        "",
-        "You are the **Planner/Architect**. Your role is to:",
-        "- Analyze the task and decompose it into ordered, actionable subtasks",
-        "- State clear assumptions and success criteria",
-        "- Design the overall approach — do NOT execute subtasks or modify files",
-        "- If the goal, scope, or acceptance criteria are unclear, ask the user for clarification before finishing the plan",
-        "- If the goal IS clear, produce a complete PlanContract",
-        "",
-        'End your response with a JSON plan block that is a PlanContract:',"",
-        '```json',
-        '{"goal": "...", "subtasks": [{"id":"task_1", "title":"...", "role":"worker", "profile":"implementation", "objective":"...", "success_criteria":["..."], "dependencies":[]}], "decisions": ["..."], "acceptance_criteria": ["..."], "non_goals": ["..."], "invariants": ["..."], "interaction_status": "ready" | "needs_clarification"',
-        '}',
-        '```',
-        "",
-        'If interaction_status is "needs_clarification", include a "clarification_questions" field with targeted questions for the user.',
-      ].join("\n");
-
-    case "executing":
-      return [
-        "",
-        "## 🔧 Flow Stage: Execution",
-        "",
-        "You are the **Developer/Worker**. Your role is to:",
-        "- Implement the subtasks from the plan using available tools",
-        "- Edit files, run shell commands, use Git freely (confirm destructive operations like force-push)",
-        "- Complete ALL subtasks before finishing your response",
-        "- Summarize what was done and any noteworthy results",
-      ].join("\n");
-
-    case "verifying":
-      return [
-        "",
-        "## ✅ Flow Stage: Verification",
-        "",
-        "You are the **Verifier/Critic**. Inspect the completed work:",
-        "- Are all subtasks from the plan complete?",
-        "- Are there errors, bugs, or policy violations?",
-        "- Do the success criteria pass?",
-        "- Are there any missing pieces or regressions?",
-        "",
-        'End your response with a VerificationReport JSON:',"",
-        '```json',
-        '{"status": "pass" | "fail", "failures": [{"issue": "...", "evidence": "...", "ownerHint": null, "requiredFix": "..."}], "checks": [{"command": "...", "result": "pass"|"fail"|"not_run"}], "scopeViolations": []}',
-        '```',
-      ].join("\n");
-
-    case "replanning":
-      return [
-        "",
-        "## 🔄 Flow Stage: Revision",
-        "",
-        "You are the **Planner**. The verification found issues. Revise the plan to address the feedback.",
-        "",
-        'Output an updated JSON plan:\n```json\n{"goal": "...", "subtasks": ["1. ...", "2. ..."], "revision_notes": "..."}\n```',
+        'End your response with a JSON classification block:\n\`\`\`json\n{"difficulty": "D0|D1|D2|D3", "secrecy": "public|private|secret", "change_kind": "...", "reasoning": "..."}\n\`\`\`',
       ].join("\n");
 
     case "synthesizing":
       return [
         "",
-        "## 📊 Flow Stage: Synthesis",
+        "## \ud83d\udcca Flow Stage: Synthesis",
         "",
         "You are the **Orchestrator**. Compile a final summary of:",
         "- What was accomplished",
@@ -282,13 +274,10 @@ function getStageInstruction(stage: FlowStage, _wf: FlowWorkflow): string | null
       ].join("\n");
 
     default:
+      // scouting, planning, executing, verifying, replanning are handled as real subagent processes
       return null;
   }
 }
-
-// ──────────────────────────────────────────────
-// Stage context (injected as a visible message)
-// ──────────────────────────────────────────────
 
 function getStageContext(stage: FlowStage, wf: FlowWorkflow): string {
   const header = `**${stageEmoji(stage)} Flow Stage: ${stageLabel(stage)}**\n\n`;
@@ -297,11 +286,27 @@ function getStageContext(stage: FlowStage, wf: FlowWorkflow): string {
     case "classifying":
       return `${header}Classifying the following request:\n\n${wf.originalPrompt}`;
 
-    case "planning":
+    case "scouting":
       return (
-        `${header}Creating a plan for:\n\n${wf.originalPrompt}` +
+        `${header}Running real repo_scout subagent for:\n\n${wf.originalPrompt}` +
         (wf.difficulty ? `\n\n*Classified as ${wf.difficulty}, ${wf.secrecy ?? "?"}, ${wf.changeKind ?? "?"}*` : "")
       );
+
+    case "planning": {
+      let scoutSection = "";
+      if (wf.scoutEvidence) {
+        const e = wf.scoutEvidence;
+        scoutSection = `\n\n## Repo Scout Evidence\n\n**Summary:** ${e.summary}\n**Confidence:** ${e.confidence}\n**Relevant files:** ${(e.relevantFiles || []).map((f: any) => f.path).join(", ")}\n**Likely edit points:** ${(e.likelyEditPoints || []).map((p: any) => p.path).join(", ")}\n**Risks:** ${(e.risks || []).join(", ")}`;
+      }
+      if (wf.scoutResult && wf.scoutResult.status !== "done") {
+        scoutSection = `\n\n**Scout status:** ${wf.scoutResult.status} — ${wf.scoutResult.report.summary}`;
+      }
+      return (
+        `${header}Creating a plan for:\n\n${wf.originalPrompt}` +
+        (wf.difficulty ? `\n\n*Classified as ${wf.difficulty}, ${wf.secrecy ?? "?"}, ${wf.changeKind ?? "?"}*` : "") +
+        scoutSection
+      );
+    }
 
     case "executing":
       return (
@@ -422,12 +427,146 @@ function loadState(ctx: ExtensionContext): void {
 }
 
 // ──────────────────────────────────────────────
-// Workflow stage transitions
+// Scout execution
 // ──────────────────────────────────────────────
+
+/**
+ * Execute the repo_scout subagent.
+ * Returns true if scout should proceed, false if it failed.
+ */
+async function runFlowSubagent(
+  role: PhenixSubagentRole,
+  task: string,
+  ctx: ExtensionContext,
+): Promise<RunPhenixSubagentResult> {
+  const wf = state.workflow;
+  const frontendModel = detectFrontendModelSet(ctx);
+  const modelStr = resolveRoleModel(frontendModel, role, (wf.difficulty ?? "D1") as any);
+  const tools = ROLE_TOOL_DEFAULTS[role];
+
+  ctx.ui.notify(
+    `${stageEmoji(wf.stage)} Running ${role} subagent (model: ${modelStr}, tools: ${tools.join(",")})`,
+    "info",
+  );
+
+  const result = await runPhenixSubagent(
+    {
+      role,
+      task,
+      cwd: ctx.cwd,
+      model: modelStr,
+      tools,
+      maxBytes: 50 * 1024,
+      maxLines: 2000,
+      timeoutMs: 120_000,
+    },
+    ctx,
+  );
+
+  // Write to comm channel
+  if (wf.commDir) {
+    writeSubagentResult(wf.commDir, wf.runId, role, result);
+    writeCommMessage(wf.commDir, {
+      id: `${role}-${Date.now()}`,
+      source: role,
+      target: "orchestrator",
+      type: result.status === "done" ? "status" : "error",
+      timestamp: result.endedAt,
+      payload: {
+        role,
+        status: result.status,
+        summary: result.summary.slice(0, 200),
+        truncated: result.truncated,
+        bytes: result.bytes,
+        lines: result.lines,
+      },
+    });
+  }
+
+  // Store result
+  wf.subagentResults[role] = result;
+
+  if (result.status === "done") {
+    ctx.ui.notify(
+      `${stageEmoji(wf.stage)} ${role} subagent complete: ${result.summary.slice(0, 100)}`,
+      "info",
+    );
+  } else {
+    ctx.ui.notify(
+      `\u26a0\ufe0f ${role} subagent ${result.status}: ${(result.error ?? result.summary).slice(0, 200)}`,
+      "warning",
+    );
+  }
+
+  return result;
+}
+
+async function runFlowScoutAndPlanner(ctx: ExtensionContext): Promise<void> {
+  const wf = state.workflow;
+  if (!piRef) return;
+
+  // Stage 1: Scout — gather repo evidence
+  await runFlowSubagent("scout",
+    `Scout the repository to find context for:\n\n${wf.originalPrompt}\n\nProduce a compact EvidencePacket with relevant files, symbols, edit points, and risks.`,
+    ctx);
+
+  const scoutResult = wf.subagentResults["scout"];
+
+  // Extract evidence for planner context
+  const evidenceSummary = scoutResult?.text?.slice(0, 3000) ?? "(no scout output)";
+
+  // Stage 2: Planner — produce plan using scout evidence
+  const planTask = `## Task\n${wf.originalPrompt}\n\n## Repo Scout Evidence\n${evidenceSummary}\n\n## Your role\nYou are the Planner/Architect.\n- Analyze the task and decompose it into ordered, actionable subtasks\n- Use the scout evidence above \u2014 do NOT re-explore the repository\n- State clear assumptions and success criteria\n- Design the overall approach \u2014 do NOT execute subtasks or modify files\n\nOutput a PlanContract JSON:\n\`\`\`json\n{"goal": "...", "subtasks": [{"id":"task_1","title":"...","role":"worker","profile":"implementation","objective":"...","success_criteria":["..."],"dependencies":[]}], "decisions": ["..."], "acceptance_criteria": ["..."], "non_goals": ["..."], "invariants": ["..."], "interaction_status": "ready"}\n\`\`\``;
+
+  await runFlowSubagent("planner", planTask, ctx);
+
+  // Extract plan from planner result
+  const plannerResult = wf.subagentResults["planner"];
+  wf.plan = plannerResult?.text ?? wf.plan;
+
+  // Mark that we ran real subagents
+  if (scoutResult?.status === "done") {
+    wf.ranRealSubagentScout = true;
+    try {
+      const packet = JSON.parse(scoutResult.text);
+      wf.scoutEvidence = packet as ExecEvidencePacket;
+    } catch {
+      // Plain text evidence
+    }
+  }
+}
+
+async function runFlowWorker(ctx: ExtensionContext): Promise<void> {
+  const wf = state.workflow;
+  const planForWorker = wf.plan ?? "(no plan)";
+  const workerTask = `## Task\n${wf.originalPrompt}\n\n## Plan\n${planForWorker.slice(0, 5000)}\n\n## Your role\nYou are the Developer/Worker.\n- Implement the subtasks from the plan using available tools\n- Edit files, run shell commands, use Git freely\n- Complete ALL subtasks before finishing\n- Summarize what was done and any noteworthy results`;
+
+  await runFlowSubagent("worker", workerTask, ctx);
+}
+
+async function runFlowVerifier(ctx: ExtensionContext): Promise<void> {
+  const wf = state.workflow;
+  const workerResult = wf.subagentResults["worker"];
+  const verifierTask = `## Task\n${wf.originalPrompt}\n\n## Plan\n${(wf.plan ?? "(no plan)").slice(0, 3000)}\n\n## Implementation Results\n${(workerResult?.text ?? "(no worker output)").slice(0, 5000)}\n\n## Your role\nYou are the Verifier/Critic.\n- Inspect the completed work against the plan\n- Are all subtasks complete? Are there errors or policy violations?\n- Do the success criteria pass?\n- Run checks (build, lint, test) to verify correctness\n\nOutput a VerificationReport JSON:\n\`\`\`json\n{"status": "pass"|"fail", "failures": [{"issue":"...","evidence":"...","ownerHint":null,"requiredFix":"..."}], "checks": [{"command":"...","result":"pass"|"fail"|"not_run"}], "scopeViolations": []}\n\`\`\``;
+
+  await runFlowSubagent("verifier", verifierTask, ctx);
+}
+
+function nextStageAfterClassify(difficulty: Difficulty): FlowStage {
+  if (isSimpleTask(difficulty)) {
+    // D0: skip scouting, skip planning — go straight to execute
+    return "executing";
+  }
+  // D1+: scouting first, then planning
+  return "scouting";
+}
 
 function nextStage(stage: FlowStage, verdict?: string): FlowStage {
   switch (stage) {
     case "classifying":
+      // Transition depends on difficulty — handled in advanceWorkflow
+      return "planning";
+    case "scouting":
       return "planning";
     case "planning":
       return "executing";
@@ -464,6 +603,13 @@ function advanceWorkflow(assistantText: string): void {
         wf.secrecy = "public";
         wf.changeKind = "unknown";
       }
+      break;
+    }
+
+    case "scouting": {
+      // Scouting is handled by the SubagentExecutor.
+      // If we end up here via the agent_end handler (instruct fallback),
+      // the scout evidence has been stored in the workflow state already.
       break;
     }
 
@@ -509,6 +655,14 @@ function advanceWorkflow(assistantText: string): void {
     return;
   }
 
+  // Handle transition from classifying based on difficulty
+  if (wf.stage === "classifying") {
+    const next = nextStageAfterClassify(wf.difficulty ?? "D1");
+    wf.stage = next;
+    persistState();
+    return;
+  }
+
   const next = nextStage(wf.stage, verdict ?? undefined);
 
   if (next === "done" || next === "idle") {
@@ -519,7 +673,7 @@ function advanceWorkflow(assistantText: string): void {
     return;
   }
 
-  // For simple tasks (D0/D1), skip planning/replanning — go straight to execute
+  // For D0 tasks, skip planning/replanning — go straight to execute
   if (
     isSimpleTask(wf.difficulty ?? "D1") &&
     (next === "planning" || next === "replanning")
@@ -578,6 +732,168 @@ export default function phenixFlow(pi: ExtensionAPI) {
     }
 
     const wf = state.workflow;
+
+    // Stages that run as real subagent pi processes (skip the normal agent turn)
+    if (wf.stage === "scouting") {
+      void (async () => {
+        try {
+          await runFlowScoutAndPlanner(ctx);
+        } catch (err) {
+          ctx.ui.notify(
+            `\u26a0\ufe0f Scout+Planner execution error: ${err instanceof Error ? err.message : String(err)}`,
+            "error",
+          );
+        }
+
+        // After scout+planner, advance to executing
+        wf.stage = "executing";
+        persistState();
+
+        ctx.ui.notify(
+          `${stageEmoji(wf.stage)} Advancing to: ${stageLabel(wf.stage)} (loop ${wf.loopCount}/${wf.maxLoops})`,
+          "info",
+        );
+        triggerNextStage(ctx);
+      })();
+
+      return {
+        systemPrompt: event.systemPrompt,
+        message: {
+          customType: "phenix-flow-stage",
+          content: `\ud83d\udd0e **Scout + Planner subagents running** \u2014 will transition to executing automatically`,
+          display: true,
+          details: {
+            stage: "scouting",
+            real_subagent: true,
+            subagent_roles: ["scout", "planner"],
+            model_set: detectFrontendModelSet(ctx),
+          },
+        },
+      };
+    }
+
+    if (wf.stage === "executing") {
+      void (async () => {
+        try {
+          await runFlowWorker(ctx);
+        } catch (err) {
+          ctx.ui.notify(
+            `\u26a0\ufe0f Worker execution error: ${err instanceof Error ? err.message : String(err)}`,
+            "error",
+          );
+        }
+
+        wf.stage = "verifying";
+        persistState();
+
+        ctx.ui.notify(
+          `${stageEmoji(wf.stage)} Advancing to: ${stageLabel(wf.stage)} (loop ${wf.loopCount}/${wf.maxLoops})`,
+          "info",
+        );
+        triggerNextStage(ctx);
+      })();
+
+      return {
+        systemPrompt: event.systemPrompt,
+        message: {
+          customType: "phenix-flow-stage",
+          content: `\ud83d\udd27 **Worker subagent running** \u2014 will transition to verifying automatically`,
+          display: true,
+          details: {
+            stage: "executing",
+            real_subagent: true,
+            subagent_role: "worker",
+            model_set: detectFrontendModelSet(ctx),
+          },
+        },
+      };
+    }
+
+    if (wf.stage === "verifying") {
+      void (async () => {
+        try {
+          await runFlowVerifier(ctx);
+        } catch (err) {
+          ctx.ui.notify(
+            `\u26a0\ufe0f Verifier execution error: ${err instanceof Error ? err.message : String(err)}`,
+            "error",
+          );
+        }
+
+        const verifierResult = wf.subagentResults["verifier"];
+        let verdict = "fail";
+        try {
+          const vJson = JSON.parse(verifierResult?.text ?? "{}");
+          verdict = vJson.status === "pass" ? "pass" : "fail";
+        } catch {
+          // default to fail
+        }
+
+        const next = verdict === "pass" ? "synthesizing" : "replanning";
+        wf.stage = next;
+        persistState();
+
+        ctx.ui.notify(
+          `${stageEmoji(wf.stage)} Verdict: ${verdict} \u2014 advancing to: ${stageLabel(next)} (loop ${wf.loopCount}/${wf.maxLoops})`,
+          "info",
+        );
+        triggerNextStage(ctx);
+      })();
+
+      return {
+        systemPrompt: event.systemPrompt,
+        message: {
+          customType: "phenix-flow-stage",
+          content: `\u2705 **Verifier subagent running** \u2014 will transition based on verdict`,
+          display: true,
+          details: {
+            stage: "verifying",
+            real_subagent: true,
+            subagent_role: "verifier",
+            model_set: detectFrontendModelSet(ctx),
+          },
+        },
+      };
+    }
+
+    if (wf.stage === "replanning") {
+      void (async () => {
+        try {
+          await runFlowWorker(ctx);
+        } catch (err) {
+          ctx.ui.notify(
+            `\u26a0\ufe0f Revised worker execution error: ${err instanceof Error ? err.message : String(err)}`,
+            "error",
+          );
+        }
+
+        wf.stage = "verifying";
+        persistState();
+
+        ctx.ui.notify(
+          `${stageEmoji(wf.stage)} Revised worker complete \u2014 re-verifying (loop ${wf.loopCount}/${wf.maxLoops})`,
+          "info",
+        );
+        triggerNextStage(ctx);
+      })();
+
+      return {
+        systemPrompt: event.systemPrompt,
+        message: {
+          customType: "phenix-flow-stage",
+          content: `\ud83d\udd04 **Revised worker subagent running** \u2014 will re-verify automatically`,
+          display: true,
+          details: {
+            stage: "replanning",
+            real_subagent: true,
+            subagent_role: "worker",
+            model_set: detectFrontendModelSet(ctx),
+          },
+        },
+      };
+    }
+
+    // Classifying and synthesizing are agent-turn stages — inject instructions
     const instruction = getStageInstruction(wf.stage, wf);
     const emoji = stageEmoji(wf.stage);
     const label = stageLabel(wf.stage);
@@ -594,15 +910,25 @@ export default function phenixFlow(pi: ExtensionAPI) {
           stage: wf.stage,
           difficulty: wf.difficulty,
           loopCount: wf.loopCount,
+          ranRealSubagentScout: wf.ranRealSubagentScout,
+          subagentRoles: wf.stage === "scouting" ? ["scout", "planner"]
+            : wf.stage === "executing" ? ["worker"]
+            : wf.stage === "verifying" ? ["verifier"]
+            : [],
         },
       },
     };
   });
-
   // ── agent_end: advance workflow state ──
 
   pi.on("agent_end", (event, ctx) => {
     if (!state.active || state.workflow.stage === "idle" || state.workflow.stage === "done" || state.workflow.stage === "failed") {
+      return;
+    }
+
+    // Subagent stages are handled in before_agent_start — skip agent_end for all of them
+    const subagentStages = ["scouting", "executing", "verifying", "replanning"];
+    if (subagentStages.includes(state.workflow.stage)) {
       return;
     }
 
@@ -673,8 +999,14 @@ export default function phenixFlow(pi: ExtensionAPI) {
           return;
         }
         const wf = state.workflow;
+        const scoutInfo = wf.ranRealSubagentScout
+          ? ` | real_subagent_scout: yes | frontend_model: ${detectFrontendModelSet(ctx)}`
+          : "";
+        const stageDetail = wf.stage === "planning" && wf.scoutEvidence
+          ? ` | scout_confidence: ${(wf.scoutEvidence as any).confidence ?? "?"}`
+          : "";
         ctx.ui.notify(
-          `${stageEmoji(wf.stage)} Flow: ${stageLabel(wf.stage)} | Difficulty: ${wf.difficulty ?? "?"} | Loop: ${wf.loopCount}/${wf.maxLoops}`,
+          `${stageEmoji(wf.stage)} Flow: ${stageLabel(wf.stage)} | Difficulty: ${wf.difficulty ?? "?"} | Loop: ${wf.loopCount}/${wf.maxLoops}${scoutInfo}${stageDetail}`,
           "info",
         );
         return;
@@ -710,6 +1042,14 @@ export default function phenixFlow(pi: ExtensionAPI) {
         prompt = prompt.replace(/--mode\s+\S+\s*/i, "").trim();
       }
 
+      // Parse scout control
+      let scoutOverride: "auto" | "force" | "skip" = "auto";
+      const scoutMatch = trimmed.match(/--scout\s+(auto|force|skip)/i);
+      if (scoutMatch) {
+        scoutOverride = scoutMatch[1].toLowerCase() as "auto" | "force" | "skip";
+        prompt = prompt.replace(/--scout\s+\S+\s*/i, "").trim();
+      }
+
       // Remove other known flags
       prompt = prompt
         .replace(/--target-state\s+\S+\s*/g, "")
@@ -717,28 +1057,55 @@ export default function phenixFlow(pi: ExtensionAPI) {
 
       if (!prompt) {
         ctx.ui.notify(
-          "Usage: /flow <prompt>\n  or: /flow --difficulty D2 <prompt>\n  or: /flow --mode ask_if_unclear <prompt>\n  or: /flow status\n  or: /flow cancel",
+          "Usage: /flow <prompt>\n  or: /flow --difficulty D2 <prompt>\n  or: /flow --mode ask_if_unclear <prompt>\n  or: /flow --scout auto|force|skip <prompt>\n  or: /flow status\n  or: /flow cancel",
           "warning",
         );
         return;
       }
 
-      // Initialize workflow
+      // Determine difficulty
       const difficulty = difficultyHint ?? classifyDifficulty(prompt);
-      const complex = !isSimpleTask(difficulty);
+
+      // Determine if scout should run
+      const shouldScout = scoutOverride === "force"
+        ? true
+        : scoutOverride === "skip"
+          ? false
+          : shouldRunRepoScout({
+              difficulty,
+              prompt,
+              exactPathsMentioned: [],
+              exactSymbolsMentioned: [],
+            });
+
+      // Determine initial stage
+      let initialStage: FlowStage;
+      if (isSimpleTask(difficulty)) {
+        // D0: direct execute
+        initialStage = "executing";
+      } else {
+        // D1+: classify first, then scout, then plan
+        initialStage = shouldScout ? "classifying" : "planning";
+      }
 
       state.active = true;
+      const runId = `flow-${Date.now()}`;
+      const commDir = ensureCommChannelDir(ctx.cwd);
       state.workflow = {
         ...DEFAULT_WORKFLOW,
-        stage: complex ? "classifying" : "executing",
+        stage: initialStage,
         originalPrompt: prompt,
         difficulty: difficulty,
         plannerInteractionMode: plannerMode,
+        runId,
+        commDir,
       };
       persistState();
 
+      const frontendModel = detectFrontendModelSet(ctx);
       ctx.ui.notify(
-        `${stageEmoji(state.workflow.stage)} Starting Phenix flow: **${prompt.length > 80 ? prompt.slice(0, 80) + "…" : prompt}** (${difficulty}${complex ? ", multi-stage" : ", single-agent"})`,
+        `${stageEmoji(state.workflow.stage)} Starting Phenix flow: **${prompt.length > 80 ? prompt.slice(0, 80) + "…" : prompt}** (${difficulty}${!isSimpleTask(difficulty) && shouldScout ? ", with scout" : !isSimpleTask(difficulty) ? ", no scout" : ", D0 direct"})` +
+        `\nFrontend model set: ${frontendModel}`,
         "info",
       );
 

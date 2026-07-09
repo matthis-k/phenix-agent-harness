@@ -53,8 +53,17 @@
           telemetry = false;
 
           extraPackages = [
-            pkgs.nil
-            pkgs.typescript-language-server
+            # LSP servers — read-only code intelligence
+            pkgs.nil                         # Nix
+            pkgs.typescript-language-server   # TypeScript, JavaScript
+            pkgs.rust-analyzer                # Rust
+            pkgs.lua-language-server          # Lua
+            pkgs.taplo                        # TOML (taplo lsp)
+            pkgs.pyright                      # Python
+            pkgs.vscode-langservers-extracted # JSON, HTML, CSS, Markdown, ESLint
+            pkgs.yaml-language-server         # YAML, Kubernetes manifests
+
+            # Runtime
             pkgs.nodejs
             pkgs.jq
             pkgs.ripgrep
@@ -157,17 +166,27 @@
               test -e ${phenixPiConfigDir}/package.json
               test -e ${phenixPiConfigDir}/pi/extensions/lsp.ts
               test -e ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
+              test -e ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
+              test -e ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+              test -e ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
               test -d ${phenixPiConfigDir}/pi/prompts
               test -d ${phenixPiConfigDir}/pi/skills
+              test -d ${phenixPiConfigDir}/pi/agents
               test -d ${phenixPiConfigDir}/pi/extensions/phenix-tools
               test -e ${phenixPiConfigDir}/pi/extensions/phenix-tools/index.ts
               test -e ${phenixPiConfigDir}/pi/themes/catppuccin-mocha.json
+
+              # Verify all agent markdown files exist
+              for agent in repo_scout planner worker verifier reviewer debugger; do
+                test -f "${phenixPiConfigDir}/pi/agents/$agent.md"
+              done
 
               jq -e '.name == "catppuccin-mocha"' ${phenixPiConfigDir}/pi/themes/catppuccin-mocha.json
               jq -e '.colors.accent == "mauve"' ${phenixPiConfigDir}/pi/themes/catppuccin-mocha.json
               jq -e '.colors.bashMode == "peach"' ${phenixPiConfigDir}/pi/themes/catppuccin-mocha.json
 
               jq -e '.pi.extensions == ["./pi/extensions"]' ${phenixPiConfigDir}/package.json
+              jq -e '.pi.agents == ["./pi/agents"]' ${phenixPiConfigDir}/package.json
               jq -e '.pi.skills == ["./pi/skills"]' ${phenixPiConfigDir}/package.json
               jq -e '.pi.prompts == ["./pi/prompts"]' ${phenixPiConfigDir}/package.json
               jq -e '.pi.themes == ["./pi/themes"]' ${phenixPiConfigDir}/package.json
@@ -176,7 +195,9 @@
               jq -e '.peerDependencies."@earendil-works/pi-ai" == "*"' ${phenixPiConfigDir}/package.json
               jq -e '.peerDependencies."@earendil-works/pi-agent-core" == "*"' ${phenixPiConfigDir}/package.json
               jq -e '.peerDependencies."@earendil-works/pi-tui" == "*"' ${phenixPiConfigDir}/package.json
-              jq -e '.dependencies | not' ${phenixPiConfigDir}/package.json
+
+              # Verify pi-context-tools dependency
+              jq -e '.dependencies."pi-context-tools" == "0.1.1"' ${phenixPiConfigDir}/package.json
 
               grep -F -q 'name: "lsp_diagnostics"' ${phenixPiConfigDir}/pi/extensions/lsp.ts
               grep -F -q 'name: "lsp_hover"' ${phenixPiConfigDir}/pi/extensions/lsp.ts
@@ -188,9 +209,24 @@
               grep -F -q 'phenix-router.routes.json' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
               ! grep -F -q 'setModel(' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
 
+              # Verify subagent executor has NO direct model API calls
+              ! grep -F -q 'streamSimple' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
+              ! grep -F -q '@earendil-works/pi-ai/compat' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
+              ! grep -F -q 'createAssistantMessageEventStream' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
+
+              # Verify subagent executor uses child process spawning
+              grep -F -q 'spawn' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
+              grep -F -q -e '--mode' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
+              grep -F -q -e '--no-session' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
+              grep -F -q -e '--model' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
+              grep -F -q -e '--tools' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
+              grep -F -q 'PI_SUBAGENT_DEPTH' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
+              grep -F -q 'runPhenixSubagent' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
+              grep -F -q 'parsePiJsonOutput' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
+              grep -F -q 'resolveRoleModel' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
+              grep -F -q 'ROLE_TOOL_DEFAULTS' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
 
               # Verify phenix-flow extension for multi-agent workflow
-              test -e ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
               grep -F -q 'pi.registerCommand("flow"' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
               grep -F -q 'before_agent_start' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
               grep -F -q 'agent_end' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
@@ -198,11 +234,10 @@
               grep -F -q 'executing' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
               grep -F -q 'verifying' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
               grep -F -q 'sendUserMessage' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+              grep -F -q 'ranRealSubagentScout' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
               ! grep -F -q 'setModel(' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
-              # Verify phenix-tools extension exists with all 11 tools
 
               # Verify phenix-runtime module with all data models
-              test -e ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
               grep -F -q 'PlanContract' ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
               grep -F -q 'TaskNode' ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
               grep -F -q 'PublicCard' ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
@@ -213,14 +248,33 @@
               grep -F -q 'scopeContainsPath' ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
               grep -F -q 'DEFAULT_PERMISSIONS' ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
               ! grep -F -q 'setModel(' ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
+
               # Verify router exposes all 5 frontend modes
               grep -F -q '"opencode-go"' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
               grep -F -q '"gpt"' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
               grep -F -q '"mixed"' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
               grep -F -q 'FRONTEND_MODELS' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
-              # Verify router retry respects flow active signal
-              grep -F -q 'flowActive' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
-              test -d ${phenixPiConfigDir}/pi/extensions/phenix-tools
+
+              # Verify router has no retry/mode artifacts
+              ! grep -F -q 'flowActive' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
+              ! grep -F -q 'maxFollowUpRetries' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
+              ! grep -F -q 'FailureEvidence' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
+              ! grep -F -q 'MODE_DESCRIPTIONS' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
+
+              # Verify routing matrix module exists in pi/lib/
+              test -e ${phenixPiConfigDir}/pi/lib/phenix-routing-matrix.ts
+              ! test -e ${phenixPiConfigDir}/pi/extensions/phenix-routing-matrix.ts
+              grep -F -q 'resolveRouting' ${phenixPiConfigDir}/pi/lib/phenix-routing-matrix.ts
+              grep -F -q 'classifyAndRoute' ${phenixPiConfigDir}/pi/lib/phenix-routing-matrix.ts
+              grep -F -q 'classifyDifficulty' ${phenixPiConfigDir}/pi/lib/phenix-routing-matrix.ts
+              grep -F -q 'classifySecrecy' ${phenixPiConfigDir}/pi/lib/phenix-routing-matrix.ts
+              grep -F -q 'classifyChangeKind' ${phenixPiConfigDir}/pi/lib/phenix-routing-matrix.ts
+              grep -F -q 'VALIDATION_PROFILES' ${phenixPiConfigDir}/pi/lib/phenix-routing-matrix.ts
+              grep -F -q 'IMPLEMENTER_RULES' ${phenixPiConfigDir}/pi/lib/phenix-routing-matrix.ts
+              grep -F -q 'VERIFIER_RULES' ${phenixPiConfigDir}/pi/lib/phenix-routing-matrix.ts
+              grep -F -q '../lib/phenix-routing-matrix' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
+
+              # Verify phenix-tools extension with all 11 tools
               grep -F -q 'registerRead' ${phenixPiConfigDir}/pi/extensions/phenix-tools/index.ts
               grep -F -q 'registerSearch' ${phenixPiConfigDir}/pi/extensions/phenix-tools/index.ts
               grep -F -q 'registerFind' ${phenixPiConfigDir}/pi/extensions/phenix-tools/index.ts
@@ -238,11 +292,10 @@
                 test -f "${phenixPiConfigDir}/pi/extensions/phenix-tools/$tool"
               done
 
-              # Verify no SOPS/auth handling
+              # Verify no SOPS/auth handling in tools
               ! grep -r -q 'sops\|secretFileEnv\|auth.json\|credential' ${phenixPiConfigDir}/pi/extensions/phenix-tools/
 
               # Verify router status bar indicator is removed
-              # (No calls to ctx.ui.setStatus for the phenix-router key)
               ! grep -F -q 'setStatus("phenix-router"' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
 
               touch $out

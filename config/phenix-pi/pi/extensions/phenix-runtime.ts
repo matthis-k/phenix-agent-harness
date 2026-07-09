@@ -10,6 +10,14 @@
  *
  * To use: import { ... } from "./phenix-runtime" from event handlers.
  * The models here are plain TypeScript types and pure functions.
+ *
+ * Terminology notes:
+ *   TaskRecord / TaskNode = state/metadata record
+ *   SubagentRun          = actual child agent model execution
+ *
+ *   PHENIX_ENABLE_SUBAGENTS is DEPRECATED. Use PHENIX_ENABLE_TASK_NESTING
+ *   for task record nesting control. Subagent execution is controlled by
+ *   the SubagentExecutor and RECURSION_DEFAULTS in phenix-subagent-executor.ts.
  */
 
 // ══════════════════════════════════════════════

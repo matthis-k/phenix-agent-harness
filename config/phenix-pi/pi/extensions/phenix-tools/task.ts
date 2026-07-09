@@ -1,7 +1,7 @@
 /**
- * task tool — durable task/subtask records with optional subagent integration.
+ * task tool — durable task/subtask records with task nesting support.
  *
- * Phase 1: task declaration + state management. Phase 2: actual subagent spawning.
+ * Phase 1: task declaration + state management. Phase 2: task nesting (not subagent execution — see phenix-subagent-executor.ts for real subagent runs).
  * Current implementation stores task records in session state.
  *
  * Portions derived from can1357/oh-my-pi, MIT License.
@@ -34,14 +34,14 @@ export function registerTask(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "task",
     label: "Task",
-    description: "Durable task/subtask records with status tracking. Phase 1: declaration and state management. Phase 2: subagent spawning with PHENIX_ENABLE_SUBAGENTS=1.",
-    promptSnippet: "Task/subtask management with status tracking and optional subagent spawning.",
+    description: "Durable task/subtask records with status tracking. Phase 1: declaration and state management. Phase 2: task nesting with PHENIX_ENABLE_TASK_NESTING=1.",
+    promptSnippet: "Task/subtask records for workflow state tracking. Subagent execution uses phenix-subagent-executor.",
     promptGuidelines: [
       "Use task for durable task records with structured status tracking.",
       "Phase 1: create, list, read, update, finish task records in session state.",
-      "Phase 2 (PHENIX_ENABLE_SUBAGENTS=1): spawn subagents with restricted tool sets.",
+      "Phase 2 (PHENIX_ENABLE_TASK_NESTING=1): allow deeper task nesting. Real subagent execution uses phenix-subagent-executor.",
       "Max nesting depth is 1 by default to prevent runaway subagents.",
-      "Subagents get read-only tools + edit preview (no direct apply, no commit/push)."
+      "Deep task nesting requires PHENIX_ENABLE_TASK_NESTING=1. Real subagent execution is in phenix-subagent-executor."
     ],
     parameters: Type.Object({
       op: Type.Union([
@@ -90,8 +90,8 @@ export function registerTask(pi: ExtensionAPI): void {
               return { content: [{ type: "text", text: `Parent task not found: ${params.parentId}` }], details: {} };
             }
             const depth = countDepth(state.tasks, params.parentId);
-            if (depth >= 1 && !process.env.PHENIX_ENABLE_SUBAGENTS) {
-              return { content: [{ type: "text", text: "Max task depth (1) reached. Set PHENIX_ENABLE_SUBAGENTS=1 to allow deeper nesting." }], details: {} };
+            if (depth >= 1 && !process.env.PHENIX_ENABLE_TASK_NESTING) {
+              return { content: [{ type: "text", text: "Max task depth (1) reached. Set PHENIX_ENABLE_TASK_NESTING=1 to allow deeper nesting." }], details: {} };
             }
           }
 

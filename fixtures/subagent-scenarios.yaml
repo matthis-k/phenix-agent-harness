@@ -1,0 +1,389 @@
+# Test fixtures for real subagent execution.
+#
+# These tests validate the contract of the SubagentExecutor, scouting stage,
+# and shouldRunRepoScout trigger. They are NOT run through Pi — they validate
+# the exported pure functions and interfaces that the executor depends on.
+#
+# Test scenarios:
+#   1. D0 skips scout
+#   2. D1 runs scout first
+#   3. D2 workflow change runs scout first
+#   4. Scout is read-only (tool policy test)
+#   5. Worker out-of-scope issue (scope resolution tests)
+#   6. Verifier is real subagent (check profile/routing)
+#   7. No fake subagents (executor reports availability)
+
+cases:
+  # ──────────────────────────────────────────────
+  # SCENARIO 1: D0 skips scout
+  # ──────────────────────────────────────────────
+  - id: d0-skips-scout
+    request: "Fix typo in README line X."
+    test_type: shouldRunRepoScout
+    input:
+      difficulty: D0
+      prompt: "Fix typo in README line X."
+      exactPathsMentioned:
+        - "README"
+      exactSymbolsMentioned: []
+    expected: false
+    notes: >
+      D0 mechanical typo fix with exact path given.
+      shouldRunRepoScout must return false.
+      No repo_scout subagent should be created.
+      Flow should go directly to executing stage.
+
+  - id: d0-ambiguous-complexity
+    request: "Fix the typo in the error handler."
+    test_type: shouldRunRepoScout
+    input:
+      difficulty: D0
+      prompt: "Fix the typo in the error handler."
+      exactPathsMentioned: []
+      exactSymbolsMentioned: []
+    expected: false
+    notes: >
+      D0 with no exact path but mechanical keyword.
+      Still no scout — D0 always skips scout.
+      Classify → Executing (D0 pipeline).
+
+  # ──────────────────────────────────────────────
+  # SCENARIO 2: D1 runs scout first
+  # ──────────────────────────────────────────────
+  - id: d1-runs-scout
+    request: "Fix /flow argument parsing."
+    test_type: shouldRunRepoScout
+    input:
+      difficulty: D1
+      prompt: "Fix /flow argument parsing."
+      exactPathsMentioned: []
+      exactSymbolsMentioned: []
+    expected: true
+    notes: >
+      D1 repo change with no exact context.
+      shouldRunRepoScout must return true.
+      Flow: Classifying → Scouting (real subagent) → Planning → Executing → Verifying.
+
+  - id: d1-with-exact-path-still-scout
+    request: "Update the rollback logic in parseSessionEntries."
+    test_type: shouldRunRepoScout
+    input:
+      difficulty: D1
+      prompt: "Update the rollback logic in parseSessionEntries."
+      exactPathsMentioned:
+        - "parseSessionEntries"
+      exactSymbolsMentioned:
+        - "rollback"
+    expected: true
+    notes: >
+      Even with exact path, D1+ always scouts.
+      The task requires understanding the existing rollback logic,
+      surrounding context, and callers. Scout provides that context.
+
+  # ──────────────────────────────────────────────
+  # SCENARIO 3: D2 workflow/routing change runs scout
+  # ──────────────────────────────────────────────
+  - id: d2-workflow-change
+    request: "Implement real subagents for recursive workflow."
+    test_type: shouldRunRepoScout
+    input:
+      difficulty: D2
+      prompt: "Implement real subagents for recursive workflow."
+      exactPathsMentioned: []
+      exactSymbolsMentioned: []
+    expected: true
+    notes: >
+      D2 architectural change.
+      shouldRunRepoScout must return true.
+      Flow: Classifying → Scouting → Planning → Executing → Verifying.
+
+  - id: d3-high-risk-change
+    request: "Update routing to support new auth provider."
+    test_type: shouldRunRepoScout
+    input:
+      difficulty: D3
+      prompt: "Update routing to support new auth provider."
+      exactPathsMentioned: []
+      exactSymbolsMentioned: []
+    expected: true
+    notes: >
+      D3 high-risk change involving auth.
+      shouldRunRepoScout must return true.
+      Sensitive keywords match "auth".
+
+  - id: nix-change-triggers-scout
+    request: "Add new flake input for Rust toolchain."
+    test_type: shouldRunRepoScout
+    input:
+      difficulty: D1
+      prompt: "Add new flake input for Rust toolchain."
+      exactPathsMentioned: []
+      exactSymbolsMentioned: []
+    expected: true
+    notes: >
+      D1 task touching "nix" and "rust" keywords.
+      Sensitive keywords match, scout required.
+
+  # ──────────────────────────────────────────────
+  # SCENARIO 4: Scout is read-only
+  # ──────────────────────────────────────────────
+  - id: scout-read-only-permissions
+    test_type: profile_check
+    profile: repo_scout
+    expected:
+      role: scout
+      permissions:
+        read: true
+        edit: false
+        shell: read_only
+        network: false
+        canDelegate: false
+        canAskUser: false
+      toolPolicy:
+        allowedTools:
+          - find
+          - search
+          - read_range
+          - ast_grep
+          - lsp_symbols
+        deniedTools:
+          - edit
+          - write
+          - resolve
+          - bash
+          - job
+          - task
+          - todo
+    notes: >
+      scout profile must be read-only.
+      No edit/write tools allowed.
+      Shell is read_only.
+      Tool policy enforcement: "prompt_only" (Pi API limitation).
+
+  - id: scout-cannot-edit-profile
+    test_type: profile_permissions
+    profile: repo_scout
+    expected:
+      edit: false
+      canDelegate: false
+      canAskUser: false
+    notes: >
+      Verify scout cannot edit, delegate, or ask user.
+
+  # ──────────────────────────────────────────────
+  # SCENARIO 5: Worker out-of-scope issue
+  # ──────────────────────────────────────────────
+  - id: worker-scope-resolution
+    test_type: scope_resolution
+    worker_scope:
+      allowedPaths:
+        - "config/phenix-pi/pi/extensions/phenix-flow.ts"
+      forbiddenPaths: []
+    out_of_scope_path: "config/phenix-pi/pi/extensions/phenix-router.ts"
+    parent_scope:
+      allowedPaths:
+        - "config/phenix-pi/pi/extensions"
+      forbiddenPaths: []
+    expected:
+      worker_can_edit: true
+      worker_can_edit_router: false
+      parent_scope_contains_router: true
+    notes: >
+      Worker scoped to phenix-flow.ts cannot edit phenix-router.ts.
+      Parent (supervisor) scope covers both.
+      Scope issue should be forwarded to parent.
+
+  # ──────────────────────────────────────────────
+  # SCENARIO 6: Verifier is real subagent
+  # ──────────────────────────────────────────────
+  - id: verifier-real-subagent-profile
+    test_type: profile_check
+    profile: verifier_patch
+    expected:
+      role: verifier
+      permissions:
+        read: true
+        edit: false
+        shell: safe
+        network: false
+        canDelegate: false
+        canAskUser: false
+      toolPolicy:
+        allowedTools:
+          - read_range
+          - diff
+          - test
+          - diagnostics
+          - search
+          - find
+        deniedTools:
+          - edit
+          - write
+          - resolve
+          - commit
+          - push
+    notes: >
+      Verifier is a separate profile with read-only + check tools.
+      It runs as a SubagentRun, not a staged turn of the main agent.
+      Tool policy enforced at "prompt_only" level.
+
+  - id: d1-flow-includes-verifier
+    test_type: flow_stage_sequence
+    difficulty: D1
+    expected_stages:
+      - classifying
+      - scouting
+      - planning
+      - executing
+      - verifying
+      - synthesizing
+      - done
+    notes: >
+      For D1+, the full pipeline runs through all stages.
+      Verifying is a separate agent turn with verification instruction.
+      A real verifier subagent (profile=verifier_patch) should be created.
+
+  # ──────────────────────────────────────────────
+  # SCENARIO 7: No fake subagents
+  # ──────────────────────────────────────────────
+  - id: no-fake-subagents-executor-check
+    test_type: executor_availability
+    expected:
+      # SubagentExecutor provides runSubagent() interface.
+      # It does NOT silently fall back to task records.
+      # If model not available, it returns status="failed" with clear error.
+      # If enforcement not possible, toolPolicyEnforced="prompt_only".
+      interface_provides:
+        - runSubagent
+        - buildScoutContextPack
+        - shouldRunRepoScout
+        - resolveSubagentModel
+        - detectFrontendModelSet
+      explicit_unavailability_message_contains: "Subagent execution unavailable"
+      does_not_provide:
+        - fakeSubagent
+        - recordOnlySubagent
+        - mockAgent
+    notes: >
+      The SubagentExecutor either runs a real model invocation
+      or reports explicit unavailability.
+      It does NOT fake success by merely creating task records.
+
+  - id: task-tool-does-not-claim-subagent
+    test_type: task_tool_terminology
+    expected:
+      # The task tool's prompt guidelines should reference
+      # task nesting, not subagent spawning.
+      description_contains: "task nesting"
+      prompt_snippet_contains: "Task/subtask records"
+      does_not_contain:
+        - "spawn subagents"
+        - "subagent spawning"
+    notes: >
+      The task tool in phenix-tools/task.ts should not claim to
+      spawn subagents. That capability lives in phenix-subagent-executor.ts.
+
+  # ──────────────────────────────────────────────
+  # TERMINOLOGY: TaskNode vs SubagentRun
+  # ──────────────────────────────────────────────
+  - id: terminology-tasknode-vs-subagent
+    test_type: terminology_check
+    expected:
+      # phenix-runtime.ts comment block must distinguish:
+      TaskNode_is: state record
+      SubagentRun_is: actual child agent execution
+      PHENIX_ENABLE_SUBAGENTS_is: deprecated in favor of PHENIX_ENABLE_TASK_NESTING
+    notes: >
+      Terminology is critical. TaskRecord/TaskNode = metadata only.
+      SubagentRun = actual model execution.
+      The flag was renamed to reflect this.
+
+  # ──────────────────────────────────────────────
+  # MODEL SET HANDLING
+  # ──────────────────────────────────────────────
+  - id: model-set-resolution-free
+    test_type: model_resolution
+    frontend_model_set: "phenix/free"
+    role: scout
+    expected:
+      provider: opencode
+      model: deepseek-v4-flash-free
+    notes: >
+      phenix/free frontend maps scout to opencode/deepseek-v4-flash-free.
+
+  - id: model-set-resolution-mixed
+    test_type: model_resolution
+    frontend_model_set: "phenix/mixed"
+    role: verifier
+    expected:
+      provider: openai
+      model: gpt-5.5
+    notes: >
+      phenix/mixed frontend maps verifier to openai/gpt-5.5.
+
+  - id: model-set-resolution-go
+    test_type: model_resolution
+    frontend_model_set: "phenix/opencode-go"
+    role: worker
+    expected:
+      provider: opencode
+      model: deepseek-v4-flash
+    notes: >
+      phenix/opencode-go frontend maps worker to opencode/deepseek-v4-flash.
+
+  # ──────────────────────────────────────────────
+  # EVIDENCE PACKET SCHEMA
+  # ──────────────────────────────────────────────
+  - id: evidence-packet-schema
+    test_type: schema_check
+    schema_name: EvidencePacket
+    required_fields:
+      - summary
+      - relevantFiles
+      - symbols
+      - currentBehavior
+      - likelyEditPoints
+      - risks
+      - confidence
+    field_types:
+      summary: string
+      relevantFiles: array
+      relevantFiles[].path: string
+      relevantFiles[].lines: string
+      relevantFiles[].reason: string
+      symbols: array
+      symbols[].name: string
+      symbols[].location: string
+      symbols[].reason: string
+      currentBehavior: string
+      likelyEditPoints: array
+      likelyEditPoints[].path: string
+      likelyEditPoints[].reason: string
+      risks: array
+      risks[]: string
+      confidence: string (low|medium|high)
+    notes: >
+      The EvidencePacket schema must include all required fields.
+      Scout output must conform to this schema.
+
+  # ──────────────────────────────────────────────
+  # RECURSION SAFETY CONTROLS
+  # ──────────────────────────────────────────────
+  - id: recursion-safety-defaults
+    test_type: recursion_defaults
+    expected:
+      maxDepth: 2
+      maxChildrenPerTask: 4
+      maxTotalSubagents: 8
+      maxTurnsPerSubagent:
+        repo_scout: 1
+        worker: 3
+        verifier: 1
+      maxToolCallsPerSubagent:
+        repo_scout: 10
+        worker: 20
+        verifier: 10
+    notes: >
+      Recursion controls prevent runaway subagent spawning.
+      Default max depth is 2 (parent → child → grandchild).
+      Default max turns per subagent is conservative for each profile.
