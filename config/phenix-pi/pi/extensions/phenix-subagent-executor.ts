@@ -47,7 +47,9 @@ export type PhenixSubagentRole =
   | "worker"
   | "verifier"
   | "reviewer"
-  | "debugger";
+  | "debugger"
+  | "critic"
+  | "final_reviewer";
 
 export interface RunPhenixSubagentInput {
   role: PhenixSubagentRole;
@@ -261,6 +263,8 @@ export const AGENT_FILE_BY_ROLE: Record<PhenixSubagentRole, string> = {
   verifier: "verifier.md",
   reviewer: "reviewer.md",
   debugger: "debugger.md",
+  critic: "planner.md",
+  final_reviewer: "reviewer.md",
 };
 
 /**
@@ -279,6 +283,8 @@ export const ROLE_TOOL_DEFAULTS: Record<PhenixSubagentRole, string[]> = {
   verifier: ["read", "find", "search", "grep", "ls", "lsp", "bash"],
   reviewer: ["read", "find", "search", "grep", "ls", "lsp"],
   debugger: ["read", "find", "search", "grep", "ls", "lsp", "bash"],
+  critic: ["read", "find", "search", "grep", "ls", "lsp"],
+  final_reviewer: ["read", "find", "search", "grep", "ls", "lsp"],
 };
 
 // ══════════════════════════════════════════════
@@ -437,107 +443,482 @@ export const AGENT_COMM_MCP_OPS = [
 ] as const;
 
 // ══════════════════════════════════════════════
-// 6. MODEL RESOLVER
+// 6. MODEL ROUTING MATRIX
 // ══════════════════════════════════════════════
 
 /**
- * Default subagent model mapping.
+ * Phenix model variants. The user selects `phenix` as model then picks a variant.
+ * Each variant defines a routing matrix: <variant>.<role>.<difficulty> → model.
  *
- * IMPORTANT: This is a FALLBACK table only.
- * The primary model routing source is the Phenix Router / routing matrix
- * (phenix-router.ts + phenix-routing-matrix.ts), which owns the full
- * routing policy including difficulty-based routing, role-based routing,
- * and safety/denial policy.
+ * Models differ by difficulty to balance cost and capability:
+ *   D0 (trivial/mechanical)  → cheap models, implementer-only
+ *   D1 (repo-aware but bounded) → cheap scout/impl, capable planner/verifier
+ *   D2 (architectural)       → capable models, critic added
+ *   D3 (high-risk/ambiguous) → strongest models, final_reviewer added
  *
- * This table exists so subagent execution works even without the router
- * being configured. It is NOT the source of truth for routing policy.
- * Do not duplicate routing policy logic here.
+ * Variants:
+ *   opencode-go — OpenCode Go models (dollar-value billing; cheap for flash)
+ *   free        — opencode/deepseek-v4-flash-free for all roles
+ *   gpt         — ChatGPT Plus GPT models via capability aliases (fast/thinking/pro)
+ *   mixed       — GPT quota only for D2/D3 planner/verifier/final-review
+ *
+ * OpenCode Go limits are dollar-value based, so cheap models allow more requests.
+ * DeepSeek V4 Flash and MiMo V2.5 are high-volume cheap routes.
+ * GLM-5.2/5.1 and Qwen3.7 Max are expensive high-reasoning routes.
+ * Kimi K2.7 Code is the preferred code implementation route.
+ *
+ * The frontend (main pi agent) receives only status updates;
+ * subagents do the heavy lifting using their role-assigned model.
+ * The frontend model is also part of the variant's model set.
  */
-const DEFAULT_SUBAGENT_MODELS: Record<string, Record<string, ModelSet>> = {
-  "phenix/free": {
-    scout: { provider: "opencode", model: "deepseek-v4-flash-free" },
-    worker: { provider: "opencode", model: "deepseek-v4-flash-free" },
-    verifier: { provider: "opencode", model: "deepseek-v4-flash-free" },
-    default: { provider: "opencode", model: "deepseek-v4-flash-free" },
-  },
-  "phenix/mixed": {
-    scout: { provider: "opencode", model: "deepseek-v4-flash-free" },
-    worker: { provider: "opencode", model: "deepseek-v4-flash-free" },
-    verifier: { provider: "openai", model: "gpt-5.5" },
-    default: { provider: "opencode", model: "deepseek-v4-flash-free" },
-  },
-  "phenix/opencode-go": {
-    scout: { provider: "opencode", model: "deepseek-v4-flash" },
-    worker: { provider: "opencode", model: "deepseek-v4-flash" },
-    verifier: { provider: "opencode", model: "deepseek-v4-flash" },
-    default: { provider: "opencode", model: "deepseek-v4-flash" },
-  },
-  "phenix/gpt": {
-    scout: { provider: "openai", model: "gpt-5.5" },
-    worker: { provider: "openai", model: "gpt-5.5" },
-    verifier: { provider: "openai", model: "gpt-5.5" },
-    default: { provider: "openai", model: "gpt-5.5" },
-  },
+
+export const DEFAULT_MODEL = "opencode-go/deepseek-v4-flash";
+
+export type PhenixVariant = "opencode-go" | "free" | "gpt" | "mixed";
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type CostMode = "quality" | "balanced" | "economy";
+
+/**
+ * Which models are visible to the "opencode-go" provider.
+ * Used for fallback resolution when a configured model is unavailable.
+ */
+export const OPENCODE_GO_AVAILABLE_MODELS: string[] = [
+  "opencode-go/glm-5.2",
+  "opencode-go/glm-5.1",
+  "opencode-go/kimi-k2.7-code",
+  "opencode-go/kimi-k2.6",
+  "opencode-go/mimo-v2.5",
+  "opencode-go/mimo-v2.5-pro",
+  "opencode-go/minimax-m3",
+  "opencode-go/minimax-m2.7",
+  "opencode-go/minimax-m2.5",
+  "opencode-go/qwen3.7-max",
+  "opencode-go/qwen3.7-plus",
+  "opencode-go/qwen3.6-plus",
+  "opencode-go/deepseek-v4-pro",
+  "opencode-go/deepseek-v4-flash",
+];
+
+/**
+ * Per-role preference lists for fallback resolution.
+ * If a configured model is unavailable, the next model in the preference
+ * list is tried. Always falls back to opencode-go/deepseek-v4-flash.
+ */
+export const ROLE_PREFERENCES: Record<string, string[]> = {
+  scout: [
+    "opencode-go/deepseek-v4-flash",
+    "opencode-go/deepseek-v4-pro",
+    "opencode-go/kimi-k2.7-code",
+    "opencode-go/mimo-v2.5",
+    "opencode-go/deepseek-v4-flash",
+  ],
+  planner: [
+    "opencode-go/qwen3.7-plus",
+    "opencode-go/glm-5.1",
+    "opencode-go/glm-5.2",
+    "opencode-go/qwen3.7-max",
+    "opencode-go/deepseek-v4-pro",
+    "opencode-go/deepseek-v4-flash",
+  ],
+  implementer: [
+    "opencode-go/kimi-k2.7-code",
+    "opencode-go/deepseek-v4-flash",
+    "opencode-go/deepseek-v4-pro",
+    "opencode-go/kimi-k2.6",
+    "opencode-go/mimo-v2.5",
+    "opencode-go/deepseek-v4-flash",
+  ],
+  verifier: [
+    "opencode-go/glm-5.1",
+    "opencode-go/glm-5.2",
+    "opencode-go/deepseek-v4-pro",
+    "opencode-go/qwen3.7-plus",
+    "opencode-go/deepseek-v4-flash",
+  ],
+  critic: [
+    "opencode-go/deepseek-v4-pro",
+    "opencode-go/qwen3.7-max",
+    "opencode-go/qwen3.7-plus",
+    "opencode-go/glm-5.1",
+    "opencode-go/deepseek-v4-flash",
+  ],
+  final_reviewer: [
+    "opencode-go/glm-5.2",
+    "opencode-go/glm-5.1",
+    "opencode-go/qwen3.7-max",
+    "opencode-go/deepseek-v4-flash",
+  ],
 };
 
-export function resolveSubagentModel(
-  frontendModelSet: string,
-  role: SubagentRole,
-  _difficulty: Difficulty,
-  _ctx: ExtensionContext,
-): { modelSet: ModelSet; available: boolean } {
-  const slots = DEFAULT_SUBAGENT_MODELS[frontendModelSet];
-  if (!slots) {
-    const fallback = DEFAULT_SUBAGENT_MODELS["phenix/free"];
-    return { modelSet: fallback[role] ?? fallback.default, available: true };
-  }
-  return { modelSet: slots[role] ?? slots.default, available: true };
+/**
+ * GPT capability alias preference lists.
+ * Resolved against the provider's available model list.
+ * If only openai/gpt-5.5 is available, all capabilities resolve to it.
+ */
+export const GPT_CAPABILITY_PREFERENCES: Record<string, string[]> = {
+  fast: [
+    "openai/gpt-5.5-instant",
+    "openai/gpt-5.5",
+    "openai/gpt-5.5-thinking",
+  ],
+  thinking: [
+    "openai/gpt-5.5-thinking",
+    "openai/gpt-5.5",
+  ],
+  pro: [
+    "openai/gpt-5.5-pro",
+    "openai/gpt-5.5-thinking",
+    "openai/gpt-5.5",
+  ],
+};
+
+/** Per-role, per-difficulty model assignment with thinking level and enabled flag. */
+export interface RoleAssignment {
+  /** Full model ID, e.g. "opencode-go/deepseek-v4-flash" or capability alias for GPT */
+  model: string;
+  /** Thinking effort level */
+  thinking: ThinkingLevel;
+  /** Whether this role is active at this difficulty */
+  enabled: boolean;
 }
 
-export function detectFrontendModelSet(ctx: ExtensionContext): string {
-  const model = ctx.model;
-  if (!model) return "phenix/free";
-
-  const id = model.id;
-  const provider = model.provider;
-
-  if (provider === "phenix") {
-    if (id === "free") return "phenix/free";
-    if (id === "mixed") return "phenix/mixed";
-    if (id === "opencode-go") return "phenix/opencode-go";
-    if (id === "gpt") return "phenix/gpt";
-    return `phenix/${id}`;
-  }
-
-  if (provider === "openai" || provider === "anthropic") return "phenix/gpt";
-  if (provider === "opencode") return "phenix/opencode-go";
-
-  return "phenix/free";
+/** All role assignments for a single difficulty level. */
+export interface DifficultyConfig {
+  scout?: RoleAssignment;
+  planner?: RoleAssignment;
+  critic?: RoleAssignment;
+  implementer?: RoleAssignment;
+  verifier?: RoleAssignment;
+  final_reviewer?: RoleAssignment;
 }
 
 /**
- * Resolve the concrete model string to pass to the child pi process.
+ * Per-variant routing definition.
  *
- * Uses the fallback model table. In production, the Phenix Router
- * (phenix-router.ts) owns policy decisions — this is a convenience
- * resolver for direct subagent execution.
+ * `difficulties` — per-difficulty role assignments with model, thinking, enabled.
+ * `costMode`     — quality (full table), balanced (downgrade D3 GLM-5.2→5.1),
+ *                   economy (avoid GLM/Qwen Max).
  */
-export function resolveRoleModel(
-  frontendMode: string,
-  role: PhenixSubagentRole,
-  _difficulty: Difficulty,
+export interface PhenixRoute {
+  variant: PhenixVariant;
+  frontend: ModelSet;
+  difficulties: Record<Difficulty, DifficultyConfig>;
+  costMode: CostMode;
+  warnings?: string[];
+}
+
+// ── OpenCode Go routing table ──
+
+const OPENCODE_GO_DIFFICULTIES: Record<Difficulty, DifficultyConfig> = {
+  D0: {
+    implementer: { model: "opencode-go/deepseek-v4-flash", thinking: "low", enabled: true },
+    // scout, planner, verifier, final_reviewer disabled unless forced
+  },
+  D1: {
+    scout: { model: "opencode-go/deepseek-v4-flash", thinking: "low", enabled: true },
+    planner: { model: "opencode-go/qwen3.7-plus", thinking: "medium", enabled: true },
+    implementer: { model: "opencode-go/kimi-k2.7-code", thinking: "low", enabled: true },
+    verifier: { model: "opencode-go/deepseek-v4-pro", thinking: "medium", enabled: true },
+  },
+  D2: {
+    scout: { model: "opencode-go/deepseek-v4-flash", thinking: "medium", enabled: true },
+    planner: { model: "opencode-go/glm-5.1", thinking: "high", enabled: true },
+    critic: { model: "opencode-go/deepseek-v4-pro", thinking: "medium", enabled: true },
+    implementer: { model: "opencode-go/kimi-k2.7-code", thinking: "medium", enabled: true },
+    verifier: { model: "opencode-go/glm-5.1", thinking: "high", enabled: true },
+  },
+  D3: {
+    scout: { model: "opencode-go/deepseek-v4-pro", thinking: "high", enabled: true },
+    planner: { model: "opencode-go/glm-5.2", thinking: "xhigh", enabled: true },
+    critic: { model: "opencode-go/qwen3.7-max", thinking: "high", enabled: true },
+    implementer: { model: "opencode-go/kimi-k2.7-code", thinking: "high", enabled: true },
+    verifier: { model: "opencode-go/glm-5.2", thinking: "xhigh", enabled: true },
+    final_reviewer: { model: "opencode-go/glm-5.2", thinking: "xhigh", enabled: true },
+  },
+};
+
+// ── GPT capability routing table ──
+
+const GPT_DIFFICULTIES: Record<Difficulty, DifficultyConfig> = {
+  D0: {
+    implementer: { model: "fast", thinking: "low", enabled: true },
+  },
+  D1: {
+    scout: { model: "fast", thinking: "low", enabled: true },
+    planner: { model: "thinking", thinking: "medium", enabled: true },
+    implementer: { model: "fast", thinking: "low", enabled: true },
+    verifier: { model: "thinking", thinking: "medium", enabled: true },
+  },
+  D2: {
+    scout: { model: "fast", thinking: "medium", enabled: true },
+    planner: { model: "thinking", thinking: "high", enabled: true },
+    implementer: { model: "fast", thinking: "medium", enabled: true },
+    verifier: { model: "thinking", thinking: "high", enabled: true },
+  },
+  D3: {
+    scout: { model: "thinking", thinking: "high", enabled: true },
+    planner: { model: "thinking", thinking: "high", enabled: true },
+    implementer: { model: "thinking", thinking: "high", enabled: true },
+    verifier: { model: "thinking", thinking: "high", enabled: true },
+    final_reviewer: { model: "pro", thinking: "xhigh", enabled: true },
+  },
+};
+
+// ── Mixed routing table ──
+
+const MIXED_DIFFICULTIES: Record<Difficulty, DifficultyConfig> = {
+  D0: {
+    implementer: { model: "opencode-go/deepseek-v4-flash", thinking: "low", enabled: true },
+  },
+  D1: {
+    scout: { model: "opencode-go/deepseek-v4-flash", thinking: "low", enabled: true },
+    planner: { model: "opencode-go/deepseek-v4-flash", thinking: "medium", enabled: true },
+    implementer: { model: "opencode-go/kimi-k2.7-code", thinking: "low", enabled: true },
+    verifier: { model: "opencode-go/deepseek-v4-flash", thinking: "medium", enabled: true },
+  },
+  D2: {
+    scout: { model: "opencode-go/deepseek-v4-flash", thinking: "medium", enabled: true },
+    planner: { model: "gpt/thinking", thinking: "high", enabled: true },
+    implementer: { model: "opencode-go/kimi-k2.7-code", thinking: "medium", enabled: true },
+    verifier: { model: "gpt/thinking", thinking: "high", enabled: true },
+  },
+  D3: {
+    scout: { model: "opencode-go/deepseek-v4-flash", thinking: "medium", enabled: true },
+    planner: { model: "gpt/thinking", thinking: "high", enabled: true },
+    implementer: { model: "opencode-go/kimi-k2.7-code", thinking: "high", enabled: true },
+    verifier: { model: "gpt/thinking", thinking: "high", enabled: true },
+    final_reviewer: { model: "gpt/pro", thinking: "xhigh", enabled: true },
+  },
+};
+
+// ── Free routing table ──
+
+const FREE_DIFFICULTIES: Record<Difficulty, DifficultyConfig> = {
+  D0: {
+    implementer: { model: "opencode/deepseek-v4-flash-free", thinking: "low", enabled: true },
+  },
+  D1: {
+    scout: { model: "opencode/deepseek-v4-flash-free", thinking: "low", enabled: true },
+    planner: { model: "opencode/deepseek-v4-flash-free", thinking: "medium", enabled: true },
+    implementer: { model: "opencode/deepseek-v4-flash-free", thinking: "low", enabled: true },
+    verifier: { model: "opencode/deepseek-v4-flash-free", thinking: "medium", enabled: true },
+  },
+  D2: {
+    scout: { model: "opencode/deepseek-v4-flash-free", thinking: "medium", enabled: true },
+    planner: { model: "opencode/deepseek-v4-flash-free", thinking: "high", enabled: true },
+    implementer: { model: "opencode/deepseek-v4-flash-free", thinking: "medium", enabled: true },
+    verifier: { model: "opencode/deepseek-v4-flash-free", thinking: "high", enabled: true },
+  },
+  D3: {
+    scout: { model: "opencode/deepseek-v4-flash-free", thinking: "high", enabled: true },
+    planner: { model: "opencode/deepseek-v4-flash-free", thinking: "xhigh", enabled: true },
+    implementer: { model: "opencode/deepseek-v4-flash-free", thinking: "high", enabled: true },
+    verifier: { model: "opencode/deepseek-v4-flash-free", thinking: "xhigh", enabled: true },
+  },
+};
+
+/** Routing matrix: variant → per-difficulty × role assignments. */
+export const ROUTING_MATRIX: Record<PhenixVariant, PhenixRoute> = {
+  "opencode-go": {
+    variant: "opencode-go",
+    frontend: { provider: "opencode-go", model: "deepseek-v4-flash" },
+    difficulties: OPENCODE_GO_DIFFICULTIES,
+    costMode: "quality",
+  },
+  free: {
+    variant: "free",
+    frontend: { provider: "opencode", model: "deepseek-v4-flash-free" },
+    difficulties: FREE_DIFFICULTIES,
+    costMode: "quality",
+    warnings: [
+      'Change kind "permissions" requires strong planning. ' +
+      'If using "phenix/free", the free model may not be sufficient.',
+    ],
+  },
+  gpt: {
+    variant: "gpt",
+    frontend: { provider: "openai", model: "gpt-5.5" },
+    difficulties: GPT_DIFFICULTIES,
+    costMode: "quality",
+  },
+  mixed: {
+    variant: "mixed",
+    frontend: { provider: "opencode-go", model: "deepseek-v4-flash" },
+    difficulties: MIXED_DIFFICULTIES,
+    costMode: "quality",
+  },
+};
+
+/**
+ * Resolve a "phenix/<variant>" frontend model ID to its route definition.
+ * Falls back to "opencode-go" for unknown variants.
+ */
+export function resolveRoute(frontendModelSet: string): PhenixRoute {
+  const variant = frontendModelSet.replace(/^phenix\//, "") as PhenixVariant;
+  return ROUTING_MATRIX[variant] ?? ROUTING_MATRIX["opencode-go"];
+}
+
+/**
+ * Apply costMode modifications to a difficulty config.
+ *
+ * quality:   No changes — use the table as-is.
+ * balanced:  D3 GLM-5.2 → GLM-5.1 for non-final roles.
+ * economy:   Avoid GLM-5.2/5.1 and Qwen3.7 Max. Use flash/pro/kimi.
+ */
+function applyCostMode(config: DifficultyConfig, costMode: CostMode): DifficultyConfig {
+  if (costMode === "quality") return config;
+
+  const result: DifficultyConfig = {};
+
+  for (const [role, assignment] of Object.entries(config)) {
+    if (!assignment) continue;
+    let model = assignment.model;
+
+    if (costMode === "balanced") {
+      // D3: downgrade GLM-5.2 to GLM-5.1 except final_reviewer
+      if (model === "opencode-go/glm-5.2" && role !== "final_reviewer") {
+        model = "opencode-go/glm-5.1";
+      }
+    } else if (costMode === "economy") {
+      // Avoid GLM-5.2/5.1 and Qwen3.7 Max
+      if (model === "opencode-go/glm-5.2" || model === "opencode-go/glm-5.1") {
+        model = "opencode-go/deepseek-v4-pro";
+      }
+      if (model === "opencode-go/qwen3.7-max") {
+        model = "opencode-go/deepseek-v4-pro";
+      }
+    }
+
+    (result as any)[role] = { ...assignment, model };
+  }
+
+  return result;
+}
+
+/**
+ * Resolve a capability alias (fast/thinking/pro) against available GPT models.
+ */
+export function resolveGptCapability(
+  capability: string,
+  availableModels: string[],
 ): string {
-  const modelSetKey = frontendMode === "phenix/free" ? "phenix/free"
-    : frontendMode === "phenix/opencode-go" ? "phenix/opencode-go"
-    : frontendMode === "phenix/gpt" ? "phenix/gpt"
-    : frontendMode === "phenix/mixed" ? "phenix/mixed"
-    : "phenix/free";
+  const preferences = GPT_CAPABILITY_PREFERENCES[capability];
+  if (!preferences) return "openai/gpt-5.5";
 
-  const slots = DEFAULT_SUBAGENT_MODELS[modelSetKey];
-  if (!slots) return "opencode/deepseek-v4-flash-free";
+  for (const modelId of preferences) {
+    if (availableModels.includes(modelId)) {
+      return modelId;
+    }
+  }
 
-  const ms = slots[role] ?? slots.default;
-  return `${ms.provider}/${ms.model}`;
+  return "openai/gpt-5.5";
+}
+
+/**
+ * Resolve a model with fallback for a given role.
+ * If the model is in the available list, use it.
+ * Otherwise, walk the role's preference list.
+ * Always falls back to opencode-go/deepseek-v4-flash.
+ */
+export function resolveRoleWithFallback(
+  model: string,
+  role: string,
+  availableModels: string[],
+): string {
+  // Direct match
+  if (availableModels.includes(model)) return model;
+
+  // Walk preference list
+  const preferences = ROLE_PREFERENCES[role];
+  if (preferences) {
+    for (const prefModel of preferences) {
+      if (availableModels.includes(prefModel)) {
+        return prefModel;
+      }
+    }
+  }
+
+  // Ultimate fallback
+  return "opencode-go/deepseek-v4-flash";
+}
+
+/**
+ * Resolve the model and metadata for a given subagent role from the routing matrix.
+ *
+ * For GPT variants, resolves capability aliases against available GPT models.
+ * For all variants, applies costMode and fallback resolution.
+ *
+ * - input.model (manual override) takes precedence
+ * - Otherwise uses the routing matrix from the frontend model set
+ * - Falls back to DEFAULT_MODEL as last resort
+ */
+export function resolveSubagentModel(
+  frontendModelSet: string,
+  role: string,
+  difficulty: Difficulty,
+  _ctx: ExtensionContext,
+  gptAvailableModels?: string[],
+): {
+  modelSet: ModelSet;
+  available: boolean;
+  thinking: ThinkingLevel;
+  warnings?: string[];
+} {
+  const route = resolveRoute(frontendModelSet);
+  const difficultyConfig = applyCostMode(
+    route.difficulties[difficulty],
+    route.costMode,
+  );
+
+  const assignment = (difficultyConfig as any)[role] as RoleAssignment | undefined;
+
+  if (!assignment || !assignment.enabled) {
+    return {
+      modelSet: { provider: "opencode-go", model: "deepseek-v4-flash" },
+      available: false,
+      thinking: "low",
+      warnings: route.warnings,
+    };
+  }
+
+  let modelId = assignment.model;
+
+  // Resolve GPT capability aliases
+  // Two forms: "gpt/fast" (from mixed variant) or bare "fast" (from GPT variant)
+  const gptPrefix = "gpt/";
+  let capability: string | null = null;
+  if (modelId.startsWith(gptPrefix)) {
+    capability = modelId.slice(gptPrefix.length);
+  } else if (route.variant === "gpt") {
+    // In the GPT variant, bare model names are capability aliases
+    capability = modelId;
+  }
+
+  if (capability) {
+    const available = gptAvailableModels ?? ["openai/gpt-5.5"];
+    modelId = resolveGptCapability(capability, available);
+  }
+
+  // Resolve OpenCode Go models with fallback
+  if (modelId.startsWith("opencode-go/")) {
+    modelId = resolveRoleWithFallback(
+      modelId,
+      role,
+      OPENCODE_GO_AVAILABLE_MODELS,
+    );
+  }
+
+  // Convert model ID to ModelSet
+  const slashIndex = modelId.indexOf("/");
+  const provider = modelId.slice(0, slashIndex);
+  const modelName = modelId.slice(slashIndex + 1);
+
+  return {
+    modelSet: { provider, model: modelName },
+    available: true,
+    thinking: assignment.thinking,
+    warnings: route.warnings,
+  };
 }
 
 // ══════════════════════════════════════════════
@@ -675,9 +1056,8 @@ export async function runPhenixSubagent(
   const maxLines = input.maxLines ?? DEFAULT_MAX_LINES;
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  // Resolve model
-  const frontendModel = detectFrontendModelSet(ctx);
-  const modelStr = input.model ?? resolveRoleModel(frontendModel, role, "D1");
+  // Resolve model — all subagents use the default model unless explicitly overridden
+  const modelStr = input.model ?? DEFAULT_MODEL;
 
   // Resolve tools
   const tools = input.tools ?? ROLE_TOOL_DEFAULTS[role];
@@ -776,8 +1156,7 @@ export async function runPhenixSubagent(
 
   // Set model API keys for the child (resolved through parent ctx)
   try {
-    const modelConfig = resolveRoleModel(frontendModel, role, "D1");
-    const [provider, modelName] = modelConfig.split("/");
+    const [provider, modelName] = modelStr.split("/");
     const concreteModel = ctx.modelRegistry?.find(provider, modelName);
     if (concreteModel) {
       const auth = await ctx.modelRegistry.getApiKeyAndHeaders(concreteModel);
@@ -1217,7 +1596,7 @@ export async function buildScoutContextPack(
       } catch { /* skip */ }
     }
 
-    for (const configFile of ["package.json", "flake.nix", ".tend.json", "routing-config.yaml"]) {
+    for (const configFile of ["package.json", "flake.nix", ".tend.json"]) {
       const configPath = `${cwd}/${configFile}`;
       try {
         const { stdout: content } = await pi.exec("head", ["-n", "100", configPath]);

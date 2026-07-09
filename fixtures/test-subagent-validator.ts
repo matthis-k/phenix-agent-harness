@@ -419,19 +419,19 @@ describe("Scenario 4: Scout read-only profile", () => {
 
 describe("Scenario 5: Worker scope resolution", () => {
   const workerAllowedPaths = ["config/phenix-pi/pi/extensions/phenix-flow.ts"];
-  const routerPath = "config/phenix-pi/pi/extensions/phenix-router.ts";
+  const runtimePath = "config/phenix-pi/pi/extensions/phenix-runtime.ts";
   const parentAllowedPaths = ["config/phenix-pi/pi/extensions"];
 
-  const workerCanEditRouter = workerAllowedPaths.some(
-    (p) => routerPath.startsWith(p) || p.startsWith(routerPath),
+  const workerCanEditRuntime = workerAllowedPaths.some(
+    (p) => runtimePath.startsWith(p) || p.startsWith(runtimePath),
   );
 
-  const parentContainsRouter = parentAllowedPaths.some(
-    (p) => routerPath.startsWith(p),
+  const parentContainsRuntime = parentAllowedPaths.some(
+    (p) => runtimePath.startsWith(p),
   );
 
-  assertEq("worker scope does not include router", workerCanEditRouter, false);
-  assertEq("parent scope includes router", parentContainsRouter, true);
+  assertEq("worker scope does not include runtime", workerCanEditRuntime, false);
+  assertEq("parent scope includes runtime", parentContainsRuntime, true);
 });
 
 // ══════════════════════════════════════════════

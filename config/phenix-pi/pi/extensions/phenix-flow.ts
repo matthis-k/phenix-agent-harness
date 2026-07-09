@@ -27,8 +27,7 @@ import {
 import {
   shouldRunRepoScout,
   runPhenixSubagent,
-  detectFrontendModelSet,
-  resolveRoleModel,
+  DEFAULT_MODEL,
   ensureCommChannelDir,
   writeCommMessage,
   writeSubagentResult,
@@ -432,8 +431,7 @@ async function runFlowSubagent(
   ctx: ExtensionContext,
 ): Promise<RunPhenixSubagentResult> {
   const wf = state.workflow;
-  const frontendModel = detectFrontendModelSet(ctx);
-  const modelStr = resolveRoleModel(frontendModel, role, (wf.difficulty ?? "D1") as any);
+  const modelStr = DEFAULT_MODEL;
   const tools = ROLE_TOOL_DEFAULTS[role];
 
   ctx.ui.notify(
@@ -812,7 +810,7 @@ export default function phenixFlow(pi: ExtensionAPI) {
             stage: "scouting",
             real_subagent: true,
             subagent_roles: ["scout", "planner"],
-            model_set: detectFrontendModelSet(ctx),
+            model: DEFAULT_MODEL,
           },
         },
       };
@@ -849,7 +847,7 @@ export default function phenixFlow(pi: ExtensionAPI) {
             stage: "executing",
             real_subagent: true,
             subagent_role: "worker",
-            model_set: detectFrontendModelSet(ctx),
+            model: DEFAULT_MODEL,
           },
         },
       };
@@ -905,7 +903,7 @@ export default function phenixFlow(pi: ExtensionAPI) {
             stage: "verifying",
             real_subagent: true,
             subagent_role: "verifier",
-            model_set: detectFrontendModelSet(ctx),
+            model: DEFAULT_MODEL,
           },
         },
       };
@@ -943,7 +941,7 @@ export default function phenixFlow(pi: ExtensionAPI) {
             stage: "replanning",
             real_subagent: true,
             subagent_role: "planner",
-            model_set: detectFrontendModelSet(ctx),
+            model: DEFAULT_MODEL,
           },
         },
       };
@@ -1059,7 +1057,7 @@ export default function phenixFlow(pi: ExtensionAPI) {
         }
         const wf = state.workflow;
         const scoutInfo = wf.ranRealSubagentScout
-          ? ` | real_subagent_scout: yes | frontend_model: ${detectFrontendModelSet(ctx)}`
+          ? ` | real_subagent_scout: yes | model: ${DEFAULT_MODEL}`
           : "";
         const d0Info = !wf.useSubagents ? " | D0: direct_execution (no subagents)" : "";
         const parseInfo = wf.verifierParseFailure ? ` | verifier_parse_failure: ${wf.verifierParseFailure}` : "";
@@ -1169,11 +1167,10 @@ export default function phenixFlow(pi: ExtensionAPI) {
       };
       persistState();
 
-      const frontendModel = detectFrontendModelSet(ctx);
       const subagentNote = useSubagents ? "with subagents" : "D0 direct (no subagents)";
       ctx.ui.notify(
         `${stageEmoji(state.workflow.stage)} Starting Phenix flow: **${prompt.length > 80 ? prompt.slice(0, 80) + "…" : prompt}** (${difficulty}, ${subagentNote}${!isSimpleTask(difficulty) && shouldScout ? ", with scout" : !isSimpleTask(difficulty) ? ", no scout" : ""})` +
-        `\nFrontend model set: ${frontendModel}`,
+        `\nModel: ${DEFAULT_MODEL}`,
         "info",
       );
 

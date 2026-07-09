@@ -27,9 +27,4 @@ Follow the Phenix structured workflow:
 - Keep Stitch as the orchestrator for multi-repo, DAG-aware, sync, and structural
   commit flows.
 - Preserve root as an aggregator; implementation logic belongs in the owning subflake.
-- For Pi model routing, use the Phenix provider-first frontend IDs
-  `phenix/auto`, `phenix/mixed`, `phenix/openai-plus`, `phenix/opencode-go`, and
-  `phenix/free`; inspect routing with `/router status|profile|mode|explain|routes|reload|reset`.
-- Keep routing config in `~/.pi/agent/extensions/phenix-router.routes.json` or a
-  trusted project `.pi/phenix-router.routes.json`. Do not route through Tend,
-  Stitch, MCP servers, credential defaults, or a fake final `setModel` facade.
+- Model variants: `phenix/opencode-go` (default), `phenix/free`, `phenix/gpt`, `phenix/mixed`. Routing: `<variant>.<role>.<difficulty> → { model, thinking, enabled }`. D0 is implementer-only. OpenCode Go models use `opencode-go/` prefix format. GPT uses capability aliases (fast/thinking/pro) resolved against available models — no `gpt-5.5-mini` or `gpt-5.6-*` models. Mixed spends GPT quota only on D2/D3 planner/verifier/final-review. Cost modes: quality, balanced, economy. Fallback: role preference lists with ultimate fallback to `opencode-go/deepseek-v4-flash`. `phenix/free` warns about permissions changes.

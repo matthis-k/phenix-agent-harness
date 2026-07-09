@@ -5,7 +5,7 @@ Use the **`/flow`** command to launch automatic multi-agent workflows:
 - **/flow <prompt>** — Classifies, scouts, plans, executes, and verifies through the pipeline.
 - **/flow --difficulty <D0|D1|D2|D3> <prompt>** — Override difficulty classification.
 - **/flow --scout auto|force|skip <prompt>** — Control repo scout behavior.
-- **/flow status** — Show current workflow stage, model set, and scout status.
+- **/flow status** — Show current workflow stage and scout status.
 - **/flow cancel** — Cancel active workflow.
 
 ## Stage pipeline
@@ -31,16 +31,87 @@ For D1+ tasks, a real `repo_scout` subagent runs before the planner. The scout:
 Use `--scout force` to always run a scout (even for D0).
 Use `--scout skip` to skip the scout (even for D1+).
 
-## Model sets
+## Model routing
 
-The selected Phenix frontend model determines the model set for subagents:
+The user selects a `phenix` model variant. The routing matrix resolves:
+`<variant>.<role>.<difficulty> → { model, thinking, enabled }`
 
-| Frontend | scout model | worker model | verifier model |
-|----------|-------------|--------------|----------------|
-| `phenix/free` | opencode/deepseek-v4-flash-free | opencode/deepseek-v4-flash-free | opencode/deepseek-v4-flash-free |
-| `phenix/mixed` | opencode/deepseek-v4-flash-free | opencode/deepseek-v4-flash-free | openai/gpt-5.5 |
-| `phenix/opencode-go` | opencode/deepseek-v4-flash | opencode/deepseek-v4-flash | opencode/deepseek-v4-flash |
-| `phenix/gpt` | openai/gpt-5.5 | openai/gpt-5.5 | openai/gpt-5.5 |
+**OpenCode Go** limits are dollar-value based, so cheap models allow more requests.
+DeepSeek V4 Flash and MiMo V2.5 are high-volume cheap routes.
+GLM-5.2/5.1 and Qwen3.7 Max are expensive high-reasoning routes.
+Kimi K2.7 Code is the preferred code implementation route.
+
+### `phenix/opencode-go` (default)
+
+| Diff | F/E | Scout | Planner | Critic | Implementer | Verifier | Final Rev. |
+|---|---|---|---|---|---|---|---|
+| **D0** | `flash` | — | — | — | `flash` (low) | — | — |
+| **D1** | `flash` | `flash` (low) | **`qwen3.7-plus`** (med) | — | **`kimi-k2.7-code`** (low) | **`deepseek-v4-pro`** (med) | — |
+| **D2** | `flash` | `flash` (med) | **`glm-5.1`** (high) | `deepseek-v4-pro` (med) | `kimi-k2.7-code` (med) | **`glm-5.1`** (high) | — |
+| **D3** | `flash` | `deepseek-v4-pro` (high) | **`glm-5.2`** (xhigh) | **`qwen3.7-max`** (high) | `kimi-k2.7-code` (high) | **`glm-5.2`** (xhigh) | **`glm-5.2`** (xhigh) |
+
+*All model IDs use `opencode-go/` prefix. D0 is implementer-only. Planners use progressively stronger models.*
+
+### `phenix/free`
+
+| Diff | F/E | Scout | Planner | Implementer | Verifier |
+|---|---|---|---|---|---|
+| D0 | `flash-free` | — | — | `flash-free` (low) | — |
+| D1 | `flash-free` | `flash-free` (low) | `flash-free` (med) | `flash-free` (low) | `flash-free` (med) |
+| D2 | `flash-free` | `flash-free` (med) | `flash-free` (high) | `flash-free` (med) | `flash-free` (high) |
+| D3 | `flash-free` | `flash-free` (high) | `flash-free` (xhigh) | `flash-free` (high) | `flash-free` (xhigh) |
+
+### `phenix/gpt`
+
+Uses **ChatGPT Plus-visible GPT models** only. Models resolved via capability aliases.
+
+| Alias | Preference order |
+|---|---|
+| `fast` | `gpt-5.5-instant` → `gpt-5.5` → `gpt-5.5-thinking` |
+| `thinking` | `gpt-5.5-thinking` → `gpt-5.5` |
+| `pro` | `gpt-5.5-pro` → `gpt-5.5-thinking` → `gpt-5.5` |
+
+If only `openai/gpt-5.5` is available, all aliases resolve to it.
+`gpt-5.5-mini` and `gpt-5.6-*` are **never** generated.
+
+| Diff | F/E | Scout | Planner | Implementer | Verifier | Final Rev. |
+|---|---|---|---|---|---|---|---|
+| D0 | `gpt-5.5` | — | — | `fast` (low) | — | — |
+| D1 | `gpt-5.5` | `fast` (low) | `thinking` (med) | `fast` (low) | `thinking` (med) | — |
+| D2 | `gpt-5.5` | `fast` (med) | `thinking` (high) | `fast` (med) | `thinking` (high) | — |
+| D3 | `gpt-5.5` | `thinking` (high) | `thinking` (high) | `thinking` (high) | `thinking` (high) | `pro` (xhigh) |
+
+### `phenix/mixed`
+
+GPT quota used only for D2/D3 planner/verifier/final-review.
+Scouting and implementation use OpenCode Go models.
+
+| Diff | F/E | Scout | Planner | Implementer | Verifier | Final Rev. |
+|---|---|---|---|---|---|---|---|
+| D0 | `flash` | — | — | `flash` (low) | — | — |
+| D1 | `flash` | `flash` (low) | `flash` (med) | `kimi-k2.7-code` (low) | `flash` (med) | — |
+| D2 | `flash` | `flash` (med) | **`gpt/thinking`** (high) | `kimi-k2.7-code` (med) | **`gpt/thinking`** (high) | — |
+| D3 | `flash` | `flash` (med) | **`gpt/thinking`** (high) | `kimi-k2.7-code` (high) | **`gpt/thinking`** (high) | **`gpt/pro`** (xhigh) |
+
+### Cost modes
+
+| Mode | Behavior |
+|---|---|
+| `quality` | Use the full table as shown above |
+| `balanced` | D3: downgrade GLM-5.2 → GLM-5.1 (except final_reviewer) |
+| `economy` | Avoid GLM-5.2/5.1 and Qwen3.7 Max; use flash/pro/kimi |
+
+### Fallback resolution
+
+If a configured `opencode-go` model is unavailable:
+1. Walk the role's preference list
+2. Ultimate fallback: `opencode-go/deepseek-v4-flash`
+
+### Warnings
+
+| Variant | Warning |
+|---|---|
+| `phenix/free` | Change kind "permissions" requires strong planning. If using "phenix/free", the free model may not be sufficient. |
 
 ## Terminology
 
@@ -83,13 +154,7 @@ implementation → verification workflow while using Pi.
 - Use Stitch for multi-repository status, DAG, commit, and sync operations.
 - Use reversible single-repo Git and safe Nix commands only inside the accepted
   task scope; keep irreversible Git/Nix actions ask/deny by default.
-- Prefer Pi's Phenix provider-first frontend IDs when model routing is needed:
-  `phenix/auto`, `phenix/mixed`, `phenix/openai-plus`, `phenix/opencode-go`,
-  and `phenix/free`. Use `/router status|profile|mode|explain|routes|reload|reset`
-  to inspect or adjust routing state.
-- Keep route configuration in trusted Pi config (`~/.pi/agent/extensions/phenix-router.routes.json`
-  and trusted project `.pi/phenix-router.routes.json`); do not route through Tend,
-  Stitch, MCP servers, or credential defaults.
+- All subagents use `opencode/deepseek-v4-flash` — no routing abstraction layer.
 - Do not manually loop through repositories when Stitch can express the DAG.
 - Keep Stitch as orchestrator for multi-repo, DAG-aware, sync, and structural
   commit flows.

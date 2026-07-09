@@ -6,7 +6,7 @@
  *
  * This module is a TYPE LAYER + PROMPT ASSEMBLY layer. It does NOT register
  * commands or Pi event handlers directly. Those live in phenix-flow.ts
- * (orchestrator) and phenix-router.ts (model routing).
+ * (orchestrator).
  *
  * To use: import { ... } from "./phenix-runtime" from event handlers.
  * The models here are plain TypeScript types and pure functions.
@@ -25,7 +25,6 @@
 // ══════════════════════════════════════════════
 
 export type RolePolicy =
-  | "router"
   | "architect"
   | "supervisor_worker"
   | "worker"
@@ -35,7 +34,7 @@ export type RolePolicy =
   | "safety_reviewer";
 
 export const ROLE_AUTHORITY: Record<RolePolicy, string> = {
-  router: "Route prompts to appropriate workflow mode and planner interaction mode.",
+
   architect: "Define global scope, decomposition, contracts, invariants, and verification strategy. Ask the user targeted clarification questions if planner interaction mode allows. Do not perform implementation edits. Produce a PlanContract and task briefs suitable for workers.",
   supervisor_worker: "Own this task subtree. Implement directly when delegation is not worthwhile. Delegate only coherent non-trivial subtasks with clear scope, low context overlap, and verifiable success criteria. Integrate child reports before reporting upward. Resolve child blockers when inside your authority. Escalate scope-changing ambiguity to parent/planner.",
   worker: "Implement the assigned scoped task. Respect allowed paths and contracts. Do not delegate. Do not ask the user. If scope is insufficient, publish a scope_issue or scope_expansion_request. Report changed files, checks, issues, and artifact refs.",
@@ -112,7 +111,7 @@ export interface Permissions {
 }
 
 export const DEFAULT_PERMISSIONS: Record<RolePolicy, Permissions> = {
-  router: { read: true, edit: false, shell: "none", network: false, canDelegate: false, canAskUser: false, canUpdatePlan: false, canPublishContracts: false, canReservePaths: false },
+
   architect: { read: true, edit: false, shell: "read_only", network: false, canDelegate: "initial_only", canAskUser: true, canUpdatePlan: true, canPublishContracts: true, canReservePaths: false },
   supervisor_worker: { read: true, edit: true, shell: "safe", network: false, canDelegate: true, canAskUser: false, canUpdatePlan: false, canPublishContracts: true, canReservePaths: true },
   worker: { read: true, edit: true, shell: "safe", network: false, canDelegate: false, canAskUser: false, canUpdatePlan: false, canPublishContracts: false, canReservePaths: false },
