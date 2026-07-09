@@ -206,7 +206,7 @@
 
               grep -F -q 'pi.registerProvider(PHENIX_PROVIDER' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
               grep -F -q 'pi.registerCommand("router"' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
-              grep -F -q 'phenix-router.routes.json' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
+              ! grep -F -q 'phenix-router.routes.json' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
               ! grep -F -q 'setModel(' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
 
               # Verify subagent executor has NO direct model API calls
@@ -355,7 +355,7 @@
                 jq -e '.enableInstallTelemetry == false' "$SETTINGS_PATH"
                 jq -e '.enableAnalytics == false' "$SETTINGS_PATH"
                 jq -e '.defaultProvider == "phenix"' "$SETTINGS_PATH"
-                jq -e '.defaultModel == "free"' "$SETTINGS_PATH"
+                jq -e '.defaultModel == "opencode-go"' "$SETTINGS_PATH"
                 jq -e 'has("extensions") | not' "$SETTINGS_PATH"
                 jq -e 'has("skills") | not' "$SETTINGS_PATH"
                 jq -e 'has("prompts") | not' "$SETTINGS_PATH"

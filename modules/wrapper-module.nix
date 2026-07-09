@@ -76,7 +76,7 @@ in
         enableInstallTelemetry = false;
         enableAnalytics = false;
         defaultProvider = "phenix";
-        defaultModel = "free";
+        defaultModel = "opencode-go";
       };
       description = "Base Pi settings written to managed settings.json.";
     };
