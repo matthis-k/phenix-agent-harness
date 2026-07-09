@@ -66,7 +66,7 @@
         "sandbox_safe": false,
         "profiles": ["git-hook", "pre-push", "manual", "rust-check"],
         "tags": ["rust", "agent-comm"],
-        "command": ["bash", "-c", "sqlite_out=$(nix eval --raw nixpkgs#sqlite.out.outPath); export LIBRARY_PATH=\"$sqlite_out/lib${LIBRARY_PATH:+:$LIBRARY_PATH}\"; cargo check"],
+        "command": ["bash", "-c", "cd modules/agent_comm_mcp && sqlite_out=$(nix eval --raw nixpkgs#sqlite.out.outPath); export LIBRARY_PATH=\"$sqlite_out/lib${LIBRARY_PATH:+:$LIBRARY_PATH}\"; cargo check"],
         "expect": { "status": 0 }
       },
       {
@@ -78,7 +78,7 @@
         "sandbox_safe": false,
         "profiles": ["pre-push", "manual", "rust-check"],
         "tags": ["rust", "agent-comm"],
-        "command": ["bash", "-c", "sqlite_out=$(nix eval --raw nixpkgs#sqlite.out.outPath); export LIBRARY_PATH=\"$sqlite_out/lib${LIBRARY_PATH:+:$LIBRARY_PATH}\"; cargo test"],
+        "command": ["bash", "-c", "cd modules/agent_comm_mcp && sqlite_out=$(nix eval --raw nixpkgs#sqlite.out.outPath); export LIBRARY_PATH=\"$sqlite_out/lib${LIBRARY_PATH:+:$LIBRARY_PATH}\"; cargo test"],
         "expect": { "status": 0 }
       },
       {

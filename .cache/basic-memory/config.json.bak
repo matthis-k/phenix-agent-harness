@@ -1,0 +1,12 @@
+{
+  "default_project": "newxos",
+  "projects": {
+    "newxos": {
+      "path": "/home/matthisk/phenix/repos/phenix-agent-harness/docs",
+      "mode": "local"
+    }
+  },
+  "semantic_search_enabled": true,
+  "semantic_embedding_provider": "fastembed",
+  "cloud_mode": false
+}
