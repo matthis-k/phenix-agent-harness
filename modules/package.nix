@@ -20,7 +20,6 @@
       wrapperModule = (inputs.nix-wrapper-modules.lib.evalModule (import ./wrapper-module.nix)).config;
 
       piDir = ../pi;
-      piExtensionsDir = piDir + "/extensions";
       routingConfigYaml = ../routing-config.yaml;
 
       agentComm = pkgs.rustPlatform.buildRustPackage {
@@ -169,7 +168,7 @@
         builtins.toJSON piPackageManifest
       );
 
-      piPackageRoot = pkgs.runCommand "phenix-pi-package" { } ''
+      phenixPiConfigDir = pkgs.runCommand "phenix-pi-config-dir" { } ''
         mkdir -p $out/pi
 
         cp ${generatedPiPackageJson} $out/package.json
@@ -182,20 +181,6 @@
         cp ${catppuccinMochaTheme} $out/pi/themes/catppuccin-mocha.json
       '';
 
-      piSettings = {
-        defaultProjectTrust = "ask";
-        enableInstallTelemetry = false;
-        enableAnalytics = false;
-
-        theme = "catppuccin-mocha";
-
-        # Load Phenix resources as a local Pi package.
-        # This does not replace Pi's runtime package root.
-        packages = [ "${piPackageRoot}" ];
-      };
-
-      generatedPiSettings = pkgs.writeText "phenix-pi-settings.json" (builtins.toJSON piSettings);
-
       routingConfigPackage = pkgs.runCommand "phenix-agent-routing-config" { } ''
         mkdir -p $out/share/phenix-agent-harness
         cp ${routingConfigYaml} $out/share/phenix-agent-harness/routing-config.yaml
@@ -207,9 +192,14 @@
         package = pkgs.pi-coding-agent;
 
         pi = {
-          codingAgentDir = "~/.config/phenix-pi";
-          managedSettings = generatedPiSettings;
+          configDir = phenixPiConfigDir;
+          stateDir = null;
+
+          theme = "catppuccin-mocha";
           managedConfig = true;
+
+          loadConfigDirAsPackage = true;
+          directResourceCompat = false;
 
           skipVersionCheck = true;
           telemetry = false;
@@ -239,11 +229,10 @@
         default = wrappedPi;
 
         pi = wrappedPi;
-        pi-package = piPackageRoot;
+        phenix-pi-config-dir = phenixPiConfigDir;
         agent-comm = agentComm;
         routing-config = routingConfigPackage;
 
-        generated-pi-settings = generatedPiSettings;
         generated-pi-package-json = generatedPiPackageJson;
         catppuccin-pi-theme = catppuccinMochaTheme;
       };
@@ -310,8 +299,8 @@
               touch $out
             '';
 
-        generated-pi-resources =
-          pkgs.runCommand "phenix-pi-generated-resources-check"
+        phenix-pi-config-dir-check =
+          pkgs.runCommand "phenix-pi-config-dir-check"
             {
               nativeBuildInputs = [
                 pkgs.jq
@@ -319,65 +308,47 @@
               ];
             }
             ''
-              jq -e '.theme == "catppuccin-mocha"' ${generatedPiSettings}
-              jq -e '.enableInstallTelemetry == false' ${generatedPiSettings}
-              jq -e '.enableAnalytics == false' ${generatedPiSettings}
-              jq -e '.packages | type == "array" and length == 1' ${generatedPiSettings}
-              jq -e '.packages[0] | test("phenix-pi-package")' ${generatedPiSettings}
+              test -e ${phenixPiConfigDir}/package.json
+              test -e ${phenixPiConfigDir}/pi/extensions/lsp.ts
+              test -e ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
+              test -d ${phenixPiConfigDir}/pi/prompts
+              test -d ${phenixPiConfigDir}/pi/skills
+              test -e ${phenixPiConfigDir}/pi/themes/catppuccin-mocha.json
 
-              jq -e 'has("extensions") | not' ${generatedPiSettings}
-              jq -e 'has("skills") | not' ${generatedPiSettings}
-              jq -e 'has("prompts") | not' ${generatedPiSettings}
-              jq -e 'has("themes") | not' ${generatedPiSettings}
+              jq -e '.name == "catppuccin-mocha"' ${phenixPiConfigDir}/pi/themes/catppuccin-mocha.json
+              jq -e '.colors.accent == "mauve"' ${phenixPiConfigDir}/pi/themes/catppuccin-mocha.json
+              jq -e '.colors.bashMode == "peach"' ${phenixPiConfigDir}/pi/themes/catppuccin-mocha.json
 
-              jq -e '.pi.extensions == ["./pi/extensions"]' ${generatedPiPackageJson}
-              jq -e '.pi.skills == ["./pi/skills"]' ${generatedPiPackageJson}
-              jq -e '.pi.prompts == ["./pi/prompts"]' ${generatedPiPackageJson}
-              jq -e '.pi.themes == ["./pi/themes"]' ${generatedPiPackageJson}
+              jq -e '.pi.extensions == ["./pi/extensions"]' ${phenixPiConfigDir}/package.json
+              jq -e '.pi.skills == ["./pi/skills"]' ${phenixPiConfigDir}/package.json
+              jq -e '.pi.prompts == ["./pi/prompts"]' ${phenixPiConfigDir}/package.json
+              jq -e '.pi.themes == ["./pi/themes"]' ${phenixPiConfigDir}/package.json
 
-              jq -e '.peerDependencies."@earendil-works/pi-coding-agent" == "*"' ${generatedPiPackageJson}
-              jq -e '.peerDependencies."@earendil-works/pi-ai" == "*"' ${generatedPiPackageJson}
-              jq -e '.peerDependencies."@earendil-works/pi-agent-core" == "*"' ${generatedPiPackageJson}
-              jq -e '.peerDependencies."@earendil-works/pi-tui" == "*"' ${generatedPiPackageJson}
-              jq -e '.dependencies | not' ${generatedPiPackageJson}
+              jq -e '.peerDependencies."@earendil-works/pi-coding-agent" == "*"' ${phenixPiConfigDir}/package.json
+              jq -e '.peerDependencies."@earendil-works/pi-ai" == "*"' ${phenixPiConfigDir}/package.json
+              jq -e '.peerDependencies."@earendil-works/pi-agent-core" == "*"' ${phenixPiConfigDir}/package.json
+              jq -e '.peerDependencies."@earendil-works/pi-tui" == "*"' ${phenixPiConfigDir}/package.json
+              jq -e '.dependencies | not' ${phenixPiConfigDir}/package.json
 
-              test -e ${piPackageRoot}/package.json
-              test -e ${piPackageRoot}/pi/extensions/lsp.ts
-              test -e ${piPackageRoot}/pi/extensions/phenix-router.ts
-              test -d ${piPackageRoot}/pi/prompts
-              test -d ${piPackageRoot}/pi/skills
-              test -e ${piPackageRoot}/pi/themes/catppuccin-mocha.json
+              grep -F -q 'name: "lsp_diagnostics"' ${phenixPiConfigDir}/pi/extensions/lsp.ts
+              grep -F -q 'name: "lsp_hover"' ${phenixPiConfigDir}/pi/extensions/lsp.ts
+              grep -F -q 'read-only' ${phenixPiConfigDir}/pi/extensions/lsp.ts
+              ! grep -E -q 'codeAction|rename|workspace/applyEdit' ${phenixPiConfigDir}/pi/extensions/lsp.ts
 
-              jq -e '.name == "catppuccin-mocha"' ${piPackageRoot}/pi/themes/catppuccin-mocha.json
-              jq -e '.colors.accent == "mauve"' ${piPackageRoot}/pi/themes/catppuccin-mocha.json
-              jq -e '.colors.bashMode == "peach"' ${piPackageRoot}/pi/themes/catppuccin-mocha.json
-
-              grep -F -q 'PI_PACKAGE_DIR' ${wrappedPi}/bin/pi
-              grep -F -q '/lib/node_modules/pi-monorepo' ${wrappedPi}/bin/pi
-              ! grep -F -q '.cache/phenix-pi/packages' ${wrappedPi}/bin/pi
-              ! grep -F -q 'export PI_PACKAGE_DIR="''${PI_PACKAGE_DIR:-$HOME/.cache/phenix-pi/packages}"' ${wrappedPi}/bin/pi
-
-              grep -F -q 'PHENIX_PI_MANAGED_CONFIG' ${wrappedPi}/bin/pi
-              grep -F -q '${generatedPiSettings}' ${wrappedPi}/bin/pi
-
-              grep -F -q 'name: "lsp_diagnostics"' ${piExtensionsDir}/lsp.ts
-              grep -F -q 'name: "lsp_hover"' ${piExtensionsDir}/lsp.ts
-              grep -F -q 'read-only' ${piExtensionsDir}/lsp.ts
-              ! grep -E -q 'codeAction|rename|workspace/applyEdit' ${piExtensionsDir}/lsp.ts
-
-              grep -F -q 'pi.registerProvider(PHENIX_PROVIDER' ${piExtensionsDir}/phenix-router.ts
-              grep -F -q 'pi.registerCommand("router"' ${piExtensionsDir}/phenix-router.ts
-              grep -F -q 'phenix-router.routes.json' ${piExtensionsDir}/phenix-router.ts
-              ! grep -F -q 'setModel(' ${piExtensionsDir}/phenix-router.ts
+              grep -F -q 'pi.registerProvider(PHENIX_PROVIDER' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
+              grep -F -q 'pi.registerCommand("router"' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
+              grep -F -q 'phenix-router.routes.json' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
+              ! grep -F -q 'setModel(' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
 
               touch $out
             '';
 
-        wrapped-pi-smoke =
-          pkgs.runCommand "phenix-pi-wrapper-smoke-test"
+        wrapped-pi-check =
+          pkgs.runCommand "phenix-pi-wrapper-check"
             {
               nativeBuildInputs = [
                 wrappedPi
+                pkgs.jq
                 pkgs.gnugrep
               ];
             }
@@ -385,7 +356,43 @@
               grep -F -q 'PI_PACKAGE_DIR' ${wrappedPi}/bin/pi
               grep -F -q '/lib/node_modules/pi-monorepo' ${wrappedPi}/bin/pi
               ! grep -F -q '.cache/phenix-pi/packages' ${wrappedPi}/bin/pi
+              ! grep -F -q 'export PI_PACKAGE_DIR="''${PI_PACKAGE_DIR:-$HOME/.cache/phenix-pi/packages}"' ${wrappedPi}/bin/pi
 
+              grep -F -q 'XDG_STATE_HOME' ${wrappedPi}/bin/pi
+              grep -F -q '.local/state}/phenix-pi' ${wrappedPi}/bin/pi
+
+              grep -F -q 'PHENIX_PI_MANAGED_CONFIG' ${wrappedPi}/bin/pi
+              grep -F -q 'phenix-pi-settings.json' ${wrappedPi}/bin/pi
+
+              ! grep -F -q 'PI_SOPS' ${wrappedPi}/bin/pi
+              ! grep -F -q 'PI_SECRET' ${wrappedPi}/bin/pi
+
+              SETTINGS_PATH=$(grep -o '/nix/store/[a-z0-9]*-phenix-pi-settings\.json' ${wrappedPi}/bin/pi | head -1)
+              if [ -n "$SETTINGS_PATH" ] && [ -f "$SETTINGS_PATH" ]; then
+                jq -e '.packages | type == "array" and length == 1' "$SETTINGS_PATH"
+                jq -e '.packages[0] | test("phenix-pi-config-dir")' "$SETTINGS_PATH"
+                jq -e '.theme == "catppuccin-mocha"' "$SETTINGS_PATH"
+                jq -e '.enableInstallTelemetry == false' "$SETTINGS_PATH"
+                jq -e '.enableAnalytics == false' "$SETTINGS_PATH"
+                jq -e 'has("extensions") | not' "$SETTINGS_PATH"
+                jq -e 'has("skills") | not' "$SETTINGS_PATH"
+                jq -e 'has("prompts") | not' "$SETTINGS_PATH"
+                jq -e 'has("themes") | not' "$SETTINGS_PATH"
+              fi
+
+              touch $out
+            '';
+
+        catppuccin-pi-theme-check =
+          pkgs.runCommand "catppuccin-pi-theme-check"
+            {
+              nativeBuildInputs = [ pkgs.jq ];
+            }
+            ''
+              jq -e '.name == "catppuccin-mocha"' ${catppuccinMochaTheme}
+              jq -e '.colors.accent == "mauve"' ${catppuccinMochaTheme}
+              jq -e '.colors.bashMode == "peach"' ${catppuccinMochaTheme}
+              jq -e '.vars.base == "#1e1e2e"' ${catppuccinMochaTheme}
               touch $out
             '';
       };

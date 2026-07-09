@@ -2,7 +2,7 @@ phenix_agent_routing:
   version: 1
 
   defaults:
-    mode: mixed
+    mode: auto
     difficulty: auto
     target_state: dev-wallet
     external_plan: auto
@@ -15,182 +15,76 @@ phenix_agent_routing:
 
   modes:
     cycle_order:
-      - mixed
-      - go
-      - plus
+      - auto
       - free
-      - manual
 
-    mixed:
-      description: "GPT-family planning, OpenCode Go implementation, independent verification."
-      enabled: true
-
-    go:
-      description: "Only OpenCode Go models."
-      enabled: true
-
-    plus:
-      description: "Only GPT-family models available through OpenCode/OpenAI auth."
+    auto:
+      description: "All models use opencode/deepseek-v4-flash-free through the Zen provider."
       enabled: true
 
     free:
-      description: "Only free OpenCode Zen models; public/mechanical work only."
-      enabled: true
-
-    manual:
-      description: "Use explicit user-selected slots while preserving hard safety guards."
+      description: "Explicitly use opencode/deepseek-v4-flash-free. Same as auto but explicit."
       enabled: true
 
   model_slots:
-    # GPT-family / ChatGPT Plus-Pro compatible via OpenCode OpenAI auth.
-    gpt:
-      fast: openai/gpt-5.4-mini
-      normal: openai/gpt-5.5
-      strong: openai/gpt-5.5
-      strongest: openai/gpt-5.5
-
-    # OpenCode Go model IDs.
-    # Format: opencode-go/<model-id>
-    go:
-      cheap: opencode-go/deepseek-v4-flash
-      normal: opencode-go/kimi-k2.7-code
-      coding: opencode-go/kimi-k2.7-code
-      verifier: opencode-go/qwen3.7-plus
-      strong: opencode-go/glm-5.2
-      strongest: opencode-go/qwen3.7-max
-
-    # Free OpenCode Zen model IDs.
-    # These are deliberately restricted by policy below.
-    free_zen:
-      cheap: opencode/deepseek-v4-flash-free
-      normal: opencode/mimo-v2.5-free
-      coding: opencode/north-mini-code-free
-      verifier: opencode/nemotron-3-ultra-free
-      fallback: opencode/big-pickle
+    # All routing uses the free opencode Zen provider with deepseek-v4-flash-free.
+    # Different difficulty levels map to the same model; Pi's model registry
+    # determines actual capability.
+    free_deepseek:
+      all: opencode/deepseek-v4-flash-free
+      planner: opencode/deepseek-v4-flash-free
+      worker: opencode/deepseek-v4-flash-free
+      verifier: opencode/deepseek-v4-flash-free
+      critic: opencode/deepseek-v4-flash-free
 
   routing_matrix:
-    mixed:
+    auto:
       D0:
-        planner: null
-        implementer: go.cheap
-        verifier: null
-        fallback_public_implementer: free_zen.cheap
+        planner: free_deepseek.planner
+        implementer: free_deepseek.worker
+        verifier: free_deepseek.verifier
 
       D1:
-        planner: gpt.normal
-        implementer: go.coding
-        verifier: go.verifier
+        planner: free_deepseek.planner
+        implementer: free_deepseek.worker
+        verifier: free_deepseek.verifier
 
       D2:
-        planner: gpt.strong
-        critic: go.strong
-        implementer: go.coding
-        verifier: gpt.strong
+        planner: free_deepseek.planner
+        critic: free_deepseek.critic
+        implementer: free_deepseek.worker
+        verifier: free_deepseek.verifier
 
       D3:
-        planner: gpt.strong
-        critic: gpt.strong
-        implementer: go.strong
-        verifier: gpt.strong
-        final_reviewer: gpt.strong
-
-    go:
-      D0:
-        planner: null
-        implementer: go.cheap
-        verifier: null
-
-      D1:
-        planner: go.normal
-        implementer: go.coding
-        verifier: go.verifier
-
-      D2:
-        planner: go.strong
-        critic: go.verifier
-        implementer: go.coding
-        verifier: go.strong
-
-      D3:
-        planner: go.strong
-        critic: go.strongest
-        implementer: go.coding
-        verifier: go.strongest
-        final_reviewer: go.strongest
-
-    plus:
-      D0:
-        planner: null
-        implementer: gpt.fast
-        verifier: null
-
-      D1:
-        planner: gpt.normal
-        implementer: gpt.fast
-        verifier: gpt.normal
-
-      D2:
-        planner: gpt.strong
-        critic: gpt.normal
-        implementer: gpt.normal
-        verifier: gpt.strong
-
-      D3:
-        planner: gpt.strong
-        critic: gpt.strong
-        implementer: gpt.normal
-        verifier: gpt.strong
-        final_reviewer: gpt.strong
+        planner: free_deepseek.planner
+        critic: free_deepseek.critic
+        implementer: free_deepseek.worker
+        verifier: free_deepseek.verifier
+        final_reviewer: free_deepseek.verifier
 
     free:
       D0:
-        planner: null
-        implementer: free_zen.cheap
-        verifier: null
+        planner: free_deepseek.planner
+        implementer: free_deepseek.worker
+        verifier: free_deepseek.verifier
 
       D1:
-        planner: free_zen.normal
-        implementer: free_zen.coding
-        verifier: free_zen.verifier
+        planner: free_deepseek.planner
+        implementer: free_deepseek.worker
+        verifier: free_deepseek.verifier
 
       D2:
-        denied: true
-        reason: "free mode is denied for D2 architectural work"
+        planner: free_deepseek.planner
+        critic: free_deepseek.critic
+        implementer: free_deepseek.worker
+        verifier: free_deepseek.verifier
 
       D3:
-        denied: true
-        reason: "free mode is denied for D3 high-risk work"
-
-    manual:
-      D0:
-        planner: manual.planner
-        implementer: manual.implementer
-        verifier: manual.verifier
-
-      D1:
-        planner: manual.planner
-        implementer: manual.implementer
-        verifier: manual.verifier
-
-      D2:
-        planner: manual.planner
-        critic: manual.critic
-        implementer: manual.implementer
-        verifier: manual.verifier
-
-      D3:
-        planner: manual.planner
-        critic: manual.critic
-        implementer: manual.implementer
-        verifier: manual.verifier
-        final_reviewer: manual.final_reviewer
-
-  manual_slots:
-    planner: openai/gpt-5.5
-    critic: opencode-go/qwen3.7-max
-    implementer: opencode-go/kimi-k2.7-code
-    verifier: openai/gpt-5.5
-    final_reviewer: openai/gpt-5.5
+        planner: free_deepseek.planner
+        critic: free_deepseek.critic
+        implementer: free_deepseek.worker
+        verifier: free_deepseek.verifier
+        final_reviewer: free_deepseek.verifier
 
   difficulty_classifier:
     D0:
@@ -227,7 +121,7 @@ phenix_agent_routing:
         - secrets/sops/auth work
         - CI/release policy
         - repo-wide Nix restructuring
-        - jj wallet/handoff architecture
+        - workspace/handoff architecture
 
   secrecy_classifier:
     public:
@@ -257,7 +151,6 @@ phenix_agent_routing:
     require_verifier_for:
       - nix
       - rust
-      - qml
       - workflow
       - tend
       - stitch
@@ -278,28 +171,11 @@ phenix_agent_routing:
     action: cycle_routing_mode
     cycles:
       normal:
-        - mixed
-        - go
-        - plus
+        - auto
         - free
-        - manual
-
-      free_unsafe:
-        - mixed
-        - go
-        - plus
-        - manual
-
-    skip_rules:
-      free:
-        if_any:
-          - secrecy != public
-          - difficulty in [D2, D3]
-          - "change_kind in ${phenix_agent_routing.change_kind_guards.deny_free_for}"
 
     status_messages:
       mode_changed: "routing: {mode}"
-      skipped: "routing: {mode} skipped: {reason}"
 
   external_plan:
     enabled: true
@@ -399,9 +275,7 @@ phenix_agent_routing:
         - change_kind
         - target_state
         - mode
-        - planner_model
-        - implementer_model
-        - verifier_model
+        - provider_model
 
     implementer_rules:
       - do_not_expand_scope
@@ -456,17 +330,8 @@ phenix_agent_routing:
 
   tests:
     required_cases:
-      - "D0 public docs task in mixed may use free Zen or cheap Go."
-      - "D1 Nix task in mixed uses GPT planner and Go implementer."
-      - "D2 architecture task in mixed requires planner and verifier."
-      - "D3 main-bound task requires strong planner and strong verifier."
-      - "Free mode rejects private tasks."
-      - "Free mode rejects D2 and D3 tasks."
-      - "Ctrl+T cycles modes in order."
-      - "Ctrl+T skips free when unsafe."
-      - "Complete external plan is passed through with metadata normalization only."
-      - "Partial external plan gets missing planner-contract fields."
-      - "Not-a-plan input triggers internal planner."
-      - "External plan hardcoding model names is normalized to semantic slots."
-      - "Implementer receives normalized contract."
-      - "Verifier checks routing and architecture compliance."
+      - "All difficulty levels use opencode/deepseek-v4-flash-free."
+      - "Free model is denied for private and secret work."
+      - "D2 and D3 work still runs full planner/verifier pipeline."
+      - "All routing uses the same deepseek v4 flash free model."
+      - "No codex, GPT, or Go models are configured."

@@ -40,3 +40,19 @@ cases:
       - routing_matrix
       - model_slots
     notes: OpenCode rejects unknown top-level config keys; only schema-valid fields are generated.
+
+  - id: phenix-router-uses-opencode-go
+    request: "Ensure phenix-router.ts uses opencode-go provider."
+    expected:
+      provider: opencode-go
+      model: deepseek-v4-flash
+      reason_contains: opencode_go
+    notes: The Pi extension router must route through opencode-go (Go API) since users authenticate with Go API keys, not Zen API keys.
+
+  - id: no-zen-api-refs-in-router
+    request: "Ensure no opencode (Zen) provider references in router config."
+    expected_absent:
+      - 'provider: "opencode"'
+      - 'model: "deepseek-v4-flash-free"'
+      - 'provider: "opencode", model: "deepseek-v4-flash-free"'
+    notes: The Zen API (opencode provider) requires a separate API key; only opencode-go is available.

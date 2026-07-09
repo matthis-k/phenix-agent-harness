@@ -1,3 +1,9 @@
+---
+title: routing
+type: note
+permalink: newxos/routing
+---
+
 # Phenix Agent Model Config
 
 Phenix agent model selection is static OpenCode configuration.
@@ -20,10 +26,10 @@ OpenCode starts:
   IDs.
 - `opencode-mixed` / `generated-config-mixed`: GPT-family planning and
   verification with an OpenCode Go worker.
-- `opencode-free` / `generated-config-free`: free OpenCode model IDs. Use only
-  for public, low-risk work; Phenix policy still denies free-model routing for
-  private, secret, security-sensitive, D2/D3, commit, sync, push, or main-bound
-  work.
+- `opencode-free` / `generated-config-free`: free OpenCode model IDs via the
+  Zen API (`opencode` provider). Use only for public, low-risk work; Phenix
+  policy still denies free-model routing for private, secret, security-sensitive,
+  D2/D3, commit, sync, push, or main-bound work.
 
 The default GPT profile currently emits:
 

@@ -11,52 +11,100 @@ let
   pathList = paths: lib.concatStringsSep ":" (map toString paths);
   boolEnv = value: if value then "1" else "0";
 
-  piPackageRoot =
+  piRuntimeRoot =
     if cfg.packageRoot != null then
       cfg.packageRoot
     else
       "${config.package}/lib/node_modules/pi-monorepo";
+
+  generatedSettings =
+    pkgs.writeText "phenix-pi-settings.json" (
+      builtins.toJSON (
+        cfg.settings
+        // {
+          theme = cfg.theme;
+        }
+        // lib.optionalAttrs (cfg.configDir != null && cfg.loadConfigDirAsPackage) {
+          packages = [ "${cfg.configDir}" ];
+        }
+        // lib.optionalAttrs (cfg.configDir != null && cfg.directResourceCompat) {
+          extensions = [
+            "${cfg.configDir}/pi/extensions/lsp.ts"
+            "${cfg.configDir}/pi/extensions/phenix-router.ts"
+          ];
+          prompts = [ "${cfg.configDir}/pi/prompts" ];
+          skills = [ "${cfg.configDir}/pi/skills" ];
+          themes = [ "${cfg.configDir}/pi/themes" ];
+        }
+      )
+    );
 in
 {
   imports = [ wlib.modules.default ];
 
   options.pi = {
-    codingAgentDir = lib.mkOption {
-      type = lib.types.str;
-      default = "~/.config/phenix-pi";
-      description = ''
-        Mutable Pi config/state directory.
-
-        The wrapper may install a managed settings.json here, but this does
-        not replace Pi's runtime/package root.
-      '';
-    };
-
-    sessionDir = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      description = ''
-        Optional Pi session directory.
-        Sets PI_CODING_AGENT_SESSION_DIR when non-null.
-      '';
-    };
-
-    managedSettings = lib.mkOption {
+    configDir = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = null;
       description = ''
-        Store path to a managed settings.json copied into PI_CODING_AGENT_DIR.
+        Store-backed Phenix Pi config/resource directory.
 
-        The wrapper copies this file unless PHENIX_PI_MANAGED_CONFIG=0.
+        Expected layout:
+          package.json
+          pi/extensions
+          pi/prompts
+          pi/skills
+          pi/themes
+      '';
+    };
+
+    stateDir = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = ''
+        Mutable Pi state directory.
+
+        If null, runtime default is:
+          ''${XDG_STATE_HOME:-$HOME/.local/state}/phenix-pi
+      '';
+    };
+
+    settings = lib.mkOption {
+      type = lib.types.attrs;
+      default = {
+        defaultProjectTrust = "ask";
+        enableInstallTelemetry = false;
+        enableAnalytics = false;
+      };
+      description = "Base Pi settings written to managed settings.json.";
+    };
+
+    theme = lib.mkOption {
+      type = lib.types.str;
+      default = "catppuccin-mocha";
+      description = "Pi theme name.";
+    };
+
+    loadConfigDirAsPackage = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Add pi.configDir to settings.packages.";
+    };
+
+    directResourceCompat = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Also add direct extensions/prompts/skills/themes paths derived from pi.configDir.
+
+        Useful for older Pi versions or debugging package discovery.
       '';
     };
 
     managedConfig = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = ''
-        Whether the wrapper should copy managedSettings to settings.json.
-      '';
+      description = "Copy generated settings.json into PI_CODING_AGENT_DIR.";
     };
 
     packageRoot = lib.mkOption {
@@ -65,8 +113,8 @@ in
       description = ''
         Optional Pi runtime package root override.
 
-        Defaults to `${config.package}/lib/node_modules/pi-monorepo`.
-        Do not point this at ~/.cache or at the Phenix Pi resource package.
+        Defaults to ''${config.package}/lib/node_modules/pi-monorepo.
+        Do not point this at cache or at pi.configDir.
       '';
     };
 
@@ -88,6 +136,12 @@ in
       description = "Set PI_OFFLINE=1.";
     };
 
+    sessionDir = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "Optional Pi session directory.";
+    };
+
     models = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = null;
@@ -97,31 +151,31 @@ in
     skills = lib.mkOption {
       type = lib.types.listOf lib.types.path;
       default = [ ];
-      description = "Additional skill directories. Sets PI_SKILLS_PATHS.";
+      description = "Additional skill dirs. Prefer pi.configDir for Phenix resources.";
     };
 
     extensions = lib.mkOption {
       type = lib.types.listOf lib.types.path;
       default = [ ];
-      description = "Additional extension directories. Sets PI_EXTENSIONS_PATHS.";
+      description = "Additional extension dirs. Prefer pi.configDir for Phenix resources.";
     };
 
     themes = lib.mkOption {
       type = lib.types.listOf lib.types.path;
       default = [ ];
-      description = "Additional theme directories. Sets PI_THEMES_PATHS.";
+      description = "Additional theme dirs. Prefer pi.configDir for Phenix resources.";
     };
 
     promptTemplates = lib.mkOption {
       type = lib.types.listOf lib.types.path;
       default = [ ];
-      description = "Additional prompt template directories. Sets PI_PROMPT_TEMPLATES_PATHS.";
+      description = "Additional prompt template dirs. Prefer pi.configDir for Phenix resources.";
     };
 
     extraPackages = lib.mkOption {
       type = lib.types.listOf lib.types.package;
       default = [ ];
-      description = "Extra tools available on PATH inside the wrapped Pi.";
+      description = "Extra tools available on PATH inside wrapped Pi.";
     };
 
     extraFlags = lib.mkOption {
@@ -132,44 +186,45 @@ in
   };
 
   config = {
-    wrapperImplementation = "binary";
+    wrapperImplementation = "shell";
 
-    env = {
-      PI_PACKAGE_DIR = toString piPackageRoot;
-      PI_CODING_AGENT_DIR = cfg.codingAgentDir;
-      PI_SKIP_VERSION_CHECK = boolEnv cfg.skipVersionCheck;
-      PI_TELEMETRY = boolEnv cfg.telemetry;
-    }
-    // lib.optionalAttrs cfg.offline {
-      PI_OFFLINE = "1";
-    }
-    // lib.optionalAttrs (cfg.sessionDir != null) {
-      PI_CODING_AGENT_SESSION_DIR = cfg.sessionDir;
-    }
-    // lib.optionalAttrs (cfg.models != null) {
-      PI_MODELS_PATH = toString cfg.models;
-    }
-    // lib.optionalAttrs (cfg.skills != [ ]) {
-      PI_SKILLS_PATHS = pathList cfg.skills;
-    }
-    // lib.optionalAttrs (cfg.extensions != [ ]) {
-      PI_EXTENSIONS_PATHS = pathList cfg.extensions;
-    }
-    // lib.optionalAttrs (cfg.themes != [ ]) {
-      PI_THEMES_PATHS = pathList cfg.themes;
-    }
-    // lib.optionalAttrs (cfg.promptTemplates != [ ]) {
-      PI_PROMPT_TEMPLATES_PATHS = pathList cfg.promptTemplates;
-    };
+    env =
+      {
+        PI_PACKAGE_DIR = toString piRuntimeRoot;
+        PI_SKIP_VERSION_CHECK = boolEnv cfg.skipVersionCheck;
+        PI_TELEMETRY = boolEnv cfg.telemetry;
+      }
+      // lib.optionalAttrs cfg.offline {
+        PI_OFFLINE = "1";
+      }
+      // lib.optionalAttrs (cfg.sessionDir != null) {
+        PI_CODING_AGENT_SESSION_DIR = cfg.sessionDir;
+      }
+      // lib.optionalAttrs (cfg.models != null) {
+        PI_MODELS_PATH = toString cfg.models;
+      }
+      // lib.optionalAttrs (cfg.skills != [ ]) {
+        PI_SKILLS_PATHS = pathList cfg.skills;
+      }
+      // lib.optionalAttrs (cfg.extensions != [ ]) {
+        PI_EXTENSIONS_PATHS = pathList cfg.extensions;
+      }
+      // lib.optionalAttrs (cfg.themes != [ ]) {
+        PI_THEMES_PATHS = pathList cfg.themes;
+      }
+      // lib.optionalAttrs (cfg.promptTemplates != [ ]) {
+        PI_PROMPT_TEMPLATES_PATHS = pathList cfg.promptTemplates;
+      };
 
-    runtimePkgs = [
-      pkgs.git
-      pkgs.ripgrep
-      pkgs.fd
-      pkgs.gnutar
-      pkgs.unzip
-    ]
-    ++ cfg.extraPackages;
+    runtimePkgs =
+      [
+        pkgs.git
+        pkgs.ripgrep
+        pkgs.fd
+        pkgs.gnutar
+        pkgs.unzip
+      ]
+      ++ cfg.extraPackages;
 
     flags = lib.listToAttrs (
       map (
@@ -190,14 +245,36 @@ in
       ) cfg.extraFlags
     );
 
-    runShell = lib.optional (cfg.managedSettings != null) ''
-      mkdir -p "$PI_CODING_AGENT_DIR"
-
-      if [ "${boolEnv cfg.managedConfig}" = "1" ] && [ "''${PHENIX_PI_MANAGED_CONFIG:-1}" = "1" ]; then
-        if [ ! -e "$PI_CODING_AGENT_DIR/settings.json" ] || ! cmp -s ${cfg.managedSettings} "$PI_CODING_AGENT_DIR/settings.json"; then
-          install -m 0644 ${cfg.managedSettings} "$PI_CODING_AGENT_DIR/settings.json"
+    runShell = [
+      ''
+        if [ -z "''${PI_CODING_AGENT_DIR:-}" ]; then
+          ${
+            if cfg.stateDir == null then
+              ''PI_CODING_AGENT_DIR="''${XDG_STATE_HOME:-$HOME/.local/state}/phenix-pi"''
+            else
+              ''PI_CODING_AGENT_DIR=${lib.escapeShellArg cfg.stateDir}''
+          }
         fi
-      fi
-    '';
+
+        case "$PI_CODING_AGENT_DIR" in
+          "~")
+            PI_CODING_AGENT_DIR="$HOME"
+            ;;
+          "~/"*)
+            PI_CODING_AGENT_DIR="$HOME/''${PI_CODING_AGENT_DIR#"~/"}"
+            ;;
+        esac
+
+        export PI_CODING_AGENT_DIR
+
+        mkdir -p "$PI_CODING_AGENT_DIR"
+
+        if [ "${boolEnv cfg.managedConfig}" = "1" ] && [ "''${PHENIX_PI_MANAGED_CONFIG:-1}" = "1" ]; then
+          if [ ! -e "$PI_CODING_AGENT_DIR/settings.json" ] || ! cmp -s ${generatedSettings} "$PI_CODING_AGENT_DIR/settings.json"; then
+            install -m 0644 ${generatedSettings} "$PI_CODING_AGENT_DIR/settings.json"
+          fi
+        fi
+      ''
+    ];
   };
 }

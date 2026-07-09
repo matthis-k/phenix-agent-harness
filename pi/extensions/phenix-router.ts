@@ -15,22 +15,11 @@ import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext 
 
 type Difficulty = "D0" | "D1" | "D2" | "D3";
 type Secrecy = "Public" | "Private" | "Secret";
-type Mode = "auto" | "mixed" | "openai-plus" | "opencode-go" | "free";
+type Mode = "auto" | "free";
 
 interface ConcreteModelRef {
 	provider: string;
 	model: string;
-}
-
-interface RouteRule {
-	match?: {
-		difficulty?: Difficulty[];
-		secrecy?: Secrecy[];
-		changeKind?: string[];
-		mainBound?: boolean;
-	};
-	target: keyof RouterConfig["targets"];
-	reason: string;
 }
 
 interface RouterConfig {
@@ -38,13 +27,7 @@ interface RouterConfig {
 	enabled: boolean;
 	mode: Mode;
 	maxFollowUpRetries: number;
-	targets: {
-		mixed: ConcreteModelRef;
-		openaiPlus: ConcreteModelRef;
-		opencodeGo: ConcreteModelRef;
-		free: ConcreteModelRef;
-	};
-	rules: RouteRule[];
+	free: ConcreteModelRef;
 }
 
 interface RouterState {
@@ -64,7 +47,7 @@ interface RouteInput {
 
 interface ResolvedRoute {
 	frontend: `phenix/${Mode}`;
-	targetName: keyof RouterConfig["targets"];
+	targetName: string;
 	target: ConcreteModelRef;
 	reason: string;
 	valid: boolean;
@@ -81,36 +64,14 @@ interface FailureEvidence {
 const PHENIX_PROVIDER = "phenix";
 const ROUTER_API = "phenix-router-api" as Api;
 
-const frontendModels = ["auto", "mixed", "openai-plus", "opencode-go", "free"] as const;
+const frontendModels = ["auto", "free"] as const;
 
 const defaultConfig: RouterConfig = {
 	version: 1,
 	enabled: true,
 	mode: "auto",
 	maxFollowUpRetries: 1,
-	targets: {
-		mixed: { provider: "opencode-go", model: "kimi-k2.7-code" },
-		openaiPlus: { provider: "openai-codex", model: "gpt-5.2-codex" },
-		opencodeGo: { provider: "opencode-go", model: "kimi-k2.7-code" },
-		free: { provider: "opencode", model: "north-mini-code-free" },
-	},
-	rules: [
-		{
-			match: { secrecy: ["Private", "Secret"] },
-			target: "openaiPlus",
-			reason: "private_or_secret_work_avoids_free_public_models",
-		},
-		{
-			match: { difficulty: ["D2", "D3"] },
-			target: "openaiPlus",
-			reason: "higher_difficulty_uses_stronger_plus_slot",
-		},
-		{
-			match: { difficulty: ["D0", "D1"], secrecy: ["Public"] },
-			target: "opencodeGo",
-			reason: "bounded_public_work_uses_go_slot",
-		},
-	],
+	free: { provider: "opencode", model: "deepseek-v4-flash-free" },
 };
 
 const emptyEvidence = (): FailureEvidence => ({ providerErrors: [], toolErrors: [], assistantErrors: [], turnErrors: [] });
@@ -129,8 +90,7 @@ function mergeConfig(base: RouterConfig, override: Partial<RouterConfig> | undef
 	return {
 		...base,
 		...override,
-		targets: { ...base.targets, ...(override.targets ?? {}) },
-		rules: override.rules ?? base.rules,
+		free: override.free ?? base.free,
 	};
 }
 
@@ -151,30 +111,17 @@ function inferInput(prompt: string): RouteInput {
 	return { difficulty, secrecy, changeKind, mainBound };
 }
 
-function matchesRule(rule: RouteRule, input: RouteInput): boolean {
-	const m = rule.match;
-	if (!m) return true;
-	if (m.difficulty && !m.difficulty.includes(input.difficulty)) return false;
-	if (m.secrecy && !m.secrecy.includes(input.secrecy)) return false;
-	if (m.changeKind && !m.changeKind.includes(input.changeKind)) return false;
-	if (typeof m.mainBound === "boolean" && m.mainBound !== input.mainBound) return false;
-	return true;
-}
 
-function resolveRoute(mode: Mode, input: RouteInput, ctx?: ExtensionContext): ResolvedRoute {
-	const targetName =
-		mode === "openai-plus" ? "openaiPlus" : mode === "opencode-go" ? "opencodeGo" : mode === "free" ? "free" : mode === "mixed" ? "mixed" :
-		(config.rules.find((rule) => matchesRule(rule, input))?.target ?? "mixed");
-	const target = config.targets[targetName];
+function resolveRoute(mode: Mode, _input: RouteInput, ctx?: ExtensionContext): ResolvedRoute {
+	const target = config.free;
 	const concrete = ctx?.modelRegistry.find(target.provider, target.model);
-	const deniedFree = targetName === "free" && (input.secrecy !== "Public" || input.difficulty === "D2" || input.difficulty === "D3");
 	return {
 		frontend: `phenix/${mode}`,
-		targetName,
+		targetName: "free" as const,
 		target,
-		reason: deniedFree ? "free_route_denied_by_privacy_or_difficulty_guard" : config.rules.find((rule) => rule.target === targetName && matchesRule(rule, input))?.reason ?? "explicit_mode_selection",
-		valid: Boolean(concrete) && !deniedFree,
-		validationMessage: deniedFree ? "free target is denied for private/secret or D2/D3 work" : concrete ? undefined : `target model not found in Pi registry: ${target.provider}/${target.model}`,
+		reason: "all_routing_through_free_deepseek_v4_flash",
+		valid: Boolean(concrete),
+		validationMessage: concrete ? undefined : `target model not found in Pi registry: ${target.provider}/${target.model}`,
 	};
 }
 
@@ -225,7 +172,7 @@ function routerStream(model: Model<Api>, context: Context, options?: SimpleStrea
 
 			const upstream = streamSimple(concrete, context, {
 				...options,
-				apiKey: options?.apiKey ?? auth.apiKey,
+				apiKey: auth.apiKey,
 				headers: auth.headers || options?.headers ? { ...auth.headers, ...options?.headers } : undefined,
 				env: auth.env || options?.env ? { ...auth.env, ...options?.env } : undefined,
 			});
@@ -256,7 +203,7 @@ function registerPhenixProvider(pi: ExtensionAPI): void {
 			id,
 			name: `Phenix ${id}`,
 			api: ROUTER_API,
-			reasoning: id !== "free",
+			reasoning: true,
 			input: ["text", "image"],
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 			contextWindow: 128000,
@@ -286,7 +233,7 @@ function handleRouterCommand(args: string, ctx: ExtensionContext): void {
 		}
 		ctx.ui.notify(`phenix router mode: ${state.mode}`, "info");
 	} else if (sub === "routes") {
-		ctx.ui.notify(Object.entries(config.targets).map(([name, target]) => `${name}: ${target.provider}/${target.model}`).join("\n"), "info");
+		ctx.ui.notify(`free: ${config.free.provider}/${config.free.model}`, "info");
 	} else if (sub === "explain") {
 		const route = resolveRoute(state.mode, inferInput(value ?? ""), ctx);
 		state.lastRoute = route;
