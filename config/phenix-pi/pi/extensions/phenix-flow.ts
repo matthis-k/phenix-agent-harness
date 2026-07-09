@@ -31,8 +31,10 @@ import {
   ensureCommChannelDir,
   writeCommMessage,
   writeSubagentResult,
+  resolveSubagentModel,
   type RunPhenixSubagentResult,
   type PhenixSubagentRole,
+  type Difficulty,
   ROLE_TOOL_DEFAULTS,
   type EvidencePacket as ExecEvidencePacket,
 } from "./phenix-subagent-executor";
@@ -49,8 +51,6 @@ type FlowStage =
   | "done"
   | "failed"
   | "direct_executing"; // D0: parent direct execution (no child subagent)
-
-type Difficulty = "D0" | "D1" | "D2" | "D3";
 
 interface FlowWorkflow {
   stage: FlowStage;
@@ -132,6 +132,58 @@ const DEFAULT_STATE: FlowState = {
 // Helpers
 // ──────────────────────────────────────────────
 
+/**
+ * Detect whether the current frontend model is a Phenix variant.
+ */
+function isPhenixModel(ctx: ExtensionContext): boolean {
+  const provider = (ctx.model as any)?.provider;
+  const id = (ctx.model as any)?.id ?? "";
+  return provider === "phenix" || id.startsWith("phenix/");
+}
+
+/**
+ * Extract the latest user prompt from the session.
+ */
+function extractLatestUserPrompt(ctx: ExtensionContext): string | null {
+  const entries = ctx.sessionManager?.getEntries?.() ?? [];
+  const latest = [...entries].reverse().find((e: any) => e.type === "user");
+  return typeof latest?.content === "string" ? latest.content.trim() : null;
+}
+
+/**
+ * Detect the frontend model set identifier for routing.
+ * Returns something like "phenix/opencode-go" that resolveSubagentModel can parse.
+ */
+function detectFrontendModelSet(ctx: ExtensionContext): string {
+  const provider = (ctx.model as any)?.provider;
+  const id = (ctx.model as any)?.id ?? "";
+  if (provider === "phenix" && id) return `phenix/${id.replace(/^phenix\//, "")}`;
+  if (id.startsWith("phenix/")) return id;
+  return "phenix/opencode-go";
+}
+
+/**
+ * Normalize flow-internal role names to the routing matrix role names.
+ */
+function normalizeRoleForRouting(role: PhenixSubagentRole): string {
+  if (role === "worker") return "implementer";
+  if (role === "architect") return "planner";
+  return role;
+}
+
+/**
+ * Control commands that should not trigger Phenix workflow autostart.
+ */
+function isControlCommand(prompt: string): boolean {
+  const lower = prompt.toLowerCase();
+  return (
+    lower.startsWith("/flow") ||
+    lower.startsWith("/router") ||
+    lower.startsWith("/help") ||
+    lower.startsWith("/model")
+  );
+}
+
 function classifyDifficulty(prompt: string): Difficulty {
   const lower = prompt.toLowerCase();
   if (
@@ -162,6 +214,70 @@ function classifyDifficulty(prompt: string): Difficulty {
  */
 function isSimpleTask(difficulty: Difficulty): boolean {
   return difficulty === "D0";
+}
+
+/**
+ * Shared workflow startup logic, extracted from /flow handler.
+ * Used by both /flow command and autostart.
+ */
+function startWorkflowFromPrompt(
+  prompt: string,
+  ctx: ExtensionContext,
+  options: {
+    source: "auto" | "command";
+    difficultyHint: Difficulty | null;
+    plannerMode: PlannerInteractionMode;
+    scoutOverride: "auto" | "force" | "skip";
+  },
+): void {
+  const difficulty = options.difficultyHint ?? classifyDifficulty(prompt);
+  const useSubagents = !isSimpleTask(difficulty);
+
+  const shouldScout = useSubagents
+    ? (options.scoutOverride === "force"
+        ? true
+        : options.scoutOverride === "skip"
+          ? false
+          : shouldRunRepoScout({
+              difficulty,
+              prompt,
+              exactPathsMentioned: [],
+              exactSymbolsMentioned: [],
+            }))
+    : false;
+
+  let initialStage: FlowStage;
+  if (isSimpleTask(difficulty)) {
+    initialStage = "direct_executing";
+  } else {
+    initialStage = shouldScout ? "classifying" : "planning";
+  }
+
+  state.active = true;
+  const runId = `flow-${Date.now()}`;
+  const commDir = ensureCommChannelDir(ctx.cwd);
+  state.workflow = {
+    ...DEFAULT_WORKFLOW,
+    stage: initialStage,
+    originalPrompt: prompt,
+    difficulty,
+    plannerInteractionMode: options.plannerMode,
+    useSubagents,
+    runId,
+    commDir,
+  };
+  persistState();
+
+  const subagentNote = useSubagents ? "with subagents" : "D0 direct (no subagents)";
+  ctx.ui.notify(
+    `${stageEmoji(state.workflow.stage)} Starting Phenix flow: **${prompt.length > 80 ? prompt.slice(0, 80) + "…" : prompt}**` +
+    ` (${difficulty}, ${subagentNote}${!isSimpleTask(difficulty) && shouldScout ? ", with scout" : !isSimpleTask(difficulty) ? ", no scout" : ""})` +
+    `\nSource: ${options.source}` +
+    `\nModel: ${detectFrontendModelSet(ctx)}`,
+    "info",
+  );
+
+  triggerNextStage(ctx);
 }
 
 function stageEmoji(stage: FlowStage): string {
@@ -431,11 +547,25 @@ async function runFlowSubagent(
   ctx: ExtensionContext,
 ): Promise<RunPhenixSubagentResult> {
   const wf = state.workflow;
-  const modelStr = DEFAULT_MODEL;
+
+  // Resolve the model via the routing matrix: variant × role × difficulty
+  const frontendModelSet = detectFrontendModelSet(ctx);
+  const routingRole = normalizeRoleForRouting(role);
+  const resolved = resolveSubagentModel(
+    frontendModelSet,
+    routingRole,
+    (wf.difficulty ?? "D1") as Difficulty,
+    ctx,
+  );
+
+  const modelStr = resolved.available
+    ? `${resolved.modelSet.provider}/${resolved.modelSet.model}`
+    : DEFAULT_MODEL;
+  const thinking = resolved.thinking;
   const tools = ROLE_TOOL_DEFAULTS[role];
 
   ctx.ui.notify(
-    `${stageEmoji(wf.stage)} Running ${role} subagent (model: ${modelStr}, tools: ${tools.join(",")})`,
+    `${stageEmoji(wf.stage)} Running ${role} subagent (model: ${modelStr}, thinking: ${thinking}, tools: ${tools.join(",")})`,
     "info",
   );
 
@@ -445,6 +575,7 @@ async function runFlowSubagent(
       task,
       cwd: ctx.cwd,
       model: modelStr,
+      thinking,
       tools,
       maxBytes: 50 * 1024,
       maxLines: 2000,
@@ -768,9 +899,39 @@ export default function phenixFlow(pi: ExtensionAPI) {
     loadState(ctx);
   });
 
-  // ── before_agent_start: inject role instructions for active workflow ──
+  // ── before_agent_start: autostart + inject role instructions for active workflow ──
 
   pi.on("before_agent_start", (event, ctx) => {
+    // ── Autostart: if Phenix model and no active workflow, auto-enter workflow ──
+    if (!state.active && isPhenixModel(ctx)) {
+      const prompt = extractLatestUserPrompt(ctx);
+      if (prompt && !isControlCommand(prompt)) {
+        // Auto-start the workflow
+        startWorkflowFromPrompt(prompt, ctx, {
+          source: "auto",
+          difficultyHint: null,
+          plannerMode: "ask_if_unclear",
+          scoutOverride: "auto",
+        });
+
+        // Return a message to display to the user, preventing normal agent turn
+        return {
+          systemPrompt: event.systemPrompt,
+          message: {
+            customType: "phenix-flow-autostart",
+            content: `🚀 **Phenix workflow auto-started** for: ${prompt.length > 120 ? prompt.slice(0, 120) + "…" : prompt}`,
+            display: true,
+            details: {
+              autostart: true,
+              prompt,
+              variant: detectFrontendModelSet(ctx),
+            },
+          },
+        };
+      }
+      // Control command or no prompt — fall through to normal handling
+    }
+
     if (!state.active || state.workflow.stage === "idle" || state.workflow.stage === "done" || state.workflow.stage === "failed") {
       return;
     }
@@ -1122,60 +1283,13 @@ export default function phenixFlow(pi: ExtensionAPI) {
         return;
       }
 
-      // Determine difficulty
-      const difficulty = difficultyHint ?? classifyDifficulty(prompt);
-
-      // D0: parent direct execution, no child subagent
-      const useSubagents = !isSimpleTask(difficulty);
-
-      // Determine if scout should run (only relevant for D1+)
-      const shouldScout = useSubagents
-        ? (scoutOverride === "force"
-            ? true
-            : scoutOverride === "skip"
-              ? false
-              : shouldRunRepoScout({
-                  difficulty,
-                  prompt,
-                  exactPathsMentioned: [],
-                  exactSymbolsMentioned: [],
-                }))
-        : false;
-
-      // Determine initial stage
-      let initialStage: FlowStage;
-      if (isSimpleTask(difficulty)) {
-        // D0: direct execute — no subagent, no classify step
-        initialStage = "direct_executing";
-      } else {
-        // D1+: classify first, then scout, then plan
-        initialStage = shouldScout ? "classifying" : "planning";
-      }
-
-      state.active = true;
-      const runId = `flow-${Date.now()}`;
-      const commDir = ensureCommChannelDir(ctx.cwd);
-      state.workflow = {
-        ...DEFAULT_WORKFLOW,
-        stage: initialStage,
-        originalPrompt: prompt,
-        difficulty: difficulty,
-        plannerInteractionMode: plannerMode,
-        useSubagents,
-        runId,
-        commDir,
-      };
-      persistState();
-
-      const subagentNote = useSubagents ? "with subagents" : "D0 direct (no subagents)";
-      ctx.ui.notify(
-        `${stageEmoji(state.workflow.stage)} Starting Phenix flow: **${prompt.length > 80 ? prompt.slice(0, 80) + "…" : prompt}** (${difficulty}, ${subagentNote}${!isSimpleTask(difficulty) && shouldScout ? ", with scout" : !isSimpleTask(difficulty) ? ", no scout" : ""})` +
-        `\nModel: ${DEFAULT_MODEL}`,
-        "info",
-      );
-
-      // Start the first stage
-      triggerNextStage(ctx);
+      // Reuse the shared startup function
+      startWorkflowFromPrompt(prompt, ctx, {
+        source: "command",
+        difficultyHint,
+        plannerMode,
+        scoutOverride,
+      });
     },
   });
 }

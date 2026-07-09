@@ -223,8 +223,12 @@
               grep -F -q 'PI_SUBAGENT_DEPTH' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
               grep -F -q 'runPhenixSubagent' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
               grep -F -q 'parsePiJsonOutput' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
-              grep -F -q 'resolveRoleModel' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
+              grep -F -q 'resolveRoleWithFallback' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
               grep -F -q 'ROLE_TOOL_DEFAULTS' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
+              grep -F -q 'resolveGptCapability' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
+              grep -F -q 'OPENCODE_GO_AVAILABLE_MODELS' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
+              grep -F -q 'ROLE_PREFERENCES' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
+              grep -F -q 'GPT_CAPABILITY_PREFERENCES' ${phenixPiConfigDir}/pi/extensions/phenix-subagent-executor.ts
 
               # Verify phenix-flow extension for multi-agent workflow
               grep -F -q 'pi.registerCommand("flow"' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
@@ -236,6 +240,20 @@
               grep -F -q 'sendUserMessage' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
               grep -F -q 'ranRealSubagentScout' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
               ! grep -F -q 'setModel(' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+
+              # Verify autostart
+              grep -F -q 'isPhenixModel' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+              grep -F -q 'startWorkflowFromPrompt' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+              grep -F -q 'phenix-flow-autostart' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+
+              # Verify routing model resolution replaces DEFAULT_MODEL
+              grep -F -q 'resolveSubagentModel' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+              grep -F -q 'detectFrontendModelSet' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+              grep -F -q 'normalizeRoleForRouting' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+              grep -F -q 'isControlCommand' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+              # /flow command must call startWorkflowFromPrompt, not duplicate startup logic
+              grep -F -q 'startWorkflowFromPrompt(prompt, ctx' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+              ! grep -F -q 'const modelStr = DEFAULT_MODEL' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
 
               # Verify phenix-runtime module with all data models
               grep -F -q 'PlanContract' ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
