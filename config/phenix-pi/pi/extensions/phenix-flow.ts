@@ -16,6 +16,44 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  type PlanContract,
+  type PlannerInteractionMode,
+  type RolePolicy,
+  type Scope,
+  type Permissions,
+  type ContextPack,
+  type PlanTask,
+  type TaskNode,
+  type PublicCard,
+  type Report,
+  type ReportType,
+  type ReportAudience,
+  type ArtifactRef,
+  type ArtifactKind,
+  type Contract,
+  type Dependency,
+  type DependencyKind,
+  type PathLock,
+  type LockMode,
+  type EvidencePacket,
+  type PatchReport,
+  type VerificationReport,
+  type RiskReport,
+  type DelegationDecision,
+  type ScopeResolution,
+  type ScopeIssue,
+  BASE_RUNTIME_CONTRACT,
+  assembleSystemPrompt,
+  ROLE_AUTHORITY,
+  DEFAULT_PERMISSIONS,
+  PROFILES,
+  shouldDelegate,
+  resolveScopeIssue,
+  scopeContainsPath,
+  RECURSIVE_DELEGATION_DEFAULTS,
+  MCP_TOOLS,
+} from "./phenix-runtime";
 
 // ──────────────────────────────────────────────
 // Types
@@ -41,10 +79,17 @@ interface FlowWorkflow {
   secrecy: string | null;
   changeKind: string | null;
   plan: string | null;
+  planContract: PlanContract | null;
+  plannerInteractionMode: PlannerInteractionMode;
   executionResults: string[];
   verificationResult: string | null;
   loopCount: number;
   maxLoops: number;
+  delegationEnabled: boolean;
+  maxDelegationDepth: number;
+  rootTaskId: string | null;
+  sessionId: string | null;
+  graphId: string | null;
 }
 
 interface FlowState {
@@ -65,10 +110,17 @@ const DEFAULT_WORKFLOW: FlowWorkflow = {
   secrecy: null,
   changeKind: null,
   plan: null,
+  planContract: null,
+  plannerInteractionMode: "ask_if_unclear",
   executionResults: [],
   verificationResult: null,
   loopCount: 0,
   maxLoops: 3,
+  delegationEnabled: false,
+  maxDelegationDepth: 2,
+  rootTaskId: null,
+  sessionId: null,
+  graphId: null,
 };
 
 const DEFAULT_STATE: FlowState = {
@@ -166,8 +218,16 @@ function getStageInstruction(stage: FlowStage, _wf: FlowWorkflow): string | null
         "- Analyze the task and decompose it into ordered, actionable subtasks",
         "- State clear assumptions and success criteria",
         "- Design the overall approach — do NOT execute subtasks or modify files",
+        "- If the goal, scope, or acceptance criteria are unclear, ask the user for clarification before finishing the plan",
+        "- If the goal IS clear, produce a complete PlanContract",
         "",
-        'End your response with a JSON plan block:\n```json\n{"goal": "...", "subtasks": ["1. ...", "2. ..."], "assumptions": ["..."], "success_criteria": ["..."]}\n```',
+        'End your response with a JSON plan block that is a PlanContract:',"",
+        '```json',
+        '{"goal": "...", "subtasks": [{"id":"task_1", "title":"...", "role":"worker", "profile":"implementation", "objective":"...", "success_criteria":["..."], "dependencies":[]}], "decisions": ["..."], "acceptance_criteria": ["..."], "non_goals": ["..."], "invariants": ["..."], "interaction_status": "ready" | "needs_clarification"',
+        '}',
+        '```',
+        "",
+        'If interaction_status is "needs_clarification", include a "clarification_questions" field with targeted questions for the user.',
       ].join("\n");
 
     case "executing":
@@ -193,7 +253,10 @@ function getStageInstruction(stage: FlowStage, _wf: FlowWorkflow): string | null
         "- Do the success criteria pass?",
         "- Are there any missing pieces or regressions?",
         "",
-        'End your response with a JSON verdict:\n```json\n{"verdict": "pass" | "fail", "issues": ["..."], "feedback": "..."}\n```',
+        'End your response with a VerificationReport JSON:',"",
+        '```json',
+        '{"status": "pass" | "fail", "failures": [{"issue": "...", "evidence": "...", "ownerHint": null, "requiredFix": "..."}], "checks": [{"command": "...", "result": "pass"|"fail"|"not_run"}], "scopeViolations": []}',
+        '```',
       ].join("\n");
 
     case "replanning":
@@ -551,7 +614,6 @@ export default function phenixFlow(pi: ExtensionAPI) {
       // No assistant response — stage failed
       state.workflow.stage = "failed";
       state.active = false;
-      (globalThis as any).__phenixFlowActive = false;
       persistState();
       ctx.ui.notify("❌ Flow workflow failed: no assistant response", "error");
       return;
@@ -625,8 +687,7 @@ export default function phenixFlow(pi: ExtensionAPI) {
         }
         state.active = false;
         state.workflow = { ...DEFAULT_WORKFLOW };
-        (globalThis as any).__phenixFlowActive = false;
-        persistState();
+          persistState();
         ctx.ui.notify("⏹️ Flow workflow cancelled.", "warning");
         return;
       }
@@ -641,15 +702,22 @@ export default function phenixFlow(pi: ExtensionAPI) {
         prompt = prompt.replace(/--difficulty\s+D[0-3]\s*/i, "").trim();
       }
 
+      // Parse planner interaction mode
+      let plannerMode: PlannerInteractionMode = "ask_if_unclear";
+      const modeMatch = trimmed.match(/--mode\s+(auto|ask_if_unclear|require_plan_approval|collaborative)/i);
+      if (modeMatch) {
+        plannerMode = modeMatch[1].toLowerCase() as PlannerInteractionMode;
+        prompt = prompt.replace(/--mode\s+\S+\s*/i, "").trim();
+      }
+
       // Remove other known flags
       prompt = prompt
-        .replace(/--mode\s+\S+\s*/g, "")
         .replace(/--target-state\s+\S+\s*/g, "")
         .trim();
 
       if (!prompt) {
         ctx.ui.notify(
-          "Usage: /flow <prompt>\n  or: /flow --difficulty D2 <prompt>\n  or: /flow status\n  or: /flow cancel",
+          "Usage: /flow <prompt>\n  or: /flow --difficulty D2 <prompt>\n  or: /flow --mode ask_if_unclear <prompt>\n  or: /flow status\n  or: /flow cancel",
           "warning",
         );
         return;
@@ -665,10 +733,9 @@ export default function phenixFlow(pi: ExtensionAPI) {
         stage: complex ? "classifying" : "executing",
         originalPrompt: prompt,
         difficulty: difficulty,
+        plannerInteractionMode: plannerMode,
       };
       persistState();
-      // Signal to phenix-router that flow is active (suppress its retry logic)
-      (globalThis as any).__phenixFlowActive = true;
 
       ctx.ui.notify(
         `${stageEmoji(state.workflow.stage)} Starting Phenix flow: **${prompt.length > 80 ? prompt.slice(0, 80) + "…" : prompt}** (${difficulty}${complex ? ", multi-stage" : ", single-agent"})`,

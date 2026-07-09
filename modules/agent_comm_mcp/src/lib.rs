@@ -58,10 +58,33 @@ pub const TOOLS: &[&str] = &[
     "comm_artifact_list",
     "comm_decision_record",
     "comm_decision_list",
+
+    // Workflow v2 tools
+    "comm_public_card_update",
+    "comm_public_card_get",
+    "comm_public_card_list",
+    "comm_report_publish",
+    "comm_report_list",
+    "comm_report_latest",
+    "comm_path_lock_reserve",
+    "comm_path_lock_release",
+    "comm_path_lock_list",
+    "comm_path_lock_find_owner",
+    "comm_contract_publish",
+    "comm_contract_update",
+    "comm_contract_get",
+    "comm_contract_list_consumers",
+    "comm_contract_mark_stale",
+    "comm_dependency_resolve",
+    "comm_dependency_list_blockers",
 ];
 
 const AGENT_STATUSES: &[&str] = &["available", "busy", "waiting", "offline"];
-const TASK_STATUSES: &[&str] = &["pending", "in_progress", "blocked", "completed", "failed"];
+const TASK_STATUSES: &[&str] = &["pending", "in_progress", "blocked", "completed", "failed", "proposed", "scoped", "needs_fix", "review", "integrated", "cancelled"];
+const LOCK_MODES: &[&str] = &["read", "write"];
+const REPORT_TYPES: &[&str] = &["discovery", "done", "blocker", "scope_issue", "scope_expansion_request", "interface_request", "interface_change", "verification", "safety_risk", "ambiguity_report", "planner_decision", "handoff"];
+const REPORT_AUDIENCES: &[&str] = &["parent", "siblings", "subtree", "session"];
+const CONTRACT_STATUSES: &[&str] = &["draft", "active", "deprecated"];
 const MESSAGE_FORMATS: &[&str] = &["text", "markdown", "json", "yaml"];
 const MESSAGE_SEVERITIES: &[&str] = &["info", "notice", "warning", "error"];
 
@@ -102,6 +125,9 @@ impl AgentCommRepository {
             .unwrap_or(0);
         if version < 1 {
             self.migrate_v1()?;
+        }
+        if version < 2 {
+            self.migrate_v2()?;
         }
         Ok(())
     }
@@ -174,6 +200,47 @@ impl AgentCommRepository {
                created_at TEXT NOT NULL
              );
              PRAGMA user_version = 1;",
+        )?;
+        Ok(())
+    }
+
+    /// Schema version 2: workflow coordination tables.
+    fn migrate_v2(&self) -> Result<()> {
+        self.conn.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             CREATE TABLE IF NOT EXISTS public_cards (
+               task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+               status TEXT NOT NULL, summary TEXT NOT NULL, current_focus TEXT,
+               changed_files TEXT NOT NULL DEFAULT '[]',
+               interface_exports TEXT NOT NULL DEFAULT '[]',
+               blockers TEXT NOT NULL DEFAULT '[]',
+               open_questions TEXT NOT NULL DEFAULT '[]',
+               latest_report_ref TEXT, updated_at TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS reports (
+               id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+               task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+               report_type TEXT NOT NULL, audience TEXT NOT NULL,
+               summary TEXT NOT NULL, body TEXT NOT NULL,
+               evidence_refs TEXT NOT NULL DEFAULT '[]',
+               created_at TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS path_locks (
+               path TEXT NOT NULL, owner_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+               lock_mode TEXT NOT NULL DEFAULT 'write',
+               reason TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+               PRIMARY KEY(path, owner_task_id)
+             );
+             CREATE TABLE IF NOT EXISTS contract_registry (
+               name TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1,
+               owner_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+               status TEXT NOT NULL DEFAULT 'draft',
+               fields TEXT NOT NULL DEFAULT '{}',
+               consumers TEXT NOT NULL DEFAULT '[]',
+               created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+               PRIMARY KEY(name, version)
+             );
+             PRAGMA user_version = 2;",
         )?;
         Ok(())
     }
@@ -321,6 +388,54 @@ impl AgentCommRepository {
             "comm_decision_list" => {
                 self.list_where("decisions", "session_id", str_arg(a, "session_id")?)
             }
+            "comm_public_card_update" => self.public_card_update(
+                str_arg(a, "task_id")?,
+                str_arg(a, "status")?,
+                opt_str(a, "summary").unwrap_or(""),
+                opt_str(a, "current_focus"),
+                opt_str_array_str(a, "changed_files")?,
+                opt_str_array_str(a, "interface_exports")?,
+                opt_str_array_str(a, "open_questions")?,
+            ),
+            "comm_public_card_get" => self.public_card_get(str_arg(a, "task_id")?),
+            "comm_public_card_list" => self.public_card_list(str_arg(a, "session_id")?),
+            "comm_report_publish" => self.report_publish(
+                str_arg(a, "session_id")?,
+                str_arg(a, "task_id")?,
+                str_arg(a, "report_type")?,
+                str_arg(a, "audience")?,
+                str_arg(a, "summary")?,
+                opt_value(a, "body"),
+                opt_str_array_str(a, "evidence_refs")?,
+            ),
+            "comm_report_list" => self.report_list(str_arg(a, "session_id")?, opt_str(a, "task_id"), opt_str(a, "report_type")),
+            "comm_report_latest" => self.report_latest(str_arg(a, "task_id")?, opt_str(a, "report_type")),
+            "comm_path_lock_reserve" => self.path_lock_reserve(
+                str_arg(a, "path")?,
+                str_arg(a, "owner_task_id")?,
+                opt_str(a, "lock_mode").unwrap_or("write"),
+                opt_str(a, "reason").unwrap_or(""),
+            ),
+            "comm_path_lock_release" => self.path_lock_release(str_arg(a, "path")?, str_arg(a, "owner_task_id")?),
+            "comm_path_lock_list" => self.path_lock_list(opt_str(a, "owner_task_id")),
+            "comm_path_lock_find_owner" => self.path_lock_find_owner(str_arg(a, "path")?),
+            "comm_contract_publish" => self.contract_publish(
+                str_arg(a, "name")?,
+                opt_str(a, "owner_task_id"),
+                opt_value(a, "fields"),
+            ),
+            "comm_contract_update" => self.contract_update(
+                str_arg(a, "name")?,
+                opt_i64(a, "version").unwrap_or(1) as i64,
+                opt_str(a, "status"),
+                opt_str(a, "owner_task_id"),
+                if opt_value(a, "fields").is_null() { None } else { Some(opt_value(a, "fields")) },
+            ),
+            "comm_contract_get" => self.contract_get(str_arg(a, "name")?, opt_i64(a, "version").unwrap_or(0) as i64),
+            "comm_contract_list_consumers" => self.contract_list_consumers(str_arg(a, "name")?),
+            "comm_contract_mark_stale" => self.contract_mark_stale(str_arg(a, "consumer_task_id")?, str_arg(a, "contract_name")?),
+            "comm_dependency_resolve" => self.dependency_resolve(str_arg(a, "task_id")?, str_arg(a, "depends_on_task_id")?),
+            "comm_dependency_list_blockers" => self.dependency_list_blockers(str_arg(a, "task_id")?),
             _ => Err(AgentCommError::UnknownTool(tool.to_owned())),
         }
     }
@@ -834,6 +949,160 @@ impl AgentCommRepository {
         self.get_by_id("decisions", &id)
     }
 
+
+    fn public_card_update(&self, task_id: &str, status: &str, summary: &str, current_focus: Option<&str>, changed_files: Vec<String>, interface_exports: Vec<String>, open_questions: Vec<String>) -> Result<Value> {
+        let now = now();
+        self.conn.execute(
+            "INSERT INTO public_cards (task_id, status, summary, current_focus, changed_files, interface_exports, open_questions, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(task_id) DO UPDATE SET status=excluded.status, summary=excluded.summary, current_focus=excluded.current_focus, changed_files=excluded.changed_files, interface_exports=excluded.interface_exports, open_questions=excluded.open_questions, updated_at=excluded.updated_at",
+            params![task_id, status, summary, current_focus, serde_json::to_string(&changed_files).unwrap_or_default(), serde_json::to_string(&interface_exports).unwrap_or_default(), serde_json::to_string(&open_questions).unwrap_or_default(), now],
+        )?;
+        self.get_by_id_custom("public_cards", "task_id", task_id)
+    }
+
+    fn public_card_get(&self, task_id: &str) -> Result<Value> {
+        self.get_by_id_custom("public_cards", "task_id", task_id)
+    }
+
+    fn public_card_list(&self, session_id: &str) -> Result<Value> {
+        self.query_json("SELECT pc.* FROM public_cards pc JOIN tasks t ON t.id=pc.task_id JOIN graphs g ON g.id=t.graph_id WHERE g.session_id=?1", params![session_id])
+    }
+
+    fn report_publish(&self, session_id: &str, task_id: &str, report_type: &str, audience: &str, summary: &str, body: Value, evidence_refs: Vec<String>) -> Result<Value> {
+        validate("report type", report_type, REPORT_TYPES)?;
+        validate("report audience", audience, REPORT_AUDIENCES)?;
+        let id = uuid();
+        let now = now();
+        self.conn.execute(
+            "INSERT INTO reports VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            params![id, session_id, task_id, report_type, audience, summary, body.to_string(), serde_json::to_string(&evidence_refs).unwrap_or_default(), now],
+        )?;
+        self.event(session_id, None, Some(task_id), &format!("report.{report_type}"), &summary, json!({"report_id": id, "audience": audience}))?;
+        self.get_by_id("reports", &id)
+    }
+
+    fn report_list(&self, session_id: &str, task_id: Option<&str>, report_type: Option<&str>) -> Result<Value> {
+        match (task_id, report_type) {
+            (Some(t), Some(r)) => self.query_json("SELECT * FROM reports WHERE session_id=?1 AND task_id=?2 AND report_type=?3 ORDER BY created_at DESC", params![session_id, t, r]),
+            (Some(t), None) => self.query_json("SELECT * FROM reports WHERE session_id=?1 AND task_id=?2 ORDER BY created_at DESC", params![session_id, t]),
+            (None, Some(r)) => self.query_json("SELECT * FROM reports WHERE session_id=?1 AND report_type=?2 ORDER BY created_at DESC", params![session_id, r]),
+            (None, None) => self.query_json("SELECT * FROM reports WHERE session_id=?1 ORDER BY created_at DESC", params![session_id]),
+        }
+    }
+
+    fn report_latest(&self, task_id: &str, report_type: Option<&str>) -> Result<Value> {
+        if let Some(report_type) = report_type {
+            self.query_one_json("SELECT * FROM reports WHERE task_id=?1 AND report_type=?2 ORDER BY created_at DESC LIMIT 1", params![task_id, report_type])
+        } else {
+            self.query_one_json("SELECT * FROM reports WHERE task_id=?1 ORDER BY created_at DESC LIMIT 1", params![task_id])
+        }
+    }
+
+    fn path_lock_reserve(&self, path: &str, owner_task_id: &str, lock_mode: &str, reason: &str) -> Result<Value> {
+        validate("lock mode", lock_mode, LOCK_MODES)?;
+        let now = now();
+        self.conn.execute(
+            "INSERT OR REPLACE INTO path_locks VALUES (?1,?2,?3,?4,?5)",
+            params![path, owner_task_id, lock_mode, reason, now],
+        )?;
+        self.query_one_json("SELECT * FROM path_locks WHERE path=?1 AND owner_task_id=?2", params![path, owner_task_id])
+    }
+
+    fn path_lock_release(&self, path: &str, owner_task_id: &str) -> Result<Value> {
+        self.conn.execute("DELETE FROM path_locks WHERE path=?1 AND owner_task_id=?2", params![path, owner_task_id])?;
+        let session_id = self.task_session_id(owner_task_id);
+        if let Ok(sid) = session_id {
+            self.event(&sid, None, Some(owner_task_id), "path_lock.release", path, json!({}))?;
+        }
+        Ok(json!({"path": path, "released_by": owner_task_id}))
+    }
+
+    fn path_lock_list(&self, owner_task_id: Option<&str>) -> Result<Value> {
+        if let Some(owner) = owner_task_id {
+            self.query_json("SELECT * FROM path_locks WHERE owner_task_id=?1", params![owner])
+        } else {
+            self.query_json("SELECT * FROM path_locks ORDER BY created_at", [])
+        }
+    }
+
+    fn path_lock_find_owner(&self, path: &str) -> Result<Value> {
+        self.query_one_json("SELECT * FROM path_locks WHERE path=?1 ORDER BY lock_mode='write' DESC, created_at DESC LIMIT 1", params![path])
+    }
+
+    fn contract_publish(&self, name: &str, owner_task_id: Option<&str>, fields: Value) -> Result<Value> {
+        let now = now();
+        let latest: Option<i64> = self.conn.query_row("SELECT MAX(version) FROM contract_registry WHERE name=?1", params![name], |r| r.get(0)).optional()?;
+        let version = latest.unwrap_or(0) + 1;
+        self.conn.execute(
+            "INSERT INTO contract_registry VALUES (?1,?2,?3,'active',?4,'[]',?5,?5)",
+            params![name, version, owner_task_id, fields.to_string(), now],
+        )?;
+        self.get_by_id_custom("contract_registry", "name", name)
+    }
+
+    fn contract_update(&self, name: &str, version: i64, status: Option<&str>, owner_task_id: Option<&str>, fields: Option<Value>) -> Result<Value> {
+        if let Some(status) = status {
+            validate("contract status", status, CONTRACT_STATUSES)?;
+            self.conn.execute("UPDATE contract_registry SET status=?2, updated_at=?3 WHERE name=?1 AND version=?4", params![name, status, now(), version])?;
+        }
+        if let Some(owner) = owner_task_id {
+            self.conn.execute("UPDATE contract_registry SET owner_task_id=?2, updated_at=?3 WHERE name=?1 AND version=?4", params![name, owner, now(), version])?;
+        }
+        if let Some(fields) = fields {
+            self.conn.execute("UPDATE contract_registry SET fields=?2, updated_at=?3 WHERE name=?1 AND version=?4", params![name, fields.to_string(), now(), version])?;
+        }
+        self.get_by_id_custom("contract_registry", "name", name)
+    }
+
+    fn contract_get(&self, name: &str, version: i64) -> Result<Value> {
+        if version == 0 {
+            self.query_one_json("SELECT * FROM contract_registry WHERE name=?1 ORDER BY version DESC LIMIT 1", params![name])
+        } else {
+            self.get_by_id_custom("contract_registry", "name", name)
+        }
+    }
+
+    fn contract_list_consumers(&self, name: &str) -> Result<Value> {
+        self.query_json("SELECT consumers FROM contract_registry WHERE name=?1 ORDER BY version DESC LIMIT 1", params![name])
+    }
+
+    fn contract_mark_stale(&self, consumer_task_id: &str, contract_name: &str) -> Result<Value> {
+        let row: Option<String> = self.conn.query_row(
+            "SELECT consumers FROM contract_registry WHERE name=?1 ORDER BY version DESC LIMIT 1",
+            params![contract_name],
+            |r| r.get(0),
+        ).optional()?;
+        let mut consumers: Vec<String> = row.and_then(|r| serde_json::from_str(&r).ok()).unwrap_or_default();
+        if !consumers.contains(&consumer_task_id.to_owned()) {
+            consumers.push(consumer_task_id.to_owned());
+        }
+        self.conn.execute(
+            "UPDATE contract_registry SET consumers=?2, updated_at=?3 WHERE name=?1 AND version=(SELECT MAX(version) FROM contract_registry WHERE name=?1)",
+            params![contract_name, serde_json::to_string(&consumers).unwrap_or_default(), now()],
+        )?;
+        if let Ok(session_id) = self.task_session_id(consumer_task_id) {
+            self.event(&session_id, None, None, "contract.stale", contract_name, json!({"consumer_task_id": consumer_task_id}))?;
+        }
+        Ok(json!({"contract_name": contract_name, "consumer_task_id": consumer_task_id, "status": "stale"}))
+    }
+
+    fn dependency_resolve(&self, task_id: &str, depends_on_task_id: &str) -> Result<Value> {
+        self.conn.execute("DELETE FROM task_dependencies WHERE task_id=?1 AND depends_on_task_id=?2", params![task_id, depends_on_task_id])?;
+        self.task_event(task_id, "dependency.resolve", depends_on_task_id, json!({}))?;
+        self.get_by_id("tasks", task_id)
+    }
+
+    fn dependency_list_blockers(&self, task_id: &str) -> Result<Value> {
+        self.query_json("SELECT d.*, t.title AS blocked_task_title, dep.title AS blocked_by_title FROM task_dependencies d JOIN tasks t ON t.id=d.task_id LEFT JOIN tasks dep ON dep.id=d.depends_on_task_id WHERE d.task_id=?1 OR d.depends_on_task_id=?1", params![task_id])
+    }
+
+    fn task_session_id(&self, task_id: &str) -> Result<String> {
+        self.scalar("SELECT g.session_id FROM graphs g JOIN tasks t ON t.graph_id=g.id WHERE t.id=?1", params![task_id])
+    }
+
+    fn get_by_id_custom(&self, table: &str, column: &str, value: &str) -> Result<Value> {
+        self.query_one_json(&format!("SELECT * FROM {table} WHERE {column}=?1"), params![value])
+    }
+
     fn get_by_id(&self, table: &str, id: &str) -> Result<Value> {
         self.query_one_json(&format!("SELECT * FROM {table} WHERE id=?1"), params![id])
     }
@@ -1012,6 +1281,22 @@ fn opt_str_array(a: &serde_json::Map<String, Value>, name: &'static str) -> Resu
             })
             .collect(),
         Some(_) => Err(AgentCommError::Invalid(format!("{name} must be an array"))),
+    }
+}
+
+fn opt_str_array_str(a: &serde_json::Map<String, Value>, name: &'static str) -> Result<Vec<String>> {
+    match a.get(name) {
+        None => Ok(Vec::new()),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| {
+                item.as_str().map(str::to_owned).ok_or_else(|| {
+                    AgentCommError::Invalid(format!("{name} must contain only strings"))
+                })
+            })
+            .collect(),
+        Some(Value::String(s)) => Ok(s.split(',').map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()).collect()),
+        Some(_) => Err(AgentCommError::Invalid(format!("{name} must be a string or array of strings"))),
     }
 }
 fn opt_value(a: &serde_json::Map<String, Value>, name: &str) -> Value {
@@ -1503,7 +1788,7 @@ mod tests {
             .conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 1, "schema should be at version 1 after init");
+        assert_eq!(version, 2, "schema should be at version 2 after init");
 
         // Open again — should not fail or reset
         let repo2 = AgentCommRepository::open(&db).unwrap();
@@ -1511,7 +1796,7 @@ mod tests {
             .conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 1, "re-opening should preserve user_version");
+        assert_eq!(version, 2, "re-opening should preserve user_version");
     }
 
     #[test]

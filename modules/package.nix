@@ -200,6 +200,26 @@
               grep -F -q 'sendUserMessage' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
               ! grep -F -q 'setModel(' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
               # Verify phenix-tools extension exists with all 11 tools
+
+              # Verify phenix-runtime module with all data models
+              test -e ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
+              grep -F -q 'PlanContract' ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
+              grep -F -q 'TaskNode' ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
+              grep -F -q 'PublicCard' ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
+              grep -F -q 'RolePolicy' ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
+              grep -F -q 'assembleSystemPrompt' ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
+              grep -F -q 'resolveScopeIssue' ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
+              grep -F -q 'shouldDelegate' ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
+              grep -F -q 'scopeContainsPath' ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
+              grep -F -q 'DEFAULT_PERMISSIONS' ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
+              ! grep -F -q 'setModel(' ${phenixPiConfigDir}/pi/extensions/phenix-runtime.ts
+              # Verify router exposes all 5 frontend modes
+              grep -F -q '"opencode-go"' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
+              grep -F -q '"gpt"' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
+              grep -F -q '"mixed"' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
+              grep -F -q 'FRONTEND_MODELS' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
+              # Verify router retry respects flow active signal
+              grep -F -q 'flowActive' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
               test -d ${phenixPiConfigDir}/pi/extensions/phenix-tools
               grep -F -q 'registerRead' ${phenixPiConfigDir}/pi/extensions/phenix-tools/index.ts
               grep -F -q 'registerSearch' ${phenixPiConfigDir}/pi/extensions/phenix-tools/index.ts
