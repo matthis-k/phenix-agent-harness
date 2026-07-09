@@ -1,5 +1,19 @@
 # Phenix Pi workflow
 
+Use the **`/flow`** command to launch automatic multi-agent workflows:
+
+- **/flow <prompt>** — Classifies, plans, executes, and verifies your request through the pipeline.
+- **/flow --difficulty <D0|D1|D2|D3> <prompt>** — Override difficulty classification.
+- **/flow status** — Show current workflow stage.
+- **/flow cancel** — Cancel active workflow.
+
+Simple requests (D0, D1) run as a single-agent implementation step.
+Complex requests (D2, D3) run through: 🏷️ Classify → 📋 Plan → 🔧 Execute → ✅ Verify → 📊 Synthesize. If verification fails, the pipeline loops through 🔄 Revise → 🔧 Execute → ✅ Verify up to 3 times.
+
+---
+
+# Phenix Pi workflow
+
 Use this prompt template to run the Phenix WorkScope-driven request → route →
 implementation → verification workflow while using Pi.
 

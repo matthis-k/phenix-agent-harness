@@ -64,12 +64,12 @@ interface FailureEvidence {
 const PHENIX_PROVIDER = "phenix";
 const ROUTER_API = "phenix-router-api" as Api;
 
-const frontendModels = ["auto", "free"] as const;
+const frontendModels = ["free", "auto"] as const;
 
 const defaultConfig: RouterConfig = {
 	version: 1,
 	enabled: true,
-	mode: "auto",
+	mode: "free",
 	maxFollowUpRetries: 1,
 	free: { provider: "opencode", model: "deepseek-v4-flash-free" },
 };
@@ -77,7 +77,7 @@ const defaultConfig: RouterConfig = {
 const emptyEvidence = (): FailureEvidence => ({ providerErrors: [], toolErrors: [], assistantErrors: [], turnErrors: [] });
 
 let config: RouterConfig = defaultConfig;
-let state: RouterState = { enabled: defaultConfig.enabled, mode: defaultConfig.mode, retryCount: 0 };
+let state: RouterState = { enabled: defaultConfig.enabled, mode: "free", retryCount: 0 };
 let evidence = emptyEvidence();
 
 function readJson(path: string): Partial<RouterConfig> | undefined {
@@ -265,7 +265,6 @@ export default function phenixRouter(pi: ExtensionAPI) {
 				state = { ...state, ...(entry.data as Partial<RouterState>) };
 			}
 		}
-		ctx.ui.setStatus("phenix-router", state.enabled ? `router:${state.mode}` : "router:off");
 	});
 
 	pi.on("before_agent_start", (event, ctx) => {
@@ -299,7 +298,9 @@ export default function phenixRouter(pi: ExtensionAPI) {
 		const hasFailure = evidence.providerErrors.length + evidence.toolErrors.length + evidence.assistantErrors.length + evidence.turnErrors.length > 0;
 		state.lastFailure = hasFailure ? evidence : undefined;
 		persist("phenix-router-state", state);
-		if (hasFailure && state.retryCount < config.maxFollowUpRetries) {
+		// Skip retry when phenix-flow has an active workflow — flow handles its own error recovery
+		const flowActive = (globalThis as any).__phenixFlowActive === true;
+		if (hasFailure && !flowActive && state.retryCount < config.maxFollowUpRetries) {
 			state.retryCount += 1;
 			pi.sendMessage({ customType: "phenix-router-retry", content: `Phenix router observed failure evidence and queued bounded follow-up retry ${state.retryCount}/${config.maxFollowUpRetries}.`, display: true, details: evidence }, { deliverAs: "followUp", triggerTurn: true });
 		}
@@ -307,7 +308,6 @@ export default function phenixRouter(pi: ExtensionAPI) {
 
 	pi.on("model_select", (event, ctx) => {
 		activeContext = ctx;
-		ctx.ui.setStatus("phenix-router", event.model.provider === PHENIX_PROVIDER ? `router:${event.model.id}` : `router:${state.mode}`);
 	});
 
 	pi.registerCommand("router", {

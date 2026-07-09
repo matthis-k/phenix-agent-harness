@@ -75,6 +75,8 @@ in
         defaultProjectTrust = "ask";
         enableInstallTelemetry = false;
         enableAnalytics = false;
+        defaultProvider = "phenix";
+        defaultModel = "free";
       };
       description = "Base Pi settings written to managed settings.json.";
     };

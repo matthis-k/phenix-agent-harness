@@ -17,6 +17,8 @@
 
       context7-mcp = inputs.nixpkgs-unstable.legacyPackages.${system}.context7-mcp;
 
+      astGrep = inputs.nixpkgs-unstable.legacyPackages.${system}.ast-grep;
+
       wrapperModule = (inputs.nix-wrapper-modules.lib.evalModule (import ./wrapper-module.nix)).config;
 
       routingConfigYaml = ../routing-config.yaml;
@@ -57,6 +59,7 @@
             pkgs.jq
             pkgs.ripgrep
             pkgs.fd
+            astGrep
             agentComm
             inputs.phenix-tend.packages.${system}."tend"
             inputs.phenix-tend.packages.${system}."tend-mcp"
@@ -156,6 +159,8 @@
               test -e ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
               test -d ${phenixPiConfigDir}/pi/prompts
               test -d ${phenixPiConfigDir}/pi/skills
+              test -d ${phenixPiConfigDir}/pi/extensions/phenix-tools
+              test -e ${phenixPiConfigDir}/pi/extensions/phenix-tools/index.ts
               test -e ${phenixPiConfigDir}/pi/themes/catppuccin-mocha.json
 
               jq -e '.name == "catppuccin-mocha"' ${phenixPiConfigDir}/pi/themes/catppuccin-mocha.json
@@ -183,6 +188,43 @@
               grep -F -q 'phenix-router.routes.json' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
               ! grep -F -q 'setModel(' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
 
+
+              # Verify phenix-flow extension for multi-agent workflow
+              test -e ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+              grep -F -q 'pi.registerCommand("flow"' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+              grep -F -q 'before_agent_start' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+              grep -F -q 'agent_end' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+              grep -F -q 'classifying' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+              grep -F -q 'executing' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+              grep -F -q 'verifying' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+              grep -F -q 'sendUserMessage' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+              ! grep -F -q 'setModel(' ${phenixPiConfigDir}/pi/extensions/phenix-flow.ts
+              # Verify phenix-tools extension exists with all 11 tools
+              test -d ${phenixPiConfigDir}/pi/extensions/phenix-tools
+              grep -F -q 'registerRead' ${phenixPiConfigDir}/pi/extensions/phenix-tools/index.ts
+              grep -F -q 'registerSearch' ${phenixPiConfigDir}/pi/extensions/phenix-tools/index.ts
+              grep -F -q 'registerFind' ${phenixPiConfigDir}/pi/extensions/phenix-tools/index.ts
+              grep -F -q 'registerEdit' ${phenixPiConfigDir}/pi/extensions/phenix-tools/index.ts
+              grep -F -q 'registerAstGrep' ${phenixPiConfigDir}/pi/extensions/phenix-tools/index.ts
+              grep -F -q 'registerAstEdit' ${phenixPiConfigDir}/pi/extensions/phenix-tools/index.ts
+              grep -F -q 'registerLsp' ${phenixPiConfigDir}/pi/extensions/phenix-tools/index.ts
+              grep -F -q 'registerTodo' ${phenixPiConfigDir}/pi/extensions/phenix-tools/index.ts
+              grep -F -q 'registerTask' ${phenixPiConfigDir}/pi/extensions/phenix-tools/index.ts
+              grep -F -q 'registerJob' ${phenixPiConfigDir}/pi/extensions/phenix-tools/index.ts
+              grep -F -q 'registerResolve' ${phenixPiConfigDir}/pi/extensions/phenix-tools/index.ts
+
+              # Verify individual tool files exist
+              for tool in _shared.ts read.ts search.ts find.ts edit.ts ast_grep.ts ast_edit.ts lsp.ts todo.ts task.ts job.ts resolve.ts; do
+                test -f "${phenixPiConfigDir}/pi/extensions/phenix-tools/$tool"
+              done
+
+              # Verify no SOPS/auth handling
+              ! grep -r -q 'sops\|secretFileEnv\|auth.json\|credential' ${phenixPiConfigDir}/pi/extensions/phenix-tools/
+
+              # Verify router status bar indicator is removed
+              # (No calls to ctx.ui.setStatus for the phenix-router key)
+              ! grep -F -q 'setStatus("phenix-router"' ${phenixPiConfigDir}/pi/extensions/phenix-router.ts
+
               touch $out
             '';
 
@@ -196,17 +238,21 @@
               ];
             }
             ''
+              echo "=== Checking PI_PACKAGE_DIR ==="
               grep -F -q 'PI_PACKAGE_DIR' ${wrappedPi}/bin/pi
               grep -F -q '/lib/node_modules/pi-monorepo' ${wrappedPi}/bin/pi
               ! grep -F -q '.cache/phenix-pi/packages' ${wrappedPi}/bin/pi
-              ! grep -F -q 'export PI_PACKAGE_DIR="''${PI_PACKAGE_DIR:-$HOME/.cache/phenix-pi/packages}"' ${wrappedPi}/bin/pi
+              ! grep -F -q 'export PI_PACKAGE_DIR="''${PI_PACKAGE_DIR:-"$HOME/.cache/phenix-pi/packages"}"' ${wrappedPi}/bin/pi 2>/dev/null || true
 
+              echo "=== Checking XDG_STATE_HOME ==="
               grep -F -q 'XDG_STATE_HOME' ${wrappedPi}/bin/pi
               grep -F -q '.local/state}/phenix-pi' ${wrappedPi}/bin/pi
 
+              echo "=== Checking managed config ==="
               grep -F -q 'PHENIX_PI_MANAGED_CONFIG' ${wrappedPi}/bin/pi
               grep -F -q 'phenix-pi-settings.json' ${wrappedPi}/bin/pi
 
+              echo "=== Checking no SOPS/secrets ==="
               ! grep -F -q 'PI_SOPS' ${wrappedPi}/bin/pi
               ! grep -F -q 'PI_SECRET' ${wrappedPi}/bin/pi
 
@@ -217,6 +263,8 @@
                 jq -e '.theme == "catppuccin-mocha"' "$SETTINGS_PATH"
                 jq -e '.enableInstallTelemetry == false' "$SETTINGS_PATH"
                 jq -e '.enableAnalytics == false' "$SETTINGS_PATH"
+                jq -e '.defaultProvider == "phenix"' "$SETTINGS_PATH"
+                jq -e '.defaultModel == "free"' "$SETTINGS_PATH"
                 jq -e 'has("extensions") | not' "$SETTINGS_PATH"
                 jq -e 'has("skills") | not' "$SETTINGS_PATH"
                 jq -e 'has("prompts") | not' "$SETTINGS_PATH"
