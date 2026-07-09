@@ -52,7 +52,7 @@ The selected Phenix frontend model determines the model set for subagents:
 ## Known limitations (Pi v0.80.3)
 
 - Pi ExtensionAPI does not expose `spawnAgent`/`createSession` for isolated child agents
-- SubagentExecutor uses direct model invocation via `streamSimple` + `ctx.modelRegistry`
+- SubagentExecutor spawns a real child pi process (not direct model API calls)
 - Tool policy is prompt-only, not runtime-enforced by Pi's tool system
 - Multi-turn tool-using subagents (workers with edit tools) are not yet available
 - Scout is single-turn model call with rich context (not multi-turn tool loop)

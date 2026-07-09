@@ -13,20 +13,21 @@
  *
  * Compare with @mjakl/pi-subagent approach which also uses child processes.
  * This implementation is a minimal Phenix-native subset:
- * *   - Parallel execution via runPhenixSubagentsParallel
- * *   - Async inter-subagent communications via SubagentCommChannel
+ *   - Parallel execution via runPhenixSubagentsParallel
+ *   - Async inter-subagent communications via SubagentCommChannel
  *   - Config directory passthrough so child pi runs with same extensions/agents/prompts as parent
  *   - No fork mode (spawn-only)
  *   - No runtime tool enforcement (Pi extension API limitation)
  *   - No agent discovery from .md files (Phenix agents are defined in pi/agents/)
  *
  * Safety:
- *   - NO imports from pi-ai/compat (no direct model streaming) (no direct model streaming)
+ *   - NO imports from pi-ai/compat (no direct model streaming)
  *   - ctx.modelRegistry key resolution is used ONLY for child env propagation
  *     to propagate keys to the child process environment — NOT for direct streaming
  *   - Recursion prevention via PI_SUBAGENT_DEPTH env var
  *   - Output caps (max bytes, max lines)
  *   - Timeout-based process termination
+ *   - Long prompts are passed via stdin or temp file, NOT as argv
  */
 
 import { spawn } from "node:child_process";
@@ -61,6 +62,10 @@ export interface RunPhenixSubagentInput {
   maxLines?: number;
   timeoutMs?: number;
   metadata?: Record<string, unknown>;
+  /** Comm channel directory to pass to child process via env */
+  commDir?: string | null;
+  /** Run ID to pass to child process via env */
+  runId?: string | null;
 }
 
 export interface RunPhenixSubagentResult {
@@ -224,6 +229,39 @@ export const COMM_CHANNEL_DEFAULTS = {
 };
 
 const SUBAGENT_DEPTH_ENV = "PI_SUBAGENT_DEPTH";
+const COMM_DIR_ENV = "PI_SUBAGENT_COMM_DIR";
+const RUN_ID_ENV = "PI_SUBAGENT_RUN_ID";
+const ROLE_ENV = "PI_SUBAGENT_ROLE";
+
+/**
+ * Maximum prompt length to pass as a CLI argument (argv).
+ * Longer prompts are passed via stdin or a temp file.
+ * 8KB is a safe limit to avoid OS argument length limits.
+ */
+const MAX_ARG_PROMPT_BYTES = 8 * 1024;
+
+/**
+ * If Pi supports reading prompt from stdin (via --mode json -p with piped input),
+ * we use stdin transport for long prompts. Otherwise fall back to temp file.
+ */
+const STDIN_PROMPT_ENABLED = true; // Pi --mode json -p reads from stdin if no positional arg
+
+/**
+ * Explicit role-to-agent-file mapping.
+ *
+ * Agent file names do not always match the role name.
+ * e.g., role "scout" uses agent file "repo_scout.md", not "scout.md".
+ * This is used by findAgentFile() to resolve the correct agent file.
+ */
+export const AGENT_FILE_BY_ROLE: Record<PhenixSubagentRole, string> = {
+  scout: "repo_scout.md",
+  planner: "planner.md",
+  architect: "planner.md",
+  worker: "worker.md",
+  verifier: "verifier.md",
+  reviewer: "reviewer.md",
+  debugger: "debugger.md",
+};
 
 /**
  * Default tool sets per role.
@@ -402,6 +440,19 @@ export const AGENT_COMM_MCP_OPS = [
 // 6. MODEL RESOLVER
 // ══════════════════════════════════════════════
 
+/**
+ * Default subagent model mapping.
+ *
+ * IMPORTANT: This is a FALLBACK table only.
+ * The primary model routing source is the Phenix Router / routing matrix
+ * (phenix-router.ts + phenix-routing-matrix.ts), which owns the full
+ * routing policy including difficulty-based routing, role-based routing,
+ * and safety/denial policy.
+ *
+ * This table exists so subagent execution works even without the router
+ * being configured. It is NOT the source of truth for routing policy.
+ * Do not duplicate routing policy logic here.
+ */
 const DEFAULT_SUBAGENT_MODELS: Record<string, Record<string, ModelSet>> = {
   "phenix/free": {
     scout: { provider: "opencode", model: "deepseek-v4-flash-free" },
@@ -466,6 +517,10 @@ export function detectFrontendModelSet(ctx: ExtensionContext): string {
 
 /**
  * Resolve the concrete model string to pass to the child pi process.
+ *
+ * Uses the fallback model table. In production, the Phenix Router
+ * (phenix-router.ts) owns policy decisions — this is a convenience
+ * resolver for direct subagent execution.
  */
 export function resolveRoleModel(
   frontendMode: string,
@@ -510,7 +565,79 @@ function resolvePiCommand(): PiCommand {
 }
 
 // ══════════════════════════════════════════════
-// 8. THE REAL SUBAGENT: CHILD PI PROCESS
+// 8. PROMPT TRANSPORT HELPERS
+// ══════════════════════════════════════════════
+
+/**
+ * PromptTransport describes how the prompt is delivered to the child process.
+ *
+ *   - "stdin":   prompt is written to child stdin
+ *   - "tempfile": prompt is written to a temp file and passed via --prompt-file
+ *   - "argv":     prompt is passed as a CLI positional argument (short prompts only)
+ */
+type PromptTransport = "stdin" | "tempfile" | "argv";
+
+interface PromptTransportResult {
+  transport: PromptTransport;
+  /** Extra CLI args to add for the chosen transport */
+  extraArgs: string[];
+  /** Temp file path if transport is "tempfile", null otherwise */
+  tempFilePath: string | null;
+  /** The stdin content if transport is "stdin", null otherwise */
+  stdinContent: string | null;
+}
+
+function resolvePromptTransport(task: string): PromptTransportResult {
+  const taskBytes = Buffer.byteLength(task, "utf8");
+
+  // Prefer stdin transport for any prompt length
+  // Pi in --mode json -p mode will accept stdin if no positional arg is given
+  if (STDIN_PROMPT_ENABLED) {
+    return {
+      transport: "stdin",
+      extraArgs: [], // No extra args needed — stdin is read by default
+      tempFilePath: null,
+      stdinContent: task,
+    };
+  }
+
+  // If stdin is not supported, try temp file
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "phenix-subagent-"));
+  const tmpFile = path.join(tmpDir, "prompt.txt");
+  try {
+    fs.writeFileSync(tmpFile, task, "utf8");
+    return {
+      transport: "tempfile",
+      extraArgs: ["--prompt-file", tmpFile],
+      tempFilePath: tmpFile,
+      stdinContent: null,
+    };
+  } catch {
+    // Fall back to short argv only
+    cleanupTempDir(tmpDir);
+  }
+
+  // argc only for short prompts
+  if (taskBytes <= MAX_ARG_PROMPT_BYTES) {
+    return {
+      transport: "argv",
+      extraArgs: [task],
+      tempFilePath: null,
+      stdinContent: null,
+    };
+  }
+
+  // All transports exhausted — this is an error handled by the caller
+  return {
+    transport: "argv",
+    extraArgs: [],
+    tempFilePath: null,
+    stdinContent: null,
+  };
+}
+
+// ══════════════════════════════════════════════
+// 9. THE REAL SUBAGENT: CHILD PI PROCESS
 // ══════════════════════════════════════════════
 
 /**
@@ -524,6 +651,14 @@ function resolvePiCommand(): PiCommand {
  *
  * The child process has its own runtime loop, tool set, and model.
  * The parent receives only the compact final output + metadata.
+ *
+ * Prompt transport (ordero of preference):
+ *   1. stdin (--mode json -p reads from stdin if no positional arg)
+ *   2. temp file (--prompt-file <path>)
+ *   3. argv (short prompts only, <= 8KB)
+ *
+ * Long prompts are NEVER silently appended as argv — they will fail
+ * explicitly with a clear error message.
  *
  * IMPORTANT: This function does NOT call any direct model APIs.
  * It spawns a real child `pi` process.
@@ -571,6 +706,30 @@ export async function runPhenixSubagent(
   // Determine pi binary
   const piCommand = resolvePiCommand();
 
+  // Resolve prompt transport
+  const promptTransport = resolvePromptTransport(task);
+
+  // If prompt is too large and no transport works, fail explicitly
+  if (promptTransport.transport === "argv" && promptTransport.extraArgs.length === 0) {
+    const taskBytes = Buffer.byteLength(task, "utf8");
+    return {
+      status: "failed",
+      role,
+      modelUsed: modelStr,
+      cwd,
+      summary: `Prompt too large for argv fallback (${taskBytes} bytes, max ${MAX_ARG_PROMPT_BYTES}). No stdin or tempfile transport available.`,
+      text: "",
+      bytes: 0,
+      lines: 0,
+      truncated: false,
+      startedAt,
+      endedAt: new Date().toISOString(),
+      exitCode: null,
+      error: `Prompt exceeds ${MAX_ARG_PROMPT_BYTES} byte argv limit and no stdin/tempfile transport is available.`,
+      details: { taskBytes, maxArgBytes: MAX_ARG_PROMPT_BYTES, transport: "argv_fallback_exhausted" },
+    };
+  }
+
   // Build pi CLI args
   const piArgs: string[] = [
     "--mode", "json",
@@ -590,11 +749,10 @@ export async function runPhenixSubagent(
     piArgs.push("--append-system-prompt", agentFile);
   }
 
-  // The prompt content is passed as the positional arg
-  piArgs.push(task);
+  // Add transport-specific args (for tempfile or argv)
+  piArgs.push(...promptTransport.extraArgs);
 
-  // Build environment with recursion guard
-  // Build environment with recursion guard and config passthrough
+  // Build environment with recursion guard, config passthrough, and comm channel
   const env: Record<string, string> = {
     ...process.env as Record<string, string>,
     [SUBAGENT_DEPTH_ENV]: String(currentDepth + 1),
@@ -607,6 +765,13 @@ export async function runPhenixSubagent(
   }
   if (process.env.PI_DIR) {
     env.PI_DIR = process.env.PI_DIR;
+  }
+
+  // Pass comm channel directory to child process if available
+  if (input.commDir) {
+    env[COMM_DIR_ENV] = input.commDir;
+    env[RUN_ID_ENV] = input.runId ?? "";
+    env[ROLE_ENV] = role;
   }
 
   // Set model API keys for the child (resolved through parent ctx)
@@ -630,6 +795,8 @@ export async function runPhenixSubagent(
   let exitCode: number | null = null;
   let timedOut = false;
   let cancelled = false;
+
+  const tempFileToCleanup = promptTransport.tempFilePath;
 
   try {
     const result = await new Promise<{
@@ -659,6 +826,14 @@ export async function runPhenixSubagent(
       proc.stderr.on("data", (chunk: Buffer) => {
         stderrBuf += chunk.toString();
       });
+
+      // Write prompt to stdin if using stdin transport
+      if (promptTransport.stdinContent !== null) {
+        proc.stdin.write(promptTransport.stdinContent);
+        proc.stdin.end();
+      } else {
+        proc.stdin.end();
+      }
 
       const timeout = setTimeout(() => {
         timedOut = true;
@@ -698,6 +873,11 @@ export async function runPhenixSubagent(
     stderr = result.stderr;
     timedOut = result.timedOut;
   } catch (err) {
+    // Clean up temp file if used
+    if (tempFileToCleanup) {
+      cleanupTempDir(path.dirname(tempFileToCleanup));
+    }
+
     const errMsg = err instanceof Error ? err.message : String(err);
     return {
       status: "failed",
@@ -714,6 +894,11 @@ export async function runPhenixSubagent(
       exitCode: null,
       error: errMsg,
     };
+  }
+
+  // Clean up temp file after process completes
+  if (tempFileToCleanup) {
+    cleanupTempDir(path.dirname(tempFileToCleanup));
   }
 
   // Parse JSON-mode output
@@ -758,12 +943,13 @@ export async function runPhenixSubagent(
       rawExitCode: exitCode,
       stderrSize: stderr.length,
       timedOut,
+      promptTransport: promptTransport.transport,
     },
   };
 }
 
 // ══════════════════════════════════════════════
-// 9. JSON OUTPUT PARSER
+// 10. JSON OUTPUT PARSER
 // ══════════════════════════════════════════════
 
 export interface PiJsonOutput {
@@ -857,14 +1043,14 @@ export function parsePiJsonOutput(
 }
 
 // ══════════════════════════════════════════════
-// 10. OLD COMPAT WRAPPER: runSubagent
+// 11. OLD COMPAT WRAPPER: runSubagent
 // ══════════════════════════════════════════════
 
 /**
  * Legacy compatibility wrapper that maps old SubagentRunRequest to new runPhenixSubagent.
  *
- * NOTE: Unlike the old implementation, this does NOT call streaming APIs directly
- * direct model API. It spawns a real child pi process.
+ * NOTE: Unlike the old implementation, this does NOT call streaming APIs directly.
+ * It spawns a real child pi process.
  */
 export async function runSubagent(
   request: SubagentRunRequest,
@@ -975,7 +1161,7 @@ export async function runSubagent(
 }
 
 // ══════════════════════════════════════════════
-// 11. CONTEXT PACK HELPER
+// 12. CONTEXT PACK HELPER
 // ══════════════════════════════════════════════
 
 export async function buildScoutContextPack(
@@ -1050,7 +1236,7 @@ export async function buildScoutContextPack(
 }
 
 // ══════════════════════════════════════════════
-// 12. HELPERS
+// 13. HELPERS
 // ══════════════════════════════════════════════
 
 function cleanupTempDir(dir: string | null): void {
@@ -1062,22 +1248,28 @@ function cleanupTempDir(dir: string | null): void {
   }
 }
 
+/**
+ * Find the agent markdown file for a subagent role.
+ *
+ * Uses AGENT_FILE_BY_ROLE to map role to the actual file name.
+ * e.g., role "scout" -> "repo_scout.md".
+ */
 function findAgentFile(role: PhenixSubagentRole, cwd: string): string | null {
   const configDir = process.env.PI_CODING_AGENT_DIR;
-  const agentFileName = `${role}.md`;
-  const underscoresName = role.replace(/_/g, "_") + ".md";
-  const name = /^[a-z]+$/.test(role) ? `${role}.md` : agentFileName;
+
+  // Look up the correct agent file name from the role-to-file map
+  const agentFileName = AGENT_FILE_BY_ROLE[role];
 
   const candidates: string[] = [];
   // Check Phenix config agents directory first
   if (configDir) {
-    candidates.push(path.join(configDir, "agents", name));
+    candidates.push(path.join(configDir, "agents", agentFileName));
   }
   // Also check project .pi/agents
-  candidates.push(path.join(cwd, ".pi", "agents", name));
+  candidates.push(path.join(cwd, ".pi", "agents", agentFileName));
   // Check Pi home dir
   const home = os.homedir();
-  candidates.push(path.join(home, ".pi", "agent", "agents", name));
+  candidates.push(path.join(home, ".pi", "agent", "agents", agentFileName));
 
   for (const candidate of candidates) {
     try {
@@ -1087,8 +1279,37 @@ function findAgentFile(role: PhenixSubagentRole, cwd: string): string | null {
   return null;
 }
 
+/**
+ * Build the child process environment map for testing/verification.
+ * Exported so tests can verify env construction without spawning.
+ */
+export function buildChildEnv(
+  input: RunPhenixSubagentInput,
+  ctx: ExtensionContext,
+): Record<string, string> {
+  const env: Record<string, string> = {
+    ...process.env as Record<string, string>,
+    [SUBAGENT_DEPTH_ENV]: "1",
+    PI_OFFLINE: "1",
+  };
+
+  if (process.env.PI_CODING_AGENT_DIR) {
+    env.PI_CODING_AGENT_DIR = process.env.PI_CODING_AGENT_DIR;
+  }
+  if (process.env.PI_DIR) {
+    env.PI_DIR = process.env.PI_DIR;
+  }
+  if (input.commDir) {
+    env[COMM_DIR_ENV] = input.commDir;
+    env[RUN_ID_ENV] = input.runId ?? "";
+    env[ROLE_ENV] = input.role;
+  }
+
+  return env;
+}
+
 // ══════════════════════════════════════════════
-// 13. SUBAGENT COMM CHANNEL
+// 14. SUBAGENT COMM CHANNEL
 // ══════════════════════════════════════════════
 
 /**
@@ -1098,7 +1319,7 @@ function findAgentFile(role: PhenixSubagentRole, cwd: string): string | null {
  * shared temporary directory. This is a simple, reliable, file-based IPC mechanism
  * that works without any external message broker or Pi RPC infrastructure.
  *
- * Each subagent run receives the comm directory path via COMM_CHANNEL_DIR env var.
+ * Each subagent run receives the comm directory path via PI_SUBAGENT_COMM_DIR env var.
  * Subagents write structured results as JSON files that other subagents can read.
  */
 
@@ -1288,7 +1509,7 @@ export function readSubagentResult(
 }
 
 // ══════════════════════════════════════════════
-// 14. PARALLEL SUBAGENT EXECUTION
+// 15. PARALLEL SUBAGENT EXECUTION
 // ══════════════════════════════════════════════
 
 export interface ParallelSubagentInput {

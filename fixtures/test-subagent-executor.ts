@@ -592,7 +592,7 @@ describe("All roles modeled as subagents in flow", () => {
   const source = fs.readFileSync(srcPath, "utf-8");
 
   assertEq("flow.ts imports runPhenixSubagent", /runPhenixSubagent/.test(source), true);
-  assertEq("flow.ts imports runPhenixSubagentsParallel", /runPhenixSubagentsParallel/.test(source), true);
+  assertEq("flow.ts does NOT import runPhenixSubagentsParallel (unused)", /runPhenixSubagentsParallel/.test(source), false);
   assertEq("flow.ts imports ensureCommChannelDir", /ensureCommChannelDir/.test(source), true);
   assertEq("flow.ts has runFlowSubagent function", /async function runFlowSubagent/.test(source), true);
   assertEq("flow.ts has runFlowScoutAndPlanner function", /async function runFlowScoutAndPlanner/.test(source), true);

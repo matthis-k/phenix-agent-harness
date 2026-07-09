@@ -78,7 +78,8 @@ warns on target state violations.
 
 ## Subagent model resolution
 
-Subagents (`repo_scout`) use the same frontend→model mapping but resolve
+All wired subagent roles (scout, planner, worker, verifier) use the same
+frontend→model mapping but resolve
 through `resolveRoleModel(frontendMode, role, difficulty)` instead of the
 full provider router. This keeps model selection in the routing layer
 without coupling subagent execution to the parent's model registry.
@@ -96,8 +97,14 @@ resolveRoleModel("phenix/mixed", "verifier", "D2")
 // → "openai/gpt-5.5"
 ```
 
-Model mapping is in `DEFAULT_SUBAGENT_MODELS` in `phenix-subagent-executor.ts`,
-not duplicated in workflow logic. Update model config in one place.
+Model mapping is in `DEFAULT_SUBAGENT_MODELS` in `phenix-subagent-executor.ts`.
+
+> **Note:** The `DEFAULT_SUBAGENT_MODELS` table is a **fallback** only.
+> The primary model routing source is the Phenix Router / routing matrix
+> (`phenix-router.ts` + `phenix-routing-matrix.ts`), which owns the full
+> routing policy including difficulty-based routing, role-based routing,
+> and safety/denial policy. The executor is NOT the source of truth.
+> Do not duplicate routing policy logic in the executor.
 
 ### Subagent model overrides
 
