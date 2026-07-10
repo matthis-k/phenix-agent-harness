@@ -207,7 +207,9 @@ export default function phenixFlow(pi: ExtensionAPI) {
   });
 
   // ── Auto-route phenix model inputs through flow ──
-  pi.on("input", (ev, _ctx) => {
+  pi.on("input", (ev, ctx) => {
+    // Only auto-route when a phenix/* model is active
+    if (!isPhenixModel(ctx)) return { action: "continue" as const };
     if (state.active) return { action: "continue" as const };
     if (!ev.text || ev.text.startsWith("/")) return { action: "continue" as const };
     // First prompt with a phenix model activates the flow
@@ -311,6 +313,14 @@ export default function phenixFlow(pi: ExtensionAPI) {
 
       ctx.ui.notify(`🚀 Phenix workflow — ${difficulty} | Chain: ${chainName}`, "info");
     },
+  });
+
+  // ── Reset state after each agent turn so the next prompt gets a fresh chain ──
+  pi.on("agent_end", () => {
+    state.active = false;
+    state.chainName = null;
+    state.difficulty = null;
+    state.prompt = null;
   });
 
   // ── Cleanup ──
