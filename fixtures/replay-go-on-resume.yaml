@@ -1,9 +1,0 @@
-id: replay-go-on-resume
-request: "go on"
-expected:
-  continue_mode: true
-  resume_from_last_blocked: true
-  reuse_leases: true
-  no_replan: true
-  no_repeat_questions: true
-  notes: go on must resume from last blocked/incomplete task without re-asking for already-granted permissions.

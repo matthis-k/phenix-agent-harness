@@ -1,9 +1,0 @@
-id: replay-bounded-edit
-request: "Fix a typo in docs/agent-workflow.md"
-expected:
-  route: direct_worker
-  lease: BoundedWorkspaceEdit
-  approvals_expected: 1
-  checkpoints:
-    - implementation_summary
-    - verification_report

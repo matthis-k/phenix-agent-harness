@@ -1,8 +1,4 @@
 .opencodestate/
 .phenix-agent-state/
 result
-target/
-.pre-commit-config.yaml
-.cache/
 config/phenix-pi/node_modules
-phenix-*.json
