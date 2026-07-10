@@ -10,8 +10,9 @@
  *   agent_end     → capture phase output, dispatch PHASE_COMPLETED / VERIFY_RESULT
  */
 
-import { readFileSync, existsSync, writeFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
+import { execSync } from "node:child_process";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
@@ -27,44 +28,62 @@ import type {
 	TargetState,
 } from "../../lib/phenix-routing-matrix";
 import { reduce, isWorkflowTask, tryParseJson } from "./machine";
-import { validatePhaseOutput, detectRole } from "./contracts";
 import type { WorkflowState, WorkflowEffect, ChainStep } from "./types";
 
 /**
- * Check if a phase agent has contract requirements.
+ * Record a phase output artifact via the phenix-agent-comm MCP server.
+ * Non-fatal: failures are silently caught.
  */
-function hasPhaseContract(agent: string): boolean {
-	return detectRole(agent) !== null;
+function recordMcpArtifact(
+	sessionId: string,
+	label: string,
+	content: string,
+): void {
+	try {
+		const args = JSON.stringify({
+			session_id: sessionId,
+			artifact_type: "phase-output",
+			name: label,
+			content,
+			content_type: "application/json",
+		});
+		execSync(
+			`phenix-agent-comm-mcp tool comm_artifact_record --args '${args}'`,
+			{ timeout: 5000, stdio: "ignore", windowsHide: true },
+		);
+	} catch {
+		// Non-fatal: MCP may not be available
+	}
 }
 
 /**
- * Write a contract artifact file after Zod validation passes.
- * The contract name is configured via the chain step's `contract` field.
- * Produces a durable JSON file alongside the phase output for traceability.
+ * Initialize an MCP communication session for a workflow run.
+ * Returns the session ID or a default if MCP is unavailable.
  */
-function writePhaseContract(
-	step: ChainStep,
-	data: unknown,
-	ctx: ExtensionContext,
-): void {
-	const contractFile = `${step.output ?? "phase-output"}.contract.json`;
-	const contractPath = resolve(ctx.cwd, contractFile);
-	const contract = {
-		contract: step.contract,
-		role: detectRole(step.agent),
-		agent: step.agent,
-		phase: step.phase,
-		label: step.label,
-		outputFile: step.output,
-		validatedAt: new Date().toISOString(),
-		data,
-	};
-	writeFileSync(contractPath, JSON.stringify(contract, null, 2), "utf-8");
+function initMcpSession(runId: string): string {
+	try {
+		const args = JSON.stringify({
+			name: `phenix-flow-${runId}`,
+			description: `Phenix workflow run ${runId}`,
+		});
+		const result = execSync(
+			`phenix-agent-comm-mcp tool comm_session_init --args '${args}'`,
+			{ timeout: 10000, encoding: "utf-8", windowsHide: true },
+		);
+		const parsed = JSON.parse(result.toString());
+		if (typeof parsed.id === "string" && parsed.id) return parsed.id;
+		if (typeof parsed.session_id === "string" && parsed.session_id)
+			return parsed.session_id;
+		if (typeof parsed.result?.id === "string") return parsed.result.id;
+		return "default";
+	} catch {
+		return "default";
+	}
 }
 
 /**
  * Dispatch a PHASE_CONTRACT_VIOLATION event and check if the run ended.
- * Shared helper for both non-JSON and schema-validation branches.
+ * Used when a phase with a required output file produces non-JSON content.
  */
 function dispatchViolation(
 	stepAgent: string,
@@ -343,9 +362,13 @@ function startWorkflow(
 		return;
 	}
 
+	const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+	const sessionId = initMcpSession(runId);
+
 	const event = {
 		type: "START_WORKFLOW" as const,
-		runId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+		runId,
+		sessionId,
 		prompt,
 		difficulty,
 		chainSteps,
@@ -476,29 +499,21 @@ export default function phenixFlow(pi: ExtensionAPI): void {
 			}
 		}
 
-		// Gate: pre-validate phase output contract at adapter boundary
-		// If contract validation fails, dispatch PHASE_CONTRACT_VIOLATION instead of PHASE_COMPLETED
-		if (hasPhaseContract(step.agent)) {
-			const parsed = tryParseJson(output);
-			if (!parsed) {
-				// Phase has a contract but output isn't valid JSON — this is a violation
-				dispatchViolation(
-					step.agent,
-					`${step.agent} output is not valid JSON`,
-					ctx,
-					pi,
-				);
-				return;
-			}
-			const validation = validatePhaseOutput(step.agent, parsed);
-			if (!validation.success) {
-				dispatchViolation(step.agent, validation.reason, ctx, pi);
-				return;
-			}
-			// After Zod validation passes, write contract artifact if configured
-			if (step.contract) {
-				writePhaseContract(step, validation.data, ctx);
-			}
+		// Handoff: verify output is valid JSON when an output file is expected,
+		// then record as a durable artifact via MCP. No Zod schema enforcement.
+		const parsed = tryParseJson(output);
+		if (step.output && !parsed) {
+			dispatchViolation(
+				step.agent,
+				`${step.agent} output is not valid JSON`,
+				ctx,
+				pi,
+			);
+			return;
+		}
+		// Record phase output via MCP for durable cross-session storage
+		if (parsed && activeState.sessionId) {
+			recordMcpArtifact(activeState.sessionId, step.label, output);
 		}
 
 		// Determine event type based on agent role
@@ -514,9 +529,10 @@ export default function phenixFlow(pi: ExtensionAPI): void {
 					passed: parsed.status === "pass",
 					reason:
 						parsed.status === "fail"
-							? ((parsed.failures as any[])
-									?.map((f: any) => f.description)
-									.join("; ") ?? "Verification failed")
+							? (parsed.failures as any[])
+									?.map((f: any) => f.issue ?? f.description ?? "")
+									.filter(Boolean)
+									.join("; ") || "Verification failed"
 							: undefined,
 				};
 			} else {

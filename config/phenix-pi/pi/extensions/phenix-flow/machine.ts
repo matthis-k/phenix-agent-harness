@@ -9,8 +9,8 @@
  * - D1-D3 stay in delegated branch
  * - Terminal states (done/failed/cancelled) absorb all events
  * - Repair loop has bounded attempts
- * - Phase output contracts are validated (scout can't implement, etc.)
- * - All effects have idempotency keys
+ * - Handoff validates JSON validity only (no Zod schemas)
+ * - Phase outputs recorded as MCP artifacts for durability
  */
 
 import type {
@@ -25,7 +25,6 @@ import type {
 	ChainStep,
 	EffectId,
 } from "./types";
-// ponytail: contract validation moved to contracts.ts (Zod schemas)
 
 // ── Defaults ──
 const MAX_REPAIR_ATTEMPTS = 3;
@@ -126,9 +125,7 @@ export function isWorkflowTask(prompt: string): boolean {
 	if (trimmed.endsWith("?") && trimmed.length < 80) return false;
 	// Simple acknowledgments → not a task
 	if (
-		/^(yes|no|ok|okay|thanks|done|yep|nope|sure|got it|lol|aha|aha)$/i.test(
-			trimmed,
-		)
+		/^(yes|no|ok|okay|thanks|done|yep|nope|sure|got it|lol|aha)$/i.test(trimmed)
 	)
 		return false;
 	return true;
@@ -201,7 +198,8 @@ function reduceIdle(state: IdleState, event: WorkflowEvent): ReduceResult {
 		return { state, effects: [] };
 	}
 
-	const { runId, prompt, difficulty, chainSteps, originalModelRef } = event;
+	const { runId, sessionId, prompt, difficulty, chainSteps, originalModelRef } =
+		event;
 
 	if (chainSteps.length === 0) {
 		return {
@@ -225,12 +223,12 @@ function reduceIdle(state: IdleState, event: WorkflowEvent): ReduceResult {
 		const directState: DirectState = {
 			tag: "direct",
 			runId,
+			sessionId,
 			prompt,
 			difficulty: "D0",
 			chainSteps,
 			chainIndex: 0,
 			originalModelRef,
-			completedEffects: [],
 		};
 		return dispatchCurrentStep(directState, 0);
 	}
@@ -238,6 +236,7 @@ function reduceIdle(state: IdleState, event: WorkflowEvent): ReduceResult {
 	const delegatedState: DelegatedState = {
 		tag: "delegated",
 		runId,
+		sessionId,
 		prompt,
 		difficulty: difficulty as "D1" | "D2" | "D3",
 		chainSteps,
@@ -245,7 +244,6 @@ function reduceIdle(state: IdleState, event: WorkflowEvent): ReduceResult {
 		repairAttempts: 0,
 		maxRepairAttempts: MAX_REPAIR_ATTEMPTS,
 		originalModelRef,
-		completedEffects: [],
 		outputs: {},
 	};
 	return dispatchCurrentStep(delegatedState, 0);
@@ -401,12 +399,12 @@ function onDelegatedPhaseCompleted(
 			const directState: DirectState = {
 				tag: "direct",
 				runId,
+				sessionId: state.sessionId,
 				prompt,
 				difficulty: "D0",
 				chainSteps: [workerStep],
 				chainIndex: 0,
 				originalModelRef,
-				completedEffects: [],
 			};
 			return dispatchCurrentStep(directState, 0);
 		}
@@ -522,26 +520,52 @@ function handleVerdict(
 		};
 	}
 
-	// Reset chain to beginning for repair cycle (skip scouting, start from planning)
+	// Reset chain to the first planner or worker step for the repair cycle.
+	// Must also emit RUN_PHASE to kick off the repair, otherwise the
+	// workflow gets stuck in "delegated" limbo (no agent is called).
 	const repairStartIndex = chainSteps.findIndex(
 		(s) => isPlanner(s.agent) || isWorker(s.agent),
 	);
 	const resetIndex = repairStartIndex >= 0 ? repairStartIndex : 0;
 
-	// ponytail: global repair cycle, per-role repair if needed
-	return {
-		state: {
-			...state,
-			chainIndex: resetIndex,
-			repairAttempts: repairAttempts + 1,
+	const repairState: DelegatedState = {
+		...state,
+		chainIndex: resetIndex,
+		repairAttempts: repairAttempts + 1,
+	};
+
+	// Build the repair step prompt from the step at resetIndex
+	const repairStep = repairState.chainSteps[resetIndex];
+	const fullPrompt = repairStep
+		? buildStepPrompt(repairStep, repairState.prompt, repairState.outputs)
+		: null;
+
+	const effects: WorkflowEffect[] = [
+		{
+			type: "NOTIFY",
+			message: `🔄 Verification failed — repair attempt ${repairAttempts + 1}/${maxRepairAttempts}. Re-running from planning phase.`,
+			level: "warning",
 		},
-		effects: [
-			{
-				type: "NOTIFY",
-				message: `🔄 Verification failed — repair attempt ${repairAttempts + 1}/${maxRepairAttempts}. Re-running from planning phase.`,
-				level: "warning",
-			},
-		],
+	];
+
+	if (repairStep && fullPrompt) {
+		const id = effectId(
+			repairState.runId,
+			resetIndex,
+			repairStep.phase,
+			repairAttempts + 1,
+		);
+		effects.push({
+			type: "RUN_PHASE",
+			effectId: id,
+			step: repairStep,
+			fullPrompt,
+		});
+	}
+
+	return {
+		state: repairState,
+		effects,
 	};
 }
 
@@ -578,11 +602,6 @@ function dispatchCurrentStep(
 		step.phase,
 		state.tag === "delegated" ? state.repairAttempts : 0,
 	);
-
-	// Check idempotency
-	if (state.completedEffects.includes(id)) {
-		return { state, effects: [] };
-	}
 
 	const outputs =
 		state.tag === "delegated" ? (state as DelegatedState).outputs : {};

@@ -40,18 +40,19 @@ export interface IdleState {
 export interface DirectState {
 	tag: "direct";
 	runId: string;
+	sessionId: string;
 	prompt: string;
 	difficulty: "D0";
 	chainSteps: ChainStep[];
 	chainIndex: number;
 	originalModelRef: string | null;
-	completedEffects: EffectId[];
 }
 
 /** Delegated execution (D1-D3). Multi-step with scout, plan, verify, optional repair. */
 export interface DelegatedState {
 	tag: "delegated";
 	runId: string;
+	sessionId: string;
 	prompt: string;
 	difficulty: "D1" | "D2" | "D3";
 	chainSteps: ChainStep[];
@@ -59,7 +60,6 @@ export interface DelegatedState {
 	repairAttempts: number;
 	maxRepairAttempts: number;
 	originalModelRef: string | null;
-	completedEffects: EffectId[];
 	/** Outputs accumulated from completed phases, keyed by step `as` tag. */
 	outputs: Record<string, string>;
 }
@@ -106,6 +106,7 @@ export interface StartWorkflowEvent {
 	difficulty: Difficulty;
 	chainSteps: ChainStep[];
 	originalModelRef: string | null;
+	sessionId: string;
 }
 
 /** A phase completed and produced output. */
@@ -134,18 +135,12 @@ export interface CancelledEvent {
 	type: "CANCELLED";
 }
 
-/** Explicit done signal. */
-export interface DoneEvent {
-	type: "DONE";
-}
-
 export type WorkflowEvent =
 	| StartWorkflowEvent
 	| PhaseCompletedEvent
 	| PhaseContractViolationEvent
 	| VerifyResultEvent
-	| CancelledEvent
-	| DoneEvent;
+	| CancelledEvent;
 
 // ═══════════════════════════════════════════════
 // EFFECTS (commands the extension adapter runs)
