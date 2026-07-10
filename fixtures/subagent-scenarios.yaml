@@ -177,7 +177,7 @@ cases:
     test_type: scope_resolution
     worker_scope:
       allowedPaths:
-        - "config/phenix-pi/pi/extensions/phenix-flow.ts"
+        - "config/phenix-pi/pi/extensions/phenix-flow/index.ts"
       forbiddenPaths: []
     out_of_scope_path: "config/phenix-pi/pi/extensions/phenix-runtime.ts"
     parent_scope:
@@ -189,7 +189,7 @@ cases:
       worker_can_edit_runtime: false
       parent_scope_contains_runtime: true
     notes: >
-      Worker scoped to phenix-flow.ts cannot edit phenix-runtime.ts.
+      Worker scoped to phenix-flow/index.ts cannot edit phenix-runtime.ts.
       Parent (supervisor) scope covers both.
       Scope issue should be forwarded to parent.
 

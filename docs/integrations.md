@@ -13,7 +13,7 @@ Custom Phenix code owns only routing, policy, model/profile selection, and thin
 ## Package inventory
 
 | Package | Version | License | Purpose | Shell/Net? | Autonomous? |
-|---------|---------|---------|---------|-----------|-------------|
+| --------- | --------- | --------- | --------- | ----------- | ------------- |
 | `pi-context-tools` | 0.1.1 | MIT | Context compaction and info | No | No |
 | `pi-subagents` | 0.34.0 | MIT | Subagent spawning, chain execution, parallelism | Spawns child Pi processes | Yes, bounded |
 | `pi-mcp-adapter` | 2.11.0 | MIT | MCP proxy and lazy server access | Spawns MCP servers | Lazy lifecycle |
@@ -30,7 +30,7 @@ Custom Phenix code owns only routing, policy, model/profile selection, and thin
 Phenix custom code:
   phenix-router.ts          — Provider registration, model cycling
   phenix-routing-matrix.ts  — Variant × difficulty × costMode → chain + model assignments
-  phenix-flow.ts            — Thin /flow command: parse flags, classify, resolve route, invoke chain
+  phenix-flow/              — Typed statechart workflow engine (reducer + thin hook adapter)
   phenix-core/              — Shared types and prompt builders
 
 Package-backed:
@@ -47,6 +47,7 @@ Package-backed:
 ## Package policies
 
 ### pi-subagents
+
 - Default workflow/subagent execution engine.
 - Chain files define declarative workflows.
 - Recursive worker (`phenix-worker-recursive`) may delegate; max depth 2.
@@ -54,6 +55,7 @@ Package-backed:
 - Parallel execution via chain parallel groups (D3).
 
 ### pi-mcp-adapter
+
 - Default MCP proxy layer.
 - Lazy lifecycle by default (servers spawned on demand).
 - Proxy mode by default.
@@ -61,33 +63,39 @@ Package-backed:
 - Output guards active.
 
 ### pi-lens
+
 - Replaces custom lsp.ts as default code intelligence.
 - Read-only diagnostics, hover, definition, references, symbols.
 - Mutation features (format, autofix, code-action) disabled/ask-gated.
 - Background scans disabled by default.
 
 ### rpiv-ask-user-question
+
 - Parent-level structured clarification only.
 - Used for: ambiguous target state, conflicting strategies, risky mutation approval.
 - Child agents use supervisor escalation; parent decides.
 
 ### rpiv-todo
+
 - Parent-level visible task state.
 - Not a mirror of internal subagent steps.
 - Subagent artifacts remain in pi-subagents.
 
 ### pi-hypa
+
 - Additive mode (HYPA_PI_MODE=additive).
 - MCP proxy in Hypa disabled (HYPA_PI_ENABLE_MCP_PROXY=0).
 - Does not replace built-in bash/read/grep/find/ls by default.
 - Output caps/recovery documented.
 
 ### ponytail
+
 - Skill for code minimization.
 - Exposed to planner, reviewer, final reviewer.
 - Not injected into worker prompts unless needed.
 
 ### rpiv-web-tools
+
 - Default non-Ollama web search/fetch.
 - Provider priority: SearXNG > Brave > Tavily > Exa > Jina > Firecrawl > Perplexity > Serper > You.com.
 - Web search disabled for private/secret code unless explicitly allowed.

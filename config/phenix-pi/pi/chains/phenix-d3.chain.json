@@ -10,7 +10,8 @@
       "output": "phenix-context.json",
       "outputMode": "file-only",
       "model": "opencode-go/deepseek-v4-pro",
-      "thinking": "high"
+      "thinking": "high",
+      "contract": "phenix-flow:context"
     },
     {
       "agent": "phenix-planner",
@@ -19,7 +20,8 @@
       "as": "plan",
       "output": "phenix-plan.json",
       "model": "opencode-go/glm-5.2",
-      "thinking": "xhigh"
+      "thinking": "xhigh",
+      "contract": "phenix-flow:plan"
     },
     {
       "agent": "phenix-reviewer",
@@ -28,7 +30,8 @@
       "as": "plan-review",
       "output": "phenix-plan-review.json",
       "model": "opencode-go/qwen3.7-max",
-      "thinking": "high"
+      "thinking": "high",
+      "contract": "phenix-flow:plan-review"
     },
     {
       "agent": "phenix-worker",
@@ -37,7 +40,8 @@
       "as": "patch",
       "output": "phenix-patch.json",
       "model": "opencode-go/kimi-k2.7-code",
-      "thinking": "high"
+      "thinking": "high",
+      "contract": "phenix-flow:patch"
     },
     {
       "parallel": [
@@ -48,7 +52,8 @@
           "as": "review-correctness",
           "output": "phenix-review-correctness.json",
           "model": "opencode-go/deepseek-v4-pro",
-          "thinking": "high"
+          "thinking": "high",
+          "contract": "phenix-flow:review"
         },
         {
           "agent": "phenix-reviewer",
@@ -57,7 +62,8 @@
           "as": "review-tests",
           "output": "phenix-review-tests.json",
           "model": "opencode-go/deepseek-v4-pro",
-          "thinking": "high"
+          "thinking": "high",
+          "contract": "phenix-flow:review"
         },
         {
           "agent": "phenix-reviewer",
@@ -66,7 +72,8 @@
           "as": "review-complexity",
           "output": "phenix-review-complexity.json",
           "model": "opencode-go/deepseek-v4-pro",
-          "thinking": "high"
+          "thinking": "high",
+          "contract": "phenix-flow:review"
         }
       ]
     },
@@ -77,7 +84,8 @@
       "as": "verification",
       "output": "phenix-verification.json",
       "model": "opencode-go/glm-5.2",
-      "thinking": "xhigh"
+      "thinking": "xhigh",
+      "contract": "phenix-flow:verification"
     },
     {
       "agent": "phenix-reviewer",
@@ -86,7 +94,8 @@
       "as": "final-review",
       "output": "phenix-final-review.json",
       "model": "opencode-go/glm-5.2",
-      "thinking": "xhigh"
+      "thinking": "xhigh",
+      "contract": "phenix-flow:final-review"
     }
   ]
 }

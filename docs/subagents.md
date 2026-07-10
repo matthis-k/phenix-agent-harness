@@ -14,12 +14,12 @@ subagent supervision, chain execution, or async job tracking.
 
 ```
 Phenix custom code:
-  - parse /flow flags                                      (phenix-flow.ts)
+  - parse /flow flags                                      (phenix-flow/)
   - classify task difficulty/secrecy/change kind            (phenix-routing-matrix.ts)
   - select variant: free | opencode-go | gpt | mixed       (phenix-routing-matrix.ts)
   - select cost mode: economy | balanced | quality          (phenix-routing-matrix.ts)
   - resolve chain + model overrides                         (phenix-routing-matrix.ts)
-  - invoke pi-subagents chain                               (phenix-flow.ts)
+  - invoke pi-subagents chain                               (phenix-flow/)
 
 Package-backed:
   pi-subagents           — spawn child Pi subagents, run chains/parallel, manage background runs
@@ -35,9 +35,9 @@ Package-backed:
 ## Key changes from legacy implementation (retired)
 
 | Area | Before | After |
-|------|--------|-------|
+| ------ | -------- | ------- |
 | Subagent execution | Custom `runPhenixSubagent()` in `phenix-subagent-executor.ts` | `pi-subagents` `subagent` tool |
-| Chain/workflow engine | Custom state machine in `phenix-flow.ts` | Declarative chain files + `pi-subagents` chain execution |
+| Chain/workflow engine | Custom state machine in `phenix-flow/` | Declarative chain files + `pi-subagents` chain execution |
 | Model routing | Embedded in `phenix-subagent-executor.ts` | Centralized in `pi/lib/phenix-routing-matrix.ts` |
 | Agent files | `repo_scout.md`, `planner.md`, etc. | `phenix-scout.md`, `phenix-planner.md`, etc. (with `phenix-` prefix) |
 | Parallel execution | Custom `runPhenixSubagentsParallel()` | `pi-subagents` parallel group support |
@@ -50,7 +50,7 @@ Package-backed:
 Saved workflows live in `config/phenix-pi/pi/chains/`:
 
 | Chain | File | Description |
-|-------|------|-------------|
+| ------- | ------ | ------------- |
 | `phenix-d0` | `phenix-d0.chain.md` | Minimal mechanical task — single worker |
 | `phenix-d1` | `phenix-d1.chain.md` | Bounded workflow: scout → plan → implement → verify |
 | `phenix-d1-noscout` | `phenix-d1-noscout.chain.md` | D1 without scouting step |
@@ -88,6 +88,7 @@ The `/flow` command is now a thin router over saved chains:
 ```
 
 Supported flags:
+
 - `--difficulty D0|D1|D2|D3`
 - `--variant free|opencode-go|gpt|mixed`
 - `--cost economy|balanced|quality`
@@ -102,7 +103,7 @@ Supported flags:
 Phenix-specific agents use the `phenix-` prefix:
 
 | Agent file | Role | Tools | Can delegate? |
-|------------|------|-------|---------------|
+| ------------ | ------ | ------- | --------------- |
 | `phenix-scout.md` | Read-only repo reconnaissance | read, grep, find, ls | No |
 | `phenix-planner.md` | Implementation planning | read, grep, find, ls | No |
 | `phenix-worker.md` | Scoped implementation | read, grep, find, ls, edit, write, ast_grep, ast_edit, bash | No |

@@ -5,13 +5,14 @@ This flake packages the Phenix OpenCode and Pi agent harness resources.
 ## Architecture
 
 Phenix custom code owns **only**:
+
 - Routing, policy, model/profile selection (`phenix-router.ts`, `phenix-routing-matrix.ts`)
-- Thin `/flow` command dispatch (`phenix-flow.ts`)
+- Typed statechart workflow engine (`phenix-flow/`)
 
 All other functionality is **package-backed**:
 
 | Package | Purpose |
-|---------|---------|
+| --------- | --------- |
 | `pi-subagents` | Subagent execution via chains, parallelism, artifacts |
 | `pi-mcp-adapter` | MCP proxy layer (Tend, Stitch, codebase-memory, GitHub, NixOS, Context7) |
 | `pi-lens` | LSP code intelligence (diagnostics, hover, definition, references, symbols) |
@@ -30,7 +31,7 @@ See `docs/integrations.md` for full package inventory, version pins, and policie
 - `config/phenix-pi/pi/agents/phenix-*.md` — Phenix-specific agent definitions
 - `config/phenix-pi/pi/chains/phenix-d*.chain.*` — Declarative workflow chains
 - `config/phenix-pi/pi/lib/phenix-routing-matrix.ts` — Central model routing
-- `config/phenix-pi/pi/extensions/phenix-flow.ts` — Thin `/flow` command router
+- `config/phenix-pi/pi/extensions/phenix-flow/` — Typed statechart workflow engine (reducer + hook adapter)
 - `config/phenix-pi/pi/extensions/phenix-router.ts` — Provider registration and model cycling
 - `modules/package.nix` — Nix wrapper configuration
 

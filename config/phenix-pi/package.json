@@ -30,12 +30,6 @@
         "./pi/chains"
       ]
     },
-    "skills": [
-      "./pi/skills"
-    ],
-    "prompts": [
-      "./pi/prompts"
-    ],
     "themes": [
       "./pi/themes"
     ]

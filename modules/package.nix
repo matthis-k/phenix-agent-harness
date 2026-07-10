@@ -69,14 +69,14 @@
 
           extraPackages = [
             # LSP servers — read-only code intelligence
-            pkgs.nil                         # Nix
-            pkgs.typescript-language-server   # TypeScript, JavaScript
-            pkgs.rust-analyzer                # Rust
-            pkgs.lua-language-server          # Lua
-            pkgs.taplo                        # TOML (taplo lsp)
-            pkgs.pyright                      # Python
+            pkgs.nil # Nix
+            pkgs.typescript-language-server # TypeScript, JavaScript
+            pkgs.rust-analyzer # Rust
+            pkgs.lua-language-server # Lua
+            pkgs.taplo # TOML (taplo lsp)
+            pkgs.pyright # Python
             pkgs.vscode-langservers-extracted # JSON, HTML, CSS, Markdown, ESLint
-            pkgs.yaml-language-server         # YAML, Kubernetes manifests
+            pkgs.yaml-language-server # YAML, Kubernetes manifests
 
             # Runtime
             pkgs.nodejs
@@ -113,21 +113,22 @@
 
         # Smoke script to list installed pi packages
         # Run with: nix build .#phenix-pi-package-list
-        phenix-pi-package-list = pkgs.runCommand "phenix-pi-package-list"
-          {
-            nativeBuildInputs = [ pkgs.findutils ];
-          }
-          ''
-            mkdir -p $out
+        phenix-pi-package-list =
+          pkgs.runCommand "phenix-pi-package-list"
             {
-              echo "Phenix Pi package root: ${phenixPiPackage}"
-              echo
-              echo "Pi packages:"
-              find ${phenixPiPackage}/node_modules -maxdepth 2 -name package.json \
-                | sort \
-                | sed "s#${phenixPiPackage}/node_modules/##"
-            } > $out/packages.txt
-          '';
+              nativeBuildInputs = [ pkgs.findutils ];
+            }
+            ''
+              mkdir -p $out
+              {
+                echo "Phenix Pi package root: ${phenixPiPackage}"
+                echo
+                echo "Pi packages:"
+                find ${phenixPiPackage}/node_modules -maxdepth 2 -name package.json \
+                  | sort \
+                  | sed "s#${phenixPiPackage}/node_modules/##"
+              } > $out/packages.txt
+            '';
 
         agent-comm = agentComm;
 
@@ -260,9 +261,17 @@
               jq -e '.pi.extensions' ${phenixPiPackage}/package.json > /dev/null
               jq -e '.pi.agents' ${phenixPiPackage}/package.json > /dev/null
               jq -e '.pi.chains' ${phenixPiPackage}/package.json > /dev/null
-              jq -e '.pi.skills' ${phenixPiPackage}/package.json > /dev/null
-              jq -e '.pi.prompts' ${phenixPiPackage}/package.json > /dev/null
+              jq -e '.pi.subagents' ${phenixPiPackage}/package.json > /dev/null
               jq -e '.pi.themes' ${phenixPiPackage}/package.json > /dev/null
+              # skills and prompts are intentionally omitted from the package
+              # manifest; the wrapper generates mcp.json and phenix-flow only
+              # injects workflow instructions when a phenix model is active.
+              if jq -e '.pi.skills' ${phenixPiPackage}/package.json >/dev/null 2>&1; then
+                echo "FAIL: .pi.skills should not be declared in manifest"; exit 1
+              fi
+              if jq -e '.pi.prompts' ${phenixPiPackage}/package.json >/dev/null 2>&1; then
+                echo "FAIL: .pi.prompts should not be declared in manifest"; exit 1
+              fi
 
               echo "All OK"
               touch $out
@@ -281,6 +290,7 @@
               echo "=== Checking wrapper basics ==="
               grep -F -q 'PI_PACKAGE_DIR' ${wrappedPi}/bin/pi
               grep -F -q 'phenix-pi-settings.json' ${wrappedPi}/bin/pi
+              grep -F -q 'phenix-pi-mcp.json' ${wrappedPi}/bin/pi
               echo "wrapper: OK"
               touch $out
             '';

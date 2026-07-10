@@ -26,27 +26,72 @@ let
     ++ (map toString cfg.piPackages)
     ++ (map toString cfg.packageDirs);
 
-  generatedSettings =
-    pkgs.writeText "phenix-pi-settings.json" (
-      builtins.toJSON (
-        cfg.settings
-        // {
-          theme = cfg.theme;
-        }
-        // lib.optionalAttrs (packagePaths != [ ]) {
-          packages = packagePaths;
-        }
-        // lib.optionalAttrs (cfg.configDir != null && cfg.directResourceCompat) {
-          extensions = [
-            "${cfg.configDir}/pi/extensions/lsp.ts"
-            "${cfg.configDir}/pi/extensions/phenix-router.ts"
-          ];
-          prompts = [ "${cfg.configDir}/pi/prompts" ];
-          skills = [ "${cfg.configDir}/pi/skills" ];
-          themes = [ "${cfg.configDir}/pi/themes" ];
-        }
-      )
-    );
+  generatedSettings = pkgs.writeText "phenix-pi-settings.json" (
+    builtins.toJSON (
+      cfg.settings
+      // {
+        theme = cfg.theme;
+      }
+      // lib.optionalAttrs (packagePaths != [ ]) {
+        packages = packagePaths;
+      }
+      // lib.optionalAttrs (cfg.configDir != null && cfg.directResourceCompat) {
+        extensions = [
+          "${cfg.configDir}/pi/extensions/lsp.ts"
+          "${cfg.configDir}/pi/extensions/phenix-router.ts"
+        ];
+        prompts = [ "${cfg.configDir}/pi/prompts" ];
+        skills = [ "${cfg.configDir}/pi/skills" ];
+        themes = [ "${cfg.configDir}/pi/themes" ];
+      }
+    )
+  );
+
+  # Managed MCP server config — installed alongside settings.json.
+  # Binaries are resolved via PATH because cfg.extraPackages adds them
+  # to the wrapper's runtime packages.  lifecycle: lazy means a server
+  # starts only when one of its tools is actually called.
+  generatedMcpConfig = pkgs.writeText "phenix-pi-mcp.json" (
+    builtins.toJSON {
+      mcpServers = {
+        phenix-agent-comm = {
+          command = "phenix-agent-comm-mcp";
+          args = [ "stdio-mcp" ];
+          lifecycle = "lazy";
+        };
+        codebase-memory = {
+          command = "codebase-memory-mcp";
+          args = [ ];
+          lifecycle = "lazy";
+        };
+        tend = {
+          command = "tend-mcp";
+          args = [ ];
+          lifecycle = "lazy";
+        };
+        stitch = {
+          command = "stitch-mcp";
+          args = [ ];
+          lifecycle = "lazy";
+        };
+        github = {
+          command = "github-mcp-server";
+          args = [ "stdio" ];
+          lifecycle = "lazy";
+        };
+        nixos = {
+          command = "mcp-nixos";
+          args = [ ];
+          lifecycle = "lazy";
+        };
+        context7 = {
+          command = "context7-mcp";
+          args = [ ];
+          lifecycle = "lazy";
+        };
+      };
+    }
+  );
 in
 {
   imports = [ wlib.modules.default ];
@@ -228,44 +273,42 @@ in
   config = {
     wrapperImplementation = "shell";
 
-    env =
-      {
-        PI_PACKAGE_DIR = toString piRuntimeRoot;
-        PI_SKIP_VERSION_CHECK = boolEnv cfg.skipVersionCheck;
-        PI_TELEMETRY = boolEnv cfg.telemetry;
-      }
-      // lib.optionalAttrs cfg.offline {
-        PI_OFFLINE = "1";
-      }
-      // lib.optionalAttrs (cfg.sessionDir != null) {
-        PI_CODING_AGENT_SESSION_DIR = cfg.sessionDir;
-      }
-      // lib.optionalAttrs (cfg.models != null) {
-        PI_MODELS_PATH = toString cfg.models;
-      }
-      // lib.optionalAttrs (cfg.skills != [ ]) {
-        PI_SKILLS_PATHS = pathList cfg.skills;
-      }
-      // lib.optionalAttrs (cfg.extensions != [ ]) {
-        PI_EXTENSIONS_PATHS = pathList cfg.extensions;
-      }
-      // lib.optionalAttrs (cfg.themes != [ ]) {
-        PI_THEMES_PATHS = pathList cfg.themes;
-      }
-      // lib.optionalAttrs (cfg.promptTemplates != [ ]) {
-        PI_PROMPT_TEMPLATES_PATHS = pathList cfg.promptTemplates;
-      }
-      // cfg.extraEnv;
+    env = {
+      PI_PACKAGE_DIR = toString piRuntimeRoot;
+      PI_SKIP_VERSION_CHECK = boolEnv cfg.skipVersionCheck;
+      PI_TELEMETRY = boolEnv cfg.telemetry;
+    }
+    // lib.optionalAttrs cfg.offline {
+      PI_OFFLINE = "1";
+    }
+    // lib.optionalAttrs (cfg.sessionDir != null) {
+      PI_CODING_AGENT_SESSION_DIR = cfg.sessionDir;
+    }
+    // lib.optionalAttrs (cfg.models != null) {
+      PI_MODELS_PATH = toString cfg.models;
+    }
+    // lib.optionalAttrs (cfg.skills != [ ]) {
+      PI_SKILLS_PATHS = pathList cfg.skills;
+    }
+    // lib.optionalAttrs (cfg.extensions != [ ]) {
+      PI_EXTENSIONS_PATHS = pathList cfg.extensions;
+    }
+    // lib.optionalAttrs (cfg.themes != [ ]) {
+      PI_THEMES_PATHS = pathList cfg.themes;
+    }
+    // lib.optionalAttrs (cfg.promptTemplates != [ ]) {
+      PI_PROMPT_TEMPLATES_PATHS = pathList cfg.promptTemplates;
+    }
+    // cfg.extraEnv;
 
-    runtimePkgs =
-      [
-        pkgs.git
-        pkgs.ripgrep
-        pkgs.fd
-        pkgs.gnutar
-        pkgs.unzip
-      ]
-      ++ cfg.extraPackages;
+    runtimePkgs = [
+      pkgs.git
+      pkgs.ripgrep
+      pkgs.fd
+      pkgs.gnutar
+      pkgs.unzip
+    ]
+    ++ cfg.extraPackages;
 
     flags = lib.listToAttrs (
       map (
@@ -293,7 +336,7 @@ in
             if cfg.stateDir == null then
               ''PI_CODING_AGENT_DIR="''${XDG_STATE_HOME:-$HOME/.local/state}/phenix-pi"''
             else
-              ''PI_CODING_AGENT_DIR=${lib.escapeShellArg cfg.stateDir}''
+              "PI_CODING_AGENT_DIR=${lib.escapeShellArg cfg.stateDir}"
           }
         fi
 
@@ -313,6 +356,9 @@ in
         if [ "${boolEnv cfg.managedConfig}" = "1" ] && [ "''${PHENIX_PI_MANAGED_CONFIG:-1}" = "1" ]; then
           if [ ! -e "$PI_CODING_AGENT_DIR/settings.json" ] || ! cmp -s ${generatedSettings} "$PI_CODING_AGENT_DIR/settings.json"; then
             install -m 0644 ${generatedSettings} "$PI_CODING_AGENT_DIR/settings.json"
+          fi
+          if [ ! -e "$PI_CODING_AGENT_DIR/mcp.json" ] || ! cmp -s ${generatedMcpConfig} "$PI_CODING_AGENT_DIR/mcp.json"; then
+            install -m 0644 ${generatedMcpConfig} "$PI_CODING_AGENT_DIR/mcp.json"
           fi
         fi
       ''

@@ -4,7 +4,7 @@
  * Registers a `phenix` provider exposing model-set frontends:
  *   phenix/free, phenix/mixed, phenix/opencode-go, phenix/gpt
  *
- * Selecting any phenix/* model triggers auto-routing in phenix-flow.ts
+ * Selecting any phenix/* model triggers auto-routing in phenix-flow/
  * (which checks provider === "phenix").
  *
  * Model ID naming is canonicalised through phenix-core/model-ids.ts.
@@ -20,12 +20,17 @@ import {
 	type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ExtensionContext,
+	ExtensionCommandContext,
+	SessionStartEvent,
+} from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
 import {
-  FRONTEND_MODEL_SETS,
-  formatModelRef,
-  type ModelRef,
+	FRONTEND_MODEL_SETS,
+	formatModelRef,
+	type ModelRef,
 } from "./phenix-core/model-ids";
 
 const MODEL_SETS: Record<string, ModelRef> = FRONTEND_MODEL_SETS;
@@ -38,7 +43,7 @@ const MODELS = FRONTEND_MODELS.map((id) => ({
 	name: `Phenix ${id}`,
 	api: ROUTER_API,
 	reasoning: true,
-	input: ["text", "image"] as const,
+	input: ["text", "image"] as unknown as ("text" | "image")[],
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 	contextWindow: 128000,
 	maxTokens: 8192,
@@ -61,37 +66,62 @@ function routerStream(
 			api: model.api,
 			provider: model.provider,
 			model: model.id,
-			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
 			stopReason: "error",
 			timestamp: Date.now(),
 		};
 
 		try {
 			const ctx = activeContext;
-			if (!ctx) throw new Error("phenix-router has no active Pi extension context");
+			if (!ctx)
+				throw new Error("phenix-router has no active Pi extension context");
 
 			const modelSet = MODEL_SETS[model.id] ?? MODEL_SETS.free;
-			const concrete = ctx.modelRegistry?.find(modelSet.provider, modelSet.model);
+			const concrete = ctx.modelRegistry?.find(
+				modelSet.provider,
+				modelSet.model,
+			);
 			if (!concrete) {
-				throw new Error(`backend model not found: ${modelSet.provider}/${modelSet.model}`);
+				throw new Error(
+					`backend model not found: ${modelSet.provider}/${modelSet.model}`,
+				);
 			}
 
 			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(concrete);
-			if (!auth.ok) throw new Error(auth.error);
+			if (!auth.ok)
+				throw new Error((auth as any).error ?? "API key resolution failed");
 
 			const upstream = streamSimple(concrete, context, {
 				...options,
 				apiKey: auth.apiKey,
-				headers: auth.headers || options?.headers ? { ...auth.headers, ...options?.headers } : undefined,
-				env: auth.env || options?.env ? { ...auth.env, ...options?.env } : undefined,
+				headers:
+					auth.headers || options?.headers
+						? { ...auth.headers, ...options?.headers }
+						: undefined,
+				env:
+					auth.env || options?.env
+						? { ...auth.env, ...options?.env }
+						: undefined,
 			});
 
 			for await (const event of upstream) stream.push(event);
 			stream.end(await upstream.result());
 		} catch (error) {
-			output.errorMessage = error instanceof Error ? error.message : String(error);
+			output.errorMessage =
+				error instanceof Error ? error.message : String(error);
 			stream.push({ type: "start", partial: output });
-			stream.push({ type: "error", reason: options?.signal?.aborted ? "aborted" : "error", error: output });
+			stream.push({
+				type: "error",
+				reason: options?.signal?.aborted ? "aborted" : "error",
+				error: output,
+			});
 			stream.end();
 		}
 	})();
@@ -105,17 +135,31 @@ function getNextPhenixModel(current: string | undefined): string {
 	return FRONTEND_MODELS[nextIdx];
 }
 
-async function cyclePhenixModel(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
+async function cyclePhenixModel(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+): Promise<void> {
 	const nextId = getNextPhenixModel(currentPhenixModel);
 	const model = ctx.modelRegistry.find(PHENIX_PROVIDER, nextId);
-	if (!model) { ctx.ui.notify(`Phenix model ${nextId} not found`, "error"); return; }
+	if (!model) {
+		ctx.ui.notify(`Phenix model ${nextId} not found`, "error");
+		return;
+	}
 	const success = await pi.setModel(model);
-	if (success) ctx.ui.notify(`Phenix mode: ${nextId} → ${formatModelRef(MODEL_SETS[nextId])}`, "info");
+	if (success)
+		ctx.ui.notify(
+			`Phenix mode: ${nextId} → ${formatModelRef(MODEL_SETS[nextId])}`,
+			"info",
+		);
 	else ctx.ui.notify(`Failed to switch to phenix/${nextId}`, "warning");
 }
 
 function updatePhenixStatus(ctx: ExtensionContext) {
-	if (currentPhenixModel) ctx.ui.setStatus("phenix", ctx.ui.theme.fg("accent", `phenix:${currentPhenixModel}`));
+	if (currentPhenixModel)
+		ctx.ui.setStatus(
+			"phenix",
+			ctx.ui.theme.fg("accent", `phenix:${currentPhenixModel}`),
+		);
 	else ctx.ui.setStatus("phenix", undefined);
 }
 
@@ -123,69 +167,121 @@ function handleRouterCommand(args: string, ctx: ExtensionContext): void {
 	const [sub] = args.trim().split(/\s+/, 1);
 	if (sub === "status" || sub === "") {
 		const m = ctx.model?.id ?? "unknown";
-		ctx.ui.notify(`model: phenix/${m}\nroute: ${m} → ${formatModelRef(MODEL_SETS[m] ?? MODEL_SETS.free)}`, "info");
+		ctx.ui.notify(
+			`model: phenix/${m}\nroute: ${m} → ${formatModelRef(MODEL_SETS[m] ?? MODEL_SETS.free)}`,
+			"info",
+		);
 	} else if (sub === "routes") {
-		ctx.ui.notify(FRONTEND_MODELS.map((m) => `  phenix/${m} → ${formatModelRef(MODEL_SETS[m])}`).join("\n"), "info");
+		ctx.ui.notify(
+			FRONTEND_MODELS.map(
+				(m) => `  phenix/${m} → ${formatModelRef(MODEL_SETS[m])}`,
+			).join("\n"),
+			"info",
+		);
 	} else {
 		ctx.ui.notify("usage: /router status|routes", "warning");
 	}
 }
 
-function handlePhenixCommand(args: string, pi: ExtensionAPI, ctx: ExtensionContext): void {
+function handlePhenixCommand(
+	args: string,
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+): void {
 	const trimmed = args.trim();
 	if (trimmed === "" || trimmed === "status") {
-		if (!currentPhenixModel) { ctx.ui.notify("No phenix model active. Use /phenix <mode> or Ctrl+Shift+M.", "warning"); return; }
-		ctx.ui.notify(`Current: phenix/${currentPhenixModel} → ${formatModelRef(MODEL_SETS[currentPhenixModel])}`, "info");
+		if (!currentPhenixModel) {
+			ctx.ui.notify(
+				"No phenix model active. Use /phenix <mode> or Ctrl+Shift+M.",
+				"warning",
+			);
+			return;
+		}
+		ctx.ui.notify(
+			`Current: phenix/${currentPhenixModel} → ${formatModelRef(MODEL_SETS[currentPhenixModel])}`,
+			"info",
+		);
 		return;
 	}
 	if (MODEL_SETS[trimmed]) {
 		const model = ctx.modelRegistry.find(PHENIX_PROVIDER, trimmed);
-		if (!model) { ctx.ui.notify(`Phenix model ${trimmed} not found`, "error"); return; }
-		void pi.setModel(model).then((ok) => {
-			if (ok) ctx.ui.notify(`Phenix mode: ${trimmed} → ${formatModelRef(MODEL_SETS[trimmed])}`, "info");
+		if (!model) {
+			ctx.ui.notify(`Phenix model ${trimmed} not found`, "error");
+			return;
+		}
+		void pi.setModel(model).then((ok: boolean) => {
+			if (ok)
+				ctx.ui.notify(
+					`Phenix mode: ${trimmed} → ${formatModelRef(MODEL_SETS[trimmed])}`,
+					"info",
+				);
 			else ctx.ui.notify(`Failed to switch to phenix/${trimmed}`, "warning");
 		});
 		return;
 	}
-	ctx.ui.notify(`Unknown phenix mode "${trimmed}". Available: ${FRONTEND_MODELS.join(", ")}`, "error");
+	ctx.ui.notify(
+		`Unknown phenix mode "${trimmed}". Available: ${FRONTEND_MODELS.join(", ")}`,
+		"error",
+	);
 }
 
 export default function phenixRouter(pi: ExtensionAPI): void {
 	pi.registerProvider(PHENIX_PROVIDER, {
-		name: "Phenix Router", baseUrl: "https://phenix.local/router", apiKey: "phenix-router-local",
-		api: ROUTER_API, streamSimple: routerStream, models: MODELS,
+		name: "Phenix Router",
+		baseUrl: "https://phenix.local/router",
+		apiKey: "phenix-router-local",
+		api: ROUTER_API,
+		streamSimple: routerStream,
+		models: MODELS,
 	});
 
 	pi.registerCommand("router", {
-		name: "router", description: "Show Phenix routing status", usage: "/router status|routes",
-		handler: (args, ctx) => handleRouterCommand(args, ctx),
+		description: "Show Phenix routing status",
+		handler: async (args: string, ctx: ExtensionCommandContext) => {
+			handleRouterCommand(args, ctx);
+		},
 	});
 
 	pi.registerCommand("phenix", {
-		name: "phenix", description: "Show or set phenix mode", usage: "/phenix status|free|mixed|opencode-go|gpt",
-		handler: (args, ctx) => handlePhenixCommand(args, pi, ctx),
+		description: "Show or set phenix mode",
+		handler: async (args: string, ctx: ExtensionCommandContext) => {
+			handlePhenixCommand(args, pi, ctx);
+		},
 	});
 
 	pi.registerShortcut(Key.ctrlShift("m"), {
 		description: "Cycle Phenix model modes",
-		handler: async (ctx) => { await cyclePhenixModel(pi, ctx); },
+		handler: async (ctx: ExtensionContext) => {
+			await cyclePhenixModel(pi, ctx);
+		},
 	});
 
-	pi.on("session_start", async (event, ctx) => {
+	pi.on(
+		"session_start",
+		async (event: SessionStartEvent, ctx: ExtensionContext) => {
+			activeContext = ctx;
+			// Only track the model if it's already phenix — don't auto-activate.
+			// If the user explicitly selected a non-phenix model (e.g.
+			// opencode-go/deepseek-v4-flash), leave it alone so stock behavior
+			// is preserved and phenix-flow prompts don't inject.
+			if (ctx.model?.provider === PHENIX_PROVIDER) {
+				currentPhenixModel = ctx.model.id;
+				updatePhenixStatus(ctx);
+			}
+		},
+	);
+
+	pi.on("before_agent_start", (_event: any, ctx: ExtensionContext) => {
 		activeContext = ctx;
+	});
+
+	pi.on("model_select", (_event: any, ctx: ExtensionContext) => {
 		if (ctx.model?.provider === PHENIX_PROVIDER) {
 			currentPhenixModel = ctx.model.id;
 			updatePhenixStatus(ctx);
-		} else if (event.reason === "startup" || event.reason === "new") {
-			const m = ctx.modelRegistry.find(PHENIX_PROVIDER, "opencode-go");
-			if (m && await pi.setModel(m)) { currentPhenixModel = "opencode-go"; updatePhenixStatus(ctx); }
+		} else {
+			currentPhenixModel = undefined;
+			ctx.ui.setStatus("phenix", undefined);
 		}
-	});
-
-	pi.on("before_agent_start", (_event, ctx) => { activeContext = ctx; });
-
-	pi.on("model_select", (_event, ctx) => {
-		if (ctx.model?.provider === PHENIX_PROVIDER) { currentPhenixModel = ctx.model.id; updatePhenixStatus(ctx); }
-		else { currentPhenixModel = undefined; ctx.ui.setStatus("phenix", undefined); }
 	});
 }
