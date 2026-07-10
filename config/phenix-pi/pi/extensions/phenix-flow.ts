@@ -22,6 +22,7 @@ import type { Variant, Difficulty, CostMode, TargetState } from "../lib/phenix-r
 
 interface FlowState {
   active: boolean;
+  justFinished: boolean;
   chainName: string | null;
   steps: ChainStep[];
   currentStep: number;
@@ -53,6 +54,7 @@ const DEFAULT_TARGET: TargetState = "dev-wallet";
 
 let state: FlowState = {
   active: false,
+  justFinished: false,
   chainName: null,
   steps: [],
   currentStep: -1,
@@ -294,6 +296,11 @@ export default function phenixFlow(pi: ExtensionAPI) {
   pi.on("input", (ev, ctx) => {
     // Only auto-route when a phenix/* model is active
     if (!isPhenixModel(ctx)) return { action: "continue" as const };
+    // If a flow just finished, ignore residual messages to prevent re-triggering
+    if (state.justFinished) {
+      state.justFinished = false;
+      return { action: "continue" as const };
+    }
     // If a flow is already active, let continuation messages pass through
     if (state.active) return { action: "continue" as const };
     if (!ev.text || ev.text.startsWith("/")) return { action: "continue" as const };
@@ -368,6 +375,19 @@ export default function phenixFlow(pi: ExtensionAPI) {
     const completedStep = state.steps[state.currentStep];
     capturePhaseOutput(completedStep, ctx.cwd);
 
+    // If phase requires an output file but it doesn't exist, give same agent another turn
+    if (completedStep.output) {
+      const outputPath = resolve(ctx.cwd, completedStep.output);
+      if (!existsSync(outputPath)) {
+        const instruction = buildStepPrompt(completedStep, state.originalPrompt, state.outputs);
+        pi.sendUserMessage(instruction, {
+          deliverAs: "followUp",
+          triggerTurn: true,
+        });
+        return;
+      }
+    }
+
     // Advance to next step
     state.currentStep++;
 
@@ -383,6 +403,7 @@ export default function phenixFlow(pi: ExtensionAPI) {
           }
         }
       }
+      state.justFinished = true;
       resetFlowState();
       return;
     }

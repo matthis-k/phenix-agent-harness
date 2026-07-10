@@ -17,6 +17,15 @@ let
     else
       "${config.package}/lib/node_modules/pi-monorepo";
 
+  # All package paths included in settings.packages:
+  #   - pi.configDir (if loadConfigDirAsPackage is set)
+  #   - all pi.piPackages entries
+  #   - all pi.packageDirs entries
+  packagePaths =
+    (lib.optional (cfg.configDir != null && cfg.loadConfigDirAsPackage) (toString cfg.configDir))
+    ++ (map toString cfg.piPackages)
+    ++ (map toString cfg.packageDirs);
+
   generatedSettings =
     pkgs.writeText "phenix-pi-settings.json" (
       builtins.toJSON (
@@ -24,8 +33,8 @@ let
         // {
           theme = cfg.theme;
         }
-        // lib.optionalAttrs (cfg.configDir != null && cfg.loadConfigDirAsPackage) {
-          packages = [ "${cfg.configDir}" ] ++ cfg.piPackages;
+        // lib.optionalAttrs (packagePaths != [ ]) {
+          packages = packagePaths;
         }
         // lib.optionalAttrs (cfg.configDir != null && cfg.directResourceCompat) {
           extensions = [
@@ -177,7 +186,24 @@ in
     piPackages = lib.mkOption {
       type = lib.types.listOf lib.types.path;
       default = [ ];
-      description = "Extra Pi package directories to include in settings.json packages list.";
+      description = ''
+        Additional Pi package root directories to include in settings.packages.
+
+        Superseded by packageDirs.  Prefer packageDirs for store-backed
+        paths so the intent is clearer.
+      '';
+    };
+
+    packageDirs = lib.mkOption {
+      type = lib.types.listOf (lib.types.either lib.types.path lib.types.str);
+      default = [ ];
+      description = ''
+        Additional Pi package root directories to add to settings.packages.
+
+        Use this for store-backed package directories, pointing to
+        third-party pi packages inside a Nix-built node_modules tree.
+        This avoids relying on mutable global `pi install` state.
+      '';
     };
 
     extraPackages = lib.mkOption {

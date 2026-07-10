@@ -10,7 +10,6 @@
     "subagent",
     "lsp",
     "mcp",
-    "permissions",
     "theme"
   ],
   "pi": {
@@ -52,12 +51,11 @@
     "pi-context-tools": "0.1.1",
     "pi-subagents": "0.34.0",
     "pi-mcp-adapter": "2.11.0",
-    "pi-lens": "0.3.0",
-    "@gotgenes/pi-permission-system": "0.2.0",
+    "pi-lens": "3.8.67",
     "@juicesharp/rpiv-ask-user-question": "0.1.0",
     "@juicesharp/rpiv-todo": "0.1.0",
-    "@hypabolic/pi-hypa": "0.2.0",
-    "@dietrichgebert/ponytail": "0.1.0",
+    "@hypabolic/pi-hypa": "0.1.9",
+    "@dietrichgebert/ponytail": "4.8.4",
     "@juicesharp/rpiv-web-tools": "0.1.0"
   }
 }

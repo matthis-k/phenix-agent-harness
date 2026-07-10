@@ -80,7 +80,6 @@ All non-routing functionality is package-backed:
 | `pi-subagents` | Subagent execution via chains |
 | `pi-mcp-adapter` | MCP proxy layer |
 | `pi-lens` | LSP code intelligence |
-| `@gotgenes/pi-permission-system` | Runtime allow/ask/deny gates |
 | `@juicesharp/rpiv-ask-user-question` | Structured clarification |
 | `@juicesharp/rpiv-todo` | Visible task state |
 | `@hypabolic/pi-hypa` | Output reduction |

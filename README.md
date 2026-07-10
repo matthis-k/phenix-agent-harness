@@ -16,7 +16,6 @@ All other functionality is **package-backed**:
 | `pi-mcp-adapter` | MCP proxy layer (Tend, Stitch, codebase-memory, GitHub, NixOS, Context7) |
 | `pi-lens` | LSP code intelligence (diagnostics, hover, definition, references, symbols) |
 | `pi-context-tools` | Context compaction and info |
-| `@gotgenes/pi-permission-system` | Runtime allow/ask/deny gates |
 | `@juicesharp/rpiv-ask-user-question` | Parent-level structured clarification |
 | `@juicesharp/rpiv-todo` | Parent-visible task state |
 | `@hypabolic/pi-hypa` | Tool output reduction/compression |

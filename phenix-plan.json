@@ -1,0 +1,41 @@
+{
+  "objective": "Remove all emoji characters from repository markdown files",
+  "difficulty": "D0",
+  "scope": {
+    "files": [
+      "config/phenix-pi/pi/prompts/flow.md"
+    ],
+    "linesChanged": 3,
+    "totalEmojisRemoved": 11
+  },
+  "changes": [
+    {
+      "line": 14,
+      "before": "🔧 Execute → (optional ✅ Verify) → done",
+      "after": "Execute → (optional Verify) → done",
+      "emojisRemoved": ["🔧", "✅"]
+    },
+    {
+      "line": 17,
+      "before": "🔍 Classify → 🔎 Scout (real subagent) → 📋 Plan → 🔧 Execute → ✅ Verify → 📊 Synthesize",
+      "after": "Classify → Scout (real subagent) → Plan → Execute → Verify → Synthesize",
+      "emojisRemoved": ["🔍", "🔎", "📋", "🔧", "✅", "📊"]
+    },
+    {
+      "line": 19,
+      "before": "If verification fails: 🔄 Revise → 🔧 Execute → ✅ Verify (up to 3 loops).",
+      "after": "If verification fails: Revise → Execute → Verify (up to 3 loops).",
+      "emojisRemoved": ["🔄", "🔧", "✅"]
+    }
+  ],
+  "sideEffects": [
+    "markdownlint auto-fix adjusted table separator spacing in 5 table definitions"
+  ],
+  "verification": [
+    "rg -n '[\\x{1F300}-\\x{1F9FF}\\x{2600}-\\x{27BF}]' returns zero matches",
+    "git diff shows only emoji removal and table spacing adjustments",
+    "markdownlint passes with no errors"
+  ],
+  "status": "completed",
+  "ponytail": "single file, direct edit, no abstractions added"
+}

@@ -25,7 +25,6 @@ Package-backed:
   pi-subagents           — spawn child Pi subagents, run chains/parallel, manage background runs
   pi-mcp-adapter         — compact MCP access without injecting large MCP tool schemas
   pi-lens                — LSP code intelligence replacing custom lsp.ts
-  pi-permission-system   — runtime allow/ask/deny gates
   rpiv-ask-user-question — parent-level structured clarification
   rpiv-todo              — parent-visible task state
   pi-hypa                — additive output reduction
@@ -43,7 +42,7 @@ Package-backed:
 | Agent files | `repo_scout.md`, `planner.md`, etc. | `phenix-scout.md`, `phenix-planner.md`, etc. (with `phenix-` prefix) |
 | Parallel execution | Custom `runPhenixSubagentsParallel()` | `pi-subagents` parallel group support |
 | LSP tools | Custom `lsp.ts` with per-server spawn | `pi-lens` package |
-| Permission gates | None (prompt-level only) | `pi-permission-system` runtime gates |
+| Permission gates | None (prompt-level only) | removed |
 | MCP access | Direct tool registration | `pi-mcp-adapter` proxy |
 
 ## Chain files

@@ -21,14 +21,31 @@
 
       wrapperModule = (inputs.nix-wrapper-modules.lib.evalModule (import ./wrapper-module.nix)).config;
 
+      # Build config/phenix-pi as a store-backed npm package with all 10
+      # declared pi dependencies installed in node_modules.
+      phenixPiPackage = import ./phenix-pi-package.nix {
+        inherit pkgs lib;
+      };
+
+      # Explicit paths to every third-party pi package.
+      # Pi sees each one individually so it can discover extensions,
+      # skills, prompts, and themes.
+      phenixPiPackageDirs = [
+        "${phenixPiPackage}/node_modules/pi-subagents"
+        "${phenixPiPackage}/node_modules/pi-mcp-adapter"
+        "${phenixPiPackage}/node_modules/pi-lens"
+        "${phenixPiPackage}/node_modules/@juicesharp/rpiv-ask-user-question"
+        "${phenixPiPackage}/node_modules/@juicesharp/rpiv-todo"
+        "${phenixPiPackage}/node_modules/@hypabolic/pi-hypa"
+        "${phenixPiPackage}/node_modules/@dietrichgebert/ponytail"
+        "${phenixPiPackage}/node_modules/@juicesharp/rpiv-web-tools"
+        "${phenixPiPackage}/node_modules/pi-context-tools"
+      ];
+
       # Source directory for test fixtures
       srcDir = ../fixtures;
 
       agentComm = import ./agent_comm_mcp/package.nix { inherit pkgs; };
-
-      phenixPiConfigDir = pkgs.runCommand "phenix-pi-config-dir" { } ''
-        cp -r ${../config/phenix-pi} $out
-      '';
 
       wrappedPi = wrapperModule.wrap {
         inherit pkgs;
@@ -36,7 +53,9 @@
         package = pkgs.pi-coding-agent;
 
         pi = {
-          configDir = phenixPiConfigDir;
+          configDir = phenixPiPackage;
+          packageDirs = phenixPiPackageDirs;
+
           stateDir = null;
 
           theme = "catppuccin-mocha";
@@ -77,7 +96,7 @@
           ];
 
           extraEnv = {
-            PI_SUBAGENT_EXTRA_AGENT_DIRS = "${phenixPiConfigDir}/pi/agents";
+            PI_SUBAGENT_EXTRA_AGENT_DIRS = "${phenixPiPackage}/pi/agents";
             # pi-hypa additive mode by default
             HYPA_PI_MODE = "additive";
             HYPA_PI_ENABLE_MCP_PROXY = "0";
@@ -90,7 +109,26 @@
         default = wrappedPi;
 
         pi = wrappedPi;
-        phenix-pi-config-dir = phenixPiConfigDir;
+        phenix-pi-package = phenixPiPackage;
+
+        # Smoke script to list installed pi packages
+        # Run with: nix build .#phenix-pi-package-list
+        phenix-pi-package-list = pkgs.runCommand "phenix-pi-package-list"
+          {
+            nativeBuildInputs = [ pkgs.findutils ];
+          }
+          ''
+            mkdir -p $out
+            {
+              echo "Phenix Pi package root: ${phenixPiPackage}"
+              echo
+              echo "Pi packages:"
+              find ${phenixPiPackage}/node_modules -maxdepth 2 -name package.json \
+                | sort \
+                | sed "s#${phenixPiPackage}/node_modules/##"
+            } > $out/packages.txt
+          '';
+
         agent-comm = agentComm;
 
         # Run with: nix run .#test-subagent-isolation
@@ -182,35 +220,50 @@
               touch $out
             '';
 
-        phenix-pi-config-dir-check =
-          pkgs.runCommand "phenix-pi-config-dir-check"
+        phenix-pi-package-check =
+          pkgs.runCommand "phenix-pi-package-check"
             {
               nativeBuildInputs = [
                 pkgs.jq
                 pkgs.gnugrep
+                pkgs.findutils
               ];
             }
             ''
-              echo "=== package.json structure ==="
-              jq -e '.pi.extensions == ["./pi/extensions"]' ${phenixPiConfigDir}/package.json > /dev/null
-              jq -e '.dependencies."pi-subagents" == "0.34.0"' ${phenixPiConfigDir}/package.json > /dev/null
-              jq -e '.dependencies."pi-lens" == "0.3.0"' ${phenixPiConfigDir}/package.json > /dev/null
-              echo "=== agents ==="
-              for agent in phenix-scout phenix-planner phenix-worker phenix-worker-recursive phenix-verifier phenix-reviewer phenix-debugger; do
-                if [ -f "${phenixPiConfigDir}/pi/agents/$agent.md" ]; then
-                  echo "  $agent: OK"
-                else
-                  echo "FAIL: missing $agent.md"; exit 1
-                fi
+              echo "=== checking Phenix Pi package root ==="
+              test -e ${phenixPiPackage}/package.json
+              test -e ${phenixPiPackage}/package-lock.json
+
+              echo "=== checking Phenix resources ==="
+              test -d ${phenixPiPackage}/pi/extensions
+              test -d ${phenixPiPackage}/pi/agents
+              test -d ${phenixPiPackage}/pi/skills
+              test -d ${phenixPiPackage}/pi/prompts
+              test -d ${phenixPiPackage}/pi/themes
+
+              echo "=== checking installed Pi package dependencies ==="
+              for pkg in \
+                pi-subagents pi-mcp-adapter pi-lens \
+                @juicesharp/rpiv-ask-user-question \
+                @juicesharp/rpiv-todo \
+                @hypabolic/pi-hypa \
+                @dietrichgebert/ponytail \
+                @juicesharp/rpiv-web-tools \
+                pi-context-tools
+              do
+                test -e "${phenixPiPackage}/node_modules/$pkg/package.json" \
+                  && echo "  $pkg: OK" \
+                  || { echo "FAIL: missing $pkg"; exit 1; }
               done
-              echo "=== chains ==="
-              for chain in phenix-d0 phenix-d1 phenix-d1-noscout phenix-d2 phenix-d2-noscout phenix-d3 phenix-repair-loop; do
-                if [ -f "${phenixPiConfigDir}/pi/chains/$chain.chain.md" ] || [ -f "${phenixPiConfigDir}/pi/chains/$chain.chain.json" ]; then
-                  echo "  $chain: OK"
-                else
-                  echo "FAIL: missing $chain"; exit 1
-                fi
-              done
+
+              echo "=== checking Pi manifest ==="
+              jq -e '.pi.extensions' ${phenixPiPackage}/package.json > /dev/null
+              jq -e '.pi.agents' ${phenixPiPackage}/package.json > /dev/null
+              jq -e '.pi.chains' ${phenixPiPackage}/package.json > /dev/null
+              jq -e '.pi.skills' ${phenixPiPackage}/package.json > /dev/null
+              jq -e '.pi.prompts' ${phenixPiPackage}/package.json > /dev/null
+              jq -e '.pi.themes' ${phenixPiPackage}/package.json > /dev/null
+
               echo "All OK"
               touch $out
             '';

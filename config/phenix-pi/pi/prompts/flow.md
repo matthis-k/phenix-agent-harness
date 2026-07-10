@@ -11,12 +11,12 @@ Use the **`/flow`** command to launch automatic multi-agent workflows:
 ## Stage pipeline
 
 **D0 mechanical tasks** (typo, format, obvious rename):
-🔧 Execute → (optional ✅ Verify) → done
+Execute → (optional Verify) → done
 
 **D1+ repo changes** (non-trivial edits, multi-file, config, workflow):
-🔍 Classify → 🔎 Scout (real subagent) → 📋 Plan → 🔧 Execute → ✅ Verify → 📊 Synthesize
+Classify → Scout (real subagent) → Plan → Execute → Verify → Synthesize
 
-If verification fails: 🔄 Revise → 🔧 Execute → ✅ Verify (up to 3 loops).
+If verification fails: Revise → Execute → Verify (up to 3 loops).
 
 ## Scouting
 
@@ -44,7 +44,7 @@ Kimi K2.7 Code is the preferred code implementation route.
 ### `phenix/opencode-go` (default)
 
 | Diff | F/E | Scout | Planner | Critic | Implementer | Verifier | Final Rev. |
-|---|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- | --- |
 | **D0** | `flash` | — | — | — | `flash` (low) | — | — |
 | **D1** | `flash` | `flash` (low) | **`qwen3.7-plus`** (med) | — | **`kimi-k2.7-code`** (low) | **`deepseek-v4-pro`** (med) | — |
 | **D2** | `flash` | `flash` (med) | **`glm-5.1`** (high) | `deepseek-v4-pro` (med) | `kimi-k2.7-code` (med) | **`glm-5.1`** (high) | — |
@@ -55,7 +55,7 @@ Kimi K2.7 Code is the preferred code implementation route.
 ### `phenix/free`
 
 | Diff | F/E | Scout | Planner | Implementer | Verifier |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | D0 | `flash-free` | — | — | `flash-free` (low) | — |
 | D1 | `flash-free` | `flash-free` (low) | `flash-free` (med) | `flash-free` (low) | `flash-free` (med) |
 | D2 | `flash-free` | `flash-free` (med) | `flash-free` (high) | `flash-free` (med) | `flash-free` (high) |
@@ -66,7 +66,7 @@ Kimi K2.7 Code is the preferred code implementation route.
 Uses **ChatGPT Plus-visible GPT models** only. Models resolved via capability aliases.
 
 | Alias | Preference order |
-|---|---|
+| --- | --- |
 | `fast` | `gpt-5.5-instant` → `gpt-5.5` → `gpt-5.5-thinking` |
 | `thinking` | `gpt-5.5-thinking` → `gpt-5.5` |
 | `pro` | `gpt-5.5-pro` → `gpt-5.5-thinking` → `gpt-5.5` |
@@ -96,7 +96,7 @@ Scouting and implementation use OpenCode Go models.
 ### Cost modes
 
 | Mode | Behavior |
-|---|---|
+| --- | --- |
 | `quality` | Use the full table as shown above |
 | `balanced` | D3: downgrade GLM-5.2 → GLM-5.1 (except final_reviewer) |
 | `economy` | Avoid GLM-5.2/5.1 and Qwen3.7 Max; use flash/pro/kimi |
@@ -104,6 +104,7 @@ Scouting and implementation use OpenCode Go models.
 ### Fallback resolution
 
 If a configured `opencode-go` model is unavailable:
+
 1. Walk the role's preference list
 2. Ultimate fallback: `opencode-go/deepseek-v4-flash`
 
@@ -111,7 +112,7 @@ If a configured `opencode-go` model is unavailable:
 
 | Variant | Warning |
 |---|---|
-| `phenix/free` | Change kind "permissions" requires strong planning. If using "phenix/free", the free model may not be sufficient. |
+| `phenix/free` | Denied for security, auth, ci, deployment. If using "phenix/free", the free model may not be sufficient. |
 
 ## Terminology
 
@@ -146,10 +147,10 @@ implementation → verification workflow while using Pi.
   trigger is present. Do not require heavyweight agent communication MCP for c1/c2
   unless recovery or handoff needs it.
 - Invoke planner only for `c3`/`c4` or a named ambiguity. Invoke architect only for
-  repo topology, public API/config, flake outputs, permission model, agent routing,
+  repo topology, public API/config, flake outputs, agent routing,
   CI/deployment, or module ownership boundaries.
 - Treat commit, push, publish, deploy, tracked deletion, secrets/auth changes, and
-  permission weakening as explicit-request-only `c4` work.
+  policy changes as explicit-request-only `c4` work.
 - Use Tend for task/profile planning and verification.
 - Use Stitch for multi-repository status, DAG, commit, and sync operations.
 - Use reversible single-repo Git and safe Nix commands only inside the accepted

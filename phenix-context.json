@@ -1,0 +1,15 @@
+{
+  "task": "de-emojiy this repo",
+  "repo": "phenix-agent-harness",
+  "filesScanned": ["config/phenix-pi/pi/prompts/flow.md", "config/phenix-pi/pi/prompts/flow.md.more", "docs/integrations.md", "docs/workflows.md", "docs/subagents.md", "docs/routing.md", "docs/phenix-tools.md", "README.md", "config/phenix-pi/pi/prompts/flow.md", "config/phenix-pi/pi/agents/phenix-debugger.md"],
+  "emojiFiles": ["config/phenix-pi/pi/prompts/flow.md"],
+  "emojiLinesFixed": [
+    "L14: replaced 🔧✅ with text",
+    "L17: replaced 🔍🔎📋🔧✅📊 with text",
+    "L19: replaced 🔄🔧✅ with text"
+  ],
+  "totalEmojisRemoved": 11,
+  "allClear": true,
+  "summary": "Only one file had emojis. All removed.",
+  "_ponytail": "de-emoji skipped 0 other files with no emojis"
+}

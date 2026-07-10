@@ -16,15 +16,15 @@ Follow the Phenix structured workflow:
   directly to worker; do not require planner, architect, or heavyweight
   the agent communication MCP unless recovery/handoff is needed.
 - Use planner for `c3`/`c4` or named ambiguity. Use architect only for repo
-  topology, public API/config, flake outputs, permission model, agent routing,
+  topology, public API/config, flake outputs, agent routing,
   CI/deployment, or module ownership boundaries.
 - Keep edits inside accepted scope and map each edit to its planned change ID.
 - Use Tend for verification profiles and Stitch for DAG-aware multi-repo operations.
 - Reversible single-repo Git and safe Nix commands may be used when permitted;
   keep irreversible Git/Nix actions gated by ask/deny behavior.
 - Do not commit, push, publish, deploy, delete tracked files, alter secrets/auth, or
-  weaken permissions unless explicitly requested and routed as `c4`.
+  weaken policies unless explicitly requested and routed as `c4`.
 - Keep Stitch as the orchestrator for multi-repo, DAG-aware, sync, and structural
   commit flows.
 - Preserve root as an aggregator; implementation logic belongs in the owning subflake.
-- Model variants: `phenix/opencode-go` (default), `phenix/free`, `phenix/gpt`, `phenix/mixed`. Routing: `<variant>.<role>.<difficulty> → { model, thinking, enabled }`. D0 is implementer-only. OpenCode Go models use `opencode-go/` prefix format. GPT uses capability aliases (fast/thinking/pro) resolved against available models — no `gpt-5.5-mini` or `gpt-5.6-*` models. Mixed spends GPT quota only on D2/D3 planner/verifier/final-review. Cost modes: quality, balanced, economy. Fallback: role preference lists with ultimate fallback to `opencode-go/deepseek-v4-flash`. `phenix/free` warns about permissions changes.
+- Model variants: `phenix/opencode-go` (default), `phenix/free`, `phenix/gpt`, `phenix/mixed`. Routing: `<variant>.<role>.<difficulty> → { model, thinking, enabled }`. D0 is implementer-only. OpenCode Go models use `opencode-go/` prefix format. GPT uses capability aliases (fast/thinking/pro) resolved against available models — no `gpt-5.5-mini` or `gpt-5.6-*` models. Mixed spends GPT quota only on D2/D3 planner/verifier/final-review. Cost modes: quality, balanced, economy. Fallback: role preference lists with ultimate fallback to `opencode-go/deepseek-v4-flash`. `phenix/free` warns about security/auth/ci/deployment changes.

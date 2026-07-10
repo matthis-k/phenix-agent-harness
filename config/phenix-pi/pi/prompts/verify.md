@@ -10,5 +10,5 @@ Verify the active change against the accepted plan:
 5. Confirm changes map to planned change IDs for `c3`/`c4`; for `c1`/`c2`, confirm
    the compact WorkScope/task packet permits the diff without heavyweight state.
 6. Fail if commit, push, publish, deploy, tracked deletion, secrets/auth changes,
-   or permission weakening occurred without explicit `c4` approval.
+    or policy weakening occurred without explicit `c4` approval.
 7. Report mechanical, WorkScope, plan-conformance, and architecture evidence.

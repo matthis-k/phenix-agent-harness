@@ -57,7 +57,7 @@ const route = resolveWorkflowRoute({
 
 ## Denial policies
 
-- Free mode denies: `secret`, `private`, `security`, `auth`, `ci`, `permissions`, `deployment`, `main-bound`
+- Free mode denies: `secret`, `private`, `security`, `auth`, `ci`, `deployment`, `main-bound`
 - Main-bound target requires at least D1 difficulty
 
 ## Adding a model

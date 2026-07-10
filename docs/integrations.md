@@ -18,7 +18,6 @@ Custom Phenix code owns only routing, policy, model/profile selection, and thin
 | `pi-subagents` | 0.34.0 | MIT | Subagent spawning, chain execution, parallelism | Spawns child Pi processes | Yes, bounded |
 | `pi-mcp-adapter` | 2.11.0 | MIT | MCP proxy and lazy server access | Spawns MCP servers | Lazy lifecycle |
 | `pi-lens` | 0.3.0 | MIT | LSP code intelligence (read-only) | Spawns LSP servers | No |
-| `@gotgenes/pi-permission-system` | 0.2.0 | MIT | Runtime allow/ask/deny gates | No | No |
 | `@juicesharp/rpiv-ask-user-question` | 0.1.0 | MIT | Parent-level structured clarification | No | No |
 | `@juicesharp/rpiv-todo` | 0.1.0 | MIT | Parent-visible task state overlay | No | No |
 | `@hypabolic/pi-hypa` | 0.2.0 | MIT | Tool output reduction/compression | No | No |
@@ -38,7 +37,6 @@ Package-backed:
   pi-subagents              — Real subagent execution via chains
   pi-mcp-adapter            — MCP proxy layer (Tend, Stitch, codebase-memory, GitHub, NixOS, Context7)
   pi-lens                   — LSP code intelligence (diagnostics, hover, definition, references, symbols)
-  @gotgenes/pi-permission-system — Runtime allow/ask/deny
   rpiv-ask-user-question    — Structured clarification at parent level
   rpiv-todo                 — Visible task state
   pi-hypa                   — Additive output reduction
@@ -67,13 +65,6 @@ Package-backed:
 - Read-only diagnostics, hover, definition, references, symbols.
 - Mutation features (format, autofix, code-action) disabled/ask-gated.
 - Background scans disabled by default.
-
-### @gotgenes/pi-permission-system
-- Runtime allow/ask/deny for tools, bash, MCP, paths.
-- Scout/planner/verifier/reviewer cannot edit.
-- Worker edits ask-gated.
-- Sensitive paths (.env, SSH keys, secrets, auth tokens) denied.
-- Commit/push/deploy denied unless explicitly requested and approved.
 
 ### rpiv-ask-user-question
 - Parent-level structured clarification only.

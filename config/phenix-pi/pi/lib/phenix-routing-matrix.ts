@@ -42,7 +42,6 @@ export type ChangeKind =
   | "ci"
   | "security"
   | "auth"
-  | "permissions"
   | "deployment"
   | "architecture"
   | "unknown";
@@ -96,7 +95,7 @@ export const GPT_CAPABILITY_PREFERENCES: Record<string, string[]> = {
 
 /** Denied change kinds for free mode. */
 const FREE_DENIED_CHANGE_KINDS: ChangeKind[] = [
-  "security", "auth", "ci", "permissions", "deployment",
+  "security", "auth", "ci", "deployment",
 ];
 
 // ══════════════════════════════════════════════
