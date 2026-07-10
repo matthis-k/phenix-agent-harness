@@ -7,7 +7,7 @@
       ...
     }:
     let
-      lib = pkgs.lib;
+      inherit (pkgs) lib;
 
       codebase-memory-mcp = inputs.nixpkgs-unstable.legacyPackages.${system}.codebase-memory-mcp;
 

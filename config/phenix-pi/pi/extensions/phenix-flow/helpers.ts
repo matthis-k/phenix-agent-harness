@@ -7,7 +7,7 @@
  * Extracted from machine.ts to reduce cognitive complexity.
  */
 
-import type { EffectId, WorkflowState } from "./types";
+import type { EffectId, WorkflowState } from "./types.js";
 
 // ── Agent role guards (prefix-based matching) ──
 

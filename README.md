@@ -42,32 +42,41 @@ Child agents, chains, parallel workflows, and background runs all go through
 pi-subagents chains. The legacy custom subagent executor (`phenix-subagent-executor.ts`)
 has been **removed**.
 
-## Agent communication MCP
+## Typed handoff system
 
-`phenix-agent-comm-mcp` is a generic local MCP server for durable agent
-communication. It stores sessions, agents, messages, task graphs, events,
-artifacts, and decisions in SQLite under the user's XDG data directory.
+Phase handoffs use the built-in `phenix_handoff` Pi tool, not MCP. The handoff
+system lives entirely in the `phenix-flow` extension:
 
-The Rust core is intentionally policy-free: it records communication and
-references/results only. It does not run shell commands, edit source files, or
-duplicate Tend/Stitch behavior. Tend remains responsible for verification; Stitch
-remains responsible for DAG-aware repository coordination.
+- **Typed schemas**: TypeBox runtime schemas for 5 handoff kinds (scout-result,
+  plan, worker-result, verification-report, repair-result) with TypeScript type
+  inference.
+- **Immutable artifact store**: File-backed content-addressed storage under
+  `.phenix/runs/<run-id>/artifacts/`. Uses SHA-256 digests and atomic writes.
+- **Repository manifest**: Deterministic Git-based change detection using
+  NUL-delimited diff output. Covers staged, unstaged, untracked, and renamed
+  files.
+- **Verification validator**: Pure functions that enforce exact file coverage,
+  required criteria, manifest freshness, and rejection of blocking findings.
+  The verifier's recommendation is never directly trusted.
+- **Concise projections**: Role-specific context builders that select only the
+  data each phase needs, avoiding generic "all outputs" functions.
 
-Useful debug commands:
+`phenix-agent-comm-mcp` remains available for downstream consumers as a general
+agent communication MCP server, but is no longer required for workflow handoff.
 
-```sh
-phenix-agent-comm-mcp init
-phenix-agent-comm-mcp tool comm_session_init --args '{"name":"example"}'
-phenix-agent-comm-mcp stdio-mcp
-```
+### Handoff kinds
 
-OpenCode is configured with a local `agent_comm` MCP server and canonical
-`agent_comm_*` permissions. The MCP tool names themselves currently use the
-`comm_` prefix (for example `comm_session_init`, `comm_agent_register`,
-`comm_message_send`, `comm_task_create`, `comm_event_recent`,
-`comm_artifact_record`, and `comm_decision_record`), but OpenCode permissions
-must always use the server namespace. Agents should use MCP records rather than
-writing handoff state into the repository.
+| Kind | Role | Identity fields |
+| ------ | ------ | ---------------- |
+| `scout-result` | scout | runId, stepId, effectId, attempt, relevantFiles, editPoints, risks |
+| `plan` | planner | runId, stepId, effectId, attempt, objective, steps, acceptanceCriteria |
+| `worker-result` | worker | runId, stepId, effectId, attempt, summary, claimedChangedFiles |
+| `verification-report` | verifier | runId, stepId, effectId, attempt, manifestDigest, reviewedFiles, criteria |
+| `repair-result` | repair | runId, stepId, effectId, attempt, addressedFindings, summary |
+
+Subagents call `phenix_handoff` with a JSON string. The tool validates,
+correlates, stores an artifact, and returns acceptance or rejection. Only a
+successful handoff advances the workflow.
 
 ## Running
 

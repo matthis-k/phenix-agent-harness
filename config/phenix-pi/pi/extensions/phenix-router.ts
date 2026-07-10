@@ -31,7 +31,7 @@ import {
 	FRONTEND_MODEL_SETS,
 	formatModelRef,
 	type ModelRef,
-} from "./phenix-core/model-ids";
+} from "./phenix-core/model-ids.js";
 
 const MODEL_SETS: Record<string, ModelRef> = FRONTEND_MODEL_SETS;
 const PHENIX_PROVIDER = "phenix";
@@ -256,26 +256,23 @@ export default function phenixRouter(pi: ExtensionAPI): void {
 		},
 	});
 
-	pi.on(
-		"session_start",
-		async (event: SessionStartEvent, ctx: ExtensionContext) => {
-			activeContext = ctx;
-			// Only track the model if it's already phenix — don't auto-activate.
-			// If the user explicitly selected a non-phenix model (e.g.
-			// opencode-go/deepseek-v4-flash), leave it alone so stock behavior
-			// is preserved and phenix-flow prompts don't inject.
-			if (ctx.model?.provider === PHENIX_PROVIDER) {
-				currentPhenixModel = ctx.model.id;
-				updatePhenixStatus(ctx);
-			}
-		},
-	);
+	pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
+		activeContext = ctx;
+		// Only track the model if it's already phenix — don't auto-activate.
+		// If the user explicitly selected a non-phenix model (e.g.
+		// opencode-go/deepseek-v4-flash), leave it alone so stock behavior
+		// is preserved and phenix-flow prompts don't inject.
+		if (ctx.model?.provider === PHENIX_PROVIDER) {
+			currentPhenixModel = ctx.model.id;
+			updatePhenixStatus(ctx);
+		}
+	});
 
 	pi.on("before_agent_start", (_event: any, ctx: ExtensionContext) => {
 		activeContext = ctx;
 	});
 
-	pi.on("model_select", (_event: any, ctx: ExtensionContext) => {
+	pi.on("model_select", (_ev: any, ctx: ExtensionContext) => {
 		if (ctx.model?.provider === PHENIX_PROVIDER) {
 			currentPhenixModel = ctx.model.id;
 			updatePhenixStatus(ctx);

@@ -30,7 +30,7 @@ let
     builtins.toJSON (
       cfg.settings
       // {
-        theme = cfg.theme;
+        inherit (cfg) theme;
       }
       // lib.optionalAttrs (packagePaths != [ ]) {
         packages = packagePaths;

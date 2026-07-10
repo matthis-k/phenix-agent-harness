@@ -11,9 +11,9 @@ import type {
 	ReduceResult,
 	WorkflowEvent,
 	WorkflowEffect,
-} from "../types";
-import { buildStepPrompt } from "../prompt-builder";
-import { effectId } from "../helpers";
+} from "../types.js";
+import { buildStepPrompt } from "../prompt-builder.js";
+import { effectId } from "../helpers.js";
 
 export function reduceDirect(
 	state: DirectState,

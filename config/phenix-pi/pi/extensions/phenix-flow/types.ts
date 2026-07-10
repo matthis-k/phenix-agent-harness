@@ -7,6 +7,13 @@
  * - Effects are commands the extension adapter interprets (set model, run phase, etc.).
  */
 
+import type {
+	AcceptedArtifact,
+	HandoffKind,
+	PhaseRole,
+} from "./handoff/schemas.js";
+import type { HandoffRejection } from "./handoff/errors.js";
+
 // ── Types shared with routing matrix ──
 export type Difficulty = "D0" | "D1" | "D2" | "D3";
 
@@ -63,6 +70,31 @@ export interface DelegatedState {
 	outputs: Record<string, string>;
 }
 
+/**
+ * Awaiting handoff — a phase was dispatched and we expect a handoff submission.
+ * The tool correlates every submission against this expected identity.
+ */
+export interface AwaitingHandoffState {
+	tag: "awaiting-handoff";
+	runId: string;
+	sessionId: string;
+	prompt: string;
+	difficulty: Difficulty;
+	chainSteps: ChainStep[];
+	chainIndex: number;
+	repairAttempts: number;
+	maxRepairAttempts: number;
+	originalModelRef: string | null;
+	outputs: Record<string, string>;
+	expected: {
+		role: PhaseRole;
+		artifactKind: HandoffKind;
+		stepId: string;
+		effectId: string;
+		attempt: number;
+	};
+}
+
 /** Completed successfully. Absorbs all further events. */
 export interface DoneState {
 	tag: "done";
@@ -89,6 +121,7 @@ export type WorkflowState =
 	| IdleState
 	| DirectState
 	| DelegatedState
+	| AwaitingHandoffState
 	| DoneState
 	| FailedState
 	| CancelledState;
@@ -108,7 +141,20 @@ export interface StartWorkflowEvent {
 	sessionId: string;
 }
 
-/** A phase completed and produced output. */
+/** A handoff submission was accepted and a trusted artifact was produced. */
+export interface HandoffAcceptedEvent {
+	type: "HANDOFF_ACCEPTED";
+	artifact: AcceptedArtifact;
+	phaseOutput: string;
+}
+
+/** A handoff submission was rejected. */
+export interface HandoffRejectedEvent {
+	type: "HANDOFF_REJECTED";
+	error: HandoffRejection;
+}
+
+/** A phase completed but the agent did not provide a valid handoff — used as fallback. */
 export interface PhaseCompletedEvent {
 	type: "PHASE_COMPLETED";
 	stepAgent: string;
@@ -136,6 +182,8 @@ export interface CancelledEvent {
 
 export type WorkflowEvent =
 	| StartWorkflowEvent
+	| HandoffAcceptedEvent
+	| HandoffRejectedEvent
 	| PhaseCompletedEvent
 	| PhaseContractViolationEvent
 	| VerifyResultEvent

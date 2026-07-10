@@ -80,7 +80,7 @@ import {
 	GPT_CAPABILITY_PREFERENCES,
 	FREE_DENIED_CHANGE_KINDS,
 	VARIANT_ROLES,
-} from "./routing-tables";
+} from "./routing-tables.js";
 
 // Re-exported for backward compatibility
 export { OPENCODE_GO_MODELS, GPT_CAPABILITY_PREFERENCES };

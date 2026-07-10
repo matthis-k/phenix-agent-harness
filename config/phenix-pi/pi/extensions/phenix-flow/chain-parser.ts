@@ -6,7 +6,7 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import type { ChainStep, Difficulty } from "./types";
+import type { ChainStep, Difficulty } from "./types.js";
 
 /**
  * Resolve the chain file path for a difficulty level.

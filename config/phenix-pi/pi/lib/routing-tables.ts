@@ -10,7 +10,7 @@ import type {
 	Difficulty,
 	Role,
 	RoleRoute,
-} from "./phenix-routing-matrix";
+} from "./phenix-routing-matrix.js";
 
 // ══════════════════════════════════════════════
 // MODEL LISTS
