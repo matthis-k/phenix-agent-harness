@@ -2,3 +2,4 @@
 .phenix-agent-state/
 result
 config/phenix-pi/node_modules
+/.cache/basic-memory
