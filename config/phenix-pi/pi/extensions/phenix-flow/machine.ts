@@ -22,147 +22,26 @@ import type {
 	IdleState,
 	PhaseCompletedEvent,
 	VerifyResultEvent,
-	ChainStep,
-	EffectId,
+	ReduceResult,
 } from "./types";
+import { buildStepPrompt } from "./prompt-builder";
+import {
+	isScout,
+	isPlanner,
+	isVerifier,
+	isWorker,
+	effectId,
+	isTerminal,
+	tryParseJson,
+} from "./helpers";
+import { reduceDirect } from "./handlers/direct";
 
 // ── Defaults ──
 const MAX_REPAIR_ATTEMPTS = 3;
 
 // ═══════════════════════════════════════════════
-// GUARDS
-// ═══════════════════════════════════════════════
-
-/** Check if the agent name indicates a scout. */
-function isScout(agent: string): boolean {
-	return agent.includes("scout");
-}
-
-/** Check if the agent name indicates a planner. */
-function isPlanner(agent: string): boolean {
-	return agent.includes("planner");
-}
-
-/** Check if the agent name indicates a verifier. */
-function isVerifier(agent: string): boolean {
-	return agent.includes("verifier");
-}
-
-/** Check if the agent name indicates a worker/implementer. */
-function isWorker(agent: string): boolean {
-	return agent.includes("worker") || agent.includes("implementer");
-}
-
-/**
- * Generate a unique effect ID for idempotency.
- * Include repair attempt so retries get distinct IDs.
- */
-function effectId(
-	runId: string,
-	stepIndex: number,
-	phase: string,
-	repairAttempt: number,
-): EffectId {
-	return `${runId}:${stepIndex}:${phase}:${repairAttempt}`;
-}
-
-// ═══════════════════════════════════════════════
-// HELPERS
-// ═══════════════════════════════════════════════
-
-/** Check if a state is terminal (absorbs all events). */
-function isTerminal(state: WorkflowState): boolean {
-	return (
-		state.tag === "done" || state.tag === "failed" || state.tag === "cancelled"
-	);
-}
-
-/** Build the full prompt for a chain step, replacing tokens with accumulated outputs. */
-function buildStepPrompt(
-	step: ChainStep,
-	prompt: string,
-	outputs: Record<string, string>,
-): string {
-	let instruction = step.instruction;
-
-	// Replace {outputs.<key>} with actual output content
-	instruction = instruction.replace(/\{outputs\.(\w+)\}/g, (_match, key) => {
-		if (outputs[key]) return outputs[key];
-		return `(output from ${key} phase)`;
-	});
-
-	// Replace {previous} with prompt
-	instruction = instruction.replace(/\{previous\}/g, prompt);
-
-	const parts: string[] = [
-		"## Phenix Workflow Phase",
-		"",
-		`Task: ${prompt}`,
-		"",
-		`### Phase: ${step.label} (${step.agent})`,
-		"",
-		instruction,
-		"",
-	];
-
-	if (step.output) {
-		parts.push(
-			`Write your output to \`${step.output}\`. This will be consumed by the next phase.`,
-		);
-		parts.push("");
-	}
-
-	parts.push("---");
-	return parts.join("\n");
-}
-
-/** Check if a prompt looks like a task worth routing, vs a conversational follow-up. */
-export function isWorkflowTask(prompt: string): boolean {
-	const trimmed = prompt.trim();
-	if (!trimmed) return false;
-	// Very short or question → likely conversational, not a task
-	if (trimmed.length < 25) return false;
-	if (trimmed.endsWith("?") && trimmed.length < 80) return false;
-	// Simple acknowledgments → not a task
-	if (
-		/^(yes|no|ok|okay|thanks|done|yep|nope|sure|got it|lol|aha)$/i.test(trimmed)
-	)
-		return false;
-	return true;
-}
-
-/**
- * Try to parse phase output as JSON. Returns the parsed object or null.
- * The output may be a JSON file or raw text from the agent response.
- */
-export function tryParseJson(text: string): Record<string, unknown> | null {
-	// Strip markdown code fences if present
-	let cleaned = text.trim();
-	const fenceMatch = cleaned.match(/^```(?:json)?\s*\n?([\s\S]*?)```$/);
-	if (fenceMatch) cleaned = fenceMatch[1].trim();
-	try {
-		const parsed = JSON.parse(cleaned);
-		if (
-			typeof parsed === "object" &&
-			parsed !== null &&
-			!Array.isArray(parsed)
-		) {
-			return parsed as Record<string, unknown>;
-		}
-		return null;
-	} catch {
-		return null;
-	}
-}
-
-// ═══════════════════════════════════════════════
 // REDUCER
 // ═══════════════════════════════════════════════
-
-export interface ReduceResult {
-	state: WorkflowState;
-	effects: WorkflowEffect[];
-}
 
 /**
  * Pure reducer: given the current state and an event, return the next state
@@ -247,52 +126,6 @@ function reduceIdle(state: IdleState, event: WorkflowEvent): ReduceResult {
 		outputs: {},
 	};
 	return dispatchCurrentStep(delegatedState, 0);
-}
-
-// ── Direct state transitions (D0 only) ──
-
-function reduceDirect(state: DirectState, event: WorkflowEvent): ReduceResult {
-	switch (event.type) {
-		case "PHASE_COMPLETED":
-			return onDirectPhaseCompleted(state, event);
-		case "CANCELLED":
-			return {
-				state: { tag: "cancelled", runId: state.runId },
-				effects: [
-					{
-						type: "NOTIFY",
-						message: "⏹️ Workflow cancelled.",
-						level: "warning",
-					},
-				],
-			};
-		case "START_WORKFLOW":
-			return { state, effects: [] }; // ignore — workflow already active
-		default:
-			return { state, effects: [] };
-	}
-}
-
-function onDirectPhaseCompleted(
-	state: DirectState,
-	_event: PhaseCompletedEvent,
-): ReduceResult {
-	const { chainSteps, chainIndex, runId, originalModelRef } = state;
-
-	// All steps complete → done
-	if (chainIndex >= chainSteps.length - 1) {
-		return {
-			state: { tag: "done", runId, difficulty: "D0" },
-			effects: originalModelRef
-				? [{ type: "RESTORE_MODEL", modelRef: originalModelRef }]
-				: [{ type: "NOOP" }],
-		};
-	}
-
-	// There should never be multiple steps in D0, but handle it anyway
-	const nextIndex = chainIndex + 1;
-	const nextState: DirectState = { ...state, chainIndex: nextIndex };
-	return dispatchCurrentStep(nextState, nextIndex);
 }
 
 // ── Delegated state transitions (D1-D3) ──

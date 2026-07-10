@@ -1,18 +1,17 @@
 /**
  * phenix-flow/index.ts — Thin Pi hook adapter.
  *
- * Hooks dispatch events to the reducer and run returned effects.
+ * Hooks dispatch events to the reducer and runs returned effects.
  * No transition logic here — all decisions live in machine.ts.
  *
- * Hook responsibilities:
+ * Responsibilities:
  *   input         → detect prompt, classify, dispatch START_WORKFLOW
- *   before_agent_start → inject current phase instruction into system prompt
- *   agent_end     → capture phase output, dispatch PHASE_COMPLETED / VERIFY_RESULT
+ *   before_agent_start → inject phase instruction into system prompt
+ *   agent_end     → capture phase output, verify contract, record MCP artifact, dispatch event
  */
 
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
-import { execSync } from "node:child_process";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
@@ -27,86 +26,13 @@ import type {
 	CostMode,
 	TargetState,
 } from "../../lib/phenix-routing-matrix";
-import { reduce, isWorkflowTask, tryParseJson } from "./machine";
-import type { WorkflowState, WorkflowEffect, ChainStep } from "./types";
-
-/**
- * Record a phase output artifact via the phenix-agent-comm MCP server.
- * Non-fatal: failures are silently caught.
- */
-function recordMcpArtifact(
-	sessionId: string,
-	label: string,
-	content: string,
-): void {
-	try {
-		const args = JSON.stringify({
-			session_id: sessionId,
-			artifact_type: "phase-output",
-			name: label,
-			content,
-			content_type: "application/json",
-		});
-		execSync(
-			`phenix-agent-comm-mcp tool comm_artifact_record --args '${args}'`,
-			{ timeout: 5000, stdio: "ignore", windowsHide: true },
-		);
-	} catch {
-		// Non-fatal: MCP may not be available
-	}
-}
-
-/**
- * Initialize an MCP communication session for a workflow run.
- * Returns the session ID or a default if MCP is unavailable.
- */
-function initMcpSession(runId: string): string {
-	try {
-		const args = JSON.stringify({
-			name: `phenix-flow-${runId}`,
-			description: `Phenix workflow run ${runId}`,
-		});
-		const result = execSync(
-			`phenix-agent-comm-mcp tool comm_session_init --args '${args}'`,
-			{ timeout: 10000, encoding: "utf-8", windowsHide: true },
-		);
-		const parsed = JSON.parse(result.toString());
-		if (typeof parsed.id === "string" && parsed.id) return parsed.id;
-		if (typeof parsed.session_id === "string" && parsed.session_id)
-			return parsed.session_id;
-		if (typeof parsed.result?.id === "string") return parsed.result.id;
-		return "default";
-	} catch {
-		return "default";
-	}
-}
-
-/**
- * Dispatch a PHASE_CONTRACT_VIOLATION event and check if the run ended.
- * Used when a phase with a required output file produces non-JSON content.
- */
-function dispatchViolation(
-	stepAgent: string,
-	reason: string,
-	ctx: ExtensionContext,
-	pi: ExtensionAPI,
-): void {
-	const event = {
-		type: "PHASE_CONTRACT_VIOLATION" as const,
-		stepAgent,
-		reason,
-	};
-	const result = reduce(state, event);
-	state = result.state;
-	runEffects(result.effects, ctx, pi);
-	if (
-		state.tag === "done" ||
-		state.tag === "failed" ||
-		state.tag === "cancelled"
-	) {
-		flowJustFinished = true;
-	}
-}
+import { reduce } from "./machine";
+import { isWorkflowTask, tryParseJson } from "./helpers";
+import { buildStepPrompt } from "./prompt-builder";
+import { initMcpSession, recordMcpArtifact } from "./handoff";
+import { verifyPhaseOutput } from "./phase-contracts";
+import { resolveChainFile, parseChainSteps } from "./chain-parser";
+import type { WorkflowState, ChainStep } from "./types";
 
 // ── Constants ──
 const DEFAULT_VARIANT: Variant = "mixed";
@@ -137,110 +63,8 @@ function parseModelRef(
 	return { provider: ref.slice(0, slash), model: ref.slice(slash + 1) };
 }
 
-function chainFileName(difficulty: Difficulty, _variant: string): string {
-	// ponytail: variant-specific chains not yet used; add when chains diverge per variant
-	if (difficulty === "D0") return "phenix-d0";
-	if (difficulty === "D3") return "phenix-d3";
-	if (difficulty === "D2") return "phenix-d2";
-	return "phenix-d1";
-}
-
-function chainFilePath(name: string): string | null {
-	const candidates = [
-		resolve(configDir, "chains", name + ".chain.md"),
-		resolve(configDir, "chains", name + ".chain.json"),
-	];
-	for (const f of candidates) {
-		if (existsSync(f)) return f;
-	}
-	return null;
-}
-
-function parseChainSteps(filePath: string, _prompt: string): ChainStep[] {
-	const content = readFileSync(filePath, "utf-8").trim();
-
-	if (filePath.endsWith(".json")) {
-		try {
-			const parsed = JSON.parse(content);
-			const raw = parsed.chain ?? [];
-			const steps: ChainStep[] = [];
-			for (const s of raw) {
-				if (s.parallel) {
-					for (const p of s.parallel) {
-						steps.push({
-							agent: p.agent ?? "unknown",
-							phase: p.phase ?? "",
-							label: p.label ?? "",
-							as: p.as,
-							output: p.output,
-							outputMode: p.outputMode,
-							model: p.model,
-							thinking: p.thinking,
-							contract: p.contract,
-							instruction: p.task ?? p.instruction ?? "",
-						});
-					}
-				} else {
-					steps.push({
-						agent: s.agent ?? "unknown",
-						phase: s.phase ?? "",
-						label: s.label ?? "",
-						as: s.as,
-						output: s.output,
-						outputMode: s.outputMode,
-						model: s.model,
-						thinking: s.thinking,
-						contract: s.contract,
-						instruction: s.task ?? s.instruction ?? "",
-					});
-				}
-			}
-			return steps;
-		} catch {
-			return [];
-		}
-	}
-
-	// Markdown chain format: ## <agent-name>\nkey: value\n\nbody
-	const steps: ChainStep[] = [];
-	// Use chain.json stopping pattern — not needed for markdown
-	const blocks = content.split(/^## /m).slice(1);
-	for (const block of blocks) {
-		const lines = block.split("\n");
-		const agent = lines[0]?.trim() ?? "unknown";
-		const bodyStart = lines.findIndex(
-			(l: string) => l.trim() && !l.includes(":"),
-		);
-		const headerLines = lines.slice(1, bodyStart > 0 ? bodyStart : undefined);
-		const bodyLines = bodyStart > 0 ? lines.slice(bodyStart) : lines.slice(1);
-
-		const getVal = (key: string): string | undefined => {
-			const prefix = `${key}:`;
-			for (const l of headerLines) {
-				if (l.startsWith(prefix)) return l.slice(prefix.length).trim();
-			}
-			return undefined;
-		};
-
-		steps.push({
-			agent,
-			phase: getVal("phase") ?? "",
-			label: getVal("label") ?? "",
-			as: getVal("as"),
-			output: getVal("output"),
-			outputMode: getVal("outputMode"),
-			model: getVal("model"),
-			thinking: getVal("thinking"),
-			contract: getVal("contract"),
-			instruction: bodyLines.join("\n").trim(),
-		});
-	}
-
-	return steps;
-}
-
 function runEffects(
-	effects: WorkflowEffect[],
+	effects: import("./types").WorkflowEffect[],
 	ctx: ExtensionContext,
 	pi: ExtensionAPI,
 ): void {
@@ -262,9 +86,7 @@ function runEffects(
 					/* thinking level API may not be available */
 				}
 			}
-			pi.sendUserMessage(effect.fullPrompt, {
-				deliverAs: "followUp",
-			});
+			pi.sendUserMessage(effect.fullPrompt, { deliverAs: "followUp" });
 		} else if (effect.type === "RESTORE_MODEL") {
 			if (effect.modelRef) {
 				const parsed = parseModelRef(effect.modelRef);
@@ -278,6 +100,7 @@ function runEffects(
 		} else if (effect.type === "NOTIFY") {
 			ctx.ui.notify(effect.message, effect.level);
 		}
+		// ponytail: NOOP needs no handler, it's a pass-through
 	}
 }
 
@@ -289,24 +112,21 @@ function tryReadOutputFile(cwd: string, outputPath?: string): string | null {
 			return readFileSync(filePath, "utf-8");
 		}
 	} catch {
-		/* file may not exist */
+		return null;
 	}
 	return null;
 }
 
 /**
- * Try to parse the phase's output: first try the output file, then fall back
- * to the agent response text.
+ * Capture phase output: try the output file first, fall back to agent response text.
  */
 function capturePhaseOutput(
 	step: ChainStep,
 	agentResponse: string,
 	cwd: string,
 ): string {
-	// First try reading the output file
 	const fileContent = tryReadOutputFile(cwd, step.output);
 	if (fileContent) return fileContent;
-	// Fall back to agent response
 	return agentResponse;
 }
 
@@ -331,20 +151,21 @@ function startWorkflow(
 	pi: ExtensionAPI,
 	variant?: Variant,
 ): void {
-	const chainName = chainFileName(difficulty, variant ?? DEFAULT_VARIANT);
-	const cf = chainFilePath(chainName);
+	const cf = resolveChainFile(difficulty, configDir);
 	if (!cf) {
-		ctx.ui.notify(`Chain file not found: ${chainName}`, "warning");
+		ctx.ui.notify(
+			`Chain file not found for difficulty ${difficulty}`,
+			"warning",
+		);
 		return;
 	}
 
-	const chainSteps = parseChainSteps(cf, prompt);
+	const chainSteps = parseChainSteps(cf);
 	if (chainSteps.length === 0) {
-		ctx.ui.notify(`Empty chain: ${chainName}`, "warning");
+		ctx.ui.notify(`Empty chain file: ${cf}`, "warning");
 		return;
 	}
 
-	// Check routing matrix for denials
 	const route = resolveWorkflowRoute({
 		variant: variant ?? DEFAULT_VARIANT,
 		difficulty,
@@ -378,10 +199,21 @@ function startWorkflow(
 	const result = reduce(state, event);
 	state = result.state;
 	ctx.ui.notify(
-		`🚀 Phenix workflow — ${difficulty} | Chain: ${chainName} | ${chainSteps.length} phases`,
+		`🚀 Phenix workflow — ${difficulty} | ${cf} | ${chainSteps.length} phases`,
 		"info",
 	);
 	runEffects(result.effects, ctx, pi);
+}
+
+// ── Re-send helper for missing output files ──
+
+function resendStep(step: ChainStep, prompt: string, pi: ExtensionAPI): void {
+	const outputs =
+		state.tag === "delegated"
+			? (state as Extract<WorkflowState, { tag: "delegated" }>).outputs
+			: {};
+	const fullPrompt = buildStepPrompt(step, prompt, outputs);
+	pi.sendUserMessage(fullPrompt, { deliverAs: "followUp" });
 }
 
 // ═══════════════════════════════════════════════
@@ -408,19 +240,17 @@ export default function phenixFlow(pi: ExtensionAPI): void {
 			flowJustFinished = false;
 			return;
 		}
-		if (state.tag !== "idle") return; // workflow already active
+		if (state.tag !== "idle") return;
 		if (!ev.text || ev.text.startsWith("/")) return;
 
 		const prompt = ev.text;
-
-		// Guard: don't auto-route conversational prompts
 		if (!isWorkflowTask(prompt)) return;
 
 		const difficulty = classifyDifficulty(prompt);
 		startWorkflow(prompt, difficulty, ctx, pi);
 	});
 
-	// ── Inject current phase into system prompt and set model/thinking ──
+	// ── Inject current phase into system prompt ──
 	pi.on("before_agent_start", (ev, _ctx) => {
 		const activeState = state;
 		if (activeState.tag !== "direct" && activeState.tag !== "delegated") return;
@@ -428,37 +258,13 @@ export default function phenixFlow(pi: ExtensionAPI): void {
 		const step = activeState.chainSteps[activeState.chainIndex];
 		if (!step) return;
 
-		// Build step prompt
 		const outputs = activeState.tag === "delegated" ? activeState.outputs : {};
-		let instruction = step.instruction;
-		instruction = instruction.replace(/\{outputs\.(\w+)\}/g, (_match, key) => {
-			if (outputs[key]) return outputs[key];
-			return `(output from ${key} phase)`;
-		});
-		instruction = instruction.replace(/\{previous\}/g, activeState.prompt);
+		const phasePrompt = buildStepPrompt(step, activeState.prompt, outputs);
 
-		const parts: string[] = [
-			"## Phenix Workflow Phase",
-			"",
-			`Task: ${activeState.prompt}`,
-			"",
-			`### Phase: ${step.label} (${step.agent})`,
-			"",
-			instruction,
-			"",
-		];
-		if (step.output) {
-			parts.push(
-				`Write your output to \`${step.output}\`. This will be consumed by the next phase.`,
-			);
-			parts.push("");
-		}
-		parts.push("---");
-
-		return { systemPrompt: ev.systemPrompt + "\n\n" + parts.join("\n") };
+		return { systemPrompt: ev.systemPrompt + "\n\n" + phasePrompt };
 	});
 
-	// ── After each phase completes, capture output and dispatch event ──
+	// ── After each phase completes ──
 	pi.on("agent_end", async (_ev, ctx) => {
 		if (state.tag !== "direct" && state.tag !== "delegated") return;
 
@@ -469,8 +275,7 @@ export default function phenixFlow(pi: ExtensionAPI): void {
 		const step = activeState.chainSteps[activeState.chainIndex];
 		if (!step) return;
 
-		// Capture output from the completed phase
-		// AgentEndEvent has `messages` — extract text from the last message
+		// ── Capture phase output ──
 		const ev = _ev as any;
 		const agentText =
 			typeof ev.text === "string"
@@ -478,51 +283,64 @@ export default function phenixFlow(pi: ExtensionAPI): void {
 				: (ev.messages?.at?.(-1)?.content ?? "");
 		const output = capturePhaseOutput(step, agentText, ctx.cwd);
 
-		// If output file is required but missing, re-send same phase
+		// ── If output file required but missing, re-send the phase ──
 		if (step.output) {
 			const outputPath = resolve(ctx.cwd, step.output);
 			if (!existsSync(outputPath) && !output) {
-				// Agent didn't write the file — give it another turn with the same instruction
-				const outputs =
-					state.tag === "delegated"
-						? (state as Extract<WorkflowState, { tag: "delegated" }>).outputs
-						: {};
-				const fullPrompt = buildInlineStepPrompt(
-					step,
-					activeState.prompt,
-					outputs,
-				);
-				pi.sendUserMessage(fullPrompt, {
-					deliverAs: "followUp",
-				});
+				resendStep(step, activeState.prompt, pi);
 				return;
 			}
 		}
 
-		// Handoff: verify output is valid JSON when an output file is expected,
-		// then record as a durable artifact via MCP. No Zod schema enforcement.
+		// ── Parse JSON and verify contract ──
 		const parsed = tryParseJson(output);
 		if (step.output && !parsed) {
-			dispatchViolation(
-				step.agent,
-				`${step.agent} output is not valid JSON`,
-				ctx,
-				pi,
-			);
+			// Phase has an output file but didn't produce valid JSON
+			const violation = {
+				type: "PHASE_CONTRACT_VIOLATION" as const,
+				stepAgent: step.agent,
+				reason: `${step.agent} output is not valid JSON`,
+			};
+			const result = reduce(state, violation);
+			state = result.state;
+			runEffects(result.effects, ctx, pi);
+			if (isFinal(state)) flowJustFinished = true;
 			return;
 		}
-		// Record phase output via MCP for durable cross-session storage
-		if (parsed && activeState.sessionId) {
-			recordMcpArtifact(activeState.sessionId, step.label, output);
+
+		// ── Runtime type verification via phase-contracts config ──
+		if (parsed) {
+			const missingKeys = verifyPhaseOutput(step.agent, parsed);
+			if (missingKeys) {
+				const violation = {
+					type: "PHASE_CONTRACT_VIOLATION" as const,
+					stepAgent: step.agent,
+					reason: missingKeys,
+				};
+				const result = reduce(state, violation);
+				state = result.state;
+				runEffects(result.effects, ctx, pi);
+				if (isFinal(state)) flowJustFinished = true;
+				return;
+			}
+
+			// ── Record phase artifact via MCP ──
+			if (activeState.tag === "delegated" && activeState.sessionId) {
+				recordMcpArtifact(
+					activeState.sessionId,
+					step.label,
+					step.phase,
+					step.output,
+					ctx.cwd,
+				);
+			}
 		}
 
-		// Determine event type based on agent role
+		// ── Dispatch PHASE_COMPLETED or VERIFY_RESULT ──
 		const isVerifier = step.agent.includes("verifier");
 		let event;
 
 		if (isVerifier) {
-			// Parse verifier output to determine pass/fail
-			const parsed = tryParseJson(output);
 			if (parsed && typeof parsed.status === "string") {
 				event = {
 					type: "VERIFY_RESULT" as const,
@@ -530,7 +348,7 @@ export default function phenixFlow(pi: ExtensionAPI): void {
 					reason:
 						parsed.status === "fail"
 							? (parsed.failures as any[])
-									?.map((f: any) => f.issue ?? f.description ?? "")
+									?.map((f: any) => f.issue ?? "")
 									.filter(Boolean)
 									.join("; ") || "Verification failed"
 							: undefined,
@@ -554,14 +372,7 @@ export default function phenixFlow(pi: ExtensionAPI): void {
 		state = result.state;
 		runEffects(result.effects, ctx, pi);
 
-		// If done/failed/cancelled, mark justFinished to prevent re-triggering
-		if (
-			state.tag === "done" ||
-			state.tag === "failed" ||
-			state.tag === "cancelled"
-		) {
-			flowJustFinished = true;
-		}
+		if (isFinal(state)) flowJustFinished = true;
 	});
 
 	// ── /flow command ──
@@ -621,36 +432,7 @@ export default function phenixFlow(pi: ExtensionAPI): void {
 	});
 }
 
-// ── Inline helpers (not exported from machine) ──
-
-function buildInlineStepPrompt(
-	step: ChainStep,
-	prompt: string,
-	outputs: Record<string, string>,
-): string {
-	let instruction = step.instruction;
-	instruction = instruction.replace(/\{outputs\.(\w+)\}/g, (_match, key) => {
-		if (outputs[key]) return outputs[key];
-		return `(output from ${key} phase)`;
-	});
-	instruction = instruction.replace(/\{previous\}/g, prompt);
-
-	const parts: string[] = [
-		"## Phenix Workflow Phase",
-		"",
-		`Task: ${prompt}`,
-		"",
-		`### Phase: ${step.label} (${step.agent})`,
-		"",
-		instruction,
-		"",
-	];
-	if (step.output) {
-		parts.push(
-			`Write your output to \`${step.output}\`. This will be consumed by the next phase.`,
-		);
-		parts.push("");
-	}
-	parts.push("---");
-	return parts.join("\n");
+/** Check if a state is terminal. */
+function isFinal(s: WorkflowState): boolean {
+	return s.tag === "done" || s.tag === "failed" || s.tag === "cancelled";
 }

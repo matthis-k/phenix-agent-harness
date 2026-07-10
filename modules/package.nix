@@ -21,6 +21,12 @@
 
       wrapperModule = (inputs.nix-wrapper-modules.lib.evalModule (import ./wrapper-module.nix)).config;
 
+      # Hypa CLI wrapper — exposed to PATH so HYPA_PI_MODE=additive works.
+      # The binary lives inside the @hypabolic/hypa npm package and needs Node.js.
+      hypa = pkgs.writeShellScriptBin "hypa" ''
+        exec ${pkgs.nodejs}/bin/node ${phenixPiPackage}/node_modules/@hypabolic/hypa/bin.js "$@"
+      '';
+
       # Build config/phenix-pi as a store-backed npm package with all 10
       # declared pi dependencies installed in node_modules.
       phenixPiPackage = import ./phenix-pi-package.nix {
@@ -93,6 +99,7 @@
             github-mcp-server
             mcp-nixos
             context7-mcp
+            hypa
           ];
 
           extraEnv = {

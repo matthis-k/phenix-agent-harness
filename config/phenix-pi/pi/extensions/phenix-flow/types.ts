@@ -20,7 +20,6 @@ export interface ChainStep {
 	outputMode?: string;
 	model?: string;
 	thinking?: string;
-	contract?: string;
 	instruction: string;
 }
 
@@ -177,3 +176,9 @@ export type WorkflowEffect =
 	| RestoreModelEffect
 	| NotifyEffect
 	| NoopEffect;
+
+/** Result of a single reduce call: next state + effects to execute. */
+export interface ReduceResult {
+	state: WorkflowState;
+	effects: WorkflowEffect[];
+}
