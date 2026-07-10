@@ -1,3 +1,9 @@
+---
+title: phenix-tools
+type: note
+permalink: newxos/phenix-tools
+---
+
 # Phenix tools — Pi extension
 
 ## Tool surface
@@ -11,6 +17,19 @@ Core read-only:
 | `find` | Path lookup via `fd` (or Node fallback) with ranked results |
 | `ast_grep` | Structural code query via `ast-grep` AST patterns |
 | `lsp` | IDE-grade code intelligence (diagnostics, hover, definition, references, symbols) |
+
+Package-backed (via pi-lens):
+
+| Tool | Provider | Description |
+|------|----------|-------------|
+| `lsp_diagnostics` | pi-lens | Read-only LSP diagnostics |
+| `lsp_hover` | pi-lens | Read-only LSP hover |
+| `lsp_definition` | pi-lens | Go-to-definition |
+| `lsp_references` | pi-lens | Find references |
+| `lsp_document_symbols` | pi-lens | Document symbols |
+
+The custom `lsp.ts` extension has been **removed**. All LSP functionality is
+provided by `pi-lens` (v0.3.0, MIT). See `docs/integrations.md`.
 
 Mutation flow (preview → resolve):
 
@@ -51,62 +70,24 @@ Runtime tools provided by the wrapper `extraPackages`:
 - `typescript-language-server` — TypeScript/JavaScript LSP server
 - `nodejs` — runtime
 
-## Pi package integration
+## Package integration
 
-### `pi-context-tools` (0.1.1, MIT)
+All non-routing functionality is package-backed:
 
-**Status: Default-enabled** as a dependency in `package.json`.
+| Package | Purpose |
+|---------|---------|
+| `pi-context-tools` | Context compaction and info |
+| `pi-subagents` | Subagent execution via chains |
+| `pi-mcp-adapter` | MCP proxy layer |
+| `pi-lens` | LSP code intelligence |
+| `@gotgenes/pi-permission-system` | Runtime allow/ask/deny gates |
+| `@juicesharp/rpiv-ask-user-question` | Structured clarification |
+| `@juicesharp/rpiv-todo` | Visible task state |
+| `@hypabolic/pi-hypa` | Output reduction |
+| `@dietrichgebert/ponytail` | Code minimization skill |
+| `@juicesharp/rpiv-web-tools` | Web search/fetch |
 
-Provides `context_info` and `compact_context` tools. Source review:
-- Tiny extension (~7.5KB unpacked)
-- No external dependencies
-- Registers two tools only, no side effects
-- No file system writes, no process spawning
-- MIT license — clean
-
-Use policy:
-- Parent flow may call `context_info` before D2/D3 planning
-- Parent flow may call `compact_context` after scout/verifier if context
-  is near threshold
-- Subagents should not call compaction unless explicitly allowed
-
-### `pi-mcp-adapter` (2.11.0, MIT)
-
-**Status: Opt-in** — not enabled by default.
-
-Larger (~1.9MB unpacked, 8 dependencies). Useful for reducing MCP tool-
-definition bloat in subagent contexts. Add via explicit wrapper/profile.
-
-Acceptance criteria for future integration:
-- MCP servers accessed through compact adapter interface
-- Raw MCP schemas not injected into every child context
-- Adapter reads standard MCP config without polluting repo
-- Direct MCP tools not automatically given to all subagents
-
-Pending source review for full integration.
-
-### `context-mode` (1.0.x, Elastic-2.0)
-
-**Status: Experimental-only, NOT integrated.**
-
-Larger (~4.2MB unpacked, 8 dependencies including better-sqlite3).
-**Elastic-2.0 licensed** — do not vendor any code into Phenix.
-
-Phenix does not ship, bundle, or enable `context-mode` by default. It is
-available as a user-installable opt-in for users who understand its
-behavior (process spawning, FTS5 knowledge base writes, sandboxed code
-execution).
-
-If added via custom wrapper/profile, document:
-- License/surface
-- No code vendored into Phenix
-- No repo pollution
-- No unexpected daemon/process spawning
-- No uncontrolled hook installation
-- Can be enabled/disabled via explicit wrapper/profile
-- Does not conflict with Pi compaction or `pi-context-tools`
-
-Recommended: "external opt-in, not integrated by default".
+See `docs/integrations.md` for full policy and version pins.
 
 ## Safety
 

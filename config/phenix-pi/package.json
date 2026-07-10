@@ -1,14 +1,16 @@
 {
   "name": "@matthis-k/phenix-pi",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "private": false,
-  "description": "Phenix workflow resources, provider router, read-only LSP tools, subagent agents, and Catppuccin theme for Pi.",
+  "description": "Phenix workflow resources, provider router, package-backed integrations, and Catppuccin theme for Pi.",
   "keywords": [
     "pi-package",
     "phenix",
     "router",
     "subagent",
     "lsp",
+    "mcp",
+    "permissions",
     "theme"
   ],
   "pi": {
@@ -18,6 +20,17 @@
     "agents": [
       "./pi/agents"
     ],
+    "chains": [
+      "./pi/chains"
+    ],
+    "subagents": {
+      "agents": [
+        "./pi/agents"
+      ],
+      "chains": [
+        "./pi/chains"
+      ]
+    },
     "skills": [
       "./pi/skills"
     ],
@@ -36,6 +49,15 @@
     "typebox": "*"
   },
   "dependencies": {
-    "pi-context-tools": "0.1.1"
+    "pi-context-tools": "0.1.1",
+    "pi-subagents": "0.34.0",
+    "pi-mcp-adapter": "2.11.0",
+    "pi-lens": "0.3.0",
+    "@gotgenes/pi-permission-system": "0.2.0",
+    "@juicesharp/rpiv-ask-user-question": "0.1.0",
+    "@juicesharp/rpiv-todo": "0.1.0",
+    "@hypabolic/pi-hypa": "0.2.0",
+    "@dietrichgebert/ponytail": "0.1.0",
+    "@juicesharp/rpiv-web-tools": "0.1.0"
   }
 }

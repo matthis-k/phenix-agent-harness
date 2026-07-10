@@ -1,245 +1,129 @@
-# Phenix Subagents
+---
+title: subagents
+type: note
+permalink: newxos/subagents
+---
 
-## What "real subagent" means
-
-A **real subagent** in Phenix is an isolated child `pi` process. This is
-fundamentally different from direct model API calls (streamSimple, etc.).
-
-```
-Real subagent:
-  parent pi process
-    └─ spawn child pi process (--mode json -p --no-session)
-        └─ child has its own runtime loop
-        └─ child has its own active tool set
-        └─ child receives a bounded prompt/context via stdin or temp file
-        └─ parent receives only compact final output + structured metadata
-        └─ parent does NOT ingest the child's full tool transcript
-
-Fake subagent (OLD, replaced):
-  parent pi process
-    └─ calls streamSimple() directly
-        └─ no separate runtime
-        └─ full transcript in parent context
-        └─ no isolated tool execution
-```
-
-## Current status
-
-| Role | Implementation | Status |
-|------|----------------|--------|
-| `repo_scout` | Child `pi` process via `runPhenixSubagent()` | ✅ Operational |
-| `planner` | Child `pi` process via `runPhenixSubagent()` | ✅ Operational |
-| `worker` | Child `pi` process via `runPhenixSubagent()` | ✅ Operational |
-| `verifier` | Child `pi` process via `runPhenixSubagent()` | ✅ Operational |
-| `reviewer` | Available as agent definition, not yet wired | 🔶 Defined |
-| `debugger` | Available as agent definition, not yet wired | 🔶 Defined |
-
-All wired roles (scout, planner, worker, verifier) run as **real child `pi` processes**.
-No role stages use direct model API calls.
-
-### Difficulty-based execution
-
-- **D0** (trivial/mechanical): Parent direct execution. No child subagent spawned.
-  The parent agent executes the task directly using available tools.
-- **D1+** (all other difficulties): Full subagent workflow with scout, planner,
-  worker, and verifier running as child `pi` processes.
-- **Classifying** and **synthesizing** remain parent agent turns (not subagent).
-
-### Role-to-agent-file mapping
-
-Agent file names do not always match the role name. The mapping is:
-
-| Role | Agent file |
-|------|-----------|
-| `scout` | `repo_scout.md` |
-| `planner` | `planner.md` |
-| `architect` | `planner.md` |
-| `worker` | `worker.md` |
-| `verifier` | `verifier.md` |
-| `reviewer` | `reviewer.md` |
-| `debugger` | `debugger.md` |
-
-Role `scout` resolves to `repo_scout.md`, not `scout.md`.
+# Phenix Subagents (pi-subagents integration)
 
 ## Architecture
 
+Phenix uses **pi-subagents** (v0.34.0) as the subagent execution engine for all
+child agent workflows. Phenix no longer owns its own child process spawning,
+subagent supervision, chain execution, or async job tracking.
+
 ```
-phenix-flow
-  -> classify request (parent agent turn)
-  -> [D0: direct execute (parent agent turn, no child subagent)]
-  -> [D1+: scout subagent (child Pi) → planner subagent (child Pi)]
-  -> worker subagent (child Pi)
-  -> verifier subagent (child Pi)
-  -> [pass → synthesizing (parent agent turn)]
-  -> [fail → replanner subagent (child Pi with verifier feedback) → worker subagent ...]
-  -> final synthesis (parent agent turn)
-```
+Phenix custom code:
+  - parse /flow flags                                      (phenix-flow.ts)
+  - classify task difficulty/secrecy/change kind            (phenix-routing-matrix.ts)
+  - select variant: free | opencode-go | gpt | mixed       (phenix-routing-matrix.ts)
+  - select cost mode: economy | balanced | quality          (phenix-routing-matrix.ts)
+  - resolve chain + model overrides                         (phenix-routing-matrix.ts)
+  - invoke pi-subagents chain                               (phenix-flow.ts)
 
-### Child process shape
-
-```sh
-pi --mode json -p --no-session \
-   --model <provider/model> \
-   --tools <comma-separated> \
-   [--thinking <level>] \
-   [--append-system-prompt <agent-file>] \
-   "<task prompt>"  # or stdin/temp file for long prompts
-```
-
-The child process receives:
-- `PI_OFFLINE=1` to skip network startup checks
-- `PI_SUBAGENT_DEPTH=<n+1>` for recursion guard
-- `PI_SUBAGENT_COMM_DIR=<dir>` if comm channel is active (set by flow)
-- `PI_SUBAGENT_RUN_ID=<id>` if comm channel is active
-- `PI_SUBAGENT_ROLE=<role>` if comm channel is active
-- A resolved model via `--model`
-- Role-specific tools via `--tools`
-- An optional agent system prompt via `--append-system-prompt`
-
-### Prompt transport
-
-Long prompts (over 8KB) are passed via **stdin** or **temp file**, NOT as argv.
-Short prompts under 8KB may use argv as a fallback. If neither stdin nor temp
-file transport is available and the prompt exceeds 8KB, the subagent fails
-explicitly with a clear error message.
-
-## Tool policy by role
-
-Tool restrictions are **advisory (prompt-only)**. Pi's extension API does not
-enforce tool filtering per-agent turn. The child Pi process receives the agent
-markdown which lists available tools, but nothing prevents the child from
-calling tools outside the allowlist.
-
-| Role | Default tools | Read-only? |
-|------|---------------|------------|
-| `scout` | `read,find,search,grep,ls,lsp` | ✅ Yes |
-| `planner` | `read,find,search,grep,ls,lsp` | ✅ Yes |
-| `architect` | `read,find,search,grep,ls,lsp` | ✅ Yes |
-| `worker` | `read,find,search,grep,ls,lsp,edit,ast_grep,ast_edit,bash` | ❌ Can edit |
-| `verifier` | `read,find,search,grep,ls,lsp,bash` | ✅ Read-only |
-| `reviewer` | `read,find,search,grep,ls,lsp` | ✅ Yes |
-| `debugger` | `read,find,search,grep,ls,lsp,bash` | ✅ Read-only |
-
-## Recursion safety
-
-The executor guards against recursive subagent spawning via the
-`PI_SUBAGENT_DEPTH` environment variable.
-
-- Current depth limit: `2` (max nesting: parent → subagent → subagent)
-- Child agents do NOT receive the `subagent` tool, so they cannot spawn
-  further subagents through the tool interface.
-- The depth env var is auto-incremented on each child spawn.
-- If depth >= `maxDepth`, `runPhenixSubagent()` returns a failed result.
-
-## Agent markdown files
-
-Agent definitions live in:
-```text
-config/phenix-pi/pi/agents/*.md
+Package-backed:
+  pi-subagents           — spawn child Pi subagents, run chains/parallel, manage background runs
+  pi-mcp-adapter         — compact MCP access without injecting large MCP tool schemas
+  pi-lens                — LSP code intelligence replacing custom lsp.ts
+  pi-permission-system   — runtime allow/ask/deny gates
+  rpiv-ask-user-question — parent-level structured clarification
+  rpiv-todo              — parent-visible task state
+  pi-hypa                — additive output reduction
+  ponytail               — code minimization skill
+  rpiv-web-tools         — web search/fetch
 ```
 
-Each file is markdown with YAML frontmatter:
+## Key changes from legacy implementation (retired)
 
-```markdown
----
-name: repo_scout
-description: Read-only repository scout
-tools: read,find,search,grep,ls,lsp
-model: ""
-thinking: medium
-sessionPreference: ephemeral
----
+| Area | Before | After |
+|------|--------|-------|
+| Subagent execution | Custom `runPhenixSubagent()` in `phenix-subagent-executor.ts` | `pi-subagents` `subagent` tool |
+| Chain/workflow engine | Custom state machine in `phenix-flow.ts` | Declarative chain files + `pi-subagents` chain execution |
+| Model routing | Embedded in `phenix-subagent-executor.ts` | Centralized in `pi/lib/phenix-routing-matrix.ts` |
+| Agent files | `repo_scout.md`, `planner.md`, etc. | `phenix-scout.md`, `phenix-planner.md`, etc. (with `phenix-` prefix) |
+| Parallel execution | Custom `runPhenixSubagentsParallel()` | `pi-subagents` parallel group support |
+| LSP tools | Custom `lsp.ts` with per-server spawn | `pi-lens` package |
+| Permission gates | None (prompt-level only) | `pi-permission-system` runtime gates |
+| MCP access | Direct tool registration | `pi-mcp-adapter` proxy |
 
-You are the Phenix repository scout...
+## Chain files
+
+Saved workflows live in `config/phenix-pi/pi/chains/`:
+
+| Chain | File | Description |
+|-------|------|-------------|
+| `phenix-d0` | `phenix-d0.chain.md` | Minimal mechanical task — single worker |
+| `phenix-d1` | `phenix-d1.chain.md` | Bounded workflow: scout → plan → implement → verify |
+| `phenix-d1-noscout` | `phenix-d1-noscout.chain.md` | D1 without scouting step |
+| `phenix-d2` | `phenix-d2.chain.md` | Architectural: scout → plan → critic → implement → verify |
+| `phenix-d2-noscout` | `phenix-d2-noscout.chain.md` | D2 without scouting step |
+| `phenix-d3` | `phenix-d3.chain.json` | High-risk: scout → plan → critic → worker → parallel reviewers → verifier → final review |
+| `phenix-repair-loop` | `phenix-repair-loop.chain.json` | Repair loop: replan → re-execute → re-verify (bounded) |
+
+## Slash commands
+
+The following pi-subagents slash commands are available:
+
+- `/run <agent> <task>` — Run a single subagent
+- `/chain <agent> "task" -> <agent>` — Run agents in sequence
+- `/run-chain <name> -- <task>` — Run a saved chain
+- `/parallel <agent> "task1" -> <agent> "task2"` — Run tasks in parallel
+- `/subagents-doctor` — Subagent diagnostics
+- `/subagents-models [agent]` — Show model assignments
+- `/subagents-cost` — Show cost breakdown
+- `/subagents-profiles` — List saved profiles
+- `/subagents-load-profile <name>` — Load a profile
+
+## /flow command
+
+The `/flow` command is now a thin router over saved chains:
+
+```
+/flow <prompt>
+  -> parse flags (--difficulty, --variant, --cost, etc.)
+  -> classify difficulty (phenix-routing-matrix.ts)
+  -> resolve WorkflowRoute
+  -> if denied: report denial
+  -> select chain: phenix-d0/d1/d1-noscout/d2/d2-noscout/d3
+  -> invoke selected pi-subagents chain
 ```
 
-Available agents:
-- `repo_scout.md` — Read-only evidence gathering
-- `planner.md` — Task decomposition and planning
-- `worker.md` — Scoped implementation
-- `verifier.md` — Validation and verification
-- `reviewer.md` — Code review (staged, not wired)
-- `debugger.md` — Failure investigation (staged, not wired)
+Supported flags:
+- `--difficulty D0|D1|D2|D3`
+- `--variant free|opencode-go|gpt|mixed`
+- `--cost economy|balanced|quality`
+- `--target scratch|dev-wallet|main-bound`
+- `--scout auto|force|skip`
+- `/flow status` — Show active workflow status
+- `/flow cancel` — Cancel active workflow
+- `/flow doctor` — Run diagnostics
 
-## Public API
+## Agent files
 
-### `runPhenixSubagent(input, ctx)`
+Phenix-specific agents use the `phenix-` prefix:
 
-```typescript
-async function runPhenixSubagent(
-  input: RunPhenixSubagentInput,
-  ctx: ExtensionContext
-): Promise<RunPhenixSubagentResult>
-```
+| Agent file | Role | Tools | Can delegate? |
+|------------|------|-------|---------------|
+| `phenix-scout.md` | Read-only repo reconnaissance | read, grep, find, ls | No |
+| `phenix-planner.md` | Implementation planning | read, grep, find, ls | No |
+| `phenix-worker.md` | Scoped implementation | read, grep, find, ls, edit, write, ast_grep, ast_edit, bash | No |
+| `phenix-worker-recursive.md` | Delegating implementation | read, grep, find, ls, edit, write, ast_grep, ast_edit, bash, subagent | Yes (depth ≤ 2) |
+| `phenix-verifier.md` | Validation and verification | read, grep, find, ls, bash | No |
+| `phenix-reviewer.md` | Code review | read, grep, find, ls, bash | No |
+| `phenix-debugger.md` | Failure investigation | read, grep, find, ls, bash | No |
 
-Input fields:
-- `role` — One of `scout`, `planner`, `architect`, `worker`, `verifier`, `reviewer`, `debugger`
-- `task` — The task prompt string (passed via stdin/temp-file, not argv for long prompts)
-- `cwd` — Working directory for the child process
-- `model` — Optional model override (e.g., `"opencode/deepseek-v4-flash-free"`)
-- `thinking` — Optional thinking level
-- `tools` — Optional tool list override
-- `maxBytes` — Output byte cap (default: 50KB)
-- `maxLines` — Output line cap (default: 2000)
-- `timeoutMs` — Process timeout (default: 120s)
-- `commDir` — Comm channel directory (passed to child via env)
-- `runId` — Run identifier (passed to child via env)
+## Legacy agents
 
-Result fields:
-- `status` — `"done"` | `"failed"` | `"timeout"` | `"cancelled"`
-- `role` — The subagent role
-- `modelUsed` — Model string that was actually used
-- `summary` — First 200 chars of output or error
-- `text` — Final cleaned output text
-- `bytes` — Output byte count
-- `lines` — Output line count
-- `truncated` — Whether output was capped
-- `exitCode` — Child process exit code
-- `error` — Stderr content if any
-- `details` — Additional metadata (includes promptTransport)
+Legacy agents (`repo_scout.md`, `planner.md`, `worker.md`, `verifier.md`,
+`reviewer.md`, `debugger.md`) remain for backward compatibility but are
+deprecated. Prefer `phenix-*` agents for new workflows.
 
-### `buildChildEnv(input, ctx)`
+## Removed: custom subagent executor
 
-Helper for testing/verification — constructs the child process environment
-map without actually spawning a process.
+The file `phenix-subagent-executor.ts` has been **removed**. All subagent
+execution goes through `pi-subagents`. See `docs/integrations.md` for package
+details.
 
-### Legacy `runSubagent(request, pi, ctx)`
+## Package integration
 
-Maintained for backward compatibility with `phenix-flow.ts`. Delegates to
-`runPhenixSubagent()` internally.
-
-## Subagent comm channel
-
-The executor provides a file-based IPC mechanism for inter-subagent
-communication:
-
-- `ensureCommChannelDir()` — Create shared comm directory
-- `writeCommMessage()` / `readCommMessage()` / `listCommMessages()` — Message I/O
-- `writeSubagentResult()` / `readSubagentResult()` — Result persistence
-- `waitForCommMessage()` — Poll for matching messages
-
-Child processes receive `PI_SUBAGENT_COMM_DIR`, `PI_SUBAGENT_RUN_ID`, and
-`PI_SUBAGENT_ROLE` in their environment when the comm channel is active.
-However, children only use the channel if agent/tooling explicitly writes to it.
-
-## Limitations
-
-1. **Tool enforcement is advisory.** Pi does not enforce per-role tool
-   restrictions at runtime. The child agent's prompt lists allowed tools,
-   but the child can still call any tool available to `pi`.
-2. **Subprocess isolation exists** — each child is a separate OS process
-   with its own runtime, but tool restrictions are prompt-only.
-3. **No fork mode.** The current implementation uses `--no-session` (spawn
-   only). Fork mode (inherit parent context) is not supported.
-4. **Agent files must exist on disk.** The executor looks for agent markdown
-   files in the configured `PI_CODING_AGENT_DIR/agents/` directory or
-   project `.pi/agents/` directory. Uses the `AGENT_FILE_BY_ROLE` map to
-   resolve role to file name (scout -> repo_scout.md).
-5. **Model resolution depends on parent context.** Provider API keys are
-   resolved through the parent's `ctx.modelRegistry`. If resolution fails,
-   the child process falls back to its own API key discovery.
-6. **Prompt transport for long prompts** uses stdin or temp file, not argv.
-   No hidden global `pi install` state is required.
-7. **No runtime enforcement** — tool filtering is prompt-level only.
-8. **Parallel execution** is supported (`runPhenixSubagentsParallel`),
-   but the flow pipeline runs subagents serially.
+See `docs/integrations.md` for full package inventory, policies, and version pins.

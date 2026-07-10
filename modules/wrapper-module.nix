@@ -25,7 +25,7 @@ let
           theme = cfg.theme;
         }
         // lib.optionalAttrs (cfg.configDir != null && cfg.loadConfigDirAsPackage) {
-          packages = [ "${cfg.configDir}" ];
+          packages = [ "${cfg.configDir}" ] ++ cfg.piPackages;
         }
         // lib.optionalAttrs (cfg.configDir != null && cfg.directResourceCompat) {
           extensions = [
@@ -174,10 +174,22 @@ in
       description = "Additional prompt template dirs. Prefer pi.configDir for Phenix resources.";
     };
 
+    piPackages = lib.mkOption {
+      type = lib.types.listOf lib.types.path;
+      default = [ ];
+      description = "Extra Pi package directories to include in settings.json packages list.";
+    };
+
     extraPackages = lib.mkOption {
       type = lib.types.listOf lib.types.package;
       default = [ ];
       description = "Extra tools available on PATH inside wrapped Pi.";
+    };
+
+    extraEnv = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = { };
+      description = "Extra environment variables to set in the wrapper.";
     };
 
     extraFlags = lib.mkOption {
@@ -216,7 +228,8 @@ in
       }
       // lib.optionalAttrs (cfg.promptTemplates != [ ]) {
         PI_PROMPT_TEMPLATES_PATHS = pathList cfg.promptTemplates;
-      };
+      }
+      // cfg.extraEnv;
 
     runtimePkgs =
       [

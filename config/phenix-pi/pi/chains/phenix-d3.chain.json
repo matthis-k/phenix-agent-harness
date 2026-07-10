@@ -1,0 +1,92 @@
+{
+  "name": "phenix-d3",
+  "description": "High-risk or ambiguous Phenix workflow with scout, plan, critic, worker, parallel reviewers, verifier, and final reviewer",
+  "chain": [
+    {
+      "agent": "phenix-scout",
+      "phase": "Context",
+      "label": "Gather repo evidence",
+      "as": "context",
+      "output": "phenix-context.json",
+      "outputMode": "file-only",
+      "model": "opencode-go/deepseek-v4-pro",
+      "thinking": "high"
+    },
+    {
+      "agent": "phenix-planner",
+      "phase": "Planning",
+      "label": "Plan high-risk change",
+      "as": "plan",
+      "output": "phenix-plan.json",
+      "model": "opencode-go/glm-5.2",
+      "thinking": "xhigh"
+    },
+    {
+      "agent": "phenix-reviewer",
+      "phase": "Review",
+      "label": "Critique plan",
+      "as": "plan-review",
+      "output": "phenix-plan-review.json",
+      "model": "opencode-go/qwen3.7-max",
+      "thinking": "high"
+    },
+    {
+      "agent": "phenix-worker",
+      "phase": "Implementation",
+      "label": "Implement reviewed plan",
+      "as": "patch",
+      "output": "phenix-patch.json",
+      "model": "opencode-go/kimi-k2.7-code",
+      "thinking": "high"
+    },
+    {
+      "parallel": [
+        {
+          "agent": "phenix-reviewer",
+          "phase": "Verification",
+          "label": "Review: correctness",
+          "as": "review-correctness",
+          "output": "phenix-review-correctness.json",
+          "model": "opencode-go/deepseek-v4-pro",
+          "thinking": "high"
+        },
+        {
+          "agent": "phenix-reviewer",
+          "phase": "Verification",
+          "label": "Review: tests and checks",
+          "as": "review-tests",
+          "output": "phenix-review-tests.json",
+          "model": "opencode-go/deepseek-v4-pro",
+          "thinking": "high"
+        },
+        {
+          "agent": "phenix-reviewer",
+          "phase": "Verification",
+          "label": "Review: complexity and minimality",
+          "as": "review-complexity",
+          "output": "phenix-review-complexity.json",
+          "model": "opencode-go/deepseek-v4-pro",
+          "thinking": "high"
+        }
+      ]
+    },
+    {
+      "agent": "phenix-verifier",
+      "phase": "Verification",
+      "label": "Verify result",
+      "as": "verification",
+      "output": "phenix-verification.json",
+      "model": "opencode-go/glm-5.2",
+      "thinking": "xhigh"
+    },
+    {
+      "agent": "phenix-reviewer",
+      "phase": "Verification",
+      "label": "Final review",
+      "as": "final-review",
+      "output": "phenix-final-review.json",
+      "model": "opencode-go/glm-5.2",
+      "thinking": "xhigh"
+    }
+  ]
+}

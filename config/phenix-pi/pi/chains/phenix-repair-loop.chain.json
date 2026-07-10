@@ -1,0 +1,35 @@
+{
+  "name": "phenix-repair-loop",
+  "description": "Repair loop: verifier failure triggers replanning and re-execution, bounded to max rounds",
+  "maxRounds": 3,
+  "loop": [
+    {
+      "agent": "phenix-planner",
+      "phase": "Repair",
+      "label": "Revise plan based on verification feedback",
+      "as": "replan",
+      "output": "phenix-replan.json",
+      "model": "opencode-go/glm-5.1",
+      "thinking": "high"
+    },
+    {
+      "agent": "phenix-worker",
+      "phase": "Repair",
+      "label": "Re-implement revised plan",
+      "as": "repatch",
+      "output": "phenix-repatch.json",
+      "model": "opencode-go/kimi-k2.7-code",
+      "thinking": "high"
+    },
+    {
+      "agent": "phenix-verifier",
+      "phase": "Repair",
+      "label": "Re-verify repaired implementation",
+      "as": "reverification",
+      "output": "phenix-reverification.json",
+      "model": "opencode-go/glm-5.1",
+      "thinking": "high",
+      "stopOnPass": true
+    }
+  ]
+}
