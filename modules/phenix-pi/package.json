@@ -10,7 +10,8 @@
   "pi": {
     "extensions": [
       "./extensions/phenix-routing/index.ts",
-      "./extensions/phenix-core.ts"
+      "./extensions/phenix-core.ts",
+      "./extensions/phenix-contract-tools.ts"
     ],
     "skills": [
       "./skills"

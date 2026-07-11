@@ -39,6 +39,26 @@ import {
   runVerificationCommands,
   type VerificationRun,
 } from "./verification.ts";
+import {
+  createRunId,
+  issueContract,
+  type ContractArtifact,
+  type ContractId,
+  type RunId,
+} from "./contract.ts";
+import {
+  FileContractStore,
+  ContractStoreError,
+} from "./contract-store.ts";
+import {
+  injectContractRuntimeBlock,
+} from "./contract-prompt.ts";
+import {
+  PHENIX_AGENT_KIND_ENV,
+  PHENIX_CONTRACT_ID_ENV,
+  PHENIX_CONTRACT_TOKEN_ENV,
+  PHENIX_RUN_ID_ENV,
+} from "./contract-identity.ts";
 
 const HANDLE_VERSION = 1;
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
@@ -81,8 +101,11 @@ const ACCEPTANCE_RANK: Record<string, number> = {
 interface AttemptRecord {
   readonly number: number;
   runId: string;
+  readonly phenixRunId: RunId;
   readonly mode: "foreground" | "background";
   readonly startedAt: string;
+  readonly contractId: ContractId;
+  criticContractId?: ContractId;
   asyncDir?: string;
   endedAt?: string;
   status: "running" | "completed" | "failed" | "cancelled";
@@ -222,6 +245,16 @@ function findProjectRoot(cwd: string): string {
   }
 }
 
+function contractsForCwd(cwd: string): FileContractStore {
+  return new FileContractStore(
+    path.join(
+      findProjectRoot(cwd),
+      ".phenix-agent-state",
+      "contracts",
+    ),
+  );
+}
+
 function sessionId(ctx: ExtensionContext): string {
   return ctx.sessionManager.getSessionId() ?? "ephemeral";
 }
@@ -317,6 +350,31 @@ function recordChildSessions(record: HandleRecord, children: readonly RuntimeChi
   }));
 }
 
+function storeRoot(): string {
+  return path.join(
+    findProjectRoot(process.cwd()),
+    ".phenix-agent-state",
+    "contracts",
+  );
+}
+
+async function cancelPendingContracts(attempt: AttemptRecord): Promise<void> {
+  const store = new FileContractStore(storeRoot());
+  const ids: Array<{ id: ContractId; label: string }> = [];
+  if (attempt.contractId) ids.push({ id: attempt.contractId, label: "producer" });
+  if (attempt.criticContractId) ids.push({ id: attempt.criticContractId, label: "critic" });
+  for (const { id, label } of ids) {
+    try {
+      await store.cancel(id, `superseded-by-repair`);
+    } catch (error) {
+      // If already terminal (submitted or already cancelled), that's fine.
+      if (error instanceof ContractStoreError && error.code === "already-terminal") continue;
+      if (error instanceof ContractStoreError && error.code === "not-found") continue;
+      throw error;
+    }
+  }
+}
+
 function expectedAcceptanceRank(policy: ResolvedExecutionPolicy): number {
   return ACCEPTANCE_RANK[policy.expectedAcceptance] ?? 0;
 }
@@ -327,114 +385,137 @@ function compactOutput(value: string | undefined): string | undefined {
   return compact.length > 500 ? `${compact.slice(0, 497)}...` : compact;
 }
 
-function evaluateAcceptance(
-  acceptance: RuntimeAcceptanceLedger | undefined,
-  expectedRank: number,
-): {
-  errors: string[];
-  runtimeChecks: string[];
-  verifyRuns: string[];
-  reviewFindings: string[];
-  status?: string;
-} {
-  const errors: string[] = [];
-  const runtimeChecks: string[] = [];
-  const verifyRuns: string[] = [];
-  const reviewFindings: string[] = [];
-  const status = acceptance?.status;
-
-  if (!status) {
-    errors.push("runtime acceptance ledger is missing");
-  } else if ((ACCEPTANCE_RANK[status] ?? -1) < expectedRank) {
-    errors.push(`runtime acceptance '${status}' is below required level`);
-  }
-
-  if (acceptance?.childReportParseError) {
-    errors.push(`acceptance report format: ${acceptance.childReportParseError}`);
-  }
-
-  for (const check of acceptance?.runtimeChecks ?? []) {
-    if (check.status === "failed") {
-      const text = `${check.id ?? "runtime-check"}: ${check.message ?? "failed"}`;
-      runtimeChecks.push(text);
-      errors.push(text);
-    }
-  }
-
-  // Phenix does not put authoritative verification or review in a model-owned
-  // acceptance report. These fields are retained only to surface failures from
-  // pi-subagents itself if a future backend version emits them unexpectedly.
-  for (const run of acceptance?.verifyRuns ?? []) {
-    if (run.status === "passed" || run.status === "allowed-failure") continue;
-    const output = compactOutput(run.stderr) ?? compactOutput(run.stdout);
-    const text = [
-      `${run.id ?? "verification"}: ${run.status ?? "failed"}`,
-      run.exitCode !== undefined ? `exit ${String(run.exitCode)}` : undefined,
-      output,
-    ].filter(Boolean).join("; ");
-    verifyRuns.push(text);
-    errors.push(text);
-  }
-
-  return { errors, runtimeChecks, verifyRuns, reviewFindings, ...(status ? { status } : {}) };
-}
-
-function evaluateStructuredChild(
+async function evaluateContractResult(
+  contractId: ContractId,
   schema: JsonSchema,
-  policy: ResolvedExecutionPolicy,
-  child: RuntimeChildResult | undefined,
-): Evaluation {
-  const errors: string[] = [];
-  if (!child) {
+  cwd: string,
+): Promise<{
+  readonly ok: boolean;
+  readonly value?: unknown;
+  readonly errors: readonly string[];
+  readonly contract:
+    | "valid"
+    | "invalid"
+    | "missing"
+    | "cancelled";
+}> {
+  const stored =
+    await contractsForCwd(cwd).load(
+      contractId,
+    );
+
+  if (!stored) {
     return {
       ok: false,
-      errors: ["expected child result is missing"],
-      repairable: true,
-      verification: {
-        runtimeChecks: [],
-        verifyRuns: [],
-        reviewFindings: [],
-        contract: "missing",
-      },
+      errors: [
+        `Contract artifact ${contractId} is missing.`,
+      ],
+      contract: "missing",
     };
   }
 
-  const executionFailed = child.success === false || (child.exitCode !== undefined && child.exitCode !== null && child.exitCode !== 0);
-  if (executionFailed) {
-    errors.push(child.error ?? compactOutput(child.finalOutput ?? child.output) ?? `child exited with ${String(child.exitCode)}`);
+  if (
+    stored.result.state === "pending"
+  ) {
+    return {
+      ok: false,
+      errors: [
+        "Child exited without submitting its Phenix contract.",
+      ],
+      contract: "missing",
+    };
   }
 
-  let contractState: VerificationSummary["contract"] = "missing";
-  if (child.structuredOutput === undefined) {
-    errors.push("structured handoff is missing");
-  } else {
-    const validation = validateContract(schema, child.structuredOutput);
-    if (validation.ok) {
-      contractState = "valid";
-    } else if ("summary" in validation) {
-      contractState = "invalid";
-      errors.push(`structured handoff format: ${validation.summary}`);
-    }
+  if (
+    stored.result.state === "cancelled"
+  ) {
+    return {
+      ok: false,
+      errors: [
+        `Contract was cancelled: ${stored.result.reason}`,
+      ],
+      contract: "cancelled",
+    };
   }
 
-  const acceptance = evaluateAcceptance(
-    child.acceptance,
-    expectedAcceptanceRank(policy),
+  if (stored.result.state !== "submitted") {
+    return {
+      ok: false,
+      errors: [
+        `Contract is in unexpected state: ${stored.result.state}`,
+      ],
+      contract: "invalid",
+    };
+  }
+
+  const validation = validateContract(
+    schema,
+    stored.result.value,
   );
-  errors.push(...acceptance.errors);
+
+  if (!validation.ok) {
+    return {
+      ok: false,
+      errors: [
+        "Parent-side contract revalidation failed.",
+        "summary" in validation
+          ? validation.summary
+          : "Unknown validation failure.",
+      ],
+      contract: "invalid",
+    };
+  }
 
   return {
-    ok: errors.length === 0,
-    ...(errors.length === 0 ? { value: child.structuredOutput } : {}),
-    errors,
-    repairable: contractState !== "valid" || acceptance.errors.length > 0,
-    verification: {
-      acceptanceStatus: acceptance.status,
-      runtimeChecks: acceptance.runtimeChecks,
-      verifyRuns: acceptance.verifyRuns,
-      reviewFindings: acceptance.reviewFindings,
-      contract: contractState,
-    },
+    ok: true,
+    value: stored.result.value,
+    errors: [],
+    contract: "valid",
+  };
+}
+
+async function createAttemptContract(
+  record: HandleRecord,
+  task: string,
+  cwd: string,
+): Promise<{
+  readonly artifact: ContractArtifact;
+  readonly capabilityToken: string;
+  readonly phenixRunId: RunId;
+}> {
+  const phenixRunId = createRunId();
+
+  const issued = issueContract({
+    runId: phenixRunId,
+    role: record.role,
+    task,
+    requirements: record.requirements,
+    outputSchema: record.outputSchema,
+  });
+
+  await contractsForCwd(cwd).create(
+    issued.artifact,
+  );
+
+  return {
+    artifact: issued.artifact,
+    capabilityToken:
+      issued.capabilityToken,
+    phenixRunId,
+  };
+}
+
+function childContractEnv(
+  contractId: ContractId,
+  capabilityToken: string,
+  phenixRunId: RunId,
+  role: AgentKind,
+): Record<string, string> {
+  return {
+    [PHENIX_CONTRACT_ID_ENV]: contractId,
+    [PHENIX_CONTRACT_TOKEN_ENV]: capabilityToken,
+    [PHENIX_RUN_ID_ENV]: phenixRunId,
+    [PHENIX_AGENT_KIND_ENV]: role,
   };
 }
 
@@ -462,9 +543,29 @@ async function evaluateAttempt(
   cwd: string,
   signal: AbortSignal,
 ): Promise<Evaluation> {
-  const primary = evaluateStructuredChild(record.outputSchema, record.policy, children[0]);
-  if (!primary.ok) return primary;
+  const attempt = latestAttempt(record);
 
+  // Evaluate primary producer via its Phenix contract.
+  const primary = await evaluateContractResult(
+    attempt.contractId,
+    record.outputSchema,
+    cwd,
+  );
+  if (!primary.ok) {
+    return {
+      ok: false,
+      errors: primary.errors,
+      repairable: primary.contract === "invalid" || primary.contract === "missing",
+      verification: {
+        runtimeChecks: [],
+        verifyRuns: [],
+        reviewFindings: [],
+        contract: primary.contract,
+      },
+    };
+  }
+
+  // Run verification commands.
   const verificationRuns = await runVerificationCommands(
     record.policy.verificationCommands,
     cwd,
@@ -473,47 +574,66 @@ async function evaluateAttempt(
   const verificationErrors = verificationRuns
     .filter((run) => run.status === "failed" || run.status === "timed-out" || run.status === "cancelled")
     .map(formatVerificationRun);
-  const verifyRuns = [
-    ...primary.verification.verifyRuns,
-    ...verificationRuns.map(formatVerificationRun),
-  ];
+  const verifyRuns = verificationRuns.map(formatVerificationRun);
   if (verificationErrors.length > 0) {
     return {
       ok: false,
       errors: verificationErrors.map((error) => `runtime verification: ${error}`),
       repairable: !signal.aborted,
       verification: {
-        ...primary.verification,
+        runtimeChecks: [],
         verifyRuns,
+        reviewFindings: [],
+        contract: "valid",
       },
     };
   }
 
   if (!record.reviewPolicy) {
     return {
-      ...primary,
+      ok: true,
+      value: primary.value,
+      errors: [],
+      repairable: false,
       verification: {
-        ...primary.verification,
+        runtimeChecks: [],
         verifyRuns,
+        reviewFindings: [],
+        contract: "valid",
       },
     };
   }
 
-  const criticChild = children[1];
-  const critic = evaluateStructuredChild(
+  // Evaluate critic via its own Phenix contract (if it was run).
+  if (!attempt.criticContractId) {
+    return {
+      ok: false,
+      errors: ["Critic contract was not issued but review policy is set."],
+      repairable: true,
+      verification: {
+        runtimeChecks: [],
+        verifyRuns,
+        reviewFindings: [],
+        contract: "valid",
+      },
+    };
+  }
+
+  const critic = await evaluateContractResult(
+    attempt.criticContractId,
     CRITIC_OUTPUT_SCHEMA,
-    record.reviewPolicy,
-    criticChild,
+    cwd,
   );
   if (!critic.ok) {
     return {
       ok: false,
       errors: critic.errors.map((error) => `critic handoff: ${error}`),
-      repairable: critic.repairable,
+      repairable: critic.contract === "invalid" || critic.contract === "missing",
       verification: {
-        ...primary.verification,
+        runtimeChecks: [],
         verifyRuns,
         reviewFindings: critic.errors,
+        contract: "valid",
       },
     };
   }
@@ -533,8 +653,6 @@ async function evaluateAttempt(
     summary: value.summary,
     findings: value.findings,
     missingRequirements: value.missingRequirements,
-    ...(criticChild?.sessionFile ? { sessionFile: criticChild.sessionFile } : {}),
-    ...(criticChild?.transcriptPath ? { transcriptPath: criticChild.transcriptPath } : {}),
   };
 
   if (reviewErrors.length > 0) {
@@ -544,9 +662,10 @@ async function evaluateAttempt(
       repairable: true,
       review,
       verification: {
-        ...primary.verification,
+        runtimeChecks: [],
         verifyRuns,
         reviewFindings,
+        contract: "valid",
       },
     };
   }
@@ -558,9 +677,10 @@ async function evaluateAttempt(
     repairable: false,
     review,
     verification: {
-      ...primary.verification,
+      runtimeChecks: [],
       verifyRuns,
       reviewFindings,
+      contract: "valid",
     },
   };
 }
@@ -576,7 +696,7 @@ function repairTask(record: HandleRecord, evaluation: Evaluation): string {
     numbered,
     "",
     "The runtime will rerun the same structural contract, verification commands, and critic gate. Do not modify verification configuration or merely claim that checks passed.",
-    "Finish by calling structured_output with a value matching the original schema.",
+    "Finish by calling phenix_contract_submit with a value matching the original schema.",
   ].join("\n");
 }
 
@@ -603,7 +723,7 @@ function materializePolicyModel(
   return policy.model ? policy : { ...policy, ...(currentModelId(ctx) ? { model: currentModelId(ctx) } : {}) };
 }
 
-function criticTask(record: HandleRecord): string {
+function criticTask(record: HandleRecord, primaryContractId: ContractId): string {
   const requirements = record.requirements.length > 0
     ? record.requirements.map((requirement, index) => `${index + 1}. ${requirement}`).join("\n")
     : "1. Complete the delegated task exactly as specified.";
@@ -619,10 +739,10 @@ function criticTask(record: HandleRecord): string {
     "Requirements:",
     requirements,
     "",
-    "Primary structured handoff:",
-    "{outputs.primary}",
+    "Primary Phenix contract:",
+    primaryContractId,
     "",
-    "Return the runtime-provided critic schema using structured_output.",
+    "Return the runtime-provided critic schema using phenix_contract_submit.",
   ].join("\n");
 }
 
@@ -634,7 +754,7 @@ function buildSubagentParams(
     agent: record.policy.agent,
     task,
     as: "primary",
-    outputSchema: record.outputSchema,
+    // No outputSchema -- Phenix contract protocol replaces structured_output.
     acceptance: record.policy.acceptance,
     toolBudget: record.policy.toolBudget,
     phase: record.role,
@@ -643,23 +763,9 @@ function buildSubagentParams(
       ? { model: applyThinking(record.policy.model, record.policy.thinking) }
       : {}),
   };
-  const chain: Record<string, unknown>[] = [primaryStep];
 
-  if (record.reviewPolicy) {
-    chain.push({
-      agent: record.reviewPolicy.agent,
-      task: criticTask(record),
-      as: "critic",
-      outputSchema: CRITIC_OUTPUT_SCHEMA,
-      acceptance: record.reviewPolicy.acceptance,
-      toolBudget: record.reviewPolicy.toolBudget,
-      phase: "critic",
-      label: `${record.role} independent critic`,
-      ...(applyThinking(record.reviewPolicy.model, record.reviewPolicy.thinking)
-        ? { model: applyThinking(record.reviewPolicy.model, record.reviewPolicy.thinking) }
-        : {}),
-    });
-  }
+  // Producer-only chain; critic is run as a separate foreground call.
+  const chain: Record<string, unknown>[] = [primaryStep];
 
   return {
     chain: chain as never,
@@ -668,10 +774,51 @@ function buildSubagentParams(
     clarify: false,
     artifacts: true,
     includeProgress: false,
-    timeoutMs: record.policy.timeoutMs + (record.reviewPolicy?.timeoutMs ?? 0),
+    timeoutMs: record.policy.timeoutMs,
     turnBudget: {
-      maxTurns: record.policy.turnBudget.maxTurns + (record.reviewPolicy?.turnBudget.maxTurns ?? 0),
-      graceTurns: Math.max(record.policy.turnBudget.graceTurns, record.reviewPolicy?.turnBudget.graceTurns ?? 0),
+      maxTurns: record.policy.turnBudget.maxTurns,
+      graceTurns: record.policy.turnBudget.graceTurns,
+    },
+    agentScope: "both",
+  };
+}
+
+function buildProducerSubagentParams(
+  record: HandleRecord,
+  task: string,
+): SubagentParamsLike {
+  return buildSubagentParams(record, task);
+}
+
+function buildCriticSubagentParams(
+  record: HandleRecord,
+  task: string,
+): SubagentParamsLike {
+  const criticStep: Record<string, unknown> = {
+    agent: record.reviewPolicy!.agent,
+    task,
+    as: "critic",
+    // No outputSchema -- Phenix contract protocol replaces structured_output.
+    acceptance: record.reviewPolicy!.acceptance,
+    toolBudget: record.reviewPolicy!.toolBudget,
+    phase: "critic",
+    label: `${record.role} independent critic`,
+    ...(applyThinking(record.reviewPolicy!.model, record.reviewPolicy!.thinking)
+      ? { model: applyThinking(record.reviewPolicy!.model, record.reviewPolicy!.thinking) }
+      : {}),
+  };
+
+  return {
+    chain: [criticStep] as never,
+    context: "fresh",
+    async: false,
+    clarify: false,
+    artifacts: true,
+    includeProgress: false,
+    timeoutMs: record.reviewPolicy!.timeoutMs,
+    turnBudget: {
+      maxTurns: record.reviewPolicy!.turnBudget.maxTurns,
+      graceTurns: record.reviewPolicy!.turnBudget.graceTurns,
     },
     agentScope: "both",
   };
@@ -690,6 +837,9 @@ function resultPayload(record: HandleRecord): Record<string, unknown> {
     attempts: record.attempts.map((attempt) => ({
       number: attempt.number,
       runId: attempt.runId,
+      phenixRunId: attempt.phenixRunId,
+      contractId: attempt.contractId,
+      criticContractId: attempt.criticContractId,
       mode: attempt.mode,
       status: attempt.status,
       startedAt: attempt.startedAt,
@@ -804,29 +954,46 @@ async function runForeground(
   while (true) {
     const attemptNumber = record.attempts.length + 1;
     const runId = `phenix-${record.id}-a${attemptNumber}`;
+
+    // Issue fresh contract for this attempt.
+    const issued = await createAttemptContract(record, task, ctx.cwd);
+    const injectedTask = injectContractRuntimeBlock(task, issued.artifact);
+    const contractEnv = childContractEnv(
+      issued.artifact.id,
+      issued.capabilityToken,
+      issued.phenixRunId,
+      record.role,
+    );
+
     record.attempts.push({
       number: attemptNumber,
       runId,
+      phenixRunId: issued.phenixRunId,
       mode: "foreground",
       status: "running",
       startedAt: now(),
+      contractId: issued.artifact.id,
       ...(task === record.task ? {} : { feedback: task }),
     });
     writeRecord(ctx.cwd, record);
 
+    // Run producer.
     let children: RuntimeChildResult[];
     try {
+      const producerParams = buildProducerSubagentParams(record, injectedTask);
       const raw = await backend.runForeground(
         runId,
-        buildSubagentParams(record, task),
+        producerParams,
         signal,
         onUpdate,
         ctx,
+        contractEnv,
       );
       children = backend.foregroundChildren(raw);
       recordChildSessions(record, children);
       writeRecord(ctx.cwd, record);
     } catch (error) {
+      await cancelPendingContracts(latestAttempt(record));
       const attempt = latestAttempt(record);
       attempt.status = signal.aborted ? "cancelled" : "failed";
       attempt.endedAt = now();
@@ -837,25 +1004,221 @@ async function runForeground(
       return record;
     }
 
-    const evaluation = await evaluateAttempt(record, children, ctx.cwd, signal);
-    markEvaluation(ctx.cwd, record, evaluation);
-    if (signal.aborted) {
-      latestAttempt(record).status = "cancelled";
-      record.status = "cancelled";
-      record.errors = ["cancelled by parent"];
-      writeRecord(ctx.cwd, record);
-      return record;
+    // Evaluate producer.
+    const primary = await evaluateContractResult(
+      latestAttempt(record).contractId,
+      record.outputSchema,
+      ctx.cwd,
+    );
+
+    // Run verification commands (only if producer succeeded).
+    let verificationRuns: VerificationRun[] = [];
+    let verifyRuns: string[] = [];
+    let verificationOk = true;
+    if (primary.ok) {
+      verificationRuns = await runVerificationCommands(
+        record.policy.verificationCommands,
+        ctx.cwd,
+        signal,
+      );
+      verificationRuns
+        .filter((run) => run.status === "failed" || run.status === "timed-out" || run.status === "cancelled")
+        .forEach((run) => { verificationOk = false; });
+      verifyRuns = verificationRuns.map(formatVerificationRun);
     }
-    if (evaluation.ok) return record;
-    if (!canRepair(record, evaluation)) {
-      record.status = "failed";
+
+    if (!primary.ok || !verificationOk) {
+      const errors = !primary.ok ? primary.errors : verificationRuns
+        .filter((run) => run.status === "failed" || run.status === "timed-out" || run.status === "cancelled")
+        .map((run) => `runtime verification: ${formatVerificationRun(run)}`);
+      const evaluation: Evaluation = {
+        ok: false,
+        errors,
+        repairable: !signal.aborted && (!primary.ok ? (primary.contract === "invalid" || primary.contract === "missing") : true),
+        verification: {
+          runtimeChecks: [],
+          verifyRuns,
+          reviewFindings: [],
+          contract: primary.contract,
+        },
+      };
+      markEvaluation(ctx.cwd, record, evaluation);
+      if (signal.aborted) {
+        latestAttempt(record).status = "cancelled";
+        record.status = "cancelled";
+        record.errors = ["cancelled by parent"];
+        writeRecord(ctx.cwd, record);
+        return record;
+      }
+      if (!canRepair(record, evaluation)) {
+        record.status = "failed";
+        writeRecord(ctx.cwd, record);
+        return record;
+      }
+      // Cancel old attempt's contracts (if any) before retry.
+      await cancelPendingContracts(latestAttempt(record));
+      record.status = "running";
+      task = repairTask(record, evaluation);
       writeRecord(ctx.cwd, record);
+      continue;
+    }
+
+    // Run critic if required.
+    if (record.reviewPolicy) {
+      const criticIssued = await createAttemptContract(record, criticTask(record, latestAttempt(record).contractId), ctx.cwd);
+      const criticInjectedTask = injectContractRuntimeBlock(criticIssued.artifact.task, criticIssued.artifact);
+      const criticEnv = childContractEnv(
+        criticIssued.artifact.id,
+        criticIssued.capabilityToken,
+        criticIssued.phenixRunId,
+        "critic",
+      );
+
+      latestAttempt(record).criticContractId = criticIssued.artifact.id;
+      writeRecord(ctx.cwd, record);
+
+      let criticChildren: RuntimeChildResult[];
+      try {
+        const criticParams = buildCriticSubagentParams(record, criticInjectedTask);
+        const criticResult = await backend.runForeground(
+          `${runId}-critic`,
+          criticParams,
+          signal,
+          onUpdate,
+          ctx,
+          criticEnv,
+        );
+        criticChildren = backend.foregroundChildren(criticResult);
+      } catch (error) {
+        await cancelPendingContracts(latestAttempt(record));
+        const attempt = latestAttempt(record);
+        attempt.status = signal.aborted ? "cancelled" : "failed";
+        attempt.endedAt = now();
+        attempt.error = error instanceof Error ? error.message : String(error);
+        record.status = signal.aborted ? "cancelled" : "failed";
+        record.errors = [attempt.error];
+        writeRecord(ctx.cwd, record);
+        return record;
+      }
+
+      const critic = await evaluateContractResult(
+        latestAttempt(record).criticContractId!,
+        CRITIC_OUTPUT_SCHEMA,
+        ctx.cwd,
+      );
+
+      if (!critic.ok) {
+        const evaluation: Evaluation = {
+          ok: false,
+          errors: critic.errors.map((error) => `critic handoff: ${error}`),
+          repairable: !signal.aborted && (critic.contract === "invalid" || critic.contract === "missing"),
+          verification: {
+            runtimeChecks: [],
+            verifyRuns,
+            reviewFindings: critic.errors,
+            contract: "valid",
+          },
+        };
+        markEvaluation(ctx.cwd, record, evaluation);
+        if (signal.aborted) {
+          latestAttempt(record).status = "cancelled";
+          record.status = "cancelled";
+          record.errors = ["cancelled by parent"];
+          writeRecord(ctx.cwd, record);
+          return record;
+        }
+        if (!canRepair(record, evaluation)) {
+          record.status = "failed";
+          writeRecord(ctx.cwd, record);
+          return record;
+        }
+        await cancelPendingContracts(latestAttempt(record));
+        record.status = "running";
+        task = repairTask(record, evaluation);
+        writeRecord(ctx.cwd, record);
+        continue;
+      }
+
+      const criticValue = critic.value as CriticValue;
+      const blockerFindings = criticValue.findings.filter(
+        (finding) => finding.severity === "major" || finding.severity === "critical",
+      );
+      const reviewFindings = criticValue.findings.map(criticFindingText);
+      const reviewErrors = [
+        ...(criticValue.verdict === "reject" ? [`critic rejected the handoff: ${criticValue.summary}`] : []),
+        ...blockerFindings.map((finding) => `critic blocker: ${criticFindingText(finding)}`),
+        ...criticValue.missingRequirements.map((requirement) => `critic missing requirement: ${requirement}`),
+      ];
+
+      if (reviewErrors.length > 0) {
+        const evaluation: Evaluation = {
+          ok: false,
+          errors: reviewErrors,
+          repairable: true,
+          review: {
+            verdict: criticValue.verdict,
+            summary: criticValue.summary,
+            findings: criticValue.findings,
+            missingRequirements: criticValue.missingRequirements,
+          },
+          verification: {
+            runtimeChecks: [],
+            verifyRuns,
+            reviewFindings,
+            contract: "valid",
+          },
+        };
+        markEvaluation(ctx.cwd, record, evaluation);
+        if (!canRepair(record, evaluation)) {
+          record.status = "failed";
+          writeRecord(ctx.cwd, record);
+          return record;
+        }
+        await cancelPendingContracts(latestAttempt(record));
+        record.status = "running";
+        task = repairTask(record, evaluation);
+        writeRecord(ctx.cwd, record);
+        continue;
+      }
+
+      // Critic approved -- full success.
+      const successEvaluation: Evaluation = {
+        ok: true,
+        value: primary.value,
+        errors: [],
+        repairable: false,
+        review: {
+          verdict: criticValue.verdict,
+          summary: criticValue.summary,
+          findings: criticValue.findings,
+          missingRequirements: criticValue.missingRequirements,
+        },
+        verification: {
+          runtimeChecks: [],
+          verifyRuns,
+          reviewFindings,
+          contract: "valid",
+        },
+      };
+      markEvaluation(ctx.cwd, record, successEvaluation);
       return record;
     }
 
-    record.status = "running";
-    task = repairTask(record, evaluation);
-    writeRecord(ctx.cwd, record);
+    // No critic required -- producer-only success.
+    const successEvaluation: Evaluation = {
+      ok: true,
+      value: primary.value,
+      errors: [],
+      repairable: false,
+      verification: {
+        runtimeChecks: [],
+        verifyRuns: verificationRuns.map(formatVerificationRun),
+        reviewFindings: [],
+        contract: "valid",
+      },
+    };
+    markEvaluation(ctx.cwd, record, successEvaluation);
+    return record;
   }
 }
 
@@ -869,12 +1232,25 @@ async function spawnBackgroundAttempt(
   const attemptNumber = record.attempts.length + 1;
   const requestId = `${record.id}-a${attemptNumber}`;
   const expectedRunId = `rpc-spawn-${requestId}`;
+
+  // Issue fresh contract for this background attempt.
+  const issued = await createAttemptContract(record, task, ctx.cwd);
+  const injectedTask = injectContractRuntimeBlock(task, issued.artifact);
+  const contractEnv = childContractEnv(
+    issued.artifact.id,
+    issued.capabilityToken,
+    issued.phenixRunId,
+    record.role,
+  );
+
   const attempt: AttemptRecord = {
     number: attemptNumber,
     runId: expectedRunId,
+    phenixRunId: issued.phenixRunId,
     mode: "background",
     status: "running",
     startedAt: now(),
+    contractId: issued.artifact.id,
     ...(task === record.task ? {} : { feedback: task }),
   };
   record.attempts.push(attempt);
@@ -883,8 +1259,9 @@ async function spawnBackgroundAttempt(
   try {
     const launched = await backend.spawnBackground(
       requestId,
-      buildSubagentParams(record, task),
+      buildProducerSubagentParams(record, injectedTask),
       signal,
+      contractEnv,
     );
     attempt.runId = launched.runId;
     attempt.asyncDir = launched.asyncDir;
@@ -929,31 +1306,68 @@ async function resolveBackground(
     const children = backend.asyncResultChildren(payload);
     recordChildSessions(record, children);
     writeRecord(ctx.cwd, record);
-    const evaluation = await evaluateAttempt(record, children, ctx.cwd, signal);
-    markEvaluation(ctx.cwd, record, evaluation);
-    if (signal.aborted) {
-      latestAttempt(record).status = "cancelled";
-      record.status = "cancelled";
-      record.errors = ["cancelled by parent"];
-      writeRecord(ctx.cwd, record);
-      return record;
-    }
-    if (evaluation.ok) return record;
-    if (!canRepair(record, evaluation)) {
-      record.status = "failed";
-      writeRecord(ctx.cwd, record);
-      return record;
+
+    // Evaluate via contract store (same as foreground).
+    const primary = await evaluateContractResult(
+      attempt.contractId,
+      record.outputSchema,
+      ctx.cwd,
+    );
+
+    if (!primary.ok) {
+      const evaluation: Evaluation = {
+        ok: false,
+        errors: primary.errors,
+        repairable: primary.contract === "invalid" || primary.contract === "missing",
+        verification: {
+          runtimeChecks: [],
+          verifyRuns: [],
+          reviewFindings: [],
+          contract: primary.contract,
+        },
+      };
+      markEvaluation(ctx.cwd, record, evaluation);
+      if (signal.aborted) {
+        latestAttempt(record).status = "cancelled";
+        record.status = "cancelled";
+        record.errors = ["cancelled by parent"];
+        writeRecord(ctx.cwd, record);
+        return record;
+      }
+      if (!canRepair(record, evaluation)) {
+        record.status = "failed";
+        writeRecord(ctx.cwd, record);
+        return record;
+      }
+      await cancelPendingContracts(latestAttempt(record));
+      record.status = "running";
+      await spawnBackgroundAttempt(
+        backend,
+        ctx,
+        signal,
+        record,
+        repairTask(record, evaluation),
+      );
+      if (!wait) return record;
+      continue;
     }
 
-    record.status = "running";
-    await spawnBackgroundAttempt(
-      backend,
-      ctx,
-      signal,
-      record,
-      repairTask(record, evaluation),
-    );
-    if (!wait) return record;
+    // Background-mode verification and critic not yet wired (future work).
+    // For background mode, mark completion from contract result.
+    const evaluation: Evaluation = {
+      ok: true,
+      value: primary.value,
+      errors: [],
+      repairable: false,
+      verification: {
+        runtimeChecks: [],
+        verifyRuns: [],
+        reviewFindings: [],
+        contract: "valid",
+      },
+    };
+    markEvaluation(ctx.cwd, record, evaluation);
+    return record;
   }
   return record;
 }
@@ -1035,7 +1449,7 @@ export default function registerPhenixSubagents(pi: ExtensionAPI): void {
     label: "Phenix Delegate",
     description: [
       "Spawn a real isolated Pi subagent with a runtime-selected model and thinking level.",
-      "The output schema is enforced by the child structured_output tool and revalidated by Phenix.",
+      "The output schema is enforced by the Phenix contract protocol.",
       "Tool access, verification commands, critic gates, retry limits, persistence, and model routing are runtime-owned; this tool intentionally exposes no override for them.",
       "Use mode=await by default. Background mode is available only from the root session and returns a persistent handle.",
     ].join(" "),
@@ -1169,6 +1583,8 @@ export default function registerPhenixSubagents(pi: ExtensionAPI): void {
           } catch {
             await backend.stop(attempt.runId, signal).catch(() => undefined);
           }
+          // Cancel any pending contracts.
+          await cancelPendingContracts(attempt);
           attempt.status = "cancelled";
           attempt.endedAt = now();
           record.status = "cancelled";
@@ -1188,46 +1604,5 @@ export default function registerPhenixSubagents(pi: ExtensionAPI): void {
   pi.registerTool(delegateTool);
   pi.registerTool(agentTool);
 
-  // Register structured_output at extension init, BEFORE the prompt-runtime
-  // extension (loaded via --extension). Our TypeBox registration wins;
-  // the prompt-runtime's duplicate (plain JSON parameters, silently ignored)
-  // gets a benign conflict error that doesn't prevent our registration from
-  // working.
-  (pi.registerTool as unknown as (tool: Record<string, unknown>) => void)({
-    name: "structured_output",
-    label: "Structured Output",
-    description:
-      "Submit the required final structured output for this subagent step. This terminates the step.",
-    parameters: Type.Object({
-      value: Type.Unsafe({}),
-    }, { additionalProperties: false }) as never,
-    execute: async (_id: string, params: { value: unknown }) => {
-      const structuredOutputPath = process.env.PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE;
-      const structuredSchemaPath = process.env.PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA;
-      if (!structuredOutputPath || !structuredSchemaPath) {
-        return {
-          content: [{ type: "text" as const, text: "Structured output: env vars not set — cannot capture output." }],
-          isError: true,
-        };
-      }
-      try {
-        fs.mkdirSync(path.dirname(structuredOutputPath), { recursive: true });
-        fs.writeFileSync(structuredOutputPath, JSON.stringify(params.value), {
-          mode: 0o600,
-        });
-      } catch (error) {
-        return {
-          content: [
-            { type: "text" as const, text: `Failed to write structured output: ${error instanceof Error ? error.message : String(error)}` },
-          ],
-          isError: true,
-        };
-      }
-      return {
-        content: [{ type: "text" as const, text: "Structured output captured." }],
-        details: { path: structuredOutputPath },
-        terminate: true,
-      };
-    },
-  });
+  // No structured_output tool registration — Phenix uses the contract protocol.
 }

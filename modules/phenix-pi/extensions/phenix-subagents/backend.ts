@@ -137,6 +137,41 @@ function textFromResult(result: AgentToolResult<Details>): string {
     .join("\n");
 }
 
+/**
+ * Temporarily set environment variables on process.env around an async
+ * operation, then restore the original values. This is safe for serialized
+ * foreground runs. Do not use with concurrent spawns.
+ *
+ * The spawned child process inherits process.env through
+ * { ...process.env, ...sharedEnv } in pi-subagents' buildPiArgs/spawn.
+ */
+async function withChildEnvironment<T>(
+  extraEnv: Readonly<Record<string, string>> | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  if (!extraEnv || Object.keys(extraEnv).length === 0) {
+    return operation();
+  }
+
+  const previous = new Map<string, string | undefined>();
+  for (const [name, value] of Object.entries(extraEnv)) {
+    previous.set(name, process.env[name]);
+    process.env[name] = value;
+  }
+
+  try {
+    return await operation();
+  } finally {
+    for (const [name, value] of previous) {
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
+  }
+}
+
 export class SubagentBackend {
   private readonly events: EventBus;
   private readonly directExecutor: ReturnType<typeof createSubagentExecutor>;
@@ -162,13 +197,16 @@ export class SubagentBackend {
     signal: AbortSignal,
     onUpdate: ((result: AgentToolResult<Details>) => void) | undefined,
     ctx: ExtensionContext,
+    extraEnv?: Readonly<Record<string, string>>,
   ): Promise<AgentToolResult<Details>> {
-    return this.directExecutor.execute(
-      runId,
-      { ...params, async: false, clarify: false },
-      signal,
-      onUpdate,
-      ctx,
+    return withChildEnvironment(extraEnv, () =>
+      this.directExecutor.execute(
+        runId,
+        { ...params, async: false, clarify: false },
+        signal,
+        onUpdate,
+        ctx,
+      ),
     );
   }
 
@@ -176,7 +214,9 @@ export class SubagentBackend {
     requestId: string,
     params: SubagentParamsLike,
     signal: AbortSignal,
+    extraEnv?: Readonly<Record<string, string>>,
   ): Promise<AsyncRunReference> {
+    return withChildEnvironment(extraEnv, async () => {
     const response = await this.rpc("spawn", {
       ...params,
       async: true,
@@ -191,6 +231,7 @@ export class SubagentBackend {
       throw new Error("pi-subagents spawn did not return asyncId and asyncDir");
     }
     return { runId, asyncDir };
+    });
   }
 
   async interrupt(runId: string, signal?: AbortSignal): Promise<void> {

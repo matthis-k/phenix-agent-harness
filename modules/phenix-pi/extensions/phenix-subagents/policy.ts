@@ -85,21 +85,15 @@ export interface ResolvedExecutionPolicy {
 }
 
 /**
- * Tools that every Phenix child process must have in its active tool set
- * so that structured handoffs, supervisor contact, and nested delegation work.
- *
- * These MUST appear in every bundled agent definition's `tools` frontmatter
- * field because pi-subagents passes that list as `--tools` to the child Pi
- * process, creating an active-tool allowlist. Registration alone (via the
- * prompt-runtime extension) is insufficient when `--tools` excludes a tool.
- *
- * When adding a new agent kind, include these in its `tools` frontmatter.
+ * Contract tools (phenix_contract_get, phenix_contract_submit) are loaded
+ * from the Phenix extension package, not declared per-agent frontmatter.
+ * Keep contact_supervisor for blocker/decision communication.
+ * Keep phenix_delegate where the role-child graph allows nested delegation.
+ * Raw subagent remains blocked by the runtime tool guard.
  */
 export const REQUIRED_CHILD_RUNTIME_TOOLS = [
-  "structured_output",
   "contact_supervisor",
   "phenix_delegate",
-  "phenix_agent",
 ] as const;
 
 /**
@@ -148,10 +142,8 @@ const COMMON_READ_TOOLS = [
   "get_search_content",
   "context_info",
   "context_*",
-  "structured_output",
   "contact_supervisor",
   "phenix_delegate",
-  "phenix_agent",
 ] as const;
 
 const ROLE_TOOLS: Record<AgentKind, readonly string[]> = {
