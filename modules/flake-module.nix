@@ -1,5 +1,12 @@
-{ inputs, ... }: {
-  perSystem = { system, ... }: {
-    phenixWrapped.pi = inputs.self.packages.${system}.default;
-  };
+{ inputs, ... }:
+
+{
+  perSystem =
+    { system, ... }:
+    {
+      phenixWrapped = {
+        pi = inputs.self.packages.${system}.pi;
+        piPackage = inputs.self.packages.${system}.phenix-pi-package;
+      };
+    };
 }

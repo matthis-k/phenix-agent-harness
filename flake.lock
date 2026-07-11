@@ -69,27 +69,6 @@
         "type": "github"
       }
     },
-    "nix-wrapper-modules": {
-      "inputs": {
-        "nixpkgs": [
-          "phenix-pins",
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1782135443,
-        "narHash": "sha256-vAmbArdCyjqpVW+37aCy/PMBOLIqukUXLQuEKLwUhA4=",
-        "owner": "BirdeeHub",
-        "repo": "nix-wrapper-modules",
-        "rev": "6e7f66fa2cdf4d63162580b438f7fcf87c28a46f",
-        "type": "github"
-      },
-      "original": {
-        "owner": "BirdeeHub",
-        "repo": "nix-wrapper-modules",
-        "type": "github"
-      }
-    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1783522502,
@@ -178,14 +157,132 @@
         "type": "github"
       }
     },
+    "pi-context-tools": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1778757473,
+        "narHash": "sha256-eQhHDTCd3Rtg9YMWkOjcZbd/gH0OLt88K4sdDLeh3p4=",
+        "owner": "theduke",
+        "repo": "pi-context-tools",
+        "rev": "d565066e1b7ebe8556d23437abd4532bd5ae12bd",
+        "type": "github"
+      },
+      "original": {
+        "owner": "theduke",
+        "repo": "pi-context-tools",
+        "type": "github"
+      }
+    },
+    "pi-hypa": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1783666841,
+        "narHash": "sha256-jw5O2GIgYA/xey2PcL0CCjv/lOv3skSrMnf32EN35KE=",
+        "owner": "Hypabolic",
+        "repo": "Hypa",
+        "rev": "8aa4a8429553fe417e41a69ed3a27242abf49861",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Hypabolic",
+        "repo": "Hypa",
+        "type": "github"
+      }
+    },
+    "pi-mcp-adapter": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1783097853,
+        "narHash": "sha256-JjYS9tPSoVuubdmHTqTNNYfDJOc9CBPvVbIxvdJWi7M=",
+        "owner": "nicobailon",
+        "repo": "pi-mcp-adapter",
+        "rev": "82724dccc13a49310530898f922bafff12b7f3fe",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nicobailon",
+        "repo": "pi-mcp-adapter",
+        "type": "github"
+      }
+    },
+    "pi-reduce": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1778689729,
+        "narHash": "sha256-wB4+gD3ZVWRk80I9xZ2V7iUcK7kpO2u6fmCnNH8XVxY=",
+        "owner": "toorusr",
+        "repo": "pi-reduce",
+        "rev": "c1ede6d6cc08d01d1e254784d19aa0dcaad77317",
+        "type": "github"
+      },
+      "original": {
+        "owner": "toorusr",
+        "repo": "pi-reduce",
+        "type": "github"
+      }
+    },
+    "pi-subagents": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1783645684,
+        "narHash": "sha256-7QKPlmgLLMBcB8tmVAwbO+8jrF7RLOwgvGC41ZHY1Rs=",
+        "owner": "nicobailon",
+        "repo": "pi-subagents",
+        "rev": "c940fe20e86d9ba429eebcac809ec79d478ef206",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nicobailon",
+        "repo": "pi-subagents",
+        "type": "github"
+      }
+    },
+    "pi-web-search": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1783617407,
+        "narHash": "sha256-8LjSroVAnE3rabVv6/1zowEbqrUclcmFbgiEPr2RjJ4=",
+        "owner": "ttttmr",
+        "repo": "pi-web-search",
+        "rev": "118b3eee3f5900cef3141745109a300315630592",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ttttmr",
+        "repo": "pi-web-search",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
-        "nix-wrapper-modules": "nix-wrapper-modules",
         "nixpkgs": [
           "phenix-pins",
           "nixpkgs"
         ],
-        "phenix-pins": "phenix-pins"
+        "phenix-pins": "phenix-pins",
+        "pi-context-tools": "pi-context-tools",
+        "pi-hypa": "pi-hypa",
+        "pi-mcp-adapter": "pi-mcp-adapter",
+        "pi-reduce": "pi-reduce",
+        "pi-subagents": "pi-subagents",
+        "pi-web-search": "pi-web-search",
+        "rpiv-web-tools": "rpiv-web-tools"
+      }
+    },
+    "rpiv-web-tools": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1783718541,
+        "narHash": "sha256-1Du+N28oQhWtur7FcfmpeMMbZzEcVn6QL52KcXg8zrU=",
+        "owner": "juicesharp",
+        "repo": "rpiv-mono",
+        "rev": "05aa1b038afbe62b516ab834b064f0e55e9e7598",
+        "type": "github"
+      },
+      "original": {
+        "owner": "juicesharp",
+        "repo": "rpiv-mono",
+        "type": "github"
       }
     },
     "sops-nix": {
