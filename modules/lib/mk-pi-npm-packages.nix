@@ -45,6 +45,7 @@ pkgs.stdenvNoCC.mkDerivation {
     export PI_SKIP_VERSION_CHECK=1
     export PI_TELEMETRY=0
     export CI=1
+    export GIT_TERMINAL_PROMPT=0
 
     export npm_config_cache="$TMPDIR/npm-cache"
     export npm_config_audit=false

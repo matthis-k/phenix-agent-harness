@@ -5,18 +5,16 @@
     { pkgs, ... }:
     let
       piNpmPackageSpecs = {
-        "@hypabolic/pi-hypa" = "npm:@hypabolic/pi-hypa";
-        "@juicesharp/rpiv-web-tools" = "npm:@juicesharp/rpiv-web-tools";
-        "pi-context-tools" = "npm:pi-context-tools";
+        "@hypabolic/pi-hypa" = "npm:@hypabolic/pi-hypa@0.1.10";
+        "@juicesharp/rpiv-web-tools" = "npm:@juicesharp/rpiv-web-tools@1.20.0";
+        "pi-context-tools" = "npm:pi-context-tools@0.1.1";
         "pi-lsp" = "npm:pi-lsp@0.1.7";
-        "pi-mcp-adapter" = "npm:pi-mcp-adapter";
-        "pi-reduce" = "npm:pi-reduce";
-        "pi-subagents" = "npm:pi-subagents";
+        "pi-mcp-adapter" = "npm:pi-mcp-adapter@2.11.0";
       };
 
       # Bootstrap or refresh with:
       #   nix run .#update-pi-npm-hash
-      piNpmHash = "sha256-2UAAx+QKMNiqwpKyK95pSwaAfP8pDM3Ts9+WjNARFec=";
+      piNpmHash = "sha256-nnx4rGgILQAzYPfNnqIqCl4NXh3cPBaRyg7hLaHrzgY=";
 
       piNpmPackages = import ./lib/mk-pi-npm-packages.nix {
         inherit lib pkgs;
@@ -28,7 +26,7 @@
       # phenix-core.ts imports Hypa, RPIV web tools, context tools, LSP, and
       # the MCP adapter directly. The shared npm tree produced by `pi install`
       # therefore belongs beside the Phenix package as its node_modules.
-      phenixShell = pkgs.runCommand "pi-phenix-shell" { } ''
+      phenixPiPackage = pkgs.runCommand "phenix-pi-package" { } ''
         mkdir -p "$out"
         cp -R ${./phenix-pi}/. "$out/"
         chmod -R u+w "$out"
@@ -82,7 +80,8 @@
     in
     {
       packages = {
-        phenix-shell = phenixShell;
+        phenix-pi-package = phenixPiPackage;
+        phenix-shell = phenixPiPackage;
         phenix-pi-npm-packages = piNpmPackages;
         update-pi-npm-hash = updatePiNpmHash;
       };

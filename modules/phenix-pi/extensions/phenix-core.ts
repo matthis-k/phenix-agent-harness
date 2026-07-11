@@ -4,16 +4,6 @@ import path from "node:path";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import registerHypa from "@hypabolic/pi-hypa/extensions/index.ts";
-import registerWebTools from "@juicesharp/rpiv-web-tools/index.ts";
-import registerContextTools from "pi-context-tools/extensions/index.ts";
-import registerLsp from "pi-lsp/extensions/pi-lsp/index.ts";
-import registerMcp from "pi-mcp-adapter/index.ts";
-
-type IntegrationFactory = (
-  pi: ExtensionAPI,
-) => void | Promise<void>;
-
 type IntegrationResult =
   | { readonly status: "loaded" }
   | { readonly status: "failed"; readonly error: string };
@@ -24,17 +14,16 @@ function formatError(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
-
   return String(error);
 }
 
 async function loadIntegration(
   name: string,
   pi: ExtensionAPI,
-  factory: IntegrationFactory,
+  loader: (pi: ExtensionAPI) => Promise<void>,
 ): Promise<void> {
   try {
-    await factory(pi);
+    await loader(pi);
     integrationResults.set(name, { status: "loaded" });
   } catch (error) {
     integrationResults.set(name, {
@@ -68,14 +57,9 @@ function exists(candidate: string): boolean {
 
 function isExecutableAvailable(name: string): boolean {
   const pathValue = process.env.PATH ?? "";
-
   for (const directory of pathValue.split(path.delimiter)) {
-    if (!directory) {
-      continue;
-    }
-
+    if (!directory) continue;
     const candidate = path.join(directory, name);
-
     try {
       fs.accessSync(candidate, fs.constants.X_OK);
       return true;
@@ -83,12 +67,11 @@ function isExecutableAvailable(name: string): boolean {
       // Continue searching PATH.
     }
   }
-
   return false;
 }
 
 function hasConfiguredWebProvider(): boolean {
-  const providerEnvironmentVariables = [
+  const providerEnvVars = [
     "BRAVE_SEARCH_API_KEY",
     "TAVILY_API_KEY",
     "SERPER_API_KEY",
@@ -100,32 +83,26 @@ function hasConfiguredWebProvider(): boolean {
     "SEARXNG_URL",
     "OLLAMA_HOST",
   ] as const;
-
-  const configuredThroughEnvironment =
-    providerEnvironmentVariables.some(
-      (name) => Boolean(process.env[name]?.trim()),
-    );
-
+  const configuredThroughEnvironment = providerEnvVars.some(
+    (name) => Boolean(process.env[name]?.trim()),
+  );
   const configFile = path.join(
     getConfigHome(),
     "rpiv-web-tools",
     "config.json",
   );
-
   return configuredThroughEnvironment || exists(configFile);
 }
 
 function hasConfiguredMcpServer(cwd: string): boolean {
   const agentDir = getAgentDir();
   const configHome = getConfigHome();
-
   const candidates = [
     path.join(configHome, "mcp", "mcp.json"),
     path.join(agentDir, "mcp.json"),
     path.join(cwd, ".mcp.json"),
     path.join(cwd, ".pi", "mcp.json"),
   ];
-
   return candidates.some(exists);
 }
 
@@ -142,40 +119,39 @@ function integrationSummary(): string {
 export default async function phenixCore(
   pi: ExtensionAPI,
 ): Promise<void> {
-  await loadIntegration(
-    "lsp",
-    pi,
-    registerLsp,
-  );
+  // 1. Hypa — local tool replacement layer
+  await loadIntegration("hypa", pi, async (api) => {
+    const mod = await import("@hypabolic/pi-hypa/extensions/index.ts");
+    await mod.default(api);
+  });
 
-  await loadIntegration(
-    "mcp",
-    pi,
-    registerMcp,
-  );
+  // 2. LSP — language server support
+  await loadIntegration("lsp", pi, async (api) => {
+    const mod = await import("pi-lsp/extensions/pi-lsp/index.ts");
+    await mod.default(api);
+  });
 
-  await loadIntegration(
-    "context",
-    pi,
-    registerContextTools,
-  );
+  // 3. MCP adapter — single proxy tool
+  await loadIntegration("mcp", pi, async (api) => {
+    const mod = await import("pi-mcp-adapter/index.ts");
+    await mod.default(api);
+  });
 
-  await loadIntegration(
-    "hypa",
-    pi,
-    registerHypa,
-  );
+  // 4. Context tools — explicit inspection and compaction
+  await loadIntegration("context", pi, async (api) => {
+    const mod = await import("pi-context-tools/extensions/index.ts");
+    await mod.default(api);
+  });
 
-  await loadIntegration(
-    "web",
-    pi,
-    (api) =>
-      registerWebTools(api, {
-        interceptors: {
-          github: true,
-        },
-      }),
-  );
+  // 5. Web tools — web search and fetch
+  await loadIntegration("web", pi, async (api) => {
+    const mod = await import("@juicesharp/rpiv-web-tools/index.ts");
+    await mod.default(api, {
+      interceptors: {
+        github: true,
+      },
+    });
+  });
 
   pi.on("before_agent_start", async (event) => {
     const guidance = [
@@ -204,10 +180,7 @@ export default async function phenixCore(
       const action = args.trim().toLowerCase() || "doctor";
 
       if (action !== "doctor") {
-        ctx.ui.notify(
-          "Usage: /phenix doctor",
-          "warning",
-        );
+        ctx.ui.notify("Usage: /phenix doctor", "warning");
         return;
       }
 
@@ -234,14 +207,13 @@ export default async function phenixCore(
         (name) => !isExecutableAvailable(name),
       );
 
+      const ghAvailable = isExecutableAvailable("gh");
       const failedIntegrations = [...integrationResults.entries()]
         .filter(([, result]) => result.status === "failed")
         .map(([name]) => name);
 
-      const lspConfigPath = path.join(
-        getAgentDir(),
-        "lsp.json",
-      );
+      const lspConfigPath = path.join(getAgentDir(), "lsp.json");
+      const hypaMode = process.env.HYPA_PI_MODE ?? "unknown";
 
       const lines = [
         `Integrations: ${integrationSummary()}`,
@@ -250,6 +222,7 @@ export default async function phenixCore(
             ? lspConfigPath
             : `missing (${lspConfigPath})`
         }`,
+        `Hypa mode: ${hypaMode}`,
         `MCP servers: ${
           hasConfiguredMcpServer(ctx.cwd)
             ? "configuration detected"
@@ -265,6 +238,9 @@ export default async function phenixCore(
             ? `${requiredExecutables.length}/${requiredExecutables.length} available`
             : `missing ${missingExecutables.join(", ")}`
         }`,
+        `GitHub CLI: ${
+          ghAvailable ? "installed" : "not found"
+        }`,
       ];
 
       const level =
@@ -274,10 +250,7 @@ export default async function phenixCore(
           ? "warning"
           : "info";
 
-      ctx.ui.notify(
-        lines.join("\n"),
-        level,
-      );
+      ctx.ui.notify(lines.join("\n"), level);
     },
   });
 }
