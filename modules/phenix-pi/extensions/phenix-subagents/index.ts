@@ -1187,4 +1187,47 @@ export default function registerPhenixSubagents(pi: ExtensionAPI): void {
 
   pi.registerTool(delegateTool);
   pi.registerTool(agentTool);
+
+  // Register structured_output at extension init, BEFORE the prompt-runtime
+  // extension (loaded via --extension). Our TypeBox registration wins;
+  // the prompt-runtime's duplicate (plain JSON parameters, silently ignored)
+  // gets a benign conflict error that doesn't prevent our registration from
+  // working.
+  (pi.registerTool as unknown as (tool: Record<string, unknown>) => void)({
+    name: "structured_output",
+    label: "Structured Output",
+    description:
+      "Submit the required final structured output for this subagent step. This terminates the step.",
+    parameters: Type.Object({
+      value: Type.Unsafe({}),
+    }, { additionalProperties: false }) as never,
+    execute: async (_id: string, params: { value: unknown }) => {
+      const structuredOutputPath = process.env.PI_SUBAGENT_STRUCTURED_OUTPUT_CAPTURE;
+      const structuredSchemaPath = process.env.PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA;
+      if (!structuredOutputPath || !structuredSchemaPath) {
+        return {
+          content: [{ type: "text" as const, text: "Structured output: env vars not set — cannot capture output." }],
+          isError: true,
+        };
+      }
+      try {
+        fs.mkdirSync(path.dirname(structuredOutputPath), { recursive: true });
+        fs.writeFileSync(structuredOutputPath, JSON.stringify(params.value), {
+          mode: 0o600,
+        });
+      } catch (error) {
+        return {
+          content: [
+            { type: "text" as const, text: `Failed to write structured output: ${error instanceof Error ? error.message : String(error)}` },
+          ],
+          isError: true,
+        };
+      }
+      return {
+        content: [{ type: "text" as const, text: "Structured output captured." }],
+        details: { path: structuredOutputPath },
+        terminate: true,
+      };
+    },
+  });
 }

@@ -2,7 +2,7 @@
 name: finalizer
 package: phenix
 description: Global requirement and completion reconciliation
-tools: read, grep, find, ls, bash, subagent
+tools: read, grep, find, ls, bash, structured_output, contact_supervisor, phenix_delegate, phenix_agent
 thinking: medium
 systemPromptMode: replace
 inheritProjectContext: true

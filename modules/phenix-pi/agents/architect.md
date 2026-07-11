@@ -2,7 +2,7 @@
 name: architect
 package: phenix
 description: Cross-cutting architecture and interface decisions
-tools: read, grep, find, ls, bash, lsp, subagent
+tools: read, grep, find, ls, bash, lsp, structured_output, contact_supervisor, phenix_delegate, phenix_agent
 thinking: high
 systemPromptMode: replace
 inheritProjectContext: true

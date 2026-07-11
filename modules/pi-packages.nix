@@ -30,12 +30,38 @@
       # MCP, pi-subagents, and the typed Phenix runtime directly. The shared
       # npm tree produced by `pi install`
       # therefore belongs beside the Phenix package as its node_modules.
+      # Patch pi-subagents' subagent-prompt-runtime.ts to comment out the
+      # structured_output registration. The original uses plain JSON
+      # parameters which pi's registerTool silently ignores, creating a
+      # phantom tool entry that blocks the proper TypeBox registration
+      # from phenix-subagents.
+      patchedPromptRuntime = pkgs.runCommand "patched-prompt-runtime" { } ''
+        mkdir -p "$(dirname "$out")"
+        sed 's|if (structuredOutputPath \&\& structuredSchemaPath)|// Patched: structured_output handled by phenix-subagents\nif (false)|' \
+          ${piNpmPackages}/npm/node_modules/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts \
+          > "$out"
+      '';
+
       phenixPiPackage = pkgs.runCommand "phenix-pi-package" { } ''
         mkdir -p "$out"
         cp -R ${./phenix-pi}/. "$out/"
-        chmod -R u+w "$out"
+        chmod -R u+w "$out/"
         rm -rf "$out/node_modules"
-        ln -s ${piNpmPackages}/npm/node_modules "$out/node_modules"
+        # Symlink most of node_modules (read-only store), but overlay a
+        # writable pi-subagents copy so we can patch specific files.
+        ln -s ${piNpmPackages}/npm/node_modules "$out/.node_modules-store"
+        mkdir -p "$out/node_modules"
+        for dir in "$out/.node_modules-store"/*/; do
+          name="$(basename "$dir")"
+          if [ "$name" = "pi-subagents" ]; then
+            cp -R "$dir" "$out/node_modules/pi-subagents"
+            chmod -R u+w "$out/node_modules/pi-subagents"
+            cp -f ${patchedPromptRuntime} "$out/node_modules/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts"
+          else
+            ln -s "$dir" "$out/node_modules/$name"
+          fi
+        done
+        rm -rf "$out/.node_modules-store"
       '';
 
       phenixSubagentTests = pkgs.runCommand "phenix-subagent-runtime-tests" {

@@ -2,7 +2,7 @@
 name: tester
 package: phenix
 description: Execution-grounded testing and failure classification
-tools: read, grep, find, ls, bash, lsp, subagent
+tools: read, grep, find, ls, bash, lsp, structured_output, contact_supervisor, phenix_delegate, phenix_agent
 thinking: low
 systemPromptMode: replace
 inheritProjectContext: true

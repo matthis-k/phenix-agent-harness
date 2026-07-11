@@ -2,7 +2,7 @@
 name: scout
 package: phenix
 description: Bounded evidence gathering and repository reconnaissance
-tools: read, grep, find, ls, bash, lsp, subagent
+tools: read, grep, find, ls, bash, lsp, structured_output, contact_supervisor, phenix_delegate, phenix_agent
 thinking: low
 systemPromptMode: replace
 inheritProjectContext: true

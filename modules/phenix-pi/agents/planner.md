@@ -2,7 +2,7 @@
 name: planner
 package: phenix
 description: Requirement-preserving implementation planning
-tools: read, grep, find, ls, bash, lsp, subagent
+tools: read, grep, find, ls, bash, lsp, structured_output, contact_supervisor, phenix_delegate, phenix_agent
 thinking: medium
 systemPromptMode: replace
 inheritProjectContext: true

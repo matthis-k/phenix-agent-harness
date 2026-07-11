@@ -2,7 +2,7 @@
 name: implementer
 package: phenix
 description: Bounded implementation with runtime verification and review
-tools: read, grep, find, ls, bash, edit, write, lsp, subagent
+tools: read, grep, find, ls, bash, edit, write, lsp, structured_output, contact_supervisor, phenix_delegate, phenix_agent
 thinking: medium
 systemPromptMode: replace
 inheritProjectContext: true
