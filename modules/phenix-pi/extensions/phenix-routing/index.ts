@@ -5,7 +5,6 @@ import os from "node:os";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 
-import type { ModelSetId } from "./types.ts";
 import { MODEL_SET_IDS } from "./types.ts";
 
 import {
@@ -19,9 +18,6 @@ import {
 } from "./resolver.ts";
 import {
   getSessionRuntime,
-  resolveModelSet,
-  cycleModelSet,
-  validateModelSet,
 } from "./state.ts";
 import {
   getActiveRouteForSession,
@@ -35,8 +31,6 @@ import {
 
 export { getActiveRouteForSession, setActiveRouteForSession };
 
-const ROUTE_AUDIT_KEY = "phenix-route-v1";
-
 /**
  * Model registry implementation wrapping Pi's modelRegistry API.
  * We store a reference to the Pi API's modelRegistry when the extension initializes.
@@ -48,25 +42,26 @@ class PiModelRegistry implements ModelRegistry {
     this.pi = pi;
   }
 
-  isAvailable(provider: string, model: string): boolean {
-    // Check if the model exists in Pi's model registry
-    if (!this.pi) return false;
-    try {
-      const models = this.pi.getModelRegistry()?.getModels();
-      if (!models) return false;
-      return models.some(
-        (m: Model<Api>) =>
-          m.provider === provider && m.id === model,
-      );
-    } catch {
-      return false;
-    }
+  isAvailable(_provider: string, _model: string): boolean {
+    // Optimistic: return true so the router attempts the upstream call.
+    // Actual availability is determined by the concrete provider's
+    // streamSimple at runtime.
+    return true;
   }
 
   getModel(provider: string, model: string): Model<Api> | undefined {
     if (!this.pi) return undefined;
     try {
-      const models = this.pi.getModelRegistry()?.getModels();
+      const registry = this.pi.getModelRegistry();
+      if (!registry) return undefined;
+      // Use find() which is the correct method on Pi's ModelRegistry class.
+      // getModel() exists on the Models interface (different class — pi-ai's
+      // runtime collection). Both should work; try find first.
+      if (typeof (registry as Record<string, unknown>).find === "function") {
+        return (registry as { find(p: string, m: string): Model<Api> | undefined }).find(provider, model);
+      }
+      // Fallback to getAll() + find.
+      const models = registry.getAll();
       if (!models) return undefined;
       return models.find(
         (m: Model<Api>) =>
@@ -77,23 +72,31 @@ class PiModelRegistry implements ModelRegistry {
     }
   }
 
+  /** Read Pi's auth.json to get the API key for a provider. */
+  private readAuthKey(provider: string): string | undefined {
+    try {
+      const agentDir =
+        process.env.PI_CODING_AGENT_DIR ??
+        path.join(os.homedir(), ".pi", "agent");
+      const authPath = path.join(agentDir, "auth.json");
+      const raw = fs.readFileSync(authPath, "utf-8");
+      const auth = JSON.parse(raw) as Record<string, { type: string; key: string }>;
+      return auth[provider]?.key;
+    } catch {
+      return undefined;
+    }
+  }
+
   getApiKeyAndHeaders(concreteModel: Model<Api>): {
     apiKey?: string;
     headers?: Record<string, string>;
     env?: Record<string, string>;
   } {
-    if (!this.pi) return {};
-    try {
-      // The Pi API exposes apiKey lookup and header resolution
-      const provider = this.pi.getProviderConfig(concreteModel.provider);
-      return {
-        apiKey: provider?.apiKey ?? process.env[`${concreteModel.provider.toUpperCase().replaceAll("-", "_")}_API_KEY`],
-        headers: concreteModel.headers,
-        env: provider?.env,
-      };
-    } catch {
-      return {};
-    }
+    // Read the API key from Pi's auth.json, which is where /login stores
+    // credentials.  The compat-layer streamSimple routes through an in-memory
+    // credential store that does NOT have these, so we must pass it explicitly.
+    const apiKey = this.readAuthKey(concreteModel.provider);
+    return { apiKey, headers: concreteModel.headers };
   }
 }
 
@@ -103,12 +106,9 @@ export const modelRegistry = new PiModelRegistry();
  * Core routing extension entry point.
  *
  * Registers:
- * - The phenix virtual provider
- * - CLI flag --phenix-model-set
- * - /phenix-model-set and /phenix-route commands
- * - Ctrl+T keybinding for model-set cycling
+ * - The phenix virtual provider (models selected via Pi's model picker)
  * - before_agent_start / agent_end hooks for route lifecycle
- * - session_start hook for session restoration
+ * - /phenix-route command for diagnostics
  */
 export default async function phenixRouting(
   pi: ExtensionAPI,
@@ -131,55 +131,18 @@ export default async function phenixRouting(
   // --- Register virtual provider ---
   registerPhenixProvider(pi);
 
-  // --- Register CLI flag ---
-  pi.registerFlag("phenix-model-set", {
-    description: "Set the active Phenix routing model set",
-    type: "string",
-  });
-  const cliModelSet = pi.getFlag("phenix-model-set") as string | undefined;
-
-  // Apply CLI override to state immediately
-  if (cliModelSet) {
-    const validated = validateModelSet(cliModelSet);
-    if (validated) {
-      for (const runtime of getAllSessionRuntimes()) {
-        runtime.modelSet = validated;
-      }
-      persistSetting(validated);
-    }
-  }
-
   // --- Session start ---
-  pi.on("session_start", async (event: { sessionId?: string; session?: { id?: string } }) => {
-    const sessionId = event.sessionId ?? "default";
-
-    // Restore model set from persisted file (survives Pi restarts)
-    try {
-      const persisted = readPersistedSetting();
-      if (persisted && validateModelSet(persisted)) {
-        const runtime = getSessionRuntime(sessionId);
-        runtime.modelSet = persisted as ModelSetId;
-      }
-    } catch {
-      // Silent — use defaults
-    }
-
-    // CLI override
-    if (cliModelSet) {
-      const validated = validateModelSet(cliModelSet);
-      if (validated) {
-        const runtime = getSessionRuntime(sessionId);
-        runtime.modelSet = validated;
-      }
-    }
-
+  pi.on("session_start", async (_event, ctx) => {
+    const sessionId = ctx.sessionManager?.getSessionId?.() ?? "default";
+    // Initialize runtime state for this session (default model set "mixed").
+    getSessionRuntime(sessionId);
     return {};
   });
 
   // --- before_agent_start ---
-  pi.on("before_agent_start", async (event: { session?: { id?: string }; model?: { provider?: string; id?: string }; task?: string; systemPrompt?: string }) => {
-    const sessionId = event.session?.id ?? "default";
-    const selectedModel = event.model;
+  pi.on("before_agent_start", async (_event, ctx) => {
+    const sessionId = ctx.sessionManager?.getSessionId?.() ?? "default";
+    const selectedModel = ctx.model;
     const selectedProvider = selectedModel?.provider;
     const selectedModelId = selectedModel?.id;
 
@@ -188,101 +151,25 @@ export default async function phenixRouting(
 
     const runtime = getSessionRuntime(sessionId);
 
-    // Resolve model set — if the user picked a specific model-set model (e.g.
-    // "phenix/opencode-go"), use that; otherwise use CLI/session default.
+    // Set model set from the selected phenix model (e.g. "mixed" from phenix/mixed).
     const explicitModelSet = selectedModelId ? modelSetForModelId(selectedModelId) : undefined;
     if (explicitModelSet) {
       runtime.modelSet = explicitModelSet;
     }
-    const modelSet = resolveModelSet(sessionId, cliModelSet);
 
-    // Derive profile from task
-    const taskText = event.task ?? event.systemPrompt ?? "";
-    const profile = deriveCoordinatorProfile(taskText);
-
-    // Resolve route for coordinator role
+    // Resolve route for coordinator role using the model set determined from selection
     const route = await resolveRoute({
-      modelSet,
+      modelSet: runtime.modelSet,
       role: "coordinator",
-      profile,
       modelRegistry,
       config,
     });
 
-    // Store active route
+    // Store active route for stream-proxy
     runtime.activeRoute = route;
     setActiveRouteForSession(sessionId, route);
 
-    // Append audit entry
-    try {
-      pi.appendEntry(ROUTE_AUDIT_KEY, {
-        modelSet: route.modelSet,
-        role: route.role,
-        difficulty: route.difficulty,
-        capability: route.capability,
-        pool: route.pool,
-        resolvedModel: `${route.model.provider}/${route.model.model}`,
-        thinking: route.thinking,
-        candidateIndex: route.candidateIndex,
-        timestamp: Date.now(),
-      });
-    } catch {
-      // Non-critical
-    }
-
     return {};
-  });
-
-  // --- agent_end ---
-  pi.on("agent_end", async (_event) => {
-    // Ephemeral turn state is cleared but persisted settings survive.
-    // We clear the active route per session on agent end.
-    // In practice multiple sessions may be active, so we iterate.
-    // For simplicity, we don't track "which session just ended" here.
-    // The stream proxy already managed route cleanup.
-    return {};
-  });
-
-  // --- /phenix-model-set command ---
-  pi.registerCommand("phenix-model-set", {
-    description: "Show or change the active Phenix model set. Usage: /phenix-model-set [free|opencode-go|gpt|mixed]",
-
-    handler: async (args, ctx) => {
-      const sessionId = ctx.session?.id ?? "default";
-      const trimmed = args.trim();
-
-      if (!trimmed) {
-        const runtime = getSessionRuntime(sessionId);
-        ctx.ui.notify(`Current model set: ${runtime.modelSet}`, "info");
-        return;
-      }
-
-      const validated = validateModelSet(trimmed);
-      if (!validated) {
-        ctx.ui.notify(
-          `Invalid model set "${trimmed}". Valid options: ${MODEL_SET_IDS.join(", ")}`,
-          "error",
-        );
-        return;
-      }
-
-      const runtime = getSessionRuntime(sessionId);
-      runtime.modelSet = validated;
-
-      // Don't check for active agent turn — reject if a turn is active
-      if (runtime.activeRoute) {
-        ctx.ui.notify(
-          `Cannot change model set while an agent turn is active. The change will apply on the next turn.`,
-          "warning",
-        );
-        return;
-      }
-
-      // Persist the change (file-based, survives restarts)
-      persistSetting(validated);
-
-      ctx.ui.notify(`Model set changed to: ${validated}`, "info");
-    },
   });
 
   // --- /phenix-route command ---
@@ -324,83 +211,4 @@ export default async function phenixRouting(
     },
   });
 
-  // --- Ctrl+T keybinding ---
-  const cycleOrder: ModelSetId[] = ["free", "opencode-go", "gpt", "mixed"];
-
-  pi.registerShortcut("ctrl+t", {
-    description: "Cycle Phenix model set",
-    handler: async (ctx) => {
-      const sessionId = ctx.session?.id ?? "default";
-      const runtime = getSessionRuntime(sessionId);
-
-      const next = cycleModelSet(runtime.modelSet, cycleOrder);
-      runtime.modelSet = next;
-
-      // Persist the change (file-based, survives restarts)
-      persistSetting(next);
-
-      ctx.ui.notify(`Phenix model set: ${next}`, "info");
-    },
-  });
-
-  // --- Footer state display hook ---
-  // We'd register a footer callback if Pi API supports it.
-  // For now, the route command provides visibility.
-}
-
-function deriveCoordinatorProfile(task: string): {
-  complexity: number;
-  uncertainty: number;
-  consequence: number;
-  breadth: number;
-  coupling: number;
-  novelty: number;
-} {
-  const text = task.toLowerCase();
-
-  const highRisk = /\b(security|auth|permission|secret|credential|migration|data\s*loss|destructive|concurren|race|deadlock|protocol|public\s*api)\b/.test(text);
-  const architecture = /\b(architect|redesign|state\s*machine|workflow|persistent|database|schema|interface|cross[\s-]cutting)\b/.test(text);
-  const uncertainty = /\b(investigate|unknown|unclear|research|diagnose|why|root\s*cause)\b/.test(text);
-  const novelty = /\b(new|introduce|design|invent|prototype|replace)\b/.test(text);
-
-  return {
-    complexity: text.length > 4000 ? 4 : text.length > 1800 ? 3 : text.length > 700 ? 2 : 1,
-    uncertainty: uncertainty ? 2 : 0,
-    consequence: highRisk ? 3 : 0,
-    breadth: (text.match(/\n/g) ?? []).length >= 9 ? 4 : (text.match(/\n/g) ?? []).length >= 5 ? 3 : (text.match(/\n/g) ?? []).length >= 2 ? 2 : 0,
-    coupling: architecture ? 3 : 0,
-    novelty: novelty ? 2 : 0,
-  };
-}
-
-/** File-based setting persistence — survives Pi restarts. */
-function settingsFilePath(): string {
-  const agentDir =
-    process.env.PI_CODING_AGENT_DIR ??
-    path.join(os.homedir(), ".pi", "agent");
-  return path.join(agentDir, "phenix-model-set");
-}
-
-function readPersistedSetting(): string | undefined {
-  try {
-    const raw = fs.readFileSync(settingsFilePath(), "utf-8").trim();
-    return raw || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function persistSetting(modelSet: string): void {
-  try {
-    const dir = path.dirname(settingsFilePath());
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(settingsFilePath(), modelSet, "utf-8");
-  } catch {
-    // Non-critical
-  }
-}
-
-function getAllSessionRuntimes(): Array<{ modelSet: ModelSetId }> {
-  // We don't expose the Map, but we can iterate known sessions
-  return []; // individual handlers have access to getSessionRuntime
 }

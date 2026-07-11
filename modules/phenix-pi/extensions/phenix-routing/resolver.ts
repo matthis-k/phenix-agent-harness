@@ -6,7 +6,6 @@ import {
   type ModelSetId,
   type ResolvedRoute,
   type RoutingConfig,
-  type RoutingError,
   type RoutingRole,
   formatModelRef,
   parseModelRef,
@@ -67,7 +66,7 @@ export async function resolveRoute(
   // 2. Look up role × difficulty in matrix
   const route = ROLE_MATRIX[role]?.[difficulty];
   if (!route) {
-    throw routingError("NO_CANDIDATES", {
+    throw new RoutingError("NO_CANDIDATES", {
       message: `No matrix entry for ${role}/${difficulty}`,
       modelSet,
       role,
@@ -83,7 +82,7 @@ export async function resolveRoute(
   // 3. Resolve capability → pool name from model set
   const modelSetDef = config.modelSets[modelSet];
   if (!modelSetDef) {
-    throw routingError("NO_CANDIDATES", {
+    throw new RoutingError("NO_CANDIDATES", {
       message: `Unknown model set "${modelSet}"`,
       modelSet,
       role,
@@ -96,7 +95,7 @@ export async function resolveRoute(
 
   const poolName = modelSetDef[capability];
   if (!poolName) {
-    throw routingError("UNKNOWN_POOL", {
+    throw new RoutingError("UNKNOWN_POOL", {
       message: `Model set "${modelSet}" has no mapping for capability "${capability}"`,
       modelSet,
       role,
@@ -110,7 +109,7 @@ export async function resolveRoute(
   // 4. Read pool candidates
   const candidates = config.pools[poolName];
   if (!candidates || candidates.length === 0) {
-    throw routingError("EMPTY_POOL", {
+    throw new RoutingError("EMPTY_POOL", {
       message: `Pool "${poolName}" is empty or undefined`,
       modelSet,
       role,
@@ -169,7 +168,7 @@ export async function resolveRoute(
 
   // 7. Error if no available candidates
   if (available.length === 0) {
-    throw routingError("NO_CANDIDATES", {
+    throw new RoutingError("NO_CANDIDATES", {
       message: `No available candidates for ${modelSet}/${capability} (pool: ${poolName})`,
       modelSet,
       role,
@@ -212,20 +211,46 @@ export async function resolveRoute(
   };
 }
 
-function routingError(
-  code: RoutingError["code"],
-  overrides: Partial<RoutingError> & {
-    message: string;
-    modelSet: ModelSetId;
-    role: RoutingRole;
-    difficulty: Difficulty;
-    capability: Capability;
-    pool: string;
-    configuredCandidates: readonly string[];
-  },
-): RoutingError {
-  return {
-    code,
-    ...overrides,
-  } as RoutingError;
+class RoutingError extends Error {
+  readonly code: RoutingErrorCode;
+  readonly modelSet: ModelSetId;
+  readonly role: RoutingRole;
+  readonly difficulty: Difficulty;
+  readonly capability: Capability;
+  readonly pool: string;
+  readonly configuredCandidates: readonly string[];
+  readonly missingCandidates?: readonly string[];
+  readonly unauthenticatedCandidates?: readonly string[];
+  readonly boundaryViolations?: readonly string[];
+
+  constructor(
+    code: RoutingErrorCode,
+    overrides: {
+      message: string;
+      modelSet: ModelSetId;
+      role: RoutingRole;
+      difficulty: Difficulty;
+      capability: Capability;
+      pool: string;
+      configuredCandidates: readonly string[];
+      missingCandidates?: readonly string[];
+      unauthenticatedCandidates?: readonly string[];
+      boundaryViolations?: readonly string[];
+    },
+  ) {
+    super(overrides.message);
+    this.name = "RoutingError";
+    this.code = code;
+    this.modelSet = overrides.modelSet;
+    this.role = overrides.role;
+    this.difficulty = overrides.difficulty;
+    this.capability = overrides.capability;
+    this.pool = overrides.pool;
+    this.configuredCandidates = overrides.configuredCandidates;
+    this.missingCandidates = overrides.missingCandidates;
+    this.unauthenticatedCandidates = overrides.unauthenticatedCandidates;
+    this.boundaryViolations = overrides.boundaryViolations;
+  }
 }
+
+type RoutingErrorCode = "NO_CANDIDATES" | "BOUNDARY_VIOLATION" | "UNKNOWN_POOL" | "MALFORMED_REF" | "DENIED_ROUTE" | "EMPTY_POOL";

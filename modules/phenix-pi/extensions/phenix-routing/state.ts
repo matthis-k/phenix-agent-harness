@@ -42,35 +42,23 @@ export function clearSessionRuntime(sessionId: string): void {
   sessionState.delete(sessionId);
 }
 
-/**
- * Determine the effective model set for a session using precedence:
- *   1. explicit CLI flag (--phenix-model-set)
- *   2. session-persisted setting
- *   3. PHENIX_MODEL_SET env var
- *   4. user routing config default
- *   5. bundled routing config default
- */
-export function resolveModelSet(
-  sessionId: string,
-  cliModelSet: string | undefined,
-): ModelSetId {
-  // 1. CLI flag
-  if (cliModelSet) {
-    const validated = validateModelSet(cliModelSet);
-    if (validated) return validated;
-  }
-
-  // 2. Session-persisted setting (default already stored in runtime)
-  const runtime = getSessionRuntime(sessionId);
-  return runtime.modelSet;
-}
-
 export function validateModelSet(value: string): ModelSetId | undefined {
   const trimmed = value.trim();
   if (MODEL_SET_IDS.includes(trimmed as ModelSetId)) {
     return trimmed as ModelSetId;
   }
   return undefined;
+}
+
+/**
+ * Determine the effective model set for a session.
+ */
+export function resolveModelSet(
+  sessionId: string,
+  _cliModelSet: string | undefined,
+): ModelSetId {
+  const runtime = getSessionRuntime(sessionId);
+  return runtime.modelSet;
 }
 
 /**

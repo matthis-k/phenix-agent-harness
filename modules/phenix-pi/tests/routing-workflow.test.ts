@@ -458,20 +458,19 @@ describe("Workflow: model set persistence", () => {
     assert.equal(validateModelSet("phenix"), undefined);
   });
 
-  it("resolveModelSet falls back through precedence chain", () => {
-    // With no session state and no CLI flag, uses default
+  it("resolveModelSet returns the session runtime model set", () => {
     const sessionId = "test-persistence";
     const runtime = getSessionRuntime(sessionId);
     runtime.modelSet = "mixed";
 
+    // Returns session state (CLI flag parameter is ignored)
     const ms = resolveModelSet(sessionId, undefined);
     assert.equal(ms, "mixed");
 
-    // CLI flag takes precedence
-    const msCli = resolveModelSet(sessionId, "free");
-    assert.equal(msCli, "free");
+    const msWithFlag = resolveModelSet(sessionId, "free");
+    assert.equal(msWithFlag, "mixed");
 
-    // Session state takes effect when no CLI flag
+    // Session state changes are reflected
     runtime.modelSet = "gpt";
     const msSession = resolveModelSet(sessionId, undefined);
     assert.equal(msSession, "gpt");

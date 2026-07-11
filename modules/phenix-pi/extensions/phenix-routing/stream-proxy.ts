@@ -10,6 +10,10 @@ import { createAssistantMessageEventStream, streamSimple } from "@earendil-works
 import type { Api } from "@earendil-works/pi-ai";
 
 import type { ResolvedRoute } from "./types.ts";
+import { loadRoutingConfig } from "./config.ts";
+import { resolveRoute } from "./resolver.ts";
+import { getSessionRuntime } from "./state.ts";
+import { modelSetForModelId } from "./provider.ts";
 
 const PHENIX_PROVIDER = "phenix";
 const PHENIX_MODEL = "workflow";
@@ -94,56 +98,104 @@ export function routerStream(
 
 async function runRouter(
   stream: AssistantMessageEventStream,
-  _model: Model<Api>,
+  model: Model<Api>,
   context: Context,
   options?: SimpleStreamOptions,
 ): Promise<void> {
-  // 1. Locate session runtime from options.
-  // The route is expected to have been stored by the before_agent_start hook.
-  // We look for it in a process-level or module-level reference.
-  const route = getActiveRouteForSession(options?.sessionId ?? "default");
-  if (!route) {
-    throw new Error("No active Phenix route for this session");
-  }
-
-  // 2. Obtain the concrete model registry entry.
-  // We import from the index to get the modelRegistry reference.
+  // 1. Obtain the concrete model registry entry.
   const { modelRegistry } = await import("./index.ts");
 
-  const concreteModel = modelRegistry.getModel(
-    route.model.provider,
-    route.model.model,
-  );
+  // 2. Resolve active route — try pre-set from before_agent_start hook first,
+  //    then resolve directly from the model parameter as fallback.
+  let route = getActiveRouteForSession(options?.sessionId ?? "default");
 
-  if (!concreteModel) {
-    throw new Error(
-      `Concrete model ${route.model.provider}/${route.model.model} not found in registry`,
-    );
+  if (!route) {
+    // No pre-set route — resolve one directly from the virtual phenix model.
+    const sessionId = options?.sessionId ?? "default";
+    const runtime = getSessionRuntime(sessionId);
+
+    // Determine model set from the virtual phenix model (e.g. "mixed" from phenix/mixed).
+    const modelSetId = model.provider === PHENIX_PROVIDER
+      ? (modelSetForModelId(model.id) ?? runtime.modelSet)
+      : runtime.modelSet;
+
+    const config = loadRoutingConfig();
+
+    route = await resolveRoute({
+      modelSet: modelSetId,
+      role: "coordinator",
+      modelRegistry,
+      config,
+    });
+
+    // Cache for potential re-use.
+    setActiveRouteForSession(sessionId, route);
   }
 
-  // 3. Get real auth from the concrete model.
-  const concreteAuth = modelRegistry.getApiKeyAndHeaders(concreteModel);
+  // 3. Look up the concrete model or build a minimal one if unregistered.
+  //    The model may not be explicitly listed in Pi's registry when the
+  //    provider is dynamic; streamSimple still works with a minimal ref.
+  const concreteModel: Model<Api> = modelRegistry.getModel(
+    route.model.provider,
+    route.model.model,
+  ) ?? modelRegistry.getModel(route.model.provider, "*") ?? (() => {
+    // Minimal model ref — Pi's streamSimple will select the API based
+    // on the provider's registered stream implementation.
+    const knownApis: Record<string, Api> = {
+      "opencode-go": "openai-completions" as Api,
+      openai: "openai-responses" as Api,
+      "opencode-go-codex": "openai-codex-responses" as Api,
+    };
+    const api = knownApis[route.model.provider] ?? ("openai-completions" as Api);
+    const modelProvider = route.model.provider;
+    const modelId = route.model.model;
+    return {
+      id: modelId,
+      name: `${modelProvider}/${modelId}`,
+      provider: modelProvider,
+      api,
+      baseUrl: api === "anthropic-messages" ? "https://opencode.ai/zen/go" : "https://opencode.ai/zen/go/v1",
+      headers: {},
+      input: ["text"],
+      reasoning: true,
+      thinkingLevelMap: { minimal: null, low: null, medium: null, high: "high", xhigh: "max" },
+      compat: {
+        supportsStore: false,
+        supportsDeveloperRole: false,
+        maxTokensField: "max_tokens",
+        requiresReasoningContentOnAssistantMessages: true,
+        thinkingFormat: "deepseek",
+      },
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 128000,
+      maxTokens: 32768,
+    } as Model<Api>;
+  })();
 
-  // 4. Call the upstream API.
+  // 4. Get real auth from the concrete model.
+  const concreteAuth = await modelRegistry.getApiKeyAndHeaders(concreteModel);
+
+  // 5. Call the upstream API. Only pass apiKey when non-null so Pi's own
+  //    auth resolution (env vars, auth storage) isn't overridden with undefined.
   const reasoningLevel = route.thinking === "minimal" ? undefined : route.thinking;
 
-  const upstreamStream = streamSimple(
-    concreteModel,
-    context,
-    {
-      ...options,
-      apiKey: concreteAuth.apiKey,
-      headers: {
-        ...concreteAuth.headers,
-        ...options?.headers,
-      },
-      env: {
-        ...concreteAuth.env,
-        ...options?.env,
-      },
-      reasoning: reasoningLevel,
+  const upstreamOptions: SimpleStreamOptions = {
+    ...options,
+    headers: {
+      ...concreteAuth.headers,
+      ...options?.headers,
     },
-  );
+    env: {
+      ...concreteAuth.env,
+      ...options?.env,
+    },
+    reasoning: reasoningLevel,
+  };
+  if (concreteAuth.apiKey) {
+    upstreamOptions.apiKey = concreteAuth.apiKey;
+  }
+
+  const upstreamStream = streamSimple(concreteModel, context, upstreamOptions);
 
   // 5. Forward events with masking and candidate fallback.
   let substantiveOutputSeen = false;

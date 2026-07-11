@@ -40,16 +40,14 @@ describe("Session routing state", () => {
     assert.equal(r.turnCount, 0);
   });
 
-  it("resolveModelSet uses CLI flag when valid", () => {
-    const modelSet = resolveModelSet("test-session", "free");
-    assert.equal(modelSet, "free");
-  });
-
-  it("resolveModelSet uses session state when no CLI flag", () => {
-    const runtime = getSessionRuntime("test-session");
+  it("resolveModelSet returns the session runtime model set", () => {
+    const sessionId = "test-resolve-model-set";
+    const runtime = getSessionRuntime(sessionId);
     runtime.modelSet = "gpt";
-    const modelSet = resolveModelSet("test-session", undefined);
-    assert.equal(modelSet, "gpt");
+    // Returns session state regardless of CLI flag parameter
+    assert.equal(resolveModelSet(sessionId, "free"), "gpt");
+    assert.equal(resolveModelSet(sessionId, undefined), "gpt");
+    clearSessionRuntime(sessionId);
   });
 
   it("validateModelSet returns valid sets", () => {
