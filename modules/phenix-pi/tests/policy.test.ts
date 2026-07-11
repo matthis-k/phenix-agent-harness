@@ -2,10 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  childAllowed,
   deriveTaskProfile,
   resolveExecutionPolicy,
-  toolAllowed,
   type RuntimePolicyConfig,
 } from "../extensions/phenix-subagents/policy.ts";
 
@@ -35,10 +33,10 @@ describe("Phenix runtime policy", () => {
       config,
     });
     assert.equal(policy.thinking, "high");
-    assert.equal(policy.expectedAcceptance, "not-required");
+    assert.equal(policy.criticRequired, false);
   });
 
-  it("keeps verification and review runtime-owned", () => {
+  it("implementer gets runtime verification and critic", () => {
     const policy = resolveExecutionPolicy({
       role: "implementer",
       task: "Implement a bounded TypeScript change",
@@ -46,20 +44,22 @@ describe("Phenix runtime policy", () => {
       cwd: process.cwd(),
       config,
     });
-    assert.equal(policy.expectedAcceptance, "not-required");
-    assert.equal(policy.acceptance.level, "none");
     assert.equal(policy.verificationCommands[0]?.id, "phenix-runtime-verification");
     assert.equal(policy.criticRequired, true);
-    assert.equal("verify" in policy.acceptance, false);
-    assert.equal("review" in policy.acceptance, false);
   });
 
-  it("enforces the fixed child-role graph and raw subagent ban", () => {
-    assert.equal(childAllowed("planner", "architect"), true);
-    assert.equal(childAllowed("tester", "implementer"), false);
-    assert.equal(toolAllowed("implementer", "edit"), true);
-    assert.equal(toolAllowed("implementer", "subagent"), false);
-    assert.equal(toolAllowed("critic", "write"), false);
+  it("null role has no critic, no verification, base agent", () => {
+    const policy = resolveExecutionPolicy({
+      role: null,
+      task: "Do something minimal",
+      requirements: [],
+      cwd: process.cwd(),
+      config,
+    });
+    assert.equal(policy.agent, "phenix.base");
+    assert.equal(policy.criticRequired, false);
+    assert.equal(policy.verificationCommands.length, 0);
+    assert.equal(policy.allowedChildren.length, 0);
   });
 
   it("includes routing metadata fields in policy", () => {
@@ -70,8 +70,6 @@ describe("Phenix runtime policy", () => {
       cwd: process.cwd(),
       config,
     });
-    // modelSet, difficulty, capability, candidatePool, candidateIndex
-    // are optional fields that the routing extension fills in
     assert.equal(policy.role, "scout");
     assert.equal(policy.tier, "low");
     assert.equal(policy.thinking, "low");

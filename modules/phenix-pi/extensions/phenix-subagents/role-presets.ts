@@ -4,26 +4,26 @@ import type {
   ModelTier,
   TaskProfile,
   ThinkingLevel,
-} from "./policy.ts";
+} from "./agent-types.ts";
 
 // ── Role preset interface ───────────────────────────────────────────────────
 
 export interface RolePreset {
-  readonly agentName: `phenix.${AgentKind}`;
-  readonly tools: readonly string[];
-  readonly allowedChildren: readonly AgentKind[];
-  readonly profileMinimums: Readonly<Partial<TaskProfile>>;
-  readonly thinking: Readonly<Record<ModelTier, ThinkingLevel>>;
-  readonly criticRequired: boolean;
-}
+  readonly agentName:
+    | `phenix.${AgentKind}`
+    | "phenix.base";
 
-export interface EmptyRolePreset {
-  readonly agentName: "phenix.base";
   readonly tools: readonly string[];
-  readonly allowedChildren: readonly AgentKind[];
-  readonly profileMinimums: Record<string, never>;
-  readonly thinking: Readonly<Record<ModelTier, ThinkingLevel>>;
-  readonly criticRequired: false;
+  readonly allowedChildren:
+    readonly AgentKind[];
+
+  readonly profileMinimums:
+    Readonly<Partial<TaskProfile>>;
+
+  readonly thinking:
+    Readonly<Record<ModelTier, ThinkingLevel>>;
+
+  readonly criticRequired: boolean;
 }
 
 // ── Common read tools (shared by most roles) ────────────────────────────────
@@ -169,7 +169,7 @@ const ROLE_PRESETS: Record<AgentKind, RolePreset> = {
   finalizer: FINALIZER_PRESET,
 };
 
-const EMPTY_ROLE_PRESET: EmptyRolePreset = {
+const EMPTY_ROLE_PRESET: RolePreset = {
   agentName: "phenix.base",
   tools: [],
   allowedChildren: [],
@@ -187,7 +187,7 @@ const EMPTY_ROLE_PRESET: EmptyRolePreset = {
 
 export function rolePreset(
   role: AgentRole,
-): RolePreset | EmptyRolePreset {
+): RolePreset {
   if (role === null) return EMPTY_ROLE_PRESET;
   return ROLE_PRESETS[role as AgentKind];
 }

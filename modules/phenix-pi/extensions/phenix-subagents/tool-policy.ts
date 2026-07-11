@@ -1,4 +1,4 @@
-import type { AgentRole } from "./policy.ts";
+import type { AgentRole } from "./agent-types.ts";
 import { rolePreset } from "./role-presets.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -128,19 +128,37 @@ function cloneToolPatch(patch: ToolPatch): ToolPatch {
 // ── Main resolution function ────────────────────────────────────────────────
 
 /**
- * Validate that added tools do not exceed the creator's delegation ceiling.
- * If the creator has a specific set of delegable tools, additional tools
- * outside that set are rejected.
+ * Validate that the complete effective child tool set does not exceed the
+ * creator's delegation ceiling. Every effective tool must be covered by
+ * the delegable set.
+ *
+ * - undefined delegableTools → unrestricted root/runtime-internal authority.
+ * - empty delegableTools → no task tool may be delegated.
+ * - non-empty delegableTools → every effective child selector must be covered.
  */
 function validateDelegationCeiling(
-  additions: readonly string[],
+  effective: readonly string[],
   delegableTools: readonly string[] | undefined,
 ): void {
-  if (!delegableTools || delegableTools.length === 0) return;
+  // undefined = unrestricted (root / runtime-internal authority).
+  if (delegableTools === undefined) return;
 
-  const delegable = new Set(delegableTools);
-  for (const tool of additions) {
-    if (!delegable.has(tool)) {
+  // Empty = no delegation allowed at all.
+  if (delegableTools.length === 0) {
+    if (effective.length > 0) {
+      throw new Error(
+        "No tools may be delegated from the current context.",
+      );
+    }
+    return;
+  }
+
+  // Every effective tool must be covered by a delegable selector.
+  for (const tool of effective) {
+    const covered = delegableTools.some((selector) =>
+      matchTool(selector, tool),
+    );
+    if (!covered) {
       throw new Error(
         `Tool "${tool}" is not authorized for delegation from the current context.`,
       );
@@ -179,9 +197,6 @@ export function resolveToolConfiguration(input: {
     };
   }
 
-  // Validate delegation ceiling for additions.
-  validateDelegationCeiling(source.patch.additional, input.delegableTools);
-
   // Build the effective tool list:
   // 1. Start with preset tools
   // 2. Add requested additions (that aren't already covered by preset patterns)
@@ -194,6 +209,9 @@ export function resolveToolConfiguration(input: {
 
   const removedSet = new Set(source.patch.removed);
   const effective = merged.filter((tool) => !removedSet.has(tool));
+
+  // Validate the complete effective tool set against the delegation ceiling.
+  validateDelegationCeiling(effective, input.delegableTools);
 
   return {
     presetRevision: 1,

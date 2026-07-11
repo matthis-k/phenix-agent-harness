@@ -10,6 +10,11 @@ import {
   type SubmittedContractResult,
   type CancelledContractResult,
 } from "./contract.ts";
+import {
+  decodeContractArtifact,
+} from "./contract-codec.ts";
+
+// ── Errors ──────────────────────────────────────────────────────────────────
 
 export class ContractStoreError extends Error {
   readonly code:
@@ -32,10 +37,14 @@ export class ContractStoreError extends Error {
   }
 }
 
+// ── Types ───────────────────────────────────────────────────────────────────
+
 interface PersistedContractDirectory {
   readonly artifact: ContractArtifact;
   readonly result: ContractResult;
 }
+
+// ── Atomic file writes ──────────────────────────────────────────────────────
 
 function atomicWriteJson(
   target: string,
@@ -72,6 +81,8 @@ function atomicWriteJson(
   }
 }
 
+// ── Result decoding ─────────────────────────────────────────────────────────
+
 function isObject(
   value: unknown,
 ): value is Record<string, unknown> {
@@ -80,136 +91,6 @@ function isObject(
     value !== null &&
     !Array.isArray(value)
   );
-}
-
-function decodeArtifact(
-  value: unknown,
-): ContractArtifact {
-  if (
-    !isObject(value) ||
-    typeof value.version !== "number"
-  ) {
-    throw new ContractStoreError(
-      "invalid-artifact",
-      "Contract artifact is malformed: missing or invalid version.",
-    );
-  }
-
-  if (value.version === 1) {
-    throw new ContractStoreError(
-      "invalid-artifact",
-      "Unsupported contract version 1. This version of the Phenix runtime only supports contract version 2.",
-    );
-  }
-
-  if (value.version !== 2) {
-    throw new ContractStoreError(
-      "invalid-artifact",
-      `Unsupported contract version ${String(value.version)}.`,
-    );
-  }
-
-  // Validate identity section.
-  if (
-    typeof value.id !== "string" ||
-    !isObject(value.identity) ||
-    typeof value.identity.runId !== "string" ||
-    typeof value.identity.handleId !== "string"
-  ) {
-    throw new ContractStoreError(
-      "invalid-artifact",
-      "Contract artifact is malformed: invalid identity section.",
-    );
-  }
-
-  // Validate assignment section.
-  if (
-    !isObject(value.assignment) ||
-    typeof value.assignment.task !== "string" ||
-    !Array.isArray(value.assignment.requirements) ||
-    !isObject(value.assignment.outputSchema)
-  ) {
-    throw new ContractStoreError(
-      "invalid-artifact",
-      "Contract artifact is malformed: invalid assignment section.",
-    );
-  }
-
-  // Validate runtime section.
-  if (
-    !isObject(value.runtime) ||
-    typeof value.runtime.agent !== "string" ||
-    typeof value.runtime.cwd !== "string" ||
-    typeof value.runtime.thinking !== "string" ||
-    typeof value.runtime.timeoutMs !== "number" ||
-    !Array.isArray(value.runtime.skills) ||
-    !Array.isArray(value.runtime.extensions) ||
-    !Array.isArray(value.runtime.allowedChildren) ||
-    typeof value.runtime.maxDelegationDepth !== "number"
-  ) {
-    throw new ContractStoreError(
-      "invalid-artifact",
-      "Contract artifact is malformed: invalid runtime section.",
-    );
-  }
-
-  // Validate tools section.
-  if (
-    !isObject(value.runtime.tools) ||
-    typeof value.runtime.tools.presetRevision !== "number" ||
-    !Array.isArray(value.runtime.tools.effective) ||
-    !isObject(value.runtime.tools.source) ||
-    !isObject(value.runtime.tools.source.patch) ||
-    !Array.isArray(value.runtime.tools.source.patch.additional) ||
-    !Array.isArray(value.runtime.tools.source.patch.removed)
-  ) {
-    throw new ContractStoreError(
-      "invalid-artifact",
-      "Contract artifact is malformed: invalid tools section.",
-    );
-  }
-
-  // Validate turn and tool budgets.
-  if (
-    !isObject(value.runtime.turnBudget) ||
-    typeof value.runtime.turnBudget.maxTurns !== "number" ||
-    typeof value.runtime.turnBudget.graceTurns !== "number" ||
-    !isObject(value.runtime.toolBudget) ||
-    typeof value.runtime.toolBudget.soft !== "number" ||
-    typeof value.runtime.toolBudget.hard !== "number" ||
-    !Array.isArray(value.runtime.toolBudget.block)
-  ) {
-    throw new ContractStoreError(
-      "invalid-artifact",
-      "Contract artifact is malformed: invalid budget section.",
-    );
-  }
-
-  // Validate verification section.
-  if (
-    !isObject(value.verification) ||
-    !Array.isArray(value.verification.commands) ||
-    typeof value.verification.criticRequired !== "boolean" ||
-    typeof value.verification.maxRepairAttempts !== "number"
-  ) {
-    throw new ContractStoreError(
-      "invalid-artifact",
-      "Contract artifact is malformed: invalid verification section.",
-    );
-  }
-
-  // Validate top-level fields.
-  if (
-    typeof value.capabilityTokenHash !== "string" ||
-    typeof value.createdAt !== "string"
-  ) {
-    throw new ContractStoreError(
-      "invalid-artifact",
-      "Contract artifact is malformed: missing required top-level fields.",
-    );
-  }
-
-  return value as unknown as ContractArtifact;
 }
 
 function decodeResult(
@@ -241,6 +122,8 @@ function decodeResult(
 
   return value as unknown as ContractResult;
 }
+
+// ── Store implementation ────────────────────────────────────────────────────
 
 export class FileContractStore {
   readonly root: string;
@@ -278,120 +161,107 @@ export class FileContractStore {
 
   private async exclusive<T>(
     id: ContractId,
-    operation: () => Promise<T> | T,
+    operation: () => Promise<T>,
   ): Promise<T> {
-    const key = id;
-    const previous =
-      this.locks.get(key) ?? Promise.resolve();
+    const previous = this.locks.get(id) ?? Promise.resolve();
 
-    let release!: () => void;
-
-    const current = new Promise<void>(
-      (resolve) => {
-        release = resolve;
-      },
-    );
+    let resolve: () => void;
+    const next = new Promise<void>((r) => {
+      resolve = r;
+    });
 
     this.locks.set(
-      key,
-      previous.then(() => current),
+      id,
+      next.finally(() => {
+        if (this.locks.get(id) === next) {
+          this.locks.delete(id);
+        }
+      }),
     );
 
-    await previous;
-
     try {
+      await previous;
       return await operation();
     } finally {
-      release();
-
-      // Clean up the lock entry only if our promise is still
-      // the current one (avoids removing a newer lock's entry).
-      if (this.locks.get(key) === current) {
-        this.locks.delete(key);
-      }
+      resolve!();
     }
   }
+
+  // ── CRUD operations ────────────────────────────────────────────────
 
   async create(
     artifact: ContractArtifact,
   ): Promise<PendingContractResult> {
-    return this.exclusive(
-      artifact.id,
-      async () => {
-        const directory =
-          this.contractDirectory(artifact.id);
-
-        if (fs.existsSync(directory)) {
+    return this.exclusive(artifact.id, async () => {
+      // Verify the contract directory does not already exist.
+      const dir = this.contractDirectory(artifact.id);
+      try {
+        const stat = fs.statSync(dir);
+        if (stat.isDirectory()) {
           throw new ContractStoreError(
             "revision-conflict",
             `Contract ${artifact.id} already exists.`,
           );
         }
+      } catch (error) {
+        if (
+          (error as NodeJS.ErrnoException).code !==
+          "ENOENT"
+        ) {
+          throw error;
+        }
+      }
 
-        fs.mkdirSync(directory, {
-          recursive: false,
-          mode: 0o700,
-        });
+      // Persist the artifact.
+      atomicWriteJson(
+        this.artifactPath(artifact.id),
+        artifact,
+      );
 
-        const pending: PendingContractResult = {
-          version: 1,
-          state: "pending",
-          contractId: artifact.id,
-          revision: 0,
-          createdAt: artifact.createdAt,
-        };
+      // Create the initial pending result.
+      const pending: PendingContractResult = {
+        version: 1,
+        state: "pending",
+        contractId: artifact.id,
+        revision: 0,
+        createdAt: new Date().toISOString(),
+      };
 
-        atomicWriteJson(
-          this.artifactPath(artifact.id),
-          artifact,
-        );
+      atomicWriteJson(
+        this.resultPath(artifact.id),
+        pending,
+      );
 
-        atomicWriteJson(
-          this.resultPath(artifact.id),
-          pending,
-        );
-
-        return pending;
-      },
-    );
+      return pending;
+    });
   }
 
   async load(
     id: ContractId,
-  ): Promise<
-    PersistedContractDirectory | undefined
-  > {
-    const artifactPath = this.artifactPath(id);
-    const resultPath = this.resultPath(id);
-
-    if (!fs.existsSync(artifactPath)) {
-      return undefined;
-    }
-
+  ): Promise<PersistedContractDirectory | undefined> {
     try {
-      const artifact = decodeArtifact(
-        JSON.parse(
-          fs.readFileSync(
-            artifactPath,
-            "utf-8",
-          ),
-        ),
+      const artifactRaw = JSON.parse(
+        fs.readFileSync(this.artifactPath(id), "utf-8"),
       );
 
-      const result = decodeResult(
-        JSON.parse(
-          fs.readFileSync(
-            resultPath,
-            "utf-8",
-          ),
-        ),
+      // Use the integrated codec for deep validation.
+      const artifact = decodeContractArtifact(artifactRaw);
+
+      const resultRaw = JSON.parse(
+        fs.readFileSync(this.resultPath(id), "utf-8"),
       );
 
-      return {
-        artifact,
-        result,
-      };
+      const result = decodeResult(resultRaw);
+
+      return { artifact, result };
     } catch (error) {
+      if (
+        (error as NodeJS.ErrnoException).code ===
+        "ENOENT"
+      ) {
+        return undefined;
+      }
+
       if (error instanceof ContractStoreError) {
         throw error;
       }
@@ -411,54 +281,51 @@ export class FileContractStore {
     expectedRevision: number,
     value: unknown,
   ): Promise<SubmittedContractResult> {
-    return this.exclusive(
-      id,
-      async () => {
-        const current = await this.load(id);
+    return this.exclusive(id, async () => {
+      const current = await this.load(id);
 
-        if (!current) {
-          throw new ContractStoreError(
-            "not-found",
-            `Contract ${id} does not exist.`,
-          );
-        }
-
-        if (current.result.state !== "pending") {
-          throw new ContractStoreError(
-            "already-terminal",
-            `Contract ${id} is already ${current.result.state}.`,
-          );
-        }
-
-        if (
-          current.result.revision !==
-          expectedRevision
-        ) {
-          throw new ContractStoreError(
-            "revision-conflict",
-            `Contract ${id} revision mismatch.`,
-          );
-        }
-
-        const submitted: SubmittedContractResult = {
-          version: 1,
-          state: "submitted",
-          contractId: id,
-          revision:
-            current.result.revision + 1,
-          submittedAt:
-            new Date().toISOString(),
-          value,
-        };
-
-        atomicWriteJson(
-          this.resultPath(id),
-          submitted,
+      if (!current) {
+        throw new ContractStoreError(
+          "not-found",
+          `Contract ${id} does not exist.`,
         );
+      }
 
-        return submitted;
-      },
-    );
+      if (current.result.state !== "pending") {
+        throw new ContractStoreError(
+          "already-terminal",
+          `Contract ${id} is already ${current.result.state}.`,
+        );
+      }
+
+      if (
+        current.result.revision !==
+        expectedRevision
+      ) {
+        throw new ContractStoreError(
+          "revision-conflict",
+          `Contract ${id} revision mismatch.`,
+        );
+      }
+
+      const submitted: SubmittedContractResult = {
+        version: 1,
+        state: "submitted",
+        contractId: id,
+        revision:
+          current.result.revision + 1,
+        submittedAt:
+          new Date().toISOString(),
+        value,
+      };
+
+      atomicWriteJson(
+        this.resultPath(id),
+        submitted,
+      );
+
+      return submitted;
+    });
   }
 
   async cancel(

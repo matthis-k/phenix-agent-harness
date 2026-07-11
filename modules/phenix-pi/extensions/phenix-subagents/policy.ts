@@ -3,47 +3,35 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { mergeObjects, readJson } from "../phenix-shared.ts";
+import {
+  AGENT_KINDS,
+  type AgentKind,
+  type AgentRole,
+  type ModelTier,
+  type ProfileHint,
+  type TaskProfile,
+  type ThinkingLevel,
+  type TurnBudget,
+  type ToolBudget,
+  type VerificationCommand,
+} from "./agent-types.ts";
+import {
+  rolePreset,
+} from "./role-presets.ts";
 
-export const AGENT_KINDS = [
-  "scout",
-  "planner",
-  "architect",
-  "implementer",
-  "tester",
-  "critic",
-  "finalizer",
-] as const;
+export type {
+  AgentKind,
+  AgentRole,
+  ModelTier,
+  ProfileHint,
+  TaskProfile,
+  ThinkingLevel,
+  TurnBudget,
+  ToolBudget,
+  VerificationCommand,
+};
 
-export type AgentKind = (typeof AGENT_KINDS)[number];
-export type AgentRole = AgentKind | null;
-export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh";
-export type ModelTier = "low" | "standard" | "high" | "critical";
-
-export interface TaskProfile {
-  readonly complexity: number;
-  readonly uncertainty: number;
-  readonly consequence: number;
-  readonly breadth: number;
-  readonly coupling: number;
-  readonly novelty: number;
-}
-
-export interface ProfileHint {
-  readonly complexity?: number;
-  readonly uncertainty?: number;
-  readonly consequence?: number;
-  readonly breadth?: number;
-  readonly coupling?: number;
-  readonly novelty?: number;
-}
-
-export interface VerificationCommand {
-  readonly id: string;
-  readonly command: string;
-  readonly timeoutMs?: number;
-  readonly cwd?: string;
-  readonly allowFailure?: boolean;
-}
+// ── Configuration types ─────────────────────────────────────────────────────
 
 interface VerificationConfig {
   readonly maxRepairAttempts?: number;
@@ -56,29 +44,33 @@ export interface RuntimePolicyConfig {
   readonly verification?: VerificationConfig;
 }
 
+// ── Resolved execution policy ────────────────────────────────────────────────
+
 export interface ResolvedExecutionPolicy {
-  readonly agent: `phenix.${AgentKind}`;
-  readonly role: AgentKind;
+  readonly role: AgentRole;
+  readonly agent:
+    | `phenix.${AgentKind}`
+    | "phenix.base";
+
   readonly profile: TaskProfile;
   readonly tier: ModelTier;
+
   readonly model?: string;
   readonly thinking: ThinkingLevel;
+
   readonly timeoutMs: number;
-  readonly turnBudget: { readonly maxTurns: number; readonly graceTurns: number };
-  readonly toolBudget: {
-    readonly soft: number;
-    readonly hard: number;
-    readonly block: readonly string[];
-  };
-  readonly expectedAcceptance: "not-required";
-  readonly acceptance: Record<string, unknown>;
-  readonly verificationCommands: readonly VerificationCommand[];
+  readonly turnBudget: TurnBudget;
+  readonly toolBudget: ToolBudget;
+
+  readonly verificationCommands:
+    readonly VerificationCommand[];
+
   readonly criticRequired: boolean;
   readonly maxRepairAttempts: number;
-  readonly allowedTools: readonly string[];
-  readonly allowedChildren: readonly AgentKind[];
+  readonly allowedChildren:
+    readonly AgentKind[];
 
-  // Routing fields (added by phenix-routing integration)
+  // Routing fields (added by phenix-routing integration).
   readonly modelSet?: string;
   readonly difficulty?: string;
   readonly capability?: string;
@@ -86,105 +78,7 @@ export interface ResolvedExecutionPolicy {
   readonly candidateIndex?: number;
 }
 
-/**
- * Contract tools are loaded by the phenix-contract-runtime bootstrap extension.
- * phenix_complete is the only model-callable contract protocol tool.
- * Keep contact_supervisor for blocker/decision communication.
- * Keep phenix_delegate where the role-child graph allows nested delegation.
- * Raw subagent remains blocked by the runtime tool guard.
- */
-export const REQUIRED_CHILD_RUNTIME_TOOLS = [
-  "contact_supervisor",
-  "phenix_delegate",
-  "phenix_complete",
-] as const;
-
-/**
- * Merge role-declared tools with the mandatory runtime tools.
- * Useful for programmatic construction or validation of agent configs.
- */
-export function augmentChildTools(
-  roleTools: readonly string[],
-): readonly string[] {
-  const seen = new Set<string>(roleTools);
-  for (const required of REQUIRED_CHILD_RUNTIME_TOOLS) {
-    if (!seen.has(required)) {
-      seen.add(required);
-    }
-  }
-  return [...seen];
-}
-
-const ROLE_CHILDREN: Record<AgentKind, readonly AgentKind[]> = {
-  scout: ["scout"],
-  planner: ["scout", "architect", "critic"],
-  architect: ["scout", "critic"],
-  implementer: ["scout", "tester", "critic"],
-  tester: ["scout"],
-  critic: ["scout", "tester"],
-  finalizer: ["critic"],
-};
-
-const COMMON_READ_TOOLS = [
-  "read",
-  "grep",
-  "search",
-  "find",
-  "ls",
-  "tree",
-  "bash",
-  "lsp",
-  "lsp_*",
-  "ast_grep",
-  "ast_*",
-  "mcp",
-  "mcp_*",
-  "web_search",
-  "web_fetch",
-  "fetch_content",
-  "get_search_content",
-  "context_info",
-  "context_*",
-  "contact_supervisor",
-  "phenix_delegate",
-] as const;
-
-const ROLE_TOOLS: Record<AgentKind, readonly string[]> = {
-  scout: COMMON_READ_TOOLS,
-  planner: COMMON_READ_TOOLS,
-  architect: COMMON_READ_TOOLS,
-  implementer: [
-    ...COMMON_READ_TOOLS,
-    "edit",
-    "write",
-    "apply_patch",
-    "ast_edit",
-    "todo",
-  ],
-  tester: COMMON_READ_TOOLS,
-  critic: COMMON_READ_TOOLS,
-  finalizer: COMMON_READ_TOOLS,
-};
-
-const THINKING: Record<AgentKind, Record<ModelTier, ThinkingLevel>> = {
-  scout: { low: "low", standard: "low", high: "medium", critical: "high" },
-  planner: { low: "medium", standard: "medium", high: "high", critical: "xhigh" },
-  architect: { low: "medium", standard: "high", high: "high", critical: "xhigh" },
-  implementer: { low: "low", standard: "medium", high: "high", critical: "high" },
-  tester: { low: "low", standard: "low", high: "medium", critical: "high" },
-  critic: { low: "medium", standard: "high", high: "high", critical: "xhigh" },
-  finalizer: { low: "low", standard: "medium", high: "medium", critical: "high" },
-};
-
-const ROLE_MINIMUMS: Record<AgentKind, Partial<TaskProfile>> = {
-  scout: { uncertainty: 1 },
-  planner: { complexity: 2, breadth: 1 },
-  architect: { complexity: 2, coupling: 2, consequence: 1 },
-  implementer: { complexity: 1 },
-  tester: { consequence: 1 },
-  critic: { consequence: 2, uncertainty: 1 },
-  finalizer: { breadth: 1 },
-};
+// ── Constants ───────────────────────────────────────────────────────────────
 
 const DEFAULT_CONFIG: RuntimePolicyConfig = {
   verification: {
@@ -195,14 +89,7 @@ const DEFAULT_CONFIG: RuntimePolicyConfig = {
   },
 };
 
-function clampScore(value: unknown): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(4, Math.round(value)));
-}
-
-function maxScore(...values: Array<number | undefined>): number {
-  return Math.max(0, ...values.map((value) => value ?? 0));
-}
+// ── Config loading ──────────────────────────────────────────────────────────
 
 export function loadPolicyConfig(): RuntimePolicyConfig {
   const bundledPath = fileURLToPath(
@@ -221,14 +108,27 @@ export function loadPolicyConfig(): RuntimePolicyConfig {
   ) as RuntimePolicyConfig;
 }
 
+// ── Profile derivation ──────────────────────────────────────────────────────
+
+function clampScore(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(4, Math.round(value)));
+}
+
+function maxScore(...values: Array<number | undefined>): number {
+  return Math.max(0, ...values.map((value) => value ?? 0));
+}
+
 export function deriveTaskProfile(
-  role: AgentKind,
+  role: AgentRole,
   task: string,
   requirements: readonly string[],
   hint: ProfileHint = {},
 ): TaskProfile {
   const text = `${task}\n${requirements.join("\n")}`.toLowerCase();
-  const minimum = ROLE_MINIMUMS[role];
+  const preset = rolePreset(role);
+  const minimum = preset.profileMinimums;
+
   const highRisk = /\b(security|auth|permission|secret|credential|migration|data loss|destructive|concurren|race|deadlock|protocol|public api)\b/.test(text);
   const architecture = /\b(architect|redesign|state machine|workflow|persistent|database|schema|interface|cross[- ]cutting)\b/.test(text);
   const uncertainty = /\b(investigate|unknown|unclear|research|diagnose|why|root cause)\b/.test(text);
@@ -254,6 +154,8 @@ export function deriveTaskProfile(
   };
 }
 
+// ── Tier calculation ────────────────────────────────────────────────────────
+
 export function tierForProfile(profile: TaskProfile): ModelTier {
   const peak = Math.max(...Object.values(profile));
   if (profile.consequence >= 4 || peak >= 4) return "critical";
@@ -269,18 +171,23 @@ export function tierForProfile(profile: TaskProfile): ModelTier {
   return "low";
 }
 
+// ── Shell quoting ───────────────────────────────────────────────────────────
+
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
+// ── Verification commands ───────────────────────────────────────────────────
+
 function verificationCommands(
-  role: AgentKind,
+  role: AgentRole,
   cwd: string,
   config: RuntimePolicyConfig,
-): VerificationCommand[] {
+): readonly VerificationCommand[] {
   const scriptPath = fileURLToPath(new URL("../../runtime/verify.mjs", import.meta.url));
   const commands: VerificationCommand[] = [];
 
+  // Only implementer and tester roles get the default runtime verification.
   if (role === "implementer" || role === "tester") {
     commands.push({
       id: "phenix-runtime-verification",
@@ -290,30 +197,28 @@ function verificationCommands(
     });
   }
 
+  // Null role gets no role-specific verification commands.
+  if (role === null) return commands;
+
   for (const command of config.verification?.extraCommands ?? []) commands.push(command);
   for (const command of config.verification?.roleCommands?.[role] ?? []) commands.push(command);
+
   return commands;
 }
 
-function acceptanceFor(): {
-  expected: "not-required";
-  config: Record<string, unknown>;
-} {
-  return {
-    expected: "not-required",
-    config: {
-      level: "none",
-      reason: "Phenix owns structural validation, executable verification, and critic gates in the runtime.",
-    },
-  };
-}
+// ── Budget tables ───────────────────────────────────────────────────────────
 
-function criticRequired(role: AgentKind): boolean {
-  return role === "planner" || role === "architect" || role === "implementer";
-}
+const TIER_BUDGETS: Record<ModelTier, { turns: number; tools: number; timeout: number }> = {
+  low: { turns: 12, tools: 40, timeout: 10 * 60_000 },
+  standard: { turns: 24, tools: 80, timeout: 20 * 60_000 },
+  high: { turns: 40, tools: 140, timeout: 35 * 60_000 },
+  critical: { turns: 64, tools: 220, timeout: 60 * 60_000 },
+};
+
+// ── Policy resolution ───────────────────────────────────────────────────────
 
 export function resolveExecutionPolicy(input: {
-  readonly role: AgentKind;
+  readonly role: AgentRole;
   readonly task: string;
   readonly requirements: readonly string[];
   readonly profileHint?: ProfileHint;
@@ -321,29 +226,40 @@ export function resolveExecutionPolicy(input: {
   readonly config?: RuntimePolicyConfig;
 }): ResolvedExecutionPolicy {
   const config = input.config ?? loadPolicyConfig();
+  const preset = rolePreset(input.role);
+
+  // 1. Derive task profile using preset minimums.
   const profile = deriveTaskProfile(
     input.role,
     input.task,
     input.requirements,
     input.profileHint,
   );
+
+  // 2. Derive tier.
   const tier = tierForProfile(profile);
+
+  // 3. Select thinking from the preset.
+  const thinking = preset.thinking[tier];
+
+  // 4. Derive budgets.
+  const budget = TIER_BUDGETS[tier];
+
+  // 5. Derive verification commands.
   const commands = verificationCommands(input.role, input.cwd, config);
-  const acceptance = acceptanceFor();
-  const budgets: Record<ModelTier, { turns: number; tools: number; timeout: number }> = {
-    low: { turns: 12, tools: 40, timeout: 10 * 60_000 },
-    standard: { turns: 24, tools: 80, timeout: 20 * 60_000 },
-    high: { turns: 40, tools: 140, timeout: 35 * 60_000 },
-    critical: { turns: 64, tools: 220, timeout: 60 * 60_000 },
-  };
-  const budget = budgets[tier];
+
+  // 6. Max repair attempts.
+  const maxRepairAttempts = Math.max(
+    0,
+    Math.min(3, config.verification?.maxRepairAttempts ?? 1),
+  );
 
   return {
-    agent: `phenix.${input.role}`,
     role: input.role,
+    agent: preset.agentName,
     profile,
     tier,
-    thinking: THINKING[input.role][tier],
+    thinking,
     timeoutMs: budget.timeout,
     turnBudget: { maxTurns: budget.turns, graceTurns: 2 },
     toolBudget: {
@@ -362,45 +278,21 @@ export function resolveExecutionPolicy(input: {
         "mcp",
         "web_search",
         "web_fetch",
-        "phenix_delegate"
+        "phenix_delegate",
       ],
     },
-    expectedAcceptance: acceptance.expected,
-    acceptance: acceptance.config,
     verificationCommands: commands,
-    criticRequired: criticRequired(input.role),
-    maxRepairAttempts: Math.max(
-      0,
-      Math.min(3, config.verification?.maxRepairAttempts ?? 1),
-    ),
-    allowedTools: ROLE_TOOLS[input.role],
-    allowedChildren: ROLE_CHILDREN[input.role],
+    criticRequired: preset.criticRequired,
+    maxRepairAttempts,
+    allowedChildren: preset.allowedChildren,
   };
 }
 
-export function isAgentKind(value: unknown): value is AgentKind {
-  return typeof value === "string" && (AGENT_KINDS as readonly string[]).includes(value);
-}
+// ── Environment helpers ─────────────────────────────────────────────────────
 
 export function roleFromEnvironment(): AgentKind | "root" {
   const raw = process.env.PI_SUBAGENT_CHILD_AGENT?.trim();
   if (!raw) return "root";
   const candidate = raw.startsWith("phenix.") ? raw.slice("phenix.".length) : raw;
-  return isAgentKind(candidate) ? candidate : "root";
-}
-
-function matchTool(pattern: string, toolName: string): boolean {
-  if (pattern.endsWith("*")) return toolName.startsWith(pattern.slice(0, -1));
-  return pattern === toolName;
-}
-
-export function toolAllowed(role: AgentKind | "root", toolName: string): boolean {
-  if (toolName === "subagent") return false;
-  if (role === "root") return true;
-  return ROLE_TOOLS[role].some((pattern) => matchTool(pattern, toolName));
-}
-
-export function childAllowed(parent: AgentKind | "root", child: AgentKind): boolean {
-  if (parent === "root") return true;
-  return ROLE_CHILDREN[parent].includes(child);
+  return AGENT_KINDS.includes(candidate as AgentKind) ? (candidate as AgentKind) : "root";
 }

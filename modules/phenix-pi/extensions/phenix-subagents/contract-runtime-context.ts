@@ -3,7 +3,7 @@ import type {
   ContractIdentity,
 } from "./contract.ts";
 import type { FileContractStore } from "./contract-store.ts";
-import type { AgentRole, AgentKind } from "./policy.ts";
+import type { AgentRole, AgentKind } from "./agent-types.ts";
 import type { ToolPatch, ToolPatchInput } from "./tool-policy.ts";
 
 // ── Runtime context types ───────────────────────────────────────────────────

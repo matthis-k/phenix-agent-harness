@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
 import type { JsonSchema } from "./contracts.ts";
-import type { AgentRole, VerificationCommand } from "./policy.ts";
+import type { AgentKind, AgentRole, TurnBudget, ToolBudget, VerificationCommand } from "./agent-types.ts";
 import type { ResolvedToolConfiguration } from "./tool-policy.ts";
 
 declare const contractIdBrand: unique symbol;
@@ -28,23 +28,10 @@ export interface ContractIdentity {
   readonly capabilityToken: CapabilityToken;
 }
 
-// ── Budget types ────────────────────────────────────────────────────────────
+// ── Contract artifact v3 ────────────────────────────────────────────────────
 
-export interface TurnBudget {
-  readonly maxTurns: number;
-  readonly graceTurns: number;
-}
-
-export interface ToolBudget {
-  readonly soft: number;
-  readonly hard: number;
-  readonly block: readonly string[];
-}
-
-// ── Contract artifact v2 ────────────────────────────────────────────────────
-
-export interface ContractArtifactV2 {
-  readonly version: 2;
+export interface ContractArtifact {
+  readonly version: 3;
   readonly id: ContractId;
 
   readonly identity: {
@@ -62,17 +49,21 @@ export interface ContractArtifactV2 {
   };
 
   readonly runtime: {
-    readonly agent: string;
+    readonly agent:
+      | `phenix.${AgentKind}`
+      | "phenix.base";
+
     readonly cwd: string;
     readonly model?: string;
     readonly thinking: string;
 
     readonly tools: ResolvedToolConfiguration;
+
     readonly skills: readonly string[];
     readonly extensions: readonly string[];
 
     readonly allowedChildren: readonly AgentRole[];
-    readonly maxDelegationDepth: number;
+    readonly remainingDelegationDepth: number;
 
     readonly timeoutMs: number;
     readonly turnBudget: TurnBudget;
@@ -89,9 +80,6 @@ export interface ContractArtifactV2 {
   readonly createdAt: string;
   readonly expiresAt?: string;
 }
-
-// Keep the old name as an alias for backward compatibility during migration.
-export type ContractArtifact = ContractArtifactV2;
 
 // ── Result types (version 1, unchanged) ─────────────────────────────────────
 
@@ -127,7 +115,7 @@ export type ContractResult =
   | CancelledContractResult;
 
 export interface IssuedContract {
-  readonly artifact: ContractArtifactV2;
+  readonly artifact: ContractArtifact;
   readonly capabilityToken: CapabilityToken;
 }
 
@@ -168,16 +156,18 @@ export function hashCapabilityToken(
   return createHash("sha256").update(token).digest("hex");
 }
 
-// ── Contract issuance (v2) ──────────────────────────────────────────────────
+// ── Contract issuance (v3) ──────────────────────────────────────────────────
 
-export type IssueContractInput = Pick<ContractArtifactV2,
-  "identity" | "assignment" | "runtime" | "verification"
-> & {
+export type IssueContractInput = {
+  readonly identity: ContractArtifact["identity"];
+  readonly assignment: ContractArtifact["assignment"];
+  readonly runtime: ContractArtifact["runtime"];
+  readonly verification: ContractArtifact["verification"];
   readonly expiresAt?: string;
 };
 
 /**
- * Issue a new v2 contract artifact from a fully resolved specification.
+ * Issue a new v3 contract artifact from a fully resolved specification.
  * No policy derivation, role configuration, or tool resolution happens here.
  */
 export function issueContract(
@@ -185,8 +175,8 @@ export function issueContract(
 ): IssuedContract {
   const capabilityToken = createCapabilityToken();
 
-  const artifact: ContractArtifactV2 = {
-    version: 2,
+  const artifact: ContractArtifact = {
+    version: 3,
     id: createContractId(),
     identity: {
       runId: input.identity.runId,
@@ -205,11 +195,21 @@ export function issueContract(
       cwd: input.runtime.cwd,
       ...(input.runtime.model ? { model: input.runtime.model } : {}),
       thinking: input.runtime.thinking,
-      tools: input.runtime.tools,
+      tools: {
+        ...input.runtime.tools,
+        source: {
+          inherited: input.runtime.tools.source.inherited,
+          patch: {
+            additional: [...input.runtime.tools.source.patch.additional],
+            removed: [...input.runtime.tools.source.patch.removed],
+          },
+        },
+        effective: [...input.runtime.tools.effective],
+      },
       skills: [...input.runtime.skills],
       extensions: [...input.runtime.extensions],
       allowedChildren: [...input.runtime.allowedChildren],
-      maxDelegationDepth: input.runtime.maxDelegationDepth,
+      remainingDelegationDepth: input.runtime.remainingDelegationDepth,
       timeoutMs: input.runtime.timeoutMs,
       turnBudget: { ...input.runtime.turnBudget },
       toolBudget: { ...input.runtime.toolBudget },
@@ -251,10 +251,9 @@ function equalHexHashes(
 
 /**
  * Authorize a contract identity against an artifact.
- * Role is no longer checked here — it's part of the artifact identity.
  */
 export function authorizeContract(
-  artifact: ContractArtifactV2,
+  artifact: ContractArtifact,
   identity: ContractIdentity,
   now = new Date(),
 ): ContractAuthorizationResult {

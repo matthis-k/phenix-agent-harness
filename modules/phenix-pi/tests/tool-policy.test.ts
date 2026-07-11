@@ -9,7 +9,7 @@ import {
   EMPTY_TOOL_PATCH,
   type ToolPatchInput,
 } from "../extensions/phenix-subagents/tool-policy.ts";
-import type { AgentRole } from "../extensions/phenix-subagents/policy.ts";
+import type { AgentRole } from "../extensions/phenix-subagents/agent-types.ts";
 
 describe("Tool-policy resolution", () => {
   it("scout preset without patch", () => {

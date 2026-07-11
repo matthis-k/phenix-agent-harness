@@ -12,7 +12,7 @@ import {
 import {
   createRunId,
   issueContract,
-  type ContractArtifactV2,
+  type ContractArtifact,
   type ContractId,
   type RunId,
 } from "./contract.ts";
@@ -28,8 +28,8 @@ import {
   type HandleRecord,
 } from "./handle-types.ts";
 import type {
-  AgentRole,
-} from "./policy.ts";
+  ResolvedChildSpec,
+} from "./child-spec.ts";
 
 // ── Contract store helper ───────────────────────────────────────────────────
 
@@ -103,56 +103,69 @@ export async function evaluateContractResult(
   };
 }
 
-// ── Attempt creation ────────────────────────────────────────────────────────
+// ── Attempt contract creation from resolved spec ────────────────────────────
 
 export async function createAttemptContract(
-  record: HandleRecord,
-  task: string,
-  cwd: string,
+  input: {
+    readonly spec: ResolvedChildSpec;
+    readonly assignment: {
+      readonly task: string;
+      readonly requirements: readonly string[];
+      readonly outputSchema: Record<string, unknown>;
+    };
+    readonly identity: {
+      readonly handleId: string;
+      readonly parentHandleId?: string;
+      readonly parentRunId?: RunId;
+    };
+    readonly cwd: string;
+  },
 ): Promise<{
-  readonly artifact: ContractArtifactV2;
+  readonly artifact: ContractArtifact;
   readonly capabilityToken: string;
   readonly phenixRunId: RunId;
 }> {
   const phenixRunId = createRunId();
 
-  const handleId = `${record.id}-attempt-${record.attempts.length + 1}`;
-  const parentHandleId = record.id;
-
   const issued = issueContract({
     identity: {
       runId: phenixRunId,
-      handleId,
-      parentHandleId,
-      role: record.role,
+      handleId: input.identity.handleId,
+      ...(input.identity.parentHandleId
+        ? { parentHandleId: input.identity.parentHandleId }
+        : {}),
+      ...(input.identity.parentRunId
+        ? { parentRunId: input.identity.parentRunId }
+        : {}),
+      role: input.spec.role,
     },
     assignment: {
-      task,
-      requirements: record.requirements,
-      outputSchema: record.outputSchema,
+      task: input.assignment.task,
+      requirements: input.assignment.requirements,
+      outputSchema: input.assignment.outputSchema,
     },
     runtime: {
-      agent: record.policy.agent,
-      cwd,
-      model: record.policy.model,
-      thinking: record.policy.thinking,
-      tools: record.resolvedTools,
-      skills: [],
-      extensions: [],
-      allowedChildren: record.policy.allowedChildren.map((r: import("./policy.ts").AgentKind) => r as AgentRole),
-      maxDelegationDepth: 2, // Default, could be derived from policy.
-      timeoutMs: record.policy.timeoutMs,
-      turnBudget: record.policy.turnBudget,
-      toolBudget: record.policy.toolBudget,
+      agent: input.spec.agent,
+      cwd: input.cwd,
+      model: input.spec.model,
+      thinking: input.spec.thinking,
+      tools: input.spec.tools,
+      skills: input.spec.skills,
+      extensions: input.spec.extensions,
+      allowedChildren: input.spec.allowedChildren,
+      remainingDelegationDepth: input.spec.remainingDelegationDepth,
+      timeoutMs: input.spec.timeoutMs,
+      turnBudget: input.spec.turnBudget,
+      toolBudget: input.spec.toolBudget,
     },
     verification: {
-      commands: record.policy.verificationCommands,
-      criticRequired: record.policy.criticRequired,
-      maxRepairAttempts: record.policy.maxRepairAttempts,
+      commands: input.spec.verificationCommands,
+      criticRequired: input.spec.criticRequired,
+      maxRepairAttempts: input.spec.maxRepairAttempts,
     },
   });
 
-  await contractsForCwd(cwd).create(issued.artifact);
+  await contractsForCwd(input.cwd).create(issued.artifact);
 
   return {
     artifact: issued.artifact,
@@ -160,6 +173,8 @@ export async function createAttemptContract(
     phenixRunId,
   };
 }
+
+// ── Environment helpers ─────────────────────────────────────────────────────
 
 export function childContractEnv(
   contractId: ContractId,
@@ -180,12 +195,12 @@ export function childContractEnv(
   };
 }
 
-// ── Repair task generation ──────────────────────────────────────────────────
+// ── Repair task generator ───────────────────────────────────────────────────
 
 export function repairTask(record: HandleRecord, evaluation: Evaluation): string {
   const numbered = evaluation.errors.map((error, index) => `${index + 1}. ${error}`).join("\n");
   return [
-    record.task,
+    record.assignment.task,
     "",
     "## Runtime repair request",
     "The previous handoff was rejected by authoritative runtime validation. Continue from the current workspace state and correct the work.",

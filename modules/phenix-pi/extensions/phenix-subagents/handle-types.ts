@@ -1,11 +1,11 @@
 import type { ContractId, RunId } from "./contract.ts";
 import type { JsonSchema } from "./contracts.ts";
-import type { AgentRole, AgentKind, ResolvedExecutionPolicy } from "./policy.ts";
-import type { ToolPatchInput, ResolvedToolConfiguration } from "./tool-policy.ts";
+import type { AgentRole } from "./agent-types.ts";
+import type { ResolvedChildSpec } from "./child-spec.ts";
 
 // ── Constants (used by index.ts; extracted for visibility) ──────────────────
 
-export const HANDLE_VERSION = 1;
+export const HANDLE_VERSION = 2;
 export const TERMINAL_STATES = new Set(["completed", "failed", "cancelled"]);
 
 // ── Critic contract schema ──────────────────────────────────────────────────
@@ -48,7 +48,7 @@ export const ACCEPTANCE_RANK: Record<string, number> = {
   rejected: -1,
 };
 
-// ── Handle record types ─────────────────────────────────────────────────────
+// ── Attempt record types ────────────────────────────────────────────────────
 
 export interface AttemptRecord {
   readonly number: number;
@@ -71,6 +71,8 @@ export interface AttemptRecord {
   }>;
 }
 
+// ── Critic types ────────────────────────────────────────────────────────────
+
 export interface CriticFinding {
   readonly severity: "minor" | "major" | "critical";
   readonly description: string;
@@ -85,6 +87,8 @@ export interface CriticValue {
   readonly missingRequirements: readonly string[];
 }
 
+// ── Verification summary ────────────────────────────────────────────────────
+
 export interface VerificationSummary {
   readonly acceptanceStatus?: string;
   readonly runtimeChecks: readonly string[];
@@ -93,23 +97,32 @@ export interface VerificationSummary {
   readonly contract: "valid" | "invalid" | "missing" | "cancelled";
 }
 
+// ── Handle record (version 2) ───────────────────────────────────────────────
+
 export interface HandleRecord {
   readonly version: typeof HANDLE_VERSION;
+
   readonly id: string;
   readonly sessionId: string;
   readonly parentId?: string;
-  readonly role: AgentRole;
-  readonly task: string;
-  readonly requirements: readonly string[];
-  readonly outputSchema: JsonSchema;
-  readonly policy: ResolvedExecutionPolicy;
-  readonly reviewPolicy?: ResolvedExecutionPolicy;
+
+  readonly assignment: {
+    readonly task: string;
+    readonly requirements: readonly string[];
+    readonly outputSchema: JsonSchema;
+  };
+
+  readonly producerSpec: ResolvedChildSpec;
+
+  readonly criticSpec?: ResolvedChildSpec;
+
   readonly createdAt: string;
   updatedAt: string;
   status: "running" | "completed" | "failed" | "cancelled";
   attempts: AttemptRecord[];
   value?: unknown;
   errors?: string[];
+
   verification?: VerificationSummary;
   review?: {
     readonly verdict: "approve" | "reject";
@@ -119,9 +132,6 @@ export interface HandleRecord {
     readonly sessionFile?: string;
     readonly transcriptPath?: string;
   };
-  // Contract v2 resolution fields.
-  readonly toolRequest: ToolPatchInput | null;
-  readonly resolvedTools: ResolvedToolConfiguration;
 }
 
 // ── Evaluation ──────────────────────────────────────────────────────────────
@@ -137,4 +147,4 @@ export interface Evaluation {
 
 // ── Re-exports ──────────────────────────────────────────────────────────────
 
-export type { AgentRole, AgentKind, ToolPatchInput, ResolvedToolConfiguration };
+export type { AgentRole, ResolvedChildSpec };

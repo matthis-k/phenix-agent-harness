@@ -1,6 +1,6 @@
-import type { ContractArtifactV2 } from "./contract.ts";
+import type { ContractArtifact } from "./contract.ts";
+import type { AgentRole } from "./agent-types.ts";
 import type { JsonSchema } from "./contracts.ts";
-import type { AgentRole } from "./policy.ts";
 
 // ── Model-facing projection ─────────────────────────────────────────────────
 
@@ -22,10 +22,10 @@ export interface ModelContractProjection {
 // ── Projection formatter ────────────────────────────────────────────────────
 
 /**
- * Derive the safe model-facing projection from a contract artifact.
+ * Derive the safe model-facing projection from a contract artifact (v3).
  */
 export function deriveProjection(
-  contract: ContractArtifactV2,
+  contract: ContractArtifact,
 ): ModelContractProjection {
   return {
     role: contract.identity.role,
@@ -53,7 +53,8 @@ export function formatProjection(
   lines.push("");
 
   // Role
-  const roleDisplay = projection.role === null ? "none (base)" : projection.role;
+  const roleDisplay =
+    projection.role === null ? "none (base)" : projection.role;
   lines.push(`Role: ${roleDisplay}`);
   lines.push("");
 
@@ -91,7 +92,9 @@ export function formatProjection(
 
   // Required result schema
   lines.push("Required result schema:");
-  lines.push(JSON.stringify(projection.outputSchema, null, 2));
+  lines.push(
+    JSON.stringify(projection.outputSchema, null, 2),
+  );
   lines.push("");
 
   // Completion instruction
@@ -114,7 +117,7 @@ export function formatProjection(
  * Convenience: deriveProjection + formatProjection.
  */
 export function buildContractProjection(
-  contract: ContractArtifactV2,
+  contract: ContractArtifact,
 ): string {
   return formatProjection(deriveProjection(contract));
 }

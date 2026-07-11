@@ -67,24 +67,13 @@ function errorResult(
   };
 }
 
-/**
- * Validate that a stored contract artifact describes an executable contract.
- * Only minimal structural checks beyond the store decoder.
- */
-function validateExecutableContract(
-  _artifact: unknown,
-): void {
-  // The contract-store decoder already performs structural validation.
-  // Additional runtime checks can be added here if needed.
-}
-
 // ── Bootstrap initialization ────────────────────────────────────────────────
 
 async function bootstrapChild(
   pi: ExtensionAPI,
   env: ChildBootstrapEnvironment,
 ): Promise<void> {
-  // 1. Load the contract from the store.
+  // 1. Load the contract from the store (uses integrated v3 codec).
   const store = new FileContractStore(env.storeRoot);
   const stored = await store.load(env.identity.contractId);
 
@@ -107,11 +96,7 @@ async function bootstrapChild(
     );
   }
 
-  // 3. Validate the contract is executable.
-  validateExecutableContract(stored.artifact);
-
-  // 4. Initialize the process-local runtime context.
-  //    This must happen before any model turn.
+  // 3. Initialize the process-local runtime context.
   initializeRuntimeContext({
     kind: "child",
     identity: env.identity,
@@ -119,16 +104,13 @@ async function bootstrapChild(
     store,
   });
 
-  // 5. Register the model-facing projection.
-  //    Injects the safe task projection into the system prompt.
+  // 4. Register the model-facing projection.
   registerContractPromptProjection(pi, stored);
 
-  // 6. Register phenix_complete.
-  //    The ONLY model-callable contract protocol tool.
+  // 5. Register phenix_complete.
   registerPhenixComplete(pi);
 
-  // 7. Register the runtime tool guard.
-  //    Ensures tool access matches the contract's effective configuration.
+  // 6. Register the runtime tool guard.
   registerContractToolGuard(pi);
 }
 
@@ -156,14 +138,17 @@ function registerContractToolGuard(
   pi: ExtensionAPI,
 ): void {
   pi.on("before_tool_call", async (event) => {
-    const toolName = (event as { toolName?: string }).toolName ?? (event as { name?: string }).name;
+    const toolName =
+      (event as { toolName?: string }).toolName ??
+      (event as { name?: string }).name;
     if (!toolName) return;
 
     // Always block raw subagent.
     if (toolName === "subagent") {
       return {
         blocked: true,
-        reason: "Raw subagent calls are not allowed in Phenix child sessions.",
+        reason:
+          "Raw subagent calls are not allowed in Phenix child sessions.",
       };
     }
 
@@ -174,7 +159,8 @@ function registerContractToolGuard(
     ) {
       return {
         blocked: true,
-        reason: `The "${toolName}" tool is no longer available. Use phenix_complete to submit your result.`,
+        reason:
+          `The "${toolName}" tool is no longer available. Use phenix_complete to submit your result.`,
       };
     }
 
@@ -184,15 +170,20 @@ function registerContractToolGuard(
     // Check against contract effective tools.
     try {
       const ctx = requireChildRuntimeContext();
-      if (!toolAllowedByConfig(ctx.contract.runtime.tools, toolName)) {
+      if (
+        !toolAllowedByConfig(
+          ctx.contract.runtime.tools,
+          toolName,
+        )
+      ) {
         return {
           blocked: true,
-          reason: `Tool "${toolName}" is not authorized by the active contract.`,
+          reason:
+            `Tool "${toolName}" is not authorized by the active contract.`,
         };
       }
     } catch {
       // Root sessions: no contract-based restrictions here.
-      // The phenix-core tool guard handles root authorization.
     }
   });
 }
@@ -315,7 +306,6 @@ export default async function phenixContractRuntime(
   pi: ExtensionAPI,
 ): Promise<void> {
   // Decode the bootstrap environment.
-  // This throws on partial/invalid child environments.
   const envState = decodeContractBootstrapEnvironment();
 
   if (envState.kind === "root") {

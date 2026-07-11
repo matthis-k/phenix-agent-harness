@@ -12,9 +12,9 @@ import {
 import {
   issueContract,
   createRunId,
-  type ContractArtifact,
   type ContractId,
 } from "../extensions/phenix-subagents/contract.ts";
+import type { AgentRole } from "../extensions/phenix-subagents/agent-types.ts";
 
 const TEST_SCHEMA = {
   type: "object",
@@ -23,7 +23,17 @@ const TEST_SCHEMA = {
   properties: { ok: { const: true } },
 };
 
-function createTestArtifact(): ContractArtifact {
+const EMPTY_TOOL_CONFIG = {
+  presetRevision: 1 as const,
+  role: "scout" as AgentRole,
+  source: {
+    inherited: false,
+    patch: { additional: [] as const, removed: [] as const },
+  },
+  effective: [] as const,
+};
+
+function createTestArtifact() {
   const runId = createRunId();
   const issued = issueContract({
     identity: {
@@ -40,19 +50,11 @@ function createTestArtifact(): ContractArtifact {
       agent: "phenix.scout",
       cwd: "/tmp",
       thinking: "medium",
-      tools: {
-        presetRevision: 1 as const,
-        role: "scout",
-        source: {
-          inherited: false,
-          patch: { additional: [] as const, removed: [] as const },
-        },
-        effective: [] as const,
-      },
+      tools: EMPTY_TOOL_CONFIG,
       skills: [],
       extensions: [],
       allowedChildren: [],
-      maxDelegationDepth: 2,
+      remainingDelegationDepth: 2,
       timeoutMs: 600_000,
       turnBudget: { maxTurns: 24, graceTurns: 2 },
       toolBudget: { soft: 60, hard: 80, block: [] },
@@ -71,7 +73,10 @@ describe("FileContractStore", () => {
   let store: FileContractStore;
 
   before(() => {
-    tmpDir = path.join(os.tmpdir(), `phenix-contract-store-test-${randomUUID()}`);
+    tmpDir = path.join(
+      os.tmpdir(),
+      `phenix-contract-store-test-${randomUUID()}`,
+    );
     store = new FileContractStore(tmpDir);
     fs.mkdirSync(tmpDir, { recursive: true });
   });
@@ -87,7 +92,6 @@ describe("FileContractStore", () => {
     assert.equal(result.contractId, artifact.id);
     assert.equal(result.revision, 0);
 
-    // Verify persistence
     const loaded = await store.load(artifact.id);
     assert(loaded !== undefined);
     assert.equal(loaded.artifact.id, artifact.id);
@@ -110,14 +114,18 @@ describe("FileContractStore", () => {
     await assert.rejects(
       () => store.submit(artifact.id, 1, { ok: true }),
       (error: unknown) =>
-        error instanceof ContractStoreError && error.code === "already-terminal",
+        error instanceof ContractStoreError &&
+        error.code === "already-terminal",
     );
   });
 
   it("cancel transitions pending to cancelled", async () => {
     const artifact = createTestArtifact();
     await store.create(artifact);
-    const result = await store.cancel(artifact.id, "test cancellation");
+    const result = await store.cancel(
+      artifact.id,
+      "test cancellation",
+    );
     assert.equal(result.state, "cancelled");
     assert.equal(result.reason, "test cancellation");
   });
@@ -129,7 +137,8 @@ describe("FileContractStore", () => {
     await assert.rejects(
       () => store.submit(artifact.id, 0, { ok: true }),
       (error: unknown) =>
-        error instanceof ContractStoreError && error.code === "already-terminal",
+        error instanceof ContractStoreError &&
+        error.code === "already-terminal",
     );
   });
 
@@ -139,19 +148,21 @@ describe("FileContractStore", () => {
     await assert.rejects(
       () => store.submit(artifact.id, 42, { ok: true }),
       (error: unknown) =>
-        error instanceof ContractStoreError && error.code === "revision-conflict",
+        error instanceof ContractStoreError &&
+        error.code === "revision-conflict",
     );
   });
 
   it("load returns undefined for missing contract", async () => {
-    const result = await store.load(`phx_${randomUUID()}` as ContractId);
+    const result = await store.load(
+      `phx_${randomUUID()}` as ContractId,
+    );
     assert.equal(result, undefined);
   });
 
   it("malformed persisted JSON throws on load", async () => {
     const artifact = createTestArtifact();
     await store.create(artifact);
-    // Corrupt the artifact file
     const dir = path.join(tmpDir, artifact.id);
     const artifactFile = path.join(dir, "contract.json");
     fs.writeFileSync(artifactFile, "not valid json{{{");
@@ -159,7 +170,8 @@ describe("FileContractStore", () => {
     await assert.rejects(
       () => store.load(artifact.id),
       (error: unknown) =>
-        error instanceof ContractStoreError && error.code === "io-failure",
+        error instanceof ContractStoreError &&
+        error.code === "io-failure",
     );
   });
 
@@ -170,8 +182,10 @@ describe("FileContractStore", () => {
     const files = fs.readdirSync(dir);
     assert(files.includes("contract.json"));
     assert(files.includes("result.json"));
-    // No .tmp files should be left
-    assert.equal(files.filter((f) => f.endsWith(".tmp")).length, 0);
+    assert.equal(
+      files.filter((f) => f.endsWith(".tmp")).length,
+      0,
+    );
   });
 
   it("create rejects duplicate ID", async () => {
@@ -180,23 +194,35 @@ describe("FileContractStore", () => {
     await assert.rejects(
       () => store.create(artifact),
       (error: unknown) =>
-        error instanceof ContractStoreError && error.code === "revision-conflict",
+        error instanceof ContractStoreError &&
+        error.code === "revision-conflict",
     );
   });
 
   it("cancel on missing contract rejects", async () => {
     await assert.rejects(
-      () => store.cancel(`phx_${randomUUID()}` as ContractId, "cancel-missing"),
+      () =>
+        store.cancel(
+          `phx_${randomUUID()}` as ContractId,
+          "cancel-missing",
+        ),
       (error: unknown) =>
-        error instanceof ContractStoreError && error.code === "not-found",
+        error instanceof ContractStoreError &&
+        error.code === "not-found",
     );
   });
 
   it("submit on missing contract rejects", async () => {
     await assert.rejects(
-      () => store.submit(`phx_${randomUUID()}` as ContractId, 0, { ok: true }),
+      () =>
+        store.submit(
+          `phx_${randomUUID()}` as ContractId,
+          0,
+          { ok: true },
+        ),
       (error: unknown) =>
-        error instanceof ContractStoreError && error.code === "not-found",
+        error instanceof ContractStoreError &&
+        error.code === "not-found",
     );
   });
 });

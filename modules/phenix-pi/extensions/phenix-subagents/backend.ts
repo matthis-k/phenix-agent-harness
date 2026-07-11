@@ -8,10 +8,9 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import type { SubagentParamsLike } from "pi-subagents/src/runs/foreground/subagent-executor.ts";
+import type { Details } from "pi-subagents/src/shared/types.ts";
 
-import { discoverAgents } from "pi-subagents/src/agents/agents.ts";
-import { getArtifactsDir } from "pi-subagents/src/shared/artifacts.ts";
-import { loadConfig } from "pi-subagents/src/extension/config.ts";
 import {
   SUBAGENT_RPC_PROTOCOL_VERSION,
   SUBAGENT_RPC_REQUEST_EVENT,
@@ -19,16 +18,19 @@ import {
   type SubagentRpcReplyEnvelope,
 } from "pi-subagents/src/extension/rpc.ts";
 import {
-  createSubagentExecutor,
-  type SubagentParamsLike,
-} from "pi-subagents/src/runs/foreground/subagent-executor.ts";
-import {
   RESULTS_DIR,
-  type Details,
-  type SubagentState,
 } from "pi-subagents/src/shared/types.ts";
 
-export interface AsyncRunReference {
+// ── Types ───────────────────────────────────────────────────────────────────
+
+export interface SpawnRequest {
+  readonly requestId: string;
+  readonly params: SubagentParamsLike;
+  readonly environment: Readonly<Record<string, string>>;
+  readonly extraAgentDirectory: string;
+}
+
+export interface SpawnedChild {
   readonly runId: string;
   readonly asyncDir: string;
 }
@@ -83,85 +85,77 @@ export interface RuntimeAcceptanceLedger {
   };
 }
 
+// ── Event bus interface ─────────────────────────────────────────────────────
+
 interface EventBus {
   on(event: string, handler: (payload: unknown) => void): (() => void) | void;
   emit(event: string, payload: unknown): void;
 }
 
-interface BackendOptions {
-  readonly pi: ExtensionAPI;
-}
+// ── Async mutex ─────────────────────────────────────────────────────────────
 
-function createState(): SubagentState {
-  return {
-    baseCwd: "",
-    currentSessionId: null,
-    subagentInProgress: false,
-    subagentSpawns: { sessionId: null, count: 0 },
-    asyncJobs: new Map(),
-    foregroundRuns: new Map(),
-    foregroundControls: new Map(),
-    lastForegroundControlId: null,
-    pendingForegroundControlNotices: new Map(),
-    cleanupTimers: new Map(),
-    lastUiContext: null,
-    poller: null,
-    completionSeen: new Map(),
-    watcher: null,
-    watcherRestartTimer: null,
-    resultFileCoalescer: {
-      schedule: () => false,
-      clear: () => {},
-    },
-  };
-}
+class AsyncMutex {
+  private queue: Array<() => void> = [];
+  private locked = false;
 
-function subagentSessionRoot(parentSessionFile: string | null): string {
-  if (parentSessionFile) {
-    const baseName = path.basename(parentSessionFile, ".jsonl");
-    return path.join(path.dirname(parentSessionFile), baseName);
+  async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+    await this.acquire();
+    try {
+      return await fn();
+    } finally {
+      this.release();
+    }
   }
-  return fs.mkdtempSync(path.join(os.tmpdir(), "phenix-subagent-session-"));
+
+  private acquire(): Promise<void> {
+    if (!this.locked) {
+      this.locked = true;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      this.queue.push(resolve);
+    });
+  }
+
+  private release(): void {
+    const next = this.queue.shift();
+    if (next) {
+      next();
+    } else {
+      this.locked = false;
+    }
+  }
 }
 
-function expandTilde(candidate: string): string {
-  return candidate.startsWith("~/")
-    ? path.join(os.homedir(), candidate.slice(2))
-    : candidate;
-}
+// ── Spawn mutex singleton ───────────────────────────────────────────────────
 
-function textFromResult(result: AgentToolResult<Details>): string {
-  return result.content
-    .filter((part): part is { type: "text"; text: string } => part.type === "text")
-    .map((part) => part.text)
-    .join("\n");
-}
+const spawnMutex = new AsyncMutex();
 
-/**
- * Temporarily set environment variables on process.env around an async
- * operation, then restore the original values. This is safe for serialized
- * foreground runs. Do not use with concurrent spawns.
- *
- * The spawned child process inherits process.env through
- * { ...process.env, ...sharedEnv } in pi-subagents' buildPiArgs/spawn.
- */
-async function withChildEnvironment<T>(
-  extraEnv: Readonly<Record<string, string>> | undefined,
-  operation: () => Promise<T>,
+// ── Environment snapshotting ────────────────────────────────────────────────
+
+async function withTemporaryEnvironment<T>(
+  env: Readonly<Record<string, string>>,
+  fn: () => Promise<T>,
 ): Promise<T> {
-  if (!extraEnv || Object.keys(extraEnv).length === 0) {
-    return operation();
-  }
-
   const previous = new Map<string, string | undefined>();
-  for (const [name, value] of Object.entries(extraEnv)) {
+  const extraAgentDirsKey = "PI_SUBAGENT_EXTRA_AGENT_DIRS";
+
+  // Snapshot every key being changed.
+  for (const [name] of Object.entries(env)) {
     previous.set(name, process.env[name]);
-    process.env[name] = value;
   }
+  // Also snapshot the extra agent dirs for merging.
+  previous.set(extraAgentDirsKey, process.env[extraAgentDirsKey]);
 
   try {
-    return await operation();
+    // Apply each environment variable.
+    for (const [name, value] of Object.entries(env)) {
+      process.env[name] = value;
+    }
+
+    return await fn();
   } finally {
+    // Restore all changed keys.
     for (const [name, value] of previous) {
       if (value === undefined) {
         delete process.env[name];
@@ -172,144 +166,25 @@ async function withChildEnvironment<T>(
   }
 }
 
+// ── Text extraction ─────────────────────────────────────────────────────────
+
+function textFromResult(result: AgentToolResult<Details>): string {
+  return result.content
+    .filter((part): part is { type: "text"; text: string } => part.type === "text")
+    .map((part) => part.text)
+    .join("\n");
+}
+
+// ── Spawn backend ───────────────────────────────────────────────────────────
+
 export class SubagentBackend {
   private readonly events: EventBus;
-  private readonly directExecutor: ReturnType<typeof createSubagentExecutor>;
 
-  constructor(options: BackendOptions) {
-    this.events = options.pi.events as unknown as EventBus;
-    this.directExecutor = createSubagentExecutor({
-      pi: options.pi,
-      state: createState(),
-      config: loadConfig(),
-      asyncByDefault: false,
-      tempArtifactsDir: getArtifactsDir(null),
-      getSubagentSessionRoot: subagentSessionRoot,
-      expandTilde,
-      discoverAgents,
-      allowMutatingManagementActions: false,
-    });
+  constructor(pi: ExtensionAPI) {
+    this.events = pi.events as unknown as EventBus;
   }
 
-  async runForeground(
-    runId: string,
-    params: SubagentParamsLike,
-    signal: AbortSignal,
-    onUpdate: ((result: AgentToolResult<Details>) => void) | undefined,
-    ctx: ExtensionContext,
-    extraEnv?: Readonly<Record<string, string>>,
-  ): Promise<AgentToolResult<Details>> {
-    return withChildEnvironment(extraEnv, () =>
-      this.directExecutor.execute(
-        runId,
-        { ...params, async: false, clarify: false },
-        signal,
-        onUpdate,
-        ctx,
-      ),
-    );
-  }
-
-  async spawnBackground(
-    requestId: string,
-    params: SubagentParamsLike,
-    signal: AbortSignal,
-    extraEnv?: Readonly<Record<string, string>>,
-  ): Promise<AsyncRunReference> {
-    return withChildEnvironment(extraEnv, async () => {
-    const response = await this.rpc("spawn", {
-      ...params,
-      async: true,
-      clarify: false,
-    }, signal, requestId);
-    const data = response as {
-      details?: { asyncId?: string; asyncDir?: string; runId?: string };
-    };
-    const runId = data.details?.asyncId ?? data.details?.runId;
-    const asyncDir = data.details?.asyncDir;
-    if (!runId || !asyncDir) {
-      throw new Error("pi-subagents spawn did not return asyncId and asyncDir");
-    }
-    return { runId, asyncDir };
-    });
-  }
-
-  async interrupt(runId: string, signal?: AbortSignal): Promise<void> {
-    await this.rpc("interrupt", { id: runId }, signal);
-  }
-
-  async stop(runId: string, signal?: AbortSignal): Promise<void> {
-    await this.rpc("stop", { id: runId }, signal);
-  }
-
-  resultPath(runId: string): string {
-    return path.join(RESULTS_DIR, `${runId}.json`);
-  }
-
-  readResult(runId: string): AsyncResultPayload | undefined {
-    const resultPath = this.resultPath(runId);
-    try {
-      return JSON.parse(fs.readFileSync(resultPath, "utf-8")) as AsyncResultPayload;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-      throw error;
-    }
-  }
-
-  async waitForResult(
-    runId: string,
-    signal: AbortSignal,
-    timeoutMs: number,
-  ): Promise<AsyncResultPayload> {
-    const deadline = Date.now() + timeoutMs;
-    while (true) {
-      if (signal.aborted) throw new Error("subagent wait aborted");
-      const result = this.readResult(runId);
-      if (result) return result;
-      if (Date.now() >= deadline) {
-        throw new Error(`timed out waiting for subagent run ${runId}`);
-      }
-      await new Promise<void>((resolve, reject) => {
-        const cleanup = () => signal.removeEventListener("abort", abort);
-        const timer = setTimeout(() => {
-          cleanup();
-          resolve();
-        }, 250);
-        const abort = () => {
-          clearTimeout(timer);
-          cleanup();
-          reject(new Error("subagent wait aborted"));
-        };
-        signal.addEventListener("abort", abort, { once: true });
-      });
-    }
-  }
-
-  foregroundChildren(result: AgentToolResult<Details>): RuntimeChildResult[] {
-    const children = (result.details?.results ?? []) as RuntimeChildResult[];
-    if (children.length > 0) {
-      if (!result.isError) return children;
-      return children.map((child, index) => index === children.length - 1
-        ? {
-            ...child,
-            success: false,
-            error: child.error ?? textFromResult(result) ?? "subagent execution failed",
-          }
-        : child);
-    }
-    return [{
-      success: false,
-      error: textFromResult(result) || "subagent execution returned no child result",
-    }];
-  }
-
-  asyncResultChildren(payload: AsyncResultPayload): RuntimeChildResult[] {
-    if (payload.results?.length) return [...payload.results];
-    return [{
-      success: payload.success,
-      error: payload.error ?? `subagent run ended in state ${payload.state ?? "unknown"}`,
-    }];
-  }
+  // ── RPC helper ────────────────────────────────────────────────────────
 
   private async rpc(
     method: "spawn" | "interrupt" | "stop" | "status" | "ping",
@@ -348,7 +223,7 @@ export class SubagentBackend {
         if (settled) return;
         cleanup();
         reject(new Error(`subagent RPC ${method} timed out`));
-      }, 10_000);
+      }, 20_000);
       signal?.addEventListener("abort", abort, { once: true });
 
       this.events.emit(SUBAGENT_RPC_REQUEST_EVENT, {
@@ -359,5 +234,173 @@ export class SubagentBackend {
         source: { extension: "phenix-subagents" },
       });
     });
+  }
+
+  // ── Unified spawn ─────────────────────────────────────────────────────
+
+  /**
+   * Spawn a child subagent through the pi-subagents RPC.
+   *
+   * Uses a global async mutex to serialize environment mutations during
+   * the spawn window. The mutex is held only for the spawn RPC call,
+   * not while waiting for child completion.
+   *
+   * Both foreground (await) and background (handle-return) modes
+   * use the same spawn path.
+   */
+  async spawn(
+    request: SpawnRequest,
+    signal: AbortSignal,
+  ): Promise<SpawnedChild> {
+    const mergedAgentDirs = this.buildExtraAgentDirs(
+      request.extraAgentDirectory,
+    );
+
+    const env: Record<string, string> = {
+      ...request.environment,
+      PI_SUBAGENT_EXTRA_AGENT_DIRS: mergedAgentDirs,
+    };
+
+    return spawnMutex.runExclusive(async () => {
+      return withTemporaryEnvironment(env, async () => {
+        const response = await this.rpc("spawn", {
+          ...request.params,
+          async: true,
+          clarify: false,
+        }, signal, request.requestId);
+
+        const data = response as {
+          details?: { asyncId?: string; asyncDir?: string; runId?: string };
+        };
+        const runId = data.details?.asyncId ?? data.details?.runId;
+        const asyncDir = data.details?.asyncDir;
+        if (!runId || !asyncDir) {
+          throw new Error(
+            "pi-subagents spawn did not return asyncId and asyncDir",
+          );
+        }
+        return { runId, asyncDir };
+      });
+    });
+  }
+
+  // ── Wait for result ───────────────────────────────────────────────────
+
+  async waitForResult(
+    runId: string,
+    signal: AbortSignal,
+    timeoutMs: number,
+  ): Promise<AsyncResultPayload> {
+    const deadline = Date.now() + timeoutMs;
+    while (true) {
+      if (signal.aborted) throw new Error("subagent wait aborted");
+      const result = this.readResult(runId);
+      if (result) return result;
+      if (Date.now() >= deadline) {
+        throw new Error(`timed out waiting for subagent run ${runId}`);
+      }
+      await new Promise<void>((resolve, reject) => {
+        const abort = () => {
+          signal.removeEventListener("abort", abort);
+          clearTimeout(timer);
+          reject(new Error("subagent wait aborted"));
+        };
+        const timer = setTimeout(() => {
+          signal.removeEventListener("abort", abort);
+          resolve();
+        }, 250);
+        signal.addEventListener("abort", abort, { once: true });
+      });
+    }
+  }
+
+  // ── Interrupt / stop ──────────────────────────────────────────────────
+
+  async interrupt(runId: string, signal?: AbortSignal): Promise<void> {
+    await this.rpc("interrupt", { id: runId }, signal);
+  }
+
+  async stop(runId: string, signal?: AbortSignal): Promise<void> {
+    await this.rpc("stop", { id: runId }, signal);
+  }
+
+  // ── Result reading ────────────────────────────────────────────────────
+
+  resultPath(runId: string): string {
+    return path.join(RESULTS_DIR, `${runId}.json`);
+  }
+
+  readResult(runId: string): AsyncResultPayload | undefined {
+    const resultPath = this.resultPath(runId);
+    try {
+      return JSON.parse(
+        fs.readFileSync(resultPath, "utf-8"),
+      ) as AsyncResultPayload;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    }
+  }
+
+  // ── Child result helpers ──────────────────────────────────────────────
+
+  foregroundChildren(
+    result: AgentToolResult<Details>,
+  ): RuntimeChildResult[] {
+    const children = (result.details?.results ?? []) as RuntimeChildResult[];
+    if (children.length > 0) {
+      if (!result.isError) return children;
+      return children.map((child, index) =>
+        index === children.length - 1
+          ? {
+              ...child,
+              success: false,
+              error:
+                child.error ??
+                textFromResult(result) ??
+                "subagent execution failed",
+            }
+          : child,
+      );
+    }
+    return [
+      {
+        success: false,
+        error:
+          textFromResult(result) ||
+          "subagent execution returned no child result",
+      },
+    ];
+  }
+
+  asyncResultChildren(payload: AsyncResultPayload): RuntimeChildResult[] {
+    if (payload.results?.length) return [...payload.results];
+    return [
+      {
+        success: payload.success,
+        error:
+          payload.error ??
+          `subagent run ended in state ${payload.state ?? "unknown"}`,
+      },
+    ];
+  }
+
+  // ── Private helpers ───────────────────────────────────────────────────
+
+  private buildExtraAgentDirs(
+    contractAgentDir: string,
+  ): string {
+    const current = process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS
+      ?.split(path.delimiter)
+      .filter(Boolean) ?? [];
+
+    const merged = [
+      ...current.filter(
+        (entry) => path.resolve(entry) !== path.resolve(contractAgentDir),
+      ),
+      contractAgentDir,
+    ];
+
+    return merged.join(path.delimiter);
   }
 }

@@ -15,7 +15,7 @@ import {
   type ContractId,
   type RunId,
 } from "../extensions/phenix-subagents/contract.ts";
-import type { AgentRole } from "../extensions/phenix-subagents/policy.ts";
+import type { AgentRole } from "../extensions/phenix-subagents/agent-types.ts";
 
 const TEST_SCHEMA = {
   type: "object",
@@ -47,6 +47,7 @@ function issueTestContract(role: AgentRole = TEST_ROLE): {
   capabilityToken: CapabilityToken;
 } {
   const runId = createRunId();
+  const config = { ...EMPTY_TOOL_CONFIG, role };
   const issued = issueContract({
     identity: {
       runId,
@@ -62,11 +63,11 @@ function issueTestContract(role: AgentRole = TEST_ROLE): {
       agent: role === null ? "phenix.base" : `phenix.${role}`,
       cwd: "/tmp",
       thinking: "medium",
-      tools: { ...EMPTY_TOOL_CONFIG, role },
+      tools: config,
       skills: [],
       extensions: [],
       allowedChildren: [],
-      maxDelegationDepth: 2,
+      remainingDelegationDepth: 2,
       timeoutMs: 600_000,
       turnBudget: { maxTurns: 24, graceTurns: 2 },
       toolBudget: { soft: 60, hard: 80, block: [] },
@@ -85,7 +86,7 @@ function issueTestContract(role: AgentRole = TEST_ROLE): {
   };
 }
 
-describe("Contract domain v2", () => {
+describe("Contract domain v3", () => {
   it("issue creates unique contract IDs", () => {
     const a = issueTestContract();
     const b = issueTestContract();
@@ -113,7 +114,7 @@ describe("Contract domain v2", () => {
       runtime: {
         agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
         tools: { ...EMPTY_TOOL_CONFIG, role: "scout" },
-        skills: [], extensions: [], allowedChildren: [], maxDelegationDepth: 2,
+        skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 2,
         timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
       },
@@ -135,7 +136,7 @@ describe("Contract domain v2", () => {
       runtime: {
         agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
         tools: { ...EMPTY_TOOL_CONFIG, role: "scout" },
-        skills: [], extensions: [], allowedChildren: [], maxDelegationDepth: 2,
+        skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 2,
         timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
       },
@@ -157,7 +158,7 @@ describe("Contract domain v2", () => {
       runtime: {
         agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
         tools: { ...EMPTY_TOOL_CONFIG, role: "scout" },
-        skills: [], extensions: [], allowedChildren: [], maxDelegationDepth: 2,
+        skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 2,
         timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
       },
@@ -179,7 +180,7 @@ describe("Contract domain v2", () => {
       runtime: {
         agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
         tools: { ...EMPTY_TOOL_CONFIG, role: "scout" },
-        skills: [], extensions: [], allowedChildren: [], maxDelegationDepth: 2,
+        skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 2,
         timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
       },
@@ -201,7 +202,7 @@ describe("Contract domain v2", () => {
       runtime: {
         agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
         tools: { ...EMPTY_TOOL_CONFIG, role: "scout" },
-        skills: [], extensions: [], allowedChildren: [], maxDelegationDepth: 2,
+        skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 2,
         timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
       },
@@ -242,7 +243,7 @@ describe("Contract domain v2", () => {
     assert.equal(parseCapabilityToken(""), undefined);
   });
 
-  it("v2 artifact has complete runtime fields", () => {
+  it("v3 artifact has complete runtime fields", () => {
     const runId = createRunId();
     const issued = issueContract({
       identity: { runId, handleId: "test", role: null },
@@ -250,19 +251,19 @@ describe("Contract domain v2", () => {
       runtime: {
         agent: "phenix.base", cwd: "/tmp", thinking: "low",
         tools: { ...EMPTY_TOOL_CONFIG, role: null },
-        skills: [], extensions: [], allowedChildren: [], maxDelegationDepth: 0,
+        skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 0,
         timeoutMs: 300_000, turnBudget: { maxTurns: 12, graceTurns: 2 },
         toolBudget: { soft: 30, hard: 40, block: ["read"] },
       },
       verification: { commands: [], criticRequired: false, maxRepairAttempts: 0 },
     });
 
-    assert.equal(issued.artifact.version, 2);
+    assert.equal(issued.artifact.version, 3);
     assert.equal(issued.artifact.identity.role, null);
     assert.equal(issued.artifact.identity.handleId, "test");
     assert.equal(issued.artifact.assignment.task, TEST_TASK);
     assert.equal(issued.artifact.runtime.agent, "phenix.base");
-    assert.equal(issued.artifact.runtime.maxDelegationDepth, 0);
+    assert.equal(issued.artifact.runtime.remainingDelegationDepth, 0);
     assert.ok(typeof issued.artifact.capabilityTokenHash === "string");
     assert.ok(issued.artifact.capabilityTokenHash.length > 0);
   });
@@ -275,7 +276,7 @@ describe("Contract domain v2", () => {
       runtime: {
         agent: "phenix.base", cwd: "/tmp", thinking: "low",
         tools: { ...EMPTY_TOOL_CONFIG, role: null },
-        skills: [], extensions: [], allowedChildren: [], maxDelegationDepth: 0,
+        skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 0,
         timeoutMs: 300_000, turnBudget: { maxTurns: 12, graceTurns: 2 },
         toolBudget: { soft: 30, hard: 40, block: [] },
       },
@@ -284,29 +285,5 @@ describe("Contract domain v2", () => {
 
     assert.equal(issued.artifact.identity.role, null);
     assert.equal(issued.artifact.identity.handleId, "test-null-role");
-  });
-
-  it("authorizeContract no longer checks role mismatch (role is artifact data)", () => {
-    // Role mismatch is not a failure in v2 since role is artifact data, not identity claim.
-    const runId = createRunId();
-    const issued = issueContract({
-      identity: { runId, handleId: "test", role: "scout" as AgentRole },
-      assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
-      runtime: {
-        agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
-        tools: { ...EMPTY_TOOL_CONFIG, role: "scout" },
-        skills: [], extensions: [], allowedChildren: [], maxDelegationDepth: 2,
-        timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
-        toolBudget: { soft: 60, hard: 80, block: [] },
-      },
-      verification: { commands: [], criticRequired: false, maxRepairAttempts: 1 },
-    });
-    // Authorization only checks ID, run ID, token hash, and expiry.
-    const result = authorizeContract(issued.artifact, {
-      contractId: issued.artifact.id,
-      runId: issued.artifact.identity.runId,
-      capabilityToken: issued.capabilityToken,
-    });
-    assert.deepEqual(result, { ok: true });
   });
 });

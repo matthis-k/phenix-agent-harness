@@ -106,7 +106,7 @@ export function recordChildSessions(
   }[],
 ): void {
   latestAttempt(record).childSessions = children.map((child, index) => ({
-    role: child.agent ?? (index === 0 ? record.policy.agent : record.reviewPolicy?.agent ?? `child-${index}`),
+    role: child.agent ?? (index === 0 ? record.producerSpec.agent : record.criticSpec?.agent ?? `child-${index}`),
     status: child.success === false || (child.exitCode !== undefined && child.exitCode !== null && child.exitCode !== 0)
       ? "failed"
       : "completed",
