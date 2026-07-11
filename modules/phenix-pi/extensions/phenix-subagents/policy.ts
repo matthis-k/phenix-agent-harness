@@ -15,6 +15,7 @@ export const AGENT_KINDS = [
 ] as const;
 
 export type AgentKind = (typeof AGENT_KINDS)[number];
+export type AgentRole = AgentKind | null;
 export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh";
 export type ModelTier = "low" | "standard" | "high" | "critical";
 
@@ -86,8 +87,8 @@ export interface ResolvedExecutionPolicy {
 }
 
 /**
- * Contract tools (phenix_contract_get, phenix_contract_submit) are loaded
- * from the Phenix extension package, not declared per-agent frontmatter.
+ * Contract tools are loaded by the phenix-contract-runtime bootstrap extension.
+ * phenix_complete is the only model-callable contract protocol tool.
  * Keep contact_supervisor for blocker/decision communication.
  * Keep phenix_delegate where the role-child graph allows nested delegation.
  * Raw subagent remains blocked by the runtime tool guard.
@@ -95,8 +96,7 @@ export interface ResolvedExecutionPolicy {
 export const REQUIRED_CHILD_RUNTIME_TOOLS = [
   "contact_supervisor",
   "phenix_delegate",
-  "phenix_contract_get",
-  "phenix_contract_submit",
+  "phenix_complete",
 ] as const;
 
 /**
@@ -147,8 +147,6 @@ const COMMON_READ_TOOLS = [
   "context_*",
   "contact_supervisor",
   "phenix_delegate",
-  "phenix_contract_get",
-  "phenix_contract_submit",
 ] as const;
 
 const ROLE_TOOLS: Record<AgentKind, readonly string[]> = {

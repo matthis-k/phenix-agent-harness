@@ -1,7 +1,8 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
 import type { JsonSchema } from "./contracts.ts";
-import type { AgentKind } from "./policy.ts";
+import type { AgentRole, VerificationCommand } from "./policy.ts";
+import type { ResolvedToolConfiguration } from "./tool-policy.ts";
 
 declare const contractIdBrand: unique symbol;
 declare const capabilityTokenBrand: unique symbol;
@@ -19,26 +20,80 @@ export type RunId = string & {
   readonly [runIdBrand]: true;
 };
 
+// ── Contract identity (for bootstrap authentication) ────────────────────────
+
 export interface ContractIdentity {
   readonly contractId: ContractId;
   readonly runId: RunId;
-  readonly role: AgentKind;
   readonly capabilityToken: CapabilityToken;
 }
 
-export interface ContractArtifact {
-  readonly version: 1;
+// ── Budget types ────────────────────────────────────────────────────────────
+
+export interface TurnBudget {
+  readonly maxTurns: number;
+  readonly graceTurns: number;
+}
+
+export interface ToolBudget {
+  readonly soft: number;
+  readonly hard: number;
+  readonly block: readonly string[];
+}
+
+// ── Contract artifact v2 ────────────────────────────────────────────────────
+
+export interface ContractArtifactV2 {
+  readonly version: 2;
   readonly id: ContractId;
-  readonly runId: RunId;
-  readonly parentRunId?: RunId;
-  readonly role: AgentKind;
-  readonly task: string;
-  readonly requirements: readonly string[];
-  readonly outputSchema: JsonSchema;
+
+  readonly identity: {
+    readonly runId: RunId;
+    readonly parentRunId?: RunId;
+    readonly handleId: string;
+    readonly parentHandleId?: string;
+    readonly role: AgentRole;
+  };
+
+  readonly assignment: {
+    readonly task: string;
+    readonly requirements: readonly string[];
+    readonly outputSchema: JsonSchema;
+  };
+
+  readonly runtime: {
+    readonly agent: string;
+    readonly cwd: string;
+    readonly model?: string;
+    readonly thinking: string;
+
+    readonly tools: ResolvedToolConfiguration;
+    readonly skills: readonly string[];
+    readonly extensions: readonly string[];
+
+    readonly allowedChildren: readonly AgentRole[];
+    readonly maxDelegationDepth: number;
+
+    readonly timeoutMs: number;
+    readonly turnBudget: TurnBudget;
+    readonly toolBudget: ToolBudget;
+  };
+
+  readonly verification: {
+    readonly commands: readonly VerificationCommand[];
+    readonly criticRequired: boolean;
+    readonly maxRepairAttempts: number;
+  };
+
   readonly capabilityTokenHash: string;
   readonly createdAt: string;
   readonly expiresAt?: string;
 }
+
+// Keep the old name as an alias for backward compatibility during migration.
+export type ContractArtifact = ContractArtifactV2;
+
+// ── Result types (version 1, unchanged) ─────────────────────────────────────
 
 export interface PendingContractResult {
   readonly version: 1;
@@ -72,14 +127,15 @@ export type ContractResult =
   | CancelledContractResult;
 
 export interface IssuedContract {
-  readonly artifact: ContractArtifact;
+  readonly artifact: ContractArtifactV2;
   readonly capabilityToken: CapabilityToken;
 }
+
+// ── Authorization ───────────────────────────────────────────────────────────
 
 export type ContractAuthorizationFailure =
   | "contract-id-mismatch"
   | "run-id-mismatch"
-  | "role-mismatch"
   | "invalid-capability"
   | "expired";
 
@@ -91,6 +147,8 @@ export type ContractAuthorizationResult =
       readonly ok: false;
       readonly reason: ContractAuthorizationFailure;
     };
+
+// ── Factory functions ───────────────────────────────────────────────────────
 
 export function createContractId(): ContractId {
   return `phx_${randomUUID()}` as ContractId;
@@ -110,43 +168,66 @@ export function hashCapabilityToken(
   return createHash("sha256").update(token).digest("hex");
 }
 
-export function issueContract(input: {
-  readonly runId: RunId;
-  readonly parentRunId?: RunId;
-  readonly role: AgentKind;
-  readonly task: string;
-  readonly requirements: readonly string[];
-  readonly outputSchema: JsonSchema;
+// ── Contract issuance (v2) ──────────────────────────────────────────────────
+
+export type IssueContractInput = Pick<ContractArtifactV2,
+  "identity" | "assignment" | "runtime" | "verification"
+> & {
   readonly expiresAt?: string;
-}): IssuedContract {
+};
+
+/**
+ * Issue a new v2 contract artifact from a fully resolved specification.
+ * No policy derivation, role configuration, or tool resolution happens here.
+ */
+export function issueContract(
+  input: IssueContractInput,
+): IssuedContract {
   const capabilityToken = createCapabilityToken();
 
-  return {
-    artifact: {
-      version: 1,
-      id: createContractId(),
-      runId: input.runId,
-      ...(input.parentRunId
-        ? {
-            parentRunId: input.parentRunId,
-          }
-        : {}),
-      role: input.role,
-      task: input.task,
-      requirements: [...input.requirements],
-      outputSchema: input.outputSchema,
-      capabilityTokenHash:
-        hashCapabilityToken(capabilityToken),
-      createdAt: new Date().toISOString(),
-      ...(input.expiresAt
-        ? {
-            expiresAt: input.expiresAt,
-          }
-        : {}),
+  const artifact: ContractArtifactV2 = {
+    version: 2,
+    id: createContractId(),
+    identity: {
+      runId: input.identity.runId,
+      ...(input.identity.parentRunId ? { parentRunId: input.identity.parentRunId } : {}),
+      handleId: input.identity.handleId,
+      ...(input.identity.parentHandleId ? { parentHandleId: input.identity.parentHandleId } : {}),
+      role: input.identity.role,
     },
-    capabilityToken,
+    assignment: {
+      task: input.assignment.task,
+      requirements: [...input.assignment.requirements],
+      outputSchema: input.assignment.outputSchema,
+    },
+    runtime: {
+      agent: input.runtime.agent,
+      cwd: input.runtime.cwd,
+      ...(input.runtime.model ? { model: input.runtime.model } : {}),
+      thinking: input.runtime.thinking,
+      tools: input.runtime.tools,
+      skills: [...input.runtime.skills],
+      extensions: [...input.runtime.extensions],
+      allowedChildren: [...input.runtime.allowedChildren],
+      maxDelegationDepth: input.runtime.maxDelegationDepth,
+      timeoutMs: input.runtime.timeoutMs,
+      turnBudget: { ...input.runtime.turnBudget },
+      toolBudget: { ...input.runtime.toolBudget },
+    },
+    verification: {
+      commands: [...input.verification.commands],
+      criticRequired: input.verification.criticRequired,
+      maxRepairAttempts: input.verification.maxRepairAttempts,
+    },
+    capabilityTokenHash: hashCapabilityToken(capabilityToken),
+    createdAt: new Date().toISOString(),
+    ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
   };
+
+  return { artifact, capabilityToken };
 }
+
+// ── Token verification ──────────────────────────────────────────────────────
 
 function equalHexHashes(
   left: string,
@@ -166,8 +247,14 @@ function equalHexHashes(
   }
 }
 
+// ── Contract authorization ──────────────────────────────────────────────────
+
+/**
+ * Authorize a contract identity against an artifact.
+ * Role is no longer checked here — it's part of the artifact identity.
+ */
 export function authorizeContract(
-  artifact: ContractArtifact,
+  artifact: ContractArtifactV2,
   identity: ContractIdentity,
   now = new Date(),
 ): ContractAuthorizationResult {
@@ -178,22 +265,14 @@ export function authorizeContract(
     };
   }
 
-  if (identity.runId !== artifact.runId) {
+  if (identity.runId !== artifact.identity.runId) {
     return {
       ok: false,
       reason: "run-id-mismatch",
     };
   }
 
-  if (identity.role !== artifact.role) {
-    return {
-      ok: false,
-      reason: "role-mismatch",
-    };
-  }
-
-  const candidateHash =
-    hashCapabilityToken(identity.capabilityToken);
+  const candidateHash = hashCapabilityToken(identity.capabilityToken);
 
   if (
     !equalHexHashes(
@@ -217,10 +296,10 @@ export function authorizeContract(
     };
   }
 
-  return {
-    ok: true,
-  };
+  return { ok: true };
 }
+
+// ── Parsing helpers ─────────────────────────────────────────────────────────
 
 export function parseContractId(
   value: unknown,

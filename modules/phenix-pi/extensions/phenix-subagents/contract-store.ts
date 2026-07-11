@@ -87,19 +87,125 @@ function decodeArtifact(
 ): ContractArtifact {
   if (
     !isObject(value) ||
-    value.version !== 1 ||
-    typeof value.id !== "string" ||
-    typeof value.runId !== "string" ||
-    typeof value.role !== "string" ||
-    typeof value.task !== "string" ||
-    !Array.isArray(value.requirements) ||
-    typeof value.capabilityTokenHash !== "string" ||
-    typeof value.createdAt !== "string" ||
-    !isObject(value.outputSchema)
+    typeof value.version !== "number"
   ) {
     throw new ContractStoreError(
       "invalid-artifact",
-      "Contract artifact is malformed.",
+      "Contract artifact is malformed: missing or invalid version.",
+    );
+  }
+
+  if (value.version === 1) {
+    throw new ContractStoreError(
+      "invalid-artifact",
+      "Unsupported contract version 1. This version of the Phenix runtime only supports contract version 2.",
+    );
+  }
+
+  if (value.version !== 2) {
+    throw new ContractStoreError(
+      "invalid-artifact",
+      `Unsupported contract version ${String(value.version)}.`,
+    );
+  }
+
+  // Validate identity section.
+  if (
+    typeof value.id !== "string" ||
+    !isObject(value.identity) ||
+    typeof value.identity.runId !== "string" ||
+    typeof value.identity.handleId !== "string"
+  ) {
+    throw new ContractStoreError(
+      "invalid-artifact",
+      "Contract artifact is malformed: invalid identity section.",
+    );
+  }
+
+  // Validate assignment section.
+  if (
+    !isObject(value.assignment) ||
+    typeof value.assignment.task !== "string" ||
+    !Array.isArray(value.assignment.requirements) ||
+    !isObject(value.assignment.outputSchema)
+  ) {
+    throw new ContractStoreError(
+      "invalid-artifact",
+      "Contract artifact is malformed: invalid assignment section.",
+    );
+  }
+
+  // Validate runtime section.
+  if (
+    !isObject(value.runtime) ||
+    typeof value.runtime.agent !== "string" ||
+    typeof value.runtime.cwd !== "string" ||
+    typeof value.runtime.thinking !== "string" ||
+    typeof value.runtime.timeoutMs !== "number" ||
+    !Array.isArray(value.runtime.skills) ||
+    !Array.isArray(value.runtime.extensions) ||
+    !Array.isArray(value.runtime.allowedChildren) ||
+    typeof value.runtime.maxDelegationDepth !== "number"
+  ) {
+    throw new ContractStoreError(
+      "invalid-artifact",
+      "Contract artifact is malformed: invalid runtime section.",
+    );
+  }
+
+  // Validate tools section.
+  if (
+    !isObject(value.runtime.tools) ||
+    typeof value.runtime.tools.presetRevision !== "number" ||
+    !Array.isArray(value.runtime.tools.effective) ||
+    !isObject(value.runtime.tools.source) ||
+    !isObject(value.runtime.tools.source.patch) ||
+    !Array.isArray(value.runtime.tools.source.patch.additional) ||
+    !Array.isArray(value.runtime.tools.source.patch.removed)
+  ) {
+    throw new ContractStoreError(
+      "invalid-artifact",
+      "Contract artifact is malformed: invalid tools section.",
+    );
+  }
+
+  // Validate turn and tool budgets.
+  if (
+    !isObject(value.runtime.turnBudget) ||
+    typeof value.runtime.turnBudget.maxTurns !== "number" ||
+    typeof value.runtime.turnBudget.graceTurns !== "number" ||
+    !isObject(value.runtime.toolBudget) ||
+    typeof value.runtime.toolBudget.soft !== "number" ||
+    typeof value.runtime.toolBudget.hard !== "number" ||
+    !Array.isArray(value.runtime.toolBudget.block)
+  ) {
+    throw new ContractStoreError(
+      "invalid-artifact",
+      "Contract artifact is malformed: invalid budget section.",
+    );
+  }
+
+  // Validate verification section.
+  if (
+    !isObject(value.verification) ||
+    !Array.isArray(value.verification.commands) ||
+    typeof value.verification.criticRequired !== "boolean" ||
+    typeof value.verification.maxRepairAttempts !== "number"
+  ) {
+    throw new ContractStoreError(
+      "invalid-artifact",
+      "Contract artifact is malformed: invalid verification section.",
+    );
+  }
+
+  // Validate top-level fields.
+  if (
+    typeof value.capabilityTokenHash !== "string" ||
+    typeof value.createdAt !== "string"
+  ) {
+    throw new ContractStoreError(
+      "invalid-artifact",
+      "Contract artifact is malformed: missing required top-level fields.",
     );
   }
 

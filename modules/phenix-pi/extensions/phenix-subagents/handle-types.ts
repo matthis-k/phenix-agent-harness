@@ -1,6 +1,7 @@
-import type { AgentKind, ResolvedExecutionPolicy } from "./policy.ts";
-import type { JsonSchema } from "./contracts.ts";
 import type { ContractId, RunId } from "./contract.ts";
+import type { JsonSchema } from "./contracts.ts";
+import type { AgentRole, AgentKind, ResolvedExecutionPolicy } from "./policy.ts";
+import type { ToolPatchInput, ResolvedToolConfiguration } from "./tool-policy.ts";
 
 // ── Constants (used by index.ts; extracted for visibility) ──────────────────
 
@@ -97,7 +98,7 @@ export interface HandleRecord {
   readonly id: string;
   readonly sessionId: string;
   readonly parentId?: string;
-  readonly role: AgentKind;
+  readonly role: AgentRole;
   readonly task: string;
   readonly requirements: readonly string[];
   readonly outputSchema: JsonSchema;
@@ -118,6 +119,9 @@ export interface HandleRecord {
     readonly sessionFile?: string;
     readonly transcriptPath?: string;
   };
+  // Contract v2 resolution fields.
+  readonly toolRequest: ToolPatchInput | null;
+  readonly resolvedTools: ResolvedToolConfiguration;
 }
 
 // ── Evaluation ──────────────────────────────────────────────────────────────
@@ -130,3 +134,7 @@ export interface Evaluation {
   readonly verification: VerificationSummary;
   readonly review?: HandleRecord["review"];
 }
+
+// ── Re-exports ──────────────────────────────────────────────────────────────
+
+export type { AgentRole, AgentKind, ToolPatchInput, ResolvedToolConfiguration };

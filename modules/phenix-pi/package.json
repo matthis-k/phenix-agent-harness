@@ -9,9 +9,9 @@
   },
   "pi": {
     "extensions": [
+      "./extensions/phenix-contract-runtime.ts",
       "./extensions/phenix-routing/index.ts",
-      "./extensions/phenix-core.ts",
-      "./extensions/phenix-contract-tools.ts"
+      "./extensions/phenix-core.ts"
     ],
     "skills": [
       "./skills"

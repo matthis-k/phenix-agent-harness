@@ -15,7 +15,7 @@ import {
   type ContractId,
   type RunId,
 } from "../extensions/phenix-subagents/contract.ts";
-import { type AgentKind } from "../extensions/phenix-subagents/policy.ts";
+import type { AgentRole } from "../extensions/phenix-subagents/policy.ts";
 
 const TEST_SCHEMA = {
   type: "object",
@@ -28,31 +28,64 @@ const TEST_SCHEMA = {
 
 const TEST_TASK = "Test task";
 const TEST_REQUIREMENTS: readonly string[] = [];
-const TEST_ROLE: AgentKind = "scout";
+const TEST_ROLE: AgentRole = "scout";
 
-function issueTestContract(): {
+const EMPTY_TOOL_CONFIG = {
+  presetRevision: 1 as const,
+  role: "scout" as AgentRole,
+  source: {
+    inherited: false,
+    patch: { additional: [] as const, removed: [] as const },
+  },
+  effective: [] as const,
+};
+
+function issueTestContract(role: AgentRole = TEST_ROLE): {
   contractId: ContractId;
   runId: RunId;
-  role: AgentKind;
+  role: AgentRole;
   capabilityToken: CapabilityToken;
 } {
   const runId = createRunId();
   const issued = issueContract({
-    runId,
-    role: TEST_ROLE,
-    task: TEST_TASK,
-    requirements: TEST_REQUIREMENTS,
-    outputSchema: TEST_SCHEMA,
+    identity: {
+      runId,
+      handleId: "test-handle",
+      role,
+    },
+    assignment: {
+      task: TEST_TASK,
+      requirements: TEST_REQUIREMENTS,
+      outputSchema: TEST_SCHEMA,
+    },
+    runtime: {
+      agent: role === null ? "phenix.base" : `phenix.${role}`,
+      cwd: "/tmp",
+      thinking: "medium",
+      tools: { ...EMPTY_TOOL_CONFIG, role },
+      skills: [],
+      extensions: [],
+      allowedChildren: [],
+      maxDelegationDepth: 2,
+      timeoutMs: 600_000,
+      turnBudget: { maxTurns: 24, graceTurns: 2 },
+      toolBudget: { soft: 60, hard: 80, block: [] },
+    },
+    verification: {
+      commands: [],
+      criticRequired: false,
+      maxRepairAttempts: 1,
+    },
   });
   return {
     contractId: issued.artifact.id,
-    runId: issued.artifact.runId,
-    role: issued.artifact.role,
+    runId: issued.artifact.identity.runId,
+    role: issued.artifact.identity.role,
     capabilityToken: issued.capabilityToken,
   };
 }
 
-describe("Contract domain", () => {
+describe("Contract domain v2", () => {
   it("issue creates unique contract IDs", () => {
     const a = issueTestContract();
     const b = issueTestContract();
@@ -73,21 +106,22 @@ describe("Contract domain", () => {
   });
 
   it("correct identity authorizes", () => {
-    const { contractId, runId, role, capabilityToken } = issueTestContract();
-    // We need the actual artifact to test authorization.
-    // Re-issue and capture the artifact.
-    const runId2 = createRunId();
+    const runId = createRunId();
     const issued = issueContract({
-      runId: runId2,
-      role: TEST_ROLE,
-      task: TEST_TASK,
-      requirements: TEST_REQUIREMENTS,
-      outputSchema: TEST_SCHEMA,
+      identity: { runId, handleId: "test", role: "scout" as AgentRole },
+      assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
+      runtime: {
+        agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
+        tools: { ...EMPTY_TOOL_CONFIG, role: "scout" },
+        skills: [], extensions: [], allowedChildren: [], maxDelegationDepth: 2,
+        timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
+        toolBudget: { soft: 60, hard: 80, block: [] },
+      },
+      verification: { commands: [], criticRequired: false, maxRepairAttempts: 1 },
     });
     const result = authorizeContract(issued.artifact, {
       contractId: issued.artifact.id,
-      runId: issued.artifact.runId,
-      role: issued.artifact.role,
+      runId: issued.artifact.identity.runId,
       capabilityToken: issued.capabilityToken,
     });
     assert.deepEqual(result, { ok: true });
@@ -96,16 +130,20 @@ describe("Contract domain", () => {
   it("wrong contract ID rejects", () => {
     const runId = createRunId();
     const issued = issueContract({
-      runId,
-      role: TEST_ROLE,
-      task: TEST_TASK,
-      requirements: TEST_REQUIREMENTS,
-      outputSchema: TEST_SCHEMA,
+      identity: { runId, handleId: "test", role: "scout" as AgentRole },
+      assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
+      runtime: {
+        agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
+        tools: { ...EMPTY_TOOL_CONFIG, role: "scout" },
+        skills: [], extensions: [], allowedChildren: [], maxDelegationDepth: 2,
+        timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
+        toolBudget: { soft: 60, hard: 80, block: [] },
+      },
+      verification: { commands: [], criticRequired: false, maxRepairAttempts: 1 },
     });
     const result = authorizeContract(issued.artifact, {
       contractId: `phx_00000000-0000-0000-0000-000000000000` as ContractId,
-      runId: issued.artifact.runId,
-      role: issued.artifact.role,
+      runId: issued.artifact.identity.runId,
       capabilityToken: issued.capabilityToken,
     });
     assert.deepEqual(result, { ok: false, reason: "contract-id-mismatch" });
@@ -114,52 +152,42 @@ describe("Contract domain", () => {
   it("wrong run ID rejects", () => {
     const runId = createRunId();
     const issued = issueContract({
-      runId,
-      role: TEST_ROLE,
-      task: TEST_TASK,
-      requirements: TEST_REQUIREMENTS,
-      outputSchema: TEST_SCHEMA,
+      identity: { runId, handleId: "test", role: "scout" as AgentRole },
+      assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
+      runtime: {
+        agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
+        tools: { ...EMPTY_TOOL_CONFIG, role: "scout" },
+        skills: [], extensions: [], allowedChildren: [], maxDelegationDepth: 2,
+        timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
+        toolBudget: { soft: 60, hard: 80, block: [] },
+      },
+      verification: { commands: [], criticRequired: false, maxRepairAttempts: 1 },
     });
     const result = authorizeContract(issued.artifact, {
       contractId: issued.artifact.id,
       runId: `run_00000000-0000-0000-0000-000000000000` as RunId,
-      role: issued.artifact.role,
       capabilityToken: issued.capabilityToken,
     });
     assert.deepEqual(result, { ok: false, reason: "run-id-mismatch" });
   });
 
-  it("wrong role rejects", () => {
-    const runId = createRunId();
-    const issued = issueContract({
-      runId,
-      role: TEST_ROLE,
-      task: TEST_TASK,
-      requirements: TEST_REQUIREMENTS,
-      outputSchema: TEST_SCHEMA,
-    });
-    const result = authorizeContract(issued.artifact, {
-      contractId: issued.artifact.id,
-      runId: issued.artifact.runId,
-      role: "implementer" as AgentKind,
-      capabilityToken: issued.capabilityToken,
-    });
-    assert.deepEqual(result, { ok: false, reason: "role-mismatch" });
-  });
-
   it("wrong token rejects", () => {
     const runId = createRunId();
     const issued = issueContract({
-      runId,
-      role: TEST_ROLE,
-      task: TEST_TASK,
-      requirements: TEST_REQUIREMENTS,
-      outputSchema: TEST_SCHEMA,
+      identity: { runId, handleId: "test", role: "scout" as AgentRole },
+      assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
+      runtime: {
+        agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
+        tools: { ...EMPTY_TOOL_CONFIG, role: "scout" },
+        skills: [], extensions: [], allowedChildren: [], maxDelegationDepth: 2,
+        timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
+        toolBudget: { soft: 60, hard: 80, block: [] },
+      },
+      verification: { commands: [], criticRequired: false, maxRepairAttempts: 1 },
     });
     const result = authorizeContract(issued.artifact, {
       contractId: issued.artifact.id,
-      runId: issued.artifact.runId,
-      role: issued.artifact.role,
+      runId: issued.artifact.identity.runId,
       capabilityToken: createCapabilityToken(),
     });
     assert.deepEqual(result, { ok: false, reason: "invalid-capability" });
@@ -168,49 +196,28 @@ describe("Contract domain", () => {
   it("expired contract rejects", () => {
     const runId = createRunId();
     const issued = issueContract({
-      runId,
-      role: TEST_ROLE,
-      task: TEST_TASK,
-      requirements: TEST_REQUIREMENTS,
-      outputSchema: TEST_SCHEMA,
+      identity: { runId, handleId: "test", role: "scout" as AgentRole },
+      assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
+      runtime: {
+        agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
+        tools: { ...EMPTY_TOOL_CONFIG, role: "scout" },
+        skills: [], extensions: [], allowedChildren: [], maxDelegationDepth: 2,
+        timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
+        toolBudget: { soft: 60, hard: 80, block: [] },
+      },
+      verification: { commands: [], criticRequired: false, maxRepairAttempts: 1 },
       expiresAt: new Date(Date.now() - 3600_000).toISOString(),
     });
     const result = authorizeContract(
       issued.artifact,
       {
         contractId: issued.artifact.id,
-        runId: issued.artifact.runId,
-        role: issued.artifact.role,
+        runId: issued.artifact.identity.runId,
         capabilityToken: issued.capabilityToken,
       },
       new Date(),
     );
     assert.deepEqual(result, { ok: false, reason: "expired" });
-  });
-
-  it("non-expired contract authorizes at expiry boundary", () => {
-    const runId = createRunId();
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + 3600_000);
-    const issued = issueContract({
-      runId,
-      role: TEST_ROLE,
-      task: TEST_TASK,
-      requirements: TEST_REQUIREMENTS,
-      outputSchema: TEST_SCHEMA,
-      expiresAt: expiresAt.toISOString(),
-    });
-    const result = authorizeContract(
-      issued.artifact,
-      {
-        contractId: issued.artifact.id,
-        runId: issued.artifact.runId,
-        role: issued.artifact.role,
-        capabilityToken: issued.capabilityToken,
-      },
-      now,
-    );
-    assert.deepEqual(result, { ok: true });
   });
 
   it("parseContractId validates format", () => {
@@ -233,5 +240,73 @@ describe("Contract domain", () => {
     assert.equal(parseCapabilityToken(token), token);
     assert.equal(parseCapabilityToken("short"), undefined);
     assert.equal(parseCapabilityToken(""), undefined);
+  });
+
+  it("v2 artifact has complete runtime fields", () => {
+    const runId = createRunId();
+    const issued = issueContract({
+      identity: { runId, handleId: "test", role: null },
+      assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
+      runtime: {
+        agent: "phenix.base", cwd: "/tmp", thinking: "low",
+        tools: { ...EMPTY_TOOL_CONFIG, role: null },
+        skills: [], extensions: [], allowedChildren: [], maxDelegationDepth: 0,
+        timeoutMs: 300_000, turnBudget: { maxTurns: 12, graceTurns: 2 },
+        toolBudget: { soft: 30, hard: 40, block: ["read"] },
+      },
+      verification: { commands: [], criticRequired: false, maxRepairAttempts: 0 },
+    });
+
+    assert.equal(issued.artifact.version, 2);
+    assert.equal(issued.artifact.identity.role, null);
+    assert.equal(issued.artifact.identity.handleId, "test");
+    assert.equal(issued.artifact.assignment.task, TEST_TASK);
+    assert.equal(issued.artifact.runtime.agent, "phenix.base");
+    assert.equal(issued.artifact.runtime.maxDelegationDepth, 0);
+    assert.ok(typeof issued.artifact.capabilityTokenHash === "string");
+    assert.ok(issued.artifact.capabilityTokenHash.length > 0);
+  });
+
+  it("role null is stored correctly in contract identity", () => {
+    const runId = createRunId();
+    const issued = issueContract({
+      identity: { runId, handleId: "test-null-role", role: null },
+      assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
+      runtime: {
+        agent: "phenix.base", cwd: "/tmp", thinking: "low",
+        tools: { ...EMPTY_TOOL_CONFIG, role: null },
+        skills: [], extensions: [], allowedChildren: [], maxDelegationDepth: 0,
+        timeoutMs: 300_000, turnBudget: { maxTurns: 12, graceTurns: 2 },
+        toolBudget: { soft: 30, hard: 40, block: [] },
+      },
+      verification: { commands: [], criticRequired: false, maxRepairAttempts: 0 },
+    });
+
+    assert.equal(issued.artifact.identity.role, null);
+    assert.equal(issued.artifact.identity.handleId, "test-null-role");
+  });
+
+  it("authorizeContract no longer checks role mismatch (role is artifact data)", () => {
+    // Role mismatch is not a failure in v2 since role is artifact data, not identity claim.
+    const runId = createRunId();
+    const issued = issueContract({
+      identity: { runId, handleId: "test", role: "scout" as AgentRole },
+      assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
+      runtime: {
+        agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
+        tools: { ...EMPTY_TOOL_CONFIG, role: "scout" },
+        skills: [], extensions: [], allowedChildren: [], maxDelegationDepth: 2,
+        timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
+        toolBudget: { soft: 60, hard: 80, block: [] },
+      },
+      verification: { commands: [], criticRequired: false, maxRepairAttempts: 1 },
+    });
+    // Authorization only checks ID, run ID, token hash, and expiry.
+    const result = authorizeContract(issued.artifact, {
+      contractId: issued.artifact.id,
+      runId: issued.artifact.identity.runId,
+      capabilityToken: issued.capabilityToken,
+    });
+    assert.deepEqual(result, { ok: true });
   });
 });

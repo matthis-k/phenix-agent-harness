@@ -26,13 +26,44 @@ const TEST_SCHEMA = {
 function createTestArtifact(): ContractArtifact {
   const runId = createRunId();
   const issued = issueContract({
-    runId,
-    role: "scout",
-    task: "test task",
-    requirements: [],
-    outputSchema: TEST_SCHEMA,
+    identity: {
+      runId,
+      handleId: "test-handle",
+      role: "scout",
+    },
+    assignment: {
+      task: "test task",
+      requirements: [],
+      outputSchema: TEST_SCHEMA,
+    },
+    runtime: {
+      agent: "phenix.scout",
+      cwd: "/tmp",
+      thinking: "medium",
+      tools: {
+        presetRevision: 1 as const,
+        role: "scout",
+        source: {
+          inherited: false,
+          patch: { additional: [] as const, removed: [] as const },
+        },
+        effective: [] as const,
+      },
+      skills: [],
+      extensions: [],
+      allowedChildren: [],
+      maxDelegationDepth: 2,
+      timeoutMs: 600_000,
+      turnBudget: { maxTurns: 24, graceTurns: 2 },
+      toolBudget: { soft: 60, hard: 80, block: [] },
+    },
+    verification: {
+      commands: [],
+      criticRequired: false,
+      maxRepairAttempts: 1,
+    },
   });
-  return issued.artifact as ContractArtifact;
+  return issued.artifact;
 }
 
 describe("FileContractStore", () => {

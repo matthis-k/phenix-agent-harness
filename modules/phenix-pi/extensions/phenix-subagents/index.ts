@@ -22,16 +22,23 @@ import {
   type JsonSchema,
 } from "./contracts.ts";
 import {
-  childAllowed,
   isAgentKind,
   loadPolicyConfig,
   resolveExecutionPolicy,
-  roleFromEnvironment,
-  toolAllowed,
   type AgentKind,
+  type AgentRole,
   type ProfileHint,
   type ResolvedExecutionPolicy,
 } from "./policy.ts";
+import {
+  rolePreset,
+} from "./role-presets.ts";
+import {
+  resolveToolConfiguration,
+  type ToolPatchInput,
+  type ToolPatch,
+  EMPTY_TOOL_PATCH,
+} from "./tool-policy.ts";
 import {
   runVerificationCommands,
   type VerificationRun,
@@ -44,11 +51,10 @@ import {
   ContractStoreError,
 } from "./contract-store.ts";
 import {
-  injectContractRuntimeBlock,
-} from "./contract-prompt.ts";
+  getRuntimeContext,
+} from "./contract-runtime-context.ts";
 
 import {
-  CRITIC_OUTPUT_SCHEMA,
   HANDLE_VERSION,
   TERMINAL_STATES,
   type AttemptRecord,
@@ -77,17 +83,25 @@ import {
 
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
 
+// ── Generic bootstrap task for child contracts ──────────────────────────────
 
+const CHILD_BOOTSTRAP_TASK =
+  "Execute the Phenix assignment initialized by the child runtime.";
+
+// ── Delegate input types ────────────────────────────────────────────────────
 
 interface DelegateInput {
-  readonly role: AgentKind;
+  readonly role: AgentRole;
   readonly task: string;
   readonly outputSchema: JsonSchema;
   readonly requirements: readonly string[];
+  readonly tools?: ToolPatchInput | null;
   readonly profile?: ProfileHint;
   readonly mode: "await" | "background";
   readonly parent?: string;
 }
+
+// ── TypeBox schemas ─────────────────────────────────────────────────────────
 
 const JsonSchemaObject = Type.Unsafe({
   type: "object",
@@ -107,12 +121,41 @@ const ProfileSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const ToolPatchSchema = Type.Optional(
+  Type.Unsafe({
+    type: "object",
+    properties: {
+      additional: Type.Optional(
+        Type.Array(Type.String({ minLength: 1 }), {
+          description: "Tools to add to the role preset.",
+        }),
+      ),
+      removed: Type.Optional(
+        Type.Array(Type.String({ minLength: 1 }), {
+          description: "Tools to remove from the role preset.",
+        }),
+      ),
+    },
+    additionalProperties: false,
+    description: "Tool patch for the child role preset.",
+  }),
+);
+
+const DelegateRoleSchema = Type.Unsafe({
+  anyOf: [
+    { type: "string", enum: ["scout", "planner", "architect", "implementer", "tester", "critic", "finalizer"] },
+    { type: "null" },
+  ],
+  description: "Agent role (one of the standard roles, or null for no preset).",
+});
+
 const DelegateParams = Type.Object(
   {
-    role: Type.String({ enum: [...(["scout", "planner", "architect", "implementer", "tester", "critic", "finalizer"] as const)] }),
+    role: DelegateRoleSchema,
     task: Type.String({ minLength: 1 }),
     outputSchema: JsonSchemaObject,
     requirements: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 64 })),
+    tools: ToolPatchSchema,
     profile: Type.Optional(ProfileSchema),
     mode: Type.Optional(Type.String({ enum: ["await", "background"] })),
     parent: Type.Optional(Type.String({ minLength: 1, description: "Optional semantic parent handle. Normally inferred for nested agents." })),
@@ -128,6 +171,8 @@ const AgentParams = Type.Object(
   { additionalProperties: false },
 );
 
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
 function storeRoot(): string {
   return path.join(
     findProjectRoot(process.cwd()),
@@ -141,11 +186,10 @@ async function cancelPendingContracts(attempt: AttemptRecord): Promise<void> {
   const ids: Array<{ id: ContractId; label: string }> = [];
   if (attempt.contractId) ids.push({ id: attempt.contractId, label: "producer" });
   if (attempt.criticContractId) ids.push({ id: attempt.criticContractId, label: "critic" });
-  for (const { id, label } of ids) {
+  for (const { id } of ids) {
     try {
       await store.cancel(id, `superseded-by-repair`);
     } catch (error) {
-      // If already terminal (submitted or already cancelled), that's fine.
       if (error instanceof ContractStoreError && error.code === "already-terminal") continue;
       if (error instanceof ContractStoreError && error.code === "not-found") continue;
       throw error;
@@ -200,7 +244,7 @@ function materializePolicyModel(
   return policy.model ? policy : { ...policy, ...(currentModelId(ctx) ? { model: currentModelId(ctx) } : {}) };
 }
 
-function criticTask(record: HandleRecord, primaryContractId: ContractId): string {
+function criticTask(record: HandleRecord): string {
   const requirements = record.requirements.length > 0
     ? record.requirements.map((requirement, index) => `${index + 1}. ${requirement}`).join("\n")
     : "1. Complete the delegated task exactly as specified.";
@@ -216,32 +260,56 @@ function criticTask(record: HandleRecord, primaryContractId: ContractId): string
     "Requirements:",
     requirements,
     "",
-    "Primary Phenix contract:",
-    primaryContractId,
-    "",
-    "Return the runtime-provided critic schema using phenix_contract_submit.",
+    "Return the runtime-provided critic schema using phenix_complete.",
   ].join("\n");
 }
 
-function buildSubagentParams(
+// ── Child authorization ─────────────────────────────────────────────────────
+
+function resolveRoleForPolicy(role: AgentRole): AgentKind {
+  if (role === null) {
+    // For null role, use "scout" as the policy base since there's no
+    // meaningful "null" role in resolveExecutionPolicy. The actual role
+    // preset for tools comes from resolveToolConfiguration.
+    return "scout";
+  }
+  return role;
+}
+
+function childAllowedByContext(child: AgentRole): boolean {
+  const ctx = getRuntimeContext();
+  if (!ctx || ctx.kind === "root") return true;
+  if (child === null) return false; // null role children not allowed from child contracts
+  return ctx.contract.runtime.allowedChildren.includes(child);
+}
+
+function currentInheritedPatch(): ToolPatch {
+  const ctx = getRuntimeContext();
+  if (ctx?.kind === "child") {
+    // Use the source patch (semantic intent), not the effective tools.
+    return ctx.contract.runtime.tools.source.patch;
+  }
+  return EMPTY_TOOL_PATCH;
+}
+
+// ── Subagent params builders ────────────────────────────────────────────────
+
+function buildProducerSubagentParams(
   record: HandleRecord,
-  task: string,
 ): SubagentParamsLike {
   const primaryStep: Record<string, unknown> = {
     agent: record.policy.agent,
-    task,
+    task: CHILD_BOOTSTRAP_TASK,
     as: "primary",
-    // No outputSchema -- Phenix contract protocol replaces structured_output.
     acceptance: record.policy.acceptance,
     toolBudget: record.policy.toolBudget,
-    phase: record.role,
-    label: `${record.role} handoff`,
+    phase: record.role === null ? "base" : record.role,
+    label: record.role === null ? "base handoff" : `${record.role} handoff`,
     ...(applyThinking(record.policy.model, record.policy.thinking)
       ? { model: applyThinking(record.policy.model, record.policy.thinking) }
       : {}),
   };
 
-  // Producer-only chain; critic is run as a separate foreground call.
   const chain: Record<string, unknown>[] = [primaryStep];
 
   return {
@@ -260,22 +328,13 @@ function buildSubagentParams(
   };
 }
 
-function buildProducerSubagentParams(
-  record: HandleRecord,
-  task: string,
-): SubagentParamsLike {
-  return buildSubagentParams(record, task);
-}
-
 function buildCriticSubagentParams(
   record: HandleRecord,
-  task: string,
 ): SubagentParamsLike {
   const criticStep: Record<string, unknown> = {
     agent: record.reviewPolicy!.agent,
-    task,
+    task: CHILD_BOOTSTRAP_TASK,
     as: "critic",
-    // No outputSchema -- Phenix contract protocol replaces structured_output.
     acceptance: record.reviewPolicy!.acceptance,
     toolBudget: record.reviewPolicy!.toolBudget,
     phase: "critic",
@@ -300,6 +359,8 @@ function buildCriticSubagentParams(
     agentScope: "both",
   };
 }
+
+// ── Result helpers ──────────────────────────────────────────────────────────
 
 function resultPayload(record: HandleRecord): Record<string, unknown> {
   return {
@@ -370,24 +431,47 @@ function canRepair(record: HandleRecord, evaluation: Evaluation): boolean {
   return evaluation.repairable && completedAttempts <= record.policy.maxRepairAttempts;
 }
 
+// ── Record creation ─────────────────────────────────────────────────────────
+
 function createRecord(
   ctx: ExtensionContext,
   input: DelegateInput,
   parent: HandleRecord | undefined,
 ): HandleRecord {
   const config = loadPolicyConfig();
-  const policy = materializePolicyModel(resolveExecutionPolicy({
+  const policyRole = resolveRoleForPolicy(input.role);
+
+  // Resolve tool configuration.
+  const resolvedTools = resolveToolConfiguration({
     role: input.role,
+    requested: input.tools,
+    inheritedPatch: currentInheritedPatch(),
+  });
+
+  // Resolve execution policy using the role-appropriate base.
+  const policy = materializePolicyModel(resolveExecutionPolicy({
+    role: policyRole,
     task: input.task,
     requirements: input.requirements,
     profileHint: input.profile,
     cwd: ctx.cwd,
     config,
   }), ctx);
+
+  // Override the policy agent and tools with the resolved values.
+  const resolvedAgent = rolePreset(input.role).agentName;
+  const resolvedAllowedChildren = rolePreset(input.role).allowedChildren;
+  const resolvedPolicy: ResolvedExecutionPolicy = {
+    ...policy,
+    agent: resolvedAgent as ResolvedExecutionPolicy["agent"],
+    allowedTools: resolvedTools.effective,
+    allowedChildren: resolvedAllowedChildren,
+  };
+
   const reviewPolicy = policy.criticRequired
     ? materializePolicyModel(resolveExecutionPolicy({
         role: "critic",
-        task: `Independently review the ${input.role} handoff for major flaws and missing requirements.`,
+        task: `Independently review the ${input.role === null ? "base" : input.role} handoff for major flaws and missing requirements.`,
         requirements: input.requirements,
         profileHint: {
           consequence: Math.max(2, policy.profile.consequence),
@@ -401,6 +485,7 @@ function createRecord(
         config,
       }), ctx)
     : undefined;
+
   const timestamp = now();
   return {
     version: HANDLE_VERSION,
@@ -411,7 +496,9 @@ function createRecord(
     task: input.task,
     requirements: input.requirements,
     outputSchema: input.outputSchema,
-    policy,
+    policy: resolvedPolicy,
+    toolRequest: input.tools ?? null,
+    resolvedTools,
     ...(reviewPolicy ? { reviewPolicy } : {}),
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -419,6 +506,8 @@ function createRecord(
     attempts: [],
   };
 }
+
+// ── Foreground runner ───────────────────────────────────────────────────────
 
 async function runForeground(
   backend: SubagentBackend,
@@ -432,14 +521,13 @@ async function runForeground(
     const attemptNumber = record.attempts.length + 1;
     const runId = `phenix-${record.id}-a${attemptNumber}`;
 
-    // Issue fresh contract for this attempt.
+    // Issue fresh v2 contract for this attempt.
     const issued = await createAttemptContract(record, task, ctx.cwd);
-    const injectedTask = injectContractRuntimeBlock(task, issued.artifact);
     const contractEnv = childContractEnv(
       issued.artifact.id,
       issued.capabilityToken,
       issued.phenixRunId,
-      record.role,
+      ctx.cwd,
     );
 
     record.attempts.push({
@@ -454,10 +542,10 @@ async function runForeground(
     });
     writeRecord(ctx.cwd, record);
 
-    // Run producer.
+    // Run producer with the generic bootstrap task.
     let children: RuntimeChildResult[];
     try {
-      const producerParams = buildProducerSubagentParams(record, injectedTask);
+      const producerParams = buildProducerSubagentParams(record);
       const raw = await backend.runForeground(
         runId,
         producerParams,
@@ -481,10 +569,9 @@ async function runForeground(
       return record;
     }
 
-    // Evaluate producer.
+    // Evaluate producer (schema from stored contract).
     const primary = await evaluateContractResult(
       latestAttempt(record).contractId,
-      record.outputSchema,
       ctx.cwd,
     );
 
@@ -500,7 +587,7 @@ async function runForeground(
       );
       verificationRuns
         .filter((run) => run.status === "failed" || run.status === "timed-out" || run.status === "cancelled")
-        .forEach((run) => { verificationOk = false; });
+        .forEach(() => { verificationOk = false; });
       verifyRuns = verificationRuns.map(formatVerificationRun);
     }
 
@@ -532,7 +619,6 @@ async function runForeground(
         writeRecord(ctx.cwd, record);
         return record;
       }
-      // Cancel old attempt's contracts (if any) before retry.
       await cancelPendingContracts(latestAttempt(record));
       record.status = "running";
       task = repairTask(record, evaluation);
@@ -542,21 +628,20 @@ async function runForeground(
 
     // Run critic if required.
     if (record.reviewPolicy) {
-      const criticIssued = await createAttemptContract(record, criticTask(record, latestAttempt(record).contractId), ctx.cwd);
-      const criticInjectedTask = injectContractRuntimeBlock(criticIssued.artifact.task, criticIssued.artifact);
+      const criticIssued = await createAttemptContract(record, criticTask(record), ctx.cwd);
       const criticEnv = childContractEnv(
         criticIssued.artifact.id,
         criticIssued.capabilityToken,
         criticIssued.phenixRunId,
-        "critic",
+        ctx.cwd,
       );
 
       latestAttempt(record).criticContractId = criticIssued.artifact.id;
       writeRecord(ctx.cwd, record);
 
-      let criticChildren: RuntimeChildResult[];
+      let _criticChildren: RuntimeChildResult[];
       try {
-        const criticParams = buildCriticSubagentParams(record, criticInjectedTask);
+        const criticParams = buildCriticSubagentParams(record);
         const criticResult = await backend.runForeground(
           `${runId}-critic`,
           criticParams,
@@ -565,7 +650,7 @@ async function runForeground(
           ctx,
           criticEnv,
         );
-        criticChildren = backend.foregroundChildren(criticResult);
+        _criticChildren = backend.foregroundChildren(criticResult);
       } catch (error) {
         await cancelPendingContracts(latestAttempt(record));
         const attempt = latestAttempt(record);
@@ -580,7 +665,6 @@ async function runForeground(
 
       const critic = await evaluateContractResult(
         latestAttempt(record).criticContractId!,
-        CRITIC_OUTPUT_SCHEMA,
         ctx.cwd,
       );
 
@@ -658,7 +742,7 @@ async function runForeground(
         continue;
       }
 
-      // Critic approved -- full success.
+      // Critic approved — full success.
       const successEvaluation: Evaluation = {
         ok: true,
         value: primary.value,
@@ -681,7 +765,7 @@ async function runForeground(
       return record;
     }
 
-    // No critic required -- producer-only success.
+    // No critic required — producer-only success.
     const successEvaluation: Evaluation = {
       ok: true,
       value: primary.value,
@@ -699,6 +783,8 @@ async function runForeground(
   }
 }
 
+// ── Background spawning ─────────────────────────────────────────────────────
+
 async function spawnBackgroundAttempt(
   backend: SubagentBackend,
   ctx: ExtensionContext,
@@ -710,14 +796,13 @@ async function spawnBackgroundAttempt(
   const requestId = `${record.id}-a${attemptNumber}`;
   const expectedRunId = `rpc-spawn-${requestId}`;
 
-  // Issue fresh contract for this background attempt.
+  // Issue fresh v2 contract for this background attempt.
   const issued = await createAttemptContract(record, task, ctx.cwd);
-  const injectedTask = injectContractRuntimeBlock(task, issued.artifact);
   const contractEnv = childContractEnv(
     issued.artifact.id,
     issued.capabilityToken,
     issued.phenixRunId,
-    record.role,
+    ctx.cwd,
   );
 
   const attempt: AttemptRecord = {
@@ -736,7 +821,7 @@ async function spawnBackgroundAttempt(
   try {
     const launched = await backend.spawnBackground(
       requestId,
-      buildProducerSubagentParams(record, injectedTask),
+      buildProducerSubagentParams(record),
       signal,
       contractEnv,
     );
@@ -784,10 +869,9 @@ async function resolveBackground(
     recordChildSessions(record, children);
     writeRecord(ctx.cwd, record);
 
-    // Evaluate via contract store (same as foreground).
+    // Evaluate via contract store (same as foreground) — schema from stored artifact.
     const primary = await evaluateContractResult(
       attempt.contractId,
-      record.outputSchema,
       ctx.cwd,
     );
 
@@ -829,8 +913,7 @@ async function resolveBackground(
       continue;
     }
 
-    // Background-mode verification and critic not yet wired (future work).
-    // For background mode, mark completion from contract result.
+    // Background-mode success.
     const evaluation: Evaluation = {
       ok: true,
       value: primary.value,
@@ -853,10 +936,14 @@ function totalTimeoutMs(record: HandleRecord): number {
   return record.policy.timeoutMs + (record.reviewPolicy?.timeoutMs ?? 0);
 }
 
+// ── Parent resolution ───────────────────────────────────────────────────────
+
 function semanticParent(ctx: ExtensionContext, explicit: string | undefined): HandleRecord | undefined {
   if (explicit) return readRecord(ctx.cwd, effectiveSessionId(ctx), explicit);
   return currentParentRecord(ctx.cwd);
 }
+
+// ── Tree display ────────────────────────────────────────────────────────────
 
 function treePayload(records: readonly HandleRecord[]): Record<string, unknown> {
   const children = new Map<string | undefined, HandleRecord[]>();
@@ -893,32 +980,9 @@ function treePayload(records: readonly HandleRecord[]): Record<string, unknown> 
   return { roots: build(undefined) };
 }
 
-function registerToolGuard(pi: ExtensionAPI): void {
-  const onRuntimeEvent = pi.on as unknown as (
-    event: string,
-    handler: (event: { toolName?: string }) => unknown,
-  ) => void;
-  onRuntimeEvent("tool_call", (event) => {
-    const toolName = event.toolName ?? "unknown";
-    const role = roleFromEnvironment();
-    if (toolName === "subagent") {
-      return {
-        block: true,
-        reason: "Raw subagent calls are disabled by Phenix. Use phenix_delegate so model/thinking selection, tool policy, persistence, structured contracts, and verification remain runtime-owned.",
-      };
-    }
-    if (!toolAllowed(role, toolName)) {
-      return {
-        block: true,
-        reason: `Tool '${toolName}' is outside the runtime allowlist for ${role}. Complete the task with the authorized tools or report the missing capability to the supervisor.`,
-      };
-    }
-    return undefined;
-  });
-}
+// ── Extension entry point ───────────────────────────────────────────────────
 
 export default function registerPhenixSubagents(pi: ExtensionAPI): void {
-  registerToolGuard(pi);
   const backend = new SubagentBackend({ pi });
 
   const delegateTool: ToolDefinition<typeof DelegateParams, Record<string, unknown>> = {
@@ -933,7 +997,9 @@ export default function registerPhenixSubagents(pi: ExtensionAPI): void {
     parameters: DelegateParams,
     async execute(_id, rawParams, signal, onUpdate, ctx) {
       const params = rawParams as unknown as DelegateInput;
-      if (!isAgentKind(params.role)) {
+
+      // Validate role: must be null or a known agent kind.
+      if (params.role !== null && !isAgentKind(params.role)) {
         return {
           content: [{ type: "text", text: `Unknown Phenix agent role: ${String(params.role)}` }],
           isError: true,
@@ -951,14 +1017,21 @@ export default function registerPhenixSubagents(pi: ExtensionAPI): void {
         };
       }
 
-      const callerRole = roleFromEnvironment();
-      if (!childAllowed(callerRole, params.role)) {
+      // Check child authorization.
+      if (!childAllowedByContext(params.role)) {
+        const callerContext = getRuntimeContext();
+        const ctxRole = callerContext?.kind === "child"
+          ? callerContext.contract.identity.role : "root";
         return {
-          content: [{ type: "text", text: `${callerRole} may not spawn ${params.role}; allowed child roles are fixed by the runtime.` }],
+          content: [{ type: "text", text: `${String(ctxRole)} may not spawn ${String(params.role)}; allowed child roles are fixed by the runtime.` }],
           isError: true,
           details: { status: "failed" },
         };
       }
+
+      const callerContext2 = getRuntimeContext();
+      const callerRole = callerContext2?.kind === "child"
+        ? callerContext2.contract.identity.role : "root";
 
       const mode = params.mode ?? "await";
       if (callerRole !== "root" && mode === "background") {
@@ -977,9 +1050,9 @@ export default function registerPhenixSubagents(pi: ExtensionAPI): void {
           details: { status: "failed" },
         };
       }
-      if (parent && callerRole === "root" && !childAllowed(parent.role, params.role)) {
+      if (parent && callerRole === "root" && params.role !== null && !parent.policy.allowedChildren.includes(params.role)) {
         return {
-          content: [{ type: "text", text: `${parent.role} handle ${parent.id} may not own a ${params.role} child.` }],
+          content: [{ type: "text", text: `${parent.role} handle ${parent.id} may not own a ${String(params.role)} child.` }],
           isError: true,
           details: { status: "failed" },
         };
@@ -992,6 +1065,7 @@ export default function registerPhenixSubagents(pi: ExtensionAPI): void {
           task: params.task.trim(),
           outputSchema: params.outputSchema,
           requirements: params.requirements ?? [],
+          tools: params.tools,
           profile: params.profile,
           mode,
           parent: params.parent,
@@ -1060,7 +1134,6 @@ export default function registerPhenixSubagents(pi: ExtensionAPI): void {
           } catch {
             await backend.stop(attempt.runId, signal).catch(() => undefined);
           }
-          // Cancel any pending contracts.
           await cancelPendingContracts(attempt);
           attempt.status = "cancelled";
           attempt.endedAt = now();
@@ -1080,6 +1153,4 @@ export default function registerPhenixSubagents(pi: ExtensionAPI): void {
 
   pi.registerTool(delegateTool);
   pi.registerTool(agentTool);
-
-  // No structured_output tool registration — Phenix uses the contract protocol.
 }

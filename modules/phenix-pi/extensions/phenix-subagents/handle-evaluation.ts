@@ -2,18 +2,17 @@ import path from "node:path";
 
 import {
   validateContract,
-  type JsonSchema,
 } from "./contracts.ts";
 import {
-  PHENIX_AGENT_KIND_ENV,
   PHENIX_CONTRACT_ID_ENV,
   PHENIX_CONTRACT_TOKEN_ENV,
+  PHENIX_CONTRACT_STORE_ENV,
   PHENIX_RUN_ID_ENV,
 } from "./contract-identity.ts";
 import {
   createRunId,
   issueContract,
-  type ContractArtifact,
+  type ContractArtifactV2,
   type ContractId,
   type RunId,
 } from "./contract.ts";
@@ -29,7 +28,7 @@ import {
   type HandleRecord,
 } from "./handle-types.ts";
 import type {
-  AgentKind,
+  AgentRole,
 } from "./policy.ts";
 
 // ── Contract store helper ───────────────────────────────────────────────────
@@ -48,7 +47,6 @@ function contractsForCwd(cwd: string): FileContractStore {
 
 export async function evaluateContractResult(
   contractId: ContractId,
-  schema: JsonSchema,
   cwd: string,
 ): Promise<{
   readonly ok: boolean;
@@ -69,7 +67,7 @@ export async function evaluateContractResult(
   if (stored.result.state === "pending") {
     return {
       ok: false,
-      errors: ["Child exited without submitting its Phenix contract."],
+      errors: ["Child exited without completing its Phenix contract."],
       contract: "missing",
     };
   }
@@ -82,7 +80,8 @@ export async function evaluateContractResult(
     };
   }
 
-  // All remaining ContractResult variants have state "submitted".
+  // Use the schema from the stored artifact as the authoritative schema.
+  const schema = stored.artifact.assignment.outputSchema;
   const validation = validateContract(schema, stored.result.value);
 
   if (!validation.ok) {
@@ -111,18 +110,46 @@ export async function createAttemptContract(
   task: string,
   cwd: string,
 ): Promise<{
-  readonly artifact: ContractArtifact;
+  readonly artifact: ContractArtifactV2;
   readonly capabilityToken: string;
   readonly phenixRunId: RunId;
 }> {
   const phenixRunId = createRunId();
 
+  const handleId = `${record.id}-attempt-${record.attempts.length + 1}`;
+  const parentHandleId = record.id;
+
   const issued = issueContract({
-    runId: phenixRunId,
-    role: record.role,
-    task,
-    requirements: record.requirements,
-    outputSchema: record.outputSchema,
+    identity: {
+      runId: phenixRunId,
+      handleId,
+      parentHandleId,
+      role: record.role,
+    },
+    assignment: {
+      task,
+      requirements: record.requirements,
+      outputSchema: record.outputSchema,
+    },
+    runtime: {
+      agent: record.policy.agent,
+      cwd,
+      model: record.policy.model,
+      thinking: record.policy.thinking,
+      tools: record.resolvedTools,
+      skills: [],
+      extensions: [],
+      allowedChildren: record.policy.allowedChildren.map((r: import("./policy.ts").AgentKind) => r as AgentRole),
+      maxDelegationDepth: 2, // Default, could be derived from policy.
+      timeoutMs: record.policy.timeoutMs,
+      turnBudget: record.policy.turnBudget,
+      toolBudget: record.policy.toolBudget,
+    },
+    verification: {
+      commands: record.policy.verificationCommands,
+      criticRequired: record.policy.criticRequired,
+      maxRepairAttempts: record.policy.maxRepairAttempts,
+    },
   });
 
   await contractsForCwd(cwd).create(issued.artifact);
@@ -138,13 +165,18 @@ export function childContractEnv(
   contractId: ContractId,
   capabilityToken: string,
   phenixRunId: RunId,
-  role: AgentKind,
+  cwd: string,
 ): Record<string, string> {
+  const storeRoot = path.join(
+    findProjectRoot(cwd),
+    ".phenix-agent-state",
+    "contracts",
+  );
   return {
     [PHENIX_CONTRACT_ID_ENV]: contractId,
     [PHENIX_CONTRACT_TOKEN_ENV]: capabilityToken,
     [PHENIX_RUN_ID_ENV]: phenixRunId,
-    [PHENIX_AGENT_KIND_ENV]: role,
+    [PHENIX_CONTRACT_STORE_ENV]: storeRoot,
   };
 }
 
@@ -161,7 +193,7 @@ export function repairTask(record: HandleRecord, evaluation: Evaluation): string
     numbered,
     "",
     "The runtime will rerun the same structural contract, verification commands, and critic gate. Do not modify verification configuration or merely claim that checks passed.",
-    "Finish by calling phenix_contract_submit with a value matching the original schema.",
+    "Finish by calling phenix_complete with a value matching the original schema.",
   ].join("\n");
 }
 
