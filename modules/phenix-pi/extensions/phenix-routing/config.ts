@@ -1,7 +1,8 @@
-import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { mergeObjects, readJson } from "../phenix-shared.ts";
 
 import {
   type ModelSetId,
@@ -21,35 +22,6 @@ const ALL_CAPABILITIES = [
   "review",
   "review-max",
 ] as const;
-
-function mergeObjects<T extends Record<string, unknown>>(base: T, overlay: unknown): T {
-  if (!overlay || typeof overlay !== "object" || Array.isArray(overlay)) return base;
-  const output: Record<string, unknown> = { ...base };
-  for (const [key, value] of Object.entries(overlay)) {
-    const previous = output[key];
-    if (
-      previous &&
-      typeof previous === "object" &&
-      !Array.isArray(previous) &&
-      value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-    ) {
-      output[key] = mergeObjects(previous as Record<string, unknown>, value);
-    } else {
-      output[key] = value;
-    }
-  }
-  return output as T;
-}
-
-function readJson(candidate: string): unknown {
-  try {
-    return JSON.parse(fs.readFileSync(candidate, "utf-8"));
-  } catch {
-    return undefined;
-  }
-}
 
 function getAgentDir(): string {
   return (

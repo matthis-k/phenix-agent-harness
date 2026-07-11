@@ -1,0 +1,8 @@
+{
+  "extensions": [".ts", ".tsx", ".mjs", ".mts"],
+  "excludeDirectories": ["/dist", "/bin", "/build", "/result", "/.direnv", "/generated"],
+  "excludeFilenames": [".d.ts", ".min.js", ".bundle.js"],
+  "skipDirectories": ["/node_modules", "/flow-typed", "/coverage", "/.git", "/.phenix-qa", "/qa-results"],
+  "minimumThreshold": 10,
+  "cliOutputLimit": 30
+}

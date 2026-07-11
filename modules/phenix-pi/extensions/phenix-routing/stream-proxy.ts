@@ -14,6 +14,7 @@ import { loadRoutingConfig } from "./config.ts";
 import { resolveRoute } from "./resolver.ts";
 import { getSessionRuntime } from "./state.ts";
 import { modelSetForModelId } from "./provider.ts";
+import { modelRegistry } from "./registry.ts";
 
 const PHENIX_PROVIDER = "phenix";
 const PHENIX_MODEL = "workflow";
@@ -102,8 +103,7 @@ async function runRouter(
   context: Context,
   options?: SimpleStreamOptions,
 ): Promise<void> {
-  // 1. Obtain the concrete model registry entry.
-  const { modelRegistry } = await import("./index.ts");
+  // 1. Obtain the concrete model registry entry (imported from registry.ts).
 
   // 2. Resolve active route — try pre-set from before_agent_start hook first,
   //    then resolve directly from the model parameter as fallback.

@@ -1,9 +1,6 @@
 import type {
   ExtensionAPI,
-  ExtensionContext,
-  ModelRegistry as PiModelRegistry,
 } from "@earendil-works/pi-coding-agent";
-import type { Api, Model } from "@earendil-works/pi-ai";
 
 import { MODEL_SET_IDS } from "./types.ts";
 
@@ -13,7 +10,6 @@ import {
   buildBundledConfig,
 } from "./config.ts";
 import {
-  type ModelRegistry as RoutingModelRegistry,
   resolveRoute,
 } from "./resolver.ts";
 import {
@@ -29,48 +25,9 @@ import {
   modelSetForModelId,
 } from "./provider.ts";
 
-export { getActiveRouteForSession, setActiveRouteForSession };
+import { modelRegistry } from "./registry.ts";
 
-/**
- * Runtime bridge to Pi's active model registry.
- *
- * Phenix owns routing only. Concrete model metadata, API keys, OAuth refresh,
- * environment fallback, runtime overrides, and provider/model request headers
- * are resolved by Pi's ModelRegistry for the current extension context.
- */
-class PhenixUpstreamRuntime implements RoutingModelRegistry {
-  private registry?: PiModelRegistry;
-
-  bind(ctx: ExtensionContext): void {
-    this.registry = ctx.modelRegistry;
-  }
-
-  requireRegistry(): PiModelRegistry {
-    if (!this.registry) {
-      throw new Error("Phenix upstream registry is not initialized");
-    }
-
-    return this.registry;
-  }
-
-  getModel(provider: string, model: string): Model<Api> | undefined {
-    return this.requireRegistry().find(provider, model);
-  }
-
-  async isAvailable(provider: string, model: string): Promise<boolean> {
-    const concreteModel = this.getModel(provider, model);
-    if (!concreteModel) return false;
-
-    const auth = await this.requireRegistry().getApiKeyAndHeaders(concreteModel);
-    return auth.ok;
-  }
-
-  getApiKeyAndHeaders(concreteModel: Model<Api>): ReturnType<PiModelRegistry["getApiKeyAndHeaders"]> {
-    return this.requireRegistry().getApiKeyAndHeaders(concreteModel);
-  }
-}
-
-export const modelRegistry = new PhenixUpstreamRuntime();
+export { modelRegistry, getActiveRouteForSession, setActiveRouteForSession };
 
 /**
  * Core routing extension entry point.
