@@ -30,15 +30,54 @@ const TEST_TASK = "Test task";
 const TEST_REQUIREMENTS: readonly string[] = [];
 const TEST_ROLE: AgentRole = "scout";
 
-const EMPTY_TOOL_CONFIG = {
-  presetRevision: 1 as const,
-  role: "scout" as AgentRole,
-  source: {
-    inherited: false,
-    patch: { additional: [] as const, removed: [] as const },
-  },
-  effective: [] as const,
-};
+// Scout preset tools for consistent effective tool construction.
+const SCOUT_PRESET_TOOLS = [
+  "read", "grep", "search", "find", "ls", "tree",
+  "bash", "lsp", "lsp_*", "ast_grep", "ast_*", "mcp",
+  "mcp_*", "web_search", "web_fetch", "fetch_content",
+  "get_search_content", "context_info", "context_*",
+  "contact_supervisor", "phenix_delegate",
+] as const;
+
+function makeToolConfig(
+  role: AgentRole,
+  additions: readonly string[] = [],
+  removals: readonly string[] = [],
+) {
+  if (role === null) {
+    return {
+      presetRevision: 1 as const,
+      role: null,
+      source: {
+        inherited: false,
+        patch: { additional: additions, removed: removals },
+      },
+      effective: [...additions],
+    };
+  }
+  // For known roles, include the preset tools.
+  const effective = [...SCOUT_PRESET_TOOLS, ...additions].filter(
+    (t) => !removals.includes(t),
+  );
+  // Deduplicate
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const t of effective) {
+    if (!seen.has(t)) {
+      seen.add(t);
+      deduped.push(t);
+    }
+  }
+  return {
+    presetRevision: 1 as const,
+    role,
+    source: {
+      inherited: false,
+      patch: { additional: additions, removed: removals },
+    },
+    effective: deduped,
+  };
+}
 
 function issueTestContract(role: AgentRole = TEST_ROLE): {
   contractId: ContractId;
@@ -47,7 +86,7 @@ function issueTestContract(role: AgentRole = TEST_ROLE): {
   capabilityToken: CapabilityToken;
 } {
   const runId = createRunId();
-  const config = { ...EMPTY_TOOL_CONFIG, role };
+  const tools = makeToolConfig(role);
   const issued = issueContract({
     identity: {
       runId,
@@ -63,7 +102,7 @@ function issueTestContract(role: AgentRole = TEST_ROLE): {
       agent: role === null ? "phenix.base" : `phenix.${role}`,
       cwd: "/tmp",
       thinking: "medium",
-      tools: config,
+      tools,
       skills: [],
       extensions: [],
       allowedChildren: [],
@@ -113,7 +152,7 @@ describe("Contract domain v3", () => {
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
         agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
-        tools: { ...EMPTY_TOOL_CONFIG, role: "scout" },
+        tools: makeToolConfig("scout"),
         skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 2,
         timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
@@ -135,7 +174,7 @@ describe("Contract domain v3", () => {
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
         agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
-        tools: { ...EMPTY_TOOL_CONFIG, role: "scout" },
+        tools: makeToolConfig("scout"),
         skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 2,
         timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
@@ -157,7 +196,7 @@ describe("Contract domain v3", () => {
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
         agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
-        tools: { ...EMPTY_TOOL_CONFIG, role: "scout" },
+        tools: makeToolConfig("scout"),
         skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 2,
         timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
@@ -179,7 +218,7 @@ describe("Contract domain v3", () => {
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
         agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
-        tools: { ...EMPTY_TOOL_CONFIG, role: "scout" },
+        tools: makeToolConfig("scout"),
         skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 2,
         timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
@@ -201,7 +240,7 @@ describe("Contract domain v3", () => {
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
         agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
-        tools: { ...EMPTY_TOOL_CONFIG, role: "scout" },
+        tools: makeToolConfig("scout"),
         skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 2,
         timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
@@ -250,7 +289,7 @@ describe("Contract domain v3", () => {
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
         agent: "phenix.base", cwd: "/tmp", thinking: "low",
-        tools: { ...EMPTY_TOOL_CONFIG, role: null },
+        tools: makeToolConfig(null),
         skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 0,
         timeoutMs: 300_000, turnBudget: { maxTurns: 12, graceTurns: 2 },
         toolBudget: { soft: 30, hard: 40, block: ["read"] },
@@ -275,7 +314,7 @@ describe("Contract domain v3", () => {
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
         agent: "phenix.base", cwd: "/tmp", thinking: "low",
-        tools: { ...EMPTY_TOOL_CONFIG, role: null },
+        tools: makeToolConfig(null),
         skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 0,
         timeoutMs: 300_000, turnBudget: { maxTurns: 12, graceTurns: 2 },
         toolBudget: { soft: 30, hard: 40, block: [] },

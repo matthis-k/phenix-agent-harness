@@ -264,10 +264,19 @@ describe("Tool-policy resolution", () => {
   });
 
   it("delegation ceiling allows authorized additions", () => {
+    // With full-effective-set ceiling validation, the delegable set
+    // must cover all preset tools plus the addition.
+    const broadCeiling = [
+      "read", "grep", "search", "find", "ls", "tree",
+      "bash", "lsp", "lsp_*", "ast_grep", "ast_*", "mcp",
+      "mcp_*", "web_search", "web_fetch", "fetch_content",
+      "get_search_content", "context_info", "context_*",
+      "contact_supervisor", "phenix_delegate", "write",
+    ];
     const config = resolveToolConfiguration({
       role: "scout",
       requested: { additional: ["write"] },
-      delegableTools: ["read", "grep", "write"],
+      delegableTools: broadCeiling,
     });
     assert.ok(config.effective.includes("write"));
   });

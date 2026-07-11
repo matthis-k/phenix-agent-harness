@@ -23,15 +23,51 @@ const TEST_SCHEMA = {
   properties: { ok: { const: true } },
 };
 
-const EMPTY_TOOL_CONFIG = {
-  presetRevision: 1 as const,
-  role: "scout" as AgentRole,
-  source: {
-    inherited: false,
-    patch: { additional: [] as const, removed: [] as const },
-  },
-  effective: [] as const,
-};
+const SCOUT_PRESET_TOOLS = [
+  "read", "grep", "search", "find", "ls", "tree",
+  "bash", "lsp", "lsp_*", "ast_grep", "ast_*", "mcp",
+  "mcp_*", "web_search", "web_fetch", "fetch_content",
+  "get_search_content", "context_info", "context_*",
+  "contact_supervisor", "phenix_delegate",
+] as const;
+
+function makeToolConfig(
+  role: AgentRole,
+  additions: readonly string[] = [],
+  removals: readonly string[] = [],
+) {
+  if (role === null) {
+    return {
+      presetRevision: 1 as const,
+      role: null,
+      source: {
+        inherited: false,
+        patch: { additional: additions, removed: removals },
+      },
+      effective: [...additions],
+    };
+  }
+  const effective = [...SCOUT_PRESET_TOOLS, ...additions].filter(
+    (t) => !removals.includes(t),
+  );
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const t of effective) {
+    if (!seen.has(t)) {
+      seen.add(t);
+      deduped.push(t);
+    }
+  }
+  return {
+    presetRevision: 1 as const,
+    role,
+    source: {
+      inherited: false,
+      patch: { additional: additions, removed: removals },
+    },
+    effective: deduped,
+  };
+}
 
 function createTestArtifact() {
   const runId = createRunId();
@@ -50,7 +86,7 @@ function createTestArtifact() {
       agent: "phenix.scout",
       cwd: "/tmp",
       thinking: "medium",
-      tools: EMPTY_TOOL_CONFIG,
+      tools: makeToolConfig("scout"),
       skills: [],
       extensions: [],
       allowedChildren: [],
