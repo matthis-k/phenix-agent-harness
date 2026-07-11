@@ -9,6 +9,7 @@
   },
   "pi": {
     "extensions": [
+      "./extensions/phenix-routing/index.ts",
       "./extensions/phenix-core.ts"
     ],
     "skills": [

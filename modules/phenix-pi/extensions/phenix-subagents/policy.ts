@@ -43,18 +43,6 @@ export interface VerificationCommand {
   readonly allowFailure?: boolean;
 }
 
-interface ModelTierMap {
-  readonly low?: string | null;
-  readonly standard?: string | null;
-  readonly high?: string | null;
-  readonly critical?: string | null;
-}
-
-interface ModelSetConfig {
-  readonly tiers?: ModelTierMap;
-  readonly roles?: Partial<Record<AgentKind, ModelTierMap>>;
-}
-
 interface VerificationConfig {
   readonly maxRepairAttempts?: number;
   readonly timeoutMs?: number;
@@ -63,8 +51,6 @@ interface VerificationConfig {
 }
 
 export interface RuntimePolicyConfig {
-  readonly activeModelSet?: string;
-  readonly modelSets?: Record<string, ModelSetConfig>;
   readonly verification?: VerificationConfig;
 }
 
@@ -89,6 +75,13 @@ export interface ResolvedExecutionPolicy {
   readonly maxRepairAttempts: number;
   readonly allowedTools: readonly string[];
   readonly allowedChildren: readonly AgentKind[];
+
+  // Routing fields (added by phenix-routing integration)
+  readonly modelSet?: string;
+  readonly difficulty?: string;
+  readonly capability?: string;
+  readonly candidatePool?: string;
+  readonly candidateIndex?: number;
 }
 
 const ROLE_CHILDREN: Record<AgentKind, readonly AgentKind[]> = {
@@ -165,18 +158,6 @@ const ROLE_MINIMUMS: Record<AgentKind, Partial<TaskProfile>> = {
 };
 
 const DEFAULT_CONFIG: RuntimePolicyConfig = {
-  activeModelSet: "inherit",
-  modelSets: {
-    inherit: {
-      tiers: {
-        low: null,
-        standard: null,
-        high: null,
-        critical: null,
-      },
-      roles: {},
-    },
-  },
   verification: {
     maxRepairAttempts: 1,
     timeoutMs: 180_000,
@@ -288,17 +269,6 @@ export function tierForProfile(profile: TaskProfile): ModelTier {
   return "low";
 }
 
-function resolveModel(
-  config: RuntimePolicyConfig,
-  role: AgentKind,
-  tier: ModelTier,
-): string | undefined {
-  const selected = process.env.PHENIX_MODEL_SET?.trim() || config.activeModelSet || "inherit";
-  const modelSet = config.modelSets?.[selected] ?? config.modelSets?.inherit;
-  const value = modelSet?.roles?.[role]?.[tier] ?? modelSet?.tiers?.[tier];
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
@@ -368,13 +338,11 @@ export function resolveExecutionPolicy(input: {
   };
   const budget = budgets[tier];
 
-  const model = resolveModel(config, input.role, tier);
   return {
     agent: `phenix.${input.role}`,
     role: input.role,
     profile,
     tier,
-    ...(model ? { model } : {}),
     thinking: THINKING[input.role][tier],
     timeoutMs: budget.timeout,
     turnBudget: { maxTurns: budget.turns, graceTurns: 2 },

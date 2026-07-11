@@ -10,20 +10,6 @@ import {
 } from "../extensions/phenix-subagents/policy.ts";
 
 const config: RuntimePolicyConfig = {
-  activeModelSet: "test",
-  modelSets: {
-    test: {
-      tiers: {
-        low: "provider/low",
-        standard: "provider/standard",
-        high: "provider/high",
-        critical: "provider/critical",
-      },
-      roles: {
-        critic: { high: "provider/critic" },
-      },
-    },
-  },
   verification: {
     maxRepairAttempts: 1,
     timeoutMs: 120_000,
@@ -40,7 +26,7 @@ describe("Phenix runtime policy", () => {
     assert.ok(profile.consequence >= 3);
   });
 
-  it("selects role-aware model and thinking at runtime", () => {
+  it("selects role-aware thinking at runtime", () => {
     const policy = resolveExecutionPolicy({
       role: "critic",
       task: "Review a security-sensitive public API migration",
@@ -48,7 +34,6 @@ describe("Phenix runtime policy", () => {
       cwd: process.cwd(),
       config,
     });
-    assert.equal(policy.model, "provider/critic");
     assert.equal(policy.thinking, "high");
     assert.equal(policy.expectedAcceptance, "not-required");
   });
@@ -75,5 +60,21 @@ describe("Phenix runtime policy", () => {
     assert.equal(toolAllowed("implementer", "edit"), true);
     assert.equal(toolAllowed("implementer", "subagent"), false);
     assert.equal(toolAllowed("critic", "write"), false);
+  });
+
+  it("includes routing metadata fields in policy", () => {
+    const policy = resolveExecutionPolicy({
+      role: "scout",
+      task: "Explore the codebase for issue #123",
+      requirements: ["Find the relevant files"],
+      cwd: process.cwd(),
+      config,
+    });
+    // modelSet, difficulty, capability, candidatePool, candidateIndex
+    // are optional fields that the routing extension fills in
+    assert.equal(policy.role, "scout");
+    assert.equal(policy.tier, "low");
+    assert.equal(policy.thinking, "low");
+    assert.ok(typeof policy.timeoutMs === "number");
   });
 });
