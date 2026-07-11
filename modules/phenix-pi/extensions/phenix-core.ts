@@ -46,7 +46,6 @@ async function loadIntegration(
 
 function getAgentDir(): string {
   return (
-    process.env.PI_AGENT_DIR ??
     process.env.PI_CODING_AGENT_DIR ??
     path.join(os.homedir(), ".pi", "agent")
   );

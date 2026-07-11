@@ -9,7 +9,8 @@
     }:
 
     let
-      phenixPiPackages = self'.packages.phenix-pi-packages;
+      phenixShell = self'.packages.phenix-shell;
+      piNpmPackages = self'.packages.phenix-pi-npm-packages;
 
       runtimeInputs = with pkgs; [
         bash
@@ -57,7 +58,7 @@
         inherit runtimeInputs;
 
         text = ''
-          agent_dir="''${PI_AGENT_DIR:-''${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}}"
+          agent_dir="''${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
 
           mkdir -p "$agent_dir"
           chmod 0700 "$agent_dir" 2>/dev/null || true
@@ -65,7 +66,7 @@
           defaults_file="$agent_dir/lsp.phenix-defaults.json"
 
           install -m 0600 \
-            "${phenixPiPackages}/config/lsp.json" \
+            "${phenixShell}/config/lsp.json" \
             "$defaults_file"
 
           if [[ ! -e "$agent_dir/lsp.json" ]]; then
@@ -73,17 +74,22 @@
             chmod 0600 "$agent_dir/lsp.json"
           fi
 
-          export PI_AGENT_DIR="$agent_dir"
+          export PI_CODING_AGENT_DIR="$agent_dir"
           export PI_SKIP_VERSION_CHECK=1
           export PI_TELEMETRY=0
 
           export HYPA_PI_MODE="''${HYPA_PI_MODE:-replace}"
           export HYPA_PI_ENABLE_MCP_PROXY="''${HYPA_PI_ENABLE_MCP_PROXY:-0}"
-
           export HYPA_PI_ASK_NON_INTERACTIVE="''${HYPA_PI_ASK_NON_INTERACTIVE:-allow}"
 
+          pi_args=(
+            -e "${phenixShell}"
+            -e "${piNpmPackages}/npm/node_modules/pi-subagents"
+            -e "${piNpmPackages}/npm/node_modules/pi-reduce"
+          )
+
           exec "${pkgs.pi-coding-agent}/bin/pi" \
-            -e "${phenixPiPackages}" \
+            "''${pi_args[@]}" \
             "$@"
         '';
       };
@@ -92,7 +98,6 @@
       packages = {
         default = wrappedPi;
         pi = wrappedPi;
-        phenix-pi-package = phenixPiPackages;
       };
 
       checks = {

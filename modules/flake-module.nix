@@ -6,7 +6,7 @@
     {
       phenixWrapped = {
         pi = inputs.self.packages.${system}.pi;
-        piPackage = inputs.self.packages.${system}.phenix-pi-package;
+        piPackage = inputs.self.packages.${system}.phenix-shell;
       };
     };
 }
