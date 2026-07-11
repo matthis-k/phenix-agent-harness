@@ -178,14 +178,11 @@ export default function registerPhenixContractTools(
   pi: ExtensionAPI,
 ): void {
   /*
-   * Register only in child sessions that have a contract.
-   * Root sessions must not expose these tools.
+   * Always register contract tools so child sessions can access them.
+   * Runtime authorization in each tool's execute handler enforces
+   * that only sessions with valid contract identities can actually
+   * retrieve or submit contracts.
    */
-  const identity = decodeContractIdentity();
-
-  if (!identity.ok) {
-    return;
-  }
 
   pi.registerTool({
     name: "phenix_contract_get",

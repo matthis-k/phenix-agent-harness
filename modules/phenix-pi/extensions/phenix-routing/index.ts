@@ -98,7 +98,61 @@ export default async function phenixRouting(
     runtime.activeRoute = route;
     setActiveRouteForSession(sessionId, route);
 
-    return {};
+    const workflowGuidance = [
+      `## Phenix Workflow Orchestration`,
+      ``,
+      `You are running with a Phenix model set (${runtime.modelSet}). As the workflow coordinator,`,
+      `you must orchestrate tasks through real isolated subagents using \`phenix_delegate\`.`,
+      `Never simulate a subagent role — each delegation creates a real isolated child process`,
+      `with its own model, tools, verification commands, and critic gates.`,
+      `Raw \`subagent\` calls are blocked by the runtime.`,
+      ``,
+      `### Standard workflow pipeline`,
+      ``,
+      `For non-trivial tasks, follow this pipeline:`,
+      ``,
+      `1. **Plan** — Delegate to a \`planner\` subagent to create a structured implementation`,
+      `   plan with requirements, scope, and acceptance criteria.`,
+      `2. **Architect Review** — If the plan involves cross-cutting or architectural decisions,`,
+      `   delegate to an \`architect\` subagent to review the plan.`,
+      `3. **Implement** — Delegate to an \`implementer\` subagent to make the actual code changes.`,
+      `   The implementer runs its own verification and reports results.`,
+      `4. **Verify** — Delegate to a \`critic\` subagent to review the implementation against`,
+      `   the plan. Report any blockers. If fixes are needed, delegate back to implementer`,
+      `   and verify again.`,
+      ``,
+      `### Delegate call structure`,
+      ``,
+      `Each \`phenix_delegate\` call requires:`,
+      `- \`role\`: the subagent role (planner, architect, implementer, tester, critic, finalizer)`,
+      `- \`task\`: a bounded objective with context and scope`,
+      `- \`outputSchema\`: a strict JSON Schema for the structured handoff`,
+      `- \`requirements\`: the obligations the child must cover`,
+      `- \`mode\`: "await" (default) for sequential workflow steps`,
+      ``,
+      `### Real isolation`,
+      ``,
+      `\`phenix_delegate\` creates real isolated subagents. The runtime owns model selection,`,
+      `thinking level, tool access, verification commands, and acceptance. Do not override`,
+      `these decisions. Each subagent runs in its own process with its own model.`,
+      ``,
+      `### Legal role transitions`,
+      ``,
+      `The root session may spawn any role. Nested delegation follows the role-child graph:`,
+      `- scout → scout`,
+      `- planner → scout, architect, critic`,
+      `- architect → scout, critic`,
+      `- implementer → scout, tester, critic`,
+      `- tester → scout`,
+      `- critic → scout, tester`,
+      `- finalizer → critic`,
+      ``,
+      `Use \`phenix_agent\` to inspect, await, poll, or cancel background handles.`,
+    ].join("\n");
+
+    return {
+      systemPrompt: `${_event.systemPrompt}\n\n${workflowGuidance}`,
+    };
   });
 
   // --- /phenix-route command ---

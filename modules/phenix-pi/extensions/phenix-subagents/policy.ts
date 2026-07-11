@@ -95,6 +95,8 @@ export interface ResolvedExecutionPolicy {
 export const REQUIRED_CHILD_RUNTIME_TOOLS = [
   "contact_supervisor",
   "phenix_delegate",
+  "phenix_contract_get",
+  "phenix_contract_submit",
 ] as const;
 
 /**
@@ -145,6 +147,8 @@ const COMMON_READ_TOOLS = [
   "context_*",
   "contact_supervisor",
   "phenix_delegate",
+  "phenix_contract_get",
+  "phenix_contract_submit",
 ] as const;
 
 const ROLE_TOOLS: Record<AgentKind, readonly string[]> = {
