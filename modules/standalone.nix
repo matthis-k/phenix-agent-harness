@@ -78,6 +78,11 @@
           export PI_TELEMETRY=0
 
           export HYPA_PI_MODE="''${HYPA_PI_MODE:-replace}"
+
+          # Point phenix_delegate at ourselves so child pi processes inherit
+          # the same extension set and environment.
+          SELF=$(readlink -f "$0" 2>/dev/null) || SELF=pi
+          export PI_SUBAGENT_PI_BINARY="''${PI_SUBAGENT_PI_BINARY:-$SELF}"
           export HYPA_PI_ENABLE_MCP_PROXY="''${HYPA_PI_ENABLE_MCP_PROXY:-0}"
           export HYPA_PI_ASK_NON_INTERACTIVE="''${HYPA_PI_ASK_NON_INTERACTIVE:-allow}"
 

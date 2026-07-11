@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 
@@ -27,7 +31,6 @@ import { registerPhenixProvider, PHENIX_PROVIDER, PHENIX_MODEL } from "./provide
 
 export { getActiveRouteForSession, setActiveRouteForSession };
 
-const SETTINGS_KEY = "phenix-routing-settings-v1";
 const ROUTE_AUDIT_KEY = "phenix-route-v1";
 
 /**
@@ -124,18 +127,37 @@ export default async function phenixRouting(
   // --- Register virtual provider ---
   registerPhenixProvider(pi);
 
-  // --- Parse CLI flags ---
-  const cliModelSet = parseCliModelSet();
+  // --- Register CLI flag ---
+  pi.registerFlag("phenix-model-set", {
+    description: "Set the active Phenix routing model set",
+    type: "string",
+  });
+  const cliModelSet = pi.getFlag("phenix-model-set") as string | undefined;
+
+  // Apply CLI override to state immediately
+  if (cliModelSet) {
+    const validated = validateModelSet(cliModelSet);
+    if (validated) {
+      for (const runtime of getAllSessionRuntimes()) {
+        runtime.modelSet = validated;
+      }
+      persistSetting(validated);
+    }
+  }
 
   // --- Session start ---
   pi.on("session_start", async (event: { sessionId?: string; session?: { id?: string } }) => {
     const sessionId = event.sessionId ?? "default";
 
-    // Restore model set from session entries
-    const settings = await scanSessionSettings(pi, sessionId);
-    if (settings && validateModelSet(settings.modelSet)) {
-      const runtime = getSessionRuntime(sessionId);
-      runtime.modelSet = settings.modelSet as ModelSetId;
+    // Restore model set from persisted file (survives Pi restarts)
+    try {
+      const persisted = readPersistedSetting();
+      if (persisted && validateModelSet(persisted)) {
+        const runtime = getSessionRuntime(sessionId);
+        runtime.modelSet = persisted as ModelSetId;
+      }
+    } catch {
+      // Silent — use defaults
     }
 
     // CLI override
@@ -246,15 +268,8 @@ export default async function phenixRouting(
         return;
       }
 
-      // Persist the change
-      try {
-        pi.appendEntry(SETTINGS_KEY, {
-          version: 1,
-          modelSet: validated,
-        });
-      } catch {
-        // Non-critical
-      }
+      // Persist the change (file-based, survives restarts)
+      persistSetting(validated);
 
       ctx.ui.notify(`Model set changed to: ${validated}`, "info");
     },
@@ -299,7 +314,7 @@ export default async function phenixRouting(
   // --- Ctrl+T keybinding ---
   const cycleOrder: ModelSetId[] = ["free", "opencode-go", "gpt", "mixed"];
 
-  pi.registerKeybinding("ctrl+t", {
+  pi.registerShortcut("ctrl+t", {
     description: "Cycle Phenix model set",
     handler: async (ctx) => {
       const sessionId = ctx.session?.id ?? "default";
@@ -308,14 +323,8 @@ export default async function phenixRouting(
       const next = cycleModelSet(runtime.modelSet, cycleOrder);
       runtime.modelSet = next;
 
-      try {
-        pi.appendEntry(SETTINGS_KEY, {
-          version: 1,
-          modelSet: next,
-        });
-      } catch {
-        // Non-critical
-      }
+      // Persist the change (file-based, survives restarts)
+      persistSetting(next);
 
       ctx.ui.notify(`Phenix model set: ${next}`, "info");
     },
@@ -324,16 +333,6 @@ export default async function phenixRouting(
   // --- Footer state display hook ---
   // We'd register a footer callback if Pi API supports it.
   // For now, the route command provides visibility.
-}
-
-function parseCliModelSet(): string | undefined {
-  const args = process.argv.slice(2);
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--phenix-model-set" && i + 1 < args.length) {
-      return args[i + 1];
-    }
-  }
-  return undefined;
 }
 
 function deriveCoordinatorProfile(task: string): {
@@ -361,21 +360,34 @@ function deriveCoordinatorProfile(task: string): {
   };
 }
 
-async function scanSessionSettings(
-  pi: ExtensionAPI,
-  sessionId: string,
-): Promise<{ version: number; modelSet: string } | undefined> {
+/** File-based setting persistence — survives Pi restarts. */
+function settingsFilePath(): string {
+  const agentDir =
+    process.env.PI_CODING_AGENT_DIR ??
+    path.join(os.homedir(), ".pi", "agent");
+  return path.join(agentDir, "phenix-model-set");
+}
+
+function readPersistedSetting(): string | undefined {
   try {
-    const entries = pi.scanEntries?.(sessionId, SETTINGS_KEY) ?? [];
-    // Find the latest valid entry
-    for (let i = entries.length - 1; i >= 0; i--) {
-      const entry = entries[i];
-      if (entry?.version === 1 && entry?.modelSet) {
-        return entry as { version: number; modelSet: string };
-      }
-    }
+    const raw = fs.readFileSync(settingsFilePath(), "utf-8").trim();
+    return raw || undefined;
   } catch {
-    // Session scanning not available
+    return undefined;
   }
-  return undefined;
+}
+
+function persistSetting(modelSet: string): void {
+  try {
+    const dir = path.dirname(settingsFilePath());
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(settingsFilePath(), modelSet, "utf-8");
+  } catch {
+    // Non-critical
+  }
+}
+
+function getAllSessionRuntimes(): Array<{ modelSet: ModelSetId }> {
+  // We don't expose the Map, but we can iterate known sessions
+  return []; // individual handlers have access to getSessionRuntime
 }
