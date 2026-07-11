@@ -1,0 +1,329 @@
+/**
+ * Phenix QA — Runtime entry point.
+ *
+ * Main QA pipeline: scope → discovery → analysis → report → validate.
+ */
+
+import type {
+  QaReport,
+  QaFinding,
+  QaEvidence,
+  ReviewScope,
+  AnalysisCoverage,
+  ModelReviewContribution,
+} from "../contracts/contracts.ts";
+import {
+  validateQaReport,
+  assertQaReport,
+  validateModelReviewContribution,
+} from "../contracts/contracts.ts";
+import type {
+  QaConfig,
+  QaAnalyzerResult,
+} from "./types.ts";
+import { DEFAULT_QA_CONFIG, mergeConfig, discoverRepoConfig } from "./config.ts";
+import { resolveScopeFiles, isIgnoredPath } from "./scope.ts";
+import { discoverGuidance } from "./guidance.ts";
+import { DEFAULT_PROCESS_RUNNER } from "./process.ts";
+import { checkAllAvailability } from "./availability.ts";
+import { ensureArtifactDir, writeJsonArtifact, writeTextArtifact } from "./artifacts.ts";
+import { buildReportSkeleton, mergeModelContribution, calculateRiskScores } from "./report.ts";
+import { validateReportSemantics } from "./semantic-validation.ts";
+import { renderTextReport } from "./render-text.ts";
+import { getAnalyzers, ALL_ANALYZERS, listAnalyzerIds } from "./analyzers/registry.ts";
+import { resetIdCounter } from "./normalize.ts";
+
+// ── Public API ───────────────────────────────────────────────────────────────
+
+export interface QaReviewOptions {
+  scope: ReviewScope;
+  config?: Partial<QaConfig>;
+  cwd?: string;
+  signal?: AbortSignal;
+}
+
+export interface QaReviewResult {
+  report: QaReport;
+  artifacts: string[];
+  diagnostics: string[];
+}
+
+/**
+ * Run a complete QA review.
+ */
+export async function review(options: QaReviewOptions): Promise<QaReviewResult> {
+  const cwd = options.cwd ?? process.cwd();
+  const signal = options.signal;
+
+  resetIdCounter(0);
+
+  // 1. Load configuration
+  let config = DEFAULT_QA_CONFIG;
+  try {
+    const repoConfig = await discoverRepoConfig(
+      cwd,
+      async (path) => {
+        const { readFile } = await import("node:fs/promises");
+        return readFile(path, "utf-8");
+      },
+      async (path) => {
+        const { access } = await import("node:fs/promises");
+        try { await access(path); return true; } catch { return false; }
+      },
+    );
+    config = mergeConfig(DEFAULT_QA_CONFIG, repoConfig);
+  } catch {
+    // Use defaults
+  }
+  config = mergeConfig(config, options.config);
+
+  // 2. Create artifact directory
+  const artifactDir = ensureArtifactDir(config.output.artifactDirectory);
+
+  // 3. Resolve scope files
+  const scopeFiles = await resolveScopeFiles(options.scope, cwd, DEFAULT_PROCESS_RUNNER);
+
+  // 4. Filter scope files for ignored paths
+  const scopedFiles = scopeFiles.files.filter(
+    (f) => !isIgnoredPath(
+      f,
+      config.ignore.paths,
+      config.ignore.generatedPaths,
+      config.ignore.vendorPaths,
+    ),
+  );
+
+  // 5. Discover repository guidance
+  const guidance = discoverGuidance(cwd);
+
+  // 6. Create analyzer context
+  const context = {
+    cwd,
+    scope: options.scope,
+    artifactDirectory: artifactDir,
+    signal,
+    config,
+  };
+
+  // 7. Check analyzer availability
+  const analyzers = getAnalyzers(config.enabledAnalyzers);
+  const availability = await checkAllAvailability(
+    analyzers.map((a) => ({ id: a.id, checkAvailability: a.checkAvailability.bind(a) })),
+    context,
+  );
+
+  const completedAnalyzers: string[] = [];
+  const unavailableAnalyzers: string[] = [];
+  const failedAnalyzers: string[] = [];
+
+  // 8. Run enabled analyzers
+  const allEvidence: QaEvidence[] = [];
+  const allFindings: QaFinding[] = [];
+  const allArtifacts: string[] = [];
+  const allDiagnostics: string[] = [];
+
+  for (const analyzer of analyzers) {
+    if (signal?.aborted) break;
+
+    const av = availability.get(analyzer.id);
+    if (!av?.available) {
+      unavailableAnalyzers.push(analyzer.id);
+      allDiagnostics.push(`${analyzer.id}: unavailable (${av?.reason ?? "unknown"})`);
+      continue;
+    }
+
+    try {
+      const result: QaAnalyzerResult = await analyzer.run(context);
+      allDiagnostics.push(
+        `${analyzer.id}: ${result.status} (${result.durationMs}ms)`,
+      );
+
+      if (result.status === "completed") {
+        completedAnalyzers.push(analyzer.id);
+        allEvidence.push(...result.evidence);
+        allFindings.push(...result.evidence.map((_e) => []).flat()); // no auto-findings from evidence
+        allArtifacts.push(...result.artifacts);
+        allDiagnostics.push(...result.diagnostics.map((d) => `  ${d}`));
+      } else if (result.status === "failed") {
+        failedAnalyzers.push(analyzer.id);
+        allDiagnostics.push(...result.diagnostics.map((d) => `  ${d}`));
+        // Still collect partial evidence
+        allEvidence.push(...result.evidence);
+        allArtifacts.push(...result.artifacts);
+      } else {
+        // timed-out, cancelled, not-applicable, unavailable
+        if (result.status === "timed-out" || result.status === "cancelled") {
+          failedAnalyzers.push(analyzer.id);
+        }
+        allDiagnostics.push(...result.diagnostics.map((d) => `  ${d}`));
+      }
+    } catch (error) {
+      failedAnalyzers.push(analyzer.id);
+      allDiagnostics.push(
+        `${analyzer.id}: error - ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  // 9. Build analysis coverage
+  const coverage: AnalysisCoverage = {
+    requestedAnalyzers: config.enabledAnalyzers,
+    completedAnalyzers,
+    unavailableAnalyzers,
+    failedAnalyzers,
+    coveredFiles: scopedFiles.length,
+    totalScopedFiles: scopeFiles.files.length,
+    coveredLanguages: [],
+    uncoveredLanguages: [],
+  };
+
+  // 10. Build deterministic report skeleton
+  const skeleton = buildReportSkeleton({
+    scope: options.scope,
+    evidence: allEvidence,
+    findings: allFindings,
+    coverage,
+    config,
+  });
+
+  // Merge raw artifacts
+  const reportWithArtifacts: QaReport = {
+    ...skeleton,
+    rawArtifacts: allArtifacts,
+  };
+
+  // 11. Write JSON report
+  if (config.output.writeJson) {
+    writeJsonArtifact(artifactDir, "qa-report", reportWithArtifacts);
+  }
+
+  // 12. Write text report
+  if (config.output.writeText) {
+    const text = renderTextReport(reportWithArtifacts);
+    writeTextArtifact(artifactDir, "qa-report", text);
+  }
+
+  return {
+    report: reportWithArtifacts,
+    artifacts: allArtifacts,
+    diagnostics: allDiagnostics,
+  };
+}
+
+/**
+ * Validate and merge a model-assisted review contribution into a skeleton report.
+ */
+export function submitModelReview(
+  skeleton: QaReport,
+  contribution: unknown,
+): { ok: true; report: QaReport } | { ok: false; summary: string; violations: readonly { path: string; message: string }[] } {
+  const validation = validateModelReviewContribution(contribution);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      summary: validation.summary,
+      violations: validation.violations,
+    };
+  }
+
+  // Merge and recalculate
+  let merged = mergeModelContribution(skeleton, validation.value);
+
+  // Recalculate risk scores
+  merged.riskAssessment = calculateRiskScores(merged.evidence, merged.findings);
+
+  // Final semantic validation
+  const semantics = validateReportSemantics(merged);
+  if (!semantics.ok) {
+    return {
+      ok: false,
+      summary: `Semantic validation failed: ${semantics.issues.length} issue(s).`,
+      violations: semantics.issues,
+    };
+  }
+
+  // Final schema validation
+  const finalCheck = validateQaReport(merged);
+  if (!finalCheck.ok) {
+    return {
+      ok: false,
+      summary: `Schema validation failed: ${finalCheck.summary}`,
+      violations: finalCheck.violations,
+    };
+  }
+
+  return { ok: true, report: merged };
+}
+
+/**
+ * Validate a QA report from a file or object.
+ */
+export function validateReport(
+  value: unknown,
+): { ok: true; report: QaReport } | { ok: false; summary: string; violations: readonly { path: string; message: string }[] } {
+  const schemaResult = validateQaReport(value);
+  if (!schemaResult.ok) {
+    return {
+      ok: false,
+      summary: `Schema validation failed: ${schemaResult.summary}`,
+      violations: schemaResult.violations,
+    };
+  }
+
+  const semantics = validateReportSemantics(schemaResult.value);
+  if (!semantics.ok) {
+    return {
+      ok: false,
+      summary: `Semantic validation failed: ${semantics.issues.length} issue(s).`,
+      violations: semantics.issues,
+    };
+  }
+
+  return { ok: true, report: schemaResult.value };
+}
+
+/**
+ * List available analyzers and their status.
+ */
+export async function listAnalyzers(cwd: string): Promise<
+  { id: string; categories: readonly string[]; available: boolean; reason?: string }[]
+> {
+  const result: {
+    id: string;
+    categories: readonly string[];
+    available: boolean;
+    reason?: string;
+  }[] = [];
+
+  const context = {
+    cwd,
+    scope: { kind: "repository" as const, description: "analyzer check" },
+    artifactDirectory: cwd,
+    config: DEFAULT_QA_CONFIG,
+  };
+
+  for (const analyzer of ALL_ANALYZERS) {
+    try {
+      const av = await analyzer.checkAvailability(context);
+      result.push({
+        id: analyzer.id,
+        categories: analyzer.categories,
+        available: av.available,
+        reason: av.reason,
+      });
+    } catch (error) {
+      result.push({
+        id: analyzer.id,
+        categories: analyzer.categories,
+        available: false,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return result;
+}
+
+export { listAnalyzerIds } from "./analyzers/registry.ts";
+export { assertQaReport, validateQaReport, validateQaFinding, validateQaEvidence } from "../contracts/contracts.ts";
+export { renderTextReport } from "./render-text.ts";

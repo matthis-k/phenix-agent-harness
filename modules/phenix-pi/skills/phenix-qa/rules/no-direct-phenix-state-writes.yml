@@ -1,0 +1,13 @@
+id: no-direct-phenix-state-writes
+language: TypeScript
+message: "Use contractStore() or handleStore() instead of writing directly to .phenix-agent-state."
+severity: error
+rule:
+  pattern: writeFileSync($BASE, $$$)
+  inside:
+    kind: call_expression
+    has:
+      regex: \.phenix-agent-state
+note: |
+  Direct writes to .phenix-agent-state bypass the authorized persistence
+  modules (contract-store.ts, handle-store.ts). Use the public API instead.

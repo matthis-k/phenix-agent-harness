@@ -1,0 +1,3 @@
+# ast-grep root config for Phenix QA structural rules
+ruleDirs:
+  - .

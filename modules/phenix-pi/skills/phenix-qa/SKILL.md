@@ -5,261 +5,177 @@ description: Multi-level code quality assurance review covering correctness, met
 
 # Phenix QA — Multi-Level Code Quality Assurance
 
-Perform a structured quality-assurance review of the selected codebase or change set. The review assesses quality at multiple levels with clear separation between:
+Perform a structured quality-assurance review of the selected codebase or change set.
 
-- **Deterministic facts** produced by tools.
-- **Repository-specific rule violations**.
-- **Reviewer judgments** based on evidence.
-- **Problems introduced by the current change** vs. **pre-existing technical debt**.
-- **Blocking defects** vs. **advisory improvements**.
+## Architecture
 
-## Quick start
+The QA system has two layers:
 
-1. Resolve the review scope.
-2. Run Level 0 checks (parse, build, typecheck, test, lint).
-3. Run deterministic metric tools against the scope.
-4. Review each higher level in sequence, building on lower-level evidence.
-5. Classify each finding as current-change or pre-existing.
-6. Produce quality gates, risk scores, and the final report.
+1. **Runtime** (`runtime/`): Deterministic TypeScript modules that own scope resolution, analyzer execution, evidence normalization, report building, gate calculation, risk scoring, and report validation. These run locally and produce machine-readable JSON and human-readable text reports.
 
-Stop only when a lower-level failure prevents meaningful higher-level analysis. Report unavailable analysis explicitly — never treat a missing tool result as a clean result.
+2. **Model-assisted review** (this skill): The model interprets deterministic evidence, performs readability/pattern/architecture/system/operability/security review, and submits structured contributions that the runtime validates and merges.
 
-## Review scope
+The runtime enforces schemas, validates cross-references (evidence→findings, findings→gates, gates→risk), and rejects malformed model contributions.
 
-Support these scopes. Default to `diff` when reviewing a change:
+## Execution workflow
 
-| Scope | Description |
-|-------|-------------|
-| `diff` | Changed code relative to a base revision (default). |
-| `files` | An explicit list of files. |
-| `module` | One module and its direct dependencies. |
-| `repository` | The complete repository. |
-| `architecture` | Package, module, service, or subsystem boundaries. |
+```
+1. Run the QA runtime to produce a deterministic skeleton.
+2. Inspect analyzer coverage — note unavailable analyzers.
+3. Review deterministic evidence.
+4. Perform only the model-assisted levels requested.
+5. Submit the model-review contribution using the runtime schema.
+6. Let the runtime validate, merge, score, and render the final report.
+```
 
-When reviewing a **diff**:
+### One-shot review
 
-- Analyze changed functions in full.
-- Inspect relevant callers and callees.
-- Inspect interfaces and contracts affected by the change.
-- Compare the implementation with neighboring modules.
-- Separate newly introduced issues from pre-existing ones.
-- Do not require unrelated historical debt to be fixed.
+```bash
+node --experimental-strip-types skills/phenix-qa/runtime/index.ts review \
+  --scope diff \
+  --base main \
+  --output qa-results/
+```
 
-Resolve the base revision from `git merge-base`, the default branch (e.g., `main` or `master`), or an explicit `--base` argument. When no base is given and the repo is dirty, diff against `HEAD`. When clean, diff against the merge-base of the current branch.
+### Validate a report
 
-## QA levels
+```bash
+node --experimental-strip-types skills/phenix-qa/runtime/index.ts validate-report report.json
+```
 
-Run the review as a hierarchy of QA levels. Each level builds on evidence from lower levels. Detailed level descriptions and tool guidance are in [references/](references/).
+### List available analyzers
 
-| Level | Name | Focus | Gate |
-|-------|------|-------|------|
-| 0 | Correctness | Parse, build, typecheck, test, lint, schema validity. | A |
-| 1 | Metrics | Deterministic complexity, size, control-flow, and boundary-safety metrics. | B |
-| 2 | Readability | Understandability, naming, control-flow clarity, local design. | C |
-| 3 | Patterns | Convention consistency across equivalent concepts. | C |
-| 4 | Architecture | Dependency direction, layer boundaries, module cohesion. | D |
-| 5 | System | System-level correctness: compatibility, retry, concurrency, ordering. | E |
-| 6 | Operability | Logging, diagnostics, observability, graceful degradation. | E |
-| 7 | Security | Trust boundaries, input validation, auth, injection, secrets. | E |
+```bash
+node --experimental-strip-types skills/phenix-qa/runtime/index.ts analyzers
+```
 
-Full details for each level are in [references/level-0.md](references/level-0.md) through [references/level-7.md](references/level-7.md).
+## Implemented runtime capability
 
-## Review process
+### Runtime schemas (`contracts/contracts.ts`)
 
-Execute in this order:
+All QA types are now runtime-validatable TypeBox schemas. Validators:
 
-1. **Resolve scope** — diff base, file list, module boundaries.
-2. **Load repository guidance** — read `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `docs/`, architecture docs, package manifests.
-3. **Run Level 0 checks** — parse, build, typecheck, test, lint, format-check. Use project-native commands. Level 0 failures are normally blocking.
-4. **Run deterministic metric tools** — prefer Tree-sitter-backed analyzers; fall back to language-specific tools. Never estimate metrics manually.
-5. **Run structural pattern rules** — use `ast-grep` or equivalent for repository-specific rules.
-6. **Build dependency and duplication reports** — dependency graph, clone detection, dead-code analysis.
-7. **Gather relevant source context** — read changed files, callers, callees, and neighboring modules.
-8. **Review readability and local design** (Level 2) — combine metric evidence with source review.
-9. **Review pattern consistency** (Level 3) — identify canonical patterns before claiming deviations.
-10. **Review module architecture** (Level 4) — check dependency direction, layer boundaries, cycles.
-11. **Review system-level effects** (Level 5) — API compatibility, retry safety, concurrency, partial failure.
-12. **Review operational and security concerns** (Levels 6-7) — observability, trust boundaries, injection risks.
-13. **Normalize and deduplicate findings** — merge overlapping findings; link each finding to evidence.
-14. **Classify current-change vs. existing debt** — tag every finding with `introducedByCurrentChange`.
-15. **Produce quality gates, risk scores, and final report**.
+- `validateQaEvidence(value)` — validates evidence items
+- `validateQaFinding(value)` — validates findings
+- `validateQaReport(value)` — validates full reports
+- `assertQaReport(value)` — throws on invalid reports
+- `validateModelReviewContribution(value)` — validates model reviewer contributions
 
-Stop only when a lower-level failure prevents meaningful higher-level analysis:
+Validation rejects: invalid QA levels, empty titles/explanations/impacts/recommendations, risk values outside 0–100, invalid source locations, invalid timestamps, invalid architecture assessments, invalid quality gate values, missing evidence references for model-assisted findings, and blocking on non-high/critical findings.
 
-- Parse failure may prevent AST-based metrics.
-- Build failure does not prevent architecture review.
-- Failing tests do not prevent readability review.
+Semantic validation (`runtime/semantic-validation.ts`) additionally checks: evidence reference integrity, gate reference integrity, risk evidence existence, duplicate IDs, timestamp format, blocking severity constraints, composite score bounds, and remediation reference integrity.
 
-## Evidence and finding contracts
+### Analyzer adapters
 
-See [contracts/contracts.ts](contracts/contracts.ts) for the full TypeScript type definitions. Every piece of evidence and every finding must conform to these contracts.
+| Analyzer | Status | Tool | Categories |
+|---|---|---|---|
+| `project-native` | Available | Discovers package.json scripts, .tend.json commands | build, test, lint, format |
+| `metrics` | Optional | codehawk-cli (when installed) | metrics, complexity |
+| `structural` | Available | ast-grep 0.44.0 | patterns, structural-rules |
+| `duplication` | Optional | jscpd (when installed) | duplication, clone-detection |
+| `security` | Optional | semgrep (when installed) | security, vulnerability |
+| `git-history` | Available | git | version-control, churn, hotspots |
 
-### Evidence structure
+**Required**: `project-native`
+**Optional**: `metrics`, `duplication`, `security` (report as unavailable when not installed; never claim clean results)
+
+### Scope resolution (`runtime/scope.ts`)
+
+Supports: `diff`, `files`, `module`, `repository`, `architecture`.
+
+For `diff` scope:
+- Accepts explicit base revision
+- Determines merge base against default branch
+- Handles dirty worktrees
+- Tracks added, modified, renamed, deleted files
+- Classifies evidence inside/outside changed lines
+
+### Report pipeline (`runtime/report.ts`)
+
+The runtime:
+1. Builds a deterministic skeleton with empty model-review sections
+2. Accepts model-review contributions
+3. Validates contribution structure
+4. Merges model findings with deterministic findings (deduplicates by ID)
+5. Recalculates risk scores and composite score in runtime code
+6. Recalculates quality gates
+7. Runs semantic validation
+8. Writes JSON and text reports
+
+### Risk scoring (`runtime/report.ts`)
+
+Scores calculated by runtime code from findings, never estimated by the model:
+
+- Local Complexity Risk (15%)
+- Readability Risk (10%)
+- Pattern Consistency Risk (10%)
+- Architecture Risk (20%)
+- System Integration Risk (15%)
+- Operational Risk (10%)
+- Security Risk (10%)
+- Change Risk (10%)
+
+Missing analyzers reduce confidence and increase `unavailableInputs` — they do not lower risk as though code were clean.
+
+### Quality gates
+
+| Gate | Name | Trigger |
+|---|---|---|
+| A | Correctness | Fail: parse/compile/type-check failure; required tests fail |
+| B | Change Safety | Fail/Review: high-severity complexity, unsafe boundaries, dependency cycles |
+| C | Design Consistency | Review: pattern deviation, competing abstractions |
+| D | Architecture | Fail: dependency direction violation, layer leak, new cycle |
+| E | Production Readiness | Fail/Review: backward compatibility, retry safety, observability, security |
+
+### Analysis coverage (`AnalysisCoverage`)
+
+Structured coverage replaces the free-form string:
+- Requested, completed, unavailable, and failed analyzers
+- Covered vs. total scoped files
+- Covered and uncovered languages
+
+### Architecture assessment
+
+Replaced the Boolean `architectureConsistent` with:
 
 ```ts
-interface QaEvidence {
-  id: string;
-  level: QaLevel;
-  source: EvidenceSource;
-  tool?: string;
-  ruleId?: string;
-  category: string;
-  message: string;
-  locations: SourceLocation[];
-  metric?: { name: string; value: number; threshold?: number; unit?: string };
-  rawReference?: string;
-}
+architectureAssessment: "consistent" | "inconsistent" | "uncertain" | "not-reviewed"
 ```
 
-### Finding structure
+### Model-assisted review responsibility
 
-```ts
-interface QaFinding {
-  id: string;
-  level: QaLevel;
-  severity: FindingSeverity;       // info | low | medium | high | critical
-  confidence: FindingConfidence;   // low | medium | high
-  title: string;
-  explanation: string;
-  evidenceIds: string[];
-  locations: SourceLocation[];
-  impact: string;
-  recommendation: string;
-  remediationScope: RemediationScope;
-  introducedByCurrentChange: true | false | "unknown";
-  blocking: boolean;
-}
-```
+The model owns:
 
-### Finding validation rules
+| Level | Responsibility |
+|---|---|
+| Level 2 — Readability | Naming, control-flow clarity, local design |
+| Level 3 — Patterns | Convention consistency across equivalent concepts |
+| Level 4 — Architecture | Dependency direction, layer boundaries, module cohesion |
+| Level 5 — System | API compatibility, retry safety, concurrency, partial failure |
+| Level 6 — Operability | Logging, diagnostics, observability, graceful degradation |
+| Level 7 — Security | Trust boundaries, input validation, auth, injection, secrets |
 
-Reject findings that:
+All model findings must reference existing evidence IDs. The runtime rejects findings with no evidence.
 
-- Contain no evidence.
-- Are purely stylistic with no maintenance benefit.
-- Make architectural claims without repository context.
-- Infer deterministic metric values manually.
-- Recommend large rewrites without proportionate benefit.
-- Repeat another finding without adding information.
+## Optional analyzer capability
 
-## Quality gates
+These analyzers are implemented but require tools not currently in the Nix package set:
 
-Apply progressive gates. Gates should be configurable by project type.
+- **Metrics**: Requires `codehawk-cli` (`npm install -g codehawk-cli`). Reports as unavailable otherwise.
+- **Duplication**: Requires `jscpd` (`npm install -g jscpd`). Reports as unavailable otherwise.
+- **Security**: Requires `semgrep` (`pip install semgrep`). Reports as unavailable otherwise.
 
-| Gate | Name | Fail / Review conditions |
-|------|------|--------------------------|
-| A | Correctness | Fail: does not parse, compile, or type-check; required tests fail; required schemas are invalid. |
-| B | Change Safety | Fail or review: high-severity complexity introduced; unsafe boundary handling; dependency cycle; major duplication; coverage drop in high-risk area; unhandled state or protocol cases. |
-| C | Design Consistency | Review: change bypasses an established pattern; introduces competing abstraction; mixes responsibilities; expands public API unnecessarily; inconsistent with equivalent modules. |
-| D | Architecture | Fail or require exception: dependency direction violated; forbidden layer import; domain/infrastructure/transport/presentation mixed; module responsible for unrelated subsystems; runtime boundary bypassed; new architectural cycle. |
-| E | Production Readiness | Fail or require approval: not backward compatible where required; retry/timeout/cancellation unsafe; unhandled data migration; not observable enough to operate; unresolved security or trust-boundary issues. |
+`git-history` and `structural` analyzers are available when ast-grep and git are present (they are in the current Nix environment).
 
-Not every repository needs every gate.
+## Future work
 
-## Risk scoring
+- Package codehawk-cli or an equivalent metrics tool in Nix
+- Add dead-code analysis adapter
+- Add dependency graph adapter (e.g., `madge` or `dependency-cruiser`)
+- Add coverage analysis adapter
+- CI integration — run QA pipeline as a Nix check
+- SARIF output support for the report format
 
-Produce separate scores (0–100) with confidence. See [references/scoring.md](references/scoring.md) for weighting details.
+## Full QA level details
 
-| Score | Weight (default) |
-|-------|------------------|
-| Local Complexity Risk | 15% |
-| Readability Risk | 10% |
-| Pattern Consistency Risk | 10% |
-| Architecture Risk | 20% |
-| System Integration Risk | 15% |
-| Operational Risk | 10% |
-| Security Risk | 10% |
-| Change Risk | 10% |
-
-Adjust weights by repository type (library weights API compatibility; service weights operability; compiler weights correctness; UI app weights state management).
-
-Do not reduce the complete review to a single number. All component scores and findings must remain visible.
-
-## Change-risk prioritization
-
-Where data is available, combine: complexity, test coverage, churn, recent defect history, dependency fan-in, public API exposure, and number of affected components.
-
-High-priority areas are those that are: complex, frequently changed, poorly tested, widely depended upon, and architecturally central. Do not prioritize stable, isolated code solely because of a high historical metric value.
-
-## Tooling strategy
-
-Prefer existing analyzers over custom metric implementations. The analysis pipeline should support:
-
-| Category | Examples |
-|----------|----------|
-| Tree-sitter metric analyzer | complexity, size, Halstead, cognitive metrics |
-| Structural rule engine | custom repository and pattern rules (e.g., `ast-grep`) |
-| Dependency graph analyzer | cycles, fan-in, fan-out, boundary violations |
-| Duplicate-code detector | clone blocks and duplication percentages (e.g., `jscpd`) |
-| Dead-code analyzer | unused files, symbols, exports, dependencies |
-| Coverage analyzer | line, branch, and function coverage |
-| Version-control analysis | churn, co-change, ownership, hotspots |
-| Security analyzer | language/ecosystem-specific security rules (e.g., `semgrep`) |
-
-Tool names are implementation choices. Normalize their results into the common evidence schema.
-
-## Output format
-
-Produce the final report in this order:
-
-### 1. Executive summary
-
-- Scope reviewed.
-- Overall result.
-- Blocking issues.
-- Highest-risk QA level.
-- Whether the architecture remains consistent.
-- Whether the current change increases technical debt.
-- Analysis coverage and unavailable checks.
-
-### 2. Quality-gate results
-
-```
-Gate A — Correctness:        PASS / FAIL / NOT RUN
-Gate B — Change Safety:      PASS / REVIEW / FAIL
-Gate C — Design Consistency: PASS / REVIEW / FAIL
-Gate D — Architecture:       PASS / REVIEW / FAIL
-Gate E — Production Readiness: PASS / REVIEW / FAIL
-```
-
-### 3. Findings by QA level
-
-For each finding: severity, confidence, location, evidence, why it matters, concrete remediation, whether introduced by current change, whether it blocks approval.
-
-### 4. Deterministic metrics summary
-
-Summarize only important outliers. Include raw machine-readable reports as attachments or referenced artifacts (e.g., `qa-artifacts/metrics.json`).
-
-### 5. Positive observations
-
-Identify patterns worth preserving: clear module boundaries, consistent error handling, good domain predicates, cohesive functions, explicit state transitions, strong tests around high-risk logic.
-
-### 6. Remediation plan
-
-Order remediation by value:
-
-1. Correctness and security.
-2. Architecture and system risk.
-3. High-risk complexity.
-4. Pattern consistency.
-5. Readability improvements.
-6. Optional cleanup.
-
-Prefer the smallest change that resolves the underlying problem.
-
-## Reviewer rules
-
-The reviewer must:
-
-- Base deterministic claims on tool output.
-- Base architectural claims on repository evidence.
-- Distinguish facts from judgment.
-- Avoid generic best-practice advice.
-- Avoid recommending abstractions without a clear boundary.
-- Avoid requiring every large function to be split.
-- Avoid requiring every repeated block to be generalized.
-- Avoid penalizing deliberate language idioms.
-- Account for generated code, tests, fixtures, migrations, and declarative files.
-- Account for project type and local conventions.
-- Prefer proportionate recommendations.
-- State when evidence is insufficient.
+Detailed review criteria for each level are in `references/level-0.md` through `references/level-7.md`. Quality gate details are in `references/quality-gates.md`. Risk scoring weights and interpretation are in `references/scoring.md`.

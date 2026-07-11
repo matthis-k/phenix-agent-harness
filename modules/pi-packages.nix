@@ -36,11 +36,27 @@
       '';
 
       phenixSubagentTests = pkgs.runCommand "phenix-subagent-runtime-tests" {
-        nativeBuildInputs = [ pkgs.nodejs ];
+        nativeBuildInputs = [
+          pkgs.nodejs
+          pkgs.ast-grep
+          pkgs.git
+        ];
       } ''
         cd ${phenixPiPackage}
         node --experimental-strip-types --test tests/*.test.ts
         node --check runtime/verify.mjs
+        touch "$out"
+      '';
+
+      phenixQaTests = pkgs.runCommand "phenix-qa-tests" {
+        nativeBuildInputs = [
+          pkgs.nodejs
+          pkgs.ast-grep
+          pkgs.git
+        ];
+      } ''
+        cd ${phenixPiPackage}
+        node --experimental-strip-types --test tests/qa-*.test.ts
         touch "$out"
       '';
 
@@ -94,12 +110,14 @@
         phenix-shell = phenixPiPackage;
         phenix-pi-npm-packages = piNpmPackages;
         phenix-subagent-tests = phenixSubagentTests;
+        phenix-qa-tests = phenixQaTests;
         update-pi-npm-hash = updatePiNpmHash;
       };
 
       checks = {
         phenix-pi-npm-packages = piNpmPackages;
         phenix-subagent-tests = phenixSubagentTests;
+        phenix-qa-tests = phenixQaTests;
       };
     };
 }

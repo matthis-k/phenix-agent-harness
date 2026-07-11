@@ -1,0 +1,17 @@
+id: no-duplicate-project-root-helpers
+language: TypeScript
+message: "Use the centralized findProjectRoot from handle-store.ts instead of duplicating project-root discovery."
+severity: warning
+rule:
+  pattern: function findProjectRoot($$$)
+  inside:
+    stopBy: end
+    kind: program
+    has:
+      any:
+        - pattern: import { findProjectRoot }
+files:
+  - extensions/phenix-subagents/
+note: |
+  Multiple modules in this repository implement their own project-root
+  discovery. Use the central helper from handle-store.ts instead.

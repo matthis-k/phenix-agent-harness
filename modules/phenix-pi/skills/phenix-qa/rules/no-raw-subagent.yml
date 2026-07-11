@@ -1,0 +1,10 @@
+id: no-raw-subagent
+language: TypeScript
+message: "Use phenix_delegate for real isolated subagents. Raw subagent calls are runtime-blocked."
+severity: error
+rule:
+  pattern: subagent({$$$ARGS})
+note: |
+  Raw subagent tool calls are blocked at runtime in Phenix.
+  Use the phenix_delegate tool instead, which enforces model selection,
+  thinking, permissions, persistence, contracts, and verification.

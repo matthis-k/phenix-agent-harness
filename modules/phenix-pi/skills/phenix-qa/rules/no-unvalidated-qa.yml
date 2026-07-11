@@ -1,0 +1,14 @@
+id: no-unvalidated-qa-reports
+language: TypeScript
+message: "QA reports and findings must be validated with runtime schemas before use."
+severity: warning
+rule:
+  any:
+    - pattern: type QaReport
+    - pattern: type QaFinding
+    - pattern: type QaEvidence
+files:
+  - skills/phenix-qa/
+note: |
+  When producing QA reports or findings programmatically, always run them
+  through validateQaReport or validateQaFinding before returning.
