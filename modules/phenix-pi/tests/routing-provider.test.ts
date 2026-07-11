@@ -37,9 +37,9 @@ const GO_MODELS: readonly ModelRef[] = [
 ];
 
 const GPT_MODELS: readonly ModelRef[] = [
-  mr("openai", "gpt-5.5"),
-  mr("openai", "gpt-5.5-thinking"),
-  mr("openai", "gpt-5.5-pro"),
+  mr("openai-codex", "gpt-5.5"),
+  mr("openai-codex", "gpt-5.4"),
+  mr("openai-codex", "gpt-5.5"),
 ];
 
 const FREE_MODELS: readonly ModelRef[] = [
@@ -187,7 +187,7 @@ describe("Provider integration tests", () => {
       config,
     });
     assert.equal(route.modelSet, "gpt");
-    assert.equal(route.model.provider, "openai");
+    assert.equal(route.model.provider, "openai-codex");
   });
 });
 
@@ -222,7 +222,7 @@ describe("Full pipeline: profile → matrix → resolver", () => {
     assert.equal(route.capability, "review-max");
     assert.equal(route.thinking, "xhigh");
     // mixed → review-max → gpt.pro
-    assert.equal(route.model.provider, "openai");
+    assert.equal(route.model.provider, "openai-codex");
   });
 });
 

@@ -205,14 +205,14 @@ function buildDefaultPools(): Record<string, readonly string[]> {
     "go.review":       ["opencode-go/qwen3.7-max", "opencode-go/deepseek-v4-pro"],
     "go.review-max":   ["opencode-go/glm-5.2", "opencode-go/qwen3.7-max"],
 
-    "gpt.fast":        ["openai/gpt-5.5-instant", "openai/gpt-5.5"],
-    "gpt.general":     ["openai/gpt-5.5", "openai/gpt-5.5-thinking"],
-    "gpt.reasoning":   ["openai/gpt-5.5-thinking", "openai/gpt-5.5"],
-    "gpt.pro":         ["openai/gpt-5.5-pro", "openai/gpt-5.5-thinking"],
-    "gpt.code-fast":   ["openai/gpt-5.5", "openai/gpt-5.5-thinking"],
-    "gpt.code":        ["openai/gpt-5.5-thinking", "openai/gpt-5.5"],
-    "gpt.code-max":    ["openai/gpt-5.5-pro", "openai/gpt-5.5-thinking"],
-    "gpt.review":      ["openai/gpt-5.5-thinking", "openai/gpt-5.5-pro"],
+    "gpt.fast":        ["openai-codex/gpt-5.5", "openai-codex/gpt-5.4-mini"],
+    "gpt.general":     ["openai-codex/gpt-5.5", "openai-codex/gpt-5.4"],
+    "gpt.reasoning":   ["openai-codex/gpt-5.5", "openai-codex/gpt-5.4"],
+    "gpt.pro":         ["openai-codex/gpt-5.5", "openai-codex/gpt-5.4"],
+    "gpt.code-fast":   ["openai-codex/gpt-5.5", "openai-codex/gpt-5.4-mini"],
+    "gpt.code":        ["openai-codex/gpt-5.5", "openai-codex/gpt-5.4"],
+    "gpt.code-max":    ["openai-codex/gpt-5.5", "openai-codex/gpt-5.4"],
+    "gpt.review":      ["openai-codex/gpt-5.5", "openai-codex/gpt-5.4"],
   };
 }
 

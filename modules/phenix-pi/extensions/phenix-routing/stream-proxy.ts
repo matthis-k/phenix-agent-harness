@@ -132,72 +132,55 @@ async function runRouter(
     setActiveRouteForSession(sessionId, route);
   }
 
-  // 3. Look up the concrete model or build a minimal one if unregistered.
-  //    The model may not be explicitly listed in Pi's registry when the
-  //    provider is dynamic; streamSimple still works with a minimal ref.
-  const concreteModel: Model<Api> = modelRegistry.getModel(
+  // 3. Look up the concrete model in Pi's active registry. Do not synthesize
+  //    model metadata: missing registry entries are routing/config errors.
+  const concreteModel: Model<Api> | undefined = modelRegistry.getModel(
     route.model.provider,
     route.model.model,
-  ) ?? modelRegistry.getModel(route.model.provider, "*") ?? (() => {
-    // Minimal model ref — Pi's streamSimple will select the API based
-    // on the provider's registered stream implementation.
-    const knownApis: Record<string, Api> = {
-      "opencode-go": "openai-completions" as Api,
-      openai: "openai-responses" as Api,
-      "opencode-go-codex": "openai-codex-responses" as Api,
-    };
-    const api = knownApis[route.model.provider] ?? ("openai-completions" as Api);
-    const modelProvider = route.model.provider;
-    const modelId = route.model.model;
-    return {
-      id: modelId,
-      name: `${modelProvider}/${modelId}`,
-      provider: modelProvider,
-      api,
-      baseUrl: api === "anthropic-messages" ? "https://opencode.ai/zen/go" : "https://opencode.ai/zen/go/v1",
-      headers: {},
-      input: ["text"],
-      reasoning: true,
-      thinkingLevelMap: { minimal: null, low: null, medium: null, high: "high", xhigh: "max" },
-      compat: {
-        supportsStore: false,
-        supportsDeveloperRole: false,
-        maxTokensField: "max_tokens",
-        requiresReasoningContentOnAssistantMessages: true,
-        thinkingFormat: "deepseek",
-      },
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 128000,
-      maxTokens: 32768,
-    } as Model<Api>;
-  })();
+  );
 
-  // 4. Get real auth from the concrete model.
-  const concreteAuth = await modelRegistry.getApiKeyAndHeaders(concreteModel);
+  if (!concreteModel) {
+    throw new Error(
+      `Model is not registered in Pi: ${route.model.provider}/${route.model.model}`,
+    );
+  }
 
-  // 5. Call the upstream API. Only pass apiKey when non-null so Pi's own
-  //    auth resolution (env vars, auth storage) isn't overridden with undefined.
+  // 4. Resolve real auth and request configuration through Pi.
+  const auth = await modelRegistry.getApiKeyAndHeaders(concreteModel);
+
+  if (!auth.ok) {
+    throw new Error(
+      `Authentication unavailable for ${concreteModel.provider}/${concreteModel.id}: ${auth.error}`,
+    );
+  }
+
+  // 5. Call the upstream API. Strip virtual-provider authentication fields so
+  //    the dummy phenix provider key cannot leak into concrete requests.
   const reasoningLevel = route.thinking === "minimal" ? undefined : route.thinking;
+  const {
+    apiKey: _virtualApiKey,
+    headers: virtualHeaders,
+    env: virtualEnv,
+    ...requestOptions
+  } = options ?? {};
 
   const upstreamOptions: SimpleStreamOptions = {
-    ...options,
+    ...requestOptions,
+    ...(auth.apiKey !== undefined ? { apiKey: auth.apiKey } : {}),
     headers: {
-      ...concreteAuth.headers,
-      ...options?.headers,
+      ...virtualHeaders,
+      ...auth.headers,
     },
     env: {
-      ...concreteAuth.env,
-      ...options?.env,
+      ...virtualEnv,
+      ...auth.env,
     },
     reasoning: reasoningLevel,
   };
-  if (concreteAuth.apiKey) {
-    upstreamOptions.apiKey = concreteAuth.apiKey;
-  }
 
   const upstreamStream = streamSimple(concreteModel, context, upstreamOptions);
 
-  // 5. Forward events with masking and candidate fallback.
+  // 6. Forward events with masking and candidate fallback.
   let substantiveOutputSeen = false;
 
   for await (const event of upstreamStream) {

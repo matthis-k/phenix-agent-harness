@@ -1,8 +1,8 @@
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
-
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  ModelRegistry as PiModelRegistry,
+} from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 
 import { MODEL_SET_IDS } from "./types.ts";
@@ -13,7 +13,7 @@ import {
   buildBundledConfig,
 } from "./config.ts";
 import {
-  type ModelRegistry,
+  type ModelRegistry as RoutingModelRegistry,
   resolveRoute,
 } from "./resolver.ts";
 import {
@@ -32,75 +32,45 @@ import {
 export { getActiveRouteForSession, setActiveRouteForSession };
 
 /**
- * Model registry implementation wrapping Pi's modelRegistry API.
- * We store a reference to the Pi API's modelRegistry when the extension initializes.
+ * Runtime bridge to Pi's active model registry.
+ *
+ * Phenix owns routing only. Concrete model metadata, API keys, OAuth refresh,
+ * environment fallback, runtime overrides, and provider/model request headers
+ * are resolved by Pi's ModelRegistry for the current extension context.
  */
-class PiModelRegistry implements ModelRegistry {
-  private pi: ExtensionAPI | null = null;
+class PhenixUpstreamRuntime implements RoutingModelRegistry {
+  private registry?: PiModelRegistry;
 
-  setPi(pi: ExtensionAPI): void {
-    this.pi = pi;
+  bind(ctx: ExtensionContext): void {
+    this.registry = ctx.modelRegistry;
   }
 
-  isAvailable(_provider: string, _model: string): boolean {
-    // Optimistic: return true so the router attempts the upstream call.
-    // Actual availability is determined by the concrete provider's
-    // streamSimple at runtime.
-    return true;
+  requireRegistry(): PiModelRegistry {
+    if (!this.registry) {
+      throw new Error("Phenix upstream registry is not initialized");
+    }
+
+    return this.registry;
   }
 
   getModel(provider: string, model: string): Model<Api> | undefined {
-    if (!this.pi) return undefined;
-    try {
-      const registry = this.pi.getModelRegistry();
-      if (!registry) return undefined;
-      // Use find() which is the correct method on Pi's ModelRegistry class.
-      // getModel() exists on the Models interface (different class — pi-ai's
-      // runtime collection). Both should work; try find first.
-      if (typeof (registry as Record<string, unknown>).find === "function") {
-        return (registry as { find(p: string, m: string): Model<Api> | undefined }).find(provider, model);
-      }
-      // Fallback to getAll() + find.
-      const models = registry.getAll();
-      if (!models) return undefined;
-      return models.find(
-        (m: Model<Api>) =>
-          m.provider === provider && m.id === model,
-      );
-    } catch {
-      return undefined;
-    }
+    return this.requireRegistry().find(provider, model);
   }
 
-  /** Read Pi's auth.json to get the API key for a provider. */
-  private readAuthKey(provider: string): string | undefined {
-    try {
-      const agentDir =
-        process.env.PI_CODING_AGENT_DIR ??
-        path.join(os.homedir(), ".pi", "agent");
-      const authPath = path.join(agentDir, "auth.json");
-      const raw = fs.readFileSync(authPath, "utf-8");
-      const auth = JSON.parse(raw) as Record<string, { type: string; key: string }>;
-      return auth[provider]?.key;
-    } catch {
-      return undefined;
-    }
+  async isAvailable(provider: string, model: string): Promise<boolean> {
+    const concreteModel = this.getModel(provider, model);
+    if (!concreteModel) return false;
+
+    const auth = await this.requireRegistry().getApiKeyAndHeaders(concreteModel);
+    return auth.ok;
   }
 
-  getApiKeyAndHeaders(concreteModel: Model<Api>): {
-    apiKey?: string;
-    headers?: Record<string, string>;
-    env?: Record<string, string>;
-  } {
-    // Read the API key from Pi's auth.json, which is where /login stores
-    // credentials.  The compat-layer streamSimple routes through an in-memory
-    // credential store that does NOT have these, so we must pass it explicitly.
-    const apiKey = this.readAuthKey(concreteModel.provider);
-    return { apiKey, headers: concreteModel.headers };
+  getApiKeyAndHeaders(concreteModel: Model<Api>): ReturnType<PiModelRegistry["getApiKeyAndHeaders"]> {
+    return this.requireRegistry().getApiKeyAndHeaders(concreteModel);
   }
 }
 
-export const modelRegistry = new PiModelRegistry();
+export const modelRegistry = new PhenixUpstreamRuntime();
 
 /**
  * Core routing extension entry point.
@@ -113,8 +83,6 @@ export const modelRegistry = new PiModelRegistry();
 export default async function phenixRouting(
   pi: ExtensionAPI,
 ): Promise<void> {
-  modelRegistry.setPi(pi);
-
   const config = loadRoutingConfig();
   const bundledConfig = buildBundledConfig();
 
@@ -133,6 +101,8 @@ export default async function phenixRouting(
 
   // --- Session start ---
   pi.on("session_start", async (_event, ctx) => {
+    modelRegistry.bind(ctx);
+
     const sessionId = ctx.sessionManager?.getSessionId?.() ?? "default";
     // Initialize runtime state for this session (default model set "mixed").
     getSessionRuntime(sessionId);
@@ -141,6 +111,8 @@ export default async function phenixRouting(
 
   // --- before_agent_start ---
   pi.on("before_agent_start", async (_event, ctx) => {
+    modelRegistry.bind(ctx);
+
     const sessionId = ctx.sessionManager?.getSessionId?.() ?? "default";
     const selectedModel = ctx.model;
     const selectedProvider = selectedModel?.provider;

@@ -66,10 +66,10 @@ const ALL_POOL_MODELS: readonly ModelRef[] = [
   mr("opencode-go", "glm-5.2"),
   mr("opencode-go", "kimi-k2.6"),
   mr("opencode-go", "kimi-k2.7-code"),
-  mr("openai", "gpt-5.5-instant"),
-  mr("openai", "gpt-5.5"),
-  mr("openai", "gpt-5.5-thinking"),
-  mr("openai", "gpt-5.5-pro"),
+  mr("openai-codex", "gpt-5.4-mini"),
+  mr("openai-codex", "gpt-5.5"),
+  mr("openai-codex", "gpt-5.4"),
+  mr("openai-codex", "gpt-5.5"),
 ];
 
 function fullRegistry(): ModelRegistry {
@@ -81,7 +81,7 @@ function goOnlyRegistry(): ModelRegistry {
 }
 
 function gptOnlyRegistry(): ModelRegistry {
-  return new FakeRegistry(ALL_POOL_MODELS.filter((m) => m.provider === "openai"));
+  return new FakeRegistry(ALL_POOL_MODELS.filter((m) => m.provider === "openai-codex"));
 }
 
 const EMPTY_REGISTRY = new FakeRegistry([]);
@@ -141,7 +141,7 @@ describe("Workflow: model selection → route resolution", () => {
     const runtime = getSessionRuntime(sessionId);
     runtime.modelSet = explicitModelSet!;
 
-    // coordinator D2 → reasoning → gpt.reasoning → openai provider
+    // coordinator D2 → reasoning → gpt.reasoning → openai-codex provider
     const route = await resolveRoute({
       modelSet: runtime.modelSet,
       role: "coordinator",
@@ -149,7 +149,7 @@ describe("Workflow: model selection → route resolution", () => {
       modelRegistry: fullRegistry(),
       config,
     });
-    assert.equal(route.model.provider, "openai");
+    assert.equal(route.model.provider, "openai-codex");
 
     clearSessionRuntime(sessionId);
   });
@@ -197,7 +197,7 @@ describe("Workflow: route lifecycle", () => {
       config,
     });
     assert.equal(route1.modelSet, "gpt");
-    assert.equal(route1.model.provider, "openai");
+    assert.equal(route1.model.provider, "openai-codex");
 
     // Turn 2: same session, model set is still gpt
     const runtime2 = getSessionRuntime(sessionId);
@@ -211,7 +211,7 @@ describe("Workflow: route lifecycle", () => {
       config,
     });
     assert.equal(route2.modelSet, "gpt");
-    assert.equal(route2.model.provider, "openai");
+    assert.equal(route2.model.provider, "openai-codex");
 
     clearSessionRuntime(sessionId);
   });
@@ -245,7 +245,7 @@ describe("Workflow: route lifecycle", () => {
       modelRegistry: fullRegistry(),
       config,
     });
-    assert.equal(routeB.model.provider, "openai");
+    assert.equal(routeB.model.provider, "openai-codex");
 
     clearSessionRuntime(sessionA);
     clearSessionRuntime(sessionB);
@@ -275,7 +275,7 @@ describe("Workflow: route lifecycle", () => {
       modelRegistry: fullRegistry(),
       config,
     });
-    assert.equal(route2.model.provider, "openai");
+    assert.equal(route2.model.provider, "openai-codex");
 
     clearSessionRuntime(sessionId);
   });
@@ -354,7 +354,7 @@ describe("Workflow: error handling", () => {
 
 describe("Workflow: mixed model set routing", () => {
 
-  it("mixed routes implementer through opencode-go and critic through openai", async () => {
+  it("mixed routes implementer through opencode-go and critic through openai-codex", async () => {
     const implRoute = await resolveRoute({
       modelSet: "mixed",
       role: "implementer",
@@ -375,7 +375,7 @@ describe("Workflow: mixed model set routing", () => {
       avoidModels: [implRoute.model],
     });
     // mixed → critic D2 → review → gpt.review → openai
-    assert.equal(critRoute.model.provider, "openai");
+    assert.equal(critRoute.model.provider, "openai-codex");
     assert.equal(critRoute.capability, "review");
   });
 
@@ -388,7 +388,7 @@ describe("Workflow: mixed model set routing", () => {
       config,
     });
     // mixed → planner D2 → reasoning → gpt.reasoning → openai
-    assert.equal(route.model.provider, "openai");
+    assert.equal(route.model.provider, "openai-codex");
     assert.equal(route.capability, "reasoning");
     assert.equal(route.thinking, "high");
   });
@@ -424,7 +424,7 @@ describe("Workflow: mixed model set routing", () => {
       config,
     });
     // mixed → architect D3 → reasoning-max → gpt.pro → openai
-    assert.equal(route.model.provider, "openai");
+    assert.equal(route.model.provider, "openai-codex");
     assert.equal(route.capability, "reasoning-max");
     assert.equal(route.thinking, "xhigh");
   });
@@ -513,9 +513,9 @@ describe("Workflow: full matrix coverage", () => {
           } else if (modelSet === "opencode-go") {
             assert.equal(route.model.provider, "opencode-go");
           } else if (modelSet === "gpt") {
-            assert.equal(route.model.provider, "openai");
+            assert.equal(route.model.provider, "openai-codex");
           }
-          // mixed can be either opencode-go or openai — both are valid
+          // mixed can be either opencode-go or openai-codex — both are valid
         });
       }
     }

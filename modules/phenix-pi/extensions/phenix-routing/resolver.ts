@@ -17,6 +17,8 @@ const PHENIX_PREFIX = "phenix/";
 
 /** Interface for the model registry used during resolution. */
 export interface ModelRegistry {
+  /** Return a concrete model when the active registry knows it. */
+  getModel?(provider: string, model: string): unknown;
   /** Check if a concrete model exists and is authenticated. */
   isAvailable(provider: string, model: string): boolean | Promise<boolean>;
 }
@@ -158,6 +160,11 @@ export async function resolveRoute(
 
   for (let i = 0; i < allCandidates.length; i++) {
     const ref = allCandidates[i];
+    if (modelRegistry.getModel && !modelRegistry.getModel(ref.provider, ref.model)) {
+      missingCandidates.push(formatModelRef(ref));
+      continue;
+    }
+
     const available_ = await modelRegistry.isAvailable(ref.provider, ref.model);
     if (available_) {
       available.push({ ref, index: i });

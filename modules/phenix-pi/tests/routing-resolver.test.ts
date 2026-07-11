@@ -35,10 +35,10 @@ const ALL_GO_AVAILABLE: readonly ModelRef[] = [
 ];
 
 const ALL_GPT_AVAILABLE: readonly ModelRef[] = [
-  mr("openai", "gpt-5.5-instant"),
-  mr("openai", "gpt-5.5"),
-  mr("openai", "gpt-5.5-thinking"),
-  mr("openai", "gpt-5.5-pro"),
+  mr("openai-codex", "gpt-5.4-mini"),
+  mr("openai-codex", "gpt-5.5"),
+  mr("openai-codex", "gpt-5.4"),
+  mr("openai-codex", "gpt-5.5"),
 ];
 
 const FREE_AVAILABLE: readonly ModelRef[] = [
@@ -167,7 +167,7 @@ describe("Route resolution", () => {
   it("mixed mode routes implementer through go and critic through gpt where available", async () => {
     const reg = new FakeRegistry([
       mr("opencode-go", "kimi-k2.7-code"),
-      mr("openai", "gpt-5.5-thinking"),
+      mr("openai-codex", "gpt-5.4"),
     ]);
 
     const implRoute = await resolveRoute({
@@ -188,7 +188,7 @@ describe("Route resolution", () => {
       avoidModels: [implRoute.model],
     });
     // critic D1 / mixed → review → gpt.review → [gpt-5.5-thinking, gpt-5.5-pro]
-    assert.equal(critRoute.model.provider, "openai");
+    assert.equal(critRoute.model.provider, "openai-codex");
   });
 });
 

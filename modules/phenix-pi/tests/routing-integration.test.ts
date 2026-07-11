@@ -36,10 +36,10 @@ const ALL_MODELS: readonly ModelRef[] = [
   mr("opencode-go", "glm-5.2"),
   mr("opencode-go", "kimi-k2.6"),
   mr("opencode-go", "kimi-k2.7-code"),
-  mr("openai", "gpt-5.5-instant"),
-  mr("openai", "gpt-5.5"),
-  mr("openai", "gpt-5.5-thinking"),
-  mr("openai", "gpt-5.5-pro"),
+  mr("openai-codex", "gpt-5.4-mini"),
+  mr("openai-codex", "gpt-5.5"),
+  mr("openai-codex", "gpt-5.4"),
+  mr("openai-codex", "gpt-5.5"),
 ];
 
 function fullRegistry(): ModelRegistry {
@@ -82,7 +82,7 @@ describe("Routing integration", () => {
             assert.equal(route.model.provider, "opencode-go");
           }
           if (modelSet === "gpt") {
-            assert.equal(route.model.provider, "openai");
+            assert.equal(route.model.provider, "openai-codex");
           }
           // mixed can be either
         }
@@ -121,8 +121,8 @@ describe("Routing integration", () => {
     });
     assert.equal(criticRoute.capability, "review");
     assert.equal(criticRoute.thinking, "high");
-    // Mixed → review → gpt.review → openai model
-    assert.equal(criticRoute.model.provider, "openai");
+    // Mixed → review → gpt.review → openai-codex model
+    assert.equal(criticRoute.model.provider, "openai-codex");
     assert.equal(criticRoute.usedAvoidedModelFallback, false);
   });
 
