@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
 
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
@@ -16,12 +15,10 @@ import type { Details } from "pi-subagents/src/shared/types.ts";
 import {
   SubagentBackend,
   type AsyncResultPayload,
-  type RuntimeAcceptanceLedger,
   type RuntimeChildResult,
 } from "./backend.ts";
 import {
   assertOutputSchema,
-  validateContract,
   type JsonSchema,
 } from "./contracts.ts";
 import {
@@ -40,11 +37,7 @@ import {
   type VerificationRun,
 } from "./verification.ts";
 import {
-  createRunId,
-  issueContract,
-  type ContractArtifact,
   type ContractId,
-  type RunId,
 } from "./contract.ts";
 import {
   FileContractStore,
@@ -53,130 +46,38 @@ import {
 import {
   injectContractRuntimeBlock,
 } from "./contract-prompt.ts";
+
 import {
-  PHENIX_AGENT_KIND_ENV,
-  PHENIX_CONTRACT_ID_ENV,
-  PHENIX_CONTRACT_TOKEN_ENV,
-  PHENIX_RUN_ID_ENV,
-} from "./contract-identity.ts";
+  CRITIC_OUTPUT_SCHEMA,
+  HANDLE_VERSION,
+  TERMINAL_STATES,
+  type AttemptRecord,
+  type CriticFinding,
+  type CriticValue,
+  type Evaluation,
+  type HandleRecord,
+} from "./handle-types.ts";
+import {
+  currentParentRecord,
+  effectiveSessionId,
+  findProjectRoot,
+  latestAttempt,
+  listRecords,
+  now,
+  readRecord,
+  recordChildSessions,
+  writeRecord,
+} from "./handle-store.ts";
+import {
+  childContractEnv,
+  createAttemptContract,
+  evaluateContractResult,
+  repairTask,
+} from "./handle-evaluation.ts";
 
-const HANDLE_VERSION = 1;
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
-const CRITIC_OUTPUT_SCHEMA: JsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["verdict", "summary", "findings", "missingRequirements"],
-  properties: {
-    verdict: { enum: ["approve", "reject"] },
-    summary: { type: "string", minLength: 1 },
-    findings: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["severity", "description", "evidence"],
-        properties: {
-          severity: { enum: ["minor", "major", "critical"] },
-          description: { type: "string", minLength: 1 },
-          evidence: { type: "string", minLength: 1 },
-          requirement: { type: "string" },
-        },
-      },
-    },
-    missingRequirements: { type: "array", items: { type: "string", minLength: 1 } },
-  },
-};
-const TERMINAL_STATES = new Set(["completed", "failed", "cancelled"]);
-const ACCEPTANCE_RANK: Record<string, number> = {
-  "not-required": 0,
-  claimed: 0,
-  attested: 1,
-  checked: 2,
-  verified: 3,
-  reviewed: 4,
-  accepted: 5,
-  rejected: -1,
-};
 
-interface AttemptRecord {
-  readonly number: number;
-  runId: string;
-  readonly phenixRunId: RunId;
-  readonly mode: "foreground" | "background";
-  readonly startedAt: string;
-  readonly contractId: ContractId;
-  criticContractId?: ContractId;
-  asyncDir?: string;
-  endedAt?: string;
-  status: "running" | "completed" | "failed" | "cancelled";
-  feedback?: string;
-  error?: string;
-  childSessions?: Array<{
-    readonly role: string;
-    readonly status: "completed" | "failed";
-    readonly sessionFile?: string;
-    readonly transcriptPath?: string;
-  }>;
-}
 
-interface HandleRecord {
-  readonly version: typeof HANDLE_VERSION;
-  readonly id: string;
-  readonly sessionId: string;
-  readonly parentId?: string;
-  readonly role: AgentKind;
-  readonly task: string;
-  readonly requirements: readonly string[];
-  readonly outputSchema: JsonSchema;
-  readonly policy: ResolvedExecutionPolicy;
-  readonly reviewPolicy?: ResolvedExecutionPolicy;
-  readonly createdAt: string;
-  updatedAt: string;
-  status: "running" | "completed" | "failed" | "cancelled";
-  attempts: AttemptRecord[];
-  value?: unknown;
-  errors?: string[];
-  verification?: VerificationSummary;
-  review?: {
-    readonly verdict: "approve" | "reject";
-    readonly summary: string;
-    readonly findings: readonly CriticFinding[];
-    readonly missingRequirements: readonly string[];
-    readonly sessionFile?: string;
-    readonly transcriptPath?: string;
-  };
-}
-
-interface CriticFinding {
-  readonly severity: "minor" | "major" | "critical";
-  readonly description: string;
-  readonly evidence: string;
-  readonly requirement?: string;
-}
-
-interface CriticValue {
-  readonly verdict: "approve" | "reject";
-  readonly summary: string;
-  readonly findings: readonly CriticFinding[];
-  readonly missingRequirements: readonly string[];
-}
-
-interface VerificationSummary {
-  readonly acceptanceStatus?: string;
-  readonly runtimeChecks: readonly string[];
-  readonly verifyRuns: readonly string[];
-  readonly reviewFindings: readonly string[];
-  readonly contract: "valid" | "invalid" | "missing";
-}
-
-interface Evaluation {
-  readonly ok: boolean;
-  readonly value?: unknown;
-  readonly errors: readonly string[];
-  readonly repairable: boolean;
-  readonly verification: VerificationSummary;
-  readonly review?: HandleRecord["review"];
-}
 
 interface DelegateInput {
   readonly role: AgentKind;
@@ -227,129 +128,6 @@ const AgentParams = Type.Object(
   { additionalProperties: false },
 );
 
-function now(): string {
-  return new Date().toISOString();
-}
-
-function sanitize(value: string): string {
-  return value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
-}
-
-function findProjectRoot(cwd: string): string {
-  let current = path.resolve(cwd);
-  while (true) {
-    if (fs.existsSync(path.join(current, ".git"))) return current;
-    const parent = path.dirname(current);
-    if (parent === current) return path.resolve(cwd);
-    current = parent;
-  }
-}
-
-function contractsForCwd(cwd: string): FileContractStore {
-  return new FileContractStore(
-    path.join(
-      findProjectRoot(cwd),
-      ".phenix-agent-state",
-      "contracts",
-    ),
-  );
-}
-
-function sessionId(ctx: ExtensionContext): string {
-  return ctx.sessionManager.getSessionId() ?? "ephemeral";
-}
-
-function currentParentRecord(cwd: string): HandleRecord | undefined {
-  for (const runId of [
-    process.env.PI_SUBAGENT_RUN_ID,
-    process.env.PI_SUBAGENT_PARENT_RUN_ID,
-    process.env.PI_SUBAGENT_PARENT_ROOT_RUN_ID,
-  ]) {
-    const record = findByRunId(cwd, runId);
-    if (record) return record;
-  }
-  return undefined;
-}
-
-function effectiveSessionId(ctx: ExtensionContext): string {
-  return currentParentRecord(ctx.cwd)?.sessionId ?? sessionId(ctx);
-}
-
-function recordsRoot(cwd: string): string {
-  return path.join(findProjectRoot(cwd), ".phenix-agent-state", "subagents");
-}
-
-function recordPath(cwd: string, session: string, id: string): string {
-  return path.join(recordsRoot(cwd), sanitize(session), `${sanitize(id)}.json`);
-}
-
-function writeRecord(cwd: string, record: HandleRecord): void {
-  record.updatedAt = now();
-  const target = recordPath(cwd, record.sessionId, record.id);
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
-  fs.writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
-  fs.renameSync(temporary, target);
-}
-
-function readRecord(cwd: string, session: string, id: string): HandleRecord | undefined {
-  try {
-    return JSON.parse(fs.readFileSync(recordPath(cwd, session, id), "utf-8")) as HandleRecord;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
-}
-
-function listRecords(cwd: string, session?: string): HandleRecord[] {
-  const root = recordsRoot(cwd);
-  const sessionDirs = session ? [sanitize(session)] : safeReadDir(root);
-  const records: HandleRecord[] = [];
-  for (const sessionDir of sessionDirs) {
-    const dir = path.join(root, sessionDir);
-    for (const file of safeReadDir(dir)) {
-      if (!file.endsWith(".json")) continue;
-      try {
-        const record = JSON.parse(fs.readFileSync(path.join(dir, file), "utf-8")) as HandleRecord;
-        if (record.version === HANDLE_VERSION) records.push(record);
-      } catch {
-        // A partially written or manually damaged record is ignored; atomic writes prevent normal partial files.
-      }
-    }
-  }
-  return records.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
-}
-
-function safeReadDir(dir: string): string[] {
-  try {
-    return fs.readdirSync(dir);
-  } catch {
-    return [];
-  }
-}
-
-function findByRunId(cwd: string, runId: string | undefined): HandleRecord | undefined {
-  if (!runId) return undefined;
-  return listRecords(cwd).find((record) => record.attempts.some((attempt) => attempt.runId === runId));
-}
-
-function latestAttempt(record: HandleRecord): AttemptRecord {
-  const attempt = record.attempts.at(-1);
-  if (!attempt) throw new Error(`handle ${record.id} has no attempts`);
-  return attempt;
-}
-
-function recordChildSessions(record: HandleRecord, children: readonly RuntimeChildResult[]): void {
-  latestAttempt(record).childSessions = children.map((child, index) => ({
-    role: child.agent ?? (index === 0 ? record.policy.agent : record.reviewPolicy?.agent ?? `child-${index}`),
-    status: child.success === false || (child.exitCode !== undefined && child.exitCode !== null && child.exitCode !== 0)
-      ? "failed"
-      : "completed",
-    ...(child.sessionFile ? { sessionFile: child.sessionFile } : {}),
-    ...(child.transcriptPath ? { transcriptPath: child.transcriptPath } : {}),
-  }));
-}
-
 function storeRoot(): string {
   return path.join(
     findProjectRoot(process.cwd()),
@@ -375,148 +153,10 @@ async function cancelPendingContracts(attempt: AttemptRecord): Promise<void> {
   }
 }
 
-function expectedAcceptanceRank(policy: ResolvedExecutionPolicy): number {
-  return ACCEPTANCE_RANK[policy.expectedAcceptance] ?? 0;
-}
-
 function compactOutput(value: string | undefined): string | undefined {
   if (!value?.trim()) return undefined;
   const compact = value.trim().replace(/\s+/g, " ");
   return compact.length > 500 ? `${compact.slice(0, 497)}...` : compact;
-}
-
-async function evaluateContractResult(
-  contractId: ContractId,
-  schema: JsonSchema,
-  cwd: string,
-): Promise<{
-  readonly ok: boolean;
-  readonly value?: unknown;
-  readonly errors: readonly string[];
-  readonly contract:
-    | "valid"
-    | "invalid"
-    | "missing"
-    | "cancelled";
-}> {
-  const stored =
-    await contractsForCwd(cwd).load(
-      contractId,
-    );
-
-  if (!stored) {
-    return {
-      ok: false,
-      errors: [
-        `Contract artifact ${contractId} is missing.`,
-      ],
-      contract: "missing",
-    };
-  }
-
-  if (
-    stored.result.state === "pending"
-  ) {
-    return {
-      ok: false,
-      errors: [
-        "Child exited without submitting its Phenix contract.",
-      ],
-      contract: "missing",
-    };
-  }
-
-  if (
-    stored.result.state === "cancelled"
-  ) {
-    return {
-      ok: false,
-      errors: [
-        `Contract was cancelled: ${stored.result.reason}`,
-      ],
-      contract: "cancelled",
-    };
-  }
-
-  if (stored.result.state !== "submitted") {
-    return {
-      ok: false,
-      errors: [
-        `Contract is in unexpected state: ${stored.result.state}`,
-      ],
-      contract: "invalid",
-    };
-  }
-
-  const validation = validateContract(
-    schema,
-    stored.result.value,
-  );
-
-  if (!validation.ok) {
-    return {
-      ok: false,
-      errors: [
-        "Parent-side contract revalidation failed.",
-        "summary" in validation
-          ? validation.summary
-          : "Unknown validation failure.",
-      ],
-      contract: "invalid",
-    };
-  }
-
-  return {
-    ok: true,
-    value: stored.result.value,
-    errors: [],
-    contract: "valid",
-  };
-}
-
-async function createAttemptContract(
-  record: HandleRecord,
-  task: string,
-  cwd: string,
-): Promise<{
-  readonly artifact: ContractArtifact;
-  readonly capabilityToken: string;
-  readonly phenixRunId: RunId;
-}> {
-  const phenixRunId = createRunId();
-
-  const issued = issueContract({
-    runId: phenixRunId,
-    role: record.role,
-    task,
-    requirements: record.requirements,
-    outputSchema: record.outputSchema,
-  });
-
-  await contractsForCwd(cwd).create(
-    issued.artifact,
-  );
-
-  return {
-    artifact: issued.artifact,
-    capabilityToken:
-      issued.capabilityToken,
-    phenixRunId,
-  };
-}
-
-function childContractEnv(
-  contractId: ContractId,
-  capabilityToken: string,
-  phenixRunId: RunId,
-  role: AgentKind,
-): Record<string, string> {
-  return {
-    [PHENIX_CONTRACT_ID_ENV]: contractId,
-    [PHENIX_CONTRACT_TOKEN_ENV]: capabilityToken,
-    [PHENIX_RUN_ID_ENV]: phenixRunId,
-    [PHENIX_AGENT_KIND_ENV]: role,
-  };
 }
 
 function formatVerificationRun(run: VerificationRun): string {
@@ -535,169 +175,6 @@ function criticFindingText(finding: CriticFinding): string {
     finding.description,
     finding.evidence,
   ].filter(Boolean).join(": ");
-}
-
-async function evaluateAttempt(
-  record: HandleRecord,
-  children: readonly RuntimeChildResult[],
-  cwd: string,
-  signal: AbortSignal,
-): Promise<Evaluation> {
-  const attempt = latestAttempt(record);
-
-  // Evaluate primary producer via its Phenix contract.
-  const primary = await evaluateContractResult(
-    attempt.contractId,
-    record.outputSchema,
-    cwd,
-  );
-  if (!primary.ok) {
-    return {
-      ok: false,
-      errors: primary.errors,
-      repairable: primary.contract === "invalid" || primary.contract === "missing",
-      verification: {
-        runtimeChecks: [],
-        verifyRuns: [],
-        reviewFindings: [],
-        contract: primary.contract,
-      },
-    };
-  }
-
-  // Run verification commands.
-  const verificationRuns = await runVerificationCommands(
-    record.policy.verificationCommands,
-    cwd,
-    signal,
-  );
-  const verificationErrors = verificationRuns
-    .filter((run) => run.status === "failed" || run.status === "timed-out" || run.status === "cancelled")
-    .map(formatVerificationRun);
-  const verifyRuns = verificationRuns.map(formatVerificationRun);
-  if (verificationErrors.length > 0) {
-    return {
-      ok: false,
-      errors: verificationErrors.map((error) => `runtime verification: ${error}`),
-      repairable: !signal.aborted,
-      verification: {
-        runtimeChecks: [],
-        verifyRuns,
-        reviewFindings: [],
-        contract: "valid",
-      },
-    };
-  }
-
-  if (!record.reviewPolicy) {
-    return {
-      ok: true,
-      value: primary.value,
-      errors: [],
-      repairable: false,
-      verification: {
-        runtimeChecks: [],
-        verifyRuns,
-        reviewFindings: [],
-        contract: "valid",
-      },
-    };
-  }
-
-  // Evaluate critic via its own Phenix contract (if it was run).
-  if (!attempt.criticContractId) {
-    return {
-      ok: false,
-      errors: ["Critic contract was not issued but review policy is set."],
-      repairable: true,
-      verification: {
-        runtimeChecks: [],
-        verifyRuns,
-        reviewFindings: [],
-        contract: "valid",
-      },
-    };
-  }
-
-  const critic = await evaluateContractResult(
-    attempt.criticContractId,
-    CRITIC_OUTPUT_SCHEMA,
-    cwd,
-  );
-  if (!critic.ok) {
-    return {
-      ok: false,
-      errors: critic.errors.map((error) => `critic handoff: ${error}`),
-      repairable: critic.contract === "invalid" || critic.contract === "missing",
-      verification: {
-        runtimeChecks: [],
-        verifyRuns,
-        reviewFindings: critic.errors,
-        contract: "valid",
-      },
-    };
-  }
-
-  const value = critic.value as CriticValue;
-  const blockerFindings = value.findings.filter(
-    (finding) => finding.severity === "major" || finding.severity === "critical",
-  );
-  const reviewFindings = value.findings.map(criticFindingText);
-  const reviewErrors = [
-    ...(value.verdict === "reject" ? [`critic rejected the handoff: ${value.summary}`] : []),
-    ...blockerFindings.map((finding) => `critic blocker: ${criticFindingText(finding)}`),
-    ...value.missingRequirements.map((requirement) => `critic missing requirement: ${requirement}`),
-  ];
-  const review: NonNullable<HandleRecord["review"]> = {
-    verdict: value.verdict,
-    summary: value.summary,
-    findings: value.findings,
-    missingRequirements: value.missingRequirements,
-  };
-
-  if (reviewErrors.length > 0) {
-    return {
-      ok: false,
-      errors: reviewErrors,
-      repairable: true,
-      review,
-      verification: {
-        runtimeChecks: [],
-        verifyRuns,
-        reviewFindings,
-        contract: "valid",
-      },
-    };
-  }
-
-  return {
-    ok: true,
-    value: primary.value,
-    errors: [],
-    repairable: false,
-    review,
-    verification: {
-      runtimeChecks: [],
-      verifyRuns,
-      reviewFindings,
-      contract: "valid",
-    },
-  };
-}
-
-function repairTask(record: HandleRecord, evaluation: Evaluation): string {
-  const numbered = evaluation.errors.map((error, index) => `${index + 1}. ${error}`).join("\n");
-  return [
-    record.task,
-    "",
-    "## Runtime repair request",
-    "The previous handoff was rejected by authoritative runtime validation. Continue from the current workspace state and correct the work.",
-    "",
-    numbered,
-    "",
-    "The runtime will rerun the same structural contract, verification commands, and critic gate. Do not modify verification configuration or merely claim that checks passed.",
-    "Finish by calling phenix_contract_submit with a value matching the original schema.",
-  ].join("\n");
 }
 
 function applyThinking(model: string | undefined, thinking: string): string | undefined {

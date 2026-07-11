@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 
 import type {
@@ -51,29 +50,9 @@ const SubmitContractParams = Type.Object(
   },
 );
 
-function findProjectRoot(
-  cwd: string,
-): string {
-  let current = path.resolve(cwd);
-
-  while (true) {
-    if (
-      fs.existsSync(
-        path.join(current, ".git"),
-      )
-    ) {
-      return current;
-    }
-
-    const parent = path.dirname(current);
-
-    if (parent === current) {
-      return path.resolve(cwd);
-    }
-
-    current = parent;
-  }
-}
+import {
+  findProjectRoot,
+} from "./phenix-subagents/handle-store.ts";
 
 function contractStore(
   ctx: ExtensionContext,
