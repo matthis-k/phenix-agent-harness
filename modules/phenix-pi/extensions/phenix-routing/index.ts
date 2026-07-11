@@ -27,7 +27,11 @@ import {
   getActiveRouteForSession,
   setActiveRouteForSession,
 } from "./stream-proxy.ts";
-import { registerPhenixProvider, PHENIX_PROVIDER, PHENIX_MODEL } from "./provider.ts";
+import {
+  registerPhenixProvider,
+  PHENIX_PROVIDER,
+  modelSetForModelId,
+} from "./provider.ts";
 
 export { getActiveRouteForSession, setActiveRouteForSession };
 
@@ -173,17 +177,23 @@ export default async function phenixRouting(
   });
 
   // --- before_agent_start ---
-  pi.on("before_agent_start", async (event: { session?: { id?: string }; model?: { provider?: string }; task?: string; systemPrompt?: string }) => {
+  pi.on("before_agent_start", async (event: { session?: { id?: string }; model?: { provider?: string; id?: string }; task?: string; systemPrompt?: string }) => {
     const sessionId = event.session?.id ?? "default";
     const selectedModel = event.model;
     const selectedProvider = selectedModel?.provider;
+    const selectedModelId = selectedModel?.id;
 
-    // Only intervene for phenix/workflow
+    // Only intervene for phenix provider
     if (selectedProvider !== PHENIX_PROVIDER) return {};
 
     const runtime = getSessionRuntime(sessionId);
 
-    // Resolve model set
+    // Resolve model set — if the user picked a specific model-set model (e.g.
+    // "phenix/opencode-go"), use that; otherwise use CLI/session default.
+    const explicitModelSet = selectedModelId ? modelSetForModelId(selectedModelId) : undefined;
+    if (explicitModelSet) {
+      runtime.modelSet = explicitModelSet;
+    }
     const modelSet = resolveModelSet(sessionId, cliModelSet);
 
     // Derive profile from task
@@ -284,9 +294,12 @@ export default async function phenixRouting(
       const runtime = getSessionRuntime(sessionId);
       const route = runtime.activeRoute ?? getActiveRouteForSession(sessionId);
 
+      const availableModels = MODEL_SET_IDS.map((id) => `${PHENIX_PROVIDER}/${id}`).join(", ");
+
       const lines: string[] = [
-        `Virtual model: ${PHENIX_PROVIDER}/${PHENIX_MODEL}`,
+        `Virtual provider: ${PHENIX_PROVIDER}`,
         `Active model set: ${runtime.modelSet}`,
+        `Available model-set models: ${availableModels}`,
       ];
 
       if (route) {

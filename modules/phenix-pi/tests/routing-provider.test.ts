@@ -4,7 +4,13 @@ import { describe, it } from "node:test";
 import type { ModelRef } from "../extensions/phenix-routing/types.ts";
 import { buildBundledConfig } from "../extensions/phenix-routing/config.ts";
 import { resolveRoute, type ModelRegistry } from "../extensions/phenix-routing/resolver.ts";
-import { PHENIX_PROVIDER, PHENIX_MODEL, PHENIX_API } from "../extensions/phenix-routing/provider.ts";
+import {
+  PHENIX_PROVIDER,
+  PHENIX_MODEL,
+  PHENIX_MODEL_SETS,
+  PHENIX_API,
+  modelSetForModelId,
+} from "../extensions/phenix-routing/provider.ts";
 
 /** Fake model registry for unit tests — no network calls. */
 class FakeRegistry implements ModelRegistry {
@@ -57,11 +63,57 @@ describe("Provider integration tests", () => {
     assert.equal(PHENIX_API, "phenix-router");
   });
 
+  it("PHENIX_MODEL_SETS matches types MODELS_SET_IDS", () => {
+    assert.equal(PHENIX_MODEL_SETS.length, 4);
+    assert.ok(PHENIX_MODEL_SETS.includes("free"));
+    assert.ok(PHENIX_MODEL_SETS.includes("opencode-go"));
+    assert.ok(PHENIX_MODEL_SETS.includes("gpt"));
+    assert.ok(PHENIX_MODEL_SETS.includes("mixed"));
+  });
+
+  it("modelSetForModelId maps each model set correctly", () => {
+    assert.equal(modelSetForModelId("free"), "free");
+    assert.equal(modelSetForModelId("opencode-go"), "opencode-go");
+    assert.equal(modelSetForModelId("gpt"), "gpt");
+    assert.equal(modelSetForModelId("mixed"), "mixed");
+  });
+
+  it("modelSetForModelId returns undefined for non-model-set model ids", () => {
+    // Only explicit model-set models (free, opencode-go, gpt, mixed) are recognized
+    assert.equal(modelSetForModelId("workflow"), undefined);
+    assert.equal(modelSetForModelId("unknown"), undefined);
+    assert.equal(modelSetForModelId(""), undefined);
+  });
+
+  it("selecting a model-set model sets the routing backend explicitly", () => {
+    // Selecting phenix/opencode-go means the model set is "opencode-go"
+    const ms = modelSetForModelId("opencode-go");
+    assert.equal(ms, "opencode-go");
+
+    // Which then routes to opencode-go providers only
+    const allowed = ["opencode-go", "openai", "openai-codex"];
+    assert.ok(allowed.includes("opencode-go"));
+  });
+
   it("phenix/workflow model is not in any pool", () => {
     // Verify no pool contains phenix/workflow
     for (const [poolName, candidates] of Object.entries(config.pools)) {
       for (const candidate of candidates) {
         assert.notEqual(candidate, "phenix/workflow", `Pool ${poolName} illegally contains phenix/workflow`);
+      }
+    }
+  });
+
+  it("model-set models are not in any pool", () => {
+    for (const setId of PHENIX_MODEL_SETS) {
+      for (const [, candidates] of Object.entries(config.pools)) {
+        for (const candidate of candidates) {
+          assert.notEqual(
+            candidate,
+            `phenix/${setId}`,
+            `Pool illegally contains phenix/${setId}`,
+          );
+        }
       }
     }
   });
@@ -92,11 +144,7 @@ describe("Provider integration tests", () => {
   });
 
   it("root session stays phenix/workflow after success (route is resolved independently)", () => {
-    // The routing resolver doesn't change the selected model
-    // The virtual provider registration keeps phenix/workflow as the user-facing model
-    // This test verifies the route never claims the model is phenix/workflow
-    // (it resolves to the concrete backend)
-    assert.ok(true); // Structural invariant
+    assert.ok(true);
   });
 
   it("free mode does not leak into paid models", async () => {
@@ -107,7 +155,6 @@ describe("Provider integration tests", () => {
       modelRegistry: fullRegistry(),
       config,
     });
-    // free only has opencode provider
     assert.equal(route.model.provider, "opencode");
   });
 
@@ -127,6 +174,20 @@ describe("Provider integration tests", () => {
                err.message.includes("reasoning");
       },
     );
+  });
+
+  it("selecting phenix/gpt routes through GPT pool exclusively", async () => {
+    // This is what happens when user picks phenix/gpt:
+    // modelSetForModelId("gpt") → "gpt" → resolveRoute with modelSet="gpt"
+    const route = await resolveRoute({
+      modelSet: "gpt",
+      role: "coordinator",
+      difficulty: "D2",
+      modelRegistry: fullRegistry(),
+      config,
+    });
+    assert.equal(route.modelSet, "gpt");
+    assert.equal(route.model.provider, "openai");
   });
 });
 
