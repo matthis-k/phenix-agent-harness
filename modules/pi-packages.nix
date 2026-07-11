@@ -10,11 +10,14 @@
         "pi-context-tools" = "npm:pi-context-tools@0.1.1";
         "pi-lsp" = "npm:pi-lsp@0.1.7";
         "pi-mcp-adapter" = "npm:pi-mcp-adapter@2.11.0";
+        "pi-subagents" = "npm:pi-subagents@0.34.0";
+        "typebox" = "npm:typebox@1.1.24";
       };
 
       # Bootstrap or refresh with:
       #   nix run .#update-pi-npm-hash
-      piNpmHash = "sha256-nnx4rGgILQAzYPfNnqIqCl4NXh3cPBaRyg7hLaHrzgY=";
+      # Intentionally fake after adding packages. Run `nix run .#update-pi-npm-hash`.
+      piNpmHash = "sha256-ac1/3HJL+J277cZRZ3wgI/xPyH6kAG/qTGp8FP62U/s=";
 
       piNpmPackages = import ./lib/mk-pi-npm-packages.nix {
         inherit lib pkgs;
@@ -23,8 +26,9 @@
         hash = piNpmHash;
       };
 
-      # phenix-core.ts imports Hypa, RPIV web tools, context tools, LSP, and
-      # the MCP adapter directly. The shared npm tree produced by `pi install`
+      # phenix-core.ts imports Hypa, RPIV web tools, context tools, LSP,
+      # MCP, pi-subagents, and the typed Phenix runtime directly. The shared
+      # npm tree produced by `pi install`
       # therefore belongs beside the Phenix package as its node_modules.
       phenixPiPackage = pkgs.runCommand "phenix-pi-package" { } ''
         mkdir -p "$out"
@@ -32,6 +36,15 @@
         chmod -R u+w "$out"
         rm -rf "$out/node_modules"
         ln -s ${piNpmPackages}/npm/node_modules "$out/node_modules"
+      '';
+
+      phenixSubagentTests = pkgs.runCommand "phenix-subagent-runtime-tests" {
+        nativeBuildInputs = [ pkgs.nodejs ];
+      } ''
+        cd ${phenixPiPackage}
+        node --experimental-strip-types --test tests/*.test.ts
+        node --check runtime/verify.mjs
+        touch "$out"
       '';
 
       updatePiNpmHash = pkgs.writeShellApplication {
@@ -83,11 +96,13 @@
         phenix-pi-package = phenixPiPackage;
         phenix-shell = phenixPiPackage;
         phenix-pi-npm-packages = piNpmPackages;
+        phenix-subagent-tests = phenixSubagentTests;
         update-pi-npm-hash = updatePiNpmHash;
       };
 
       checks = {
         phenix-pi-npm-packages = piNpmPackages;
+        phenix-subagent-tests = phenixSubagentTests;
       };
     };
 }

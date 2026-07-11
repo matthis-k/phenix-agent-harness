@@ -1,0 +1,20 @@
+{
+  "activeModelSet": "inherit",
+  "modelSets": {
+    "inherit": {
+      "tiers": {
+        "low": null,
+        "standard": null,
+        "high": null,
+        "critical": null
+      },
+      "roles": {}
+    }
+  },
+  "verification": {
+    "maxRepairAttempts": 1,
+    "timeoutMs": 180000,
+    "extraCommands": [],
+    "roleCommands": {}
+  }
+}

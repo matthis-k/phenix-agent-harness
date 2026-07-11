@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -116,9 +117,22 @@ function integrationSummary(): string {
     .join(", ");
 }
 
+function registerBundledSubagentAgents(): void {
+  const bundled = fileURLToPath(new URL("../agents", import.meta.url));
+  const current = process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS
+    ?.split(path.delimiter)
+    .filter(Boolean) ?? [];
+  process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS = [
+    bundled,
+    ...current.filter((entry) => path.resolve(entry) !== path.resolve(bundled)),
+  ].join(path.delimiter);
+}
+
 export default async function phenixCore(
   pi: ExtensionAPI,
 ): Promise<void> {
+  registerBundledSubagentAgents();
+
   // 1. Hypa — local tool replacement layer
   await loadIntegration("hypa", pi, async (api) => {
     const mod = await import("@hypabolic/pi-hypa/extensions/index.ts");
@@ -153,6 +167,18 @@ export default async function phenixCore(
     });
   });
 
+  // 6. Real process-isolated subagents and lifecycle/status support.
+  await loadIntegration("subagents", pi, async (api) => {
+    const mod = await import("pi-subagents/src/extension/index.ts");
+    await mod.default(api);
+  });
+
+  // 7. Phenix policy and typed handoff layer over pi-subagents.
+  await loadIntegration("phenix-subagents", pi, async (api) => {
+    const mod = await import("./phenix-subagents/index.ts");
+    await mod.default(api);
+  });
+
   pi.on("before_agent_start", async (event) => {
     const guidance = [
       "Use focused searches and bounded reads instead of dumping entire repositories or logs.",
@@ -161,6 +187,9 @@ export default async function phenixCore(
       "Use the `mcp` proxy to discover MCP capabilities on demand instead of assuming every MCP tool is directly registered.",
       "Use `web_search` for external discovery and `web_fetch` for specific pages; use `gh` through the shell for GitHub-native operations.",
       "Use `context_info` and compact only at coherent boundaries during genuinely long tasks.",
+      "Use `phenix_delegate` for real isolated subagents. Raw `subagent` calls are runtime-blocked so model selection, thinking, permissions, persistence, contracts, and verification cannot be bypassed.",
+      "Every delegated handoff must use a strict output schema. Invalid structured output is returned to the child with exact validation failures so it can repair the handoff.",
+      "Runtime verification and critic gates are authoritative. Do not treat a model's claim that tests passed as verification evidence.",
       "The shell is intentionally permissive, but avoid destructive or unrelated operations unless the task requires them.",
     ].join("\n- ");
 
