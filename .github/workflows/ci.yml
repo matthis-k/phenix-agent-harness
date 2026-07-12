@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   checks:
-    name: Nix flake checks
+    name: Deterministic checks
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -30,20 +30,24 @@ jobs:
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check changed files for whitespace errors
+      - name: Check changed files without modifying them
         shell: bash
         run: |
           set -euo pipefail
           zero_sha="0000000000000000000000000000000000000000"
 
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            git diff --check \
-              "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
           elif [[ -n "${{ github.event.before }}" && "${{ github.event.before }}" != "$zero_sha" ]]; then
-            git diff --check "${{ github.event.before }}" "${{ github.sha }}"
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
           else
-            git diff --check "${{ github.sha }}^" "${{ github.sha }}"
+            base="${{ github.sha }}^"
+            head="${{ github.sha }}"
           fi
 
-      - name: Run flake checks
+          nix run .#phenix-check -- range "$base" "$head"
+
+      - name: Run complete flake checks
         run: nix flake check --print-build-logs --keep-going
