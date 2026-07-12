@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { DEFAULT_MAXIMUM_DELEGATION_DEPTH } from "../phenix-composition/runtime-policy.ts";
 import type { AgentRole } from "../phenix-kernel/agents.ts";
 import type { AgentCapabilityArtifact } from "./agent-capabilities.ts";
 import { readCapabilityArtifact } from "./agent-capabilities.ts";
@@ -44,8 +45,6 @@ export type WorkflowActorSource =
   | { readonly kind: "root"; readonly sessionId: string }
   | { readonly kind: "child"; readonly contract: WorkflowContractArtifact };
 
-const ROOT_MAXIMUM_DELEGATION_DEPTH = 4;
-
 export function buildWorkflowRuntimeDependencies(input: {
   readonly cwd: string;
   readonly sessionId: string;
@@ -88,7 +87,7 @@ function buildRootDependencies(
       effective: [...availableRoles],
     },
     availableRoles: [...availableRoles],
-    remainingDepth: ROOT_MAXIMUM_DELEGATION_DEPTH,
+    remainingDepth: DEFAULT_MAXIMUM_DELEGATION_DEPTH,
     transitionAuthority: { kind: "unrestricted" },
   };
   const activeHandles = handleStore.listRecords(cwd, sessionId).filter(

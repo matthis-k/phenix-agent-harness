@@ -41,6 +41,7 @@ import {
   definePhenixConfiguration,
 } from "./phenix-composition/configuration.ts";
 import { link } from "./phenix-composition/linker.ts";
+import { DEFAULT_MAXIMUM_DELEGATION_DEPTH } from "./phenix-composition/runtime-policy.ts";
 import { createChildSessionBackend } from "./phenix-runtime/child-session-backend.ts";
 import { getChildSessionRegistry } from "./phenix-runtime/child-session-registry.ts";
 import { createDelegationTool } from "./phenix-runtime/delegation-tool.ts";
@@ -65,7 +66,7 @@ const defaultPhenixConfiguration = definePhenixConfiguration({
   workflows: [],
   runtime: {
     childSessionBackend: "sdk",
-    maximumDelegationDepth: 3,
+    maximumDelegationDepth: DEFAULT_MAXIMUM_DELEGATION_DEPTH,
     persistChildSessions: true,
   },
 });

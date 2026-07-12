@@ -43,6 +43,7 @@ import {
 } from "../phenix-workflow/workflow-store.ts";
 import {
   finalizeHandleWorkflow,
+  initialWorkflowStateForRole,
   transitionAuthorityForChild,
 } from "../phenix-workflow/workflow-runtime.ts";
 
@@ -72,6 +73,7 @@ import type {
 import {
   CRITIC_OUTPUT_SCHEMA,
   HANDLE_VERSION,
+  isTerminalHandleStatus,
 } from "./handle-types.ts";
 import {
   effectiveSessionId,
@@ -167,18 +169,6 @@ function createHandle(input: {
     status: "starting",
     producerCycles: [],
   };
-}
-
-function initialStateForRole(role: AgentRole) {
-  return role === null
-    ? "classified"
-    : role === "scout" ? "scouting"
-    : role === "planner" ? "planning"
-    : role === "architect" ? "designing"
-    : role === "implementer" ? "implementing"
-    : role === "tester" ? "testing"
-    : role === "critic" ? "reviewing"
-    : "finalizing";
 }
 
 // ── Coordinator ─────────────────────────────────────────────────────────────
@@ -422,7 +412,7 @@ export class AgentExecutionCoordinator {
     try {
     // ── Create child workflow record ──────────────────────────────────
     const role = roleForAgentClient(transition.agentClient);
-    const childInitialState = initialStateForRole(role) as ResolvedWorkflowChildInput["initialState"];
+    const childInitialState = initialWorkflowStateForRole(role);
 
     const childRuntimeRecord = createWorkflowRecord(ctx.cwd, {
       instanceId,
@@ -794,16 +784,23 @@ export class AgentExecutionCoordinator {
       void completionPromise
         .then(
           (result) => {
-            finalizeOrRejectHandle(result.record as HandleRecord);
+            const persisted = readRecord(ctx.cwd, sessionId, handleId);
+            const settledRecord =
+              persisted && isTerminalHandleStatus(persisted.status)
+                ? persisted
+                : (result.record as HandleRecord);
+            finalizeOrRejectHandle(settledRecord);
           },
           (error) => {
             const failedRecord =
               readRecord(ctx.cwd, sessionId, handleId) ?? record;
-            failedRecord.status = "failed";
-            failedRecord.errors = [
-              error instanceof Error ? error.message : String(error),
-            ];
-            writeRecord(ctx.cwd, failedRecord);
+            if (!isTerminalHandleStatus(failedRecord.status)) {
+              failedRecord.status = "failed";
+              failedRecord.errors = [
+                error instanceof Error ? error.message : String(error),
+              ];
+              writeRecord(ctx.cwd, failedRecord);
+            }
             finalizeOrRejectHandle(failedRecord);
           },
         )
@@ -1150,93 +1147,151 @@ export class AgentExecutionCoordinator {
     }
   }
 
-  // ── Background operations: poll, await, cancel ────────────────────────
+  // ── Background handle lifecycle ───────────────────────────────────────
 
-  async poll(ctx: ExtensionContext, id: string): Promise<HandleRecord | undefined> {
-    const record = readRecord(ctx.cwd, effectiveSessionId(ctx), id);
-    if (!record) return undefined;
+  private finalizePersistedHandle(ctx: ExtensionContext, record: HandleRecord): void {
+    if (!record.workflowBinding) return;
 
-    if (record.status === "completed" || record.status === "failed" || record.status === "cancelled" || record.status === "orphaned") {
-      return record;
-    }
-
-    if (!record.childRunId) return record;
-
-    const registry = getChildSessionRegistry();
-    const live = registry.get(record.childRunId);
-    if (!live) {
-      // No live entry — do not rerun. Mark orphaned if nonterminal.
-      if (record.status === "running" || record.status === "starting") {
-        record.status = "orphaned";
+    try {
+      const finalized = finalizeHandleWorkflow({ cwd: ctx.cwd, handle: record });
+      if (!finalized) {
+        throw new Error(
+          `Workflow finalization returned no record for terminal handle ${record.id}.`,
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const diagnostic = `WORKFLOW_FINALIZATION_FAILED: ${message}`;
+      if (!record.errors?.includes(diagnostic)) {
+        record.errors = [...(record.errors ?? []), diagnostic];
         writeRecord(ctx.cwd, record);
       }
-      return record;
+    }
+  }
+
+  private abortError(signal: AbortSignal, fallback: string): ChildRuntimeError {
+    const reason = signal.reason;
+    if (reason instanceof ChildRuntimeError) return reason;
+    return new ChildRuntimeError(
+      "ABORTED",
+      reason instanceof Error
+        ? reason.message
+        : typeof reason === "string" && reason.length > 0
+          ? reason
+          : fallback,
+    );
+  }
+
+  private async awaitLiveCompletion(
+    completion: Promise<AttemptRunResult>,
+    signal: AbortSignal,
+  ): Promise<AttemptRunResult> {
+    if (signal.aborted) {
+      throw this.abortError(signal, "Waiting for delegated execution was cancelled.");
     }
 
-    // Inspect the existing live promise/snapshot — do not create a new attempt.
+    return new Promise<AttemptRunResult>((resolve, reject) => {
+      const cleanup = (): void => signal.removeEventListener("abort", onAbort);
+      const onAbort = (): void => {
+        cleanup();
+        reject(
+          this.abortError(signal, "Waiting for delegated execution was cancelled."),
+        );
+      };
+
+      signal.addEventListener("abort", onAbort, { once: true });
+      completion.then(
+        (result) => {
+          cleanup();
+          resolve(result);
+        },
+        (error) => {
+          cleanup();
+          reject(error);
+        },
+      );
+    });
+  }
+
+  private orphanHandle(ctx: ExtensionContext, record: HandleRecord): HandleRecord {
+    if (!isTerminalHandleStatus(record.status)) {
+      record.status = "orphaned";
+      record.errors = [
+        ...(record.errors ?? []),
+        "ORPHANED_SESSION: no live child run exists for this persisted handle.",
+      ];
+      writeRecord(ctx.cwd, record);
+      this.finalizePersistedHandle(ctx, record);
+    }
     return record;
   }
 
-  async awaitHandle(ctx: ExtensionContext, id: string, _signal: AbortSignal): Promise<HandleRecord | undefined> {
+  async poll(ctx: ExtensionContext, id: string): Promise<HandleRecord | undefined> {
     const record = readRecord(ctx.cwd, effectiveSessionId(ctx), id);
-    if (!record) return undefined;
-
-    if (record.status === "completed" || record.status === "failed" || record.status === "cancelled" || record.status === "orphaned") {
-      return record;
-    }
-
+    if (!record || isTerminalHandleStatus(record.status)) return record;
     if (!record.childRunId) return record;
 
-    const registry = getChildSessionRegistry();
-    const live = registry.get(record.childRunId);
-    if (!live) {
-      if (record.status === "running" || record.status === "starting") {
-        record.status = "orphaned";
-        writeRecord(ctx.cwd, record);
-      }
-      return record;
-    }
-
-    // Await the same registered promise.
-    const result = await live.completion;
-    return result.record as HandleRecord | undefined;
+    const live = getChildSessionRegistry().get(record.childRunId);
+    return live ? record : this.orphanHandle(ctx, record);
   }
 
-  async cancelHandle(ctx: ExtensionContext, id: string, reason: string): Promise<HandleRecord | undefined> {
+  async awaitHandle(
+    ctx: ExtensionContext,
+    id: string,
+    signal: AbortSignal,
+  ): Promise<HandleRecord | undefined> {
     const record = readRecord(ctx.cwd, effectiveSessionId(ctx), id);
-    if (!record) return undefined;
+    if (!record || isTerminalHandleStatus(record.status)) return record;
+    if (!record.childRunId) return record;
 
-    if (record.status === "completed" || record.status === "failed" || record.status === "cancelled" || record.status === "orphaned") {
-      return record;
-    }
+    const live = getChildSessionRegistry().get(record.childRunId);
+    if (!live) return this.orphanHandle(ctx, record);
+
+    // Cancelling the wait does not cancel the child. Explicit child cancellation
+    // remains the responsibility of cancelHandle().
+    const result = await this.awaitLiveCompletion(live.completion, signal);
+    return result.record as HandleRecord;
+  }
+
+  async cancelHandle(
+    ctx: ExtensionContext,
+    id: string,
+    reason: string,
+  ): Promise<HandleRecord | undefined> {
+    const record = readRecord(ctx.cwd, effectiveSessionId(ctx), id);
+    if (!record || isTerminalHandleStatus(record.status)) return record;
+
+    // Persist the terminal state before aborting the live run. The background
+    // completion observer checks persisted terminal state and therefore cannot
+    // overwrite an explicit cancellation with a generic failure.
+    record.status = "cancelled";
+    record.errors = [...(record.errors ?? []), reason];
+    writeRecord(ctx.cwd, record);
 
     if (record.childRunId) {
       const registry = getChildSessionRegistry();
       const live = registry.get(record.childRunId);
       if (live) {
-        // Abort the registered run — idempotent.
-        try {
-          live.controller.abort();
-        } catch {
-          // Already aborted — ignore.
+        const cancellation = new ChildRuntimeError("ABORTED", reason);
+        if (!live.controller.signal.aborted) {
+          live.controller.abort(cancellation);
         }
         try {
           await live.run.abort(reason);
         } catch {
-          // Best-effort.
+          // Provider abort is best-effort after the terminal state is persisted.
         }
         try {
           await live.run.dispose();
         } catch {
-          // Best-effort.
+          // Disposal is best-effort; the registry entry is removed regardless.
         }
         registry.remove(record.childRunId);
       }
     }
 
-    record.status = "cancelled";
-    record.errors = [reason];
-    writeRecord(ctx.cwd, record);
+    this.finalizePersistedHandle(ctx, record);
     return record;
   }
+
 }

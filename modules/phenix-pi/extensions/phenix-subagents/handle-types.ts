@@ -11,7 +11,27 @@ import type {
 // ── Constants (used by index.ts; extracted for visibility) ──────────────────
 
 export const HANDLE_VERSION = 4;
-export const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]);
+
+/** Persisted lifecycle states for a delegated handle. */
+export type HandleStatus =
+  | "starting"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "orphaned";
+
+/** States after which neither producer execution nor workflow settlement may restart. */
+export const TERMINAL_STATES: ReadonlySet<HandleStatus> = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+  "orphaned",
+]);
+
+export function isTerminalHandleStatus(status: HandleStatus): boolean {
+  return TERMINAL_STATES.has(status);
+}
 
 // ── Critic contract schema ──────────────────────────────────────────────────
 
@@ -150,7 +170,7 @@ export interface HandleRecord {
 
   readonly createdAt: string;
   updatedAt: string;
-  status: "starting" | "running" | "completed" | "failed" | "cancelled" | "orphaned";
+  status: HandleStatus;
   value?: unknown;
   errors?: string[];
 
