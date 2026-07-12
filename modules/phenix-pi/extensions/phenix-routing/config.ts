@@ -6,7 +6,6 @@ import { mergeObjects, readJson } from "../phenix-shared.ts";
 import { defaultModelPools, defaultModelSets } from "./default-routing.ts";
 import type {
   Capability,
-  ConfigDiagnostic as _UnusedConfigDiagnostic,
   ModelSetId,
   RoutingConfig,
   RoutingGuard,
