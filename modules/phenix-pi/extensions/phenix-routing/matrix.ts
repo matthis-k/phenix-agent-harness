@@ -1,101 +1,66 @@
+import { defaultAgentRoutes } from "./default-routing.ts";
 import type { Difficulty, RoleRoute, RoutingRole } from "./types.ts";
+import { capabilityFromId, ROUTING_ROLES, routingRoleFromId } from "./types.ts";
+
+const DIFFICULTIES = ["D0", "D1", "D2", "D3"] as const satisfies readonly Difficulty[];
+
+type MutableRoleMatrix = Partial<Record<RoutingRole, Partial<Record<Difficulty, RoleRoute>>>>;
 
 /**
- * Fixed role matrix mapping (role × difficulty) → (capability, thinking).
+ * Project passive agent-route declarations into the resolver's indexed matrix.
  *
- * This is the single source of truth for semantic routing. A role having a
- * route does not mean that role must be spawned — the workflow state machine
- * determines activation.
+ * `defaultAgentRoutes` is the source of truth. This module owns only the lookup
+ * representation required by the routing mechanism.
  */
-export const ROLE_MATRIX: Readonly<
-  Record<RoutingRole, Readonly<Record<Difficulty, RoleRoute>>>
-> = {
-  coordinator: {
-    D0: { capability: "fast",        thinking: "minimal" },
-    D1: { capability: "general",     thinking: "low"     },
-    D2: { capability: "reasoning",   thinking: "high"    },
-    D3: { capability: "reasoning-max", thinking: "xhigh" },
-  },
+function buildRoleMatrix(): Readonly<Record<RoutingRole, Readonly<Record<Difficulty, RoleRoute>>>> {
+  const projected: MutableRoleMatrix = {};
 
-  base: {
-    D0: { capability: "fast",        thinking: "minimal" },
-    D1: { capability: "general",     thinking: "low"     },
-    D2: { capability: "reasoning",   thinking: "medium"  },
-    D3: { capability: "reasoning",   thinking: "high"    },
-  },
+  for (const definition of defaultAgentRoutes) {
+    const role = routingRoleFromId(definition.agentClient.id);
+    if (projected[role]) {
+      throw new Error(`Duplicate routing declaration for role "${role}"`);
+    }
 
-  scout: {
-    D0: { capability: "fast",        thinking: "minimal" },
-    D1: { capability: "fast",        thinking: "low"     },
-    D2: { capability: "general",     thinking: "medium"  },
-    D3: { capability: "reasoning",   thinking: "high"    },
-  },
+    const difficulties: Partial<Record<Difficulty, RoleRoute>> = {};
+    for (const difficulty of DIFFICULTIES) {
+      const route = definition.difficulties[difficulty];
+      difficulties[difficulty] = {
+        capability: capabilityFromId(route.capability.id),
+        thinking: route.thinking,
+      };
+    }
+    projected[role] = difficulties;
+  }
 
-  planner: {
-    D0: { capability: "general",     thinking: "low"     },
-    D1: { capability: "general",     thinking: "medium"  },
-    D2: { capability: "reasoning",   thinking: "high"    },
-    D3: { capability: "reasoning-max", thinking: "xhigh" },
-  },
-
-  architect: {
-    D0: { capability: "general",       thinking: "low"     },
-    D1: { capability: "reasoning",     thinking: "medium"  },
-    D2: { capability: "reasoning-max", thinking: "high"    },
-    D3: { capability: "reasoning-max", thinking: "xhigh"   },
-  },
-
-  implementer: {
-    D0: { capability: "code-fast", thinking: "low"     },
-    D1: { capability: "code",      thinking: "low"     },
-    D2: { capability: "code",      thinking: "medium"  },
-    D3: { capability: "code-max",  thinking: "high"    },
-  },
-
-  tester: {
-    D0: { capability: "fast",        thinking: "minimal" },
-    D1: { capability: "code-fast",   thinking: "low"     },
-    D2: { capability: "code",        thinking: "medium"  },
-    D3: { capability: "code-max",    thinking: "high"    },
-  },
-
-  critic: {
-    D0: { capability: "general",    thinking: "low"     },
-    D1: { capability: "review",     thinking: "medium"  },
-    D2: { capability: "review",     thinking: "high"    },
-    D3: { capability: "review-max", thinking: "xhigh"   },
-  },
-
-  finalizer: {
-    D0: { capability: "fast",       thinking: "minimal" },
-    D1: { capability: "general",    thinking: "low"     },
-    D2: { capability: "review",     thinking: "medium"  },
-    D3: { capability: "review-max", thinking: "high"    },
-  },
-};
-
-/** List all (role, difficulty) pairs in the matrix. */
-export function allMatrixKeys(): Array<{ role: RoutingRole; difficulty: Difficulty }> {
-  const keys: Array<{ role: RoutingRole; difficulty: Difficulty }> = [];
-  for (const [role, diffs] of Object.entries(ROLE_MATRIX)) {
-    for (const difficulty of Object.keys(diffs) as Difficulty[]) {
-      keys.push({ role: role as RoutingRole, difficulty });
+  for (const role of ROUTING_ROLES) {
+    const routes = projected[role];
+    if (!routes) {
+      throw new Error(`Missing routing declaration for role "${role}"`);
+    }
+    for (const difficulty of DIFFICULTIES) {
+      if (!routes[difficulty]) {
+        throw new Error(`Missing routing declaration for ${role}/${difficulty}`);
+      }
     }
   }
-  return keys;
+
+  return projected as Record<RoutingRole, Readonly<Record<Difficulty, RoleRoute>>>;
 }
 
-/** Validate that every matrix cell resolves. Throws on missing entries. */
+/** Indexed runtime projection of the authoritative agent-route declarations. */
+export const ROLE_MATRIX = buildRoleMatrix();
+
+/** List every declared `(role, difficulty)` route. */
+export function allMatrixKeys(): Array<{ role: RoutingRole; difficulty: Difficulty }> {
+  return ROUTING_ROLES.flatMap((role) => DIFFICULTIES.map((difficulty) => ({ role, difficulty })));
+}
+
+/** Assert that the projected matrix remains complete. */
 export function validateMatrix(): void {
-  for (const role of Object.keys(ROLE_MATRIX) as RoutingRole[]) {
-    for (const difficulty of ["D0", "D1", "D2", "D3"] as Difficulty[]) {
-      const route = ROLE_MATRIX[role]?.[difficulty];
-      if (!route) {
-        throw new Error(`Matrix missing entry for ${role}/${difficulty}`);
-      }
-      if (!route.capability || !route.thinking) {
-        throw new Error(`Matrix entry ${role}/${difficulty} has incomplete route`);
-      }
+  for (const { role, difficulty } of allMatrixKeys()) {
+    const route = ROLE_MATRIX[role][difficulty];
+    if (!route.capability || !route.thinking) {
+      throw new Error(`Matrix entry ${role}/${difficulty} is incomplete`);
     }
   }
 }

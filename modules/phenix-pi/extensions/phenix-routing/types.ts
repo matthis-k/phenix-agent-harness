@@ -1,39 +1,78 @@
 import type { AgentKind } from "../phenix-kernel/agents.ts";
-import type { Difficulty, ThinkingLevel, TaskProfile } from "../phenix-kernel/task.ts";
 import type { ModelSetId } from "../phenix-kernel/ids.ts";
+import { modelSetId } from "../phenix-kernel/ids.ts";
+import type { Difficulty, TaskProfile, ThinkingLevel } from "../phenix-kernel/task.ts";
+import { defaultModelSets } from "./default-routing.ts";
 
 // ── Re-export canonical types from kernel ──────────────────────────────────
 
-export type { Difficulty, ThinkingLevel, TaskProfile, ModelSetId };
+export type { Difficulty, ModelSetId, TaskProfile, ThinkingLevel };
 
-// ── Model set IDs (deprecated — use kernel ModelSetId for new code) ───────
+// ── Built-in model sets ────────────────────────────────────────────────────
 
-export const MODEL_SET_IDS = [
-  "free" as ModelSetId,
-  "opencode-go" as ModelSetId,
-  "gpt" as ModelSetId,
-  "mixed" as ModelSetId,
+/**
+ * Built-in model-set identifiers projected from the authoritative declarations.
+ *
+ * User configuration may override the contents of a built-in model set, but it
+ * cannot silently introduce a model set that has no linked provider model.
+ */
+export const MODEL_SET_IDS: readonly ModelSetId[] = defaultModelSets.map((definition) =>
+  modelSetId(definition.id),
+);
+
+// ── Capability (routing-owned concept) ─────────────────────────────────────
+
+export const CAPABILITIES = [
+  "fast",
+  "general",
+  "reasoning",
+  "reasoning-max",
+  "code-fast",
+  "code",
+  "code-max",
+  "review",
+  "review-max",
 ] as const;
 
-// ── Capability (routing-owned concept) ────────────────────────────────────
+export type Capability = (typeof CAPABILITIES)[number];
 
-export type Capability =
-  | "fast"
-  | "general"
-  | "reasoning"
-  | "reasoning-max"
-  | "code-fast"
-  | "code"
-  | "code-max"
-  | "review"
-  | "review-max";
+export function isCapability(value: unknown): value is Capability {
+  return typeof value === "string" && CAPABILITIES.includes(value as Capability);
+}
 
-// ── Routing role (deprecated — use kernel AgentClientId for new code) ─────
+export function capabilityFromId(value: string): Capability {
+  if (!isCapability(value)) {
+    throw new Error(`Unknown routing capability "${value}"`);
+  }
+  return value;
+}
 
-export type RoutingRole =
-  | "coordinator"
-  | "base"
-  | AgentKind;
+// ── Routing role ───────────────────────────────────────────────────────────
+
+export const ROUTING_ROLES = [
+  "coordinator",
+  "base",
+  "scout",
+  "planner",
+  "architect",
+  "implementer",
+  "tester",
+  "critic",
+  "finalizer",
+] as const;
+
+export type RoutingRole = "coordinator" | "base" | AgentKind;
+
+export function isRoutingRole(value: unknown): value is RoutingRole {
+  return typeof value === "string" && ROUTING_ROLES.includes(value as RoutingRole);
+}
+
+export function routingRoleFromId(value: string): RoutingRole {
+  if (!isRoutingRole(value)) {
+    throw new Error(`Unknown routing role "${value}"`);
+  }
+  return value;
+}
 
 // ── Route and model types ──────────────────────────────────────────────────
 
@@ -66,28 +105,35 @@ export interface PhenixRoutingSettings {
   readonly modelSet: ModelSetId;
 }
 
+export interface RoutingGuard {
+  readonly allowedProviders?: readonly string[];
+  readonly denySecrecy?: readonly string[];
+  readonly denyChangeKinds?: readonly string[];
+  readonly denyTargetStates?: readonly string[];
+}
+
+/**
+ * Runtime projection consumed by the resolver and user-override loader.
+ *
+ * The bundled value is generated from `default-routing.ts`; this interface is
+ * intentionally a serializable data shape, not another declaration authority.
+ */
 export interface RoutingConfig {
   readonly defaultModelSet: ModelSetId;
   readonly modelSetOrder: readonly ModelSetId[];
-
   readonly pools: Readonly<Record<string, readonly string[]>>;
-
-  readonly modelSets: Readonly<
-    Record<ModelSetId, Readonly<Record<Capability, string>>>
-  >;
-
-  readonly guards?: Partial<
-    Record<ModelSetId, {
-      readonly allowedProviders?: readonly string[];
-      readonly denySecrecy?: readonly string[];
-      readonly denyChangeKinds?: readonly string[];
-      readonly denyTargetStates?: readonly string[];
-    }>
-  >;
+  readonly modelSets: Readonly<Record<string, Readonly<Record<Capability, string>>>>;
+  readonly guards?: Readonly<Record<string, RoutingGuard>>;
 }
 
 export interface RoutingError {
-  readonly code: "NO_CANDIDATES" | "BOUNDARY_VIOLATION" | "UNKNOWN_POOL" | "MALFORMED_REF" | "DENIED_ROUTE" | "EMPTY_POOL";
+  readonly code:
+    | "NO_CANDIDATES"
+    | "BOUNDARY_VIOLATION"
+    | "UNKNOWN_POOL"
+    | "MALFORMED_REF"
+    | "DENIED_ROUTE"
+    | "EMPTY_POOL";
   readonly message: string;
   readonly modelSet: ModelSetId;
   readonly role: RoutingRole;
@@ -100,7 +146,7 @@ export interface RoutingError {
   readonly boundaryViolations?: readonly string[];
 }
 
-/** Parse a "provider/model" string into a ModelRef */
+/** Parse a `provider/model` string into a model reference. */
 export function parseModelRef(ref: string): ModelRef {
   const slashIndex = ref.indexOf("/");
   if (slashIndex === -1 || slashIndex === 0 || slashIndex === ref.length - 1) {
@@ -112,7 +158,7 @@ export function parseModelRef(ref: string): ModelRef {
   };
 }
 
-/** Format a ModelRef back to "provider/model" */
+/** Format a model reference as `provider/model`. */
 export function formatModelRef(ref: ModelRef): string {
   return `${ref.provider}/${ref.model}`;
 }
