@@ -101,7 +101,7 @@ function makeContractRuntime(role: AgentRole) {
       definitionVersion: 1 as const,
       difficulty: "D1" as const,
       initialState: "classified" as const,
-      transitionCeiling: [] as readonly WorkflowTransitionId[],
+      transitionAuthority: { kind: "unrestricted" } as const,
       capabilityArtifactHash: "0000000000000000000000000000000000000000000000000000000000000000",
     },
   };

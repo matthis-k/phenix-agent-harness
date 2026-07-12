@@ -6,6 +6,7 @@ import type { FileContractStore } from "./contract-store.ts";
 import type { AgentRole, AgentKind } from "./agent-types.ts";
 import type { ToolPatch, ToolPatchInput } from "./tool-policy.ts";
 import type { DelegateRolePatchInput } from "./delegation-policy.ts";
+import type { AgentCapabilityArtifact } from "../phenix-workflow/agent-capabilities.ts";
 
 // ── Runtime context types ───────────────────────────────────────────────────
 
@@ -16,6 +17,7 @@ export type PhenixRuntimeContext =
         readonly instanceId: string;
         readonly actorId: string;
       };
+      readonly capabilityArtifact?: AgentCapabilityArtifact;
     }
   | {
       readonly kind: "child";
@@ -120,8 +122,33 @@ export function setRootWorkflowData(
   data: { readonly instanceId: string; readonly actorId: string },
 ): void {
   if (_context && _context.kind === "root") {
-    _context = { kind: "root", workflowData: data };
+    _context = { ..._context, workflowData: data };
   }
+}
+
+/**
+ * Set the capability artifact on the root runtime context.
+ * Called by the routing extension after capability discovery.
+ */
+export function setRootCapabilityArtifact(artifact: AgentCapabilityArtifact): void {
+  if (_context && _context.kind === "root") {
+    _context = { ..._context, capabilityArtifact: artifact };
+  }
+}
+
+/**
+ * Get the root capability artifact.
+ * Throws if not set — capability discovery must complete before delegation.
+ */
+export function getRootCapabilityArtifact(): AgentCapabilityArtifact {
+  if (_context?.kind === "root" && _context.capabilityArtifact) {
+    return _context.capabilityArtifact;
+  }
+  throw new Error(
+    "Capability artifact has not been registered. " +
+    "The routing extension must complete capability discovery " +
+    "during session startup before any delegate or child agent runs.",
+  );
 }
 
 /**

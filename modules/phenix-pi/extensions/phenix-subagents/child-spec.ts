@@ -28,8 +28,8 @@ import type { ContractArtifact } from "./contract.ts";
 import type {
   WorkflowDefinitionId,
   WorkflowStateId,
-  WorkflowTransitionId,
 } from "../phenix-workflow/workflow-types.ts";
+import type { TransitionAuthority } from "../phenix-workflow/transition-authority.ts";
 import type { Difficulty } from "../phenix-routing/types.ts";
 import type { AgentCapabilityArtifact } from "../phenix-workflow/agent-capabilities.ts";
 import { isSpawnableAgent } from "../phenix-workflow/agent-capabilities.ts";
@@ -72,7 +72,7 @@ export interface ResolvedChildSpec {
 
     readonly initialState: WorkflowStateId;
 
-    readonly transitionCeiling: readonly WorkflowTransitionId[];
+    readonly transitionAuthority: TransitionAuthority;
 
     readonly capabilityArtifactHash: string;
   };
@@ -112,7 +112,7 @@ export interface ResolvedWorkflowChildInput {
   readonly definitionVersion: 1;
   readonly difficulty: Difficulty;
   readonly initialState: WorkflowStateId;
-  readonly transitionCeiling: readonly WorkflowTransitionId[];
+  readonly transitionAuthority: TransitionAuthority;
   readonly capabilityArtifactHash: string;
 }
 
@@ -238,7 +238,9 @@ export function resolveChildSpec(
       definitionVersion: input.workflow.definitionVersion,
       difficulty: input.workflow.difficulty,
       initialState: input.workflow.initialState,
-      transitionCeiling: [...input.workflow.transitionCeiling],
+      transitionAuthority: input.workflow.transitionAuthority.kind === "unrestricted"
+        ? { kind: "unrestricted" as const }
+        : { kind: "restricted" as const, allowed: [...input.workflow.transitionAuthority.allowed] },
       capabilityArtifactHash: input.workflow.capabilityArtifactHash,
     },
     timeoutMs: policy.timeoutMs,

@@ -274,19 +274,28 @@ function validateWorkflowSection(
     );
   }
 
-  // Validate transitionCeiling
-  if (!Array.isArray(raw.transitionCeiling)) {
-    throw new Error(`${ctx}: runtime.workflow.transitionCeiling must be an array`);
+  // Validate transitionAuthority
+  if (!isRecord(raw.transitionAuthority)) {
+    throw new Error(`${ctx}: runtime.workflow.transitionAuthority must be an object`);
   }
-  for (const tid of raw.transitionCeiling) {
-    if (typeof tid !== "string" || tid.length === 0) {
-      throw new Error(`${ctx}: runtime.workflow.transitionCeiling contains invalid transition ID`);
+  const ta = raw.transitionAuthority as Record<string, unknown>;
+  if (ta.kind !== "unrestricted" && ta.kind !== "restricted") {
+    throw new Error(`${ctx}: runtime.workflow.transitionAuthority.kind must be "unrestricted" or "restricted"`);
+  }
+  if (ta.kind === "restricted") {
+    if (!Array.isArray(ta.allowed)) {
+      throw new Error(`${ctx}: runtime.workflow.transitionAuthority.allowed must be an array`);
     }
-    const exists = definition.transitions.some((t) => t.id === tid);
-    if (!exists) {
-      throw new Error(
-        `${ctx}: runtime.workflow.transitionCeiling references unknown transition ID "${tid}"`,
-      );
+    for (const tid of ta.allowed) {
+      if (typeof tid !== "string" || tid.length === 0) {
+        throw new Error(`${ctx}: runtime.workflow.transitionAuthority.allowed contains invalid transition ID`);
+      }
+      const exists = definition.transitions.some((t) => t.id === tid);
+      if (!exists) {
+        throw new Error(
+          `${ctx}: runtime.workflow.transitionAuthority.allowed references unknown transition ID "${tid}"`,
+        );
+      }
     }
   }
 

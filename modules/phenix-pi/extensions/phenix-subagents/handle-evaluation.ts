@@ -165,7 +165,7 @@ export async function createAttemptContract(
         definitionVersion: input.spec.workflow.definitionVersion,
         difficulty: input.spec.workflow.difficulty,
         initialState: input.spec.workflow.initialState,
-        transitionCeiling: input.spec.workflow.transitionCeiling,
+        transitionAuthority: input.spec.workflow.transitionAuthority,
         capabilityArtifactHash: input.spec.workflow.capabilityArtifactHash,
       },
       timeoutMs: input.spec.timeoutMs,

@@ -9,6 +9,7 @@ import type {
 import { conditionSatisfied } from "./workflow-conditions.ts";
 import { transitionMatchesDifficulty } from "./workflow-reducer.ts";
 import { getOutputSchema } from "./workflow-schemas.ts";
+import { isTransitionPermitted } from "./transition-authority.ts";
 import type { HandleRecord } from "../phenix-subagents/handle-types.ts";
 
 // ── Resolve current delegation options ──────────────────────────────────────
@@ -91,11 +92,8 @@ export function resolveDelegationOptions(input: {
     // 6. Source state match
     if (!dt.from.includes(runtime.state)) continue;
 
-    // 7. Transition ceiling check
-    if (
-      authority.transitionCeiling.length > 0 &&
-      !authority.transitionCeiling.includes(dt.id)
-    ) {
+    // 7. Transition authority check
+    if (!isTransitionPermitted(dt.id, authority.transitionAuthority)) {
       continue;
     }
 

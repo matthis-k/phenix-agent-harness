@@ -40,8 +40,6 @@ import {
   formatWorkflowProjection,
   buildCapabilityArtifact,
   persistCapabilityArtifact,
-  setCachedCapabilityArtifact,
-  getCachedCapabilityArtifact,
   createWorkflowRecord,
   resolveDelegationOptions,
   getAgentDiscoveryHelper,
@@ -53,7 +51,7 @@ import {
 import {
   rolePreset,
 } from "../phenix-subagents/role-presets.ts";
-import { setRootWorkflowData } from "../phenix-subagents/contract-runtime-context.ts";
+import { setRootWorkflowData, setRootCapabilityArtifact } from "../phenix-subagents/contract-runtime-context.ts";
 import { difficultyForProfile } from "./classifier.ts";
 import { deriveTaskProfile } from "../phenix-subagents/policy.ts";
 
@@ -111,7 +109,7 @@ function buildRootDelegationAuthority(
     },
     availableRoles: [...allRoles],
     remainingDepth: 4, // Root maximum
-    transitionCeiling: [], // No ceiling for root (empty = unrestricted)
+    transitionAuthority: { kind: "unrestricted" },
   };
 }
 
@@ -159,7 +157,7 @@ export default async function phenixRouting(
       runtime.capabilityArtifact = artifact;
 
       // Share artifact with the subagents delegate handler.
-      setCachedCapabilityArtifact(artifact);
+      setRootCapabilityArtifact(artifact);
 
       // Persist diagnostic copy
       try {

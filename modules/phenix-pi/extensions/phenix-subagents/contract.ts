@@ -4,7 +4,8 @@ import type { JsonSchema } from "./contracts.ts";
 import type { AgentKind, AgentRole, TurnBudget, ToolBudget, VerificationCommand } from "./agent-types.ts";
 import type { ResolvedToolConfiguration } from "./tool-policy.ts";
 import type { ResolvedDelegateRoleConfiguration } from "./delegation-policy.ts";
-import type { WorkflowDefinitionId, WorkflowStateId, WorkflowTransitionId } from "../phenix-workflow/workflow-types.ts";
+import type { WorkflowDefinitionId, WorkflowStateId } from "../phenix-workflow/workflow-types.ts";
+import type { TransitionAuthority } from "../phenix-workflow/transition-authority.ts";
 import type { Difficulty } from "../phenix-routing/types.ts";
 
 declare const contractIdBrand: unique symbol;
@@ -87,7 +88,7 @@ export interface ContractArtifact {
 
       readonly initialState: WorkflowStateId;
 
-      readonly transitionCeiling: readonly WorkflowTransitionId[];
+      readonly transitionAuthority: TransitionAuthority;
 
       readonly capabilityArtifactHash: string;
     };
@@ -261,7 +262,9 @@ export function issueContract(
         definitionVersion: input.runtime.workflow.definitionVersion,
         difficulty: input.runtime.workflow.difficulty,
         initialState: input.runtime.workflow.initialState,
-        transitionCeiling: [...input.runtime.workflow.transitionCeiling],
+        transitionAuthority: input.runtime.workflow.transitionAuthority.kind === "unrestricted"
+          ? { kind: "unrestricted" as const }
+          : { kind: "restricted" as const, allowed: [...input.runtime.workflow.transitionAuthority.allowed] },
         capabilityArtifactHash: input.runtime.workflow.capabilityArtifactHash,
       },
       timeoutMs: input.runtime.timeoutMs,

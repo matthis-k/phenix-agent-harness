@@ -40,6 +40,7 @@ import {
 import {
   getRuntimeContext,
   getRootWorkflowData,
+  getRootCapabilityArtifact,
 } from "./contract-runtime-context.ts";
 import { toolAllowedByConfig } from "./tool-policy.ts";
 
@@ -48,6 +49,8 @@ import { toolAllowedByConfig } from "./tool-policy.ts";
 import type {
   WorkflowTransitionId,
 } from "../phenix-workflow/workflow-types.ts";
+import type { TransitionAuthority } from "../phenix-workflow/transition-authority.ts";
+import { isTransitionPermitted } from "../phenix-workflow/transition-authority.ts";
 import type { Difficulty } from "../phenix-routing/types.ts";
 import { PHENIX_DEFAULT_WORKFLOW } from "../phenix-workflow/workflow-definitions.ts";
 import {
@@ -59,7 +62,6 @@ import {
 } from "../phenix-workflow/workflow-store.ts";
 import { getOutputSchema } from "../phenix-workflow/workflow-schemas.ts";
 import { resolveDelegationOptions } from "../phenix-workflow/delegation-options.ts";
-import { getCachedCapabilityArtifact } from "../phenix-workflow/agent-capabilities.ts";
 
 import type { AgentRole } from "./agent-types.ts";
 
@@ -313,7 +315,7 @@ export default async function phenixSubagents(
 
         let instanceId: string;
         let actorId: string;
-        let transitionCeiling: readonly WorkflowTransitionId[];
+        let transitionAuthority: TransitionAuthority;
         let difficulty: Difficulty;
         let creator: ContractCreatorContext;
 
@@ -321,7 +323,7 @@ export default async function phenixSubagents(
           const contract = runtimeCtx.contract;
           instanceId = contract.runtime.workflow.instanceId;
           actorId = contract.runtime.workflow.actorId;
-          transitionCeiling = contract.runtime.workflow.transitionCeiling;
+          transitionAuthority = contract.runtime.workflow.transitionAuthority;
           difficulty = contract.runtime.workflow.difficulty;
           creator = { kind: "child", contract };
 
@@ -339,7 +341,7 @@ export default async function phenixSubagents(
           }
           instanceId = wfData.instanceId;
           actorId = wfData.actorId;
-          transitionCeiling = [];
+          transitionAuthority = { kind: "unrestricted" };
           creator = { kind: "root", maximumDelegationDepth: 4 };
         }
 
@@ -389,9 +391,9 @@ export default async function phenixSubagents(
             `It is available at: ${transition.difficulty.join(", ")}.`,
           );
         }
-        if (transitionCeiling.length > 0 && !transitionCeiling.includes(transition.id)) {
+        if (!isTransitionPermitted(transition.id, transitionAuthority)) {
           return errorResult(
-            `phenix_delegate: transition "${params.transitionId}" is not within the allowed delegation ceiling.`,
+            `phenix_delegate: transition "${params.transitionId}" is not within the allowed delegation authority.`,
           );
         }
         if (isBackground && !transition.allowedModes.includes("background")) {
@@ -430,7 +432,7 @@ export default async function phenixSubagents(
 
         const role = transition.role;
         const outputSchema = getOutputSchema(transition.outputSchemaId);
-        const capabilityArtifact = getCachedCapabilityArtifact();
+        const capabilityArtifact = getRootCapabilityArtifact();
 
         // ── Build child workflow input ────────────────────────────────
 
@@ -443,7 +445,7 @@ export default async function phenixSubagents(
           definitionVersion: 1,
           difficulty,
           initialState: "classified",
-          transitionCeiling: [...transitionCeiling],
+          transitionAuthority: transitionAuthority,
           capabilityArtifactHash: wfRecord.capabilityArtifactHash,
         };
 
@@ -479,7 +481,7 @@ export default async function phenixSubagents(
             definitionVersion: 1,
             difficulty,
             initialState: "reviewing",
-            transitionCeiling: [],
+            transitionAuthority: { kind: "restricted", allowed: [] },
             capabilityArtifactHash: wfRecord.capabilityArtifactHash,
           };
 

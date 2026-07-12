@@ -109,7 +109,7 @@ function createTestArtifact() {
         definitionVersion: 1,
         difficulty: "D1" as const,
         initialState: "classified" as const,
-        transitionCeiling: [],
+        transitionAuthority: { kind: "unrestricted" },
         capabilityArtifactHash: "0000000000000000000000000000000000000000000000000000000000000000",
       },
       timeoutMs: 600_000,

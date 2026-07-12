@@ -237,6 +237,7 @@ export interface WorkflowRuntimeRecord {
 
 // ── Delegation authority ────────────────────────────────────────────────────
 
+import type { TransitionAuthority } from "./transition-authority.ts";
 import type { ResolvedDelegateRoleConfiguration } from "../phenix-subagents/delegation-policy.ts";
 
 export interface DelegationAuthority {
@@ -246,7 +247,7 @@ export interface DelegationAuthority {
 
   readonly remainingDepth: number;
 
-  readonly transitionCeiling: readonly WorkflowTransitionId[];
+  readonly transitionAuthority: TransitionAuthority;
 }
 
 // ── Resolved delegation option ──────────────────────────────────────────────

@@ -165,7 +165,11 @@ export function isSpawnableAgent(
 import fs from "node:fs";
 import path from "node:path";
 
-// ── Fallback artifact for when discovery hasn't run ──────────────────────────────────────────
+// ── Capability artifact getter (session-scoped) ──────────────────────────────
+//
+// The capability artifact MUST be registered via registerSession() before
+// any delegate or child agent is spawned. If no artifact is registered,
+// the operation fails closed — no fallback is built.
 
 let _cachedArtifact: AgentCapabilityArtifact | undefined;
 
@@ -174,42 +178,22 @@ export function setCachedCapabilityArtifact(artifact: AgentCapabilityArtifact): 
   _cachedArtifact = artifact;
 }
 
-/** Get the cached artifact, or build a fallback with all defaults as spawnable. */
+/**
+ * Get the cached capability artifact.
+ *
+ * Throws if no artifact has been set — capability discovery must
+ * complete before any delegation. This is fail-closed: a missing
+ * artifact is a hard error, not a silent fallback to all-defaults.
+ */
 export function getCachedCapabilityArtifact(): AgentCapabilityArtifact {
-  if (_cachedArtifact) return _cachedArtifact;
-
-  const entries: AgentCapabilityEntry[] = DEFAULT_AGENT_TARGETS.map((target) => ({
-    role: target.role,
-    logicalName: target.logicalName,
-    runtimeName: target.runtimeName,
-    configured: true,
-    spawnable: true,
-    tools: [],
-  }));
-
-  const canonicalContent = JSON.stringify(
-    entries.map((e) => ({
-      role: e.role,
-      logicalName: e.logicalName,
-      runtimeName: e.runtimeName,
-      configured: e.configured,
-      spawnable: e.spawnable,
-      source: e.source,
-      tools: e.tools,
-      unavailableReason: e.unavailableReason,
-    })),
-    null,
-    2,
-  );
-
-  const artifactHash = createHash("sha256").update(canonicalContent, "utf-8").digest("hex");
-
-  return {
-    version: 1,
-    generatedAt: new Date().toISOString(),
-    artifactHash,
-    entries,
-  };
+  if (!_cachedArtifact) {
+    throw new Error(
+      "Capability artifact has not been registered. " +
+      "The routing extension must complete capability discovery during " +
+      "session startup before any delegate or child agent runs.",
+    );
+  }
+  return _cachedArtifact;
 }
 
 // ── Persisted copy ───────────────────────────────────────────────────
