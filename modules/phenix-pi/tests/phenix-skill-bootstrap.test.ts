@@ -4,10 +4,7 @@ import { describe, it } from "node:test";
 import {
   bootstrapPhenixSubagentsSkillPrompt,
   shouldBootstrapPhenixSubagentsSkill,
-} from "../extensions/phenix.ts";
-import {
-  formatChildBootstrapEvidence,
-} from "../extensions/phenix-contract-runtime.ts";
+} from "../extensions/phenix-skill-bootstrap.ts";
 
 describe("Phenix subagents skill bootstrap", () => {
   it("is enabled only for phenix provider models", () => {
@@ -27,16 +24,5 @@ describe("Phenix subagents skill bootstrap", () => {
 
     const again = bootstrapPhenixSubagentsSkillPrompt(bootstrapped);
     assert.equal(again, bootstrapped);
-  });
-
-  it("formats deterministic child bootstrap evidence", () => {
-    assert.equal(
-      formatChildBootstrapEvidence({
-        contractId: "phx_123",
-        runId: "run_456",
-        role: "scout",
-      }),
-      "PHENIX_CHILD_BOOTSTRAP contractId=phx_123 runId=run_456 role=scout",
-    );
   });
 });

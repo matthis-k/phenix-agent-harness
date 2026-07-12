@@ -1,8 +1,7 @@
 /**
  * Agent capability provider interface and implementation.
  *
- * Uses pi-subagents' built-in agent discovery mechanism to inspect
- * configured agents at startup. No separate discovery implementation.
+ * Discovers Phenix agents from the bundled agents directory.
  */
 
 // ── Discovered agent definition ─────────────────────────────────────────────
@@ -34,14 +33,10 @@ export interface AgentDiscoveryHelper {
 // ── Builtin discovery implementation ────────────────────────────────────────
 
 /**
- * Discover agents using pi-subagents' built-in agent listing.
+ * Discover agents from the bundled agents directory.
  *
- * We use the subagent tool's `list` action to discover configured agents
- * at startup. This relies on the pi-subagents package being available
- * in the runtime process.
- *
- * When pi-subagents is not in the process (e.g., tests), this falls back
- * to checking known agent markdown files in the agents directory.
+ * Agents are markdown files under the package's agents/ directory.
+ * No external subagents config is consulted.
  */
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
@@ -116,9 +111,6 @@ export class BuiltinAgentDiscovery implements AgentDiscoveryHelper {
       }
     }
 
-    // Also discover from pi-subagents config
-    await this.discoverFromSubagentsConfig(input, results);
-
     return results;
   }
 
@@ -126,56 +118,6 @@ export class BuiltinAgentDiscovery implements AgentDiscoveryHelper {
     // Tools are determined by the role preset, not the markdown file
     // Return the default tool set based on known role
     return [];
-  }
-
-  private async discoverFromSubagentsConfig(
-    _input: { readonly cwd: string; readonly scope: "both" },
-    results: DiscoveredAgentDefinition[],
-  ): Promise<void> {
-    // Check for subagents.json config
-    const configPath = fileURLToPath(
-      new URL("../../config/subagents.json", import.meta.url),
-    );
-
-    if (!existsSync(configPath)) return;
-
-    try {
-      const configRaw = readFileSync(configPath, "utf-8");
-      const config = JSON.parse(configRaw);
-
-      // Merge any configured agents not already discovered
-      if (config.agents && typeof config.agents === "object") {
-        for (const [name, def] of Object.entries(config.agents)) {
-          const runtimeName = name.startsWith("phenix.")
-            ? name
-            : `phenix.${name}`;
-
-          const existing = results.find(
-            (r) => r.runtimeName === runtimeName,
-          );
-          if (existing) continue;
-
-          const agentDef = def as Record<string, unknown>;
-          results.push({
-            runtimeName,
-            localName: name,
-            description:
-              typeof agentDef.description === "string"
-                ? agentDef.description
-                : `Configured agent: ${name}`,
-            tools:
-              Array.isArray(agentDef.tools)
-                ? agentDef.tools
-                : [],
-            source: "project",
-            filePath: configPath,
-            disabled: agentDef.disabled === true,
-          });
-        }
-      }
-    } catch {
-      // Config parse error, skip
-    }
   }
 }
 

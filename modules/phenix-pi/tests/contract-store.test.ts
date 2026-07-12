@@ -282,4 +282,51 @@ describe("FileContractStore", () => {
         error.code === "not-found",
     );
   });
+
+  it("reopen transitions submitted back to pending", async () => {
+    const artifact = createTestArtifact();
+    await store.create(artifact);
+    await store.submit(artifact.id, 0, { ok: true });
+    const reopened = await store.reopen(
+      artifact.id,
+      1,
+      "runtime-rejected",
+      [{ path: ["ok"], message: "must be true" }],
+    );
+    assert.equal(reopened.state, "pending");
+    assert.equal(reopened.revision, 2);
+    assert.equal(reopened.history.length, 1);
+    assert.equal(reopened.history[0].disposition, "runtime-rejected");
+  });
+
+  it("accept transitions submitted to accepted", async () => {
+    const artifact = createTestArtifact();
+    await store.create(artifact);
+    await store.submit(artifact.id, 0, { ok: true });
+    const accepted = await store.accept(artifact.id, 1);
+    assert.equal(accepted.state, "accepted");
+    assert.equal(accepted.revision, 2);
+    assert.deepEqual(accepted.value, { ok: true });
+    assert.equal(accepted.history.length, 1);
+    assert.equal(accepted.history[0].disposition, "accepted");
+  });
+
+  it("reopen on non-submitted rejects", async () => {
+    const artifact = createTestArtifact();
+    await store.create(artifact);
+    await assert.rejects(
+      () => store.reopen(artifact.id, 0, "runtime-rejected", []),
+      (error: unknown) =>
+        error instanceof ContractStoreError &&
+        error.code === "invalid-state-transition",
+    );
+  });
+
+  it("cancel from submitted state succeeds", async () => {
+    const artifact = createTestArtifact();
+    await store.create(artifact);
+    await store.submit(artifact.id, 0, { ok: true });
+    const cancelled = await store.cancel(artifact.id, "cancelled after submit");
+    assert.equal(cancelled.state, "cancelled");
+  });
 });

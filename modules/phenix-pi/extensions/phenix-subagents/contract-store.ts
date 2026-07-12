@@ -8,7 +8,9 @@ import {
   type ContractResult,
   type PendingContractResult,
   type SubmittedContractResult,
+  type AcceptedContractResult,
   type CancelledContractResult,
+  type ContractSubmissionRecord,
 } from "./contract.ts";
 import {
   decodeContractArtifact,
@@ -22,7 +24,8 @@ export class ContractStoreError extends Error {
     | "already-terminal"
     | "revision-conflict"
     | "invalid-artifact"
-    | "io-failure";
+    | "io-failure"
+    | "invalid-state-transition";
 
   constructor(
     code: ContractStoreError["code"],
@@ -98,7 +101,6 @@ function decodeResult(
 ): ContractResult {
   if (
     !isObject(value) ||
-    value.schemaVersion !== 1 ||
     typeof value.contractId !== "string" ||
     typeof value.revision !== "number" ||
     typeof value.state !== "string"
@@ -112,6 +114,7 @@ function decodeResult(
   if (
     value.state !== "pending" &&
     value.state !== "submitted" &&
+    value.state !== "accepted" &&
     value.state !== "cancelled"
   ) {
     throw new ContractStoreError(
@@ -220,11 +223,12 @@ export class FileContractStore {
 
       // Create the initial pending result.
       const pending: PendingContractResult = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         state: "pending",
         contractId: artifact.id,
         revision: 0,
         createdAt: new Date().toISOString(),
+        history: [],
       };
 
       atomicWriteJson(
@@ -308,15 +312,21 @@ export class FileContractStore {
         );
       }
 
+      const submissionRecord: ContractSubmissionRecord = {
+        revision: current.result.revision + 1,
+        submittedAt: new Date().toISOString(),
+        value,
+      };
+
       const submitted: SubmittedContractResult = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         state: "submitted",
         contractId: id,
         revision:
           current.result.revision + 1,
-        submittedAt:
-          new Date().toISOString(),
+        submittedAt: submissionRecord.submittedAt,
         value,
+        history: [...current.result.history, submissionRecord],
       };
 
       atomicWriteJson(
@@ -344,7 +354,7 @@ export class FileContractStore {
           );
         }
 
-        if (current.result.state !== "pending") {
+        if (current.result.state !== "pending" && current.result.state !== "submitted") {
           throw new ContractStoreError(
             "already-terminal",
             `Contract ${id} is already ${current.result.state}.`,
@@ -352,7 +362,7 @@ export class FileContractStore {
         }
 
         const cancelled: CancelledContractResult = {
-          schemaVersion: 1,
+          schemaVersion: 2,
           state: "cancelled",
           contractId: id,
           revision:
@@ -360,6 +370,7 @@ export class FileContractStore {
           cancelledAt:
             new Date().toISOString(),
           reason,
+          history: current.result.history,
         };
 
         atomicWriteJson(
@@ -370,5 +381,125 @@ export class FileContractStore {
         return cancelled;
       },
     );
+  }
+
+  // ── Reopen: submitted → pending (with rejection history) ─────────────
+
+  async reopen(
+    id: ContractId,
+    expectedRevision: number,
+    disposition: ContractSubmissionRecord["disposition"],
+    issues: readonly { readonly path: readonly (string | number)[]; readonly message: string; readonly code?: string }[],
+  ): Promise<PendingContractResult> {
+    return this.exclusive(id, async () => {
+      const current = await this.load(id);
+
+      if (!current) {
+        throw new ContractStoreError(
+          "not-found",
+          `Contract ${id} does not exist.`,
+        );
+      }
+
+      if (current.result.state !== "submitted") {
+        throw new ContractStoreError(
+          "invalid-state-transition",
+          `Cannot reopen contract ${id} from state ${current.result.state}.`,
+        );
+      }
+
+      if (current.result.revision !== expectedRevision) {
+        throw new ContractStoreError(
+          "revision-conflict",
+          `Contract ${id} revision mismatch.`,
+        );
+      }
+
+      // Update the last submission record with rejection disposition.
+      const history = [...current.result.history];
+      const lastRecord = history[history.length - 1];
+      if (lastRecord) {
+        history[history.length - 1] = {
+          ...lastRecord,
+          disposition,
+          issues,
+        };
+      }
+
+      const pending: PendingContractResult = {
+        schemaVersion: 2,
+        state: "pending",
+        contractId: id,
+        revision: current.result.revision + 1,
+        createdAt: new Date().toISOString(),
+        history,
+      };
+
+      atomicWriteJson(
+        this.resultPath(id),
+        pending,
+      );
+
+      return pending;
+    });
+  }
+
+  // ── Accept: submitted → accepted ─────────────────────────────────────
+
+  async accept(
+    id: ContractId,
+    expectedRevision: number,
+  ): Promise<AcceptedContractResult> {
+    return this.exclusive(id, async () => {
+      const current = await this.load(id);
+
+      if (!current) {
+        throw new ContractStoreError(
+          "not-found",
+          `Contract ${id} does not exist.`,
+        );
+      }
+
+      if (current.result.state !== "submitted") {
+        throw new ContractStoreError(
+          "invalid-state-transition",
+          `Cannot accept contract ${id} from state ${current.result.state}.`,
+        );
+      }
+
+      if (current.result.revision !== expectedRevision) {
+        throw new ContractStoreError(
+          "revision-conflict",
+          `Contract ${id} revision mismatch.`,
+        );
+      }
+
+      // Mark the last submission record as accepted.
+      const history = [...current.result.history];
+      const lastRecord = history[history.length - 1];
+      if (lastRecord) {
+        history[history.length - 1] = {
+          ...lastRecord,
+          disposition: "accepted",
+        };
+      }
+
+      const accepted: AcceptedContractResult = {
+        schemaVersion: 2,
+        state: "accepted",
+        contractId: id,
+        revision: current.result.revision + 1,
+        acceptedAt: new Date().toISOString(),
+        value: current.result.value,
+        history,
+      };
+
+      atomicWriteJson(
+        this.resultPath(id),
+        accepted,
+      );
+
+      return accepted;
+    });
   }
 }

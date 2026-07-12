@@ -262,9 +262,10 @@ export function resolveExecutionPolicy(input: {
 
 // ── Environment helpers ─────────────────────────────────────────────────────
 
+// In the Pi-native child-session architecture, the child agent role is
+// determined by the contract artifact, not by environment variables.
+// This function is retained for backward compatibility but always returns
+// "root" since PI_SUBAGENT_CHILD_AGENT is no longer set.
 export function roleFromEnvironment(): AgentKind | "root" {
-  const raw = process.env.PI_SUBAGENT_CHILD_AGENT?.trim();
-  if (!raw) return "root";
-  const candidate = raw.startsWith("phenix.") ? raw.slice("phenix.".length) : raw;
-  return AGENT_KINDS.includes(candidate as AgentKind) ? (candidate as AgentKind) : "root";
+  return "root";
 }

@@ -1,4 +1,20 @@
+/**
+ * coordinator — Phenix agent execution coordinator
+ *
+ * Orchestrates child session delegation using the new Pi-native child-session
+ * runtime. Workflow transitions, routing, contract validation, verification,
+ * critic decisions, repair limits, budgets, and acceptance remain
+ * deterministic in TypeScript.
+ *
+ * The coordinator uses:
+ * - ChildSessionBackend to start live child runs
+ * - ContractSubmissionChannel for closure-bound completion tool isolation
+ * - ChildSessionRegistry for background mode (live-run registry, no polling)
+ * - executeProducerCycles for repair cycles over one Pi session
+ */
+
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
@@ -25,13 +41,21 @@ import {
   transitionAuthorityForChild,
 } from "../phenix-workflow/workflow-runtime.ts";
 
-import type { AgentSessionPort } from "./session-port.ts";
 import type {
-  ContractCreatorContext,
-  ResolvedChildSpec,
-  ResolvedWorkflowChildInput,
-} from "./child-spec.ts";
-import { resolveChildSpec } from "./child-spec.ts";
+  ChildSessionBackend,
+  ChildRun,
+  ChildSessionSpec,
+} from "../phenix-runtime/child-session-types.ts";
+import { childRunId } from "../phenix-runtime/child-session-types.ts";
+import type { ParentExecutionContext } from "../phenix-runtime/delegation-tool.ts";
+import {
+  ContractSubmissionChannelImpl,
+} from "../phenix-runtime/contract-channel.ts";
+import {
+  getChildSessionRegistry,
+} from "../phenix-runtime/child-session-registry.ts";
+import type { LiveChildRunRecord, AttemptRunResult } from "../phenix-runtime/child-session-registry.ts";
+
 import type { WorkflowBinding, HandleRecord } from "./handle-types.ts";
 import { HANDLE_VERSION } from "./handle-types.ts";
 import {
@@ -39,9 +63,21 @@ import {
   listRecords,
   now,
   writeRecord,
+  readRecord,
 } from "./handle-store.ts";
-import { runAttempt } from "./attempt-runner.ts";
-import { getRuntimeContext } from "./contract-runtime-context.ts";
+import {
+  createAttemptContract,
+} from "./handle-evaluation.ts";
+import type {
+  ContractCreatorContext,
+  ResolvedChildSpec,
+  ResolvedWorkflowChildInput,
+} from "./child-spec.ts";
+import { resolveChildSpec } from "./child-spec.ts";
+import { resolveChildRoute } from "../phenix-routing/child-route.ts";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+
+// ── Delegate execution parameters ───────────────────────────────────────────
 
 export interface DelegateExecutionParams {
   readonly transitionId: string;
@@ -68,6 +104,8 @@ export type DelegateExecutionResult =
       readonly details?: Record<string, unknown>;
     };
 
+// ── Handle creation ─────────────────────────────────────────────────────────
+
 function createHandle(input: {
   readonly ctx: ExtensionContext;
   readonly producerSpec: ResolvedChildSpec;
@@ -93,8 +131,8 @@ function createHandle(input: {
     ...(input.workflowBinding ? { workflowBinding: input.workflowBinding } : {}),
     createdAt: now(),
     updatedAt: now(),
-    status: "running",
-    attempts: [],
+    status: "starting",
+    producerCycles: [],
   };
 }
 
@@ -110,18 +148,47 @@ function initialStateForRole(role: AgentRole) {
     : "finalizing";
 }
 
+// ── Coordinator ─────────────────────────────────────────────────────────────
+
+export interface AgentExecutionCoordinatorOptions {
+  readonly backend: ChildSessionBackend;
+  readonly resolveModelRegistry: () => ModelRegistry;
+  readonly agentDir: string;
+  readonly maximumDelegationDepth: number;
+}
+
 export class AgentExecutionCoordinator {
-  constructor(
-    private readonly port: AgentSessionPort,
-  ) {}
+  private readonly backend: ChildSessionBackend;
+  private readonly resolveModelRegistry: () => ModelRegistry;
+  private readonly maximumDelegationDepth: number;
+
+  constructor(options: AgentExecutionCoordinatorOptions) {
+    this.backend = options.backend;
+    this.resolveModelRegistry = options.resolveModelRegistry;
+    this.maximumDelegationDepth = options.maximumDelegationDepth;
+  }
 
   async delegate(input: {
     readonly params: DelegateExecutionParams;
     readonly ctx: ExtensionContext;
     readonly signal: AbortSignal;
+    readonly parent?: ParentExecutionContext;
+  }): Promise<DelegateExecutionResult> {
+    return this.delegateInternal(input);
+  }
+
+  /**
+   * Internal delegation used by both root and child delegation tools.
+   */
+  private async delegateInternal(input: {
+    readonly params: DelegateExecutionParams;
+    readonly ctx: ExtensionContext;
+    readonly signal: AbortSignal;
+    readonly parent?: ParentExecutionContext;
   }): Promise<DelegateExecutionResult> {
     const { params, ctx, signal } = input;
 
+    // ── Validate parameters ──────────────────────────────────────────
     if (typeof params.transitionId !== "string" || params.transitionId.length === 0) {
       return { ok: false, message: "phenix_delegate: transitionId is required. Select one from the projected delegation options." };
     }
@@ -135,16 +202,23 @@ export class AgentExecutionCoordinator {
     const requirements = [...(params.requirements ?? [])];
     const isBackground = params.mode === "background";
 
+    // ── Build workflow runtime dependencies ───────────────────────────
     const sessionId = effectiveSessionId(ctx);
-    const runtimeCtx = getRuntimeContext();
-    const source = runtimeCtx?.kind === "child"
-      ? { kind: "child" as const, contract: runtimeCtx.contract }
+    const parent = input.parent ?? {
+      kind: "root" as const,
+      sessionId,
+      cwd: ctx.cwd,
+      maximumDelegationDepth: this.maximumDelegationDepth,
+    };
+
+    const source = parent.kind === "child"
+      ? { kind: "child" as const, contract: parent.contractId as any }
       : { kind: "root" as const, sessionId };
 
     const dependencies = buildWorkflowRuntimeDependencies({
       cwd: ctx.cwd,
       sessionId,
-      source,
+      source: source as any,
       handleStore: { listRecords },
     });
 
@@ -156,6 +230,7 @@ export class AgentExecutionCoordinator {
       activeHandles: dependencies.activeHandles,
     });
 
+    // ── Validate authority digest ─────────────────────────────────────
     if (
       typeof params.authorityDigest === "string" &&
       params.authorityDigest !== decision.optionsDigest
@@ -183,6 +258,7 @@ export class AgentExecutionCoordinator {
       };
     }
 
+    // ── Validate transition ──────────────────────────────────────────
     const transitionId = params.transitionId as WorkflowTransitionId;
     const matchingOption = decision.options.find((o) => o.transitionId === transitionId);
     if (!matchingOption) {
@@ -222,6 +298,7 @@ export class AgentExecutionCoordinator {
       return { ok: false, message: `phenix_delegate: internal error - "${params.transitionId}" is not a delegate transition.` };
     }
 
+    // ── Begin workflow transition ─────────────────────────────────────
     const handleId = randomUUID();
     const childActorId = `actor_${handleId}`;
     const instanceId = wfRecord.instanceId;
@@ -248,8 +325,9 @@ export class AgentExecutionCoordinator {
       throw err;
     }
 
+    // ── Create child workflow record ──────────────────────────────────
     const role = roleForAgentClient(transition.agentClient);
-    const childInitialState = initialStateForRole(role) as ResolvedWorkflowChildInput["initialState"]; 
+    const childInitialState = initialStateForRole(role) as ResolvedWorkflowChildInput["initialState"];
 
     createWorkflowRecord(ctx.cwd, {
       instanceId,
@@ -283,9 +361,9 @@ export class AgentExecutionCoordinator {
     };
 
     const capabilityArtifact = dependencies.capabilities;
-    const creator: ContractCreatorContext = runtimeCtx?.kind === "child"
-      ? { kind: "child", contract: runtimeCtx.contract }
-      : { kind: "root", maximumDelegationDepth: 4 };
+    const creator: ContractCreatorContext = parent.kind === "child"
+      ? { kind: "child", contract: parent.contractId as any }
+      : { kind: "root", maximumDelegationDepth: this.maximumDelegationDepth };
 
     const producerSpec = resolveChildSpec({
       role,
@@ -301,6 +379,7 @@ export class AgentExecutionCoordinator {
       workflow: childWorkflow,
     });
 
+    // ── Resolve critic spec if required ───────────────────────────────
     let criticSpec: ResolvedChildSpec | undefined;
     if (producerSpec.criticRequired) {
       const criticTask = `Review the completed handoff: ${params.task.slice(0, 200)}`;
@@ -355,21 +434,253 @@ export class AgentExecutionCoordinator {
 
     writeRecord(ctx.cwd, record);
 
+    // ── Resolve concrete model via routing ────────────────────────────
+    let concreteModel: { readonly provider: string; readonly id: string };
+    try {
+      const route = await resolveChildRoute({
+        modelSet: "mixed" as any,
+        role,
+        difficulty: wfRecord.difficulty,
+      });
+      concreteModel = {
+        provider: route.model.provider,
+        id: route.model.model,
+      };
+
+      // Verify the model exists in the registry before starting.
+      const model = this.resolveModelRegistry().find(concreteModel.provider, concreteModel.id);
+      if (!model) {
+        record.status = "failed";
+        record.errors = [`MODEL_NOT_FOUND: ${concreteModel.provider}/${concreteModel.id}`];
+        writeRecord(ctx.cwd, record);
+        return {
+          ok: false,
+          message: `phenix_delegate: configured child model ${concreteModel.provider}/${concreteModel.id} is unavailable.`,
+          details: { code: "MODEL_NOT_FOUND" },
+        };
+      }
+    } catch (error) {
+      record.status = "failed";
+      record.errors = [error instanceof Error ? error.message : String(error)];
+      writeRecord(ctx.cwd, record);
+      return {
+        ok: false,
+        message: `phenix_delegate: routing failed: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+
+    // ── Issue contract and create channel ─────────────────────────────
+    const issuedContract = await createAttemptContract({
+      spec: producerSpec,
+      assignment: {
+        task: params.task,
+        requirements,
+        outputSchema,
+      },
+      identity: {
+        handleId: record.id,
+        parentHandleId: record.parentId,
+      },
+      cwd: ctx.cwd,
+    });
+
+    const contractArtifact = issuedContract.artifact;
+
+    // Build contract store for the channel
+    const { FileContractStore } = await import("./contract-store.ts");
+    const { findProjectRoot } = await import("./handle-store.ts");
+    const store = new FileContractStore(
+      path.join(findProjectRoot(ctx.cwd), ".phenix-agent-state", "contracts"),
+    );
+    const contractChannel = new ContractSubmissionChannelImpl(store, contractArtifact);
+
+    // ── Prepare child session spec ────────────────────────────────────
+    const childRunIdVal = childRunId(`child_${record.id}`);
+    const spec: ChildSessionSpec = {
+      id: childRunIdVal,
+      ...(record.parentId ? { parentId: childRunId(record.parentId) } : {}),
+      rootId: childRunIdVal,
+      handleId: record.id,
+      agentClient: {
+        id: producerSpec.agent.replace("phenix.", "") as any,
+        kind: "agent" as any,
+      },
+      role: producerSpec.role,
+      cwd: ctx.cwd,
+      model: concreteModel,
+      thinkingLevel: producerSpec.thinking,
+      initialPrompt: params.task,
+      contract: contractArtifact,
+      effectiveTools: producerSpec.tools.effective,
+      skillRefs: producerSpec.skills,
+      extensionRefs: producerSpec.extensions,
+      inheritProjectContext: true,
+      timeoutMs: producerSpec.timeoutMs,
+      turnBudget: producerSpec.turnBudget,
+      toolBudget: producerSpec.toolBudget,
+      persistence: "file",
+    };
+
+    // ── Start the child run ───────────────────────────────────────────
+    let run: ChildRun;
+    try {
+      run = await this.backend.start(spec, signal);
+    } catch (error) {
+      record.status = "failed";
+      record.errors = [error instanceof Error ? error.message : String(error)];
+      writeRecord(ctx.cwd, record);
+      return {
+        ok: false,
+        message: `phenix_delegate: child session start failed: ${error instanceof Error ? error.message : String(error)}`,
+        details: { code: "SESSION_START_FAILED" },
+      };
+    }
+
+    // Record Pi session reference
+    record.childRunId = run.id;
+    record.backend = run.backend;
+    record.piSessionId = run.pi.sessionId;
+    record.piSessionFile = run.pi.sessionFile;
+    record.status = "running";
+    writeRecord(ctx.cwd, record);
+
+    // ── Execute producer cycles ───────────────────────────────────────
+    const { executeProducerCycles } = await import("./attempt-runner.ts");
+
+    const executeCycles = async (): Promise<AttemptRunResult> => {
+      return executeProducerCycles({
+        run,
+        contractChannel,
+        contractArtifact,
+        record,
+        cwd: ctx.cwd,
+        signal,
+        maximumProducerCycles: producerSpec.maxRepairAttempts + 1,
+        completionGraceRemaining: 1,
+        backend: this.backend,
+      });
+    };
+
     if (isBackground) {
-      runAttempt(this.port, ctx, signal, record)
-        .then((runnerResult) => {
-          finalizeHandleWorkflow({ cwd: ctx.cwd, handle: runnerResult.record });
+      // Register the live completion promise in the registry.
+      const controller = new AbortController();
+      const completionPromise = executeCycles();
+
+      const liveRecord: LiveChildRunRecord = {
+        run,
+        completion: completionPromise,
+        controller,
+      };
+
+      getChildSessionRegistry().add(liveRecord);
+
+      // Finalize workflow after completion (async, best-effort).
+      completionPromise
+        .then((result) => {
+          finalizeHandleWorkflow({ cwd: ctx.cwd, handle: result.record as any });
+          getChildSessionRegistry().remove(run.id);
         })
         .catch(() => {
-          // Errors are captured in the handle record by the attempt runner.
+          getChildSessionRegistry().remove(run.id);
         });
 
       return { ok: true, record };
     }
 
-    const runnerResult = await runAttempt(this.port, ctx, signal, record);
-    const finalRecord = runnerResult.record;
-    finalizeHandleWorkflow({ cwd: ctx.cwd, handle: finalRecord });
+    // Foreground — await completion
+    const result = await executeCycles();
+    const finalRecord = result.record as HandleRecord;
+    finalizeHandleWorkflow({ cwd: ctx.cwd, handle: finalRecord as any });
     return { ok: true, record: finalRecord };
+  }
+
+  // ── Background operations: poll, await, cancel ────────────────────────
+
+  async poll(ctx: ExtensionContext, id: string): Promise<HandleRecord | undefined> {
+    const record = readRecord(ctx.cwd, effectiveSessionId(ctx), id);
+    if (!record) return undefined;
+
+    if (record.status === "completed" || record.status === "failed" || record.status === "cancelled" || record.status === "orphaned") {
+      return record;
+    }
+
+    if (!record.childRunId) return record;
+
+    const registry = getChildSessionRegistry();
+    const live = registry.get(record.childRunId);
+    if (!live) {
+      // No live entry — do not rerun. Mark orphaned if nonterminal.
+      if (record.status === "running" || record.status === "starting") {
+        record.status = "orphaned";
+        writeRecord(ctx.cwd, record);
+      }
+      return record;
+    }
+
+    // Inspect the existing live promise/snapshot — do not create a new attempt.
+    return record;
+  }
+
+  async awaitHandle(ctx: ExtensionContext, id: string, _signal: AbortSignal): Promise<HandleRecord | undefined> {
+    const record = readRecord(ctx.cwd, effectiveSessionId(ctx), id);
+    if (!record) return undefined;
+
+    if (record.status === "completed" || record.status === "failed" || record.status === "cancelled" || record.status === "orphaned") {
+      return record;
+    }
+
+    if (!record.childRunId) return record;
+
+    const registry = getChildSessionRegistry();
+    const live = registry.get(record.childRunId);
+    if (!live) {
+      if (record.status === "running" || record.status === "starting") {
+        record.status = "orphaned";
+        writeRecord(ctx.cwd, record);
+      }
+      return record;
+    }
+
+    // Await the same registered promise.
+    const result = await live.completion;
+    return result.record as HandleRecord | undefined;
+  }
+
+  async cancelHandle(ctx: ExtensionContext, id: string, reason: string): Promise<HandleRecord | undefined> {
+    const record = readRecord(ctx.cwd, effectiveSessionId(ctx), id);
+    if (!record) return undefined;
+
+    if (record.status === "completed" || record.status === "failed" || record.status === "cancelled" || record.status === "orphaned") {
+      return record;
+    }
+
+    if (record.childRunId) {
+      const registry = getChildSessionRegistry();
+      const live = registry.get(record.childRunId);
+      if (live) {
+        // Abort the registered run — idempotent.
+        try {
+          live.controller.abort();
+        } catch {
+          // Already aborted — ignore.
+        }
+        try {
+          await live.run.abort(reason);
+        } catch {
+          // Best-effort.
+        }
+        try {
+          await live.run.dispose();
+        } catch {
+          // Best-effort.
+        }
+        registry.remove(record.childRunId);
+      }
+    }
+
+    record.status = "cancelled";
+    record.errors = [reason];
+    writeRecord(ctx.cwd, record);
+    return record;
   }
 }

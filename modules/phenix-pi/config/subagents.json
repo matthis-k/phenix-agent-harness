@@ -1,8 +1,0 @@
-{
-  "verification": {
-    "maxRepairAttempts": 1,
-    "timeoutMs": 180000,
-    "extraCommands": [],
-    "roleCommands": {}
-  }
-}

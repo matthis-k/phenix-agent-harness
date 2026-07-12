@@ -4,12 +4,6 @@ import {
   validateContract,
 } from "./contracts.ts";
 import {
-  PHENIX_CONTRACT_ID_ENV,
-  PHENIX_CONTRACT_TOKEN_ENV,
-  PHENIX_CONTRACT_STORE_ENV,
-  PHENIX_RUN_ID_ENV,
-} from "./contract-identity.ts";
-import {
   createRunId,
   issueContract,
   type ContractArtifact,
@@ -185,27 +179,6 @@ export async function createAttemptContract(
     artifact: issued.artifact,
     capabilityToken: issued.capabilityToken,
     phenixRunId,
-  };
-}
-
-// ── Environment helpers ─────────────────────────────────────────────────────
-
-export function childContractEnv(
-  contractId: ContractId,
-  capabilityToken: string,
-  phenixRunId: RunId,
-  cwd: string,
-): Record<string, string> {
-  const storeRoot = path.join(
-    findProjectRoot(cwd),
-    ".phenix-agent-state",
-    "contracts",
-  );
-  return {
-    [PHENIX_CONTRACT_ID_ENV]: contractId,
-    [PHENIX_CONTRACT_TOKEN_ENV]: capabilityToken,
-    [PHENIX_RUN_ID_ENV]: phenixRunId,
-    [PHENIX_CONTRACT_STORE_ENV]: storeRoot,
   };
 }
 

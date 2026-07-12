@@ -1,5 +1,4 @@
 .phenix-agent-state/
-.pi-subagents/
 result
 /.cache/
-result-1
+/.pi-subagents

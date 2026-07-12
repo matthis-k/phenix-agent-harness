@@ -1,3 +1,15 @@
+/**
+ * phenix-subagents — index
+ *
+ * Registers the root-visible phenix_delegate and phenix_agent tools.
+ * Each child session receives its own closure-bound tools through
+ * customTools — not process-global tools.
+ *
+ * Tool authorization is no longer duplicated between
+ * phenix-contract-runtime.ts and this file. The root extension registers
+ * root-visible tools; child sessions get closure-bound tools.
+ */
+
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type {
   ExtensionAPI,
@@ -5,45 +17,24 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import {
-  SubagentBackend,
-} from "./backend.ts";
-import {
-  PiSubagentsAgentSessionPort,
-  type AgentSessionPort,
-} from "./session-port.ts";
-import { agentSessionId } from "../phenix-kernel/index.ts";
-import {
-  runAttempt,
-} from "./attempt-runner.ts";
-import {
   type HandleRecord,
   TERMINAL_STATES,
 } from "./handle-types.ts";
 import {
-  writeRecord,
   readRecord,
   listRecords,
-  latestAttempt,
   effectiveSessionId,
-  now,
 } from "./handle-store.ts";
-import type { Details } from "pi-subagents/src/shared/types.ts";
 import {
   DelegateParams,
   AgentParams,
 } from "./delegate-schema.ts";
-import {
-  getRuntimeContext,
-} from "./contract-runtime-context.ts";
-import { toolAllowedByConfig } from "./tool-policy.ts";
 import { AgentExecutionCoordinator } from "./coordinator.ts";
-
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
 interface PiEvents {
   on(event: string, handler: (payload: unknown) => void): (() => void) | void;
-  emit(event: string, payload: unknown): void;
 }
 
 // ── Tool result helpers ─────────────────────────────────────────────────────
@@ -51,14 +42,15 @@ interface PiEvents {
 function toolResult(
   record: HandleRecord,
 ): AgentToolResult<Record<string, unknown>> {
-  const attempt = latestAttempt(record);
   const min = {
     id: record.id,
     handleId: record.id,
-    runId: attempt?.runId,
+    childRunId: record.childRunId,
     status: record.status,
     value: record.value,
     error: record.errors?.join(" | "),
+    piSessionId: record.piSessionId,
+    backend: record.backend,
     ...(record.producerSpec ? {
       role: record.producerSpec.role,
       agent: record.producerSpec.agent,
@@ -105,70 +97,34 @@ function treePayload(
       status: r.status,
       role: r.producerSpec.role,
       agent: r.producerSpec.agent,
-      attempts: r.attempts.length,
+      cycles: r.producerCycles.length,
+      childRunId: r.childRunId,
+      piSessionId: r.piSessionId,
     })),
   };
 }
 
-// ── Handle resolution for await/poll ────────────────────────────────────────
-
-async function resolveBackground(
-  port: AgentSessionPort,
-  ctx: ExtensionContext,
-  signal: AbortSignal,
-  record: HandleRecord,
-  awaitCompletion: boolean,
-): Promise<HandleRecord> {
-  // Already terminal — nothing to do.
-  if (TERMINAL_STATES.has(record.status)) return record;
-
-  const attempt = latestAttempt(record);
-  if (attempt.status !== "running") {
-    // Check if there's a pending attempt that's still running.
-    const lastAttempt = record.attempts.at(-1);
-    if (!lastAttempt || lastAttempt.status !== "running") return record;
-  }
-
-  if (!awaitCompletion) {
-    // Poll once — ask the session port whether a result is available yet.
-    const attempt = latestAttempt(record);
-    if (!attempt.sessionId && !attempt.runId) return record;
-    try {
-      const polled = await port.resume(
-        agentSessionId(attempt.sessionId ?? attempt.runId),
-        { awaitCompletion: false },
-        signal,
-      );
-      if (polled.status === "waiting") return record;
-    } catch {
-      return record;
-    }
-  }
-
-  // Run the full attempt runner (idempotent — will skip completed/cancelled).
-  const runnerResult = await runAttempt(port, ctx, signal, record);
-  return runnerResult.record;
-}
-
 // ── Extension entry point ───────────────────────────────────────────────────
+
+export interface PhenixSubagentsOptions {
+  readonly coordinator: AgentExecutionCoordinator;
+}
 
 export default async function phenixSubagents(
   pi: ExtensionAPI,
+  options: PhenixSubagentsOptions,
 ): Promise<void> {
   const events = pi.events as unknown as PiEvents;
-  const backend = new SubagentBackend(pi);
-  const port = new PiSubagentsAgentSessionPort(backend);
-  const coordinator = new AgentExecutionCoordinator(port);
+  const coordinator = options.coordinator;
 
   // ── Runtime tool guard ────────────────────────────────────────────────
 
-  // Block raw subagent and obsolete contract tools globally.
+  // Block raw subagent globally — only phenix_delegate is allowed.
   events.on("before_tool_call" as string, async (event: unknown) => {
     const raw = event as { toolName?: string; name?: string };
     const toolName = raw.toolName ?? raw.name;
     if (!toolName) return;
 
-    // Always block raw subagent.
     if (toolName === "subagent") {
       return {
         blocked: true,
@@ -188,23 +144,6 @@ export default async function phenixSubagents(
           `Tool "${toolName}" is no longer available. Use phenix_complete to submit your result.`,
       };
     }
-
-    // In child session, enforce contract tool authorization.
-    const runtimeCtx = getRuntimeContext();
-    if (runtimeCtx?.kind === "child") {
-      const contract = runtimeCtx.contract;
-
-      // phenix_complete is always allowed for child sessions.
-      if (toolName === "phenix_complete") return;
-
-      if (!toolAllowedByConfig(contract.runtime.tools, toolName)) {
-        return {
-          blocked: true,
-          reason:
-            `Tool "${toolName}" is not authorized by the active Phenix contract.`,
-        };
-      }
-    }
   });
 
   // ── phenix_delegate tool ──────────────────────────────────────────────
@@ -213,7 +152,11 @@ export default async function phenixSubagents(
     name: "phenix_delegate",
     label: "Delegate Phenix Subagent",
     description:
-      "Spawn a real isolated Pi subagent with a runtime-selected model and thinking level. The output schema is enforced by the Phenix contract protocol. Tool access, verification commands, critic gates, retry limits, persistence, and model routing are runtime-owned; this tool intentionally exposes no override for them. Use mode=await by default. Background mode is available only from the root session and returns a persistent handle.",
+      "Spawn a real isolated Pi subagent with a runtime-selected model and thinking level. " +
+      "The output schema is enforced by the Phenix contract protocol. Tool access, verification " +
+      "commands, critic gates, retry limits, persistence, and model routing are runtime-owned; " +
+      "this tool intentionally exposes no override for them. Use mode=await by default. " +
+      "Background mode is available only from the root session and returns a persistent handle.",
     parameters: DelegateParams,
 
     async execute(
@@ -221,7 +164,7 @@ export default async function phenixSubagents(
       rawParams: Record<string, unknown>,
       signal: AbortSignal,
       _onUpdate:
-        | ((result: AgentToolResult<Details>) => void)
+        | ((result: AgentToolResult<Record<string, unknown>>) => void)
         | undefined,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<Record<string, unknown>>> {
@@ -259,7 +202,7 @@ export default async function phenixSubagents(
       rawParams: Record<string, unknown>,
       signal: AbortSignal,
       _onUpdate:
-        | ((result: AgentToolResult<Details>) => void)
+        | ((result: AgentToolResult<Record<string, unknown>>) => void)
         | undefined,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<Record<string, unknown>>> {
@@ -304,39 +247,23 @@ export default async function phenixSubagents(
       if (params.action === "inspect") return toolResult(record);
 
       if (params.action === "cancel") {
-        if (!TERMINAL_STATES.has(record.status)) {
-          const attempt = latestAttempt(record);
-          try {
-            await port.cancel(
-              agentSessionId(attempt.sessionId ?? attempt.runId),
-              "cancelled by parent",
-              signal,
-            );
-          } catch {
-            // Cancel is best-effort; the session may already be gone.
-          }
-          attempt.status = "cancelled";
-          attempt.endedAt = now();
-          record.status = "cancelled";
-          record.errors = ["cancelled by parent"];
-          writeRecord(ctx.cwd, record);
-        }
-        return toolResult(record);
+        const cancelled = await coordinator.cancelHandle(
+          ctx,
+          params.id,
+          "cancelled by parent",
+        );
+        return toolResult(cancelled ?? record);
       }
 
-      // await / poll
-      if (
-        record.status === "running" &&
-        latestAttempt(record).mode === "background"
-      ) {
-        const resolved = await resolveBackground(
-          port,
-          ctx,
-          signal,
-          record,
-          params.action === "await",
-        );
-        return toolResult(resolved);
+      if (params.action === "poll") {
+        const polled = await coordinator.poll(ctx, params.id);
+        return toolResult(polled ?? record);
+      }
+
+      // await
+      if (!TERMINAL_STATES.has(record.status)) {
+        const resolved = await coordinator.awaitHandle(ctx, params.id, signal);
+        return toolResult(resolved ?? record);
       }
 
       return toolResult(record);

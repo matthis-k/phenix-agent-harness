@@ -4,7 +4,7 @@ import path from "node:path";
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import type { AttemptRecord, HandleRecord } from "./handle-types.ts";
+import type { HandleRecord, ProducerCycleRecord } from "./handle-types.ts";
 import { HANDLE_VERSION } from "./handle-types.ts";
 
 // ── Path helpers ────────────────────────────────────────────────────────────
@@ -82,17 +82,18 @@ export function listRecords(cwd: string, session?: string): HandleRecord[] {
   return records.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 
-export function findByRunId(cwd: string, runId: string | undefined): HandleRecord | undefined {
-  if (!runId) return undefined;
-  return listRecords(cwd).find((record) => record.attempts.some((attempt) => attempt.runId === runId));
+export function findByRunId(_cwd: string, _runId: string | undefined): HandleRecord | undefined {
+  // In the Pi-native architecture, run IDs are not stored on producer cycles.
+  // Use findByChildRunId or findById instead.
+  return undefined;
 }
 
-// ── Attempt helpers ──────────────────────────────────────────────────────────
+// ── Producer cycle helpers ───────────────────────────────────────────────────
 
-export function latestAttempt(record: HandleRecord): AttemptRecord {
-  const attempt = record.attempts.at(-1);
-  if (!attempt) throw new Error(`handle ${record.id} has no attempts`);
-  return attempt;
+export function latestProducerCycle(record: HandleRecord): ProducerCycleRecord {
+  const cycle = record.producerCycles.at(-1);
+  if (!cycle) throw new Error(`handle ${record.id} has no producer cycles`);
+  return cycle;
 }
 
 export function recordChildSessions(
@@ -105,7 +106,7 @@ export function recordChildSessions(
     readonly transcriptPath?: string;
   }[],
 ): void {
-  latestAttempt(record).childSessions = children.map((child, index) => ({
+  latestProducerCycle(record).childSessions = children.map((child, index) => ({
     role: child.agent ?? (index === 0 ? record.producerSpec.agent : record.criticSpec?.agent ?? `child-${index}`),
     status: child.success === false || (child.exitCode !== undefined && child.exitCode !== null && child.exitCode !== 0)
       ? "failed"
@@ -121,15 +122,10 @@ export function sessionId(ctx: ExtensionContext): string {
   return ctx.sessionManager.getSessionId() ?? "ephemeral";
 }
 
-export function currentParentRecord(cwd: string): HandleRecord | undefined {
-  for (const runId of [
-    process.env.PI_SUBAGENT_RUN_ID,
-    process.env.PI_SUBAGENT_PARENT_RUN_ID,
-    process.env.PI_SUBAGENT_PARENT_ROOT_RUN_ID,
-  ]) {
-    const record = findByRunId(cwd, runId);
-    if (record) return record;
-  }
+export function currentParentRecord(_cwd: string): HandleRecord | undefined {
+  // In the Pi-native child-session architecture, parent run IDs are not
+  // propagated through environment variables. The coordinator manages
+  // child sessions directly and records their handles.
   return undefined;
 }
 
@@ -138,5 +134,5 @@ export function effectiveSessionId(ctx: ExtensionContext): string {
 }
 
 // Re-export for convenience
-export type { HandleRecord, AttemptRecord };
+export type { HandleRecord, ProducerCycleRecord };
 export { HANDLE_VERSION };

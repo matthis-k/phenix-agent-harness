@@ -1,495 +1,492 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+/**
+ * attempt-runner — producer repair cycles over one Pi session
+ *
+ * Replaces the old recursive attempt runner that created a new child session
+ * for each repair. A producer handle now owns one producer ChildRun.
+ *
+ * Repair reuses the same Pi session via continue(). A critic is a separate
+ * Pi child session.
+ */
 
-import type { ContractArtifact } from "./contract.ts";
 import type {
-  AttemptRecord,
-  CriticValue,
-  Evaluation,
   HandleRecord,
   VerificationSummary,
+  ProducerCycleRecord,
 } from "./handle-types.ts";
 import {
-  createAttemptContract,
-  evaluateContractResult,
-  repairTask,
-  childContractEnv,
-} from "./handle-evaluation.ts";
-import {
-  latestAttempt,
   now,
   writeRecord,
 } from "./handle-store.ts";
-import type { AgentSessionNode } from "../phenix-kernel/index.ts";
+import type { ContractArtifact } from "./contract.ts";
 import type {
-  AgentSessionExecutionParams,
-  AgentSessionPort,
-} from "./session-port.ts";
+  ChildRun,
+  ChildSessionSpec,
+  ChildSessionBackend,
+  ContractSubmissionChannel,
+} from "../phenix-runtime/child-session-types.ts";
 import {
-  materializeContractAgent,
-  releaseMaterializedAgent,
-} from "./contract-agent-materializer.ts";
-import {
-  CRITIC_OUTPUT_SCHEMA,
-} from "./handle-types.ts";
+  childRunId,
+  serializeError,
+} from "../phenix-runtime/child-session-types.ts";
+import { validateContract } from "./contracts.ts";
 
-// ── Attempt phases ──────────────────────────────────────────────────────────
-
-type AttemptPhase =
-  | "spawning-producer"
-  | "producer-running"
-  | "evaluating-producer"
-  | "verifying"
-  | "spawning-critic"
-  | "critic-running"
-  | "evaluating-critic"
-  | "repair-pending"
-  | "completed"
-  | "failed"
-  | "cancelled";
-
-// ── Internal state tracker ──────────────────────────────────────────────────
-
-interface RunnerState {
-  phase: AttemptPhase;
-  sessionNode?: AgentSessionNode;
-  materializedProducer?: ReturnType<typeof materializeContractAgent>;
-  materializedCritic?: ReturnType<typeof materializeContractAgent>;
-  issuedContract?: Awaited<ReturnType<typeof createAttemptContract>>;
-  criticContract?: Awaited<ReturnType<typeof createAttemptContract>>;
-}
-
-// ── Run result ──────────────────────────────────────────────────────────────
+// ── Attempt run result ──────────────────────────────────────────────────────
 
 export interface AttemptRunResult {
-  readonly phase: AttemptPhase;
-  readonly evaluation?: Evaluation;
+  readonly ok: boolean;
+  readonly status: "completed" | "failed" | "cancelled";
+  readonly value?: unknown;
+  readonly error?: { readonly code: string; readonly message: string };
   readonly record: HandleRecord;
 }
 
-// ── Attempt runner ──────────────────────────────────────────────────────────
+// ── Verification function type ──────────────────────────────────────────────
 
-export async function runAttempt(
-  port: AgentSessionPort,
-  ctx: ExtensionContext,
-  signal: AbortSignal,
-  record: HandleRecord,
-  _mode: "foreground" | "background" = "foreground",
-): Promise<AttemptRunResult> {
-  const state: RunnerState = { phase: "spawning-producer" };
-
-  try {
-    return await runProducerCycle(port, ctx, signal, record, state);
-  } catch (error) {
-    if (signal.aborted) {
-      record.status = "cancelled";
-      record.errors = ["cancelled by parent"];
-      writeRecord(ctx.cwd, record);
-      return { phase: "cancelled", record };
-    }
-    throw error;
-  }
+export interface VerificationInput {
+  readonly record: HandleRecord;
+  readonly value: unknown;
+  readonly cwd: string;
 }
 
-async function runProducerCycle(
-  port: AgentSessionPort,
-  ctx: ExtensionContext,
-  signal: AbortSignal,
-  record: HandleRecord,
-  state: RunnerState,
-): Promise<AttemptRunResult> {
-  // ── Create attempt record ──────────────────────────────────────────────
-  const attemptNumber = record.attempts.length + 1;
-  const handleId = `${record.id}-attempt-${attemptNumber}`;
-
-  // ── Issue producer contract ───────────────────────────────────────────
-  state.issuedContract = await createAttemptContract({
-    spec: record.producerSpec,
-    assignment: record.assignment,
-    identity: {
-      handleId,
-      parentHandleId: record.id,
-    },
-    cwd: ctx.cwd,
-  });
-
-  const phenixRunId = state.issuedContract.phenixRunId;
-  const contractId = state.issuedContract.artifact.id;
-  const capabilityToken = state.issuedContract.capabilityToken;
-
-  // ── Persist the attempt record ────────────────────────────────────────
-  const attempt: AttemptRecord = {
-    number: attemptNumber,
-    runId: "",
-    phenixRunId,
-    mode: record.attempts.at(-1)?.mode ?? "foreground",
-    startedAt: now(),
-    contractId,
-    status: "running",
-  };
-  record.attempts.push(attempt);
-  writeRecord(ctx.cwd, record);
-
-  // ── Materialize contract agent ────────────────────────────────────────
-  const materialized = materializeContractAgent(state.issuedContract.artifact);
-  state.materializedProducer = materialized;
-
-  // ── Build environment ─────────────────────────────────────────────────
-  const env = childContractEnv(
-    contractId,
-    capabilityToken,
-    phenixRunId,
-    ctx.cwd,
-  );
-
-  // ── Build subagent params from contract ───────────────────────────────
-  const params = buildSubagentParams(
-    state.issuedContract.artifact,
-    materialized.runtimeName,
-  );
-
-  try {
-    state.phase = "spawning-producer";
-
-    // ── Spawn child ─────────────────────────────────────────────────────
-    const node = await port.create(
-      {
-        requestId: handleId,
-        contract: state.issuedContract.artifact,
-        materializedAgent: materialized,
-        environment: env,
-        params,
-      },
-      signal,
-    );
-    state.sessionNode = node;
-
-    // Record the session id and execution-layer run id.
-    attempt.sessionId = node.id;
-    attempt.runId = node.context.runId ?? "";
-    attempt.asyncDir = node.context.asyncDir;
-    writeRecord(ctx.cwd, record);
-
-    state.phase = "producer-running";
-
-    // Release materialized lease (child has been spawned).
-    if (state.materializedProducer) {
-      releaseMaterializedAgent(state.materializedProducer);
-      state.materializedProducer = undefined;
-    }
-
-    // ── Wait for result ─────────────────────────────────────────────────
-    const sessionResult = await port.run(node.id, signal);
-    const result = sessionResult.payload ?? {};
-
-    // ── Evaluate producer result ────────────────────────────────────────
-    state.phase = "evaluating-producer";
-
-    const evaluation = await evaluateProducerResult(
-      record,
-      state.issuedContract.artifact,
-      result,
-      ctx.cwd,
-      signal,
-    );
-
-    attempt.endedAt = now();
-
-    if (!evaluation.ok) {
-      // ── Check if repairable ──────────────────────────────────────────
-      if (evaluation.repairable && attemptNumber <= record.producerSpec.maxRepairAttempts + 1) {
-        state.phase = "repair-pending";
-        attempt.feedback = repairTask(record, evaluation);
-        attempt.status = "failed";
-        if (!record.errors) record.errors = [];
-        record.errors = [...record.errors, ...evaluation.errors];
-        writeRecord(ctx.cwd, record);
-        return await runProducerCycle(port, ctx, signal, record, state);
-      }
-
-      // Not repairable — fail.
-      attempt.status = "failed";
-      attempt.error = evaluation.errors.join(" | ");
-      record.status = "failed";
-      record.errors = [...evaluation.errors];
-      writeRecord(ctx.cwd, record);
-      return { phase: "failed", evaluation, record };
-    }
-
-    // Producer succeeded. Record the value.
-    attempt.status = "completed";
-    record.value = evaluation.value;
-
-    // ── Run critic if required ──────────────────────────────────────────
-    if (record.producerSpec.criticRequired && record.criticSpec) {
-      return await runCriticCycle(port, ctx, signal, record, state, evaluation);
-    }
-
-    // No critic needed — mark complete.
-    record.status = "completed";
-    writeRecord(ctx.cwd, record);
-    return { phase: "completed", evaluation, record };
-  } catch (error) {
-    // Clean up materialized lease on error.
-    if (state.materializedProducer) {
-      releaseMaterializedAgent(state.materializedProducer);
-    }
-    throw error;
-  }
+export interface VerificationResult {
+  readonly ok: boolean;
+  readonly issues: readonly { readonly path: readonly (string | number)[]; readonly message: string; readonly code?: string }[];
+  readonly summary: VerificationSummary;
 }
 
-async function runCriticCycle(
-  port: AgentSessionPort,
-  ctx: ExtensionContext,
-  signal: AbortSignal,
-  record: HandleRecord,
-  state: RunnerState,
-  producerEvaluation: Evaluation,
-): Promise<AttemptRunResult> {
-  if (!record.criticSpec) {
-    record.status = "completed";
-    writeRecord(ctx.cwd, record);
-    return { phase: "completed", evaluation: producerEvaluation, record };
-  }
+export type VerificationFn = (
+  input: VerificationInput,
+) => Promise<VerificationResult>;
 
-  const criticPick = record.criticSpec;
-  const parentRunId = state.issuedContract?.phenixRunId;
-  const attempt = latestAttempt(record);
-  const criticHandleId = `${record.id}-critic-attempt-${attempt.number}`;
+// ── Critic factory type ─────────────────────────────────────────────────────
 
-  // ── Issue critic contract ─────────────────────────────────────────────
-  state.criticContract = await createAttemptContract({
-    spec: criticPick,
-    assignment: {
-      task: buildCriticTask(record, producerEvaluation),
-      requirements: record.assignment.requirements,
-      outputSchema: CRITIC_OUTPUT_SCHEMA,
-    },
-    identity: {
-      handleId: criticHandleId,
-      parentHandleId: record.id,
-      parentRunId,
-    },
-    cwd: ctx.cwd,
-  });
-
-  const criticContractId = state.criticContract.artifact.id;
-  const criticCapabilityToken = state.criticContract.capabilityToken;
-  const criticRunId = state.criticContract.phenixRunId;
-
-  attempt.criticContractId = criticContractId;
-  writeRecord(ctx.cwd, record);
-
-  // ── Materialize critic agent ──────────────────────────────────────────
-  const materialized = materializeContractAgent(state.criticContract.artifact);
-  state.materializedCritic = materialized;
-
-  const env = childContractEnv(
-    criticContractId,
-    criticCapabilityToken,
-    criticRunId,
-    ctx.cwd,
-  );
-
-  const params = buildSubagentParams(
-    state.criticContract.artifact,
-    materialized.runtimeName,
-  );
-
-  try {
-    state.phase = "spawning-critic";
-
-    const node = await port.create(
-      {
-        requestId: criticHandleId,
-        contract: state.criticContract.artifact,
-        materializedAgent: materialized,
-        environment: env,
-        params,
-      },
-      signal,
-    );
-    state.sessionNode = node;
-
-    // Record the critic session id / execution run id (enables cancel).
-    attempt.sessionId = node.id;
-    attempt.runId = node.context.runId ?? "";
-    attempt.asyncDir = node.context.asyncDir;
-    writeRecord(ctx.cwd, record);
-
-    state.phase = "critic-running";
-
-    // Release materialized critic lease.
-    if (state.materializedCritic) {
-      releaseMaterializedAgent(state.materializedCritic);
-      state.materializedCritic = undefined;
-    }
-
-    // Run the critic session to completion. The critic verdict is read back
-    // from the submitted contract result on disk (see evaluateContractResult),
-    // so the session payload is not needed here.
-    await port.run(node.id, signal);
-
-    state.phase = "evaluating-critic";
-
-    // ── Evaluate critic result ─────────────────────────────────────────
-    const criticEval = await evaluateContractResult(criticContractId, ctx.cwd);
-
-    if (!criticEval.ok || !criticEval.value) {
-      attempt.status = "failed";
-      attempt.error = `Critic evaluation failed: ${criticEval.errors.join("; ")}`;
-      record.status = "failed";
-      record.errors = [...criticEval.errors];
-      writeRecord(ctx.cwd, record);
-      return { phase: "failed", evaluation: producerEvaluation, record };
-    }
-
-    const criticResult = criticEval.value as CriticValue;
-
-    if (criticResult.verdict === "reject") {
-      const evaluation: Evaluation = {
-        ok: false,
-        errors: [
-          `Critic rejected: ${criticResult.summary}`,
-          ...criticResult.findings.map(
-            (f) => `[${f.severity}] ${f.description}`,
-          ),
-        ],
-        repairable: true,
-        verification: producerEvaluation.verification,
-        review: {
-          verdict: "reject",
-          summary: criticResult.summary,
-          findings: criticResult.findings,
-          missingRequirements: criticResult.missingRequirements,
-        },
-      };
-
-      if (attempt.number <= record.producerSpec.maxRepairAttempts + 1) {
-        state.phase = "repair-pending";
-        attempt.feedback = repairTask(record, evaluation);
-        attempt.status = "failed";
-        if (!record.errors) record.errors = [];
-        record.errors = [...record.errors, ...evaluation.errors];
-        writeRecord(ctx.cwd, record);
-        return await runProducerCycle(port, ctx, signal, record, state);
-      }
-
-      attempt.status = "failed";
-      attempt.error = criticResult.summary;
-      record.status = "failed";
-      record.errors = evaluation.errors as string[];
-      writeRecord(ctx.cwd, record);
-      return { phase: "failed", evaluation, record };
-    }
-
-    // Critic approved.
-    record.status = "completed";
-    if (!record.review) {
-      record.review = {
-        verdict: "approve",
-        summary: criticResult.summary,
-        findings: criticResult.findings,
-        missingRequirements: criticResult.missingRequirements,
-      };
-    }
-    writeRecord(ctx.cwd, record);
-    return {
-      phase: "completed",
-      evaluation: producerEvaluation,
-      record,
-    };
-  } catch (error) {
-    if (state.materializedCritic) {
-      releaseMaterializedAgent(state.materializedCritic);
-    }
-    throw error;
-  }
+export interface CriticRunInput {
+  readonly record: HandleRecord;
+  readonly producerValue: unknown;
+  readonly verification: VerificationSummary;
+  readonly cwd: string;
+  readonly signal: AbortSignal;
 }
 
-// ── Helper: build subagent params from contract ─────────────────────────────
-
-export function buildSubagentParams(
-  contract: ContractArtifact,
-  materializedAgentName: string,
-): AgentSessionExecutionParams {
-  return {
-    agent: materializedAgentName,
-    ...(contract.runtime.model ? { model: contract.runtime.model } : {}),
-    thinking: contract.runtime.thinking,
-    cwd: contract.runtime.cwd,
-    maxTurns: contract.runtime.turnBudget.maxTurns,
-    graceTurns: contract.runtime.turnBudget.graceTurns,
-    toolSoft: contract.runtime.toolBudget.soft,
-    toolHard: contract.runtime.toolBudget.hard,
-    toolBlock: contract.runtime.toolBudget.block,
-    maxSubagentDepth: contract.runtime.delegation.remainingDepth,
-    timeoutMs: contract.runtime.timeoutMs,
-    async: true,
-    clarify: false,
-  };
+export interface CriticRunResult {
+  readonly verdict: "approve" | "reject";
+  readonly summary: string;
+  readonly findings: readonly { readonly severity: string; readonly description: string; readonly evidence: string; readonly requirement?: string }[];
+  readonly missingRequirements: readonly string[];
 }
 
-// ── Helper: evaluate producer result ────────────────────────────────────────
+export type CriticFactory = (
+  backend: ChildSessionBackend,
+  input: CriticRunInput,
+) => Promise<CriticRunResult>;
 
-async function evaluateProducerResult(
-  record: HandleRecord,
-  _contract: ContractArtifact,
-  _result: { success?: boolean; error?: string; state?: string },
-  cwd: string,
-  _signal: AbortSignal,
-): Promise<Evaluation> {
-  const attempt = latestAttempt(record);
+// ── Repair feedback builders ────────────────────────────────────────────────
 
-  const contractResult = await evaluateContractResult(
-    attempt.contractId,
-    cwd,
-  );
-
-  const verification: VerificationSummary = {
-    runtimeChecks: [],
-    verifyRuns: [],
-    reviewFindings: [],
-    contract: contractResult.contract,
-  };
-
-  if (!contractResult.ok) {
-    return {
-      ok: false,
-      errors: contractResult.errors,
-      repairable: contractResult.contract === "invalid",
-      verification,
-    };
-  }
-
-  return {
-    ok: true,
-    value: contractResult.value,
-    errors: [],
-    repairable: false,
-    verification,
-  };
-}
-
-// ── Critic task builder ─────────────────────────────────────────────────────
-
-function buildCriticTask(
-  record: HandleRecord,
-  evaluation: Evaluation,
-): string {
-  const valuePreview = evaluation.value
-    ? JSON.stringify(evaluation.value).slice(0, 500)
-    : "(no value)";
+function buildMissingCompletionFeedback(record: HandleRecord): string {
   return [
-    `Review the completed Phenix child assignment for handle "${record.id}".`,
+    "You did not call phenix_complete before the session settled.",
+    "Call phenix_complete with a value matching the required output schema.",
     "",
     `Original task: ${record.assignment.task}`,
-    "",
-    `Requirements:`,
-    ...record.assignment.requirements.map((r, i) => `${i + 1}. ${r}`),
-    "",
-    `Producer result preview: ${valuePreview}`,
-    "",
-    "Evaluate whether the result satisfies all requirements. Report any missing or incomplete work.",
-    "Call phenix_complete with your verdict (approve/reject) and structured findings.",
   ].join("\n");
+}
+
+function buildValidationRepairFeedback(
+  issues: readonly { readonly path: readonly (string | number)[]; readonly message: string }[],
+): string {
+  const numbered = issues
+    .map((issue, i) => `${i + 1}. [${issue.path.join(".")}] ${issue.message}`)
+    .join("\n");
+  return [
+    "## Runtime validation feedback",
+    "Your submission did not match the required output schema. Correct the following issues:",
+    "",
+    numbered,
+    "",
+    "Call phenix_complete again with a corrected value.",
+  ].join("\n");
+}
+
+function buildVerificationRepairFeedback(
+  issues: readonly { readonly path: readonly (string | number)[]; readonly message: string }[],
+): string {
+  const numbered = issues
+    .map((issue, i) => `${i + 1}. [${issue.path.join(".")}] ${issue.message}`)
+    .join("\n");
+  return [
+    "## Verification feedback",
+    "The runtime verification gate rejected your work. Correct the following issues:",
+    "",
+    numbered,
+    "",
+    "Do not merely claim that checks passed. The runtime will rerun verification.",
+    "Call phenix_complete again after correcting the work.",
+  ].join("\n");
+}
+
+function buildCriticRepairFeedback(critic: CriticRunResult): string {
+  const findings = critic.findings
+    .map((f, i) => `${i + 1}. [${f.severity}] ${f.description} — ${f.evidence}`)
+    .join("\n");
+  return [
+    "## Critic feedback",
+    `The critic rejected your work: ${critic.summary}`,
+    "",
+    findings,
+    "",
+    ...(critic.missingRequirements.length > 0
+      ? ["Missing requirements:", ...critic.missingRequirements.map((r) => `- ${r}`), ""]
+      : []),
+    "Call phenix_complete again after addressing the critic findings.",
+  ].join("\n");
+}
+
+// ── Execute producer cycles ─────────────────────────────────────────────────
+
+export interface ExecuteProducerCyclesInput {
+  readonly run: ChildRun;
+  readonly contractChannel: ContractSubmissionChannel;
+  readonly contractArtifact: ContractArtifact;
+  readonly record: HandleRecord;
+  readonly cwd: string;
+  readonly signal: AbortSignal;
+  readonly maximumProducerCycles: number;
+  readonly completionGraceRemaining: number;
+  readonly verify?: VerificationFn;
+  readonly criticFactory?: CriticFactory;
+  readonly backend: ChildSessionBackend;
+}
+
+/**
+ * Execute producer repair cycles over one Pi session.
+ *
+ * A producer handle owns one producer ChildRun. Repair reuses the same
+ * session via continue(). A critic is a separate Pi child session.
+ */
+export async function executeProducerCycles(
+  input: ExecuteProducerCyclesInput,
+): Promise<AttemptRunResult> {
+  const {
+    run,
+    contractChannel,
+    contractArtifact,
+    record,
+    cwd,
+    signal,
+    maximumProducerCycles,
+    completionGraceRemaining,
+    verify,
+    criticFactory,
+    backend,
+  } = input;
+
+  let completionGrace = completionGraceRemaining;
+
+  for (let cycle = 1; cycle <= maximumProducerCycles; cycle++) {
+    const cycleRecord: ProducerCycleRecord = {
+      number: cycle,
+      startedAt: now(),
+      contractRevision: contractChannel.current().revision,
+      status: "running",
+    };
+    record.producerCycles.push(cycleRecord);
+
+    // Wait for the current cycle to settle.
+    let outcome;
+    try {
+      if (cycle === 1) {
+        outcome = await run.waitForCurrentCycle(signal);
+      } else {
+        outcome = await run.continue("", signal);
+      }
+    } catch (error) {
+      cycleRecord.endedAt = now();
+      cycleRecord.status = "failed";
+      cycleRecord.error = serializeError(error);
+      record.status = "failed";
+      record.errors = [error instanceof Error ? error.message : String(error)];
+      writeRecord(cwd, record);
+      return {
+        ok: false,
+        status: "failed",
+        error: serializeError(error),
+        record,
+      };
+    }
+
+    if (outcome.status === "cancelled") {
+      cycleRecord.endedAt = now();
+      cycleRecord.status = "cancelled";
+      record.status = "cancelled";
+      writeRecord(cwd, record);
+      return { ok: false, status: "cancelled", record };
+    }
+
+    if (outcome.status === "failed") {
+      cycleRecord.endedAt = now();
+      cycleRecord.status = "failed";
+      cycleRecord.error = outcome.error;
+      record.status = "failed";
+      record.errors = [outcome.error?.message ?? "producer cycle failed"];
+      writeRecord(cwd, record);
+      return { ok: false, status: "failed", error: outcome.error, record };
+    }
+
+    // Check if the child submitted output.
+    const submitted = await contractChannel.readSubmitted();
+
+    if (!submitted) {
+      // No submission — check if we have grace remaining.
+      if (completionGrace > 0) {
+        completionGrace--;
+        cycleRecord.endedAt = now();
+        cycleRecord.status = "rejected";
+        cycleRecord.feedback = "missing-completion";
+        writeRecord(cwd, record);
+
+        // Remove this cycle record — we'll retry in the same session.
+        record.producerCycles.pop();
+
+        try {
+          await run.continue(buildMissingCompletionFeedback(record), signal);
+        } catch (error) {
+          record.status = "failed";
+          record.errors = [error instanceof Error ? error.message : String(error)];
+          writeRecord(cwd, record);
+          return { ok: false, status: "failed", error: serializeError(error), record };
+        }
+        continue;
+      }
+
+      // No grace remaining — fail with CONTRACT_NOT_SUBMITTED.
+      cycleRecord.endedAt = now();
+      cycleRecord.status = "failed";
+      cycleRecord.error = { code: "CONTRACT_NOT_SUBMITTED", message: "Child did not submit output." };
+      record.status = "failed";
+      record.errors = ["CONTRACT_NOT_SUBMITTED: Child did not call phenix_complete."];
+      writeRecord(cwd, record);
+      return {
+        ok: false,
+        status: "failed",
+        error: { code: "CONTRACT_NOT_SUBMITTED", message: "Child did not submit output." },
+        record,
+      };
+    }
+
+    // Validate the submitted output against the schema.
+    const validation = validateContract(
+      contractArtifact.assignment.outputSchema,
+      submitted.value,
+    );
+
+    if (!validation.ok) {
+      const issues = validation.violations.map((v) => ({
+        path: v.path.split("."),
+        message: v.message,
+      }));
+
+      await contractChannel.reopen({
+        reason: "runtime-validation",
+        issues,
+      });
+
+      cycleRecord.endedAt = now();
+      cycleRecord.status = "rejected";
+      cycleRecord.contractRevision = contractChannel.current().revision;
+      cycleRecord.feedback = "validation-repair";
+      writeRecord(cwd, record);
+
+      try {
+        await run.continue(buildValidationRepairFeedback(issues), signal);
+      } catch (error) {
+        record.status = "failed";
+        record.errors = [error instanceof Error ? error.message : String(error)];
+        writeRecord(cwd, record);
+        return { ok: false, status: "failed", error: serializeError(error), record };
+      }
+      continue;
+    }
+
+    // Run deterministic verification.
+    let verification: VerificationResult | undefined;
+    if (verify) {
+      verification = await verify({
+        record,
+        value: submitted.value,
+        cwd,
+      });
+
+      if (!verification.ok) {
+        await contractChannel.reopen({
+          reason: "verification",
+          issues: verification.issues,
+        });
+
+        cycleRecord.endedAt = now();
+        cycleRecord.status = "rejected";
+        cycleRecord.verification = verification.summary;
+        cycleRecord.feedback = "verification-repair";
+        writeRecord(cwd, record);
+
+        try {
+          await run.continue(
+            buildVerificationRepairFeedback(verification.issues),
+            signal,
+          );
+        } catch (error) {
+          record.status = "failed";
+          record.errors = [error instanceof Error ? error.message : String(error)];
+          writeRecord(cwd, record);
+          return { ok: false, status: "failed", error: serializeError(error), record };
+        }
+        continue;
+      }
+    }
+
+    // Run critic if required.
+    if (record.producerSpec.criticRequired && criticFactory) {
+      let criticResult: CriticRunResult;
+      try {
+        criticResult = await criticFactory(backend, {
+          record,
+          producerValue: submitted.value,
+          verification: verification?.summary ?? {
+            acceptanceStatus: "verified",
+            runtimeChecks: [],
+            verifyRuns: [],
+            reviewFindings: [],
+            contract: "valid",
+          },
+          cwd,
+          signal,
+        });
+      } catch (error) {
+        cycleRecord.endedAt = now();
+        cycleRecord.status = "failed";
+        cycleRecord.error = serializeError(error);
+        record.status = "failed";
+        record.errors = [error instanceof Error ? error.message : String(error)];
+        writeRecord(cwd, record);
+        return { ok: false, status: "failed", error: serializeError(error), record };
+      }
+
+      cycleRecord.critic = {
+        verdict: criticResult.verdict,
+        summary: criticResult.summary,
+        findings: criticResult.findings as any,
+        missingRequirements: criticResult.missingRequirements,
+      };
+
+      if (criticResult.verdict === "reject") {
+        await contractChannel.reopen({
+          reason: "critic",
+          issues: criticResult.findings.map((f) => ({
+            path: [f.severity],
+            message: f.description,
+          })),
+        });
+
+        cycleRecord.endedAt = now();
+        cycleRecord.status = "rejected";
+        cycleRecord.feedback = "critic-repair";
+        writeRecord(cwd, record);
+
+        try {
+          await run.continue(
+            buildCriticRepairFeedback(criticResult),
+            signal,
+          );
+        } catch (error) {
+          record.status = "failed";
+          record.errors = [error instanceof Error ? error.message : String(error)];
+          writeRecord(cwd, record);
+          return { ok: false, status: "failed", error: serializeError(error), record };
+        }
+        continue;
+      }
+    }
+
+    // All gates passed — accept the submission.
+    await contractChannel.accept(submitted.value);
+
+    cycleRecord.endedAt = now();
+    cycleRecord.status = "accepted";
+    cycleRecord.contractRevision = contractChannel.current().revision;
+    record.value = submitted.value;
+    record.status = "completed";
+
+    if (cycleRecord.critic) {
+      record.review = {
+        verdict: cycleRecord.critic.verdict,
+        summary: cycleRecord.critic.summary,
+        findings: cycleRecord.critic.findings as any,
+        missingRequirements: cycleRecord.critic.missingRequirements,
+      };
+    }
+
+    writeRecord(cwd, record);
+    return { ok: true, status: "completed", value: submitted.value, record };
+  }
+
+  // Exceeded repair limit.
+  record.status = "failed";
+  record.errors = ["Exceeded maximum producer repair cycles."];
+  writeRecord(cwd, record);
+  return {
+    ok: false,
+    status: "failed",
+    error: { code: "REPAIR_LIMIT_EXCEEDED", message: "Exceeded maximum producer repair cycles." },
+    record,
+  };
+}
+
+// ── Build child session spec from handle ────────────────────────────────────
+
+export interface PrepareChildSessionSpecInput {
+  readonly record: HandleRecord;
+  readonly contractArtifact: ContractArtifact;
+  readonly cwd: string;
+  readonly parentId?: string;
+  readonly rootId?: string;
+}
+
+/**
+ * Prepare a ChildSessionSpec from a handle record and contract artifact.
+ *
+ * The model must already be resolved to a concrete provider/model pair
+ * by routing before this point.
+ */
+export function prepareChildSessionSpec(
+  input: PrepareChildSessionSpecInput,
+  model: { readonly provider: string; readonly id: string },
+): ChildSessionSpec {
+  const { record, contractArtifact, cwd } = input;
+  const spec = record.producerSpec;
+  const id = childRunId(`child_${record.id}`);
+  const rootId = childRunId(input.rootId ?? input.parentId ?? record.id);
+
+  return {
+    id,
+    ...(input.parentId ? { parentId: childRunId(input.parentId) } : {}),
+    rootId,
+    handleId: record.id,
+    agentClient: {
+      id: spec.agent.replace("phenix.", "") as any,
+      kind: "agent" as any,
+    },
+    role: spec.role,
+    cwd,
+    model,
+    thinkingLevel: spec.thinking,
+    initialPrompt: contractArtifact.assignment.task,
+    contract: contractArtifact,
+    effectiveTools: spec.tools.effective,
+    skillRefs: spec.skills,
+    extensionRefs: spec.extensions,
+    inheritProjectContext: true,
+    timeoutMs: spec.timeoutMs,
+    turnBudget: spec.turnBudget,
+    toolBudget: spec.toolBudget,
+    persistence: "file",
+  };
 }

@@ -10,14 +10,13 @@
         "pi-context-tools" = "npm:pi-context-tools@0.1.1";
         "pi-lsp" = "npm:pi-lsp@0.1.7";
         "pi-mcp-adapter" = "npm:pi-mcp-adapter@2.11.0";
-        "pi-subagents" = "npm:pi-subagents@0.34.0";
         "typebox" = "npm:typebox@1.1.24";
       };
 
       # Bootstrap or refresh with:
       #   nix run .#update-pi-npm-hash
       # Intentionally fake after adding packages. Run `nix run .#update-pi-npm-hash`.
-      piNpmHash = "sha256-ac1/3HJL+J277cZRZ3wgI/xPyH6kAG/qTGp8FP62U/s=";
+      piNpmHash = "sha256-XvCLcnzVf/ng42vNuv1qksEocKRBIAUhYqa68tGr0Ec=";
 
       piNpmPackages = import ./lib/mk-pi-npm-packages.nix {
         inherit lib pkgs;
@@ -35,7 +34,7 @@
         ln -s ${piNpmPackages}/npm/node_modules "$out/node_modules"
       '';
 
-      phenixSubagentTests = pkgs.runCommand "phenix-subagent-runtime-tests" {
+      phenixRuntimeTests = pkgs.runCommand "phenix-runtime-tests" {
         nativeBuildInputs = [
           pkgs.nodejs
           pkgs.ast-grep
@@ -109,14 +108,14 @@
         phenix-pi-package = phenixPiPackage;
         phenix-shell = phenixPiPackage;
         phenix-pi-npm-packages = piNpmPackages;
-        phenix-subagent-tests = phenixSubagentTests;
+        phenix-runtime-tests = phenixRuntimeTests;
         phenix-qa-tests = phenixQaTests;
         update-pi-npm-hash = updatePiNpmHash;
       };
 
       checks = {
         phenix-pi-npm-packages = piNpmPackages;
-        phenix-subagent-tests = phenixSubagentTests;
+        phenix-runtime-tests = phenixRuntimeTests;
         phenix-qa-tests = phenixQaTests;
       };
     };

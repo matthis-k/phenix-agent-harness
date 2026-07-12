@@ -293,7 +293,7 @@ export interface WorkflowBinding {
 export interface WorkflowHandleRecord {
   readonly id: string;
   readonly sessionId: string;
-  readonly status: "running" | "completed" | "failed" | "cancelled";
+  status: "starting" | "running" | "completed" | "failed" | "cancelled" | "orphaned";
   readonly workflowBinding?: WorkflowBinding;
   readonly value?: unknown;
 }

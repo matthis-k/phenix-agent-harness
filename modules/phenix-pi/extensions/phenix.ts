@@ -1,9 +1,19 @@
 /**
  * phenix.ts — single Phenix composition entry point
  *
- * This is the one Pi extension entry for Phenix-owned behavior.
- * It replaces phenix-contract-runtime.ts, phenix-routing/index.ts,
- * and phenix-core.ts as separate extension entry points.
+ * The one Pi extension entry for Phenix-owned behavior.
+ *
+ * Root composition steps:
+ * 1. Link configuration.
+ * 2. Register generic root integrations.
+ * 3. Register routing.
+ * 4. Register root workflow composition.
+ * 5. Construct runtime services.
+ * 6. Construct the selected child-session backend.
+ * 7. Construct the coordinator.
+ * 8. Register Phenix tools.
+ * 9. Register TUI projection and commands.
+ * 10. Register shutdown cleanup.
  */
 
 import fs from "node:fs";
@@ -11,11 +21,10 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-import {
-  decodeContractBootstrapEnvironment,
-} from "./phenix-subagents/contract-identity.ts";
+import type {
+  ExtensionAPI,
+  ModelRegistry,
+} from "@earendil-works/pi-coding-agent";
 
 import { modelSetRef } from "./phenix-kernel/refs.ts";
 import { PHENIX_PROVIDER } from "./phenix-routing/provider.ts";
@@ -31,8 +40,15 @@ import {
 import {
   definePhenixConfiguration,
 } from "./phenix-composition/configuration.ts";
-import type { PhenixConfiguration } from "./phenix-composition/configuration.ts";
 import { link } from "./phenix-composition/linker.ts";
+import { createChildSessionBackend } from "./phenix-runtime/child-session-backend.ts";
+import { getChildSessionRegistry } from "./phenix-runtime/child-session-registry.ts";
+import { AgentExecutionCoordinator } from "./phenix-subagents/coordinator.ts";
+import phenixSubagents from "./phenix-subagents/index.ts";
+import {
+  shouldBootstrapPhenixSubagentsSkill,
+  bootstrapPhenixSubagentsSkillPrompt,
+} from "./phenix-skill-bootstrap.ts";
 
 // ── Default configuration ──────────────────────────────────────────────────
 
@@ -45,12 +61,11 @@ const defaultPhenixConfiguration = definePhenixConfiguration({
     pools: defaultModelPools,
     agentRoutes: defaultAgentRoutes,
   },
-  workflows: [
-    // Loaded lazily from the existing workflow definition
-  ],
+  workflows: [],
   runtime: {
-    sessionExecutionBackend: "external-process",
+    childSessionBackend: "sdk",
     maximumDelegationDepth: 3,
+    persistChildSessions: true,
   },
 });
 
@@ -142,55 +157,7 @@ function hasConfiguredMcpServer(cwd: string): boolean {
   return candidates.some(exists);
 }
 
-function registerBundledSubagentAgents(): void {
-  const bundled = fileURLToPath(new URL("../agents", import.meta.url));
-  const current = process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS
-    ?.split(path.delimiter)
-    .filter(Boolean) ?? [];
-  process.env.PI_SUBAGENT_EXTRA_AGENT_DIRS = [
-    bundled,
-    ...current.filter((entry) => path.resolve(entry) !== path.resolve(bundled)),
-  ].join(path.delimiter);
-}
-
-const PHENIX_SUBAGENTS_SKILL_NAME = "phenix-subagents";
-
-function stripFrontmatter(markdown: string): string {
-  if (!markdown.startsWith("---\n")) return markdown.trim();
-  const end = markdown.indexOf("\n---\n", 4);
-  if (end === -1) return markdown.trim();
-  return markdown.slice(end + "\n---\n".length).trim();
-}
-
-function phenixSubagentsSkillBlock(): string {
-  const skillDirectory = fileURLToPath(
-    new URL("../skills/phenix-subagents", import.meta.url),
-  );
-  const skillPath = path.join(skillDirectory, "SKILL.md");
-  const skillBody = stripFrontmatter(fs.readFileSync(skillPath, "utf8"));
-
-  return [
-    `<skill name="${PHENIX_SUBAGENTS_SKILL_NAME}" location="${skillPath}">`,
-    `References are relative to ${skillDirectory}.`,
-    "",
-    skillBody,
-    "</skill>",
-  ].join("\n");
-}
-
-export function shouldBootstrapPhenixSubagentsSkill(
-  model: { readonly provider?: string } | null | undefined,
-): boolean {
-  return model?.provider === PHENIX_PROVIDER;
-}
-
-export function bootstrapPhenixSubagentsSkillPrompt(systemPrompt: string): string {
-  if (systemPrompt.includes(`<skill name="${PHENIX_SUBAGENTS_SKILL_NAME}"`)) {
-    return systemPrompt;
-  }
-
-  return `${systemPrompt}\n\n${phenixSubagentsSkillBlock()}`;
-}
+// ── Phenix coding substrate prompt ──────────────────────────────────────────
 
 function registerPhenixCodingSubstratePrompt(pi: ExtensionAPI): void {
   pi.on("before_agent_start", async (event, ctx) => {
@@ -221,31 +188,38 @@ function registerPhenixCodingSubstratePrompt(pi: ExtensionAPI): void {
   });
 }
 
+// ── TUI projection ──────────────────────────────────────────────────────────
+
+function registerTuiProjection(pi: ExtensionAPI): void {
+  // Status bar: current workflow state, active child count, selected model set
+  pi.on("context", async (_event, ctx) => {
+    try {
+      const registry = getChildSessionRegistry();
+      const activeCount = registry.list().length;
+      ctx.ui.setStatus(
+        `Phenix · ${activeCount} active child${activeCount !== 1 ? "ren" : ""}`,
+      );
+    } catch {
+      // UI is optional — ignore errors.
+    }
+  });
+}
+
+// ── Shutdown cleanup ────────────────────────────────────────────────────────
+
+function registerShutdown(pi: ExtensionAPI): void {
+  pi.on("session_shutdown", async () => {
+    const registry = getChildSessionRegistry();
+    await registry.shutdown("session shutdown");
+  });
+}
+
 // ── Default export — Phenix composition entry point ────────────────────────
 
 export default async function phenix(
   pi: ExtensionAPI,
 ): Promise<void> {
-  // ── Detect root vs child process ─────────────────────────────
-  const envState = decodeContractBootstrapEnvironment();
-
-  if (envState.kind === "child") {
-    // Child process — only load contract runtime and routing.
-    await loadIntegration("phenix-contract-runtime", pi, async (api) => {
-      const mod = await import("./phenix-contract-runtime.ts");
-      await mod.default(api);
-    });
-    await loadIntegration("phenix-routing", pi, async (api) => {
-      const mod = await import("./phenix-routing/index.ts");
-      await mod.default(api);
-    });
-    return;
-  }
-
-  // ── Root process below ──────────────────────────────────────
-  // ── 1. Perform startup linking and validation ─────────────────
-  // Merge user configuration with this default.
-  // For now, use the default configuration directly.
+  // ── 1. Link configuration ───────────────────────────────────────────
   const linkResult = link(defaultPhenixConfiguration);
 
   if (!linkResult.ok) {
@@ -266,10 +240,7 @@ export default async function phenix(
     `${linkResult.graph.routing.agentRoutes.size} agent routes.`,
   );
 
-  // ── 2. Register bundled subagent agent directories ────────────
-  registerBundledSubagentAgents();
-
-  // ── 3. Generic integrations ──────────────────────────────────
+  // ── 2. Register generic root integrations ────────────────────────────
 
   // Hypa — local tool replacement layer
   await loadIntegration("hypa", pi, async (api) => {
@@ -301,43 +272,79 @@ export default async function phenix(
     await mod.default(api, { interceptors: { github: true } });
   });
 
-  // Process-isolated subagents and lifecycle/status support
-  await loadIntegration("subagents", pi, async (api) => {
-    const mod = await import("pi-subagents/src/extension/index.ts");
-    await mod.default(api);
-  });
-
-  // ── 4. Phenix-specific extensions ────────────────────────────
-
-  // Phenix routing — virtual provider and route state
+  // ── 3. Register routing ──────────────────────────────────────────────
   await loadIntegration("phenix-routing", pi, async (api) => {
     const mod = await import("./phenix-routing/index.ts");
     await mod.default(api);
   });
 
+  // ── 4. Register root workflow composition ────────────────────────────
+
   // Phenix coding substrate prompt injection. Register before workflow
   // projection so the workflow authority remains the final prompt layer.
   registerPhenixCodingSubstratePrompt(pi);
 
-  // Phenix root workflow composition — deterministic root workflow authority
   await loadIntegration("phenix-root-workflow", pi, async (api) => {
     const mod = await import("./phenix-composition/root-workflow-integration.ts");
     await mod.default(api);
   });
 
-  // Phenix contract runtime — child bootstrap, phenix_complete, tool guards
-  await loadIntegration("phenix-contract-runtime", pi, async (api) => {
-    const mod = await import("./phenix-contract-runtime.ts");
-    await mod.default(api);
+  // ── 5. Construct runtime services ────────────────────────────────────
+  // The root extension receives Pi's ctx.modelRegistry via the context.
+  // We capture it lazily from the first context event.
+  let capturedModelRegistry: ModelRegistry | undefined;
+  const agentDir = getAgentDir();
+
+  pi.on("session_start", async (_event, ctx) => {
+    capturedModelRegistry = ctx.modelRegistry;
   });
 
-  // Phenix policy and typed handoff layer over pi-subagents
+  // ── 6. Construct the selected child-session backend ──────────────────
+  // The backend is constructed lazily when the coordinator is first used,
+  // because the model registry is only available after session start.
+
+  const getRuntimeServices = (): { readonly modelRegistry: ModelRegistry; readonly agentDir: string } => {
+    if (!capturedModelRegistry) {
+      throw new Error(
+        "Phenix runtime services are not yet available — model registry has not been captured.",
+      );
+    }
+    return { modelRegistry: capturedModelRegistry, agentDir };
+  };
+
+  const backend = createChildSessionBackend({
+    kind: defaultPhenixConfiguration.runtime.childSessionBackend,
+    services: {
+      get modelRegistry() {
+        return getRuntimeServices().modelRegistry;
+      },
+      agentDir,
+    },
+    ...(defaultPhenixConfiguration.runtime.rpc
+      ? { rpc: defaultPhenixConfiguration.runtime.rpc }
+      : {}),
+  });
+
+  // ── 7. Construct the coordinator ─────────────────────────────────────
+  const coordinator = new AgentExecutionCoordinator({
+    backend,
+    resolveModelRegistry: () => getRuntimeServices().modelRegistry,
+    agentDir,
+    maximumDelegationDepth: defaultPhenixConfiguration.runtime.maximumDelegationDepth,
+  });
+
+  // ── 8. Register Phenix tools ─────────────────────────────────────────
   await loadIntegration("phenix-subagents", pi, async (api) => {
-    const mod = await import("./phenix-subagents/index.ts");
-    await mod.default(api);
+    await phenixSubagents(api, { coordinator });
   });
 
-  // ── 5. /phenix doctor command ─────────────────────────────────
+  // ── 9. Register TUI projection and commands ──────────────────────────
+  registerTuiProjection(pi);
+
+  // ── 10. Register shutdown cleanup ────────────────────────────────────
+  registerShutdown(pi);
+
+  // ── /phenix doctor command ─────────────────────────────────────────
 
   pi.registerCommand("phenix", {
     description: "Inspect the Phenix coding substrate; usage: /phenix doctor",
@@ -372,6 +379,7 @@ export default async function phenix(
 
       const lines = [
         `Phenix: linked graph — ${linkResult.ok ? `${linkResult.graph.contracts.size} contracts, ${linkResult.graph.agentClients.size} clients, ${linkResult.graph.routing.modelSets.size} model sets` : "link errors"}`,
+        `Backend: ${defaultPhenixConfiguration.runtime.childSessionBackend}`,
         `Integrations: ${integrationSummary()}`,
         `LSP config: ${exists(lspConfigPath) ? lspConfigPath : `missing (${lspConfigPath})`}`,
         `Hypa mode: ${hypaMode}`,

@@ -1,13 +1,17 @@
-import type { ContractId, RunId } from "./contract.ts";
 import type { JsonSchema } from "./contracts.ts";
 import type { AgentRole } from "./agent-types.ts";
 import type { ResolvedChildSpec } from "./child-spec.ts";
 import type { WorkflowTransitionId, WorkflowStateId } from "../phenix-workflow/workflow-types.ts";
+import type {
+  ChildRunId,
+  ChildSessionBackendKind,
+  SerializedError,
+} from "../phenix-runtime/child-session-types.ts";
 
 // ── Constants (used by index.ts; extracted for visibility) ──────────────────
 
-export const HANDLE_VERSION = 2;
-export const TERMINAL_STATES = new Set(["completed", "failed", "cancelled"]);
+export const HANDLE_VERSION = 3;
+export const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]);
 
 // ── Critic contract schema ──────────────────────────────────────────────────
 
@@ -49,29 +53,43 @@ export const ACCEPTANCE_RANK: Record<string, number> = {
   rejected: -1,
 };
 
-// ── Attempt record types ────────────────────────────────────────────────────
+// ── Producer cycle record ───────────────────────────────────────────────────
 
-export interface AttemptRecord {
+export interface ProducerCycleRecord {
   readonly number: number;
-  runId: string;
-  /** Phenix agent session id (from AgentSessionPort.create). Opaque handle for cancel/resume. */
-  sessionId?: string;
-  readonly phenixRunId: RunId;
-  readonly mode: "foreground" | "background";
   readonly startedAt: string;
-  readonly contractId: ContractId;
-  criticContractId?: ContractId;
-  asyncDir?: string;
   endedAt?: string;
-  status: "running" | "completed" | "failed" | "cancelled";
+
+  contractRevision: number;
+  status:
+    | "running"
+    | "submitted"
+    | "rejected"
+    | "accepted"
+    | "failed"
+    | "cancelled";
+
   feedback?: string;
-  error?: string;
-  childSessions?: Array<{
-    readonly role: string;
-    readonly status: "completed" | "failed";
-    readonly sessionFile?: string;
-    readonly transcriptPath?: string;
-  }>;
+  verification?: VerificationSummary;
+  critic?: CriticSummary;
+  error?: SerializedError;
+
+  // Child session summaries (for multi-session cycles)
+  childSessions?: readonly ChildSessionSummary[];
+}
+
+export interface ChildSessionSummary {
+  readonly role: string;
+  readonly status: "completed" | "failed";
+  readonly sessionFile?: string;
+  readonly transcriptPath?: string;
+}
+
+export interface CriticSummary {
+  readonly verdict: "approve" | "reject";
+  readonly summary: string;
+  readonly findings: readonly CriticFinding[];
+  readonly missingRequirements: readonly string[];
 }
 
 // ── Critic types ────────────────────────────────────────────────────────────
@@ -119,10 +137,18 @@ export interface HandleRecord {
 
   readonly criticSpec?: ResolvedChildSpec;
 
+  // ── Child session linkage (distinct from Pi session IDs) ────────────
+  childRunId?: ChildRunId;
+  backend?: ChildSessionBackendKind;
+  piSessionId?: string;
+  piSessionFile?: string;
+
+  // ── Producer cycles (repair reuses one Pi session) ──────────────────
+  producerCycles: ProducerCycleRecord[];
+
   readonly createdAt: string;
   updatedAt: string;
-  status: "running" | "completed" | "failed" | "cancelled";
-  attempts: AttemptRecord[];
+  status: "starting" | "running" | "completed" | "failed" | "cancelled" | "orphaned";
   value?: unknown;
   errors?: string[];
 
@@ -132,8 +158,6 @@ export interface HandleRecord {
     readonly summary: string;
     readonly findings: readonly CriticFinding[];
     readonly missingRequirements: readonly string[];
-    readonly sessionFile?: string;
-    readonly transcriptPath?: string;
   };
 
   /** Workflow binding set when the handle was spawned through a v4 workflow transition. */

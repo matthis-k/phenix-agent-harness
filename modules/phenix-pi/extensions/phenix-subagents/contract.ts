@@ -128,7 +128,7 @@ export interface ContractArtifact {
   readonly expiresAt?: string;
 }
 
-export const CONTRACT_RESULT_SCHEMA_VERSION = 1 as const;
+export const CONTRACT_RESULT_SCHEMA_VERSION = 2 as const;
 
 // ── Result types ────────────────────────────────────────────────────────────
 
@@ -138,6 +138,7 @@ export interface PendingContractResult {
   readonly contractId: ContractId;
   readonly revision: number;
   readonly createdAt: string;
+  readonly history: readonly ContractSubmissionRecord[];
 }
 
 export interface SubmittedContractResult {
@@ -147,6 +148,17 @@ export interface SubmittedContractResult {
   readonly revision: number;
   readonly submittedAt: string;
   readonly value: unknown;
+  readonly history: readonly ContractSubmissionRecord[];
+}
+
+export interface AcceptedContractResult {
+  readonly schemaVersion: typeof CONTRACT_RESULT_SCHEMA_VERSION;
+  readonly state: "accepted";
+  readonly contractId: ContractId;
+  readonly revision: number;
+  readonly acceptedAt: string;
+  readonly value: unknown;
+  readonly history: readonly ContractSubmissionRecord[];
 }
 
 export interface CancelledContractResult {
@@ -156,12 +168,26 @@ export interface CancelledContractResult {
   readonly revision: number;
   readonly cancelledAt: string;
   readonly reason: string;
+  readonly history: readonly ContractSubmissionRecord[];
 }
 
 export type ContractResult =
   | PendingContractResult
   | SubmittedContractResult
+  | AcceptedContractResult
   | CancelledContractResult;
+
+export interface ContractSubmissionRecord {
+  readonly revision: number;
+  readonly submittedAt: string;
+  readonly value: unknown;
+  readonly disposition?:
+    | "accepted"
+    | "runtime-rejected"
+    | "verification-rejected"
+    | "critic-rejected";
+  readonly issues?: readonly { readonly path: readonly (string | number)[]; readonly message: string; readonly code?: string }[];
+}
 
 export interface IssuedContract {
   readonly artifact: ContractArtifact;
