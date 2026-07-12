@@ -38,6 +38,7 @@ import {
 import {
   beginTransition,
   createWorkflowRecord,
+  rejectTransition,
   WorkflowStoreError,
 } from "../phenix-workflow/workflow-store.ts";
 import {
@@ -50,7 +51,10 @@ import type {
   ChildRun,
   ChildSessionSpec,
 } from "../phenix-runtime/child-session-types.ts";
-import { childRunId } from "../phenix-runtime/child-session-types.ts";
+import {
+  childRunId,
+  ChildRuntimeError,
+} from "../phenix-runtime/child-session-types.ts";
 import type { ParentExecutionContext } from "../phenix-runtime/delegation-tool.ts";
 import {
   ContractSubmissionChannelImpl,
@@ -254,7 +258,7 @@ export class AgentExecutionCoordinator {
           : this.activeModelSet;
 
     const source = parent.kind === "child"
-      ? { kind: "child" as const, contract: parent.contractId as any }
+      ? { kind: "child" as const, contract: parent.contract }
       : { kind: "root" as const, sessionId };
 
     const dependencies = buildWorkflowRuntimeDependencies({
@@ -367,6 +371,18 @@ export class AgentExecutionCoordinator {
       throw err;
     }
 
+    const rejectStartedTransition = (): void => {
+      try {
+        rejectTransition(ctx.cwd, wfRecord, {
+          executionId,
+          nextState: transition.onRejected,
+        });
+      } catch {
+        // Best effort. rejectTransition is idempotent for completed executions.
+      }
+    };
+
+    try {
     // ── Create child workflow record ──────────────────────────────────
     const role = roleForAgentClient(transition.agentClient);
     const childInitialState = initialStateForRole(role) as ResolvedWorkflowChildInput["initialState"];
@@ -404,7 +420,7 @@ export class AgentExecutionCoordinator {
 
     const capabilityArtifact = dependencies.capabilities;
     const creator: ContractCreatorContext = parent.kind === "child"
-      ? { kind: "child", contract: parent.contractId as any }
+      ? { kind: "child", contract: parent.contract }
       : { kind: "root", maximumDelegationDepth: this.maximumDelegationDepth };
 
     const producerSpec = resolveChildSpec({
@@ -501,6 +517,7 @@ export class AgentExecutionCoordinator {
         record.status = "failed";
         record.errors = [`MODEL_NOT_FOUND: ${concreteModel.provider}/${concreteModel.id}`];
         writeRecord(ctx.cwd, record);
+        finalizeHandleWorkflow({ cwd: ctx.cwd, handle: record as any });
         return {
           ok: false,
           message: `phenix_delegate: configured child model ${concreteModel.provider}/${concreteModel.id} is unavailable.`,
@@ -511,6 +528,7 @@ export class AgentExecutionCoordinator {
       record.status = "failed";
       record.errors = [error instanceof Error ? error.message : String(error)];
       writeRecord(ctx.cwd, record);
+      finalizeHandleWorkflow({ cwd: ctx.cwd, handle: record as any });
       return {
         ok: false,
         message: `phenix_delegate: routing failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -588,6 +606,7 @@ export class AgentExecutionCoordinator {
         sessionId,
         cwd: ctx.cwd,
         contractId: contractArtifact.id,
+        contract: contractArtifact,
         handleId: record.id,
         childRunId: childRunIdVal,
         rootChildRunId: rootRunId,
@@ -606,22 +625,75 @@ export class AgentExecutionCoordinator {
     };
 
     // ── Start the child run ───────────────────────────────────────────
-    // Background work owns an independent cancellation scope. It must not
-    // inherit the lifetime of the root tool invocation that launched it.
-    const runController = isBackground ? new AbortController() : undefined;
-    const runSignal = runController?.signal ?? signal;
+    // One coordinator-owned scope covers model execution, deterministic
+    // verification, and critic execution. Background work is detached from
+    // the launching tool call but still receives the same total deadline.
+    const runController = new AbortController();
+    const abortFromParent = (): void => {
+      if (!runController.signal.aborted) {
+        runController.abort(
+          signal.reason ??
+            new ChildRuntimeError(
+              "ABORTED",
+              "Delegated execution was cancelled by its parent.",
+            ),
+        );
+      }
+    };
+
+    if (!isBackground) {
+      if (signal.aborted) {
+        abortFromParent();
+      } else {
+        signal.addEventListener("abort", abortFromParent, { once: true });
+      }
+    }
+
+    let executionTimeout: NodeJS.Timeout | undefined;
+    if (producerSpec.timeoutMs > 0) {
+      executionTimeout = setTimeout(() => {
+        if (!runController.signal.aborted) {
+          runController.abort(
+            new ChildRuntimeError(
+              "TIMEOUT",
+              `Delegated execution timed out after ${producerSpec.timeoutMs}ms.`,
+            ),
+          );
+        }
+      }, producerSpec.timeoutMs);
+      executionTimeout.unref?.();
+    }
+
+    const cleanupRunScope = (): void => {
+      if (!isBackground) {
+        signal.removeEventListener("abort", abortFromParent);
+      }
+      if (executionTimeout) {
+        clearTimeout(executionTimeout);
+        executionTimeout = undefined;
+      }
+    };
+
+    const runSignal = runController.signal;
 
     let run: ChildRun;
     try {
       run = await this.backend.start(spec, runSignal);
     } catch (error) {
+      cleanupRunScope();
       record.status = "failed";
       record.errors = [error instanceof Error ? error.message : String(error)];
       writeRecord(ctx.cwd, record);
+      finalizeHandleWorkflow({ cwd: ctx.cwd, handle: record as any });
       return {
         ok: false,
         message: `phenix_delegate: child session start failed: ${error instanceof Error ? error.message : String(error)}`,
-        details: { code: "SESSION_START_FAILED" },
+        details: {
+          code:
+            error instanceof ChildRuntimeError
+              ? error.code
+              : "SESSION_START_FAILED",
+        },
       };
     }
 
@@ -655,6 +727,7 @@ export class AgentExecutionCoordinator {
           backend: this.backend,
         });
       } finally {
+        cleanupRunScope();
         await run.dispose();
       }
     };
@@ -666,7 +739,7 @@ export class AgentExecutionCoordinator {
       const liveRecord: LiveChildRunRecord = {
         run,
         completion: completionPromise,
-        controller: runController!,
+        controller: runController,
       };
 
       getChildSessionRegistry().add(liveRecord);
@@ -688,7 +761,24 @@ export class AgentExecutionCoordinator {
     const result = await executeCycles();
     const finalRecord = result.record as HandleRecord;
     finalizeHandleWorkflow({ cwd: ctx.cwd, handle: finalRecord as any });
+    if (!result.ok) {
+      return {
+        ok: false,
+        message:
+          result.error?.message ??
+          "Delegated child execution failed.",
+        details: {
+          code: result.error?.code ?? "CHILD_EXECUTION_FAILED",
+          handleId: finalRecord.id,
+          status: finalRecord.status,
+        },
+      };
+    }
     return { ok: true, record: finalRecord };
+    } catch (error) {
+      rejectStartedTransition();
+      throw error;
+    }
   }
 
   private async verifyProducer(
@@ -841,6 +931,7 @@ export class AgentExecutionCoordinator {
         sessionId: input.record.sessionId,
         cwd: input.cwd,
         contractId: issued.artifact.id,
+        contract: issued.artifact,
         handleId: `${input.record.id}-critic`,
         childRunId: runId,
         rootChildRunId: rootRunId,

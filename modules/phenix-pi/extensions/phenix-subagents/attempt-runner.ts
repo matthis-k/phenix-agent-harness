@@ -27,6 +27,7 @@ import type {
 } from "../phenix-runtime/child-session-types.ts";
 import {
   childRunId,
+  ChildRuntimeError,
   serializeError,
 } from "../phenix-runtime/child-session-types.ts";
 import { validateContract } from "./contracts.ts";
@@ -444,6 +445,32 @@ export async function executeProducerCycles(
         }
         continue;
       }
+    }
+
+    // A total execution timeout/cancellation may have fired while
+    // deterministic verification or the critic was running. Never accept
+    // output after the shared execution scope has been aborted.
+    if (signal.aborted) {
+      const serialized = serializeError(
+        signal.reason ??
+          new ChildRuntimeError(
+            "ABORTED",
+            "Producer execution was cancelled.",
+          ),
+      );
+      const cancelled = serialized.code === "ABORTED";
+      cycleRecord.endedAt = now();
+      cycleRecord.status = cancelled ? "cancelled" : "failed";
+      cycleRecord.error = serialized;
+      record.status = cancelled ? "cancelled" : "failed";
+      record.errors = [`${serialized.code}: ${serialized.message}`];
+      writeRecord(cwd, record);
+      return {
+        ok: false,
+        status: cancelled ? "cancelled" : "failed",
+        error: serialized,
+        record,
+      };
     }
 
     // All gates passed — accept the submission.

@@ -101,6 +101,7 @@ export interface PiSessionLike {
 export interface PreparedPiSessionSpec {
   readonly cwd: string;
   readonly model: Model<any>;
+  readonly modelRegistry: ModelRegistry;
   readonly thinkingLevel: ThinkingLevel;
   readonly tools: readonly string[];
   readonly excludeTools?: readonly string[];
@@ -132,6 +133,7 @@ export class ProductionPiSessionFactory implements PiSessionFactory {
     const { session } = await createAgentSession({
       cwd: spec.cwd,
       model: spec.model,
+      modelRegistry: spec.modelRegistry,
       thinkingLevel: spec.thinkingLevel,
       tools: [...spec.tools],
       ...(spec.excludeTools && spec.excludeTools.length > 0
@@ -232,7 +234,6 @@ class SdkChildRun implements ChildRun {
   };
   private disposed = false;
   private unsub: (() => void) | undefined;
-  private timeout: NodeJS.Timeout | undefined;
   private lastAssistantText: string | undefined;
 
   constructor(
@@ -577,11 +578,6 @@ class SdkChildRun implements ChildRun {
       // Best-effort unsubscribe.
     }
 
-    if (this.timeout) {
-      clearTimeout(this.timeout);
-      this.timeout = undefined;
-    }
-
     try {
       this.session.dispose();
     } catch {
@@ -610,18 +606,6 @@ class SdkChildRun implements ChildRun {
     this.unsub = this.session.subscribe(this.handlePiEvent);
     this.beginCycle();
     this.bindSignal(signal);
-
-    if (this.spec.timeoutMs > 0) {
-      this.timeout = setTimeout(() => {
-        void this.failAndAbort(
-          new ChildRuntimeError(
-            "TIMEOUT",
-            `Child session timed out after ${this.spec.timeoutMs}ms.`,
-          ),
-        );
-      }, this.spec.timeoutMs);
-      this.timeout.unref?.();
-    }
 
     await this.dispatchPrompt(this.spec.initialPrompt);
 
@@ -742,6 +726,7 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
     const preparedSpec: PreparedPiSessionSpec = {
       cwd: spec.cwd,
       model,
+      modelRegistry,
       thinkingLevel: spec.thinkingLevel,
       tools: toolNames,
       customTools,
@@ -758,7 +743,9 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
     const budgetGuard = new BudgetGuard({
       turnBudget: spec.turnBudget,
       toolBudget: spec.toolBudget,
-      timeoutMs: spec.timeoutMs,
+      // Total timeout ownership belongs to the coordinator so the same
+      // deadline covers model execution, verification, and critic execution.
+      timeoutMs: 0,
     });
 
     // 10. Create the run.

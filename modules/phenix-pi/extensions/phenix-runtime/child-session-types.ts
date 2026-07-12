@@ -141,6 +141,7 @@ export interface ChildParentExecutionContext {
   readonly sessionId: string;
   readonly cwd: string;
   readonly contractId: string;
+  readonly contract: ContractArtifact;
   readonly handleId: string;
   readonly childRunId: ChildRunId;
   readonly rootChildRunId: ChildRunId;

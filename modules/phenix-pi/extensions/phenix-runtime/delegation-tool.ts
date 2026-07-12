@@ -13,6 +13,7 @@ import type { AgentRole } from "../phenix-kernel/agents.ts";
 import { DelegateParams } from "../phenix-subagents/delegate-schema.ts";
 import type { WorkflowDecisionContext } from "../phenix-workflow/workflow-projection.ts";
 import type { MinimalToolDefinition } from "./completion-tool.ts";
+import type { ChildParentExecutionContext } from "./child-session-types.ts";
 
 interface AgentToolResult {
   readonly content: readonly { readonly type: string; readonly text: string }[];
@@ -28,17 +29,14 @@ interface AgentToolResult {
  * Replaces process-global current-child detection. Each child session
  * receives its own delegation tool with its own parent context.
  */
-export interface ParentExecutionContext {
-  readonly kind: "root" | "child";
-  readonly sessionId: string;
-  readonly cwd: string;
-  readonly contractId?: string;
-  readonly handleId?: string;
-  readonly childRunId?: string;
-  readonly rootChildRunId?: string;
-  readonly modelSet?: string;
-  readonly maximumDelegationDepth: number;
-}
+export type ParentExecutionContext =
+  | {
+      readonly kind: "root";
+      readonly sessionId: string;
+      readonly cwd: string;
+      readonly maximumDelegationDepth: number;
+    }
+  | ChildParentExecutionContext;
 
 // ── Delegate execution result ───────────────────────────────────────────────
 
