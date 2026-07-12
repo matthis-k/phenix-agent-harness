@@ -34,12 +34,14 @@
         cp -R ${piNpmPackages}/npm/node_modules "$out/node_modules"
         chmod -R u+w "$out/node_modules"
 
-        # Pi is supplied by Nix rather than installed into the fixed-output npm
-        # set. Expose the directly imported Pi packages to TypeScript and Node
-        # through the same package-local node_modules tree.
+        # Nix packages Pi as a monorepo root plus workspace dependencies. Expose
+        # the three packages imported directly by Phenix without duplicating the
+        # monorepo's transitive dependency tree.
+        piRoot=${pkgs.pi-coding-agent}/lib/node_modules/pi-monorepo
         mkdir -p "$out/node_modules/@earendil-works"
-        for package in pi-coding-agent pi-agent-core pi-ai; do
-          source=${pkgs.pi-coding-agent}/lib/node_modules/@earendil-works/$package
+        ln -s "$piRoot" "$out/node_modules/@earendil-works/pi-coding-agent"
+        for package in pi-agent-core pi-ai; do
+          source="$piRoot/node_modules/@earendil-works/$package"
           test -e "$source"
           rm -rf "$out/node_modules/@earendil-works/$package"
           ln -s "$source" "$out/node_modules/@earendil-works/$package"
