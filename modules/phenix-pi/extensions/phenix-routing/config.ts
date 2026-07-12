@@ -4,12 +4,7 @@ import path from "node:path";
 import { modelSetId } from "../phenix-kernel/ids.ts";
 import { mergeObjects, readJson } from "../phenix-shared.ts";
 import { defaultModelPools, defaultModelSets } from "./default-routing.ts";
-import type {
-  Capability,
-  ModelSetId,
-  RoutingConfig,
-  RoutingGuard,
-} from "./types.ts";
+import type { Capability, ModelSetId, RoutingConfig, RoutingGuard } from "./types.ts";
 import { CAPABILITIES, MODEL_SET_IDS, parseModelRef } from "./types.ts";
 
 function getAgentDir(): string {
@@ -225,9 +220,6 @@ export function providerBoundaryForSet(
   return config.guards?.[modelSet]?.allowedProviders ?? [];
 }
 
-export function isProviderAllowed(
-  provider: string,
-  allowedProviders: readonly string[],
-): boolean {
+export function isProviderAllowed(provider: string, allowedProviders: readonly string[]): boolean {
   return allowedProviders.includes(provider);
 }

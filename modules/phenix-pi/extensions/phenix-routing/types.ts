@@ -1,6 +1,6 @@
 import type { AgentKind } from "../phenix-kernel/agents.ts";
-import { modelSetId } from "../phenix-kernel/ids.ts";
 import type { ModelSetId } from "../phenix-kernel/ids.ts";
+import { modelSetId } from "../phenix-kernel/ids.ts";
 import type { Difficulty, TaskProfile, ThinkingLevel } from "../phenix-kernel/task.ts";
 import { defaultModelSets } from "./default-routing.ts";
 

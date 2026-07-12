@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
+import { buildBundledConfig, validateConfig } from "../extensions/phenix-routing/config.ts";
 import {
   defaultAgentRoutes,
   defaultModelPools,
   defaultModelSets,
 } from "../extensions/phenix-routing/default-routing.ts";
-import { buildBundledConfig, validateConfig } from "../extensions/phenix-routing/config.ts";
 import { ROLE_MATRIX } from "../extensions/phenix-routing/matrix.ts";
 import { capabilityFromId, routingRoleFromId } from "../extensions/phenix-routing/types.ts";
 
@@ -28,12 +27,8 @@ describe("routing declaration authority", () => {
     for (const definition of defaultModelSets) {
       assert.deepEqual(config.modelSets[definition.id], definition.capabilityPools);
       assert.deepEqual(config.guards?.[definition.id], {
-        ...(definition.allowedProviders
-          ? { allowedProviders: definition.allowedProviders }
-          : {}),
-        ...(definition.guards?.denySecrecy
-          ? { denySecrecy: definition.guards.denySecrecy }
-          : {}),
+        ...(definition.allowedProviders ? { allowedProviders: definition.allowedProviders } : {}),
+        ...(definition.guards?.denySecrecy ? { denySecrecy: definition.guards.denySecrecy } : {}),
         ...(definition.guards?.denyChangeKinds
           ? { denyChangeKinds: definition.guards.denyChangeKinds }
           : {}),
