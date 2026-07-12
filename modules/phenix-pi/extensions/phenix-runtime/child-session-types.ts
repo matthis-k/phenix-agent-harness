@@ -51,16 +51,13 @@ export interface PiSessionReference {
 // ── Backend kind ────────────────────────────────────────────────────────────
 
 /**
- * How a child session is backed.
+ * Supported child-session mechanism.
  *
- * - "sdk": an independently stateful Pi AgentSession in the current process.
- * - "rpc": a Pi session controlled through the public RpcClient.
- *
- * Do not use vague values like "in-process" or "external-process".
- * An SDK child is a real independent model context even though it shares
- * the Node process.
+ * An SDK child is a real independent model context even though it shares the
+ * Node process. Add another value only when that backend can satisfy the same
+ * contract-bound completion and nested-delegation semantics.
  */
-export type ChildSessionBackendKind = "sdk" | "rpc";
+export type ChildSessionBackendKind = "sdk";
 
 // ── Concrete model reference ────────────────────────────────────────────────
 
@@ -371,9 +368,6 @@ export type ChildRuntimeErrorCode =
   | "VERIFICATION_FAILED"
   | "CRITIC_REJECTED"
   | "REPAIR_LIMIT_EXCEEDED"
-  | "RPC_PROCESS_EXITED"
-  | "RPC_NESTED_DELEGATION_UNSUPPORTED"
-  | "RPC_CONTRACT_RUNTIME_UNAVAILABLE"
   | "ORPHANED_SESSION";
 
 const CHILD_RUNTIME_ERROR_CODES: ReadonlySet<string> = new Set([
@@ -391,9 +385,6 @@ const CHILD_RUNTIME_ERROR_CODES: ReadonlySet<string> = new Set([
   "VERIFICATION_FAILED",
   "CRITIC_REJECTED",
   "REPAIR_LIMIT_EXCEEDED",
-  "RPC_PROCESS_EXITED",
-  "RPC_NESTED_DELEGATION_UNSUPPORTED",
-  "RPC_CONTRACT_RUNTIME_UNAVAILABLE",
   "ORPHANED_SESSION",
 ]);
 

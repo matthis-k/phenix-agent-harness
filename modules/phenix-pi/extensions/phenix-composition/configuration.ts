@@ -30,8 +30,6 @@ export interface PhenixConfiguration {
   };
 }
 
-export function definePhenixConfiguration(
-  configuration: PhenixConfiguration,
-): PhenixConfiguration {
+export function definePhenixConfiguration(configuration: PhenixConfiguration): PhenixConfiguration {
   return configuration;
 }

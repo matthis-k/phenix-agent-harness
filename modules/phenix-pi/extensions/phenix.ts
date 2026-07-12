@@ -55,7 +55,6 @@ const defaultPhenixConfiguration = definePhenixConfiguration({
   },
   workflows: [],
   runtime: {
-    childSessionBackend: "sdk",
     maximumDelegationDepth: DEFAULT_MAXIMUM_DELEGATION_DEPTH,
     persistChildSessions: true,
   },
@@ -315,7 +314,6 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
 
   let coordinator!: AgentExecutionCoordinator;
   const backend = createChildSessionBackend({
-    kind: defaultPhenixConfiguration.runtime.childSessionBackend,
     services: {
       get modelRegistry() {
         return getRuntimeServices().modelRegistry;

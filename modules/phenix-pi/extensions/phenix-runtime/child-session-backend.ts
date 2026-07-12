@@ -7,21 +7,18 @@
  * advertising an unusable alternative backend.
  */
 
-import type {
-  ChildSessionBackend,
-  PiRuntimeServices,
-} from "./child-session-types.ts";
-import {
-  ProductionPiSessionFactory,
-  SdkChildSessionBackend,
-  buildEffectiveToolNames,
-} from "./sdk-child-session-backend.ts";
+import type { ChildSessionBackend, PiRuntimeServices } from "./child-session-types.ts";
 import type {
   PiSessionFactory,
   PiSessionLike,
   PreparedPiSessionSpec,
   PromptOptions,
   SdkChildSessionBackendOptions,
+} from "./sdk-child-session-backend.ts";
+import {
+  buildEffectiveToolNames,
+  ProductionPiSessionFactory,
+  SdkChildSessionBackend,
 } from "./sdk-child-session-backend.ts";
 
 /** Options accepted by the sole supported child-session backend. */
@@ -44,8 +41,4 @@ export type {
   SdkChildSessionBackendOptions,
 };
 
-export {
-  ProductionPiSessionFactory,
-  SdkChildSessionBackend,
-  buildEffectiveToolNames,
-};
+export { buildEffectiveToolNames, ProductionPiSessionFactory, SdkChildSessionBackend };
