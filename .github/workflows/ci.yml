@@ -31,10 +31,9 @@ jobs:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check changed files without modifying them
-        id: changed
         shell: bash
         run: |
-          set +e
+          set -euo pipefail
           zero_sha="0000000000000000000000000000000000000000"
 
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
@@ -48,24 +47,7 @@ jobs:
             head="${{ github.sha }}"
           fi
 
-          nix run .#phenix-check -- range "$base" "$head" > deterministic-check.log 2>&1
-          status=$?
-          cat deterministic-check.log
-          echo "status=$status" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: Upload deterministic-check diagnostics
-        if: steps.changed.outputs.status != '0'
-        uses: actions/upload-artifact@v4
-        with:
-          name: deterministic-check-diagnostics
-          path: deterministic-check.log
-          if-no-files-found: error
-
-      - name: Fail when changed-file checks fail
-        if: steps.changed.outputs.status != '0'
-        run: exit 1
+          nix run .#phenix-check -- range "$base" "$head"
 
       - name: Run complete flake checks
-        if: steps.changed.outputs.status == '0'
         run: nix flake check --print-build-logs --keep-going
