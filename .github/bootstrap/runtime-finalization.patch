@@ -1,0 +1,395 @@
+diff --git a/modules/phenix-pi/extensions/phenix-runtime/sdk-child-session-backend.ts b/modules/phenix-pi/extensions/phenix-runtime/sdk-child-session-backend.ts
+--- a/modules/phenix-pi/extensions/phenix-runtime/sdk-child-session-backend.ts
++++ b/modules/phenix-pi/extensions/phenix-runtime/sdk-child-session-backend.ts
+@@ -69,3 +69,20 @@
+ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+ 
++function abortErrorFromSignal(
++  signal: AbortSignal,
++  fallbackMessage: string,
++): ChildRuntimeError {
++  const reason = signal.reason;
++  if (reason instanceof ChildRuntimeError) return reason;
++
++  return new ChildRuntimeError(
++    "ABORTED",
++    reason instanceof Error
++      ? reason.message
++      : typeof reason === "string" && reason.length > 0
++        ? reason
++        : fallbackMessage,
++  );
++}
++
+ // ── PiSessionLike — injectable session interface for testing ────────────────
+@@ -384,25 +384,18 @@
+     this.boundSignals.add(signal);
+ 
+     const abortFromSignal = (): void => {
+-      const reason = signal.reason;
++      const error = abortErrorFromSignal(
++        signal,
++        "Cancelled by parent.",
++      );
+ 
+       // Preserve typed runtime failures such as TIMEOUT. Ordinary parent
+       // cancellation remains a cancelled outcome rather than a failed one.
+-      if (
+-        reason instanceof ChildRuntimeError &&
+-        reason.code !== "ABORTED"
+-      ) {
+-        void this.failAndAbort(reason);
+-        return;
++      if (error.code === "ABORTED") {
++        void this.abort(error.message);
++      } else {
++        void this.failAndAbort(error);
+       }
+-
+-      const message =
+-        reason instanceof Error
+-          ? reason.message
+-          : typeof reason === "string" && reason.length > 0
+-            ? reason
+-            : "cancelled by parent";
+-      void this.abort(message);
+     };
+ 
+     if (signal.aborted) {
+@@ -507,7 +507,15 @@
+     }
+     if (signal?.aborted) {
+-      await this.abort("cancelled by parent");
+-      throw new ChildRuntimeError("ABORTED", "Cancelled by parent.");
++      const error = abortErrorFromSignal(
++        signal,
++        "Cancelled by parent.",
++      );
++      if (error.code === "ABORTED") {
++        await this.abort(error.message);
++      } else {
++        await this.failAndAbort(error);
++      }
++      throw error;
+     }
+ 
+     const cycle = this.beginCycle();
+@@ -623,6 +623,9 @@
+   async startInitialPrompt(signal: AbortSignal): Promise<void> {
+     if (signal.aborted) {
+-      throw new ChildRuntimeError("ABORTED", "Cancelled by parent.");
++      throw abortErrorFromSignal(
++        signal,
++        "Cancelled by parent.",
++      );
+     }
+ 
+     this.unsub = this.session.subscribe(this.handlePiEvent);
+diff --git a/modules/phenix-pi/extensions/phenix-subagents/attempt-runner.ts b/modules/phenix-pi/extensions/phenix-subagents/attempt-runner.ts
+--- a/modules/phenix-pi/extensions/phenix-subagents/attempt-runner.ts
++++ b/modules/phenix-pi/extensions/phenix-subagents/attempt-runner.ts
+@@ -186,4 +186,31 @@
+   let completionGrace = completionGraceRemaining;
+   let pendingOutcome: ChildCycleOutcome | undefined;
+ 
++  const finishAbortedCycle = (
++    cycleRecord: ProducerCycleRecord,
++  ): AttemptRunResult | undefined => {
++    if (!signal.aborted) return undefined;
++
++    const serialized = serializeError(
++      signal.reason ??
++        new ChildRuntimeError(
++          "ABORTED",
++          "Producer execution was cancelled.",
++        ),
++    );
++    const cancelled = serialized.code === "ABORTED";
++    cycleRecord.endedAt = now();
++    cycleRecord.status = cancelled ? "cancelled" : "failed";
++    cycleRecord.error = serialized;
++    record.status = cancelled ? "cancelled" : "failed";
++    record.errors = [`${serialized.code}: ${serialized.message}`];
++    writeRecord(cwd, record);
++    return {
++      ok: false,
++      status: cancelled ? "cancelled" : "failed",
++      error: serialized,
++      record,
++    };
++  };
++
+   for (let cycle = 1; cycle <= maximumProducerCycles; cycle++) {
+@@ -209,4 +236,7 @@
+     } catch (error) {
++      const aborted = finishAbortedCycle(cycleRecord);
++      if (aborted) return aborted;
++
+       cycleRecord.endedAt = now();
+       cycleRecord.status = "failed";
+       cycleRecord.error = serializeError(error);
+@@ -261,4 +291,7 @@
+         } catch (error) {
++          const aborted = finishAbortedCycle(cycleRecord);
++          if (aborted) return aborted;
++
+           record.status = "failed";
+           record.errors = [error instanceof Error ? error.message : String(error)];
+           writeRecord(cwd, record);
+@@ -315,4 +348,7 @@
+         } catch (error) {
++          const aborted = finishAbortedCycle(cycleRecord);
++          if (aborted) return aborted;
++
+           record.status = "failed";
+           record.errors = [error instanceof Error ? error.message : String(error)];
+           writeRecord(cwd, record);
+@@ -331,4 +367,7 @@
+         signal,
+       });
+ 
++      const aborted = finishAbortedCycle(cycleRecord);
++      if (aborted) return aborted;
++
+       if (!verification.ok) {
+@@ -353,4 +392,7 @@
+         } catch (error) {
++          const aborted = finishAbortedCycle(cycleRecord);
++          if (aborted) return aborted;
++
+           record.status = "failed";
+           record.errors = [error instanceof Error ? error.message : String(error)];
+           writeRecord(cwd, record);
+@@ -402,4 +444,7 @@
+       } catch (error) {
++        const aborted = finishAbortedCycle(cycleRecord);
++        if (aborted) return aborted;
++
+         cycleRecord.endedAt = now();
+         cycleRecord.status = "failed";
+         cycleRecord.error = serializeError(error);
+@@ -410,4 +455,7 @@
+       }
++
++      const aborted = finishAbortedCycle(cycleRecord);
++      if (aborted) return aborted;
+ 
+       cycleRecord.critic = {
+         verdict: criticResult.verdict,
+@@ -438,6 +486,9 @@
+             signal,
+           );
+         } catch (error) {
++          const aborted = finishAbortedCycle(cycleRecord);
++          if (aborted) return aborted;
++
+           record.status = "failed";
+           record.errors = [error instanceof Error ? error.message : String(error)];
+           writeRecord(cwd, record);
+@@ -450,27 +501,7 @@
+     // A total execution timeout/cancellation may have fired while
+     // deterministic verification or the critic was running. Never accept
+     // output after the shared execution scope has been aborted.
+-    if (signal.aborted) {
+-      const serialized = serializeError(
+-        signal.reason ??
+-          new ChildRuntimeError(
+-            "ABORTED",
+-            "Producer execution was cancelled.",
+-          ),
+-      );
+-      const cancelled = serialized.code === "ABORTED";
+-      cycleRecord.endedAt = now();
+-      cycleRecord.status = cancelled ? "cancelled" : "failed";
+-      cycleRecord.error = serialized;
+-      record.status = cancelled ? "cancelled" : "failed";
+-      record.errors = [`${serialized.code}: ${serialized.message}`];
+-      writeRecord(cwd, record);
+-      return {
+-        ok: false,
+-        status: cancelled ? "cancelled" : "failed",
+-        error: serialized,
+-        record,
+-      };
+-    }
++    const aborted = finishAbortedCycle(cycleRecord);
++    if (aborted) return aborted;
+ 
+     // All gates passed — accept the submission.
+diff --git a/modules/phenix-pi/extensions/phenix-subagents/coordinator.ts b/modules/phenix-pi/extensions/phenix-subagents/coordinator.ts
+--- a/modules/phenix-pi/extensions/phenix-subagents/coordinator.ts
++++ b/modules/phenix-pi/extensions/phenix-subagents/coordinator.ts
+@@ -374,12 +374,47 @@
+-    const rejectStartedTransition = (): void => {
++    const rejectStartedTransition = (): boolean => {
+       try {
+         rejectTransition(ctx.cwd, wfRecord, {
+           executionId,
+           nextState: transition.onRejected,
+         });
++        return true;
+       } catch {
+-        // Best effort. rejectTransition is idempotent for completed executions.
++        // The transition may already be settled or persistence may have failed.
++        return false;
+       }
+     };
+ 
++    const finalizeOrRejectHandle = (handle: HandleRecord): void => {
++      let finalizationError: unknown = new Error(
++        `Workflow finalization returned no record for handle ${handle.id}.`,
++      );
++
++      // Retrying is useful when transition settlement succeeded but automatic
++      // workflow advancement failed afterward. finalizeHandleWorkflow is
++      // idempotent for already-completed transition executions.
++      for (let attempt = 0; attempt < 2; attempt++) {
++        try {
++          const finalized = finalizeHandleWorkflow({
++            cwd: ctx.cwd,
++            handle: handle as any,
++          });
++          if (finalized) return;
++        } catch (error) {
++          finalizationError = error;
++        }
++      }
++
++      if (rejectStartedTransition()) return;
++
++      const message =
++        finalizationError instanceof Error
++          ? finalizationError.message
++          : String(finalizationError);
++      handle.errors = [
++        ...(handle.errors ?? []),
++        `WORKFLOW_FINALIZATION_FAILED: ${message}`,
++      ];
++      writeRecord(ctx.cwd, handle);
++    };
++
+     let ownedRun: ChildRun | undefined;
+@@ -518,6 +518,6 @@
+         record.status = "failed";
+         record.errors = [`MODEL_NOT_FOUND: ${concreteModel.provider}/${concreteModel.id}`];
+         writeRecord(ctx.cwd, record);
+-        finalizeHandleWorkflow({ cwd: ctx.cwd, handle: record as any });
++        finalizeOrRejectHandle(record);
+         return {
+           ok: false,
+@@ -527,7 +527,7 @@
+       record.status = "failed";
+       record.errors = [error instanceof Error ? error.message : String(error)];
+       writeRecord(ctx.cwd, record);
+-      finalizeHandleWorkflow({ cwd: ctx.cwd, handle: record as any });
++      finalizeOrRejectHandle(record);
+       return {
+         ok: false,
+         message: `phenix_delegate: routing failed: ${error instanceof Error ? error.message : String(error)}`,
+@@ -690,7 +690,7 @@
+       record.status = "failed";
+       record.errors = [error instanceof Error ? error.message : String(error)];
+       writeRecord(ctx.cwd, record);
+-      finalizeHandleWorkflow({ cwd: ctx.cwd, handle: record as any });
++      finalizeOrRejectHandle(record);
+       return {
+         ok: false,
+         message: `phenix_delegate: child session start failed: ${error instanceof Error ? error.message : String(error)}`,
+@@ -762,12 +762,5 @@
+         .then(
+           (result) => {
+-            try {
+-              finalizeHandleWorkflow({
+-                cwd: ctx.cwd,
+-                handle: result.record as any,
+-              });
+-            } catch {
+-              // The completed handle remains persisted and can be reconciled.
+-            }
++            finalizeOrRejectHandle(result.record as HandleRecord);
+           },
+           (error) => {
+@@ -778,12 +778,5 @@
+               error instanceof Error ? error.message : String(error),
+             ];
+             writeRecord(ctx.cwd, failedRecord);
+-            try {
+-              finalizeHandleWorkflow({
+-                cwd: ctx.cwd,
+-                handle: failedRecord as any,
+-              });
+-            } catch {
+-              rejectStartedTransition();
+-            }
++            finalizeOrRejectHandle(failedRecord);
+           },
+@@ -801,5 +801,5 @@
+     // Foreground — await completion
+     const result = await executeCycles();
+     const finalRecord = result.record as HandleRecord;
+-    finalizeHandleWorkflow({ cwd: ctx.cwd, handle: finalRecord as any });
++    finalizeOrRejectHandle(finalRecord);
+     if (!result.ok) {
+@@ -829,23 +829,17 @@
+       const failedRecord = readRecord(ctx.cwd, sessionId, handleId);
+-      if (
+-        failedRecord &&
+-        (failedRecord.status === "starting" ||
+-          failedRecord.status === "running")
+-      ) {
+-        failedRecord.status = "failed";
+-        failedRecord.errors = [
+-          error instanceof Error ? error.message : String(error),
+-        ];
+-        writeRecord(ctx.cwd, failedRecord);
+-        try {
+-          finalizeHandleWorkflow({
+-            cwd: ctx.cwd,
+-            handle: failedRecord as any,
+-          });
+-        } catch {
+-          rejectStartedTransition();
++      if (failedRecord) {
++        if (
++          failedRecord.status === "starting" ||
++          failedRecord.status === "running"
++        ) {
++          failedRecord.status = "failed";
++          failedRecord.errors = [
++            error instanceof Error ? error.message : String(error),
++          ];
++          writeRecord(ctx.cwd, failedRecord);
+         }
+-      } else if (!failedRecord) {
++        finalizeOrRejectHandle(failedRecord);
++      } else {
+         rejectStartedTransition();
+       }
+ 
+diff --git a/modules/phenix-pi/extensions/phenix-workflow/workflow-runtime.ts b/modules/phenix-pi/extensions/phenix-workflow/workflow-runtime.ts
+--- a/modules/phenix-pi/extensions/phenix-workflow/workflow-runtime.ts
++++ b/modules/phenix-pi/extensions/phenix-workflow/workflow-runtime.ts
+@@ -250,10 +250,21 @@
+   const binding = input.handle.workflowBinding;
+-  if (!binding || input.handle.status === "running") return undefined;
++  if (
++    !binding ||
++    input.handle.status === "starting" ||
++    input.handle.status === "running"
++  ) {
++    return undefined;
++  }
+   let record = readWorkflowRecord(
+     input.cwd,
+     binding.instanceId,
+     binding.actorId,
+   );
+-  if (!record) return undefined;
++  if (!record) {
++    throw new Error(
++      `Workflow record not found while finalizing handle ${input.handle.id}: ` +
++        `${binding.instanceId}/${binding.actorId}`,
++    );
++  }
+   if (
+     record.completed.some(
