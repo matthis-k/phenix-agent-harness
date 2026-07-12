@@ -15,7 +15,10 @@ case "$mode" in
       exit 0
     fi
 
-    nix build --no-link .#phenix-runtime-tests .#phenix-qa-tests
+    nix build --no-link \
+      .#phenix-runtime-tests \
+      .#phenix-qa-tests \
+      .#phenix-repository-checks
     ;;
   full)
     git diff --check
