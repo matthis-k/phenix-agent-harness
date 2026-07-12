@@ -3,12 +3,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def replace(path: str, old: str, new: str, expected: int = 1) -> None:
+def replace(path: str, old: str, new: str, minimum: int = 1) -> None:
     target = ROOT / path
     content = target.read_text()
     count = content.count(old)
-    if count != expected:
-        raise RuntimeError(f"{path}: expected {expected} matches, found {count}: {old!r}")
+    if count < minimum:
+        raise RuntimeError(f"{path}: expected at least {minimum} matches, found {count}: {old!r}")
     target.write_text(content.replace(old, new))
 
 
@@ -19,14 +19,14 @@ for path in [
 ]:
     replace(
         path,
-        'import type { JsonSchema } from "./contracts.ts";',
-        'import type { JsonSchema } from "../phenix-contracts/definitions.ts";',
+        'from "./contracts.ts"',
+        'from "../phenix-contracts/definitions.ts"',
     )
 
 replace(
     "modules/phenix-pi/extensions/phenix-runtime/child-session-types.ts",
-    'import type { JsonSchema } from "../phenix-subagents/contracts.ts";',
-    'import type { JsonSchema } from "../phenix-contracts/definitions.ts";',
+    'from "../phenix-subagents/contracts.ts"',
+    'from "../phenix-contracts/definitions.ts"',
 )
 
 for path in [
@@ -36,36 +36,31 @@ for path in [
 ]:
     replace(
         path,
-        'import { validateContract } from "./contracts.ts";',
-        'import { validateSchema } from "../phenix-contracts/validator.ts";',
+        'from "./contracts.ts"',
+        'from "../phenix-contracts/validator.ts"',
     )
-    replace(path, "validateContract(", "validateSchema(")
+    replace(path, "validateContract", "validateSchema", minimum=2)
 
 replace(
     "modules/phenix-pi/extensions/phenix-runtime/completion-tool.ts",
-    'import { validateContract } from "../phenix-subagents/contracts.ts";',
-    'import { validateSchema } from "../phenix-contracts/validator.ts";',
+    'from "../phenix-subagents/contracts.ts"',
+    'from "../phenix-contracts/validator.ts"',
 )
 replace(
     "modules/phenix-pi/extensions/phenix-runtime/completion-tool.ts",
-    "validateContract(",
-    "validateSchema(",
+    "validateContract",
+    "validateSchema",
+    minimum=2,
 )
 
 replace(
     "modules/phenix-pi/tests/contracts.test.ts",
-    '''import {
-  assertOutputSchema,
-  validateContract,
-} from "../extensions/phenix-subagents/contracts.ts";''',
-    '''import {
-  assertOutputSchema,
-  validateSchema,
-} from "../extensions/phenix-contracts/validator.ts";''',
+    'from "../extensions/phenix-subagents/contracts.ts"',
+    'from "../extensions/phenix-contracts/validator.ts"',
 )
 replace(
     "modules/phenix-pi/tests/contracts.test.ts",
-    "validateContract(",
-    "validateSchema(",
-    expected=2,
+    "validateContract",
+    "validateSchema",
+    minimum=3,
 )
