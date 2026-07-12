@@ -3,12 +3,10 @@ import type {
   WorkflowRuntimeRecord,
   DelegationAuthority,
   DelegationOption,
-  WorkflowOutputSchemaId,
 } from "./workflow-types.ts";
 import { resolveDelegationOptions } from "./delegation-options.ts";
 import type { HandleRecord } from "../phenix-subagents/handle-types.ts";
 import type { Difficulty } from "../phenix-routing/types.ts";
-import { getOutputSchema } from "./workflow-schemas.ts";
 
 // ── Model-facing delegation option ──────────────────────────────────────────
 
@@ -49,6 +47,61 @@ export function projectDelegationOptions(
   }));
 }
 
+// ── Workflow decision context (shared prompt + runtime) ─────────────────────
+
+import { createHash } from "node:crypto";
+
+/**
+ * WorkflowDecisionContext is the single source of truth for what
+ * transitions are legal at a given workflow state. Both the prompt
+ * projector and the runtime delegate handler consume it to guarantee
+ * equivalence.
+ */
+export interface WorkflowDecisionContext {
+  readonly difficulty: Difficulty;
+  readonly currentState: string;
+  readonly revision: number;
+  readonly options: readonly ModelDelegationOption[];
+  /** Stable digest of the projected options. Verified at runtime. */
+  readonly optionsDigest: string;
+}
+
+/**
+ * Canonical options digest: SHA-256 of stable JSON of transitionIds + revisions.
+ * Both prompt projection and runtime validation MUST compute the same digest.
+ */
+export function computeOptionsDigest(
+  options: readonly ModelDelegationOption[],
+): string {
+  const canonical = options.map((o) => ({
+    t: o.transitionId,
+    r: o.workflowRevision,
+  }));
+  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
+}
+
+/**
+ * Build the shared decision context from definition + runtime + authority.
+ */
+export function buildWorkflowDecisionContext(input: {
+  readonly definition: WorkflowDefinition;
+  readonly runtime: WorkflowRuntimeRecord;
+  readonly authority: DelegationAuthority;
+  readonly activeHandles: readonly HandleRecord[];
+}): WorkflowDecisionContext {
+  const options = projectDelegationOptions(
+    resolveDelegationOptions(input),
+  );
+
+  return {
+    difficulty: input.runtime.difficulty,
+    currentState: input.runtime.state,
+    revision: input.runtime.revision,
+    options,
+    optionsDigest: computeOptionsDigest(options),
+  };
+}
+
 // ── Build root workflow projection ──────────────────────────────────────────
 
 export function buildRootWorkflowProjection(input: {
@@ -56,14 +109,15 @@ export function buildRootWorkflowProjection(input: {
   readonly runtime: WorkflowRuntimeRecord;
   readonly authority: DelegationAuthority;
   readonly activeHandles: readonly HandleRecord[];
-}): ModelWorkflowProjection {
-  const options = resolveDelegationOptions(input);
+}): ModelWorkflowProjection & { readonly optionsDigest: string } {
+  const ctx = buildWorkflowDecisionContext(input);
 
   return {
-    difficulty: input.runtime.difficulty,
-    currentState: input.runtime.state,
-    revision: input.runtime.revision,
-    options: projectDelegationOptions(options),
+    difficulty: ctx.difficulty,
+    currentState: ctx.currentState,
+    revision: ctx.revision,
+    options: ctx.options,
+    optionsDigest: ctx.optionsDigest,
   };
 }
 
@@ -74,21 +128,22 @@ export function buildChildWorkflowProjection(input: {
   readonly runtime: WorkflowRuntimeRecord;
   readonly authority: DelegationAuthority;
   readonly activeHandles: readonly HandleRecord[];
-}): ModelWorkflowProjection {
-  const options = resolveDelegationOptions(input);
+}): ModelWorkflowProjection & { readonly optionsDigest: string } {
+  const ctx = buildWorkflowDecisionContext(input);
 
   return {
-    difficulty: input.runtime.difficulty,
-    currentState: input.runtime.state,
-    revision: input.runtime.revision,
-    options: projectDelegationOptions(options),
+    difficulty: ctx.difficulty,
+    currentState: ctx.currentState,
+    revision: ctx.revision,
+    options: ctx.options,
+    optionsDigest: ctx.optionsDigest,
   };
 }
 
 // ── Format workflow projection as system prompt text ────────────────────────
 
 export function formatWorkflowProjection(
-  projection: ModelWorkflowProjection,
+  projection: ModelWorkflowProjection & { readonly optionsDigest?: string },
 ): string {
   const lines: string[] = [];
 
@@ -97,6 +152,9 @@ export function formatWorkflowProjection(
   lines.push(`Difficulty: ${projection.difficulty}`);
   lines.push(`Current state: ${projection.currentState}`);
   lines.push(`Workflow revision: ${projection.revision}`);
+  if (projection.optionsDigest) {
+    lines.push(`Options digest: ${projection.optionsDigest}`);
+  }
   lines.push("");
 
   if (projection.options.length === 0) {
@@ -126,11 +184,10 @@ export function formatWorkflowProjection(
   }
 
   lines.push("Call phenix_delegate with exactly:");
-  lines.push("- transitionId");
-  lines.push("- workflowRevision");
-  lines.push("- task");
-  lines.push("- optional requirements");
-  lines.push("- optional narrowing patches");
+  lines.push("- transitionId: one of the transition IDs listed above");
+  lines.push("- workflowRevision: the workflow revision shown above");
+  lines.push("- task: the bounded objective for the child");
+  lines.push("- optional: requirements, tools narrowing, delegateRoles narrowing, mode");
   lines.push("");
 
   lines.push("Do not invent a role or transition.");

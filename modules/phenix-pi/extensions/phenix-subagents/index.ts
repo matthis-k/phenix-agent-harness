@@ -50,7 +50,6 @@ import type {
   WorkflowTransitionId,
 } from "../phenix-workflow/workflow-types.ts";
 import type { TransitionAuthority } from "../phenix-workflow/transition-authority.ts";
-import { isTransitionPermitted } from "../phenix-workflow/transition-authority.ts";
 import type { Difficulty } from "../phenix-routing/types.ts";
 import { PHENIX_DEFAULT_WORKFLOW } from "../phenix-workflow/workflow-definitions.ts";
 import {
@@ -61,7 +60,9 @@ import {
   WorkflowStoreError,
 } from "../phenix-workflow/workflow-store.ts";
 import { getOutputSchema } from "../phenix-workflow/workflow-schemas.ts";
-import { resolveDelegationOptions } from "../phenix-workflow/delegation-options.ts";
+import {
+  buildWorkflowDecisionContext,
+} from "../phenix-workflow/workflow-projection.ts";
 
 import type { AgentRole } from "./agent-types.ts";
 
@@ -364,42 +365,69 @@ export default async function phenixSubagents(
           );
         }
 
-        // ── Look up transition ───────────────────────────────────────
+        // ── Build decision context for validation ────────────────────
+
+        const decisionCtx = buildWorkflowDecisionContext({
+          definition: PHENIX_DEFAULT_WORKFLOW,
+          runtime: wfRecord,
+          authority: {
+            roles: {
+              presetRevision: 1,
+              role: null,
+              source: { inherited: false, patch: { additional: [], removed: [] } },
+              effective: [],
+            },
+            availableRoles: [],
+            remainingDepth: 0,
+            transitionAuthority,
+          },
+          activeHandles: [],
+        });
+
+        // ── Validate transition against decision context ─────────────
 
         const transitionId = params.transitionId as WorkflowTransitionId;
+        const matchingOption = decisionCtx.options.find(
+          (o) => o.transitionId === transitionId,
+        );
+
+        if (!matchingOption) {
+          const availableIds = decisionCtx.options.map((o) => o.transitionId).join(", ");
+          return errorResult(
+            `phenix_delegate: transition "${params.transitionId}" is not currently available. ` +
+            `State: ${wfRecord.state}, Difficulty: ${wfRecord.difficulty}. ` +
+            `Available transitions: ${availableIds || "(none)"}`,
+            {
+              state: wfRecord.state,
+              difficulty: wfRecord.difficulty,
+              available: decisionCtx.options.map((o) => ({
+                id: o.transitionId,
+                role: o.role,
+                category: o.category,
+              })),
+            },
+          );
+        }
+
+        // ── Validate mode ───────────────────────────────────────────
+
+        if (isBackground && !matchingOption.allowedModes.includes("background")) {
+          return errorResult(
+            `phenix_delegate: background mode is not allowed for transition "${params.transitionId}". ` +
+            `Allowed modes: ${matchingOption.allowedModes.join(", ")}.`,
+          );
+        }
+
+        // ── Look up transition definition ────────────────────────────
+
         const transition = PHENIX_DEFAULT_WORKFLOW.transitions.find(
           (t) => t.id === transitionId,
         );
         if (!transition) {
-          return errorResult(`phenix_delegate: transition "${params.transitionId}" not found in the workflow definition.`);
+          return errorResult(`phenix_delegate: internal error - transition "${params.transitionId}" not found in workflow definition.`);
         }
         if (transition.kind !== "delegate") {
-          return errorResult(`phenix_delegate: "${params.transitionId}" is not a delegate transition (it is ${transition.kind}).`);
-        }
-
-        // ── Validate transition applicability ────────────────────────
-
-        if (!transition.from.includes(wfRecord.state)) {
-          return errorResult(
-            `phenix_delegate: transition "${params.transitionId}" is not valid from state "${wfRecord.state}". ` +
-            `It is valid from: ${transition.from.join(", ")}.`,
-          );
-        }
-        if (!transition.difficulty.includes(difficulty)) {
-          return errorResult(
-            `phenix_delegate: transition "${params.transitionId}" is not available at difficulty "${difficulty}". ` +
-            `It is available at: ${transition.difficulty.join(", ")}.`,
-          );
-        }
-        if (!isTransitionPermitted(transition.id, transitionAuthority)) {
-          return errorResult(
-            `phenix_delegate: transition "${params.transitionId}" is not within the allowed delegation authority.`,
-          );
-        }
-        if (isBackground && !transition.allowedModes.includes("background")) {
-          return errorResult(
-            `phenix_delegate: background mode is not allowed for transition "${params.transitionId}".`,
-          );
+          return errorResult(`phenix_delegate: internal error - "${params.transitionId}" is not a delegate transition.`);
         }
 
         // ── Capture source state before transition ────────────────────
