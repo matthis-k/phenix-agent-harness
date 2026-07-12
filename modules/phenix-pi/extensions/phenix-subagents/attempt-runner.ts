@@ -72,6 +72,7 @@ export async function runAttempt(
   ctx: ExtensionContext,
   signal: AbortSignal,
   record: HandleRecord,
+  mode: "foreground" | "background" = "foreground",
 ): Promise<AttemptRunResult> {
   const state: RunnerState = { phase: "spawning-producer" };
 

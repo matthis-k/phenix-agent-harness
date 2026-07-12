@@ -135,6 +135,7 @@ export interface ChildSpecInput {
   readonly creator: ContractCreatorContext;
   readonly config?: RuntimePolicyConfig;
   readonly model?: string;
+  readonly thinking?: ThinkingLevel;
   readonly capabilityArtifact: AgentCapabilityArtifact;
   readonly workflow: ResolvedWorkflowChildInput;
   readonly routingContext?: {
@@ -220,7 +221,7 @@ export function resolveChildSpec(
     profile: policy.profile,
     tier: policy.tier,
     model: input.model ?? policy.model,
-    thinking: policy.thinking,
+    thinking: input.thinking ?? policy.thinking,
     cwd: input.cwd,
     tools,
     skills: input.skills ?? [],

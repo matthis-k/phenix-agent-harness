@@ -101,6 +101,8 @@ export {
   configuredAgent,
   isSpawnableAgent,
   persistCapabilityArtifact,
+  readCapabilityArtifact,
+  capabilityArtifactPath,
 } from "./agent-capabilities.ts";
 
 // Session registry
@@ -128,6 +130,7 @@ export {
   initialWorkflowStateForRole,
   transitionAuthorityForChild,
   applyAutomaticTransitions,
+  finalizeHandleWorkflow,
 } from "./workflow-runtime.ts";
 
 // Capability provider

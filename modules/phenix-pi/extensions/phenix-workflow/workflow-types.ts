@@ -1,5 +1,5 @@
 import type { AgentKind, AgentRole, TaskProfile } from "../phenix-subagents/agent-types.ts";
-import type { Difficulty } from "../phenix-routing/types.ts";
+import type { Difficulty, ModelSetId } from "../phenix-routing/types.ts";
 
 // ── Workflow definition identity ────────────────────────────────────────────
 
@@ -216,6 +216,7 @@ export interface WorkflowRuntimeRecord {
   readonly definitionVersion: 1;
 
   readonly difficulty: Difficulty;
+  readonly modelSet?: ModelSetId;
   readonly taskProfile: TaskProfile;
 
   readonly actorRole: "coordinator" | AgentKind | "base";

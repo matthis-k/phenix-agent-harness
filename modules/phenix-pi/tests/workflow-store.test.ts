@@ -173,8 +173,11 @@ describe("Workflow Store", () => {
       nextState: "scouting",
     });
 
-    // Should return same record unchanged.
-    assert.equal(updated, record);
+    // Should return logically unchanged record (state and revision preserved).
+    assert.equal(updated.state, record.state);
+    assert.equal(updated.revision, record.revision);
+    assert.equal(updated.instanceId, record.instanceId);
+    assert.equal(updated.actorId, record.actorId);
   });
 
   it("verifyWorkflowActorExists throws for missing record", () => {

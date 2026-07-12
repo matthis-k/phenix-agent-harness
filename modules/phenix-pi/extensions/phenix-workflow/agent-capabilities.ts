@@ -165,23 +165,47 @@ export function isSpawnableAgent(
 import fs from "node:fs";
 import path from "node:path";
 
-export function persistCapabilityArtifact(
+export function capabilityArtifactPath(
   cwd: string,
-  artifact: AgentCapabilityArtifact,
+  artifactHash: string,
 ): string {
-  const dir = path.join(
+  return path.join(
     cwd,
     ".phenix-agent-state",
     "runtime",
     "agent-capabilities",
+    `${artifactHash}.json`,
   );
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+}
 
-  const filePath = path.join(dir, `${artifact.artifactHash}.json`);
-  fs.writeFileSync(filePath, JSON.stringify(artifact, null, 2), {
+export function readCapabilityArtifact(
+  cwd: string,
+  artifactHash: string,
+): AgentCapabilityArtifact {
+  const target = capabilityArtifactPath(cwd, artifactHash);
+  const artifact = JSON.parse(
+    fs.readFileSync(target, "utf-8"),
+  ) as AgentCapabilityArtifact;
+  if (artifact.artifactHash !== artifactHash) {
+    throw new Error(
+      `Capability artifact hash mismatch at ${target}: ` +
+      `expected ${artifactHash}, got ${artifact.artifactHash}`,
+    );
+  }
+  return artifact;
+}
+export function persistCapabilityArtifact(
+  cwd: string,
+  artifact: AgentCapabilityArtifact,
+): string {
+  const filePath = capabilityArtifactPath(cwd, artifact.artifactHash);
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const temporary = `${filePath}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify(artifact, null, 2), {
     encoding: "utf-8",
     mode: 0o600,
   });
-
+  fs.renameSync(temporary, filePath);
   return filePath;
 }

@@ -62,6 +62,7 @@ async function initializeRootWorkflow(input: {
   readonly cwd: string;
   readonly sessionId: string;
   readonly difficulty: Difficulty;
+  readonly modelSet: import("./types.ts").ModelSetId;
   readonly taskProfile: TaskProfile;
   readonly capabilityArtifactHash: string;
 }): Promise<WorkflowRuntimeRecord> {
@@ -74,6 +75,7 @@ async function initializeRootWorkflow(input: {
     sessionId: input.sessionId,
     definitionId: "phenix-default",
     difficulty: input.difficulty,
+    modelSet: input.modelSet,
     taskProfile: input.taskProfile,
     actorRole: "coordinator",
     capabilityArtifactHash: input.capabilityArtifactHash,
@@ -228,6 +230,7 @@ export default async function phenixRouting(
         cwd,
         sessionId,
         difficulty,
+        modelSet: runtime.modelSet,
         taskProfile: profile,
         capabilityArtifactHash: artifact.artifactHash,
       });

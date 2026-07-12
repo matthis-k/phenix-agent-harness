@@ -45,3 +45,16 @@ export function isTransitionPermitted(
   return authority.allowed.includes(transitionId);
 }
 
+/**
+ * Convert a transition ceiling array into a restricted authority.
+ * An empty array produces a deny-all authority.
+ */
+export function authorityFromCeiling(
+  ceiling: readonly WorkflowTransitionId[],
+): TransitionAuthority {
+  return {
+    kind: "restricted",
+    allowed: ceiling,
+  };
+}
+
