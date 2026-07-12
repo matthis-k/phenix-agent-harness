@@ -1,12 +1,18 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
-import type { JsonSchema } from "./contracts.ts";
-import type { AgentKind, AgentRole, TurnBudget, ToolBudget, VerificationCommand } from "./agent-types.ts";
-import type { ResolvedToolConfiguration } from "./tool-policy.ts";
-import type { ResolvedDelegateRoleConfiguration } from "./delegation-policy.ts";
-import type { WorkflowDefinitionId, WorkflowStateId } from "../phenix-workflow/workflow-types.ts";
-import type { TransitionAuthority } from "../phenix-workflow/transition-authority.ts";
+import type { JsonSchema } from "../phenix-contracts/definitions.ts";
 import type { Difficulty } from "../phenix-routing/types.ts";
+import type { TransitionAuthority } from "../phenix-workflow/transition-authority.ts";
+import type { WorkflowDefinitionId, WorkflowStateId } from "../phenix-workflow/workflow-types.ts";
+import type {
+  AgentKind,
+  AgentRole,
+  ToolBudget,
+  TurnBudget,
+  VerificationCommand,
+} from "./agent-types.ts";
+import type { ResolvedDelegateRoleConfiguration } from "./delegation-policy.ts";
+import type { ResolvedToolConfiguration } from "./tool-policy.ts";
 
 declare const contractIdBrand: unique symbol;
 declare const capabilityTokenBrand: unique symbol;
@@ -57,44 +63,41 @@ export interface ContractAssignment {
  * phenix-contracts and from the persisted ContractArtifact envelope.
  */
 export interface ContractExecutionManifest {
+  readonly agent: `phenix.${AgentKind}` | "phenix.base";
 
-    readonly agent:
-      | `phenix.${AgentKind}`
-      | "phenix.base";
+  readonly cwd: string;
+  readonly model?: string;
+  readonly thinking: string;
 
-    readonly cwd: string;
-    readonly model?: string;
-    readonly thinking: string;
+  readonly tools: ResolvedToolConfiguration;
 
-    readonly tools: ResolvedToolConfiguration;
+  readonly skills: readonly string[];
+  readonly extensions: readonly string[];
 
-    readonly skills: readonly string[];
-    readonly extensions: readonly string[];
+  readonly delegation: {
+    readonly roles: ResolvedDelegateRoleConfiguration;
 
-    readonly delegation: {
-      readonly roles: ResolvedDelegateRoleConfiguration;
+    readonly availableRoles: readonly AgentRole[];
 
-      readonly availableRoles: readonly AgentRole[];
+    readonly remainingDepth: number;
+  };
 
-      readonly remainingDepth: number;
-    };
+  readonly workflow: {
+    readonly instanceId: string;
+    readonly actorId: string;
+    readonly parentActorId?: string;
 
-    readonly workflow: {
-      readonly instanceId: string;
-      readonly actorId: string;
-      readonly parentActorId?: string;
+    readonly definitionId: WorkflowDefinitionId;
+    readonly definitionVersion: 1;
 
-      readonly definitionId: WorkflowDefinitionId;
-      readonly definitionVersion: 1;
+    readonly difficulty: Difficulty;
 
-      readonly difficulty: Difficulty;
+    readonly initialState: WorkflowStateId;
 
-      readonly initialState: WorkflowStateId;
+    readonly transitionAuthority: TransitionAuthority;
 
-      readonly transitionAuthority: TransitionAuthority;
-
-      readonly capabilityArtifactHash: string;
-    };
+    readonly capabilityArtifactHash: string;
+  };
 
   readonly timeoutMs: number;
   readonly turnBudget: TurnBudget;
@@ -186,7 +189,11 @@ export interface ContractSubmissionRecord {
     | "runtime-rejected"
     | "verification-rejected"
     | "critic-rejected";
-  readonly issues?: readonly { readonly path: readonly (string | number)[]; readonly message: string; readonly code?: string }[];
+  readonly issues?: readonly {
+    readonly path: readonly (string | number)[];
+    readonly message: string;
+    readonly code?: string;
+  }[];
 }
 
 export interface IssuedContract {
@@ -225,9 +232,7 @@ export function createCapabilityToken(): CapabilityToken {
   return randomBytes(32).toString("base64url") as CapabilityToken;
 }
 
-export function hashCapabilityToken(
-  token: CapabilityToken,
-): string {
+export function hashCapabilityToken(token: CapabilityToken): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
@@ -245,9 +250,7 @@ export type IssueContractInput = {
  * Issue a new contract artifact from a fully resolved specification.
  * No policy derivation, role configuration, or tool resolution happens here.
  */
-export function issueContract(
-  input: IssueContractInput,
-): IssuedContract {
+export function issueContract(input: IssueContractInput): IssuedContract {
   const capabilityToken = createCapabilityToken();
 
   const artifact: ContractArtifact = {
@@ -302,14 +305,20 @@ export function issueContract(
       workflow: {
         instanceId: input.runtime.workflow.instanceId,
         actorId: input.runtime.workflow.actorId,
-        ...(input.runtime.workflow.parentActorId ? { parentActorId: input.runtime.workflow.parentActorId } : {}),
+        ...(input.runtime.workflow.parentActorId
+          ? { parentActorId: input.runtime.workflow.parentActorId }
+          : {}),
         definitionId: input.runtime.workflow.definitionId,
         definitionVersion: input.runtime.workflow.definitionVersion,
         difficulty: input.runtime.workflow.difficulty,
         initialState: input.runtime.workflow.initialState,
-        transitionAuthority: input.runtime.workflow.transitionAuthority.kind === "unrestricted"
-          ? { kind: "unrestricted" as const }
-          : { kind: "restricted" as const, allowed: [...input.runtime.workflow.transitionAuthority.allowed] },
+        transitionAuthority:
+          input.runtime.workflow.transitionAuthority.kind === "unrestricted"
+            ? { kind: "unrestricted" as const }
+            : {
+                kind: "restricted" as const,
+                allowed: [...input.runtime.workflow.transitionAuthority.allowed],
+              },
         capabilityArtifactHash: input.runtime.workflow.capabilityArtifactHash,
       },
       timeoutMs: input.runtime.timeoutMs,
@@ -331,10 +340,7 @@ export function issueContract(
 
 // ── Token verification ──────────────────────────────────────────────────────
 
-function equalHexHashes(
-  left: string,
-  right: string,
-): boolean {
+function equalHexHashes(left: string, right: string): boolean {
   try {
     const leftBytes = Buffer.from(left, "hex");
     const rightBytes = Buffer.from(right, "hex");
@@ -375,22 +381,14 @@ export function authorizeContract(
 
   const candidateHash = hashCapabilityToken(identity.capabilityToken);
 
-  if (
-    !equalHexHashes(
-      candidateHash,
-      artifact.capabilityTokenHash,
-    )
-  ) {
+  if (!equalHexHashes(candidateHash, artifact.capabilityTokenHash)) {
     return {
       ok: false,
       reason: "invalid-capability",
     };
   }
 
-  if (
-    artifact.expiresAt &&
-    now.getTime() >= new Date(artifact.expiresAt).getTime()
-  ) {
+  if (artifact.expiresAt && now.getTime() >= new Date(artifact.expiresAt).getTime()) {
     return {
       ok: false,
       reason: "expired",
@@ -402,39 +400,24 @@ export function authorizeContract(
 
 // ── Parsing helpers ─────────────────────────────────────────────────────────
 
-export function parseContractId(
-  value: unknown,
-): ContractId | undefined {
-  if (
-    typeof value !== "string" ||
-    !/^phx_[0-9a-f-]{36}$/i.test(value)
-  ) {
+export function parseContractId(value: unknown): ContractId | undefined {
+  if (typeof value !== "string" || !/^phx_[0-9a-f-]{36}$/i.test(value)) {
     return undefined;
   }
 
   return value as ContractId;
 }
 
-export function parseRunId(
-  value: unknown,
-): RunId | undefined {
-  if (
-    typeof value !== "string" ||
-    !/^run_[0-9a-f-]{36}$/i.test(value)
-  ) {
+export function parseRunId(value: unknown): RunId | undefined {
+  if (typeof value !== "string" || !/^run_[0-9a-f-]{36}$/i.test(value)) {
     return undefined;
   }
 
   return value as RunId;
 }
 
-export function parseCapabilityToken(
-  value: unknown,
-): CapabilityToken | undefined {
-  if (
-    typeof value !== "string" ||
-    value.length < 32
-  ) {
+export function parseCapabilityToken(value: unknown): CapabilityToken | undefined {
+  if (typeof value !== "string" || value.length < 32) {
     return undefined;
   }
 

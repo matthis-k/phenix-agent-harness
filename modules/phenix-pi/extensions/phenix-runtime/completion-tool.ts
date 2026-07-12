@@ -19,21 +19,19 @@
  */
 
 import { Type } from "typebox";
-
+import { validateSchema } from "../phenix-contracts/validator.ts";
 import type {
   ContractSubmissionChannel,
   ContractSubmissionResult,
   ExecutionIssue,
 } from "./child-session-types.ts";
-import { validateContract } from "../phenix-subagents/contracts.ts";
 
 // ── Completion tool parameters ──────────────────────────────────────────────
 
 const CompleteParams = Type.Object(
   {
     value: Type.Unknown({
-      description:
-        "The complete structured result required by the active Phenix assignment.",
+      description: "The complete structured result required by the active Phenix assignment.",
     }),
   },
   {
@@ -66,10 +64,7 @@ interface AgentToolResult {
   readonly terminate?: boolean;
 }
 
-function errorResult(
-  message: string,
-  details?: Record<string, unknown>,
-): AgentToolResult {
+function errorResult(message: string, details?: Record<string, unknown>): AgentToolResult {
   return {
     content: [{ type: "text", text: message }],
     isError: true,
@@ -94,9 +89,7 @@ function issuesToExecutionIssues(
  * The channel is specific to the child run's contract. No process-global
  * state is consulted.
  */
-export function createCompletionTool(
-  channel: ContractSubmissionChannel,
-): MinimalToolDefinition {
+export function createCompletionTool(channel: ContractSubmissionChannel): MinimalToolDefinition {
   return {
     name: "phenix_complete",
     label: "Complete Phenix Assignment",
@@ -126,25 +119,22 @@ export function createCompletionTool(
       }
 
       if (attempt.state === "cancelled") {
-        return errorResult(
-          "This assignment has been cancelled.",
-          { status: "cancelled", contractId: attempt.contractId },
-        );
+        return errorResult("This assignment has been cancelled.", {
+          status: "cancelled",
+          contractId: attempt.contractId,
+        });
       }
 
       if (attempt.state === "submitted") {
         return errorResult(
           "A submission is already under evaluation. " +
-          "Wait for runtime feedback before submitting again.",
+            "Wait for runtime feedback before submitting again.",
           { status: "already-submitted", contractId: attempt.contractId },
         );
       }
 
       // Validate against the contract's output schema.
-      const validation = validateContract(
-        attempt.outputSchema,
-        params.value,
-      );
+      const validation = validateSchema(attempt.outputSchema, params.value);
 
       if (!validation.ok) {
         const issues = issuesToExecutionIssues(validation.violations);
@@ -166,15 +156,12 @@ export function createCompletionTool(
       const result: ContractSubmissionResult = await channel.submit(params.value);
 
       if (!result.ok) {
-        return errorResult(
-          `Submission could not be recorded: state is ${result.state}.`,
-          {
-            status: "rejected",
-            contractId: attempt.contractId,
-            state: result.state,
-            ...(result.issues ? { issues: result.issues } : {}),
-          },
-        );
+        return errorResult(`Submission could not be recorded: state is ${result.state}.`, {
+          status: "rejected",
+          contractId: attempt.contractId,
+          state: result.state,
+          ...(result.issues ? { issues: result.issues } : {}),
+        });
       }
 
       // terminate: true only after a valid submission is stored.

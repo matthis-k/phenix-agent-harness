@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import {
-  assertOutputSchema,
-  validateContract,
-} from "../extensions/phenix-subagents/contracts.ts";
+import { assertOutputSchema, validateSchema } from "../extensions/phenix-contracts/validator.ts";
 
 describe("Phenix handoff contracts", () => {
   const schema = {
@@ -19,14 +16,11 @@ describe("Phenix handoff contracts", () => {
 
   it("accepts valid structured handoffs", () => {
     assertOutputSchema(schema);
-    assert.deepEqual(
-      validateContract(schema, { summary: "done", files: ["a.ts"] }),
-      { ok: true },
-    );
+    assert.deepEqual(validateSchema(schema, { summary: "done", files: ["a.ts"] }), { ok: true });
   });
 
   it("returns precise validation failures", () => {
-    const result = validateContract(schema, { summary: "" });
+    const result = validateSchema(schema, { summary: "" });
     assert.equal(result.ok, false);
     if (!result.ok && "summary" in result) {
       assert.match(result.summary, /summary|files/);

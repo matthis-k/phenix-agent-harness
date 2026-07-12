@@ -1,3 +1,4 @@
+import type { JsonSchema } from "../phenix-contracts/definitions.ts";
 import type {
   ChildRunId,
   ChildSessionBackendKind,
@@ -6,7 +7,6 @@ import type {
 import type { WorkflowStateId, WorkflowTransitionId } from "../phenix-workflow/workflow-types.ts";
 import type { AgentRole } from "./agent-types.ts";
 import type { ResolvedChildSpec } from "./child-spec.ts";
-import type { JsonSchema } from "./contracts.ts";
 
 // ── Constants (used by index.ts; extracted for visibility) ──────────────────
 

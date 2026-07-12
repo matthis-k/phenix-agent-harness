@@ -16,6 +16,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { ExtensionContext, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { validateSchema } from "../phenix-contracts/validator.ts";
 import type { AgentRole } from "../phenix-kernel/agents.ts";
 import { modelSetId } from "../phenix-kernel/ids.ts";
 import { agentClientRef } from "../phenix-kernel/refs.ts";
@@ -79,7 +80,6 @@ import type {
 } from "./child-spec.ts";
 import { resolveChildSpec } from "./child-spec.ts";
 import { FileContractStore } from "./contract-store.ts";
-import { validateContract } from "./contracts.ts";
 import { createAttemptContract } from "./handle-evaluation.ts";
 import {
   effectiveSessionId,
@@ -1033,7 +1033,7 @@ export class AgentExecutionCoordinator {
         throw new Error("Critic did not submit a structured verdict.");
       }
 
-      const validation = validateContract(CRITIC_OUTPUT_SCHEMA, submitted.value);
+      const validation = validateSchema(CRITIC_OUTPUT_SCHEMA, submitted.value);
       if (!validation.ok) {
         throw new Error(`Critic verdict failed schema validation: ${validation.summary}`);
       }

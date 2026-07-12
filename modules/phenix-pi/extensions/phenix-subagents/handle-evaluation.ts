@@ -1,40 +1,22 @@
 import path from "node:path";
 
+import { validateSchema } from "../phenix-contracts/validator.ts";
+import type { ResolvedChildSpec } from "./child-spec.ts";
 import {
-  validateContract,
-} from "./contracts.ts";
-import {
-  createRunId,
-  issueContract,
   type ContractArtifact,
   type ContractId,
+  createRunId,
+  issueContract,
   type RunId,
 } from "./contract.ts";
-import {
-  FileContractStore,
-} from "./contract-store.ts";
-import {
-  findProjectRoot,
-} from "./handle-store.ts";
-import {
-  ACCEPTANCE_RANK,
-  type Evaluation,
-  type HandleRecord,
-} from "./handle-types.ts";
-import type {
-  ResolvedChildSpec,
-} from "./child-spec.ts";
+import { FileContractStore } from "./contract-store.ts";
+import { findProjectRoot } from "./handle-store.ts";
+import { ACCEPTANCE_RANK, type Evaluation, type HandleRecord } from "./handle-types.ts";
 
 // ── Contract store helper ───────────────────────────────────────────────────
 
 function contractsForCwd(cwd: string): FileContractStore {
-  return new FileContractStore(
-    path.join(
-      findProjectRoot(cwd),
-      ".phenix-agent-state",
-      "contracts",
-    ),
-  );
+  return new FileContractStore(path.join(findProjectRoot(cwd), ".phenix-agent-state", "contracts"));
 }
 
 // ── Contract evaluation ─────────────────────────────────────────────────────
@@ -76,7 +58,7 @@ export async function evaluateContractResult(
 
   // Use the schema from the stored artifact as the authoritative schema.
   const schema = stored.artifact.assignment.outputSchema;
-  const validation = validateContract(schema, stored.result.value);
+  const validation = validateSchema(schema, stored.result.value);
 
   if (!validation.ok) {
     return {
@@ -99,22 +81,20 @@ export async function evaluateContractResult(
 
 // ── Attempt contract creation from resolved spec ────────────────────────────
 
-export async function createAttemptContract(
-  input: {
-    readonly spec: ResolvedChildSpec;
-    readonly assignment: {
-      readonly task: string;
-      readonly requirements: readonly string[];
-      readonly outputSchema: Record<string, unknown>;
-    };
-    readonly identity: {
-      readonly handleId: string;
-      readonly parentHandleId?: string;
-      readonly parentRunId?: RunId;
-    };
-    readonly cwd: string;
-  },
-): Promise<{
+export async function createAttemptContract(input: {
+  readonly spec: ResolvedChildSpec;
+  readonly assignment: {
+    readonly task: string;
+    readonly requirements: readonly string[];
+    readonly outputSchema: Record<string, unknown>;
+  };
+  readonly identity: {
+    readonly handleId: string;
+    readonly parentHandleId?: string;
+    readonly parentRunId?: RunId;
+  };
+  readonly cwd: string;
+}): Promise<{
   readonly artifact: ContractArtifact;
   readonly capabilityToken: string;
   readonly phenixRunId: RunId;
@@ -125,12 +105,8 @@ export async function createAttemptContract(
     identity: {
       runId: phenixRunId,
       handleId: input.identity.handleId,
-      ...(input.identity.parentHandleId
-        ? { parentHandleId: input.identity.parentHandleId }
-        : {}),
-      ...(input.identity.parentRunId
-        ? { parentRunId: input.identity.parentRunId }
-        : {}),
+      ...(input.identity.parentHandleId ? { parentHandleId: input.identity.parentHandleId } : {}),
+      ...(input.identity.parentRunId ? { parentRunId: input.identity.parentRunId } : {}),
       role: input.spec.role,
     },
     assignment: {
@@ -154,7 +130,9 @@ export async function createAttemptContract(
       workflow: {
         instanceId: input.spec.workflow.instanceId,
         actorId: input.spec.workflow.actorId,
-        ...(input.spec.workflow.parentActorId ? { parentActorId: input.spec.workflow.parentActorId } : {}),
+        ...(input.spec.workflow.parentActorId
+          ? { parentActorId: input.spec.workflow.parentActorId }
+          : {}),
         definitionId: input.spec.workflow.definitionId,
         definitionVersion: input.spec.workflow.definitionVersion,
         difficulty: input.spec.workflow.difficulty,

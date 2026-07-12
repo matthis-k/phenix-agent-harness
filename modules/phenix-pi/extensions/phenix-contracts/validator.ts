@@ -35,11 +35,7 @@ function compileSchema(schema: JsonSchema): CompiledSchema {
   return (Compile as (input: unknown) => CompiledSchema)(schema);
 }
 
-function visitSchema(
-  value: unknown,
-  depth: number,
-  state: { nodes: number },
-): void {
+function visitSchema(value: unknown, depth: number, state: { nodes: number }): void {
   if (depth > MAX_SCHEMA_DEPTH) {
     throw new Error(`output schema exceeds maximum depth ${MAX_SCHEMA_DEPTH}`);
   }
@@ -92,15 +88,8 @@ export function assertJsonSchema(value: unknown): asserts value is JsonSchema {
 /** Backward-compatible runtime name retained at schema-input boundaries. */
 export const assertOutputSchema = assertJsonSchema;
 
-function stringPath(error: {
-  instancePath?: string;
-  path?: string;
-}): string {
-  return (
-    (error.instancePath ?? error.path ?? "")
-      .replace(/^\//, "")
-      .replaceAll("/", ".") || "root"
-  );
+function stringPath(error: { instancePath?: string; path?: string }): string {
+  return (error.instancePath ?? error.path ?? "").replace(/^\//, "").replaceAll("/", ".") || "root";
 }
 
 function pathSegments(path: string): readonly (string | number)[] {
@@ -133,10 +122,7 @@ function validationFailure(
 }
 
 /** Validate a runtime value directly against a JSON Schema. */
-export function validateSchema(
-  schema: JsonSchema,
-  value: unknown,
-): SchemaValidation {
+export function validateSchema(schema: JsonSchema, value: unknown): SchemaValidation {
   let compiled: CompiledSchema;
   try {
     assertJsonSchema(schema);

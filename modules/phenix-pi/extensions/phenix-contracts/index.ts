@@ -5,6 +5,17 @@
  * declaration and validation are owned here.
  */
 
+export {
+  ARCHITECTURE_HANDOFF,
+  BASE_HANDOFF,
+  CRITIC_HANDOFF,
+  defaultContracts,
+  FINALIZER_HANDOFF,
+  IMPLEMENTATION_HANDOFF,
+  PLANNER_HANDOFF,
+  SCOUT_HANDOFF,
+  TEST_HANDOFF,
+} from "./default-contracts.ts";
 export type {
   CompiledContract,
   ContractDefinition,
@@ -16,18 +27,6 @@ export type {
   SchemaValidation,
   SchemaViolation,
 } from "./definitions.ts";
-
-export {
-  ARCHITECTURE_HANDOFF,
-  BASE_HANDOFF,
-  CRITIC_HANDOFF,
-  FINALIZER_HANDOFF,
-  IMPLEMENTATION_HANDOFF,
-  PLANNER_HANDOFF,
-  SCOUT_HANDOFF,
-  TEST_HANDOFF,
-  defaultContracts,
-} from "./default-contracts.ts";
 
 export {
   assertJsonSchema,
