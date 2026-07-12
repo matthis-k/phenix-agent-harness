@@ -39,6 +39,7 @@ jobs:
             sed '7,8d' .github/bootstrap/apply-runtime-fix.sh | bash
             git add -A
             git diff --cached --check
+            git diff --cached --binary > candidate.diff
           } > bootstrap-apply.log 2>&1
           status=$?
           cat bootstrap-apply.log
@@ -50,7 +51,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bootstrap-apply-diagnostics
-          path: bootstrap-apply.log
+          path: |
+            bootstrap-apply.log
+            candidate.diff
           if-no-files-found: error
 
       - name: Fail when bootstrap application failed
@@ -74,7 +77,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nix-check-diagnostics
-          path: nix-check.log
+          path: |
+            nix-check.log
+            candidate.diff
           if-no-files-found: error
 
       - name: Fail when repository checks failed
