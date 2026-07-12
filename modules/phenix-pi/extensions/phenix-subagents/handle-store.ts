@@ -82,55 +82,14 @@ export function listRecords(cwd: string, session?: string): HandleRecord[] {
   return records.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 
-export function findByRunId(_cwd: string, _runId: string | undefined): HandleRecord | undefined {
-  // In the Pi-native architecture, run IDs are not stored on producer cycles.
-  // Use findByChildRunId or findById instead.
-  return undefined;
-}
-
-// ── Producer cycle helpers ───────────────────────────────────────────────────
-
-export function latestProducerCycle(record: HandleRecord): ProducerCycleRecord {
-  const cycle = record.producerCycles.at(-1);
-  if (!cycle) throw new Error(`handle ${record.id} has no producer cycles`);
-  return cycle;
-}
-
-export function recordChildSessions(
-  record: HandleRecord,
-  children: readonly {
-    readonly agent?: string;
-    readonly success?: boolean;
-    readonly exitCode?: number | null;
-    readonly sessionFile?: string;
-    readonly transcriptPath?: string;
-  }[],
-): void {
-  latestProducerCycle(record).childSessions = children.map((child, index) => ({
-    role: child.agent ?? (index === 0 ? record.producerSpec.agent : record.criticSpec?.agent ?? `child-${index}`),
-    status: child.success === false || (child.exitCode !== undefined && child.exitCode !== null && child.exitCode !== 0)
-      ? "failed"
-      : "completed",
-    ...(child.sessionFile ? { sessionFile: child.sessionFile } : {}),
-    ...(child.transcriptPath ? { transcriptPath: child.transcriptPath } : {}),
-  }));
-}
-
 // ── Session helpers ──────────────────────────────────────────────────────────
 
 export function sessionId(ctx: ExtensionContext): string {
   return ctx.sessionManager.getSessionId() ?? "ephemeral";
 }
 
-export function currentParentRecord(_cwd: string): HandleRecord | undefined {
-  // In the Pi-native child-session architecture, parent run IDs are not
-  // propagated through environment variables. The coordinator manages
-  // child sessions directly and records their handles.
-  return undefined;
-}
-
 export function effectiveSessionId(ctx: ExtensionContext): string {
-  return currentParentRecord(ctx.cwd)?.sessionId ?? sessionId(ctx);
+  return sessionId(ctx);
 }
 
 // Re-export for convenience
