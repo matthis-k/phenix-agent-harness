@@ -29,15 +29,38 @@ jobs:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Apply reviewed runtime changes
+        id: apply
+        shell: bash
         run: |
-          python3 .github/bootstrap/apply-exact-patch.py \
-            .github/bootstrap/runtime-finalization.patch
-          sed '7,8d' .github/bootstrap/apply-runtime-fix.sh | bash
+          set +e
+          {
+            python3 .github/bootstrap/apply-exact-patch.py \
+              .github/bootstrap/runtime-finalization.patch
+            sed '7,8d' .github/bootstrap/apply-runtime-fix.sh | bash
+          } > bootstrap-apply.log 2>&1
+          status=$?
+          cat bootstrap-apply.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload bootstrap diagnostics
+        if: steps.apply.outputs.status != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-apply-diagnostics
+          path: bootstrap-apply.log
+          if-no-files-found: error
+
+      - name: Fail when bootstrap application failed
+        if: steps.apply.outputs.status != '0'
+        run: exit 1
 
       - name: Run complete repository checks
+        if: steps.apply.outputs.status == '0'
         run: nix flake check --print-build-logs
 
       - name: Commit verified result
+        if: steps.apply.outputs.status == '0'
         run: |
           rm -rf .github/bootstrap .github/workflows/bootstrap-runtime-fix.yml
           git config user.name "github-actions[bot]"
