@@ -1,17 +1,37 @@
-import type { JsonSchema } from "./contracts.ts";
-import type { AgentRole } from "./agent-types.ts";
-import type { ResolvedChildSpec } from "./child-spec.ts";
-import type { WorkflowTransitionId, WorkflowStateId } from "../phenix-workflow/workflow-types.ts";
 import type {
   ChildRunId,
   ChildSessionBackendKind,
   SerializedError,
 } from "../phenix-runtime/child-session-types.ts";
+import type { WorkflowStateId, WorkflowTransitionId } from "../phenix-workflow/workflow-types.ts";
+import type { AgentRole } from "./agent-types.ts";
+import type { ResolvedChildSpec } from "./child-spec.ts";
+import type { JsonSchema } from "./contracts.ts";
 
 // ── Constants (used by index.ts; extracted for visibility) ──────────────────
 
 export const HANDLE_VERSION = 4;
-export const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]);
+
+/** Persisted lifecycle states for a delegated handle. */
+export type HandleStatus =
+  | "starting"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "orphaned";
+
+/** States after which neither producer execution nor workflow settlement may restart. */
+export const TERMINAL_STATES: ReadonlySet<HandleStatus> = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+  "orphaned",
+]);
+
+export function isTerminalHandleStatus(status: HandleStatus): boolean {
+  return TERMINAL_STATES.has(status);
+}
 
 // ── Critic contract schema ──────────────────────────────────────────────────
 
@@ -61,13 +81,7 @@ export interface ProducerCycleRecord {
   endedAt?: string;
 
   contractRevision: number;
-  status:
-    | "running"
-    | "submitted"
-    | "rejected"
-    | "accepted"
-    | "failed"
-    | "cancelled";
+  status: "running" | "submitted" | "rejected" | "accepted" | "failed" | "cancelled";
 
   feedback?: string;
   verification?: VerificationSummary;
@@ -150,7 +164,7 @@ export interface HandleRecord {
 
   readonly createdAt: string;
   updatedAt: string;
-  status: "starting" | "running" | "completed" | "failed" | "cancelled" | "orphaned";
+  status: HandleStatus;
   value?: unknown;
   errors?: string[];
 

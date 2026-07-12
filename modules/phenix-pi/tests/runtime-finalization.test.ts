@@ -1,30 +1,31 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { describe, it } from "node:test";
 
 import {
-  childRunId,
-  ChildRuntimeError,
   type ChildRun,
+  ChildRuntimeError,
   type ContractSubmissionChannel,
+  childRunId,
 } from "../extensions/phenix-runtime/child-session-types.ts";
 import { executeProducerCycles } from "../extensions/phenix-subagents/attempt-runner.ts";
 import type { HandleRecord } from "../extensions/phenix-subagents/handle-types.ts";
+import { isTerminalHandleStatus } from "../extensions/phenix-subagents/handle-types.ts";
+import {
+  finalizeHandleWorkflow,
+  initialWorkflowStateForRole,
+} from "../extensions/phenix-workflow/workflow-runtime.ts";
 import {
   beginTransition,
   createWorkflowRecord,
   readWorkflowRecord,
 } from "../extensions/phenix-workflow/workflow-store.ts";
-import { finalizeHandleWorkflow } from "../extensions/phenix-workflow/workflow-runtime.ts";
 
 function temporaryDirectory(prefix: string): string {
-  const directory = path.join(
-    os.tmpdir(),
-    `${prefix}-${randomUUID().slice(0, 8)}`,
-  );
+  const directory = path.join(os.tmpdir(), `${prefix}-${randomUUID().slice(0, 8)}`);
   fs.mkdirSync(directory, { recursive: true });
   return directory;
 }
@@ -103,9 +104,7 @@ describe("runtime cancellation ownership", () => {
       maximumProducerCycles: 2,
       completionGraceRemaining: 0,
       verify: async () => {
-        controller.abort(
-          new ChildRuntimeError("TIMEOUT", "verification deadline exceeded"),
-        );
+        controller.abort(new ChildRuntimeError("TIMEOUT", "verification deadline exceeded"));
         return {
           ok: false,
           issues: [{ path: ["verification"], message: "cancelled" }],
@@ -177,10 +176,7 @@ describe("workflow handle finalization", () => {
     } as never;
 
     assert.equal(finalizeHandleWorkflow({ cwd, handle }), undefined);
-    assert.equal(
-      readWorkflowRecord(cwd, params.instanceId, params.actorId)?.active.length,
-      1,
-    );
+    assert.equal(readWorkflowRecord(cwd, params.instanceId, params.actorId)?.active.length, 1);
 
     (handle as { status: string }).status = "completed";
     const finalized = finalizeHandleWorkflow({ cwd, handle });
@@ -214,5 +210,66 @@ describe("workflow handle finalization", () => {
       () => finalizeHandleWorkflow({ cwd, handle }),
       /Workflow record not found while finalizing handle/,
     );
+  });
+});
+
+describe("canonical runtime lifecycle policy", () => {
+  it("uses executing as the base child initial state", () => {
+    assert.equal(initialWorkflowStateForRole(null), "executing");
+  });
+
+  it("recognizes every persisted terminal handle state", () => {
+    for (const status of ["completed", "failed", "cancelled", "orphaned"] as const) {
+      assert.equal(isTerminalHandleStatus(status), true);
+    }
+    assert.equal(isTerminalHandleStatus("running"), false);
+  });
+
+  it("rejects a cancelled handle and clears its active workflow transition", () => {
+    const cwd = temporaryDirectory("phenix-workflow-cancelled");
+    const params = {
+      instanceId: "instance-cancelled",
+      actorId: "actor-cancelled",
+      sessionId: "session-cancelled",
+      definitionId: "phenix-default" as const,
+      difficulty: "D0" as const,
+      taskProfile: {
+        complexity: 0,
+        uncertainty: 0,
+        consequence: 0,
+        breadth: 0,
+        coupling: 0,
+        novelty: 0,
+      },
+      actorRole: "coordinator" as const,
+      capabilityArtifactHash: "0".repeat(64),
+    };
+    const workflow = createWorkflowRecord(cwd, params);
+    const begun = beginTransition(cwd, workflow, {
+      expectedRevision: workflow.revision,
+      transitionId: "d0.execute-base" as never,
+      handleId: "handle-cancelled",
+    });
+    const handle = {
+      id: "handle-cancelled",
+      sessionId: params.sessionId,
+      status: "cancelled",
+      workflowBinding: {
+        instanceId: params.instanceId,
+        actorId: params.actorId,
+        transitionExecutionId: begun.executionId,
+        transitionId: "d0.execute-base",
+        sourceState: "classified",
+        sourceRevision: 0,
+        acceptedState: "completed",
+        rejectedState: "failed",
+      },
+    } as never;
+
+    const finalized = finalizeHandleWorkflow({ cwd, handle });
+    assert.ok(finalized);
+    assert.equal(finalized.state, "failed");
+    assert.equal(finalized.active.length, 0);
+    assert.equal(finalized.completed.at(-1)?.accepted, false);
   });
 });

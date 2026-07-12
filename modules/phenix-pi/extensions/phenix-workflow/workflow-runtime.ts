@@ -1,36 +1,34 @@
 import { randomUUID } from "node:crypto";
 
+import { DEFAULT_MAXIMUM_DELEGATION_DEPTH } from "../phenix-composition/runtime-policy.ts";
 import type { AgentRole } from "../phenix-kernel/agents.ts";
 import type { AgentCapabilityArtifact } from "./agent-capabilities.ts";
 import { readCapabilityArtifact } from "./agent-capabilities.ts";
-import { conditionSatisfied } from "./workflow-conditions.ts";
-import { PHENIX_DEFAULT_WORKFLOW } from "./workflow-definitions.ts";
-import {
-  factsFromTransitionResult,
-  transitionMatchesDifficulty,
-} from "./workflow-reducer.ts";
-import {
-  acceptTransition,
-  mutateWorkflowRecord,
-  readWorkflowRecord,
-  rejectTransition,
-  now,
-} from "./workflow-store.ts";
-import type {
-  DelegationAuthority,
-  WorkflowDefinition,
-  WorkflowRuntimeRecord,
-  WorkflowStateId,
-  WorkflowContractArtifact,
-  WorkflowHandleRecord,
-  WorkflowHandleStorePort,
-} from "./workflow-types.ts";
-import { roleForAgentClient } from "./workflow-types.ts";
-import type { TransitionAuthority } from "./transition-authority.ts";
 import {
   requireSessionCapabilityArtifact,
   requireSessionWorkflowData,
 } from "./session-registry.ts";
+import type { TransitionAuthority } from "./transition-authority.ts";
+import { conditionSatisfied } from "./workflow-conditions.ts";
+import { PHENIX_DEFAULT_WORKFLOW } from "./workflow-definitions.ts";
+import { factsFromTransitionResult, transitionMatchesDifficulty } from "./workflow-reducer.ts";
+import {
+  acceptTransition,
+  mutateWorkflowRecord,
+  now,
+  readWorkflowRecord,
+  rejectTransition,
+} from "./workflow-store.ts";
+import type {
+  DelegationAuthority,
+  WorkflowContractArtifact,
+  WorkflowDefinition,
+  WorkflowHandleRecord,
+  WorkflowHandleStorePort,
+  WorkflowRuntimeRecord,
+  WorkflowStateId,
+} from "./workflow-types.ts";
+import { roleForAgentClient } from "./workflow-types.ts";
 
 export interface WorkflowRuntimeDependencies {
   readonly definition: WorkflowDefinition;
@@ -43,8 +41,6 @@ export interface WorkflowRuntimeDependencies {
 export type WorkflowActorSource =
   | { readonly kind: "root"; readonly sessionId: string }
   | { readonly kind: "child"; readonly contract: WorkflowContractArtifact };
-
-const ROOT_MAXIMUM_DELEGATION_DEPTH = 4;
 
 export function buildWorkflowRuntimeDependencies(input: {
   readonly cwd: string;
@@ -64,11 +60,7 @@ function buildRootDependencies(
 ): WorkflowRuntimeDependencies {
   const workflowData = requireSessionWorkflowData(sessionId);
   const capabilities = requireSessionCapabilityArtifact(sessionId);
-  const record = readWorkflowRecord(
-    cwd,
-    workflowData.instanceId,
-    workflowData.actorId,
-  );
+  const record = readWorkflowRecord(cwd, workflowData.instanceId, workflowData.actorId);
   if (!record) {
     throw new Error(
       `Root workflow record not found for ${workflowData.instanceId}/${workflowData.actorId}`,
@@ -88,15 +80,17 @@ function buildRootDependencies(
       effective: [...availableRoles],
     },
     availableRoles: [...availableRoles],
-    remainingDepth: ROOT_MAXIMUM_DELEGATION_DEPTH,
+    remainingDepth: DEFAULT_MAXIMUM_DELEGATION_DEPTH,
     transitionAuthority: { kind: "unrestricted" },
   };
-  const activeHandles = handleStore.listRecords(cwd, sessionId).filter(
-    (handle) =>
-      handle.status === "running" &&
-      handle.workflowBinding?.instanceId === record.instanceId &&
-      handle.workflowBinding.actorId === record.actorId,
-  );
+  const activeHandles = handleStore
+    .listRecords(cwd, sessionId)
+    .filter(
+      (handle) =>
+        handle.status === "running" &&
+        handle.workflowBinding?.instanceId === record.instanceId &&
+        handle.workflowBinding.actorId === record.actorId,
+    );
   return {
     definition: PHENIX_DEFAULT_WORKFLOW,
     record,
@@ -118,22 +112,21 @@ function buildChildDependencies(
       `Child workflow record not found for ${workflow.instanceId}/${workflow.actorId}`,
     );
   }
-  const capabilities = readCapabilityArtifact(
-    cwd,
-    workflow.capabilityArtifactHash,
-  );
+  const capabilities = readCapabilityArtifact(cwd, workflow.capabilityArtifactHash);
   const authority: DelegationAuthority = {
     roles: structuredClone(contract.runtime.delegation.roles),
     availableRoles: [...contract.runtime.delegation.availableRoles],
     remainingDepth: contract.runtime.delegation.remainingDepth,
     transitionAuthority: structuredClone(workflow.transitionAuthority),
   };
-  const activeHandles = handleStore.listRecords(cwd, record.sessionId).filter(
-    (handle) =>
-      handle.status === "running" &&
-      handle.workflowBinding?.instanceId === record.instanceId &&
-      handle.workflowBinding.actorId === record.actorId,
-  );
+  const activeHandles = handleStore
+    .listRecords(cwd, record.sessionId)
+    .filter(
+      (handle) =>
+        handle.status === "running" &&
+        handle.workflowBinding?.instanceId === record.instanceId &&
+        handle.workflowBinding.actorId === record.actorId,
+    );
   return {
     definition: PHENIX_DEFAULT_WORKFLOW,
     record,
@@ -176,7 +169,9 @@ export function transitionAuthorityForChild(input: {
     .filter((transition) => transition.scope !== "root")
     .filter((transition) => transition.actorRoles.includes(actorRole as never))
     .filter((transition) => transition.from.includes(input.initialState))
-    .filter((transition) => input.authorizedRoles.includes(roleForAgentClient(transition.agentClient)))
+    .filter((transition) =>
+      input.authorizedRoles.includes(roleForAgentClient(transition.agentClient)),
+    )
     .map((transition) => transition.id);
   return { kind: "restricted", allowed };
 }
@@ -186,12 +181,8 @@ function conditionContext(record: WorkflowRuntimeRecord) {
     difficulty: record.difficulty,
     profile: record.taskProfile,
     facts: record.facts,
-    completedTransitionIds: new Set(
-      record.completed.map((item) => item.transitionId),
-    ),
-    activeTransitionIds: new Set(
-      record.active.map((item) => item.transitionId),
-    ),
+    completedTransitionIds: new Set(record.completed.map((item) => item.transitionId)),
+    activeTransitionIds: new Set(record.active.map((item) => item.transitionId)),
   };
 }
 
@@ -246,18 +237,10 @@ export function finalizeHandleWorkflow(input: {
   readonly handle: WorkflowHandleRecord;
 }): WorkflowRuntimeRecord | undefined {
   const binding = input.handle.workflowBinding;
-  if (
-    !binding ||
-    input.handle.status === "starting" ||
-    input.handle.status === "running"
-  ) {
+  if (!binding || input.handle.status === "starting" || input.handle.status === "running") {
     return undefined;
   }
-  let record = readWorkflowRecord(
-    input.cwd,
-    binding.instanceId,
-    binding.actorId,
-  );
+  let record = readWorkflowRecord(input.cwd, binding.instanceId, binding.actorId);
   if (!record) {
     throw new Error(
       `Workflow record not found while finalizing handle ${input.handle.id}: ` +
@@ -265,9 +248,7 @@ export function finalizeHandleWorkflow(input: {
     );
   }
   if (
-    record.completed.some(
-      (completed) => completed.executionId === binding.transitionExecutionId,
-    )
+    record.completed.some((completed) => completed.executionId === binding.transitionExecutionId)
   ) {
     return applyAutomaticTransitions({
       cwd: input.cwd,
@@ -278,7 +259,7 @@ export function finalizeHandleWorkflow(input: {
   const transition = PHENIX_DEFAULT_WORKFLOW.transitions.find(
     (item) => item.id === binding.transitionId,
   );
-  if (!transition || transition.kind !== "delegate") {
+  if (transition?.kind !== "delegate") {
     throw new Error(`Unknown delegate transition ${binding.transitionId}`);
   }
   if (
