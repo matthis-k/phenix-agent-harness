@@ -8,7 +8,7 @@ mapfile -d '' -t staged_files < <(
   git diff --cached --name-only --diff-filter=ACMR -z
 )
 
-if (( ${#staged_files[@]} == 0 )); then
+if ((${#staged_files[@]} == 0)); then
   exit 0
 fi
 
@@ -19,7 +19,7 @@ for file in "${staged_files[@]}"; do
   fi
 done
 
-if (( ${#partially_staged[@]} > 0 )); then
+if ((${#partially_staged[@]} > 0)); then
   printf '%s\n' \
     'Cannot safely apply automatic fixes to partially staged files.' \
     'Stage or stash their remaining changes first:' >&2
@@ -53,7 +53,7 @@ for file in "${staged_files[@]}"; do
   esac
 done
 
-if (( ${#biome_files[@]} > 0 )); then
+if ((${#biome_files[@]} > 0)); then
   biome check \
     --write \
     --no-errors-on-unmatched \
@@ -66,7 +66,7 @@ for file in "${nix_files[@]}"; do
   nixfmt "$file"
 done
 
-if (( ${#shell_files[@]} > 0 )); then
+if ((${#shell_files[@]} > 0)); then
   shfmt -w -i 2 -ci "${shell_files[@]}"
 fi
 
