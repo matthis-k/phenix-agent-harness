@@ -18,7 +18,7 @@ case "$mode" in
       .#phenix-repository-checks
     ;;
   range)
-    if (( $# != 3 )); then
+    if (($# != 3)); then
       printf 'usage: %s range BASE HEAD\n' "$0" >&2
       exit 2
     fi
