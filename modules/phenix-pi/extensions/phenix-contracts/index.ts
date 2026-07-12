@@ -1,36 +1,36 @@
 /**
- * phenix-contracts — index
+ * phenix-contracts — public contract declaration and validation API
  *
- * Static contract definitions, validation, and registry.
- * Separate from runtime contract instances (phenix-subagents/contract.ts).
+ * Runtime contract instances remain in phenix-subagents/contract.ts; schema
+ * declaration and validation are owned here.
  */
 
-// Definitions
-export type {
-  JsonSchema,
-  ContractDefinition,
-  ContractValidationIssue,
-  ContractValidationSuccess,
-  ContractValidationFailure,
-  ContractValidationResult,
-  CompiledContract,
-} from "./definitions.ts";
-
-// Default contracts
 export {
-  SCOUT_HANDOFF,
-  PLANNER_HANDOFF,
   ARCHITECTURE_HANDOFF,
-  IMPLEMENTATION_HANDOFF,
-  TEST_HANDOFF,
-  FINALIZER_HANDOFF,
-  CRITIC_HANDOFF,
   BASE_HANDOFF,
+  CRITIC_HANDOFF,
   defaultContracts,
+  FINALIZER_HANDOFF,
+  IMPLEMENTATION_HANDOFF,
+  PLANNER_HANDOFF,
+  SCOUT_HANDOFF,
+  TEST_HANDOFF,
 } from "./default-contracts.ts";
 
-// Registry
-export { ContractRegistry } from "./registry.ts";
+export type {
+  ContractDefinition,
+  ContractValidationFailure,
+  ContractValidationIssue,
+  ContractValidationResult,
+  ContractValidationSuccess,
+  JsonSchema,
+  SchemaValidation,
+  SchemaViolation,
+} from "./definitions.ts";
 
-// Validator
-export { validateContract } from "./validator.ts";
+export {
+  assertJsonSchema,
+  assertOutputSchema,
+  validateContract,
+  validateSchema,
+} from "./validator.ts";

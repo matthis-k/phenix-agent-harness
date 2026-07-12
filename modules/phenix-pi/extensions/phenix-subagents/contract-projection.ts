@@ -1,7 +1,7 @@
-import type { ContractArtifact } from "./contract.ts";
-import type { AgentRole } from "./agent-types.ts";
-import type { JsonSchema } from "./contracts.ts";
+import type { JsonSchema } from "../phenix-contracts/definitions.ts";
 import type { ModelWorkflowProjection } from "../phenix-workflow/workflow-projection.ts";
+import type { AgentRole } from "./agent-types.ts";
+import type { ContractArtifact } from "./contract.ts";
 
 // ── Model-facing projection ─────────────────────────────────────────────────
 
@@ -48,17 +48,14 @@ export function deriveProjection(
  * Format the model-facing projection as a system-prompt section.
  * Contains only safe task-facing information.
  */
-export function formatProjection(
-  projection: ModelContractProjection,
-): string {
+export function formatProjection(projection: ModelContractProjection): string {
   const lines: string[] = [];
 
   lines.push("## Phenix child assignment");
   lines.push("");
 
   // Role
-  const roleDisplay =
-    projection.role === null ? "none (base)" : projection.role;
+  const roleDisplay = projection.role === null ? "none (base)" : projection.role;
   lines.push(`Role: ${roleDisplay}`);
   lines.push("");
 
@@ -101,18 +98,12 @@ export function formatProjection(
 
   // Required result schema
   lines.push("Required result schema:");
-  lines.push(
-    JSON.stringify(projection.outputSchema, null, 2),
-  );
+  lines.push(JSON.stringify(projection.outputSchema, null, 2));
   lines.push("");
 
   // Completion instruction
-  lines.push(
-    "Complete the assignment by calling:",
-  );
-  lines.push(
-    "phenix_complete({ value: <schema-conforming value> })",
-  );
+  lines.push("Complete the assignment by calling:");
+  lines.push("phenix_complete({ value: <schema-conforming value> })");
   lines.push("");
   lines.push(
     "The value will be validated against the output schema. If validation fails, correct the reported fields and call phenix_complete again.",

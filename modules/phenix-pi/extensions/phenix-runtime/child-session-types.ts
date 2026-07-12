@@ -9,14 +9,13 @@
  * on AgentSession, RpcClient, or other Pi implementation types.
  */
 
+import type { JsonSchema } from "../phenix-contracts/definitions.ts";
 import type { AgentRole } from "../phenix-kernel/agents.ts";
 import type { WorkflowExecutionBinding } from "../phenix-kernel/execution.ts";
 import type { AgentClientRef } from "../phenix-kernel/refs.ts";
 import type { ThinkingLevel } from "../phenix-kernel/task.ts";
 import type { ToolBudget, TurnBudget } from "../phenix-subagents/agent-types.ts";
-
 import type { ContractArtifact } from "../phenix-subagents/contract.ts";
-import type { JsonSchema } from "../phenix-subagents/contracts.ts";
 import type { ModelWorkflowProjection } from "../phenix-workflow/workflow-projection.ts";
 
 // ── Branded Phenix child run identity ───────────────────────────────────────

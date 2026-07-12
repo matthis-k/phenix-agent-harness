@@ -8,29 +8,28 @@
  * Pi child session.
  */
 
-import type {
-  HandleRecord,
-  VerificationSummary,
-  ProducerCycleRecord,
-} from "./handle-types.ts";
-import {
-  now,
-  writeRecord,
-} from "./handle-store.ts";
-import type { ContractArtifact } from "./contract.ts";
+import { validateSchema } from "../phenix-contracts/validator.ts";
+import { agentClientRef } from "../phenix-kernel/refs.ts";
 import type {
   ChildCycleOutcome,
   ChildRun,
-  ChildSessionSpec,
   ChildSessionBackend,
+  ChildSessionSpec,
   ContractSubmissionChannel,
 } from "../phenix-runtime/child-session-types.ts";
 import {
-  childRunId,
   ChildRuntimeError,
+  childRunId,
   serializeError,
 } from "../phenix-runtime/child-session-types.ts";
-import { validateContract } from "./contracts.ts";
+import type { ContractArtifact } from "./contract.ts";
+import { now, writeRecord } from "./handle-store.ts";
+import type {
+  CriticFinding,
+  HandleRecord,
+  ProducerCycleRecord,
+  VerificationSummary,
+} from "./handle-types.ts";
 
 // ── Attempt run result ──────────────────────────────────────────────────────
 
@@ -53,13 +52,15 @@ export interface VerificationInput {
 
 export interface VerificationResult {
   readonly ok: boolean;
-  readonly issues: readonly { readonly path: readonly (string | number)[]; readonly message: string; readonly code?: string }[];
+  readonly issues: readonly {
+    readonly path: readonly (string | number)[];
+    readonly message: string;
+    readonly code?: string;
+  }[];
   readonly summary: VerificationSummary;
 }
 
-export type VerificationFn = (
-  input: VerificationInput,
-) => Promise<VerificationResult>;
+export type VerificationFn = (input: VerificationInput) => Promise<VerificationResult>;
 
 // ── Critic factory type ─────────────────────────────────────────────────────
 
@@ -74,7 +75,7 @@ export interface CriticRunInput {
 export interface CriticRunResult {
   readonly verdict: "approve" | "reject";
   readonly summary: string;
-  readonly findings: readonly { readonly severity: string; readonly description: string; readonly evidence: string; readonly requirement?: string }[];
+  readonly findings: readonly CriticFinding[];
   readonly missingRequirements: readonly string[];
 }
 
@@ -186,17 +187,11 @@ export async function executeProducerCycles(
   let completionGrace = completionGraceRemaining;
   let pendingOutcome: ChildCycleOutcome | undefined;
 
-  const finishAbortedCycle = (
-    cycleRecord: ProducerCycleRecord,
-  ): AttemptRunResult | undefined => {
+  const finishAbortedCycle = (cycleRecord: ProducerCycleRecord): AttemptRunResult | undefined => {
     if (!signal.aborted) return undefined;
 
     const serialized = serializeError(
-      signal.reason ??
-        new ChildRuntimeError(
-          "ABORTED",
-          "Producer execution was cancelled.",
-        ),
+      signal.reason ?? new ChildRuntimeError("ABORTED", "Producer execution was cancelled."),
     );
     const cancelled = serialized.code === "ABORTED";
     cycleRecord.endedAt = now();
@@ -284,10 +279,7 @@ export async function executeProducerCycles(
         if (cycle >= maximumProducerCycles) break;
 
         try {
-          pendingOutcome = await run.continue(
-            buildMissingCompletionFeedback(record),
-            signal,
-          );
+          pendingOutcome = await run.continue(buildMissingCompletionFeedback(record), signal);
         } catch (error) {
           const aborted = finishAbortedCycle(cycleRecord);
           if (aborted) return aborted;
@@ -303,7 +295,10 @@ export async function executeProducerCycles(
       // No grace remaining — fail with CONTRACT_NOT_SUBMITTED.
       cycleRecord.endedAt = now();
       cycleRecord.status = "failed";
-      cycleRecord.error = { code: "CONTRACT_NOT_SUBMITTED", message: "Child did not submit output." };
+      cycleRecord.error = {
+        code: "CONTRACT_NOT_SUBMITTED",
+        message: "Child did not submit output.",
+      };
       record.status = "failed";
       record.errors = ["CONTRACT_NOT_SUBMITTED: Child did not call phenix_complete."];
       writeRecord(cwd, record);
@@ -316,10 +311,7 @@ export async function executeProducerCycles(
     }
 
     // Validate the submitted output against the schema.
-    const validation = validateContract(
-      contractArtifact.assignment.outputSchema,
-      submitted.value,
-    );
+    const validation = validateSchema(contractArtifact.assignment.outputSchema, submitted.value);
 
     if (!validation.ok) {
       const issues = validation.violations.map((v) => ({
@@ -341,10 +333,7 @@ export async function executeProducerCycles(
       if (cycle >= maximumProducerCycles) break;
 
       try {
-        pendingOutcome = await run.continue(
-          buildValidationRepairFeedback(issues),
-          signal,
-        );
+        pendingOutcome = await run.continue(buildValidationRepairFeedback(issues), signal);
       } catch (error) {
         record.status = "failed";
         record.errors = [error instanceof Error ? error.message : String(error)];
@@ -457,7 +446,7 @@ export async function executeProducerCycles(
       cycleRecord.critic = {
         verdict: criticResult.verdict,
         summary: criticResult.summary,
-        findings: criticResult.findings as any,
+        findings: criticResult.findings,
         missingRequirements: criticResult.missingRequirements,
       };
 
@@ -478,10 +467,7 @@ export async function executeProducerCycles(
         if (cycle >= maximumProducerCycles) break;
 
         try {
-          pendingOutcome = await run.continue(
-            buildCriticRepairFeedback(criticResult),
-            signal,
-          );
+          pendingOutcome = await run.continue(buildCriticRepairFeedback(criticResult), signal);
         } catch (error) {
           const aborted = finishAbortedCycle(cycleRecord);
           if (aborted) return aborted;
@@ -514,7 +500,7 @@ export async function executeProducerCycles(
       record.review = {
         verdict: cycleRecord.critic.verdict,
         summary: cycleRecord.critic.summary,
-        findings: cycleRecord.critic.findings as any,
+        findings: cycleRecord.critic.findings,
         missingRequirements: cycleRecord.critic.missingRequirements,
       };
     }
@@ -557,10 +543,7 @@ export interface PrepareChildSessionSpecInput {
 export function prepareChildSessionSpec(
   input: PrepareChildSessionSpecInput,
   model: { readonly provider: string; readonly id: string },
-): Omit<
-  ChildSessionSpec,
-  "workflowProjection" | "contractChannel" | "parentContext"
-> {
+): Omit<ChildSessionSpec, "workflowProjection" | "contractChannel" | "parentContext"> {
   const { record, contractArtifact, cwd } = input;
   const spec = record.producerSpec;
   const id = childRunId(`child_${record.id}`);
@@ -571,10 +554,7 @@ export function prepareChildSessionSpec(
     ...(input.parentId ? { parentId: childRunId(input.parentId) } : {}),
     rootId,
     handleId: record.id,
-    agentClient: {
-      id: spec.agent.replace("phenix.", "") as any,
-      kind: "agent" as any,
-    },
+    agentClient: agentClientRef(spec.agent.replace(/^phenix\./, "")),
     role: spec.role,
     cwd,
     model,

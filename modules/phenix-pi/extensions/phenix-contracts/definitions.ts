@@ -1,34 +1,46 @@
 /**
- * phenix-contracts — static contract definitions
+ * phenix-contracts — contract data model
  *
- * A ContractDefinition is a passive declaration of a structured handoff type.
- * It is distinct from a runtime ContractInstance (see ../phenix-subagents/contract.ts).
+ * Static ContractDefinition values describe reusable handoff schemas. Runtime
+ * contract instances reference the same JsonSchema type but carry execution
+ * identity, policy, and persistence state in phenix-subagents/contract.ts.
  */
 
 import type { ContractDefinitionId } from "../phenix-kernel/ids.ts";
 
-// ── JSON Schema (compatible with TypeBox-compatible JSON Schema) ──────────
-
+/** TypeBox-compatible JSON Schema object accepted at contract boundaries. */
 export type JsonSchema = Record<string, unknown>;
 
-// ── Contract definition ────────────────────────────────────────────────────
-
-export interface ContractDefinition<T = unknown> {
+/** Passive declaration of a reusable structured handoff. */
+export interface ContractDefinition {
   readonly id: ContractDefinitionId;
   readonly description: string;
   readonly schema: JsonSchema;
 }
 
-// ── Validation result ──────────────────────────────────────────────────────
-
+/** Canonical schema validation issue used by static contract consumers. */
 export interface ContractValidationIssue {
   readonly path: readonly (string | number)[];
   readonly message: string;
 }
 
-export interface ContractValidationSuccess<T> {
+/** String-path projection used by model-facing runtime diagnostics. */
+export interface SchemaViolation {
+  readonly path: string;
+  readonly message: string;
+}
+
+export type SchemaValidation =
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly summary: string;
+      readonly violations: readonly SchemaViolation[];
+    };
+
+export interface ContractValidationSuccess {
   readonly ok: true;
-  readonly value: T;
+  readonly value: unknown;
 }
 
 export interface ContractValidationFailure {
@@ -37,13 +49,4 @@ export interface ContractValidationFailure {
   readonly summary: string;
 }
 
-export type ContractValidationResult<T = unknown> =
-  | ContractValidationSuccess<T>
-  | ContractValidationFailure;
-
-// ── Compiled contract ──────────────────────────────────────────────────────
-
-export interface CompiledContract<T = unknown> {
-  readonly definition: ContractDefinition<T>;
-  validate(value: unknown): ContractValidationResult<T>;
-}
+export type ContractValidationResult = ContractValidationSuccess | ContractValidationFailure;

@@ -20,20 +20,23 @@
 
 import { Type } from "typebox";
 
+import { validateSchema } from "../phenix-contracts/validator.ts";
 import type {
   ContractSubmissionChannel,
   ContractSubmissionResult,
   ExecutionIssue,
 } from "./child-session-types.ts";
-import { validateContract } from "../phenix-subagents/contracts.ts";
 
 // ── Completion tool parameters ──────────────────────────────────────────────
+
+interface CompleteToolParams {
+  readonly value: unknown;
+}
 
 const CompleteParams = Type.Object(
   {
     value: Type.Unknown({
-      description:
-        "The complete structured result required by the active Phenix assignment.",
+      description: "The complete structured result required by the active Phenix assignment.",
     }),
   },
   {
@@ -50,14 +53,14 @@ export interface MinimalToolDefinition {
   readonly parameters: unknown;
   execute(
     toolCallId: string,
-    params: any,
+    params: CompleteToolParams,
     signal: AbortSignal | undefined,
     onUpdate: unknown,
     ctx: unknown,
   ): Promise<AgentToolResult>;
 }
 
-// ── AgentToolResult (structural — avoids Pi import) ──────────────────────────
+// ── AgentToolResult (structural — avoids Pi import) ─────────────────────────
 
 interface AgentToolResult {
   readonly content: readonly { readonly type: string; readonly text: string }[];
@@ -66,10 +69,7 @@ interface AgentToolResult {
   readonly terminate?: boolean;
 }
 
-function errorResult(
-  message: string,
-  details?: Record<string, unknown>,
-): AgentToolResult {
+function errorResult(message: string, details?: Record<string, unknown>): AgentToolResult {
   return {
     content: [{ type: "text", text: message }],
     isError: true,
@@ -80,9 +80,9 @@ function errorResult(
 function issuesToExecutionIssues(
   violations: readonly { readonly path: string; readonly message: string }[],
 ): readonly ExecutionIssue[] {
-  return violations.map((v) => ({
-    path: v.path.split("."),
-    message: v.message,
+  return violations.map((violation) => ({
+    path: violation.path.split("."),
+    message: violation.message,
   }));
 }
 
@@ -94,9 +94,7 @@ function issuesToExecutionIssues(
  * The channel is specific to the child run's contract. No process-global
  * state is consulted.
  */
-export function createCompletionTool(
-  channel: ContractSubmissionChannel,
-): MinimalToolDefinition {
+export function createCompletionTool(channel: ContractSubmissionChannel): MinimalToolDefinition {
   return {
     name: "phenix_complete",
     label: "Complete Phenix Assignment",
@@ -110,14 +108,13 @@ export function createCompletionTool(
 
     async execute(
       _toolCallId: string,
-      params: { value: unknown },
+      params: CompleteToolParams,
       _signal: AbortSignal | undefined,
       _onUpdate: unknown,
       _ctx: unknown,
     ): Promise<AgentToolResult> {
       const attempt = channel.current();
 
-      // Check if the contract is still in a submittable state.
       if (attempt.state === "accepted") {
         return errorResult(
           "This assignment has already been accepted. No further submission is needed.",
@@ -126,25 +123,21 @@ export function createCompletionTool(
       }
 
       if (attempt.state === "cancelled") {
-        return errorResult(
-          "This assignment has been cancelled.",
-          { status: "cancelled", contractId: attempt.contractId },
-        );
+        return errorResult("This assignment has been cancelled.", {
+          status: "cancelled",
+          contractId: attempt.contractId,
+        });
       }
 
       if (attempt.state === "submitted") {
         return errorResult(
           "A submission is already under evaluation. " +
-          "Wait for runtime feedback before submitting again.",
+            "Wait for runtime feedback before submitting again.",
           { status: "already-submitted", contractId: attempt.contractId },
         );
       }
 
-      // Validate against the contract's output schema.
-      const validation = validateContract(
-        attempt.outputSchema,
-        params.value,
-      );
+      const validation = validateSchema(attempt.outputSchema, params.value);
 
       if (!validation.ok) {
         const issues = issuesToExecutionIssues(validation.violations);
@@ -162,30 +155,24 @@ export function createCompletionTool(
         );
       }
 
-      // Atomically submit valid output.
       const result: ContractSubmissionResult = await channel.submit(params.value);
 
       if (!result.ok) {
-        return errorResult(
-          `Submission could not be recorded: state is ${result.state}.`,
-          {
-            status: "rejected",
-            contractId: attempt.contractId,
-            state: result.state,
-            ...(result.issues ? { issues: result.issues } : {}),
-          },
-        );
+        return errorResult(`Submission could not be recorded: state is ${result.state}.`, {
+          status: "rejected",
+          contractId: attempt.contractId,
+          state: result.state,
+          ...(result.issues ? { issues: result.issues } : {}),
+        });
       }
 
-      // terminate: true only after a valid submission is stored.
-      // Say "submission received" — do NOT claim final acceptance.
       return {
         content: [
           {
             type: "text",
             text:
-              "Submission received. The runtime will now validate, verify, and " +
-              "optionally review your work. Continue if you receive repair feedback.",
+              "Structured submission received. The runtime will now perform deterministic " +
+              "verification and any required critic review before final acceptance.",
           },
         ],
         details: {
