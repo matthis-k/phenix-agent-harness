@@ -50,4 +50,24 @@ jobs:
           nix run .#phenix-check -- range "$base" "$head"
 
       - name: Run complete flake checks
-        run: nix flake check --print-build-logs --keep-going
+        id: checks
+        shell: bash
+        run: |
+          set +e
+          nix flake check --print-build-logs --keep-going > flake-check.log 2>&1
+          status=$?
+          cat flake-check.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload flake diagnostics
+        if: steps.checks.outputs.status != '0'
+        uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097 # v4.4.2
+        with:
+          name: flake-check-diagnostics
+          path: flake-check.log
+          if-no-files-found: error
+
+      - name: Fail when flake checks fail
+        if: steps.checks.outputs.status != '0'
+        run: exit 1
