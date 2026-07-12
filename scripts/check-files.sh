@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-if (( $# == 0 )); then
+if (($# == 0)); then
   exit 0
 fi
 
@@ -43,7 +43,7 @@ done
 
 status=0
 
-if (( ${#biome_files[@]} > 0 )); then
+if ((${#biome_files[@]} > 0)); then
   biome ci \
     --no-errors-on-unmatched \
     --files-ignore-unknown=true \
