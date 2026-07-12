@@ -13,10 +13,6 @@
     "noImplicitAny": false,
     "types": ["node"]
   },
-  "include": [
-    "extensions/**/*.ts",
-    "tests/**/*.ts",
-    "skills/**/*.ts"
-  ],
+  "include": ["extensions/**/*.ts", "tests/**/*.ts", "skills/**/*.ts"],
   "exclude": ["node_modules"]
 }
