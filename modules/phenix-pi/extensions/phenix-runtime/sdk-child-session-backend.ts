@@ -68,6 +68,23 @@ import {
 } from "./child-session-resources.ts";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
+function abortErrorFromSignal(
+  signal: AbortSignal,
+  fallbackMessage: string,
+): ChildRuntimeError {
+  const reason = signal.reason;
+  if (reason instanceof ChildRuntimeError) return reason;
+
+  return new ChildRuntimeError(
+    "ABORTED",
+    reason instanceof Error
+      ? reason.message
+      : typeof reason === "string" && reason.length > 0
+        ? reason
+        : fallbackMessage,
+  );
+}
+
 // ── PiSessionLike — injectable session interface for testing ────────────────
 
 export interface PromptOptions {
@@ -384,25 +401,18 @@ class SdkChildRun implements ChildRun {
     this.boundSignals.add(signal);
 
     const abortFromSignal = (): void => {
-      const reason = signal.reason;
+      const error = abortErrorFromSignal(
+        signal,
+        "Cancelled by parent.",
+      );
 
       // Preserve typed runtime failures such as TIMEOUT. Ordinary parent
       // cancellation remains a cancelled outcome rather than a failed one.
-      if (
-        reason instanceof ChildRuntimeError &&
-        reason.code !== "ABORTED"
-      ) {
-        void this.failAndAbort(reason);
-        return;
+      if (error.code === "ABORTED") {
+        void this.abort(error.message);
+      } else {
+        void this.failAndAbort(error);
       }
-
-      const message =
-        reason instanceof Error
-          ? reason.message
-          : typeof reason === "string" && reason.length > 0
-            ? reason
-            : "cancelled by parent";
-      void this.abort(message);
     };
 
     if (signal.aborted) {
@@ -520,8 +530,16 @@ class SdkChildRun implements ChildRun {
       );
     }
     if (signal?.aborted) {
-      await this.abort("cancelled by parent");
-      throw new ChildRuntimeError("ABORTED", "Cancelled by parent.");
+      const error = abortErrorFromSignal(
+        signal,
+        "Cancelled by parent.",
+      );
+      if (error.code === "ABORTED") {
+        await this.abort(error.message);
+      } else {
+        await this.failAndAbort(error);
+      }
+      throw error;
     }
 
     const cycle = this.beginCycle();
@@ -620,7 +638,10 @@ class SdkChildRun implements ChildRun {
    */
   async startInitialPrompt(signal: AbortSignal): Promise<void> {
     if (signal.aborted) {
-      throw new ChildRuntimeError("ABORTED", "Cancelled by parent.");
+      throw abortErrorFromSignal(
+        signal,
+        "Cancelled by parent.",
+      );
     }
 
     this.unsub = this.session.subscribe(this.handlePiEvent);

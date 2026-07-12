@@ -186,6 +186,33 @@ export async function executeProducerCycles(
   let completionGrace = completionGraceRemaining;
   let pendingOutcome: ChildCycleOutcome | undefined;
 
+  const finishAbortedCycle = (
+    cycleRecord: ProducerCycleRecord,
+  ): AttemptRunResult | undefined => {
+    if (!signal.aborted) return undefined;
+
+    const serialized = serializeError(
+      signal.reason ??
+        new ChildRuntimeError(
+          "ABORTED",
+          "Producer execution was cancelled.",
+        ),
+    );
+    const cancelled = serialized.code === "ABORTED";
+    cycleRecord.endedAt = now();
+    cycleRecord.status = cancelled ? "cancelled" : "failed";
+    cycleRecord.error = serialized;
+    record.status = cancelled ? "cancelled" : "failed";
+    record.errors = [`${serialized.code}: ${serialized.message}`];
+    writeRecord(cwd, record);
+    return {
+      ok: false,
+      status: cancelled ? "cancelled" : "failed",
+      error: serialized,
+      record,
+    };
+  };
+
   for (let cycle = 1; cycle <= maximumProducerCycles; cycle++) {
     const cycleRecord: ProducerCycleRecord = {
       number: cycle,
@@ -207,6 +234,9 @@ export async function executeProducerCycles(
         outcome = await run.waitForCurrentCycle(signal);
       }
     } catch (error) {
+      const aborted = finishAbortedCycle(cycleRecord);
+      if (aborted) return aborted;
+
       cycleRecord.endedAt = now();
       cycleRecord.status = "failed";
       cycleRecord.error = serializeError(error);
@@ -259,6 +289,9 @@ export async function executeProducerCycles(
             signal,
           );
         } catch (error) {
+          const aborted = finishAbortedCycle(cycleRecord);
+          if (aborted) return aborted;
+
           record.status = "failed";
           record.errors = [error instanceof Error ? error.message : String(error)];
           writeRecord(cwd, record);
@@ -331,6 +364,9 @@ export async function executeProducerCycles(
         signal,
       });
 
+      const aborted = finishAbortedCycle(cycleRecord);
+      if (aborted) return aborted;
+
       if (!verification.ok) {
         await contractChannel.reopen({
           reason: "verification",
@@ -351,6 +387,9 @@ export async function executeProducerCycles(
             signal,
           );
         } catch (error) {
+          const aborted = finishAbortedCycle(cycleRecord);
+          if (aborted) return aborted;
+
           record.status = "failed";
           record.errors = [error instanceof Error ? error.message : String(error)];
           writeRecord(cwd, record);
@@ -400,6 +439,9 @@ export async function executeProducerCycles(
           signal,
         });
       } catch (error) {
+        const aborted = finishAbortedCycle(cycleRecord);
+        if (aborted) return aborted;
+
         cycleRecord.endedAt = now();
         cycleRecord.status = "failed";
         cycleRecord.error = serializeError(error);
@@ -408,6 +450,9 @@ export async function executeProducerCycles(
         writeRecord(cwd, record);
         return { ok: false, status: "failed", error: serializeError(error), record };
       }
+
+      const aborted = finishAbortedCycle(cycleRecord);
+      if (aborted) return aborted;
 
       cycleRecord.critic = {
         verdict: criticResult.verdict,
@@ -438,6 +483,9 @@ export async function executeProducerCycles(
             signal,
           );
         } catch (error) {
+          const aborted = finishAbortedCycle(cycleRecord);
+          if (aborted) return aborted;
+
           record.status = "failed";
           record.errors = [error instanceof Error ? error.message : String(error)];
           writeRecord(cwd, record);
@@ -450,28 +498,8 @@ export async function executeProducerCycles(
     // A total execution timeout/cancellation may have fired while
     // deterministic verification or the critic was running. Never accept
     // output after the shared execution scope has been aborted.
-    if (signal.aborted) {
-      const serialized = serializeError(
-        signal.reason ??
-          new ChildRuntimeError(
-            "ABORTED",
-            "Producer execution was cancelled.",
-          ),
-      );
-      const cancelled = serialized.code === "ABORTED";
-      cycleRecord.endedAt = now();
-      cycleRecord.status = cancelled ? "cancelled" : "failed";
-      cycleRecord.error = serialized;
-      record.status = cancelled ? "cancelled" : "failed";
-      record.errors = [`${serialized.code}: ${serialized.message}`];
-      writeRecord(cwd, record);
-      return {
-        ok: false,
-        status: cancelled ? "cancelled" : "failed",
-        error: serialized,
-        record,
-      };
-    }
+    const aborted = finishAbortedCycle(cycleRecord);
+    if (aborted) return aborted;
 
     // All gates passed — accept the submission.
     await contractChannel.accept(submitted.value);

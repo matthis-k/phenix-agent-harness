@@ -371,15 +371,50 @@ export class AgentExecutionCoordinator {
       throw err;
     }
 
-    const rejectStartedTransition = (): void => {
+    const rejectStartedTransition = (): boolean => {
       try {
         rejectTransition(ctx.cwd, wfRecord, {
           executionId,
           nextState: transition.onRejected,
         });
+        return true;
       } catch {
-        // Best effort. rejectTransition is idempotent for completed executions.
+        // The transition may already be settled or persistence may have failed.
+        return false;
       }
+    };
+
+    const finalizeOrRejectHandle = (handle: HandleRecord): void => {
+      let finalizationError: unknown = new Error(
+        `Workflow finalization returned no record for handle ${handle.id}.`,
+      );
+
+      // Retrying is useful when transition settlement succeeded but automatic
+      // workflow advancement failed afterward. finalizeHandleWorkflow is
+      // idempotent for already-completed transition executions.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const finalized = finalizeHandleWorkflow({
+            cwd: ctx.cwd,
+            handle: handle as any,
+          });
+          if (finalized) return;
+        } catch (error) {
+          finalizationError = error;
+        }
+      }
+
+      if (rejectStartedTransition()) return;
+
+      const message =
+        finalizationError instanceof Error
+          ? finalizationError.message
+          : String(finalizationError);
+      handle.errors = [
+        ...(handle.errors ?? []),
+        `WORKFLOW_FINALIZATION_FAILED: ${message}`,
+      ];
+      writeRecord(ctx.cwd, handle);
     };
 
     let ownedRun: ChildRun | undefined;
@@ -519,7 +554,7 @@ export class AgentExecutionCoordinator {
         record.status = "failed";
         record.errors = [`MODEL_NOT_FOUND: ${concreteModel.provider}/${concreteModel.id}`];
         writeRecord(ctx.cwd, record);
-        finalizeHandleWorkflow({ cwd: ctx.cwd, handle: record as any });
+        finalizeOrRejectHandle(record);
         return {
           ok: false,
           message: `phenix_delegate: configured child model ${concreteModel.provider}/${concreteModel.id} is unavailable.`,
@@ -530,7 +565,7 @@ export class AgentExecutionCoordinator {
       record.status = "failed";
       record.errors = [error instanceof Error ? error.message : String(error)];
       writeRecord(ctx.cwd, record);
-      finalizeHandleWorkflow({ cwd: ctx.cwd, handle: record as any });
+      finalizeOrRejectHandle(record);
       return {
         ok: false,
         message: `phenix_delegate: routing failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -687,7 +722,7 @@ export class AgentExecutionCoordinator {
       record.status = "failed";
       record.errors = [error instanceof Error ? error.message : String(error)];
       writeRecord(ctx.cwd, record);
-      finalizeHandleWorkflow({ cwd: ctx.cwd, handle: record as any });
+      finalizeOrRejectHandle(record);
       return {
         ok: false,
         message: `phenix_delegate: child session start failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -759,14 +794,7 @@ export class AgentExecutionCoordinator {
       void completionPromise
         .then(
           (result) => {
-            try {
-              finalizeHandleWorkflow({
-                cwd: ctx.cwd,
-                handle: result.record as any,
-              });
-            } catch {
-              // The completed handle remains persisted and can be reconciled.
-            }
+            finalizeOrRejectHandle(result.record as HandleRecord);
           },
           (error) => {
             const failedRecord =
@@ -776,14 +804,7 @@ export class AgentExecutionCoordinator {
               error instanceof Error ? error.message : String(error),
             ];
             writeRecord(ctx.cwd, failedRecord);
-            try {
-              finalizeHandleWorkflow({
-                cwd: ctx.cwd,
-                handle: failedRecord as any,
-              });
-            } catch {
-              rejectStartedTransition();
-            }
+            finalizeOrRejectHandle(failedRecord);
           },
         )
         .finally(() => {
@@ -797,7 +818,7 @@ export class AgentExecutionCoordinator {
     // Foreground — await completion
     const result = await executeCycles();
     const finalRecord = result.record as HandleRecord;
-    finalizeHandleWorkflow({ cwd: ctx.cwd, handle: finalRecord as any });
+    finalizeOrRejectHandle(finalRecord);
     if (!result.ok) {
       return {
         ok: false,
@@ -829,25 +850,19 @@ export class AgentExecutionCoordinator {
       }
 
       const failedRecord = readRecord(ctx.cwd, sessionId, handleId);
-      if (
-        failedRecord &&
-        (failedRecord.status === "starting" ||
-          failedRecord.status === "running")
-      ) {
-        failedRecord.status = "failed";
-        failedRecord.errors = [
-          error instanceof Error ? error.message : String(error),
-        ];
-        writeRecord(ctx.cwd, failedRecord);
-        try {
-          finalizeHandleWorkflow({
-            cwd: ctx.cwd,
-            handle: failedRecord as any,
-          });
-        } catch {
-          rejectStartedTransition();
+      if (failedRecord) {
+        if (
+          failedRecord.status === "starting" ||
+          failedRecord.status === "running"
+        ) {
+          failedRecord.status = "failed";
+          failedRecord.errors = [
+            error instanceof Error ? error.message : String(error),
+          ];
+          writeRecord(ctx.cwd, failedRecord);
         }
-      } else if (!failedRecord) {
+        finalizeOrRejectHandle(failedRecord);
+      } else {
         rejectStartedTransition();
       }
 
