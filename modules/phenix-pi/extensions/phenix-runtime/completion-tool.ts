@@ -19,6 +19,7 @@
  */
 
 import { Type } from "typebox";
+
 import { validateSchema } from "../phenix-contracts/validator.ts";
 import type {
   ContractSubmissionChannel,
@@ -27,6 +28,10 @@ import type {
 } from "./child-session-types.ts";
 
 // ── Completion tool parameters ──────────────────────────────────────────────
+
+interface CompleteToolParams {
+  readonly value: unknown;
+}
 
 const CompleteParams = Type.Object(
   {
@@ -48,14 +53,14 @@ export interface MinimalToolDefinition {
   readonly parameters: unknown;
   execute(
     toolCallId: string,
-    params: any,
+    params: CompleteToolParams,
     signal: AbortSignal | undefined,
     onUpdate: unknown,
     ctx: unknown,
   ): Promise<AgentToolResult>;
 }
 
-// ── AgentToolResult (structural — avoids Pi import) ──────────────────────────
+// ── AgentToolResult (structural — avoids Pi import) ─────────────────────────
 
 interface AgentToolResult {
   readonly content: readonly { readonly type: string; readonly text: string }[];
@@ -75,9 +80,9 @@ function errorResult(message: string, details?: Record<string, unknown>): AgentT
 function issuesToExecutionIssues(
   violations: readonly { readonly path: string; readonly message: string }[],
 ): readonly ExecutionIssue[] {
-  return violations.map((v) => ({
-    path: v.path.split("."),
-    message: v.message,
+  return violations.map((violation) => ({
+    path: violation.path.split("."),
+    message: violation.message,
   }));
 }
 
@@ -103,14 +108,13 @@ export function createCompletionTool(channel: ContractSubmissionChannel): Minima
 
     async execute(
       _toolCallId: string,
-      params: { value: unknown },
+      params: CompleteToolParams,
       _signal: AbortSignal | undefined,
       _onUpdate: unknown,
       _ctx: unknown,
     ): Promise<AgentToolResult> {
       const attempt = channel.current();
 
-      // Check if the contract is still in a submittable state.
       if (attempt.state === "accepted") {
         return errorResult(
           "This assignment has already been accepted. No further submission is needed.",
@@ -133,7 +137,6 @@ export function createCompletionTool(channel: ContractSubmissionChannel): Minima
         );
       }
 
-      // Validate against the contract's output schema.
       const validation = validateSchema(attempt.outputSchema, params.value);
 
       if (!validation.ok) {
@@ -152,7 +155,6 @@ export function createCompletionTool(channel: ContractSubmissionChannel): Minima
         );
       }
 
-      // Atomically submit valid output.
       const result: ContractSubmissionResult = await channel.submit(params.value);
 
       if (!result.ok) {
@@ -164,15 +166,13 @@ export function createCompletionTool(channel: ContractSubmissionChannel): Minima
         });
       }
 
-      // terminate: true only after a valid submission is stored.
-      // Say "submission received" — do NOT claim final acceptance.
       return {
         content: [
           {
             type: "text",
             text:
-              "Submission received. The runtime will now validate, verify, and " +
-              "optionally review your work. Continue if you receive repair feedback.",
+              "Structured submission received. The runtime will now perform deterministic " +
+              "verification and any required critic review before final acceptance.",
           },
         ],
         details: {
