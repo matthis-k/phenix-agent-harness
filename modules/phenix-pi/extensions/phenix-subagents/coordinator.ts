@@ -382,6 +382,8 @@ export class AgentExecutionCoordinator {
       }
     };
 
+    let ownedRun: ChildRun | undefined;
+    let cleanupOwnedRunScope: (() => void) | undefined;
     try {
     // ── Create child workflow record ──────────────────────────────────
     const role = roleForAgentClient(transition.agentClient);
@@ -673,6 +675,7 @@ export class AgentExecutionCoordinator {
         executionTimeout = undefined;
       }
     };
+    cleanupOwnedRunScope = cleanupRunScope;
 
     const runSignal = runController.signal;
 
@@ -696,6 +699,7 @@ export class AgentExecutionCoordinator {
         },
       };
     }
+    ownedRun = run;
 
     // Record Pi session reference
     record.childRunId = run.id;
@@ -728,7 +732,12 @@ export class AgentExecutionCoordinator {
         });
       } finally {
         cleanupRunScope();
-        await run.dispose();
+        try {
+          await run.dispose();
+        } finally {
+          ownedRun = undefined;
+          cleanupOwnedRunScope = undefined;
+        }
       }
     };
 
@@ -744,15 +753,43 @@ export class AgentExecutionCoordinator {
 
       getChildSessionRegistry().add(liveRecord);
 
-      // Finalize workflow after completion (async, best-effort).
-      completionPromise
-        .then((result) => {
-          finalizeHandleWorkflow({ cwd: ctx.cwd, handle: result.record as any });
+      // Finalize the same persisted handle on either settlement path. Promise
+      // rejection must not leave a running handle after the live registry
+      // entry is removed.
+      void completionPromise
+        .then(
+          (result) => {
+            try {
+              finalizeHandleWorkflow({
+                cwd: ctx.cwd,
+                handle: result.record as any,
+              });
+            } catch {
+              // The completed handle remains persisted and can be reconciled.
+            }
+          },
+          (error) => {
+            const failedRecord =
+              readRecord(ctx.cwd, sessionId, handleId) ?? record;
+            failedRecord.status = "failed";
+            failedRecord.errors = [
+              error instanceof Error ? error.message : String(error),
+            ];
+            writeRecord(ctx.cwd, failedRecord);
+            try {
+              finalizeHandleWorkflow({
+                cwd: ctx.cwd,
+                handle: failedRecord as any,
+              });
+            } catch {
+              rejectStartedTransition();
+            }
+          },
+        )
+        .finally(() => {
           getChildSessionRegistry().remove(run.id);
         })
-        .catch(() => {
-          getChildSessionRegistry().remove(run.id);
-        });
+        .catch(() => undefined);
 
       return { ok: true, record };
     }
@@ -776,8 +813,58 @@ export class AgentExecutionCoordinator {
     }
     return { ok: true, record: finalRecord };
     } catch (error) {
-      rejectStartedTransition();
-      throw error;
+      cleanupOwnedRunScope?.();
+
+      if (ownedRun) {
+        try {
+          await ownedRun.abort("delegation execution failed");
+        } catch {
+          // Best-effort provider abort.
+        }
+        try {
+          await ownedRun.dispose();
+        } catch {
+          // Best-effort disposal.
+        }
+      }
+
+      const failedRecord = readRecord(ctx.cwd, sessionId, handleId);
+      if (
+        failedRecord &&
+        (failedRecord.status === "starting" ||
+          failedRecord.status === "running")
+      ) {
+        failedRecord.status = "failed";
+        failedRecord.errors = [
+          error instanceof Error ? error.message : String(error),
+        ];
+        writeRecord(ctx.cwd, failedRecord);
+        try {
+          finalizeHandleWorkflow({
+            cwd: ctx.cwd,
+            handle: failedRecord as any,
+          });
+        } catch {
+          rejectStartedTransition();
+        }
+      } else if (!failedRecord) {
+        rejectStartedTransition();
+      }
+
+      return {
+        ok: false,
+        message:
+          `phenix_delegate: execution failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        details: {
+          code:
+            error instanceof ChildRuntimeError
+              ? error.code
+              : "SESSION_START_FAILED",
+          ...(failedRecord ? { handleId: failedRecord.id } : {}),
+        },
+      };
     }
   }
 
@@ -948,11 +1035,58 @@ export class AgentExecutionCoordinator {
       persistence: "file",
     };
 
-    const run = await backend.start(spec, input.signal);
+    const criticController = new AbortController();
+    const abortCriticFromParent = (): void => {
+      if (!criticController.signal.aborted) {
+        criticController.abort(
+          input.signal.reason ??
+            new ChildRuntimeError(
+              "ABORTED",
+              "Critic execution was cancelled by its parent.",
+            ),
+        );
+      }
+    };
+
+    if (input.signal.aborted) {
+      abortCriticFromParent();
+    } else {
+      input.signal.addEventListener(
+        "abort",
+        abortCriticFromParent,
+        { once: true },
+      );
+    }
+
+    let criticTimeout: NodeJS.Timeout | undefined;
+    if (criticSpec.timeoutMs > 0) {
+      criticTimeout = setTimeout(() => {
+        if (!criticController.signal.aborted) {
+          criticController.abort(
+            new ChildRuntimeError(
+              "TIMEOUT",
+              `Critic timed out after ${criticSpec.timeoutMs}ms.`,
+            ),
+          );
+        }
+      }, criticSpec.timeoutMs);
+      criticTimeout.unref?.();
+    }
+
+    let run: ChildRun | undefined;
     try {
-      const outcome = await run.waitForCurrentCycle(input.signal);
+      run = await backend.start(spec, criticController.signal);
+      const outcome = await run.waitForCurrentCycle(
+        criticController.signal,
+      );
       if (outcome.status !== "settled") {
-        throw new Error(
+        throw new ChildRuntimeError(
+          (
+            outcome.error?.code ??
+            (outcome.status === "cancelled"
+              ? "ABORTED"
+              : "PROVIDER_FAILED")
+          ) as any,
           outcome.error?.message ??
             "Critic session did not settle successfully.",
         );
@@ -973,10 +1107,31 @@ export class AgentExecutionCoordinator {
         );
       }
 
+      if (criticController.signal.aborted) {
+        const reason = criticController.signal.reason;
+        throw reason instanceof ChildRuntimeError
+          ? reason
+          : new ChildRuntimeError(
+              "ABORTED",
+              reason instanceof Error
+                ? reason.message
+                : "Critic execution was cancelled.",
+            );
+      }
+
       await channel.accept(submitted.value);
       return submitted.value as CriticValue;
     } finally {
-      await run.dispose();
+      input.signal.removeEventListener(
+        "abort",
+        abortCriticFromParent,
+      );
+      if (criticTimeout) {
+        clearTimeout(criticTimeout);
+      }
+      if (run) {
+        await run.dispose();
+      }
     }
   }
 

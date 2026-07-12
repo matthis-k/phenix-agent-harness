@@ -234,6 +234,7 @@ class SdkChildRun implements ChildRun {
   };
   private disposed = false;
   private unsub: (() => void) | undefined;
+  private readonly boundSignals = new WeakSet<AbortSignal>();
   private lastAssistantText: string | undefined;
 
   constructor(
@@ -379,18 +380,37 @@ class SdkChildRun implements ChildRun {
   }
 
   private bindSignal(signal?: AbortSignal): void {
-    if (!signal) return;
+    if (!signal || this.boundSignals.has(signal)) return;
+    this.boundSignals.add(signal);
+
+    const abortFromSignal = (): void => {
+      const reason = signal.reason;
+
+      // Preserve typed runtime failures such as TIMEOUT. Ordinary parent
+      // cancellation remains a cancelled outcome rather than a failed one.
+      if (
+        reason instanceof ChildRuntimeError &&
+        reason.code !== "ABORTED"
+      ) {
+        void this.failAndAbort(reason);
+        return;
+      }
+
+      const message =
+        reason instanceof Error
+          ? reason.message
+          : typeof reason === "string" && reason.length > 0
+            ? reason
+            : "cancelled by parent";
+      void this.abort(message);
+    };
+
     if (signal.aborted) {
-      void this.abort("cancelled by parent");
+      abortFromSignal();
       return;
     }
-    signal.addEventListener(
-      "abort",
-      () => {
-        void this.abort("cancelled by parent");
-      },
-      { once: true },
-    );
+
+    signal.addEventListener("abort", abortFromSignal, { once: true });
   }
 
   /**
