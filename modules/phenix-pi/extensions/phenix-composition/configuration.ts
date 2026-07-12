@@ -1,20 +1,16 @@
 /**
  * phenix-composition — configuration
  *
- * Top-level Phenix configuration that collects all declarations.
- * This is passive data — no runtime logic or Pi imports.
+ * Top-level Phenix configuration that collects passive declarations and
+ * runtime policy. Runtime mechanisms are selected by the composition root and
+ * are not represented as user-selectable data until multiple implementations
+ * are actually supported.
  */
 
 import type { ContractDefinition } from "../phenix-contracts/definitions.ts";
-import type { AgentClientDefinition } from "../phenix-subagents/definitions.ts";
-import type { RoutingConfiguration } from "../phenix-routing/definitions.ts";
 import type { ModelSetRef } from "../phenix-kernel/refs.ts";
-
-// ── Child session backend kind ──────────────────────────────────────────────
-
-export type ChildSessionBackendKind = "sdk" | "rpc";
-
-// ── Phenix configuration ───────────────────────────────────────────────────
+import type { RoutingConfiguration } from "../phenix-routing/definitions.ts";
+import type { AgentClientDefinition } from "../phenix-subagents/definitions.ts";
 
 export interface PhenixConfiguration {
   readonly activeModelSet: ModelSetRef;
@@ -28,23 +24,11 @@ export interface PhenixConfiguration {
   readonly workflows: readonly /** WorkflowDefinition */ unknown[];
 
   readonly runtime: {
-    /** How real child agent sessions are backed. */
-    readonly childSessionBackend: ChildSessionBackendKind;
-
     readonly maximumDelegationDepth: number;
 
     readonly persistChildSessions: boolean;
-
-    /** RPC-specific settings — validated only when RPC is selected. */
-    readonly rpc?: {
-      readonly cliPath?: string;
-      readonly sessionDirectory?: string;
-      readonly childExtensionPath?: string;
-    };
   };
 }
-
-// ── Configuration builder ──────────────────────────────────────────────────
 
 export function definePhenixConfiguration(
   configuration: PhenixConfiguration,
