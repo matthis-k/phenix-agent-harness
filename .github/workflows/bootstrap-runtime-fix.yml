@@ -96,16 +96,17 @@ jobs:
           (
             set -euo pipefail
             rm -rf .github/bootstrap .github/workflows/bootstrap-runtime-fix.yml
-            rm -f bootstrap-apply.log candidate.diff nix-check.log
+            rm -f .github/workflows/ci.yml
+            rm -f bootstrap-apply.log candidate.diff nix-check.log commit-result.log
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add -A
             git diff --cached --check
             git commit -m "fix(runtime): preserve cancellation and finalize workflows [runtime-fix-applied]"
             git push origin HEAD:fix/runtime-workflow-finalization
-          ) > commit-result.log 2>&1
+          ) > /tmp/commit-result.log 2>&1
           status=$?
-          cat commit-result.log
+          cat /tmp/commit-result.log
           echo "status=$status" >> "$GITHUB_OUTPUT"
           exit 0
 
@@ -114,7 +115,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: commit-diagnostics
-          path: commit-result.log
+          path: /tmp/commit-result.log
           if-no-files-found: error
 
       - name: Fail when committing verified result failed
