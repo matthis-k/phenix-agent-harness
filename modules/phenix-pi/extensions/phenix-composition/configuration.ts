@@ -9,6 +9,7 @@ import type { ContractDefinition } from "../phenix-contracts/definitions.ts";
 import type { AgentClientDefinition } from "../phenix-subagents/definitions.ts";
 import type { RoutingConfiguration } from "../phenix-routing/definitions.ts";
 import type { ModelSetRef } from "../phenix-kernel/refs.ts";
+import type { AgentSessionExecutionBackend } from "../phenix-kernel/index.ts";
 
 // ── Phenix configuration ───────────────────────────────────────────────────
 
@@ -24,9 +25,8 @@ export interface PhenixConfiguration {
   readonly workflows: readonly /** WorkflowDefinition */ unknown[];
 
   readonly runtime: {
-    readonly subagentBackend:
-      | "in-process"
-      | "pi-subagents-process";
+    /** How real child agent sessions are executed. A process is one possible backend. */
+    readonly sessionExecutionBackend: AgentSessionExecutionBackend;
 
     readonly maximumDelegationDepth: number;
   };

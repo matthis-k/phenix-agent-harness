@@ -8,6 +8,11 @@ import {
   SubagentBackend,
 } from "./backend.ts";
 import {
+  PiSubagentsAgentSessionPort,
+  type AgentSessionPort,
+} from "./session-port.ts";
+import { agentSessionId } from "../phenix-kernel/index.ts";
+import {
   runAttempt,
 } from "./attempt-runner.ts";
 import {
@@ -108,7 +113,7 @@ function treePayload(
 // ── Handle resolution for await/poll ────────────────────────────────────────
 
 async function resolveBackground(
-  backend: SubagentBackend,
+  port: AgentSessionPort,
   ctx: ExtensionContext,
   signal: AbortSignal,
   record: HandleRecord,
@@ -125,19 +130,23 @@ async function resolveBackground(
   }
 
   if (!awaitCompletion) {
-    // Just poll once — check if result file exists.
+    // Poll once — ask the session port whether a result is available yet.
     const attempt = latestAttempt(record);
-    if (!attempt.asyncDir) return record;
+    if (!attempt.sessionId && !attempt.runId) return record;
     try {
-      const result = backend.readResult(attempt.runId);
-      if (!result) return record;
+      const polled = await port.resume(
+        agentSessionId(attempt.sessionId ?? attempt.runId),
+        { awaitCompletion: false },
+        signal,
+      );
+      if (polled.status === "waiting") return record;
     } catch {
       return record;
     }
   }
 
   // Run the full attempt runner (idempotent — will skip completed/cancelled).
-  const runnerResult = await runAttempt(backend, ctx, signal, record);
+  const runnerResult = await runAttempt(port, ctx, signal, record);
   return runnerResult.record;
 }
 
@@ -148,7 +157,8 @@ export default async function phenixSubagents(
 ): Promise<void> {
   const events = pi.events as unknown as PiEvents;
   const backend = new SubagentBackend(pi);
-  const coordinator = new AgentExecutionCoordinator(backend);
+  const port = new PiSubagentsAgentSessionPort(backend);
+  const coordinator = new AgentExecutionCoordinator(port);
 
   // ── Runtime tool guard ────────────────────────────────────────────────
 
@@ -297,9 +307,13 @@ export default async function phenixSubagents(
         if (!TERMINAL_STATES.has(record.status)) {
           const attempt = latestAttempt(record);
           try {
-            await backend.interrupt(attempt.runId, signal);
+            await port.cancel(
+              agentSessionId(attempt.sessionId ?? attempt.runId),
+              "cancelled by parent",
+              signal,
+            );
           } catch {
-            await backend.stop(attempt.runId, signal).catch(() => undefined);
+            // Cancel is best-effort; the session may already be gone.
           }
           attempt.status = "cancelled";
           attempt.endedAt = now();
@@ -316,7 +330,7 @@ export default async function phenixSubagents(
         latestAttempt(record).mode === "background"
       ) {
         const resolved = await resolveBackground(
-          backend,
+          port,
           ctx,
           signal,
           record,

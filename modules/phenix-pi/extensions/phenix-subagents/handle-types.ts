@@ -54,6 +54,8 @@ export const ACCEPTANCE_RANK: Record<string, number> = {
 export interface AttemptRecord {
   readonly number: number;
   runId: string;
+  /** Phenix agent session id (from AgentSessionPort.create). Opaque handle for cancel/resume. */
+  sessionId?: string;
   readonly phenixRunId: RunId;
   readonly mode: "foreground" | "background";
   readonly startedAt: string;

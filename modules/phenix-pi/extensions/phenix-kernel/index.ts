@@ -95,7 +95,16 @@ export type {
   ExecutionIssue,
   AgentExecutionResult,
   AgentExecutionPort,
+  AgentSessionId,
+  AgentSessionStatus,
+  AgentSessionExecutionBackend,
+  AgentSessionContractRef,
+  AgentSessionContext,
+  AgentSessionNode,
+  AgentSessionResult,
 } from "./execution.ts";
+
+export { agentSessionId } from "./execution.ts";
 
 // Diagnostics
 export type {

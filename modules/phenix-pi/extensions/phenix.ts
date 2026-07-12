@@ -49,7 +49,7 @@ const defaultPhenixConfiguration = definePhenixConfiguration({
     // Loaded lazily from the existing workflow definition
   ],
   runtime: {
-    subagentBackend: "pi-subagents-process",
+    sessionExecutionBackend: "external-process",
     maximumDelegationDepth: 3,
   },
 });

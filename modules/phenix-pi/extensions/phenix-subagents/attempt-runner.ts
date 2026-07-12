@@ -19,10 +19,11 @@ import {
   now,
   writeRecord,
 } from "./handle-store.ts";
-import {
-  SubagentBackend,
-  type SpawnedChild,
-} from "./backend.ts";
+import type { AgentSessionNode } from "../phenix-kernel/index.ts";
+import type {
+  AgentSessionExecutionParams,
+  AgentSessionPort,
+} from "./session-port.ts";
 import {
   materializeContractAgent,
   releaseMaterializedAgent,
@@ -50,7 +51,7 @@ type AttemptPhase =
 
 interface RunnerState {
   phase: AttemptPhase;
-  spawnedChild?: SpawnedChild;
+  sessionNode?: AgentSessionNode;
   materializedProducer?: ReturnType<typeof materializeContractAgent>;
   materializedCritic?: ReturnType<typeof materializeContractAgent>;
   issuedContract?: Awaited<ReturnType<typeof createAttemptContract>>;
@@ -68,16 +69,16 @@ export interface AttemptRunResult {
 // ── Attempt runner ──────────────────────────────────────────────────────────
 
 export async function runAttempt(
-  backend: SubagentBackend,
+  port: AgentSessionPort,
   ctx: ExtensionContext,
   signal: AbortSignal,
   record: HandleRecord,
-  mode: "foreground" | "background" = "foreground",
+  _mode: "foreground" | "background" = "foreground",
 ): Promise<AttemptRunResult> {
   const state: RunnerState = { phase: "spawning-producer" };
 
   try {
-    return await runProducerCycle(backend, ctx, signal, record, state);
+    return await runProducerCycle(port, ctx, signal, record, state);
   } catch (error) {
     if (signal.aborted) {
       record.status = "cancelled";
@@ -90,7 +91,7 @@ export async function runAttempt(
 }
 
 async function runProducerCycle(
-  backend: SubagentBackend,
+  port: AgentSessionPort,
   ctx: ExtensionContext,
   signal: AbortSignal,
   record: HandleRecord,
@@ -150,20 +151,22 @@ async function runProducerCycle(
     state.phase = "spawning-producer";
 
     // ── Spawn child ─────────────────────────────────────────────────────
-    const child = await backend.spawn(
+    const node = await port.create(
       {
         requestId: handleId,
-        params,
+        contract: state.issuedContract.artifact,
+        materializedAgent: materialized,
         environment: env,
-        extraAgentDirectory: materialized.leaseDir,
+        params,
       },
       signal,
     );
-    state.spawnedChild = child;
+    state.sessionNode = node;
 
-    // Record the run ID.
-    attempt.runId = child.runId;
-    attempt.asyncDir = child.asyncDir;
+    // Record the session id and execution-layer run id.
+    attempt.sessionId = node.id;
+    attempt.runId = node.context.runId ?? "";
+    attempt.asyncDir = node.context.asyncDir;
     writeRecord(ctx.cwd, record);
 
     state.phase = "producer-running";
@@ -175,11 +178,8 @@ async function runProducerCycle(
     }
 
     // ── Wait for result ─────────────────────────────────────────────────
-    const result = await backend.waitForResult(
-      child.runId,
-      signal,
-      state.issuedContract.artifact.runtime.timeoutMs + 30_000,
-    );
+    const sessionResult = await port.run(node.id, signal);
+    const result = sessionResult.payload ?? {};
 
     // ── Evaluate producer result ────────────────────────────────────────
     state.phase = "evaluating-producer";
@@ -203,7 +203,7 @@ async function runProducerCycle(
         if (!record.errors) record.errors = [];
         record.errors = [...record.errors, ...evaluation.errors];
         writeRecord(ctx.cwd, record);
-        return await runProducerCycle(backend, ctx, signal, record, state);
+        return await runProducerCycle(port, ctx, signal, record, state);
       }
 
       // Not repairable — fail.
@@ -221,7 +221,7 @@ async function runProducerCycle(
 
     // ── Run critic if required ──────────────────────────────────────────
     if (record.producerSpec.criticRequired && record.criticSpec) {
-      return await runCriticCycle(backend, ctx, signal, record, state, evaluation);
+      return await runCriticCycle(port, ctx, signal, record, state, evaluation);
     }
 
     // No critic needed — mark complete.
@@ -238,7 +238,7 @@ async function runProducerCycle(
 }
 
 async function runCriticCycle(
-  backend: SubagentBackend,
+  port: AgentSessionPort,
   ctx: ExtensionContext,
   signal: AbortSignal,
   record: HandleRecord,
@@ -298,15 +298,23 @@ async function runCriticCycle(
   try {
     state.phase = "spawning-critic";
 
-    const child = await backend.spawn(
+    const node = await port.create(
       {
         requestId: criticHandleId,
-        params,
+        contract: state.criticContract.artifact,
+        materializedAgent: materialized,
         environment: env,
-        extraAgentDirectory: materialized.leaseDir,
+        params,
       },
       signal,
     );
+    state.sessionNode = node;
+
+    // Record the critic session id / execution run id (enables cancel).
+    attempt.sessionId = node.id;
+    attempt.runId = node.context.runId ?? "";
+    attempt.asyncDir = node.context.asyncDir;
+    writeRecord(ctx.cwd, record);
 
     state.phase = "critic-running";
 
@@ -316,11 +324,10 @@ async function runCriticCycle(
       state.materializedCritic = undefined;
     }
 
-    const result = await backend.waitForResult(
-      child.runId,
-      signal,
-      state.criticContract.artifact.runtime.timeoutMs + 30_000,
-    );
+    // Run the critic session to completion. The critic verdict is read back
+    // from the submitted contract result on disk (see evaluateContractResult),
+    // so the session payload is not needed here.
+    await port.run(node.id, signal);
 
     state.phase = "evaluating-critic";
 
@@ -364,7 +371,7 @@ async function runCriticCycle(
         if (!record.errors) record.errors = [];
         record.errors = [...record.errors, ...evaluation.errors];
         writeRecord(ctx.cwd, record);
-        return await runProducerCycle(backend, ctx, signal, record, state);
+        return await runProducerCycle(port, ctx, signal, record, state);
       }
 
       attempt.status = "failed";
@@ -404,21 +411,7 @@ async function runCriticCycle(
 export function buildSubagentParams(
   contract: ContractArtifact,
   materializedAgentName: string,
-): {
-  agent: string;
-  model?: string;
-  thinking: string;
-  cwd: string;
-  maxTurns: number;
-  graceTurns: number;
-  toolSoft: number;
-  toolHard: number;
-  toolBlock: readonly string[];
-  maxSubagentDepth: number;
-  timeoutMs: number;
-  async: boolean;
-  clarify: boolean;
-} {
+): AgentSessionExecutionParams {
   return {
     agent: materializedAgentName,
     ...(contract.runtime.model ? { model: contract.runtime.model } : {}),

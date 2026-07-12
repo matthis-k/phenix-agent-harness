@@ -25,7 +25,7 @@ import {
   transitionAuthorityForChild,
 } from "../phenix-workflow/workflow-runtime.ts";
 
-import type { SubagentBackend } from "./backend.ts";
+import type { AgentSessionPort } from "./session-port.ts";
 import type {
   ContractCreatorContext,
   ResolvedChildSpec,
@@ -112,7 +112,7 @@ function initialStateForRole(role: AgentRole) {
 
 export class AgentExecutionCoordinator {
   constructor(
-    private readonly backend: SubagentBackend,
+    private readonly port: AgentSessionPort,
   ) {}
 
   async delegate(input: {
@@ -356,7 +356,7 @@ export class AgentExecutionCoordinator {
     writeRecord(ctx.cwd, record);
 
     if (isBackground) {
-      runAttempt(this.backend, ctx, signal, record)
+      runAttempt(this.port, ctx, signal, record)
         .then((runnerResult) => {
           finalizeHandleWorkflow({ cwd: ctx.cwd, handle: runnerResult.record });
         })
@@ -367,7 +367,7 @@ export class AgentExecutionCoordinator {
       return { ok: true, record };
     }
 
-    const runnerResult = await runAttempt(this.backend, ctx, signal, record);
+    const runnerResult = await runAttempt(this.port, ctx, signal, record);
     const finalRecord = runnerResult.record;
     finalizeHandleWorkflow({ cwd: ctx.cwd, handle: finalRecord });
     return { ok: true, record: finalRecord };

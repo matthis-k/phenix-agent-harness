@@ -61,7 +61,7 @@ describe("Phenix architecture boundaries", () => {
         agentRoutes: defaultAgentRoutes,
       },
       workflows: [],
-      runtime: { subagentBackend: "pi-subagents-process", maximumDelegationDepth: 3 },
+      runtime: { sessionExecutionBackend: "external-process", maximumDelegationDepth: 3 },
     }));
 
     assert.equal(result.ok, true, result.ok ? undefined : result.diagnostics.map((d) => d.message).join("; "));
