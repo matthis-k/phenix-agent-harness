@@ -88,13 +88,35 @@ jobs:
         run: exit 1
 
       - name: Commit verified result
+        id: commit
         if: steps.apply.outputs.status == '0' && steps.checks.outputs.status == '0'
+        shell: bash
         run: |
-          rm -rf .github/bootstrap .github/workflows/bootstrap-runtime-fix.yml
-          rm -f bootstrap-apply.log candidate.diff nix-check.log
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git diff --cached --check
-          git commit -m "fix(runtime): preserve cancellation and finalize workflows [runtime-fix-applied]"
-          git push origin HEAD:fix/runtime-workflow-finalization
+          set +e
+          (
+            set -euo pipefail
+            rm -rf .github/bootstrap .github/workflows/bootstrap-runtime-fix.yml
+            rm -f bootstrap-apply.log candidate.diff nix-check.log
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git diff --cached --check
+            git commit -m "fix(runtime): preserve cancellation and finalize workflows [runtime-fix-applied]"
+            git push origin HEAD:fix/runtime-workflow-finalization
+          ) > commit-result.log 2>&1
+          status=$?
+          cat commit-result.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload commit diagnostics
+        if: steps.commit.outputs.status != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: commit-diagnostics
+          path: commit-result.log
+          if-no-files-found: error
+
+      - name: Fail when committing verified result failed
+        if: steps.commit.outputs.status != '0'
+        run: exit 1
