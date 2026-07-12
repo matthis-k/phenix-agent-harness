@@ -1,48 +1,29 @@
-export const AGENT_KINDS = [
-  "scout",
-  "planner",
-  "architect",
-  "implementer",
-  "tester",
-  "critic",
-  "finalizer",
-] as const;
+// ── Re-exports from kernel (canonical definitions) ─────────────────────────
 
-export type AgentKind =
-  (typeof AGENT_KINDS)[number];
+export type {
+  AgentKind,
+  AgentRole,
+} from "../phenix-kernel/agents.ts";
 
-export type AgentRole = AgentKind | null;
+export {
+  AGENT_KINDS,
+  isAgentKind,
+} from "../phenix-kernel/agents.ts";
 
-export type ThinkingLevel =
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
+export type {
+  Difficulty,
+  ThinkingLevel,
+  TaskProfile,
+  ProfileHint,
+} from "../phenix-kernel/task.ts";
+
+// ── Subagent-local types ──────────────────────────────────────────────────
 
 export type ModelTier =
   | "low"
   | "standard"
   | "high"
   | "critical";
-
-export interface TaskProfile {
-  readonly complexity: number;
-  readonly uncertainty: number;
-  readonly consequence: number;
-  readonly breadth: number;
-  readonly coupling: number;
-  readonly novelty: number;
-}
-
-export interface ProfileHint {
-  readonly complexity?: number;
-  readonly uncertainty?: number;
-  readonly consequence?: number;
-  readonly breadth?: number;
-  readonly coupling?: number;
-  readonly novelty?: number;
-}
 
 export interface TurnBudget {
   readonly maxTurns: number;
@@ -63,11 +44,3 @@ export interface VerificationCommand {
   readonly allowFailure?: boolean;
 }
 
-export function isAgentKind(
-  value: unknown,
-): value is AgentKind {
-  return (
-    typeof value === "string" &&
-    AGENT_KINDS.includes(value as AgentKind)
-  );
-}

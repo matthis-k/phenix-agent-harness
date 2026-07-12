@@ -1,20 +1,21 @@
-import type { AgentKind } from "../phenix-subagents/agent-types.ts";
+import type { AgentKind } from "../phenix-kernel/agents.ts";
+import type { Difficulty, ThinkingLevel, TaskProfile } from "../phenix-kernel/task.ts";
+import type { ModelSetId } from "../phenix-kernel/ids.ts";
+
+// ── Re-export canonical types from kernel ──────────────────────────────────
+
+export type { Difficulty, ThinkingLevel, TaskProfile, ModelSetId };
+
+// ── Model set IDs (deprecated — use kernel ModelSetId for new code) ───────
 
 export const MODEL_SET_IDS = [
-  "free",
-  "opencode-go",
-  "gpt",
-  "mixed",
+  "free" as ModelSetId,
+  "opencode-go" as ModelSetId,
+  "gpt" as ModelSetId,
+  "mixed" as ModelSetId,
 ] as const;
 
-export type ModelSetId = (typeof MODEL_SET_IDS)[number];
-
-export type Difficulty = "D0" | "D1" | "D2" | "D3";
-
-export type RoutingRole =
-  | "coordinator"
-  | "base"
-  | AgentKind;
+// ── Capability (routing-owned concept) ────────────────────────────────────
 
 export type Capability =
   | "fast"
@@ -27,16 +28,14 @@ export type Capability =
   | "review"
   | "review-max";
 
-export type ThinkingLevel =
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
+// ── Routing role (deprecated — use kernel AgentClientId for new code) ─────
 
-export function isThinkingLevel(value: string): value is ThinkingLevel {
-  return ["minimal", "low", "medium", "high", "xhigh"].includes(value);
-}
+export type RoutingRole =
+  | "coordinator"
+  | "base"
+  | AgentKind;
+
+// ── Route and model types ──────────────────────────────────────────────────
 
 export interface RoleRoute {
   readonly capability: Capability;
@@ -85,15 +84,6 @@ export interface RoutingConfig {
       readonly denyTargetStates?: readonly string[];
     }>
   >;
-}
-
-export interface TaskProfile {
-  readonly complexity: number;
-  readonly uncertainty: number;
-  readonly consequence: number;
-  readonly breadth: number;
-  readonly coupling: number;
-  readonly novelty: number;
 }
 
 export interface RoutingError {

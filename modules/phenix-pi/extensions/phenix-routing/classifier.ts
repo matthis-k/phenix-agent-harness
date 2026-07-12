@@ -1,22 +1,12 @@
-import type { Difficulty } from "./types.ts";
-import { tierForProfile } from "../phenix-subagents/policy.ts";
-import type { TaskProfile } from "../phenix-subagents/policy.ts";
+import type { Difficulty, TaskProfile } from "../phenix-kernel/task.ts";
+import { difficultyForProfile as kernelDifficultyForProfile } from "../phenix-kernel/task.ts";
 
 /**
- * Map the generic task profile tier to the D0–D3 difficulty scale.
- * Uses tierForProfile from the authoritative policy module.
+ * Map the generic task profile onto the D0–D3 difficulty scale.
+ *
+ * New code should import this from phenix-kernel/task.ts directly; this module
+ * remains routing-owned only as the historical test/import surface.
  */
 export function difficultyForProfile(profile: TaskProfile): Difficulty {
-  const tier = tierForProfile(profile);
-
-  switch (tier) {
-    case "low":
-      return "D0";
-    case "standard":
-      return "D1";
-    case "high":
-      return "D2";
-    case "critical":
-      return "D3";
-  }
+  return kernelDifficultyForProfile(profile);
 }

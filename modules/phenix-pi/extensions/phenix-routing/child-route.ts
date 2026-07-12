@@ -1,4 +1,4 @@
-import type { AgentRole } from "../phenix-subagents/agent-types.ts";
+import type { AgentRole } from "../phenix-kernel/agents.ts";
 import { loadRoutingConfig } from "./config.ts";
 import { modelRegistry } from "./registry.ts";
 import { resolveRoute } from "./resolver.ts";

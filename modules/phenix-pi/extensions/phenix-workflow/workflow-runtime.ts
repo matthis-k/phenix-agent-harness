@@ -1,9 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { AgentRole } from "../phenix-subagents/agent-types.ts";
-import type { ContractArtifact } from "../phenix-subagents/contract.ts";
-import { listRecords } from "../phenix-subagents/handle-store.ts";
-import type { HandleRecord } from "../phenix-subagents/handle-types.ts";
+import type { AgentRole } from "../phenix-kernel/agents.ts";
 import type { AgentCapabilityArtifact } from "./agent-capabilities.ts";
 import { readCapabilityArtifact } from "./agent-capabilities.ts";
 import { conditionSatisfied } from "./workflow-conditions.ts";
@@ -24,8 +21,11 @@ import type {
   WorkflowDefinition,
   WorkflowRuntimeRecord,
   WorkflowStateId,
-  WorkflowTransitionId,
+  WorkflowContractArtifact,
+  WorkflowHandleRecord,
+  WorkflowHandleStorePort,
 } from "./workflow-types.ts";
+import { roleForAgentClient } from "./workflow-types.ts";
 import type { TransitionAuthority } from "./transition-authority.ts";
 import {
   requireSessionCapabilityArtifact,
@@ -37,12 +37,12 @@ export interface WorkflowRuntimeDependencies {
   readonly record: WorkflowRuntimeRecord;
   readonly capabilities: AgentCapabilityArtifact;
   readonly authority: DelegationAuthority;
-  readonly activeHandles: readonly HandleRecord[];
+  readonly activeHandles: readonly WorkflowHandleRecord[];
 }
 
 export type WorkflowActorSource =
   | { readonly kind: "root"; readonly sessionId: string }
-  | { readonly kind: "child"; readonly contract: ContractArtifact };
+  | { readonly kind: "child"; readonly contract: WorkflowContractArtifact };
 
 const ROOT_MAXIMUM_DELEGATION_DEPTH = 4;
 
@@ -50,15 +50,17 @@ export function buildWorkflowRuntimeDependencies(input: {
   readonly cwd: string;
   readonly sessionId: string;
   readonly source: WorkflowActorSource;
+  readonly handleStore: WorkflowHandleStorePort;
 }): WorkflowRuntimeDependencies {
   return input.source.kind === "root"
-    ? buildRootDependencies(input.cwd, input.source.sessionId)
-    : buildChildDependencies(input.cwd, input.source.contract);
+    ? buildRootDependencies(input.cwd, input.source.sessionId, input.handleStore)
+    : buildChildDependencies(input.cwd, input.source.contract, input.handleStore);
 }
 
 function buildRootDependencies(
   cwd: string,
   sessionId: string,
+  handleStore: WorkflowHandleStorePort,
 ): WorkflowRuntimeDependencies {
   const workflowData = requireSessionWorkflowData(sessionId);
   const capabilities = requireSessionCapabilityArtifact(sessionId);
@@ -89,7 +91,7 @@ function buildRootDependencies(
     remainingDepth: ROOT_MAXIMUM_DELEGATION_DEPTH,
     transitionAuthority: { kind: "unrestricted" },
   };
-  const activeHandles = listRecords(cwd, sessionId).filter(
+  const activeHandles = handleStore.listRecords(cwd, sessionId).filter(
     (handle) =>
       handle.status === "running" &&
       handle.workflowBinding?.instanceId === record.instanceId &&
@@ -106,7 +108,8 @@ function buildRootDependencies(
 
 function buildChildDependencies(
   cwd: string,
-  contract: ContractArtifact,
+  contract: WorkflowContractArtifact,
+  handleStore: WorkflowHandleStorePort,
 ): WorkflowRuntimeDependencies {
   const workflow = contract.runtime.workflow;
   const record = readWorkflowRecord(cwd, workflow.instanceId, workflow.actorId);
@@ -125,7 +128,7 @@ function buildChildDependencies(
     remainingDepth: contract.runtime.delegation.remainingDepth,
     transitionAuthority: structuredClone(workflow.transitionAuthority),
   };
-  const activeHandles = listRecords(cwd, record.sessionId).filter(
+  const activeHandles = handleStore.listRecords(cwd, record.sessionId).filter(
     (handle) =>
       handle.status === "running" &&
       handle.workflowBinding?.instanceId === record.instanceId &&
@@ -173,7 +176,7 @@ export function transitionAuthorityForChild(input: {
     .filter((transition) => transition.scope !== "root")
     .filter((transition) => transition.actorRoles.includes(actorRole as never))
     .filter((transition) => transition.from.includes(input.initialState))
-    .filter((transition) => input.authorizedRoles.includes(transition.role))
+    .filter((transition) => input.authorizedRoles.includes(roleForAgentClient(transition.agentClient)))
     .map((transition) => transition.id);
   return { kind: "restricted", allowed };
 }
@@ -240,7 +243,7 @@ export function applyAutomaticTransitions(input: {
 
 export function finalizeHandleWorkflow(input: {
   readonly cwd: string;
-  readonly handle: HandleRecord;
+  readonly handle: WorkflowHandleRecord;
 }): WorkflowRuntimeRecord | undefined {
   const binding = input.handle.workflowBinding;
   if (!binding || input.handle.status === "running") return undefined;

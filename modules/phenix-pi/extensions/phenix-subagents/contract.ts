@@ -34,27 +34,30 @@ export interface ContractIdentity {
 
 export const CONTRACT_SCHEMA_VERSION = 1 as const;
 
-// ── Contract artifact ───────────────────────────────────────────────────────
+// ── Contract artifact and execution manifest ───────────────────────────────
 
-export interface ContractArtifact {
-  readonly schemaVersion: typeof CONTRACT_SCHEMA_VERSION;
-  readonly id: ContractId;
+export interface ContractRuntimeIdentity {
+  readonly runId: RunId;
+  readonly parentRunId?: RunId;
+  readonly handleId: string;
+  readonly parentHandleId?: string;
+  readonly role: AgentRole;
+}
 
-  readonly identity: {
-    readonly runId: RunId;
-    readonly parentRunId?: RunId;
-    readonly handleId: string;
-    readonly parentHandleId?: string;
-    readonly role: AgentRole;
-  };
+export interface ContractAssignment {
+  readonly task: string;
+  readonly requirements: readonly string[];
+  readonly outputSchema: JsonSchema;
+}
 
-  readonly assignment: {
-    readonly task: string;
-    readonly requirements: readonly string[];
-    readonly outputSchema: JsonSchema;
-  };
+/**
+ * Runtime execution manifest installed into a child session.
+ *
+ * This is deliberately distinct from static contract definitions in
+ * phenix-contracts and from the persisted ContractArtifact envelope.
+ */
+export interface ContractExecutionManifest {
 
-  readonly runtime: {
     readonly agent:
       | `phenix.${AgentKind}`
       | "phenix.base";
@@ -93,10 +96,26 @@ export interface ContractArtifact {
       readonly capabilityArtifactHash: string;
     };
 
-    readonly timeoutMs: number;
-    readonly turnBudget: TurnBudget;
-    readonly toolBudget: ToolBudget;
-  };
+  readonly timeoutMs: number;
+  readonly turnBudget: TurnBudget;
+  readonly toolBudget: ToolBudget;
+}
+
+export interface ContractRuntimeInstance {
+  readonly identity: ContractRuntimeIdentity;
+  readonly assignment: ContractAssignment;
+  readonly manifest: ContractExecutionManifest;
+}
+
+export interface ContractArtifact {
+  readonly schemaVersion: typeof CONTRACT_SCHEMA_VERSION;
+  readonly id: ContractId;
+
+  readonly identity: ContractRuntimeIdentity;
+
+  readonly assignment: ContractAssignment;
+
+  readonly runtime: ContractExecutionManifest;
 
   readonly verification: {
     readonly commands: readonly VerificationCommand[];

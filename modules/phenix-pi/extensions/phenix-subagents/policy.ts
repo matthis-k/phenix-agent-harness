@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { mergeObjects, readJson } from "../phenix-shared.ts";
+import { deriveTaskProfileFromText } from "../phenix-kernel/task.ts";
 import {
   AGENT_KINDS,
   type AgentKind,
@@ -110,48 +111,19 @@ export function loadPolicyConfig(): RuntimePolicyConfig {
 
 // ── Profile derivation ──────────────────────────────────────────────────────
 
-function clampScore(value: unknown): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(4, Math.round(value)));
-}
-
-function maxScore(...values: Array<number | undefined>): number {
-  return Math.max(0, ...values.map((value) => value ?? 0));
-}
-
 export function deriveTaskProfile(
   role: AgentRole,
   task: string,
   requirements: readonly string[],
   hint: ProfileHint = {},
 ): TaskProfile {
-  const text = `${task}\n${requirements.join("\n")}`.toLowerCase();
   const preset = rolePreset(role);
-  const minimum = preset.profileMinimums;
-
-  const highRisk = /\b(security|auth|permission|secret|credential|migration|data loss|destructive|concurren|race|deadlock|protocol|public api)\b/.test(text);
-  const architecture = /\b(architect|redesign|state machine|workflow|persistent|database|schema|interface|cross[- ]cutting)\b/.test(text);
-  const uncertainty = /\b(investigate|unknown|unclear|research|diagnose|why|root cause)\b/.test(text);
-  const novelty = /\b(new|introduce|design|invent|prototype|replace)\b/.test(text);
-
-  const inferred: TaskProfile = {
-    complexity:
-      task.length > 4_000 ? 4 : task.length > 1_800 ? 3 : task.length > 700 ? 2 : 1,
-    uncertainty: uncertainty ? 2 : 0,
-    consequence: highRisk ? 3 : 0,
-    breadth: requirements.length >= 9 ? 4 : requirements.length >= 5 ? 3 : requirements.length >= 2 ? 2 : 0,
-    coupling: architecture ? 3 : 0,
-    novelty: novelty ? 2 : 0,
-  };
-
-  return {
-    complexity: clampScore(maxScore(inferred.complexity, minimum.complexity, hint.complexity)),
-    uncertainty: clampScore(maxScore(inferred.uncertainty, minimum.uncertainty, hint.uncertainty)),
-    consequence: clampScore(maxScore(inferred.consequence, minimum.consequence, hint.consequence)),
-    breadth: clampScore(maxScore(inferred.breadth, minimum.breadth, hint.breadth)),
-    coupling: clampScore(maxScore(inferred.coupling, minimum.coupling, hint.coupling)),
-    novelty: clampScore(maxScore(inferred.novelty, minimum.novelty, hint.novelty)),
-  };
+  return deriveTaskProfileFromText(
+    task,
+    requirements,
+    hint,
+    preset.profileMinimums,
+  );
 }
 
 // ── Tier calculation ────────────────────────────────────────────────────────

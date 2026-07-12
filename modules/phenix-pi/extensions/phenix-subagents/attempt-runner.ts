@@ -120,7 +120,7 @@ async function runProducerCycle(
     number: attemptNumber,
     runId: "",
     phenixRunId,
-    mode: record.status === "running" ? latestAttempt(record)?.mode ?? "foreground" : "foreground",
+    mode: record.attempts.at(-1)?.mode ?? "foreground",
     startedAt: now(),
     contractId,
     status: "running",

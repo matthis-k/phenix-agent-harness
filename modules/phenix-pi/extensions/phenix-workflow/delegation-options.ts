@@ -4,13 +4,16 @@ import type {
   DelegateTransition,
   DelegationAuthority,
   DelegationOption,
-  WorkflowTransition,
+} from "./workflow-types.ts";
+import {
+  roleForAgentClient,
+  outputSchemaIdForContract,
 } from "./workflow-types.ts";
 import { conditionSatisfied } from "./workflow-conditions.ts";
 import { transitionMatchesDifficulty } from "./workflow-reducer.ts";
 import { getOutputSchema } from "./workflow-schemas.ts";
 import { isTransitionPermitted } from "./transition-authority.ts";
-import type { HandleRecord } from "../phenix-subagents/handle-types.ts";
+import type { WorkflowHandleRecord } from "./workflow-types.ts";
 
 // ── Resolve current delegation options ──────────────────────────────────────
 
@@ -36,7 +39,7 @@ export function resolveDelegationOptions(input: {
   readonly definition: WorkflowDefinition;
   readonly runtime: WorkflowRuntimeRecord;
   readonly authority: DelegationAuthority;
-  readonly activeHandles: readonly HandleRecord[];
+  readonly activeHandles: readonly WorkflowHandleRecord[];
 }): readonly DelegationOption[] {
   const { definition, runtime, authority } = input;
 
@@ -102,9 +105,11 @@ export function resolveDelegationOptions(input: {
 
     // 9. Role authorization check — AgentRole includes null so
     //    array membership works for base agents too.
+    const targetRole = roleForAgentClient(dt.agentClient);
+
     if (
       !authority.roles.effective.includes(
-        dt.role,
+        targetRole,
       )
     ) {
       continue;
@@ -113,7 +118,7 @@ export function resolveDelegationOptions(input: {
     // 10. Role availability check
     if (
       !authority.availableRoles.includes(
-        dt.role,
+        targetRole,
       )
     ) {
       continue;
@@ -163,17 +168,18 @@ export function resolveDelegationOptions(input: {
     if (allowedModes.length === 0) continue;
 
     // All checks passed - create option
-    const outputSchema = getOutputSchema(dt.outputSchemaId);
+    const outputSchemaId = outputSchemaIdForContract(dt.outputContract);
+    const outputSchema = getOutputSchema(outputSchemaId);
 
     options.push({
       transitionId: dt.id,
       workflowRevision: runtime.revision,
-      role: dt.role,
+      role: targetRole,
       targetState: dt.onAccepted,
       purpose: dt.purpose,
       description: dt.description,
       category: dt.category,
-      outputSchemaId: dt.outputSchemaId,
+      outputSchemaId,
       outputSchema,
       allowedModes,
     });

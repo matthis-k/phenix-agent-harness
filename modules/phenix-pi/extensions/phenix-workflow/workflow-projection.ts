@@ -7,8 +7,8 @@ import type {
   WorkflowOutputSchemaId,
   WorkflowRuntimeRecord,
 } from "./workflow-types.ts";
-import type { HandleRecord } from "../phenix-subagents/handle-types.ts";
-import type { Difficulty } from "../phenix-routing/types.ts";
+import type { WorkflowHandleRecord } from "./workflow-types.ts";
+import type { Difficulty } from "../phenix-kernel/task.ts";
 import { resolveDelegationOptions } from "./delegation-options.ts";
 
 export interface ModelDelegationOption {
@@ -70,7 +70,7 @@ export function buildWorkflowDecisionContext(input: {
   readonly definition: WorkflowDefinition;
   readonly runtime: WorkflowRuntimeRecord;
   readonly authority: DelegationAuthority;
-  readonly activeHandles: readonly HandleRecord[];
+  readonly activeHandles: readonly WorkflowHandleRecord[];
 }): WorkflowDecisionContext {
   const options = projectDelegationOptions(resolveDelegationOptions(input));
   return {

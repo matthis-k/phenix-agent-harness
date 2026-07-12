@@ -1,6 +1,10 @@
 import type { ModelSetId, ResolvedRoute } from "./types.ts";
 import { MODEL_SET_IDS } from "./types.ts";
-import type { AgentCapabilityArtifact } from "../phenix-workflow/agent-capabilities.ts";
+
+export interface SessionCapabilityArtifactView {
+  readonly artifactHash: string;
+  readonly entries?: readonly unknown[];
+}
 
 /**
  * Session-scoped routing state.
@@ -23,7 +27,7 @@ export interface SessionRoutingRuntime {
   cachedMessages?: unknown[];
 
   /** Immutable agent capability artifact built at session startup. */
-  capabilityArtifact?: AgentCapabilityArtifact;
+  capabilityArtifact?: SessionCapabilityArtifactView;
 
   /** Active workflow instance (root-level). */
   activeWorkflow?: {
@@ -39,15 +43,15 @@ const sessionState = new Map<string, SessionRoutingRuntime>();
  * Get or create routing state for a session.
  */
 export function getSessionRuntime(sessionId: string): SessionRoutingRuntime {
-  let state = sessionState.get(sessionId);
-  if (!state) {
-    state = {
-      modelSet: "mixed",
-      activeRoute: null,
-      turnCount: 0,
-    };
-    sessionState.set(sessionId, state);
-  }
+  const existing = sessionState.get(sessionId);
+  if (existing) return existing;
+
+  const state: SessionRoutingRuntime = {
+    modelSet: "mixed" as ModelSetId,
+    activeRoute: null,
+    turnCount: 0,
+  };
+  sessionState.set(sessionId, state);
   return state;
 }
 

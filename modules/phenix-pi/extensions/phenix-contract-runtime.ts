@@ -78,6 +78,26 @@ function errorResult(
 
 // ── Bootstrap initialization ────────────────────────────────────────────────
 
+const PHENIX_TEST_BOOTSTRAP_EVIDENCE_ENV = "PHENIX_TEST_BOOTSTRAP_EVIDENCE";
+
+export function formatChildBootstrapEvidence(input: {
+  readonly contractId: string;
+  readonly runId: string;
+  readonly role: string | null;
+}): string {
+  return [
+    "PHENIX_CHILD_BOOTSTRAP",
+    `contractId=${input.contractId}`,
+    `runId=${input.runId}`,
+    `role=${input.role ?? "base"}`,
+  ].join(" ");
+}
+
+function shouldEmitBootstrapEvidence(): boolean {
+  const value = process.env[PHENIX_TEST_BOOTSTRAP_EVIDENCE_ENV];
+  return value === "1" || value === "true" || value === "yes";
+}
+
 async function bootstrapChild(
   pi: ExtensionAPI,
   env: ChildBootstrapEnvironment,
@@ -113,8 +133,18 @@ async function bootstrapChild(
     store,
   });
 
+  const bootstrapEvidence = formatChildBootstrapEvidence({
+    contractId: stored.artifact.id,
+    runId: env.identity.runId,
+    role: stored.artifact.identity.role,
+  });
+
+  if (shouldEmitBootstrapEvidence()) {
+    console.error(bootstrapEvidence);
+  }
+
   // 4. Register the model-facing projection.
-  registerContractPromptProjection(pi, stored);
+  registerContractPromptProjection(pi, stored, bootstrapEvidence);
 
   // 5. Register phenix_complete.
   registerPhenixComplete(pi);
@@ -128,6 +158,7 @@ async function bootstrapChild(
 function registerContractPromptProjection(
   pi: ExtensionAPI,
   stored: Awaited<ReturnType<FileContractStore["load"]>>,
+  bootstrapEvidence: string,
 ): void {
   if (!stored) return;
 
@@ -186,9 +217,12 @@ function registerContractPromptProjection(
 
     const projection = deriveProjection(contract, workflowProjection);
     const formatted = formatProjection(projection);
+    const evidenceSection = shouldEmitBootstrapEvidence()
+      ? `## Phenix child bootstrap evidence\n\n${bootstrapEvidence}\n\n`
+      : "";
 
     return {
-      systemPrompt: `${event.systemPrompt}\n\n${formatted}`,
+      systemPrompt: `${event.systemPrompt}\n\n${evidenceSection}${formatted}`,
     };
   });
 }

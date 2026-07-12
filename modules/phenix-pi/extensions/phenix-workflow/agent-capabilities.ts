@@ -1,5 +1,5 @@
-import type { AgentRole, AgentKind } from "../phenix-subagents/agent-types.ts";
-import { AGENT_KINDS } from "../phenix-subagents/agent-types.ts";
+import type { AgentRole, AgentKind } from "../phenix-kernel/agents.ts";
+import { AGENT_KINDS } from "../phenix-kernel/agents.ts";
 import type { DiscoveredAgentDefinition, AgentDiscoveryHelper } from "./capability-provider.ts";
 
 // ── Default agent targets ───────────────────────────────────────────────────

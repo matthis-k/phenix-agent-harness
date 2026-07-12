@@ -256,9 +256,11 @@ export class SubagentBackend {
       request.extraAgentDirectory,
     );
 
+    const piWrapper = process.env.PHENIX_PI_WRAPPER;
     const env: Record<string, string> = {
       ...request.environment,
       PI_SUBAGENT_EXTRA_AGENT_DIRS: mergedAgentDirs,
+      ...(piWrapper ? { PI_SUBAGENT_PI_BINARY: piWrapper } : {}),
     };
 
     return spawnMutex.runExclusive(async () => {

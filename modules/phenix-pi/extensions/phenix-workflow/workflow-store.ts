@@ -10,12 +10,8 @@ import type {
   WorkflowStateId,
   WorkflowTransitionId,
 } from "./workflow-types.ts";
-import type {
-  Difficulty,
-  ModelSetId,
-  TaskProfile,
-} from "../phenix-routing/types.ts";
-import type { AgentKind } from "../phenix-subagents/agent-types.ts";
+import type { AgentKind } from "../phenix-kernel/agents.ts";
+import type { Difficulty, TaskProfile } from "../phenix-kernel/task.ts";
 import { isTerminalState } from "./workflow-reducer.ts";
 
 function stateRoot(cwd: string): string {
@@ -190,7 +186,6 @@ export function createWorkflowRecord(
     readonly sessionId: string;
     readonly definitionId: WorkflowDefinitionId;
     readonly difficulty: Difficulty;
-    readonly modelSet?: ModelSetId;
     readonly taskProfile: TaskProfile;
     readonly actorRole: "coordinator" | AgentKind | "base";
     readonly capabilityArtifactHash: string;
@@ -206,7 +201,6 @@ export function createWorkflowRecord(
     definitionId: input.definitionId,
     definitionVersion: 1,
     difficulty: input.difficulty,
-    ...(input.modelSet ? { modelSet: input.modelSet } : {}),
     taskProfile: input.taskProfile,
     actorRole: input.actorRole,
     state: input.initialState ?? "classified",

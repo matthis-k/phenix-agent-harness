@@ -4,7 +4,8 @@ import type {
   WorkflowStateId,
   WorkflowFactKey,
 } from "./workflow-types.ts";
-import type { Difficulty } from "../phenix-routing/types.ts";
+import { outputSchemaIdForContract } from "./workflow-types.ts";
+import type { Difficulty } from "../phenix-kernel/task.ts";
 
 // ── Facts extractor ─────────────────────────────────────────────────────────
 
@@ -27,7 +28,7 @@ export function factsFromTransitionResult(
 
   const obj = value as Record<string, unknown>;
 
-  switch (transition.outputSchemaId) {
+  switch (outputSchemaIdForContract(transition.outputContract)) {
     case "planner-handoff":
       if (typeof obj.crossCuttingDesignRequired === "boolean") {
         facts.crossCuttingDesignRequired = obj.crossCuttingDesignRequired;

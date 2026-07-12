@@ -10,10 +10,21 @@ import type {
   WorkflowTransition,
 } from "./workflow-types.ts";
 import { mkTransitionId } from "./workflow-types.ts";
-import type { AgentRole, AgentKind } from "../phenix-subagents/agent-types.ts";
-import type { Difficulty } from "../phenix-routing/types.ts";
+import type { AgentRole, AgentKind } from "../phenix-kernel/agents.ts";
+import type { Difficulty } from "../phenix-kernel/task.ts";
+import { agentClientRef, contractRef } from "../phenix-kernel/refs.ts";
 
 // ── Helper factories ────────────────────────────────────────────────────────
+
+function clientIdForRole(role: AgentRole): string {
+  return role === null ? "base" : role;
+}
+
+function actorClientRefs(
+  roles: ReadonlyArray<"coordinator" | AgentKind>,
+) {
+  return roles.map((role) => agentClientRef(role));
+}
 
 function delegate(args: {
   readonly id: string;
@@ -33,11 +44,14 @@ function delegate(args: {
   readonly parallelGroup?: string;
   readonly maxExecutions?: number;
 }): DelegateTransition {
-  const { id: _id, allowedModes, ...rest } = args;
+  const { id: _id, allowedModes, role, outputSchemaId, ...rest } = args;
   return {
     kind: "delegate",
     id: mkTransitionId(_id),
     ...rest,
+    actorClients: actorClientRefs(rest.actorRoles),
+    agentClient: agentClientRef(clientIdForRole(role)),
+    outputContract: contractRef(outputSchemaId),
     allowedModes: allowedModes ?? ["await"],
   };
 }

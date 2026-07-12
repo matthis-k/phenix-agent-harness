@@ -109,7 +109,7 @@ export function currentInheritedRolePatch(): DelegateRolePatchInput | undefined 
   return _context.contract.runtime.delegation.roles.source.patch;
 }
 
-export { AgentRole, AgentKind, ToolPatch, ToolPatchInput, DelegateRolePatchInput };
+export type { AgentRole, AgentKind, ToolPatch, ToolPatchInput, DelegateRolePatchInput };
 
 // ── Root context fields (removed) ───────────────────────────────────────────
 //

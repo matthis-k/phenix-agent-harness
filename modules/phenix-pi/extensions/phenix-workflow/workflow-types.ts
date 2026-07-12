@@ -1,5 +1,6 @@
-import type { AgentKind, AgentRole, TaskProfile } from "../phenix-subagents/agent-types.ts";
-import type { Difficulty, ModelSetId } from "../phenix-routing/types.ts";
+import type { AgentKind, AgentRole } from "../phenix-kernel/agents.ts";
+import type { Difficulty, TaskProfile } from "../phenix-kernel/task.ts";
+import type { AgentClientRef, ContractDefinitionRef } from "../phenix-kernel/refs.ts";
 
 // ── Workflow definition identity ────────────────────────────────────────────
 
@@ -115,14 +116,20 @@ export interface DelegateTransition extends TransitionBase {
 
   readonly actorRoles: ReadonlyArray<"coordinator" | AgentKind>;
 
+  /** Agent clients authorized to start this transition. */
+  readonly actorClients: readonly AgentClientRef[];
+
   readonly from: readonly WorkflowStateId[];
 
-  readonly role: AgentRole;
+  /** Agent client that will execute this transition. */
+  readonly agentClient: AgentClientRef;
+
   readonly purpose: DelegationPurpose;
 
   readonly category: "required" | "optional" | "repair";
 
-  readonly outputSchemaId: WorkflowOutputSchemaId;
+  /** Contract definition produced by this transition. */
+  readonly outputContract: ContractDefinitionRef;
 
   readonly allowedModes: ReadonlyArray<"await" | "background">;
 
@@ -186,6 +193,24 @@ export type WorkflowOutputSchemaId =
   | "critic-handoff"
   | "base-handoff";
 
+export function roleForAgentClient(
+  ref: AgentClientRef,
+): AgentRole {
+  return ref.id === "base" ? null : ref.id as AgentKind;
+}
+
+export function actorRoleForAgentClient(
+  ref: AgentClientRef,
+): "base" | "coordinator" | AgentKind {
+  return ref.id as "base" | "coordinator" | AgentKind;
+}
+
+export function outputSchemaIdForContract(
+  ref: ContractDefinitionRef,
+): WorkflowOutputSchemaId {
+  return ref.id as WorkflowOutputSchemaId;
+}
+
 // ── Runtime workflow record ─────────────────────────────────────────────────
 
 export interface ActiveWorkflowTransition {
@@ -216,7 +241,6 @@ export interface WorkflowRuntimeRecord {
   readonly definitionVersion: 1;
 
   readonly difficulty: Difficulty;
-  readonly modelSet?: ModelSetId;
   readonly taskProfile: TaskProfile;
 
   readonly actorRole: "coordinator" | AgentKind | "base";
@@ -239,7 +263,68 @@ export interface WorkflowRuntimeRecord {
 // ── Delegation authority ────────────────────────────────────────────────────
 
 import type { TransitionAuthority } from "./transition-authority.ts";
-import type { ResolvedDelegateRoleConfiguration } from "../phenix-subagents/delegation-policy.ts";
+
+export interface DelegateRolePatch {
+  readonly additional: readonly AgentRole[];
+  readonly removed: readonly AgentRole[];
+}
+
+export interface ResolvedDelegateRoleConfiguration {
+  readonly presetRevision: 1;
+  readonly role: AgentRole;
+  readonly source: {
+    readonly inherited: boolean;
+    readonly patch: DelegateRolePatch;
+  };
+  readonly effective: readonly AgentRole[];
+}
+
+export interface WorkflowBinding {
+  readonly instanceId: string;
+  readonly actorId: string;
+  readonly transitionExecutionId: string;
+  readonly transitionId: WorkflowTransitionId;
+  readonly sourceState: WorkflowStateId;
+  readonly sourceRevision: number;
+  readonly acceptedState: WorkflowStateId;
+  readonly rejectedState: WorkflowStateId;
+}
+
+export interface WorkflowHandleRecord {
+  readonly id: string;
+  readonly sessionId: string;
+  readonly status: "running" | "completed" | "failed" | "cancelled";
+  readonly workflowBinding?: WorkflowBinding;
+  readonly value?: unknown;
+}
+
+export interface WorkflowContractArtifact {
+  readonly identity: {
+    readonly role: AgentRole;
+  };
+  readonly runtime: {
+    readonly delegation: {
+      readonly roles: ResolvedDelegateRoleConfiguration;
+      readonly availableRoles: readonly AgentRole[];
+      readonly remainingDepth: number;
+    };
+    readonly workflow: {
+      readonly instanceId: string;
+      readonly actorId: string;
+      readonly parentActorId?: string;
+      readonly definitionId: WorkflowDefinitionId;
+      readonly definitionVersion: 1;
+      readonly difficulty: Difficulty;
+      readonly initialState: WorkflowStateId;
+      readonly transitionAuthority: TransitionAuthority;
+      readonly capabilityArtifactHash: string;
+    };
+  };
+}
+
+export interface WorkflowHandleStorePort {
+  listRecords(cwd: string, sessionId: string): readonly WorkflowHandleRecord[];
+}
 
 export interface DelegationAuthority {
   readonly roles: ResolvedDelegateRoleConfiguration;
