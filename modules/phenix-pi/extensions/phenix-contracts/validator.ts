@@ -1,148 +1,176 @@
 /**
- * phenix-contracts — validator
+ * phenix-contracts — canonical schema compiler and validator
  *
- * Schema-agnostic JSON validation against contract definitions.
- * Uses a built-in JSON Schema validator implementation.
+ * All static and runtime handoff validation goes through this module. Schema
+ * limits are enforced before compilation so model-provided schemas cannot
+ * trigger unbounded traversal or remote reference resolution.
  */
+
+import { Compile } from "typebox/compile";
 
 import type {
   ContractDefinition,
   ContractValidationIssue,
   ContractValidationResult,
+  JsonSchema,
+  SchemaValidation,
+  SchemaViolation,
 } from "./definitions.ts";
 
-// ── Validation ─────────────────────────────────────────────────────────────
+const MAX_SCHEMA_BYTES = 64 * 1024;
+const MAX_SCHEMA_DEPTH = 20;
+const MAX_SCHEMA_NODES = 1024;
+const MAX_REPORTED_ISSUES = 12;
 
-function validateNode(
-  schema: Record<string, unknown>,
-  value: unknown,
-  path: readonly (string | number)[],
-): ContractValidationIssue[] {
-  const issues: ContractValidationIssue[] = [];
-
-  const type = schema["type"] as string | undefined;
-
-  if (type === "object" && typeof value === "object" && value !== null && !Array.isArray(value)) {
-    const val = value as Record<string, unknown>;
-
-    // Check required
-    const required = schema["required"] as string[] | undefined;
-    if (required) {
-      for (const key of required) {
-        if (!(key in val) || val[key] === undefined) {
-          issues.push({
-            path: [...path, key],
-            message: `Required property "${key}" is missing`,
-          });
-        }
-      }
-    }
-
-    // Check additionalProperties
-    if (schema["additionalProperties"] === false) {
-      const allowedProps = schema["properties"] as Record<string, unknown> | undefined;
-      const allowedKeys = allowedProps ? Object.keys(allowedProps) : [];
-      for (const key of Object.keys(val)) {
-        if (!allowedKeys.includes(key)) {
-          issues.push({
-            path: [...path, key],
-            message: `Unexpected property "${key}" is not allowed`,
-          });
-        }
-      }
-    }
-
-    // Check each property
-    const properties = schema["properties"] as Record<string, Record<string, unknown>> | undefined;
-    if (properties) {
-      for (const [key, propSchema] of Object.entries(properties)) {
-        if (key in val && val[key] !== undefined) {
-          issues.push(...validateNode(propSchema, val[key], [...path, key]));
-        }
-      }
-    }
-  } else if (type === "array" && Array.isArray(value)) {
-    const items = schema["items"] as Record<string, unknown> | undefined;
-    if (items) {
-      for (let i = 0; i < value.length; i++) {
-        issues.push(...validateNode(items, value[i], [...path, i]));
-      }
-    }
-  } else if (type === "string") {
-    if (typeof value !== "string") {
-      issues.push({
-        path,
-        message: `Expected string but got ${typeof value}`,
-      });
-    } else {
-      const minLength = schema["minLength"] as number | undefined;
-      if (minLength !== undefined && value.length < minLength) {
-        issues.push({
-          path,
-          message: `String must have minimum length ${minLength}`,
-        });
-      }
-    }
-  } else if (type === "boolean") {
-    if (typeof value !== "boolean") {
-      issues.push({
-        path,
-        message: `Expected boolean but got ${typeof value}`,
-      });
-    }
-  } else if (type === "integer" || type === "number") {
-    if (typeof value !== "number") {
-      issues.push({
-        path,
-        message: `Expected ${type} but got ${typeof value}`,
-      });
-    } else {
-      const minimum = schema["minimum"] as number | undefined;
-      if (minimum !== undefined && value < minimum) {
-        issues.push({
-          path,
-          message: `Value must be >= ${minimum}`,
-        });
-      }
-    }
-  } else if (type === "enum") {
-    // enum values are specified as an array
-    // handled generically - actual enum checks are in the type-specific validators
-  }
-
-  // Check enum constraint at any node
-  const enumValues = schema["enum"] as unknown[] | undefined;
-  if (enumValues && !enumValues.includes(value)) {
-    issues.push({
-      path,
-      message: `Value "${String(value)}" is not one of: ${enumValues.map(String).join(", ")}`,
-    });
-  }
-
-  return issues;
+interface CompiledSchema {
+  Check(value: unknown): boolean;
+  Errors(value: unknown): Iterable<{
+    instancePath?: string;
+    path?: string;
+    message?: string;
+  }>;
 }
 
-// ── Public API ──────────────────────────────────────────────────────────────
+function compileSchema(schema: JsonSchema): CompiledSchema {
+  return (Compile as (input: unknown) => CompiledSchema)(schema);
+}
 
-export function validateContract<T = unknown>(
-  definition: ContractDefinition<T>,
+function visitSchema(
   value: unknown,
-): ContractValidationResult<T> {
-  const schema = definition.schema as Record<string, unknown>;
-  const issues = validateNode(schema, value, []);
-  if (issues.length > 0) {
-    const summary = `Contract validation failed with ${issues.length} issue(s):\n${issues
-      .map((i) => `  [${i.path.join(".") || "root"}] ${i.message}`)
-      .join("\n")}`;
+  depth: number,
+  state: { nodes: number },
+): void {
+  if (depth > MAX_SCHEMA_DEPTH) {
+    throw new Error(`output schema exceeds maximum depth ${MAX_SCHEMA_DEPTH}`);
+  }
+  if (!value || typeof value !== "object") return;
+
+  state.nodes += 1;
+  if (state.nodes > MAX_SCHEMA_NODES) {
+    throw new Error(`output schema exceeds maximum node count ${MAX_SCHEMA_NODES}`);
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      visitSchema(item, depth + 1, state);
+    }
+    return;
+  }
+
+  for (const [key, child] of Object.entries(value)) {
+    if (key === "$ref" && typeof child === "string" && !child.startsWith("#")) {
+      throw new Error("remote output-schema $ref values are not allowed");
+    }
+    visitSchema(child, depth + 1, state);
+  }
+}
+
+/**
+ * Validate schema structure, resource limits, and TypeBox compatibility.
+ */
+export function assertJsonSchema(value: unknown): asserts value is JsonSchema {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("outputSchema must be a JSON Schema object");
+  }
+
+  const serialized = JSON.stringify(value);
+  if (Buffer.byteLength(serialized, "utf-8") > MAX_SCHEMA_BYTES) {
+    throw new Error(`output schema exceeds ${MAX_SCHEMA_BYTES} bytes`);
+  }
+
+  visitSchema(value, 0, { nodes: 0 });
+
+  try {
+    compileSchema(value);
+  } catch (error) {
+    throw new Error(
+      `invalid outputSchema: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/** Backward-compatible runtime name retained at schema-input boundaries. */
+export const assertOutputSchema = assertJsonSchema;
+
+function stringPath(error: {
+  instancePath?: string;
+  path?: string;
+}): string {
+  return (
+    (error.instancePath ?? error.path ?? "")
+      .replace(/^\//, "")
+      .replaceAll("/", ".") || "root"
+  );
+}
+
+function pathSegments(path: string): readonly (string | number)[] {
+  if (path === "root" || path.length === 0) return [];
+
+  return path.split(".").map((segment) => {
+    const index = Number(segment);
+    return Number.isInteger(index) && String(index) === segment ? index : segment;
+  });
+}
+
+function validationFailure(
+  compiled: CompiledSchema,
+  value: unknown,
+): Extract<SchemaValidation, { readonly ok: false }> {
+  const violations: SchemaViolation[] = [...compiled.Errors(value)]
+    .slice(0, MAX_REPORTED_ISSUES)
+    .map((error) => ({
+      path: stringPath(error),
+      message: error.message ?? "schema validation failed",
+    }));
+
+  return {
+    ok: false,
+    summary:
+      violations.map((entry) => `${entry.path}: ${entry.message}`).join("; ") ||
+      "schema validation failed",
+    violations,
+  };
+}
+
+/** Validate a runtime value directly against a JSON Schema. */
+export function validateSchema(
+  schema: JsonSchema,
+  value: unknown,
+): SchemaValidation {
+  let compiled: CompiledSchema;
+  try {
+    assertJsonSchema(schema);
+    compiled = compileSchema(schema);
+  } catch (error) {
     return {
       ok: false,
-      issues,
-      summary,
+      summary: `invalid runtime output contract: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      violations: [],
     };
   }
 
+  return compiled.Check(value) ? { ok: true } : validationFailure(compiled, value);
+}
+
+/** Validate a value against a reusable static contract definition. */
+export function validateContract<T>(
+  definition: ContractDefinition<T>,
+  value: unknown,
+): ContractValidationResult<T> {
+  const validation = validateSchema(definition.schema, value);
+  if (validation.ok) {
+    return { ok: true, value: value as T };
+  }
+
+  const issues: ContractValidationIssue[] = validation.violations.map((violation) => ({
+    path: pathSegments(violation.path),
+    message: violation.message,
+  }));
   return {
-    ok: true,
-    value: value as T,
+    ok: false,
+    issues,
+    summary: validation.summary,
   };
 }
