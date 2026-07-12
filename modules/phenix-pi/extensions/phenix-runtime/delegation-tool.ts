@@ -7,6 +7,8 @@
  * and digest already introduced in the repository.
  */
 
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+
 import type { AgentRole } from "../phenix-kernel/agents.ts";
 import { DelegateParams } from "../phenix-subagents/delegate-schema.ts";
 import type { WorkflowDecisionContext } from "../phenix-workflow/workflow-projection.ts";
@@ -31,7 +33,10 @@ export interface ParentExecutionContext {
   readonly sessionId: string;
   readonly cwd: string;
   readonly contractId?: string;
+  readonly handleId?: string;
   readonly childRunId?: string;
+  readonly rootChildRunId?: string;
+  readonly modelSet?: string;
   readonly maximumDelegationDepth: number;
 }
 
@@ -73,6 +78,7 @@ export interface DelegationCoordinator {
     readonly params: DelegateExecutionParams;
     readonly parent: ParentExecutionContext;
     readonly signal: AbortSignal;
+    readonly ctx: ExtensionContext;
   }): Promise<DelegateExecutionResult>;
 }
 
@@ -121,7 +127,7 @@ export function createDelegationTool(input: {
       rawParams: Record<string, unknown>,
       signal: AbortSignal,
       _onUpdate: unknown,
-      _ctx: unknown,
+      rawContext: unknown,
     ): Promise<AgentToolResult> {
       try {
         const params = rawParams as unknown as DelegateExecutionParams;
@@ -183,6 +189,7 @@ export function createDelegationTool(input: {
           params,
           parent,
           signal,
+          ctx: rawContext as ExtensionContext,
         });
 
         if (!result.ok) {

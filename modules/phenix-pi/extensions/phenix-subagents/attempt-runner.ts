@@ -19,6 +19,7 @@ import {
 } from "./handle-store.ts";
 import type { ContractArtifact } from "./contract.ts";
 import type {
+  ChildCycleOutcome,
   ChildRun,
   ChildSessionSpec,
   ChildSessionBackend,
@@ -46,6 +47,7 @@ export interface VerificationInput {
   readonly record: HandleRecord;
   readonly value: unknown;
   readonly cwd: string;
+  readonly signal: AbortSignal;
 }
 
 export interface VerificationResult {
@@ -181,6 +183,7 @@ export async function executeProducerCycles(
   } = input;
 
   let completionGrace = completionGraceRemaining;
+  let pendingOutcome: ChildCycleOutcome | undefined;
 
   for (let cycle = 1; cycle <= maximumProducerCycles; cycle++) {
     const cycleRecord: ProducerCycleRecord = {
@@ -191,13 +194,16 @@ export async function executeProducerCycles(
     };
     record.producerCycles.push(cycleRecord);
 
-    // Wait for the current cycle to settle.
-    let outcome;
+    // The first outcome belongs to the initial prompt. Every later outcome
+    // is produced by the exact repair feedback sent in the previous branch.
+    // Never manufacture an additional empty prompt between repair cycles.
+    let outcome: ChildCycleOutcome;
     try {
-      if (cycle === 1) {
-        outcome = await run.waitForCurrentCycle(signal);
+      if (pendingOutcome) {
+        outcome = pendingOutcome;
+        pendingOutcome = undefined;
       } else {
-        outcome = await run.continue("", signal);
+        outcome = await run.waitForCurrentCycle(signal);
       }
     } catch (error) {
       cycleRecord.endedAt = now();
@@ -244,11 +250,13 @@ export async function executeProducerCycles(
         cycleRecord.feedback = "missing-completion";
         writeRecord(cwd, record);
 
-        // Remove this cycle record — we'll retry in the same session.
-        record.producerCycles.pop();
+        if (cycle >= maximumProducerCycles) break;
 
         try {
-          await run.continue(buildMissingCompletionFeedback(record), signal);
+          pendingOutcome = await run.continue(
+            buildMissingCompletionFeedback(record),
+            signal,
+          );
         } catch (error) {
           record.status = "failed";
           record.errors = [error instanceof Error ? error.message : String(error)];
@@ -296,8 +304,13 @@ export async function executeProducerCycles(
       cycleRecord.feedback = "validation-repair";
       writeRecord(cwd, record);
 
+      if (cycle >= maximumProducerCycles) break;
+
       try {
-        await run.continue(buildValidationRepairFeedback(issues), signal);
+        pendingOutcome = await run.continue(
+          buildValidationRepairFeedback(issues),
+          signal,
+        );
       } catch (error) {
         record.status = "failed";
         record.errors = [error instanceof Error ? error.message : String(error)];
@@ -314,6 +327,7 @@ export async function executeProducerCycles(
         record,
         value: submitted.value,
         cwd,
+        signal,
       });
 
       if (!verification.ok) {
@@ -328,8 +342,10 @@ export async function executeProducerCycles(
         cycleRecord.feedback = "verification-repair";
         writeRecord(cwd, record);
 
+        if (cycle >= maximumProducerCycles) break;
+
         try {
-          await run.continue(
+          pendingOutcome = await run.continue(
             buildVerificationRepairFeedback(verification.issues),
             signal,
           );
@@ -341,9 +357,31 @@ export async function executeProducerCycles(
         }
         continue;
       }
+
+      cycleRecord.verification = verification.summary;
+      record.verification = verification.summary;
     }
 
-    // Run critic if required.
+    // Run critic if required. Production may never silently skip a required
+    // independent review.
+    if (record.producerSpec.criticRequired && !criticFactory) {
+      cycleRecord.endedAt = now();
+      cycleRecord.status = "failed";
+      cycleRecord.error = {
+        code: "CRITIC_REJECTED",
+        message: "Required critic runner is not configured.",
+      };
+      record.status = "failed";
+      record.errors = ["Required critic runner is not configured."];
+      writeRecord(cwd, record);
+      return {
+        ok: false,
+        status: "failed",
+        error: cycleRecord.error,
+        record,
+      };
+    }
+
     if (record.producerSpec.criticRequired && criticFactory) {
       let criticResult: CriticRunResult;
       try {
@@ -391,8 +429,10 @@ export async function executeProducerCycles(
         cycleRecord.feedback = "critic-repair";
         writeRecord(cwd, record);
 
+        if (cycle >= maximumProducerCycles) break;
+
         try {
-          await run.continue(
+          pendingOutcome = await run.continue(
             buildCriticRepairFeedback(criticResult),
             signal,
           );
@@ -435,7 +475,10 @@ export async function executeProducerCycles(
   return {
     ok: false,
     status: "failed",
-    error: { code: "REPAIR_LIMIT_EXCEEDED", message: "Exceeded maximum producer repair cycles." },
+    error: {
+      code: "REPAIR_LIMIT_EXCEEDED",
+      message: "Exceeded maximum producer repair cycles.",
+    },
     record,
   };
 }
@@ -459,7 +502,10 @@ export interface PrepareChildSessionSpecInput {
 export function prepareChildSessionSpec(
   input: PrepareChildSessionSpecInput,
   model: { readonly provider: string; readonly id: string },
-): ChildSessionSpec {
+): Omit<
+  ChildSessionSpec,
+  "workflowProjection" | "contractChannel" | "parentContext"
+> {
   const { record, contractArtifact, cwd } = input;
   const spec = record.producerSpec;
   const id = childRunId(`child_${record.id}`);

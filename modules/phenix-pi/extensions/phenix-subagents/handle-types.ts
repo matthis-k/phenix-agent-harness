@@ -10,7 +10,7 @@ import type {
 
 // ── Constants (used by index.ts; extracted for visibility) ──────────────────
 
-export const HANDLE_VERSION = 3;
+export const HANDLE_VERSION = 4;
 export const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]);
 
 // ── Critic contract schema ──────────────────────────────────────────────────
@@ -126,6 +126,7 @@ export interface HandleRecord {
   readonly id: string;
   readonly sessionId: string;
   readonly parentId?: string;
+  readonly modelSet: string;
 
   readonly assignment: {
     readonly task: string;
@@ -139,6 +140,7 @@ export interface HandleRecord {
 
   // ── Child session linkage (distinct from Pi session IDs) ────────────
   childRunId?: ChildRunId;
+  rootChildRunId?: ChildRunId;
   backend?: ChildSessionBackendKind;
   piSessionId?: string;
   piSessionFile?: string;

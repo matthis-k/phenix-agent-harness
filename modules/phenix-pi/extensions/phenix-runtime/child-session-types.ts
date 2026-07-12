@@ -13,6 +13,7 @@ import type { AgentRole } from "../phenix-kernel/agents.ts";
 import type { ThinkingLevel } from "../phenix-kernel/task.ts";
 import type { AgentClientRef } from "../phenix-kernel/refs.ts";
 import type { WorkflowExecutionBinding } from "../phenix-kernel/execution.ts";
+import type { ModelWorkflowProjection } from "../phenix-workflow/workflow-projection.ts";
 
 import type { ContractArtifact } from "../phenix-subagents/contract.ts";
 import type { TurnBudget, ToolBudget } from "../phenix-subagents/agent-types.ts";
@@ -126,6 +127,27 @@ export interface ChildSessionNode {
   readonly endedAt?: string;
 }
 
+// ── Live parent binding ─────────────────────────────────────────────────────
+
+/**
+ * Explicit parent identity and authority supplied to a child session.
+ *
+ * This is runtime input, not persisted adapter state. It exists so a
+ * closure-bound phenix_delegate tool never has to infer its parent from
+ * process globals or environment variables.
+ */
+export interface ChildParentExecutionContext {
+  readonly kind: "child";
+  readonly sessionId: string;
+  readonly cwd: string;
+  readonly contractId: string;
+  readonly handleId: string;
+  readonly childRunId: ChildRunId;
+  readonly rootChildRunId: ChildRunId;
+  readonly modelSet: string;
+  readonly maximumDelegationDepth: number;
+}
+
 // ── Child session spec ──────────────────────────────────────────────────────
 
 /**
@@ -151,6 +173,14 @@ export interface ChildSessionSpec {
   readonly initialPrompt: string;
   readonly contract: ContractArtifact;
   readonly workflowBinding?: WorkflowExecutionBinding;
+
+  /**
+   * Runtime-only bindings. ChildSessionNode remains the serializable
+   * projection; these values are never persisted as adapter metadata.
+   */
+  readonly workflowProjection: ModelWorkflowProjection;
+  readonly contractChannel: ContractSubmissionChannel;
+  readonly parentContext: ChildParentExecutionContext;
 
   readonly effectiveTools: readonly string[];
   readonly skillRefs: readonly string[];
@@ -354,8 +384,10 @@ export type ChildRuntimeErrorCode =
   | "ABORTED"
   | "VERIFICATION_FAILED"
   | "CRITIC_REJECTED"
+  | "REPAIR_LIMIT_EXCEEDED"
   | "RPC_PROCESS_EXITED"
   | "RPC_NESTED_DELEGATION_UNSUPPORTED"
+  | "RPC_CONTRACT_RUNTIME_UNAVAILABLE"
   | "ORPHANED_SESSION";
 
 export class ChildRuntimeError extends Error {

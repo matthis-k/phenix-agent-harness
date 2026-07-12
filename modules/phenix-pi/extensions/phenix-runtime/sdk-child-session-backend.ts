@@ -57,6 +57,15 @@ import {
   BudgetGuard,
   budgetViolationToError,
 } from "./budget-guard.ts";
+import { createCompletionTool } from "./completion-tool.ts";
+import { buildChildSystemPrompt } from "./child-session-prompt.ts";
+import {
+  buildChildResourceLoaderOptions,
+  inferChildIntegrationRefs,
+  loadPersona,
+  resolveChildExtensionFactories,
+  resolveChildSkillPaths,
+} from "./child-session-resources.ts";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 // ── PiSessionLike — injectable session interface for testing ────────────────
@@ -209,15 +218,21 @@ class SdkChildRun implements ChildRun {
 
   private status: ChildSessionNode["status"] = "running";
   private cycle = 0;
-  private currentCycleResolve:
-    | ((outcome: ChildCycleOutcome) => void)
+  private currentCycle:
+    | {
+        readonly number: number;
+        readonly promise: Promise<ChildCycleOutcome>;
+        readonly resolve: (outcome: ChildCycleOutcome) => void;
+        error?: SerializedError;
+      }
     | undefined;
-  private currentCycleReject:
-    | ((error: unknown) => void)
-    | undefined;
-  private currentCycleError: SerializedError | undefined;
+  private lastCycleOutcome: ChildCycleOutcome = {
+    cycle: 0,
+    status: "settled",
+  };
   private disposed = false;
   private unsub: (() => void) | undefined;
+  private timeout: NodeJS.Timeout | undefined;
   private lastAssistantText: string | undefined;
 
   constructor(
@@ -240,92 +255,191 @@ class SdkChildRun implements ChildRun {
   private handlePiEvent = (raw: AgentSessionEvent): void => {
     if (this.disposed) return;
 
-    const normalized = normalizePiEvent(this.id, raw as unknown as { type: string });
+    const normalized = normalizePiEvent(
+      this.id,
+      raw as unknown as { type: string },
+    );
 
     for (const event of normalized) {
-      // Budget guard
       const { violation, softWarning } = this.budgetGuard.observe(event);
 
       if (violation) {
-        const error = budgetViolationToError(violation);
-        this.failCycle(serializeError(error));
-        this.emit({
-          type: "session.failed",
-          runId: this.id,
-          error: serializeError(error),
-        });
+        void this.failAndAbort(budgetViolationToError(violation));
         return;
       }
 
-      // Emit the normalized event
       this.emit(event);
 
-      // Soft warning — emit as agent.event (not a failure)
       if (softWarning) {
         this.emit({
           type: "agent.event",
           runId: this.id,
           event: { type: "budget_soft_warning", message: softWarning },
         });
+        // A soft budget warning must reach the model, not only observers.
+        void this.session.steer(softWarning).catch(() => undefined);
       }
     }
 
-    // Failure detection
     if (isFailureEvent(raw as unknown as { type: string })) {
-      this.currentCycleError = serializeError(raw);
+      if (this.currentCycle) {
+        this.currentCycle.error = serializeError(raw);
+      }
     }
 
-    // Check for agent_end with no retry — treat turn_end as settlement
+    // agent_settled is Pi's authoritative overall idle boundary. turn_end
+    // and agent_end may be followed by retries, compaction, or continuations.
     const rawType = (raw as unknown as { type: string }).type;
-    if (rawType === "turn_end" || rawType === "agent_end") {
-      // On agent_end, check willRetry
-      if (rawType === "agent_end") {
-        const willRetry = (raw as unknown as { willRetry?: boolean }).willRetry;
-        if (!willRetry) {
-          this.settleCycle();
-        }
-      } else {
-        // turn_end — settle the cycle
-        this.settleCycle();
-      }
+    if (rawType === "agent_settled") {
+      this.settleCycle();
     }
   };
 
+  private beginCycle(): {
+    readonly number: number;
+    readonly promise: Promise<ChildCycleOutcome>;
+    readonly resolve: (outcome: ChildCycleOutcome) => void;
+    error?: SerializedError;
+  } {
+    if (this.currentCycle) {
+      throw new ChildRuntimeError(
+        "SESSION_START_FAILED",
+        `Child session ${this.id} already has an active cycle.`,
+      );
+    }
+
+    this.status = "running";
+    this.cycle++;
+    let resolve!: (outcome: ChildCycleOutcome) => void;
+    const promise = new Promise<ChildCycleOutcome>((r) => {
+      resolve = r;
+    });
+    const cycle = {
+      number: this.cycle,
+      promise,
+      resolve,
+    };
+    this.currentCycle = cycle;
+    return cycle;
+  }
+
   private settleCycle(): void {
-    if (this.currentCycleResolve) {
-      const outcome: ChildCycleOutcome = {
-        cycle: this.cycle,
-        status: this.currentCycleError ? "failed" : "settled",
-        ...(this.lastAssistantText
-          ? { lastAssistantText: this.lastAssistantText }
-          : {}),
-        ...(this.currentCycleError
-          ? { error: this.currentCycleError }
-          : {}),
-      };
-      const resolve = this.currentCycleResolve;
-      this.currentCycleResolve = undefined;
-      this.currentCycleReject = undefined;
-      this.currentCycleError = undefined;
-      this.emit({
-        type: "cycle.settled",
-        runId: this.id,
-        cycle: this.cycle,
-      });
-      resolve(outcome);
+    const cycle = this.currentCycle;
+    if (!cycle) return;
+
+    const outcome: ChildCycleOutcome = {
+      cycle: cycle.number,
+      status: cycle.error ? "failed" : "settled",
+      ...(this.lastAssistantText
+        ? { lastAssistantText: this.lastAssistantText }
+        : {}),
+      ...(cycle.error ? { error: cycle.error } : {}),
+    };
+
+    this.currentCycle = undefined;
+    this.lastCycleOutcome = outcome;
+    this.status = outcome.status === "failed" ? "failed" : "settled";
+    this.emit({
+      type: "cycle.settled",
+      runId: this.id,
+      cycle: cycle.number,
+    });
+    cycle.resolve(outcome);
+  }
+
+  private completeCycle(outcome: ChildCycleOutcome): void {
+    const cycle = this.currentCycle;
+    this.currentCycle = undefined;
+    this.lastCycleOutcome = outcome;
+    if (cycle) cycle.resolve(outcome);
+  }
+
+  private async failAndAbort(error: ChildRuntimeError): Promise<void> {
+    if (this.disposed || this.status === "failed") return;
+
+    this.status = "failed";
+    const serialized = serializeError(error);
+    this.emit({
+      type: "session.failed",
+      runId: this.id,
+      error: serialized,
+    });
+    this.completeCycle({
+      cycle: this.currentCycle?.number ?? this.cycle,
+      status: "failed",
+      error: serialized,
+    });
+
+    try {
+      await this.session.abort();
+    } catch {
+      // Best-effort provider abort.
     }
   }
 
-  private failCycle(error: SerializedError): void {
-    this.currentCycleError = error;
-    if (this.currentCycleReject) {
-      const reject = this.currentCycleReject;
-      this.currentCycleResolve = undefined;
-      this.currentCycleReject = undefined;
-      reject(new ChildRuntimeError(error.code as any, error.message));
-    } else if (this.currentCycleResolve) {
-      this.settleCycle();
+  private bindSignal(signal?: AbortSignal): void {
+    if (!signal) return;
+    if (signal.aborted) {
+      void this.abort("cancelled by parent");
+      return;
     }
+    signal.addEventListener(
+      "abort",
+      () => {
+        void this.abort("cancelled by parent");
+      },
+      { once: true },
+    );
+  }
+
+  /**
+   * Start an idle-session prompt and resolve once Pi accepts it. The full
+   * prompt promise remains detached and is completed by agent_settled.
+   */
+  private async dispatchPrompt(message: string): Promise<void> {
+    let preflightSeen = false;
+    let accept!: () => void;
+    let reject!: (error: unknown) => void;
+    const accepted = new Promise<void>((resolve, rejectPromise) => {
+      accept = resolve;
+      reject = rejectPromise;
+    });
+
+    const fullRun = this.session.prompt(message, {
+      preflightResult: (success) => {
+        preflightSeen = true;
+        if (success) {
+          accept();
+        } else {
+          reject(
+            new ChildRuntimeError(
+              "PROMPT_REJECTED",
+              "Prompt was rejected by the Pi session.",
+            ),
+          );
+        }
+      },
+    });
+
+    void fullRun.then(
+      () => {
+        // Test doubles may not implement preflightResult. In that case,
+        // accepting after full completion is conservative and deterministic.
+        if (!preflightSeen) accept();
+      },
+      (error) => {
+        if (!preflightSeen) reject(error);
+        void this.failAndAbort(
+          new ChildRuntimeError(
+            "PROVIDER_FAILED",
+            error instanceof Error ? error.message : String(error),
+            { cause: error },
+          ),
+        );
+      },
+    );
+
+    await accepted;
   }
 
   private emit(event: ChildSessionEvent): void {
@@ -374,116 +488,77 @@ class SdkChildRun implements ChildRun {
     message: string,
     signal?: AbortSignal,
   ): Promise<ChildCycleOutcome> {
-    if (this.disposed) {
+    if (
+      this.disposed ||
+      this.status === "failed" ||
+      this.status === "cancelled"
+    ) {
       throw new ChildRuntimeError(
         "ABORTED",
-        "Child session has been disposed.",
+        `Child session is ${this.status}.`,
       );
     }
+    if (signal?.aborted) {
+      await this.abort("cancelled by parent");
+      throw new ChildRuntimeError("ABORTED", "Cancelled by parent.");
+    }
 
-    this.cycle++;
-    this.currentCycleError = undefined;
+    const cycle = this.beginCycle();
+    this.bindSignal(signal);
 
-    const cyclePromise = new Promise<ChildCycleOutcome>(
-      (resolve, reject) => {
-        this.currentCycleResolve = resolve;
-        this.currentCycleReject = reject;
-      },
-    );
-
-    // If the session is idle, send a normal prompt.
-    // If it is streaming, queue a follow-up.
     try {
       if (this.session.isStreaming) {
         await this.session.followUp(message);
       } else {
-        await this.session.prompt(message);
+        await this.dispatchPrompt(message);
       }
     } catch (error) {
-      this.failCycle(serializeError(error));
-    }
-
-    // Handle caller cancellation
-    if (signal) {
-      if (signal.aborted) {
-        await this.abort("cancelled by parent");
-        throw new ChildRuntimeError("ABORTED", "Cancelled by parent.");
-      }
-      signal.addEventListener(
-        "abort",
-        () => {
-          this.abort("cancelled by parent").catch(() => undefined);
-        },
-        { once: true },
+      await this.failAndAbort(
+        error instanceof ChildRuntimeError
+          ? error
+          : new ChildRuntimeError(
+              "PROMPT_REJECTED",
+              error instanceof Error ? error.message : String(error),
+              { cause: error },
+            ),
       );
     }
 
-    const outcome = await cyclePromise;
-
-    // Update Pi session reference (may have changed after compaction/branching)
+    const outcome = await cycle.promise;
     this.pi = {
       sessionId: this.session.sessionId,
       ...(this.session.sessionFile
         ? { sessionFile: this.session.sessionFile }
         : {}),
     };
-
     return outcome;
   }
 
   async waitForCurrentCycle(
     signal?: AbortSignal,
   ): Promise<ChildCycleOutcome> {
-    // If there's an active cycle promise, wait for it.
-    if (this.currentCycleResolve) {
-      const cyclePromise = new Promise<ChildCycleOutcome>(
-        (resolve, reject) => {
-          const origResolve = this.currentCycleResolve;
-          const origReject = this.currentCycleReject;
-          this.currentCycleResolve = resolve;
-          this.currentCycleReject = reject;
-          void origResolve;
-          void origReject;
-        },
-      );
-
-      if (signal) {
-        signal.addEventListener(
-          "abort",
-          () => {
-            this.abort("cancelled by parent").catch(() => undefined);
-          },
-          { once: true },
-        );
-      }
-
-      return cyclePromise;
-    }
-
-    // No active cycle — return immediately as settled.
-    return {
-      cycle: this.cycle,
-      status: "settled",
-      ...(this.lastAssistantText
-        ? { lastAssistantText: this.lastAssistantText }
-        : {}),
-    };
+    this.bindSignal(signal);
+    return this.currentCycle?.promise ?? this.lastCycleOutcome;
   }
 
   async abort(reason: string): Promise<void> {
-    if (this.disposed) return;
+    if (this.disposed || this.status === "cancelled") return;
+    this.status = "cancelled";
+
     try {
       await this.session.abort();
     } catch {
       // Best-effort abort.
     }
-    this.status = "cancelled";
-    if (this.currentCycleReject) {
-      const reject = this.currentCycleReject;
-      this.currentCycleResolve = undefined;
-      this.currentCycleReject = undefined;
-      reject(new ChildRuntimeError("ABORTED", reason));
-    }
+
+    this.completeCycle({
+      cycle: this.currentCycle?.number ?? this.cycle,
+      status: "cancelled",
+      error: {
+        code: "ABORTED",
+        message: reason,
+      },
+    });
     this.emit({
       type: "session.cancelled",
       runId: this.id,
@@ -502,17 +577,22 @@ class SdkChildRun implements ChildRun {
       // Best-effort unsubscribe.
     }
 
+    if (this.timeout) {
+      clearTimeout(this.timeout);
+      this.timeout = undefined;
+    }
+
     try {
       this.session.dispose();
     } catch {
       // Best-effort dispose.
     }
 
-    this.listeners.clear();
     this.emit({
       type: "session.disposed",
       runId: this.id,
     });
+    this.listeners.clear();
   }
 
   // ── Setup ────────────────────────────────────────────────────────────
@@ -523,65 +603,33 @@ class SdkChildRun implements ChildRun {
    * not after full settlement.
    */
   async startInitialPrompt(signal: AbortSignal): Promise<void> {
-    // Subscribe before prompting.
+    if (signal.aborted) {
+      throw new ChildRuntimeError("ABORTED", "Cancelled by parent.");
+    }
+
     this.unsub = this.session.subscribe(this.handlePiEvent);
+    this.beginCycle();
+    this.bindSignal(signal);
 
-    this.cycle = 1;
-
-    const cyclePromise = new Promise<ChildCycleOutcome>(
-      (resolve, reject) => {
-        this.currentCycleResolve = resolve;
-        this.currentCycleReject = reject;
-      },
-    );
-
-    // Use preflightResult to distinguish prompt acceptance from full settlement.
-    let promptRejected = false;
-
-    try {
-      await this.session.prompt(this.spec.initialPrompt, {
-        preflightResult: (_success: boolean) => {
-          if (!_success) {
-            promptRejected = true;
-          }
-        },
-      });
-    } catch (error) {
-      // Prompt threw — the session could not start.
-      throw new ChildRuntimeError(
-        "PROMPT_REJECTED",
-        `Initial prompt was rejected: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
+    if (this.spec.timeoutMs > 0) {
+      this.timeout = setTimeout(() => {
+        void this.failAndAbort(
+          new ChildRuntimeError(
+            "TIMEOUT",
+            `Child session timed out after ${this.spec.timeoutMs}ms.`,
+          ),
+        );
+      }, this.spec.timeoutMs);
+      this.timeout.unref?.();
     }
 
-    // If prompt was explicitly rejected
-    if (promptRejected) {
-      throw new ChildRuntimeError(
-        "PROMPT_REJECTED",
-        "Initial prompt was rejected by the session.",
-      );
-    }
+    await this.dispatchPrompt(this.spec.initialPrompt);
 
-    // Handle caller cancellation
-    signal.addEventListener(
-      "abort",
-      () => {
-        this.abort("cancelled by parent").catch(() => undefined);
-      },
-      { once: true },
-    );
-
-    // Store the cycle promise for waitForCurrentCycle.
-    // We don't await it here — the caller will use waitForCurrentCycle.
-    this._initialCyclePromise = cyclePromise;
-  }
-
-  private _initialCyclePromise: Promise<ChildCycleOutcome> | undefined;
-
-  getInitialCyclePromise(): Promise<ChildCycleOutcome> | undefined {
-    return this._initialCyclePromise;
+    this.emit({
+      type: "session.started",
+      runId: this.id,
+      pi: this.pi,
+    });
   }
 }
 
@@ -650,20 +698,30 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
       );
     }
 
-    // 2. Build the system prompt.
+    // 2. Build the deterministic contract/persona/workflow system prompt.
     const systemPrompt = this.buildSystemPromptFn
       ? this.buildSystemPromptFn(spec)
-      : spec.initialPrompt; // fallback — should not happen in production
+      : buildChildSystemPrompt({
+          persona: loadPersona(spec.role),
+          contract: spec.contract,
+          workflowProjection: spec.workflowProjection,
+        });
 
-    // 3. Build the resource loader.
+    // 3. Build the isolated resource loader.
     const resourceLoader = this.buildResourceLoaderFn
       ? this.buildResourceLoaderFn(spec, systemPrompt)
       : await this.buildDefaultResourceLoader(spec, systemPrompt);
 
-    // 4. Build custom tools (closure-bound phenix_complete, phenix_delegate).
-    const customTools = this.buildCustomToolsFn
-      ? this.buildCustomToolsFn(spec)
-      : [];
+    // 4. Every SDK child gets its own closure-bound completion tool.
+    // Delegation tools, when legal, are supplied by the composition root.
+    const customTools: readonly ToolDefinition[] = [
+      createCompletionTool(
+        spec.contractChannel,
+      ) as unknown as ToolDefinition,
+      ...(this.buildCustomToolsFn
+        ? this.buildCustomToolsFn(spec)
+        : []),
+    ];
 
     // 5. Build the tool allowlist.
     const toolNames = buildEffectiveToolNames(spec);
@@ -707,7 +765,12 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
     const run = new SdkChildRun(session, spec, budgetGuard);
 
     // 11. Subscribe before prompting and start the initial prompt.
-    await run.startInitialPrompt(signal);
+    try {
+      await run.startInitialPrompt(signal);
+    } catch (error) {
+      await run.dispose();
+      throw error;
+    }
 
     // 12. Return the live run once the prompt has been accepted.
     return run;
@@ -717,18 +780,27 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
     spec: ChildSessionSpec,
     systemPrompt: string,
   ): Promise<DefaultResourceLoader> {
-    const loader = new DefaultResourceLoader({
-      cwd: spec.cwd,
-      agentDir: this.services.agentDir,
-      noExtensions: true,
-      noSkills: true,
-      noPromptTemplates: true,
-      noThemes: true,
-      noContextFiles: !spec.inheritProjectContext,
-      extensionFactories: [],
-      additionalSkillPaths: [],
-      systemPromptOverride: () => systemPrompt,
-    });
+    const integrationRefs = inferChildIntegrationRefs(
+      spec.effectiveTools,
+      spec.extensionRefs,
+    );
+    const extensionFactories = await resolveChildExtensionFactories(
+      integrationRefs,
+    );
+    const skillPaths = resolveChildSkillPaths(
+      spec.skillRefs,
+      this.services.agentDir,
+    );
+
+    const loader = new DefaultResourceLoader(
+      buildChildResourceLoaderOptions({
+        spec,
+        agentDir: this.services.agentDir,
+        systemPrompt,
+        extensionFactories,
+        skillPaths,
+      }),
+    );
     await loader.reload();
     return loader;
   }
@@ -747,10 +819,16 @@ export function buildEffectiveToolNames(
 ): readonly string[] {
   const canDelegate =
     spec.contract.runtime.delegation.remainingDepth > 0 &&
-    spec.contract.runtime.delegation.availableRoles.length > 0;
+    spec.contract.runtime.delegation.availableRoles.length > 0 &&
+    spec.workflowProjection.options.length > 0;
 
+  const baseTools = spec.effectiveTools.filter(
+    (tool) =>
+      tool !== "phenix_complete" &&
+      (tool !== "phenix_delegate" || canDelegate),
+  );
   const toolNames = [
-    ...spec.effectiveTools,
+    ...baseTools,
     "phenix_complete",
     ...(canDelegate ? ["phenix_delegate"] : []),
   ];

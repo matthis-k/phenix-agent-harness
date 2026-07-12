@@ -43,6 +43,7 @@ import {
 import { link } from "./phenix-composition/linker.ts";
 import { createChildSessionBackend } from "./phenix-runtime/child-session-backend.ts";
 import { getChildSessionRegistry } from "./phenix-runtime/child-session-registry.ts";
+import { createDelegationTool } from "./phenix-runtime/delegation-tool.ts";
 import { AgentExecutionCoordinator } from "./phenix-subagents/coordinator.ts";
 import phenixSubagents from "./phenix-subagents/index.ts";
 import {
@@ -312,6 +313,7 @@ export default async function phenix(
     return { modelRegistry: capturedModelRegistry, agentDir };
   };
 
+  let coordinator!: AgentExecutionCoordinator;
   const backend = createChildSessionBackend({
     kind: defaultPhenixConfiguration.runtime.childSessionBackend,
     services: {
@@ -320,15 +322,31 @@ export default async function phenix(
       },
       agentDir,
     },
+    buildCustomTools: (spec) => {
+      const canDelegate =
+        spec.contract.runtime.delegation.remainingDepth > 0 &&
+        spec.contract.runtime.delegation.availableRoles.length > 0 &&
+        spec.workflowProjection.options.length > 0;
+      if (!canDelegate) return [];
+
+      return [
+        createDelegationTool({
+          coordinator,
+          parent: spec.parentContext,
+          decisionContext: spec.workflowProjection,
+        }) as any,
+      ];
+    },
     ...(defaultPhenixConfiguration.runtime.rpc
       ? { rpc: defaultPhenixConfiguration.runtime.rpc }
       : {}),
   });
 
   // ── 7. Construct the coordinator ─────────────────────────────────────
-  const coordinator = new AgentExecutionCoordinator({
+  coordinator = new AgentExecutionCoordinator({
     backend,
     resolveModelRegistry: () => getRuntimeServices().modelRegistry,
+    activeModelSet: linkResult.graph.activeModelSet.id,
     agentDir,
     maximumDelegationDepth: defaultPhenixConfiguration.runtime.maximumDelegationDepth,
   });

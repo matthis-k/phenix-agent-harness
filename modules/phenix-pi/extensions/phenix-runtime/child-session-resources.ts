@@ -107,7 +107,8 @@ export function buildChildResourceLoaderOptions(input: {
   readonly spec: ChildSessionSpec;
   readonly agentDir: string;
   readonly systemPrompt: string;
-  readonly integrationRegistry?: CodingSubstrateIntegrationRegistry;
+  readonly extensionFactories?: readonly ((pi: unknown) => void | Promise<void>)[];
+  readonly skillPaths?: readonly string[];
 }): DefaultResourceLoaderOptions {
   const { spec, agentDir, systemPrompt } = input;
 
@@ -123,15 +124,133 @@ export function buildChildResourceLoaderOptions(input: {
     noThemes: true,
     noContextFiles: !spec.inheritProjectContext,
 
-    // Extension factories are resolved by the caller from the integration
-    // registry and injected here. The options builder itself does not
-    // resolve them to keep this function synchronous and testable.
-    extensionFactories: [],
+    // Only explicitly resolved inline factories are loaded.
+    extensionFactories: [...(input.extensionFactories ?? [])] as any,
 
-    // Skill paths are resolved by the caller and injected via
-    // additionalSkillPaths. The options builder keeps it empty here.
-    additionalSkillPaths: [],
+    // Skill references are resolved to concrete paths by the caller.
+    additionalSkillPaths: [...(input.skillPaths ?? [])],
 
     systemPromptOverride: () => systemPrompt,
   };
+}
+
+/**
+ * Infer the minimal integration set from the exact tool allowlist.
+ *
+ * Agent definitions currently carry tools as the authoritative capability
+ * surface. This keeps extension loading derived from that surface instead
+ * of reintroducing a second ambient configuration source.
+ */
+export function inferChildIntegrationRefs(
+  tools: readonly string[],
+  explicit: readonly string[],
+): readonly string[] {
+  const refs = new Set(explicit);
+  const has = (prefix: string): boolean =>
+    tools.some((tool) => tool === prefix || tool.startsWith(`${prefix}_`));
+
+  if (
+    tools.some((tool) =>
+      [
+        "read",
+        "grep",
+        "search",
+        "find",
+        "ls",
+        "tree",
+        "edit",
+        "write",
+        "apply_patch",
+        "ast_grep",
+        "ast_edit",
+        "todo",
+      ].includes(tool),
+    )
+  ) {
+    refs.add("hypa");
+  }
+  if (has("lsp")) refs.add("lsp");
+  if (has("mcp")) refs.add("mcp");
+  if (has("context")) refs.add("context");
+  if (
+    has("web") ||
+    tools.includes("fetch_content") ||
+    tools.includes("get_search_content")
+  ) {
+    refs.add("web");
+  }
+
+  return [...refs].sort();
+}
+
+/**
+ * Resolve named integrations to inline extension factories.
+ *
+ * Loading remains explicit and child-local; the root Phenix extension is
+ * never rediscovered by DefaultResourceLoader.
+ */
+export async function resolveChildExtensionFactories(
+  refs: readonly string[],
+): Promise<readonly ((pi: unknown) => Promise<void>)[]> {
+  return refs.map((ref) => {
+    switch (ref) {
+      case "hypa":
+        return async (pi: unknown) => {
+          const mod = await import("@hypabolic/pi-hypa/extensions/index.ts");
+          await mod.default(pi as any);
+        };
+      case "lsp":
+        return async (pi: unknown) => {
+          const mod = await import("pi-lsp/extensions/pi-lsp/index.ts");
+          await mod.default(pi as any);
+        };
+      case "mcp":
+        return async (pi: unknown) => {
+          const mod = await import("pi-mcp-adapter/index.ts");
+          await mod.default(pi as any);
+        };
+      case "context":
+        return async (pi: unknown) => {
+          const mod = await import("pi-context-tools/extensions/index.ts");
+          await mod.default(pi as any);
+        };
+      case "web":
+        return async (pi: unknown) => {
+          const mod = await import("@juicesharp/rpiv-web-tools/index.ts");
+          await mod.default(pi as any, {
+            interceptors: { github: true },
+          });
+        };
+      default:
+        throw new Error(`Unknown child extension reference: ${ref}`);
+    }
+  });
+}
+
+/**
+ * Resolve skill references without enabling ambient skill discovery.
+ */
+export function resolveChildSkillPaths(
+  refs: readonly string[],
+  agentDir: string,
+): readonly string[] {
+  const resolved: string[] = [];
+
+  for (const ref of refs) {
+    const candidates = path.isAbsolute(ref)
+      ? [ref]
+      : [
+          path.join(agentDir, "skills", ref),
+          path.join(agentDir, "skills", ref, "SKILL.md"),
+          path.resolve(ref),
+        ];
+
+    const match = candidates.find((candidate) => fs.existsSync(candidate));
+    if (!match) {
+      throw new Error(`Unknown child skill reference: ${ref}`);
+    }
+    resolved.push(match);
+  }
+
+  return [...new Set(resolved)].sort();
 }

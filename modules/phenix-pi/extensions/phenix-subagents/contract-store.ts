@@ -173,14 +173,12 @@ export class FileContractStore {
       resolve = r;
     });
 
-    this.locks.set(
-      id,
-      next.finally(() => {
-        if (this.locks.get(id) === next) {
-          this.locks.delete(id);
-        }
-      }),
-    );
+    const queued = next.finally(() => {
+      if (this.locks.get(id) === queued) {
+        this.locks.delete(id);
+      }
+    });
+    this.locks.set(id, queued);
 
     try {
       await previous;

@@ -51,6 +51,7 @@ function toolResult(
     error: record.errors?.join(" | "),
     piSessionId: record.piSessionId,
     backend: record.backend,
+    modelSet: record.modelSet,
     ...(record.producerSpec ? {
       role: record.producerSpec.role,
       agent: record.producerSpec.agent,
@@ -99,6 +100,7 @@ function treePayload(
       agent: r.producerSpec.agent,
       cycles: r.producerCycles.length,
       childRunId: r.childRunId,
+      rootChildRunId: r.rootChildRunId,
       piSessionId: r.piSessionId,
     })),
   };

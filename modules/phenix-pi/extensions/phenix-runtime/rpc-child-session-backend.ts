@@ -491,6 +491,15 @@ export class RpcChildSessionBackend implements ChildSessionBackend {
     spec: ChildSessionSpec,
     signal: AbortSignal,
   ): Promise<ChildRun> {
+    // RPC cannot receive closure-bound custom tools through the command
+    // protocol. Until childExtensionPath is implemented as a complete,
+    // contract-specific bootstrap extension, fail closed instead of starting
+    // a process that cannot submit or enforce its contract.
+    throw new ChildRuntimeError(
+      "RPC_CONTRACT_RUNTIME_UNAVAILABLE",
+      "RPC child sessions are disabled until the contract-bound child extension bootstrap is implemented. Use runtime.childSessionBackend = \"sdk\".",
+    );
+
     // Leaf-only restriction: fail closed if nested delegation is requested.
     if (spec.contract.runtime.delegation.remainingDepth > 0) {
       throw new ChildRuntimeError(

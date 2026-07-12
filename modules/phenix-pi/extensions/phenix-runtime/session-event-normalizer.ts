@@ -90,15 +90,12 @@ export function normalizePiEvent(
 /**
  * Determine whether a Pi event indicates the current cycle has settled.
  *
- * Uses agent_settled (if present) or turn_end as runtime settlement.
- * Does NOT use agent_end as the authoritative boundary — Pi may retry
- * or compact after agent_end.
+ * Uses agent_settled as the authoritative runtime settlement boundary.
+ * turn_end and agent_end may be followed by retries, compaction, or queued
+ * continuations and therefore are observation/budget events only.
  */
 export function isSettlementEvent(raw: PiAgentEvent): boolean {
-  return (
-    raw.type === "agent_settled" ||
-    raw.type === "turn_end"
-  );
+  return raw.type === "agent_settled";
 }
 
 /**
