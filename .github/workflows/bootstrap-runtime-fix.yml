@@ -1,0 +1,42 @@
+name: Bootstrap runtime finalization fix
+
+on:
+  push:
+    branches:
+      - fix/runtime-workflow-finalization
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    if: ${{ !contains(github.event.head_commit.message, '[runtime-fix-applied]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v5
+        with:
+          ref: fix/runtime-workflow-finalization
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply reviewed runtime changes
+        run: bash .github/bootstrap/apply-runtime-fix.sh
+
+      - name: Run complete repository checks
+        run: nix flake check --print-build-logs
+
+      - name: Commit verified result
+        run: |
+          rm -rf .github/bootstrap .github/workflows/bootstrap-runtime-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix(runtime): preserve cancellation and finalize workflows [runtime-fix-applied]"
+          git push origin HEAD:fix/runtime-workflow-finalization
