@@ -12,7 +12,7 @@ import type { ContractDefinitionId } from "../phenix-kernel/ids.ts";
 export type JsonSchema = Record<string, unknown>;
 
 /** Passive declaration of a reusable structured handoff. */
-export interface ContractDefinition<T = unknown> {
+export interface ContractDefinition {
   readonly id: ContractDefinitionId;
   readonly description: string;
   readonly schema: JsonSchema;
@@ -38,9 +38,9 @@ export type SchemaValidation =
       readonly violations: readonly SchemaViolation[];
     };
 
-export interface ContractValidationSuccess<T> {
+export interface ContractValidationSuccess {
   readonly ok: true;
-  readonly value: T;
+  readonly value: unknown;
 }
 
 export interface ContractValidationFailure {
@@ -49,12 +49,6 @@ export interface ContractValidationFailure {
   readonly summary: string;
 }
 
-export type ContractValidationResult<T = unknown> =
-  | ContractValidationSuccess<T>
+export type ContractValidationResult =
+  | ContractValidationSuccess
   | ContractValidationFailure;
-
-/** Compiled reusable contract validator. */
-export interface CompiledContract<T = unknown> {
-  readonly definition: ContractDefinition<T>;
-  validate(value: unknown): ContractValidationResult<T>;
-}
