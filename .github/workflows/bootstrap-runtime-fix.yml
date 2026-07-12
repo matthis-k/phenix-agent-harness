@@ -37,6 +37,8 @@ jobs:
             python3 .github/bootstrap/apply-exact-patch.py \
               .github/bootstrap/runtime-finalization.patch
             sed '7,8d' .github/bootstrap/apply-runtime-fix.sh | bash
+            git add -A
+            git diff --cached --check
           } > bootstrap-apply.log 2>&1
           status=$?
           cat bootstrap-apply.log
