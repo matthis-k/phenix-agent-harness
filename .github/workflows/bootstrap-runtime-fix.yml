@@ -29,7 +29,10 @@ jobs:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Apply reviewed runtime changes
-        run: bash .github/bootstrap/apply-runtime-fix.sh
+        run: |
+          python3 .github/bootstrap/apply-exact-patch.py \
+            .github/bootstrap/runtime-finalization.patch
+          sed '7,8d' .github/bootstrap/apply-runtime-fix.sh | bash
 
       - name: Run complete repository checks
         run: nix flake check --print-build-logs
