@@ -91,6 +91,7 @@ jobs:
         if: steps.apply.outputs.status == '0' && steps.checks.outputs.status == '0'
         run: |
           rm -rf .github/bootstrap .github/workflows/bootstrap-runtime-fix.yml
+          rm -f bootstrap-apply.log candidate.diff nix-check.log
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
