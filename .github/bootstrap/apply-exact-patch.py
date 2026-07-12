@@ -15,6 +15,14 @@ class Hunk:
     new: str
 
 
+OPTIONAL_HUNKS = {
+    (
+        Path("modules/phenix-pi/extensions/phenix-subagents/attempt-runner.ts"),
+        9,
+    ),
+}
+
+
 def parse_patch(patch_text: str) -> dict[Path, list[Hunk]]:
     lines = patch_text.splitlines(keepends=True)
     files: dict[Path, list[Hunk]] = {}
@@ -92,6 +100,9 @@ def apply_hunks(source: str, hunks: list[Hunk], path: Path) -> str:
         if position < 0:
             first = result.find(hunk.old)
             if first < 0:
+                if (path, number) in OPTIONAL_HUNKS:
+                    print(f"skipping optional hunk {number} for {path}")
+                    continue
                 raise RuntimeError(
                     f"{path}: exact source for hunk {number} was not found"
                 )
