@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - qa/01-runtime-lifecycle
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -15,6 +18,7 @@ jobs:
       - name: Check out maintenance branch
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
+          ref: qa/01-runtime-lifecycle
           fetch-depth: 0
 
       - name: Install Nix
