@@ -34,18 +34,21 @@
         ln -s ${piNpmPackages}/npm/node_modules "$out/node_modules"
       '';
 
-      phenixRuntimeTests = pkgs.runCommand "phenix-runtime-tests" {
-        nativeBuildInputs = [
-          pkgs.nodejs
-          pkgs.ast-grep
-          pkgs.git
-        ];
-      } ''
-        cd ${phenixPiPackage}
-        node --experimental-strip-types --test tests/*.test.ts
-        node --check runtime/verify.mjs
-        touch "$out"
-      '';
+      phenixRuntimeTests =
+        pkgs.runCommand "phenix-runtime-tests"
+          {
+            nativeBuildInputs = [
+              pkgs.nodejs
+              pkgs.ast-grep
+              pkgs.git
+            ];
+          }
+          ''
+            cd ${phenixPiPackage}
+            node --experimental-strip-types --test tests/*.test.ts
+            node --check runtime/verify.mjs
+            touch "$out"
+          '';
 
       qualityTools = [
         pkgs.actionlint
@@ -54,44 +57,47 @@
         pkgs.diffutils
         pkgs.git
         pkgs.gnugrep
-        pkgs.nixfmt-rfc-style
+        pkgs.nixfmt
         pkgs.shellcheck
         pkgs.shfmt
         pkgs.statix
       ];
 
-      phenixRepositoryChecks = pkgs.runCommand "phenix-repository-checks" {
-        nativeBuildInputs = qualityTools ++ [ pkgs.bash ];
-      } ''
-        bash -n \
-          ${../scripts/check.sh} \
-          ${../scripts/check-files.sh} \
-          ${../scripts/fix-staged.sh} \
-          ${../scripts/setup-git-hooks.sh} \
-          ${../.githooks/pre-commit} \
-          ${../.githooks/pre-push}
-        shellcheck \
-          ${../scripts/check.sh} \
-          ${../scripts/check-files.sh} \
-          ${../scripts/fix-staged.sh} \
-          ${../scripts/setup-git-hooks.sh} \
-          ${../.githooks/pre-commit} \
-          ${../.githooks/pre-push}
-        shfmt -d -i 2 -ci \
-          ${../scripts/check.sh} \
-          ${../scripts/check-files.sh} \
-          ${../scripts/fix-staged.sh} \
-          ${../scripts/setup-git-hooks.sh} \
-          ${../.githooks/pre-commit} \
-          ${../.githooks/pre-push}
-        actionlint ${../.github/workflows/ci.yml}
-        biome ci \
-          --config-path ${../biome.json} \
-          --no-errors-on-unmatched \
-          --files-ignore-unknown=true \
-          ${../biome.json}
-        touch "$out"
-      '';
+      phenixRepositoryChecks =
+        pkgs.runCommand "phenix-repository-checks"
+          {
+            nativeBuildInputs = qualityTools ++ [ pkgs.bash ];
+          }
+          ''
+            bash -n \
+              ${../scripts/check.sh} \
+              ${../scripts/check-files.sh} \
+              ${../scripts/fix-staged.sh} \
+              ${../scripts/setup-git-hooks.sh} \
+              ${../.githooks/pre-commit} \
+              ${../.githooks/pre-push}
+            shellcheck \
+              ${../scripts/check.sh} \
+              ${../scripts/check-files.sh} \
+              ${../scripts/fix-staged.sh} \
+              ${../scripts/setup-git-hooks.sh} \
+              ${../.githooks/pre-commit} \
+              ${../.githooks/pre-push}
+            shfmt -d -i 2 -ci \
+              ${../scripts/check.sh} \
+              ${../scripts/check-files.sh} \
+              ${../scripts/fix-staged.sh} \
+              ${../scripts/setup-git-hooks.sh} \
+              ${../.githooks/pre-commit} \
+              ${../.githooks/pre-push}
+            actionlint ${../.github/workflows/ci.yml}
+            biome ci \
+              --config-path ${../biome.json} \
+              --no-errors-on-unmatched \
+              --files-ignore-unknown=true \
+              ${../biome.json}
+            touch "$out"
+          '';
 
       phenixCheck = pkgs.writeShellApplication {
         name = "phenix-check";
