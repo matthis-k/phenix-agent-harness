@@ -87,11 +87,7 @@ export function assertJsonSchema(value: unknown): asserts value is JsonSchema {
 export const assertOutputSchema = assertJsonSchema;
 
 function stringPath(error: { instancePath?: string; path?: string }): string {
-  return (
-    (error.instancePath ?? error.path ?? "")
-      .replace(/^\//, "")
-      .replaceAll("/", ".") || "root"
-  );
+  return (error.instancePath ?? error.path ?? "").replace(/^\//, "").replaceAll("/", ".") || "root";
 }
 
 function pathSegments(path: string): readonly (string | number)[] {

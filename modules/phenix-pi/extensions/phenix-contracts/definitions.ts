@@ -49,6 +49,4 @@ export interface ContractValidationFailure {
   readonly summary: string;
 }
 
-export type ContractValidationResult =
-  | ContractValidationSuccess
-  | ContractValidationFailure;
+export type ContractValidationResult = ContractValidationSuccess | ContractValidationFailure;

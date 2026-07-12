@@ -9,6 +9,7 @@
  */
 
 import { validateSchema } from "../phenix-contracts/validator.ts";
+import { agentClientRef } from "../phenix-kernel/refs.ts";
 import type {
   ChildCycleOutcome,
   ChildRun,
@@ -23,7 +24,12 @@ import {
 } from "../phenix-runtime/child-session-types.ts";
 import type { ContractArtifact } from "./contract.ts";
 import { now, writeRecord } from "./handle-store.ts";
-import type { HandleRecord, ProducerCycleRecord, VerificationSummary } from "./handle-types.ts";
+import type {
+  CriticFinding,
+  HandleRecord,
+  ProducerCycleRecord,
+  VerificationSummary,
+} from "./handle-types.ts";
 
 // ── Attempt run result ──────────────────────────────────────────────────────
 
@@ -69,12 +75,7 @@ export interface CriticRunInput {
 export interface CriticRunResult {
   readonly verdict: "approve" | "reject";
   readonly summary: string;
-  readonly findings: readonly {
-    readonly severity: string;
-    readonly description: string;
-    readonly evidence: string;
-    readonly requirement?: string;
-  }[];
+  readonly findings: readonly CriticFinding[];
   readonly missingRequirements: readonly string[];
 }
 
@@ -445,7 +446,7 @@ export async function executeProducerCycles(
       cycleRecord.critic = {
         verdict: criticResult.verdict,
         summary: criticResult.summary,
-        findings: criticResult.findings as any,
+        findings: criticResult.findings,
         missingRequirements: criticResult.missingRequirements,
       };
 
@@ -499,7 +500,7 @@ export async function executeProducerCycles(
       record.review = {
         verdict: cycleRecord.critic.verdict,
         summary: cycleRecord.critic.summary,
-        findings: cycleRecord.critic.findings as any,
+        findings: cycleRecord.critic.findings,
         missingRequirements: cycleRecord.critic.missingRequirements,
       };
     }
@@ -553,10 +554,7 @@ export function prepareChildSessionSpec(
     ...(input.parentId ? { parentId: childRunId(input.parentId) } : {}),
     rootId,
     handleId: record.id,
-    agentClient: {
-      id: spec.agent.replace("phenix.", "") as any,
-      kind: "agent" as any,
-    },
+    agentClient: agentClientRef(spec.agent.replace(/^phenix\./, "")),
     role: spec.role,
     cwd,
     model,
