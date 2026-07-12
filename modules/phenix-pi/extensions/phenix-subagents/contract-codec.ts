@@ -3,7 +3,7 @@ import type {
   ThinkingLevel,
 } from "./agent-types.ts";
 import { isAgentKind } from "./agent-types.ts";
-import type { ContractArtifact } from "./contract.ts";
+import { CONTRACT_SCHEMA_VERSION, type ContractArtifact } from "./contract.ts";
 import type { ResolvedToolConfiguration } from "./tool-policy.ts";
 import type { ResolvedDelegateRoleConfiguration } from "./delegation-policy.ts";
 import { rolePreset } from "./role-presets.ts";
@@ -317,16 +317,12 @@ export function decodeContractArtifact(
     return `Contract ${id}`;
   };
 
-  // ── version ──────────────────────────────────────────────────────────
-  if (value.version === 1 || value.version === 2 || value.version === 3) {
+  // ── schemaVersion ────────────────────────────────────────────────────
+  if (value.schemaVersion !== 1) {
     throw new Error(
-      `${ctx()}: Contract version ${value.version} is no longer supported. ` +
-      `This runtime only supports version 4.`,
-    );
-  }
-  if (value.version !== 4) {
-    throw new Error(
-      `${ctx()}: Contract version must be 4, got ${JSON.stringify(value.version)}`,
+      `${ctx()}: Unsupported contract schema version ${JSON.stringify(value.schemaVersion)}. ` +
+      `Expected ${CONTRACT_SCHEMA_VERSION}. This runtime does not support migration. ` +
+      `Delete .phenix-agent-state if it contains stale development artifacts.`,
     );
   }
 

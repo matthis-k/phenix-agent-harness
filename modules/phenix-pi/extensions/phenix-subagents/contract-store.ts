@@ -98,7 +98,7 @@ function decodeResult(
 ): ContractResult {
   if (
     !isObject(value) ||
-    value.version !== 1 ||
+    value.schemaVersion !== 1 ||
     typeof value.contractId !== "string" ||
     typeof value.revision !== "number" ||
     typeof value.state !== "string"
@@ -220,7 +220,7 @@ export class FileContractStore {
 
       // Create the initial pending result.
       const pending: PendingContractResult = {
-        version: 1,
+        schemaVersion: 1,
         state: "pending",
         contractId: artifact.id,
         revision: 0,
@@ -309,7 +309,7 @@ export class FileContractStore {
       }
 
       const submitted: SubmittedContractResult = {
-        version: 1,
+        schemaVersion: 1,
         state: "submitted",
         contractId: id,
         revision:
@@ -352,7 +352,7 @@ export class FileContractStore {
         }
 
         const cancelled: CancelledContractResult = {
-          version: 1,
+          schemaVersion: 1,
           state: "cancelled",
           contractId: id,
           revision:

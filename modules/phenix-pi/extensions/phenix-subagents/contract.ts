@@ -31,10 +31,12 @@ export interface ContractIdentity {
   readonly capabilityToken: CapabilityToken;
 }
 
-// ── Contract artifact v4 ────────────────────────────────────────────────────
+export const CONTRACT_SCHEMA_VERSION = 1 as const;
+
+// ── Contract artifact ───────────────────────────────────────────────────────
 
 export interface ContractArtifact {
-  readonly version: 4;
+  readonly schemaVersion: typeof CONTRACT_SCHEMA_VERSION;
   readonly id: ContractId;
 
   readonly identity: {
@@ -106,10 +108,12 @@ export interface ContractArtifact {
   readonly expiresAt?: string;
 }
 
-// ── Result types (version 1, unchanged) ─────────────────────────────────────
+export const CONTRACT_RESULT_SCHEMA_VERSION = 1 as const;
+
+// ── Result types ────────────────────────────────────────────────────────────
 
 export interface PendingContractResult {
-  readonly version: 1;
+  readonly schemaVersion: typeof CONTRACT_RESULT_SCHEMA_VERSION;
   readonly state: "pending";
   readonly contractId: ContractId;
   readonly revision: number;
@@ -117,7 +121,7 @@ export interface PendingContractResult {
 }
 
 export interface SubmittedContractResult {
-  readonly version: 1;
+  readonly schemaVersion: typeof CONTRACT_RESULT_SCHEMA_VERSION;
   readonly state: "submitted";
   readonly contractId: ContractId;
   readonly revision: number;
@@ -126,7 +130,7 @@ export interface SubmittedContractResult {
 }
 
 export interface CancelledContractResult {
-  readonly version: 1;
+  readonly schemaVersion: typeof CONTRACT_RESULT_SCHEMA_VERSION;
   readonly state: "cancelled";
   readonly contractId: ContractId;
   readonly revision: number;
@@ -181,7 +185,7 @@ export function hashCapabilityToken(
   return createHash("sha256").update(token).digest("hex");
 }
 
-// ── Contract issuance (v4) ──────────────────────────────────────────────────
+// ── Contract issuance ──────────────────────────────────────────────────────
 
 export type IssueContractInput = {
   readonly identity: ContractArtifact["identity"];
@@ -192,7 +196,7 @@ export type IssueContractInput = {
 };
 
 /**
- * Issue a new v4 contract artifact from a fully resolved specification.
+ * Issue a new contract artifact from a fully resolved specification.
  * No policy derivation, role configuration, or tool resolution happens here.
  */
 export function issueContract(
@@ -201,7 +205,7 @@ export function issueContract(
   const capabilityToken = createCapabilityToken();
 
   const artifact: ContractArtifact = {
-    version: 4,
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
     id: createContractId(),
     identity: {
       runId: input.identity.runId,

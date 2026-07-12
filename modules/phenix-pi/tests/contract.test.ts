@@ -79,7 +79,7 @@ function makeToolConfig(
   };
 }
 
-function makeV4Runtime(role: AgentRole) {
+function makeContractRuntime(role: AgentRole) {
   return {
     delegation: {
       roles: {
@@ -115,7 +115,7 @@ function issueTestContract(role: AgentRole = TEST_ROLE): {
 } {
   const runId = createRunId();
   const tools = makeToolConfig(role);
-  const v4 = makeV4Runtime(role);
+  const v4 = makeContractRuntime(role);
   const issued = issueContract({
     identity: {
       runId,
@@ -154,7 +154,7 @@ function issueTestContract(role: AgentRole = TEST_ROLE): {
   };
 }
 
-describe("Contract domain v4", () => {
+describe("Contract domain", () => {
   it("issue creates unique contract IDs", () => {
     const a = issueTestContract();
     const b = issueTestContract();
@@ -176,7 +176,7 @@ describe("Contract domain v4", () => {
 
   it("correct identity authorizes", () => {
     const runId = createRunId();
-    const v4 = makeV4Runtime("scout");
+    const v4 = makeContractRuntime("scout");
     const issued = issueContract({
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
@@ -201,7 +201,7 @@ describe("Contract domain v4", () => {
 
   it("wrong contract ID rejects", () => {
     const runId = createRunId();
-    const v4 = makeV4Runtime("scout");
+    const v4 = makeContractRuntime("scout");
     const issued = issueContract({
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
@@ -226,7 +226,7 @@ describe("Contract domain v4", () => {
 
   it("wrong run ID rejects", () => {
     const runId = createRunId();
-    const v4 = makeV4Runtime("scout");
+    const v4 = makeContractRuntime("scout");
     const issued = issueContract({
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
@@ -251,7 +251,7 @@ describe("Contract domain v4", () => {
 
   it("wrong token rejects", () => {
     const runId = createRunId();
-    const v4 = makeV4Runtime("scout");
+    const v4 = makeContractRuntime("scout");
     const issued = issueContract({
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
@@ -276,7 +276,7 @@ describe("Contract domain v4", () => {
 
   it("expired contract rejects", () => {
     const runId = createRunId();
-    const v4 = makeV4Runtime("scout");
+    const v4 = makeContractRuntime("scout");
     const issued = issueContract({
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
@@ -326,9 +326,9 @@ describe("Contract domain v4", () => {
     assert.equal(parseCapabilityToken(""), undefined);
   });
 
-  it("v4 artifact has complete runtime fields", () => {
+  it("artifact has complete runtime fields", () => {
     const runId = createRunId();
-    const v4 = makeV4Runtime(null);
+    const v4 = makeContractRuntime(null);
     const issued = issueContract({
       identity: { runId, handleId: "test", role: null },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
@@ -344,7 +344,7 @@ describe("Contract domain v4", () => {
       verification: { commands: [], criticRequired: false, maxRepairAttempts: 0 },
     });
 
-    assert.equal(issued.artifact.version, 4);
+    assert.equal(issued.artifact.schemaVersion, 1);
     assert.equal(issued.artifact.identity.role, null);
     assert.equal(issued.artifact.identity.handleId, "test");
     assert.equal(issued.artifact.assignment.task, TEST_TASK);
@@ -356,7 +356,7 @@ describe("Contract domain v4", () => {
 
   it("role null is stored correctly in contract identity", () => {
     const runId = createRunId();
-    const v4 = makeV4Runtime(null);
+    const v4 = makeContractRuntime(null);
     const issued = issueContract({
       identity: { runId, handleId: "test-null-role", role: null },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
