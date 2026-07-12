@@ -1,5 +1,6 @@
 import type { ModelSetId, ResolvedRoute } from "./types.ts";
 import { MODEL_SET_IDS } from "./types.ts";
+import type { AgentCapabilityArtifact } from "../phenix-workflow/agent-capabilities.ts";
 
 /**
  * Session-scoped routing state.
@@ -14,6 +15,15 @@ export interface SessionRoutingRuntime {
 
   /** Monotonically increasing turn counter for this session. */
   turnCount: number;
+
+  /** Immutable agent capability artifact built at session startup. */
+  capabilityArtifact?: AgentCapabilityArtifact;
+
+  /** Active workflow instance (root-level). */
+  activeWorkflow?: {
+    readonly instanceId: string;
+    readonly actorId: string;
+  };
 }
 
 /** In-memory session state map. */

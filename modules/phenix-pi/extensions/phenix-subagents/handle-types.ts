@@ -2,6 +2,7 @@ import type { ContractId, RunId } from "./contract.ts";
 import type { JsonSchema } from "./contracts.ts";
 import type { AgentRole } from "./agent-types.ts";
 import type { ResolvedChildSpec } from "./child-spec.ts";
+import type { WorkflowTransitionId, WorkflowStateId } from "../phenix-workflow/workflow-types.ts";
 
 // ── Constants (used by index.ts; extracted for visibility) ──────────────────
 
@@ -132,6 +133,34 @@ export interface HandleRecord {
     readonly sessionFile?: string;
     readonly transcriptPath?: string;
   };
+
+  /** Workflow binding set when the handle was spawned through a v4 workflow transition. */
+  workflowBinding?: WorkflowBinding;
+}
+
+// ── Workflow binding (v4) ───────────────────────────────────────────────────
+
+export interface WorkflowBinding {
+  readonly instanceId: string;
+  readonly actorId: string;
+
+  readonly transitionExecutionId: string;
+
+  readonly transitionId: WorkflowTransitionId;
+
+  readonly sourceState: WorkflowStateId;
+
+  readonly sourceRevision: number;
+
+  readonly acceptedState: WorkflowStateId;
+
+  readonly rejectedState: WorkflowStateId;
+}
+
+// ── Extended handle record with workflow binding ────────────────────────────
+
+export interface HandleRecordWithWorkflow extends HandleRecord {
+  readonly workflowBinding: WorkflowBinding;
 }
 
 // ── Evaluation ──────────────────────────────────────────────────────────────

@@ -16,6 +16,8 @@ import {
   type RunId,
 } from "../extensions/phenix-subagents/contract.ts";
 import type { AgentRole } from "../extensions/phenix-subagents/agent-types.ts";
+import { mkTransitionId } from "../extensions/phenix-workflow/workflow-types.ts";
+import type { WorkflowTransitionId } from "../extensions/phenix-workflow/workflow-types.ts";
 
 const TEST_SCHEMA = {
   type: "object",
@@ -55,11 +57,9 @@ function makeToolConfig(
       effective: [...additions],
     };
   }
-  // For known roles, include the preset tools.
   const effective = [...SCOUT_PRESET_TOOLS, ...additions].filter(
     (t) => !removals.includes(t),
   );
-  // Deduplicate
   const seen = new Set<string>();
   const deduped: string[] = [];
   for (const t of effective) {
@@ -79,6 +79,34 @@ function makeToolConfig(
   };
 }
 
+function makeV4Runtime(role: AgentRole) {
+  return {
+    delegation: {
+      roles: {
+        presetRevision: 1 as const,
+        role,
+        source: {
+          inherited: false,
+          patch: { additional: [] as readonly AgentRole[], removed: [] as readonly AgentRole[] },
+        },
+        effective: [] as readonly AgentRole[],
+      },
+      availableRoles: [] as readonly AgentRole[],
+      remainingDepth: 2,
+    },
+    workflow: {
+      instanceId: "test-instance",
+      actorId: "test-actor",
+      definitionId: "phenix-default" as const,
+      definitionVersion: 1 as const,
+      difficulty: "D1" as const,
+      initialState: "classified" as const,
+      transitionCeiling: [] as readonly WorkflowTransitionId[],
+      capabilityArtifactHash: "0000000000000000000000000000000000000000000000000000000000000000",
+    },
+  };
+}
+
 function issueTestContract(role: AgentRole = TEST_ROLE): {
   contractId: ContractId;
   runId: RunId;
@@ -87,6 +115,7 @@ function issueTestContract(role: AgentRole = TEST_ROLE): {
 } {
   const runId = createRunId();
   const tools = makeToolConfig(role);
+  const v4 = makeV4Runtime(role);
   const issued = issueContract({
     identity: {
       runId,
@@ -105,8 +134,8 @@ function issueTestContract(role: AgentRole = TEST_ROLE): {
       tools,
       skills: [],
       extensions: [],
-      allowedChildren: [],
-      remainingDelegationDepth: 2,
+      delegation: v4.delegation,
+      workflow: v4.workflow,
       timeoutMs: 600_000,
       turnBudget: { maxTurns: 24, graceTurns: 2 },
       toolBudget: { soft: 60, hard: 80, block: [] },
@@ -125,7 +154,7 @@ function issueTestContract(role: AgentRole = TEST_ROLE): {
   };
 }
 
-describe("Contract domain v3", () => {
+describe("Contract domain v4", () => {
   it("issue creates unique contract IDs", () => {
     const a = issueTestContract();
     const b = issueTestContract();
@@ -142,18 +171,21 @@ describe("Contract domain v3", () => {
     const issued = issueTestContract();
     const rawHash = hashCapabilityToken(issued.capabilityToken);
     assert.notEqual(rawHash, issued.capabilityToken);
-    assert.equal(rawHash.length, 64); // sha256 hex
+    assert.equal(rawHash.length, 64);
   });
 
   it("correct identity authorizes", () => {
     const runId = createRunId();
+    const v4 = makeV4Runtime("scout");
     const issued = issueContract({
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
         agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
         tools: makeToolConfig("scout"),
-        skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 2,
+        skills: [], extensions: [],
+        delegation: v4.delegation,
+        workflow: v4.workflow,
         timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
       },
@@ -169,13 +201,16 @@ describe("Contract domain v3", () => {
 
   it("wrong contract ID rejects", () => {
     const runId = createRunId();
+    const v4 = makeV4Runtime("scout");
     const issued = issueContract({
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
         agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
         tools: makeToolConfig("scout"),
-        skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 2,
+        skills: [], extensions: [],
+        delegation: v4.delegation,
+        workflow: v4.workflow,
         timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
       },
@@ -191,13 +226,16 @@ describe("Contract domain v3", () => {
 
   it("wrong run ID rejects", () => {
     const runId = createRunId();
+    const v4 = makeV4Runtime("scout");
     const issued = issueContract({
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
         agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
         tools: makeToolConfig("scout"),
-        skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 2,
+        skills: [], extensions: [],
+        delegation: v4.delegation,
+        workflow: v4.workflow,
         timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
       },
@@ -213,13 +251,16 @@ describe("Contract domain v3", () => {
 
   it("wrong token rejects", () => {
     const runId = createRunId();
+    const v4 = makeV4Runtime("scout");
     const issued = issueContract({
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
         agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
         tools: makeToolConfig("scout"),
-        skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 2,
+        skills: [], extensions: [],
+        delegation: v4.delegation,
+        workflow: v4.workflow,
         timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
       },
@@ -235,13 +276,16 @@ describe("Contract domain v3", () => {
 
   it("expired contract rejects", () => {
     const runId = createRunId();
+    const v4 = makeV4Runtime("scout");
     const issued = issueContract({
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
         agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
         tools: makeToolConfig("scout"),
-        skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 2,
+        skills: [], extensions: [],
+        delegation: v4.delegation,
+        workflow: v4.workflow,
         timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
       },
@@ -282,40 +326,46 @@ describe("Contract domain v3", () => {
     assert.equal(parseCapabilityToken(""), undefined);
   });
 
-  it("v3 artifact has complete runtime fields", () => {
+  it("v4 artifact has complete runtime fields", () => {
     const runId = createRunId();
+    const v4 = makeV4Runtime(null);
     const issued = issueContract({
       identity: { runId, handleId: "test", role: null },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
         agent: "phenix.base", cwd: "/tmp", thinking: "low",
         tools: makeToolConfig(null),
-        skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 0,
+        skills: [], extensions: [],
+        delegation: { ...v4.delegation, remainingDepth: 0 },
+        workflow: v4.workflow,
         timeoutMs: 300_000, turnBudget: { maxTurns: 12, graceTurns: 2 },
         toolBudget: { soft: 30, hard: 40, block: ["read"] },
       },
       verification: { commands: [], criticRequired: false, maxRepairAttempts: 0 },
     });
 
-    assert.equal(issued.artifact.version, 3);
+    assert.equal(issued.artifact.version, 4);
     assert.equal(issued.artifact.identity.role, null);
     assert.equal(issued.artifact.identity.handleId, "test");
     assert.equal(issued.artifact.assignment.task, TEST_TASK);
     assert.equal(issued.artifact.runtime.agent, "phenix.base");
-    assert.equal(issued.artifact.runtime.remainingDelegationDepth, 0);
+    assert.equal(issued.artifact.runtime.delegation.remainingDepth, 0);
     assert.ok(typeof issued.artifact.capabilityTokenHash === "string");
     assert.ok(issued.artifact.capabilityTokenHash.length > 0);
   });
 
   it("role null is stored correctly in contract identity", () => {
     const runId = createRunId();
+    const v4 = makeV4Runtime(null);
     const issued = issueContract({
       identity: { runId, handleId: "test-null-role", role: null },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
         agent: "phenix.base", cwd: "/tmp", thinking: "low",
         tools: makeToolConfig(null),
-        skills: [], extensions: [], allowedChildren: [], remainingDelegationDepth: 0,
+        skills: [], extensions: [],
+        delegation: { ...v4.delegation, remainingDepth: 0 },
+        workflow: v4.workflow,
         timeoutMs: 300_000, turnBudget: { maxTurns: 12, graceTurns: 2 },
         toolBudget: { soft: 30, hard: 40, block: [] },
       },

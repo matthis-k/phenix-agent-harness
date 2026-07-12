@@ -124,7 +124,7 @@ function generateAgentDefinition(
   lines.push("inheritSkills: true");
   lines.push("completionGuard: false");
   lines.push(
-    `maxSubagentDepth: ${contract.runtime.remainingDelegationDepth}`,
+    `maxSubagentDepth: ${contract.runtime.delegation.remainingDepth}`,
   );
   lines.push("---");
   lines.push("");

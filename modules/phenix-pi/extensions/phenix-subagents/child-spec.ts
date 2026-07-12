@@ -12,13 +12,27 @@ import type {
 import {
   resolveExecutionPolicy,
   type RuntimePolicyConfig,
+  type ResolvedExecutionPolicy,
 } from "./policy.ts";
 import {
   resolveToolConfiguration,
   type ResolvedToolConfiguration,
   type ToolPatch,
 } from "./tool-policy.ts";
+import {
+  resolveDelegateRoleConfiguration,
+  type ResolvedDelegateRoleConfiguration,
+  type DelegateRolePatchInput,
+} from "./delegation-policy.ts";
 import type { ContractArtifact } from "./contract.ts";
+import type {
+  WorkflowDefinitionId,
+  WorkflowStateId,
+  WorkflowTransitionId,
+} from "../phenix-workflow/workflow-types.ts";
+import type { Difficulty } from "../phenix-routing/types.ts";
+import type { AgentCapabilityArtifact } from "../phenix-workflow/agent-capabilities.ts";
+import { isSpawnableAgent } from "../phenix-workflow/agent-capabilities.ts";
 
 // ── Resolved child specification ────────────────────────────────────────────
 
@@ -35,25 +49,39 @@ export interface ResolvedChildSpec {
   readonly thinking: ThinkingLevel;
   readonly cwd: string;
 
-  readonly tools:
-    ResolvedToolConfiguration;
+  readonly tools: ResolvedToolConfiguration;
 
   readonly skills: readonly string[];
   readonly extensions: readonly string[];
 
-  readonly allowedChildren:
-    readonly AgentKind[];
+  readonly delegation: {
+    readonly roles: ResolvedDelegateRoleConfiguration;
+    readonly availableRoles: readonly AgentRole[];
+    readonly remainingDepth: number;
+  };
 
-  readonly remainingDelegationDepth:
-    number;
+  readonly workflow: {
+    readonly instanceId: string;
+    readonly actorId: string;
+    readonly parentActorId?: string;
+
+    readonly definitionId: WorkflowDefinitionId;
+    readonly definitionVersion: 1;
+
+    readonly difficulty: Difficulty;
+
+    readonly initialState: WorkflowStateId;
+
+    readonly transitionCeiling: readonly WorkflowTransitionId[];
+
+    readonly capabilityArtifactHash: string;
+  };
 
   readonly timeoutMs: number;
   readonly turnBudget: TurnBudget;
   readonly toolBudget: ToolBudget;
 
-  readonly verificationCommands:
-    readonly VerificationCommand[];
-
+  readonly verificationCommands: readonly VerificationCommand[];
   readonly criticRequired: boolean;
   readonly maxRepairAttempts: number;
 }
@@ -63,8 +91,7 @@ export interface ResolvedChildSpec {
 export type ContractCreatorContext =
   | {
       readonly kind: "root";
-      readonly maximumDelegationDepth:
-        number;
+      readonly maximumDelegationDepth: number;
     }
   | {
       readonly kind: "child";
@@ -72,9 +99,22 @@ export type ContractCreatorContext =
     }
   | {
       readonly kind: "runtime-internal";
-      readonly maximumDelegationDepth:
-        number;
+      readonly maximumDelegationDepth: number;
     };
+
+// ── Workflow child input ────────────────────────────────────────────────────
+
+export interface ResolvedWorkflowChildInput {
+  readonly instanceId: string;
+  readonly actorId: string;
+  readonly parentActorId?: string;
+  readonly definitionId: WorkflowDefinitionId;
+  readonly definitionVersion: 1;
+  readonly difficulty: Difficulty;
+  readonly initialState: WorkflowStateId;
+  readonly transitionCeiling: readonly WorkflowTransitionId[];
+  readonly capabilityArtifactHash: string;
+}
 
 // ── Input types ─────────────────────────────────────────────────────────────
 
@@ -88,12 +128,15 @@ export interface ChildSpecInput {
     readonly additional?: readonly string[];
     readonly removed?: readonly string[];
   } | null;
+  readonly delegateRoles?: DelegateRolePatchInput | null;
   readonly skills?: readonly string[];
   readonly extensions?: readonly string[];
   readonly cwd: string;
   readonly creator: ContractCreatorContext;
   readonly config?: RuntimePolicyConfig;
   readonly model?: string;
+  readonly capabilityArtifact: AgentCapabilityArtifact;
+  readonly workflow: ResolvedWorkflowChildInput;
   readonly routingContext?: {
     readonly modelSet?: string;
     readonly difficulty?: string;
@@ -108,7 +151,7 @@ export interface ChildSpecInput {
 export function resolveChildSpec(
   input: ChildSpecInput,
 ): ResolvedChildSpec {
-  // 1. Resolve execution policy (profile, tier, thinking, budgets, children, critic).
+  // 1. Resolve execution policy (profile, tier, thinking, budgets, critic).
   const policy = resolveExecutionPolicy({
     role: input.role,
     task: input.task,
@@ -118,35 +161,58 @@ export function resolveChildSpec(
     config: input.config,
   });
 
-  // 2. Determine inherited patch from creator context.
-  let inheritedPatch: ToolPatch | undefined;
+  // 2. Determine inherited patches from creator context.
+  let inheritedToolPatch: ToolPatch | undefined;
   let delegableTools: readonly string[] | undefined;
 
+  let inheritedRolePatch: DelegateRolePatchInput | undefined;
+  let delegableRoleCeiling: readonly AgentRole[] | undefined;
+  let remainingDepth: number;
+
   if (input.creator.kind === "child") {
-    inheritedPatch = input.creator.contract.runtime.tools.source.patch;
+    inheritedToolPatch = input.creator.contract.runtime.tools.source.patch;
     delegableTools = input.creator.contract.runtime.tools.effective;
+
+    inheritedRolePatch =
+      input.creator.contract.runtime.delegation.roles.source.patch;
+    delegableRoleCeiling =
+      input.creator.contract.runtime.delegation.roles.effective;
+
+    remainingDepth = Math.max(
+      0,
+      input.creator.contract.runtime.delegation.remainingDepth - 1,
+    );
   } else {
-    // root or runtime-internal: no inherited patch, unrestricted ceiling.
-    inheritedPatch = undefined;
+    // root or runtime-internal: no inherited patches, unrestricted ceilings.
+    inheritedToolPatch = undefined;
     delegableTools = undefined;
+    inheritedRolePatch = undefined;
+    delegableRoleCeiling = undefined;
+    remainingDepth = input.creator.maximumDelegationDepth;
   }
 
   // 3. Resolve tool configuration.
   const tools = resolveToolConfiguration({
     role: input.role,
     requested: input.tools,
-    inheritedPatch,
+    inheritedPatch: inheritedToolPatch,
     delegableTools,
   });
 
-  // 4. Calculate remaining delegation depth.
-  const remainingDelegationDepth =
-    input.creator.kind === "child"
-      ? Math.max(
-          0,
-          input.creator.contract.runtime.remainingDelegationDepth - 1,
-        )
-      : input.creator.maximumDelegationDepth;
+  // 4. Resolve delegate role configuration.
+  const roles = resolveDelegateRoleConfiguration({
+    role: input.role,
+    requested: input.delegateRoles ?? null,
+    inheritedPatch: inheritedRolePatch
+      ? { additional: [...inheritedRolePatch.additional ?? []], removed: [...inheritedRolePatch.removed ?? []] }
+      : undefined,
+    delegableRoles: delegableRoleCeiling,
+  });
+
+  // 5. Filter available roles against capability artifact.
+  const availableRoles = roles.effective.filter(
+    (role) => isSpawnableAgent(input.capabilityArtifact, role),
+  );
 
   return {
     role: input.role,
@@ -159,8 +225,22 @@ export function resolveChildSpec(
     tools,
     skills: input.skills ?? [],
     extensions: input.extensions ?? [],
-    allowedChildren: policy.allowedChildren,
-    remainingDelegationDepth,
+    delegation: {
+      roles,
+      availableRoles,
+      remainingDepth,
+    },
+    workflow: {
+      instanceId: input.workflow.instanceId,
+      actorId: input.workflow.actorId,
+      parentActorId: input.workflow.parentActorId,
+      definitionId: input.workflow.definitionId,
+      definitionVersion: input.workflow.definitionVersion,
+      difficulty: input.workflow.difficulty,
+      initialState: input.workflow.initialState,
+      transitionCeiling: [...input.workflow.transitionCeiling],
+      capabilityArtifactHash: input.workflow.capabilityArtifactHash,
+    },
     timeoutMs: policy.timeoutMs,
     turnBudget: policy.turnBudget,
     toolBudget: policy.toolBudget,

@@ -428,7 +428,7 @@ export function buildSubagentParams(
     toolSoft: contract.runtime.toolBudget.soft,
     toolHard: contract.runtime.toolBudget.hard,
     toolBlock: contract.runtime.toolBudget.block,
-    maxSubagentDepth: contract.runtime.remainingDelegationDepth,
+    maxSubagentDepth: contract.runtime.delegation.remainingDepth,
     timeoutMs: contract.runtime.timeoutMs,
     async: true,
     clarify: false,

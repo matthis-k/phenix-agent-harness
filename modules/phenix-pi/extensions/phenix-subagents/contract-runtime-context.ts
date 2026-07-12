@@ -5,12 +5,17 @@ import type {
 import type { FileContractStore } from "./contract-store.ts";
 import type { AgentRole, AgentKind } from "./agent-types.ts";
 import type { ToolPatch, ToolPatchInput } from "./tool-policy.ts";
+import type { DelegateRolePatchInput } from "./delegation-policy.ts";
 
 // ── Runtime context types ───────────────────────────────────────────────────
 
 export type PhenixRuntimeContext =
   | {
       readonly kind: "root";
+      readonly workflowData?: {
+        readonly instanceId: string;
+        readonly actorId: string;
+      };
     }
   | {
       readonly kind: "child";
@@ -97,4 +102,34 @@ export function currentInheritedToolPatch(): ToolPatch | undefined {
   return _context.contract.runtime.tools.source.patch;
 }
 
-export type { AgentRole, AgentKind, ToolPatch, ToolPatchInput };
+export function currentInheritedRolePatch(): DelegateRolePatchInput | undefined {
+  if (!_context || _context.kind !== "child") return undefined;
+  return _context.contract.runtime.delegation.roles.source.patch;
+}
+
+export { AgentRole, AgentKind, ToolPatch, ToolPatchInput, DelegateRolePatchInput };
+
+// ── Root workflow data setter ───────────────────────────────────────────────
+
+/**
+ * Set the root workflow instance/actor IDs on the current root context.
+ * Called by the routing extension after workflow record creation.
+ * Does nothing if the context is not root or not yet initialized.
+ */
+export function setRootWorkflowData(
+  data: { readonly instanceId: string; readonly actorId: string },
+): void {
+  if (_context && _context.kind === "root") {
+    _context = { kind: "root", workflowData: data };
+  }
+}
+
+/**
+ * Get the root workflow data, if set.
+ */
+export function getRootWorkflowData(): { readonly instanceId: string; readonly actorId: string } | undefined {
+  if (_context && _context.kind === "root") {
+    return _context.workflowData;
+  }
+  return undefined;
+}

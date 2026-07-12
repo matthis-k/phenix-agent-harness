@@ -12,6 +12,7 @@ import { buildBundledConfig } from "../extensions/phenix-routing/config.ts";
 
 const ALL_ROLES: RoutingRole[] = [
   "coordinator",
+  "base",
   "scout",
   "planner",
   "architect",
@@ -23,7 +24,7 @@ const ALL_ROLES: RoutingRole[] = [
 
 const ALL_DIFFICULTIES: Difficulty[] = ["D0", "D1", "D2", "D3"];
 
-describe("Routing matrix cells (8 roles × 4 difficulties)", () => {
+describe("Routing matrix cells (9 roles × 4 difficulties)", () => {
   it("every role/difficulty pair resolves to expected capability and thinking", () => {
     const expected: Record<RoutingRole, Record<Difficulty, { capability: Capability; thinking: string }>> = {
       coordinator: {
@@ -74,6 +75,12 @@ describe("Routing matrix cells (8 roles × 4 difficulties)", () => {
         D2: { capability: "review",     thinking: "medium"  },
         D3: { capability: "review-max", thinking: "high"    },
       },
+      base: {
+        D0: { capability: "fast",        thinking: "minimal" },
+        D1: { capability: "general",     thinking: "low"     },
+        D2: { capability: "reasoning",   thinking: "medium"  },
+        D3: { capability: "reasoning",   thinking: "high"    },
+      },
     };
 
     for (const role of ALL_ROLES) {
@@ -87,9 +94,9 @@ describe("Routing matrix cells (8 roles × 4 difficulties)", () => {
     }
   });
 
-  it("allMatrixKeys returns all 32 pairs", () => {
+  it("allMatrixKeys returns all 36 pairs", () => {
     const keys = allMatrixKeys();
-    assert.equal(keys.length, 8 * 4);
+    assert.equal(keys.length, 9 * 4);
   });
 
   it("validateMatrix does not throw", () => {

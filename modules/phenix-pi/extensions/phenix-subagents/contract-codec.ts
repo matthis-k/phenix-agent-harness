@@ -5,8 +5,10 @@ import type {
 import { isAgentKind } from "./agent-types.ts";
 import type { ContractArtifact } from "./contract.ts";
 import type { ResolvedToolConfiguration } from "./tool-policy.ts";
+import type { ResolvedDelegateRoleConfiguration } from "./delegation-policy.ts";
 import { rolePreset } from "./role-presets.ts";
 import { matchTool } from "./tool-policy.ts";
+import { getWorkflowDefinition } from "../phenix-workflow/workflow-definitions.ts";
 
 // ── Guard functions ─────────────────────────────────────────────────────────
 
@@ -53,7 +55,9 @@ function isThinkingLevel(value: unknown): value is ThinkingLevel {
   return typeof value === "string" && VALID_THINKING.has(value);
 }
 
-// ── Tool patch validation ───────────────────────────────────────────────────
+const VALID_DIFFICULTIES: ReadonlySet<string> = new Set(["D0", "D1", "D2", "D3"]);
+
+// ── Tool patch validation (unchanged) ───────────────────────────────────────
 
 function validateToolPatch(
   patch: unknown,
@@ -70,7 +74,7 @@ function validateToolPatch(
   }
 }
 
-// ── Tool configuration validation ───────────────────────────────────────────
+// ── Tool configuration validation (unchanged core) ──────────────────────────
 
 function validateToolConfiguration(
   raw: unknown,
@@ -86,13 +90,11 @@ function validateToolConfiguration(
     throw new Error(`${ctx}: unsupported runtime.tools.presetRevision`);
   }
 
-  // Validate role field.
   const role = raw.role;
   if (role !== null && !isAgentKind(role)) {
     throw new Error(`${ctx}: runtime.tools.role must be a valid AgentKind or null`);
   }
 
-  // Validate source.
   if (!isRecord(raw.source)) {
     throw new Error(`${ctx}: runtime.tools.source must be an object`);
   }
@@ -101,23 +103,17 @@ function validateToolConfiguration(
   }
   validateToolPatch(raw.source.patch, ctx);
 
-  // Validate effective is a string array.
   if (!isStringArray(raw.effective)) {
     throw new Error(`${ctx}: runtime.tools.effective must be a string array`);
   }
 
-  // Recompute effective tools from source and verify they match.
-  // We can't fully recompute because we don't have delegableTools context,
-  // but we can verify structural consistency.
   const preset = rolePreset(role as AgentRole);
   const base = preset.tools;
 
-  // Build expected effective set (simplified recomputation).
   const patch = raw.source.patch as { additional: readonly string[]; removed: readonly string[] };
   const additions = patch.additional;
   const removed = new Set(patch.removed);
 
-  // Deduplicate additions against preset patterns.
   const deduplicated = additions.filter((addition: string) => {
     for (const pattern of base) {
       if (matchTool(pattern, addition)) return false;
@@ -125,7 +121,6 @@ function validateToolConfiguration(
     return true;
   });
 
-  // Stable unique merge.
   const seen = new Set<string>();
   const merged: string[] = [];
   for (const tool of base) {
@@ -141,7 +136,6 @@ function validateToolConfiguration(
     }
   }
 
-  // Compare lengths and elements.
   const effective = raw.effective as readonly string[];
   if (merged.length !== effective.length) {
     throw new Error(
@@ -159,14 +153,157 @@ function validateToolConfiguration(
   }
 }
 
+// ── Role patch validation ───────────────────────────────────────────────────
+
+function validateRolePatch(
+  patch: unknown,
+  context: string,
+): asserts patch is { additional: readonly AgentRole[]; removed: readonly AgentRole[] } {
+  if (!isRecord(patch)) {
+    throw new Error(`${context}: delegation roles source.patch must be an object`);
+  }
+  if (!Array.isArray(patch.additional)) {
+    throw new Error(`${context}: delegation roles source.patch.additional must be an array`);
+  }
+  for (const r of patch.additional) {
+    if (r !== null && !isAgentKind(r)) {
+      throw new Error(`${context}: delegation roles source.patch.additional contains invalid role "${String(r)}"`);
+    }
+  }
+  if (!Array.isArray(patch.removed)) {
+    throw new Error(`${context}: delegation roles source.patch.removed must be an array`);
+  }
+  for (const r of patch.removed) {
+    if (r !== null && !isAgentKind(r)) {
+      throw new Error(`${context}: delegation roles source.patch.removed contains invalid role "${String(r)}"`);
+    }
+  }
+}
+
+// ── Delegation roles validation ─────────────────────────────────────────────
+
+function validateDelegationRoles(
+  raw: unknown,
+  contractId: string,
+  identityRole: AgentRole,
+): asserts raw is ResolvedDelegateRoleConfiguration {
+  const ctx = `Contract ${contractId}`;
+
+  if (!isRecord(raw)) {
+    throw new Error(`${ctx}: runtime.delegation.roles must be an object`);
+  }
+
+  if (raw.presetRevision !== 1) {
+    throw new Error(`${ctx}: unsupported runtime.delegation.roles.presetRevision`);
+  }
+
+  // role must match identity.role
+  if (raw.role !== identityRole) {
+    throw new Error(
+      `${ctx}: runtime.delegation.roles.role "${raw.role}" does not match identity.role "${identityRole}"`,
+    );
+  }
+
+  // validate source
+  if (!isRecord(raw.source)) {
+    throw new Error(`${ctx}: runtime.delegation.roles.source must be an object`);
+  }
+  if (typeof raw.source.inherited !== "boolean") {
+    throw new Error(`${ctx}: runtime.delegation.roles.source.inherited must be a boolean`);
+  }
+  validateRolePatch(raw.source.patch, ctx);
+
+  // validate effective is an array of valid roles
+  if (!Array.isArray(raw.effective)) {
+    throw new Error(`${ctx}: runtime.delegation.roles.effective must be an array`);
+  }
+  for (const r of raw.effective) {
+    if (r !== null && !isAgentKind(r)) {
+      throw new Error(`${ctx}: runtime.delegation.roles.effective contains invalid role "${String(r)}"`);
+    }
+  }
+}
+
+// ── Workflow validation ─────────────────────────────────────────────────────
+
+function validateWorkflowSection(
+  raw: unknown,
+  contractId: string,
+): void {
+  const ctx = `Contract ${contractId}`;
+
+  if (!isRecord(raw)) {
+    throw new Error(`${ctx}: runtime.workflow must be an object`);
+  }
+
+  if (!isNonEmptyString(raw.instanceId)) {
+    throw new Error(`${ctx}: runtime.workflow.instanceId must be a non-empty string`);
+  }
+  if (!isNonEmptyString(raw.actorId)) {
+    throw new Error(`${ctx}: runtime.workflow.actorId must be a non-empty string`);
+  }
+  if (raw.parentActorId !== undefined && !isNonEmptyString(raw.parentActorId)) {
+    throw new Error(`${ctx}: runtime.workflow.parentActorId must be a string or undefined`);
+  }
+
+  // Validate definition exists
+  const defId = raw.definitionId as string;
+  const definition = getWorkflowDefinition(defId);
+  if (!definition) {
+    throw new Error(`${ctx}: unknown workflow definition "${defId}"`);
+  }
+  if (raw.definitionVersion !== 1) {
+    throw new Error(`${ctx}: unsupported workflow definitionVersion`);
+  }
+
+  // Validate difficulty
+  if (!VALID_DIFFICULTIES.has(raw.difficulty as string)) {
+    throw new Error(`${ctx}: invalid workflow difficulty "${raw.difficulty}"`);
+  }
+
+  // Validate initialState exists in definition
+  const initialState = raw.initialState as string;
+  const stateExists = definition.transitions.some(
+    (t) =>
+      (t.kind === "delegate" && t.from.includes(initialState as never)) ||
+      (t.kind === "automatic" && t.from === initialState),
+  ) || definition.initialState === initialState;
+  if (!stateExists) {
+    throw new Error(
+      `${ctx}: workflow initialState "${initialState}" is not a valid state in definition "${defId}"`,
+    );
+  }
+
+  // Validate transitionCeiling
+  if (!Array.isArray(raw.transitionCeiling)) {
+    throw new Error(`${ctx}: runtime.workflow.transitionCeiling must be an array`);
+  }
+  for (const tid of raw.transitionCeiling) {
+    if (typeof tid !== "string" || tid.length === 0) {
+      throw new Error(`${ctx}: runtime.workflow.transitionCeiling contains invalid transition ID`);
+    }
+    const exists = definition.transitions.some((t) => t.id === tid);
+    if (!exists) {
+      throw new Error(
+        `${ctx}: runtime.workflow.transitionCeiling references unknown transition ID "${tid}"`,
+      );
+    }
+  }
+
+  // Validate capability artifact hash format (SHA-256 hex)
+  if (!isNonEmptyString(raw.capabilityArtifactHash) || !/^[0-9a-f]{64}$/.test(raw.capabilityArtifactHash)) {
+    throw new Error(`${ctx}: invalid runtime.workflow.capabilityArtifactHash`);
+  }
+}
+
 // ── Main decoder ────────────────────────────────────────────────────────────
 
 /**
  * Decode and validate a contract artifact.
  *
  * Rejects:
- * - contract versions 1 and 2 with a clear unsupported-version error.
- * - structurally invalid v3 artifacts with detailed errors.
+ * - contract versions 1-3 with a clear unsupported-version error.
+ * - structurally invalid v4 artifacts with detailed errors.
  */
 export function decodeContractArtifact(
   value: unknown,
@@ -181,15 +318,15 @@ export function decodeContractArtifact(
   };
 
   // ── version ──────────────────────────────────────────────────────────
-  if (value.version === 1 || value.version === 2) {
+  if (value.version === 1 || value.version === 2 || value.version === 3) {
     throw new Error(
       `${ctx()}: Contract version ${value.version} is no longer supported. ` +
-      `This runtime only supports version 3.`,
+      `This runtime only supports version 4.`,
     );
   }
-  if (value.version !== 3) {
+  if (value.version !== 4) {
     throw new Error(
-      `${ctx()}: Contract version must be 3, got ${JSON.stringify(value.version)}`,
+      `${ctx()}: Contract version must be 4, got ${JSON.stringify(value.version)}`,
     );
   }
 
@@ -286,27 +423,45 @@ export function decodeContractArtifact(
     throw new Error(`${ctx()}: runtime.extensions must be a string array`);
   }
 
-  // Validate allowedChildren.
-  if (!Array.isArray(runtime.allowedChildren)) {
-    throw new Error(`${ctx()}: runtime.allowedChildren must be an array`);
+  // ── Validate delegation section (v4) ──────────────────────────────────
+  if (!isRecord(runtime.delegation)) {
+    throw new Error(`${ctx()}: runtime.delegation must be an object`);
   }
-  for (const child of runtime.allowedChildren) {
-    if (child !== null && !isAgentKind(child)) {
-      throw new Error(`${ctx()}: runtime.allowedChildren contains invalid role "${child}"`);
+  const delegation = runtime.delegation;
+
+  // Validate delegation.roles
+  validateDelegationRoles(delegation.roles, value.id, role);
+
+  // Validate availableRoles is subset of effective roles
+  if (!Array.isArray(delegation.availableRoles)) {
+    throw new Error(`${ctx()}: runtime.delegation.availableRoles must be an array`);
+  }
+  const effectiveRoleSet = new Set(delegation.roles.effective as readonly AgentRole[]);
+  for (const ar of delegation.availableRoles) {
+    if (ar !== null && !isAgentKind(ar)) {
+      throw new Error(`${ctx()}: runtime.delegation.availableRoles contains invalid role "${String(ar)}"`);
+    }
+    if (!effectiveRoleSet.has(ar)) {
+      throw new Error(
+        `${ctx()}: runtime.delegation.availableRoles contains "${ar}" which is not in effective roles`,
+      );
     }
   }
 
-  // Validate remainingDelegationDepth.
-  if (!isNonNegativeInteger(runtime.remainingDelegationDepth)) {
-    throw new Error(`${ctx()}: runtime.remainingDelegationDepth must be a non-negative integer`);
+  // Validate remainingDepth
+  if (!isNonNegativeInteger(delegation.remainingDepth)) {
+    throw new Error(`${ctx()}: runtime.delegation.remainingDepth must be a non-negative integer`);
   }
 
-  // Validate timeout.
+  // ── Validate workflow section (v4) ────────────────────────────────────
+  validateWorkflowSection(runtime.workflow, value.id);
+
+  // ── Validate timeout ──────────────────────────────────────────────────
   if (typeof runtime.timeoutMs !== "number" || runtime.timeoutMs < 1 || !Number.isInteger(runtime.timeoutMs)) {
     throw new Error(`${ctx()}: runtime.timeoutMs must be a positive integer`);
   }
 
-  // Validate turnBudget.
+  // ── Validate turnBudget ───────────────────────────────────────────────
   if (!isRecord(runtime.turnBudget)) {
     throw new Error(`${ctx()}: runtime.turnBudget must be an object`);
   }
@@ -318,7 +473,7 @@ export function decodeContractArtifact(
     throw new Error(`${ctx()}: runtime.turnBudget.graceTurns must be a non-negative integer`);
   }
 
-  // Validate toolBudget.
+  // ── Validate toolBudget ───────────────────────────────────────────────
   if (!isRecord(runtime.toolBudget)) {
     throw new Error(`${ctx()}: runtime.toolBudget must be an object`);
   }

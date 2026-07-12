@@ -17,6 +17,13 @@ export const ROLE_MATRIX: Readonly<
     D3: { capability: "reasoning-max", thinking: "xhigh" },
   },
 
+  base: {
+    D0: { capability: "fast",        thinking: "minimal" },
+    D1: { capability: "general",     thinking: "low"     },
+    D2: { capability: "reasoning",   thinking: "medium"  },
+    D3: { capability: "reasoning",   thinking: "high"    },
+  },
+
   scout: {
     D0: { capability: "fast",        thinking: "minimal" },
     D1: { capability: "fast",        thinking: "low"     },

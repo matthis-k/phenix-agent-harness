@@ -1,6 +1,7 @@
 import type { ContractArtifact } from "./contract.ts";
 import type { AgentRole } from "./agent-types.ts";
 import type { JsonSchema } from "./contracts.ts";
+import type { ModelWorkflowProjection } from "../phenix-workflow/workflow-projection.ts";
 
 // ── Model-facing projection ─────────────────────────────────────────────────
 
@@ -17,26 +18,29 @@ export interface ModelContractProjection {
   readonly allowedChildren: readonly string[];
   readonly outputSchema: JsonSchema;
   readonly completionTool: "phenix_complete";
+  readonly workflow: ModelWorkflowProjection;
 }
 
 // ── Projection formatter ────────────────────────────────────────────────────
 
 /**
- * Derive the safe model-facing projection from a contract artifact (v3).
+ * Derive the safe model-facing projection from a contract artifact (v4).
  */
 export function deriveProjection(
   contract: ContractArtifact,
+  workflowProjection: ModelWorkflowProjection,
 ): ModelContractProjection {
   return {
     role: contract.identity.role,
     task: contract.assignment.task,
     requirements: contract.assignment.requirements,
     tools: contract.runtime.tools.effective,
-    allowedChildren: contract.runtime.allowedChildren
+    allowedChildren: contract.runtime.delegation.roles.effective
       .filter((r): r is AgentRole => r !== null)
       .map((r) => r as string),
     outputSchema: contract.assignment.outputSchema,
     completionTool: "phenix_complete",
+    workflow: workflowProjection,
   };
 }
 
@@ -81,11 +85,16 @@ export function formatProjection(
     lines.push("");
   }
 
-  // Allowed child roles
-  if (projection.allowedChildren.length > 0) {
-    lines.push("Allowed child roles:");
-    for (const role of projection.allowedChildren) {
-      lines.push(`- ${role}`);
+  // Workflow projection
+  if (projection.workflow && projection.workflow.options.length > 0) {
+    lines.push("## Phenix workflow authority");
+    lines.push("");
+    lines.push(`Current state: ${projection.workflow.currentState}`);
+    lines.push(`Workflow revision: ${projection.workflow.revision}`);
+    lines.push("");
+    lines.push("Available delegation transitions:");
+    for (const opt of projection.workflow.options) {
+      lines.push(`- ${opt.transitionId} → ${opt.role} (${opt.category})`);
     }
     lines.push("");
   }
@@ -118,6 +127,7 @@ export function formatProjection(
  */
 export function buildContractProjection(
   contract: ContractArtifact,
+  workflowProjection: ModelWorkflowProjection,
 ): string {
-  return formatProjection(deriveProjection(contract));
+  return formatProjection(deriveProjection(contract, workflowProjection));
 }

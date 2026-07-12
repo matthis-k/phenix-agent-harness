@@ -3,6 +3,9 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import type { JsonSchema } from "./contracts.ts";
 import type { AgentKind, AgentRole, TurnBudget, ToolBudget, VerificationCommand } from "./agent-types.ts";
 import type { ResolvedToolConfiguration } from "./tool-policy.ts";
+import type { ResolvedDelegateRoleConfiguration } from "./delegation-policy.ts";
+import type { WorkflowDefinitionId, WorkflowStateId, WorkflowTransitionId } from "../phenix-workflow/workflow-types.ts";
+import type { Difficulty } from "../phenix-routing/types.ts";
 
 declare const contractIdBrand: unique symbol;
 declare const capabilityTokenBrand: unique symbol;
@@ -28,10 +31,10 @@ export interface ContractIdentity {
   readonly capabilityToken: CapabilityToken;
 }
 
-// ── Contract artifact v3 ────────────────────────────────────────────────────
+// ── Contract artifact v4 ────────────────────────────────────────────────────
 
 export interface ContractArtifact {
-  readonly version: 3;
+  readonly version: 4;
   readonly id: ContractId;
 
   readonly identity: {
@@ -62,8 +65,30 @@ export interface ContractArtifact {
     readonly skills: readonly string[];
     readonly extensions: readonly string[];
 
-    readonly allowedChildren: readonly AgentRole[];
-    readonly remainingDelegationDepth: number;
+    readonly delegation: {
+      readonly roles: ResolvedDelegateRoleConfiguration;
+
+      readonly availableRoles: readonly AgentRole[];
+
+      readonly remainingDepth: number;
+    };
+
+    readonly workflow: {
+      readonly instanceId: string;
+      readonly actorId: string;
+      readonly parentActorId?: string;
+
+      readonly definitionId: WorkflowDefinitionId;
+      readonly definitionVersion: 1;
+
+      readonly difficulty: Difficulty;
+
+      readonly initialState: WorkflowStateId;
+
+      readonly transitionCeiling: readonly WorkflowTransitionId[];
+
+      readonly capabilityArtifactHash: string;
+    };
 
     readonly timeoutMs: number;
     readonly turnBudget: TurnBudget;
@@ -156,7 +181,7 @@ export function hashCapabilityToken(
   return createHash("sha256").update(token).digest("hex");
 }
 
-// ── Contract issuance (v3) ──────────────────────────────────────────────────
+// ── Contract issuance (v4) ──────────────────────────────────────────────────
 
 export type IssueContractInput = {
   readonly identity: ContractArtifact["identity"];
@@ -167,7 +192,7 @@ export type IssueContractInput = {
 };
 
 /**
- * Issue a new v3 contract artifact from a fully resolved specification.
+ * Issue a new v4 contract artifact from a fully resolved specification.
  * No policy derivation, role configuration, or tool resolution happens here.
  */
 export function issueContract(
@@ -176,7 +201,7 @@ export function issueContract(
   const capabilityToken = createCapabilityToken();
 
   const artifact: ContractArtifact = {
-    version: 3,
+    version: 4,
     id: createContractId(),
     identity: {
       runId: input.identity.runId,
@@ -208,8 +233,33 @@ export function issueContract(
       },
       skills: [...input.runtime.skills],
       extensions: [...input.runtime.extensions],
-      allowedChildren: [...input.runtime.allowedChildren],
-      remainingDelegationDepth: input.runtime.remainingDelegationDepth,
+      delegation: {
+        roles: {
+          presetRevision: input.runtime.delegation.roles.presetRevision,
+          role: input.runtime.delegation.roles.role,
+          source: {
+            inherited: input.runtime.delegation.roles.source.inherited,
+            patch: {
+              additional: [...input.runtime.delegation.roles.source.patch.additional],
+              removed: [...input.runtime.delegation.roles.source.patch.removed],
+            },
+          },
+          effective: [...input.runtime.delegation.roles.effective],
+        },
+        availableRoles: [...input.runtime.delegation.availableRoles],
+        remainingDepth: input.runtime.delegation.remainingDepth,
+      },
+      workflow: {
+        instanceId: input.runtime.workflow.instanceId,
+        actorId: input.runtime.workflow.actorId,
+        ...(input.runtime.workflow.parentActorId ? { parentActorId: input.runtime.workflow.parentActorId } : {}),
+        definitionId: input.runtime.workflow.definitionId,
+        definitionVersion: input.runtime.workflow.definitionVersion,
+        difficulty: input.runtime.workflow.difficulty,
+        initialState: input.runtime.workflow.initialState,
+        transitionCeiling: [...input.runtime.workflow.transitionCeiling],
+        capabilityArtifactHash: input.runtime.workflow.capabilityArtifactHash,
+      },
       timeoutMs: input.runtime.timeoutMs,
       turnBudget: { ...input.runtime.turnBudget },
       toolBudget: { ...input.runtime.toolBudget },

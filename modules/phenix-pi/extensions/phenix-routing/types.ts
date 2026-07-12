@@ -1,4 +1,4 @@
-import type { AgentKind } from "../phenix-subagents/policy.ts";
+import type { AgentKind } from "../phenix-subagents/agent-types.ts";
 
 export const MODEL_SET_IDS = [
   "free",
@@ -13,6 +13,7 @@ export type Difficulty = "D0" | "D1" | "D2" | "D3";
 
 export type RoutingRole =
   | "coordinator"
+  | "base"
   | AgentKind;
 
 export type Capability =

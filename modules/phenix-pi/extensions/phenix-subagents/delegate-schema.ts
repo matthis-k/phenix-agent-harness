@@ -1,51 +1,79 @@
 import { Type, type TSchema } from "typebox";
 
-// ── Delegate parameters schema ──────────────────────────────────────────────
+// ── Agent role schema ───────────────────────────────────────────────────────
+
+const AgentRoleSchema = Type.Union([
+  Type.Literal("scout"),
+  Type.Literal("planner"),
+  Type.Literal("architect"),
+  Type.Literal("implementer"),
+  Type.Literal("tester"),
+  Type.Literal("critic"),
+  Type.Literal("finalizer"),
+  Type.Null(),
+]);
+
+// ── Tool patch schema ───────────────────────────────────────────────────────
+
+const ToolPatchSchema = Type.Optional(
+  Type.Union([
+    Type.Null(),
+    Type.Object(
+      {
+        additional: Type.Optional(
+          Type.Array(Type.String({ minLength: 1 })),
+        ),
+        removed: Type.Optional(
+          Type.Array(Type.String({ minLength: 1 })),
+        ),
+      },
+      {
+        additionalProperties: false,
+      },
+    ),
+  ]),
+);
+
+// ── Delegate parameters schema (v4) ─────────────────────────────────────────
 
 export const DelegateParams = Type.Object(
   {
-    role: Type.Union([
-      Type.Literal("scout"),
-      Type.Literal("planner"),
-      Type.Literal("architect"),
-      Type.Literal("implementer"),
-      Type.Literal("tester"),
-      Type.Literal("critic"),
-      Type.Literal("finalizer"),
-      Type.Null(),
-    ], {
+    transitionId: Type.String({
+      minLength: 1,
       description:
-        "The subagent role (scout, planner, architect, implementer, tester, critic, finalizer). Null triggers a base agent with no role preset.",
+        "One transition ID from the currently projected Phenix delegation options.",
+    }),
+
+    workflowRevision: Type.Integer({
+      minimum: 0,
+      description:
+        "The exact workflow revision shown with the delegation options.",
     }),
 
     task: Type.String({
       minLength: 1,
       description:
-        "A bounded objective with context and scope",
-    }),
-
-    outputSchema: Type.Record(Type.String(), Type.Unknown(), {
-      description:
-        "Strict JSON Schema object for the child handoff",
+        "Task-specific context for the runtime-selected transition and role.",
     }),
 
     requirements: Type.Optional(
       Type.Array(Type.String({ minLength: 1 }), {
         maxItems: 64,
-        description: "Additional requirements",
       }),
     ),
 
-    tools: Type.Optional(
+    tools: ToolPatchSchema,
+
+    delegateRoles: Type.Optional(
       Type.Union([
         Type.Null(),
         Type.Object(
           {
             additional: Type.Optional(
-              Type.Array(Type.String({ minLength: 1 })),
+              Type.Array(AgentRoleSchema),
             ),
             removed: Type.Optional(
-              Type.Array(Type.String({ minLength: 1 })),
+              Type.Array(AgentRoleSchema),
             ),
           },
           {
@@ -55,51 +83,11 @@ export const DelegateParams = Type.Object(
       ]),
     ),
 
-    profile: Type.Optional(
-      Type.Object(
-        {
-          complexity: Type.Optional(
-            Type.Number({ minimum: 0, maximum: 4 }),
-          ),
-          uncertainty: Type.Optional(
-            Type.Number({ minimum: 0, maximum: 4 }),
-          ),
-          consequence: Type.Optional(
-            Type.Number({ minimum: 0, maximum: 4 }),
-          ),
-          breadth: Type.Optional(
-            Type.Number({ minimum: 0, maximum: 4 }),
-          ),
-          coupling: Type.Optional(
-            Type.Number({ minimum: 0, maximum: 4 }),
-          ),
-          novelty: Type.Optional(
-            Type.Number({ minimum: 0, maximum: 4 }),
-          ),
-        },
-        {
-          additionalProperties: false,
-        },
-      ),
-    ),
-
     mode: Type.Optional(
       Type.Union([
         Type.Literal("await"),
         Type.Literal("background"),
       ]),
-    ),
-
-    model: Type.Optional(
-      Type.String({ minLength: 1 }),
-    ),
-
-    cwd: Type.Optional(
-      Type.String({ minLength: 1 }),
-    ),
-
-    parent: Type.Optional(
-      Type.String({ minLength: 1 }),
     ),
   },
   {
