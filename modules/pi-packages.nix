@@ -59,6 +59,26 @@
         touch "$out"
       '';
 
+
+      phenixRepositoryChecks = pkgs.runCommand "phenix-repository-checks" {
+        nativeBuildInputs = [
+          pkgs.bash
+          pkgs.shellcheck
+        ];
+      } ''
+        bash -n \
+          ${../scripts/check.sh} \
+          ${../scripts/setup-git-hooks.sh} \
+          ${../.githooks/pre-commit} \
+          ${../.githooks/pre-push}
+        shellcheck \
+          ${../scripts/check.sh} \
+          ${../scripts/setup-git-hooks.sh} \
+          ${../.githooks/pre-commit} \
+          ${../.githooks/pre-push}
+        touch "$out"
+      '';
+
       updatePiNpmHash = pkgs.writeShellApplication {
         name = "update-pi-npm-hash";
         runtimeInputs = [
@@ -110,6 +130,7 @@
         phenix-pi-npm-packages = piNpmPackages;
         phenix-runtime-tests = phenixRuntimeTests;
         phenix-qa-tests = phenixQaTests;
+        phenix-repository-checks = phenixRepositoryChecks;
         update-pi-npm-hash = updatePiNpmHash;
       };
 
@@ -117,6 +138,7 @@
         phenix-pi-npm-packages = piNpmPackages;
         phenix-runtime-tests = phenixRuntimeTests;
         phenix-qa-tests = phenixQaTests;
+        phenix-repository-checks = phenixRepositoryChecks;
       };
     };
 }

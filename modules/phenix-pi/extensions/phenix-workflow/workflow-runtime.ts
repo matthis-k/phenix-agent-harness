@@ -246,13 +246,24 @@ export function finalizeHandleWorkflow(input: {
   readonly handle: WorkflowHandleRecord;
 }): WorkflowRuntimeRecord | undefined {
   const binding = input.handle.workflowBinding;
-  if (!binding || input.handle.status === "running") return undefined;
+  if (
+    !binding ||
+    input.handle.status === "starting" ||
+    input.handle.status === "running"
+  ) {
+    return undefined;
+  }
   let record = readWorkflowRecord(
     input.cwd,
     binding.instanceId,
     binding.actorId,
   );
-  if (!record) return undefined;
+  if (!record) {
+    throw new Error(
+      `Workflow record not found while finalizing handle ${input.handle.id}: ` +
+        `${binding.instanceId}/${binding.actorId}`,
+    );
+  }
   if (
     record.completed.some(
       (completed) => completed.executionId === binding.transitionExecutionId,
