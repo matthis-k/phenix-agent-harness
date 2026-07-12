@@ -1,34 +1,31 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { describe, it } from "node:test";
 
 import {
-  childRunId,
-  ChildRuntimeError,
   type ChildRun,
+  ChildRuntimeError,
   type ContractSubmissionChannel,
+  childRunId,
 } from "../extensions/phenix-runtime/child-session-types.ts";
 import { executeProducerCycles } from "../extensions/phenix-subagents/attempt-runner.ts";
 import type { HandleRecord } from "../extensions/phenix-subagents/handle-types.ts";
+import { isTerminalHandleStatus } from "../extensions/phenix-subagents/handle-types.ts";
+import {
+  finalizeHandleWorkflow,
+  initialWorkflowStateForRole,
+} from "../extensions/phenix-workflow/workflow-runtime.ts";
 import {
   beginTransition,
   createWorkflowRecord,
   readWorkflowRecord,
 } from "../extensions/phenix-workflow/workflow-store.ts";
-import {
-  finalizeHandleWorkflow,
-  initialWorkflowStateForRole,
-} from "../extensions/phenix-workflow/workflow-runtime.ts";
-import { isTerminalHandleStatus } from "../extensions/phenix-subagents/handle-types.ts";
 
 function temporaryDirectory(prefix: string): string {
-  const directory = path.join(
-    os.tmpdir(),
-    `${prefix}-${randomUUID().slice(0, 8)}`,
-  );
+  const directory = path.join(os.tmpdir(), `${prefix}-${randomUUID().slice(0, 8)}`);
   fs.mkdirSync(directory, { recursive: true });
   return directory;
 }
@@ -107,9 +104,7 @@ describe("runtime cancellation ownership", () => {
       maximumProducerCycles: 2,
       completionGraceRemaining: 0,
       verify: async () => {
-        controller.abort(
-          new ChildRuntimeError("TIMEOUT", "verification deadline exceeded"),
-        );
+        controller.abort(new ChildRuntimeError("TIMEOUT", "verification deadline exceeded"));
         return {
           ok: false,
           issues: [{ path: ["verification"], message: "cancelled" }],
@@ -181,10 +176,7 @@ describe("workflow handle finalization", () => {
     } as never;
 
     assert.equal(finalizeHandleWorkflow({ cwd, handle }), undefined);
-    assert.equal(
-      readWorkflowRecord(cwd, params.instanceId, params.actorId)?.active.length,
-      1,
-    );
+    assert.equal(readWorkflowRecord(cwd, params.instanceId, params.actorId)?.active.length, 1);
 
     (handle as { status: string }).status = "completed";
     const finalized = finalizeHandleWorkflow({ cwd, handle });

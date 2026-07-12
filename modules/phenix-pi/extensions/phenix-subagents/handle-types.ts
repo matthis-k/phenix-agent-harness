@@ -1,12 +1,12 @@
-import type { JsonSchema } from "./contracts.ts";
-import type { AgentRole } from "./agent-types.ts";
-import type { ResolvedChildSpec } from "./child-spec.ts";
-import type { WorkflowTransitionId, WorkflowStateId } from "../phenix-workflow/workflow-types.ts";
 import type {
   ChildRunId,
   ChildSessionBackendKind,
   SerializedError,
 } from "../phenix-runtime/child-session-types.ts";
+import type { WorkflowStateId, WorkflowTransitionId } from "../phenix-workflow/workflow-types.ts";
+import type { AgentRole } from "./agent-types.ts";
+import type { ResolvedChildSpec } from "./child-spec.ts";
+import type { JsonSchema } from "./contracts.ts";
 
 // ── Constants (used by index.ts; extracted for visibility) ──────────────────
 
@@ -81,13 +81,7 @@ export interface ProducerCycleRecord {
   endedAt?: string;
 
   contractRevision: number;
-  status:
-    | "running"
-    | "submitted"
-    | "rejected"
-    | "accepted"
-    | "failed"
-    | "cancelled";
+  status: "running" | "submitted" | "rejected" | "accepted" | "failed" | "cancelled";
 
   feedback?: string;
   verification?: VerificationSummary;

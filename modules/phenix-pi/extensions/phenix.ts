@@ -21,36 +21,28 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type {
-  ExtensionAPI,
-  ModelRegistry,
-} from "@earendil-works/pi-coding-agent";
-
-import { modelSetRef } from "./phenix-kernel/refs.ts";
-import { PHENIX_PROVIDER } from "./phenix-routing/provider.ts";
-import { defaultContracts } from "./phenix-contracts/index.ts";
-import {
-  defaultAgentClients,
-} from "./phenix-subagents/definitions.ts";
-import {
-  defaultModelPools,
-  defaultModelSets,
-  defaultAgentRoutes,
-} from "./phenix-routing/default-routing.ts";
-import {
-  definePhenixConfiguration,
-} from "./phenix-composition/configuration.ts";
+import type { ExtensionAPI, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { definePhenixConfiguration } from "./phenix-composition/configuration.ts";
 import { link } from "./phenix-composition/linker.ts";
 import { DEFAULT_MAXIMUM_DELEGATION_DEPTH } from "./phenix-composition/runtime-policy.ts";
+import { defaultContracts } from "./phenix-contracts/index.ts";
+import { modelSetRef } from "./phenix-kernel/refs.ts";
+import {
+  defaultAgentRoutes,
+  defaultModelPools,
+  defaultModelSets,
+} from "./phenix-routing/default-routing.ts";
+import { PHENIX_PROVIDER } from "./phenix-routing/provider.ts";
 import { createChildSessionBackend } from "./phenix-runtime/child-session-backend.ts";
 import { getChildSessionRegistry } from "./phenix-runtime/child-session-registry.ts";
 import { createDelegationTool } from "./phenix-runtime/delegation-tool.ts";
-import { AgentExecutionCoordinator } from "./phenix-subagents/coordinator.ts";
-import phenixSubagents from "./phenix-subagents/index.ts";
 import {
-  shouldBootstrapPhenixSubagentsSkill,
   bootstrapPhenixSubagentsSkillPrompt,
+  shouldBootstrapPhenixSubagentsSkill,
 } from "./phenix-skill-bootstrap.ts";
+import { AgentExecutionCoordinator } from "./phenix-subagents/coordinator.ts";
+import { defaultAgentClients } from "./phenix-subagents/definitions.ts";
+import phenixSubagents from "./phenix-subagents/index.ts";
 
 // ── Default configuration ──────────────────────────────────────────────────
 
@@ -103,9 +95,7 @@ async function loadIntegration(
 function integrationSummary(): string {
   return [...integrationResults.entries()]
     .map(([name, result]) =>
-      result.status === "loaded"
-        ? `${name}=loaded`
-        : `${name}=failed(${result.error})`,
+      result.status === "loaded" ? `${name}=loaded` : `${name}=failed(${result.error})`,
     )
     .join(", ");
 }
@@ -119,7 +109,11 @@ function getConfigHome(): string {
 }
 
 function exists(candidate: string): boolean {
-  try { return fs.existsSync(candidate); } catch { return false; }
+  try {
+    return fs.existsSync(candidate);
+  } catch {
+    return false;
+  }
 }
 
 function isExecutableAvailable(name: string): boolean {
@@ -129,20 +123,28 @@ function isExecutableAvailable(name: string): boolean {
     try {
       fs.accessSync(path.join(directory, name), fs.constants.X_OK);
       return true;
-    } catch { /* continue */ }
+    } catch {
+      /* continue */
+    }
   }
   return false;
 }
 
 function hasConfiguredWebProvider(): boolean {
   const providerEnvVars = [
-    "BRAVE_SEARCH_API_KEY", "TAVILY_API_KEY", "SERPER_API_KEY",
-    "EXA_API_KEY", "YOUCOM_API_KEY", "JINA_API_KEY",
-    "FIRECRAWL_API_KEY", "PERPLEXITY_API_KEY", "SEARXNG_URL",
+    "BRAVE_SEARCH_API_KEY",
+    "TAVILY_API_KEY",
+    "SERPER_API_KEY",
+    "EXA_API_KEY",
+    "YOUCOM_API_KEY",
+    "JINA_API_KEY",
+    "FIRECRAWL_API_KEY",
+    "PERPLEXITY_API_KEY",
+    "SEARXNG_URL",
     "OLLAMA_HOST",
   ] as const;
-  const configuredThroughEnvironment = providerEnvVars.some(
-    (name) => Boolean(process.env[name]?.trim()),
+  const configuredThroughEnvironment = providerEnvVars.some((name) =>
+    Boolean(process.env[name]?.trim()),
   );
   const configFile = path.join(getConfigHome(), "rpiv-web-tools", "config.json");
   return configuredThroughEnvironment || exists(configFile);
@@ -198,9 +200,7 @@ function registerTuiProjection(pi: ExtensionAPI): void {
     try {
       const registry = getChildSessionRegistry();
       const activeCount = registry.list().length;
-      ctx.ui.setStatus(
-        `Phenix · ${activeCount} active child${activeCount !== 1 ? "ren" : ""}`,
-      );
+      ctx.ui.setStatus(`Phenix · ${activeCount} active child${activeCount !== 1 ? "ren" : ""}`);
     } catch {
       // UI is optional — ignore errors.
     }
@@ -218,9 +218,7 @@ function registerShutdown(pi: ExtensionAPI): void {
 
 // ── Default export — Phenix composition entry point ────────────────────────
 
-export default async function phenix(
-  pi: ExtensionAPI,
-): Promise<void> {
+export default async function phenix(pi: ExtensionAPI): Promise<void> {
   // ── 1. Link configuration ───────────────────────────────────────────
   const linkResult = link(defaultPhenixConfiguration);
 
@@ -236,10 +234,10 @@ export default async function phenix(
 
   console.error(
     `[phenix] Linked graph: ` +
-    `${linkResult.graph.contracts.size} contracts, ` +
-    `${linkResult.graph.agentClients.size} agent clients, ` +
-    `${linkResult.graph.routing.modelSets.size} model sets, ` +
-    `${linkResult.graph.routing.agentRoutes.size} agent routes.`,
+      `${linkResult.graph.contracts.size} contracts, ` +
+      `${linkResult.graph.agentClients.size} agent clients, ` +
+      `${linkResult.graph.routing.modelSets.size} model sets, ` +
+      `${linkResult.graph.routing.agentRoutes.size} agent routes.`,
   );
 
   // ── 2. Register generic root integrations ────────────────────────────
@@ -305,7 +303,10 @@ export default async function phenix(
   // The backend is constructed lazily when the coordinator is first used,
   // because the model registry is only available after session start.
 
-  const getRuntimeServices = (): { readonly modelRegistry: ModelRegistry; readonly agentDir: string } => {
+  const getRuntimeServices = (): {
+    readonly modelRegistry: ModelRegistry;
+    readonly agentDir: string;
+  } => {
     if (!capturedModelRegistry) {
       throw new Error(
         "Phenix runtime services are not yet available — model registry has not been captured.",
@@ -377,16 +378,25 @@ export default async function phenix(
       }
 
       const requiredExecutables = [
-        "git", "gh", "rg", "fd", "jq", "ast-grep",
-        "rust-analyzer", "cargo", "cargo-clippy",
-        "lua-language-server", "typescript-language-server",
-        "vscode-json-language-server", "nixd", "taplo",
-        "yaml-language-server", "basedpyright-langserver",
+        "git",
+        "gh",
+        "rg",
+        "fd",
+        "jq",
+        "ast-grep",
+        "rust-analyzer",
+        "cargo",
+        "cargo-clippy",
+        "lua-language-server",
+        "typescript-language-server",
+        "vscode-json-language-server",
+        "nixd",
+        "taplo",
+        "yaml-language-server",
+        "basedpyright-langserver",
       ] as const;
 
-      const missingExecutables = requiredExecutables.filter(
-        (name) => !isExecutableAvailable(name),
-      );
+      const missingExecutables = requiredExecutables.filter((name) => !isExecutableAvailable(name));
 
       const ghAvailable = isExecutableAvailable("gh");
       const failedIntegrations = [...integrationResults.entries()]
