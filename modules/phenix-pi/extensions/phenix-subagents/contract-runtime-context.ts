@@ -111,52 +111,10 @@ export function currentInheritedRolePatch(): DelegateRolePatchInput | undefined 
 
 export { AgentRole, AgentKind, ToolPatch, ToolPatchInput, DelegateRolePatchInput };
 
-// ── Root workflow data setter ───────────────────────────────────────────────
-
-/**
- * Set the root workflow instance/actor IDs on the current root context.
- * Called by the routing extension after workflow record creation.
- * Does nothing if the context is not root or not yet initialized.
- */
-export function setRootWorkflowData(
-  data: { readonly instanceId: string; readonly actorId: string },
-): void {
-  if (_context && _context.kind === "root") {
-    _context = { ..._context, workflowData: data };
-  }
-}
-
-/**
- * Set the capability artifact on the root runtime context.
- * Called by the routing extension after capability discovery.
- */
-export function setRootCapabilityArtifact(artifact: AgentCapabilityArtifact): void {
-  if (_context && _context.kind === "root") {
-    _context = { ..._context, capabilityArtifact: artifact };
-  }
-}
-
-/**
- * Get the root capability artifact.
- * Throws if not set — capability discovery must complete before delegation.
- */
-export function getRootCapabilityArtifact(): AgentCapabilityArtifact {
-  if (_context?.kind === "root" && _context.capabilityArtifact) {
-    return _context.capabilityArtifact;
-  }
-  throw new Error(
-    "Capability artifact has not been registered. " +
-    "The routing extension must complete capability discovery " +
-    "during session startup before any delegate or child agent runs.",
-  );
-}
-
-/**
- * Get the root workflow data, if set.
- */
-export function getRootWorkflowData(): { readonly instanceId: string; readonly actorId: string } | undefined {
-  if (_context && _context.kind === "root") {
-    return _context.workflowData;
-  }
-  return undefined;
-}
+// ── Root context fields (removed) ───────────────────────────────────────────
+//
+// Root workflow data and capability artifacts are now session-scoped
+// via session-registry.ts. The old process-global getters/setters
+// (setRootWorkflowData, getRootWorkflowData, setRootCapabilityArtifact,
+// getRootCapabilityArtifact) have been removed. Use the session registry
+// or buildWorkflowRuntimeDependencies() instead.

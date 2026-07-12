@@ -35,101 +35,49 @@ export { modelRegistry, getActiveRouteForSession, setActiveRouteForSession };
 // ── Workflow module imports ─────────────────────────────────────────────────
 
 import {
-  PHENIX_DEFAULT_WORKFLOW,
   buildRootWorkflowProjection,
   formatWorkflowProjection,
   buildCapabilityArtifact,
   persistCapabilityArtifact,
   createWorkflowRecord,
   getAgentDiscoveryHelper,
-  type ModelWorkflowProjection,
-  type DelegationAuthority,
+  registerSession,
+  buildWorkflowRuntimeDependencies,
   type WorkflowRuntimeRecord,
 } from "../phenix-workflow/index.ts";
 
-import { setRootWorkflowData, setRootCapabilityArtifact } from "../phenix-subagents/contract-runtime-context.ts";
 import { difficultyForProfile } from "./classifier.ts";
-import { deriveTaskProfile } from "../phenix-subagents/policy.ts";
-import { extractRootTurnInput, type RootTurnInput } from "./root-turn.ts";
-
-import type { AgentRole } from "../phenix-subagents/agent-types.ts";
+import { deriveTaskProfile, type TaskProfile } from "../phenix-subagents/policy.ts";
+import { extractRootTurnInput } from "./root-turn.ts";
 
 // ── Root workflow initialization ────────────────────────────────────────────
 
 /**
  * Initialize a root workflow instance for a new user task.
+ *
+ * The task profile must be derived once by the caller and passed in —
+ * do not call deriveTaskProfile again inside this function.
  */
-async function initializeRootWorkflow(
-  cwd: string,
-  sessionId: string,
-  difficulty: Difficulty,
-  task: string,
-  requirements: readonly string[],
-  capabilityArtifactHash: string,
-): Promise<WorkflowRuntimeRecord> {
+async function initializeRootWorkflow(input: {
+  readonly cwd: string;
+  readonly sessionId: string;
+  readonly difficulty: Difficulty;
+  readonly taskProfile: TaskProfile;
+  readonly capabilityArtifactHash: string;
+}): Promise<WorkflowRuntimeRecord> {
   const instanceId = `wf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const actorId = `root_${sessionId}`;
+  const actorId = `root_${input.sessionId}`;
 
-  const profile = deriveTaskProfile(null, task, requirements);
-
-  return createWorkflowRecord(cwd, {
+  return createWorkflowRecord(input.cwd, {
     instanceId,
     actorId,
-    sessionId,
+    sessionId: input.sessionId,
     definitionId: "phenix-default",
-    difficulty,
-    taskProfile: profile,
+    difficulty: input.difficulty,
+    taskProfile: input.taskProfile,
     actorRole: "coordinator",
-    capabilityArtifactHash,
+    capabilityArtifactHash: input.capabilityArtifactHash,
   });
-}
-
-// ── Build root delegation authority ─────────────────────────────────────────
-
-/**
- * Build root delegation authority from the capability artifact.
- *
- * Fails closed: if the artifact is not available or has no spawnable
- * entries, no roles are available for delegation. The hardcoded
- * allRoles list is removed — roles are discovered from the artifact.
- */
-function buildRootDelegationAuthority(
-  capabilityArtifact: import("../phenix-workflow/agent-capabilities.ts").AgentCapabilityArtifact | undefined,
-): DelegationAuthority {
-  // Derive available roles from the capability artifact.
-  // Only roles that are configured and spawnable are available.
-  let availableRoles: AgentRole[];
-  if (capabilityArtifact) {
-    availableRoles = capabilityArtifact.entries
-      .filter((e) => e.spawnable)
-      .map((e) => e.role)
-      .filter((r): r is AgentRole => r !== null && r !== undefined);
-  } else {
-    // No artifact — fail closed with empty available roles.
-    availableRoles = [];
-  }
-
-  return {
-    roles: {
-      presetRevision: 1,
-      role: null,
-      source: {
-        inherited: false,
-        patch: { additional: [], removed: [] },
-      },
-      effective: [...availableRoles],
-    },
-    availableRoles: [...availableRoles],
-    remainingDepth: 4, // Root maximum
-    transitionAuthority: { kind: "unrestricted" },
-  };
-}
-
-// ── Derive difficulty from task text ─────────────────────────────────────────
-
-function deriveDifficulty(task: string, requirements: readonly string[]): Difficulty {
-  const profile = deriveTaskProfile(null, task, requirements);
-  return difficultyForProfile(profile);
 }
 
 // ── Extension entry point ───────────────────────────────────────────────────
@@ -167,9 +115,6 @@ export default async function phenixRouting(
       const discovered = await discovery.discoverAgents({ cwd, scope: "both" });
       const artifact = buildCapabilityArtifact(discovered);
       runtime.capabilityArtifact = artifact;
-
-      // Share artifact with the subagents delegate handler.
-      setRootCapabilityArtifact(artifact);
 
       // Persist diagnostic copy
       try {
@@ -212,38 +157,42 @@ export default async function phenixRouting(
     const runtime = getSessionRuntime(sessionId);
 
     // ── Section 1: Extract root task from Pi messages ────────────────
-    // Use cached messages from the context event (not systemPrompt).
+    // Fail closed when no user message is available.
     const cachedMessages = runtime.cachedMessages;
-    let turnInput: RootTurnInput;
-    if (Array.isArray(cachedMessages)) {
-      turnInput = extractRootTurnInput(
-        cachedMessages as Parameters<typeof extractRootTurnInput>[0],
-        ctx,
+    if (!Array.isArray(cachedMessages)) {
+      throw new Error(
+        "Cannot initialize the Phenix workflow: " +
+        "the current user message is unavailable.",
       );
-    } else {
-      // Fallback: extract from systemPrompt (less reliable).
-      const eventAny = _event as Record<string, unknown>;
-      const fallbackText = typeof eventAny.systemPrompt === "string" ? eventAny.systemPrompt : "";
-      turnInput = {
-        turnId: `${sessionId}#fallback#${Date.now().toString(36)}`,
-        userMessage: fallbackText,
-      };
     }
 
-    // ── Section 2: Derive difficulty BEFORE routing ─────────────────
-    const difficulty = deriveDifficulty(turnInput.userMessage, []);
+    const turn = extractRootTurnInput(
+      cachedMessages as Parameters<
+        typeof extractRootTurnInput
+      >[0],
+      ctx,
+    );
+
+    // ── Section 2: Compute the task profile once ────────────────────
+    const profile = deriveTaskProfile(null, turn.userMessage, []);
+    const difficulty = difficultyForProfile(profile);
 
     // ── Section 3: turnId-based workflow lifecycle ──────────────────
-    // Initialize workflow on new turns (not based on turnCount).
-    const isNewTurn = runtime.currentTurnId !== turnInput.turnId;
+    const isNewTurn = runtime.currentTurnId !== turn.turnId;
     if (isNewTurn) {
-      runtime.currentTurnId = turnInput.turnId;
+      runtime.currentTurnId = turn.turnId;
     }
 
     const cwd = ctx.cwd ?? process.cwd();
-    const capabilityArtifact = runtime.capabilityArtifact;
-    const capabilityArtifactHash = capabilityArtifact?.artifactHash ??
-      "0000000000000000000000000000000000000000000000000000000000000000";
+
+    // Fail when capability discovery did not complete.
+    const artifact = runtime.capabilityArtifact;
+    if (!artifact) {
+      throw new Error(
+        "Cannot initialize the Phenix workflow: " +
+        "agent capability discovery did not complete.",
+      );
+    }
 
     // Set model set from the selected phenix model.
     const explicitModelSet = selectedModelId ? modelSetForModelId(selectedModelId) : undefined;
@@ -251,67 +200,89 @@ export default async function phenixRouting(
       runtime.modelSet = explicitModelSet;
     }
 
-    // Resolve route for coordinator role using difficulty AND model set.
+    // Resolve route for coordinator role, passing difficulty.
     const route = await resolveRoute({
       modelSet: runtime.modelSet,
       role: "coordinator",
+      difficulty,
       modelRegistry,
       config,
     });
+
+    // Assert difficulty invariance.
+    if (route.difficulty !== difficulty) {
+      throw new Error(
+        `Coordinator route difficulty mismatch: ` +
+        `workflow=${difficulty}, route=${route.difficulty}`,
+      );
+    }
 
     // Store active route for stream-proxy
     runtime.activeRoute = route;
     setActiveRouteForSession(sessionId, route);
 
     // Initialize or clear root workflow based on turn identity.
+    let workflowRecord: WorkflowRuntimeRecord;
     if (!runtime.activeWorkflow || isNewTurn) {
-      const workflowRecord = await initializeRootWorkflow(
+      workflowRecord = await initializeRootWorkflow({
         cwd,
         sessionId,
         difficulty,
-        turnInput.userMessage,
-        [],
-        capabilityArtifactHash,
-      );
+        taskProfile: profile,
+        capabilityArtifactHash: artifact.artifactHash,
+      });
 
       runtime.activeWorkflow = {
         instanceId: workflowRecord.instanceId,
         actorId: workflowRecord.actorId,
       };
+    } else {
+      // Re-read the existing workflow record.
+      const existing = (await import(
+        "../phenix-workflow/workflow-store.ts"
+      )).readWorkflowRecord(
+        cwd,
+        runtime.activeWorkflow.instanceId,
+        runtime.activeWorkflow.actorId,
+      );
+      if (!existing) {
+        throw new Error(
+          `Root workflow record not found for ` +
+          `instance "${runtime.activeWorkflow.instanceId}".`,
+        );
+      }
+      workflowRecord = existing;
+    }
 
-      // Share root workflow data with the subagents delegate handler.
-      setRootWorkflowData({
+    // ── Section 4: Register session in the session registry ────────
+    registerSession(sessionId, {
+      capabilityArtifact: artifact,
+      workflowData: {
+        turnId: turn.turnId,
         instanceId: workflowRecord.instanceId,
         actorId: workflowRecord.actorId,
-      });
-    }
+        definitionId: workflowRecord.definitionId,
+        definitionVersion: workflowRecord.definitionVersion,
+        cwd,
+      },
+    });
 
-    // ── Section 4: Capability-aware delegation authority ────────────
-    const authority = buildRootDelegationAuthority(capabilityArtifact);
+    // ── Section 5: Build root projection from the shared runtime service
+    const dependencies = buildWorkflowRuntimeDependencies({
+      cwd,
+      sessionId,
+      source: {
+        kind: "root",
+        sessionId,
+      },
+    });
 
-    // Build workflow projection
-    const activeWorkflow = runtime.activeWorkflow;
-    let workflowProjection: ModelWorkflowProjection | null = null;
-
-    if (activeWorkflow) {
-      const definition = PHENIX_DEFAULT_WORKFLOW;
-
-      // Re-read the workflow record to get current state
-      const { readWorkflowRecord: readWf } = await import(
-        "../phenix-workflow/workflow-store.ts"
-      );
-
-      const wfRecord = readWf(cwd, activeWorkflow.instanceId, activeWorkflow.actorId);
-
-      if (wfRecord) {
-        workflowProjection = buildRootWorkflowProjection({
-          definition,
-          runtime: wfRecord,
-          authority,
-          activeHandles: [],
-        });
-      }
-    }
+    const workflowProjection = buildRootWorkflowProjection({
+      definition: dependencies.definition,
+      runtime: dependencies.record,
+      authority: dependencies.authority,
+      activeHandles: dependencies.activeHandles,
+    });
 
     // Build the system prompt injection
     let workflowGuidance = `## Phenix Workflow Orchestration\n\n`;

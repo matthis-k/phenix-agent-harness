@@ -160,43 +160,10 @@ export function isSpawnableAgent(
   return entry.spawnable;
 }
 
-// ── Persisted copy ──────────────────────────────────────────────────────────
+// ── Persisted copy ───────────────────────────────────────────────────
 
 import fs from "node:fs";
 import path from "node:path";
-
-// ── Capability artifact getter (session-scoped) ──────────────────────────────
-//
-// The capability artifact MUST be registered via registerSession() before
-// any delegate or child agent is spawned. If no artifact is registered,
-// the operation fails closed — no fallback is built.
-
-let _cachedArtifact: AgentCapabilityArtifact | undefined;
-
-/** Set the runtime capability artifact (called by routing extension). */
-export function setCachedCapabilityArtifact(artifact: AgentCapabilityArtifact): void {
-  _cachedArtifact = artifact;
-}
-
-/**
- * Get the cached capability artifact.
- *
- * Throws if no artifact has been set — capability discovery must
- * complete before any delegation. This is fail-closed: a missing
- * artifact is a hard error, not a silent fallback to all-defaults.
- */
-export function getCachedCapabilityArtifact(): AgentCapabilityArtifact {
-  if (!_cachedArtifact) {
-    throw new Error(
-      "Capability artifact has not been registered. " +
-      "The routing extension must complete capability discovery during " +
-      "session startup before any delegate or child agent runs.",
-    );
-  }
-  return _cachedArtifact;
-}
-
-// ── Persisted copy ───────────────────────────────────────────────────
 
 export function persistCapabilityArtifact(
   cwd: string,

@@ -77,6 +77,7 @@ export { resolveDelegationOptions } from "./delegation-options.ts";
 export type {
   ModelDelegationOption,
   ModelWorkflowProjection,
+  WorkflowDecisionContext,
 } from "./workflow-projection.ts";
 
 export {
@@ -84,6 +85,8 @@ export {
   buildRootWorkflowProjection,
   buildChildWorkflowProjection,
   formatWorkflowProjection,
+  buildWorkflowDecisionContext,
+  computeOptionsDigest,
 } from "./workflow-projection.ts";
 
 // Agent capabilities
@@ -98,9 +101,34 @@ export {
   configuredAgent,
   isSpawnableAgent,
   persistCapabilityArtifact,
-  setCachedCapabilityArtifact,
-  getCachedCapabilityArtifact,
 } from "./agent-capabilities.ts";
+
+// Session registry
+export {
+  registerSession,
+  unregisterSession,
+  getSessionCapabilityArtifact,
+  getSessionWorkflowData,
+  requireSessionCapabilityArtifact,
+  requireSessionWorkflowData,
+  activeSessionCount,
+  clearAllSessions,
+} from "./session-registry.ts";
+
+export type { SessionWorkflowData } from "./session-registry.ts";
+
+// Workflow runtime service
+export type {
+  WorkflowRuntimeDependencies,
+  WorkflowActorSource,
+} from "./workflow-runtime.ts";
+
+export {
+  buildWorkflowRuntimeDependencies,
+  initialWorkflowStateForRole,
+  transitionAuthorityForChild,
+  applyAutomaticTransitions,
+} from "./workflow-runtime.ts";
 
 // Capability provider
 export type {

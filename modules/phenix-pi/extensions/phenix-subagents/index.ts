@@ -39,8 +39,6 @@ import {
 } from "./delegate-schema.ts";
 import {
   getRuntimeContext,
-  getRootWorkflowData,
-  getRootCapabilityArtifact,
 } from "./contract-runtime-context.ts";
 import { toolAllowedByConfig } from "./tool-policy.ts";
 
@@ -51,18 +49,16 @@ import type {
 } from "../phenix-workflow/workflow-types.ts";
 import type { TransitionAuthority } from "../phenix-workflow/transition-authority.ts";
 import type { Difficulty } from "../phenix-routing/types.ts";
-import { PHENIX_DEFAULT_WORKFLOW } from "../phenix-workflow/workflow-definitions.ts";
+import { PHENIX_DEFAULT_WORKFLOW, buildWorkflowRuntimeDependencies, buildWorkflowDecisionContext, getOutputSchema } from "../phenix-workflow/index.ts";
 import {
   readWorkflowRecord,
   beginTransition,
-  acceptTransition,
-  rejectTransition,
+  createWorkflowRecord,
   WorkflowStoreError,
 } from "../phenix-workflow/workflow-store.ts";
-import { getOutputSchema } from "../phenix-workflow/workflow-schemas.ts";
 import {
-  buildWorkflowDecisionContext,
-} from "../phenix-workflow/workflow-projection.ts";
+  finalizeHandleWorkflow,
+} from "../phenix-workflow/workflow-runtime.ts";
 
 import type { AgentRole } from "./agent-types.ts";
 
@@ -282,6 +278,7 @@ export default async function phenixSubagents(
         const params = rawParams as {
           transitionId: string;
           workflowRevision: number;
+          authorityDigest?: string;
           task: string;
           requirements?: string[];
           tools?: {
@@ -310,52 +307,56 @@ export default async function phenixSubagents(
         const requirements = params.requirements ?? [];
         const isBackground = params.mode === "background";
 
-        // ── Determine workflow context ────────────────────────────────
+        // ── Build shared runtime dependencies ───────────────────────
 
+        const sessionId = effectiveSessionId(ctx);
         const runtimeCtx = getRuntimeContext();
 
-        let instanceId: string;
-        let actorId: string;
-        let transitionAuthority: TransitionAuthority;
-        let difficulty: Difficulty;
-        let creator: ContractCreatorContext;
+        const source =
+          runtimeCtx?.kind === "child"
+            ? {
+                kind: "child" as const,
+                contract: runtimeCtx.contract,
+              }
+            : {
+                kind: "root" as const,
+                sessionId,
+              };
 
-        if (runtimeCtx?.kind === "child") {
-          const contract = runtimeCtx.contract;
-          instanceId = contract.runtime.workflow.instanceId;
-          actorId = contract.runtime.workflow.actorId;
-          transitionAuthority = contract.runtime.workflow.transitionAuthority;
-          difficulty = contract.runtime.workflow.difficulty;
-          creator = { kind: "child", contract };
+        const dependencies = buildWorkflowRuntimeDependencies({
+          cwd: ctx.cwd,
+          sessionId,
+          source,
+        });
 
-          // Enforce remaining delegation depth.
-          if (contract.runtime.delegation.remainingDepth <= 0) {
-            return errorResult(
-              "phenix_delegate: delegation depth exhausted. No further children may be spawned.",
-            );
-          }
-        } else {
-          // Root session.
-          const wfData = getRootWorkflowData();
-          if (!wfData) {
-            return errorResult("phenix_delegate: workflow not initialized. Wait for the routing extension to set up the root workflow.");
-          }
-          instanceId = wfData.instanceId;
-          actorId = wfData.actorId;
-          transitionAuthority = { kind: "unrestricted" };
-          creator = { kind: "root", maximumDelegationDepth: 4 };
+        let wfRecord = dependencies.record;
+
+        const decision = buildWorkflowDecisionContext({
+          definition: dependencies.definition,
+          runtime: dependencies.record,
+          authority: dependencies.authority,
+          activeHandles: dependencies.activeHandles,
+        });
+
+        // ── Validate authority digest ─────────────────────────────
+
+        if (
+          typeof params.authorityDigest === "string" &&
+          params.authorityDigest !== decision.optionsDigest
+        ) {
+          return errorResult(
+            "phenix_delegate: stale workflow authority digest.",
+            {
+              code: "STALE_WORKFLOW_AUTHORITY",
+              expected: decision.optionsDigest,
+              received: params.authorityDigest,
+              state: decision.currentState,
+              revision: decision.revision,
+            },
+          );
         }
 
-        // ── Load workflow record ──────────────────────────────────────
-
-        let wfRecord = readWorkflowRecord(ctx.cwd, instanceId, actorId);
-        if (!wfRecord) {
-          return errorResult("phenix_delegate: workflow record not found.");
-        }
-
-        difficulty = wfRecord.difficulty;
-
-        // ── Validate revision ────────────────────────────────────────
+        // ── Validate revision ─────────────────────────────────────
 
         if (params.workflowRevision !== wfRecord.revision) {
           return errorResult(
@@ -365,34 +366,15 @@ export default async function phenixSubagents(
           );
         }
 
-        // ── Build decision context for validation ────────────────────
-
-        const decisionCtx = buildWorkflowDecisionContext({
-          definition: PHENIX_DEFAULT_WORKFLOW,
-          runtime: wfRecord,
-          authority: {
-            roles: {
-              presetRevision: 1,
-              role: null,
-              source: { inherited: false, patch: { additional: [], removed: [] } },
-              effective: [],
-            },
-            availableRoles: [],
-            remainingDepth: 0,
-            transitionAuthority,
-          },
-          activeHandles: [],
-        });
-
-        // ── Validate transition against decision context ─────────────
+        // ── Validate transition against decision context ──────────
 
         const transitionId = params.transitionId as WorkflowTransitionId;
-        const matchingOption = decisionCtx.options.find(
+        const matchingOption = decision.options.find(
           (o) => o.transitionId === transitionId,
         );
 
         if (!matchingOption) {
-          const availableIds = decisionCtx.options.map((o) => o.transitionId).join(", ");
+          const availableIds = decision.options.map((o) => o.transitionId).join(", ");
           return errorResult(
             `phenix_delegate: transition "${params.transitionId}" is not currently available. ` +
             `State: ${wfRecord.state}, Difficulty: ${wfRecord.difficulty}. ` +
@@ -400,7 +382,7 @@ export default async function phenixSubagents(
             {
               state: wfRecord.state,
               difficulty: wfRecord.difficulty,
-              available: decisionCtx.options.map((o) => ({
+              available: decision.options.map((o) => ({
                 id: o.transitionId,
                 role: o.role,
                 category: o.category,
@@ -409,7 +391,7 @@ export default async function phenixSubagents(
           );
         }
 
-        // ── Validate mode ───────────────────────────────────────────
+        // ── Validate mode ─────────────────────────────────────────
 
         if (isBackground && !matchingOption.allowedModes.includes("background")) {
           return errorResult(
@@ -418,7 +400,7 @@ export default async function phenixSubagents(
           );
         }
 
-        // ── Look up transition definition ────────────────────────────
+        // ── Look up transition definition ─────────────────────────
 
         const transition = PHENIX_DEFAULT_WORKFLOW.transitions.find(
           (t) => t.id === transitionId,
@@ -430,19 +412,23 @@ export default async function phenixSubagents(
           return errorResult(`phenix_delegate: internal error - "${params.transitionId}" is not a delegate transition.`);
         }
 
-        // ── Capture source state before transition ────────────────────
+        // ── Create handle and child actor IDs before transition ───
 
-        const sourceState = wfRecord.state;
-        const sourceRevision = wfRecord.revision;
+        const handleId = randomUUID();
+        const childActorId = `actor_${handleId}`;
+        const instanceId = wfRecord.instanceId;
 
-        // ── Begin workflow transition ─────────────────────────────────
+        // ── Begin workflow transition ──────────────────
+        // Capture source state before transition.
+        const sourceStateBefore = wfRecord.state;
+        const sourceRevisionBefore = wfRecord.revision;
 
         let executionId: string;
         try {
           const result = beginTransition(ctx.cwd, wfRecord, {
-            expectedRevision: sourceRevision,
+            expectedRevision: sourceRevisionBefore,
             transitionId: transition.id,
-            handleId: "pending",
+            handleId,
           });
           wfRecord = result.record;
           executionId = result.executionId;
@@ -456,26 +442,69 @@ export default async function phenixSubagents(
           throw err;
         }
 
-        // ── Derive role and output schema from transition ─────────────
+        // ── Create child actor workflow record before spawn ───────
+
+        const childInitialState = transition.role === null
+          ? "classified"
+          : (transition.role === "scout" ? "scouting" :
+             transition.role === "planner" ? "planning" :
+             transition.role === "architect" ? "designing" :
+             transition.role === "implementer" ? "implementing" :
+             transition.role === "tester" ? "testing" :
+             transition.role === "critic" ? "reviewing" : "finalizing") as import("../phenix-workflow/workflow-types.ts").WorkflowStateId;
+
+        createWorkflowRecord(ctx.cwd, {
+          instanceId,
+          actorId: childActorId,
+          parentActorId: wfRecord.actorId,
+          sessionId,
+          definitionId: wfRecord.definitionId,
+          difficulty: wfRecord.difficulty,
+          taskProfile: wfRecord.taskProfile,
+          actorRole: transition.role === null ? "base" : transition.role,
+          initialState: childInitialState,
+          capabilityArtifactHash: wfRecord.capabilityArtifactHash,
+        });
+
+        // ── Derive role, output schema, child workflow input ──────
 
         const role = transition.role;
         const outputSchema = getOutputSchema(transition.outputSchemaId);
-        const capabilityArtifact = getRootCapabilityArtifact();
 
-        // ── Build child workflow input ────────────────────────────────
+        // Import transitionAuthorityForChild BEFORE using it.
+        const { transitionAuthorityForChild } = await import(
+          "../phenix-workflow/workflow-runtime.ts"
+        );
 
-        const childActorId = `${role}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
         const childWorkflow: ResolvedWorkflowChildInput = {
           instanceId,
           actorId: childActorId,
-          parentActorId: actorId,
+          parentActorId: wfRecord.actorId,
           definitionId: wfRecord.definitionId,
           definitionVersion: 1,
-          difficulty,
-          initialState: "classified",
-          transitionAuthority: transitionAuthority,
+          difficulty: wfRecord.difficulty,
+          initialState: childInitialState,
+          transitionAuthority: transitionAuthorityForChild({
+            definition: dependencies.definition,
+            role: transition.role,
+            initialState: childInitialState,
+            authorizedRoles: dependencies.authority.roles.effective,
+          }),
           capabilityArtifactHash: wfRecord.capabilityArtifactHash,
         };
+
+        // ── Derive variables needed by the remaining code ────────
+
+        const capabilityArtifact = dependencies.capabilities;
+        const difficulty = wfRecord.difficulty;
+        const actorId = wfRecord.actorId;
+        const sourceState = sourceStateBefore;
+        const sourceRevision = sourceRevisionBefore;
+
+        const creator: ContractCreatorContext =
+          runtimeCtx?.kind === "child"
+            ? { kind: "child", contract: runtimeCtx.contract }
+            : { kind: "root", maximumDelegationDepth: 4 };
 
         // ── Resolve producer child spec ──────────────────────────────
 
@@ -560,9 +589,21 @@ export default async function phenixSubagents(
         // ── Run or background ─────────────────────────────────────────
 
         if (isBackground) {
-          runAttempt(backend, ctx, signal, record).catch(() => {
-            // Errors captured in record.
-          });
+          runAttempt(backend, ctx, signal, record)
+            .then((runnerResult) => {
+              finalizeHandleWorkflow(
+                ctx.cwd,
+                instanceId,
+                actorId,
+                executionId,
+                runnerResult.record.status as "completed" | "failed" | "cancelled",
+                transition.onAccepted,
+                transition.onRejected,
+              );
+            })
+            .catch(() => {
+              // Errors captured in record.
+            });
 
           return toolResult(record);
         }
@@ -579,20 +620,15 @@ export default async function phenixSubagents(
 
         // ── Update workflow state ─────────────────────────────────────
 
-        wfRecord = readWorkflowRecord(ctx.cwd, instanceId, actorId);
-        if (wfRecord && !wfRecord.completed.find((c) => c.executionId === executionId)) {
-          if (finalRecord.status === "completed") {
-            wfRecord = acceptTransition(ctx.cwd, wfRecord, {
-              executionId,
-              nextState: transition.onAccepted,
-            });
-          } else {
-            wfRecord = rejectTransition(ctx.cwd, wfRecord, {
-              executionId,
-              nextState: transition.onRejected,
-            });
-          }
-        }
+        finalizeHandleWorkflow(
+          ctx.cwd,
+          instanceId,
+          actorId,
+          executionId,
+          finalRecord.status as "completed" | "failed" | "cancelled",
+          transition.onAccepted,
+          transition.onRejected,
+        );
 
         return toolResult(finalRecord);
       } catch (error) {

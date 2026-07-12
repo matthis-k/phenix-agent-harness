@@ -32,6 +32,15 @@ import {
 import {
   toolAllowedByConfig,
 } from "./phenix-subagents/tool-policy.ts";
+import {
+  PHENIX_DEFAULT_WORKFLOW,
+  buildChildWorkflowProjection,
+} from "./phenix-workflow/index.ts";
+import type {
+  WorkflowRuntimeRecord,
+  DelegationAuthority,
+} from "./phenix-workflow/workflow-types.ts";
+import type { AgentRole } from "./phenix-subagents/agent-types.ts";
 
 // ── phenix_complete parameters ──────────────────────────────────────────────
 
@@ -73,7 +82,7 @@ async function bootstrapChild(
   pi: ExtensionAPI,
   env: ChildBootstrapEnvironment,
 ): Promise<void> {
-  // 1. Load the contract from the store (uses integrated v3 codec).
+  // 1. Load the contract from the store.
   const store = new FileContractStore(env.storeRoot);
   const stored = await store.load(env.identity.contractId);
 
@@ -122,8 +131,60 @@ function registerContractPromptProjection(
 ): void {
   if (!stored) return;
 
+  // Pre-compute the child's DelegationAuthority from the contract.
+  const contract = stored.artifact;
+  const authority: DelegationAuthority = {
+    roles: {
+      presetRevision: 1,
+      role: contract.identity.role,
+      source: { inherited: true, patch: { additional: [], removed: [] } },
+      effective:
+        contract.runtime.delegation.roles.effective as unknown as AgentRole[],
+    },
+    availableRoles:
+      contract.runtime.delegation.roles.effective as unknown as AgentRole[],
+    remainingDepth: contract.runtime.delegation.remainingDepth,
+    transitionAuthority: contract.runtime.workflow.transitionAuthority,
+  };
+
   pi.on("before_agent_start", async (event) => {
-    const projection = deriveProjection(stored.artifact);
+    // Build a synthetic workflow runtime record from the contract.
+    const runtime: WorkflowRuntimeRecord = {
+      version: 1,
+      instanceId: contract.runtime.workflow.instanceId,
+      actorId: contract.runtime.workflow.actorId,
+      parentActorId: contract.runtime.workflow.parentActorId,
+      sessionId: "",
+      definitionId: "phenix-default",
+      definitionVersion: 1,
+      difficulty: contract.runtime.workflow.difficulty,
+      taskProfile: {
+        complexity: 1,
+        uncertainty: 1,
+        consequence: 1,
+        breadth: 1,
+        coupling: 1,
+        novelty: 1,
+      },
+      actorRole: (contract.identity.role ?? "base") as WorkflowRuntimeRecord["actorRole"],
+      state: contract.runtime.workflow.initialState,
+      revision: 0,
+      facts: {},
+      active: [],
+      completed: [],
+      capabilityArtifactHash: "",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const workflowProjection = buildChildWorkflowProjection({
+      definition: PHENIX_DEFAULT_WORKFLOW,
+      runtime,
+      authority,
+      activeHandles: [],
+    });
+
+    const projection = deriveProjection(contract, workflowProjection);
     const formatted = formatProjection(projection);
 
     return {

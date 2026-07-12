@@ -45,22 +45,3 @@ export function isTransitionPermitted(
   return authority.allowed.includes(transitionId);
 }
 
-/**
- * Convert a legacy transitionCeiling array to a TransitionAuthority.
- *
- * An empty ceiling was previously used to mean "unrestricted" in some
- * contexts and "no transitions" in others. This function treats an
- * empty array as RESTRICTED with no transitions — callers that want
- * unrestricted authority must use the explicit kind.
- *
- * This migration helper exists only during the transition. After all
- * callers use TransitionAuthority, it should be deleted.
- */
-export function authorityFromCeiling(
-  ceiling: readonly WorkflowTransitionId[],
-): TransitionAuthority {
-  if (ceiling.length === 0) {
-    return { kind: "restricted", allowed: [] };
-  }
-  return { kind: "restricted", allowed: [...ceiling] };
-}

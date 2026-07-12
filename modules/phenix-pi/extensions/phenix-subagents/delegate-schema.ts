@@ -50,6 +50,14 @@ export const DelegateParams = Type.Object(
         "The exact workflow revision shown with the delegation options.",
     }),
 
+    authorityDigest: Type.String({
+      minLength: 64,
+      maxLength: 64,
+      pattern: "^[0-9a-f]{64}$",
+      description:
+        "The options digest from the current workflow projection.",
+    }),
+
     task: Type.String({
       minLength: 1,
       description:

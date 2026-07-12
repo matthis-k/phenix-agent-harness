@@ -207,6 +207,7 @@ export function createWorkflowRecord(
     readonly taskProfile: TaskProfile;
     readonly actorRole: "coordinator" | AgentKind | "base";
     readonly capabilityArtifactHash: string;
+    readonly initialState?: WorkflowStateId;
   },
 ): WorkflowRuntimeRecord {
   const record: WorkflowRuntimeRecord = {
@@ -220,7 +221,7 @@ export function createWorkflowRecord(
     difficulty: input.difficulty,
     taskProfile: input.taskProfile,
     actorRole: input.actorRole,
-    state: "classified",
+    state: input.initialState ?? "classified",
     revision: 0,
     facts: {},
     active: [],
@@ -242,6 +243,51 @@ export function writeWorkflowRecord(
 ): void {
   record.updatedAt = now();
   atomicWriteLocked(cwd, record.instanceId, record.actorId, record);
+}
+
+// ── Mutate record (lock + read + CAS + write) ──────────────────────────────
+
+/**
+ * Acquire the cross-process lock, read the current record, validate
+ * the revision, apply the mutation, and write the result atomically.
+ *
+ * If the record does not exist, or the revision does not match the
+ * expected value, a STALE_REVISION error is thrown. If the mutate
+ * callback returns null, the mutation is declined and the unchanged
+ * record is returned, but the lock is still released.
+ */
+export function mutateWorkflowRecord(
+  cwd: string,
+  instanceId: string,
+  actorId: string,
+  expectedRevision: number,
+  mutate: (record: WorkflowRuntimeRecord) => WorkflowRuntimeRecord | null,
+): WorkflowRuntimeRecord {
+  const lock = acquireWorkflowLock(cwd, instanceId, actorId);
+  try {
+    const record = readWorkflowRecord(cwd, instanceId, actorId);
+    if (!record) {
+      throw new WorkflowStoreError(
+        "STALE_REVISION",
+        `Workflow record not found for ${instanceId}/${actorId}`,
+        { instanceId, actorId },
+      );
+    }
+    if (record.revision !== expectedRevision) {
+      throw new WorkflowStoreError(
+        "STALE_REVISION",
+        `Expected revision ${expectedRevision}, current is ${record.revision}`,
+        { state: record.state, revision: record.revision },
+      );
+    }
+    const result = mutate(record);
+    if (result === null) return record; // mutation declined
+    result.updatedAt = now();
+    atomicWrite(recordPath(cwd, instanceId, actorId), result);
+    return result;
+  } finally {
+    releaseWorkflowLock(lock);
+  }
 }
 
 /**

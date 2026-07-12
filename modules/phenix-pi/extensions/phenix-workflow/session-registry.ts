@@ -13,15 +13,21 @@
  */
 
 import type { AgentCapabilityArtifact } from "./agent-capabilities.ts";
+import type { WorkflowDefinitionId } from "./workflow-types.ts";
 
 // ── Session-scoped workflow data ─────────────────────────────────────────────
 
 /** Workflow data set by the routing extension during session startup. */
 export interface SessionWorkflowData {
+  readonly turnId: string;
+
   readonly instanceId: string;
   readonly actorId: string;
-  readonly definitionId: string;
+
+  readonly definitionId: WorkflowDefinitionId;
   readonly definitionVersion: 1;
+
+  readonly cwd: string;
 }
 
 // ── Per-session state ───────────────────────────────────────────────────────
@@ -82,6 +88,46 @@ export function getSessionWorkflowData(
   sessionId: string,
 ): SessionWorkflowData | undefined {
   return _sessions.get(sessionId)?.workflowData;
+}
+
+// ── Require variants (fail-closed) ──────────────────────────────────────────
+
+/**
+ * Get the capability artifact for a session, throwing if not registered.
+ * Fail-closed: a missing artifact is a hard error.
+ */
+export function requireSessionCapabilityArtifact(
+  sessionId: string,
+): AgentCapabilityArtifact {
+  const artifact = getSessionCapabilityArtifact(sessionId);
+
+  if (!artifact) {
+    throw new Error(
+      `No Phenix capability artifact is registered ` +
+      `for session "${sessionId}".`,
+    );
+  }
+
+  return artifact;
+}
+
+/**
+ * Get the root workflow data for a session, throwing if not registered.
+ * Fail-closed: missing workflow data is a hard error.
+ */
+export function requireSessionWorkflowData(
+  sessionId: string,
+): SessionWorkflowData {
+  const workflow = getSessionWorkflowData(sessionId);
+
+  if (!workflow) {
+    throw new Error(
+      `No Phenix root workflow is registered ` +
+      `for session "${sessionId}".`,
+    );
+  }
+
+  return workflow;
 }
 
 // ── Diagnostics ─────────────────────────────────────────────────────────────

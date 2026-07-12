@@ -100,15 +100,22 @@ export function resolveDelegationOptions(input: {
     // 8. Condition check
     if (!conditionSatisfied(dt.condition, context)) continue;
 
-    // 9. Role authorization check
-    const authorizedRoles = authority.roles.effective;
-    if (dt.role !== null && !authorizedRoles.includes(dt.role)) {
+    // 9. Role authorization check — AgentRole includes null so
+    //    array membership works for base agents too.
+    if (
+      !authority.roles.effective.includes(
+        dt.role,
+      )
+    ) {
       continue;
     }
-    // null role (base) is always authorized if base is in the effective set
 
     // 10. Role availability check
-    if (dt.role !== null && !authority.availableRoles.includes(dt.role)) {
+    if (
+      !authority.availableRoles.includes(
+        dt.role,
+      )
+    ) {
       continue;
     }
 
