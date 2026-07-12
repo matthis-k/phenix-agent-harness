@@ -1,11 +1,9 @@
 {
   "commands": {
     "test": [
-      "nix build .#phenix-subagent-tests --no-link",
-      "nix build .#phenix-qa-tests --no-link"
+      "nix build .#phenix-runtime-tests --no-link",
+      "nix build .#phenix-repository-checks --no-link"
     ],
-    "build": [
-      "nix build .#phenix-pi-package --no-link"
-    ]
+    "build": ["nix build .#phenix-pi-package --no-link"]
   }
 }

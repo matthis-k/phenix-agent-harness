@@ -34,51 +34,92 @@
         ln -s ${piNpmPackages}/npm/node_modules "$out/node_modules"
       '';
 
-      phenixRuntimeTests = pkgs.runCommand "phenix-runtime-tests" {
-        nativeBuildInputs = [
-          pkgs.nodejs
-          pkgs.ast-grep
-          pkgs.git
-        ];
-      } ''
-        cd ${phenixPiPackage}
-        node --experimental-strip-types --test tests/*.test.ts
-        node --check runtime/verify.mjs
-        touch "$out"
-      '';
+      phenixRuntimeTests =
+        pkgs.runCommand "phenix-runtime-tests"
+          {
+            nativeBuildInputs = [
+              pkgs.nodejs
+              pkgs.ast-grep
+              pkgs.git
+            ];
+          }
+          ''
+            cd ${phenixPiPackage}
+            node --experimental-strip-types --test tests/*.test.ts
+            node --check runtime/verify.mjs
+            touch "$out"
+          '';
 
-      phenixQaTests = pkgs.runCommand "phenix-qa-tests" {
-        nativeBuildInputs = [
-          pkgs.nodejs
-          pkgs.ast-grep
-          pkgs.git
-        ];
-      } ''
-        cd ${phenixPiPackage}
-        node --experimental-strip-types --test tests/qa-*.test.ts
-        touch "$out"
-      '';
+      qualityTools = [
+        pkgs.actionlint
+        pkgs.biome
+        pkgs.coreutils
+        pkgs.diffutils
+        pkgs.git
+        pkgs.gnugrep
+        pkgs.nixfmt
+        pkgs.shellcheck
+        pkgs.shfmt
+        pkgs.statix
+      ];
 
-      phenixRepositoryChecks = pkgs.runCommand "phenix-repository-checks" {
-        nativeBuildInputs = [
-          pkgs.actionlint
+      phenixRepositoryChecks =
+        pkgs.runCommand "phenix-repository-checks"
+          {
+            nativeBuildInputs = qualityTools ++ [ pkgs.bash ];
+          }
+          ''
+            bash -n \
+              ${../scripts/check.sh} \
+              ${../scripts/check-files.sh} \
+              ${../scripts/fix-staged.sh} \
+              ${../scripts/setup-git-hooks.sh} \
+              ${../.githooks/pre-commit} \
+              ${../.githooks/pre-push}
+            shellcheck \
+              ${../scripts/check.sh} \
+              ${../scripts/check-files.sh} \
+              ${../scripts/fix-staged.sh} \
+              ${../scripts/setup-git-hooks.sh} \
+              ${../.githooks/pre-commit} \
+              ${../.githooks/pre-push}
+            shfmt -d -i 2 -ci \
+              ${../scripts/check.sh} \
+              ${../scripts/check-files.sh} \
+              ${../scripts/fix-staged.sh} \
+              ${../scripts/setup-git-hooks.sh} \
+              ${../.githooks/pre-commit} \
+              ${../.githooks/pre-push}
+            actionlint ${../.github/workflows/ci.yml}
+            biome ci \
+              --config-path ${../biome.json} \
+              --no-errors-on-unmatched \
+              --files-ignore-unknown=true \
+              ${../biome.json}
+            touch "$out"
+          '';
+
+      phenixCheck = pkgs.writeShellApplication {
+        name = "phenix-check";
+        runtimeInputs = qualityTools ++ [
           pkgs.bash
-          pkgs.shellcheck
+          pkgs.nix
         ];
-      } ''
-        bash -n \
-          ${../scripts/check.sh} \
-          ${../scripts/setup-git-hooks.sh} \
-          ${../.githooks/pre-commit} \
-          ${../.githooks/pre-push}
-        shellcheck \
-          ${../scripts/check.sh} \
-          ${../scripts/setup-git-hooks.sh} \
-          ${../.githooks/pre-commit} \
-          ${../.githooks/pre-push}
-        actionlint ${../.github/workflows/ci.yml}
-        touch "$out"
-      '';
+        text = ''
+          exec bash ${../scripts/check.sh} "$@"
+        '';
+      };
+
+      phenixFixStaged = pkgs.writeShellApplication {
+        name = "phenix-fix-staged";
+        runtimeInputs = qualityTools ++ [
+          pkgs.bash
+          pkgs.nix
+        ];
+        text = ''
+          exec bash ${../scripts/fix-staged.sh} "$@"
+        '';
+      };
 
       setupGitHooks = pkgs.writeShellApplication {
         name = "setup-git-hooks";
@@ -87,7 +128,7 @@
           pkgs.git
         ];
         text = ''
-          exec ${../scripts/setup-git-hooks.sh}
+          exec bash ${../scripts/setup-git-hooks.sh}
         '';
       };
 
@@ -141,8 +182,9 @@
         phenix-shell = phenixPiPackage;
         phenix-pi-npm-packages = piNpmPackages;
         phenix-runtime-tests = phenixRuntimeTests;
-        phenix-qa-tests = phenixQaTests;
         phenix-repository-checks = phenixRepositoryChecks;
+        phenix-check = phenixCheck;
+        phenix-fix-staged = phenixFixStaged;
         setup-git-hooks = setupGitHooks;
         update-pi-npm-hash = updatePiNpmHash;
       };
@@ -150,7 +192,6 @@
       checks = {
         phenix-pi-npm-packages = piNpmPackages;
         phenix-runtime-tests = phenixRuntimeTests;
-        phenix-qa-tests = phenixQaTests;
         phenix-repository-checks = phenixRepositoryChecks;
       };
     };
