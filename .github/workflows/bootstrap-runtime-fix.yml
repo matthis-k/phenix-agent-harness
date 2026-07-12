@@ -56,11 +56,31 @@ jobs:
         run: exit 1
 
       - name: Run complete repository checks
+        id: checks
         if: steps.apply.outputs.status == '0'
-        run: nix flake check --print-build-logs
+        shell: bash
+        run: |
+          set +e
+          nix flake check --print-build-logs > nix-check.log 2>&1
+          status=$?
+          cat nix-check.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload Nix diagnostics
+        if: steps.apply.outputs.status == '0' && steps.checks.outputs.status != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nix-check-diagnostics
+          path: nix-check.log
+          if-no-files-found: error
+
+      - name: Fail when repository checks failed
+        if: steps.apply.outputs.status == '0' && steps.checks.outputs.status != '0'
+        run: exit 1
 
       - name: Commit verified result
-        if: steps.apply.outputs.status == '0'
+        if: steps.apply.outputs.status == '0' && steps.checks.outputs.status == '0'
         run: |
           rm -rf .github/bootstrap .github/workflows/bootstrap-runtime-fix.yml
           git config user.name "github-actions[bot]"
