@@ -1,0 +1,45 @@
+name: Apply typed runtime lifecycle cleanup
+
+on:
+  push:
+    branches:
+      - qa/01-runtime-lifecycle
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out maintenance branch
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+
+      - name: Apply typed source transformation
+        run: python .github/maintenance/fix-types.py
+
+      - name: Apply deterministic TypeScript formatting
+        run: |
+          nix run nixpkgs#biome -- check --write \
+            modules/phenix-pi/extensions/phenix.ts \
+            modules/phenix-pi/extensions/phenix-runtime/child-session-types.ts \
+            modules/phenix-pi/extensions/phenix-subagents/coordinator.ts \
+            modules/phenix-pi/extensions/phenix-workflow/workflow-runtime.ts
+
+      - name: Remove maintenance bootstrap and commit
+        run: |
+          rm -f .github/maintenance/fix-types.py
+          rmdir .github/maintenance 2>/dev/null || true
+          rm -f .github/workflows/maintenance-fix-types.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m "refactor(runtime): replace unsafe lifecycle casts"
+          git push origin HEAD:qa/01-runtime-lifecycle
