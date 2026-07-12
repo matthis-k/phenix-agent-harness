@@ -24,13 +24,17 @@ update(
             'import { agentClientRef } from "../phenix-kernel/refs.ts";\n',
         ),
         (
+            'import { ChildRuntimeError, childRunId } from "../phenix-runtime/child-session-types.ts";\n',
+            'import {\n'
+            '  ChildRuntimeError,\n'
+            '  childRunId,\n'
+            '  isChildRuntimeErrorCode,\n'
+            '} from "../phenix-runtime/child-session-types.ts";\n',
+        ),
+        (
             'import {\n  finalizeHandleWorkflow,\n  initialWorkflowStateForRole,\n  transitionAuthorityForChild,\n} from "../phenix-workflow/workflow-runtime.ts";\n',
             'import {\n  finalizeHandleWorkflow,\n  initialWorkflowStateForRole,\n  transitionAuthorityForChild,\n} from "../phenix-workflow/workflow-runtime.ts";\n'
             'import type { WorkflowActorSource } from "../phenix-workflow/workflow-runtime.ts";\n',
-        ),
-        (
-            '  childRunId,\n  ChildRuntimeError,\n} from "../phenix-runtime/child-session-types.ts";\n',
-            '  childRunId,\n  ChildRuntimeError,\n  isChildRuntimeErrorCode,\n} from "../phenix-runtime/child-session-types.ts";\n',
         ),
         (
             '    const source =\n      parent.kind === "child"\n        ? { kind: "child" as const, contract: parent.contract }\n        : { kind: "root" as const, sessionId };\n',
@@ -62,10 +66,6 @@ update(
 update(
     "modules/phenix-pi/extensions/phenix-runtime/child-session-types.ts",
     [
-        (
-            'export type ChildRuntimeErrorCode =\n',
-            'export type ChildRuntimeErrorCode =\n',
-        ),
         (
             '  | "ORPHANED_SESSION";\n\nexport class ChildRuntimeError extends Error {\n',
             '  | "ORPHANED_SESSION";\n\n'
