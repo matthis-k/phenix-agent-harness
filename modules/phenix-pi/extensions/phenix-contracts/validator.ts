@@ -61,9 +61,7 @@ function visitSchema(value: unknown, depth: number, state: { nodes: number }): v
   }
 }
 
-/**
- * Validate schema structure, resource limits, and TypeBox compatibility.
- */
+/** Validate schema structure, resource limits, and TypeBox compatibility. */
 export function assertJsonSchema(value: unknown): asserts value is JsonSchema {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("outputSchema must be a JSON Schema object");
@@ -89,7 +87,11 @@ export function assertJsonSchema(value: unknown): asserts value is JsonSchema {
 export const assertOutputSchema = assertJsonSchema;
 
 function stringPath(error: { instancePath?: string; path?: string }): string {
-  return (error.instancePath ?? error.path ?? "").replace(/^\//, "").replaceAll("/", ".") || "root";
+  return (
+    (error.instancePath ?? error.path ?? "")
+      .replace(/^\//, "")
+      .replaceAll("/", ".") || "root"
+  );
 }
 
 function pathSegments(path: string): readonly (string | number)[] {
@@ -141,13 +143,13 @@ export function validateSchema(schema: JsonSchema, value: unknown): SchemaValida
 }
 
 /** Validate a value against a reusable static contract definition. */
-export function validateContract<T>(
-  definition: ContractDefinition<T>,
+export function validateContract(
+  definition: ContractDefinition,
   value: unknown,
-): ContractValidationResult<T> {
+): ContractValidationResult {
   const validation = validateSchema(definition.schema, value);
   if (validation.ok) {
-    return { ok: true, value: value as T };
+    return { ok: true, value };
   }
 
   const issues: ContractValidationIssue[] = validation.violations.map((violation) => ({
