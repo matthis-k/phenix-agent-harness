@@ -50,6 +50,20 @@
             touch "$out"
           '';
 
+      phenixTypecheck =
+        pkgs.runCommand "phenix-typecheck"
+          {
+            nativeBuildInputs = [
+              pkgs.nodejs
+              pkgs.typescript
+            ];
+          }
+          ''
+            cd ${phenixPiPackage}
+            tsc --project tsconfig.json --pretty false
+            touch "$out"
+          '';
+
       qualityTools = [
         pkgs.actionlint
         pkgs.biome
@@ -182,6 +196,7 @@
         phenix-shell = phenixPiPackage;
         phenix-pi-npm-packages = piNpmPackages;
         phenix-runtime-tests = phenixRuntimeTests;
+        phenix-typecheck = phenixTypecheck;
         phenix-repository-checks = phenixRepositoryChecks;
         phenix-check = phenixCheck;
         phenix-fix-staged = phenixFixStaged;
@@ -192,6 +207,7 @@
       checks = {
         phenix-pi-npm-packages = piNpmPackages;
         phenix-runtime-tests = phenixRuntimeTests;
+        phenix-typecheck = phenixTypecheck;
         phenix-repository-checks = phenixRepositoryChecks;
       };
     };
