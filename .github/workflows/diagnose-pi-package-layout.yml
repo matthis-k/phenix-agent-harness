@@ -1,0 +1,40 @@
+name: Inspect Pi package layout
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out type branch
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: qa/05-types-and-identifiers
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+
+      - name: Inspect package tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="$(nix build --no-link --print-out-paths nixpkgs#pi-coding-agent)"
+          {
+            printf 'package=%s\n' "$package"
+            find "$package" -maxdepth 6 -type d -o -type l | sort
+          } > pi-package-layout.log
+          cat pi-package-layout.log
+
+      - name: Upload layout
+        uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097 # v4.4.2
+        with:
+          name: pi-package-layout
+          path: pi-package-layout.log
+          if-no-files-found: error
