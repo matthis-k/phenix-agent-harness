@@ -17,6 +17,8 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { ExtensionContext, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AgentRole } from "../phenix-kernel/agents.ts";
+import { modelSetId } from "../phenix-kernel/ids.ts";
+import { agentClientRef } from "../phenix-kernel/refs.ts";
 import { resolveChildRoute } from "../phenix-routing/child-route.ts";
 import { modelSetForModelId, PHENIX_PROVIDER } from "../phenix-routing/provider.ts";
 import type {
@@ -29,7 +31,11 @@ import type {
   ChildSessionBackend,
   ChildSessionSpec,
 } from "../phenix-runtime/child-session-types.ts";
-import { ChildRuntimeError, childRunId } from "../phenix-runtime/child-session-types.ts";
+import {
+  ChildRuntimeError,
+  childRunId,
+  isChildRuntimeErrorCode,
+} from "../phenix-runtime/child-session-types.ts";
 import { ContractSubmissionChannelImpl } from "../phenix-runtime/contract-channel.ts";
 import type { ParentExecutionContext } from "../phenix-runtime/delegation-tool.ts";
 import {
@@ -39,6 +45,7 @@ import {
   PHENIX_DEFAULT_WORKFLOW,
 } from "../phenix-workflow/index.ts";
 import { computeOptionsDigest } from "../phenix-workflow/workflow-projection.ts";
+import type { WorkflowActorSource } from "../phenix-workflow/workflow-runtime.ts";
 import {
   finalizeHandleWorkflow,
   initialWorkflowStateForRole,
@@ -232,15 +239,15 @@ export class AgentExecutionCoordinator {
           ? (modelSetForModelId(ctx.model.id) ?? this.activeModelSet)
           : this.activeModelSet;
 
-    const source =
+    const source: WorkflowActorSource =
       parent.kind === "child"
-        ? { kind: "child" as const, contract: parent.contract }
-        : { kind: "root" as const, sessionId };
+        ? { kind: "child", contract: parent.contract }
+        : { kind: "root", sessionId };
 
     const dependencies = buildWorkflowRuntimeDependencies({
       cwd: ctx.cwd,
       sessionId,
-      source: source as any,
+      source,
       handleStore: { listRecords },
     });
 
@@ -378,7 +385,7 @@ export class AgentExecutionCoordinator {
         try {
           const finalized = finalizeHandleWorkflow({
             cwd: ctx.cwd,
-            handle: handle as any,
+            handle,
           });
           if (finalized) return;
         } catch (error) {
@@ -517,7 +524,7 @@ export class AgentExecutionCoordinator {
       let concreteModel: { readonly provider: string; readonly id: string };
       try {
         const route = await resolveChildRoute({
-          modelSet: selectedModelSet as any,
+          modelSet: modelSetId(selectedModelSet),
           role,
           difficulty: wfRecord.difficulty,
         });
@@ -598,10 +605,7 @@ export class AgentExecutionCoordinator {
         ...(parentRunId ? { parentId: parentRunId } : {}),
         rootId: rootRunId,
         handleId: record.id,
-        agentClient: {
-          id: producerSpec.agent.replace("phenix.", "") as any,
-          kind: "agent" as any,
-        },
+        agentClient: agentClientRef(producerSpec.agent.replace(/^phenix\./, "")),
         role: producerSpec.role,
         cwd: ctx.cwd,
         model: concreteModel,
@@ -854,7 +858,7 @@ export class AgentExecutionCoordinator {
       runtimeChecks: [],
       verifyRuns: runs.map(
         (run) =>
-          `${run.id}: ${run.status}` + (run.exitCode === null ? "" : ` (exit ${run.exitCode})`),
+          `${run.id}: ${run.status}${run.exitCode === null ? "" : ` (exit ${run.exitCode})`}`,
       ),
       reviewFindings: [],
       contract: "valid" as const,
@@ -921,7 +925,7 @@ export class AgentExecutionCoordinator {
     const channel = new ContractSubmissionChannelImpl(store, issued.artifact);
 
     const route = await resolveChildRoute({
-      modelSet: input.record.modelSet as any,
+      modelSet: modelSetId(input.record.modelSet),
       role: "critic",
       difficulty: criticSpec.workflow.difficulty,
     });
@@ -948,10 +952,7 @@ export class AgentExecutionCoordinator {
       ...(input.record.childRunId ? { parentId: input.record.childRunId } : {}),
       rootId: rootRunId,
       handleId: `${input.record.id}-critic`,
-      agentClient: {
-        id: criticSpec.agent.replace("phenix.", "") as any,
-        kind: "agent" as any,
-      },
+      agentClient: agentClientRef(criticSpec.agent.replace(/^phenix\./, "")),
       role: "critic",
       cwd: input.cwd,
       model,
@@ -1015,9 +1016,14 @@ export class AgentExecutionCoordinator {
       run = await backend.start(spec, criticController.signal);
       const outcome = await run.waitForCurrentCycle(criticController.signal);
       if (outcome.status !== "settled") {
+        const code =
+          outcome.status === "cancelled"
+            ? "ABORTED"
+            : isChildRuntimeErrorCode(outcome.error?.code)
+              ? outcome.error.code
+              : "PROVIDER_FAILED";
         throw new ChildRuntimeError(
-          (outcome.error?.code ??
-            (outcome.status === "cancelled" ? "ABORTED" : "PROVIDER_FAILED")) as any,
+          code,
           outcome.error?.message ?? "Critic session did not settle successfully.",
         );
       }

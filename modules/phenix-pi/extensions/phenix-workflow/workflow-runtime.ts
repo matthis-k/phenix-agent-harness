@@ -259,7 +259,7 @@ export function finalizeHandleWorkflow(input: {
   const transition = PHENIX_DEFAULT_WORKFLOW.transitions.find(
     (item) => item.id === binding.transitionId,
   );
-  if (!transition || transition.kind !== "delegate") {
+  if (transition?.kind !== "delegate") {
     throw new Error(`Unknown delegate transition ${binding.transitionId}`);
   }
   if (

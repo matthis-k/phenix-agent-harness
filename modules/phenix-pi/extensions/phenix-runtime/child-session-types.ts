@@ -10,14 +10,14 @@
  */
 
 import type { AgentRole } from "../phenix-kernel/agents.ts";
-import type { ThinkingLevel } from "../phenix-kernel/task.ts";
-import type { AgentClientRef } from "../phenix-kernel/refs.ts";
 import type { WorkflowExecutionBinding } from "../phenix-kernel/execution.ts";
-import type { ModelWorkflowProjection } from "../phenix-workflow/workflow-projection.ts";
+import type { AgentClientRef } from "../phenix-kernel/refs.ts";
+import type { ThinkingLevel } from "../phenix-kernel/task.ts";
+import type { ToolBudget, TurnBudget } from "../phenix-subagents/agent-types.ts";
 
 import type { ContractArtifact } from "../phenix-subagents/contract.ts";
-import type { TurnBudget, ToolBudget } from "../phenix-subagents/agent-types.ts";
 import type { JsonSchema } from "../phenix-subagents/contracts.ts";
+import type { ModelWorkflowProjection } from "../phenix-workflow/workflow-projection.ts";
 
 // ── Branded Phenix child run identity ───────────────────────────────────────
 
@@ -197,11 +197,7 @@ export interface ChildSessionSpec {
 
 // ── Contract submission ─────────────────────────────────────────────────────
 
-export type ContractResultState =
-  | "pending"
-  | "submitted"
-  | "accepted"
-  | "cancelled";
+export type ContractResultState = "pending" | "submitted" | "accepted" | "cancelled";
 
 export interface ExecutionIssue {
   readonly path: readonly (string | number)[];
@@ -316,9 +312,7 @@ export interface ChildRun {
 
   snapshot(): ChildSessionNode;
 
-  subscribe(
-    listener: (event: ChildSessionEvent) => void,
-  ): () => void;
+  subscribe(listener: (event: ChildSessionEvent) => void): () => void;
 
   /**
    * Continue the same Pi session.
@@ -326,14 +320,9 @@ export interface ChildRun {
    * If the underlying session is idle, send a normal prompt.
    * If it is streaming, queue an appropriate Pi follow-up.
    */
-  continue(
-    message: string,
-    signal?: AbortSignal,
-  ): Promise<ChildCycleOutcome>;
+  continue(message: string, signal?: AbortSignal): Promise<ChildCycleOutcome>;
 
-  waitForCurrentCycle(
-    signal?: AbortSignal,
-  ): Promise<ChildCycleOutcome>;
+  waitForCurrentCycle(signal?: AbortSignal): Promise<ChildCycleOutcome>;
 
   abort(reason: string): Promise<void>;
   dispose(): Promise<void>;
@@ -350,10 +339,7 @@ export interface ChildRun {
 export interface ChildSessionBackend {
   readonly kind: ChildSessionBackendKind;
 
-  start(
-    spec: ChildSessionSpec,
-    signal: AbortSignal,
-  ): Promise<ChildRun>;
+  start(spec: ChildSessionSpec, signal: AbortSignal): Promise<ChildRun>;
 }
 
 // ── Pi runtime services ─────────────────────────────────────────────────────
@@ -390,6 +376,32 @@ export type ChildRuntimeErrorCode =
   | "RPC_NESTED_DELEGATION_UNSUPPORTED"
   | "RPC_CONTRACT_RUNTIME_UNAVAILABLE"
   | "ORPHANED_SESSION";
+
+const CHILD_RUNTIME_ERROR_CODES: ReadonlySet<string> = new Set([
+  "MODEL_NOT_FOUND",
+  "MODEL_AUTH_UNAVAILABLE",
+  "SESSION_START_FAILED",
+  "PROMPT_REJECTED",
+  "PROVIDER_FAILED",
+  "CONTRACT_NOT_SUBMITTED",
+  "CONTRACT_INVALID",
+  "TURN_BUDGET_EXCEEDED",
+  "TOOL_BUDGET_EXCEEDED",
+  "TIMEOUT",
+  "ABORTED",
+  "VERIFICATION_FAILED",
+  "CRITIC_REJECTED",
+  "REPAIR_LIMIT_EXCEEDED",
+  "RPC_PROCESS_EXITED",
+  "RPC_NESTED_DELEGATION_UNSUPPORTED",
+  "RPC_CONTRACT_RUNTIME_UNAVAILABLE",
+  "ORPHANED_SESSION",
+]);
+
+/** Narrow a serialized provider/runtime code before constructing a typed error. */
+export function isChildRuntimeErrorCode(value: unknown): value is ChildRuntimeErrorCode {
+  return typeof value === "string" && CHILD_RUNTIME_ERROR_CODES.has(value);
+}
 
 export class ChildRuntimeError extends Error {
   readonly code: ChildRuntimeErrorCode;

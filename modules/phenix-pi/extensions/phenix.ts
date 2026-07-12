@@ -19,9 +19,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-import type { ExtensionAPI, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ModelRegistry, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { definePhenixConfiguration } from "./phenix-composition/configuration.ts";
 import { link } from "./phenix-composition/linker.ts";
 import { DEFAULT_MAXIMUM_DELEGATION_DEPTH } from "./phenix-composition/runtime-policy.ts";
@@ -32,7 +31,6 @@ import {
   defaultModelPools,
   defaultModelSets,
 } from "./phenix-routing/default-routing.ts";
-import { PHENIX_PROVIDER } from "./phenix-routing/provider.ts";
 import { createChildSessionBackend } from "./phenix-runtime/child-session-backend.ts";
 import { getChildSessionRegistry } from "./phenix-runtime/child-session-registry.ts";
 import { createDelegationTool } from "./phenix-runtime/delegation-tool.ts";
@@ -331,13 +329,15 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
         spec.workflowProjection.options.length > 0;
       if (!canDelegate) return [];
 
-      return [
-        createDelegationTool({
-          coordinator,
-          parent: spec.parentContext,
-          decisionContext: spec.workflowProjection,
-        }) as any,
-      ];
+      const delegationTool = createDelegationTool({
+        coordinator,
+        parent: spec.parentContext,
+        decisionContext: spec.workflowProjection,
+      });
+
+      // The runtime tool is structurally compatible with Pi. Keep this
+      // conversion at the composition boundary rather than in domain code.
+      return [delegationTool as unknown as ToolDefinition];
     },
     ...(defaultPhenixConfiguration.runtime.rpc
       ? { rpc: defaultPhenixConfiguration.runtime.rpc }
