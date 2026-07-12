@@ -173,7 +173,19 @@ export default async function phenixCore(
     await mod.default(api);
   });
 
-  // 7. Phenix policy and typed handoff layer over pi-subagents.
+  // 7. Phenix routing — virtual provider, model routing, workflow guidance.
+  await loadIntegration("phenix-routing", pi, async (api) => {
+    const mod = await import("./phenix-routing/index.ts");
+    await mod.default(api);
+  });
+
+  // 8. Phenix contract runtime — child bootstrap, phenix_complete, tool guards.
+  await loadIntegration("phenix-contract-runtime", pi, async (api) => {
+    const mod = await import("./phenix-contract-runtime.ts");
+    await mod.default(api);
+  });
+
+  // 9. Phenix policy and typed handoff layer over pi-subagents.
   await loadIntegration("phenix-subagents", pi, async (api) => {
     const mod = await import("./phenix-subagents/index.ts");
     await mod.default(api);
