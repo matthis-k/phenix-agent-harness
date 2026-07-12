@@ -1,0 +1,40 @@
+name: Diagnose runtime lifecycle checks
+
+on:
+  push:
+    branches:
+      - qa/01-runtime-lifecycle
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out maintenance branch
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+
+      - name: Capture deterministic checks
+        shell: bash
+        run: |
+          set +e
+          nix run .#phenix-check -- range origin/main HEAD > deterministic-check.log 2>&1
+          status=$?
+          cat deterministic-check.log
+          echo "$status" > deterministic-check.status
+          exit 0
+
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-lifecycle-diagnostics
+          path: |
+            deterministic-check.log
+            deterministic-check.status
+          if-no-files-found: error
