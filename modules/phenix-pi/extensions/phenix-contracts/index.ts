@@ -16,8 +16,8 @@ export {
   SCOUT_HANDOFF,
   TEST_HANDOFF,
 } from "./default-contracts.ts";
+
 export type {
-  CompiledContract,
   ContractDefinition,
   ContractValidationFailure,
   ContractValidationIssue,
