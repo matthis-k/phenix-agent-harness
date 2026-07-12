@@ -37,24 +37,143 @@ export function now(): string {
   return new Date().toISOString();
 }
 
-// ── Atomic write helper ─────────────────────────────────────────────────────
+// ── Cross-process lock ──────────────────────────────────────────────────────
+
+const LOCK_STALE_MS = 30_000;
+const LOCK_RETRY_MS = 100;
+
+interface LockEntry {
+  pid: number;
+  timestamp: string;
+  instanceId: string;
+  actorId: string;
+}
+
+export interface LockHandle {
+  readonly lockPath: string;
+}
+
+function lockPath(cwd: string, instanceId: string, actorId: string): string {
+  return recordPath(cwd, instanceId, actorId) + ".lock";
+}
+
+function isStaleLock(lp: string): boolean {
+  try {
+    const raw = fs.readFileSync(lp, "utf-8");
+    const entry = JSON.parse(raw) as LockEntry;
+    try {
+      process.kill(entry.pid, 0);
+    } catch {
+      return true; // process dead
+    }
+    const age = Date.now() - new Date(entry.timestamp).getTime();
+    return age > LOCK_STALE_MS;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Acquire a cross-process lock for a workflow record.
+ *
+ * PID-stamped lock file. Stale locks are broken and retaken.
+ * Live locks from another process cause LOCK_CONTENTION error.
+ */
+export function acquireWorkflowLock(
+  cwd: string,
+  instanceId: string,
+  actorId: string,
+  timeoutMs = 5_000,
+): LockHandle {
+  const lp = lockPath(cwd, instanceId, actorId);
+  const dir = path.dirname(lp);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    try {
+      const entry: LockEntry = {
+        pid: process.pid,
+        timestamp: now(),
+        instanceId,
+        actorId,
+      };
+      const fd = fs.openSync(lp, "wx", 0o600);
+      try {
+        fs.writeFileSync(fd, JSON.stringify(entry), "utf-8");
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      return { lockPath: lp };
+    } catch {
+      if (!isStaleLock(lp)) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+          throw new WorkflowStoreError(
+            "LOCK_CONTENTION",
+            `Could not acquire lock for ${instanceId}/${actorId} within ${timeoutMs}ms`,
+            { instanceId, actorId },
+          );
+        }
+        const start = Date.now();
+        while (Date.now() - start < Math.min(LOCK_RETRY_MS, remaining)) { /* spin */ }
+        continue;
+      }
+      try { fs.unlinkSync(lp); } catch { /* gone */ }
+      continue;
+    }
+  }
+
+  throw new WorkflowStoreError(
+    "LOCK_CONTENTION",
+    `Timed out acquiring lock for ${instanceId}/${actorId}`,
+    { instanceId, actorId },
+  );
+}
+
+export function releaseWorkflowLock(handle: LockHandle): void {
+  try { fs.unlinkSync(handle.lockPath); } catch { /* already released */ }
+}
+
+// ── Atomic write with fsync ─────────────────────────────────────────────────
 
 function atomicWrite(filePath: string, data: unknown): void {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const tmp = `${filePath}.${randomUUID()}.tmp`;
   try {
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), {
-      encoding: "utf-8",
-      mode: 0o600,
-    });
-    fs.renameSync(tmp, filePath);
-  } finally {
+    const fd = fs.openSync(tmp, "w", 0o600);
     try {
-      fs.unlinkSync(tmp);
-    } catch {
-      // best-effort cleanup
+      fs.writeFileSync(fd, JSON.stringify(data, null, 2), "utf-8");
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
     }
+    fs.renameSync(tmp, filePath);
+    const dirFd = fs.openSync(dir, "r");
+    try {
+      fs.fsyncSync(dirFd);
+    } finally {
+      fs.closeSync(dirFd);
+    }
+  } finally {
+    try { fs.unlinkSync(tmp); } catch { /* cleanup */ }
+  }
+}
+
+function atomicWriteLocked(
+  cwd: string,
+  instanceId: string,
+  actorId: string,
+  data: unknown,
+): void {
+  const lock = acquireWorkflowLock(cwd, instanceId, actorId);
+  try {
+    atomicWrite(recordPath(cwd, instanceId, actorId), data);
+  } finally {
+    releaseWorkflowLock(lock);
   }
 }
 
@@ -111,18 +230,39 @@ export function createWorkflowRecord(
     updatedAt: now(),
   };
 
-  atomicWrite(recordPath(cwd, input.instanceId, input.actorId), record);
+  atomicWriteLocked(cwd, input.instanceId, input.actorId, record);
   return record;
 }
 
-// ── Write record (with atomic write) ────────────────────────────────────────
+// ── Write record (cross-process locked) ─────────────────────────────────────
 
 export function writeWorkflowRecord(
   cwd: string,
   record: WorkflowRuntimeRecord,
 ): void {
   record.updatedAt = now();
-  atomicWrite(recordPath(cwd, record.instanceId, record.actorId), record);
+  atomicWriteLocked(cwd, record.instanceId, record.actorId, record);
+}
+
+/**
+ * Verify that a workflow actor record exists. Fails with CHILD_ACTOR_MISSING
+ * if the record does not exist — used during child agent bootstrap to ensure
+ * the workflow store is consistent before spawning.
+ */
+export function verifyWorkflowActorExists(
+  cwd: string,
+  instanceId: string,
+  actorId: string,
+): void {
+  const record = readWorkflowRecord(cwd, instanceId, actorId);
+  if (!record) {
+    throw new WorkflowStoreError(
+      "CHILD_ACTOR_MISSING",
+      `Workflow record for child actor ${actorId} in instance ${instanceId} not found. ` +
+      `The parent must create the child actor record before spawning the child agent.`,
+      { instanceId, actorId },
+    );
+  }
 }
 
 // ── Begin transition ────────────────────────────────────────────────────────
@@ -141,7 +281,6 @@ export function beginTransition(
     readonly handleId: string;
   },
 ): BeginTransitionResult {
-  // Stale revision check
   if (input.expectedRevision !== record.revision) {
     throw new WorkflowStoreError(
       "STALE_REVISION",
@@ -150,7 +289,6 @@ export function beginTransition(
     );
   }
 
-  // Terminal state check
   if (isTerminalState(record.state)) {
     throw new WorkflowStoreError(
       "TERMINAL_STATE",
@@ -159,8 +297,6 @@ export function beginTransition(
     );
   }
 
-  // Check for conflict: an active transition with a different handle for the same transitionId
-  // (unless it's a parallel group transition)
   const existingSame = record.active.find(
     (a) => a.transitionId === input.transitionId,
   );
@@ -206,8 +342,7 @@ export function acceptTransition(
   );
 
   if (activeIndex === -1) {
-    // Already processed - idempotent
-    return record;
+    return record; // Idempotent
   }
 
   const [active] = record.active.splice(activeIndex, 1);
@@ -225,10 +360,7 @@ export function acceptTransition(
   record.revision += 1;
 
   if (input.newFacts) {
-    record.facts = {
-      ...record.facts,
-      ...input.newFacts,
-    };
+    record.facts = { ...record.facts, ...input.newFacts };
   }
 
   writeWorkflowRecord(cwd, record);
@@ -283,7 +415,9 @@ export class WorkflowStoreError extends Error {
   readonly code:
     | "STALE_REVISION"
     | "TERMINAL_STATE"
-    | "TRANSITION_CONFLICT";
+    | "TRANSITION_CONFLICT"
+    | "LOCK_CONTENTION"
+    | "CHILD_ACTOR_MISSING";
   readonly context: Record<string, unknown>;
 
   constructor(

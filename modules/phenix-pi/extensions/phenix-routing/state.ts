@@ -16,6 +16,12 @@ export interface SessionRoutingRuntime {
   /** Monotonically increasing turn counter for this session. */
   turnCount: number;
 
+  /** Stable turn identity for the current turn (from user message). */
+  currentTurnId?: string;
+
+  /** Messages cached from the Pi context event. */
+  cachedMessages?: unknown[];
+
   /** Immutable agent capability artifact built at session startup. */
   capabilityArtifact?: AgentCapabilityArtifact;
 

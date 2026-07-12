@@ -41,19 +41,16 @@ import {
   buildCapabilityArtifact,
   persistCapabilityArtifact,
   createWorkflowRecord,
-  resolveDelegationOptions,
   getAgentDiscoveryHelper,
   type ModelWorkflowProjection,
   type DelegationAuthority,
   type WorkflowRuntimeRecord,
 } from "../phenix-workflow/index.ts";
 
-import {
-  rolePreset,
-} from "../phenix-subagents/role-presets.ts";
 import { setRootWorkflowData, setRootCapabilityArtifact } from "../phenix-subagents/contract-runtime-context.ts";
 import { difficultyForProfile } from "./classifier.ts";
 import { deriveTaskProfile } from "../phenix-subagents/policy.ts";
+import { extractRootTurnInput, type RootTurnInput } from "./root-turn.ts";
 
 import type { AgentRole } from "../phenix-subagents/agent-types.ts";
 
@@ -89,13 +86,28 @@ async function initializeRootWorkflow(
 
 // ── Build root delegation authority ─────────────────────────────────────────
 
+/**
+ * Build root delegation authority from the capability artifact.
+ *
+ * Fails closed: if the artifact is not available or has no spawnable
+ * entries, no roles are available for delegation. The hardcoded
+ * allRoles list is removed — roles are discovered from the artifact.
+ */
 function buildRootDelegationAuthority(
-  capabilityArtifactHash: string,
+  capabilityArtifact: import("../phenix-workflow/agent-capabilities.ts").AgentCapabilityArtifact | undefined,
 ): DelegationAuthority {
-  // Root has unrestricted role authority - all roles from coordinator preset
-  // Coordinator preset has allowedChildren = all roles
-  const coordinatorPreset = rolePreset("implementer"); // Use any preset to get all tools
-  const allRoles: AgentRole[] = ["scout", "planner", "architect", "implementer", "tester", "critic", "finalizer"];
+  // Derive available roles from the capability artifact.
+  // Only roles that are configured and spawnable are available.
+  let availableRoles: AgentRole[];
+  if (capabilityArtifact) {
+    availableRoles = capabilityArtifact.entries
+      .filter((e) => e.spawnable)
+      .map((e) => e.role)
+      .filter((r): r is AgentRole => r !== null && r !== undefined);
+  } else {
+    // No artifact — fail closed with empty available roles.
+    availableRoles = [];
+  }
 
   return {
     roles: {
@@ -105,9 +117,9 @@ function buildRootDelegationAuthority(
         inherited: false,
         patch: { additional: [], removed: [] },
       },
-      effective: [...allRoles],
+      effective: [...availableRoles],
     },
-    availableRoles: [...allRoles],
+    availableRoles: [...availableRoles],
     remainingDepth: 4, // Root maximum
     transitionAuthority: { kind: "unrestricted" },
   };
@@ -172,6 +184,19 @@ export default async function phenixRouting(
     return {};
   });
 
+  // --- context event (captures Pi messages for user message extraction) ---
+  pi.on("context", async (_event, ctx) => {
+    const sessionId = ctx.sessionManager?.getSessionId?.() ?? "default";
+    const runtime = getSessionRuntime(sessionId);
+
+    // Cache messages for user message extraction in before_agent_start.
+    const eventAny = _event as Record<string, unknown>;
+    if (Array.isArray(eventAny.messages)) {
+      runtime.cachedMessages = eventAny.messages;
+    }
+    return {};
+  });
+
   // --- before_agent_start ---
   pi.on("before_agent_start", async (_event, ctx) => {
     modelRegistry.bind(ctx);
@@ -186,13 +211,47 @@ export default async function phenixRouting(
 
     const runtime = getSessionRuntime(sessionId);
 
-    // Set model set from the selected phenix model (e.g. "mixed" from phenix/mixed).
+    // ── Section 1: Extract root task from Pi messages ────────────────
+    // Use cached messages from the context event (not systemPrompt).
+    const cachedMessages = runtime.cachedMessages;
+    let turnInput: RootTurnInput;
+    if (Array.isArray(cachedMessages)) {
+      turnInput = extractRootTurnInput(
+        cachedMessages as Parameters<typeof extractRootTurnInput>[0],
+        ctx,
+      );
+    } else {
+      // Fallback: extract from systemPrompt (less reliable).
+      const eventAny = _event as Record<string, unknown>;
+      const fallbackText = typeof eventAny.systemPrompt === "string" ? eventAny.systemPrompt : "";
+      turnInput = {
+        turnId: `${sessionId}#fallback#${Date.now().toString(36)}`,
+        userMessage: fallbackText,
+      };
+    }
+
+    // ── Section 2: Derive difficulty BEFORE routing ─────────────────
+    const difficulty = deriveDifficulty(turnInput.userMessage, []);
+
+    // ── Section 3: turnId-based workflow lifecycle ──────────────────
+    // Initialize workflow on new turns (not based on turnCount).
+    const isNewTurn = runtime.currentTurnId !== turnInput.turnId;
+    if (isNewTurn) {
+      runtime.currentTurnId = turnInput.turnId;
+    }
+
+    const cwd = ctx.cwd ?? process.cwd();
+    const capabilityArtifact = runtime.capabilityArtifact;
+    const capabilityArtifactHash = capabilityArtifact?.artifactHash ??
+      "0000000000000000000000000000000000000000000000000000000000000000";
+
+    // Set model set from the selected phenix model.
     const explicitModelSet = selectedModelId ? modelSetForModelId(selectedModelId) : undefined;
     if (explicitModelSet) {
       runtime.modelSet = explicitModelSet;
     }
 
-    // Resolve route for coordinator role using the model set determined from selection
+    // Resolve route for coordinator role using difficulty AND model set.
     const route = await resolveRoute({
       modelSet: runtime.modelSet,
       role: "coordinator",
@@ -204,37 +263,14 @@ export default async function phenixRouting(
     runtime.activeRoute = route;
     setActiveRouteForSession(sessionId, route);
 
-    // Get the actual user task text from the event.
-    // The _event may have the prompt/user task in different locations
-    // depending on the Pi version. Try several known patterns.
-    let taskText = "";
-    let taskReqs: string[] = [];
-
-    const eventAny = _event as Record<string, unknown>;
-    if (typeof eventAny.systemPrompt === "string") {
-      taskText = eventAny.systemPrompt;
-    } else if (typeof eventAny.prompt === "string") {
-      taskText = eventAny.prompt;
-    } else if (typeof eventAny.userPrompt === "string") {
-      taskText = eventAny.userPrompt;
-    }
-
-    // Derive difficulty from the task text
-    const difficulty = deriveDifficulty(taskText, taskReqs);
-
-    // Initialize root workflow
-    const cwd = ctx.cwd ?? process.cwd();
-    const capabilityArtifactHash = runtime.capabilityArtifact?.artifactHash ??
-      "0000000000000000000000000000000000000000000000000000000000000000";
-
-    // Check if there's already an active workflow for this turn
-    if (!runtime.activeWorkflow || runtime.turnCount === 0) {
+    // Initialize or clear root workflow based on turn identity.
+    if (!runtime.activeWorkflow || isNewTurn) {
       const workflowRecord = await initializeRootWorkflow(
         cwd,
         sessionId,
         difficulty,
-        taskText,
-        taskReqs,
+        turnInput.userMessage,
+        [],
         capabilityArtifactHash,
       );
 
@@ -250,12 +286,14 @@ export default async function phenixRouting(
       });
     }
 
+    // ── Section 4: Capability-aware delegation authority ────────────
+    const authority = buildRootDelegationAuthority(capabilityArtifact);
+
     // Build workflow projection
     const activeWorkflow = runtime.activeWorkflow;
     let workflowProjection: ModelWorkflowProjection | null = null;
 
     if (activeWorkflow) {
-      const authority = buildRootDelegationAuthority(capabilityArtifactHash);
       const definition = PHENIX_DEFAULT_WORKFLOW;
 
       // Re-read the workflow record to get current state
@@ -278,7 +316,7 @@ export default async function phenixRouting(
     // Build the system prompt injection
     let workflowGuidance = `## Phenix Workflow Orchestration\n\n`;
     workflowGuidance += `You are running with a Phenix model set (${runtime.modelSet}). `;
-    workflowGuidance += `Every task must use the deterministic Phenix workflow. `;
+    workflowGuidance += `The deterministic Phenix workflow owns role selection, output schemas, and models. `;
     workflowGuidance += `Only delegate through the transitions projected below.\n\n`;
 
     if (workflowProjection) {
