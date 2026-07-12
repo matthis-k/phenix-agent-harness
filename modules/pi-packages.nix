@@ -31,7 +31,19 @@
         chmod -R u+w "$out"
 
         rm -rf "$out/node_modules"
-        ln -s ${piNpmPackages}/npm/node_modules "$out/node_modules"
+        cp -R ${piNpmPackages}/npm/node_modules "$out/node_modules"
+        chmod -R u+w "$out/node_modules"
+
+        # Pi is supplied by Nix rather than installed into the fixed-output npm
+        # set. Expose the directly imported Pi packages to TypeScript and Node
+        # through the same package-local node_modules tree.
+        mkdir -p "$out/node_modules/@earendil-works"
+        for package in pi-coding-agent pi-agent-core pi-ai; do
+          source=${pkgs.pi-coding-agent}/lib/node_modules/@earendil-works/$package
+          test -e "$source"
+          rm -rf "$out/node_modules/@earendil-works/$package"
+          ln -s "$source" "$out/node_modules/@earendil-works/$package"
+        done
       '';
 
       phenixRuntimeTests =
