@@ -82,7 +82,7 @@
           repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
           cd "$repo_root"
 
-          mapfile -d '' nix_files < <(
+          mapfile -d $'\0' nix_files < <(
             find . \
               -path './.git' -prune -o \
               -path './result' -prune -o \
@@ -213,7 +213,7 @@
           repo_root="$(git rev-parse --show-toplevel)"
           cd "$repo_root"
 
-          mapfile -d '' staged_files < <(
+          mapfile -d $'\0' staged_files < <(
             git diff --cached --name-only --diff-filter=ACMR -z
           )
 
