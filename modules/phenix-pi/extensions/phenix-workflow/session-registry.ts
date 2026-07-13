@@ -63,37 +63,27 @@ export function getSessionCapabilityArtifact(
 }
 
 /** Return root workflow data for a session, when registered. */
-export function getSessionWorkflowData(
-  sessionId: string,
-): SessionWorkflowData | undefined {
+export function getSessionWorkflowData(sessionId: string): SessionWorkflowData | undefined {
   return sessions.get(sessionId)?.workflowData;
 }
 
 /** Require the capability artifact installed during session startup. */
-export function requireSessionCapabilityArtifact(
-  sessionId: string,
-): AgentCapabilityArtifact {
+export function requireSessionCapabilityArtifact(sessionId: string): AgentCapabilityArtifact {
   const artifact = getSessionCapabilityArtifact(sessionId);
 
   if (!artifact) {
-    throw new Error(
-      `No Phenix capability artifact is registered for session "${sessionId}".`,
-    );
+    throw new Error(`No Phenix capability artifact is registered for session "${sessionId}".`);
   }
 
   return artifact;
 }
 
 /** Require root workflow data installed during session startup. */
-export function requireSessionWorkflowData(
-  sessionId: string,
-): SessionWorkflowData {
+export function requireSessionWorkflowData(sessionId: string): SessionWorkflowData {
   const workflow = getSessionWorkflowData(sessionId);
 
   if (!workflow) {
-    throw new Error(
-      `No Phenix root workflow is registered for session "${sessionId}".`,
-    );
+    throw new Error(`No Phenix root workflow is registered for session "${sessionId}".`);
   }
 
   return workflow;

@@ -23,10 +23,7 @@ import {
   type ResolvedDelegateRoleConfiguration,
   resolveDelegateRoleConfiguration,
 } from "./delegation-policy.ts";
-import {
-  type RuntimePolicyConfig,
-  resolveExecutionPolicy,
-} from "./policy.ts";
+import { type RuntimePolicyConfig, resolveExecutionPolicy } from "./policy.ts";
 import {
   type ResolvedToolConfiguration,
   resolveToolConfiguration,
@@ -166,10 +163,7 @@ export function resolveChildSpec(input: ChildSpecInput): ResolvedChildSpec {
   const tools = resolveToolConfiguration(input.role, toolPatch);
 
   // 3. Resolve delegation roles from role preset + caller patch.
-  const delegationRoles = resolveDelegateRoleConfiguration(
-    input.role,
-    input.delegateRoles,
-  );
+  const delegationRoles = resolveDelegateRoleConfiguration(input.role, input.delegateRoles);
 
   // 4. Restrict effective delegation roles to clients that are both present in
   // the immutable capability artifact and authorized by this role's preset.
