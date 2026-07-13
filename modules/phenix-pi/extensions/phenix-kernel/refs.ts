@@ -1,8 +1,9 @@
 /**
  * phenix-kernel — typed symbolic references
  *
- * References are passive values. They must not capture a registry
- * or resolve themselves.
+ * References are passive values. They do not capture a registry or resolve
+ * themselves. Every constructor validates its ID through the canonical kernel
+ * constructor before creating the reference.
  */
 
 import type {
@@ -13,8 +14,14 @@ import type {
   ModelSetId,
   WorkflowDefinitionId,
 } from "./ids.ts";
-
-// ── Resource kinds ──────────────────────────────────────────────────────────
+import {
+  agentClientId,
+  agentKindId,
+  capabilityId,
+  contractDefinitionId,
+  modelSetId,
+  workflowDefinitionId,
+} from "./ids.ts";
 
 export type ResourceKind =
   | "agent-client"
@@ -24,78 +31,52 @@ export type ResourceKind =
   | "capability"
   | "agent-kind";
 
-// ── Generic resource reference ──────────────────────────────────────────────
-
-export interface ResourceRef<
-  Kind extends ResourceKind,
-  Id extends string,
-> {
+export interface ResourceRef<Kind extends ResourceKind, Id extends string> {
   readonly kind: Kind;
   readonly id: Id;
 }
 
-// ── Concrete ref types ──────────────────────────────────────────────────────
-
 export type AgentClientRef = ResourceRef<"agent-client", AgentClientId>;
 export type AgentKindRef = ResourceRef<"agent-kind", AgentKindId>;
-export type ContractDefinitionRef = ResourceRef<
-  "contract-definition",
-  ContractDefinitionId
->;
+export type ContractDefinitionRef = ResourceRef<"contract-definition", ContractDefinitionId>;
 export type WorkflowRef = ResourceRef<"workflow", WorkflowDefinitionId>;
 export type ModelSetRef = ResourceRef<"model-set", ModelSetId>;
 export type CapabilityRef = ResourceRef<"capability", CapabilityId>;
 
-// ── Reference constructors ──────────────────────────────────────────────────
-
-function ref<
-  Kind extends ResourceKind,
-  Id extends string,
->(kind: Kind, id: Id): ResourceRef<Kind, Id> {
+function ref<Kind extends ResourceKind, Id extends string>(
+  kind: Kind,
+  id: Id,
+): ResourceRef<Kind, Id> {
   return { kind, id };
 }
 
-export function agentClientRef(
-  id: string | AgentClientId,
-): AgentClientRef {
-  return ref("agent-client", id as AgentClientId);
+export function agentClientRef(id: string | AgentClientId): AgentClientRef {
+  return ref("agent-client", agentClientId(id));
 }
 
-export function agentKindRef(
-  id: string | AgentKindId,
-): AgentKindRef {
-  return ref("agent-kind", id as AgentKindId);
+export function agentKindRef(id: string | AgentKindId): AgentKindRef {
+  return ref("agent-kind", agentKindId(id));
 }
 
-export function contractRef(
-  id: string | ContractDefinitionId,
-): ContractDefinitionRef {
-  return ref("contract-definition", id as ContractDefinitionId);
+export function contractRef(id: string | ContractDefinitionId): ContractDefinitionRef {
+  return ref("contract-definition", contractDefinitionId(id));
 }
 
-export function workflowRef(
-  id: string | WorkflowDefinitionId,
-): WorkflowRef {
-  return ref("workflow", id as WorkflowDefinitionId);
+export function workflowRef(id: string | WorkflowDefinitionId): WorkflowRef {
+  return ref("workflow", workflowDefinitionId(id));
 }
 
-export function modelSetRef(
-  id: string | ModelSetId,
-): ModelSetRef {
-  return ref("model-set", id as ModelSetId);
+export function modelSetRef(id: string | ModelSetId): ModelSetRef {
+  return ref("model-set", modelSetId(id));
 }
 
-export function capabilityRef(
-  id: string | CapabilityId,
-): CapabilityRef {
-  return ref("capability", id as CapabilityId);
+export function capabilityRef(id: string | CapabilityId): CapabilityRef {
+  return ref("capability", capabilityId(id));
 }
-
-// ── Equality helpers ────────────────────────────────────────────────────────
 
 export function refEquals<Kind extends ResourceKind, Id extends string>(
-  a: ResourceRef<Kind, Id>,
-  b: ResourceRef<Kind, Id>,
+  left: ResourceRef<Kind, Id>,
+  right: ResourceRef<Kind, Id>,
 ): boolean {
-  return a.kind === b.kind && a.id === b.id;
+  return left.kind === right.kind && left.id === right.id;
 }

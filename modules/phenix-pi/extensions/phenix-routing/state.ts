@@ -1,3 +1,4 @@
+import { modelSetId } from "../phenix-kernel/ids.ts";
 import type { ModelSetId, ResolvedRoute } from "./types.ts";
 import { MODEL_SET_IDS } from "./types.ts";
 
@@ -6,48 +7,42 @@ export interface SessionCapabilityArtifactView {
   readonly entries?: readonly unknown[];
 }
 
-/**
- * Session-scoped routing state.
- * Keyed by session ID so multiple sessions don't conflict.
- */
+/** Session-scoped routing state keyed by Pi session ID. */
 export interface SessionRoutingRuntime {
-  /** The active model set for this session. */
+  /** Active model set for the session. */
   modelSet: ModelSetId;
 
-  /** The active route for the current root agent turn, if any. */
+  /** Active route for the current root-agent turn, if any. */
   activeRoute: ResolvedRoute | null;
 
-  /** Monotonically increasing turn counter for this session. */
+  /** Monotonically increasing turn counter for the session. */
   turnCount: number;
 
-  /** Stable turn identity for the current turn (from user message). */
+  /** Stable identity of the current logical user turn. */
   currentTurnId?: string;
 
-  /** Messages cached from the Pi context event. */
+  /** Messages cached from Pi's context event until boundary validation. */
   cachedMessages?: unknown[];
 
-  /** Immutable agent capability artifact built at session startup. */
+  /** Immutable agent-capability artifact discovered at session startup. */
   capabilityArtifact?: SessionCapabilityArtifactView;
 
-  /** Active workflow instance (root-level). */
+  /** Active root workflow identity. */
   activeWorkflow?: {
     readonly instanceId: string;
     readonly actorId: string;
   };
 }
 
-/** In-memory session state map. */
 const sessionState = new Map<string, SessionRoutingRuntime>();
 
-/**
- * Get or create routing state for a session.
- */
+/** Return existing session state or initialize it from canonical defaults. */
 export function getSessionRuntime(sessionId: string): SessionRoutingRuntime {
   const existing = sessionState.get(sessionId);
   if (existing) return existing;
 
   const state: SessionRoutingRuntime = {
-    modelSet: "mixed" as ModelSetId,
+    modelSet: modelSetId("mixed"),
     activeRoute: null,
     turnCount: 0,
   };
@@ -55,41 +50,30 @@ export function getSessionRuntime(sessionId: string): SessionRoutingRuntime {
   return state;
 }
 
-/**
- * Remove routing state for a session (cleanup).
- */
+/** Remove routing state after a Pi session is closed. */
 export function clearSessionRuntime(sessionId: string): void {
   sessionState.delete(sessionId);
 }
 
+/** Parse an external model-set name against the linked built-in vocabulary. */
 export function validateModelSet(value: string): ModelSetId | undefined {
   const trimmed = value.trim();
-  if (MODEL_SET_IDS.includes(trimmed as ModelSetId)) {
-    return trimmed as ModelSetId;
+  return MODEL_SET_IDS.find((modelSet) => modelSet === trimmed);
+}
+
+/** Determine the effective model set for a session. */
+export function resolveModelSet(sessionId: string, _cliModelSet: string | undefined): ModelSetId {
+  return getSessionRuntime(sessionId).modelSet;
+}
+
+/** Cycle through a non-empty model-set order. */
+export function cycleModelSet(current: ModelSetId, order: readonly ModelSetId[]): ModelSetId {
+  const first = order[0];
+  if (!first) {
+    throw new Error("Cannot cycle an empty model-set order");
   }
-  return undefined;
-}
 
-/**
- * Determine the effective model set for a session.
- */
-export function resolveModelSet(
-  sessionId: string,
-  _cliModelSet: string | undefined,
-): ModelSetId {
-  const runtime = getSessionRuntime(sessionId);
-  return runtime.modelSet;
-}
-
-/**
- * Cycle through model sets in the provided order.
- * Returns the next set after the current one.
- */
-export function cycleModelSet(
-  current: ModelSetId,
-  order: readonly ModelSetId[],
-): ModelSetId {
   const index = order.indexOf(current);
-  if (index === -1 || index === order.length - 1) return order[0];
-  return order[index + 1];
+  if (index === -1 || index === order.length - 1) return first;
+  return order[index + 1] ?? first;
 }
