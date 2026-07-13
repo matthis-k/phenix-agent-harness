@@ -90,15 +90,14 @@
 
       devShells.default = pkgs.mkShell {
         name = "phenix-agent-harness-dev";
-        packages = lib.unique (
+        packages =
           tooling.agentRuntime
           ++ tooling.quality
           ++ [
             phenixTend
             self'.packages.setup-git-hooks
             self'.packages.update-pi-npm-lock
-          ]
-        );
+          ];
 
         shellHook = ''
           echo "phenix-agent-harness dev shell"
