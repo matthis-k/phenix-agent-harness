@@ -56,36 +56,39 @@
         '';
       };
 
-      stitchRuntimeSmoke = pkgs.runCommand "phenix-stitch-runtime-smoke" {
-        nativeBuildInputs = [
-          phenixStitch
-          pkgs.git
-          pkgs.jq
-        ];
-      } ''
-        mkdir source
-        cd source
-        git init --quiet
-        git config user.name "Phenix CI"
-        git config user.email "ci@example.invalid"
-        touch flake.nix
-        git add flake.nix
-        git commit --quiet -m init
+      stitchRuntimeSmoke =
+        pkgs.runCommand "phenix-stitch-runtime-smoke"
+          {
+            nativeBuildInputs = [
+              phenixStitch
+              pkgs.git
+              pkgs.jq
+            ];
+          }
+          ''
+            mkdir source
+            cd source
+            git init --quiet
+            git config user.name "Phenix CI"
+            git config user.email "ci@example.invalid"
+            touch flake.nix
+            git add flake.nix
+            git commit --quiet -m init
 
-        stitch --version
-        stitch workspace discover \
-          --workspace . \
-          --repository-pattern 'phenix-*' \
-          --json > discovery.json
+            stitch --version
+            stitch workspace discover \
+              --workspace . \
+              --repository-pattern 'phenix-*' \
+              --json > discovery.json
 
-        jq -e '
-          .version == 2 and
-          (.repos | length) == 1 and
-          .repos[0].path == "."
-        ' discovery.json
+            jq -e '
+              .version == 2 and
+              (.repos | length) == 1 and
+              .repos[0].path == "."
+            ' discovery.json
 
-        touch "$out"
-      '';
+            touch "$out"
+          '';
     in
     {
       packages = {

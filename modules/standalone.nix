@@ -14,13 +14,11 @@
 
       wrappedPi = pkgs.writeShellApplication {
         name = "pi";
-        runtimeInputs =
-          tooling.agentRuntime
-          ++ [
-            self'.packages.tend
-            self'.packages.stitch
-            self'.packages.stitch-mcp
-          ];
+        runtimeInputs = tooling.agentRuntime ++ [
+          self'.packages.tend
+          self'.packages.stitch
+          self'.packages.stitch-mcp
+        ];
 
         text = ''
           agent_dir="''${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
