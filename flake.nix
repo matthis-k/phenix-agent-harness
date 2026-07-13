@@ -6,7 +6,7 @@
     nixpkgs.follows = "phenix-pins/nixpkgs";
 
     phenix-tend = {
-      url = "github:matthis-k/phenix-tend";
+      url = "github:matthis-k/phenix-tend/feat/execution-contexts";
       inputs.flake-parts.follows = "phenix-pins/flake-parts";
       inputs.phenix-pins.follows = "phenix-pins";
     };
