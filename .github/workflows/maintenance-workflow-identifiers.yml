@@ -1,0 +1,45 @@
+name: Apply workflow identifier cleanup
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out workflow branch
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: qa/09-workflow-types
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+
+      - name: Apply identifier migration
+        run: python .github/maintenance/migrate-workflow-ids.py
+
+      - name: Format touched TypeScript
+        run: |
+          nix run nixpkgs#biome -- check --write \
+            modules/phenix-pi/extensions/phenix-subagents/contract.ts \
+            modules/phenix-pi/extensions/phenix-subagents/child-spec.ts \
+            modules/phenix-pi/extensions/phenix-workflow/index.ts \
+            modules/phenix-pi/extensions/phenix-workflow/session-registry.ts \
+            modules/phenix-pi/extensions/phenix-workflow/workflow-store.ts \
+            modules/phenix-pi/extensions/phenix-workflow/workflow-types.ts \
+            modules/phenix-pi/tests/workflow-identifier-authority.test.ts
+
+      - name: Commit source files
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add modules/phenix-pi
+          git diff --cached --check
+          git commit -m "refactor(workflow): unify identifier authority"
+          git push origin HEAD:qa/09-workflow-types
