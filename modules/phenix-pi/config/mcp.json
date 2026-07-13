@@ -1,0 +1,13 @@
+{
+  "settings": {
+    "toolPrefix": "server",
+    "directTools": false
+  },
+  "mcpServers": {
+    "stitch": {
+      "command": "stitch-mcp",
+      "args": [],
+      "lifecycle": "lazy"
+    }
+  }
+}
