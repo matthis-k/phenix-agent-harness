@@ -1,8 +1,8 @@
 /**
- * phenix-composition — index
+ * phenix-composition — public configuration and linking API.
  *
- * Single composition package that imports all declaration types,
- * links them, and bootstraps the Phenix runtime.
+ * Composition owns passive declarations and the immutable graph consumed by
+ * runtime services. Workflow execution remains in phenix-workflow.
  */
 
 // Configuration
@@ -13,11 +13,10 @@ export { definePhenixConfiguration } from "./configuration.ts";
 export type {
   LinkedAgentClient,
   LinkedAgentRoute,
-  LinkedModelSet,
   LinkedModelPool,
-  LinkedRoutingGraph,
-  LinkedWorkflowDefinition,
+  LinkedModelSet,
   LinkedPhenixGraph,
+  LinkedRoutingGraph,
 } from "./linked-graph.ts";
 
 // Linker
