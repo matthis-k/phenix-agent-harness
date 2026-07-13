@@ -4,7 +4,6 @@ _:
   perSystem =
     { pkgs, ... }:
     let
-      tooling = import ./tooling.nix { inherit pkgs; };
       piNpmRoot = ./pi-npm;
 
       # package-lock.json is the sole dependency authority. importNpmLock
@@ -78,50 +77,6 @@ _:
             tsc --project tsconfig.json --pretty false
             touch "$out"
           '';
-
-      qualityTools = tooling.quality;
-
-      phenixRepositoryChecks =
-        pkgs.runCommand "phenix-repository-checks"
-          {
-            nativeBuildInputs = qualityTools ++ [ pkgs.bash ];
-          }
-          ''
-            bash ${../scripts/check-repository-direct.sh} ${../.}
-            touch "$out"
-          '';
-
-      setupGitHooks = pkgs.writeShellApplication {
-        name = "setup-git-hooks";
-        runtimeInputs = [
-          pkgs.coreutils
-          pkgs.git
-        ];
-        text = ''
-          exec bash ${../scripts/setup-git-hooks.sh}
-        '';
-      };
-
-      updatePiNpmLock = pkgs.writeShellApplication {
-        name = "update-pi-npm-lock";
-        runtimeInputs = [ pkgs.nodejs ];
-        text = ''
-          if [[ ! -f modules/pi-npm/package.json ]]; then
-            echo "run this command from the phenix-agent-harness repository root" >&2
-            exit 1
-          fi
-
-          npm install \
-            --prefix modules/pi-npm \
-            --package-lock-only \
-            --ignore-scripts \
-            --legacy-peer-deps \
-            --no-audit \
-            --no-fund
-
-          echo "Updated modules/pi-npm/package-lock.json"
-        '';
-      };
     in
     {
       packages = {
@@ -130,9 +85,6 @@ _:
         phenix-pi-npm-packages = piNpmPackages;
         phenix-runtime-tests = phenixRuntimeTests;
         phenix-typecheck = phenixTypecheck;
-        phenix-repository-checks = phenixRepositoryChecks;
-        setup-git-hooks = setupGitHooks;
-        update-pi-npm-lock = updatePiNpmLock;
       };
     };
 }
