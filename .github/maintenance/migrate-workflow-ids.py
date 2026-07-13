@@ -3,13 +3,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def replace(path: str, old: str, new: str, expected: int = 1) -> None:
+def replace_all(path: str, old: str, new: str) -> None:
     target = ROOT / path
     content = target.read_text()
     count = content.count(old)
-    if count != expected:
-        raise RuntimeError(f"{path}: expected {expected} matches, found {count}: {old[:100]!r}")
-    target.write_text(content.replace(old, new, expected))
+    if count == 0:
+        raise RuntimeError(f"{path}: expected at least one match: {old[:100]!r}")
+    target.write_text(content.replace(old, new))
 
 
 for path in [
@@ -18,10 +18,10 @@ for path in [
     "modules/phenix-pi/extensions/phenix-workflow/session-registry.ts",
     "modules/phenix-pi/extensions/phenix-workflow/workflow-store.ts",
 ]:
-    replace(path, "WorkflowDefinitionId", "DefaultWorkflowDefinitionId")
+    replace_all(path, "WorkflowDefinitionId", "DefaultWorkflowDefinitionId")
 
-replace(
+replace_all(
     "modules/phenix-pi/extensions/phenix-workflow/index.ts",
-    "  WorkflowDefinitionId,\n",
-    "  DefaultWorkflowDefinitionId,\n",
+    "WorkflowDefinitionId",
+    "DefaultWorkflowDefinitionId",
 )
