@@ -6,4 +6,4 @@ cd "$repo_root"
 
 exec nix run --quiet .#tend -- check \
   --profile pre-push \
-  --locked
+  --context local
