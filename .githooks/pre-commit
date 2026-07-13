@@ -4,4 +4,8 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-exec nix run --quiet .#phenix-fix-staged
+exec nix run --quiet .#tend -- check \
+  --profile git-hook \
+  --staged \
+  --offline \
+  --locked
