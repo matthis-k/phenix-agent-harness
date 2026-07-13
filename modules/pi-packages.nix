@@ -16,7 +16,7 @@
       # Bootstrap or refresh with:
       #   nix run .#update-pi-npm-hash
       # Intentionally fake after adding packages. Run `nix run .#update-pi-npm-hash`.
-      piNpmHash = "sha256-XvCLcnzVf/ng42vNuv1qksEocKRBIAUhYqa68tGr0Ec=";
+      piNpmHash = "sha256-EbrJxqF+YURhUVUdlcXillQWist6W1A49Ge1doVD47M=";
 
       piNpmPackages = import ./lib/mk-pi-npm-packages.nix {
         inherit lib pkgs;
