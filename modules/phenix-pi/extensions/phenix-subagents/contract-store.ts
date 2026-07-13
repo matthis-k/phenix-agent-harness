@@ -101,7 +101,7 @@ export class FileContractStore {
   private async exclusive<T>(id: ContractId, operation: () => Promise<T>): Promise<T> {
     const previous = this.locks.get(id) ?? Promise.resolve();
 
-    let resolve: () => void;
+    let resolve: (() => void) | undefined;
     const next = new Promise<void>((r) => {
       resolve = r;
     });
