@@ -1,119 +1,100 @@
 {
-  "version": 1,
+  "version": 2,
+  "profiles": {
+    "git-hook": {
+      "phase": "verify",
+      "selection": "staged",
+      "tasks": ["changed-files", "repository-checks"],
+      "contexts": ["local"]
+    },
+    "manual": {
+      "phase": "verify",
+      "selection": "changed",
+      "tasks": ["changed-files", "repository-checks", "runtime-tests", "typecheck"],
+      "contexts": ["local"]
+    },
+    "full": {
+      "phase": "verify",
+      "selection": "full",
+      "tasks": ["repository-checks", "runtime-tests", "typecheck"],
+      "contexts": ["local", "nix-sandbox"]
+    },
+    "pre-push": {
+      "phase": "verify",
+      "selection": "full",
+      "tasks": ["flake-check"],
+      "contexts": ["local"]
+    },
+    "ci": {
+      "phase": "verify",
+      "selection": "git-range",
+      "tasks": [
+        "changed-files",
+        "repository-checks",
+        "runtime-tests",
+        "typecheck",
+        "flake-check"
+      ],
+      "contexts": ["local"]
+    },
+    "fix": {
+      "phase": "fix",
+      "selection": "staged",
+      "tasks": ["format-files"],
+      "contexts": ["local"]
+    }
+  },
+  "contexts": {
+    "local": {
+      "implementation": "nix",
+      "allow_mutation": true,
+      "allow_interactive": false,
+      "allow_network": true,
+      "require_sandbox_safe": false
+    },
+    "nix-sandbox": {
+      "implementation": "direct",
+      "allow_mutation": false,
+      "allow_interactive": false,
+      "allow_network": false,
+      "require_sandbox_safe": true
+    }
+  },
   "node": {
     "id": "phenix-agent-harness",
     "description": "Verify and maintain the Phenix Pi harness",
-    "tags": ["agent-harness", "typescript", "nix"],
-    "when": {
-      "changed": {
-        "paths": [
-          ".github/**",
-          ".githooks/**",
-          ".tend.json",
-          "*.json",
-          "*.nix",
-          "modules/**",
-          "scripts/**"
-        ]
-      }
-    },
     "tasks": [
       {
-        "id": "staged-files",
-        "description": "Check staged files without modifying the index or worktree",
+        "id": "changed-files",
+        "description": "Check selected repository files",
         "phase": "verify",
-        "kind": "command",
-        "command": ["bash", "scripts/check.sh", "staged"],
-        "profiles": ["git-hook"],
-        "tags": ["format", "lint", "fast"],
-        "sandbox_safe": true,
-        "mutates": false,
-        "interactive": false,
-        "network": false,
-        "always": true
-      },
-      {
-        "id": "ci-changed-files",
-        "description": "Check files changed by the CI revision range",
-        "phase": "verify",
-        "kind": "command",
-        "command": ["bash", "scripts/check.sh", "ci-range"],
-        "profiles": ["ci"],
-        "tags": ["format", "lint", "ci"],
-        "sandbox_safe": true,
-        "mutates": false,
-        "interactive": false,
-        "network": false,
-        "always": true
+        "when": {
+          "changed": {
+            "paths": [
+              ".github/**",
+              ".githooks/**",
+              ".tend.json",
+              "*.json",
+              "*.jsonc",
+              "*.nix",
+              "modules/**",
+              "scripts/**"
+            ]
+          }
+        },
+        "implementations": {
+          "default": {
+            "kind": "command",
+            "command": ["bash", "scripts/check-files.sh"],
+            "file_args": "matched",
+            "sandbox_safe": true
+          }
+        }
       },
       {
         "id": "repository-checks",
-        "description": "Run repository scripts, workflow, and configuration checks",
+        "description": "Run repository-wide script, workflow, and configuration checks",
         "phase": "verify",
-        "kind": "command",
-        "command": ["bash", "scripts/check-repository-direct.sh"],
-        "profiles": ["manual", "nix-check"],
-        "tags": ["format", "lint", "repository"],
-        "sandbox_safe": true,
-        "mutates": false,
-        "interactive": false,
-        "network": false,
-        "always": true
-      },
-      {
-        "id": "runtime-tests",
-        "description": "Build and run the packaged TypeScript runtime tests",
-        "phase": "verify",
-        "kind": "command",
-        "command": ["nix", "build", "--no-link", "--print-build-logs", ".#phenix-runtime-tests"],
-        "profiles": ["manual"],
-        "tags": ["typescript", "runtime", "test"],
-        "sandbox_safe": false,
-        "mutates": false,
-        "interactive": false,
-        "network": true,
-        "when": {
-          "changed": {
-            "paths": ["modules/phenix-pi/**", "modules/pi-npm/**", "modules/pi-packages.nix"]
-          }
-        }
-      },
-      {
-        "id": "typecheck",
-        "description": "Build the authoritative TypeScript compiler check",
-        "phase": "verify",
-        "kind": "command",
-        "command": ["nix", "build", "--no-link", "--print-build-logs", ".#phenix-typecheck"],
-        "profiles": ["manual"],
-        "tags": ["typescript", "compile"],
-        "sandbox_safe": false,
-        "mutates": false,
-        "interactive": false,
-        "network": true,
-        "when": {
-          "changed": {
-            "paths": ["modules/phenix-pi/**", "modules/pi-npm/**", "modules/pi-packages.nix"]
-          }
-        }
-      },
-      {
-        "id": "repository-derivation",
-        "description": "Build the repository script and workflow checks",
-        "phase": "verify",
-        "kind": "command",
-        "command": [
-          "nix",
-          "build",
-          "--no-link",
-          "--print-build-logs",
-          ".#phenix-repository-checks"
-        ],
-        "profiles": ["manual"],
-        "tags": ["repository", "nix"],
-        "sandbox_safe": false,
-        "mutates": false,
-        "interactive": false,
-        "network": true,
         "when": {
           "changed": {
             "paths": [
@@ -126,63 +107,109 @@
               "scripts/**"
             ]
           }
+        },
+        "implementations": {
+          "default": {
+            "kind": "command",
+            "command": ["bash", "scripts/check-repository-direct.sh"],
+            "sandbox_safe": true
+          }
+        }
+      },
+      {
+        "id": "runtime-tests",
+        "description": "Run the packaged TypeScript runtime tests",
+        "phase": "verify",
+        "when": {
+          "changed": {
+            "paths": ["modules/phenix-pi/**", "modules/pi-npm/**", "modules/pi-packages.nix"]
+          }
+        },
+        "implementations": {
+          "nix": {
+            "kind": "command",
+            "command": [
+              "nix",
+              "build",
+              "--no-link",
+              "--print-build-logs",
+              ".#phenix-runtime-tests"
+            ],
+            "network": true
+          },
+          "direct": {
+            "kind": "command",
+            "command": ["bash", "scripts/check-runtime-direct.sh", "runtime-tests"],
+            "sandbox_safe": true
+          }
+        }
+      },
+      {
+        "id": "typecheck",
+        "description": "Run the authoritative TypeScript compiler check",
+        "phase": "verify",
+        "when": {
+          "changed": {
+            "paths": ["modules/phenix-pi/**", "modules/pi-npm/**", "modules/pi-packages.nix"]
+          }
+        },
+        "implementations": {
+          "nix": {
+            "kind": "command",
+            "command": [
+              "nix",
+              "build",
+              "--no-link",
+              "--print-build-logs",
+              ".#phenix-typecheck"
+            ],
+            "network": true
+          },
+          "direct": {
+            "kind": "command",
+            "command": ["bash", "scripts/check-runtime-direct.sh", "typecheck"],
+            "sandbox_safe": true
+          }
         }
       },
       {
         "id": "flake-check",
         "description": "Run the complete reproducible flake gate",
         "phase": "verify",
-        "kind": "command",
-        "command": ["nix", "flake", "check", "--print-build-logs", "--keep-going"],
-        "profiles": ["pre-push", "ci"],
-        "tags": ["nix", "full", "slow", "test"],
-        "sandbox_safe": false,
-        "mutates": false,
-        "interactive": false,
-        "network": true,
-        "always": true
+        "always": true,
+        "implementations": {
+          "nix": {
+            "kind": "command",
+            "command": ["nix", "flake", "check", "--print-build-logs", "--keep-going"],
+            "network": true
+          }
+        }
       },
       {
-        "id": "runtime-tests-direct",
-        "description": "Run runtime tests directly in the prepared Nix sandbox",
-        "phase": "verify",
-        "kind": "command",
-        "command": ["bash", "scripts/check-runtime-direct.sh", "runtime-tests"],
-        "profiles": ["nix-check"],
-        "tags": ["typescript", "runtime", "test"],
-        "sandbox_safe": true,
-        "mutates": false,
-        "interactive": false,
-        "network": false,
-        "always": true
-      },
-      {
-        "id": "typecheck-direct",
-        "description": "Run TypeScript compilation directly in the prepared Nix sandbox",
-        "phase": "verify",
-        "kind": "command",
-        "command": ["bash", "scripts/check-runtime-direct.sh", "typecheck"],
-        "profiles": ["nix-check"],
-        "tags": ["typescript", "compile"],
-        "sandbox_safe": true,
-        "mutates": false,
-        "interactive": false,
-        "network": false,
-        "always": true
-      },
-      {
-        "id": "fix-staged",
-        "description": "Apply supported format fixes to fully staged files",
+        "id": "format-files",
+        "description": "Apply supported formatters to selected staged files",
         "phase": "fix",
-        "kind": "command",
-        "command": ["bash", "scripts/fix-staged.sh"],
-        "profiles": ["fix"],
-        "tags": ["format", "fix"],
-        "sandbox_safe": false,
-        "mutates": true,
-        "interactive": false,
-        "network": false,
-        "always": true
+        "when": {
+          "changed": {
+            "paths": [
+              ".githooks/**",
+              ".tend.json",
+              "*.json",
+              "*.jsonc",
+              "*.nix",
+              "modules/**",
+              "scripts/**"
+            ]
+          }
+        },
+        "implementations": {
+          "default": {
+            "kind": "command",
+            "command": ["bash", "scripts/format-files.sh"],
+            "file_args": "matched",
+            "mutates": true
+          }
+        }
       }
     ]
   }
