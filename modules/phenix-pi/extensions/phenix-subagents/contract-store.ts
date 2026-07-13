@@ -117,7 +117,7 @@ export class FileContractStore {
       await previous;
       return await operation();
     } finally {
-      resolve!();
+      resolve?.();
     }
   }
 

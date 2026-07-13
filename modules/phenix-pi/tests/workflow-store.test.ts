@@ -16,8 +16,8 @@ import {
   verifyWorkflowActorExists,
   WorkflowStoreError,
 } from "../extensions/phenix-workflow/workflow-store.ts";
-import { mkTransitionId } from "../extensions/phenix-workflow/workflow-types.ts";
 import type { WorkflowRuntimeRecord } from "../extensions/phenix-workflow/workflow-types.ts";
+import { mkTransitionId } from "../extensions/phenix-workflow/workflow-types.ts";
 
 function makeRecordParams(overrides?: Record<string, unknown>) {
   return {
@@ -40,26 +40,20 @@ function makeRecordParams(overrides?: Record<string, unknown>) {
   };
 }
 
-function requireRecord(
-  value: WorkflowRuntimeRecord | undefined,
-): WorkflowRuntimeRecord {
+function requireRecord(value: WorkflowRuntimeRecord | undefined): WorkflowRuntimeRecord {
   assert.ok(value);
   return value;
 }
 
 function isStoreError(code: WorkflowStoreError["code"]) {
-  return (error: unknown): boolean =>
-    error instanceof WorkflowStoreError && error.code === code;
+  return (error: unknown): boolean => error instanceof WorkflowStoreError && error.code === code;
 }
 
 describe("Workflow Store", () => {
   let directory: string;
 
   beforeEach(() => {
-    directory = path.join(
-      os.tmpdir(),
-      `phenix-test-store-${randomUUID().slice(0, 8)}`,
-    );
+    directory = path.join(os.tmpdir(), `phenix-test-store-${randomUUID().slice(0, 8)}`);
     fs.mkdirSync(directory, { recursive: true });
   });
 
@@ -71,9 +65,7 @@ describe("Workflow Store", () => {
     assert.equal(record.state, "classified");
     assert.equal(record.revision, 0);
 
-    const read = requireRecord(
-      readWorkflowRecord(directory, params.instanceId, params.actorId),
-    );
+    const read = requireRecord(readWorkflowRecord(directory, params.instanceId, params.actorId));
     assert.equal(read.state, "classified");
   });
 
@@ -90,9 +82,7 @@ describe("Workflow Store", () => {
     assert.ok(result.executionId.startsWith("wfexec_"));
     assert.equal(result.record.active.length, 1);
 
-    const reread = requireRecord(
-      readWorkflowRecord(directory, params.instanceId, params.actorId),
-    );
+    const reread = requireRecord(readWorkflowRecord(directory, params.instanceId, params.actorId));
     assert.equal(reread.active.length, 1);
     assert.equal(reread.revision, 1);
   });
@@ -128,9 +118,7 @@ describe("Workflow Store", () => {
       handleId: "handle-1",
     });
 
-    record = requireRecord(
-      readWorkflowRecord(directory, params.instanceId, params.actorId),
-    );
+    record = requireRecord(readWorkflowRecord(directory, params.instanceId, params.actorId));
 
     const updated = acceptTransition(directory, record, {
       executionId,
@@ -153,9 +141,7 @@ describe("Workflow Store", () => {
       handleId: "handle-1",
     });
 
-    record = requireRecord(
-      readWorkflowRecord(directory, params.instanceId, params.actorId),
-    );
+    record = requireRecord(readWorkflowRecord(directory, params.instanceId, params.actorId));
 
     const updated = rejectTransition(directory, record, {
       executionId,
@@ -203,10 +189,7 @@ describe("Workflow Store — Concurrency", () => {
   let directory: string;
 
   beforeEach(() => {
-    directory = path.join(
-      os.tmpdir(),
-      `phenix-test-lock-${randomUUID().slice(0, 8)}`,
-    );
+    directory = path.join(os.tmpdir(), `phenix-test-lock-${randomUUID().slice(0, 8)}`);
     fs.mkdirSync(directory, { recursive: true });
   });
 
@@ -219,11 +202,7 @@ describe("Workflow Store — Concurrency", () => {
 
     releaseWorkflowLock(lock);
 
-    const nextLock = acquireWorkflowLock(
-      directory,
-      params.instanceId,
-      params.actorId,
-    );
+    const nextLock = acquireWorkflowLock(directory, params.instanceId, params.actorId);
     releaseWorkflowLock(nextLock);
   });
 
@@ -234,8 +213,7 @@ describe("Workflow Store — Concurrency", () => {
     const lock = acquireWorkflowLock(directory, params.instanceId, params.actorId);
 
     assert.throws(
-      () =>
-        acquireWorkflowLock(directory, params.instanceId, params.actorId, 100),
+      () => acquireWorkflowLock(directory, params.instanceId, params.actorId, 100),
       isStoreError("LOCK_CONTENTION"),
     );
 
@@ -250,12 +228,7 @@ describe("Workflow Store — Concurrency", () => {
     releaseWorkflowLock(lock);
 
     assert.doesNotThrow(() => {
-      const nextLock = acquireWorkflowLock(
-        directory,
-        params.instanceId,
-        params.actorId,
-        1000,
-      );
+      const nextLock = acquireWorkflowLock(directory, params.instanceId, params.actorId, 1000);
       releaseWorkflowLock(nextLock);
     });
   });
@@ -266,16 +239,8 @@ describe("Workflow Store — Concurrency", () => {
     createWorkflowRecord(directory, first);
     createWorkflowRecord(directory, second);
 
-    const firstLock = acquireWorkflowLock(
-      directory,
-      first.instanceId,
-      first.actorId,
-    );
-    const secondLock = acquireWorkflowLock(
-      directory,
-      second.instanceId,
-      second.actorId,
-    );
+    const firstLock = acquireWorkflowLock(directory, first.instanceId, first.actorId);
+    const secondLock = acquireWorkflowLock(directory, second.instanceId, second.actorId);
 
     releaseWorkflowLock(firstLock);
     releaseWorkflowLock(secondLock);
