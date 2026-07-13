@@ -1,88 +1,114 @@
-import { randomUUID } from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import type { HandleRecord, ProducerCycleRecord } from "./handle-types.ts";
+import {
+  atomicWriteJson,
+  findRepositoryRoot,
+  readDirectory,
+  readJsonFile,
+  sanitizePathSegment,
+  timestamp,
+} from "../phenix-persistence/json-files.ts";
+import type {
+  HandleRecord,
+  HandleStatus,
+  ProducerCycleRecord,
+} from "./handle-types.ts";
 import { HANDLE_VERSION } from "./handle-types.ts";
 
-// ── Path helpers ────────────────────────────────────────────────────────────
+const HANDLE_STATUSES: ReadonlySet<string> = new Set<HandleStatus>([
+  "starting",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+  "orphaned",
+]);
 
-export function sanitize(value: string): string {
-  return value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function findProjectRoot(cwd: string): string {
-  let current = path.resolve(cwd);
-  while (true) {
-    if (fs.existsSync(path.join(current, ".git"))) return current;
-    const parent = path.dirname(current);
-    if (parent === current) return path.resolve(cwd);
-    current = parent;
+/** Decode the stable envelope needed before a persisted handle enters runtime. */
+export function decodeHandleRecord(value: unknown): HandleRecord {
+  if (
+    !isObject(value) ||
+    value.version !== HANDLE_VERSION ||
+    typeof value.id !== "string" ||
+    typeof value.sessionId !== "string" ||
+    typeof value.modelSet !== "string" ||
+    typeof value.createdAt !== "string" ||
+    typeof value.updatedAt !== "string" ||
+    typeof value.status !== "string" ||
+    !HANDLE_STATUSES.has(value.status) ||
+    !Array.isArray(value.producerCycles) ||
+    !isObject(value.assignment) ||
+    !isObject(value.producerSpec)
+  ) {
+    throw new Error("Persisted handle record is malformed or uses an unsupported version.");
   }
+
+  return value as unknown as HandleRecord;
 }
 
-export function now(): string {
-  return new Date().toISOString();
-}
-
-// ── Record persistence ──────────────────────────────────────────────────────
+// Compatibility names retained for callers while filesystem mechanics live in
+// phenix-persistence.
+export const sanitize = sanitizePathSegment;
+export const findProjectRoot = findRepositoryRoot;
+export const now = timestamp;
 
 export function recordsRoot(cwd: string): string {
-  return path.join(findProjectRoot(cwd), ".phenix-agent-state", "subagents");
+  return path.join(findRepositoryRoot(cwd), ".phenix-agent-state", "subagents");
 }
 
 export function recordPath(cwd: string, session: string, id: string): string {
-  return path.join(recordsRoot(cwd), sanitize(session), `${sanitize(id)}.json`);
+  return path.join(
+    recordsRoot(cwd),
+    sanitizePathSegment(session),
+    `${sanitizePathSegment(id)}.json`,
+  );
 }
 
 export function writeRecord(cwd: string, record: HandleRecord): void {
-  record.updatedAt = now();
-  const target = recordPath(cwd, record.sessionId, record.id);
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
-  fs.writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
-  fs.renameSync(temporary, target);
+  record.updatedAt = timestamp();
+  atomicWriteJson(recordPath(cwd, record.sessionId, record.id), record);
 }
 
-export function readRecord(cwd: string, session: string, id: string): HandleRecord | undefined {
-  try {
-    return JSON.parse(fs.readFileSync(recordPath(cwd, session, id), "utf-8")) as HandleRecord;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
-}
-
-function safeReadDir(dir: string): string[] {
-  try {
-    return fs.readdirSync(dir);
-  } catch {
-    return [];
-  }
+export function readRecord(
+  cwd: string,
+  session: string,
+  id: string,
+): HandleRecord | undefined {
+  return readJsonFile(recordPath(cwd, session, id), decodeHandleRecord);
 }
 
 export function listRecords(cwd: string, session?: string): HandleRecord[] {
   const root = recordsRoot(cwd);
-  const sessionDirs = session ? [sanitize(session)] : safeReadDir(root);
+  const sessionDirectories = session
+    ? [sanitizePathSegment(session)]
+    : readDirectory(root);
   const records: HandleRecord[] = [];
-  for (const sessionDir of sessionDirs) {
-    const dir = path.join(root, sessionDir);
-    for (const file of safeReadDir(dir)) {
+
+  for (const sessionDirectory of sessionDirectories) {
+    const directory = path.join(root, sessionDirectory);
+    for (const file of readDirectory(directory)) {
       if (!file.endsWith(".json")) continue;
       try {
-        const record = JSON.parse(fs.readFileSync(path.join(dir, file), "utf-8")) as HandleRecord;
-        if (record.version === HANDLE_VERSION) records.push(record);
+        const record = readJsonFile(
+          path.join(directory, file),
+          decodeHandleRecord,
+        );
+        if (record) records.push(record);
       } catch {
-        // A partially written or manually damaged record is ignored; atomic writes prevent normal partial files.
+        // Listing is diagnostic and tolerant: a damaged record does not hide
+        // other valid handles. Direct reads still surface corruption.
       }
     }
   }
+
   return records.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
-
-// ── Session helpers ──────────────────────────────────────────────────────────
 
 export function sessionId(ctx: ExtensionContext): string {
   return ctx.sessionManager.getSessionId() ?? "ephemeral";
@@ -92,6 +118,5 @@ export function effectiveSessionId(ctx: ExtensionContext): string {
   return sessionId(ctx);
 }
 
-// Re-export for convenience
 export type { HandleRecord, ProducerCycleRecord };
 export { HANDLE_VERSION };
