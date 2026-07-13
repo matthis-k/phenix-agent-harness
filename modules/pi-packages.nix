@@ -1,4 +1,4 @@
-{ ... }:
+_:
 
 {
   perSystem =
@@ -11,7 +11,7 @@
       # hash or commit without a repository-wide fixed-output hash.
       piNpmPackages = pkgs.importNpmLock.buildNodeModules {
         npmRoot = piNpmRoot;
-        nodejs = pkgs.nodejs;
+        inherit (pkgs) nodejs;
         derivationArgs = {
           pname = "phenix-pi-npm-packages";
           version = "1.0.0";
