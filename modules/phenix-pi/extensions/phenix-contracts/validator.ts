@@ -61,9 +61,13 @@ function visitSchema(value: unknown, depth: number, state: { nodes: number }): v
   }
 }
 
+function isJsonSchema(value: unknown): value is JsonSchema {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 /** Validate schema structure, resource limits, and TypeBox compatibility. */
 export function assertJsonSchema(value: unknown): asserts value is JsonSchema {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  if (!isJsonSchema(value)) {
     throw new Error("outputSchema must be a JSON Schema object");
   }
 

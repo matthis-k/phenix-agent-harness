@@ -1,28 +1,25 @@
 import type {
+  Api,
   AssistantMessage,
   AssistantMessageEventStream,
   Context,
   Model,
   SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
-import { createAssistantMessageEventStream, streamSimple } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 
-import type { Api } from "@earendil-works/pi-ai";
-
-import type { ResolvedRoute } from "./types.ts";
 import { loadRoutingConfig } from "./config.ts";
-import { resolveRoute } from "./resolver.ts";
-import { getSessionRuntime } from "./state.ts";
 import { modelSetForModelId } from "./provider.ts";
 import { modelRegistry } from "./registry.ts";
+import { resolveRoute } from "./resolver.ts";
+import { getSessionRuntime } from "./state.ts";
+import type { ResolvedRoute } from "./types.ts";
 
 const PHENIX_PROVIDER = "phenix";
 const PHENIX_MODEL = "workflow";
 const PHENIX_API = "phenix-router";
 
-/**
- * Event types that need their provider/model fields masked.
- */
 const MASKED_EVENT_TYPES = new Set([
   "start",
   "text_start",
@@ -36,28 +33,16 @@ const MASKED_EVENT_TYPES = new Set([
   "toolcall_end",
 ]);
 
-/**
- * Mask the provider, model, and api fields of a partial AssistantMessage
- * so it appears to come from phenix/workflow.
- */
-function maskMessage(msg: AssistantMessage): AssistantMessage {
+function maskMessage(message: AssistantMessage): AssistantMessage {
   return {
-    ...msg,
+    ...message,
     api: PHENIX_API as Api,
     provider: PHENIX_PROVIDER,
     model: PHENIX_MODEL,
-    responseModel: msg.responseModel ?? msg.responseModel,
   };
 }
 
-/**
- * Create a router stream that:
- * 1. Locates the session runtime.
- * 2. Resolves the active root route.
- * 3. Calls the concrete upstream via streamSimple using real auth.
- * 4. Masks all forwarded events.
- * 5. Applies candidate fallback pre-output.
- */
+/** Route a virtual Phenix model request to the selected concrete model. */
 export function routerStream(
   model: Model<Api>,
   context: Context,
@@ -65,10 +50,8 @@ export function routerStream(
 ): AssistantMessageEventStream {
   const stream = createAssistantMessageEventStream();
 
-  // Kick off async routing in the background.
-  runRouter(stream, model, context, options).catch((error) => {
-    // If no events have been pushed yet, emit a masked error.
-    const errorMsg: AssistantMessage = {
+  void runRouter(stream, model, context, options).catch((error) => {
+    const errorMessage: AssistantMessage = {
       role: "assistant",
       content: [],
       api: PHENIX_API as Api,
@@ -89,7 +72,7 @@ export function routerStream(
     stream.push({
       type: "error",
       reason: "error",
-      error: maskMessage(errorMsg),
+      error: maskMessage(errorMessage),
     });
     stream.end();
   });
@@ -103,88 +86,59 @@ async function runRouter(
   context: Context,
   options?: SimpleStreamOptions,
 ): Promise<void> {
-  // 1. Obtain the concrete model registry entry (imported from registry.ts).
-
-  // 2. Resolve active route — try pre-set from before_agent_start hook first,
-  //    then resolve directly from the model parameter as fallback.
   let route = getActiveRouteForSession(options?.sessionId ?? "default");
 
   if (!route) {
-    // No pre-set route — resolve one directly from the virtual phenix model.
     const sessionId = options?.sessionId ?? "default";
     const runtime = getSessionRuntime(sessionId);
-
-    // Determine model set from the virtual phenix model (e.g. "mixed" from phenix/mixed).
-    const modelSetId = model.provider === PHENIX_PROVIDER
-      ? (modelSetForModelId(model.id) ?? runtime.modelSet)
-      : runtime.modelSet;
-
-    const config = loadRoutingConfig();
+    const modelSet =
+      model.provider === PHENIX_PROVIDER
+        ? (modelSetForModelId(model.id) ?? runtime.modelSet)
+        : runtime.modelSet;
 
     route = await resolveRoute({
-      modelSet: modelSetId,
+      modelSet,
       role: "coordinator",
       modelRegistry,
-      config,
+      config: loadRoutingConfig(),
     });
-
-    // Cache for potential re-use.
     setActiveRouteForSession(sessionId, route);
   }
 
-  // 3. Look up the concrete model in Pi's active registry. Do not synthesize
-  //    model metadata: missing registry entries are routing/config errors.
   const concreteModel: Model<Api> | undefined = modelRegistry.getModel(
     route.model.provider,
     route.model.model,
   );
-
   if (!concreteModel) {
-    throw new Error(
-      `Model is not registered in Pi: ${route.model.provider}/${route.model.model}`,
-    );
+    throw new Error(`Model is not registered in Pi: ${route.model.provider}/${route.model.model}`);
   }
 
-  // 4. Resolve real auth and request configuration through Pi.
   const auth = await modelRegistry.getApiKeyAndHeaders(concreteModel);
-
   if (!auth.ok) {
     throw new Error(
       `Authentication unavailable for ${concreteModel.provider}/${concreteModel.id}: ${auth.error}`,
     );
   }
 
-  // 5. Call the upstream API. Strip virtual-provider authentication fields so
-  //    the dummy phenix provider key cannot leak into concrete requests.
-  const reasoningLevel = route.thinking === "minimal" ? undefined : route.thinking;
+  const reasoning = route.thinking === "minimal" ? undefined : route.thinking;
   const {
     apiKey: _virtualApiKey,
     headers: virtualHeaders,
     env: virtualEnv,
     ...requestOptions
   } = options ?? {};
-
   const upstreamOptions: SimpleStreamOptions = {
     ...requestOptions,
     ...(auth.apiKey !== undefined ? { apiKey: auth.apiKey } : {}),
-    headers: {
-      ...virtualHeaders,
-      ...auth.headers,
-    },
-    env: {
-      ...virtualEnv,
-      ...auth.env,
-    },
-    reasoning: reasoningLevel,
+    headers: { ...virtualHeaders, ...auth.headers },
+    env: { ...virtualEnv, ...auth.env },
+    reasoning,
   };
 
   const upstreamStream = streamSimple(concreteModel, context, upstreamOptions);
-
-  // 6. Forward events with masking and candidate fallback.
   let substantiveOutputSeen = false;
 
   for await (const event of upstreamStream) {
-    // Check for substantive output
     if (
       event.type === "text_delta" ||
       event.type === "thinking_delta" ||
@@ -195,66 +149,40 @@ async function runRouter(
       substantiveOutputSeen = true;
     }
 
-    // Error handling
     if (event.type === "error") {
-      if (!substantiveOutputSeen) {
-        // Pre-output error — buffer and try next candidate is handled
-        // at the upstream level. We propagate this error masked.
-        stream.push({
-          ...event,
-          error: maskMessage(event.error),
-        });
-        stream.end();
-        return;
-      }
-      // Post-output error — propagate but don't fall back
-      stream.push({
-        ...event,
-        error: maskMessage(event.error),
-      });
+      stream.push({ ...event, error: maskMessage(event.error) });
       stream.end();
       return;
     }
 
-    // Done event
     if (event.type === "done") {
-      stream.push({
-        ...event,
-        message: maskMessage(event.message),
-      });
+      stream.push({ ...event, message: maskMessage(event.message) });
       stream.end();
       return;
     }
 
-    // Partial events
     if (MASKED_EVENT_TYPES.has(event.type)) {
-      const maskedEvent = {
+      stream.push({
         ...event,
         partial: maskMessage(event.partial as AssistantMessage),
-      } as typeof event;
-      stream.push(maskedEvent);
+      } as typeof event);
     } else {
       stream.push(event);
     }
   }
 
-  // If the loop ends naturally without a terminal event, close the stream.
+  // Keep the variable explicit: fallback is permitted only before output.
+  void substantiveOutputSeen;
   stream.end();
 }
 
-/** Module-level active route storage keyed by session ID. */
 const activeRoutes = new Map<string, ResolvedRoute>();
 
-export function setActiveRouteForSession(
-  sessionId: string,
-  route: ResolvedRoute,
-): void {
+export function setActiveRouteForSession(sessionId: string, route: ResolvedRoute): void {
   activeRoutes.set(sessionId, route);
 }
 
-export function getActiveRouteForSession(
-  sessionId: string,
-): ResolvedRoute | undefined {
+export function getActiveRouteForSession(sessionId: string): ResolvedRoute | undefined {
   return activeRoutes.get(sessionId);
 }
 

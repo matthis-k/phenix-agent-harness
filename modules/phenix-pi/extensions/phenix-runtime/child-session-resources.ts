@@ -3,52 +3,34 @@
  *
  * Creates a DefaultResourceLoader configured for a child session.
  * It must NOT rediscover and load the root phenix.ts extension.
- *
- * noExtensions: true is intentional — ambient global/project extensions
- * must not be loaded into every child. Only explicitly resolved inline
- * factories may be present.
- *
- * Generic integrations are extracted from phenix.ts into reusable named
- * inline factories so root and children can share them without recursively
- * loading the whole Phenix extension.
  */
-
-import type {
-  DefaultResourceLoaderOptions,
-} from "@earendil-works/pi-coding-agent";
-
-import type { ChildSessionSpec } from "./child-session-types.ts";
-import type { PersonaDefinition } from "./child-session-prompt.ts";
-
-// ── Inline extension registry ───────────────────────────────────────────────
-
-/**
- * A named inline extension factory that can be shared between root and
- * children without recursively loading the whole Phenix extension.
- */
-export interface InlineExtension {
-  readonly ref: string;
-  readonly factory: (pi: unknown) => void | Promise<void>;
-}
-
-/**
- * Registry that resolves stable integration references to inline factories.
- *
- * Each integration has one stable reference such as:
- *   hypa, lsp, mcp, context, web
- */
-export interface CodingSubstrateIntegrationRegistry {
-  resolve(
-    refs: readonly string[],
-  ): Promise<readonly InlineExtension[]>;
-}
-
-// ── Persona loading ─────────────────────────────────────────────────────────
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import type {
+  DefaultResourceLoader,
+  ExtensionAPI,
+  ExtensionFactory,
+} from "@earendil-works/pi-coding-agent";
+
 import type { AgentKind } from "../phenix-kernel/agents.ts";
+import type { PersonaDefinition } from "./child-session-prompt.ts";
+import type { ChildSessionSpec } from "./child-session-types.ts";
+
+export type DefaultResourceLoaderOptions = ConstructorParameters<typeof DefaultResourceLoader>[0];
+
+/** Explicit child-local extension factory. */
+export interface InlineExtension {
+  readonly ref: string;
+  readonly factory: ExtensionFactory;
+}
+
+/** Resolves stable integration references to child-local extension factories. */
+export interface CodingSubstrateIntegrationRegistry {
+  resolve(refs: readonly string[]): Promise<readonly InlineExtension[]>;
+}
 
 function resolvePersonasDir(): string {
   return fileURLToPath(new URL("../../agents", import.meta.url));
@@ -62,11 +44,10 @@ function stripFrontmatter(markdown: string): string {
 }
 
 /**
- * Load a persona definition for a role.
+ * Load persona prose for a role.
  *
- * Returns plain content — no YAML/frontmatter files are generated.
- * Persona files provide prose only. They must not become a second
- * authority for tools, thinking, routing, or delegation.
+ * Persona files are descriptive only; they do not own tools, routing, thinking,
+ * or delegation policy.
  */
 export function loadPersona(role: AgentKind | null): PersonaDefinition {
   if (role === null) {
@@ -78,14 +59,11 @@ export function loadPersona(role: AgentKind | null): PersonaDefinition {
     };
   }
 
-  const personasDir = resolvePersonasDir();
-  const filePath = path.join(personasDir, `${role}.md`);
-
+  const filePath = path.join(resolvePersonasDir(), `${role}.md`);
   try {
-    const content = fs.readFileSync(filePath, "utf-8");
     return {
       role,
-      body: stripFrontmatter(content),
+      body: stripFrontmatter(fs.readFileSync(filePath, "utf-8")),
     };
   } catch {
     return {
@@ -95,19 +73,12 @@ export function loadPersona(role: AgentKind | null): PersonaDefinition {
   }
 }
 
-// ── Child resource loader options ───────────────────────────────────────────
-
-/**
- * Build DefaultResourceLoaderOptions for a child session.
- *
- * The child loader does not load phenix.ts, does not discover ambient
- * project extensions, and only loads explicitly referenced inline factories.
- */
+/** Build an isolated resource-loader configuration for one child session. */
 export function buildChildResourceLoaderOptions(input: {
   readonly spec: ChildSessionSpec;
   readonly agentDir: string;
   readonly systemPrompt: string;
-  readonly extensionFactories?: readonly ((pi: unknown) => void | Promise<void>)[];
+  readonly extensionFactories?: readonly ExtensionFactory[];
   readonly skillPaths?: readonly string[];
 }): DefaultResourceLoaderOptions {
   const { spec, agentDir, systemPrompt } = input;
@@ -115,32 +86,18 @@ export function buildChildResourceLoaderOptions(input: {
   return {
     cwd: spec.cwd,
     agentDir,
-
-    // noExtensions: true — ambient global/project extensions must not be
-    // loaded into every child. Only explicitly resolved inline factories.
     noExtensions: true,
     noSkills: true,
     noPromptTemplates: true,
     noThemes: true,
     noContextFiles: !spec.inheritProjectContext,
-
-    // Only explicitly resolved inline factories are loaded.
-    extensionFactories: [...(input.extensionFactories ?? [])] as any,
-
-    // Skill references are resolved to concrete paths by the caller.
+    extensionFactories: [...(input.extensionFactories ?? [])],
     additionalSkillPaths: [...(input.skillPaths ?? [])],
-
     systemPromptOverride: () => systemPrompt,
   };
 }
 
-/**
- * Infer the minimal integration set from the exact tool allowlist.
- *
- * Agent definitions currently carry tools as the authoritative capability
- * surface. This keeps extension loading derived from that surface instead
- * of reintroducing a second ambient configuration source.
- */
+/** Infer the minimal integration set from the exact child tool allowlist. */
 export function inferChildIntegrationRefs(
   tools: readonly string[],
   explicit: readonly string[],
@@ -172,11 +129,7 @@ export function inferChildIntegrationRefs(
   if (has("lsp")) refs.add("lsp");
   if (has("mcp")) refs.add("mcp");
   if (has("context")) refs.add("context");
-  if (
-    has("web") ||
-    tools.includes("fetch_content") ||
-    tools.includes("get_search_content")
-  ) {
+  if (has("web") || tools.includes("fetch_content") || tools.includes("get_search_content")) {
     refs.add("web");
   }
 
@@ -184,42 +137,40 @@ export function inferChildIntegrationRefs(
 }
 
 /**
- * Resolve named integrations to inline extension factories.
+ * Resolve named integrations to child-local factories.
  *
- * Loading remains explicit and child-local; the root Phenix extension is
- * never rediscovered by DefaultResourceLoader.
+ * The web-tools package currently exposes a one-argument extension factory;
+ * interception policy is owned by that package rather than configured here.
  */
 export async function resolveChildExtensionFactories(
   refs: readonly string[],
-): Promise<readonly ((pi: unknown) => Promise<void>)[]> {
+): Promise<readonly ExtensionFactory[]> {
   return refs.map((ref) => {
     switch (ref) {
       case "hypa":
-        return async (pi: unknown) => {
+        return async (pi: ExtensionAPI) => {
           const mod = await import("@hypabolic/pi-hypa/extensions/index.ts");
-          await mod.default(pi as any);
+          await mod.default(pi);
         };
       case "lsp":
-        return async (pi: unknown) => {
+        return async (pi: ExtensionAPI) => {
           const mod = await import("pi-lsp/extensions/pi-lsp/index.ts");
-          await mod.default(pi as any);
+          await mod.default(pi);
         };
       case "mcp":
-        return async (pi: unknown) => {
+        return async (pi: ExtensionAPI) => {
           const mod = await import("pi-mcp-adapter/index.ts");
-          await mod.default(pi as any);
+          await mod.default(pi);
         };
       case "context":
-        return async (pi: unknown) => {
+        return async (pi: ExtensionAPI) => {
           const mod = await import("pi-context-tools/extensions/index.ts");
-          await mod.default(pi as any);
+          await mod.default(pi);
         };
       case "web":
-        return async (pi: unknown) => {
+        return async (pi: ExtensionAPI) => {
           const mod = await import("@juicesharp/rpiv-web-tools/index.ts");
-          await mod.default(pi as any, {
-            interceptors: { github: true },
-          });
+          await mod.default(pi);
         };
       default:
         throw new Error(`Unknown child extension reference: ${ref}`);
@@ -227,9 +178,7 @@ export async function resolveChildExtensionFactories(
   });
 }
 
-/**
- * Resolve skill references without enabling ambient skill discovery.
- */
+/** Resolve explicit child skill references to concrete paths. */
 export function resolveChildSkillPaths(
   refs: readonly string[],
   agentDir: string,

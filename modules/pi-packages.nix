@@ -16,7 +16,7 @@
       # Bootstrap or refresh with:
       #   nix run .#update-pi-npm-hash
       # Intentionally fake after adding packages. Run `nix run .#update-pi-npm-hash`.
-      piNpmHash = "sha256-XvCLcnzVf/ng42vNuv1qksEocKRBIAUhYqa68tGr0Ec=";
+      piNpmHash = "sha256-EbrJxqF+YURhUVUdlcXillQWist6W1A49Ge1doVD47M=";
 
       piNpmPackages = import ./lib/mk-pi-npm-packages.nix {
         inherit lib pkgs;
@@ -31,7 +31,21 @@
         chmod -R u+w "$out"
 
         rm -rf "$out/node_modules"
-        ln -s ${piNpmPackages}/npm/node_modules "$out/node_modules"
+        cp -R ${piNpmPackages}/npm/node_modules "$out/node_modules"
+        chmod -R u+w "$out/node_modules"
+
+        # Nix packages Pi as a monorepo root plus workspace dependencies. Expose
+        # the three packages imported directly by Phenix without duplicating the
+        # monorepo's transitive dependency tree.
+        piRoot=${pkgs.pi-coding-agent}/lib/node_modules/pi-monorepo
+        mkdir -p "$out/node_modules/@earendil-works"
+        ln -s "$piRoot" "$out/node_modules/@earendil-works/pi-coding-agent"
+        for package in pi-agent-core pi-ai; do
+          source="$piRoot/node_modules/@earendil-works/$package"
+          test -e "$source"
+          rm -rf "$out/node_modules/@earendil-works/$package"
+          ln -s "$source" "$out/node_modules/@earendil-works/$package"
+        done
       '';
 
       phenixRuntimeTests =
@@ -47,6 +61,20 @@
             cd ${phenixPiPackage}
             node --experimental-strip-types --test tests/*.test.ts
             node --check runtime/verify.mjs
+            touch "$out"
+          '';
+
+      phenixTypecheck =
+        pkgs.runCommand "phenix-typecheck"
+          {
+            nativeBuildInputs = [
+              pkgs.nodejs
+              pkgs.typescript
+            ];
+          }
+          ''
+            cd ${phenixPiPackage}
+            tsc --project tsconfig.json --pretty false
             touch "$out"
           '';
 
@@ -182,6 +210,7 @@
         phenix-shell = phenixPiPackage;
         phenix-pi-npm-packages = piNpmPackages;
         phenix-runtime-tests = phenixRuntimeTests;
+        phenix-typecheck = phenixTypecheck;
         phenix-repository-checks = phenixRepositoryChecks;
         phenix-check = phenixCheck;
         phenix-fix-staged = phenixFixStaged;
@@ -192,6 +221,7 @@
       checks = {
         phenix-pi-npm-packages = piNpmPackages;
         phenix-runtime-tests = phenixRuntimeTests;
+        phenix-typecheck = phenixTypecheck;
         phenix-repository-checks = phenixRepositoryChecks;
       };
     };

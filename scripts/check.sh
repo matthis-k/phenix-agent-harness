@@ -15,6 +15,7 @@ case "$mode" in
     bash scripts/check-files.sh "${files[@]}"
     nix build --no-link \
       .#phenix-runtime-tests \
+      .#phenix-typecheck \
       .#phenix-repository-checks
     ;;
   range)

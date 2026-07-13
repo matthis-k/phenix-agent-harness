@@ -197,7 +197,10 @@ function registerTuiProjection(pi: ExtensionAPI): void {
     try {
       const registry = getChildSessionRegistry();
       const activeCount = registry.list().length;
-      ctx.ui.setStatus(`Phenix · ${activeCount} active child${activeCount !== 1 ? "ren" : ""}`);
+      ctx.ui.setStatus(
+        "phenix",
+        `Phenix · ${activeCount} active child${activeCount !== 1 ? "ren" : ""}`,
+      );
     } catch {
       // UI is optional — ignore errors.
     }
@@ -266,7 +269,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
   // Web tools — web search and fetch
   await loadIntegration("web", pi, async (api) => {
     const mod = await import("@juicesharp/rpiv-web-tools/index.ts");
-    await mod.default(api, { interceptors: { github: true } });
+    await mod.default(api);
   });
 
   // ── 3. Register routing ──────────────────────────────────────────────
@@ -333,13 +336,11 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
         decisionContext: spec.workflowProjection,
       });
 
-      // The runtime tool is structurally compatible with Pi. Keep this
-      // conversion at the composition boundary rather than in domain code.
+      // ToolDefinition is invariant in its schema-derived argument type.
+      // Child sessions intentionally accept heterogeneous Pi tools, so erase the
+      // concrete schema only at this composition boundary.
       return [delegationTool as unknown as ToolDefinition];
     },
-    ...(defaultPhenixConfiguration.runtime.rpc
-      ? { rpc: defaultPhenixConfiguration.runtime.rpc }
-      : {}),
   });
 
   // ── 7. Construct the coordinator ─────────────────────────────────────
@@ -406,7 +407,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
 
       const lines = [
         `Phenix: linked graph — ${linkResult.ok ? `${linkResult.graph.contracts.size} contracts, ${linkResult.graph.agentClients.size} clients, ${linkResult.graph.routing.modelSets.size} model sets` : "link errors"}`,
-        `Backend: ${defaultPhenixConfiguration.runtime.childSessionBackend}`,
+        "Backend: sdk",
         `Integrations: ${integrationSummary()}`,
         `LSP config: ${exists(lspConfigPath) ? lspConfigPath : `missing (${lspConfigPath})`}`,
         `Hypa mode: ${hypaMode}`,

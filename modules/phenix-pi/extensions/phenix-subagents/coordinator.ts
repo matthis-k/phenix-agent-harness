@@ -38,7 +38,10 @@ import {
   isChildRuntimeErrorCode,
 } from "../phenix-runtime/child-session-types.ts";
 import { ContractSubmissionChannelImpl } from "../phenix-runtime/contract-channel.ts";
-import type { ParentExecutionContext } from "../phenix-runtime/delegation-tool.ts";
+import type {
+  DelegateExecutionParams,
+  ParentExecutionContext,
+} from "../phenix-runtime/delegation-tool.ts";
 import {
   buildWorkflowDecisionContext,
   buildWorkflowRuntimeDependencies,
@@ -93,24 +96,7 @@ import type { CriticValue, HandleRecord, WorkflowBinding } from "./handle-types.
 import { CRITIC_OUTPUT_SCHEMA, HANDLE_VERSION, isTerminalHandleStatus } from "./handle-types.ts";
 import { runVerificationCommands } from "./verification.ts";
 
-// ── Delegate execution parameters ───────────────────────────────────────────
-
-export interface DelegateExecutionParams {
-  readonly transitionId: string;
-  readonly workflowRevision: number;
-  readonly authorityDigest?: string;
-  readonly task: string;
-  readonly requirements?: readonly string[];
-  readonly tools?: {
-    readonly additional?: readonly string[];
-    readonly removed?: readonly string[];
-  } | null;
-  readonly delegateRoles?: {
-    readonly additional?: readonly string[];
-    readonly removed?: readonly string[];
-  } | null;
-  readonly mode?: "await" | "background";
-}
+// ── Delegate execution result ───────────────────────────────────────────────
 
 export type DelegateExecutionResult =
   | { readonly ok: true; readonly record: HandleRecord }
@@ -235,7 +221,7 @@ export class AgentExecutionCoordinator {
     const selectedModelSet =
       parent.kind === "child" && parent.modelSet
         ? parent.modelSet
-        : ctx.model.provider === PHENIX_PROVIDER
+        : ctx.model?.provider === PHENIX_PROVIDER
           ? (modelSetForModelId(ctx.model.id) ?? this.activeModelSet)
           : this.activeModelSet;
 
