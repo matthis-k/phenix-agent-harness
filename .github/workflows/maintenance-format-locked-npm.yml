@@ -1,0 +1,46 @@
+name: Normalize locked npm sources
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out npm branch
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: build/locked-pi-npm-dependencies
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+
+      - name: Apply deterministic fixes
+        run: |
+          nix run nixpkgs#biome -- check --write \
+            modules/pi-npm/package.json \
+            modules/pi-npm/package-lock.json
+          nix run nixpkgs#statix -- fix modules/pi-packages.nix
+          nix run nixpkgs#nixfmt -- modules/pi-packages.nix
+
+      - name: Commit normalized files
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            modules/pi-npm/package.json \
+            modules/pi-npm/package-lock.json \
+            modules/pi-packages.nix
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "No formatter changes were required."
+            exit 0
+          fi
+          git commit -m "style(npm): normalize locked dependency files"
+          git push origin HEAD:build/locked-pi-npm-dependencies
