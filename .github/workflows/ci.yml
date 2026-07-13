@@ -30,6 +30,9 @@ jobs:
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Validate Tend profiles
+        run: nix run .#tend -- validate --profiles
+
       - name: Check changed files without modifying them
         shell: bash
         run: |
