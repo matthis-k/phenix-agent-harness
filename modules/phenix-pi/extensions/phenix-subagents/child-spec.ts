@@ -26,7 +26,7 @@ import {
 } from "./delegation-policy.ts";
 import type { ContractArtifact } from "./contract.ts";
 import type {
-  WorkflowDefinitionId,
+  DefaultWorkflowDefinitionId,
   WorkflowStateId,
 } from "../phenix-workflow/workflow-types.ts";
 import type { TransitionAuthority } from "../phenix-workflow/transition-authority.ts";
@@ -65,7 +65,7 @@ export interface ResolvedChildSpec {
     readonly actorId: string;
     readonly parentActorId?: string;
 
-    readonly definitionId: WorkflowDefinitionId;
+    readonly definitionId: DefaultWorkflowDefinitionId;
     readonly definitionVersion: 1;
 
     readonly difficulty: Difficulty;
@@ -108,7 +108,7 @@ export interface ResolvedWorkflowChildInput {
   readonly instanceId: string;
   readonly actorId: string;
   readonly parentActorId?: string;
-  readonly definitionId: WorkflowDefinitionId;
+  readonly definitionId: DefaultWorkflowDefinitionId;
   readonly definitionVersion: 1;
   readonly difficulty: Difficulty;
   readonly initialState: WorkflowStateId;
