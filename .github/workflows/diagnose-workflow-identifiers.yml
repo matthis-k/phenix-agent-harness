@@ -1,0 +1,40 @@
+name: Diagnose workflow identifier checks
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out workflow branch
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: qa/09-workflow-types
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+
+      - name: Capture deterministic checks
+        shell: bash
+        run: |
+          set +e
+          nix run .#phenix-check -- range origin/main HEAD > workflow-id-check.log 2>&1
+          echo "$?" > workflow-id-check.status
+          cat workflow-id-check.log
+          exit 0
+
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097 # v4.4.2
+        with:
+          name: workflow-identifier-check-diagnostics
+          path: |
+            workflow-id-check.log
+            workflow-id-check.status
+          if-no-files-found: error
