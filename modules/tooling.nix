@@ -56,15 +56,12 @@ in
 {
   inherit agentRuntime quality;
 
-  tendRuntime = pkgs.lib.unique (
-    quality
-    ++ (with pkgs; [
-      ast-grep
-      bash
-      git
-      nix
-      nodejs
-      typescript
-    ])
-  );
+  tendRuntime = quality ++ (with pkgs; [
+    ast-grep
+    bash
+    git
+    nix
+    nodejs
+    typescript
+  ]);
 }
