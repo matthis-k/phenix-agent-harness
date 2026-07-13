@@ -3,9 +3,9 @@ import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import {
+  type Difficulty,
   deriveTaskProfileFromText,
   difficultyForProfile,
-  type Difficulty,
   type TaskProfile,
 } from "../phenix-kernel/task.ts";
 import { loadRoutingConfig, validateConfig } from "../phenix-routing/config.ts";

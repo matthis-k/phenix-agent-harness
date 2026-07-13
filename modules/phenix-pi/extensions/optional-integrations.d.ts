@@ -29,9 +29,6 @@ declare module "@juicesharp/rpiv-web-tools/index.ts" {
     };
   }
 
-  const register: (
-    pi: ExtensionAPI,
-    options?: WebToolOptions,
-  ) => void | Promise<void>;
+  const register: (pi: ExtensionAPI, options?: WebToolOptions) => void | Promise<void>;
   export default register;
 }

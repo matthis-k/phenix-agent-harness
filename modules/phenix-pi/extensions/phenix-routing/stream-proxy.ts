@@ -110,9 +110,7 @@ async function runRouter(
     route.model.model,
   );
   if (!concreteModel) {
-    throw new Error(
-      `Model is not registered in Pi: ${route.model.provider}/${route.model.model}`,
-    );
+    throw new Error(`Model is not registered in Pi: ${route.model.provider}/${route.model.model}`);
   }
 
   const auth = await modelRegistry.getApiKeyAndHeaders(concreteModel);
@@ -180,16 +178,11 @@ async function runRouter(
 
 const activeRoutes = new Map<string, ResolvedRoute>();
 
-export function setActiveRouteForSession(
-  sessionId: string,
-  route: ResolvedRoute,
-): void {
+export function setActiveRouteForSession(sessionId: string, route: ResolvedRoute): void {
   activeRoutes.set(sessionId, route);
 }
 
-export function getActiveRouteForSession(
-  sessionId: string,
-): ResolvedRoute | undefined {
+export function getActiveRouteForSession(sessionId: string): ResolvedRoute | undefined {
   return activeRoutes.get(sessionId);
 }
 

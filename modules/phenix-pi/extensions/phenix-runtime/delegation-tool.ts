@@ -6,15 +6,9 @@
  */
 
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import type {
-  ExtensionContext,
-  ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
-import {
-  DelegateParams,
-  type DelegateParamsType,
-} from "../phenix-subagents/delegate-schema.ts";
+import { DelegateParams, type DelegateParamsType } from "../phenix-subagents/delegate-schema.ts";
 import type { WorkflowDecisionContext } from "../phenix-workflow/workflow-projection.ts";
 import type { ChildParentExecutionContext } from "./child-session-types.ts";
 
@@ -118,10 +112,7 @@ export function createDelegationTool(input: {
           );
         }
 
-        if (
-          params.mode === "background" &&
-          !matchingOption.allowedModes.includes("background")
-        ) {
+        if (params.mode === "background" && !matchingOption.allowedModes.includes("background")) {
           return errorResult(
             `phenix_delegate: background mode is not allowed for transition "${params.transitionId}". ` +
               `Allowed modes: ${matchingOption.allowedModes.join(", ")}.`,

@@ -5,11 +5,11 @@ import { registerPhenixProvider } from "./provider.ts";
 import { modelRegistry } from "./registry.ts";
 import { getSessionRuntime } from "./state.ts";
 
-export { modelRegistry };
 export {
   getActiveRouteForSession,
   setActiveRouteForSession,
 } from "./stream-proxy.ts";
+export { modelRegistry };
 
 /** Register the virtual provider and bind per-session routing state. */
 export default async function phenixRouting(pi: ExtensionAPI): Promise<void> {

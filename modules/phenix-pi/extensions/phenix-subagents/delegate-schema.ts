@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { type Static, Type } from "typebox";
 
 const AgentRoleSchema = Type.Union([
   Type.Literal("scout"),
@@ -45,9 +45,7 @@ export const DelegateParams = Type.Object(
       minLength: 1,
       description: "Task-specific context for the runtime-selected transition and role.",
     }),
-    requirements: Type.Optional(
-      Type.Array(Type.String({ minLength: 1 }), { maxItems: 64 }),
-    ),
+    requirements: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 64 })),
     tools: ToolPatchSchema,
     delegateRoles: Type.Optional(
       Type.Union([
@@ -61,9 +59,7 @@ export const DelegateParams = Type.Object(
         ),
       ]),
     ),
-    mode: Type.Optional(
-      Type.Union([Type.Literal("await"), Type.Literal("background")]),
-    ),
+    mode: Type.Optional(Type.Union([Type.Literal("await"), Type.Literal("background")])),
   },
   { additionalProperties: false },
 );
