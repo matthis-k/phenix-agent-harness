@@ -19,8 +19,8 @@ done < <(
     -maxdepth 1 \
     -type f \
     \( -name '*.sh' -o -path "$repo_root/.githooks/*" \) \
-    -print0 \
-    | sort -z
+    -print0 |
+    sort -z
 )
 
 bash -n "${shell_files[@]}"
