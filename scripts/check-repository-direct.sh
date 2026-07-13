@@ -9,21 +9,25 @@ fi
 repo_root="${1:-$(git rev-parse --show-toplevel)}"
 repo_root="$(cd "$repo_root" && pwd)"
 
-shell_files=(
-  "$repo_root/scripts/check-files.sh"
-  "$repo_root/scripts/check-repository-direct.sh"
-  "$repo_root/scripts/check-runtime-direct.sh"
-  "$repo_root/scripts/format-files.sh"
-  "$repo_root/scripts/setup-git-hooks.sh"
-  "$repo_root/.githooks/pre-commit"
-  "$repo_root/.githooks/pre-push"
+shell_files=()
+while IFS= read -r -d '' file; do
+  shell_files+=("$file")
+done < <(
+  find \
+    "$repo_root/scripts" \
+    "$repo_root/.githooks" \
+    -maxdepth 1 \
+    -type f \
+    \( -name '*.sh' -o -path "$repo_root/.githooks/*" \) \
+    -print0 \
+    | sort -z
 )
 
 bash -n "${shell_files[@]}"
 shellcheck "${shell_files[@]}"
 shfmt -d -i 2 -ci "${shell_files[@]}"
 
-actionlint "$repo_root/.github/workflows/ci.yml"
+actionlint "$repo_root"/.github/workflows/*.yml
 biome ci \
   --config-path "$repo_root/biome.json" \
   --no-errors-on-unmatched \
