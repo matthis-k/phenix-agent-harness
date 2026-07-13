@@ -4,6 +4,7 @@ _:
   perSystem =
     { pkgs, ... }:
     let
+      tooling = import ./tooling.nix { inherit pkgs; };
       piNpmRoot = ./pi-npm;
 
       # package-lock.json is the sole dependency authority. importNpmLock
@@ -78,18 +79,7 @@ _:
             touch "$out"
           '';
 
-      qualityTools = [
-        pkgs.actionlint
-        pkgs.biome
-        pkgs.coreutils
-        pkgs.diffutils
-        pkgs.git
-        pkgs.gnugrep
-        pkgs.nixfmt
-        pkgs.shellcheck
-        pkgs.shfmt
-        pkgs.statix
-      ];
+      qualityTools = tooling.quality;
 
       phenixRepositoryChecks =
         pkgs.runCommand "phenix-repository-checks"
@@ -100,6 +90,8 @@ _:
             bash -n \
               ${../scripts/check.sh} \
               ${../scripts/check-files.sh} \
+              ${../scripts/check-all-files.sh} \
+              ${../scripts/check-runtime-direct.sh} \
               ${../scripts/fix-staged.sh} \
               ${../scripts/setup-git-hooks.sh} \
               ${../.githooks/pre-commit} \
@@ -107,6 +99,8 @@ _:
             shellcheck \
               ${../scripts/check.sh} \
               ${../scripts/check-files.sh} \
+              ${../scripts/check-all-files.sh} \
+              ${../scripts/check-runtime-direct.sh} \
               ${../scripts/fix-staged.sh} \
               ${../scripts/setup-git-hooks.sh} \
               ${../.githooks/pre-commit} \
@@ -114,6 +108,8 @@ _:
             shfmt -d -i 2 -ci \
               ${../scripts/check.sh} \
               ${../scripts/check-files.sh} \
+              ${../scripts/check-all-files.sh} \
+              ${../scripts/check-runtime-direct.sh} \
               ${../scripts/fix-staged.sh} \
               ${../scripts/setup-git-hooks.sh} \
               ${../.githooks/pre-commit} \
@@ -123,7 +119,8 @@ _:
               --config-path ${../biome.json} \
               --no-errors-on-unmatched \
               --files-ignore-unknown=true \
-              ${../biome.json}
+              ${../biome.json} \
+              ${../.tend.json}
             touch "$out"
           '';
 
