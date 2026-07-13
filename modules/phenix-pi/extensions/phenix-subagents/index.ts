@@ -20,7 +20,7 @@ import { type HandleRecord, TERMINAL_STATES } from "./handle-types.ts";
 // ── Types ───────────────────────────────────────────────────────────────────
 
 interface PiEvents {
-  on(event: string, handler: (payload: unknown) => void): (() => void) | void;
+  on(event: string, handler: (payload: unknown) => void): (() => void) | undefined;
 }
 
 // ── Tool result helpers ─────────────────────────────────────────────────────
