@@ -1,0 +1,53 @@
+name: Regenerate npm lock without Pi peers
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out npm branch
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: build/locked-pi-npm-dependencies
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+
+      - name: Regenerate dependency lock
+        run: |
+          rm modules/pi-npm/package-lock.json
+          nix shell nixpkgs#nodejs -c npm install \
+            --prefix modules/pi-npm \
+            --package-lock-only \
+            --ignore-scripts \
+            --legacy-peer-deps \
+            --no-audit \
+            --no-fund
+          nix run nixpkgs#biome -- check --write modules/pi-npm/package-lock.json
+          nix run nixpkgs#nixfmt -- modules/pi-packages.nix
+
+      - name: Assert Pi peers are not locked
+        run: |
+          if grep -q 'node_modules/@earendil-works/pi-coding-agent' modules/pi-npm/package-lock.json; then
+            echo 'Pi peer dependency was unexpectedly written into package-lock.json' >&2
+            exit 1
+          fi
+
+      - name: Commit regenerated lock
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            modules/pi-npm/package-lock.json \
+            modules/pi-packages.nix
+          git diff --cached --check
+          git commit -m "build(npm): exclude Nix-provided Pi peers from lock"
+          git push origin HEAD:build/locked-pi-npm-dependencies
