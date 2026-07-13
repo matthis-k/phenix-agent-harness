@@ -1,10 +1,22 @@
-import type { AgentKind, AgentRole } from "../phenix-kernel/agents.ts";
-import type { Difficulty, TaskProfile } from "../phenix-kernel/task.ts";
+import { type AgentKind, type AgentRole, isAgentKind } from "../phenix-kernel/agents.ts";
+import { type WorkflowTransitionId, workflowTransitionId } from "../phenix-kernel/ids.ts";
 import type { AgentClientRef, ContractDefinitionRef } from "../phenix-kernel/refs.ts";
+import type { Difficulty, TaskProfile } from "../phenix-kernel/task.ts";
+import type { TransitionAuthority } from "./transition-authority.ts";
 
-// ── Workflow definition identity ────────────────────────────────────────────
+/**
+ * Closed identity of the workflow implementation shipped by this package.
+ *
+ * Kernel `WorkflowDefinitionId` remains the open branded vocabulary used for
+ * symbolic references. Runtime records are deliberately narrower while Phenix
+ * supports exactly one built-in workflow.
+ */
+export type DefaultWorkflowDefinitionId = "phenix-default";
 
-export type WorkflowDefinitionId = "phenix-default";
+export type { WorkflowTransitionId };
+
+/** Construct a validated open workflow-transition identifier. */
+export const mkTransitionId = workflowTransitionId;
 
 // ── Workflow states (semantic task progression) ─────────────────────────────
 
@@ -28,16 +40,6 @@ export type WorkflowStateId =
   | "reviewing"
   // Base execution state
   | "executing";
-
-declare const workflowTransitionBrand: unique symbol;
-
-export type WorkflowTransitionId = string & {
-  readonly [workflowTransitionBrand]: true;
-};
-
-export function mkTransitionId(id: string): WorkflowTransitionId {
-  return id as WorkflowTransitionId;
-}
 
 // ── Delegation purposes ─────────────────────────────────────────────────────
 
@@ -133,14 +135,10 @@ export interface DelegateTransition extends TransitionBase {
 
   readonly allowedModes: ReadonlyArray<"await" | "background">;
 
-  /**
-   * State after the transition's accepted child handle.
-   */
+  /** State after the transition's accepted child handle. */
   readonly onAccepted: WorkflowStateId;
 
-  /**
-   * State after terminal rejection/failure.
-   */
+  /** State after terminal rejection/failure. */
   readonly onRejected: WorkflowStateId;
 
   /** Optional state-machine conditions. */
@@ -173,7 +171,7 @@ export type WorkflowTransition = DelegateTransition | AutomaticTransition;
 // ── Workflow definition ─────────────────────────────────────────────────────
 
 export interface WorkflowDefinition {
-  readonly id: WorkflowDefinitionId;
+  readonly id: DefaultWorkflowDefinitionId;
   readonly version: 1;
 
   readonly initialState: WorkflowStateId;
@@ -183,32 +181,46 @@ export interface WorkflowDefinition {
 
 // ── Output schema identifiers ───────────────────────────────────────────────
 
-export type WorkflowOutputSchemaId =
-  | "scout-handoff"
-  | "planner-handoff"
-  | "architecture-handoff"
-  | "implementation-handoff"
-  | "test-handoff"
-  | "finalizer-handoff"
-  | "critic-handoff"
-  | "base-handoff";
+export const WORKFLOW_OUTPUT_SCHEMA_IDS = [
+  "scout-handoff",
+  "planner-handoff",
+  "architecture-handoff",
+  "implementation-handoff",
+  "test-handoff",
+  "finalizer-handoff",
+  "critic-handoff",
+  "base-handoff",
+] as const;
 
-export function roleForAgentClient(
-  ref: AgentClientRef,
-): AgentRole {
-  return ref.id === "base" ? null : ref.id as AgentKind;
+export type WorkflowOutputSchemaId = (typeof WORKFLOW_OUTPUT_SCHEMA_IDS)[number];
+
+export function isWorkflowOutputSchemaId(value: unknown): value is WorkflowOutputSchemaId {
+  return (
+    typeof value === "string" && WORKFLOW_OUTPUT_SCHEMA_IDS.some((schemaId) => schemaId === value)
+  );
 }
 
-export function actorRoleForAgentClient(
-  ref: AgentClientRef,
-): "base" | "coordinator" | AgentKind {
-  return ref.id as "base" | "coordinator" | AgentKind;
+/** Convert a linked agent client into the child-runtime role vocabulary. */
+export function roleForAgentClient(ref: AgentClientRef): AgentRole {
+  if (ref.id === "base") return null;
+  if (isAgentKind(ref.id)) return ref.id;
+
+  throw new Error(`Agent client "${ref.id}" cannot be used as a child execution role`);
 }
 
-export function outputSchemaIdForContract(
-  ref: ContractDefinitionRef,
-): WorkflowOutputSchemaId {
-  return ref.id as WorkflowOutputSchemaId;
+/** Convert a linked agent client into the workflow actor vocabulary. */
+export function actorRoleForAgentClient(ref: AgentClientRef): "base" | "coordinator" | AgentKind {
+  if (ref.id === "base" || ref.id === "coordinator") return ref.id;
+  if (isAgentKind(ref.id)) return ref.id;
+
+  throw new Error(`Agent client "${ref.id}" cannot be used as a workflow actor role`);
+}
+
+/** Convert a contract reference into the workflow schema registry vocabulary. */
+export function outputSchemaIdForContract(ref: ContractDefinitionRef): WorkflowOutputSchemaId {
+  if (isWorkflowOutputSchemaId(ref.id)) return ref.id;
+
+  throw new Error(`Contract "${ref.id}" has no workflow output-schema projection`);
 }
 
 // ── Runtime workflow record ─────────────────────────────────────────────────
@@ -237,7 +249,7 @@ export interface WorkflowRuntimeRecord {
 
   readonly sessionId: string;
 
-  readonly definitionId: WorkflowDefinitionId;
+  readonly definitionId: DefaultWorkflowDefinitionId;
   readonly definitionVersion: 1;
 
   readonly difficulty: Difficulty;
@@ -261,8 +273,6 @@ export interface WorkflowRuntimeRecord {
 }
 
 // ── Delegation authority ────────────────────────────────────────────────────
-
-import type { TransitionAuthority } from "./transition-authority.ts";
 
 export interface DelegateRolePatch {
   readonly additional: readonly AgentRole[];
@@ -312,7 +322,7 @@ export interface WorkflowContractArtifact {
       readonly instanceId: string;
       readonly actorId: string;
       readonly parentActorId?: string;
-      readonly definitionId: WorkflowDefinitionId;
+      readonly definitionId: DefaultWorkflowDefinitionId;
       readonly definitionVersion: 1;
       readonly difficulty: Difficulty;
       readonly initialState: WorkflowStateId;
