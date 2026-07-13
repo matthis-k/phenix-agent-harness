@@ -210,7 +210,8 @@ export function roleForAgentClient(ref: AgentClientRef): AgentRole {
 
 /** Convert a linked agent client into the workflow actor vocabulary. */
 export function actorRoleForAgentClient(ref: AgentClientRef): "base" | "coordinator" | AgentKind {
-  if (ref.id === "base" || ref.id === "coordinator") return ref.id;
+  if (ref.id === "base") return "base";
+  if (ref.id === "coordinator") return "coordinator";
   if (isAgentKind(ref.id)) return ref.id;
 
   throw new Error(`Agent client "${ref.id}" cannot be used as a workflow actor role`);
