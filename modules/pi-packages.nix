@@ -1,28 +1,28 @@
-{ lib, ... }:
+_:
 
 {
   perSystem =
     { pkgs, ... }:
     let
-      piNpmPackageSpecs = {
-        "@hypabolic/pi-hypa" = "npm:@hypabolic/pi-hypa@0.1.10";
-        "@juicesharp/rpiv-web-tools" = "npm:@juicesharp/rpiv-web-tools@1.20.0";
-        "pi-context-tools" = "npm:pi-context-tools@0.1.1";
-        "pi-lsp" = "npm:pi-lsp@0.1.7";
-        "pi-mcp-adapter" = "npm:pi-mcp-adapter@2.11.0";
-        "typebox" = "npm:typebox@1.1.24";
-      };
+      piNpmRoot = ./pi-npm;
 
-      # Bootstrap or refresh with:
-      #   nix run .#update-pi-npm-hash
-      # Intentionally fake after adding packages. Run `nix run .#update-pi-npm-hash`.
-      piNpmHash = "sha256-EbrJxqF+YURhUVUdlcXillQWist6W1A49Ge1doVD47M=";
-
-      piNpmPackages = import ./lib/mk-pi-npm-packages.nix {
-        inherit lib pkgs;
-        pi = pkgs.pi-coding-agent;
-        packages = piNpmPackageSpecs;
-        hash = piNpmHash;
+      # package-lock.json is the sole dependency authority. importNpmLock
+      # resolves every registry or Git dependency from its recorded integrity
+      # hash or commit without a repository-wide fixed-output hash.
+      #
+      # Pi packages are peers of the extension packages but are supplied from
+      # pkgs.pi-coding-agent below. The lockfile is therefore generated and
+      # installed with legacy-peer-deps so npm does not duplicate Pi and its
+      # shrinkwrap graph.
+      piNpmPackages = pkgs.importNpmLock.buildNodeModules {
+        npmRoot = piNpmRoot;
+        inherit (pkgs) nodejs;
+        derivationArgs = {
+          pname = "phenix-pi-npm-packages";
+          version = "1.0.0";
+          npmFlags = [ "--legacy-peer-deps" ];
+          npm_config_ignore_scripts = true;
+        };
       };
 
       phenixPiPackage = pkgs.runCommand "phenix-pi-package" { } ''
@@ -31,7 +31,7 @@
         chmod -R u+w "$out"
 
         rm -rf "$out/node_modules"
-        cp -R ${piNpmPackages}/npm/node_modules "$out/node_modules"
+        cp -R ${piNpmPackages}/node_modules "$out/node_modules"
         chmod -R u+w "$out/node_modules"
 
         # Nix packages Pi as a monorepo root plus workspace dependencies. Expose
@@ -160,47 +160,24 @@
         '';
       };
 
-      updatePiNpmHash = pkgs.writeShellApplication {
-        name = "update-pi-npm-hash";
-        runtimeInputs = [
-          pkgs.nix
-          pkgs.coreutils
-          pkgs.gnused
-        ];
-
+      updatePiNpmLock = pkgs.writeShellApplication {
+        name = "update-pi-npm-lock";
+        runtimeInputs = [ pkgs.nodejs ];
         text = ''
-          if [[ ! -f modules/pi-packages.nix ]]; then
+          if [[ ! -f modules/pi-npm/package.json ]]; then
             echo "run this command from the phenix-agent-harness repository root" >&2
             exit 1
           fi
 
-          set +e
-          build_log="$(nix build --no-link .#phenix-pi-npm-packages 2>&1)"
-          build_status=$?
-          set -e
+          npm install \
+            --prefix modules/pi-npm \
+            --package-lock-only \
+            --ignore-scripts \
+            --legacy-peer-deps \
+            --no-audit \
+            --no-fund
 
-          if [[ $build_status -eq 0 ]]; then
-            echo "Pi npm package hash is already valid."
-            exit 0
-          fi
-
-          got_hash="$(
-            printf '%s\n' "$build_log" \
-              | sed -nE 's/^[[:space:]]*got:[[:space:]]*(sha256-[^[:space:]]+).*$/\1/p' \
-              | tail -n 1
-          )"
-
-          if [[ -z "$got_hash" ]]; then
-            printf '%s\n' "$build_log" >&2
-            echo "could not extract the fixed-output hash" >&2
-            exit "$build_status"
-          fi
-
-          sed -i -E \
-            's|^      piNpmHash = .*;|      piNpmHash = "'"$got_hash"'";|' \
-            modules/pi-packages.nix
-
-          echo "Updated piNpmHash to $got_hash"
+          echo "Updated modules/pi-npm/package-lock.json"
         '';
       };
     in
@@ -215,7 +192,7 @@
         phenix-check = phenixCheck;
         phenix-fix-staged = phenixFixStaged;
         setup-git-hooks = setupGitHooks;
-        update-pi-npm-hash = updatePiNpmHash;
+        update-pi-npm-lock = updatePiNpmLock;
       };
 
       checks = {

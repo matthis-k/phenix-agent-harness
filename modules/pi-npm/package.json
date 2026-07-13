@@ -1,0 +1,14 @@
+{
+  "name": "phenix-pi-runtime-dependencies",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Locked npm dependency set embedded into the Phenix Pi package.",
+  "dependencies": {
+    "@hypabolic/pi-hypa": "0.1.10",
+    "@juicesharp/rpiv-web-tools": "1.20.0",
+    "pi-context-tools": "0.1.1",
+    "pi-lsp": "0.1.7",
+    "pi-mcp-adapter": "2.11.0",
+    "typebox": "1.1.24"
+  }
+}
