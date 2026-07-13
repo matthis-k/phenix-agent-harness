@@ -24,7 +24,6 @@ import {
   resolveDelegateRoleConfiguration,
 } from "./delegation-policy.ts";
 import {
-  type ResolvedExecutionPolicy,
   type RuntimePolicyConfig,
   resolveExecutionPolicy,
 } from "./policy.ts";
@@ -154,94 +153,53 @@ export function resolveChildSpec(input: ChildSpecInput): ResolvedChildSpec {
     task: input.task,
     requirements: input.requirements,
     profileHint: input.profileHint,
-    cwd: input.cwd,
     config: input.config,
   });
 
-  // 2. Determine inherited patches from creator context.
-  let inheritedToolPatch: ToolPatch | undefined;
-  let delegableTools: readonly string[] | undefined;
+  // 2. Resolve tools from role preset + caller patch.
+  const toolPatch: ToolPatch | undefined = input.tools
+    ? {
+        additional: input.tools.additional ?? [],
+        removed: input.tools.removed ?? [],
+      }
+    : undefined;
+  const tools = resolveToolConfiguration(input.role, toolPatch);
 
-  let inheritedRolePatch: DelegateRolePatchInput | undefined;
-  let delegableRoleCeiling: readonly AgentRole[] | undefined;
-  let remainingDepth: number;
+  // 3. Resolve delegation roles from role preset + caller patch.
+  const delegationRoles = resolveDelegateRoleConfiguration(
+    input.role,
+    input.delegateRoles,
+  );
 
-  if (input.creator.kind === "child") {
-    inheritedToolPatch = input.creator.contract.runtime.tools.source.patch;
-    delegableTools = input.creator.contract.runtime.tools.effective;
-
-    inheritedRolePatch = input.creator.contract.runtime.delegation.roles.source.patch;
-    delegableRoleCeiling = input.creator.contract.runtime.delegation.roles.effective;
-
-    remainingDepth = Math.max(0, input.creator.contract.runtime.delegation.remainingDepth - 1);
-  } else {
-    // root or runtime-internal: no inherited patches, unrestricted ceilings.
-    inheritedToolPatch = undefined;
-    delegableTools = undefined;
-    inheritedRolePatch = undefined;
-    delegableRoleCeiling = undefined;
-    remainingDepth = input.creator.maximumDelegationDepth;
-  }
-
-  // 3. Resolve tool configuration.
-  const tools = resolveToolConfiguration({
-    role: input.role,
-    requested: input.tools,
-    inheritedPatch: inheritedToolPatch,
-    delegableTools,
-  });
-
-  // 4. Resolve delegate role configuration.
-  const roles = resolveDelegateRoleConfiguration({
-    role: input.role,
-    requested: input.delegateRoles ?? null,
-    inheritedPatch: inheritedRolePatch
-      ? {
-          additional: [...(inheritedRolePatch.additional ?? [])],
-          removed: [...(inheritedRolePatch.removed ?? [])],
-        }
-      : undefined,
-    delegableRoles: delegableRoleCeiling,
-  });
-
-  // 5. Filter available roles against capability artifact.
-  const availableRoles = roles.effective.filter((role) =>
+  // 4. Restrict effective delegation roles to clients that are both present in
+  // the immutable capability artifact and authorized by this role's preset.
+  const availableRoles = delegationRoles.effective.filter((role) =>
     isSpawnableAgent(input.capabilityArtifact, role),
   );
 
+  // 5. Calculate remaining depth from creator context.
+  const remainingDepth =
+    input.creator.kind === "child"
+      ? Math.max(0, input.creator.contract.runtime.delegation.remainingDepth - 1)
+      : input.creator.maximumDelegationDepth;
+
   return {
     role: input.role,
-    agent: policy.agent,
+    agent: input.role === null ? "phenix.base" : `phenix.${input.role}`,
     profile: policy.profile,
     tier: policy.tier,
-    model: input.model ?? policy.model,
+    ...(input.model ? { model: input.model } : {}),
     thinking: input.thinking ?? policy.thinking,
     cwd: input.cwd,
     tools,
     skills: input.skills ?? [],
     extensions: input.extensions ?? [],
     delegation: {
-      roles,
+      roles: delegationRoles,
       availableRoles,
       remainingDepth,
     },
-    workflow: {
-      instanceId: input.workflow.instanceId,
-      actorId: input.workflow.actorId,
-      parentActorId: input.workflow.parentActorId,
-      definitionId: input.workflow.definitionId,
-      definitionVersion: input.workflow.definitionVersion,
-      difficulty: input.workflow.difficulty,
-      initialState: input.workflow.initialState,
-      transitionAuthority:
-        input.workflow.transitionAuthority.kind === "unrestricted"
-          ? { kind: "unrestricted" as const }
-          : {
-              kind: "restricted" as const,
-              allowed: [...input.workflow.transitionAuthority.allowed],
-            },
-      capabilityArtifactHash: input.workflow.capabilityArtifactHash,
-    },
+    workflow: input.workflow,
     timeoutMs: policy.timeoutMs,
     turnBudget: policy.turnBudget,
     toolBudget: policy.toolBudget,
