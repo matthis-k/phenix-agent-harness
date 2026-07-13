@@ -75,6 +75,8 @@
           ++ tooling.quality
           ++ [
             phenixTend
+            self'.packages.stitch
+            self'.packages.stitch-mcp
             self'.packages.setup-git-hooks
             self'.packages.update-pi-npm-lock
           ];
@@ -84,6 +86,8 @@
           echo "  tend check --profile manual --context local"
           echo "  tend check --profile pre-push --context local"
           echo "  tend check --profile fix --context local"
+          echo "  stitch workspace discover --json"
+          echo "  stitch verify --changed --profile manual --context local"
         '';
       };
     };
