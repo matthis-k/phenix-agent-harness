@@ -73,20 +73,18 @@
           "changed": {
             "paths": [
               ".github/**",
-              ".githooks/**",
               ".tend.json",
               "*.json",
               "*.jsonc",
               "*.nix",
-              "modules/**",
-              "scripts/**"
+              "modules/**"
             ]
           }
         },
         "implementations": {
           "default": {
             "kind": "command",
-            "command": ["bash", "scripts/check-files.sh"],
+            "command": ["phenix-check-files"],
             "file_args": "matched",
             "sandbox_safe": true
           }
@@ -94,25 +92,23 @@
       },
       {
         "id": "repository-checks",
-        "description": "Run repository-wide script, workflow, and configuration checks",
+        "description": "Run repository-wide workflow and configuration checks",
         "phase": "verify",
         "when": {
           "changed": {
             "paths": [
               ".github/**",
-              ".githooks/**",
               ".tend.json",
               "biome.json",
               "*.nix",
-              "modules/**/*.nix",
-              "scripts/**"
+              "modules/**/*.nix"
             ]
           }
         },
         "implementations": {
           "default": {
             "kind": "command",
-            "command": ["bash", "scripts/check-repository-direct.sh"],
+            "command": ["phenix-check-repository"],
             "sandbox_safe": true
           }
         }
@@ -140,7 +136,7 @@
           },
           "direct": {
             "kind": "command",
-            "command": ["bash", "scripts/check-runtime-direct.sh", "runtime-tests"],
+            "command": ["phenix-check-runtime", "runtime-tests"],
             "sandbox_safe": true
           }
         }
@@ -162,7 +158,7 @@
           },
           "direct": {
             "kind": "command",
-            "command": ["bash", "scripts/check-runtime-direct.sh", "typecheck"],
+            "command": ["phenix-check-runtime", "typecheck"],
             "sandbox_safe": true
           }
         }
@@ -187,20 +183,18 @@
         "when": {
           "changed": {
             "paths": [
-              ".githooks/**",
               ".tend.json",
               "*.json",
               "*.jsonc",
               "*.nix",
-              "modules/**",
-              "scripts/**"
+              "modules/**"
             ]
           }
         },
         "implementations": {
           "default": {
             "kind": "command",
-            "command": ["bash", "scripts/format-files.sh"],
+            "command": ["phenix-format-files"],
             "file_args": "matched",
             "mutates": true
           }
