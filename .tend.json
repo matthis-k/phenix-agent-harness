@@ -28,13 +28,7 @@
     "ci": {
       "phase": "verify",
       "selection": "git-range",
-      "tasks": [
-        "changed-files",
-        "repository-checks",
-        "runtime-tests",
-        "typecheck",
-        "flake-check"
-      ],
+      "tasks": ["changed-files", "repository-checks", "runtime-tests", "typecheck", "flake-check"],
       "contexts": ["local"]
     },
     "fix": {
@@ -156,13 +150,7 @@
         "implementations": {
           "nix": {
             "kind": "command",
-            "command": [
-              "nix",
-              "build",
-              "--no-link",
-              "--print-build-logs",
-              ".#phenix-typecheck"
-            ],
+            "command": ["nix", "build", "--no-link", "--print-build-logs", ".#phenix-typecheck"],
             "network": true
           },
           "direct": {
