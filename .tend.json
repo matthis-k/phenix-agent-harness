@@ -33,11 +33,11 @@
         "always": true
       },
       {
-        "id": "repository-files",
-        "description": "Check every tracked and unignored repository file",
+        "id": "repository-checks",
+        "description": "Run repository scripts, workflow, and configuration checks",
         "phase": "verify",
         "kind": "command",
-        "command": ["bash", "scripts/check-all-files.sh"],
+        "command": ["bash", "scripts/check-repository-direct.sh"],
         "profiles": ["manual", "nix-check"],
         "tags": ["format", "lint", "repository"],
         "sandbox_safe": true,
