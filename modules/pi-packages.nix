@@ -11,16 +11,17 @@ _:
       # hash or commit without a repository-wide fixed-output hash.
       #
       # Pi packages are peers of the extension packages but are supplied from
-      # pkgs.pi-coding-agent below. The lockfile is therefore generated with
-      # legacy-peer-deps so npm does not duplicate Pi and its shrinkwrap graph.
+      # pkgs.pi-coding-agent below. The lockfile is therefore generated and
+      # installed with legacy-peer-deps so npm does not duplicate Pi and its
+      # shrinkwrap graph.
       piNpmPackages = pkgs.importNpmLock.buildNodeModules {
         npmRoot = piNpmRoot;
         inherit (pkgs) nodejs;
         derivationArgs = {
           pname = "phenix-pi-npm-packages";
           version = "1.0.0";
+          npmFlags = [ "--legacy-peer-deps" ];
           npm_config_ignore_scripts = true;
-          npm_config_legacy_peer_deps = true;
         };
       };
 
