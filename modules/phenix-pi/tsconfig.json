@@ -11,7 +11,15 @@
     "forceConsistentCasingInFileNames": true,
     "strict": true,
     "noImplicitAny": false,
-    "types": ["node"]
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@hypabolic/pi-hypa/extensions/index.ts": ["extensions/optional-integrations.d.ts"],
+      "pi-lsp/extensions/pi-lsp/index.ts": ["extensions/optional-integrations.d.ts"],
+      "pi-mcp-adapter/index.ts": ["extensions/optional-integrations.d.ts"],
+      "pi-context-tools/extensions/index.ts": ["extensions/optional-integrations.d.ts"],
+      "@juicesharp/rpiv-web-tools/index.ts": ["extensions/optional-integrations.d.ts"]
+    }
   },
   "include": ["extensions/**/*.ts"],
   "exclude": ["node_modules"]
