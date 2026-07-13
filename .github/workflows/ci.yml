@@ -30,90 +30,28 @@ jobs:
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Validate Tend profiles
-        run: nix run .#tend -- validate --profiles
-
-      - name: Check changed files without modifying them
-        id: changed-files
+      - name: Run Tend CI profile
+        id: tend
         shell: bash
+        env:
+          TEND_DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
+          TEND_DIFF_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set +e
-          set -uo pipefail
-          zero_sha="0000000000000000000000000000000000000000"
-
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            base="${{ github.event.pull_request.base.sha }}"
-            head="${{ github.event.pull_request.head.sha }}"
-          elif [[ -n "${{ github.event.before }}" && "${{ github.event.before }}" != "$zero_sha" ]]; then
-            base="${{ github.event.before }}"
-            head="${{ github.sha }}"
-          else
-            base="${{ github.sha }}^"
-            head="${{ github.sha }}"
-          fi
-
-          nix run .#phenix-check -- range "$base" "$head" > changed-files.log 2>&1
+          nix run .#tend -- check --profile ci --locked > tend-ci.log 2>&1
           status=$?
-          cat changed-files.log
+          cat tend-ci.log
           echo "status=$status" >> "$GITHUB_OUTPUT"
           exit 0
 
-      - name: Upload changed-file diagnostics
-        if: steps.changed-files.outputs.status != '0'
+      - name: Upload Tend diagnostics
+        if: steps.tend.outputs.status != '0'
         uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097 # v4.4.2
         with:
-          name: changed-file-diagnostics
-          path: changed-files.log
+          name: tend-ci-diagnostics
+          path: tend-ci.log
           if-no-files-found: error
 
-      - name: Fail when changed-file checks fail
-        if: steps.changed-files.outputs.status != '0'
-        run: exit 1
-
-      - name: Run TypeScript compiler check
-        id: typecheck
-        if: steps.changed-files.outputs.status == '0'
-        shell: bash
-        run: |
-          set +e
-          nix build --no-link --print-build-logs .#phenix-typecheck > typecheck.log 2>&1
-          status=$?
-          cat typecheck.log
-          echo "status=$status" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: Upload compiler diagnostics
-        if: steps.typecheck.outputs.status != '0'
-        uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097 # v4.4.2
-        with:
-          name: typecheck-diagnostics
-          path: typecheck.log
-          if-no-files-found: error
-
-      - name: Fail when compiler check fails
-        if: steps.typecheck.outputs.status != '0'
-        run: exit 1
-
-      - name: Run remaining flake checks
-        id: flake-check
-        if: steps.typecheck.outputs.status == '0'
-        shell: bash
-        run: |
-          set +e
-          nix flake check --print-build-logs --keep-going > flake-check.log 2>&1
-          status=$?
-          cat flake-check.log
-          echo "status=$status" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: Upload flake check diagnostics
-        if: steps.flake-check.outputs.status != '0'
-        uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097 # v4.4.2
-        with:
-          name: flake-check-diagnostics
-          path: flake-check.log
-          if-no-files-found: error
-
-      - name: Fail when flake checks fail
-        if: steps.flake-check.outputs.status != '0'
+      - name: Fail when Tend checks fail
+        if: steps.tend.outputs.status != '0'
         run: exit 1
