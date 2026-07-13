@@ -269,7 +269,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
   // Web tools — web search and fetch
   await loadIntegration("web", pi, async (api) => {
     const mod = await import("@juicesharp/rpiv-web-tools/index.ts");
-    await mod.default(api, { interceptors: { github: true } });
+    await mod.default(api);
   });
 
   // ── 3. Register routing ──────────────────────────────────────────────
@@ -336,7 +336,10 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
         decisionContext: spec.workflowProjection,
       });
 
-      return [delegationTool];
+      // ToolDefinition is invariant in its schema-derived argument type.
+      // Child sessions intentionally accept heterogeneous Pi tools, so erase the
+      // concrete schema only at this composition boundary.
+      return [delegationTool as unknown as ToolDefinition];
     },
   });
 

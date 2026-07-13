@@ -7,12 +7,8 @@
  */
 
 import { createHash } from "node:crypto";
-
+import type { Message as _Message, UserMessage as _UserMessage } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type {
-  Message as _Message,
-  UserMessage as _UserMessage,
-} from "@earendil-works/pi-ai";
 
 export type { _Message as Message, _UserMessage as UserMessage };
 
@@ -34,10 +30,7 @@ interface TextContent {
 
 function isRootTurnMessage(value: unknown): value is RootTurnMessage {
   return (
-    typeof value === "object" &&
-    value !== null &&
-    "role" in value &&
-    typeof value.role === "string"
+    typeof value === "object" && value !== null && "role" in value && typeof value.role === "string"
   );
 }
 
@@ -90,9 +83,7 @@ export function extractRootTurnInput(
 
   if (!userMessage) {
     throw Object.assign(
-      new Error(
-        "Root turn input: could not locate a user message in the conversation.",
-      ),
+      new Error("Root turn input: could not locate a user message in the conversation."),
       { code: "MISSING_USER_MESSAGE" },
     );
   }

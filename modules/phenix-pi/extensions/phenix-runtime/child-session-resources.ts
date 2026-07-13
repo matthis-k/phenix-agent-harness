@@ -19,9 +19,7 @@ import type { AgentKind } from "../phenix-kernel/agents.ts";
 import type { PersonaDefinition } from "./child-session-prompt.ts";
 import type { ChildSessionSpec } from "./child-session-types.ts";
 
-export type DefaultResourceLoaderOptions = ConstructorParameters<
-  typeof DefaultResourceLoader
->[0];
+export type DefaultResourceLoaderOptions = ConstructorParameters<typeof DefaultResourceLoader>[0];
 
 /** Explicit child-local extension factory. */
 export interface InlineExtension {
@@ -131,11 +129,7 @@ export function inferChildIntegrationRefs(
   if (has("lsp")) refs.add("lsp");
   if (has("mcp")) refs.add("mcp");
   if (has("context")) refs.add("context");
-  if (
-    has("web") ||
-    tools.includes("fetch_content") ||
-    tools.includes("get_search_content")
-  ) {
+  if (has("web") || tools.includes("fetch_content") || tools.includes("get_search_content")) {
     refs.add("web");
   }
 
