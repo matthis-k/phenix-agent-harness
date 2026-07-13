@@ -14,7 +14,7 @@ import { isTerminalState } from "./workflow-reducer.ts";
 import type {
   ActiveWorkflowTransition,
   CompletedWorkflowTransition,
-  WorkflowDefinitionId,
+  DefaultWorkflowDefinitionId,
   WorkflowRuntimeRecord,
   WorkflowStateId,
   WorkflowTransitionId,
@@ -170,7 +170,7 @@ export function createWorkflowRecord(
     readonly actorId: string;
     readonly parentActorId?: string;
     readonly sessionId: string;
-    readonly definitionId: WorkflowDefinitionId;
+    readonly definitionId: DefaultWorkflowDefinitionId;
     readonly difficulty: Difficulty;
     readonly taskProfile: TaskProfile;
     readonly actorRole: "coordinator" | AgentKind | "base";

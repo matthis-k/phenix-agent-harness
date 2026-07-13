@@ -4,10 +4,10 @@ import { describe, it } from "node:test";
 import { agentClientRef, contractRef } from "../extensions/phenix-kernel/refs.ts";
 import {
   actorRoleForAgentClient,
+  type DefaultWorkflowDefinitionId,
   mkTransitionId,
   outputSchemaIdForContract,
   roleForAgentClient,
-  type DefaultWorkflowDefinitionId,
 } from "../extensions/phenix-workflow/workflow-types.ts";
 
 describe("workflow identifier authority", () => {
@@ -24,10 +24,7 @@ describe("workflow identifier authority", () => {
   it("validates agent-client projections instead of casting", () => {
     assert.equal(roleForAgentClient(agentClientRef("base")), null);
     assert.equal(roleForAgentClient(agentClientRef("planner")), "planner");
-    assert.equal(
-      actorRoleForAgentClient(agentClientRef("coordinator")),
-      "coordinator",
-    );
+    assert.equal(actorRoleForAgentClient(agentClientRef("coordinator")), "coordinator");
 
     assert.throws(
       () => roleForAgentClient(agentClientRef("unknown-client")),
@@ -40,10 +37,7 @@ describe("workflow identifier authority", () => {
   });
 
   it("validates contract-to-schema projections", () => {
-    assert.equal(
-      outputSchemaIdForContract(contractRef("planner-handoff")),
-      "planner-handoff",
-    );
+    assert.equal(outputSchemaIdForContract(contractRef("planner-handoff")), "planner-handoff");
     assert.throws(
       () => outputSchemaIdForContract(contractRef("unknown-contract")),
       /no workflow output-schema projection/,

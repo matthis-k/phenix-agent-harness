@@ -3,7 +3,10 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import type { JsonSchema } from "../phenix-contracts/definitions.ts";
 import type { Difficulty } from "../phenix-routing/types.ts";
 import type { TransitionAuthority } from "../phenix-workflow/transition-authority.ts";
-import type { WorkflowDefinitionId, WorkflowStateId } from "../phenix-workflow/workflow-types.ts";
+import type {
+  DefaultWorkflowDefinitionId,
+  WorkflowStateId,
+} from "../phenix-workflow/workflow-types.ts";
 import type {
   AgentKind,
   AgentRole,
@@ -87,7 +90,7 @@ export interface ContractExecutionManifest {
     readonly actorId: string;
     readonly parentActorId?: string;
 
-    readonly definitionId: WorkflowDefinitionId;
+    readonly definitionId: DefaultWorkflowDefinitionId;
     readonly definitionVersion: 1;
 
     readonly difficulty: Difficulty;

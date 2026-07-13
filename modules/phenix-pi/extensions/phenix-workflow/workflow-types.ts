@@ -1,16 +1,6 @@
-import {
-  isAgentKind,
-  type AgentKind,
-  type AgentRole,
-} from "../phenix-kernel/agents.ts";
-import {
-  workflowTransitionId,
-  type WorkflowTransitionId,
-} from "../phenix-kernel/ids.ts";
-import type {
-  AgentClientRef,
-  ContractDefinitionRef,
-} from "../phenix-kernel/refs.ts";
+import { type AgentKind, type AgentRole, isAgentKind } from "../phenix-kernel/agents.ts";
+import { type WorkflowTransitionId, workflowTransitionId } from "../phenix-kernel/ids.ts";
+import type { AgentClientRef, ContractDefinitionRef } from "../phenix-kernel/refs.ts";
 import type { Difficulty, TaskProfile } from "../phenix-kernel/task.ts";
 import type { TransitionAuthority } from "./transition-authority.ts";
 
@@ -202,15 +192,11 @@ export const WORKFLOW_OUTPUT_SCHEMA_IDS = [
   "base-handoff",
 ] as const;
 
-export type WorkflowOutputSchemaId =
-  (typeof WORKFLOW_OUTPUT_SCHEMA_IDS)[number];
+export type WorkflowOutputSchemaId = (typeof WORKFLOW_OUTPUT_SCHEMA_IDS)[number];
 
-export function isWorkflowOutputSchemaId(
-  value: unknown,
-): value is WorkflowOutputSchemaId {
+export function isWorkflowOutputSchemaId(value: unknown): value is WorkflowOutputSchemaId {
   return (
-    typeof value === "string" &&
-    WORKFLOW_OUTPUT_SCHEMA_IDS.some((schemaId) => schemaId === value)
+    typeof value === "string" && WORKFLOW_OUTPUT_SCHEMA_IDS.some((schemaId) => schemaId === value)
   );
 }
 
@@ -219,32 +205,22 @@ export function roleForAgentClient(ref: AgentClientRef): AgentRole {
   if (ref.id === "base") return null;
   if (isAgentKind(ref.id)) return ref.id;
 
-  throw new Error(
-    `Agent client "${ref.id}" cannot be used as a child execution role`,
-  );
+  throw new Error(`Agent client "${ref.id}" cannot be used as a child execution role`);
 }
 
 /** Convert a linked agent client into the workflow actor vocabulary. */
-export function actorRoleForAgentClient(
-  ref: AgentClientRef,
-): "base" | "coordinator" | AgentKind {
+export function actorRoleForAgentClient(ref: AgentClientRef): "base" | "coordinator" | AgentKind {
   if (ref.id === "base" || ref.id === "coordinator") return ref.id;
   if (isAgentKind(ref.id)) return ref.id;
 
-  throw new Error(
-    `Agent client "${ref.id}" cannot be used as a workflow actor role`,
-  );
+  throw new Error(`Agent client "${ref.id}" cannot be used as a workflow actor role`);
 }
 
 /** Convert a contract reference into the workflow schema registry vocabulary. */
-export function outputSchemaIdForContract(
-  ref: ContractDefinitionRef,
-): WorkflowOutputSchemaId {
+export function outputSchemaIdForContract(ref: ContractDefinitionRef): WorkflowOutputSchemaId {
   if (isWorkflowOutputSchemaId(ref.id)) return ref.id;
 
-  throw new Error(
-    `Contract "${ref.id}" has no workflow output-schema projection`,
-  );
+  throw new Error(`Contract "${ref.id}" has no workflow output-schema projection`);
 }
 
 // ── Runtime workflow record ─────────────────────────────────────────────────
@@ -327,13 +303,7 @@ export interface WorkflowBinding {
 export interface WorkflowHandleRecord {
   readonly id: string;
   readonly sessionId: string;
-  status:
-    | "starting"
-    | "running"
-    | "completed"
-    | "failed"
-    | "cancelled"
-    | "orphaned";
+  status: "starting" | "running" | "completed" | "failed" | "cancelled" | "orphaned";
   readonly workflowBinding?: WorkflowBinding;
   readonly value?: unknown;
 }

@@ -13,7 +13,7 @@
  */
 
 import type { AgentCapabilityArtifact } from "./agent-capabilities.ts";
-import type { WorkflowDefinitionId } from "./workflow-types.ts";
+import type { DefaultWorkflowDefinitionId } from "./workflow-types.ts";
 
 // ── Session-scoped workflow data ─────────────────────────────────────────────
 
@@ -24,7 +24,7 @@ export interface SessionWorkflowData {
   readonly instanceId: string;
   readonly actorId: string;
 
-  readonly definitionId: WorkflowDefinitionId;
+  readonly definitionId: DefaultWorkflowDefinitionId;
   readonly definitionVersion: 1;
 
   readonly cwd: string;
@@ -84,9 +84,7 @@ export function getSessionCapabilityArtifact(
  *
  * Returns undefined if no session is registered.
  */
-export function getSessionWorkflowData(
-  sessionId: string,
-): SessionWorkflowData | undefined {
+export function getSessionWorkflowData(sessionId: string): SessionWorkflowData | undefined {
   return _sessions.get(sessionId)?.workflowData;
 }
 
@@ -96,16 +94,11 @@ export function getSessionWorkflowData(
  * Get the capability artifact for a session, throwing if not registered.
  * Fail-closed: a missing artifact is a hard error.
  */
-export function requireSessionCapabilityArtifact(
-  sessionId: string,
-): AgentCapabilityArtifact {
+export function requireSessionCapabilityArtifact(sessionId: string): AgentCapabilityArtifact {
   const artifact = getSessionCapabilityArtifact(sessionId);
 
   if (!artifact) {
-    throw new Error(
-      `No Phenix capability artifact is registered ` +
-      `for session "${sessionId}".`,
-    );
+    throw new Error(`No Phenix capability artifact is registered ` + `for session "${sessionId}".`);
   }
 
   return artifact;
@@ -115,16 +108,11 @@ export function requireSessionCapabilityArtifact(
  * Get the root workflow data for a session, throwing if not registered.
  * Fail-closed: missing workflow data is a hard error.
  */
-export function requireSessionWorkflowData(
-  sessionId: string,
-): SessionWorkflowData {
+export function requireSessionWorkflowData(sessionId: string): SessionWorkflowData {
   const workflow = getSessionWorkflowData(sessionId);
 
   if (!workflow) {
-    throw new Error(
-      `No Phenix root workflow is registered ` +
-      `for session "${sessionId}".`,
-    );
+    throw new Error(`No Phenix root workflow is registered ` + `for session "${sessionId}".`);
   }
 
   return workflow;
