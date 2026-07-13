@@ -7,15 +7,19 @@
 
     phenix-tend = {
       url = "github:matthis-k/phenix-tend";
-      inputs.flake-parts.follows = "phenix-pins/flake-parts";
-      inputs.phenix-pins.follows = "phenix-pins";
+      inputs = {
+        flake-parts.follows = "phenix-pins/flake-parts";
+        phenix-pins.follows = "phenix-pins";
+      };
     };
 
     phenix-stitch = {
       url = "github:matthis-k/phenix-stitch";
-      inputs.flake-parts.follows = "phenix-pins/flake-parts";
-      inputs.phenix-pins.follows = "phenix-pins";
-      inputs.phenix-tend.follows = "phenix-tend";
+      inputs = {
+        flake-parts.follows = "phenix-pins/flake-parts";
+        phenix-pins.follows = "phenix-pins";
+        phenix-tend.follows = "phenix-tend";
+      };
     };
   };
 
