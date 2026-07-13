@@ -4,143 +4,125 @@
  * Deterministic TypeScript-owned workflow and delegation authority system.
  */
 
-// Types
+// Agent capabilities
 export type {
-  WorkflowDefinitionId,
-  WorkflowStateId,
-  WorkflowTransitionId,
-  DelegationPurpose,
-  TransitionCondition,
-  WorkflowConditionContext,
-  WorkflowTransition,
-  DelegateTransition,
-  AutomaticTransition,
-  WorkflowDefinition,
-  WorkflowOutputSchemaId,
-  ActiveWorkflowTransition,
-  CompletedWorkflowTransition,
-  WorkflowRuntimeRecord,
-  DelegationAuthority,
-  DelegationOption,
-} from "./workflow-types.ts";
-
-export { mkTransitionId } from "./workflow-types.ts";
-
-// Schemas
+  AgentCapabilityArtifact,
+  AgentCapabilityEntry,
+} from "./agent-capabilities.ts";
 export {
-  OUTPUT_SCHEMAS,
-  getOutputSchema,
-  SCOUT_HANDOFF_SCHEMA,
-  PLANNER_HANDOFF_SCHEMA,
-  ARCHITECTURE_HANDOFF_SCHEMA,
-  IMPLEMENTATION_HANDOFF_SCHEMA,
-  TEST_HANDOFF_SCHEMA,
-  FINALIZER_HANDOFF_SCHEMA,
-  CRITIC_HANDOFF_SCHEMA,
-  BASE_HANDOFF_SCHEMA,
-} from "./workflow-schemas.ts";
-
-// Conditions
-export { conditionSatisfied } from "./workflow-conditions.ts";
-
-// Definitions
+  buildCapabilityArtifact,
+  capabilityArtifactPath,
+  configuredAgent,
+  DEFAULT_AGENT_TARGETS,
+  isSpawnableAgent,
+  persistCapabilityArtifact,
+  readCapabilityArtifact,
+} from "./agent-capabilities.ts";
+// Capability provider
+export type {
+  AgentDiscoveryHelper,
+  DiscoveredAgentDefinition,
+} from "./capability-provider.ts";
 export {
-  PHENIX_DEFAULT_WORKFLOW,
-  getWorkflowDefinition,
-  validateDefinition,
-} from "./workflow-definitions.ts";
-
-// Reducer
-export {
-  factsFromTransitionResult,
-  advanceWorkflowState,
-  isTerminalState,
-  transitionMatchesDifficulty,
-} from "./workflow-reducer.ts";
-
-// Store
-export {
-  readWorkflowRecord,
-  createWorkflowRecord,
-  writeWorkflowRecord,
-  beginTransition,
-  acceptTransition,
-  rejectTransition,
-  hashCapabilityContent,
-  now,
-} from "./workflow-store.ts";
-
+  BuiltinAgentDiscovery,
+  getAgentDiscoveryHelper,
+  setAgentDiscoveryHelper,
+} from "./capability-provider.ts";
 // Delegation options
 export { resolveDelegationOptions } from "./delegation-options.ts";
-
+export type { SessionWorkflowData } from "./session-registry.ts";
+// Session registry
+export {
+  activeSessionCount,
+  clearAllSessions,
+  getSessionCapabilityArtifact,
+  getSessionWorkflowData,
+  registerSession,
+  requireSessionCapabilityArtifact,
+  requireSessionWorkflowData,
+  unregisterSession,
+} from "./session-registry.ts";
+// Conditions
+export { conditionSatisfied } from "./workflow-conditions.ts";
+// Definitions
+export {
+  getWorkflowDefinition,
+  PHENIX_DEFAULT_WORKFLOW,
+  validateDefinition,
+} from "./workflow-definitions.ts";
 // Projection
 export type {
   ModelDelegationOption,
   ModelWorkflowProjection,
   WorkflowDecisionContext,
 } from "./workflow-projection.ts";
-
 export {
-  projectDelegationOptions,
-  buildRootWorkflowProjection,
   buildChildWorkflowProjection,
-  formatWorkflowProjection,
+  buildRootWorkflowProjection,
   buildWorkflowDecisionContext,
   computeOptionsDigest,
+  formatWorkflowProjection,
+  projectDelegationOptions,
 } from "./workflow-projection.ts";
-
-// Agent capabilities
-export type {
-  AgentCapabilityEntry,
-  AgentCapabilityArtifact,
-} from "./agent-capabilities.ts";
-
+// Reducer
 export {
-  DEFAULT_AGENT_TARGETS,
-  buildCapabilityArtifact,
-  configuredAgent,
-  isSpawnableAgent,
-  persistCapabilityArtifact,
-  readCapabilityArtifact,
-  capabilityArtifactPath,
-} from "./agent-capabilities.ts";
-
-// Session registry
-export {
-  registerSession,
-  unregisterSession,
-  getSessionCapabilityArtifact,
-  getSessionWorkflowData,
-  requireSessionCapabilityArtifact,
-  requireSessionWorkflowData,
-  activeSessionCount,
-  clearAllSessions,
-} from "./session-registry.ts";
-
-export type { SessionWorkflowData } from "./session-registry.ts";
-
+  advanceWorkflowState,
+  factsFromTransitionResult,
+  isTerminalState,
+  transitionMatchesDifficulty,
+} from "./workflow-reducer.ts";
 // Workflow runtime service
 export type {
-  WorkflowRuntimeDependencies,
   WorkflowActorSource,
+  WorkflowRuntimeDependencies,
 } from "./workflow-runtime.ts";
-
 export {
+  applyAutomaticTransitions,
   buildWorkflowRuntimeDependencies,
+  finalizeHandleWorkflow,
   initialWorkflowStateForRole,
   transitionAuthorityForChild,
-  applyAutomaticTransitions,
-  finalizeHandleWorkflow,
 } from "./workflow-runtime.ts";
-
-// Capability provider
-export type {
-  DiscoveredAgentDefinition,
-  AgentDiscoveryHelper,
-} from "./capability-provider.ts";
-
+// Schemas
 export {
-  getAgentDiscoveryHelper,
-  setAgentDiscoveryHelper,
-  BuiltinAgentDiscovery,
-} from "./capability-provider.ts";
+  ARCHITECTURE_HANDOFF_SCHEMA,
+  BASE_HANDOFF_SCHEMA,
+  CRITIC_HANDOFF_SCHEMA,
+  FINALIZER_HANDOFF_SCHEMA,
+  getOutputSchema,
+  IMPLEMENTATION_HANDOFF_SCHEMA,
+  OUTPUT_SCHEMAS,
+  PLANNER_HANDOFF_SCHEMA,
+  SCOUT_HANDOFF_SCHEMA,
+  TEST_HANDOFF_SCHEMA,
+} from "./workflow-schemas.ts";
+// Store
+export {
+  acceptTransition,
+  beginTransition,
+  createWorkflowRecord,
+  hashCapabilityContent,
+  now,
+  readWorkflowRecord,
+  rejectTransition,
+} from "./workflow-store.ts";
+// Types
+export type {
+  ActiveWorkflowTransition,
+  AutomaticTransition,
+  CompletedWorkflowTransition,
+  DelegateTransition,
+  DelegationAuthority,
+  DelegationOption,
+  DelegationPurpose,
+  TransitionCondition,
+  WorkflowConditionContext,
+  WorkflowDefinition,
+  WorkflowDefinitionId,
+  WorkflowOutputSchemaId,
+  WorkflowRuntimeRecord,
+  WorkflowStateId,
+  WorkflowTransition,
+  WorkflowTransitionId,
+} from "./workflow-types.ts";
+export { mkTransitionId } from "./workflow-types.ts";

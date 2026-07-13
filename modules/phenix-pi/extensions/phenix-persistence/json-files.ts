@@ -12,11 +12,7 @@ import path from "node:path";
 
 /** Convert an external identifier into one safe path segment. */
 export function sanitizePathSegment(value: string): string {
-  return (
-    value
-      .replace(/[^A-Za-z0-9._-]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "unknown"
-  );
+  return value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
 }
 
 /** Return an ISO-8601 timestamp from the process clock. */
@@ -30,9 +26,7 @@ export function isErrno(
   code: NodeJS.ErrnoException["code"],
 ): error is NodeJS.ErrnoException {
   return (
-    error instanceof Error &&
-    "code" in error &&
-    (error as NodeJS.ErrnoException).code === code
+    error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === code
   );
 }
 
@@ -88,10 +82,7 @@ export function atomicWriteJson(target: string, value: unknown): void {
  * Read and decode one JSON file. Missing files return undefined; malformed data
  * and codec failures are surfaced to the domain store.
  */
-export function readJsonFile<T>(
-  target: string,
-  decode: (value: unknown) => T,
-): T | undefined {
+export function readJsonFile<T>(target: string, decode: (value: unknown) => T): T | undefined {
   try {
     const value: unknown = JSON.parse(fs.readFileSync(target, "utf-8"));
     return decode(value);

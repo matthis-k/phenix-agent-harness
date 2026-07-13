@@ -10,11 +10,7 @@ import {
   sanitizePathSegment,
   timestamp,
 } from "../phenix-persistence/json-files.ts";
-import type {
-  HandleRecord,
-  HandleStatus,
-  ProducerCycleRecord,
-} from "./handle-types.ts";
+import type { HandleRecord, HandleStatus, ProducerCycleRecord } from "./handle-types.ts";
 import { HANDLE_VERSION } from "./handle-types.ts";
 
 const HANDLE_STATUSES: ReadonlySet<string> = new Set<HandleStatus>([
@@ -75,19 +71,13 @@ export function writeRecord(cwd: string, record: HandleRecord): void {
   atomicWriteJson(recordPath(cwd, record.sessionId, record.id), record);
 }
 
-export function readRecord(
-  cwd: string,
-  session: string,
-  id: string,
-): HandleRecord | undefined {
+export function readRecord(cwd: string, session: string, id: string): HandleRecord | undefined {
   return readJsonFile(recordPath(cwd, session, id), decodeHandleRecord);
 }
 
 export function listRecords(cwd: string, session?: string): HandleRecord[] {
   const root = recordsRoot(cwd);
-  const sessionDirectories = session
-    ? [sanitizePathSegment(session)]
-    : readDirectory(root);
+  const sessionDirectories = session ? [sanitizePathSegment(session)] : readDirectory(root);
   const records: HandleRecord[] = [];
 
   for (const sessionDirectory of sessionDirectories) {
@@ -95,10 +85,7 @@ export function listRecords(cwd: string, session?: string): HandleRecord[] {
     for (const file of readDirectory(directory)) {
       if (!file.endsWith(".json")) continue;
       try {
-        const record = readJsonFile(
-          path.join(directory, file),
-          decodeHandleRecord,
-        );
+        const record = readJsonFile(path.join(directory, file), decodeHandleRecord);
         if (record) records.push(record);
       } catch {
         // Listing is diagnostic and tolerant: a damaged record does not hide

@@ -1,22 +1,21 @@
-import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { beforeEach, describe, it } from "node:test";
 
 import {
-  acquireWorkflowLock,
-  releaseWorkflowLock,
-  createWorkflowRecord,
-  readWorkflowRecord,
-  beginTransition,
   acceptTransition,
+  acquireWorkflowLock,
+  beginTransition,
+  createWorkflowRecord,
+  type LockHandle,
+  readWorkflowRecord,
   rejectTransition,
-  writeWorkflowRecord,
+  releaseWorkflowLock,
   verifyWorkflowActorExists,
   WorkflowStoreError,
-  type LockHandle,
 } from "../extensions/phenix-workflow/workflow-store.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -29,7 +28,11 @@ function setup() {
 }
 
 function teardown() {
-  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ok */ }
+  try {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  } catch {
+    /* ok */
+  }
 }
 
 function makeRecordParams(overrides?: Record<string, unknown>) {
@@ -78,7 +81,7 @@ describe("Workflow Store", () => {
 
   it("beginTransition advances revision and adds active entry", () => {
     const params = makeRecordParams();
-    let record = createWorkflowRecord(dir, params);
+    const record = createWorkflowRecord(dir, params);
 
     const result = beginTransition(dir, record, {
       expectedRevision: 0,
@@ -98,7 +101,7 @@ describe("Workflow Store", () => {
 
   it("throws STALE_REVISION when expected revision is wrong", () => {
     const params = makeRecordParams();
-    let record = createWorkflowRecord(dir, params);
+    const record = createWorkflowRecord(dir, params);
 
     // Make first transition.
     beginTransition(dir, record, {
@@ -109,11 +112,12 @@ describe("Workflow Store", () => {
 
     // Retry with stale expectedRevision.
     assert.throws(
-      () => beginTransition(dir, record, {
-        expectedRevision: 0,
-        transitionId: "delegate_to_planner" as any,
-        handleId: "handle-2",
-      }),
+      () =>
+        beginTransition(dir, record, {
+          expectedRevision: 0,
+          transitionId: "delegate_to_planner" as any,
+          handleId: "handle-2",
+        }),
       (err: any) => err instanceof WorkflowStoreError && err.code === "STALE_REVISION",
     );
   });
@@ -166,7 +170,7 @@ describe("Workflow Store", () => {
 
   it("accept/reject are idempotent for unknown executionId", () => {
     const params = makeRecordParams();
-    let record = createWorkflowRecord(dir, params);
+    const record = createWorkflowRecord(dir, params);
 
     const updated = acceptTransition(dir, record, {
       executionId: "wfexec_nonexistent",
@@ -191,9 +195,7 @@ describe("Workflow Store", () => {
     const params = makeRecordParams();
     createWorkflowRecord(dir, params);
 
-    assert.doesNotThrow(
-      () => verifyWorkflowActorExists(dir, params.instanceId, params.actorId),
-    );
+    assert.doesNotThrow(() => verifyWorkflowActorExists(dir, params.instanceId, params.actorId));
   });
 });
 

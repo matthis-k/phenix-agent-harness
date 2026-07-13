@@ -47,7 +47,10 @@ describe("shared JSON persistence mechanics", () => {
     const directory = temporaryDirectory();
     const missing = path.join(directory, "missing.json");
 
-    assert.equal(readJsonFile(missing, (value) => value), undefined);
+    assert.equal(
+      readJsonFile(missing, (value) => value),
+      undefined,
+    );
 
     const malformed = path.join(directory, "malformed.json");
     fs.writeFileSync(malformed, "{not-json", "utf-8");
@@ -71,17 +74,13 @@ describe("shared JSON persistence mechanics", () => {
 
 describe("domain persistence codecs", () => {
   it("rejects unsupported handle envelopes before runtime use", () => {
-    assert.throws(
-      () => decodeHandleRecord({ version: 3, id: "old" }),
-      /unsupported version/,
-    );
+    assert.throws(() => decodeHandleRecord({ version: 3, id: "old" }), /unsupported version/);
   });
 
   it("reports malformed workflow envelopes with a domain error", () => {
     assert.throws(
       () => decodeWorkflowRecord({ version: 1 }),
-      (error: unknown) =>
-        error instanceof WorkflowStoreError && error.code === "INVALID_RECORD",
+      (error: unknown) => error instanceof WorkflowStoreError && error.code === "INVALID_RECORD",
     );
   });
 });
