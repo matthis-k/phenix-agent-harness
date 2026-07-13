@@ -1,36 +1,23 @@
-import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { beforeEach, describe, it } from "node:test";
 
 import {
+  acceptTransition,
   acquireWorkflowLock,
-  releaseWorkflowLock,
+  beginTransition,
   createWorkflowRecord,
   readWorkflowRecord,
-  beginTransition,
-  acceptTransition,
   rejectTransition,
-  writeWorkflowRecord,
+  releaseWorkflowLock,
   verifyWorkflowActorExists,
   WorkflowStoreError,
-  type LockHandle,
 } from "../extensions/phenix-workflow/workflow-store.ts";
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
-
-let tmpDir: string;
-
-function setup() {
-  tmpDir = path.join(os.tmpdir(), `phenix-test-store-${randomUUID().slice(0, 8)}`);
-  fs.mkdirSync(tmpDir, { recursive: true });
-}
-
-function teardown() {
-  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ok */ }
-}
+import type { WorkflowRuntimeRecord } from "../extensions/phenix-workflow/workflow-types.ts";
+import { mkTransitionId } from "../extensions/phenix-workflow/workflow-types.ts";
 
 function makeRecordParams(overrides?: Record<string, unknown>) {
   return {
@@ -53,85 +40,87 @@ function makeRecordParams(overrides?: Record<string, unknown>) {
   };
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
+function requireRecord(value: WorkflowRuntimeRecord | undefined): WorkflowRuntimeRecord {
+  assert.ok(value);
+  return value;
+}
+
+function isStoreError(code: WorkflowStoreError["code"]) {
+  return (error: unknown): boolean => error instanceof WorkflowStoreError && error.code === code;
+}
 
 describe("Workflow Store", () => {
-  let dir: string;
+  let directory: string;
 
   beforeEach(() => {
-    dir = path.join(os.tmpdir(), `phenix-test-store-${randomUUID().slice(0, 8)}`);
-    fs.mkdirSync(dir, { recursive: true });
+    directory = path.join(os.tmpdir(), `phenix-test-store-${randomUUID().slice(0, 8)}`);
+    fs.mkdirSync(directory, { recursive: true });
   });
 
   it("creates and reads a workflow record", () => {
     const params = makeRecordParams();
-    const record = createWorkflowRecord(dir, params);
+    const record = createWorkflowRecord(directory, params);
 
     assert.equal(record.instanceId, params.instanceId);
     assert.equal(record.state, "classified");
     assert.equal(record.revision, 0);
 
-    const read = readWorkflowRecord(dir, params.instanceId, params.actorId);
-    assert.ok(read);
-    assert.equal(read?.state, "classified");
+    const read = requireRecord(readWorkflowRecord(directory, params.instanceId, params.actorId));
+    assert.equal(read.state, "classified");
   });
 
   it("beginTransition advances revision and adds active entry", () => {
     const params = makeRecordParams();
-    let record = createWorkflowRecord(dir, params);
+    const record = createWorkflowRecord(directory, params);
 
-    const result = beginTransition(dir, record, {
+    const result = beginTransition(directory, record, {
       expectedRevision: 0,
-      transitionId: "delegate_to_scout" as any,
+      transitionId: mkTransitionId("delegate_to_scout"),
       handleId: "handle-1",
     });
 
     assert.ok(result.executionId.startsWith("wfexec_"));
     assert.equal(result.record.active.length, 1);
 
-    // Re-read to verify persistence.
-    const reread = readWorkflowRecord(dir, params.instanceId, params.actorId);
-    assert.ok(reread);
-    assert.equal(reread?.active.length, 1);
-    assert.equal(reread?.revision, 1);
+    const reread = requireRecord(readWorkflowRecord(directory, params.instanceId, params.actorId));
+    assert.equal(reread.active.length, 1);
+    assert.equal(reread.revision, 1);
   });
 
   it("throws STALE_REVISION when expected revision is wrong", () => {
     const params = makeRecordParams();
-    let record = createWorkflowRecord(dir, params);
+    const record = createWorkflowRecord(directory, params);
 
-    // Make first transition.
-    beginTransition(dir, record, {
+    beginTransition(directory, record, {
       expectedRevision: 0,
-      transitionId: "delegate_to_scout" as any,
+      transitionId: mkTransitionId("delegate_to_scout"),
       handleId: "handle-1",
     });
 
-    // Retry with stale expectedRevision.
     assert.throws(
-      () => beginTransition(dir, record, {
-        expectedRevision: 0,
-        transitionId: "delegate_to_planner" as any,
-        handleId: "handle-2",
-      }),
-      (err: any) => err instanceof WorkflowStoreError && err.code === "STALE_REVISION",
+      () =>
+        beginTransition(directory, record, {
+          expectedRevision: 0,
+          transitionId: mkTransitionId("delegate_to_planner"),
+          handleId: "handle-2",
+        }),
+      isStoreError("STALE_REVISION"),
     );
   });
 
   it("acceptTransition advances state and marks completed", () => {
     const params = makeRecordParams();
-    let record = createWorkflowRecord(dir, params);
+    let record = createWorkflowRecord(directory, params);
 
-    const { executionId } = beginTransition(dir, record, {
+    const { executionId } = beginTransition(directory, record, {
       expectedRevision: 0,
-      transitionId: "delegate_to_scout" as any,
+      transitionId: mkTransitionId("delegate_to_scout"),
       handleId: "handle-1",
     });
 
-    // Re-read to get updated revision.
-    record = readWorkflowRecord(dir, params.instanceId, params.actorId)!;
+    record = requireRecord(readWorkflowRecord(directory, params.instanceId, params.actorId));
 
-    const updated = acceptTransition(dir, record, {
+    const updated = acceptTransition(directory, record, {
       executionId,
       nextState: "scouting",
     });
@@ -139,41 +128,40 @@ describe("Workflow Store", () => {
     assert.equal(updated.state, "scouting");
     assert.equal(updated.active.length, 0);
     assert.equal(updated.completed.length, 1);
-    assert.ok(updated.completed[0].accepted);
+    assert.ok(updated.completed[0]?.accepted);
   });
 
   it("rejectTransition advances state and marks rejected", () => {
     const params = makeRecordParams();
-    let record = createWorkflowRecord(dir, params);
+    let record = createWorkflowRecord(directory, params);
 
-    const { executionId } = beginTransition(dir, record, {
+    const { executionId } = beginTransition(directory, record, {
       expectedRevision: 0,
-      transitionId: "delegate_to_scout" as any,
+      transitionId: mkTransitionId("delegate_to_scout"),
       handleId: "handle-1",
     });
 
-    record = readWorkflowRecord(dir, params.instanceId, params.actorId)!;
+    record = requireRecord(readWorkflowRecord(directory, params.instanceId, params.actorId));
 
-    const updated = rejectTransition(dir, record, {
+    const updated = rejectTransition(directory, record, {
       executionId,
       nextState: "classified",
     });
 
     assert.equal(updated.state, "classified");
     assert.equal(updated.completed.length, 1);
-    assert.ok(!updated.completed[0].accepted);
+    assert.equal(updated.completed[0]?.accepted, false);
   });
 
   it("accept/reject are idempotent for unknown executionId", () => {
     const params = makeRecordParams();
-    let record = createWorkflowRecord(dir, params);
+    const record = createWorkflowRecord(directory, params);
 
-    const updated = acceptTransition(dir, record, {
+    const updated = acceptTransition(directory, record, {
       executionId: "wfexec_nonexistent",
       nextState: "scouting",
     });
 
-    // Should return logically unchanged record (state and revision preserved).
     assert.equal(updated.state, record.state);
     assert.equal(updated.revision, record.revision);
     assert.equal(updated.instanceId, record.instanceId);
@@ -182,82 +170,79 @@ describe("Workflow Store", () => {
 
   it("verifyWorkflowActorExists throws for missing record", () => {
     assert.throws(
-      () => verifyWorkflowActorExists(dir, "nonexistent", "fake"),
-      (err: any) => err instanceof WorkflowStoreError && err.code === "CHILD_ACTOR_MISSING",
+      () => verifyWorkflowActorExists(directory, "nonexistent", "fake"),
+      isStoreError("CHILD_ACTOR_MISSING"),
     );
   });
 
   it("verifyWorkflowActorExists succeeds for existing record", () => {
     const params = makeRecordParams();
-    createWorkflowRecord(dir, params);
+    createWorkflowRecord(directory, params);
 
-    assert.doesNotThrow(
-      () => verifyWorkflowActorExists(dir, params.instanceId, params.actorId),
+    assert.doesNotThrow(() =>
+      verifyWorkflowActorExists(directory, params.instanceId, params.actorId),
     );
   });
 });
 
 describe("Workflow Store — Concurrency", () => {
-  let dir: string;
+  let directory: string;
 
   beforeEach(() => {
-    dir = path.join(os.tmpdir(), `phenix-test-lock-${randomUUID().slice(0, 8)}`);
-    fs.mkdirSync(dir, { recursive: true });
+    directory = path.join(os.tmpdir(), `phenix-test-lock-${randomUUID().slice(0, 8)}`);
+    fs.mkdirSync(directory, { recursive: true });
   });
 
   it("acquires and releases lock", () => {
     const params = makeRecordParams();
-    createWorkflowRecord(dir, params);
+    createWorkflowRecord(directory, params);
 
-    const lock = acquireWorkflowLock(dir, params.instanceId, params.actorId);
+    const lock = acquireWorkflowLock(directory, params.instanceId, params.actorId);
     assert.ok(lock.lockPath.endsWith(".lock"));
 
     releaseWorkflowLock(lock);
 
-    // Should be able to re-acquire after release.
-    const lock2 = acquireWorkflowLock(dir, params.instanceId, params.actorId);
-    releaseWorkflowLock(lock2);
+    const nextLock = acquireWorkflowLock(directory, params.instanceId, params.actorId);
+    releaseWorkflowLock(nextLock);
   });
 
   it("lock is exclusive — second acquire fails with LOCK_CONTENTION", () => {
     const params = makeRecordParams();
-    createWorkflowRecord(dir, params);
+    createWorkflowRecord(directory, params);
 
-    const lock1 = acquireWorkflowLock(dir, params.instanceId, params.actorId);
+    const lock = acquireWorkflowLock(directory, params.instanceId, params.actorId);
 
     assert.throws(
-      () => acquireWorkflowLock(dir, params.instanceId, params.actorId, 100),
-      (err: any) => err instanceof WorkflowStoreError && err.code === "LOCK_CONTENTION",
+      () => acquireWorkflowLock(directory, params.instanceId, params.actorId, 100),
+      isStoreError("LOCK_CONTENTION"),
     );
 
-    releaseWorkflowLock(lock1);
+    releaseWorkflowLock(lock);
   });
 
   it("releasing and re-acquiring works", () => {
     const params = makeRecordParams();
-    createWorkflowRecord(dir, params);
+    createWorkflowRecord(directory, params);
 
-    const lock = acquireWorkflowLock(dir, params.instanceId, params.actorId);
+    const lock = acquireWorkflowLock(directory, params.instanceId, params.actorId);
     releaseWorkflowLock(lock);
 
-    // Re-acquire should succeed.
     assert.doesNotThrow(() => {
-      const lock2 = acquireWorkflowLock(dir, params.instanceId, params.actorId, 1000);
-      releaseWorkflowLock(lock2);
+      const nextLock = acquireWorkflowLock(directory, params.instanceId, params.actorId, 1000);
+      releaseWorkflowLock(nextLock);
     });
   });
 
   it("different actors can hold locks simultaneously", () => {
-    const params1 = makeRecordParams();
-    const params2 = makeRecordParams();
-    createWorkflowRecord(dir, params1);
-    createWorkflowRecord(dir, params2);
+    const first = makeRecordParams();
+    const second = makeRecordParams();
+    createWorkflowRecord(directory, first);
+    createWorkflowRecord(directory, second);
 
-    // Different actors should not conflict.
-    const lock1 = acquireWorkflowLock(dir, params1.instanceId, params1.actorId);
-    const lock2 = acquireWorkflowLock(dir, params2.instanceId, params2.actorId);
+    const firstLock = acquireWorkflowLock(directory, first.instanceId, first.actorId);
+    const secondLock = acquireWorkflowLock(directory, second.instanceId, second.actorId);
 
-    releaseWorkflowLock(lock1);
-    releaseWorkflowLock(lock2);
+    releaseWorkflowLock(firstLock);
+    releaseWorkflowLock(secondLock);
   });
 });

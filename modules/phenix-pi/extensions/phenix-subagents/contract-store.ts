@@ -1,20 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
-
-import {
-  type ContractArtifact,
-  type ContractId,
-  type ContractResult,
-  type PendingContractResult,
-  type SubmittedContractResult,
-  type AcceptedContractResult,
-  type CancelledContractResult,
-  type ContractSubmissionRecord,
+import { atomicWriteJson, isErrno, readJsonFile } from "../phenix-persistence/json-files.ts";
+import type {
+  AcceptedContractResult,
+  CancelledContractResult,
+  ContractArtifact,
+  ContractId,
+  ContractResult,
+  ContractSubmissionRecord,
+  PendingContractResult,
+  SubmittedContractResult,
 } from "./contract.ts";
-import {
-  decodeContractArtifact,
-} from "./contract-codec.ts";
+import { decodeContractArtifact } from "./contract-codec.ts";
 
 // ── Errors ──────────────────────────────────────────────────────────────────
 
@@ -47,68 +44,20 @@ interface PersistedContractDirectory {
   readonly result: ContractResult;
 }
 
-// ── Atomic file writes ──────────────────────────────────────────────────────
-
-function atomicWriteJson(
-  target: string,
-  value: unknown,
-): void {
-  fs.mkdirSync(path.dirname(target), {
-    recursive: true,
-    mode: 0o700,
-  });
-
-  const temporary =
-    `${target}.${process.pid}.${randomUUID()}.tmp`;
-
-  try {
-    fs.writeFileSync(
-      temporary,
-      `${JSON.stringify(value, null, 2)}\n`,
-      {
-        mode: 0o600,
-      },
-    );
-
-    fs.renameSync(temporary, target);
-  } catch (error) {
-    try {
-      fs.rmSync(temporary, {
-        force: true,
-      });
-    } catch {
-      // Preserve the original failure.
-    }
-
-    throw error;
-  }
-}
-
 // ── Result decoding ─────────────────────────────────────────────────────────
 
-function isObject(
-  value: unknown,
-): value is Record<string, unknown> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value)
-  );
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function decodeResult(
-  value: unknown,
-): ContractResult {
+function decodeResult(value: unknown): ContractResult {
   if (
     !isObject(value) ||
     typeof value.contractId !== "string" ||
     typeof value.revision !== "number" ||
     typeof value.state !== "string"
   ) {
-    throw new ContractStoreError(
-      "invalid-artifact",
-      "Contract result is malformed.",
-    );
+    throw new ContractStoreError("invalid-artifact", "Contract result is malformed.");
   }
 
   if (
@@ -131,44 +80,28 @@ function decodeResult(
 export class FileContractStore {
   readonly root: string;
 
-  private readonly locks =
-    new Map<string, Promise<void>>();
+  private readonly locks = new Map<string, Promise<void>>();
 
   constructor(root: string) {
     this.root = root;
   }
 
-  private contractDirectory(
-    id: ContractId,
-  ): string {
+  private contractDirectory(id: ContractId): string {
     return path.join(this.root, id);
   }
 
-  private artifactPath(
-    id: ContractId,
-  ): string {
-    return path.join(
-      this.contractDirectory(id),
-      "contract.json",
-    );
+  private artifactPath(id: ContractId): string {
+    return path.join(this.contractDirectory(id), "contract.json");
   }
 
-  private resultPath(
-    id: ContractId,
-  ): string {
-    return path.join(
-      this.contractDirectory(id),
-      "result.json",
-    );
+  private resultPath(id: ContractId): string {
+    return path.join(this.contractDirectory(id), "result.json");
   }
 
-  private async exclusive<T>(
-    id: ContractId,
-    operation: () => Promise<T>,
-  ): Promise<T> {
+  private async exclusive<T>(id: ContractId, operation: () => Promise<T>): Promise<T> {
     const previous = this.locks.get(id) ?? Promise.resolve();
 
-    let resolve: () => void;
+    let resolve: (() => void) | undefined;
     const next = new Promise<void>((r) => {
       resolve = r;
     });
@@ -184,15 +117,13 @@ export class FileContractStore {
       await previous;
       return await operation();
     } finally {
-      resolve!();
+      resolve?.();
     }
   }
 
   // ── CRUD operations ────────────────────────────────────────────────
 
-  async create(
-    artifact: ContractArtifact,
-  ): Promise<PendingContractResult> {
+  async create(artifact: ContractArtifact): Promise<PendingContractResult> {
     return this.exclusive(artifact.id, async () => {
       // Verify the contract directory does not already exist.
       const dir = this.contractDirectory(artifact.id);
@@ -205,19 +136,13 @@ export class FileContractStore {
           );
         }
       } catch (error) {
-        if (
-          (error as NodeJS.ErrnoException).code !==
-          "ENOENT"
-        ) {
+        if (!isErrno(error, "ENOENT")) {
           throw error;
         }
       }
 
       // Persist the artifact.
-      atomicWriteJson(
-        this.artifactPath(artifact.id),
-        artifact,
-      );
+      atomicWriteJson(this.artifactPath(artifact.id), artifact);
 
       // Create the initial pending result.
       const pending: PendingContractResult = {
@@ -229,52 +154,29 @@ export class FileContractStore {
         history: [],
       };
 
-      atomicWriteJson(
-        this.resultPath(artifact.id),
-        pending,
-      );
+      atomicWriteJson(this.resultPath(artifact.id), pending);
 
       return pending;
     });
   }
 
-  async load(
-    id: ContractId,
-  ): Promise<PersistedContractDirectory | undefined> {
+  async load(id: ContractId): Promise<PersistedContractDirectory | undefined> {
     try {
-      const artifactRaw = JSON.parse(
-        fs.readFileSync(this.artifactPath(id), "utf-8"),
-      );
+      const artifact = readJsonFile(this.artifactPath(id), decodeContractArtifact);
+      const result = readJsonFile(this.resultPath(id), decodeResult);
 
-      // Use the integrated codec for deep validation.
-      const artifact = decodeContractArtifact(artifactRaw);
-
-      const resultRaw = JSON.parse(
-        fs.readFileSync(this.resultPath(id), "utf-8"),
-      );
-
-      const result = decodeResult(resultRaw);
-
+      if (!artifact || !result) return undefined;
       return { artifact, result };
     } catch (error) {
-      if (
-        (error as NodeJS.ErrnoException).code ===
-        "ENOENT"
-      ) {
-        return undefined;
-      }
+      if (isErrno(error, "ENOENT")) return undefined;
 
       if (error instanceof ContractStoreError) {
         throw error;
       }
 
-      throw new ContractStoreError(
-        "io-failure",
-        `Failed to load contract ${id}.`,
-        {
-          cause: error,
-        },
-      );
+      throw new ContractStoreError("io-failure", `Failed to load contract ${id}.`, {
+        cause: error,
+      });
     }
   }
 
@@ -287,10 +189,7 @@ export class FileContractStore {
       const current = await this.load(id);
 
       if (!current) {
-        throw new ContractStoreError(
-          "not-found",
-          `Contract ${id} does not exist.`,
-        );
+        throw new ContractStoreError("not-found", `Contract ${id} does not exist.`);
       }
 
       if (current.result.state !== "pending") {
@@ -300,14 +199,8 @@ export class FileContractStore {
         );
       }
 
-      if (
-        current.result.revision !==
-        expectedRevision
-      ) {
-        throw new ContractStoreError(
-          "revision-conflict",
-          `Contract ${id} revision mismatch.`,
-        );
+      if (current.result.revision !== expectedRevision) {
+        throw new ContractStoreError("revision-conflict", `Contract ${id} revision mismatch.`);
       }
 
       const submissionRecord: ContractSubmissionRecord = {
@@ -320,65 +213,47 @@ export class FileContractStore {
         schemaVersion: 2,
         state: "submitted",
         contractId: id,
-        revision:
-          current.result.revision + 1,
+        revision: current.result.revision + 1,
         submittedAt: submissionRecord.submittedAt,
         value,
         history: [...current.result.history, submissionRecord],
       };
 
-      atomicWriteJson(
-        this.resultPath(id),
-        submitted,
-      );
+      atomicWriteJson(this.resultPath(id), submitted);
 
       return submitted;
     });
   }
 
-  async cancel(
-    id: ContractId,
-    reason: string,
-  ): Promise<CancelledContractResult> {
-    return this.exclusive(
-      id,
-      async () => {
-        const current = await this.load(id);
+  async cancel(id: ContractId, reason: string): Promise<CancelledContractResult> {
+    return this.exclusive(id, async () => {
+      const current = await this.load(id);
 
-        if (!current) {
-          throw new ContractStoreError(
-            "not-found",
-            `Contract ${id} does not exist.`,
-          );
-        }
+      if (!current) {
+        throw new ContractStoreError("not-found", `Contract ${id} does not exist.`);
+      }
 
-        if (current.result.state !== "pending" && current.result.state !== "submitted") {
-          throw new ContractStoreError(
-            "already-terminal",
-            `Contract ${id} is already ${current.result.state}.`,
-          );
-        }
-
-        const cancelled: CancelledContractResult = {
-          schemaVersion: 2,
-          state: "cancelled",
-          contractId: id,
-          revision:
-            current.result.revision + 1,
-          cancelledAt:
-            new Date().toISOString(),
-          reason,
-          history: current.result.history,
-        };
-
-        atomicWriteJson(
-          this.resultPath(id),
-          cancelled,
+      if (current.result.state !== "pending" && current.result.state !== "submitted") {
+        throw new ContractStoreError(
+          "already-terminal",
+          `Contract ${id} is already ${current.result.state}.`,
         );
+      }
 
-        return cancelled;
-      },
-    );
+      const cancelled: CancelledContractResult = {
+        schemaVersion: 2,
+        state: "cancelled",
+        contractId: id,
+        revision: current.result.revision + 1,
+        cancelledAt: new Date().toISOString(),
+        reason,
+        history: current.result.history,
+      };
+
+      atomicWriteJson(this.resultPath(id), cancelled);
+
+      return cancelled;
+    });
   }
 
   // ── Reopen: submitted → pending (with rejection history) ─────────────
@@ -387,16 +262,17 @@ export class FileContractStore {
     id: ContractId,
     expectedRevision: number,
     disposition: ContractSubmissionRecord["disposition"],
-    issues: readonly { readonly path: readonly (string | number)[]; readonly message: string; readonly code?: string }[],
+    issues: readonly {
+      readonly path: readonly (string | number)[];
+      readonly message: string;
+      readonly code?: string;
+    }[],
   ): Promise<PendingContractResult> {
     return this.exclusive(id, async () => {
       const current = await this.load(id);
 
       if (!current) {
-        throw new ContractStoreError(
-          "not-found",
-          `Contract ${id} does not exist.`,
-        );
+        throw new ContractStoreError("not-found", `Contract ${id} does not exist.`);
       }
 
       if (current.result.state !== "submitted") {
@@ -407,10 +283,7 @@ export class FileContractStore {
       }
 
       if (current.result.revision !== expectedRevision) {
-        throw new ContractStoreError(
-          "revision-conflict",
-          `Contract ${id} revision mismatch.`,
-        );
+        throw new ContractStoreError("revision-conflict", `Contract ${id} revision mismatch.`);
       }
 
       // Update the last submission record with rejection disposition.
@@ -433,10 +306,7 @@ export class FileContractStore {
         history,
       };
 
-      atomicWriteJson(
-        this.resultPath(id),
-        pending,
-      );
+      atomicWriteJson(this.resultPath(id), pending);
 
       return pending;
     });
@@ -444,18 +314,12 @@ export class FileContractStore {
 
   // ── Accept: submitted → accepted ─────────────────────────────────────
 
-  async accept(
-    id: ContractId,
-    expectedRevision: number,
-  ): Promise<AcceptedContractResult> {
+  async accept(id: ContractId, expectedRevision: number): Promise<AcceptedContractResult> {
     return this.exclusive(id, async () => {
       const current = await this.load(id);
 
       if (!current) {
-        throw new ContractStoreError(
-          "not-found",
-          `Contract ${id} does not exist.`,
-        );
+        throw new ContractStoreError("not-found", `Contract ${id} does not exist.`);
       }
 
       if (current.result.state !== "submitted") {
@@ -466,10 +330,7 @@ export class FileContractStore {
       }
 
       if (current.result.revision !== expectedRevision) {
-        throw new ContractStoreError(
-          "revision-conflict",
-          `Contract ${id} revision mismatch.`,
-        );
+        throw new ContractStoreError("revision-conflict", `Contract ${id} revision mismatch.`);
       }
 
       // Mark the last submission record as accepted.
@@ -492,10 +353,7 @@ export class FileContractStore {
         history,
       };
 
-      atomicWriteJson(
-        this.resultPath(id),
-        accepted,
-      );
+      atomicWriteJson(this.resultPath(id), accepted);
 
       return accepted;
     });

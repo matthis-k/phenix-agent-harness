@@ -1,7 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-
+import type { AgentKind } from "../phenix-kernel/agents.ts";
+import type { Difficulty, TaskProfile } from "../phenix-kernel/task.ts";
+import {
+  atomicWriteJson,
+  isErrno,
+  readJsonFile,
+  sanitizePathSegment,
+  timestamp,
+} from "../phenix-persistence/json-files.ts";
+import { isTerminalState } from "./workflow-reducer.ts";
 import type {
   ActiveWorkflowTransition,
   CompletedWorkflowTransition,
@@ -10,43 +19,24 @@ import type {
   WorkflowStateId,
   WorkflowTransitionId,
 } from "./workflow-types.ts";
-import type { AgentKind } from "../phenix-kernel/agents.ts";
-import type { Difficulty, TaskProfile } from "../phenix-kernel/task.ts";
-import { isTerminalState } from "./workflow-reducer.ts";
 
 function stateRoot(cwd: string): string {
   return path.join(cwd, ".phenix-agent-state", "workflows");
 }
 
-function sanitize(value: string): string {
-  return value
-    .replace(/[^A-Za-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "unknown";
-}
-
-function recordPath(
-  cwd: string,
-  instanceId: string,
-  actorId: string,
-): string {
+function recordPath(cwd: string, instanceId: string, actorId: string): string {
   return path.join(
     stateRoot(cwd),
-    sanitize(instanceId),
-    `${sanitize(actorId)}.json`,
+    sanitizePathSegment(instanceId),
+    `${sanitizePathSegment(actorId)}.json`,
   );
 }
 
-function lockPath(
-  cwd: string,
-  instanceId: string,
-  actorId: string,
-): string {
+function lockPath(cwd: string, instanceId: string, actorId: string): string {
   return `${recordPath(cwd, instanceId, actorId)}.lock`;
 }
 
-export function now(): string {
-  return new Date().toISOString();
-}
+export const now = timestamp;
 
 const LOCK_STALE_MS = 30_000;
 const LOCK_RETRY_MS = 50;
@@ -104,8 +94,7 @@ export function acquireWorkflowLock(
       }
       return { lockPath: target };
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== "EEXIST") throw error;
+      if (!isErrno(error, "EEXIST")) throw error;
       if (isStaleLock(target)) {
         try {
           fs.unlinkSync(target);
@@ -134,32 +123,36 @@ export function releaseWorkflowLock(handle: LockHandle): void {
   }
 }
 
-function atomicWrite(target: string, data: unknown): void {
-  const dir = path.dirname(target);
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    const fd = fs.openSync(temporary, "w", 0o600);
-    try {
-      fs.writeFileSync(fd, JSON.stringify(data, null, 2), "utf-8");
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-    fs.renameSync(temporary, target);
-    const dirFd = fs.openSync(dir, "r");
-    try {
-      fs.fsyncSync(dirFd);
-    } finally {
-      fs.closeSync(dirFd);
-    }
-  } finally {
-    try {
-      fs.unlinkSync(temporary);
-    } catch {
-      // Renamed or already cleaned up.
-    }
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Decode the stable workflow envelope before it enters reducer logic. */
+export function decodeWorkflowRecord(value: unknown): WorkflowRuntimeRecord {
+  if (
+    !isObject(value) ||
+    value.version !== 1 ||
+    typeof value.instanceId !== "string" ||
+    typeof value.actorId !== "string" ||
+    typeof value.sessionId !== "string" ||
+    value.definitionId !== "phenix-default" ||
+    typeof value.definitionVersion !== "number" ||
+    typeof value.state !== "string" ||
+    typeof value.revision !== "number" ||
+    !Array.isArray(value.active) ||
+    !Array.isArray(value.completed) ||
+    !isObject(value.facts) ||
+    typeof value.createdAt !== "string" ||
+    typeof value.updatedAt !== "string"
+  ) {
+    throw new WorkflowStoreError(
+      "INVALID_RECORD",
+      "Persisted workflow record is malformed or uses an unsupported version.",
+      {},
+    );
   }
+
+  return value as unknown as WorkflowRuntimeRecord;
 }
 
 export function readWorkflowRecord(
@@ -167,14 +160,7 @@ export function readWorkflowRecord(
   instanceId: string,
   actorId: string,
 ): WorkflowRuntimeRecord | undefined {
-  try {
-    return JSON.parse(
-      fs.readFileSync(recordPath(cwd, instanceId, actorId), "utf-8"),
-    ) as WorkflowRuntimeRecord;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
+  return readJsonFile(recordPath(cwd, instanceId, actorId), decodeWorkflowRecord);
 }
 
 export function createWorkflowRecord(
@@ -223,24 +209,11 @@ export function createWorkflowRecord(
         { instanceId: input.instanceId, actorId: input.actorId },
       );
     }
-    atomicWrite(target, record);
+    atomicWriteJson(target, record);
   } finally {
     releaseWorkflowLock(lock);
   }
   return record;
-}
-
-export function writeWorkflowRecord(
-  cwd: string,
-  record: WorkflowRuntimeRecord,
-): void {
-  const lock = acquireWorkflowLock(cwd, record.instanceId, record.actorId);
-  try {
-    record.updatedAt = now();
-    atomicWrite(recordPath(cwd, record.instanceId, record.actorId), record);
-  } finally {
-    releaseWorkflowLock(lock);
-  }
 }
 
 export function mutateWorkflowRecord(
@@ -269,7 +242,7 @@ export function mutateWorkflowRecord(
     }
     const next = mutate(structuredClone(current));
     next.updatedAt = now();
-    atomicWrite(recordPath(cwd, instanceId, actorId), next);
+    atomicWriteJson(recordPath(cwd, instanceId, actorId), next);
     return next;
   } finally {
     releaseWorkflowLock(lock);
@@ -295,18 +268,14 @@ function mutateLatestWorkflowRecord(
     const next = mutate(structuredClone(current));
     if (next === current) return current;
     next.updatedAt = now();
-    atomicWrite(recordPath(cwd, instanceId, actorId), next);
+    atomicWriteJson(recordPath(cwd, instanceId, actorId), next);
     return next;
   } finally {
     releaseWorkflowLock(lock);
   }
 }
 
-export function verifyWorkflowActorExists(
-  cwd: string,
-  instanceId: string,
-  actorId: string,
-): void {
+export function verifyWorkflowActorExists(cwd: string, instanceId: string, actorId: string): void {
   if (!readWorkflowRecord(cwd, instanceId, actorId)) {
     throw new WorkflowStoreError(
       "CHILD_ACTOR_MISSING",
@@ -344,9 +313,7 @@ export function beginTransition(
           { state: current.state, revision: current.revision },
         );
       }
-      const existing = current.active.find(
-        (active) => active.transitionId === input.transitionId,
-      );
+      const existing = current.active.find((active) => active.transitionId === input.transitionId);
       if (existing) {
         throw new WorkflowStoreError(
           "TRANSITION_CONFLICT",
@@ -390,35 +357,28 @@ export function acceptTransition(
     readonly newFacts?: Readonly<Record<string, unknown>>;
   },
 ): WorkflowRuntimeRecord {
-  return mutateLatestWorkflowRecord(
-    cwd,
-    record.instanceId,
-    record.actorId,
-    (current) => {
-      const status = completedOrThrow(current, input.executionId);
-      if (status !== "active") {
-        return current;
-      }
-      const activeIndex = current.active.findIndex(
-        (item) => item.executionId === input.executionId,
-      );
-      const [active] = current.active.splice(activeIndex, 1);
-      const completed: CompletedWorkflowTransition = {
-        executionId: active.executionId,
-        transitionId: active.transitionId,
-        handleId: active.handleId,
-        completedAt: now(),
-        accepted: true,
-      };
-      current.completed = [...current.completed, completed];
-      current.state = input.nextState;
-      current.revision += 1;
-      if (input.newFacts) {
-        current.facts = { ...current.facts, ...input.newFacts };
-      }
+  return mutateLatestWorkflowRecord(cwd, record.instanceId, record.actorId, (current) => {
+    const status = completedOrThrow(current, input.executionId);
+    if (status !== "active") {
       return current;
-    },
-  );
+    }
+    const activeIndex = current.active.findIndex((item) => item.executionId === input.executionId);
+    const [active] = current.active.splice(activeIndex, 1);
+    const completed: CompletedWorkflowTransition = {
+      executionId: active.executionId,
+      transitionId: active.transitionId,
+      handleId: active.handleId,
+      completedAt: now(),
+      accepted: true,
+    };
+    current.completed = [...current.completed, completed];
+    current.state = input.nextState;
+    current.revision += 1;
+    if (input.newFacts) {
+      current.facts = { ...current.facts, ...input.newFacts };
+    }
+    return current;
+  });
 }
 
 export function rejectTransition(
@@ -429,32 +389,25 @@ export function rejectTransition(
     readonly nextState: WorkflowStateId;
   },
 ): WorkflowRuntimeRecord {
-  return mutateLatestWorkflowRecord(
-    cwd,
-    record.instanceId,
-    record.actorId,
-    (current) => {
-      const status = completedOrThrow(current, input.executionId);
-      if (status !== "active") {
-        return current;
-      }
-      const activeIndex = current.active.findIndex(
-        (item) => item.executionId === input.executionId,
-      );
-      const [active] = current.active.splice(activeIndex, 1);
-      const completed: CompletedWorkflowTransition = {
-        executionId: active.executionId,
-        transitionId: active.transitionId,
-        handleId: active.handleId,
-        completedAt: now(),
-        accepted: false,
-      };
-      current.completed = [...current.completed, completed];
-      current.state = input.nextState;
-      current.revision += 1;
+  return mutateLatestWorkflowRecord(cwd, record.instanceId, record.actorId, (current) => {
+    const status = completedOrThrow(current, input.executionId);
+    if (status !== "active") {
       return current;
-    },
-  );
+    }
+    const activeIndex = current.active.findIndex((item) => item.executionId === input.executionId);
+    const [active] = current.active.splice(activeIndex, 1);
+    const completed: CompletedWorkflowTransition = {
+      executionId: active.executionId,
+      transitionId: active.transitionId,
+      handleId: active.handleId,
+      completedAt: now(),
+      accepted: false,
+    };
+    current.completed = [...current.completed, completed];
+    current.state = input.nextState;
+    current.revision += 1;
+    return current;
+  });
 }
 
 export function hashCapabilityContent(content: string): string {
@@ -470,14 +423,11 @@ export class WorkflowStoreError extends Error {
     | "CHILD_ACTOR_MISSING"
     | "WORKFLOW_NOT_FOUND"
     | "WORKFLOW_EXISTS"
-    | "UNKNOWN_EXECUTION";
+    | "UNKNOWN_EXECUTION"
+    | "INVALID_RECORD";
   readonly context: Record<string, unknown>;
 
-  constructor(
-    code: WorkflowStoreError["code"],
-    message: string,
-    context: Record<string, unknown>,
-  ) {
+  constructor(code: WorkflowStoreError["code"], message: string, context: Record<string, unknown>) {
     super(message);
     this.name = "WorkflowStoreError";
     this.code = code;
