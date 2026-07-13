@@ -49,5 +49,29 @@ jobs:
 
           nix run .#phenix-check -- range "$base" "$head"
 
-      - name: Run complete flake checks
+      - name: Run TypeScript compiler check
+        id: typecheck
+        shell: bash
+        run: |
+          set +e
+          nix build --no-link --print-build-logs .#phenix-typecheck > typecheck.log 2>&1
+          status=$?
+          cat typecheck.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload compiler diagnostics
+        if: steps.typecheck.outputs.status != '0'
+        uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097 # v4.4.2
+        with:
+          name: typecheck-diagnostics
+          path: typecheck.log
+          if-no-files-found: error
+
+      - name: Fail when compiler check fails
+        if: steps.typecheck.outputs.status != '0'
+        run: exit 1
+
+      - name: Run remaining flake checks
+        if: steps.typecheck.outputs.status == '0'
         run: nix flake check --print-build-logs --keep-going
