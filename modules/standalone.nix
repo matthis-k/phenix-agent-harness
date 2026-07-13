@@ -9,52 +9,12 @@
     }:
 
     let
+      tooling = import ./tooling.nix { inherit pkgs; };
       phenixPiPackage = self'.packages.phenix-pi-package;
-
-      runtimeInputs = with pkgs; [
-        bash
-        coreutils
-        diffutils
-        file
-        findutils
-        gawk
-        git
-        gh
-        gnugrep
-        gnused
-        jq
-        patch
-        ripgrep
-        fd
-        ast-grep
-        tree
-        which
-
-        nix
-        nixd
-
-        cargo
-        rustc
-        clippy
-        rust-analyzer
-
-        lua-language-server
-
-        nodejs
-        typescript
-        typescript-language-server
-        vscode-langservers-extracted
-
-        taplo
-
-        yaml-language-server
-
-        basedpyright
-      ];
 
       wrappedPi = pkgs.writeShellApplication {
         name = "pi";
-        inherit runtimeInputs;
+        runtimeInputs = tooling.agentRuntime;
 
         text = ''
           agent_dir="''${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"

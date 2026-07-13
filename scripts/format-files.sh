@@ -4,16 +4,14 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-mapfile -d '' -t staged_files < <(
-  git diff --cached --name-only --diff-filter=ACMR -z
-)
-
-if ((${#staged_files[@]} == 0)); then
+files=("$@")
+if ((${#files[@]} == 0)); then
   exit 0
 fi
 
 partially_staged=()
-for file in "${staged_files[@]}"; do
+for file in "${files[@]}"; do
+  [[ -e "$file" ]] || continue
   if ! git diff --quiet -- "$file"; then
     partially_staged+=("$file")
   fi
@@ -31,7 +29,7 @@ biome_files=()
 nix_files=()
 shell_files=()
 
-for file in "${staged_files[@]}"; do
+for file in "${files[@]}"; do
   [[ -f "$file" ]] || continue
 
   case "$file" in
@@ -70,6 +68,5 @@ if ((${#shell_files[@]} > 0)); then
   shfmt -w -i 2 -ci "${shell_files[@]}"
 fi
 
-git add -- "${staged_files[@]}"
-
-exec bash scripts/check.sh staged
+git add -- "${files[@]}"
+exec bash scripts/check-files.sh "${files[@]}"

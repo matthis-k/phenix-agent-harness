@@ -4,6 +4,7 @@ _:
   perSystem =
     { pkgs, ... }:
     let
+      tooling = import ./tooling.nix { inherit pkgs; };
       piNpmRoot = ./pi-npm;
 
       # package-lock.json is the sole dependency authority. importNpmLock
@@ -78,18 +79,7 @@ _:
             touch "$out"
           '';
 
-      qualityTools = [
-        pkgs.actionlint
-        pkgs.biome
-        pkgs.coreutils
-        pkgs.diffutils
-        pkgs.git
-        pkgs.gnugrep
-        pkgs.nixfmt
-        pkgs.shellcheck
-        pkgs.shfmt
-        pkgs.statix
-      ];
+      qualityTools = tooling.quality;
 
       phenixRepositoryChecks =
         pkgs.runCommand "phenix-repository-checks"
@@ -97,57 +87,9 @@ _:
             nativeBuildInputs = qualityTools ++ [ pkgs.bash ];
           }
           ''
-            bash -n \
-              ${../scripts/check.sh} \
-              ${../scripts/check-files.sh} \
-              ${../scripts/fix-staged.sh} \
-              ${../scripts/setup-git-hooks.sh} \
-              ${../.githooks/pre-commit} \
-              ${../.githooks/pre-push}
-            shellcheck \
-              ${../scripts/check.sh} \
-              ${../scripts/check-files.sh} \
-              ${../scripts/fix-staged.sh} \
-              ${../scripts/setup-git-hooks.sh} \
-              ${../.githooks/pre-commit} \
-              ${../.githooks/pre-push}
-            shfmt -d -i 2 -ci \
-              ${../scripts/check.sh} \
-              ${../scripts/check-files.sh} \
-              ${../scripts/fix-staged.sh} \
-              ${../scripts/setup-git-hooks.sh} \
-              ${../.githooks/pre-commit} \
-              ${../.githooks/pre-push}
-            actionlint ${../.github/workflows/ci.yml}
-            biome ci \
-              --config-path ${../biome.json} \
-              --no-errors-on-unmatched \
-              --files-ignore-unknown=true \
-              ${../biome.json}
+            bash ${../scripts/check-repository-direct.sh} ${../.}
             touch "$out"
           '';
-
-      phenixCheck = pkgs.writeShellApplication {
-        name = "phenix-check";
-        runtimeInputs = qualityTools ++ [
-          pkgs.bash
-          pkgs.nix
-        ];
-        text = ''
-          exec bash ${../scripts/check.sh} "$@"
-        '';
-      };
-
-      phenixFixStaged = pkgs.writeShellApplication {
-        name = "phenix-fix-staged";
-        runtimeInputs = qualityTools ++ [
-          pkgs.bash
-          pkgs.nix
-        ];
-        text = ''
-          exec bash ${../scripts/fix-staged.sh} "$@"
-        '';
-      };
 
       setupGitHooks = pkgs.writeShellApplication {
         name = "setup-git-hooks";
@@ -189,17 +131,8 @@ _:
         phenix-runtime-tests = phenixRuntimeTests;
         phenix-typecheck = phenixTypecheck;
         phenix-repository-checks = phenixRepositoryChecks;
-        phenix-check = phenixCheck;
-        phenix-fix-staged = phenixFixStaged;
         setup-git-hooks = setupGitHooks;
         update-pi-npm-lock = updatePiNpmLock;
-      };
-
-      checks = {
-        phenix-pi-npm-packages = piNpmPackages;
-        phenix-runtime-tests = phenixRuntimeTests;
-        phenix-typecheck = phenixTypecheck;
-        phenix-repository-checks = phenixRepositoryChecks;
       };
     };
 }
