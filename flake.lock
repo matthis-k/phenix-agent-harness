@@ -157,13 +157,43 @@
         "type": "github"
       }
     },
+    "phenix-tend": {
+      "inputs": {
+        "flake-parts": [
+          "phenix-pins",
+          "flake-parts"
+        ],
+        "nixpkgs": [
+          "phenix-tend",
+          "phenix-pins",
+          "nixpkgs"
+        ],
+        "phenix-pins": [
+          "phenix-pins"
+        ]
+      },
+      "locked": {
+        "lastModified": 1783795781,
+        "narHash": "sha256-UdRoh4MtgMHdfH4wA6G1EEK7etTmqkU4VOZ/pl+uhcA=",
+        "owner": "matthis-k",
+        "repo": "phenix-tend",
+        "rev": "00a22c702c5499b4d5d960cd7180aaa09fb42116",
+        "type": "github"
+      },
+      "original": {
+        "owner": "matthis-k",
+        "repo": "phenix-tend",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "nixpkgs": [
           "phenix-pins",
           "nixpkgs"
         ],
-        "phenix-pins": "phenix-pins"
+        "phenix-pins": "phenix-pins",
+        "phenix-tend": "phenix-tend"
       }
     },
     "sops-nix": {
