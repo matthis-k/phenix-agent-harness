@@ -26,10 +26,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          {
-            python .github/maintenance/migrate-persistence.py
-            python .github/maintenance/finalize-persistence-migration.py
-          } > persistence-migration.log 2>&1
+          python .github/maintenance/migrate-persistence-v2.py > persistence-migration.log 2>&1
           status=$?
           cat persistence-migration.log
           echo "status=$status" >> "$GITHUB_OUTPUT"
