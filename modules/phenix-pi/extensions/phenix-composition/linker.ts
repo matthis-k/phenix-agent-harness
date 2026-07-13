@@ -1,44 +1,31 @@
 /**
  * phenix-composition — linker
  *
- * Resolves symbolic references, cross-validates declarations,
- * and produces an immutable linked graph.
- *
- * The linker is analogous to a compiler/linker. The runtime operates
- * only on the linked result.
+ * Resolves symbolic references, cross-validates declarations, and produces the
+ * immutable graph consumed by runtime composition. The linker is the only place
+ * where passive configuration becomes indexed runtime data.
  */
 
+import type { ContractDefinition } from "../phenix-contracts/definitions.ts";
+import type { LinkDiagnostic } from "../phenix-kernel/diagnostics.ts";
 import type {
   AgentClientId,
-  AgentKindId,
-  ContractDefinitionId,
-  WorkflowDefinitionId,
-  ModelSetId,
   CapabilityId,
+  ContractDefinitionId,
+  ModelSetId,
 } from "../phenix-kernel/ids.ts";
-import { agentClientId, modelSetId, capabilityId } from "../phenix-kernel/ids.ts";
-import type {
-  AgentClientRef,
-  ContractDefinitionRef,
-  ModelSetRef,
-} from "../phenix-kernel/refs.ts";
-import { refEquals } from "../phenix-kernel/refs.ts";
-import type { LinkDiagnostic } from "../phenix-kernel/diagnostics.ts";
+import { capabilityId, modelSetId } from "../phenix-kernel/ids.ts";
+import type { Difficulty } from "../phenix-kernel/task.ts";
+import { ALL_DIFFICULTIES } from "../phenix-kernel/task.ts";
 import type { PhenixConfiguration } from "./configuration.ts";
 import type {
-  LinkedPhenixGraph,
   LinkedAgentClient,
-  LinkedModelSet,
-  LinkedModelPool,
   LinkedAgentRoute,
+  LinkedModelPool,
+  LinkedModelSet,
+  LinkedPhenixGraph,
   LinkedRoutingGraph,
-  LinkedWorkflowDefinition,
 } from "./linked-graph.ts";
-import type { AgentClientDefinition } from "../phenix-subagents/definitions.ts";
-import type { Difficulty, ThinkingLevel } from "../phenix-kernel/task.ts";
-import { ALL_DIFFICULTIES } from "../phenix-kernel/task.ts";
-
-// ── Link result ────────────────────────────────────────────────────────────
 
 export type LinkResult =
   | {
@@ -50,337 +37,309 @@ export type LinkResult =
       readonly diagnostics: readonly LinkDiagnostic[];
     };
 
-// ── Error codes ────────────────────────────────────────────────────────────
+const DIAGNOSTIC_PREFIX = "PHX-LINK";
+const DIAGNOSTIC_SOURCE = "phenix-composition";
 
-const PHX_LINK = "PHX-LINK";
-
-function diag(
-  code: string,
-  message: string,
-  source: string,
-  path: readonly string[] = [],
-): LinkDiagnostic {
+function diagnostic(code: string, message: string, path: readonly string[] = []): LinkDiagnostic {
   return {
-    code: `${PHX_LINK}-${code}`,
+    code: `${DIAGNOSTIC_PREFIX}-${code}`,
     severity: "error",
-    source,
+    source: DIAGNOSTIC_SOURCE,
     path,
     message,
   };
 }
 
-function warn(
-  code: string,
-  message: string,
-  source: string,
-  path: readonly string[] = [],
-): LinkDiagnostic {
-  return {
-    code: `${PHX_LINK}-${code}`,
-    severity: "warning",
-    source,
-    path,
-    message,
-  };
+function findDuplicates<T>(values: readonly T[]): readonly T[] {
+  const seen = new Set<T>();
+  const duplicates = new Set<T>();
+
+  for (const value of values) {
+    if (seen.has(value)) duplicates.add(value);
+    seen.add(value);
+  }
+
+  return [...duplicates];
 }
 
-// ── Link function ──────────────────────────────────────────────────────────
-
-export function link(
+function validateUniqueDeclarations(
   configuration: PhenixConfiguration,
-): LinkResult {
-  const errors: LinkDiagnostic[] = [];
-  const warnings: LinkDiagnostic[] = [];
-
-  const source = "phenix-composition";
-
-  // ── Step 1: Validate there are no duplicate IDs ──────────────────────────
-
-  const contractIds = new Set<string>();
-  const clientIds = new Set<string>();
-  const modelSetIdsSet = new Set<string>();
-  const poolIds = new Set<string>();
-  const routeClientIds = new Set<string>();
-
-  for (const c of configuration.contracts) {
-    if (contractIds.has(c.id)) {
-      errors.push(diag("0001", `Duplicate contract definition ID: "${c.id}"`, source));
-    }
-    contractIds.add(c.id);
+  diagnostics: LinkDiagnostic[],
+): void {
+  for (const id of findDuplicates(configuration.contracts.map((contract) => contract.id))) {
+    diagnostics.push(diagnostic("0001", `Duplicate contract definition ID: "${id}"`));
   }
 
-  for (const c of configuration.agentClients) {
-    if (clientIds.has(c.id)) {
-      errors.push(diag("0002", `Duplicate agent client ID: "${c.id}"`, source));
-    }
-    clientIds.add(c.id);
+  for (const id of findDuplicates(configuration.agentClients.map((client) => client.id))) {
+    diagnostics.push(diagnostic("0002", `Duplicate agent client ID: "${id}"`));
   }
 
-  for (const ms of configuration.routing.modelSets) {
-    if (modelSetIdsSet.has(ms.id)) {
-      errors.push(diag("0003", `Duplicate model set ID: "${ms.id}"`, source));
-    }
-    modelSetIdsSet.add(ms.id);
+  for (const id of findDuplicates(configuration.routing.modelSets.map((modelSet) => modelSet.id))) {
+    diagnostics.push(diagnostic("0003", `Duplicate model set ID: "${id}"`));
   }
 
-  for (const p of configuration.routing.pools) {
-    if (poolIds.has(p.id)) {
-      errors.push(diag("0004", `Duplicate pool ID: "${p.id}"`, source));
-    }
-    poolIds.add(p.id);
+  for (const id of findDuplicates(configuration.routing.pools.map((pool) => pool.id))) {
+    diagnostics.push(diagnostic("0004", `Duplicate pool ID: "${id}"`));
   }
 
-  for (const r of configuration.routing.agentRoutes) {
-    if (routeClientIds.has(r.agentClient.id)) {
-      errors.push(diag("0005", `Duplicate agent route for: "${r.agentClient.id}"`, source));
-    }
-    routeClientIds.add(r.agentClient.id);
+  for (const id of findDuplicates(
+    configuration.routing.agentRoutes.map((route) => route.agentClient.id),
+  )) {
+    diagnostics.push(diagnostic("0005", `Duplicate agent route for: "${id}"`));
   }
+}
 
-  // ── Step 2: Validate active model set exists ─────────────────────────────
-
-  const activeSet = configuration.routing.modelSets.find(
-    (ms) => ms.id === configuration.activeModelSet.id,
+function validateReferences(
+  configuration: PhenixConfiguration,
+  diagnostics: LinkDiagnostic[],
+): void {
+  const contractIds = new Set(configuration.contracts.map((contract) => contract.id));
+  const clientIds = new Set(configuration.agentClients.map((client) => client.id));
+  const poolIds = new Set(configuration.routing.pools.map((pool) => pool.id));
+  const routeClientIds = new Set(
+    configuration.routing.agentRoutes.map((route) => route.agentClient.id),
   );
-  if (!activeSet) {
-    errors.push(
-      diag(
+
+  const activeModelSetExists = configuration.routing.modelSets.some(
+    (modelSet) => modelSet.id === configuration.activeModelSet.id,
+  );
+  if (!activeModelSetExists) {
+    diagnostics.push(
+      diagnostic(
         "0006",
         `Active model set "${configuration.activeModelSet.id}" not found in model sets`,
-        source,
       ),
     );
   }
 
-  // ── Step 3: Validate agent clients reference existing contracts ──────────
-
-  const contractDefMap = new Map<ContractDefinitionId, unknown>(
-    configuration.contracts.map((c) => [c.id, c]),
-  );
-
   for (const client of configuration.agentClients) {
-    for (const ref of client.accepts) {
-      if (!contractDefMap.has(ref.id as ContractDefinitionId)) {
-        errors.push(
-          diag(
+    for (const reference of client.accepts) {
+      if (!contractIds.has(reference.id)) {
+        diagnostics.push(
+          diagnostic(
             "0007",
-            `Agent client "${client.id}" accepts unknown contract: "${ref.id}"`,
-            source,
+            `Agent client "${client.id}" accepts unknown contract: "${reference.id}"`,
           ),
         );
       }
     }
-    for (const ref of client.produces) {
-      if (!contractDefMap.has(ref.id as ContractDefinitionId)) {
-        errors.push(
-          diag(
+
+    for (const reference of client.produces) {
+      if (!contractIds.has(reference.id)) {
+        diagnostics.push(
+          diagnostic(
             "0008",
-            `Agent client "${client.id}" produces unknown contract: "${ref.id}"`,
-            source,
+            `Agent client "${client.id}" produces unknown contract: "${reference.id}"`,
           ),
         );
       }
     }
-  }
 
-  // ── Step 4: Validate agent clients delegate to existing clients ──────────
-
-  for (const client of configuration.agentClients) {
-    for (const ref of client.delegation.allowedClients) {
-      if (!clientIds.has(ref.id as string)) {
-        errors.push(
-          diag(
+    for (const reference of client.delegation.allowedClients) {
+      if (!clientIds.has(reference.id)) {
+        diagnostics.push(
+          diagnostic(
             "0009",
-            `Agent client "${client.id}" delegates to unknown client: "${ref.id}"`,
-            source,
+            `Agent client "${client.id}" delegates to unknown client: "${reference.id}"`,
           ),
         );
       }
     }
-  }
 
-  // ── Step 5: Validate pools and model sets ────────────────────────────────
+    if (!routeClientIds.has(client.id)) {
+      diagnostics.push(diagnostic("0013", `Agent client "${client.id}" has no route definition`));
+    }
+  }
 
   for (const pool of configuration.routing.pools) {
     if (pool.candidates.length === 0) {
-      errors.push(
-        diag(
-          "0010",
-          `Pool "${pool.id}" has no candidates`,
-          source,
-        ),
-      );
+      diagnostics.push(diagnostic("0010", `Pool "${pool.id}" has no candidates`));
     }
   }
 
-  for (const ms of configuration.routing.modelSets) {
-    for (const [cap, poolName] of Object.entries(ms.capabilityPools)) {
-      const pool = configuration.routing.pools.find((p) => p.id === poolName);
-      if (!pool) {
-        errors.push(
-          diag(
+  for (const modelSet of configuration.routing.modelSets) {
+    for (const [capability, poolId] of Object.entries(modelSet.capabilityPools)) {
+      if (!poolIds.has(poolId)) {
+        diagnostics.push(
+          diagnostic(
             "0011",
-            `Model set "${ms.id}" references unknown pool "${poolName}" for capability "${cap}"`,
-            source,
+            `Model set "${modelSet.id}" references unknown pool "${poolId}" for capability "${capability}"`,
           ),
         );
       }
     }
   }
 
-  // ── Step 6: Validate agent routes reference existing clients ─────────────
-
   for (const route of configuration.routing.agentRoutes) {
-    if (!clientIds.has(route.agentClient.id as string)) {
-      errors.push(
-        diag(
-          "0012",
-          `Agent route references unknown client: "${route.agentClient.id}"`,
-          source,
-        ),
+    if (!clientIds.has(route.agentClient.id)) {
+      diagnostics.push(
+        diagnostic("0012", `Agent route references unknown client: "${route.agentClient.id}"`),
       );
     }
   }
+}
 
-  // ── Step 7: Validate route coverage ─────────────────────────────────────
+function linkContracts(
+  configuration: PhenixConfiguration,
+): ReadonlyMap<ContractDefinitionId, ContractDefinition> {
+  return new Map(configuration.contracts.map((contract) => [contract.id, contract] as const));
+}
 
-  // Every agent client that appears in the configuration should have a route
-  for (const client of configuration.agentClients) {
-    const route = configuration.routing.agentRoutes.find(
-      (r) => r.agentClient.id === (client.id as string),
-    );
-    if (!route) {
-      errors.push(
-        diag(
-          "0013",
-          `Agent client "${client.id}" has no route definition`,
-          source,
-        ),
-      );
-    }
-  }
-
-  // ── If errors, return failure ────────────────────────────────────────────
-
-  if (errors.length > 0) {
-    return {
-      ok: false,
-      diagnostics: [...warnings, ...errors],
-    };
-  }
-
-  // ── Build linked graph ───────────────────────────────────────────────────
-
-  const contracts = new Map(
-    configuration.contracts.map((c) => [c.id, c]),
-  ) as ReadonlyMap<ContractDefinitionId, unknown>;
-
-  const agentClients = new Map<AgentClientId, LinkedAgentClient>(
-    configuration.agentClients.map((c) => [
-      c.id,
+function linkAgentClients(
+  configuration: PhenixConfiguration,
+): ReadonlyMap<AgentClientId, LinkedAgentClient> {
+  return new Map(
+    configuration.agentClients.map((client) => [
+      client.id,
       {
-        definition: c,
-        accepts: new Set(c.accepts.map((r) => r.id as ContractDefinitionId)),
-        produces: new Set(c.produces.map((r) => r.id as ContractDefinitionId)),
-        allowedClients: new Set(
-          c.delegation.allowedClients.map((r) => r.id as AgentClientId),
-        ),
+        definition: client,
+        accepts: new Set(client.accepts.map((reference) => reference.id)),
+        produces: new Set(client.produces.map((reference) => reference.id)),
+        allowedClients: new Set(client.delegation.allowedClients.map((reference) => reference.id)),
       } satisfies LinkedAgentClient,
     ]),
   );
+}
 
-  const modelSets = new Map<ModelSetId, LinkedModelSet>(
-    configuration.routing.modelSets.map((ms) => [
-      modelSetId(ms.id),
+function linkModelSets(
+  configuration: PhenixConfiguration,
+): ReadonlyMap<ModelSetId, LinkedModelSet> {
+  return new Map(
+    configuration.routing.modelSets.map((definition) => {
+      const id = modelSetId(definition.id);
+      const capabilityPools = Object.fromEntries(
+        Object.entries(definition.capabilityPools).map(([capability, pool]) => [
+          capabilityId(capability),
+          pool,
+        ]),
+      ) as Readonly<Record<CapabilityId, string>>;
+
+      return [
+        id,
+        {
+          id,
+          capabilityPools,
+          allowedProviders: definition.allowedProviders ?? [],
+          guards: definition.guards,
+        } satisfies LinkedModelSet,
+      ] as const;
+    }),
+  );
+}
+
+function linkPools(configuration: PhenixConfiguration): ReadonlyMap<string, LinkedModelPool> {
+  return new Map(
+    configuration.routing.pools.map((pool) => [
+      pool.id,
       {
-        id: modelSetId(ms.id),
-        capabilityPools: Object.fromEntries(
-          Object.entries(ms.capabilityPools).map(([k, v]) => [capabilityId(k), v]),
-        ) as Record<CapabilityId, string>,
-        allowedProviders: ms.allowedProviders ?? [],
-        guards: ms.guards,
-      } satisfies LinkedModelSet,
+        id: pool.id,
+        candidates: pool.candidates,
+      } satisfies LinkedModelPool,
     ]),
   );
+}
 
-  const pools = new Map<string, LinkedModelPool>(
-    configuration.routing.pools.map((p) => [
-      p.id,
-      { id: p.id, candidates: p.candidates },
-    ]),
-  );
-
-  const agentRoutes = new Map<AgentClientId, LinkedAgentRoute>(
-    configuration.routing.agentRoutes.map((r) => [
-      agentClientId(r.agentClient.id as string),
-      {
-        agentClientId: agentClientId(r.agentClient.id as string),
-        difficulties: Object.fromEntries(
-          ALL_DIFFICULTIES.map((d) => [
-            d,
+function linkAgentRoutes(
+  configuration: PhenixConfiguration,
+): ReadonlyMap<AgentClientId, LinkedAgentRoute> {
+  return new Map(
+    configuration.routing.agentRoutes.map((definition) => {
+      const difficulties = Object.fromEntries(
+        ALL_DIFFICULTIES.map((difficulty) => {
+          const route = definition.difficulties[difficulty];
+          return [
+            difficulty,
             {
-              capability: capabilityId(
-                r.difficulties[d]?.capability.id ?? "general",
-              ),
-              thinking: r.difficulties[d]?.thinking ?? "low",
+              capability: route.capability.id,
+              thinking: route.thinking,
             },
-          ]),
-        ) as Record<Difficulty, { capability: CapabilityId; thinking: ThinkingLevel }>,
-      } satisfies LinkedAgentRoute,
-    ]),
+          ];
+        }),
+      ) as Readonly<
+        Record<
+          Difficulty,
+          {
+            readonly capability: CapabilityId;
+            readonly thinking: (typeof definition.difficulties)[Difficulty]["thinking"];
+          }
+        >
+      >;
+
+      return [
+        definition.agentClient.id,
+        {
+          agentClientId: definition.agentClient.id,
+          difficulties,
+        } satisfies LinkedAgentRoute,
+      ] as const;
+    }),
   );
+}
 
-  const routing: LinkedRoutingGraph = {
-    modelSets,
-    pools,
-    agentRoutes,
-  };
+/** Validate and link passive configuration into immutable runtime data. */
+export function link(configuration: PhenixConfiguration): LinkResult {
+  const diagnostics: LinkDiagnostic[] = [];
 
-  const workflows = new Map<WorkflowDefinitionId, LinkedWorkflowDefinition>(
-    configuration.workflows.map((w: any) => [
-      w.id ?? "unknown",
-      {
-        id: w.id ?? "unknown",
-        version: 1,
-        initialState: w.initialState ?? "classified",
-        raw: w,
-      },
-    ]),
-  );
+  validateUniqueDeclarations(configuration, diagnostics);
+  validateReferences(configuration, diagnostics);
 
-  const activeModelSetLinked = modelSets.get(
-    configuration.activeModelSet.id as ModelSetId,
-  )!;
+  if (diagnostics.length > 0) {
+    return {
+      ok: false,
+      diagnostics,
+    };
+  }
+
+  const modelSets = linkModelSets(configuration);
+  const activeModelSet = modelSets.get(configuration.activeModelSet.id);
+  if (!activeModelSet) {
+    // The reference check above guarantees this. Keep the assertion local to
+    // the linking boundary instead of leaking optionality into runtime code.
+    throw new Error(`Linked active model set "${configuration.activeModelSet.id}" is missing`);
+  }
 
   const graph: LinkedPhenixGraph = {
-    activeModelSet: activeModelSetLinked,
-    contracts: contracts as ReadonlyMap<ContractDefinitionId, any>,
-    agentClients,
-    routing,
-    workflows,
+    activeModelSet,
+    contracts: linkContracts(configuration),
+    agentClients: linkAgentClients(configuration),
+    routing: {
+      modelSets,
+      pools: linkPools(configuration),
+      agentRoutes: linkAgentRoutes(configuration),
+    } satisfies LinkedRoutingGraph,
   };
 
-  // Deep-freeze
   return {
     ok: true,
-    graph: deepFreeze(graph) as LinkedPhenixGraph,
+    graph: deepFreeze(graph),
   };
 }
 
-// ── Deep freeze helper ─────────────────────────────────────────────────────
-
-function deepFreeze<T>(obj: T): T {
-  if (obj && typeof obj === "object" && !Object.isFrozen(obj)) {
-    Object.freeze(obj);
-    if (obj instanceof Map) {
-      for (const [key, value] of obj) {
-        deepFreeze(value);
-      }
-      return obj;
-    }
-    for (const key of Object.keys(obj as object)) {
-      deepFreeze((obj as any)[key]);
-    }
+function deepFreeze<T>(value: T): T {
+  if (value === null || typeof value !== "object" || Object.isFrozen(value)) {
+    return value;
   }
-  return obj;
+
+  if (value instanceof Map) {
+    for (const [key, entry] of value) {
+      deepFreeze(key);
+      deepFreeze(entry);
+    }
+    Object.freeze(value);
+    return value;
+  }
+
+  if (value instanceof Set) {
+    for (const entry of value) {
+      deepFreeze(entry);
+    }
+    Object.freeze(value);
+    return value;
+  }
+
+  for (const entry of Object.values(value as Record<string, unknown>)) {
+    deepFreeze(entry);
+  }
+
+  return Object.freeze(value);
 }

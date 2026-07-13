@@ -1,23 +1,22 @@
 /**
  * phenix-composition — linked graph
  *
- * The immutable linked graph produced by the linker.
- * Runtime services consume the linked graph rather than raw configuration.
+ * Immutable declarations produced by the linker. Runtime services consume this
+ * graph instead of raw configuration so references are validated once at the
+ * composition boundary.
  */
 
+import type { ContractDefinition } from "../phenix-contracts/definitions.ts";
 import type {
   AgentClientId,
-  ContractDefinitionId,
-  WorkflowDefinitionId,
-  ModelSetId,
   CapabilityId,
+  ContractDefinitionId,
+  ModelSetId,
 } from "../phenix-kernel/ids.ts";
 import type { Difficulty, ThinkingLevel } from "../phenix-kernel/task.ts";
-import type { ContractDefinition } from "../phenix-contracts/definitions.ts";
 import type { AgentClientDefinition } from "../phenix-subagents/definitions.ts";
 
-// ── Linked agent client ────────────────────────────────────────────────────
-
+/** Agent declaration with all symbolic contract and delegation references resolved. */
 export interface LinkedAgentClient {
   readonly definition: AgentClientDefinition;
   readonly accepts: ReadonlySet<ContractDefinitionId>;
@@ -25,23 +24,25 @@ export interface LinkedAgentClient {
   readonly allowedClients: ReadonlySet<AgentClientId>;
 }
 
-// ── Linked routing graph ───────────────────────────────────────────────────
-
+/** Route selected for one difficulty tier. */
 export interface AgentDifficultyRoute {
   readonly capability: CapabilityId;
   readonly thinking: ThinkingLevel;
 }
 
+/** Runtime lookup projection for one agent client. */
 export interface LinkedAgentRoute {
   readonly agentClientId: AgentClientId;
   readonly difficulties: Readonly<Record<Difficulty, AgentDifficultyRoute>>;
 }
 
+/** Named ordered candidate pool. */
 export interface LinkedModelPool {
   readonly id: string;
   readonly candidates: readonly string[];
 }
 
+/** Linked model-set declaration with capability and provider policy. */
 export interface LinkedModelSet {
   readonly id: ModelSetId;
   readonly capabilityPools: Readonly<Record<CapabilityId, string>>;
@@ -53,41 +54,22 @@ export interface LinkedModelSet {
   };
 }
 
+/** Routing declarations indexed for deterministic runtime lookup. */
 export interface LinkedRoutingGraph {
   readonly modelSets: ReadonlyMap<ModelSetId, LinkedModelSet>;
   readonly pools: ReadonlyMap<string, LinkedModelPool>;
   readonly agentRoutes: ReadonlyMap<AgentClientId, LinkedAgentRoute>;
 }
 
-// ── Linked workflow definition ─────────────────────────────────────────────
-
-export interface LinkedWorkflowDefinition {
-  readonly id: WorkflowDefinitionId;
-  readonly version: 1;
-  readonly initialState: string;
-  /* ... full workflow struct ... */
-  readonly raw: unknown;
-}
-
-// ── Linked Phenix graph ────────────────────────────────────────────────────
-
+/**
+ * Complete linked configuration consumed by the composition root.
+ *
+ * Workflow authority is not part of this graph while Phenix has one built-in
+ * workflow. The workflow runtime owns that definition directly.
+ */
 export interface LinkedPhenixGraph {
   readonly activeModelSet: LinkedModelSet;
-
-  readonly contracts: ReadonlyMap<
-    ContractDefinitionId,
-    ContractDefinition
-  >;
-
-  readonly agentClients: ReadonlyMap<
-    AgentClientId,
-    LinkedAgentClient
-  >;
-
+  readonly contracts: ReadonlyMap<ContractDefinitionId, ContractDefinition>;
+  readonly agentClients: ReadonlyMap<AgentClientId, LinkedAgentClient>;
   readonly routing: LinkedRoutingGraph;
-
-  readonly workflows: ReadonlyMap<
-    WorkflowDefinitionId,
-    LinkedWorkflowDefinition
-  >;
 }

@@ -53,7 +53,6 @@ const defaultPhenixConfiguration = definePhenixConfiguration({
     pools: defaultModelPools,
     agentRoutes: defaultAgentRoutes,
   },
-  workflows: [],
   runtime: {
     maximumDelegationDepth: DEFAULT_MAXIMUM_DELEGATION_DEPTH,
     persistChildSessions: true,
