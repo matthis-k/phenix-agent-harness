@@ -33,6 +33,20 @@
         "always": true
       },
       {
+        "id": "ci-changed-files",
+        "description": "Check files changed by the CI revision range",
+        "phase": "verify",
+        "kind": "command",
+        "command": ["bash", "scripts/check.sh", "ci-range"],
+        "profiles": ["ci"],
+        "tags": ["format", "lint", "ci"],
+        "sandbox_safe": true,
+        "mutates": false,
+        "interactive": false,
+        "network": false,
+        "always": true
+      },
+      {
         "id": "repository-checks",
         "description": "Run repository scripts, workflow, and configuration checks",
         "phase": "verify",
