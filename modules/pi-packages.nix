@@ -87,40 +87,7 @@ _:
             nativeBuildInputs = qualityTools ++ [ pkgs.bash ];
           }
           ''
-            bash -n \
-              ${../scripts/check.sh} \
-              ${../scripts/check-files.sh} \
-              ${../scripts/check-all-files.sh} \
-              ${../scripts/check-runtime-direct.sh} \
-              ${../scripts/fix-staged.sh} \
-              ${../scripts/setup-git-hooks.sh} \
-              ${../.githooks/pre-commit} \
-              ${../.githooks/pre-push}
-            shellcheck \
-              ${../scripts/check.sh} \
-              ${../scripts/check-files.sh} \
-              ${../scripts/check-all-files.sh} \
-              ${../scripts/check-runtime-direct.sh} \
-              ${../scripts/fix-staged.sh} \
-              ${../scripts/setup-git-hooks.sh} \
-              ${../.githooks/pre-commit} \
-              ${../.githooks/pre-push}
-            shfmt -d -i 2 -ci \
-              ${../scripts/check.sh} \
-              ${../scripts/check-files.sh} \
-              ${../scripts/check-all-files.sh} \
-              ${../scripts/check-runtime-direct.sh} \
-              ${../scripts/fix-staged.sh} \
-              ${../scripts/setup-git-hooks.sh} \
-              ${../.githooks/pre-commit} \
-              ${../.githooks/pre-push}
-            actionlint ${../.github/workflows/ci.yml}
-            biome ci \
-              --config-path ${../biome.json} \
-              --no-errors-on-unmatched \
-              --files-ignore-unknown=true \
-              ${../biome.json} \
-              ${../.tend.json}
+            bash ${../scripts/check-repository-direct.sh} ${../.}
             touch "$out"
           '';
 
