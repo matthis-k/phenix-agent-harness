@@ -134,12 +134,5 @@ _:
         setup-git-hooks = setupGitHooks;
         update-pi-npm-lock = updatePiNpmLock;
       };
-
-      checks = {
-        phenix-pi-npm-packages = piNpmPackages;
-        phenix-runtime-tests = phenixRuntimeTests;
-        phenix-typecheck = phenixTypecheck;
-        phenix-repository-checks = phenixRepositoryChecks;
-      };
     };
 }
