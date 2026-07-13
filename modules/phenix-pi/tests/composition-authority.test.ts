@@ -1,12 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
-import { defaultContracts } from "../extensions/phenix-contracts/default-contracts.ts";
-import {
-  definePhenixConfiguration,
-  link,
-} from "../extensions/phenix-composition/index.ts";
+import { definePhenixConfiguration, link } from "../extensions/phenix-composition/index.ts";
 import { DEFAULT_MAXIMUM_DELEGATION_DEPTH } from "../extensions/phenix-composition/runtime-policy.ts";
+import { defaultContracts } from "../extensions/phenix-contracts/default-contracts.ts";
 import { modelSetRef } from "../extensions/phenix-kernel/refs.ts";
 import {
   defaultAgentRoutes,

@@ -7,6 +7,7 @@
  */
 
 import type { ContractDefinition } from "../phenix-contracts/definitions.ts";
+import type { LinkDiagnostic } from "../phenix-kernel/diagnostics.ts";
 import type {
   AgentClientId,
   CapabilityId,
@@ -14,9 +15,8 @@ import type {
   ModelSetId,
 } from "../phenix-kernel/ids.ts";
 import { capabilityId, modelSetId } from "../phenix-kernel/ids.ts";
-import type { LinkDiagnostic } from "../phenix-kernel/diagnostics.ts";
-import { ALL_DIFFICULTIES } from "../phenix-kernel/task.ts";
 import type { Difficulty } from "../phenix-kernel/task.ts";
+import { ALL_DIFFICULTIES } from "../phenix-kernel/task.ts";
 import type { PhenixConfiguration } from "./configuration.ts";
 import type {
   LinkedAgentClient,
@@ -40,11 +40,7 @@ export type LinkResult =
 const DIAGNOSTIC_PREFIX = "PHX-LINK";
 const DIAGNOSTIC_SOURCE = "phenix-composition";
 
-function diagnostic(
-  code: string,
-  message: string,
-  path: readonly string[] = [],
-): LinkDiagnostic {
+function diagnostic(code: string, message: string, path: readonly string[] = []): LinkDiagnostic {
   return {
     code: `${DIAGNOSTIC_PREFIX}-${code}`,
     severity: "error",
@@ -151,9 +147,7 @@ function validateReferences(
     }
 
     if (!routeClientIds.has(client.id)) {
-      diagnostics.push(
-        diagnostic("0013", `Agent client "${client.id}" has no route definition`),
-      );
+      diagnostics.push(diagnostic("0013", `Agent client "${client.id}" has no route definition`));
     }
   }
 
@@ -179,10 +173,7 @@ function validateReferences(
   for (const route of configuration.routing.agentRoutes) {
     if (!clientIds.has(route.agentClient.id)) {
       diagnostics.push(
-        diagnostic(
-          "0012",
-          `Agent route references unknown client: "${route.agentClient.id}"`,
-        ),
+        diagnostic("0012", `Agent route references unknown client: "${route.agentClient.id}"`),
       );
     }
   }
@@ -191,9 +182,7 @@ function validateReferences(
 function linkContracts(
   configuration: PhenixConfiguration,
 ): ReadonlyMap<ContractDefinitionId, ContractDefinition> {
-  return new Map(
-    configuration.contracts.map((contract) => [contract.id, contract] as const),
-  );
+  return new Map(configuration.contracts.map((contract) => [contract.id, contract] as const));
 }
 
 function linkAgentClients(
@@ -206,9 +195,7 @@ function linkAgentClients(
         definition: client,
         accepts: new Set(client.accepts.map((reference) => reference.id)),
         produces: new Set(client.produces.map((reference) => reference.id)),
-        allowedClients: new Set(
-          client.delegation.allowedClients.map((reference) => reference.id),
-        ),
+        allowedClients: new Set(client.delegation.allowedClients.map((reference) => reference.id)),
       } satisfies LinkedAgentClient,
     ]),
   );
@@ -240,9 +227,7 @@ function linkModelSets(
   );
 }
 
-function linkPools(
-  configuration: PhenixConfiguration,
-): ReadonlyMap<string, LinkedModelPool> {
+function linkPools(configuration: PhenixConfiguration): ReadonlyMap<string, LinkedModelPool> {
   return new Map(
     configuration.routing.pools.map((pool) => [
       pool.id,
@@ -310,9 +295,7 @@ export function link(configuration: PhenixConfiguration): LinkResult {
   if (!activeModelSet) {
     // The reference check above guarantees this. Keep the assertion local to
     // the linking boundary instead of leaking optionality into runtime code.
-    throw new Error(
-      `Linked active model set "${configuration.activeModelSet.id}" is missing`,
-    );
+    throw new Error(`Linked active model set "${configuration.activeModelSet.id}" is missing`);
   }
 
   const graph: LinkedPhenixGraph = {

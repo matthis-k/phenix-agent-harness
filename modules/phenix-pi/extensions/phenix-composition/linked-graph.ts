@@ -6,6 +6,7 @@
  * composition boundary.
  */
 
+import type { ContractDefinition } from "../phenix-contracts/definitions.ts";
 import type {
   AgentClientId,
   CapabilityId,
@@ -13,7 +14,6 @@ import type {
   ModelSetId,
 } from "../phenix-kernel/ids.ts";
 import type { Difficulty, ThinkingLevel } from "../phenix-kernel/task.ts";
-import type { ContractDefinition } from "../phenix-contracts/definitions.ts";
 import type { AgentClientDefinition } from "../phenix-subagents/definitions.ts";
 
 /** Agent declaration with all symbolic contract and delegation references resolved. */
