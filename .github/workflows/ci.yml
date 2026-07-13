@@ -37,6 +37,7 @@ jobs:
         id: changed-files
         shell: bash
         run: |
+          set +e
           set -uo pipefail
           zero_sha="0000000000000000000000000000000000000000"
 
