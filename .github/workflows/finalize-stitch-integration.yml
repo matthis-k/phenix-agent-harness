@@ -1,0 +1,76 @@
+name: Finalize Stitch Integration
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-stitch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  finalize:
+    if: github.head_ref == 'feat/stitch-orchestration-runtime'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out integration branch
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+          ref: feat/stitch-orchestration-runtime
+
+      - name: Advertise orchestration executables
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("modules/phenix-pi/extensions/phenix.ts")
+          text = path.read_text()
+          needle = '        "basedpyright-langserver",\n'
+          replacement = (
+              '        "basedpyright-langserver",\n'
+              '        "tend",\n'
+              '        "stitch",\n'
+              '        "stitch-mcp",\n'
+          )
+          if text.count(needle) != 1:
+              raise SystemExit("doctor executable list changed unexpectedly")
+          path.write_text(text.replace(needle, replacement, 1))
+          PY
+
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add modules/phenix-pi/extensions/phenix.ts
+          git commit -m 'feat(doctor): report orchestration executables'
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Regenerate the coordinated flake lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          nix flake lock
+          nix shell nixpkgs#nixfmt -c nixfmt flake.nix modules/stitch.nix modules/standalone.nix modules/tend.nix modules/flake-module.nix
+          jq -e '
+            .mcpServers.stitch.command == "stitch-mcp" and
+            .mcpServers.stitch.lifecycle == "lazy" and
+            .settings.directTools == false
+          ' modules/phenix-pi/config/mcp.json
+          git diff --check
+
+      - name: Commit lock and remove helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/finalize-stitch-integration.yml
+          git add -A
+          git commit -m 'build(flake): lock the Stitch integration graph'
+          git push origin HEAD:feat/stitch-orchestration-runtime
