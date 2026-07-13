@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-mode="${1:-full}"
+mode="${1:-}"
 
 case "$mode" in
   staged)
@@ -14,25 +14,31 @@ case "$mode" in
     )
     bash scripts/check-files.sh "${files[@]}"
     ;;
-  range)
-    if (($# != 3)); then
-      printf 'usage: %s range BASE HEAD\n' "$0" >&2
-      exit 2
+  ci-range)
+    zero_sha="0000000000000000000000000000000000000000"
+    head="${TEND_DIFF_HEAD:-HEAD}"
+    base="${TEND_DIFF_BASE:-}"
+
+    git cat-file -e "$head^{commit}"
+
+    if [[ -z "$base" || "$base" == "$zero_sha" ]]; then
+      if git rev-parse --verify --quiet "$head^" >/dev/null; then
+        base="$head^"
+      else
+        base="$(git hash-object -t tree /dev/null)"
+      fi
+    else
+      git cat-file -e "$base^{commit}"
     fi
-    base="$2"
-    head="$3"
+
     git diff --check "$base" "$head"
     mapfile -d '' -t files < <(
       git diff --name-only --diff-filter=ACMR -z "$base" "$head"
     )
     bash scripts/check-files.sh "${files[@]}"
     ;;
-  full)
-    git diff --check
-    nix flake check --print-build-logs --keep-going
-    ;;
   *)
-    printf 'usage: %s [staged|range BASE HEAD|full]\n' "$0" >&2
+    printf 'usage: %s {staged|ci-range}\n' "$0" >&2
     exit 2
     ;;
 esac
