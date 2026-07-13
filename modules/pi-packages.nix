@@ -9,6 +9,10 @@ _:
       # package-lock.json is the sole dependency authority. importNpmLock
       # resolves every registry or Git dependency from its recorded integrity
       # hash or commit without a repository-wide fixed-output hash.
+      #
+      # Pi packages are peers of the extension packages but are supplied from
+      # pkgs.pi-coding-agent below. The lockfile is therefore generated with
+      # legacy-peer-deps so npm does not duplicate Pi and its shrinkwrap graph.
       piNpmPackages = pkgs.importNpmLock.buildNodeModules {
         npmRoot = piNpmRoot;
         inherit (pkgs) nodejs;
@@ -16,6 +20,7 @@ _:
           pname = "phenix-pi-npm-packages";
           version = "1.0.0";
           npm_config_ignore_scripts = true;
+          npm_config_legacy_peer_deps = true;
         };
       };
 
@@ -167,6 +172,7 @@ _:
             --prefix modules/pi-npm \
             --package-lock-only \
             --ignore-scripts \
+            --legacy-peer-deps \
             --no-audit \
             --no-fund
 
