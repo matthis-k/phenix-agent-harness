@@ -173,16 +173,15 @@
         ]
       },
       "locked": {
-        "lastModified": 1783942213,
+        "lastModified": 1783946084,
         "narHash": "sha256-4Vfy9TmPap/XdueiJa2izAMpVsdpUK7mmFV+UWcpE48=",
         "owner": "matthis-k",
         "repo": "phenix-tend",
-        "rev": "5cf389d719ae65137eb89e783e8b31adeecddbaa",
+        "rev": "5e8cf88f23447639b096e03cc5bc326f485dd9b3",
         "type": "github"
       },
       "original": {
         "owner": "matthis-k",
-        "ref": "feat/execution-contexts",
         "repo": "phenix-tend",
         "type": "github"
       }
