@@ -14,7 +14,13 @@
 
       wrappedPi = pkgs.writeShellApplication {
         name = "pi";
-        runtimeInputs = tooling.agentRuntime;
+        runtimeInputs =
+          tooling.agentRuntime
+          ++ [
+            self'.packages.tend
+            self'.packages.stitch
+            self'.packages.stitch-mcp
+          ];
 
         text = ''
           agent_dir="''${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
@@ -22,15 +28,26 @@
           mkdir -p "$agent_dir"
           chmod 0700 "$agent_dir" 2>/dev/null || true
 
-          defaults_file="$agent_dir/lsp.phenix-defaults.json"
+          lsp_defaults_file="$agent_dir/lsp.phenix-defaults.json"
 
           install -m 0600 \
             "${phenixPiPackage}/config/lsp.json" \
-            "$defaults_file"
+            "$lsp_defaults_file"
 
           if [[ ! -e "$agent_dir/lsp.json" ]]; then
-            cp "$defaults_file" "$agent_dir/lsp.json"
+            cp "$lsp_defaults_file" "$agent_dir/lsp.json"
             chmod 0600 "$agent_dir/lsp.json"
+          fi
+
+          mcp_defaults_file="$agent_dir/mcp.phenix-defaults.json"
+
+          install -m 0600 \
+            "${phenixPiPackage}/config/mcp.json" \
+            "$mcp_defaults_file"
+
+          if [[ ! -e "$agent_dir/mcp.json" ]]; then
+            cp "$mcp_defaults_file" "$agent_dir/mcp.json"
+            chmod 0600 "$agent_dir/mcp.json"
           fi
 
           export PI_CODING_AGENT_DIR="$agent_dir"
