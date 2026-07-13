@@ -38,10 +38,7 @@ export interface ResourceRef<Kind extends ResourceKind, Id extends string> {
 
 export type AgentClientRef = ResourceRef<"agent-client", AgentClientId>;
 export type AgentKindRef = ResourceRef<"agent-kind", AgentKindId>;
-export type ContractDefinitionRef = ResourceRef<
-  "contract-definition",
-  ContractDefinitionId
->;
+export type ContractDefinitionRef = ResourceRef<"contract-definition", ContractDefinitionId>;
 export type WorkflowRef = ResourceRef<"workflow", WorkflowDefinitionId>;
 export type ModelSetRef = ResourceRef<"model-set", ModelSetId>;
 export type CapabilityRef = ResourceRef<"capability", CapabilityId>;
@@ -61,9 +58,7 @@ export function agentKindRef(id: string | AgentKindId): AgentKindRef {
   return ref("agent-kind", agentKindId(id));
 }
 
-export function contractRef(
-  id: string | ContractDefinitionId,
-): ContractDefinitionRef {
+export function contractRef(id: string | ContractDefinitionId): ContractDefinitionRef {
   return ref("contract-definition", contractDefinitionId(id));
 }
 

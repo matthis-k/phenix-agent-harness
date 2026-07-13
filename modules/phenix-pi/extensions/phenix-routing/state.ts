@@ -62,18 +62,12 @@ export function validateModelSet(value: string): ModelSetId | undefined {
 }
 
 /** Determine the effective model set for a session. */
-export function resolveModelSet(
-  sessionId: string,
-  _cliModelSet: string | undefined,
-): ModelSetId {
+export function resolveModelSet(sessionId: string, _cliModelSet: string | undefined): ModelSetId {
   return getSessionRuntime(sessionId).modelSet;
 }
 
 /** Cycle through a non-empty model-set order. */
-export function cycleModelSet(
-  current: ModelSetId,
-  order: readonly ModelSetId[],
-): ModelSetId {
+export function cycleModelSet(current: ModelSetId, order: readonly ModelSetId[]): ModelSetId {
   const first = order[0];
   if (!first) {
     throw new Error("Cannot cycle an empty model-set order");
