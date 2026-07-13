@@ -4,6 +4,4 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-exec nix run --quiet .#tend -- check \
-  --profile git-hook \
-  --context local
+exec bash scripts/fix-staged.sh
