@@ -1,0 +1,43 @@
+name: Apply production type alignment
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out type branch
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: qa/05-types-and-identifiers
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+
+      - name: Apply deterministic type alignment
+        run: python .github/maintenance/fix-production-types.py
+
+      - name: Format touched source files
+        run: |
+          nix run nixpkgs#biome -- check --write \
+            modules/phenix-pi/extensions/phenix.ts \
+            modules/phenix-pi/extensions/phenix-contracts/validator.ts \
+            modules/phenix-pi/extensions/phenix-runtime/child-session-resources.ts \
+            modules/phenix-pi/extensions/phenix-subagents/coordinator.ts \
+            modules/phenix-pi/extensions/phenix-subagents/index.ts
+
+      - name: Commit source files
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add modules/phenix-pi/extensions
+          git diff --cached --check
+          git commit -m "refactor(types): align production runtime with Pi"
+          git push origin HEAD:qa/05-types-and-identifiers
