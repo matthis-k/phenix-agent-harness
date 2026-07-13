@@ -32,4 +32,5 @@ jobs:
             .tend.json
             modules/tend.nix
             modules/tooling.nix
+          include-hidden-files: true
           if-no-files-found: error
