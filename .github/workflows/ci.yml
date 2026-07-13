@@ -30,6 +30,16 @@ jobs:
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Update Tend input lock
+        run: nix flake lock --update-input phenix-tend
+
+      - name: Upload generated lock
+        uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097 # v4.4.2
+        with:
+          name: generated-flake-lock-final
+          path: flake.lock
+          if-no-files-found: error
+
       - name: Run Tend CI profile
         id: tend
         shell: bash
