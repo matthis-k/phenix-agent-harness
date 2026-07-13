@@ -173,15 +173,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1783795781,
-        "narHash": "sha256-UdRoh4MtgMHdfH4wA6G1EEK7etTmqkU4VOZ/pl+uhcA=",
+        "lastModified": 1783941416,
+        "narHash": "sha256-mugeIAVKBM0Fr8Nvl6u9DSaOr88WWKYWwp/N3MGBFc0=",
         "owner": "matthis-k",
         "repo": "phenix-tend",
-        "rev": "00a22c702c5499b4d5d960cd7180aaa09fb42116",
+        "rev": "b5f1d4b18229350a08bc45a970aa43b378fc94c2",
         "type": "github"
       },
       "original": {
         "owner": "matthis-k",
+        "ref": "feat/execution-contexts",
         "repo": "phenix-tend",
         "type": "github"
       }
