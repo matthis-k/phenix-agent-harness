@@ -1,46 +1,40 @@
-import type {
-  AgentRole,
-  AgentKind,
-  ModelTier,
-  TaskProfile,
-  ThinkingLevel,
-  TurnBudget,
-  ToolBudget,
-  VerificationCommand,
-  ProfileHint,
-} from "./agent-types.ts";
-import {
-  resolveExecutionPolicy,
-  type RuntimePolicyConfig,
-  type ResolvedExecutionPolicy,
-} from "./policy.ts";
-import {
-  resolveToolConfiguration,
-  type ResolvedToolConfiguration,
-  type ToolPatch,
-} from "./tool-policy.ts";
-import {
-  resolveDelegateRoleConfiguration,
-  type ResolvedDelegateRoleConfiguration,
-  type DelegateRolePatchInput,
-} from "./delegation-policy.ts";
-import type { ContractArtifact } from "./contract.ts";
+import type { Difficulty } from "../phenix-routing/types.ts";
+import type { AgentCapabilityArtifact } from "../phenix-workflow/agent-capabilities.ts";
+import { isSpawnableAgent } from "../phenix-workflow/agent-capabilities.ts";
+import type { TransitionAuthority } from "../phenix-workflow/transition-authority.ts";
 import type {
   DefaultWorkflowDefinitionId,
   WorkflowStateId,
 } from "../phenix-workflow/workflow-types.ts";
-import type { TransitionAuthority } from "../phenix-workflow/transition-authority.ts";
-import type { Difficulty } from "../phenix-routing/types.ts";
-import type { AgentCapabilityArtifact } from "../phenix-workflow/agent-capabilities.ts";
-import { isSpawnableAgent } from "../phenix-workflow/agent-capabilities.ts";
+import type {
+  AgentKind,
+  AgentRole,
+  ModelTier,
+  ProfileHint,
+  TaskProfile,
+  ThinkingLevel,
+  ToolBudget,
+  TurnBudget,
+  VerificationCommand,
+} from "./agent-types.ts";
+import type { ContractArtifact } from "./contract.ts";
+import {
+  type DelegateRolePatchInput,
+  type ResolvedDelegateRoleConfiguration,
+  resolveDelegateRoleConfiguration,
+} from "./delegation-policy.ts";
+import { type RuntimePolicyConfig, resolveExecutionPolicy } from "./policy.ts";
+import {
+  type ResolvedToolConfiguration,
+  resolveToolConfiguration,
+  type ToolPatch,
+} from "./tool-policy.ts";
 
 // ── Resolved child specification ────────────────────────────────────────────
 
 export interface ResolvedChildSpec {
   readonly role: AgentRole;
-  readonly agent:
-    | `phenix.${AgentKind}`
-    | "phenix.base";
+  readonly agent: `phenix.${AgentKind}` | "phenix.base";
 
   readonly profile: TaskProfile;
   readonly tier: ModelTier;
@@ -149,9 +143,7 @@ export interface ChildSpecInput {
 
 // ── Resolution ──────────────────────────────────────────────────────────────
 
-export function resolveChildSpec(
-  input: ChildSpecInput,
-): ResolvedChildSpec {
+export function resolveChildSpec(input: ChildSpecInput): ResolvedChildSpec {
   // 1. Resolve execution policy (profile, tier, thinking, budgets, critic).
   const policy = resolveExecutionPolicy({
     role: input.role,
@@ -174,15 +166,10 @@ export function resolveChildSpec(
     inheritedToolPatch = input.creator.contract.runtime.tools.source.patch;
     delegableTools = input.creator.contract.runtime.tools.effective;
 
-    inheritedRolePatch =
-      input.creator.contract.runtime.delegation.roles.source.patch;
-    delegableRoleCeiling =
-      input.creator.contract.runtime.delegation.roles.effective;
+    inheritedRolePatch = input.creator.contract.runtime.delegation.roles.source.patch;
+    delegableRoleCeiling = input.creator.contract.runtime.delegation.roles.effective;
 
-    remainingDepth = Math.max(
-      0,
-      input.creator.contract.runtime.delegation.remainingDepth - 1,
-    );
+    remainingDepth = Math.max(0, input.creator.contract.runtime.delegation.remainingDepth - 1);
   } else {
     // root or runtime-internal: no inherited patches, unrestricted ceilings.
     inheritedToolPatch = undefined;
@@ -205,14 +192,17 @@ export function resolveChildSpec(
     role: input.role,
     requested: input.delegateRoles ?? null,
     inheritedPatch: inheritedRolePatch
-      ? { additional: [...inheritedRolePatch.additional ?? []], removed: [...inheritedRolePatch.removed ?? []] }
+      ? {
+          additional: [...(inheritedRolePatch.additional ?? [])],
+          removed: [...(inheritedRolePatch.removed ?? [])],
+        }
       : undefined,
     delegableRoles: delegableRoleCeiling,
   });
 
   // 5. Filter available roles against capability artifact.
-  const availableRoles = roles.effective.filter(
-    (role) => isSpawnableAgent(input.capabilityArtifact, role),
+  const availableRoles = roles.effective.filter((role) =>
+    isSpawnableAgent(input.capabilityArtifact, role),
   );
 
   return {
@@ -239,9 +229,13 @@ export function resolveChildSpec(
       definitionVersion: input.workflow.definitionVersion,
       difficulty: input.workflow.difficulty,
       initialState: input.workflow.initialState,
-      transitionAuthority: input.workflow.transitionAuthority.kind === "unrestricted"
-        ? { kind: "unrestricted" as const }
-        : { kind: "restricted" as const, allowed: [...input.workflow.transitionAuthority.allowed] },
+      transitionAuthority:
+        input.workflow.transitionAuthority.kind === "unrestricted"
+          ? { kind: "unrestricted" as const }
+          : {
+              kind: "restricted" as const,
+              allowed: [...input.workflow.transitionAuthority.allowed],
+            },
       capabilityArtifactHash: input.workflow.capabilityArtifactHash,
     },
     timeoutMs: policy.timeoutMs,
