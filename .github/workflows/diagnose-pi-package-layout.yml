@@ -1,4 +1,4 @@
-name: Inspect Pi package layout
+name: Inspect Pi API surface
 
 on:
   pull_request:
@@ -21,20 +21,32 @@ jobs:
       - name: Install Nix
         uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
 
-      - name: Inspect package tree
+      - name: Inspect declarations
         shell: bash
         run: |
           set -euo pipefail
           package="$(nix build --no-link --print-out-paths nixpkgs#pi-coding-agent)"
+          root="$package/lib/node_modules/pi-monorepo"
           {
-            printf 'package=%s\n' "$package"
-            find "$package" -maxdepth 6 -type d -o -type l | sort
-          } > pi-package-layout.log
-          cat pi-package-layout.log
+            printf 'package=%s\n\n' "$package"
+            printf '%s\n' '=== package exports ==='
+            cat "$root/package.json"
+            printf '\n%s\n' '=== extension API ==='
+            grep -R -n -A 80 -B 10 'interface ExtensionAPI' "$root/dist" | head -240 || true
+            printf '\n%s\n' '=== tool definitions/results ==='
+            grep -R -n -A 60 -B 10 'interface ToolDefinition\|type ToolDefinition\|interface AgentToolResult\|type AgentToolResult' "$root/dist" | head -320 || true
+            printf '\n%s\n' '=== resource loader ==='
+            grep -R -n -A 60 -B 10 'DefaultResourceLoader' "$root/dist" | head -240 || true
+            printf '\n%s\n' '=== model and streaming ==='
+            grep -R -n -A 50 -B 10 'interface Model\|type Model\|streamSimple\|SimpleStreamOptions' "$root/node_modules/@earendil-works/pi-ai" | head -360 || true
+            printf '\n%s\n' '=== context events ==='
+            grep -R -n -A 50 -B 10 'ContextEvent\|BeforeAgentStart' "$root/dist" | head -260 || true
+          } > pi-api-surface.log
+          cat pi-api-surface.log
 
-      - name: Upload layout
+      - name: Upload declarations
         uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097 # v4.4.2
         with:
-          name: pi-package-layout
-          path: pi-package-layout.log
+          name: pi-api-surface
+          path: pi-api-surface.log
           if-no-files-found: error
