@@ -91,28 +91,6 @@ _:
             touch "$out"
           '';
 
-      phenixCheck = pkgs.writeShellApplication {
-        name = "phenix-check";
-        runtimeInputs = qualityTools ++ [
-          pkgs.bash
-          pkgs.nix
-        ];
-        text = ''
-          exec bash ${../scripts/check.sh} "$@"
-        '';
-      };
-
-      phenixFixStaged = pkgs.writeShellApplication {
-        name = "phenix-fix-staged";
-        runtimeInputs = qualityTools ++ [
-          pkgs.bash
-          pkgs.nix
-        ];
-        text = ''
-          exec bash ${../scripts/fix-staged.sh} "$@"
-        '';
-      };
-
       setupGitHooks = pkgs.writeShellApplication {
         name = "setup-git-hooks";
         runtimeInputs = [
@@ -153,8 +131,6 @@ _:
         phenix-runtime-tests = phenixRuntimeTests;
         phenix-typecheck = phenixTypecheck;
         phenix-repository-checks = phenixRepositoryChecks;
-        phenix-check = phenixCheck;
-        phenix-fix-staged = phenixFixStaged;
         setup-git-hooks = setupGitHooks;
         update-pi-npm-lock = updatePiNpmLock;
       };
