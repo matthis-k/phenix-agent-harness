@@ -43,7 +43,7 @@ jobs:
           fi
           nix run .#tend -- check \
             --profile ci \
-            --context local \
+            --context ci \
             --base "$BASE_SHA" \
             --head "$HEAD_SHA" \
             > tend-ci.log 2>&1

@@ -75,15 +75,27 @@
           ++ tooling.quality
           ++ [
             phenixTend
+            self'.packages.stitch
+            self'.packages.stitch-mcp
             self'.packages.setup-git-hooks
             self'.packages.update-pi-npm-lock
           ];
 
         shellHook = ''
+          if repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" && [[ -d "$repo_root/.githooks" ]]; then
+            (cd "$repo_root" && setup-git-hooks >/dev/null)
+            hook_status="enabled"
+          else
+            hook_status="not in the harness repository"
+          fi
+
           echo "phenix-agent-harness dev shell"
-          echo "  tend check --profile manual --context local"
-          echo "  tend check --profile pre-push --context local"
-          echo "  tend check --profile fix --context local"
+          echo "  git hooks: $hook_status"
+          echo "  pre-commit: repair and verify staged files"
+          echo "  pre-push:   tend check --profile pre-push --context local"
+          echo "  manual:     tend check --profile manual --context local"
+          echo "  stitch:     stitch workspace discover --json"
+          echo "  verify:     stitch verify --changed --profile manual --context local"
         '';
       };
     };

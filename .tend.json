@@ -29,7 +29,7 @@
       "phase": "verify",
       "selection": "git-range",
       "tasks": ["changed-files", "repository-checks", "runtime-tests", "typecheck", "flake-check"],
-      "contexts": ["local"]
+      "contexts": ["ci"]
     },
     "fix": {
       "phase": "fix",
@@ -42,6 +42,13 @@
     "local": {
       "implementation": "nix",
       "allow_mutation": true,
+      "allow_interactive": false,
+      "allow_network": true,
+      "require_sandbox_safe": false
+    },
+    "ci": {
+      "implementation": "nix",
+      "allow_mutation": false,
       "allow_interactive": false,
       "allow_network": true,
       "require_sandbox_safe": false

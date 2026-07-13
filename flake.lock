@@ -157,6 +157,38 @@
         "type": "github"
       }
     },
+    "phenix-stitch": {
+      "inputs": {
+        "flake-parts": [
+          "phenix-pins",
+          "flake-parts"
+        ],
+        "nixpkgs": [
+          "phenix-stitch",
+          "phenix-pins",
+          "nixpkgs"
+        ],
+        "phenix-pins": [
+          "phenix-pins"
+        ],
+        "phenix-tend": [
+          "phenix-tend"
+        ]
+      },
+      "locked": {
+        "lastModified": 1783960829,
+        "narHash": "sha256-+cJ25jXCcARow3nkuL8J+ExeHllbXcATbuaMR5DUB7s=",
+        "owner": "matthis-k",
+        "repo": "phenix-stitch",
+        "rev": "e83df1f3b8771716a96670dc6af6cdfdeabe236d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "matthis-k",
+        "repo": "phenix-stitch",
+        "type": "github"
+      }
+    },
     "phenix-tend": {
       "inputs": {
         "flake-parts": [
@@ -193,6 +225,7 @@
           "nixpkgs"
         ],
         "phenix-pins": "phenix-pins",
+        "phenix-stitch": "phenix-stitch",
         "phenix-tend": "phenix-tend"
       }
     },
