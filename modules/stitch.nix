@@ -9,6 +9,7 @@
     }:
     let
       upstream = inputs.phenix-stitch.packages.${system};
+      mcpConfig = ./phenix-pi/config/mcp.json;
 
       workspaceEnvironment = ''
         if repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
@@ -66,6 +67,12 @@
             ];
           }
           ''
+            jq -e '
+              .mcpServers.stitch.command == "stitch-mcp" and
+              .mcpServers.stitch.lifecycle == "lazy" and
+              .settings.directTools == false
+            ' ${mcpConfig}
+
             mkdir source
             cd source
             git init --quiet
