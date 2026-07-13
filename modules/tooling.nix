@@ -56,12 +56,14 @@ in
 {
   inherit agentRuntime quality;
 
-  tendRuntime = quality ++ (with pkgs; [
-    ast-grep
-    bash
-    git
-    nix
-    nodejs
-    typescript
-  ]);
+  tendRuntime =
+    quality
+    ++ (with pkgs; [
+      ast-grep
+      bash
+      git
+      nix
+      nodejs
+      typescript
+    ]);
 }
