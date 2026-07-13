@@ -1,105 +1,91 @@
 /**
  * Root-turn extraction adapter.
  *
- * Extracts the actual user message and a stable turn identity from the
- * Pi before_agent_start event and extension context.
- *
- * The BeforeAgentStartEvent provides systemPrompt (the fully assembled
- * system prompt containing base prompt + Project Context + injected skills +
- * tool instructions + workflow guidance), which is NOT the user message.
- *
- * The user's instruction is the last UserMessage in the conversation.
- * Messages are obtained via the "context" event (pi.on("context", ...)).
- *
- * Turn identity is derived from session metadata + message position
- * + content hash as a final fallback, so identical repeated requests
- * can still produce distinct turns.
+ * Extracts the actual user message and a stable turn identity from Pi context
+ * messages. The adapter accepts unknown message values because Pi's context
+ * event is an external boundary; shape validation therefore belongs here.
  */
 
+import { createHash } from "node:crypto";
+
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-// Import Message types from pi-ai (resolved at Pi runtime via Nix).
 import type {
   Message as _Message,
   UserMessage as _UserMessage,
 } from "@earendil-works/pi-ai";
-import { createHash } from "node:crypto";
 
-// Re-export for convenience.
 export type { _Message as Message, _UserMessage as UserMessage };
 
-/**
- * Stable identity for one logical user turn.
- *
- * Must remain consistent across repeated before_agent_start hooks for the
- * same user message (retries, extension re-invocations), and change when
- * a genuinely new user message arrives.
- */
+/** Stable identity and text for one logical user turn. */
 export interface RootTurnInput {
-  /** Stable identifier for this logical turn. */
   readonly turnId: string;
-
-  /** The user message that initiated this turn — NOT the system prompt. */
   readonly userMessage: string;
 }
 
-// ── Message helper types ────────────────────────────────────────────────────
-
-interface MinimalTextContent {
-  type: "text";
-  text: string;
+interface RootTurnMessage {
+  readonly role: string;
+  readonly content?: unknown;
 }
 
-interface MinimalImageContent {
-  type: "image";
-  data: string;
-  mimeType: string;
+interface TextContent {
+  readonly type: "text";
+  readonly text: string;
 }
 
-interface MinimalUserMessage {
-  role: "user";
-  content: string | (MinimalTextContent | MinimalImageContent)[];
-  timestamp: number;
+function isRootTurnMessage(value: unknown): value is RootTurnMessage {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "role" in value &&
+    typeof value.role === "string"
+  );
 }
 
-interface MinimalMessage {
-  role: string;
+function isTextContent(value: unknown): value is TextContent {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "type" in value &&
+    value.type === "text" &&
+    "text" in value &&
+    typeof value.text === "string"
+  );
 }
 
-type MinimalMessageUnion = MinimalMessage &
-  Partial<MinimalUserMessage>;
+function extractUserContent(message: RootTurnMessage): string {
+  if (typeof message.content === "string") return message.content;
+  if (!Array.isArray(message.content)) return "";
 
-// ── Extraction ──────────────────────────────────────────────────────────────
+  return message.content
+    .filter(isTextContent)
+    .map((block) => block.text)
+    .join("\n");
+}
 
 /**
- * Extract the user turn from a before_agent_start invocation.
+ * Extract the final user message from a Pi context snapshot.
  *
- * Uses the last UserMessage from the cached conversation to obtain the
- * actual user instruction, not the system prompt.
- *
- * @param messages - Conversation messages cached from the "context" event.
- * @param ctx - Extension context (for session identity).
- * @returns RootTurnInput with stable turnId and user message.
- * @throws Error with code "MISSING_USER_MESSAGE" when no user message is found.
+ * @throws an error with code `MISSING_USER_MESSAGE` when no valid user message
+ * exists in the supplied context values.
  */
 export function extractRootTurnInput(
-  messages: readonly MinimalMessageUnion[],
+  messages: readonly unknown[],
   ctx: ExtensionContext,
 ): RootTurnInput {
   const sessionId = ctx.sessionManager?.getSessionId?.() ?? "unknown-session";
 
-  // ── Extract user message ────────────────────────────────────────────
-
   let userMessage = "";
   let userMessageIndex = -1;
 
-  // Walk messages in reverse to find the last user message.
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (msg.role === "user") {
-      userMessage = extractUserContent(msg as MinimalMessageUnion & { content: MinimalUserMessage["content"] });
-      userMessageIndex = i;
-      break;
-    }
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!isRootTurnMessage(message) || message.role !== "user") continue;
+
+    userMessage = extractUserContent(message);
+    if (userMessage.length === 0) continue;
+
+    userMessageIndex = index;
+    break;
   }
 
   if (!userMessage) {
@@ -111,40 +97,15 @@ export function extractRootTurnInput(
     );
   }
 
-  // ── Derive turn ID ──────────────────────────────────────────────────
-
-  // Preferred: session + message index creates a stable, session-scoped
-  // identity within one Pi session. The content hash suffix ensures that
-  // a different message at the same index produces a distinct turn, and
-  // identical repeated requests at the same index are still identical turns.
   const userContentHash = createHash("sha256")
     .update(userMessage, "utf-8")
     .digest("hex")
     .slice(0, 16);
 
-  const turnId = userMessageIndex >= 0
-    ? `${sessionId}#msg${userMessageIndex}#${userContentHash}`
-    : `${sessionId}#${userContentHash}`;
+  const turnId =
+    userMessageIndex >= 0
+      ? `${sessionId}#msg${userMessageIndex}#${userContentHash}`
+      : `${sessionId}#${userContentHash}`;
 
   return { turnId, userMessage };
-}
-
-/**
- * Extract the text content from a UserMessage.
- *
- * UserMessage.content is either a plain string or an array of
- * TextContent | ImageContent blocks.
- */
-function extractUserContent(
-  msg: MinimalMessageUnion & { content: MinimalUserMessage["content"] },
-): string {
-  if (typeof msg.content === "string") return msg.content;
-  if (!Array.isArray(msg.content)) return "";
-  return msg.content
-    .filter(
-      (block: MinimalTextContent | MinimalImageContent): block is MinimalTextContent =>
-        block.type === "text",
-    )
-    .map((block) => block.text)
-    .join("\n");
 }
