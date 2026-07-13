@@ -20,7 +20,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import type { ExtensionAPI, ModelRegistry, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { definePhenixConfiguration } from "./phenix-composition/configuration.ts";
 import { link } from "./phenix-composition/linker.ts";
 import { DEFAULT_MAXIMUM_DELEGATION_DEPTH } from "./phenix-composition/runtime-policy.ts";
@@ -197,7 +197,10 @@ function registerTuiProjection(pi: ExtensionAPI): void {
     try {
       const registry = getChildSessionRegistry();
       const activeCount = registry.list().length;
-      ctx.ui.setStatus(`Phenix · ${activeCount} active child${activeCount !== 1 ? "ren" : ""}`);
+      ctx.ui.setStatus(
+        "phenix",
+        `Phenix · ${activeCount} active child${activeCount !== 1 ? "ren" : ""}`,
+      );
     } catch {
       // UI is optional — ignore errors.
     }
@@ -333,13 +336,8 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
         decisionContext: spec.workflowProjection,
       });
 
-      // The runtime tool is structurally compatible with Pi. Keep this
-      // conversion at the composition boundary rather than in domain code.
-      return [delegationTool as unknown as ToolDefinition];
+      return [delegationTool];
     },
-    ...(defaultPhenixConfiguration.runtime.rpc
-      ? { rpc: defaultPhenixConfiguration.runtime.rpc }
-      : {}),
   });
 
   // ── 7. Construct the coordinator ─────────────────────────────────────
@@ -406,7 +404,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
 
       const lines = [
         `Phenix: linked graph — ${linkResult.ok ? `${linkResult.graph.contracts.size} contracts, ${linkResult.graph.agentClients.size} clients, ${linkResult.graph.routing.modelSets.size} model sets` : "link errors"}`,
-        `Backend: ${defaultPhenixConfiguration.runtime.childSessionBackend}`,
+        "Backend: sdk",
         `Integrations: ${integrationSummary()}`,
         `LSP config: ${exists(lspConfigPath) ? lspConfigPath : `missing (${lspConfigPath})`}`,
         `Hypa mode: ${hypaMode}`,

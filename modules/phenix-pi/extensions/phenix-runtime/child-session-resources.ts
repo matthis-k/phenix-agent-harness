@@ -14,11 +14,15 @@
  */
 
 import type {
-  DefaultResourceLoaderOptions,
+  DefaultResourceLoader,
+  ExtensionAPI,
+  ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
 
-import type { ChildSessionSpec } from "./child-session-types.ts";
+export type DefaultResourceLoaderOptions = ConstructorParameters<typeof DefaultResourceLoader>[0];
+
 import type { PersonaDefinition } from "./child-session-prompt.ts";
+import type { ChildSessionSpec } from "./child-session-types.ts";
 
 // ── Inline extension registry ───────────────────────────────────────────────
 
@@ -28,7 +32,7 @@ import type { PersonaDefinition } from "./child-session-prompt.ts";
  */
 export interface InlineExtension {
   readonly ref: string;
-  readonly factory: (pi: unknown) => void | Promise<void>;
+  readonly factory: ExtensionFactory;
 }
 
 /**
@@ -38,9 +42,7 @@ export interface InlineExtension {
  *   hypa, lsp, mcp, context, web
  */
 export interface CodingSubstrateIntegrationRegistry {
-  resolve(
-    refs: readonly string[],
-  ): Promise<readonly InlineExtension[]>;
+  resolve(refs: readonly string[]): Promise<readonly InlineExtension[]>;
 }
 
 // ── Persona loading ─────────────────────────────────────────────────────────
@@ -107,7 +109,7 @@ export function buildChildResourceLoaderOptions(input: {
   readonly spec: ChildSessionSpec;
   readonly agentDir: string;
   readonly systemPrompt: string;
-  readonly extensionFactories?: readonly ((pi: unknown) => void | Promise<void>)[];
+  readonly extensionFactories?: readonly ExtensionFactory[];
   readonly skillPaths?: readonly string[];
 }): DefaultResourceLoaderOptions {
   const { spec, agentDir, systemPrompt } = input;
@@ -125,7 +127,7 @@ export function buildChildResourceLoaderOptions(input: {
     noContextFiles: !spec.inheritProjectContext,
 
     // Only explicitly resolved inline factories are loaded.
-    extensionFactories: [...(input.extensionFactories ?? [])] as any,
+    extensionFactories: [...(input.extensionFactories ?? [])],
 
     // Skill references are resolved to concrete paths by the caller.
     additionalSkillPaths: [...(input.skillPaths ?? [])],
@@ -172,11 +174,7 @@ export function inferChildIntegrationRefs(
   if (has("lsp")) refs.add("lsp");
   if (has("mcp")) refs.add("mcp");
   if (has("context")) refs.add("context");
-  if (
-    has("web") ||
-    tools.includes("fetch_content") ||
-    tools.includes("get_search_content")
-  ) {
+  if (has("web") || tools.includes("fetch_content") || tools.includes("get_search_content")) {
     refs.add("web");
   }
 
@@ -191,33 +189,33 @@ export function inferChildIntegrationRefs(
  */
 export async function resolveChildExtensionFactories(
   refs: readonly string[],
-): Promise<readonly ((pi: unknown) => Promise<void>)[]> {
+): Promise<readonly ExtensionFactory[]> {
   return refs.map((ref) => {
     switch (ref) {
       case "hypa":
-        return async (pi: unknown) => {
+        return async (pi: ExtensionAPI) => {
           const mod = await import("@hypabolic/pi-hypa/extensions/index.ts");
-          await mod.default(pi as any);
+          await mod.default(pi);
         };
       case "lsp":
-        return async (pi: unknown) => {
+        return async (pi: ExtensionAPI) => {
           const mod = await import("pi-lsp/extensions/pi-lsp/index.ts");
-          await mod.default(pi as any);
+          await mod.default(pi);
         };
       case "mcp":
-        return async (pi: unknown) => {
+        return async (pi: ExtensionAPI) => {
           const mod = await import("pi-mcp-adapter/index.ts");
-          await mod.default(pi as any);
+          await mod.default(pi);
         };
       case "context":
-        return async (pi: unknown) => {
+        return async (pi: ExtensionAPI) => {
           const mod = await import("pi-context-tools/extensions/index.ts");
-          await mod.default(pi as any);
+          await mod.default(pi);
         };
       case "web":
-        return async (pi: unknown) => {
+        return async (pi: ExtensionAPI) => {
           const mod = await import("@juicesharp/rpiv-web-tools/index.ts");
-          await mod.default(pi as any, {
+          await mod.default(pi, {
             interceptors: { github: true },
           });
         };

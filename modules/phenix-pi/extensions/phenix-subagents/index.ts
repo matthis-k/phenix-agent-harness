@@ -11,25 +11,11 @@
  */
 
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
-
-import {
-  type HandleRecord,
-  TERMINAL_STATES,
-} from "./handle-types.ts";
-import {
-  readRecord,
-  listRecords,
-  effectiveSessionId,
-} from "./handle-store.ts";
-import {
-  DelegateParams,
-  AgentParams,
-} from "./delegate-schema.ts";
-import { AgentExecutionCoordinator } from "./coordinator.ts";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentExecutionCoordinator } from "./coordinator.ts";
+import { AgentParams, DelegateParams } from "./delegate-schema.ts";
+import { effectiveSessionId, listRecords, readRecord } from "./handle-store.ts";
+import { type HandleRecord, TERMINAL_STATES } from "./handle-types.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -39,9 +25,7 @@ interface PiEvents {
 
 // ── Tool result helpers ─────────────────────────────────────────────────────
 
-function toolResult(
-  record: HandleRecord,
-): AgentToolResult<Record<string, unknown>> {
+function toolResult(record: HandleRecord): AgentToolResult<Record<string, unknown>> {
   const min = {
     id: record.id,
     handleId: record.id,
@@ -52,23 +36,22 @@ function toolResult(
     piSessionId: record.piSessionId,
     backend: record.backend,
     modelSet: record.modelSet,
-    ...(record.producerSpec ? {
-      role: record.producerSpec.role,
-      agent: record.producerSpec.agent,
-      model: record.producerSpec.model,
-      thinking: record.producerSpec.thinking,
-      tier: record.producerSpec.tier,
-    } : {}),
+    ...(record.producerSpec
+      ? {
+          role: record.producerSpec.role,
+          agent: record.producerSpec.agent,
+          model: record.producerSpec.model,
+          thinking: record.producerSpec.thinking,
+          tier: record.producerSpec.tier,
+        }
+      : {}),
   };
   const compact = JSON.stringify(min, null, 2);
   return {
     content: [
       {
         type: "text",
-        text:
-          compact.length > 500
-            ? `${compact.slice(0, 497)}...`
-            : compact,
+        text: compact.length > 500 ? `${compact.slice(0, 497)}...` : compact,
       },
     ],
     details: min as Record<string, unknown>,
@@ -81,16 +64,13 @@ function errorResult(
 ): AgentToolResult<Record<string, unknown>> {
   return {
     content: [{ type: "text", text: message }],
-    isError: true,
     details: details ?? { status: "failed" },
   };
 }
 
 // ── Tree payload ────────────────────────────────────────────────────────────
 
-function treePayload(
-  records: HandleRecord[],
-): Record<string, unknown> {
+function treePayload(records: HandleRecord[]): Record<string, unknown> {
   return {
     handles: records.map((r) => ({
       id: r.id,
@@ -136,14 +116,10 @@ export default async function phenixSubagents(
     }
 
     // Block obsolete contract tools.
-    if (
-      toolName === "phenix_contract_get" ||
-      toolName === "phenix_contract_submit"
-    ) {
+    if (toolName === "phenix_contract_get" || toolName === "phenix_contract_submit") {
       return {
         blocked: true,
-        reason:
-          `Tool "${toolName}" is no longer available. Use phenix_complete to submit your result.`,
+        reason: `Tool "${toolName}" is no longer available. Use phenix_complete to submit your result.`,
       };
     }
   });
@@ -164,17 +140,15 @@ export default async function phenixSubagents(
     async execute(
       _toolCallId: string,
       rawParams: Record<string, unknown>,
-      signal: AbortSignal,
-      _onUpdate:
-        | ((result: AgentToolResult<Record<string, unknown>>) => void)
-        | undefined,
+      signal: AbortSignal | undefined,
+      _onUpdate: ((result: AgentToolResult<Record<string, unknown>>) => void) | undefined,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<Record<string, unknown>>> {
       try {
         const result = await coordinator.delegate({
           params: rawParams as unknown as Parameters<typeof coordinator.delegate>[0]["params"],
           ctx,
-          signal,
+          signal: signal ?? new AbortController().signal,
         });
 
         if (!result.ok) {
@@ -183,9 +157,7 @@ export default async function phenixSubagents(
 
         return toolResult(result.record);
       } catch (error) {
-        return errorResult(
-          error instanceof Error ? error.message : String(error),
-        );
+        return errorResult(error instanceof Error ? error.message : String(error));
       }
     },
   });
@@ -202,10 +174,8 @@ export default async function phenixSubagents(
     async execute(
       _toolCallId: string,
       rawParams: Record<string, unknown>,
-      signal: AbortSignal,
-      _onUpdate:
-        | ((result: AgentToolResult<Record<string, unknown>>) => void)
-        | undefined,
+      signal: AbortSignal | undefined,
+      _onUpdate: ((result: AgentToolResult<Record<string, unknown>>) => void) | undefined,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<Record<string, unknown>>> {
       const params = rawParams as {
@@ -214,9 +184,7 @@ export default async function phenixSubagents(
       };
 
       if (params.action === "tree") {
-        const payload = treePayload(
-          listRecords(ctx.cwd, effectiveSessionId(ctx)),
-        );
+        const payload = treePayload(listRecords(ctx.cwd, effectiveSessionId(ctx)));
         return {
           content: [
             {
@@ -229,31 +197,19 @@ export default async function phenixSubagents(
       }
 
       if (!params.id) {
-        return errorResult(
-          `phenix_agent action '${params.action}' requires id`,
-        );
+        return errorResult(`phenix_agent action '${params.action}' requires id`);
       }
 
-      const record = readRecord(
-        ctx.cwd,
-        effectiveSessionId(ctx),
-        params.id,
-      );
+      const record = readRecord(ctx.cwd, effectiveSessionId(ctx), params.id);
 
       if (!record) {
-        return errorResult(
-          `Phenix handle not found: ${params.id}`,
-        );
+        return errorResult(`Phenix handle not found: ${params.id}`);
       }
 
       if (params.action === "inspect") return toolResult(record);
 
       if (params.action === "cancel") {
-        const cancelled = await coordinator.cancelHandle(
-          ctx,
-          params.id,
-          "cancelled by parent",
-        );
+        const cancelled = await coordinator.cancelHandle(ctx, params.id, "cancelled by parent");
         return toolResult(cancelled ?? record);
       }
 
@@ -264,7 +220,11 @@ export default async function phenixSubagents(
 
       // await
       if (!TERMINAL_STATES.has(record.status)) {
-        const resolved = await coordinator.awaitHandle(ctx, params.id, signal);
+        const resolved = await coordinator.awaitHandle(
+          ctx,
+          params.id,
+          signal ?? new AbortController().signal,
+        );
         return toolResult(resolved ?? record);
       }
 
