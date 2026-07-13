@@ -71,14 +71,7 @@
         "phase": "verify",
         "when": {
           "changed": {
-            "paths": [
-              ".github/**",
-              ".tend.json",
-              "*.json",
-              "*.jsonc",
-              "*.nix",
-              "modules/**"
-            ]
+            "paths": [".github/**", ".tend.json", "*.json", "*.jsonc", "*.nix", "modules/**"]
           }
         },
         "implementations": {
@@ -96,13 +89,7 @@
         "phase": "verify",
         "when": {
           "changed": {
-            "paths": [
-              ".github/**",
-              ".tend.json",
-              "biome.json",
-              "*.nix",
-              "modules/**/*.nix"
-            ]
+            "paths": [".github/**", ".tend.json", "biome.json", "*.nix", "modules/**/*.nix"]
           }
         },
         "implementations": {
@@ -182,13 +169,7 @@
         "phase": "fix",
         "when": {
           "changed": {
-            "paths": [
-              ".tend.json",
-              "*.json",
-              "*.jsonc",
-              "*.nix",
-              "modules/**"
-            ]
+            "paths": [".tend.json", "*.json", "*.jsonc", "*.nix", "modules/**"]
           }
         },
         "implementations": {
