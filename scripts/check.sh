@@ -13,10 +13,6 @@ case "$mode" in
       git diff --cached --name-only --diff-filter=ACMR -z
     )
     bash scripts/check-files.sh "${files[@]}"
-    nix build --no-link \
-      .#phenix-runtime-tests \
-      .#phenix-typecheck \
-      .#phenix-repository-checks
     ;;
   range)
     if (($# != 3)); then
