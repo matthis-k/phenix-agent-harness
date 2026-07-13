@@ -27,7 +27,8 @@
           if [[ -d "$repo_root/repos" ]]; then
             discovery_roots+=("$repo_root/repos")
           fi
-          export STITCH_DISCOVERY_ROOTS="$(IFS=:; echo "''${discovery_roots[*]}")"
+          stitch_discovery_roots="$(IFS=:; printf '%s' "''${discovery_roots[*]}")"
+          export STITCH_DISCOVERY_ROOTS="$stitch_discovery_roots"
         fi
       '';
 
