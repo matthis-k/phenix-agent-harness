@@ -1,9 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-repo_root="$(git rev-parse --show-toplevel)"
-cd "$repo_root"
-
-exec nix run --quiet .#tend -- check \
-  --profile pre-push \
-  --context local
