@@ -32,7 +32,10 @@
       tendNixCheck =
         pkgs.runCommand "phenix-tend-nix-check"
           {
-            nativeBuildInputs = [ phenixTend ];
+            nativeBuildInputs = [
+              phenixTend
+              pkgs.git
+            ];
             inherit source;
           }
           ''
