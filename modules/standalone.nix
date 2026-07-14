@@ -70,7 +70,7 @@
         '';
       };
 
-      qaRuntimeCheck = pkgs.runCommand "phenix-qa-runtime-tools" { } ''
+      qaRuntimeCheck = pkgs.runCommand "phenix-qa-runtime-tools" { nativeBuildInputs = [ pkgs.gnugrep ]; } ''
         ${lib.concatMapStringsSep "\n" (
           package: ''
             grep -F ${lib.escapeShellArg "${package}/bin"} ${wrappedPi}/bin/pi >/dev/null
