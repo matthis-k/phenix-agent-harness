@@ -53,12 +53,12 @@ let
     basedpyright
   ];
 
-  harnessRuntime = pkgs.lib.unique (agentRuntime ++ quality);
+  harnessRuntime = agentRuntime ++ quality;
 in
 {
   inherit agentRuntime harnessRuntime quality;
 
-  tendRuntime = pkgs.lib.unique (
+  tendRuntime =
     quality
     ++ (with pkgs; [
       ast-grep
@@ -67,6 +67,5 @@ in
       nix
       nodejs
       typescript
-    ])
-  );
+    ]);
 }
