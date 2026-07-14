@@ -52,9 +52,11 @@ let
     yaml-language-server
     basedpyright
   ];
+
+  harnessRuntime = agentRuntime ++ quality;
 in
 {
-  inherit agentRuntime quality;
+  inherit agentRuntime harnessRuntime quality;
 
   tendRuntime =
     quality
