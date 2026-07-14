@@ -52,11 +52,13 @@ let
     yaml-language-server
     basedpyright
   ];
+
+  harnessRuntime = pkgs.lib.unique (agentRuntime ++ quality);
 in
 {
-  inherit agentRuntime quality;
+  inherit agentRuntime harnessRuntime quality;
 
-  tendRuntime =
+  tendRuntime = pkgs.lib.unique (
     quality
     ++ (with pkgs; [
       ast-grep
@@ -65,5 +67,6 @@ in
       nix
       nodejs
       typescript
-    ]);
+    ])
+  );
 }
