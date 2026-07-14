@@ -70,15 +70,20 @@
         '';
       };
 
-      qaRuntimeCheck = pkgs.runCommand "phenix-qa-runtime-tools" { nativeBuildInputs = [ pkgs.gnugrep ]; } ''
-        ${lib.concatMapStringsSep "\n" (
-          package: ''
-            grep -F ${lib.escapeShellArg "${package}/bin"} ${wrappedPi}/bin/pi >/dev/null
+      qaRuntimeCheck =
+        pkgs.runCommand "phenix-qa-runtime-tools"
+          {
+            nativeBuildInputs = [ pkgs.gnugrep ];
+          }
           ''
-        ) tooling.quality}
+            ${lib.concatMapStringsSep "\n" (
+              package: ''
+                grep -F ${lib.escapeShellArg "${package}/bin"} ${wrappedPi}/bin/pi >/dev/null
+              ''
+            ) tooling.quality}
 
-        touch "$out"
-      '';
+            touch "$out"
+          '';
     in
     {
       packages = {
