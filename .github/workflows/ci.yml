@@ -36,43 +36,39 @@ jobs:
         if: (github.ref_name == 'feat/contract-workflow-api' || github.head_ref == 'feat/contract-workflow-api') && github.actor != 'github-actions[bot]'
         shell: bash
         run: |
-          set -o pipefail
-          {
-            python - <<'PY'
-            from pathlib import Path
+          exec > >(tee migration.log) 2>&1
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
 
-            target = Path("modules/phenix-pi/extensions/phenix-composition/root-workflow-integration.ts")
-            text = target.read_text()
-            text = text.replace(
-                "The deterministic Phenix workflow owns role selection, output schemas, and models.",
-                "The deterministic Phenix workflow owns role selection, output schemas, models, tools, and delegation depth.",
-            )
-            old_line = '    workflowGuidance += "Only delegate through the transitions projected below.\\n\\n";'
-            new_line = '''    workflowGuidance +=
-              "Use the workflow API: call phenix_workflow for fresh authority, then phenix_create_subagent with one returned transition.\\n\\n";'''
-            text = text.replace(old_line, new_line)
-            target.write_text(text)
+          target = Path("modules/phenix-pi/extensions/phenix-composition/root-workflow-integration.ts")
+          text = target.read_text()
+          text = text.replace(
+              "The deterministic Phenix workflow owns role selection, output schemas, and models.",
+              "The deterministic Phenix workflow owns role selection, output schemas, models, tools, and delegation depth.",
+          )
+          old_line = '    workflowGuidance += "Only delegate through the transitions projected below.\\n\\n";'
+          new_line = '''    workflowGuidance +=
+            "Use the workflow API: call phenix_workflow for fresh authority, then phenix_create_subagent with one returned transition.\\n\\n";'''
+          text = text.replace(old_line, new_line)
+          target.write_text(text)
 
-            migration = Path("workflow-api-migration.py")
-            source = migration.read_text()
-            start = source.index('path = root / "extensions/phenix-composition/root-workflow-integration.ts"')
-            end = source.index('for path in (root / "agents").glob("*.md"):', start)
-            migration.write_text(source[:start] + source[end:])
-            PY
-            python workflow-api-migration.py
-            mapfile -t changed_ts < <(git diff --name-only -- '*.ts')
-            if (( ${#changed_ts[@]} > 0 )); then
-              nix run nixpkgs#biome -- check --write "${changed_ts[@]}"
-            fi
-            git config user.name github-actions[bot]
-            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-            git add -A
-            git commit -m "feat(workflow): install contract-bound workflow API"
-            git push origin HEAD:${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}
-          } > migration.log 2>&1
-          status=$?
-          cat migration.log
-          exit "$status"
+          migration = Path("workflow-api-migration.py")
+          source = migration.read_text()
+          start = source.index('path = root / "extensions/phenix-composition/root-workflow-integration.ts"')
+          end = source.index('for path in (root / "agents").glob("*.md"):', start)
+          migration.write_text(source[:start] + source[end:])
+          PY
+          python workflow-api-migration.py
+          mapfile -t changed_ts < <(git diff --name-only -- '*.ts')
+          if (( ${#changed_ts[@]} > 0 )); then
+            nix run nixpkgs#biome -- check --write "${changed_ts[@]}"
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "feat(workflow): install contract-bound workflow API"
+          git push origin HEAD:${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}
 
       - name: Upload migration diagnostics
         if: failure()
