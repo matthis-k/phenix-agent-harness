@@ -5,17 +5,17 @@ import { modelSetId } from "../extensions/phenix-kernel/ids.ts";
 import {
   createSubagentSessionRuntime,
   routing,
-  SubagentSessionPlanner,
   type SubagentSessionBindings,
+  SubagentSessionPlanner,
 } from "../extensions/phenix-runtime/child-session-backend.ts";
 import {
-  childRunId,
   type ChildCycleOutcome,
   type ChildRun,
   type ChildSessionBackend,
   type ChildSessionEvent,
   type ChildSessionNode,
   type ChildSessionSpec,
+  childRunId,
 } from "../extensions/phenix-runtime/child-session-types.ts";
 
 const bindings = {
