@@ -6,7 +6,6 @@
  * registry membership, polling, awaiting, cancellation, and orphan detection.
  */
 
-import type { ChildRunId } from "../phenix-runtime/child-session-types.ts";
 import { ChildRuntimeError } from "../phenix-runtime/child-session-types.ts";
 import type { SubagentExecutionCompiler } from "../phenix-runtime/execution-plan.ts";
 import type { ManagedSubagentRegistry } from "../phenix-runtime/managed-subagent-registry.ts";
@@ -49,7 +48,7 @@ export interface ManagedDelegationExecutionInput {
   readonly mode: "await" | "background";
   readonly signal: AbortSignal;
   readonly timeoutMs: number;
-  readonly rootChildRunId: ChildRunId;
+  readonly rootSubagentId: string;
   readonly settle: (record: HandleRecord) => void;
 }
 
@@ -177,8 +176,8 @@ export class ManagedDelegationRuntime {
       cleanup();
     };
 
-    input.record.childRunId = handle.id as ChildRunId;
-    input.record.rootChildRunId = input.rootChildRunId;
+    input.record.subagentId = handle.id;
+    input.record.rootSubagentId = input.rootSubagentId;
     input.record.status = "running";
     writeRecord(input.cwd, input.record);
 
@@ -230,8 +229,8 @@ export class ManagedDelegationRuntime {
   poll(input: ManagedHandleLookup): HandleRecord | undefined {
     const record = readRecord(input.cwd, input.sessionId, input.id);
     if (!record || isTerminalHandleStatus(record.status)) return record;
-    if (!record.childRunId) return record;
-    return this.registry.get(record.childRunId) ? record : this.orphan(input.cwd, record);
+    if (!record.subagentId) return record;
+    return this.registry.get(record.subagentId) ? record : this.orphan(input.cwd, record);
   }
 
   async awaitHandle(
@@ -240,9 +239,9 @@ export class ManagedDelegationRuntime {
   ): Promise<HandleRecord | undefined> {
     const record = readRecord(input.cwd, input.sessionId, input.id);
     if (!record || isTerminalHandleStatus(record.status)) return record;
-    if (!record.childRunId) return record;
+    if (!record.subagentId) return record;
 
-    const handle = this.registry.get(record.childRunId);
+    const handle = this.registry.get(record.subagentId);
     if (!handle) return this.orphan(input.cwd, record);
 
     try {
@@ -274,13 +273,13 @@ export class ManagedDelegationRuntime {
     record.errors = [...(record.errors ?? []), reason];
     writeRecord(input.cwd, record);
 
-    if (record.childRunId) {
-      const handle = this.registry.get(record.childRunId);
+    if (record.subagentId) {
+      const handle = this.registry.get(record.subagentId);
       if (handle) {
         try {
           await handle.cancel(reason);
         } finally {
-          this.registry.remove(record.childRunId);
+          this.registry.remove(record.subagentId);
         }
       }
     }

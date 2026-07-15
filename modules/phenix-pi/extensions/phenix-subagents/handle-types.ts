@@ -1,16 +1,12 @@
 import type { JsonSchema } from "../phenix-contracts/definitions.ts";
-import type {
-  ChildRunId,
-  ChildSessionBackendKind,
-  SerializedError,
-} from "../phenix-runtime/child-session-types.ts";
+import type { SerializedError } from "../phenix-runtime/child-session-types.ts";
 import type { WorkflowStateId, WorkflowTransitionId } from "../phenix-workflow/workflow-types.ts";
 import type { AgentRole } from "./agent-types.ts";
 import type { ResolvedChildSpec } from "./child-spec.ts";
 
 // ── Constants (used by index.ts; extracted for visibility) ──────────────────
 
-export const HANDLE_VERSION = 4;
+export const HANDLE_VERSION = 5;
 
 /** Persisted lifecycle states for a delegated handle. */
 export type HandleStatus =
@@ -87,16 +83,6 @@ export interface ProducerCycleRecord {
   verification?: VerificationSummary;
   critic?: CriticSummary;
   error?: SerializedError;
-
-  // Child session summaries (for multi-session cycles)
-  childSessions?: readonly ChildSessionSummary[];
-}
-
-export interface ChildSessionSummary {
-  readonly role: string;
-  readonly status: "completed" | "failed";
-  readonly sessionFile?: string;
-  readonly transcriptPath?: string;
 }
 
 export interface CriticSummary {
@@ -132,7 +118,7 @@ export interface VerificationSummary {
   readonly contract: "valid" | "invalid" | "missing" | "cancelled";
 }
 
-// ── Handle record (version 2) ───────────────────────────────────────────────
+// ── Handle record (version 5) ───────────────────────────────────────────────
 
 export interface HandleRecord {
   readonly version: typeof HANDLE_VERSION;
@@ -152,12 +138,9 @@ export interface HandleRecord {
 
   readonly criticSpec?: ResolvedChildSpec;
 
-  // ── Child session linkage (distinct from Pi session IDs) ────────────
-  childRunId?: ChildRunId;
-  rootChildRunId?: ChildRunId;
-  backend?: ChildSessionBackendKind;
-  piSessionId?: string;
-  piSessionFile?: string;
+  // ── Managed subagent linkage ───────────────────────────────────────
+  subagentId?: string;
+  rootSubagentId?: string;
 
   // ── Producer cycles (repair reuses one Pi session) ──────────────────
   producerCycles: ProducerCycleRecord[];
@@ -176,11 +159,11 @@ export interface HandleRecord {
     readonly missingRequirements: readonly string[];
   };
 
-  /** Workflow binding set when the handle was spawned through a v4 workflow transition. */
+  /** Workflow binding set when the handle was spawned through a v5 workflow transition. */
   workflowBinding?: WorkflowBinding;
 }
 
-// ── Workflow binding (v4) ───────────────────────────────────────────────────
+// ── Workflow binding (v5) ───────────────────────────────────────────────────
 
 export interface WorkflowBinding {
   readonly instanceId: string;
@@ -197,12 +180,6 @@ export interface WorkflowBinding {
   readonly acceptedState: WorkflowStateId;
 
   readonly rejectedState: WorkflowStateId;
-}
-
-// ── Extended handle record with workflow binding ────────────────────────────
-
-export interface HandleRecordWithWorkflow extends HandleRecord {
-  readonly workflowBinding: WorkflowBinding;
 }
 
 // ── Evaluation ──────────────────────────────────────────────────────────────

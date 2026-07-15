@@ -502,7 +502,7 @@ export class AgentExecutionCoordinator {
             contract: contractArtifact,
             handleId: record.id,
             childRunId: childRunIdValue,
-            rootChildRunId: rootRunId,
+            rootSubagentId: rootRunId,
             modelSet: selectedModelSet,
             maximumDelegationDepth: contractArtifact.runtime.delegation.remainingDepth,
           },
@@ -531,7 +531,7 @@ export class AgentExecutionCoordinator {
         mode: isBackground ? "background" : "await",
         signal,
         timeoutMs: producerSpec.timeoutMs,
-        rootChildRunId: rootRunId,
+        rootSubagentId: rootRunId,
         settle: finalizeOrRejectHandle,
       });
 

@@ -29,12 +29,10 @@ function toolResult(record: HandleRecord): AgentToolResult<Record<string, unknow
   const min = {
     id: record.id,
     handleId: record.id,
-    childRunId: record.childRunId,
+    subagentId: record.subagentId,
     status: record.status,
     value: record.value,
     error: record.errors?.join(" | "),
-    piSessionId: record.piSessionId,
-    backend: record.backend,
     modelSet: record.modelSet,
     ...(record.producerSpec
       ? {
@@ -79,9 +77,8 @@ function treePayload(records: HandleRecord[]): Record<string, unknown> {
       role: r.producerSpec.role,
       agent: r.producerSpec.agent,
       cycles: r.producerCycles.length,
-      childRunId: r.childRunId,
-      rootChildRunId: r.rootChildRunId,
-      piSessionId: r.piSessionId,
+      subagentId: r.subagentId,
+      rootSubagentId: r.rootSubagentId,
     })),
   };
 }
