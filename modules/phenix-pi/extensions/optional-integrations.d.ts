@@ -7,6 +7,15 @@ declare module "@hypabolic/pi-hypa/extensions/index.ts" {
   export default register;
 }
 
+declare module "@hypabolic/pi-hypa/extensions/rewrite-client.ts" {
+  export function getExecArgs(binary: string, args: string[]): [string, string[]];
+  export function resolveHypaBinary(binary: string): string;
+}
+
+declare module "@hypabolic/pi-hypa/extensions/tools.ts" {
+  export function buildReadCommand(path: string, offset?: number, limit?: number): string;
+}
+
 declare module "pi-lsp/extensions/pi-lsp/index.ts" {
   const register: ExtensionRegistrar;
   export default register;
