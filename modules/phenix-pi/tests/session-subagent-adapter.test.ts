@@ -237,6 +237,22 @@ describe("SessionSubagentExecutionAdapter", () => {
     assert.deepEqual(await handle.result(), { summary: "still running" });
   });
 
+  it("keeps explicit cancellation terminal when evaluation ignores abort", async () => {
+    const evaluation = deferred<SummaryResult>();
+    const compiler = new RecordingCompiler(() => evaluation.promise);
+    const { manager, spawner } = managerWith(compiler);
+    const handle = await manager.spawn(request());
+
+    await handle.cancel("stop requested");
+    evaluation.resolve({ summary: "late success" });
+
+    await assert.rejects(handle.result(), (error: unknown) => {
+      return error instanceof SubagentExecutionError && error.code === "ABORTED";
+    });
+    assert.equal(spawner.run.abortCalls, 1);
+    assert.equal(handle.snapshot().status, "cancelled");
+  });
+
   it("explicitly cancels both evaluation and the child run", async () => {
     const compiler = new RecordingCompiler((_run, signal) => {
       return new Promise<SummaryResult>((_resolve, reject) => {

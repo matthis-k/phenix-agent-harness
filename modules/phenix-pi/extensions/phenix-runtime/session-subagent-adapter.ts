@@ -190,6 +190,25 @@ class SessionSubagentHandle<TOutput> implements SubagentHandle<TOutput> {
   private async evaluate(): Promise<TOutput> {
     try {
       const value = await this.execution.evaluate(this.run, this.evaluationController.signal);
+      if (this.evaluationController.signal.aborted || this.terminalStatus === "cancelled") {
+        const reason = this.evaluationController.signal.reason;
+        throw reason instanceof SubagentExecutionError
+          ? reason
+          : new SubagentExecutionError("ABORTED", "Subagent execution was cancelled.", {
+              cause: reason,
+              snapshot: this.snapshot(),
+            });
+      }
+      if (this.terminalStatus === "failed" || this.terminalStatus === "orphaned") {
+        throw (
+          this.terminalError ??
+          new SubagentExecutionError(
+            "INVALID_STATE",
+            `Subagent ${this.id} settled in state ${this.terminalStatus}.`,
+            { snapshot: this.snapshot() },
+          )
+        );
+      }
       this.terminalStatus = "completed";
       return value;
     } catch (error) {
@@ -323,6 +342,10 @@ export class SessionSubagentExecutionAdapter implements SubagentExecutionAdapter
       }
 
       const run = await this.sessions.spawn(execution.session, start.signal);
+      if (start.signal.aborted) {
+        await run.abort("subagent creation was cancelled");
+        throw new SubagentExecutionError("ABORTED", "Subagent creation was cancelled.");
+      }
       return new SessionSubagentHandle(run, execution);
     } catch (error) {
       const snapshot: SubagentSnapshot = {
