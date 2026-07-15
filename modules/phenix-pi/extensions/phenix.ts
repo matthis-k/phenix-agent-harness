@@ -37,7 +37,6 @@ import {
   createSubagentSessionRuntime,
 } from "./phenix-runtime/child-session-backend.ts";
 import { createDelegationTool } from "./phenix-runtime/delegation-tool.ts";
-import { createManagedSubagentRegistry } from "./phenix-runtime/managed-subagent-registry.ts";
 import { createSessionSubagentManagerFactory } from "./phenix-runtime/subagent-manager-factory.ts";
 import {
   bootstrapPhenixSubagentsSkillPrompt,
@@ -328,11 +327,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
     sessions: sessionRuntime,
     acceptance,
   });
-  const managedRegistry = createManagedSubagentRegistry();
-  const delegationRuntime = createManagedDelegationRuntime({
-    managers,
-    registry: managedRegistry,
-  });
+  const delegationRuntime = createManagedDelegationRuntime({ managers });
 
   coordinator = new AgentExecutionCoordinator({
     delegationRuntime,
