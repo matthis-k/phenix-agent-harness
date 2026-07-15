@@ -34,6 +34,12 @@ function request(): SubagentRequest<SummaryResult> {
   };
 }
 
+interface FakeHandleOptions {
+  readonly id?: string;
+  readonly status?: SubagentStatus;
+  readonly parentId?: string;
+}
+
 class FakeHandle<TOutput> implements SubagentHandle<TOutput> {
   readonly id: string;
   readonly value: TOutput;
@@ -43,10 +49,7 @@ class FakeHandle<TOutput> implements SubagentHandle<TOutput> {
   private readonly status: SubagentStatus;
   private readonly parentId: string | undefined;
 
-  constructor(
-    value: TOutput,
-    options: { readonly id?: string; readonly status?: SubagentStatus; readonly parentId?: string } = {},
-  ) {
+  constructor(value: TOutput, options: FakeHandleOptions = {}) {
     this.value = value;
     this.id = options.id ?? "handle-test";
     this.status = options.status ?? "running";
@@ -93,10 +96,7 @@ class RecordingAdapter implements SubagentExecutionAdapter {
   requests: SubagentRequest<unknown>[] = [];
   signals: Array<AbortSignal | undefined> = [];
 
-  constructor(
-    value: SummaryResult = { summary: "done" },
-    options: { readonly id?: string; readonly status?: SubagentStatus; readonly parentId?: string } = {},
-  ) {
+  constructor(value: SummaryResult = { summary: "done" }, options: FakeHandleOptions = {}) {
     this.handle = new FakeHandle(value, options);
   }
 
