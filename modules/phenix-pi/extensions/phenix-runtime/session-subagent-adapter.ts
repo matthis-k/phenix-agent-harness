@@ -3,7 +3,7 @@
  *
  * A compiler produces one passive SubagentExecutionPlan. The session runtime
  * owns backend translation, while an AcceptanceEngine independently interprets
- * acceptance policy. The adapter owns only lifecycle projection and cancellation.
+ * acceptance policy. The adapter owns lifecycle projection and cancellation.
  */
 
 import {
@@ -19,6 +19,7 @@ import type {
 } from "./execution-plan.ts";
 import type { SubagentRequest } from "./subagent-api.ts";
 import {
+  type SubagentCancellation,
   type SubagentEvent,
   type SubagentExecutionAdapter,
   SubagentExecutionError,
@@ -27,7 +28,6 @@ import {
   type SubagentStatus,
 } from "./subagent-manager.ts";
 
-/** Minimal session-runtime port consumed by this adapter. */
 export interface SubagentSessionSpawner {
   spawn(execution: SubagentExecutionPlan<unknown>, signal?: AbortSignal): Promise<ChildRun>;
 }
@@ -82,10 +82,7 @@ function projectChildEvent(event: ChildSessionEvent, snapshot: SubagentSnapshot)
       return {
         type: event.type,
         snapshot,
-        error: {
-          code: event.error.code,
-          message: event.error.message,
-        },
+        error: { code: event.error.code, message: event.error.message },
       };
     case "session.cancelled":
       return { type: event.type, snapshot, reason: event.reason };
@@ -164,20 +161,27 @@ function scopedStartSignal(signal?: AbortSignal): {
 } {
   const controller = new AbortController();
   const abort = (): void => {
-    if (!controller.signal.aborted) {
-      controller.abort(signal?.reason);
-    }
+    if (!controller.signal.aborted) controller.abort(signal?.reason);
   };
 
-  if (signal?.aborted) {
-    abort();
-  } else {
-    signal?.addEventListener("abort", abort, { once: true });
-  }
+  if (signal?.aborted) abort();
+  else signal?.addEventListener("abort", abort, { once: true });
 
   return {
     signal: controller.signal,
     dispose: () => signal?.removeEventListener("abort", abort),
+  };
+}
+
+function normalizeCancellation(
+  cancellation: string | SubagentCancellation | undefined,
+): Required<SubagentCancellation> {
+  if (typeof cancellation === "string") {
+    return { code: "ABORTED", reason: cancellation };
+  }
+  return {
+    code: cancellation?.code ?? "ABORTED",
+    reason: cancellation?.reason ?? "cancelled by caller",
   };
 }
 
@@ -247,7 +251,7 @@ class SessionSubagentHandle<TOutput> implements SubagentHandle<TOutput> {
       this.terminalStatus = "failed";
     }
 
-    if (event.type === "session.cancelled") {
+    if (event.type === "session.cancelled" && !this.terminalError) {
       this.terminalStatus = "cancelled";
     }
   }
@@ -311,14 +315,19 @@ class SessionSubagentHandle<TOutput> implements SubagentHandle<TOutput> {
     }
   }
 
-  async cancel(reason = "cancelled by caller"): Promise<void> {
+  async cancel(cancellation?: string | SubagentCancellation): Promise<void> {
     if (this.terminalStatus) return;
 
-    this.terminalStatus = "cancelled";
-    this.evaluationController.abort(
-      new SubagentExecutionError("ABORTED", reason, { snapshot: this.snapshot() }),
-    );
-    await this.run.abort(reason);
+    const { code, reason } = normalizeCancellation(cancellation);
+    const error = new SubagentExecutionError(code, reason, { snapshot: this.snapshot() });
+    this.terminalError = error;
+    this.terminalStatus = statusForError(error);
+    this.evaluationController.abort(error);
+
+    if (code === "ABORTED") {
+      await this.run.abort(reason);
+    }
+    await this.evaluation.catch(() => undefined);
   }
 
   subscribe(listener: (event: SubagentEvent) => void): () => void {
@@ -335,7 +344,6 @@ export interface SessionSubagentExecutionAdapterOptions {
   readonly sessions: SubagentSessionSpawner;
 }
 
-/** Concrete adapter from the stable manager API to the child-session runtime. */
 export class SessionSubagentExecutionAdapter implements SubagentExecutionAdapter {
   private readonly compiler: SubagentExecutionCompiler;
   private readonly acceptance: AcceptanceEngine;
@@ -362,6 +370,7 @@ export class SessionSubagentExecutionAdapter implements SubagentExecutionAdapter
       const run = await this.sessions.spawn(plan, start.signal);
       if (start.signal.aborted) {
         await run.abort("subagent creation was cancelled");
+        await run.dispose();
         throw new SubagentExecutionError("ABORTED", "Subagent creation was cancelled.");
       }
       return new SessionSubagentHandle(run, plan, this.acceptance);
