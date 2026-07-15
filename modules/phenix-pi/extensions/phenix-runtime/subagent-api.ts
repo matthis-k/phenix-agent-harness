@@ -80,9 +80,6 @@ export function returnsWithDecoder<TOutput>(
 }
 
 /** Decode an accepted value using the contract decoder when one is present. */
-export function decodeReturnValue<TOutput>(
-  contract: ReturnSpec<TOutput>,
-  value: unknown,
-): TOutput {
+export function decodeReturnValue<TOutput>(contract: ReturnSpec<TOutput>, value: unknown): TOutput {
   return contract.decode ? contract.decode(value) : (value as TOutput);
 }

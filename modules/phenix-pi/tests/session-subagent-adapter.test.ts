@@ -14,8 +14,9 @@ import {
   createSessionSubagentExecutionAdapter,
   createSubagentManager,
   type RuntimeBindings,
-  returns,
+  returnsWithDecoder,
   routing,
+  type SubagentEvent,
   type SubagentExecutionCompiler,
   SubagentExecutionError,
   type SubagentExecutionPlan,
@@ -30,12 +31,15 @@ interface SummaryResult {
 function request(): SubagentRequest<SummaryResult> {
   return {
     task: "Inspect the adapter boundary.",
-    returns: returns<SummaryResult>({
-      type: "object",
-      additionalProperties: false,
-      required: ["summary"],
-      properties: { summary: { type: "string" } },
-    }),
+    returns: returnsWithDecoder<SummaryResult>(
+      {
+        type: "object",
+        additionalProperties: false,
+        required: ["summary"],
+        properties: { summary: { type: "string" } },
+      },
+      (value) => value as SummaryResult,
+    ),
     session: {
       agent: "scout",
       model: routing.get("scout"),
@@ -105,6 +109,7 @@ class FakeRun implements ChildRun {
   abortCalls = 0;
 
   private status: ChildSessionNode["status"] = "running";
+  private listener?: (event: ChildSessionEvent) => void;
 
   snapshot(): ChildSessionNode {
     return {
@@ -123,8 +128,15 @@ class FakeRun implements ChildRun {
     };
   }
 
-  subscribe(_listener: (event: ChildSessionEvent) => void): () => void {
-    return () => {};
+  subscribe(listener: (event: ChildSessionEvent) => void): () => void {
+    this.listener = listener;
+    return () => {
+      if (this.listener === listener) this.listener = undefined;
+    };
+  }
+
+  emit(event: ChildSessionEvent): void {
+    this.listener?.(event);
   }
 
   continue(message: string, _signal?: AbortSignal): Promise<ChildCycleOutcome> {
@@ -231,6 +243,38 @@ describe("SessionSubagentExecutionAdapter", () => {
 
     acceptance.pending.resolve({ summary: "done" });
     assert.deepEqual(await handle.result(), { summary: "done" });
+  });
+
+  it("projects backend events into the stable public event protocol", async () => {
+    const { manager, sessions, acceptance } = managerWith();
+    const handle = await manager.spawn(request());
+    const events: SubagentEvent[] = [];
+    handle.subscribe((event) => events.push(event));
+
+    sessions.run.emit({
+      type: "tool.completed",
+      runId: sessions.run.id,
+      toolName: "read",
+      isError: false,
+    });
+
+    assert.deepEqual(events, [
+      {
+        type: "tool.completed",
+        snapshot: {
+          id: "adapter-child",
+          status: "running",
+          model: { provider: "opencode-go", id: "deepseek-v4-flash" },
+          thinking: "medium",
+        },
+        toolName: "read",
+        isError: false,
+      },
+    ]);
+    assert.equal("data" in events[0], false);
+
+    acceptance.pending.resolve({ summary: "done" });
+    await handle.result();
   });
 
   it("cancels a result wait without cancelling child execution", async () => {
