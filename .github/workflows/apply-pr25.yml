@@ -1,0 +1,507 @@
+name: Apply canonical execution plan migration
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'refactor/canonical-execution-plan' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Migrate workflow and tests
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          coordinator = Path('modules/phenix-pi/extensions/phenix-subagents/coordinator.ts')
+          text = coordinator.read_text()
+          replacement = '''      const executionPlan = {
+            assignment: {
+              task: params.task,
+              requirements,
+            },
+            session: {
+              options: {
+                agent: role,
+                thinking: producerSpec.thinking,
+                persistence: "file" as const,
+              },
+              defaults: {
+                agent: role,
+                modelSet: modelSetId(selectedModelSet),
+                difficulty: wfRecord.difficulty,
+                thinking: producerSpec.thinking,
+                persistence: "file" as const,
+              },
+            },
+            runtime: {
+              id: childRunIdVal,
+              ...(parentRunId ? { parentId: parentRunId } : {}),
+              rootId: rootRunId,
+              handleId: record.id,
+              cwd: ctx.cwd,
+              contract: contractArtifact,
+              workflowProjection,
+              contractChannel,
+              parentContext: {
+                kind: "child" as const,
+                sessionId,
+                cwd: ctx.cwd,
+                contractId: contractArtifact.id,
+                contract: contractArtifact,
+                handleId: record.id,
+                childRunId: childRunIdVal,
+                rootChildRunId: rootRunId,
+                modelSet: selectedModelSet,
+                maximumDelegationDepth: contractArtifact.runtime.delegation.remainingDepth,
+              },
+              effectiveTools: producerSpec.tools.effective,
+              skillRefs: producerSpec.skills,
+              extensionRefs: producerSpec.extensions,
+              inheritProjectContext: true,
+              timeoutMs: producerSpec.timeoutMs,
+              turnBudget: producerSpec.turnBudget,
+              toolBudget: producerSpec.toolBudget,
+            },
+            acceptance: {
+              kind: "workflow",
+              returns: { schema: outputSchema },
+            },
+          };
+
+'''
+          text, count = re.subn(
+              r'      const sessionRequest = \{.*?\n      \};\n\n(?=      // ── Start the child run)',
+              replacement,
+              text,
+              count=1,
+              flags=re.S,
+          )
+          if count != 1:
+              raise RuntimeError(f'expected one session request block, found {count}')
+          text = text.replace(
+              'this.sessionRuntime.spawn(sessionRequest, runSignal)',
+              'this.sessionRuntime.spawn(executionPlan, runSignal)',
+          )
+          coordinator.write_text(text)
+
+          Path('modules/phenix-pi/tests/subagent-session-runtime.test.ts').write_text(r'''import assert from "node:assert/strict";
+          import { describe, it } from "node:test";
+
+          import { modelSetId } from "../extensions/phenix-kernel/ids.ts";
+          import {
+            createSubagentSessionRuntime,
+            returns,
+            routing,
+            SubagentSessionPlanner,
+            type RuntimeBindings,
+            type SubagentExecutionPlan,
+          } from "../extensions/phenix-runtime/child-session-backend.ts";
+          import {
+            childRunId,
+            type ChildCycleOutcome,
+            type ChildRun,
+            type ChildSessionBackend,
+            type ChildSessionEvent,
+            type ChildSessionNode,
+            type ChildSessionSpec,
+          } from "../extensions/phenix-runtime/child-session-types.ts";
+
+          const runtime = {
+            id: childRunId("child-session-runtime-test"),
+            rootId: childRunId("child-session-runtime-test"),
+            handleId: "handle-test",
+            cwd: "/tmp/phenix-session-runtime-test",
+            contract: { id: "contract-test" },
+            workflowProjection: { options: [] },
+            contractChannel: {},
+            parentContext: {},
+            effectiveTools: ["read"],
+            skillRefs: [],
+            extensionRefs: [],
+            inheritProjectContext: true,
+            timeoutMs: 1_000,
+            turnBudget: {},
+            toolBudget: {},
+          } as unknown as RuntimeBindings;
+
+          const defaults = {
+            agent: "implementer" as const,
+            modelSet: modelSetId("mixed"),
+            difficulty: "D2" as const,
+            thinking: "medium" as const,
+            persistence: "file" as const,
+          };
+
+          function executionPlan(
+            session: SubagentExecutionPlan<unknown>["session"] = { defaults },
+          ): SubagentExecutionPlan<unknown> {
+            return {
+              assignment: {
+                task: "Inspect the repository boundary.",
+                requirements: [],
+              },
+              session,
+              runtime,
+              acceptance: {
+                kind: "test",
+                returns: returns({ type: "object" }),
+              },
+            };
+          }
+
+          class FakeRun implements ChildRun {
+            readonly id = runtime.id;
+            readonly backend = "sdk" as const;
+            readonly pi = { sessionId: "pi-test" };
+
+            snapshot(): ChildSessionNode {
+              throw new Error("not used");
+            }
+
+            subscribe(_listener: (event: ChildSessionEvent) => void): () => void {
+              return () => {};
+            }
+
+            async continue(_message: string, _signal?: AbortSignal): Promise<ChildCycleOutcome> {
+              return { cycle: 1, status: "settled" };
+            }
+
+            async waitForCurrentCycle(_signal?: AbortSignal): Promise<ChildCycleOutcome> {
+              return { cycle: 1, status: "settled" };
+            }
+
+            async abort(_reason: string): Promise<void> {}
+            async dispose(): Promise<void> {}
+          }
+
+          class RecordingBackend implements ChildSessionBackend {
+            readonly kind = "sdk" as const;
+            readonly run = new FakeRun();
+            spec?: ChildSessionSpec;
+            signal?: AbortSignal;
+
+            async start(spec: ChildSessionSpec, signal: AbortSignal): Promise<ChildRun> {
+              this.spec = spec;
+              this.signal = signal;
+              return this.run;
+            }
+          }
+
+          describe("SubagentSessionPlanner", () => {
+            it("translates one canonical plan into a backend spec", async () => {
+              const planner = new SubagentSessionPlanner(async (request) => {
+                assert.deepEqual(request, {
+                  modelSet: modelSetId("mixed"),
+                  agent: "scout",
+                  difficulty: "D2",
+                });
+                return {
+                  model: { provider: "opencode-go", id: "deepseek-v4-flash" },
+                  thinking: "low",
+                };
+              });
+
+              const spec = await planner.plan(
+                executionPlan({
+                  defaults,
+                  options: {
+                    agent: "planner",
+                    model: routing.get("scout"),
+                    thinking: "high",
+                  },
+                }),
+              );
+
+              assert.equal(spec.role, "planner");
+              assert.deepEqual(spec.agentClient, { kind: "agent-client", id: "planner" });
+              assert.deepEqual(spec.model, {
+                provider: "opencode-go",
+                id: "deepseek-v4-flash",
+              });
+              assert.equal(spec.thinkingLevel, "high");
+              assert.equal(spec.initialPrompt, "Inspect the repository boundary.");
+              assert.equal(spec.persistence, "file");
+              assert.equal(spec.contract, runtime.contract);
+            });
+          });
+
+          describe("SubagentSessionRuntime", () => {
+            it("starts the backend from the same canonical plan", async () => {
+              const backend = new RecordingBackend();
+              const sessions = createSubagentSessionRuntime({
+                backend,
+                resolveRoute: async () => ({
+                  model: { provider: "opencode-go", id: "mimo-v2.5" },
+                  thinking: "medium",
+                }),
+              });
+              const controller = new AbortController();
+
+              const run = await sessions.spawn(
+                executionPlan({ defaults, options: { agent: "scout" } }),
+                controller.signal,
+              );
+
+              assert.equal(run, backend.run);
+              assert.equal(backend.signal, controller.signal);
+              assert.equal(backend.spec?.role, "scout");
+              assert.deepEqual(backend.spec?.model, {
+                provider: "opencode-go",
+                id: "mimo-v2.5",
+              });
+            });
+          });
+          '''.replace('          ', ''))
+
+          Path('modules/phenix-pi/tests/session-subagent-adapter.test.ts').write_text(r'''import assert from "node:assert/strict";
+          import { describe, it } from "node:test";
+
+          import { agentClientRef } from "../extensions/phenix-kernel/refs.ts";
+          import {
+            type ChildCycleOutcome,
+            type ChildRun,
+            type ChildSessionEvent,
+            type ChildSessionNode,
+            childRunId,
+          } from "../extensions/phenix-runtime/child-session-types.ts";
+          import {
+            type AcceptanceEngine,
+            createSessionSubagentExecutionAdapter,
+            createSubagentManager,
+            returns,
+            routing,
+            type RuntimeBindings,
+            type SubagentExecutionCompiler,
+            SubagentExecutionError,
+            type SubagentExecutionPlan,
+            type SubagentRequest,
+            type SubagentSessionSpawner,
+          } from "../extensions/phenix-runtime/index.ts";
+
+          interface SummaryResult {
+            readonly summary: string;
+          }
+
+          function request(): SubagentRequest<SummaryResult> {
+            return {
+              task: "Inspect the adapter boundary.",
+              returns: returns<SummaryResult>({ type: "object" }),
+              session: {
+                agent: "scout",
+                model: routing.get("scout"),
+                thinking: "medium",
+              },
+            };
+          }
+
+          const runtime = {
+            id: childRunId("adapter-test"),
+            rootId: childRunId("adapter-test"),
+            handleId: "adapter-handle",
+            cwd: "/tmp/adapter-test",
+            contract: {},
+            workflowProjection: { options: [] },
+            contractChannel: {},
+            parentContext: {},
+            effectiveTools: [],
+            skillRefs: [],
+            extensionRefs: [],
+            inheritProjectContext: true,
+            timeoutMs: 1_000,
+            turnBudget: {},
+            toolBudget: {},
+          } as unknown as RuntimeBindings;
+
+          function plan<T>(publicRequest: SubagentRequest<T>): SubagentExecutionPlan<T> {
+            return {
+              assignment: {
+                task: publicRequest.task,
+                requirements: publicRequest.requirements ?? [],
+              },
+              session: {
+                options: publicRequest.session,
+                defaults: {
+                  agent: "scout",
+                  modelSet: "mixed" as never,
+                  difficulty: "D1",
+                  thinking: "medium",
+                  persistence: "memory",
+                },
+              },
+              runtime,
+              acceptance: {
+                kind: "test",
+                returns: publicRequest.returns,
+                data: { result: { summary: "accepted" } },
+              },
+            };
+          }
+
+          class FakeRun implements ChildRun {
+            readonly id = runtime.id;
+            readonly backend = "sdk" as const;
+            readonly pi = { sessionId: "pi-adapter" };
+            aborted = false;
+
+            snapshot(): ChildSessionNode {
+              return {
+                id: this.id,
+                rootId: this.id,
+                parentId: undefined,
+                status: "running",
+                backend: "sdk",
+                role: "scout",
+                agentClient: agentClientRef("scout"),
+                model: { provider: "opencode-go", id: "mimo-v2.5" },
+                thinkingLevel: "medium",
+                persistence: "memory",
+                cycle: 1,
+                startedAt: new Date(0).toISOString(),
+                updatedAt: new Date(0).toISOString(),
+                children: [],
+                pi: this.pi,
+              } as ChildSessionNode;
+            }
+
+            subscribe(_listener: (event: ChildSessionEvent) => void): () => void {
+              return () => {};
+            }
+
+            async continue(_message: string, _signal?: AbortSignal): Promise<ChildCycleOutcome> {
+              return { cycle: 2, status: "settled" };
+            }
+
+            async waitForCurrentCycle(_signal?: AbortSignal): Promise<ChildCycleOutcome> {
+              return { cycle: 1, status: "settled" };
+            }
+
+            async abort(_reason: string): Promise<void> {
+              this.aborted = true;
+            }
+
+            async dispose(): Promise<void> {}
+          }
+
+          class Compiler implements SubagentExecutionCompiler {
+            async compile<T>(publicRequest: SubagentRequest<T>): Promise<SubagentExecutionPlan<T>> {
+              return plan(publicRequest);
+            }
+          }
+
+          class Sessions implements SubagentSessionSpawner {
+            readonly run = new FakeRun();
+            received?: SubagentExecutionPlan<unknown>;
+
+            async spawn(execution: SubagentExecutionPlan<unknown>): Promise<ChildRun> {
+              this.received = execution;
+              return this.run;
+            }
+          }
+
+          class Acceptance implements AcceptanceEngine {
+            calls = 0;
+
+            async evaluate<T>(
+              acceptance: SubagentExecutionPlan<T>["acceptance"],
+            ): Promise<T> {
+              this.calls += 1;
+              return (acceptance.data as { result: T }).result;
+            }
+          }
+
+          describe("SessionSubagentExecutionAdapter", () => {
+            it("uses one passive plan for session creation and acceptance", async () => {
+              const sessions = new Sessions();
+              const acceptance = new Acceptance();
+              const agents = createSubagentManager(
+                createSessionSubagentExecutionAdapter({
+                  compiler: new Compiler(),
+                  acceptance,
+                  sessions,
+                }),
+              );
+
+              const result = await agents.run(request());
+
+              assert.deepEqual(result, { summary: "accepted" });
+              assert.equal(acceptance.calls, 1);
+              assert.equal(sessions.received?.assignment.task, request().task);
+              assert.equal(typeof sessions.received?.acceptance, "object");
+              assert.equal("evaluate" in (sessions.received ?? {}), false);
+            });
+
+            it("keeps waiter cancellation separate from explicit child cancellation", async () => {
+              let resolveResult!: (value: SummaryResult) => void;
+              const pending = new Promise<SummaryResult>((resolve) => {
+                resolveResult = resolve;
+              });
+              const sessions = new Sessions();
+              const acceptance: AcceptanceEngine = {
+                evaluate: async <T>() => pending as Promise<T>,
+              };
+              const agents = createSubagentManager(
+                createSessionSubagentExecutionAdapter({
+                  compiler: new Compiler(),
+                  acceptance,
+                  sessions,
+                }),
+              );
+              const handle = await agents.spawn(request());
+              const wait = new AbortController();
+              const resultWait = handle.result(wait.signal);
+
+              wait.abort();
+              await assert.rejects(resultWait, /Waiting for the subagent was cancelled/);
+              assert.equal(sessions.run.aborted, false);
+
+              resolveResult({ summary: "accepted" });
+              assert.deepEqual(await handle.result(), { summary: "accepted" });
+            });
+
+            it("maps explicit cancellation to the child run", async () => {
+              const sessions = new Sessions();
+              const acceptance: AcceptanceEngine = {
+                evaluate: async <T>(_plan, _run, signal) =>
+                  new Promise<T>((_resolve, reject) => {
+                    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+                  }),
+              };
+              const agents = createSubagentManager(
+                createSessionSubagentExecutionAdapter({
+                  compiler: new Compiler(),
+                  acceptance,
+                  sessions,
+                }),
+              );
+              const handle = await agents.spawn(request());
+
+              await handle.cancel("stop");
+
+              assert.equal(sessions.run.aborted, true);
+              await assert.rejects(handle.result(), SubagentExecutionError);
+            });
+          });
+          '''.replace('          ', ''))
+
+      - name: Commit migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add modules/phenix-pi/extensions/phenix-subagents/coordinator.ts \
+            modules/phenix-pi/tests/subagent-session-runtime.test.ts \
+            modules/phenix-pi/tests/session-subagent-adapter.test.ts
+          git commit -m "refactor(runtime): migrate execution paths to canonical plans"
+          git push origin HEAD:${GITHUB_HEAD_REF}
