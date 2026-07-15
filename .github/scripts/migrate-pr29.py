@@ -20,7 +20,6 @@ attempt.write_text(text)
 
 coordinator = Path("modules/phenix-pi/extensions/phenix-subagents/coordinator.ts")
 text = coordinator.read_text()
-text = text.replace('import { randomUUID } from "node:crypto";\n', "")
 text = text.replace(
     'import type { ExtensionContext, ModelRegistry } from "@earendil-works/pi-coding-agent";\n',
     'import type { ExtensionContext } from "@earendil-works/pi-coding-agent";\n',
@@ -77,10 +76,13 @@ text = text.replace(
   readonly backend: ChildSessionBackend;
   readonly sessionRuntime: SubagentSessionRuntime;
   readonly resolveModelRegistry: () => ModelRegistry;
+  readonly activeModelSet: string;
+  readonly agentDir: string;
 ''',
     '''export interface AgentExecutionCoordinatorOptions {
   readonly sessionRuntime: SubagentSessionRuntime;
   readonly quality: ExecutionQualityService;
+  readonly activeModelSet: string;
 ''',
 )
 text = text.replace(
@@ -127,14 +129,12 @@ coordinator.write_text(text)
 
 composition = Path("modules/phenix-pi/extensions/phenix.ts")
 text = composition.read_text()
-quality_import = '''import { createExecutionQualityService } from "./phenix-subagents/execution-quality-service.ts";
-'''
+quality_import = 'import { createExecutionQualityService } from "./phenix-subagents/execution-quality-service.ts";\n'
 anchor = 'import { defaultAgentClients } from "./phenix-subagents/definitions.ts";\n'
 if quality_import not in text:
     text = text.replace(anchor, anchor + quality_import)
 quality_block = '''  const quality = createExecutionQualityService({
-    backend,
-    resolveModelRegistry: () => getRuntimeServices().modelRegistry,
+    sessions: sessionRuntime,
   });
 
 '''
@@ -146,10 +146,13 @@ text = text.replace(
     backend,
     sessionRuntime,
     resolveModelRegistry: () => getRuntimeServices().modelRegistry,
+    activeModelSet: linkResult.graph.activeModelSet.id,
+    agentDir,
 ''',
     '''  coordinator = new AgentExecutionCoordinator({
     sessionRuntime,
     quality,
+    activeModelSet: linkResult.graph.activeModelSet.id,
 ''',
 )
 composition.write_text(text)
