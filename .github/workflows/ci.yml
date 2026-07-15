@@ -39,20 +39,21 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
+
           path = Path("modules/phenix-pi/extensions/phenix.ts")
           text = path.read_text()
           text = text.replace(
               'import { createManagedSubagentRegistry } from "./phenix-runtime/managed-subagent-registry.ts";\n',
               "",
           )
-          old = '''  const managedRegistry = createManagedSubagentRegistry();
-          const delegationRuntime = createManagedDelegationRuntime({
-            managers,
-            registry: managedRegistry,
-          });
-          '''
-          new = '''  const delegationRuntime = createManagedDelegationRuntime({ managers });
-          '''
+          old = (
+              "  const managedRegistry = createManagedSubagentRegistry();\n"
+              "  const delegationRuntime = createManagedDelegationRuntime({\n"
+              "    managers,\n"
+              "    registry: managedRegistry,\n"
+              "  });\n"
+          )
+          new = "  const delegationRuntime = createManagedDelegationRuntime({ managers });\n"
           if text.count(old) != 1:
               raise RuntimeError(f"expected one registry composition block, found {text.count(old)}")
           path.write_text(text.replace(old, new))
