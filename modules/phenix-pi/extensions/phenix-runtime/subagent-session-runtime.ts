@@ -8,11 +8,7 @@
  */
 
 import { agentClientRef } from "../phenix-kernel/refs.ts";
-import type {
-  ChildRun,
-  ChildSessionBackend,
-  ChildSessionSpec,
-} from "./child-session-types.ts";
+import type { ChildRun, ChildSessionBackend, ChildSessionSpec } from "./child-session-types.ts";
 import {
   resolveSubagentSessionOptions,
   type SessionRouteResolver,
@@ -27,12 +23,7 @@ import {
  */
 export type SubagentSessionBindings = Omit<
   ChildSessionSpec,
-  | "agentClient"
-  | "role"
-  | "model"
-  | "thinkingLevel"
-  | "initialPrompt"
-  | "persistence"
+  "agentClient" | "role" | "model" | "thinkingLevel" | "initialPrompt" | "persistence"
 >;
 
 /**
