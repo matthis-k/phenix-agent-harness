@@ -11,7 +11,7 @@ import {
   type SubagentHandle,
   type SubagentRequest,
   type SubagentSnapshot,
-} from "../extensions/phenix-runtime/child-session-backend.ts";
+} from "../extensions/phenix-runtime/index.ts";
 
 interface SummaryResult {
   readonly summary: string;
