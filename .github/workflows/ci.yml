@@ -38,8 +38,7 @@ jobs:
         run: |
           set -o pipefail
           {
-            python .github/scripts/extract-managed-delegation-runtime.py
-            python .github/scripts/finish-managed-delegation-extraction.py
+            python .github/scripts/extract-managed-delegation-runtime-v2.py
             nix run nixpkgs#biome -- check --write \
               modules/phenix-pi/extensions/phenix-runtime/managed-subagent-registry.ts \
               modules/phenix-pi/extensions/phenix-subagents/coordinator.ts \
