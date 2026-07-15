@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -23,39 +23,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
 
       - name: Install Nix
         uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Apply typed contract migration
-        if: github.head_ref == 'refactor/typed-subagent-contract' && github.actor != 'github-actions[bot]'
-        shell: bash
-        run: |
-          set -euo pipefail
-          python .github/scripts/migrate-pr27.py
-          nix run nixpkgs#biome -- check --write \
-            modules/phenix-pi/extensions/phenix-runtime/subagent-api.ts \
-            modules/phenix-pi/extensions/phenix-runtime/subagent-manager.ts \
-            modules/phenix-pi/extensions/phenix-runtime/session-subagent-adapter.ts \
-            modules/phenix-pi/extensions/phenix-runtime/index.ts \
-            modules/phenix-pi/extensions/phenix-runtime/child-session-backend.ts \
-            modules/phenix-pi/tests/subagent-api.test.ts \
-            modules/phenix-pi/tests/subagent-manager.test.ts \
-            modules/phenix-pi/tests/session-subagent-adapter.test.ts \
-            modules/phenix-pi/tests/workflow-execution-compiler.test.ts
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add modules/phenix-pi/extensions/phenix-runtime \
-            modules/phenix-pi/tests/subagent-api.test.ts \
-            modules/phenix-pi/tests/subagent-manager.test.ts \
-            modules/phenix-pi/tests/session-subagent-adapter.test.ts \
-            modules/phenix-pi/tests/workflow-execution-compiler.test.ts
-          git commit -m "refactor(runtime): type return contracts and lifecycle events"
-          git push origin HEAD:${GITHUB_HEAD_REF}
 
       - name: Run read-only Tend CI profile
         id: tend
