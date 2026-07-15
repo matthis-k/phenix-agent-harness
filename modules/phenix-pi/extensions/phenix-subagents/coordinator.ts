@@ -13,20 +13,12 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentRole } from "../phenix-kernel/agents.ts";
 import { modelSetId } from "../phenix-kernel/ids.ts";
 import { modelSetForModelId, PHENIX_PROVIDER } from "../phenix-routing/provider.ts";
-import type { LiveChildRunRecord } from "../phenix-runtime/child-session-registry.ts";
-import { getChildSessionRegistry } from "../phenix-runtime/child-session-registry.ts";
-import { ChildRuntimeError, childRunId } from "../phenix-runtime/child-session-types.ts";
+import { childRunId } from "../phenix-runtime/child-session-types.ts";
 import { ContractSubmissionChannelImpl } from "../phenix-runtime/contract-channel.ts";
 import type {
   DelegateExecutionParams,
   ParentExecutionContext,
 } from "../phenix-runtime/delegation-tool.ts";
-import {
-  type SubagentCancellation,
-  SubagentExecutionError,
-  type SubagentHandle,
-} from "../phenix-runtime/subagent-manager.ts";
-import type { SubagentManagerFactory } from "../phenix-runtime/subagent-manager-factory.ts";
 import {
   buildWorkflowDecisionContext,
   buildWorkflowRuntimeDependencies,
@@ -72,6 +64,7 @@ import {
 } from "./handle-store.ts";
 import type { HandleRecord, WorkflowBinding } from "./handle-types.ts";
 import { HANDLE_VERSION, isTerminalHandleStatus } from "./handle-types.ts";
+import type { ManagedDelegationRuntime } from "./managed-delegation-runtime.ts";
 import type { WorkflowProducerAcceptanceData } from "./workflow-acceptance-engine.ts";
 import { createWorkflowExecutionCompiler } from "./workflow-execution-compiler.ts";
 
@@ -82,14 +75,6 @@ export type DelegateExecutionResult =
       readonly message: string;
       readonly details?: Record<string, unknown>;
     };
-
-interface ManagedCompletion {
-  readonly record: HandleRecord;
-  readonly error?: {
-    readonly code: string;
-    readonly message: string;
-  };
-}
 
 function createHandle(input: {
   readonly id: string;
@@ -124,45 +109,19 @@ function createHandle(input: {
   };
 }
 
-function executionError(error: unknown): { readonly code: string; readonly message: string } {
-  if (error instanceof SubagentExecutionError || error instanceof ChildRuntimeError) {
-    return { code: error.code, message: error.message };
-  }
-  return {
-    code: "SUBAGENT_EXECUTION_FAILED",
-    message: error instanceof Error ? error.message : String(error),
-  };
-}
-
-function cancellationFromSignal(signal: AbortSignal, fallback: string): SubagentCancellation {
-  const reason = signal.reason;
-  if (reason instanceof SubagentExecutionError || reason instanceof ChildRuntimeError) {
-    return { code: reason.code, reason: reason.message };
-  }
-  return {
-    code: "ABORTED",
-    reason:
-      reason instanceof Error
-        ? reason.message
-        : typeof reason === "string" && reason.length > 0
-          ? reason
-          : fallback,
-  };
-}
-
 export interface AgentExecutionCoordinatorOptions {
-  readonly managers: SubagentManagerFactory;
+  readonly delegationRuntime: ManagedDelegationRuntime;
   readonly activeModelSet: string;
   readonly maximumDelegationDepth: number;
 }
 
 export class AgentExecutionCoordinator {
-  private readonly managers: SubagentManagerFactory;
+  private readonly delegationRuntime: ManagedDelegationRuntime;
   private readonly activeModelSet: string;
   private readonly maximumDelegationDepth: number;
 
   constructor(options: AgentExecutionCoordinatorOptions) {
-    this.managers = options.managers;
+    this.delegationRuntime = options.delegationRuntime;
     this.activeModelSet = options.activeModelSet;
     this.maximumDelegationDepth = options.maximumDelegationDepth;
   }
@@ -374,8 +333,6 @@ export class AgentExecutionCoordinator {
       writeRecord(ctx.cwd, handle);
     };
 
-    let ownedHandle: SubagentHandle<unknown> | undefined;
-    let cleanupOwnedScope: (() => void) | undefined;
     try {
       const role = roleForAgentClient(transition.agentClient);
       const childInitialState = initialWorkflowStateForRole(role);
@@ -561,146 +518,42 @@ export class AgentExecutionCoordinator {
         acceptanceData,
       });
 
-      const runController = new AbortController();
-      const abortFromParent = (): void => {
-        if (!runController.signal.aborted) {
-          runController.abort(
-            signal.reason ??
-              new ChildRuntimeError("ABORTED", "Delegated execution was cancelled by its parent."),
-          );
-        }
-      };
-      if (!isBackground) {
-        if (signal.aborted) abortFromParent();
-        else signal.addEventListener("abort", abortFromParent, { once: true });
-      }
+      const execution = await this.delegationRuntime.execute({
+        compiler: executionCompiler,
+        request: {
+          task: params.task,
+          requirements,
+          returns: { schema: outputSchema },
+        },
+        record,
+        cwd: ctx.cwd,
+        sessionId,
+        mode: isBackground ? "background" : "await",
+        signal,
+        timeoutMs: producerSpec.timeoutMs,
+        rootChildRunId: rootRunId,
+        settle: finalizeOrRejectHandle,
+      });
 
-      let executionTimeout: NodeJS.Timeout | undefined;
-      if (producerSpec.timeoutMs > 0) {
-        executionTimeout = setTimeout(() => {
-          if (!runController.signal.aborted) {
-            runController.abort(
-              new ChildRuntimeError(
-                "TIMEOUT",
-                `Delegated execution timed out after ${producerSpec.timeoutMs}ms.`,
-              ),
-            );
-          }
-        }, producerSpec.timeoutMs);
-        executionTimeout.unref?.();
-      }
-
-      const manager = this.managers.create(executionCompiler);
-      let handle: SubagentHandle<unknown>;
-      try {
-        handle = await manager.spawn(
-          {
-            task: params.task,
-            requirements,
-            returns: { schema: outputSchema },
-          },
-          runController.signal,
-        );
-      } catch (error) {
-        if (!isBackground) signal.removeEventListener("abort", abortFromParent);
-        if (executionTimeout) clearTimeout(executionTimeout);
-        const normalized = executionError(error);
-        record.status = normalized.code === "ABORTED" ? "cancelled" : "failed";
-        record.errors = [`${normalized.code}: ${normalized.message}`];
-        writeRecord(ctx.cwd, record);
-        finalizeOrRejectHandle(record);
+      if (!execution.ok) {
         return {
           ok: false,
-          message: `phenix_delegate: child session start failed: ${normalized.message}`,
-          details: { code: normalized.code },
-        };
-      }
-      ownedHandle = handle;
-
-      const cancelFromScope = (): void => {
-        void handle.cancel(
-          cancellationFromSignal(runController.signal, "Delegated execution was cancelled."),
-        );
-      };
-      if (runController.signal.aborted) cancelFromScope();
-      else runController.signal.addEventListener("abort", cancelFromScope, { once: true });
-
-      const cleanupScope = (): void => {
-        if (!isBackground) signal.removeEventListener("abort", abortFromParent);
-        runController.signal.removeEventListener("abort", cancelFromScope);
-        if (executionTimeout) {
-          clearTimeout(executionTimeout);
-          executionTimeout = undefined;
-        }
-      };
-      cleanupOwnedScope = cleanupScope;
-
-      record.childRunId = childRunId(handle.id);
-      record.rootChildRunId = rootRunId;
-      record.status = "running";
-      writeRecord(ctx.cwd, record);
-
-      const completion: Promise<ManagedCompletion> = handle
-        .result()
-        .then(
-          () => ({ record: readRecord(ctx.cwd, sessionId, handleId) ?? record }),
-          (error) => {
-            const normalized = executionError(error);
-            const failedRecord = readRecord(ctx.cwd, sessionId, handleId) ?? record;
-            if (!isTerminalHandleStatus(failedRecord.status)) {
-              failedRecord.status = normalized.code === "ABORTED" ? "cancelled" : "failed";
-              failedRecord.errors = [`${normalized.code}: ${normalized.message}`];
-              writeRecord(ctx.cwd, failedRecord);
-            }
-            return { record: failedRecord, error: normalized };
-          },
-        )
-        .finally(() => {
-          cleanupScope();
-          ownedHandle = undefined;
-          cleanupOwnedScope = undefined;
-        });
-
-      if (isBackground) {
-        const liveRecord: LiveChildRunRecord = { handle, completion };
-        getChildSessionRegistry().add(liveRecord);
-        void completion
-          .then((settled) => finalizeOrRejectHandle(settled.record))
-          .finally(() => getChildSessionRegistry().remove(handle.id))
-          .catch(() => undefined);
-        return { ok: true, record };
-      }
-
-      const settled = await completion;
-      finalizeOrRejectHandle(settled.record);
-      if (settled.record.status !== "completed") {
-        return {
-          ok: false,
-          message: settled.error?.message ?? "Delegated child execution failed.",
+          message: execution.error.message,
           details: {
-            code: settled.error?.code ?? "CHILD_EXECUTION_FAILED",
-            handleId: settled.record.id,
-            status: settled.record.status,
+            code: execution.error.code,
+            handleId: execution.record.id,
+            status: execution.record.status,
           },
         };
       }
-      return { ok: true, record: settled.record };
+      return { ok: true, record: execution.record };
     } catch (error) {
-      cleanupOwnedScope?.();
-      if (ownedHandle) {
-        try {
-          await ownedHandle.cancel("delegation execution failed");
-        } catch {
-          // Best-effort managed cancellation.
-        }
-      }
-
+      const message = error instanceof Error ? error.message : String(error);
       const failedRecord = readRecord(ctx.cwd, sessionId, handleId);
       if (failedRecord) {
         if (!isTerminalHandleStatus(failedRecord.status)) {
-          const normalized = executionError(error);
-          failedRecord.status = normalized.code === "ABORTED" ? "cancelled" : "failed";
-          failedRecord.errors = [`${normalized.code}: ${normalized.message}`];
+          failedRecord.status = "failed";
+          failedRecord.errors = [`DELEGATION_PREPARATION_FAILED: ${message}`];
           writeRecord(ctx.cwd, failedRecord);
         }
         finalizeOrRejectHandle(failedRecord);
@@ -708,86 +561,23 @@ export class AgentExecutionCoordinator {
         rejectStartedTransition();
       }
 
-      const normalized = executionError(error);
       return {
         ok: false,
-        message: `phenix_delegate: execution failed: ${normalized.message}`,
+        message: `phenix_delegate: execution preparation failed: ${message}`,
         details: {
-          code: normalized.code,
+          code: "DELEGATION_PREPARATION_FAILED",
           ...(failedRecord ? { handleId: failedRecord.id } : {}),
         },
       };
     }
   }
 
-  private finalizePersistedHandle(ctx: ExtensionContext, record: HandleRecord): void {
-    if (!record.workflowBinding) return;
-
-    try {
-      const finalized = finalizeHandleWorkflow({ cwd: ctx.cwd, handle: record });
-      if (!finalized) {
-        throw new Error(
-          `Workflow finalization returned no record for terminal handle ${record.id}.`,
-        );
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const diagnostic = `WORKFLOW_FINALIZATION_FAILED: ${message}`;
-      if (!record.errors?.includes(diagnostic)) {
-        record.errors = [...(record.errors ?? []), diagnostic];
-        writeRecord(ctx.cwd, record);
-      }
-    }
-  }
-
-  private async awaitLiveCompletion(
-    completion: Promise<unknown>,
-    signal: AbortSignal,
-  ): Promise<ManagedCompletion> {
-    if (signal.aborted) {
-      throw new ChildRuntimeError("ABORTED", "Waiting for delegated execution was cancelled.");
-    }
-
-    return new Promise<ManagedCompletion>((resolve, reject) => {
-      const cleanup = (): void => signal.removeEventListener("abort", onAbort);
-      const onAbort = (): void => {
-        cleanup();
-        reject(new ChildRuntimeError("ABORTED", "Waiting for delegated execution was cancelled."));
-      };
-      signal.addEventListener("abort", onAbort, { once: true });
-      completion.then(
-        (result) => {
-          cleanup();
-          resolve(result as ManagedCompletion);
-        },
-        (error) => {
-          cleanup();
-          reject(error);
-        },
-      );
-    });
-  }
-
-  private orphanHandle(ctx: ExtensionContext, record: HandleRecord): HandleRecord {
-    if (!isTerminalHandleStatus(record.status)) {
-      record.status = "orphaned";
-      record.errors = [
-        ...(record.errors ?? []),
-        "ORPHANED_SESSION: no live managed subagent exists for this persisted handle.",
-      ];
-      writeRecord(ctx.cwd, record);
-      this.finalizePersistedHandle(ctx, record);
-    }
-    return record;
-  }
-
   async poll(ctx: ExtensionContext, id: string): Promise<HandleRecord | undefined> {
-    const record = readRecord(ctx.cwd, effectiveSessionId(ctx), id);
-    if (!record || isTerminalHandleStatus(record.status)) return record;
-    if (!record.childRunId) return record;
-    return getChildSessionRegistry().get(record.childRunId)
-      ? record
-      : this.orphanHandle(ctx, record);
+    return this.delegationRuntime.poll({
+      cwd: ctx.cwd,
+      sessionId: effectiveSessionId(ctx),
+      id,
+    });
   }
 
   async awaitHandle(
@@ -795,12 +585,14 @@ export class AgentExecutionCoordinator {
     id: string,
     signal: AbortSignal,
   ): Promise<HandleRecord | undefined> {
-    const record = readRecord(ctx.cwd, effectiveSessionId(ctx), id);
-    if (!record || isTerminalHandleStatus(record.status)) return record;
-    if (!record.childRunId) return record;
-    const live = getChildSessionRegistry().get(record.childRunId);
-    if (!live) return this.orphanHandle(ctx, record);
-    return (await this.awaitLiveCompletion(live.completion, signal)).record;
+    return this.delegationRuntime.awaitHandle(
+      {
+        cwd: ctx.cwd,
+        sessionId: effectiveSessionId(ctx),
+        id,
+      },
+      signal,
+    );
   }
 
   async cancelHandle(
@@ -808,26 +600,13 @@ export class AgentExecutionCoordinator {
     id: string,
     reason: string,
   ): Promise<HandleRecord | undefined> {
-    const record = readRecord(ctx.cwd, effectiveSessionId(ctx), id);
-    if (!record || isTerminalHandleStatus(record.status)) return record;
-
-    record.status = "cancelled";
-    record.errors = [...(record.errors ?? []), reason];
-    writeRecord(ctx.cwd, record);
-
-    if (record.childRunId) {
-      const registry = getChildSessionRegistry();
-      const live = registry.get(record.childRunId);
-      if (live) {
-        try {
-          await live.handle.cancel(reason);
-        } finally {
-          registry.remove(record.childRunId);
-        }
-      }
-    }
-
-    this.finalizePersistedHandle(ctx, record);
-    return record;
+    return this.delegationRuntime.cancelHandle(
+      {
+        cwd: ctx.cwd,
+        sessionId: effectiveSessionId(ctx),
+        id,
+      },
+      reason,
+    );
   }
 }
