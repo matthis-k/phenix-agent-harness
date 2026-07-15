@@ -10,6 +10,7 @@
  * - concurrent submissions do not cross-contaminate state
  */
 
+/* biome-ignore-all lint/suspicious/noExplicitAny: isolated tool-boundary fixture. */
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";

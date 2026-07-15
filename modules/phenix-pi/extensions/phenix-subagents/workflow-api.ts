@@ -47,8 +47,7 @@ function inspectAuthority(input: {
   return {
     source: parent.kind === "child" ? "contract" : "root",
     role: parent.kind === "child" ? (parent.contract.identity.role ?? "base") : "coordinator",
-    effectiveTools:
-      parent.kind === "child" ? [...parent.contract.runtime.tools.effective] : [],
+    effectiveTools: parent.kind === "child" ? [...parent.contract.runtime.tools.effective] : [],
     delegation: {
       remainingDepth: dependencies.authority.remainingDepth,
       effectiveRoles: dependencies.authority.roles.effective

@@ -186,10 +186,7 @@ export function childLaunchTools(config: ResolvedToolConfiguration): readonly st
   return stableUnique([...config.effective, "phenix_complete"]);
 }
 
-export function toolAllowedByConfig(
-  config: ResolvedToolConfiguration,
-  toolName: string,
-): boolean {
+export function toolAllowedByConfig(config: ResolvedToolConfiguration, toolName: string): boolean {
   if (toolName === "subagent" || toolName === "phenix_delegate") return false;
   if (toolName === "phenix_complete" || toolName === "phenix_workflow") return true;
   if (toolName === "phenix_contract_get" || toolName === "phenix_contract_submit") {

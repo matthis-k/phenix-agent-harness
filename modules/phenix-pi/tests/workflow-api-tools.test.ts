@@ -64,7 +64,9 @@ class RecordingWorkflow implements WorkflowApiPort {
 }
 
 async function execute(
-  tool: ReturnType<typeof createWorkflowInspectTool> | ReturnType<typeof createWorkflowSubagentTool>,
+  tool:
+    | ReturnType<typeof createWorkflowInspectTool>
+    | ReturnType<typeof createWorkflowSubagentTool>,
   params: Record<string, unknown>,
   signal = new AbortController().signal,
 ) {

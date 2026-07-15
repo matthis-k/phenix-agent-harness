@@ -66,9 +66,7 @@ export interface WorkflowApiPort {
   }): Promise<WorkflowApiExecutionResult>;
 }
 
-function result(
-  payload: Record<string, unknown>,
-): AgentToolResult<Record<string, unknown>> {
+function result(payload: Record<string, unknown>): AgentToolResult<Record<string, unknown>> {
   return {
     content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
     details: payload,
@@ -198,8 +196,6 @@ export function createWorkflowApiTools(input: {
 }): readonly ToolDefinition[] {
   return [
     createWorkflowInspectTool(input) as unknown as ToolDefinition,
-    ...(input.allowCreate
-      ? [createWorkflowSubagentTool(input) as unknown as ToolDefinition]
-      : []),
+    ...(input.allowCreate ? [createWorkflowSubagentTool(input) as unknown as ToolDefinition] : []),
   ];
 }

@@ -37,9 +37,7 @@ describe("workflow API session initialization", () => {
   });
 
   it("installs subagent creation from contract delegation settings", () => {
-    const tools = buildEffectiveToolNames(
-      spec({ remainingDepth: 2, availableRoles: ["scout"] }),
-    );
+    const tools = buildEffectiveToolNames(spec({ remainingDepth: 2, availableRoles: ["scout"] }));
 
     assert.deepEqual(tools, [
       "phenix_complete",
