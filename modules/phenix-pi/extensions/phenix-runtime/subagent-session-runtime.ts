@@ -1,46 +1,20 @@
 /**
  * subagent-session-runtime — application facade for child Pi sessions
  *
- * The facade is an anti-corruption boundary between declarative Phenix session
- * requests and the lower-level ChildSessionBackend port. The planner resolves
- * routing and defaults into an immutable ChildSessionSpec; the runtime then
- * delegates that specification to the selected backend adapter.
+ * The facade is an anti-corruption boundary between the canonical execution
+ * plan and the lower-level ChildSessionBackend port. It resolves model/session
+ * selection, translates explicit runtime bindings, and delegates to the backend.
  */
 
 import { agentClientRef } from "../phenix-kernel/refs.ts";
 import type { ChildRun, ChildSessionBackend, ChildSessionSpec } from "./child-session-types.ts";
+import type { SubagentExecutionPlan } from "./execution-plan.ts";
 import {
   resolveSubagentSessionOptions,
   type SessionRouteResolver,
-  type SubagentSessionDefaults,
-  type SubagentSessionOptions,
 } from "./session-options.ts";
 
-/**
- * Runtime-owned bindings that are already resolved before a session is
- * planned. They contain contracts, workflow authority, capabilities, budgets,
- * and stable identities, but no model/session-selection decisions.
- */
-export type SubagentSessionBindings = Omit<
-  ChildSessionSpec,
-  "agentClient" | "role" | "model" | "thinkingLevel" | "initialPrompt" | "persistence"
->;
-
-/**
- * Easy-to-use session creation request.
- *
- * `session` is the only caller-facing selection surface. `bindings` remains a
- * nested runtime concern so workflows can supply authority and policy without
- * leaking Pi SDK construction details into the public options object.
- */
-export interface SubagentSessionRequest {
-  readonly task: string;
-  readonly session?: SubagentSessionOptions;
-  readonly defaults: SubagentSessionDefaults;
-  readonly bindings: SubagentSessionBindings;
-}
-
-/** Deterministically translates a declarative request into a backend spec. */
+/** Deterministically translates a canonical plan into a backend specification. */
 export class SubagentSessionPlanner {
   private readonly resolveRoute: SessionRouteResolver;
 
@@ -48,24 +22,24 @@ export class SubagentSessionPlanner {
     this.resolveRoute = resolveRoute;
   }
 
-  async plan(request: SubagentSessionRequest): Promise<ChildSessionSpec> {
-    if (request.task.trim().length === 0) {
+  async plan(execution: SubagentExecutionPlan<unknown>): Promise<ChildSessionSpec> {
+    if (execution.assignment.task.trim().length === 0) {
       throw new Error("Subagent session task must be non-empty.");
     }
 
     const session = await resolveSubagentSessionOptions({
-      session: request.session,
-      defaults: request.defaults,
+      session: execution.session.options,
+      defaults: execution.session.defaults,
       resolveRoute: this.resolveRoute,
     });
 
     return {
-      ...request.bindings,
+      ...execution.runtime,
       agentClient: agentClientRef(session.agent ?? "base"),
       role: session.agent,
       model: session.model,
       thinkingLevel: session.thinking,
-      initialPrompt: request.task,
+      initialPrompt: execution.assignment.task,
       persistence: session.persistence,
     };
   }
@@ -76,12 +50,7 @@ export interface SubagentSessionRuntimeOptions {
   readonly resolveRoute: SessionRouteResolver;
 }
 
-/**
- * Facade used by workflow and standalone orchestration code.
- *
- * The backend remains a narrow port over the Pi runtime. Callers interact with
- * declarative requests and never construct ChildSessionSpec directly.
- */
+/** Child-session mechanism used by workflow and standalone execution services. */
 export class SubagentSessionRuntime {
   private readonly backend: ChildSessionBackend;
   private readonly planner: SubagentSessionPlanner;
@@ -91,12 +60,15 @@ export class SubagentSessionRuntime {
     this.planner = new SubagentSessionPlanner(options.resolveRoute);
   }
 
-  plan(request: SubagentSessionRequest): Promise<ChildSessionSpec> {
-    return this.planner.plan(request);
+  plan(execution: SubagentExecutionPlan<unknown>): Promise<ChildSessionSpec> {
+    return this.planner.plan(execution);
   }
 
-  async spawn(request: SubagentSessionRequest, signal?: AbortSignal): Promise<ChildRun> {
-    const spec = await this.plan(request);
+  async spawn(
+    execution: SubagentExecutionPlan<unknown>,
+    signal?: AbortSignal,
+  ): Promise<ChildRun> {
+    const spec = await this.plan(execution);
     return this.backend.start(spec, signal ?? new AbortController().signal);
   }
 }
