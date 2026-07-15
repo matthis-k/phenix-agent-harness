@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import {
-  type ChildRun,
-  childRunId,
-} from "../extensions/phenix-runtime/child-session-types.ts";
+import { type ChildRun, childRunId } from "../extensions/phenix-runtime/child-session-types.ts";
 import type {
   AcceptanceEngine,
   AcceptancePlan,
