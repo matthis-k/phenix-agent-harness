@@ -6,6 +6,7 @@ import {
   createSubagentManager,
   returns,
   routing,
+  type SubagentCancellation,
   type SubagentEvent,
   type SubagentExecutionAdapter,
   SubagentExecutionError,
@@ -37,7 +38,7 @@ class FakeHandle<TOutput> implements SubagentHandle<TOutput> {
   readonly value: TOutput;
   readonly resultSignals: Array<AbortSignal | undefined> = [];
   readonly sent: string[] = [];
-  cancelCalls = 0;
+  readonly cancellations: Array<string | SubagentCancellation | undefined> = [];
 
   constructor(value: TOutput) {
     this.value = value;
@@ -64,8 +65,8 @@ class FakeHandle<TOutput> implements SubagentHandle<TOutput> {
     return Promise.resolve();
   }
 
-  cancel(_reason?: string): Promise<void> {
-    this.cancelCalls++;
+  cancel(cancellation?: string | SubagentCancellation): Promise<void> {
+    this.cancellations.push(cancellation);
     return Promise.resolve();
   }
 
@@ -127,7 +128,19 @@ describe("SubagentManager", () => {
     await assert.rejects(manager.run(request(), controller.signal), (error: unknown) => {
       return error instanceof SubagentExecutionError && error.code === "ABORTED";
     });
-    assert.equal(adapter.handle.cancelCalls, 0);
+    assert.equal(adapter.handle.cancellations.length, 0);
+  });
+
+  it("supports structured cancellation reasons on managed handles", async () => {
+    const adapter = new RecordingAdapter();
+    const manager = createSubagentManager(adapter);
+    const handle = await manager.spawn(request());
+
+    await handle.cancel({ code: "TIMEOUT", reason: "deadline exceeded" });
+
+    assert.deepEqual(adapter.handle.cancellations, [
+      { code: "TIMEOUT", reason: "deadline exceeded" },
+    ]);
   });
 
   it("validates requests before invoking the adapter", async () => {
