@@ -5,11 +5,10 @@ on:
   push:
     branches:
       - main
-      - refactor/subagent-manager-directory
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -24,70 +23,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
 
       - name: Install Nix
         uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Apply manager directory composition
-        if: (github.ref_name == 'refactor/subagent-manager-directory' || github.head_ref == 'refactor/subagent-manager-directory') && github.actor != 'github-actions[bot]'
-        shell: bash
-        run: |
-          set -o pipefail
-          {
-            python - <<'PY'
-          from pathlib import Path
-
-          path = Path("modules/phenix-pi/extensions/phenix.ts")
-          lines = path.read_text().splitlines()
-          import_line = 'import { createManagedSubagentRegistry } from "./phenix-runtime/managed-subagent-registry.ts";'
-          if lines.count(import_line) != 1:
-              raise RuntimeError(f"expected one registry import, found {lines.count(import_line)}")
-          lines.remove(import_line)
-
-          start = next(
-              (index for index, line in enumerate(lines) if line.strip() == "const managedRegistry = createManagedSubagentRegistry();"),
-              None,
-          )
-          if start is None:
-              raise RuntimeError("managed registry composition block was not found")
-          expected = [
-              "  const managedRegistry = createManagedSubagentRegistry();",
-              "  const delegationRuntime = createManagedDelegationRuntime({",
-              "    managers,",
-              "    registry: managedRegistry,",
-              "  });",
-          ]
-          if lines[start : start + len(expected)] != expected:
-              raise RuntimeError("managed registry composition block has an unexpected shape")
-          lines[start : start + len(expected)] = [
-              "  const delegationRuntime = createManagedDelegationRuntime({ managers });"
-          ]
-          path.write_text("\n".join(lines) + "\n")
-          PY
-            rm -f tmp-manager-directory.txt migration.log
-            mapfile -t changed_ts < <(git diff --name-only -- '*.ts')
-            nix run nixpkgs#biome -- check --write "${changed_ts[@]}"
-            git config user.name github-actions[bot]
-            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-            git add -A
-            git commit -m "refactor(runtime): centralize subagent handle directory"
-            git push origin HEAD:${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}
-          } > migration.log 2>&1
-          status=$?
-          cat migration.log
-          exit "$status"
-
-      - name: Upload migration diagnostics
-        if: failure()
-        uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097 # v4.4.2
-        with:
-          name: manager-directory-migration-diagnostics
-          path: migration.log
-          if-no-files-found: error
 
       - name: Run read-only Tend CI profile
         id: tend
