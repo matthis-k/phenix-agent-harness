@@ -31,8 +31,6 @@ export function createChildSessionBackend(
   return new SdkChildSessionBackend(options);
 }
 
-export type { ReturnSpec, ReturnSpecOptions, SubagentRequest } from "./subagent-api.ts";
-export { returns } from "./subagent-api.ts";
 export type {
   ConcreteSessionModel,
   ResolvedSubagentSessionOptions,
@@ -47,6 +45,8 @@ export type {
   SubagentSessionOptions,
 } from "./session-options.ts";
 export { resolveSubagentSessionOptions, routing } from "./session-options.ts";
+export type { ReturnSpec, ReturnSpecOptions, SubagentRequest } from "./subagent-api.ts";
+export { returns } from "./subagent-api.ts";
 export type {
   SubagentSessionBindings,
   SubagentSessionRequest,
