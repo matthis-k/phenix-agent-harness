@@ -2,9 +2,8 @@
  * subagent-manager — application facade for Phenix subagents
  *
  * Callers use `run()` for an awaited typed result or `spawn()` for explicit
- * asynchronous lifecycle management. The manager depends on one execution
- * adapter port; workflow-aware and standalone implementations may compile the
- * same public request into different policies without changing this API.
+ * asynchronous lifecycle management. Managers may share one handle directory,
+ * allowing scoped compilers to expose a coherent `get()` and `list()` surface.
  */
 
 import type { ThinkingLevel } from "../phenix-kernel/task.ts";
@@ -31,6 +30,11 @@ export interface SubagentSnapshot {
   readonly model?: ConcreteModelRef;
   readonly thinking?: ThinkingLevel;
   readonly error?: SubagentError;
+}
+
+export interface SubagentQuery {
+  readonly parentId?: string;
+  readonly status?: SubagentStatus | readonly SubagentStatus[];
 }
 
 export type SubagentEvent =
@@ -137,11 +141,54 @@ function validateRequest(request: SubagentRequest<unknown>): void {
   }
 }
 
+function matchesQuery(snapshot: SubagentSnapshot, query: SubagentQuery): boolean {
+  if (query.parentId !== undefined && snapshot.parentId !== query.parentId) return false;
+  if (query.status === undefined) return true;
+
+  const statuses = Array.isArray(query.status) ? query.status : [query.status];
+  return statuses.includes(snapshot.status);
+}
+
+/** Shared directory for managers created with different authoritative compilers. */
+export class SubagentHandleDirectory {
+  private readonly handles = new Map<string, SubagentHandle<unknown>>();
+
+  add(handle: SubagentHandle<unknown>): void {
+    this.handles.set(handle.id, handle);
+  }
+
+  get<TOutput = unknown>(id: string): SubagentHandle<TOutput> | undefined {
+    return this.handles.get(id) as SubagentHandle<TOutput> | undefined;
+  }
+
+  remove(id: string): void {
+    this.handles.delete(id);
+  }
+
+  list(query: SubagentQuery = {}): readonly SubagentSnapshot[] {
+    return [...this.handles.values()]
+      .map((handle) => handle.snapshot())
+      .filter((snapshot) => matchesQuery(snapshot, query));
+  }
+
+  get size(): number {
+    return this.handles.size;
+  }
+
+  async shutdown(reason: string): Promise<void> {
+    const active = [...this.handles.values()];
+    this.handles.clear();
+    await Promise.allSettled(active.map((handle) => handle.cancel(reason)));
+  }
+}
+
 export class SubagentManager {
   private readonly adapter: SubagentExecutionAdapter;
+  private readonly directory: SubagentHandleDirectory;
 
-  constructor(adapter: SubagentExecutionAdapter) {
+  constructor(adapter: SubagentExecutionAdapter, directory = new SubagentHandleDirectory()) {
     this.adapter = adapter;
+    this.directory = directory;
   }
 
   async spawn<TOutput>(
@@ -149,15 +196,28 @@ export class SubagentManager {
     signal?: AbortSignal,
   ): Promise<SubagentHandle<TOutput>> {
     validateRequest(request);
-    return this.adapter.spawn(request, signal);
+    const handle = await this.adapter.spawn(request, signal);
+    this.directory.add(handle);
+    return handle;
   }
 
   async run<TOutput>(request: SubagentRequest<TOutput>, signal?: AbortSignal): Promise<TOutput> {
     const handle = await this.spawn(request, signal);
     return handle.result(signal);
   }
+
+  get<TOutput = unknown>(id: string): SubagentHandle<TOutput> | undefined {
+    return this.directory.get<TOutput>(id);
+  }
+
+  list(query?: SubagentQuery): readonly SubagentSnapshot[] {
+    return this.directory.list(query);
+  }
 }
 
-export function createSubagentManager(adapter: SubagentExecutionAdapter): SubagentManager {
-  return new SubagentManager(adapter);
+export function createSubagentManager(
+  adapter: SubagentExecutionAdapter,
+  directory?: SubagentHandleDirectory,
+): SubagentManager {
+  return new SubagentManager(adapter, directory);
 }
