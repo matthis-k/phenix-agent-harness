@@ -10,26 +10,16 @@
  * - concurrent submissions do not cross-contaminate state
  */
 
-import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
 import { randomUUID } from "node:crypto";
-
-import {
-  FileContractStore,
-} from "../extensions/phenix-subagents/contract-store.ts";
-import {
-  issueContract,
-  createRunId,
-} from "../extensions/phenix-subagents/contract.ts";
-import {
-  ContractSubmissionChannelImpl,
-} from "../extensions/phenix-runtime/contract-channel.ts";
-import {
-  createCompletionTool,
-} from "../extensions/phenix-runtime/completion-tool.ts";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { after, before, describe, it } from "node:test";
+import { createCompletionTool } from "../extensions/phenix-runtime/completion-tool.ts";
+import { ContractSubmissionChannelImpl } from "../extensions/phenix-runtime/contract-channel.ts";
+import { createRunId, issueContract } from "../extensions/phenix-subagents/contract.ts";
+import { FileContractStore } from "../extensions/phenix-subagents/contract-store.ts";
 
 // ── Test schema ─────────────────────────────────────────────────────────────
 
@@ -50,11 +40,28 @@ const SCHEMA_B = {
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 const SCOUT_PRESET_TOOLS = [
-  "read", "grep", "search", "find", "ls", "tree",
-  "bash", "lsp", "lsp_*", "ast_grep", "ast_*", "mcp",
-  "mcp_*", "web_search", "web_fetch", "fetch_content",
-  "get_search_content", "context_info", "context_*",
-  "contact_supervisor", "phenix_delegate",
+  "read",
+  "grep",
+  "search",
+  "find",
+  "ls",
+  "tree",
+  "bash",
+  "lsp",
+  "lsp_*",
+  "ast_grep",
+  "ast_*",
+  "mcp",
+  "mcp_*",
+  "web_search",
+  "web_fetch",
+  "fetch_content",
+  "get_search_content",
+  "context_info",
+  "context_*",
+  "contact_supervisor",
+  "phenix_workflow",
+  "phenix_create_subagent",
 ] as const;
 
 function createTestArtifact(outputSchema: Record<string, unknown>, role: string) {
@@ -139,7 +146,13 @@ describe("Contract tool isolation", () => {
     const toolA = createCompletionTool(channelA) as any;
 
     // Submit valid A output
-    const result = await toolA.execute("call-1", { value: { name: "A" } }, undefined as any, undefined, undefined as any);
+    const result = await toolA.execute(
+      "call-1",
+      { value: { name: "A" } },
+      undefined as any,
+      undefined,
+      undefined as any,
+    );
     assert.equal(result.isError, undefined);
     assert.equal((result.details as any).status, "submitted");
   });
@@ -152,7 +165,13 @@ describe("Contract tool isolation", () => {
     const toolB = createCompletionTool(channelB) as any;
 
     // Submit valid B output
-    const result = await toolB.execute("call-2", { value: { name: "B" } }, undefined as any, undefined, undefined as any);
+    const result = await toolB.execute(
+      "call-2",
+      { value: { name: "B" } },
+      undefined as any,
+      undefined,
+      undefined as any,
+    );
     assert.equal(result.isError, undefined);
     assert.equal((result.details as any).status, "submitted");
   });
@@ -169,7 +188,13 @@ describe("Contract tool isolation", () => {
     const toolB = createCompletionTool(channelB) as any;
 
     // Invalid A submission (wrong value)
-    const invalidResult = await toolA.execute("call-3", { value: { name: "WRONG" } }, undefined as any, undefined, undefined as any);
+    const invalidResult = await toolA.execute(
+      "call-3",
+      { value: { name: "WRONG" } },
+      undefined as any,
+      undefined,
+      undefined as any,
+    );
     assert.equal(invalidResult.isError, true);
 
     // A contract should still be pending (invalid submissions don't leave pending)
@@ -177,7 +202,13 @@ describe("Contract tool isolation", () => {
     assert.equal(aState.state, "pending");
 
     // B should be unaffected — can still submit valid B output
-    const bResult = await toolB.execute("call-4", { value: { name: "B" } }, undefined as any, undefined, undefined as any);
+    const bResult = await toolB.execute(
+      "call-4",
+      { value: { name: "B" } },
+      undefined as any,
+      undefined,
+      undefined as any,
+    );
     assert.equal(bResult.isError, undefined);
     assert.equal((bResult.details as any).status, "submitted");
   });

@@ -1,20 +1,19 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
 import { randomUUID } from "node:crypto";
-import { describe, it, before, after } from "node:test";
-
-import {
-  FileContractStore,
-  ContractStoreError,
-} from "../extensions/phenix-subagents/contract-store.ts";
-import {
-  issueContract,
-  createRunId,
-  type ContractId,
-} from "../extensions/phenix-subagents/contract.ts";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { after, before, describe, it } from "node:test";
 import type { AgentRole } from "../extensions/phenix-subagents/agent-types.ts";
+import {
+  type ContractId,
+  createRunId,
+  issueContract,
+} from "../extensions/phenix-subagents/contract.ts";
+import {
+  ContractStoreError,
+  FileContractStore,
+} from "../extensions/phenix-subagents/contract-store.ts";
 
 const TEST_SCHEMA = {
   type: "object",
@@ -24,11 +23,28 @@ const TEST_SCHEMA = {
 };
 
 const SCOUT_PRESET_TOOLS = [
-  "read", "grep", "search", "find", "ls", "tree",
-  "bash", "lsp", "lsp_*", "ast_grep", "ast_*", "mcp",
-  "mcp_*", "web_search", "web_fetch", "fetch_content",
-  "get_search_content", "context_info", "context_*",
-  "contact_supervisor", "phenix_delegate",
+  "read",
+  "grep",
+  "search",
+  "find",
+  "ls",
+  "tree",
+  "bash",
+  "lsp",
+  "lsp_*",
+  "ast_grep",
+  "ast_*",
+  "mcp",
+  "mcp_*",
+  "web_search",
+  "web_fetch",
+  "fetch_content",
+  "get_search_content",
+  "context_info",
+  "context_*",
+  "contact_supervisor",
+  "phenix_workflow",
+  "phenix_create_subagent",
 ] as const;
 
 function makeToolConfig(
@@ -47,9 +63,7 @@ function makeToolConfig(
       effective: [...additions],
     };
   }
-  const effective = [...SCOUT_PRESET_TOOLS, ...additions].filter(
-    (t) => !removals.includes(t),
-  );
+  const effective = [...SCOUT_PRESET_TOOLS, ...additions].filter((t) => !removals.includes(t));
   const seen = new Set<string>();
   const deduped: string[] = [];
   for (const t of effective) {
@@ -130,10 +144,7 @@ describe("FileContractStore", () => {
   let store: FileContractStore;
 
   before(() => {
-    tmpDir = path.join(
-      os.tmpdir(),
-      `phenix-contract-store-test-${randomUUID()}`,
-    );
+    tmpDir = path.join(os.tmpdir(), `phenix-contract-store-test-${randomUUID()}`);
     store = new FileContractStore(tmpDir);
     fs.mkdirSync(tmpDir, { recursive: true });
   });
@@ -170,19 +181,14 @@ describe("FileContractStore", () => {
     await store.submit(artifact.id, 0, { ok: true });
     await assert.rejects(
       () => store.submit(artifact.id, 1, { ok: true }),
-      (error: unknown) =>
-        error instanceof ContractStoreError &&
-        error.code === "already-terminal",
+      (error: unknown) => error instanceof ContractStoreError && error.code === "already-terminal",
     );
   });
 
   it("cancel transitions pending to cancelled", async () => {
     const artifact = createTestArtifact();
     await store.create(artifact);
-    const result = await store.cancel(
-      artifact.id,
-      "test cancellation",
-    );
+    const result = await store.cancel(artifact.id, "test cancellation");
     assert.equal(result.state, "cancelled");
     assert.equal(result.reason, "test cancellation");
   });
@@ -193,9 +199,7 @@ describe("FileContractStore", () => {
     await store.cancel(artifact.id, "cancelled");
     await assert.rejects(
       () => store.submit(artifact.id, 0, { ok: true }),
-      (error: unknown) =>
-        error instanceof ContractStoreError &&
-        error.code === "already-terminal",
+      (error: unknown) => error instanceof ContractStoreError && error.code === "already-terminal",
     );
   });
 
@@ -204,16 +208,12 @@ describe("FileContractStore", () => {
     await store.create(artifact);
     await assert.rejects(
       () => store.submit(artifact.id, 42, { ok: true }),
-      (error: unknown) =>
-        error instanceof ContractStoreError &&
-        error.code === "revision-conflict",
+      (error: unknown) => error instanceof ContractStoreError && error.code === "revision-conflict",
     );
   });
 
   it("load returns undefined for missing contract", async () => {
-    const result = await store.load(
-      `phx_${randomUUID()}` as ContractId,
-    );
+    const result = await store.load(`phx_${randomUUID()}` as ContractId);
     assert.equal(result, undefined);
   });
 
@@ -226,9 +226,7 @@ describe("FileContractStore", () => {
 
     await assert.rejects(
       () => store.load(artifact.id),
-      (error: unknown) =>
-        error instanceof ContractStoreError &&
-        error.code === "io-failure",
+      (error: unknown) => error instanceof ContractStoreError && error.code === "io-failure",
     );
   });
 
@@ -239,10 +237,7 @@ describe("FileContractStore", () => {
     const files = fs.readdirSync(dir);
     assert(files.includes("contract.json"));
     assert(files.includes("result.json"));
-    assert.equal(
-      files.filter((f) => f.endsWith(".tmp")).length,
-      0,
-    );
+    assert.equal(files.filter((f) => f.endsWith(".tmp")).length, 0);
   });
 
   it("create rejects duplicate ID", async () => {
@@ -250,36 +245,21 @@ describe("FileContractStore", () => {
     await store.create(artifact);
     await assert.rejects(
       () => store.create(artifact),
-      (error: unknown) =>
-        error instanceof ContractStoreError &&
-        error.code === "revision-conflict",
+      (error: unknown) => error instanceof ContractStoreError && error.code === "revision-conflict",
     );
   });
 
   it("cancel on missing contract rejects", async () => {
     await assert.rejects(
-      () =>
-        store.cancel(
-          `phx_${randomUUID()}` as ContractId,
-          "cancel-missing",
-        ),
-      (error: unknown) =>
-        error instanceof ContractStoreError &&
-        error.code === "not-found",
+      () => store.cancel(`phx_${randomUUID()}` as ContractId, "cancel-missing"),
+      (error: unknown) => error instanceof ContractStoreError && error.code === "not-found",
     );
   });
 
   it("submit on missing contract rejects", async () => {
     await assert.rejects(
-      () =>
-        store.submit(
-          `phx_${randomUUID()}` as ContractId,
-          0,
-          { ok: true },
-        ),
-      (error: unknown) =>
-        error instanceof ContractStoreError &&
-        error.code === "not-found",
+      () => store.submit(`phx_${randomUUID()}` as ContractId, 0, { ok: true }),
+      (error: unknown) => error instanceof ContractStoreError && error.code === "not-found",
     );
   });
 
@@ -287,12 +267,9 @@ describe("FileContractStore", () => {
     const artifact = createTestArtifact();
     await store.create(artifact);
     await store.submit(artifact.id, 0, { ok: true });
-    const reopened = await store.reopen(
-      artifact.id,
-      1,
-      "runtime-rejected",
-      [{ path: ["ok"], message: "must be true" }],
-    );
+    const reopened = await store.reopen(artifact.id, 1, "runtime-rejected", [
+      { path: ["ok"], message: "must be true" },
+    ]);
     assert.equal(reopened.state, "pending");
     assert.equal(reopened.revision, 2);
     assert.equal(reopened.history.length, 1);
@@ -317,8 +294,7 @@ describe("FileContractStore", () => {
     await assert.rejects(
       () => store.reopen(artifact.id, 0, "runtime-rejected", []),
       (error: unknown) =>
-        error instanceof ContractStoreError &&
-        error.code === "invalid-state-transition",
+        error instanceof ContractStoreError && error.code === "invalid-state-transition",
     );
   });
 

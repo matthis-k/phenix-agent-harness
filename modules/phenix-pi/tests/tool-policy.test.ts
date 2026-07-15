@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
+import type { AgentRole } from "../extensions/phenix-subagents/agent-types.ts";
 import {
-  resolveToolConfiguration,
-  toolAllowedByConfig,
-  modelTaskTools,
   childLaunchTools,
   EMPTY_TOOL_PATCH,
+  modelTaskTools,
+  resolveToolConfiguration,
   type ToolPatchInput,
+  toolAllowedByConfig,
 } from "../extensions/phenix-subagents/tool-policy.ts";
-import type { AgentRole } from "../extensions/phenix-subagents/agent-types.ts";
 
 describe("Tool-policy resolution", () => {
   it("scout preset without patch", () => {
@@ -141,7 +140,7 @@ describe("Tool-policy resolution", () => {
       removed: ["write"],
     };
     const config = resolveToolConfiguration({
-      role: "scout",  // Scout preset doesn't have write.
+      role: "scout", // Scout preset doesn't have write.
       requested: null,
       inheritedPatch,
     });
@@ -267,11 +266,29 @@ describe("Tool-policy resolution", () => {
     // With full-effective-set ceiling validation, the delegable set
     // must cover all preset tools plus the addition.
     const broadCeiling = [
-      "read", "grep", "search", "find", "ls", "tree",
-      "bash", "lsp", "lsp_*", "ast_grep", "ast_*", "mcp",
-      "mcp_*", "web_search", "web_fetch", "fetch_content",
-      "get_search_content", "context_info", "context_*",
-      "contact_supervisor", "phenix_delegate", "write",
+      "read",
+      "grep",
+      "search",
+      "find",
+      "ls",
+      "tree",
+      "bash",
+      "lsp",
+      "lsp_*",
+      "ast_grep",
+      "ast_*",
+      "mcp",
+      "mcp_*",
+      "web_search",
+      "web_fetch",
+      "fetch_content",
+      "get_search_content",
+      "context_info",
+      "context_*",
+      "contact_supervisor",
+      "phenix_workflow",
+      "phenix_create_subagent",
+      "write",
     ];
     const config = resolveToolConfiguration({
       role: "scout",
