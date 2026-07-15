@@ -1,7 +1,7 @@
 /**
  * execution-quality-service — deterministic verification and critic execution
  *
- * The coordinator sequences workflow lifecycle. This service owns the concrete
+ * The workflow delegator sequences workflow lifecycle. This service owns the concrete
  * mechanisms used to assess producer work: verification commands and an
  * isolated critic child session. Critic execution uses the same canonical
  * SubagentExecutionPlan and session runtime as every other child.

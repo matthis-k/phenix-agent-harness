@@ -1,5 +1,5 @@
 /**
- * delegator — Phenix workflow delegation delegator
+ * workflow-delegator — authoritative workflow delegation
  *
  * Owns workflow authority, transition settlement, handle persistence, and
  * foreground/background orchestration. Child execution is performed through a
@@ -53,7 +53,6 @@ import type {
 } from "./child-spec.ts";
 import { resolveChildSpec } from "./child-spec.ts";
 import { FileContractStore } from "./contract-store.ts";
-import { createProducerContract } from "./producer-contract.ts";
 import {
   effectiveSessionId,
   findProjectRoot,
@@ -65,6 +64,7 @@ import {
 import type { HandleRecord, WorkflowBinding } from "./handle-types.ts";
 import { HANDLE_VERSION, isTerminalHandleStatus } from "./handle-types.ts";
 import type { ManagedDelegationRuntime } from "./managed-delegation-runtime.ts";
+import { createProducerContract } from "./producer-contract.ts";
 import type { WorkflowProducerAcceptanceData } from "./workflow-acceptance-engine.ts";
 import { createWorkflowExecutionCompiler } from "./workflow-execution-compiler.ts";
 
