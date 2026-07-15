@@ -5,11 +5,10 @@ on:
   push:
     branches:
       - main
-      - refactor/final-subagent-cleanup
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -24,66 +23,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
 
       - name: Install Nix
         uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Finalize subagent naming audit
-        if: (github.ref_name == 'refactor/final-subagent-cleanup' || github.head_ref == 'refactor/final-subagent-cleanup') && github.actor != 'github-actions[bot]'
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-
-          replacements = {
-              Path("modules/phenix-pi/extensions/phenix-subagents/workflow-delegator.ts"): {
-                  "* delegator — Phenix workflow delegation delegator":
-                      "* workflow-delegator — authoritative workflow delegation",
-              },
-              Path("modules/phenix-pi/extensions/phenix-subagents/execution-quality-service.ts"): {
-                  "The coordinator sequences workflow lifecycle.":
-                      "The workflow delegator sequences workflow lifecycle.",
-              },
-          }
-          for path, mapping in replacements.items():
-              text = path.read_text()
-              for old, new in mapping.items():
-                  if text.count(old) != 1:
-                      raise RuntimeError(f"expected one occurrence of {old!r} in {path}")
-                  text = text.replace(old, new)
-              path.write_text(text)
-          PY
-
-          stale_patterns=(
-            'AgentExecutionCoordinator'
-            'DelegationCoordinator'
-            'AttemptRunResult'
-            'createAttemptContract'
-            'handle-evaluation\.ts'
-            'attempt-runner\.ts'
-            'phenix-subagents/coordinator\.ts'
-            'ACCEPTANCE_RANK'
-            'interface Evaluation'
-          )
-          for pattern in "${stale_patterns[@]}"; do
-            if rg -n "$pattern" modules/phenix-pi/extensions modules/phenix-pi/tests; then
-              echo "stale runtime symbol or path remains: $pattern" >&2
-              exit 1
-            fi
-          done
-
-          mapfile -t changed_ts < <(git diff --name-only -- '*.ts')
-          nix run nixpkgs#biome -- check --write "${changed_ts[@]}"
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git commit -m "docs(runtime): finish subagent terminology cleanup"
-          git push origin HEAD:${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}
 
       - name: Run read-only Tend CI profile
         id: tend
