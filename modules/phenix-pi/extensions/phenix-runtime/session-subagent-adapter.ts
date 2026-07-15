@@ -1,10 +1,9 @@
 /**
  * session-subagent-adapter — bridge the public manager to child sessions
  *
- * The compiler owns policy: contracts, workflow bindings, capabilities,
- * verification, critic gates, persistence, and result decoding. The adapter
- * owns mechanism: start one resolved session, project its lifecycle, and expose
- * it through the stable SubagentHandle API.
+ * A compiler produces one passive SubagentExecutionPlan. The session runtime
+ * owns backend translation, while an AcceptanceEngine independently interprets
+ * acceptance policy. The adapter owns only lifecycle projection and cancellation.
  */
 
 import {
@@ -13,6 +12,11 @@ import {
   type ChildSessionEvent,
   type ChildSessionNode,
 } from "./child-session-types.ts";
+import type {
+  AcceptanceEngine,
+  SubagentExecutionCompiler,
+  SubagentExecutionPlan,
+} from "./execution-plan.ts";
 import type { SubagentRequest } from "./subagent-api.ts";
 import {
   type SubagentEvent,
@@ -22,33 +26,10 @@ import {
   type SubagentSnapshot,
   type SubagentStatus,
 } from "./subagent-manager.ts";
-import type { SubagentSessionRequest } from "./subagent-session-runtime.ts";
-
-/** Fully compiled work that can be executed by the child-session mechanism. */
-export interface CompiledSubagentExecution<TOutput> {
-  readonly session: SubagentSessionRequest;
-
-  /**
-   * Own the complete acceptance pipeline for the live run.
-   *
-   * This is where an implementation waits for structured completion, performs
-   * deterministic verification and critic review, accepts the contract, and
-   * decodes the final value.
-   */
-  evaluate(run: ChildRun, signal: AbortSignal): Promise<TOutput>;
-}
-
-/** Compile the stable user request into runtime-owned policy and bindings. */
-export interface SubagentExecutionCompiler {
-  compile<TOutput>(
-    request: SubagentRequest<TOutput>,
-    signal: AbortSignal,
-  ): Promise<CompiledSubagentExecution<TOutput>>;
-}
 
 /** Minimal session-runtime port consumed by this adapter. */
 export interface SubagentSessionSpawner {
-  spawn(request: SubagentSessionRequest, signal?: AbortSignal): Promise<ChildRun>;
+  spawn(execution: SubagentExecutionPlan<unknown>, signal?: AbortSignal): Promise<ChildRun>;
 }
 
 function statusFromNode(node: ChildSessionNode, terminal?: SubagentStatus): SubagentStatus {
@@ -172,16 +153,18 @@ class SessionSubagentHandle<TOutput> implements SubagentHandle<TOutput> {
   readonly id: string;
 
   private readonly run: ChildRun;
-  private readonly execution: CompiledSubagentExecution<TOutput>;
+  private readonly plan: SubagentExecutionPlan<TOutput>;
+  private readonly acceptance: AcceptanceEngine;
   private readonly evaluationController = new AbortController();
 
   private terminalStatus: SubagentStatus | undefined;
   private terminalError: SubagentExecutionError | undefined;
   private readonly evaluation: Promise<TOutput>;
 
-  constructor(run: ChildRun, execution: CompiledSubagentExecution<TOutput>) {
+  constructor(run: ChildRun, plan: SubagentExecutionPlan<TOutput>, acceptance: AcceptanceEngine) {
     this.run = run;
-    this.execution = execution;
+    this.plan = plan;
+    this.acceptance = acceptance;
     this.id = run.id;
     this.evaluation = this.evaluate();
     void this.evaluation.catch(() => undefined);
@@ -189,7 +172,11 @@ class SessionSubagentHandle<TOutput> implements SubagentHandle<TOutput> {
 
   private async evaluate(): Promise<TOutput> {
     try {
-      const value = await this.execution.evaluate(this.run, this.evaluationController.signal);
+      const value = await this.acceptance.evaluate(
+        this.plan.acceptance,
+        this.run,
+        this.evaluationController.signal,
+      );
       if (this.evaluationController.signal.aborted || this.terminalStatus === "cancelled") {
         const reason = this.evaluationController.signal.reason;
         throw reason instanceof SubagentExecutionError
@@ -316,16 +303,19 @@ class SessionSubagentHandle<TOutput> implements SubagentHandle<TOutput> {
 
 export interface SessionSubagentExecutionAdapterOptions {
   readonly compiler: SubagentExecutionCompiler;
+  readonly acceptance: AcceptanceEngine;
   readonly sessions: SubagentSessionSpawner;
 }
 
 /** Concrete adapter from the stable manager API to the child-session runtime. */
 export class SessionSubagentExecutionAdapter implements SubagentExecutionAdapter {
   private readonly compiler: SubagentExecutionCompiler;
+  private readonly acceptance: AcceptanceEngine;
   private readonly sessions: SubagentSessionSpawner;
 
   constructor(options: SessionSubagentExecutionAdapterOptions) {
     this.compiler = options.compiler;
+    this.acceptance = options.acceptance;
     this.sessions = options.sessions;
   }
 
@@ -336,17 +326,17 @@ export class SessionSubagentExecutionAdapter implements SubagentExecutionAdapter
     const start = scopedStartSignal(signal);
 
     try {
-      const execution = await this.compiler.compile(request, start.signal);
+      const plan = await this.compiler.compile(request, start.signal);
       if (start.signal.aborted) {
         throw new SubagentExecutionError("ABORTED", "Subagent creation was cancelled.");
       }
 
-      const run = await this.sessions.spawn(execution.session, start.signal);
+      const run = await this.sessions.spawn(plan, start.signal);
       if (start.signal.aborted) {
         await run.abort("subagent creation was cancelled");
         throw new SubagentExecutionError("ABORTED", "Subagent creation was cancelled.");
       }
-      return new SessionSubagentHandle(run, execution);
+      return new SessionSubagentHandle(run, plan, this.acceptance);
     } catch (error) {
       const snapshot: SubagentSnapshot = {
         id: "unstarted",

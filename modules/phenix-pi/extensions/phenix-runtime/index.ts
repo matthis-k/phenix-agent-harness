@@ -1,5 +1,12 @@
-/** Public Phenix subagent API. */
+/** Public Phenix subagent API and canonical execution-plan vocabulary. */
 
+export type {
+  AcceptanceEngine,
+  AcceptancePlan,
+  RuntimeBindings,
+  SubagentExecutionCompiler,
+  SubagentExecutionPlan,
+} from "./execution-plan.ts";
 export type {
   ConcreteSessionModel,
   RoutedSessionModel,
@@ -10,9 +17,7 @@ export type {
 } from "./session-options.ts";
 export { routing } from "./session-options.ts";
 export type {
-  CompiledSubagentExecution,
   SessionSubagentExecutionAdapterOptions,
-  SubagentExecutionCompiler,
   SubagentSessionSpawner,
 } from "./session-subagent-adapter.ts";
 export {

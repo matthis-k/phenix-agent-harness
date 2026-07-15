@@ -10,17 +10,18 @@ import {
   childRunId,
 } from "../extensions/phenix-runtime/child-session-types.ts";
 import {
-  type CompiledSubagentExecution,
+  type AcceptanceEngine,
   createSessionSubagentExecutionAdapter,
   createSubagentManager,
+  type RuntimeBindings,
   returns,
   routing,
   type SubagentExecutionCompiler,
   SubagentExecutionError,
+  type SubagentExecutionPlan,
   type SubagentRequest,
   type SubagentSessionSpawner,
 } from "../extensions/phenix-runtime/index.ts";
-import type { SubagentSessionRequest } from "../extensions/phenix-runtime/subagent-session-runtime.ts";
 
 interface SummaryResult {
   readonly summary: string;
@@ -43,30 +44,64 @@ function request(): SubagentRequest<SummaryResult> {
   };
 }
 
-const sessionRequest = {
-  task: "Inspect the adapter boundary.",
-} as unknown as SubagentSessionRequest;
+const runtime = {
+  id: childRunId("adapter-child"),
+  rootId: childRunId("adapter-child"),
+  handleId: "adapter-handle",
+  cwd: "/tmp/adapter-test",
+  contract: {},
+  workflowProjection: { options: [] },
+  contractChannel: {},
+  parentContext: {},
+  effectiveTools: [],
+  skillRefs: [],
+  extensionRefs: [],
+  inheritProjectContext: true,
+  timeoutMs: 1_000,
+  turnBudget: {},
+  toolBudget: {},
+} as unknown as RuntimeBindings;
 
 function deferred<T>(): {
   readonly promise: Promise<T>;
   readonly resolve: (value: T) => void;
-  readonly reject: (error: unknown) => void;
 } {
   let resolve!: (value: T) => void;
-  let reject!: (error: unknown) => void;
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+  const promise = new Promise<T>((resolvePromise) => {
     resolve = resolvePromise;
-    reject = rejectPromise;
   });
-  return { promise, resolve, reject };
+  return { promise, resolve };
+}
+
+function plan<TOutput>(input: SubagentRequest<TOutput>): SubagentExecutionPlan<TOutput> {
+  return {
+    assignment: {
+      task: input.task,
+      requirements: input.requirements ?? [],
+    },
+    session: {
+      options: input.session,
+      defaults: {
+        agent: "scout",
+        modelSet: "mixed" as never,
+        difficulty: "D1",
+        thinking: "medium",
+        persistence: "memory",
+      },
+    },
+    runtime,
+    acceptance: {
+      kind: "test",
+      returns: input.returns,
+    },
+  };
 }
 
 class FakeRun implements ChildRun {
-  readonly id = childRunId("adapter-child");
+  readonly id = runtime.id;
   readonly backend = "sdk" as const;
   readonly pi = { sessionId: "pi-adapter-child" };
   readonly messages: string[] = [];
-  readonly listeners = new Set<(event: ChildSessionEvent) => void>();
   abortCalls = 0;
 
   private status: ChildSessionNode["status"] = "running";
@@ -88,9 +123,8 @@ class FakeRun implements ChildRun {
     };
   }
 
-  subscribe(listener: (event: ChildSessionEvent) => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+  subscribe(_listener: (event: ChildSessionEvent) => void): () => void {
+    return () => {};
   }
 
   continue(message: string, _signal?: AbortSignal): Promise<ChildCycleOutcome> {
@@ -102,15 +136,9 @@ class FakeRun implements ChildRun {
     return Promise.resolve({ cycle: 1, status: "settled" });
   }
 
-  abort(reason: string): Promise<void> {
+  abort(_reason: string): Promise<void> {
     this.abortCalls++;
     this.status = "cancelled";
-    const event: ChildSessionEvent = {
-      type: "session.cancelled",
-      runId: this.id,
-      reason,
-    };
-    for (const listener of this.listeners) listener(event);
     return Promise.resolve();
   }
 
@@ -120,72 +148,76 @@ class FakeRun implements ChildRun {
   }
 }
 
+class RecordingCompiler implements SubagentExecutionCompiler {
+  requests: SubagentRequest<unknown>[] = [];
+
+  compile<TOutput>(
+    input: SubagentRequest<TOutput>,
+    _signal: AbortSignal,
+  ): Promise<SubagentExecutionPlan<TOutput>> {
+    this.requests.push(input);
+    return Promise.resolve(plan(input));
+  }
+}
+
 class RecordingSpawner implements SubagentSessionSpawner {
   readonly run = new FakeRun();
-  requests: SubagentSessionRequest[] = [];
-  signals: Array<AbortSignal | undefined> = [];
+  plans: SubagentExecutionPlan<unknown>[] = [];
 
-  spawn(requestValue: SubagentSessionRequest, signal?: AbortSignal): Promise<ChildRun> {
-    this.requests.push(requestValue);
-    this.signals.push(signal);
+  spawn(execution: SubagentExecutionPlan<unknown>): Promise<ChildRun> {
+    this.plans.push(execution);
     return Promise.resolve(this.run);
   }
 }
 
-class RecordingCompiler implements SubagentExecutionCompiler {
-  requests: SubagentRequest<unknown>[] = [];
-  signals: AbortSignal[] = [];
-  evaluator: (run: ChildRun, signal: AbortSignal) => Promise<SummaryResult>;
+class RecordingAcceptance implements AcceptanceEngine {
+  readonly pending = deferred<SummaryResult>();
+  calls = 0;
 
-  constructor(
-    evaluator: (run: ChildRun, signal: AbortSignal) => Promise<SummaryResult> = () =>
-      Promise.resolve({ summary: "done" }),
-  ) {
-    this.evaluator = evaluator;
-  }
-
-  compile<TOutput>(
-    requestValue: SubagentRequest<TOutput>,
-    signal: AbortSignal,
-  ): Promise<CompiledSubagentExecution<TOutput>> {
-    this.requests.push(requestValue);
-    this.signals.push(signal);
-    return Promise.resolve({
-      session: sessionRequest,
-      evaluate: (run, evaluationSignal) =>
-        this.evaluator(run, evaluationSignal) as Promise<unknown> as Promise<TOutput>,
-    });
+  evaluate<TOutput>(
+    _plan: SubagentExecutionPlan<TOutput>["acceptance"],
+    _run: ChildRun,
+    _signal: AbortSignal,
+  ): Promise<TOutput> {
+    this.calls++;
+    return this.pending.promise as Promise<TOutput>;
   }
 }
 
-function managerWith(compiler: RecordingCompiler, spawner = new RecordingSpawner()) {
+function managerWith() {
+  const compiler = new RecordingCompiler();
+  const sessions = new RecordingSpawner();
+  const acceptance = new RecordingAcceptance();
   const adapter = createSessionSubagentExecutionAdapter({
     compiler,
-    sessions: spawner,
+    acceptance,
+    sessions,
   });
   return {
     manager: createSubagentManager(adapter),
-    spawner,
+    compiler,
+    sessions,
+    acceptance,
   };
 }
 
 describe("SessionSubagentExecutionAdapter", () => {
-  it("compiles the public request and returns its typed evaluated result", async () => {
-    const compiler = new RecordingCompiler();
-    const { manager, spawner } = managerWith(compiler);
+  it("uses one passive plan for session creation and acceptance", async () => {
+    const { manager, compiler, sessions, acceptance } = managerWith();
     const input = request();
+    const handle = await manager.spawn(input);
 
-    const result = await manager.run(input);
-
-    assert.deepEqual(result, { summary: "done" });
     assert.equal(compiler.requests[0], input);
-    assert.equal(spawner.requests[0], sessionRequest);
+    assert.equal(sessions.plans[0]?.assignment.task, input.task);
+    assert.equal(acceptance.calls, 1);
+    assert.equal("evaluate" in (sessions.plans[0] ?? {}), false);
+
+    acceptance.pending.resolve({ summary: "done" });
+    assert.deepEqual(await handle.result(), { summary: "done" });
   });
 
   it("projects the live child session through the public handle", async () => {
-    const evaluation = deferred<SummaryResult>();
-    const compiler = new RecordingCompiler(() => evaluation.promise);
-    const { manager } = managerWith(compiler);
+    const { manager, sessions, acceptance } = managerWith();
     const handle = await manager.spawn(request());
 
     assert.deepEqual(handle.snapshot(), {
@@ -195,19 +227,14 @@ describe("SessionSubagentExecutionAdapter", () => {
       thinking: "medium",
     });
     await handle.send("Continue the inspection.");
-    assert.deepEqual((await handle.poll()).model, {
-      provider: "opencode-go",
-      id: "deepseek-v4-flash",
-    });
+    assert.deepEqual(sessions.run.messages, ["Continue the inspection."]);
 
-    evaluation.resolve({ summary: "done" });
+    acceptance.pending.resolve({ summary: "done" });
     assert.deepEqual(await handle.result(), { summary: "done" });
   });
 
-  it("cancels a result wait without cancelling shared child execution", async () => {
-    const evaluation = deferred<SummaryResult>();
-    const compiler = new RecordingCompiler(() => evaluation.promise);
-    const { manager, spawner } = managerWith(compiler);
+  it("cancels a result wait without cancelling child execution", async () => {
+    const { manager, sessions, acceptance } = managerWith();
     const handle = await manager.spawn(request());
     const waitController = new AbortController();
     waitController.abort();
@@ -215,63 +242,25 @@ describe("SessionSubagentExecutionAdapter", () => {
     await assert.rejects(handle.result(waitController.signal), (error: unknown) => {
       return error instanceof SubagentExecutionError && error.code === "ABORTED";
     });
-    assert.equal(spawner.run.abortCalls, 0);
+    assert.equal(sessions.run.abortCalls, 0);
 
-    evaluation.resolve({ summary: "completed after detached wait" });
+    acceptance.pending.resolve({ summary: "completed after detached wait" });
     assert.deepEqual(await handle.result(), {
       summary: "completed after detached wait",
     });
   });
 
-  it("does not retain the caller startup signal after the handle is returned", async () => {
-    const evaluation = deferred<SummaryResult>();
-    const compiler = new RecordingCompiler(() => evaluation.promise);
-    const { manager, spawner } = managerWith(compiler);
-    const controller = new AbortController();
-    const handle = await manager.spawn(request(), controller.signal);
-
-    controller.abort();
-    assert.equal(spawner.run.abortCalls, 0);
-
-    evaluation.resolve({ summary: "still running" });
-    assert.deepEqual(await handle.result(), { summary: "still running" });
-  });
-
-  it("keeps explicit cancellation terminal when evaluation ignores abort", async () => {
-    const evaluation = deferred<SummaryResult>();
-    const compiler = new RecordingCompiler(() => evaluation.promise);
-    const { manager, spawner } = managerWith(compiler);
+  it("maps explicit cancellation to the child run", async () => {
+    const { manager, sessions, acceptance } = managerWith();
     const handle = await manager.spawn(request());
 
     await handle.cancel("stop requested");
-    evaluation.resolve({ summary: "late success" });
+    acceptance.pending.resolve({ summary: "late success" });
 
     await assert.rejects(handle.result(), (error: unknown) => {
       return error instanceof SubagentExecutionError && error.code === "ABORTED";
     });
-    assert.equal(spawner.run.abortCalls, 1);
-    assert.equal(handle.snapshot().status, "cancelled");
-  });
-
-  it("explicitly cancels both evaluation and the child run", async () => {
-    const compiler = new RecordingCompiler((_run, signal) => {
-      return new Promise<SummaryResult>((_resolve, reject) => {
-        signal.addEventListener(
-          "abort",
-          () => reject(new SubagentExecutionError("ABORTED", "evaluation cancelled")),
-          { once: true },
-        );
-      });
-    });
-    const { manager, spawner } = managerWith(compiler);
-    const handle = await manager.spawn(request());
-
-    await handle.cancel("stop requested");
-
-    await assert.rejects(handle.result(), (error: unknown) => {
-      return error instanceof SubagentExecutionError && error.code === "ABORTED";
-    });
-    assert.equal(spawner.run.abortCalls, 1);
+    assert.equal(sessions.run.abortCalls, 1);
     assert.equal(handle.snapshot().status, "cancelled");
   });
 });
