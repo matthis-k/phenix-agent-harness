@@ -11,7 +11,7 @@ delegation depth, role authority, output schemas, model routing, verification,
 critics, and repair limits are owned by the TypeScript runtime.
 
 Use only the delegation transitions projected into the current system prompt.
-Call `phenix_delegate` with the exact transition ID and workflow revision shown
+Call `phenix_create_subagent` with the exact transition ID and workflow revision shown
 there. Do not invent roles or transitions.
 
 Each accepted child must finish through `phenix_complete`.

@@ -54,7 +54,7 @@
 
           export HYPA_PI_MODE="''${HYPA_PI_MODE:-replace}"
 
-          # Point phenix_delegate at this wrapper so child pi processes inherit
+          # Point phenix_create_subagent at this wrapper so child pi processes inherit
           # the same extension set and environment. Always replace inherited
           # values because stale repo-local result symlinks can otherwise poison
           # nested subagent spawns with ENOTDIR.

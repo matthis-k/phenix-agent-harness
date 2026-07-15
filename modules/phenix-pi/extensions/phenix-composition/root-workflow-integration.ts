@@ -201,8 +201,9 @@ export default async function rootWorkflowIntegration(pi: ExtensionAPI): Promise
     let workflowGuidance = "## Phenix Workflow Orchestration\n\n";
     workflowGuidance += `You are running with a Phenix model set (${runtime.modelSet}). `;
     workflowGuidance +=
-      "The deterministic Phenix workflow owns role selection, output schemas, and models. ";
-    workflowGuidance += "Only delegate through the transitions projected below.\n\n";
+      "The deterministic Phenix workflow owns role selection, output schemas, models, tools, and delegation depth. ";
+    workflowGuidance +=
+      "Use the workflow API: call phenix_workflow for fresh authority, then phenix_create_subagent with one returned transition.\n\n";
     workflowGuidance += workflowProjection
       ? formatWorkflowProjection(workflowProjection)
       : "Workflow state not yet initialized. Start by classifying the task.\n";

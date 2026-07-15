@@ -17,47 +17,22 @@
  * the Node process.
  */
 
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { Model } from "@earendil-works/pi-ai/compat";
 import type {
   AgentSession,
   AgentSessionEvent,
   AgentSessionEventListener,
+  ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { Model } from "@earendil-works/pi-ai/compat";
-
 import {
   createAgentSession,
   DefaultResourceLoader,
+  type ModelRegistry,
   SessionManager,
   SettingsManager,
-  ModelRegistry,
 } from "@earendil-works/pi-coding-agent";
-
-import type {
-  ChildCycleOutcome,
-  ChildRun,
-  ChildRunId,
-  ChildSessionBackend,
-  ChildSessionEvent,
-  ChildSessionNode,
-  ChildSessionSpec,
-  PiSessionReference,
-  PiRuntimeServices,
-  SerializedError,
-} from "./child-session-types.ts";
-import {
-  ChildRuntimeError,
-  serializeError,
-} from "./child-session-types.ts";
-import {
-  normalizePiEvent,
-  isFailureEvent,
-} from "./session-event-normalizer.ts";
-import {
-  BudgetGuard,
-  budgetViolationToError,
-} from "./budget-guard.ts";
-import { createCompletionTool } from "./completion-tool.ts";
+import { BudgetGuard, budgetViolationToError } from "./budget-guard.ts";
 import { buildChildSystemPrompt } from "./child-session-prompt.ts";
 import {
   buildChildResourceLoaderOptions,
@@ -66,12 +41,23 @@ import {
   resolveChildExtensionFactories,
   resolveChildSkillPaths,
 } from "./child-session-resources.ts";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type {
+  ChildCycleOutcome,
+  ChildRun,
+  ChildRunId,
+  ChildSessionBackend,
+  ChildSessionEvent,
+  ChildSessionNode,
+  ChildSessionSpec,
+  PiRuntimeServices,
+  PiSessionReference,
+  SerializedError,
+} from "./child-session-types.ts";
+import { ChildRuntimeError, serializeError } from "./child-session-types.ts";
+import { createCompletionTool } from "./completion-tool.ts";
+import { isFailureEvent, normalizePiEvent } from "./session-event-normalizer.ts";
 
-function abortErrorFromSignal(
-  signal: AbortSignal,
-  fallbackMessage: string,
-): ChildRuntimeError {
+function abortErrorFromSignal(signal: AbortSignal, fallbackMessage: string): ChildRuntimeError {
   const reason = signal.reason;
   if (reason instanceof ChildRuntimeError) return reason;
 
@@ -97,17 +83,12 @@ export interface PiSessionLike {
   readonly sessionFile?: string;
   readonly isStreaming: boolean;
 
-  prompt(
-    text: string,
-    options?: PromptOptions,
-  ): Promise<void>;
+  prompt(text: string, options?: PromptOptions): Promise<void>;
 
   followUp(text: string): Promise<void>;
   steer(text: string): Promise<void>;
 
-  subscribe(
-    listener: (event: AgentSessionEvent) => void,
-  ): () => void;
+  subscribe(listener: (event: AgentSessionEvent) => void): () => void;
 
   abort(): Promise<void>;
   dispose(): void;
@@ -133,9 +114,7 @@ export interface PreparedPiSessionSpec {
 // ── Pi session factory ──────────────────────────────────────────────────────
 
 export interface PiSessionFactory {
-  create(
-    spec: PreparedPiSessionSpec,
-  ): Promise<PiSessionLike>;
+  create(spec: PreparedPiSessionSpec): Promise<PiSessionLike>;
 }
 
 // ── Production session factory ──────────────────────────────────────────────
@@ -144,9 +123,7 @@ export interface PiSessionFactory {
  * Production factory that wraps createAgentSession().
  */
 export class ProductionPiSessionFactory implements PiSessionFactory {
-  async create(
-    spec: PreparedPiSessionSpec,
-  ): Promise<PiSessionLike> {
+  async create(spec: PreparedPiSessionSpec): Promise<PiSessionLike> {
     const { session } = await createAgentSession({
       cwd: spec.cwd,
       model: spec.model,
@@ -190,10 +167,7 @@ class AgentSessionAdapter implements PiSessionLike {
     return this.session.isStreaming;
   }
 
-  async prompt(
-    text: string,
-    options?: PromptOptions,
-  ): Promise<void> {
+  async prompt(text: string, options?: PromptOptions): Promise<void> {
     await this.session.prompt(text, options as any);
   }
 
@@ -205,9 +179,7 @@ class AgentSessionAdapter implements PiSessionLike {
     await this.session.steer(text);
   }
 
-  subscribe(
-    listener: (event: AgentSessionEvent) => void,
-  ): () => void {
+  subscribe(listener: (event: AgentSessionEvent) => void): () => void {
     return this.session.subscribe(listener as AgentSessionEventListener);
   }
 
@@ -229,9 +201,7 @@ class SdkChildRun implements ChildRun {
 
   private readonly session: PiSessionLike;
   private readonly spec: ChildSessionSpec;
-  private readonly listeners = new Set<
-    (event: ChildSessionEvent) => void
-  >();
+  private readonly listeners = new Set<(event: ChildSessionEvent) => void>();
   private readonly budgetGuard: BudgetGuard;
   private readonly startTime = new Date().toISOString();
 
@@ -254,11 +224,7 @@ class SdkChildRun implements ChildRun {
   private readonly boundSignals = new WeakSet<AbortSignal>();
   private lastAssistantText: string | undefined;
 
-  constructor(
-    session: PiSessionLike,
-    spec: ChildSessionSpec,
-    budgetGuard: BudgetGuard,
-  ) {
+  constructor(session: PiSessionLike, spec: ChildSessionSpec, budgetGuard: BudgetGuard) {
     this.session = session;
     this.spec = spec;
     this.id = spec.id;
@@ -274,10 +240,7 @@ class SdkChildRun implements ChildRun {
   private handlePiEvent = (raw: AgentSessionEvent): void => {
     if (this.disposed) return;
 
-    const normalized = normalizePiEvent(
-      this.id,
-      raw as unknown as { type: string },
-    );
+    const normalized = normalizePiEvent(this.id, raw as unknown as { type: string });
 
     for (const event of normalized) {
       const { violation, softWarning } = this.budgetGuard.observe(event);
@@ -349,9 +312,7 @@ class SdkChildRun implements ChildRun {
     const outcome: ChildCycleOutcome = {
       cycle: cycle.number,
       status: cycle.error ? "failed" : "settled",
-      ...(this.lastAssistantText
-        ? { lastAssistantText: this.lastAssistantText }
-        : {}),
+      ...(this.lastAssistantText ? { lastAssistantText: this.lastAssistantText } : {}),
       ...(cycle.error ? { error: cycle.error } : {}),
     };
 
@@ -401,10 +362,7 @@ class SdkChildRun implements ChildRun {
     this.boundSignals.add(signal);
 
     const abortFromSignal = (): void => {
-      const error = abortErrorFromSignal(
-        signal,
-        "Cancelled by parent.",
-      );
+      const error = abortErrorFromSignal(signal, "Cancelled by parent.");
 
       // Preserve typed runtime failures such as TIMEOUT. Ordinary parent
       // cancellation remains a cancelled outcome rather than a failed one.
@@ -443,10 +401,7 @@ class SdkChildRun implements ChildRun {
           accept();
         } else {
           reject(
-            new ChildRuntimeError(
-              "PROMPT_REJECTED",
-              "Prompt was rejected by the Pi session.",
-            ),
+            new ChildRuntimeError("PROMPT_REJECTED", "Prompt was rejected by the Pi session."),
           );
         }
       },
@@ -496,9 +451,7 @@ class SdkChildRun implements ChildRun {
       model: this.spec.model,
       thinkingLevel: this.spec.thinkingLevel,
       contractId: this.spec.contract.id,
-      ...(this.spec.workflowBinding
-        ? { workflowBinding: this.spec.workflowBinding }
-        : {}),
+      ...(this.spec.workflowBinding ? { workflowBinding: this.spec.workflowBinding } : {}),
       backend: "sdk",
       pi: this.pi,
       status: this.status,
@@ -506,34 +459,19 @@ class SdkChildRun implements ChildRun {
     };
   }
 
-  subscribe(
-    listener: (event: ChildSessionEvent) => void,
-  ): () => void {
+  subscribe(listener: (event: ChildSessionEvent) => void): () => void {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
     };
   }
 
-  async continue(
-    message: string,
-    signal?: AbortSignal,
-  ): Promise<ChildCycleOutcome> {
-    if (
-      this.disposed ||
-      this.status === "failed" ||
-      this.status === "cancelled"
-    ) {
-      throw new ChildRuntimeError(
-        "ABORTED",
-        `Child session is ${this.status}.`,
-      );
+  async continue(message: string, signal?: AbortSignal): Promise<ChildCycleOutcome> {
+    if (this.disposed || this.status === "failed" || this.status === "cancelled") {
+      throw new ChildRuntimeError("ABORTED", `Child session is ${this.status}.`);
     }
     if (signal?.aborted) {
-      const error = abortErrorFromSignal(
-        signal,
-        "Cancelled by parent.",
-      );
+      const error = abortErrorFromSignal(signal, "Cancelled by parent.");
       if (error.code === "ABORTED") {
         await this.abort(error.message);
       } else {
@@ -566,16 +504,12 @@ class SdkChildRun implements ChildRun {
     const outcome = await cycle.promise;
     this.pi = {
       sessionId: this.session.sessionId,
-      ...(this.session.sessionFile
-        ? { sessionFile: this.session.sessionFile }
-        : {}),
+      ...(this.session.sessionFile ? { sessionFile: this.session.sessionFile } : {}),
     };
     return outcome;
   }
 
-  async waitForCurrentCycle(
-    signal?: AbortSignal,
-  ): Promise<ChildCycleOutcome> {
+  async waitForCurrentCycle(signal?: AbortSignal): Promise<ChildCycleOutcome> {
     this.bindSignal(signal);
     return this.currentCycle?.promise ?? this.lastCycleOutcome;
   }
@@ -638,10 +572,7 @@ class SdkChildRun implements ChildRun {
    */
   async startInitialPrompt(signal: AbortSignal): Promise<void> {
     if (signal.aborted) {
-      throw abortErrorFromSignal(
-        signal,
-        "Cancelled by parent.",
-      );
+      throw abortErrorFromSignal(signal, "Cancelled by parent.");
     }
 
     this.unsub = this.session.subscribe(this.handlePiEvent);
@@ -687,34 +618,22 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
     | ((spec: ChildSessionSpec) => readonly ToolDefinition[])
     | undefined;
   private readonly buildResourceLoaderFn:
-    | ((
-      spec: ChildSessionSpec,
-      systemPrompt: string,
-    ) => DefaultResourceLoader)
+    | ((spec: ChildSessionSpec, systemPrompt: string) => DefaultResourceLoader)
     | undefined;
-  private readonly buildSystemPromptFn:
-    | ((spec: ChildSessionSpec) => string)
-    | undefined;
+  private readonly buildSystemPromptFn: ((spec: ChildSessionSpec) => string) | undefined;
 
   constructor(options: SdkChildSessionBackendOptions) {
     this.services = options.services;
-    this.sessionFactory =
-      options.sessionFactory ?? new ProductionPiSessionFactory();
+    this.sessionFactory = options.sessionFactory ?? new ProductionPiSessionFactory();
     this.buildCustomToolsFn = options.buildCustomTools;
     this.buildResourceLoaderFn = options.buildResourceLoader;
     this.buildSystemPromptFn = options.buildSystemPrompt;
   }
 
-  async start(
-    spec: ChildSessionSpec,
-    signal: AbortSignal,
-  ): Promise<ChildRun> {
+  async start(spec: ChildSessionSpec, signal: AbortSignal): Promise<ChildRun> {
     // 1. Resolve the concrete model from the shared registry.
     const modelRegistry = this.services.modelRegistry as ModelRegistry;
-    const model = modelRegistry.find(
-      spec.model.provider,
-      spec.model.id,
-    );
+    const model = modelRegistry.find(spec.model.provider, spec.model.id);
 
     if (!model) {
       throw new ChildRuntimeError(
@@ -738,14 +657,10 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
       : await this.buildDefaultResourceLoader(spec, systemPrompt);
 
     // 4. Every SDK child gets its own closure-bound completion tool.
-    // Delegation tools, when legal, are supplied by the composition root.
+    // Contract-derived workflow API tools are supplied by the composition root.
     const customTools: readonly ToolDefinition[] = [
-      createCompletionTool(
-        spec.contractChannel,
-      ) as unknown as ToolDefinition,
-      ...(this.buildCustomToolsFn
-        ? this.buildCustomToolsFn(spec)
-        : []),
+      createCompletionTool(spec.contractChannel) as unknown as ToolDefinition,
+      ...(this.buildCustomToolsFn ? this.buildCustomToolsFn(spec) : []),
     ];
 
     // 5. Build the tool allowlist.
@@ -758,10 +673,7 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
         : SessionManager.create(spec.cwd);
 
     // 7. Build settings manager.
-    const settingsManager = SettingsManager.create(
-      spec.cwd,
-      this.services.agentDir,
-    );
+    const settingsManager = SettingsManager.create(spec.cwd, this.services.agentDir);
 
     // 8. Create the session.
     const preparedSpec: PreparedPiSessionSpec = {
@@ -808,17 +720,9 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
     spec: ChildSessionSpec,
     systemPrompt: string,
   ): Promise<DefaultResourceLoader> {
-    const integrationRefs = inferChildIntegrationRefs(
-      spec.effectiveTools,
-      spec.extensionRefs,
-    );
-    const extensionFactories = await resolveChildExtensionFactories(
-      integrationRefs,
-    );
-    const skillPaths = resolveChildSkillPaths(
-      spec.skillRefs,
-      this.services.agentDir,
-    );
+    const integrationRefs = inferChildIntegrationRefs(spec.effectiveTools, spec.extensionRefs);
+    const extensionFactories = await resolveChildExtensionFactories(integrationRefs);
+    const skillPaths = resolveChildSkillPaths(spec.skillRefs, this.services.agentDir);
 
     const loader = new DefaultResourceLoader(
       buildChildResourceLoaderOptions({
@@ -839,26 +743,27 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
 /**
  * Build the deterministic tool allowlist.
  *
- * Includes effective tools plus required runtime tools (phenix_complete,
- * phenix_delegate when delegation is legal). Deduplicates and sorts.
+ * Includes effective tools plus required runtime tools. `phenix_workflow` is
+ * always installed; `phenix_create_subagent` is installed only when the loaded
+ * contract retains delegation depth and at least one available role.
  */
-export function buildEffectiveToolNames(
-  spec: ChildSessionSpec,
-): readonly string[] {
-  const canDelegate =
+export function buildEffectiveToolNames(spec: ChildSessionSpec): readonly string[] {
+  const canCreateSubagent =
     spec.contract.runtime.delegation.remainingDepth > 0 &&
-    spec.contract.runtime.delegation.availableRoles.length > 0 &&
-    spec.workflowProjection.options.length > 0;
+    spec.contract.runtime.delegation.availableRoles.length > 0;
 
-  const baseTools = spec.effectiveTools.filter(
-    (tool) =>
-      tool !== "phenix_complete" &&
-      (tool !== "phenix_delegate" || canDelegate),
-  );
+  const runtimeTools = new Set([
+    "phenix_complete",
+    "phenix_workflow",
+    "phenix_create_subagent",
+    "phenix_delegate",
+  ]);
+  const baseTools = spec.effectiveTools.filter((tool) => !runtimeTools.has(tool));
   const toolNames = [
     ...baseTools,
     "phenix_complete",
-    ...(canDelegate ? ["phenix_delegate"] : []),
+    "phenix_workflow",
+    ...(canCreateSubagent ? ["phenix_create_subagent"] : []),
   ];
 
   // Deduplicate and sort for deterministic ordering.

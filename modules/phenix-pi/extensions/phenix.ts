@@ -36,8 +36,11 @@ import {
   createChildSessionBackend,
   createSubagentSessionRuntime,
 } from "./phenix-runtime/child-session-backend.ts";
-import { createDelegationTool } from "./phenix-runtime/delegation-tool.ts";
 import { createSessionSubagentManagerFactory } from "./phenix-runtime/subagent-manager-factory.ts";
+import {
+  createWorkflowApiTools,
+  type WorkflowApiPort,
+} from "./phenix-runtime/workflow-api-tools.ts";
 import {
   bootstrapPhenixSubagentsSkillPrompt,
   shouldBootstrapPhenixSubagentsSkill,
@@ -50,6 +53,7 @@ import {
   type ManagedDelegationRuntime,
 } from "./phenix-subagents/managed-delegation-runtime.ts";
 import { createWorkflowAcceptanceEngine } from "./phenix-subagents/workflow-acceptance-engine.ts";
+import { createWorkflowApi } from "./phenix-subagents/workflow-api.ts";
 import { WorkflowDelegator } from "./phenix-subagents/workflow-delegator.ts";
 
 const defaultPhenixConfiguration = definePhenixConfiguration({
@@ -176,7 +180,7 @@ function registerPhenixCodingSubstratePrompt(pi: ExtensionAPI): void {
       "Use the `mcp` proxy to discover MCP capabilities on demand instead of assuming every MCP tool is directly registered.",
       "Use `web_search` for external discovery and `web_fetch` for specific pages; use `gh` through the shell for GitHub-native operations.",
       "Use `context_info` and compact only at coherent boundaries during genuinely long tasks.",
-      "Use `phenix_delegate` for real isolated subagents. Raw `subagent` calls are runtime-blocked so model selection, thinking, permissions, persistence, contracts, and verification cannot be bypassed.",
+      "Use the Phenix workflow API for every subagent decision: call `phenix_workflow` to inspect current authority, then `phenix_create_subagent` with one returned transition. Raw `subagent` and legacy `phenix_delegate` calls are runtime-blocked.",
       "Every delegated handoff must use a strict output schema. Invalid structured output is returned to the child with exact validation failures so it can repair the handoff.",
       "Runtime verification and critic gates are authoritative. Do not treat a model's claim that tests passed as verification evidence.",
       "The shell is intentionally permissive, but avoid destructive or unrelated operations unless the task requires them.",
@@ -288,6 +292,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
   };
 
   let delegator!: WorkflowDelegator;
+  let workflowApi!: WorkflowApiPort;
   const backend = createChildSessionBackend({
     services: {
       get modelRegistry() {
@@ -302,12 +307,13 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
         spec.workflowProjection.options.length > 0;
       if (!canDelegate) return [];
 
-      const delegationTool = createDelegationTool({
-        delegator,
+      return createWorkflowApiTools({
+        workflow: workflowApi,
         parent: spec.parentContext,
-        decisionContext: spec.workflowProjection,
-      });
-      return [delegationTool as unknown as ToolDefinition];
+        allowCreate:
+          spec.contract.runtime.delegation.remainingDepth > 0 &&
+          spec.contract.runtime.delegation.availableRoles.length > 0,
+      }) as readonly ToolDefinition[];
     },
   });
 
@@ -334,9 +340,13 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
     activeModelSet: linkResult.graph.activeModelSet.id,
     maximumDelegationDepth: defaultPhenixConfiguration.runtime.maximumDelegationDepth,
   });
+  workflowApi = createWorkflowApi({
+    delegator,
+    maximumDelegationDepth: defaultPhenixConfiguration.runtime.maximumDelegationDepth,
+  });
 
   await loadIntegration("phenix-subagents", pi, async (api) => {
-    await phenixSubagents(api, { delegator });
+    await phenixSubagents(api, { delegator, workflow: workflowApi });
   });
   registerTuiProjection(pi, delegationRuntime);
   registerShutdown(pi, delegationRuntime);

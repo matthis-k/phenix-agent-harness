@@ -222,21 +222,6 @@ if text.count(old) != 1:
     raise RuntimeError("workflow projection protocol changed")
 path.write_text(text.replace(old, new))
 
-path = root / "extensions/phenix-composition/root-workflow-integration.ts"
-text = path.read_text()
-old = '''    workflowGuidance +=
-      "The deterministic Phenix workflow owns role selection, output schemas, and models. ";
-    workflowGuidance += "Only delegate through the transitions projected below.\n\n";
-'''
-new = '''    workflowGuidance +=
-      "The deterministic Phenix workflow owns role selection, output schemas, models, tools, and delegation depth. ";
-    workflowGuidance +=
-      "Use the workflow API: call phenix_workflow for fresh authority, then phenix_create_subagent with one returned transition.\n\n";
-'''
-if text.count(old) != 1:
-    raise RuntimeError("root workflow guidance changed")
-path.write_text(text.replace(old, new))
-
 for path in (root / "agents").glob("*.md"):
     text = path.read_text().replace("phenix_delegate", "phenix_workflow, phenix_create_subagent")
     text = text.replace(

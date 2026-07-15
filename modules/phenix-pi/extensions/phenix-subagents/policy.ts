@@ -1,9 +1,8 @@
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
-import { mergeObjects, readJson } from "../phenix-shared.ts";
 import { deriveTaskProfileFromText } from "../phenix-kernel/task.ts";
+import { mergeObjects, readJson } from "../phenix-shared.ts";
 import {
   AGENT_KINDS,
   type AgentKind,
@@ -12,13 +11,11 @@ import {
   type ProfileHint,
   type TaskProfile,
   type ThinkingLevel,
-  type TurnBudget,
   type ToolBudget,
+  type TurnBudget,
   type VerificationCommand,
 } from "./agent-types.ts";
-import {
-  rolePreset,
-} from "./role-presets.ts";
+import { rolePreset } from "./role-presets.ts";
 
 export type {
   AgentKind,
@@ -27,8 +24,8 @@ export type {
   ProfileHint,
   TaskProfile,
   ThinkingLevel,
-  TurnBudget,
   ToolBudget,
+  TurnBudget,
   VerificationCommand,
 };
 
@@ -49,9 +46,7 @@ export interface RuntimePolicyConfig {
 
 export interface ResolvedExecutionPolicy {
   readonly role: AgentRole;
-  readonly agent:
-    | `phenix.${AgentKind}`
-    | "phenix.base";
+  readonly agent: `phenix.${AgentKind}` | "phenix.base";
 
   readonly profile: TaskProfile;
   readonly tier: ModelTier;
@@ -63,13 +58,11 @@ export interface ResolvedExecutionPolicy {
   readonly turnBudget: TurnBudget;
   readonly toolBudget: ToolBudget;
 
-  readonly verificationCommands:
-    readonly VerificationCommand[];
+  readonly verificationCommands: readonly VerificationCommand[];
 
   readonly criticRequired: boolean;
   readonly maxRepairAttempts: number;
-  readonly allowedChildren:
-    readonly AgentKind[];
+  readonly allowedChildren: readonly AgentKind[];
 
   // Routing fields (added by phenix-routing integration).
   readonly modelSet?: string;
@@ -93,20 +86,11 @@ const DEFAULT_CONFIG: RuntimePolicyConfig = {
 // ── Config loading ──────────────────────────────────────────────────────────
 
 export function loadPolicyConfig(): RuntimePolicyConfig {
-  const bundledPath = fileURLToPath(
-    new URL("../../config/subagents.json", import.meta.url),
-  );
-  const agentDir =
-    process.env.PI_CODING_AGENT_DIR ?? path.join(os.homedir(), ".pi", "agent");
+  const bundledPath = fileURLToPath(new URL("../../config/subagents.json", import.meta.url));
+  const agentDir = process.env.PI_CODING_AGENT_DIR ?? path.join(os.homedir(), ".pi", "agent");
   const userPath = path.join(agentDir, "phenix-subagents.json");
-  const bundled = mergeObjects(
-    DEFAULT_CONFIG as Record<string, unknown>,
-    readJson(bundledPath),
-  );
-  return mergeObjects(
-    bundled,
-    readJson(userPath),
-  ) as RuntimePolicyConfig;
+  const bundled = mergeObjects(DEFAULT_CONFIG as Record<string, unknown>, readJson(bundledPath));
+  return mergeObjects(bundled, readJson(userPath)) as RuntimePolicyConfig;
 }
 
 // ── Profile derivation ──────────────────────────────────────────────────────
@@ -118,12 +102,7 @@ export function deriveTaskProfile(
   hint: ProfileHint = {},
 ): TaskProfile {
   const preset = rolePreset(role);
-  return deriveTaskProfileFromText(
-    task,
-    requirements,
-    hint,
-    preset.profileMinimums,
-  );
+  return deriveTaskProfileFromText(task, requirements, hint, preset.profileMinimums);
 }
 
 // ── Tier calculation ────────────────────────────────────────────────────────
@@ -201,12 +180,7 @@ export function resolveExecutionPolicy(input: {
   const preset = rolePreset(input.role);
 
   // 1. Derive task profile using preset minimums.
-  const profile = deriveTaskProfile(
-    input.role,
-    input.task,
-    input.requirements,
-    input.profileHint,
-  );
+  const profile = deriveTaskProfile(input.role, input.task, input.requirements, input.profileHint);
 
   // 2. Derive tier.
   const tier = tierForProfile(profile);
@@ -221,10 +195,7 @@ export function resolveExecutionPolicy(input: {
   const commands = verificationCommands(input.role, input.cwd, config);
 
   // 6. Max repair attempts.
-  const maxRepairAttempts = Math.max(
-    0,
-    Math.min(3, config.verification?.maxRepairAttempts ?? 1),
-  );
+  const maxRepairAttempts = Math.max(0, Math.min(3, config.verification?.maxRepairAttempts ?? 1));
 
   return {
     role: input.role,
@@ -250,7 +221,8 @@ export function resolveExecutionPolicy(input: {
         "mcp",
         "web_search",
         "web_fetch",
-        "phenix_delegate",
+        "phenix_workflow",
+        "phenix_create_subagent",
       ],
     },
     verificationCommands: commands,

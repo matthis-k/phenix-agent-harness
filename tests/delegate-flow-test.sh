@@ -25,10 +25,10 @@ echo ""
 echo "--- Step 1: Planner ---"
 echo "Asking planner to design the Deeply Silly Greeting Protocol..."
 
-# The actual delegate calls happen via phenix_delegate tool
+# The actual delegate calls happen via phenix_create_subagent tool
 # This script is a demonstration — run it inside pi with delegates available
 echo ""
-echo "This test must be run INSIDE a pi session with phenix_delegate"
+echo "This test must be run INSIDE a pi session with phenix_create_subagent"
 echo "available and PI_SUBAGENT_PI_BINARY set."
 echo ""
 echo "To run:"
