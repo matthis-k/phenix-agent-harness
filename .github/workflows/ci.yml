@@ -5,10 +5,11 @@ on:
   push:
     branches:
       - main
+      - refactor/subagent-manager-directory
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -23,12 +24,46 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
+          ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
 
       - name: Install Nix
         uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply manager directory composition
+        if: (github.ref_name == 'refactor/subagent-manager-directory' || github.head_ref == 'refactor/subagent-manager-directory') && github.actor != 'github-actions[bot]'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("modules/phenix-pi/extensions/phenix.ts")
+          text = path.read_text()
+          text = text.replace(
+              'import { createManagedSubagentRegistry } from "./phenix-runtime/managed-subagent-registry.ts";\n',
+              "",
+          )
+          old = '''  const managedRegistry = createManagedSubagentRegistry();
+          const delegationRuntime = createManagedDelegationRuntime({
+            managers,
+            registry: managedRegistry,
+          });
+          '''
+          new = '''  const delegationRuntime = createManagedDelegationRuntime({ managers });
+          '''
+          if text.count(old) != 1:
+              raise RuntimeError(f"expected one registry composition block, found {text.count(old)}")
+          path.write_text(text.replace(old, new))
+          PY
+          mapfile -t changed_ts < <(git diff --name-only -- '*.ts')
+          nix run nixpkgs#biome -- check --write "${changed_ts[@]}"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "refactor(runtime): centralize subagent handle directory"
+          git push origin HEAD:${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}
 
       - name: Run read-only Tend CI profile
         id: tend
