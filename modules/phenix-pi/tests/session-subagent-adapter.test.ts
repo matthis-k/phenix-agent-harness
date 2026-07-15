@@ -3,23 +3,23 @@ import { describe, it } from "node:test";
 
 import { agentClientRef } from "../extensions/phenix-kernel/refs.ts";
 import {
+  type ChildCycleOutcome,
+  type ChildRun,
+  type ChildSessionEvent,
+  type ChildSessionNode,
+  childRunId,
+} from "../extensions/phenix-runtime/child-session-types.ts";
+import {
+  type CompiledSubagentExecution,
   createSessionSubagentExecutionAdapter,
   createSubagentManager,
   returns,
   routing,
-  type CompiledSubagentExecution,
   type SubagentExecutionCompiler,
   SubagentExecutionError,
   type SubagentRequest,
   type SubagentSessionSpawner,
 } from "../extensions/phenix-runtime/index.ts";
-import {
-  childRunId,
-  type ChildCycleOutcome,
-  type ChildRun,
-  type ChildSessionEvent,
-  type ChildSessionNode,
-} from "../extensions/phenix-runtime/child-session-types.ts";
 import type { SubagentSessionRequest } from "../extensions/phenix-runtime/subagent-session-runtime.ts";
 
 interface SummaryResult {

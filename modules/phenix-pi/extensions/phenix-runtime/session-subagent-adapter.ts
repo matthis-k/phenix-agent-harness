@@ -7,13 +7,13 @@
  * it through the stable SubagentHandle API.
  */
 
-import type { SubagentRequest } from "./subagent-api.ts";
 import {
-  ChildRuntimeError,
   type ChildRun,
+  ChildRuntimeError,
   type ChildSessionEvent,
   type ChildSessionNode,
 } from "./child-session-types.ts";
+import type { SubagentRequest } from "./subagent-api.ts";
 import {
   type SubagentEvent,
   type SubagentExecutionAdapter,
