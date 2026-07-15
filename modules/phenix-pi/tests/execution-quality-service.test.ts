@@ -17,6 +17,30 @@ import {
 } from "../extensions/phenix-subagents/execution-quality-service.ts";
 import type { HandleRecord } from "../extensions/phenix-subagents/handle-types.ts";
 
+const CRITIC_TOOLS = [
+  "read",
+  "grep",
+  "search",
+  "find",
+  "ls",
+  "tree",
+  "bash",
+  "lsp",
+  "lsp_*",
+  "ast_grep",
+  "ast_*",
+  "mcp",
+  "mcp_*",
+  "web_search",
+  "web_fetch",
+  "fetch_content",
+  "get_search_content",
+  "context_info",
+  "context_*",
+  "contact_supervisor",
+  "phenix_delegate",
+] as const;
+
 function temporaryDirectory(prefix: string): string {
   const directory = path.join(os.tmpdir(), `${prefix}-${randomUUID().slice(0, 8)}`);
   fs.mkdirSync(directory, { recursive: true });
@@ -38,7 +62,7 @@ function criticSpec(cwd: string): ResolvedChildSpec {
         inherited: false,
         patch: { additional: [], removed: [] },
       },
-      effective: [],
+      effective: CRITIC_TOOLS,
     },
     skills: [],
     extensions: [],
@@ -50,9 +74,9 @@ function criticSpec(cwd: string): ResolvedChildSpec {
           inherited: false,
           patch: { additional: [], removed: [] },
         },
-        effective: [],
+        effective: ["scout", "tester"],
       },
-      availableRoles: [],
+      availableRoles: ["scout", "tester"],
       remainingDepth: 0,
     },
     workflow: {
