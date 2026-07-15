@@ -1,4 +1,4 @@
-/** Public Phenix subagent API. */
+/** Public Phenix subagent API and canonical execution-plan vocabulary. */
 
 export type {
   AcceptanceEngine,
