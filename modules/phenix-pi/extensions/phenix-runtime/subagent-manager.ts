@@ -19,23 +19,61 @@ export type SubagentStatus =
   | "cancelled"
   | "orphaned";
 
+export interface SubagentError {
+  readonly code: string;
+  readonly message: string;
+}
+
 export interface SubagentSnapshot {
   readonly id: string;
   readonly status: SubagentStatus;
   readonly parentId?: string;
   readonly model?: ConcreteModelRef;
   readonly thinking?: ThinkingLevel;
-  readonly error?: {
-    readonly code: string;
-    readonly message: string;
-  };
+  readonly error?: SubagentError;
 }
 
-export interface SubagentEvent {
-  readonly type: string;
-  readonly snapshot: SubagentSnapshot;
-  readonly data?: unknown;
-}
+/** Stable public lifecycle protocol independent from backend event payloads. */
+export type SubagentEvent =
+  | {
+      readonly type: "session.started";
+      readonly snapshot: SubagentSnapshot;
+    }
+  | {
+      readonly type: "agent.event";
+      readonly snapshot: SubagentSnapshot;
+      readonly event: unknown;
+    }
+  | {
+      readonly type: "tool.started";
+      readonly snapshot: SubagentSnapshot;
+      readonly toolName: string;
+    }
+  | {
+      readonly type: "tool.completed";
+      readonly snapshot: SubagentSnapshot;
+      readonly toolName: string;
+      readonly isError: boolean;
+    }
+  | {
+      readonly type: "cycle.settled";
+      readonly snapshot: SubagentSnapshot;
+      readonly cycle: number;
+    }
+  | {
+      readonly type: "session.failed";
+      readonly snapshot: SubagentSnapshot;
+      readonly error: SubagentError;
+    }
+  | {
+      readonly type: "session.cancelled";
+      readonly snapshot: SubagentSnapshot;
+      readonly reason: string;
+    }
+  | {
+      readonly type: "session.disposed";
+      readonly snapshot: SubagentSnapshot;
+    };
 
 /**
  * Persistent asynchronous control surface for one subagent.
