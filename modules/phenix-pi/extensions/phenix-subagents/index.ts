@@ -12,10 +12,10 @@
 
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AgentExecutionCoordinator } from "./coordinator.ts";
 import { AgentParams, DelegateParams } from "./delegate-schema.ts";
 import { effectiveSessionId, listRecords, readRecord } from "./handle-store.ts";
 import { type HandleRecord, TERMINAL_STATES } from "./handle-types.ts";
+import type { WorkflowDelegator } from "./workflow-delegator.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -86,7 +86,7 @@ function treePayload(records: HandleRecord[]): Record<string, unknown> {
 // ── Extension entry point ───────────────────────────────────────────────────
 
 export interface PhenixSubagentsOptions {
-  readonly coordinator: AgentExecutionCoordinator;
+  readonly delegator: WorkflowDelegator;
 }
 
 export default async function phenixSubagents(
@@ -94,7 +94,7 @@ export default async function phenixSubagents(
   options: PhenixSubagentsOptions,
 ): Promise<void> {
   const events = pi.events as unknown as PiEvents;
-  const coordinator = options.coordinator;
+  const delegator = options.delegator;
 
   // ── Runtime tool guard ────────────────────────────────────────────────
 
@@ -142,8 +142,8 @@ export default async function phenixSubagents(
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<Record<string, unknown>>> {
       try {
-        const result = await coordinator.delegate({
-          params: rawParams as unknown as Parameters<typeof coordinator.delegate>[0]["params"],
+        const result = await delegator.delegate({
+          params: rawParams as unknown as Parameters<typeof delegator.delegate>[0]["params"],
           ctx,
           signal: signal ?? new AbortController().signal,
         });
@@ -206,18 +206,18 @@ export default async function phenixSubagents(
       if (params.action === "inspect") return toolResult(record);
 
       if (params.action === "cancel") {
-        const cancelled = await coordinator.cancelHandle(ctx, params.id, "cancelled by parent");
+        const cancelled = await delegator.cancelHandle(ctx, params.id, "cancelled by parent");
         return toolResult(cancelled ?? record);
       }
 
       if (params.action === "poll") {
-        const polled = await coordinator.poll(ctx, params.id);
+        const polled = await delegator.poll(ctx, params.id);
         return toolResult(polled ?? record);
       }
 
       // await
       if (!TERMINAL_STATES.has(record.status)) {
-        const resolved = await coordinator.awaitHandle(
+        const resolved = await delegator.awaitHandle(
           ctx,
           params.id,
           signal ?? new AbortController().signal,

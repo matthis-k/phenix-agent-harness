@@ -11,9 +11,9 @@ import {
   type ContractSubmissionChannel,
   childRunId,
 } from "../extensions/phenix-runtime/child-session-types.ts";
-import { executeProducerCycles } from "../extensions/phenix-subagents/attempt-runner.ts";
 import type { HandleRecord } from "../extensions/phenix-subagents/handle-types.ts";
 import { isTerminalHandleStatus } from "../extensions/phenix-subagents/handle-types.ts";
+import { executeProducerCycles } from "../extensions/phenix-subagents/producer-cycle-runner.ts";
 import {
   finalizeHandleWorkflow,
   initialWorkflowStateForRole,

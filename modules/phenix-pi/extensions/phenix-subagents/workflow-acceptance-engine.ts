@@ -11,10 +11,13 @@ import { type ChildRun, ChildRuntimeError } from "../phenix-runtime/child-sessio
 import type { AcceptanceEngine, AcceptancePlan } from "../phenix-runtime/execution-plan.ts";
 import { decodeReturnValue } from "../phenix-runtime/subagent-api.ts";
 import { SubagentExecutionError } from "../phenix-runtime/subagent-manager.ts";
-import { type AttemptRunResult, executeProducerCycles } from "./attempt-runner.ts";
 import type { ContractArtifact } from "./contract.ts";
 import type { ExecutionQualityService } from "./execution-quality-service.ts";
 import type { HandleRecord } from "./handle-types.ts";
+import {
+  executeProducerCycles,
+  type ProducerCycleExecutionResult,
+} from "./producer-cycle-runner.ts";
 
 export interface WorkflowProducerAcceptanceData {
   readonly record: HandleRecord;
@@ -74,7 +77,7 @@ export class WorkflowAcceptanceEngine implements AcceptanceEngine {
     }
 
     const data = workflowProducerData(plan.data);
-    let result: AttemptRunResult;
+    let result: ProducerCycleExecutionResult;
     try {
       result = await executeProducerCycles({
         run,

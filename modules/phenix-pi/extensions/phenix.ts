@@ -10,7 +10,7 @@
  * 4. Register root workflow composition.
  * 5. Construct runtime services.
  * 6. Construct the selected child-session backend.
- * 7. Construct execution services and the coordinator.
+ * 7. Construct execution services and the delegator.
  * 8. Register Phenix tools.
  * 9. Register TUI projection and commands.
  * 10. Register shutdown cleanup.
@@ -42,7 +42,6 @@ import {
   bootstrapPhenixSubagentsSkillPrompt,
   shouldBootstrapPhenixSubagentsSkill,
 } from "./phenix-skill-bootstrap.ts";
-import { AgentExecutionCoordinator } from "./phenix-subagents/coordinator.ts";
 import { defaultAgentClients } from "./phenix-subagents/definitions.ts";
 import { createExecutionQualityService } from "./phenix-subagents/execution-quality-service.ts";
 import phenixSubagents from "./phenix-subagents/index.ts";
@@ -51,6 +50,7 @@ import {
   type ManagedDelegationRuntime,
 } from "./phenix-subagents/managed-delegation-runtime.ts";
 import { createWorkflowAcceptanceEngine } from "./phenix-subagents/workflow-acceptance-engine.ts";
+import { WorkflowDelegator } from "./phenix-subagents/workflow-delegator.ts";
 
 const defaultPhenixConfiguration = definePhenixConfiguration({
   activeModelSet: modelSetRef("mixed"),
@@ -287,7 +287,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
     return { modelRegistry: capturedModelRegistry, agentDir };
   };
 
-  let coordinator!: AgentExecutionCoordinator;
+  let delegator!: WorkflowDelegator;
   const backend = createChildSessionBackend({
     services: {
       get modelRegistry() {
@@ -303,7 +303,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
       if (!canDelegate) return [];
 
       const delegationTool = createDelegationTool({
-        coordinator,
+        delegator,
         parent: spec.parentContext,
         decisionContext: spec.workflowProjection,
       });
@@ -329,14 +329,14 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
   });
   const delegationRuntime = createManagedDelegationRuntime({ managers });
 
-  coordinator = new AgentExecutionCoordinator({
+  delegator = new WorkflowDelegator({
     delegationRuntime,
     activeModelSet: linkResult.graph.activeModelSet.id,
     maximumDelegationDepth: defaultPhenixConfiguration.runtime.maximumDelegationDepth,
   });
 
   await loadIntegration("phenix-subagents", pi, async (api) => {
-    await phenixSubagents(api, { coordinator });
+    await phenixSubagents(api, { delegator });
   });
   registerTuiProjection(pi, delegationRuntime);
   registerShutdown(pi, delegationRuntime);

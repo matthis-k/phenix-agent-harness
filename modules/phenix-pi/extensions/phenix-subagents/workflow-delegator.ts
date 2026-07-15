@@ -1,5 +1,5 @@
 /**
- * coordinator — Phenix workflow delegation coordinator
+ * delegator — Phenix workflow delegation delegator
  *
  * Owns workflow authority, transition settlement, handle persistence, and
  * foreground/background orchestration. Child execution is performed through a
@@ -53,7 +53,7 @@ import type {
 } from "./child-spec.ts";
 import { resolveChildSpec } from "./child-spec.ts";
 import { FileContractStore } from "./contract-store.ts";
-import { createAttemptContract } from "./handle-evaluation.ts";
+import { createProducerContract } from "./producer-contract.ts";
 import {
   effectiveSessionId,
   findProjectRoot,
@@ -109,18 +109,18 @@ function createHandle(input: {
   };
 }
 
-export interface AgentExecutionCoordinatorOptions {
+export interface WorkflowDelegatorOptions {
   readonly delegationRuntime: ManagedDelegationRuntime;
   readonly activeModelSet: string;
   readonly maximumDelegationDepth: number;
 }
 
-export class AgentExecutionCoordinator {
+export class WorkflowDelegator {
   private readonly delegationRuntime: ManagedDelegationRuntime;
   private readonly activeModelSet: string;
   private readonly maximumDelegationDepth: number;
 
-  constructor(options: AgentExecutionCoordinatorOptions) {
+  constructor(options: WorkflowDelegatorOptions) {
     this.delegationRuntime = options.delegationRuntime;
     this.activeModelSet = options.activeModelSet;
     this.maximumDelegationDepth = options.maximumDelegationDepth;
@@ -438,7 +438,7 @@ export class AgentExecutionCoordinator {
       });
       writeRecord(ctx.cwd, record);
 
-      const issuedContract = await createAttemptContract({
+      const issuedContract = await createProducerContract({
         spec: producerSpec,
         assignment: { task: params.task, requirements, outputSchema },
         identity: { handleId: record.id, parentHandleId: record.parentId },

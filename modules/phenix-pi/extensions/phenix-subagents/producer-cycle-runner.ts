@@ -1,5 +1,5 @@
 /**
- * attempt-runner — producer repair cycles over one child session
+ * producer-cycle-runner — producer repair cycles over one child session
  *
  * A producer handle owns one ChildRun. Repair reuses that session through
  * continue(); verification and critic review are injected runtime services.
@@ -21,7 +21,7 @@ import type {
   VerificationSummary,
 } from "./handle-types.ts";
 
-export interface AttemptRunResult {
+export interface ProducerCycleExecutionResult {
   readonly ok: boolean;
   readonly status: "completed" | "failed" | "cancelled";
   readonly value?: unknown;
@@ -143,7 +143,7 @@ export interface ExecuteProducerCyclesInput {
 /** Execute producer repair cycles over one child session. */
 export async function executeProducerCycles(
   input: ExecuteProducerCyclesInput,
-): Promise<AttemptRunResult> {
+): Promise<ProducerCycleExecutionResult> {
   const {
     run,
     contractChannel,
@@ -160,7 +160,7 @@ export async function executeProducerCycles(
   let completionGrace = completionGraceRemaining;
   let pendingOutcome: ChildCycleOutcome | undefined;
 
-  const finishAbortedCycle = (cycleRecord: ProducerCycleRecord): AttemptRunResult | undefined => {
+  const finishAbortedCycle = (cycleRecord: ProducerCycleRecord): ProducerCycleExecutionResult | undefined => {
     if (!signal.aborted) return undefined;
 
     const serialized = serializeError(

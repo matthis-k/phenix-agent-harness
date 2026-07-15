@@ -105,15 +105,15 @@ describe("Phenix architecture boundaries", () => {
     ]);
   });
 
-  it("keeps the coordinator independent from managed execution mechanics", () => {
-    assertNoDependencies(selectedFiles("phenix-subagents/coordinator.ts"), [
+  it("keeps the workflow delegator independent from managed execution mechanics", () => {
+    assertNoDependencies(selectedFiles("phenix-subagents/workflow-delegator.ts"), [
       "../phenix-runtime/child-session-backend",
       "../phenix-runtime/sdk-child-session-backend",
       "../phenix-runtime/subagent-session-runtime",
       "../phenix-runtime/subagent-manager",
       "../phenix-runtime/subagent-manager-factory",
       "./execution-quality-service",
-      "./attempt-runner",
+      "./producer-cycle-runner",
     ]);
   });
 

@@ -56,19 +56,6 @@ export const CRITIC_OUTPUT_SCHEMA: JsonSchema = {
   },
 };
 
-// ── Acceptance ranking ─────────────────────────────────────────────────────
-
-export const ACCEPTANCE_RANK: Record<string, number> = {
-  "not-required": 0,
-  claimed: 0,
-  attested: 1,
-  checked: 2,
-  verified: 3,
-  reviewed: 4,
-  accepted: 5,
-  rejected: -1,
-};
-
 // ── Producer cycle record ───────────────────────────────────────────────────
 
 export interface ProducerCycleRecord {
@@ -180,17 +167,6 @@ export interface WorkflowBinding {
   readonly acceptedState: WorkflowStateId;
 
   readonly rejectedState: WorkflowStateId;
-}
-
-// ── Evaluation ──────────────────────────────────────────────────────────────
-
-export interface Evaluation {
-  readonly ok: boolean;
-  readonly value?: unknown;
-  readonly errors: readonly string[];
-  readonly repairable: boolean;
-  readonly verification: VerificationSummary;
-  readonly review?: HandleRecord["review"];
 }
 
 // ── Re-exports ──────────────────────────────────────────────────────────────
