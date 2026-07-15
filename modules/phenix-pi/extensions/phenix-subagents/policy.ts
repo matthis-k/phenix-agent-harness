@@ -3,17 +3,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { deriveTaskProfileFromText } from "../phenix-kernel/task.ts";
 import { mergeObjects, readJson } from "../phenix-shared.ts";
-import {
-  AGENT_KINDS,
-  type AgentKind,
-  type AgentRole,
-  type ModelTier,
-  type ProfileHint,
-  type TaskProfile,
-  type ThinkingLevel,
-  type ToolBudget,
-  type TurnBudget,
-  type VerificationCommand,
+import type {
+  AgentKind,
+  AgentRole,
+  ModelTier,
+  ProfileHint,
+  TaskProfile,
+  ThinkingLevel,
+  ToolBudget,
+  TurnBudget,
+  VerificationCommand,
 } from "./agent-types.ts";
 import { rolePreset } from "./role-presets.ts";
 

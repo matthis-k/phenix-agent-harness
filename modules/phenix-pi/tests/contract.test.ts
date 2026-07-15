@@ -15,8 +15,6 @@ import {
   parseRunId,
   type RunId,
 } from "../extensions/phenix-subagents/contract.ts";
-import type { WorkflowTransitionId } from "../extensions/phenix-workflow/workflow-types.ts";
-import { mkTransitionId } from "../extensions/phenix-workflow/workflow-types.ts";
 
 const TEST_SCHEMA = {
   type: "object",

@@ -1,12 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { AgentRole } from "../extensions/phenix-subagents/agent-types.ts";
 import {
   childLaunchTools,
   EMPTY_TOOL_PATCH,
   modelTaskTools,
   resolveToolConfiguration,
-  type ToolPatchInput,
   toolAllowedByConfig,
 } from "../extensions/phenix-subagents/tool-policy.ts";
 
