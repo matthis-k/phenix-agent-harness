@@ -41,4 +41,19 @@ export type {
   SdkChildSessionBackendOptions,
 };
 
+export type {
+  ConcreteSessionModel,
+  ResolvedSubagentSessionOptions,
+  RoutedSessionModel,
+  RoutedSessionModelOptions,
+  SessionModelSelector,
+  SessionPersistence,
+  SessionRouteRequest,
+  SessionRouteResolution,
+  SessionRouteResolver,
+  SubagentSessionDefaults,
+  SubagentSessionOptions,
+} from "./session-options.ts";
+export { resolveSubagentSessionOptions, routing } from "./session-options.ts";
+
 export { buildEffectiveToolNames, ProductionPiSessionFactory, SdkChildSessionBackend };
