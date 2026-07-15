@@ -35,6 +35,11 @@ export type ManagedDelegationExecutionResult =
       readonly error: ManagedDelegationFailure;
     };
 
+interface ManagedCompletion {
+  readonly record: HandleRecord;
+  readonly error?: ManagedDelegationFailure;
+}
+
 export interface ManagedDelegationExecutionInput {
   readonly compiler: SubagentExecutionCompiler;
   readonly request: SubagentRequest<unknown>;
@@ -177,7 +182,7 @@ export class ManagedDelegationRuntime {
     input.record.status = "running";
     writeRecord(input.cwd, input.record);
 
-    const completion = handle.result().then(
+    const completion: Promise<ManagedCompletion> = handle.result().then(
       () => ({ record: readRecord(input.cwd, input.sessionId, input.record.id) ?? input.record }),
       (error) => {
         const failure = executionFailure(error);
