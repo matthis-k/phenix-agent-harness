@@ -1,9 +1,0 @@
-from pathlib import Path
-
-path = Path("modules/phenix-pi/extensions/phenix-subagents/coordinator.ts")
-text = path.read_text()
-old = "            rootSubagentId: rootRunId,"
-new = "            rootChildRunId: rootRunId,"
-if text.count(old) != 1:
-    raise RuntimeError(f"expected one internal occurrence, found {text.count(old)}")
-path.write_text(text.replace(old, new, 1))
