@@ -14,9 +14,9 @@ import type {
   SubagentSnapshot,
 } from "../extensions/phenix-runtime/subagent-manager.ts";
 import { SubagentExecutionError } from "../extensions/phenix-runtime/subagent-manager.ts";
-import { ManagedDelegationRuntime } from "../extensions/phenix-subagents/managed-delegation-runtime.ts";
 import { readRecord, writeRecord } from "../extensions/phenix-subagents/handle-store.ts";
 import type { HandleRecord } from "../extensions/phenix-subagents/handle-types.ts";
+import { ManagedDelegationRuntime } from "../extensions/phenix-subagents/managed-delegation-runtime.ts";
 
 function temporaryDirectory(prefix: string): string {
   const directory = path.join(os.tmpdir(), `${prefix}-${randomUUID().slice(0, 8)}`);
@@ -127,10 +127,7 @@ describe("ManagedDelegationRuntime background awaits", () => {
     controller.abort();
 
     await assert.rejects(
-      runtime.awaitHandle(
-        { cwd, sessionId: record.sessionId, id: record.id },
-        controller.signal,
-      ),
+      runtime.awaitHandle({ cwd, sessionId: record.sessionId, id: record.id }, controller.signal),
       (error: unknown) => error instanceof SubagentExecutionError && error.code === "ABORTED",
     );
 
