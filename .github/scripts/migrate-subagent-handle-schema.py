@@ -125,17 +125,23 @@ for test in (root / "tests").glob("*.ts"):
         text = text.replace("        childRunId,", "        subagentId,")
     test.write_text(text)
 
-stale = []
-for path in [handle_types, runtime, quality, index]:
-    content = path.read_text()
-    for token in [
+checks = {
+    handle_types: [
         "piSessionId",
         "piSessionFile",
         "rootChildRunId",
-        "record.childRunId",
+        "childRunId",
         "ChildSessionSummary",
         "HandleRecordWithWorkflow",
-    ]:
+    ],
+    runtime: ["rootChildRunId", "record.childRunId", "ChildRunId"],
+    quality: ["input.record.rootChildRunId", "input.record.childRunId"],
+    index: ["piSessionId", "piSessionFile", "rootChildRunId", "childRunId", "record.backend"],
+}
+stale = []
+for path, tokens in checks.items():
+    content = path.read_text()
+    for token in tokens:
         if token in content:
             stale.append(f"{path}: {token}")
 if stale:
