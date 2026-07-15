@@ -47,10 +47,10 @@ jobs:
                 "The deterministic Phenix workflow owns role selection, output schemas, and models.",
                 "The deterministic Phenix workflow owns role selection, output schemas, models, tools, and delegation depth.",
             )
-            text = text.replace(
-                '    workflowGuidance += "Only delegate through the transitions projected below.\\n\\n";',
-                '    workflowGuidance +=\n      "Use the workflow API: call phenix_workflow for fresh authority, then phenix_create_subagent with one returned transition.\\n\\n";',
-            )
+            old_line = '    workflowGuidance += "Only delegate through the transitions projected below.\\n\\n";'
+            new_line = '''    workflowGuidance +=
+              "Use the workflow API: call phenix_workflow for fresh authority, then phenix_create_subagent with one returned transition.\\n\\n";'''
+            text = text.replace(old_line, new_line)
             target.write_text(text)
 
             migration = Path("workflow-api-migration.py")
