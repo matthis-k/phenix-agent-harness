@@ -3,12 +3,7 @@
 import path from "node:path";
 
 import type { ResolvedChildSpec } from "./child-spec.ts";
-import {
-  type ContractArtifact,
-  createRunId,
-  issueContract,
-  type RunId,
-} from "./contract.ts";
+import { type ContractArtifact, createRunId, issueContract, type RunId } from "./contract.ts";
 import { FileContractStore } from "./contract-store.ts";
 import { findProjectRoot } from "./handle-store.ts";
 

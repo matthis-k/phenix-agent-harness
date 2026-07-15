@@ -160,7 +160,9 @@ export async function executeProducerCycles(
   let completionGrace = completionGraceRemaining;
   let pendingOutcome: ChildCycleOutcome | undefined;
 
-  const finishAbortedCycle = (cycleRecord: ProducerCycleRecord): ProducerCycleExecutionResult | undefined => {
+  const finishAbortedCycle = (
+    cycleRecord: ProducerCycleRecord,
+  ): ProducerCycleExecutionResult | undefined => {
     if (!signal.aborted) return undefined;
 
     const serialized = serializeError(
