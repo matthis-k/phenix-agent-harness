@@ -42,23 +42,33 @@ jobs:
           from pathlib import Path
 
           path = Path("modules/phenix-pi/extensions/phenix.ts")
-          text = path.read_text()
-          text = text.replace(
-              'import { createManagedSubagentRegistry } from "./phenix-runtime/managed-subagent-registry.ts";\n',
-              "",
+          lines = path.read_text().splitlines()
+          import_line = 'import { createManagedSubagentRegistry } from "./phenix-runtime/managed-subagent-registry.ts";'
+          if lines.count(import_line) != 1:
+              raise RuntimeError(f"expected one registry import, found {lines.count(import_line)}")
+          lines.remove(import_line)
+
+          start = next(
+              (index for index, line in enumerate(lines) if line.strip() == "const managedRegistry = createManagedSubagentRegistry();"),
+              None,
           )
-          old = (
-              "  const managedRegistry = createManagedSubagentRegistry();\n"
-              "  const delegationRuntime = createManagedDelegationRuntime({\n"
-              "    managers,\n"
-              "    registry: managedRegistry,\n"
-              "  });\n"
-          )
-          new = "  const delegationRuntime = createManagedDelegationRuntime({ managers });\n"
-          if text.count(old) != 1:
-              raise RuntimeError(f"expected one registry composition block, found {text.count(old)}")
-          path.write_text(text.replace(old, new))
+          if start is None:
+              raise RuntimeError("managed registry composition block was not found")
+          expected = [
+              "  const managedRegistry = createManagedSubagentRegistry();",
+              "  const delegationRuntime = createManagedDelegationRuntime({",
+              "    managers,",
+              "    registry: managedRegistry,",
+              "  });",
+          ]
+          if lines[start : start + len(expected)] != expected:
+              raise RuntimeError("managed registry composition block has an unexpected shape")
+          lines[start : start + len(expected)] = [
+              "  const delegationRuntime = createManagedDelegationRuntime({ managers });"
+          ]
+          path.write_text("\n".join(lines) + "\n")
           PY
+            rm -f tmp-manager-directory.txt migration.log
             mapfile -t changed_ts < <(git diff --name-only -- '*.ts')
             nix run nixpkgs#biome -- check --write "${changed_ts[@]}"
             git config user.name github-actions[bot]
