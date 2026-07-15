@@ -38,6 +38,8 @@ jobs:
         run: |
           set -o pipefail
           {
+            sed -i 's/attempt-runner/producer-cycle-runner/g' \
+              modules/phenix-pi/extensions/phenix-subagents/attempt-runner.ts
             python .github/scripts/finalize-subagent-runtime.py
             mapfile -t changed_ts < <(git diff --name-only -- '*.ts')
             nix run nixpkgs#biome -- check --write "${changed_ts[@]}"
