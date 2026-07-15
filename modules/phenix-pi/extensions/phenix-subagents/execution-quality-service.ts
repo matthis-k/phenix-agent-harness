@@ -3,28 +3,23 @@
  *
  * The coordinator sequences workflow lifecycle. This service owns the concrete
  * mechanisms used to assess producer work: verification commands and an
- * isolated critic child session.
+ * isolated critic child session. Critic execution uses the same canonical
+ * SubagentExecutionPlan and session runtime as every other child.
  */
 
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 import { validateSchema } from "../phenix-contracts/validator.ts";
 import { modelSetId } from "../phenix-kernel/ids.ts";
-import { agentClientRef } from "../phenix-kernel/refs.ts";
-import { resolveChildRoute } from "../phenix-routing/child-route.ts";
-import type {
-  ChildRun,
-  ChildSessionBackend,
-  ChildSessionSpec,
-} from "../phenix-runtime/child-session-types.ts";
+import type { ChildRun } from "../phenix-runtime/child-session-types.ts";
 import {
   ChildRuntimeError,
   childRunId,
   isChildRuntimeErrorCode,
 } from "../phenix-runtime/child-session-types.ts";
 import { ContractSubmissionChannelImpl } from "../phenix-runtime/contract-channel.ts";
+import type { SubagentExecutionPlan } from "../phenix-runtime/execution-plan.ts";
 import { computeOptionsDigest } from "../phenix-workflow/workflow-projection.ts";
 import type {
   CriticRunInput,
@@ -39,22 +34,28 @@ import type { CriticValue } from "./handle-types.ts";
 import { CRITIC_OUTPUT_SCHEMA } from "./handle-types.ts";
 import { runVerificationCommands } from "./verification.ts";
 
+export interface ExecutionQualitySessionRuntime {
+  spawn(execution: SubagentExecutionPlan<unknown>, signal?: AbortSignal): Promise<ChildRun>;
+}
+
+export type VerificationCommandRunner = typeof runVerificationCommands;
+
 export interface ExecutionQualityServiceOptions {
-  readonly backend: ChildSessionBackend;
-  readonly resolveModelRegistry: () => ModelRegistry;
+  readonly sessions: ExecutionQualitySessionRuntime;
+  readonly runVerification?: VerificationCommandRunner;
 }
 
 export class ExecutionQualityService {
-  private readonly backend: ChildSessionBackend;
-  private readonly resolveModelRegistry: () => ModelRegistry;
+  private readonly sessions: ExecutionQualitySessionRuntime;
+  private readonly runVerification: VerificationCommandRunner;
 
   constructor(options: ExecutionQualityServiceOptions) {
-    this.backend = options.backend;
-    this.resolveModelRegistry = options.resolveModelRegistry;
+    this.sessions = options.sessions;
+    this.runVerification = options.runVerification ?? runVerificationCommands;
   }
 
   async verify(input: VerificationInput): Promise<VerificationResult> {
-    const runs = await runVerificationCommands(
+    const runs = await this.runVerification(
       input.record.producerSpec.verificationCommands,
       input.cwd,
       input.signal,
@@ -131,19 +132,6 @@ export class ExecutionQualityService {
     );
     const channel = new ContractSubmissionChannelImpl(store, issued.artifact);
 
-    const route = await resolveChildRoute({
-      modelSet: modelSetId(input.record.modelSet),
-      role: "critic",
-      difficulty: criticSpec.workflow.difficulty,
-    });
-    const model = {
-      provider: route.model.provider,
-      id: route.model.model,
-    };
-    if (!this.resolveModelRegistry().find(model.provider, model.id)) {
-      throw new Error(`Configured critic model ${model.provider}/${model.id} is unavailable.`);
-    }
-
     const runId = childRunId(`critic_${input.record.id}_${randomUUID()}`);
     const rootRunId = input.record.rootChildRunId ?? input.record.childRunId ?? runId;
     const workflowProjection = {
@@ -154,40 +142,59 @@ export class ExecutionQualityService {
       options: [],
     } as const;
 
-    const spec: ChildSessionSpec = {
-      id: runId,
-      ...(input.record.childRunId ? { parentId: input.record.childRunId } : {}),
-      rootId: rootRunId,
-      handleId: `${input.record.id}-critic`,
-      agentClient: agentClientRef(criticSpec.agent.replace(/^phenix\./, "")),
-      role: "critic",
-      cwd: input.cwd,
-      model,
-      thinkingLevel: criticSpec.thinking,
-      initialPrompt: criticTask,
-      contract: issued.artifact,
-      workflowProjection,
-      contractChannel: channel,
-      parentContext: {
-        kind: "child",
-        sessionId: input.record.sessionId,
-        cwd: input.cwd,
-        contractId: issued.artifact.id,
-        contract: issued.artifact,
-        handleId: `${input.record.id}-critic`,
-        childRunId: runId,
-        rootChildRunId: rootRunId,
-        modelSet: input.record.modelSet,
-        maximumDelegationDepth: 0,
+    const executionPlan: SubagentExecutionPlan<unknown> = {
+      assignment: {
+        task: criticTask,
+        requirements: input.record.assignment.requirements,
       },
-      effectiveTools: criticSpec.tools.effective,
-      skillRefs: criticSpec.skills,
-      extensionRefs: criticSpec.extensions,
-      inheritProjectContext: true,
-      timeoutMs: criticSpec.timeoutMs,
-      turnBudget: criticSpec.turnBudget,
-      toolBudget: criticSpec.toolBudget,
-      persistence: "file",
+      session: {
+        options: {
+          agent: "critic",
+          thinking: criticSpec.thinking,
+          persistence: "file",
+        },
+        defaults: {
+          agent: "critic",
+          modelSet: modelSetId(input.record.modelSet),
+          difficulty: criticSpec.workflow.difficulty,
+          thinking: criticSpec.thinking,
+          persistence: "file",
+        },
+      },
+      runtime: {
+        id: runId,
+        ...(input.record.childRunId ? { parentId: input.record.childRunId } : {}),
+        rootId: rootRunId,
+        handleId: `${input.record.id}-critic`,
+        cwd: input.cwd,
+        contract: issued.artifact,
+        workflowProjection,
+        contractChannel: channel,
+        parentContext: {
+          kind: "child",
+          sessionId: input.record.sessionId,
+          cwd: input.cwd,
+          contractId: issued.artifact.id,
+          contract: issued.artifact,
+          handleId: `${input.record.id}-critic`,
+          childRunId: runId,
+          rootChildRunId: rootRunId,
+          modelSet: input.record.modelSet,
+          maximumDelegationDepth: 0,
+        },
+        effectiveTools: criticSpec.tools.effective,
+        skillRefs: criticSpec.skills,
+        extensionRefs: criticSpec.extensions,
+        inheritProjectContext: true,
+        timeoutMs: criticSpec.timeoutMs,
+        turnBudget: criticSpec.turnBudget,
+        toolBudget: criticSpec.toolBudget,
+      },
+      acceptance: {
+        kind: "critic",
+        returns: { schema: CRITIC_OUTPUT_SCHEMA },
+        data: { parentHandleId: input.record.id },
+      },
     };
 
     const criticController = new AbortController();
@@ -220,7 +227,7 @@ export class ExecutionQualityService {
 
     let run: ChildRun | undefined;
     try {
-      run = await this.backend.start(spec, criticController.signal);
+      run = await this.sessions.spawn(executionPlan, criticController.signal);
       const outcome = await run.waitForCurrentCycle(criticController.signal);
       if (outcome.status !== "settled") {
         const code =
