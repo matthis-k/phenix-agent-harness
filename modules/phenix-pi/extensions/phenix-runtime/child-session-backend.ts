@@ -21,10 +21,8 @@ import {
   SdkChildSessionBackend,
 } from "./sdk-child-session-backend.ts";
 
-/** Options accepted by the sole supported child-session backend. */
 export type ChildSessionBackendOptions = SdkChildSessionBackendOptions;
 
-/** Construct the supported SDK child-session backend. */
 export function createChildSessionBackend(
   options: ChildSessionBackendOptions,
 ): ChildSessionBackend {
@@ -58,12 +56,9 @@ export type {
   ReturnSpecOptions,
   SubagentRequest,
 } from "./subagent-api.ts";
-export {
-  decodeReturnValue,
-  returns,
-  returnsWithDecoder,
-} from "./subagent-api.ts";
+export { decodeReturnValue, returns, returnsWithDecoder } from "./subagent-api.ts";
 export type {
+  SubagentCancellation,
   SubagentError,
   SubagentEvent,
   SubagentExecutionAdapter,
@@ -76,6 +71,14 @@ export {
   SubagentExecutionError,
   SubagentManager,
 } from "./subagent-manager.ts";
+export type {
+  SessionSubagentManagerFactoryOptions,
+  SubagentManagerFactory,
+} from "./subagent-manager-factory.ts";
+export {
+  createSessionSubagentManagerFactory,
+  SessionSubagentManagerFactory,
+} from "./subagent-manager-factory.ts";
 export type { SubagentSessionRuntimeOptions } from "./subagent-session-runtime.ts";
 export {
   createSubagentSessionRuntime,

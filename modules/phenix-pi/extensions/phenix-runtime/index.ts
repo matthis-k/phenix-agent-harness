@@ -30,12 +30,9 @@ export type {
   ReturnSpecOptions,
   SubagentRequest,
 } from "./subagent-api.ts";
-export {
-  decodeReturnValue,
-  returns,
-  returnsWithDecoder,
-} from "./subagent-api.ts";
+export { decodeReturnValue, returns, returnsWithDecoder } from "./subagent-api.ts";
 export type {
+  SubagentCancellation,
   SubagentError,
   SubagentEvent,
   SubagentExecutionAdapter,
@@ -48,3 +45,11 @@ export {
   SubagentExecutionError,
   SubagentManager,
 } from "./subagent-manager.ts";
+export type {
+  SessionSubagentManagerFactoryOptions,
+  SubagentManagerFactory,
+} from "./subagent-manager-factory.ts";
+export {
+  createSessionSubagentManagerFactory,
+  SessionSubagentManagerFactory,
+} from "./subagent-manager-factory.ts";

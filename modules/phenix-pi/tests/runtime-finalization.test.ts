@@ -117,7 +117,6 @@ describe("runtime cancellation ownership", () => {
           },
         };
       },
-      backend: { kind: "sdk" } as never,
     });
 
     assert.equal(result.ok, false);

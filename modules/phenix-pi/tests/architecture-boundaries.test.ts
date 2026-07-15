@@ -28,12 +28,6 @@ function readTsFiles(dir: string): readonly string[] {
   return out;
 }
 
-/**
- * Extract module specifiers from static import/export declarations and dynamic
- * imports. This inspects dependency syntax rather than arbitrary source text,
- * so comments, diagnostics, and documentation cannot trigger a false boundary
- * failure.
- */
 function moduleSpecifiers(file: string): readonly string[] {
   const source = fs.readFileSync(file, "utf-8");
   const specifiers = new Set<string>();
@@ -88,6 +82,7 @@ describe("Phenix architecture boundaries", () => {
         "phenix-runtime/index.ts",
         "phenix-runtime/subagent-api.ts",
         "phenix-runtime/subagent-manager.ts",
+        "phenix-runtime/subagent-manager-factory.ts",
         "phenix-runtime/execution-plan.ts",
         "phenix-runtime/session-options.ts",
         "phenix-runtime/session-subagent-adapter.ts",
@@ -110,9 +105,13 @@ describe("Phenix architecture boundaries", () => {
     ]);
   });
 
-  it("keeps the coordinator independent from the Pi SDK adapter", () => {
+  it("keeps the coordinator on the managed subagent surface", () => {
     assertNoDependencies(selectedFiles("phenix-subagents/coordinator.ts"), [
+      "../phenix-runtime/child-session-backend",
       "../phenix-runtime/sdk-child-session-backend",
+      "../phenix-runtime/subagent-session-runtime",
+      "./execution-quality-service",
+      "./attempt-runner",
     ]);
   });
 

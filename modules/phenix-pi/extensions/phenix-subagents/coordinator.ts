@@ -2,9 +2,9 @@
  * coordinator — Phenix workflow delegation coordinator
  *
  * Owns workflow authority, transition settlement, handle persistence, and
- * foreground/background lifecycle. Session construction is delegated to the
- * canonical session runtime; deterministic verification and critic execution
- * are delegated to ExecutionQualityService.
+ * foreground/background orchestration. Child execution is performed through a
+ * workflow-scoped SubagentManager; backend and session details stay below the
+ * runtime adapter boundary.
  */
 
 import { randomUUID } from "node:crypto";
@@ -13,19 +13,20 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentRole } from "../phenix-kernel/agents.ts";
 import { modelSetId } from "../phenix-kernel/ids.ts";
 import { modelSetForModelId, PHENIX_PROVIDER } from "../phenix-routing/provider.ts";
-import type {
-  AttemptRunResult,
-  LiveChildRunRecord,
-} from "../phenix-runtime/child-session-registry.ts";
+import type { LiveChildRunRecord } from "../phenix-runtime/child-session-registry.ts";
 import { getChildSessionRegistry } from "../phenix-runtime/child-session-registry.ts";
-import type { ChildRun, ChildSessionBackend } from "../phenix-runtime/child-session-types.ts";
 import { ChildRuntimeError, childRunId } from "../phenix-runtime/child-session-types.ts";
 import { ContractSubmissionChannelImpl } from "../phenix-runtime/contract-channel.ts";
 import type {
   DelegateExecutionParams,
   ParentExecutionContext,
 } from "../phenix-runtime/delegation-tool.ts";
-import type { SubagentSessionRuntime } from "../phenix-runtime/subagent-session-runtime.ts";
+import {
+  type SubagentCancellation,
+  SubagentExecutionError,
+  type SubagentHandle,
+} from "../phenix-runtime/subagent-manager.ts";
+import type { SubagentManagerFactory } from "../phenix-runtime/subagent-manager-factory.ts";
 import {
   buildWorkflowDecisionContext,
   buildWorkflowRuntimeDependencies,
@@ -60,7 +61,6 @@ import type {
 } from "./child-spec.ts";
 import { resolveChildSpec } from "./child-spec.ts";
 import { FileContractStore } from "./contract-store.ts";
-import type { ExecutionQualityService } from "./execution-quality-service.ts";
 import { createAttemptContract } from "./handle-evaluation.ts";
 import {
   effectiveSessionId,
@@ -72,6 +72,7 @@ import {
 } from "./handle-store.ts";
 import type { HandleRecord, WorkflowBinding } from "./handle-types.ts";
 import { HANDLE_VERSION, isTerminalHandleStatus } from "./handle-types.ts";
+import type { WorkflowProducerAcceptanceData } from "./workflow-acceptance-engine.ts";
 import { createWorkflowExecutionCompiler } from "./workflow-execution-compiler.ts";
 
 export type DelegateExecutionResult =
@@ -81,6 +82,14 @@ export type DelegateExecutionResult =
       readonly message: string;
       readonly details?: Record<string, unknown>;
     };
+
+interface ManagedCompletion {
+  readonly record: HandleRecord;
+  readonly error?: {
+    readonly code: string;
+    readonly message: string;
+  };
+}
 
 function createHandle(input: {
   readonly id: string;
@@ -115,25 +124,45 @@ function createHandle(input: {
   };
 }
 
+function executionError(error: unknown): { readonly code: string; readonly message: string } {
+  if (error instanceof SubagentExecutionError || error instanceof ChildRuntimeError) {
+    return { code: error.code, message: error.message };
+  }
+  return {
+    code: "SUBAGENT_EXECUTION_FAILED",
+    message: error instanceof Error ? error.message : String(error),
+  };
+}
+
+function cancellationFromSignal(signal: AbortSignal, fallback: string): SubagentCancellation {
+  const reason = signal.reason;
+  if (reason instanceof SubagentExecutionError || reason instanceof ChildRuntimeError) {
+    return { code: reason.code, reason: reason.message };
+  }
+  return {
+    code: "ABORTED",
+    reason:
+      reason instanceof Error
+        ? reason.message
+        : typeof reason === "string" && reason.length > 0
+          ? reason
+          : fallback,
+  };
+}
+
 export interface AgentExecutionCoordinatorOptions {
-  readonly backend: ChildSessionBackend;
-  readonly sessionRuntime: SubagentSessionRuntime;
-  readonly quality: ExecutionQualityService;
+  readonly managers: SubagentManagerFactory;
   readonly activeModelSet: string;
   readonly maximumDelegationDepth: number;
 }
 
 export class AgentExecutionCoordinator {
-  private readonly backend: ChildSessionBackend;
-  private readonly sessionRuntime: SubagentSessionRuntime;
-  private readonly quality: ExecutionQualityService;
+  private readonly managers: SubagentManagerFactory;
   private readonly activeModelSet: string;
   private readonly maximumDelegationDepth: number;
 
   constructor(options: AgentExecutionCoordinatorOptions) {
-    this.backend = options.backend;
-    this.sessionRuntime = options.sessionRuntime;
-    this.quality = options.quality;
+    this.managers = options.managers;
     this.activeModelSet = options.activeModelSet;
     this.maximumDelegationDepth = options.maximumDelegationDepth;
   }
@@ -202,7 +231,7 @@ export class AgentExecutionCoordinator {
       handleStore: { listRecords },
     });
 
-    let wfRecord = dependencies.record;
+    let workflowRecord = dependencies.record;
     const decision = buildWorkflowDecisionContext({
       definition: dependencies.definition,
       runtime: dependencies.record,
@@ -227,13 +256,16 @@ export class AgentExecutionCoordinator {
       };
     }
 
-    if (params.workflowRevision !== wfRecord.revision) {
+    if (params.workflowRevision !== workflowRecord.revision) {
       return {
         ok: false,
         message:
-          `phenix_delegate: stale workflow revision. Expected ${params.workflowRevision}, current ${wfRecord.revision}. ` +
-          `Current state: ${wfRecord.state}. Refresh delegation options before attempting again.`,
-        details: { currentState: wfRecord.state, currentRevision: wfRecord.revision },
+          `phenix_delegate: stale workflow revision. Expected ${params.workflowRevision}, current ${workflowRecord.revision}. ` +
+          `Current state: ${workflowRecord.state}. Refresh delegation options before attempting again.`,
+        details: {
+          currentState: workflowRecord.state,
+          currentRevision: workflowRecord.revision,
+        },
       };
     }
 
@@ -245,11 +277,11 @@ export class AgentExecutionCoordinator {
         ok: false,
         message:
           `phenix_delegate: transition "${params.transitionId}" is not currently available. ` +
-          `State: ${wfRecord.state}, Difficulty: ${wfRecord.difficulty}. ` +
+          `State: ${workflowRecord.state}, Difficulty: ${workflowRecord.difficulty}. ` +
           `Available transitions: ${availableIds || "(none)"}`,
         details: {
-          state: wfRecord.state,
-          difficulty: wfRecord.difficulty,
+          state: workflowRecord.state,
+          difficulty: workflowRecord.difficulty,
           available: decision.options.map((option) => ({
             id: option.transitionId,
             role: option.role,
@@ -284,18 +316,18 @@ export class AgentExecutionCoordinator {
 
     const handleId = randomUUID();
     const childActorId = `actor_${handleId}`;
-    const instanceId = wfRecord.instanceId;
-    const sourceStateBefore = wfRecord.state;
-    const sourceRevisionBefore = wfRecord.revision;
+    const instanceId = workflowRecord.instanceId;
+    const sourceStateBefore = workflowRecord.state;
+    const sourceRevisionBefore = workflowRecord.revision;
 
     let executionId: string;
     try {
-      const result = beginTransition(ctx.cwd, wfRecord, {
+      const result = beginTransition(ctx.cwd, workflowRecord, {
         expectedRevision: sourceRevisionBefore,
         transitionId: transition.id,
         handleId,
       });
-      wfRecord = result.record;
+      workflowRecord = result.record;
       executionId = result.executionId;
     } catch (error) {
       if (error instanceof WorkflowStoreError) {
@@ -310,7 +342,7 @@ export class AgentExecutionCoordinator {
 
     const rejectStartedTransition = (): boolean => {
       try {
-        rejectTransition(ctx.cwd, wfRecord, {
+        rejectTransition(ctx.cwd, workflowRecord, {
           executionId,
           nextState: transition.onRejected,
         });
@@ -342,32 +374,32 @@ export class AgentExecutionCoordinator {
       writeRecord(ctx.cwd, handle);
     };
 
-    let ownedRun: ChildRun | undefined;
-    let cleanupOwnedRunScope: (() => void) | undefined;
+    let ownedHandle: SubagentHandle<unknown> | undefined;
+    let cleanupOwnedScope: (() => void) | undefined;
     try {
       const role = roleForAgentClient(transition.agentClient);
       const childInitialState = initialWorkflowStateForRole(role);
       const childRuntimeRecord = createWorkflowRecord(ctx.cwd, {
         instanceId,
         actorId: childActorId,
-        parentActorId: wfRecord.actorId,
+        parentActorId: workflowRecord.actorId,
         sessionId,
-        definitionId: wfRecord.definitionId,
-        difficulty: wfRecord.difficulty,
-        taskProfile: wfRecord.taskProfile,
+        definitionId: workflowRecord.definitionId,
+        difficulty: workflowRecord.difficulty,
+        taskProfile: workflowRecord.taskProfile,
         actorRole: actorRoleForAgentClient(transition.agentClient),
         initialState: childInitialState,
-        capabilityArtifactHash: wfRecord.capabilityArtifactHash,
+        capabilityArtifactHash: workflowRecord.capabilityArtifactHash,
       });
 
       const outputSchema = getOutputSchema(outputSchemaIdForContract(transition.outputContract));
       const childWorkflow: ResolvedWorkflowChildInput = {
         instanceId,
         actorId: childActorId,
-        parentActorId: wfRecord.actorId,
-        definitionId: wfRecord.definitionId,
+        parentActorId: workflowRecord.actorId,
+        definitionId: workflowRecord.definitionId,
         definitionVersion: 1,
-        difficulty: wfRecord.difficulty,
+        difficulty: workflowRecord.difficulty,
         initialState: childInitialState,
         transitionAuthority: transitionAuthorityForChild({
           definition: dependencies.definition,
@@ -375,15 +407,13 @@ export class AgentExecutionCoordinator {
           initialState: childInitialState,
           authorizedRoles: dependencies.authority.roles.effective,
         }),
-        capabilityArtifactHash: wfRecord.capabilityArtifactHash,
+        capabilityArtifactHash: workflowRecord.capabilityArtifactHash,
       };
 
-      const capabilityArtifact = dependencies.capabilities;
       const creator: ContractCreatorContext =
         parent.kind === "child"
           ? { kind: "child", contract: parent.contract }
           : { kind: "root", maximumDelegationDepth: this.maximumDelegationDepth };
-
       const producerSpec = resolveChildSpec({
         role,
         task: params.task,
@@ -396,41 +426,40 @@ export class AgentExecutionCoordinator {
           | undefined,
         cwd: ctx.cwd,
         creator,
-        capabilityArtifact,
+        capabilityArtifact: dependencies.capabilities,
         workflow: childWorkflow,
       });
 
       let criticSpec: ResolvedChildSpec | undefined;
       if (producerSpec.criticRequired) {
-        const criticTask = `Review the completed handoff: ${params.task.slice(0, 200)}`;
         const criticWorkflow: ResolvedWorkflowChildInput = {
           instanceId,
           actorId: `critic_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           parentActorId: childActorId,
-          definitionId: wfRecord.definitionId,
+          definitionId: workflowRecord.definitionId,
           definitionVersion: 1,
-          difficulty: wfRecord.difficulty,
+          difficulty: workflowRecord.difficulty,
           initialState: "reviewing",
           transitionAuthority: { kind: "restricted", allowed: [] },
-          capabilityArtifactHash: wfRecord.capabilityArtifactHash,
+          capabilityArtifactHash: workflowRecord.capabilityArtifactHash,
         };
         criticSpec = resolveChildSpec({
           role: "critic",
-          task: criticTask,
+          task: `Review the completed handoff: ${params.task.slice(0, 200)}`,
           requirements,
           outputSchema: getOutputSchema("critic-handoff"),
           tools: null,
           delegateRoles: null,
           cwd: ctx.cwd,
           creator: { kind: "runtime-internal", maximumDelegationDepth: 0 },
-          capabilityArtifact,
+          capabilityArtifact: dependencies.capabilities,
           workflow: criticWorkflow,
         });
       }
 
       const workflowBinding: WorkflowBinding = {
         instanceId,
-        actorId: wfRecord.actorId,
+        actorId: workflowRecord.actorId,
         transitionExecutionId: executionId,
         transitionId: transition.id,
         sourceState: sourceStateBefore,
@@ -438,7 +467,6 @@ export class AgentExecutionCoordinator {
         acceptedState: transition.onAccepted,
         rejectedState: transition.onRejected,
       };
-
       const record = createHandle({
         id: handleId,
         sessionId,
@@ -460,10 +488,12 @@ export class AgentExecutionCoordinator {
         cwd: ctx.cwd,
       });
       const contractArtifact = issuedContract.artifact;
-      const store = new FileContractStore(
-        path.join(findProjectRoot(ctx.cwd), ".phenix-agent-state", "contracts"),
+      const contractChannel = new ContractSubmissionChannelImpl(
+        new FileContractStore(
+          path.join(findProjectRoot(ctx.cwd), ".phenix-agent-state", "contracts"),
+        ),
+        contractArtifact,
       );
-      const contractChannel = new ContractSubmissionChannelImpl(store, contractArtifact);
       const childAuthority: DelegationAuthority = {
         roles: contractArtifact.runtime.delegation.roles,
         availableRoles: contractArtifact.runtime.delegation.availableRoles,
@@ -484,10 +514,18 @@ export class AgentExecutionCoordinator {
         parent.kind === "child" && parent.rootChildRunId
           ? childRunId(parent.rootChildRunId)
           : childRunIdValue;
+      const acceptanceData: WorkflowProducerAcceptanceData = {
+        record,
+        contractArtifact,
+        contractChannel,
+        cwd: ctx.cwd,
+        maximumProducerCycles: producerSpec.maxRepairAttempts + 1,
+        completionGraceRemaining: 1,
+      };
       const executionCompiler = createWorkflowExecutionCompiler({
         role,
         modelSet: modelSetId(selectedModelSet),
-        difficulty: wfRecord.difficulty,
+        difficulty: workflowRecord.difficulty,
         thinking: producerSpec.thinking,
         persistence: "file",
         runtime: {
@@ -520,7 +558,7 @@ export class AgentExecutionCoordinator {
           toolBudget: producerSpec.toolBudget,
         },
         acceptanceKind: "workflow-producer",
-        acceptanceData: { handleId: record.id },
+        acceptanceData,
       });
 
       const runController = new AbortController();
@@ -552,147 +590,117 @@ export class AgentExecutionCoordinator {
         executionTimeout.unref?.();
       }
 
-      const cleanupRunScope = (): void => {
-        if (!isBackground) signal.removeEventListener("abort", abortFromParent);
-        if (executionTimeout) {
-          clearTimeout(executionTimeout);
-          executionTimeout = undefined;
-        }
-      };
-      cleanupOwnedRunScope = cleanupRunScope;
-      const runSignal = runController.signal;
-
-      let run: ChildRun;
+      const manager = this.managers.create(executionCompiler);
+      let handle: SubagentHandle<unknown>;
       try {
-        const executionPlan = await executionCompiler.compile(
+        handle = await manager.spawn(
           {
             task: params.task,
             requirements,
             returns: { schema: outputSchema },
           },
-          runSignal,
+          runController.signal,
         );
-        run = await this.sessionRuntime.spawn(executionPlan, runSignal);
       } catch (error) {
-        cleanupRunScope();
-        record.status = "failed";
-        record.errors = [error instanceof Error ? error.message : String(error)];
+        if (!isBackground) signal.removeEventListener("abort", abortFromParent);
+        if (executionTimeout) clearTimeout(executionTimeout);
+        const normalized = executionError(error);
+        record.status = normalized.code === "ABORTED" ? "cancelled" : "failed";
+        record.errors = [`${normalized.code}: ${normalized.message}`];
         writeRecord(ctx.cwd, record);
         finalizeOrRejectHandle(record);
         return {
           ok: false,
-          message: `phenix_delegate: child session start failed: ${error instanceof Error ? error.message : String(error)}`,
-          details: {
-            code: error instanceof ChildRuntimeError ? error.code : "SESSION_START_FAILED",
-          },
+          message: `phenix_delegate: child session start failed: ${normalized.message}`,
+          details: { code: normalized.code },
         };
       }
-      ownedRun = run;
-      record.childRunId = run.id;
-      record.rootChildRunId = run.snapshot().rootId;
-      record.backend = run.backend;
-      record.piSessionId = run.pi.sessionId;
-      record.piSessionFile = run.pi.sessionFile;
+      ownedHandle = handle;
+
+      const cancelFromScope = (): void => {
+        void handle.cancel(
+          cancellationFromSignal(runController.signal, "Delegated execution was cancelled."),
+        );
+      };
+      if (runController.signal.aborted) cancelFromScope();
+      else runController.signal.addEventListener("abort", cancelFromScope, { once: true });
+
+      const cleanupScope = (): void => {
+        if (!isBackground) signal.removeEventListener("abort", abortFromParent);
+        runController.signal.removeEventListener("abort", cancelFromScope);
+        if (executionTimeout) {
+          clearTimeout(executionTimeout);
+          executionTimeout = undefined;
+        }
+      };
+      cleanupOwnedScope = cleanupScope;
+
+      record.childRunId = childRunId(handle.id);
+      record.rootChildRunId = rootRunId;
       record.status = "running";
       writeRecord(ctx.cwd, record);
 
-      const { executeProducerCycles } = await import("./attempt-runner.ts");
-      const executeCycles = async (): Promise<AttemptRunResult> => {
-        try {
-          return await executeProducerCycles({
-            run,
-            contractChannel,
-            contractArtifact,
-            record,
-            cwd: ctx.cwd,
-            signal: runSignal,
-            maximumProducerCycles: producerSpec.maxRepairAttempts + 1,
-            completionGraceRemaining: 1,
-            verify: (verificationInput) => this.quality.verify(verificationInput),
-            criticFactory: (_backend, criticInput) => this.quality.review(criticInput),
-            backend: this.backend,
-          });
-        } finally {
-          cleanupRunScope();
-          try {
-            await run.dispose();
-          } finally {
-            ownedRun = undefined;
-            cleanupOwnedRunScope = undefined;
-          }
-        }
-      };
+      const completion: Promise<ManagedCompletion> = handle
+        .result()
+        .then(
+          () => ({ record: readRecord(ctx.cwd, sessionId, handleId) ?? record }),
+          (error) => {
+            const normalized = executionError(error);
+            const failedRecord = readRecord(ctx.cwd, sessionId, handleId) ?? record;
+            if (!isTerminalHandleStatus(failedRecord.status)) {
+              failedRecord.status = normalized.code === "ABORTED" ? "cancelled" : "failed";
+              failedRecord.errors = [`${normalized.code}: ${normalized.message}`];
+              writeRecord(ctx.cwd, failedRecord);
+            }
+            return { record: failedRecord, error: normalized };
+          },
+        )
+        .finally(() => {
+          cleanupScope();
+          ownedHandle = undefined;
+          cleanupOwnedScope = undefined;
+        });
 
       if (isBackground) {
-        const completionPromise = executeCycles();
-        const liveRecord: LiveChildRunRecord = {
-          run,
-          completion: completionPromise,
-          controller: runController,
-        };
+        const liveRecord: LiveChildRunRecord = { handle, completion };
         getChildSessionRegistry().add(liveRecord);
-        void completionPromise
-          .then(
-            (result) => {
-              const persisted = readRecord(ctx.cwd, sessionId, handleId);
-              const settledRecord =
-                persisted && isTerminalHandleStatus(persisted.status)
-                  ? persisted
-                  : (result.record as HandleRecord);
-              finalizeOrRejectHandle(settledRecord);
-            },
-            (error) => {
-              const failedRecord = readRecord(ctx.cwd, sessionId, handleId) ?? record;
-              if (!isTerminalHandleStatus(failedRecord.status)) {
-                failedRecord.status = "failed";
-                failedRecord.errors = [error instanceof Error ? error.message : String(error)];
-                writeRecord(ctx.cwd, failedRecord);
-              }
-              finalizeOrRejectHandle(failedRecord);
-            },
-          )
-          .finally(() => {
-            getChildSessionRegistry().remove(run.id);
-          })
+        void completion
+          .then((settled) => finalizeOrRejectHandle(settled.record))
+          .finally(() => getChildSessionRegistry().remove(handle.id))
           .catch(() => undefined);
         return { ok: true, record };
       }
 
-      const result = await executeCycles();
-      const finalRecord = result.record as HandleRecord;
-      finalizeOrRejectHandle(finalRecord);
-      if (!result.ok) {
+      const settled = await completion;
+      finalizeOrRejectHandle(settled.record);
+      if (settled.record.status !== "completed") {
         return {
           ok: false,
-          message: result.error?.message ?? "Delegated child execution failed.",
+          message: settled.error?.message ?? "Delegated child execution failed.",
           details: {
-            code: result.error?.code ?? "CHILD_EXECUTION_FAILED",
-            handleId: finalRecord.id,
-            status: finalRecord.status,
+            code: settled.error?.code ?? "CHILD_EXECUTION_FAILED",
+            handleId: settled.record.id,
+            status: settled.record.status,
           },
         };
       }
-      return { ok: true, record: finalRecord };
+      return { ok: true, record: settled.record };
     } catch (error) {
-      cleanupOwnedRunScope?.();
-      if (ownedRun) {
+      cleanupOwnedScope?.();
+      if (ownedHandle) {
         try {
-          await ownedRun.abort("delegation execution failed");
+          await ownedHandle.cancel("delegation execution failed");
         } catch {
-          // Best-effort provider abort.
-        }
-        try {
-          await ownedRun.dispose();
-        } catch {
-          // Best-effort disposal.
+          // Best-effort managed cancellation.
         }
       }
 
       const failedRecord = readRecord(ctx.cwd, sessionId, handleId);
       if (failedRecord) {
-        if (failedRecord.status === "starting" || failedRecord.status === "running") {
-          failedRecord.status = "failed";
-          failedRecord.errors = [error instanceof Error ? error.message : String(error)];
+        if (!isTerminalHandleStatus(failedRecord.status)) {
+          const normalized = executionError(error);
+          failedRecord.status = normalized.code === "ABORTED" ? "cancelled" : "failed";
+          failedRecord.errors = [`${normalized.code}: ${normalized.message}`];
           writeRecord(ctx.cwd, failedRecord);
         }
         finalizeOrRejectHandle(failedRecord);
@@ -700,13 +708,12 @@ export class AgentExecutionCoordinator {
         rejectStartedTransition();
       }
 
+      const normalized = executionError(error);
       return {
         ok: false,
-        message: `phenix_delegate: execution failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        message: `phenix_delegate: execution failed: ${normalized.message}`,
         details: {
-          code: error instanceof ChildRuntimeError ? error.code : "SESSION_START_FAILED",
+          code: normalized.code,
           ...(failedRecord ? { handleId: failedRecord.id } : {}),
         },
       };
@@ -733,38 +740,25 @@ export class AgentExecutionCoordinator {
     }
   }
 
-  private abortError(signal: AbortSignal, fallback: string): ChildRuntimeError {
-    const reason = signal.reason;
-    if (reason instanceof ChildRuntimeError) return reason;
-    return new ChildRuntimeError(
-      "ABORTED",
-      reason instanceof Error
-        ? reason.message
-        : typeof reason === "string" && reason.length > 0
-          ? reason
-          : fallback,
-    );
-  }
-
   private async awaitLiveCompletion(
-    completion: Promise<AttemptRunResult>,
+    completion: Promise<unknown>,
     signal: AbortSignal,
-  ): Promise<AttemptRunResult> {
+  ): Promise<ManagedCompletion> {
     if (signal.aborted) {
-      throw this.abortError(signal, "Waiting for delegated execution was cancelled.");
+      throw new ChildRuntimeError("ABORTED", "Waiting for delegated execution was cancelled.");
     }
 
-    return new Promise<AttemptRunResult>((resolve, reject) => {
+    return new Promise<ManagedCompletion>((resolve, reject) => {
       const cleanup = (): void => signal.removeEventListener("abort", onAbort);
       const onAbort = (): void => {
         cleanup();
-        reject(this.abortError(signal, "Waiting for delegated execution was cancelled."));
+        reject(new ChildRuntimeError("ABORTED", "Waiting for delegated execution was cancelled."));
       };
       signal.addEventListener("abort", onAbort, { once: true });
       completion.then(
         (result) => {
           cleanup();
-          resolve(result);
+          resolve(result as ManagedCompletion);
         },
         (error) => {
           cleanup();
@@ -779,7 +773,7 @@ export class AgentExecutionCoordinator {
       record.status = "orphaned";
       record.errors = [
         ...(record.errors ?? []),
-        "ORPHANED_SESSION: no live child run exists for this persisted handle.",
+        "ORPHANED_SESSION: no live managed subagent exists for this persisted handle.",
       ];
       writeRecord(ctx.cwd, record);
       this.finalizePersistedHandle(ctx, record);
@@ -791,8 +785,9 @@ export class AgentExecutionCoordinator {
     const record = readRecord(ctx.cwd, effectiveSessionId(ctx), id);
     if (!record || isTerminalHandleStatus(record.status)) return record;
     if (!record.childRunId) return record;
-    const live = getChildSessionRegistry().get(record.childRunId);
-    return live ? record : this.orphanHandle(ctx, record);
+    return getChildSessionRegistry().get(record.childRunId)
+      ? record
+      : this.orphanHandle(ctx, record);
   }
 
   async awaitHandle(
@@ -805,8 +800,7 @@ export class AgentExecutionCoordinator {
     if (!record.childRunId) return record;
     const live = getChildSessionRegistry().get(record.childRunId);
     if (!live) return this.orphanHandle(ctx, record);
-    const result = await this.awaitLiveCompletion(live.completion, signal);
-    return result.record as HandleRecord;
+    return (await this.awaitLiveCompletion(live.completion, signal)).record;
   }
 
   async cancelHandle(
@@ -825,19 +819,11 @@ export class AgentExecutionCoordinator {
       const registry = getChildSessionRegistry();
       const live = registry.get(record.childRunId);
       if (live) {
-        const cancellation = new ChildRuntimeError("ABORTED", reason);
-        if (!live.controller.signal.aborted) live.controller.abort(cancellation);
         try {
-          await live.run.abort(reason);
-        } catch {
-          // Provider abort is best-effort after terminal persistence.
+          await live.handle.cancel(reason);
+        } finally {
+          registry.remove(record.childRunId);
         }
-        try {
-          await live.run.dispose();
-        } catch {
-          // Disposal is best-effort; registry removal is authoritative.
-        }
-        registry.remove(record.childRunId);
       }
     }
 

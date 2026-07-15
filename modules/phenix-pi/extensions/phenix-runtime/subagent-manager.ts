@@ -33,12 +33,8 @@ export interface SubagentSnapshot {
   readonly error?: SubagentError;
 }
 
-/** Stable public lifecycle protocol independent from backend event payloads. */
 export type SubagentEvent =
-  | {
-      readonly type: "session.started";
-      readonly snapshot: SubagentSnapshot;
-    }
+  | { readonly type: "session.started"; readonly snapshot: SubagentSnapshot }
   | {
       readonly type: "agent.event";
       readonly snapshot: SubagentSnapshot;
@@ -70,16 +66,17 @@ export type SubagentEvent =
       readonly snapshot: SubagentSnapshot;
       readonly reason: string;
     }
-  | {
-      readonly type: "session.disposed";
-      readonly snapshot: SubagentSnapshot;
-    };
+  | { readonly type: "session.disposed"; readonly snapshot: SubagentSnapshot };
+
+export interface SubagentCancellation {
+  readonly code?: string;
+  readonly reason: string;
+}
 
 /**
  * Persistent asynchronous control surface for one subagent.
- *
- * Cancelling a `result()` wait must not implicitly cancel the child. Explicit
- * child termination is always performed through `cancel()`.
+ * Cancelling a result wait never cancels the child; explicit termination uses
+ * `cancel()`. Runtime callers may preserve a structured failure code.
  */
 export interface SubagentHandle<TOutput> {
   readonly id: string;
@@ -89,17 +86,11 @@ export interface SubagentHandle<TOutput> {
   result(signal?: AbortSignal): Promise<TOutput>;
 
   send(message: string, signal?: AbortSignal): Promise<void>;
-  cancel(reason?: string): Promise<void>;
+  cancel(cancellation?: string | SubagentCancellation): Promise<void>;
 
   subscribe(listener: (event: SubagentEvent) => void): () => void;
 }
 
-/**
- * Anti-corruption port between the stable public API and an execution system.
- *
- * An adapter owns request compilation, contracts, verification, persistence,
- * and the concrete Pi/session backend. The manager owns only API semantics.
- */
 export interface SubagentExecutionAdapter {
   spawn<TOutput>(
     request: SubagentRequest<TOutput>,
@@ -153,7 +144,6 @@ export class SubagentManager {
     this.adapter = adapter;
   }
 
-  /** Spawn a child and return immediately after its execution handle is ready. */
   async spawn<TOutput>(
     request: SubagentRequest<TOutput>,
     signal?: AbortSignal,
@@ -162,7 +152,6 @@ export class SubagentManager {
     return this.adapter.spawn(request, signal);
   }
 
-  /** Spawn a child and await its accepted, decoded structured result. */
   async run<TOutput>(request: SubagentRequest<TOutput>, signal?: AbortSignal): Promise<TOutput> {
     const handle = await this.spawn(request, signal);
     return handle.result(signal);
