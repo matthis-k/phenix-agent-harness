@@ -96,6 +96,7 @@ import {
 import type { CriticValue, HandleRecord, WorkflowBinding } from "./handle-types.ts";
 import { CRITIC_OUTPUT_SCHEMA, HANDLE_VERSION, isTerminalHandleStatus } from "./handle-types.ts";
 import { runVerificationCommands } from "./verification.ts";
+import { createWorkflowExecutionCompiler } from "./workflow-execution-compiler.ts";
 
 // ── Delegate execution result ───────────────────────────────────────────────
 
@@ -545,7 +546,7 @@ export class AgentExecutionCoordinator {
         activeHandles: [],
       });
 
-      // ── Prepare declarative child session request ───────────────────────
+      // ── Compile the authorized workflow execution ──────────────────────
       const childRunIdVal = childRunId(`child_${record.id}`);
       const parentRunId =
         parent.kind === "child" && parent.childRunId ? childRunId(parent.childRunId) : undefined;
@@ -553,21 +554,13 @@ export class AgentExecutionCoordinator {
         parent.kind === "child" && parent.rootChildRunId
           ? childRunId(parent.rootChildRunId)
           : childRunIdVal;
-      const sessionRequest = {
-        task: params.task,
-        session: {
-          agent: role,
-          thinking: producerSpec.thinking,
-          persistence: "file" as const,
-        },
-        defaults: {
-          agent: role,
-          modelSet: modelSetId(selectedModelSet),
-          difficulty: wfRecord.difficulty,
-          thinking: producerSpec.thinking,
-          persistence: "file" as const,
-        },
-        bindings: {
+      const executionCompiler = createWorkflowExecutionCompiler({
+        role,
+        modelSet: modelSetId(selectedModelSet),
+        difficulty: wfRecord.difficulty,
+        thinking: producerSpec.thinking,
+        persistence: "file",
+        runtime: {
           id: childRunIdVal,
           ...(parentRunId ? { parentId: parentRunId } : {}),
           rootId: rootRunId,
@@ -596,7 +589,9 @@ export class AgentExecutionCoordinator {
           turnBudget: producerSpec.turnBudget,
           toolBudget: producerSpec.toolBudget,
         },
-      };
+        acceptanceKind: "workflow-producer",
+        acceptanceData: { handleId: record.id },
+      });
 
       // ── Start the child run ───────────────────────────────────────────
       // One coordinator-owned scope covers model execution, deterministic
@@ -650,7 +645,15 @@ export class AgentExecutionCoordinator {
 
       let run: ChildRun;
       try {
-        run = await this.sessionRuntime.spawn(sessionRequest, runSignal);
+        const executionPlan = await executionCompiler.compile(
+          {
+            task: params.task,
+            requirements,
+            returns: { schema: outputSchema },
+          },
+          runSignal,
+        );
+        run = await this.sessionRuntime.spawn(executionPlan, runSignal);
       } catch (error) {
         cleanupRunScope();
         record.status = "failed";

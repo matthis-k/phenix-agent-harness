@@ -53,9 +53,7 @@ export class WorkflowExecutionCompiler implements SubagentExecutionCompiler {
     const acceptance: AcceptancePlan<TOutput> = {
       kind: this.scope.acceptanceKind ?? "workflow",
       returns: request.returns,
-      ...(this.scope.acceptanceData !== undefined
-        ? { data: this.scope.acceptanceData }
-        : {}),
+      ...(this.scope.acceptanceData !== undefined ? { data: this.scope.acceptanceData } : {}),
     };
 
     return Promise.resolve({

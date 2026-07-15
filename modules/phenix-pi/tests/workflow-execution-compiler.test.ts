@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { modelSetId } from "../extensions/phenix-kernel/ids.ts";
-import { routing } from "../extensions/phenix-runtime/index.ts";
 import type { RuntimeBindings } from "../extensions/phenix-runtime/execution-plan.ts";
+import { routing } from "../extensions/phenix-runtime/index.ts";
 import { returns } from "../extensions/phenix-runtime/subagent-api.ts";
 import {
   createWorkflowExecutionCompiler,

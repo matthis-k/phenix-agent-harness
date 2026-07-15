@@ -9,10 +9,7 @@
 import { agentClientRef } from "../phenix-kernel/refs.ts";
 import type { ChildRun, ChildSessionBackend, ChildSessionSpec } from "./child-session-types.ts";
 import type { SubagentExecutionPlan } from "./execution-plan.ts";
-import {
-  resolveSubagentSessionOptions,
-  type SessionRouteResolver,
-} from "./session-options.ts";
+import { resolveSubagentSessionOptions, type SessionRouteResolver } from "./session-options.ts";
 
 /** Deterministically translates a canonical plan into a backend specification. */
 export class SubagentSessionPlanner {
@@ -64,10 +61,7 @@ export class SubagentSessionRuntime {
     return this.planner.plan(execution);
   }
 
-  async spawn(
-    execution: SubagentExecutionPlan<unknown>,
-    signal?: AbortSignal,
-  ): Promise<ChildRun> {
+  async spawn(execution: SubagentExecutionPlan<unknown>, signal?: AbortSignal): Promise<ChildRun> {
     const spec = await this.plan(execution);
     return this.backend.start(spec, signal ?? new AbortController().signal);
   }
