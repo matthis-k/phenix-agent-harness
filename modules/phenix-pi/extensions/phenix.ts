@@ -38,6 +38,7 @@ import {
 } from "./phenix-runtime/child-session-backend.ts";
 import { getChildSessionRegistry } from "./phenix-runtime/child-session-registry.ts";
 import { createDelegationTool } from "./phenix-runtime/delegation-tool.ts";
+import { createSessionSubagentManagerFactory } from "./phenix-runtime/subagent-manager-factory.ts";
 import {
   bootstrapPhenixSubagentsSkillPrompt,
   shouldBootstrapPhenixSubagentsSkill,
@@ -46,6 +47,7 @@ import { AgentExecutionCoordinator } from "./phenix-subagents/coordinator.ts";
 import { defaultAgentClients } from "./phenix-subagents/definitions.ts";
 import { createExecutionQualityService } from "./phenix-subagents/execution-quality-service.ts";
 import phenixSubagents from "./phenix-subagents/index.ts";
+import { createWorkflowAcceptanceEngine } from "./phenix-subagents/workflow-acceptance-engine.ts";
 
 const defaultPhenixConfiguration = definePhenixConfiguration({
   activeModelSet: modelSetRef("mixed"),
@@ -316,11 +318,14 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
     },
   });
   const quality = createExecutionQualityService({ sessions: sessionRuntime });
+  const acceptance = createWorkflowAcceptanceEngine({ quality });
+  const managers = createSessionSubagentManagerFactory({
+    sessions: sessionRuntime,
+    acceptance,
+  });
 
   coordinator = new AgentExecutionCoordinator({
-    backend,
-    sessionRuntime,
-    quality,
+    managers,
     activeModelSet: linkResult.graph.activeModelSet.id,
     maximumDelegationDepth: defaultPhenixConfiguration.runtime.maximumDelegationDepth,
   });
