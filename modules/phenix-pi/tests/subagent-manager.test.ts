@@ -136,10 +136,7 @@ describe("SubagentManager", () => {
     const adapter = new RecordingAdapter();
     const manager = createSubagentManager(adapter);
 
-    await assert.rejects(
-      manager.spawn({ ...request(), task: "   " }),
-      /task must be non-empty/,
-    );
+    await assert.rejects(manager.spawn({ ...request(), task: "   " }), /task must be non-empty/);
     await assert.rejects(
       manager.spawn({
         ...request(),
