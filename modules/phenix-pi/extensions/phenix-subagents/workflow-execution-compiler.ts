@@ -2,8 +2,8 @@
  * workflow-execution-compiler — compile an authorized workflow scope
  *
  * Workflow authority resolves role, routing defaults, runtime bindings, and the
- * acceptance policy before exposing a compiler. The compiler then translates
- * the same public SubagentRequest used elsewhere into the canonical passive plan.
+ * acceptance policy before exposing a compiler. The compiler translates the
+ * shared public SubagentRequest into the canonical passive execution plan.
  */
 
 import type { AgentRole } from "../phenix-kernel/agents.ts";
