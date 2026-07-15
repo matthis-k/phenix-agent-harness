@@ -8,8 +8,8 @@
  */
 
 import type { ThinkingLevel } from "../phenix-kernel/task.ts";
-import type { SubagentRequest } from "./subagent-api.ts";
 import type { ConcreteModelRef } from "./child-session-types.ts";
+import type { SubagentRequest } from "./subagent-api.ts";
 
 export type SubagentStatus =
   | "starting"
