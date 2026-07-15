@@ -13,6 +13,7 @@ import {
   type SubagentHandle,
   type SubagentRequest,
   type SubagentSnapshot,
+  type SubagentStatus,
 } from "../extensions/phenix-runtime/index.ts";
 
 const SummarySchema = Type.Object({
@@ -34,18 +35,30 @@ function request(): SubagentRequest<SummaryResult> {
 }
 
 class FakeHandle<TOutput> implements SubagentHandle<TOutput> {
-  readonly id = "handle-test";
+  readonly id: string;
   readonly value: TOutput;
   readonly resultSignals: Array<AbortSignal | undefined> = [];
   readonly sent: string[] = [];
   readonly cancellations: Array<string | SubagentCancellation | undefined> = [];
+  private readonly status: SubagentStatus;
+  private readonly parentId: string | undefined;
 
-  constructor(value: TOutput) {
+  constructor(
+    value: TOutput,
+    options: { readonly id?: string; readonly status?: SubagentStatus; readonly parentId?: string } = {},
+  ) {
     this.value = value;
+    this.id = options.id ?? "handle-test";
+    this.status = options.status ?? "running";
+    this.parentId = options.parentId;
   }
 
   snapshot(): SubagentSnapshot {
-    return { id: this.id, status: "running" };
+    return {
+      id: this.id,
+      status: this.status,
+      ...(this.parentId ? { parentId: this.parentId } : {}),
+    };
   }
 
   poll(): Promise<SubagentSnapshot> {
@@ -80,8 +93,11 @@ class RecordingAdapter implements SubagentExecutionAdapter {
   requests: SubagentRequest<unknown>[] = [];
   signals: Array<AbortSignal | undefined> = [];
 
-  constructor(value: SummaryResult = { summary: "done" }) {
-    this.handle = new FakeHandle(value);
+  constructor(
+    value: SummaryResult = { summary: "done" },
+    options: { readonly id?: string; readonly status?: SubagentStatus; readonly parentId?: string } = {},
+  ) {
+    this.handle = new FakeHandle(value, options);
   }
 
   spawn<TOutput>(
@@ -117,6 +133,31 @@ describe("SubagentManager", () => {
 
     assert.deepEqual(result, { summary: "typed result" });
     assert.equal(adapter.handle.resultSignals[0], controller.signal);
+  });
+
+  it("registers spawned handles for typed get", async () => {
+    const adapter = new RecordingAdapter({ summary: "typed" }, { id: "typed-handle" });
+    const manager = createSubagentManager(adapter);
+
+    const spawned = await manager.spawn(request());
+    const stored = manager.get<SummaryResult>(spawned.id);
+
+    assert.equal(stored, spawned);
+    assert.deepEqual(await stored?.result(), { summary: "typed" });
+    assert.equal(manager.get("missing"), undefined);
+  });
+
+  it("lists snapshots and filters by parent and status", async () => {
+    const first = createSubagentManager(
+      new RecordingAdapter({ summary: "first" }, { id: "first", parentId: "root" }),
+    );
+    await first.spawn(request());
+
+    assert.deepEqual(first.list(), [{ id: "first", status: "running", parentId: "root" }]);
+    assert.deepEqual(first.list({ parentId: "root" }), first.list());
+    assert.deepEqual(first.list({ status: "running" }), first.list());
+    assert.deepEqual(first.list({ status: ["completed", "failed"] }), []);
+    assert.deepEqual(first.list({ parentId: "other" }), []);
   });
 
   it("does not cancel the child when an awaited result signal is cancelled", async () => {
