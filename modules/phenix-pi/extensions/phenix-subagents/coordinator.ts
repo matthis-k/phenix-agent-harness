@@ -38,11 +38,11 @@ import {
   isChildRuntimeErrorCode,
 } from "../phenix-runtime/child-session-types.ts";
 import { ContractSubmissionChannelImpl } from "../phenix-runtime/contract-channel.ts";
-import type { SubagentSessionRuntime } from "../phenix-runtime/subagent-session-runtime.ts";
 import type {
   DelegateExecutionParams,
   ParentExecutionContext,
 } from "../phenix-runtime/delegation-tool.ts";
+import type { SubagentSessionRuntime } from "../phenix-runtime/subagent-session-runtime.ts";
 import {
   buildWorkflowDecisionContext,
   buildWorkflowRuntimeDependencies,
