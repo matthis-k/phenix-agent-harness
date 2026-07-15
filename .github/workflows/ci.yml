@@ -5,11 +5,10 @@ on:
   push:
     branches:
       - main
-      - feat/contract-workflow-api
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -24,50 +23,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
 
       - name: Install Nix
         uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Remove final workflow API lint warnings
-        if: (github.ref_name == 'feat/contract-workflow-api' || github.head_ref == 'feat/contract-workflow-api') && github.actor != 'github-actions[bot]'
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-
-          replacements = {
-              Path("modules/phenix-pi/extensions/phenix-subagents/policy.ts"): [
-                  ('  AGENT_KINDS,\n', ''),
-              ],
-              Path("modules/phenix-pi/tests/contract.test.ts"): [
-                  ('import type { WorkflowTransitionId } from "../extensions/phenix-workflow/workflow-types.ts";\n', ''),
-                  ('import { mkTransitionId } from "../extensions/phenix-workflow/workflow-types.ts";\n', ''),
-              ],
-              Path("modules/phenix-pi/tests/tool-policy.test.ts"): [
-                  ('import type { AgentRole } from "../extensions/phenix-subagents/agent-types.ts";\n', ''),
-                  ('  type ToolPatchInput,\n', ''),
-              ],
-          }
-          for path, edits in replacements.items():
-              text = path.read_text()
-              for old, new in edits:
-                  text = text.replace(old, new)
-              path.write_text(text)
-          PY
-          nix run nixpkgs#biome -- check --write \
-            modules/phenix-pi/extensions/phenix-subagents/policy.ts \
-            modules/phenix-pi/tests/contract.test.ts \
-            modules/phenix-pi/tests/tool-policy.test.ts
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git commit -m "style(workflow): remove final lint warnings"
-          git push origin HEAD:${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}
 
       - name: Run read-only Tend CI profile
         id: tend
