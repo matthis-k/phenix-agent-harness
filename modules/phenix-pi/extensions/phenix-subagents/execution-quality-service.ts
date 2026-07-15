@@ -1,7 +1,7 @@
 /**
  * execution-quality-service — deterministic verification and critic execution
  *
- * The coordinator sequences workflow lifecycle. This service owns the concrete
+ * The workflow delegator sequences workflow lifecycle. This service owns the concrete
  * mechanisms used to assess producer work: verification commands and an
  * isolated critic child session. Critic execution uses the same canonical
  * SubagentExecutionPlan and session runtime as every other child.
@@ -21,17 +21,17 @@ import {
 import { ContractSubmissionChannelImpl } from "../phenix-runtime/contract-channel.ts";
 import type { SubagentExecutionPlan } from "../phenix-runtime/execution-plan.ts";
 import { computeOptionsDigest } from "../phenix-workflow/workflow-projection.ts";
+import { FileContractStore } from "./contract-store.ts";
+import { findProjectRoot } from "./handle-store.ts";
+import type { CriticValue } from "./handle-types.ts";
+import { CRITIC_OUTPUT_SCHEMA } from "./handle-types.ts";
+import { createProducerContract } from "./producer-contract.ts";
 import type {
   CriticRunInput,
   CriticRunResult,
   VerificationInput,
   VerificationResult,
-} from "./attempt-runner.ts";
-import { FileContractStore } from "./contract-store.ts";
-import { createAttemptContract } from "./handle-evaluation.ts";
-import { findProjectRoot } from "./handle-store.ts";
-import type { CriticValue } from "./handle-types.ts";
-import { CRITIC_OUTPUT_SCHEMA } from "./handle-types.ts";
+} from "./producer-cycle-runner.ts";
 import { runVerificationCommands } from "./verification.ts";
 
 export interface ExecutionQualitySessionRuntime {
@@ -113,7 +113,7 @@ export class ExecutionQualityService {
       "Return an independent approve/reject verdict through phenix_complete.",
     ].join("\n");
 
-    const issued = await createAttemptContract({
+    const issued = await createProducerContract({
       spec: criticSpec,
       assignment: {
         task: criticTask,

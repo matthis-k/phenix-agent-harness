@@ -38,8 +38,8 @@ export type DelegateExecutionResult =
       readonly details?: Record<string, unknown>;
     };
 
-/** Minimal coordinator port required by the delegation tool. */
-export interface DelegationCoordinator {
+/** Minimal delegator port required by the delegation tool. */
+export interface WorkflowDelegatorPort {
   delegate(input: {
     readonly params: DelegateExecutionParams;
     readonly parent: ParentExecutionContext;
@@ -60,11 +60,11 @@ function errorResult(
 
 /** Create one delegation tool bound to a specific parent and authority view. */
 export function createDelegationTool(input: {
-  readonly coordinator: DelegationCoordinator;
+  readonly delegator: WorkflowDelegatorPort;
   readonly parent: ParentExecutionContext;
   readonly decisionContext: WorkflowDecisionContext;
 }): ToolDefinition<typeof DelegateParams, Record<string, unknown>> {
-  const { coordinator, parent, decisionContext } = input;
+  const { delegator, parent, decisionContext } = input;
 
   return {
     name: "phenix_delegate",
@@ -119,7 +119,7 @@ export function createDelegationTool(input: {
           );
         }
 
-        const result = await coordinator.delegate({
+        const result = await delegator.delegate({
           params,
           parent,
           signal: signal ?? new AbortController().signal,
