@@ -80,10 +80,7 @@ export interface RoutedSessionModelOptions {
 
 /** Declarative model-selector constructors for session options. */
 export const routing = Object.freeze({
-  get(
-    agent?: AgentRole,
-    options: RoutedSessionModelOptions = {},
-  ): RoutedSessionModel {
+  get(agent?: AgentRole, options: RoutedSessionModelOptions = {}): RoutedSessionModel {
     return {
       kind: "route",
       ...(agent !== undefined ? { agent } : {}),
@@ -106,10 +103,7 @@ export const routing = Object.freeze({
   },
 });
 
-function selectedAgent(
-  requested: AgentRole | undefined,
-  fallback: AgentRole,
-): AgentRole {
+function selectedAgent(requested: AgentRole | undefined, fallback: AgentRole): AgentRole {
   return requested === undefined ? fallback : requested;
 }
 
