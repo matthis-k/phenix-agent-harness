@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { Type } from "typebox";
 
 import { modelSetId } from "../extensions/phenix-kernel/ids.ts";
 import type { RuntimeBindings } from "../extensions/phenix-runtime/execution-plan.ts";
@@ -28,7 +29,11 @@ describe("WorkflowExecutionCompiler", () => {
       acceptanceKind: "workflow-producer",
       acceptanceData: { handleId: "handle-test" },
     });
-    const output = returns<{ readonly plan: string }>({ type: "object" });
+    const output = returns(
+      Type.Object({
+        plan: Type.String(),
+      }),
+    );
 
     const plan = await compiler.compile(
       {
@@ -76,7 +81,7 @@ describe("WorkflowExecutionCompiler", () => {
       compiler.compile(
         {
           task: "Inspect the repository.",
-          returns: returns({ type: "object" }),
+          returns: returns(Type.Object({})),
         },
         controller.signal,
       ),
