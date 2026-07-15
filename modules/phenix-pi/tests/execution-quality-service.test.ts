@@ -31,11 +31,27 @@ function criticSpec(cwd: string): ResolvedChildSpec {
     tier: "standard" as never,
     thinking: "medium",
     cwd,
-    tools: { effective: [] } as never,
+    tools: {
+      presetRevision: 1,
+      role: "critic",
+      source: {
+        inherited: false,
+        patch: { additional: [], removed: [] },
+      },
+      effective: [],
+    },
     skills: [],
     extensions: [],
     delegation: {
-      roles: {} as never,
+      roles: {
+        presetRevision: 1,
+        role: "critic",
+        source: {
+          inherited: false,
+          patch: { additional: [], removed: [] },
+        },
+        effective: [],
+      },
       availableRoles: [],
       remainingDepth: 0,
     },
