@@ -71,7 +71,7 @@ export interface SubagentExecutionAdapter {
 
 export class SubagentExecutionError extends Error {
   readonly code: string;
-  readonly snapshot?: SubagentSnapshot;
+  readonly snapshot: SubagentSnapshot | undefined;
 
   constructor(
     code: string,
@@ -116,7 +116,7 @@ export class SubagentManager {
   }
 
   /** Spawn a child and return immediately after its execution handle is ready. */
-  spawn<TOutput>(
+  async spawn<TOutput>(
     request: SubagentRequest<TOutput>,
     signal?: AbortSignal,
   ): Promise<SubagentHandle<TOutput>> {
