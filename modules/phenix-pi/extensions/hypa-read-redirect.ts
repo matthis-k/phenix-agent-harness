@@ -4,10 +4,7 @@ import {
   type ExtensionAPI,
   truncateHead,
 } from "@earendil-works/pi-coding-agent";
-import {
-  getExecArgs,
-  resolveHypaBinary,
-} from "@hypabolic/pi-hypa/extensions/rewrite-client.ts";
+import { getExecArgs, resolveHypaBinary } from "@hypabolic/pi-hypa/extensions/rewrite-client.ts";
 import { buildReadCommand } from "@hypabolic/pi-hypa/extensions/tools.ts";
 import { Type } from "typebox";
 import { ensureReadActive, hasHypaReadTool } from "./hypa-read-policy.ts";
