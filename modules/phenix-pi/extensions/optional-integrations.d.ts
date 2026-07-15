@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
- type ExtensionRegistrar = (pi: ExtensionAPI) => void | Promise<void>;
+type ExtensionRegistrar = (pi: ExtensionAPI) => void | Promise<void>;
 
 declare module "@hypabolic/pi-hypa/extensions/index.ts" {
   const register: ExtensionRegistrar;
