@@ -15,6 +15,8 @@
     "baseUrl": ".",
     "paths": {
       "@hypabolic/pi-hypa/extensions/index.ts": ["extensions/optional-integrations.d.ts"],
+      "@hypabolic/pi-hypa/extensions/rewrite-client.ts": ["extensions/optional-integrations.d.ts"],
+      "@hypabolic/pi-hypa/extensions/tools.ts": ["extensions/optional-integrations.d.ts"],
       "pi-lsp/extensions/pi-lsp/index.ts": ["extensions/optional-integrations.d.ts"],
       "pi-mcp-adapter/index.ts": ["extensions/optional-integrations.d.ts"],
       "pi-context-tools/extensions/index.ts": ["extensions/optional-integrations.d.ts"],
