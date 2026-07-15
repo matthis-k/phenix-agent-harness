@@ -502,7 +502,7 @@ export class AgentExecutionCoordinator {
             contract: contractArtifact,
             handleId: record.id,
             childRunId: childRunIdValue,
-            rootSubagentId: rootRunId,
+            rootChildRunId: rootRunId,
             modelSet: selectedModelSet,
             maximumDelegationDepth: contractArtifact.runtime.delegation.remainingDepth,
           },
