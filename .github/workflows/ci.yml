@@ -32,34 +32,58 @@ jobs:
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Apply final subagent cleanup
+      - name: Finalize subagent naming audit
         if: (github.ref_name == 'refactor/final-subagent-cleanup' || github.head_ref == 'refactor/final-subagent-cleanup') && github.actor != 'github-actions[bot]'
         shell: bash
         run: |
-          set -o pipefail
-          {
-            sed -i 's/attempt-runner/producer-cycle-runner/g' \
-              modules/phenix-pi/extensions/phenix-subagents/attempt-runner.ts
-            python .github/scripts/finalize-subagent-runtime.py
-            mapfile -t changed_ts < <(git diff --name-only -- '*.ts')
-            nix run nixpkgs#biome -- check --write "${changed_ts[@]}"
-            git config user.name github-actions[bot]
-            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-            git add -A
-            git commit -m "refactor(runtime): finalize subagent architecture"
-            git push origin HEAD:${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}
-          } > cleanup.log 2>&1
-          status=$?
-          cat cleanup.log
-          exit "$status"
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
 
-      - name: Upload cleanup diagnostics
-        if: failure()
-        uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097 # v4.4.2
-        with:
-          name: final-subagent-cleanup-diagnostics
-          path: cleanup.log
-          if-no-files-found: error
+          replacements = {
+              Path("modules/phenix-pi/extensions/phenix-subagents/workflow-delegator.ts"): {
+                  "* delegator — Phenix workflow delegation delegator":
+                      "* workflow-delegator — authoritative workflow delegation",
+              },
+              Path("modules/phenix-pi/extensions/phenix-subagents/execution-quality-service.ts"): {
+                  "The coordinator sequences workflow lifecycle.":
+                      "The workflow delegator sequences workflow lifecycle.",
+              },
+          }
+          for path, mapping in replacements.items():
+              text = path.read_text()
+              for old, new in mapping.items():
+                  if text.count(old) != 1:
+                      raise RuntimeError(f"expected one occurrence of {old!r} in {path}")
+                  text = text.replace(old, new)
+              path.write_text(text)
+          PY
+
+          stale_patterns=(
+            'AgentExecutionCoordinator'
+            'DelegationCoordinator'
+            'AttemptRunResult'
+            'createAttemptContract'
+            'handle-evaluation\.ts'
+            'attempt-runner\.ts'
+            'phenix-subagents/coordinator\.ts'
+            'ACCEPTANCE_RANK'
+            'interface Evaluation'
+          )
+          for pattern in "${stale_patterns[@]}"; do
+            if rg -n "$pattern" modules/phenix-pi/extensions modules/phenix-pi/tests; then
+              echo "stale runtime symbol or path remains: $pattern" >&2
+              exit 1
+            fi
+          done
+
+          mapfile -t changed_ts < <(git diff --name-only -- '*.ts')
+          nix run nixpkgs#biome -- check --write "${changed_ts[@]}"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "docs(runtime): finish subagent terminology cleanup"
+          git push origin HEAD:${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}
 
       - name: Run read-only Tend CI profile
         id: tend
