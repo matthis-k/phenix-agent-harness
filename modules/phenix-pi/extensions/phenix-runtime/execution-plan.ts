@@ -6,12 +6,9 @@
  * backend DTO. Dedicated services resolve the session and evaluate acceptance.
  */
 
-import type { ReturnSpec } from "./subagent-api.ts";
 import type { ChildRun, ChildSessionSpec } from "./child-session-types.ts";
-import type {
-  SubagentSessionDefaults,
-  SubagentSessionOptions,
-} from "./session-options.ts";
+import type { SubagentSessionDefaults, SubagentSessionOptions } from "./session-options.ts";
+import type { ReturnSpec } from "./subagent-api.ts";
 
 /**
  * Runtime-owned values required to construct a child session.
