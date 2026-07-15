@@ -42,6 +42,7 @@ import type {
   DelegateExecutionParams,
   ParentExecutionContext,
 } from "../phenix-runtime/delegation-tool.ts";
+import type { SubagentSessionRuntime } from "../phenix-runtime/subagent-session-runtime.ts";
 import {
   buildWorkflowDecisionContext,
   buildWorkflowRuntimeDependencies,
@@ -146,6 +147,7 @@ function createHandle(input: {
 
 export interface AgentExecutionCoordinatorOptions {
   readonly backend: ChildSessionBackend;
+  readonly sessionRuntime: SubagentSessionRuntime;
   readonly resolveModelRegistry: () => ModelRegistry;
   readonly activeModelSet: string;
   readonly agentDir: string;
@@ -154,12 +156,14 @@ export interface AgentExecutionCoordinatorOptions {
 
 export class AgentExecutionCoordinator {
   private readonly backend: ChildSessionBackend;
+  private readonly sessionRuntime: SubagentSessionRuntime;
   private readonly resolveModelRegistry: () => ModelRegistry;
   private readonly activeModelSet: string;
   private readonly maximumDelegationDepth: number;
 
   constructor(options: AgentExecutionCoordinatorOptions) {
     this.backend = options.backend;
+    this.sessionRuntime = options.sessionRuntime;
     this.resolveModelRegistry = options.resolveModelRegistry;
     this.activeModelSet = options.activeModelSet;
     this.maximumDelegationDepth = options.maximumDelegationDepth;
@@ -506,43 +510,6 @@ export class AgentExecutionCoordinator {
 
       writeRecord(ctx.cwd, record);
 
-      // ── Resolve concrete model via routing ────────────────────────────
-      let concreteModel: { readonly provider: string; readonly id: string };
-      try {
-        const route = await resolveChildRoute({
-          modelSet: modelSetId(selectedModelSet),
-          role,
-          difficulty: wfRecord.difficulty,
-        });
-        concreteModel = {
-          provider: route.model.provider,
-          id: route.model.model,
-        };
-
-        // Verify the model exists in the registry before starting.
-        const model = this.resolveModelRegistry().find(concreteModel.provider, concreteModel.id);
-        if (!model) {
-          record.status = "failed";
-          record.errors = [`MODEL_NOT_FOUND: ${concreteModel.provider}/${concreteModel.id}`];
-          writeRecord(ctx.cwd, record);
-          finalizeOrRejectHandle(record);
-          return {
-            ok: false,
-            message: `phenix_delegate: configured child model ${concreteModel.provider}/${concreteModel.id} is unavailable.`,
-            details: { code: "MODEL_NOT_FOUND" },
-          };
-        }
-      } catch (error) {
-        record.status = "failed";
-        record.errors = [error instanceof Error ? error.message : String(error)];
-        writeRecord(ctx.cwd, record);
-        finalizeOrRejectHandle(record);
-        return {
-          ok: false,
-          message: `phenix_delegate: routing failed: ${error instanceof Error ? error.message : String(error)}`,
-        };
-      }
-
       // ── Issue contract and create channel ─────────────────────────────
       const issuedContract = await createAttemptContract({
         spec: producerSpec,
@@ -578,7 +545,7 @@ export class AgentExecutionCoordinator {
         activeHandles: [],
       });
 
-      // ── Prepare child session spec ────────────────────────────────────
+      // ── Prepare declarative child session request ───────────────────────
       const childRunIdVal = childRunId(`child_${record.id}`);
       const parentRunId =
         parent.kind === "child" && parent.childRunId ? childRunId(parent.childRunId) : undefined;
@@ -586,40 +553,49 @@ export class AgentExecutionCoordinator {
         parent.kind === "child" && parent.rootChildRunId
           ? childRunId(parent.rootChildRunId)
           : childRunIdVal;
-      const spec: ChildSessionSpec = {
-        id: childRunIdVal,
-        ...(parentRunId ? { parentId: parentRunId } : {}),
-        rootId: rootRunId,
-        handleId: record.id,
-        agentClient: agentClientRef(producerSpec.agent.replace(/^phenix\./, "")),
-        role: producerSpec.role,
-        cwd: ctx.cwd,
-        model: concreteModel,
-        thinkingLevel: producerSpec.thinking,
-        initialPrompt: params.task,
-        contract: contractArtifact,
-        workflowProjection,
-        contractChannel,
-        parentContext: {
-          kind: "child",
-          sessionId,
-          cwd: ctx.cwd,
-          contractId: contractArtifact.id,
-          contract: contractArtifact,
-          handleId: record.id,
-          childRunId: childRunIdVal,
-          rootChildRunId: rootRunId,
-          modelSet: selectedModelSet,
-          maximumDelegationDepth: contractArtifact.runtime.delegation.remainingDepth,
+      const sessionRequest = {
+        task: params.task,
+        session: {
+          agent: role,
+          thinking: producerSpec.thinking,
+          persistence: "file" as const,
         },
-        effectiveTools: producerSpec.tools.effective,
-        skillRefs: producerSpec.skills,
-        extensionRefs: producerSpec.extensions,
-        inheritProjectContext: true,
-        timeoutMs: producerSpec.timeoutMs,
-        turnBudget: producerSpec.turnBudget,
-        toolBudget: producerSpec.toolBudget,
-        persistence: "file",
+        defaults: {
+          agent: role,
+          modelSet: modelSetId(selectedModelSet),
+          difficulty: wfRecord.difficulty,
+          thinking: producerSpec.thinking,
+          persistence: "file" as const,
+        },
+        bindings: {
+          id: childRunIdVal,
+          ...(parentRunId ? { parentId: parentRunId } : {}),
+          rootId: rootRunId,
+          handleId: record.id,
+          cwd: ctx.cwd,
+          contract: contractArtifact,
+          workflowProjection,
+          contractChannel,
+          parentContext: {
+            kind: "child" as const,
+            sessionId,
+            cwd: ctx.cwd,
+            contractId: contractArtifact.id,
+            contract: contractArtifact,
+            handleId: record.id,
+            childRunId: childRunIdVal,
+            rootChildRunId: rootRunId,
+            modelSet: selectedModelSet,
+            maximumDelegationDepth: contractArtifact.runtime.delegation.remainingDepth,
+          },
+          effectiveTools: producerSpec.tools.effective,
+          skillRefs: producerSpec.skills,
+          extensionRefs: producerSpec.extensions,
+          inheritProjectContext: true,
+          timeoutMs: producerSpec.timeoutMs,
+          turnBudget: producerSpec.turnBudget,
+          toolBudget: producerSpec.toolBudget,
+        },
       };
 
       // ── Start the child run ───────────────────────────────────────────
@@ -674,7 +650,7 @@ export class AgentExecutionCoordinator {
 
       let run: ChildRun;
       try {
-        run = await this.backend.start(spec, runSignal);
+        run = await this.sessionRuntime.spawn(sessionRequest, runSignal);
       } catch (error) {
         cleanupRunScope();
         record.status = "failed";
