@@ -1,42 +1,25 @@
 /**
- * coordinator — Phenix agent execution coordinator
+ * coordinator — Phenix workflow delegation coordinator
  *
- * Orchestrates child session delegation using the new Pi-native child-session
- * runtime. Workflow transitions, routing, contract validation, verification,
- * critic decisions, repair limits, budgets, and acceptance remain
- * deterministic in TypeScript.
- *
- * The coordinator uses:
- * - ChildSessionBackend to start live child runs
- * - ContractSubmissionChannel for closure-bound completion tool isolation
- * - ChildSessionRegistry for background mode (live-run registry, no polling)
- * - executeProducerCycles for repair cycles over one Pi session
+ * Owns workflow authority, transition settlement, handle persistence, and
+ * foreground/background lifecycle. Session construction is delegated to the
+ * canonical session runtime; deterministic verification and critic execution
+ * are delegated to ExecutionQualityService.
  */
 
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import type { ExtensionContext, ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { validateSchema } from "../phenix-contracts/validator.ts";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentRole } from "../phenix-kernel/agents.ts";
 import { modelSetId } from "../phenix-kernel/ids.ts";
-import { agentClientRef } from "../phenix-kernel/refs.ts";
-import { resolveChildRoute } from "../phenix-routing/child-route.ts";
 import { modelSetForModelId, PHENIX_PROVIDER } from "../phenix-routing/provider.ts";
 import type {
   AttemptRunResult,
   LiveChildRunRecord,
 } from "../phenix-runtime/child-session-registry.ts";
 import { getChildSessionRegistry } from "../phenix-runtime/child-session-registry.ts";
-import type {
-  ChildRun,
-  ChildSessionBackend,
-  ChildSessionSpec,
-} from "../phenix-runtime/child-session-types.ts";
-import {
-  ChildRuntimeError,
-  childRunId,
-  isChildRuntimeErrorCode,
-} from "../phenix-runtime/child-session-types.ts";
+import type { ChildRun, ChildSessionBackend } from "../phenix-runtime/child-session-types.ts";
+import { ChildRuntimeError, childRunId } from "../phenix-runtime/child-session-types.ts";
 import { ContractSubmissionChannelImpl } from "../phenix-runtime/contract-channel.ts";
 import type {
   DelegateExecutionParams,
@@ -49,7 +32,6 @@ import {
   getOutputSchema,
   PHENIX_DEFAULT_WORKFLOW,
 } from "../phenix-workflow/index.ts";
-import { computeOptionsDigest } from "../phenix-workflow/workflow-projection.ts";
 import type { WorkflowActorSource } from "../phenix-workflow/workflow-runtime.ts";
 import {
   finalizeHandleWorkflow,
@@ -72,18 +54,13 @@ import {
   roleForAgentClient,
 } from "../phenix-workflow/workflow-types.ts";
 import type {
-  CriticRunInput,
-  CriticRunResult,
-  VerificationInput,
-  VerificationResult,
-} from "./attempt-runner.ts";
-import type {
   ContractCreatorContext,
   ResolvedChildSpec,
   ResolvedWorkflowChildInput,
 } from "./child-spec.ts";
 import { resolveChildSpec } from "./child-spec.ts";
 import { FileContractStore } from "./contract-store.ts";
+import type { ExecutionQualityService } from "./execution-quality-service.ts";
 import { createAttemptContract } from "./handle-evaluation.ts";
 import {
   effectiveSessionId,
@@ -93,12 +70,9 @@ import {
   readRecord,
   writeRecord,
 } from "./handle-store.ts";
-import type { CriticValue, HandleRecord, WorkflowBinding } from "./handle-types.ts";
-import { CRITIC_OUTPUT_SCHEMA, HANDLE_VERSION, isTerminalHandleStatus } from "./handle-types.ts";
-import { runVerificationCommands } from "./verification.ts";
+import type { HandleRecord, WorkflowBinding } from "./handle-types.ts";
+import { HANDLE_VERSION, isTerminalHandleStatus } from "./handle-types.ts";
 import { createWorkflowExecutionCompiler } from "./workflow-execution-compiler.ts";
-
-// ── Delegate execution result ───────────────────────────────────────────────
 
 export type DelegateExecutionResult =
   | { readonly ok: true; readonly record: HandleRecord }
@@ -108,12 +82,9 @@ export type DelegateExecutionResult =
       readonly details?: Record<string, unknown>;
     };
 
-// ── Handle creation ─────────────────────────────────────────────────────────
-
 function createHandle(input: {
   readonly id: string;
   readonly sessionId: string;
-  readonly ctx: ExtensionContext;
   readonly producerSpec: ResolvedChildSpec;
   readonly criticSpec?: ResolvedChildSpec;
   readonly task: string;
@@ -144,28 +115,25 @@ function createHandle(input: {
   };
 }
 
-// ── Coordinator ─────────────────────────────────────────────────────────────
-
 export interface AgentExecutionCoordinatorOptions {
   readonly backend: ChildSessionBackend;
   readonly sessionRuntime: SubagentSessionRuntime;
-  readonly resolveModelRegistry: () => ModelRegistry;
+  readonly quality: ExecutionQualityService;
   readonly activeModelSet: string;
-  readonly agentDir: string;
   readonly maximumDelegationDepth: number;
 }
 
 export class AgentExecutionCoordinator {
   private readonly backend: ChildSessionBackend;
   private readonly sessionRuntime: SubagentSessionRuntime;
-  private readonly resolveModelRegistry: () => ModelRegistry;
+  private readonly quality: ExecutionQualityService;
   private readonly activeModelSet: string;
   private readonly maximumDelegationDepth: number;
 
   constructor(options: AgentExecutionCoordinatorOptions) {
     this.backend = options.backend;
     this.sessionRuntime = options.sessionRuntime;
-    this.resolveModelRegistry = options.resolveModelRegistry;
+    this.quality = options.quality;
     this.activeModelSet = options.activeModelSet;
     this.maximumDelegationDepth = options.maximumDelegationDepth;
   }
@@ -179,9 +147,6 @@ export class AgentExecutionCoordinator {
     return this.delegateInternal(input);
   }
 
-  /**
-   * Internal delegation used by both root and child delegation tools.
-   */
   private async delegateInternal(input: {
     readonly params: DelegateExecutionParams;
     readonly ctx: ExtensionContext;
@@ -190,7 +155,6 @@ export class AgentExecutionCoordinator {
   }): Promise<DelegateExecutionResult> {
     const { params, ctx, signal } = input;
 
-    // ── Validate parameters ──────────────────────────────────────────
     if (typeof params.transitionId !== "string" || params.transitionId.length === 0) {
       return {
         ok: false,
@@ -211,8 +175,6 @@ export class AgentExecutionCoordinator {
 
     const requirements = [...(params.requirements ?? [])];
     const isBackground = params.mode === "background";
-
-    // ── Build workflow runtime dependencies ───────────────────────────
     const invocationSessionId = effectiveSessionId(ctx);
     const parent = input.parent ?? {
       kind: "root" as const,
@@ -220,8 +182,6 @@ export class AgentExecutionCoordinator {
       cwd: ctx.cwd,
       maximumDelegationDepth: this.maximumDelegationDepth,
     };
-    // Nested handles stay in the root Phenix session namespace even though
-    // the model-facing ExtensionContext belongs to the child Pi session.
     const sessionId = parent.kind === "child" ? parent.sessionId : invocationSessionId;
     const selectedModelSet =
       parent.kind === "child" && parent.modelSet
@@ -250,7 +210,6 @@ export class AgentExecutionCoordinator {
       activeHandles: dependencies.activeHandles,
     });
 
-    // ── Validate authority digest ─────────────────────────────────────
     if (
       typeof params.authorityDigest === "string" &&
       params.authorityDigest !== decision.optionsDigest
@@ -278,11 +237,10 @@ export class AgentExecutionCoordinator {
       };
     }
 
-    // ── Validate transition ──────────────────────────────────────────
     const transitionId = params.transitionId as WorkflowTransitionId;
-    const matchingOption = decision.options.find((o) => o.transitionId === transitionId);
+    const matchingOption = decision.options.find((option) => option.transitionId === transitionId);
     if (!matchingOption) {
-      const availableIds = decision.options.map((o) => o.transitionId).join(", ");
+      const availableIds = decision.options.map((option) => option.transitionId).join(", ");
       return {
         ok: false,
         message:
@@ -292,10 +250,10 @@ export class AgentExecutionCoordinator {
         details: {
           state: wfRecord.state,
           difficulty: wfRecord.difficulty,
-          available: decision.options.map((o) => ({
-            id: o.transitionId,
-            role: o.role,
-            category: o.category,
+          available: decision.options.map((option) => ({
+            id: option.transitionId,
+            role: option.role,
+            category: option.category,
           })),
         },
       };
@@ -310,7 +268,7 @@ export class AgentExecutionCoordinator {
       };
     }
 
-    const transition = PHENIX_DEFAULT_WORKFLOW.transitions.find((t) => t.id === transitionId);
+    const transition = PHENIX_DEFAULT_WORKFLOW.transitions.find((item) => item.id === transitionId);
     if (!transition) {
       return {
         ok: false,
@@ -324,7 +282,6 @@ export class AgentExecutionCoordinator {
       };
     }
 
-    // ── Begin workflow transition ─────────────────────────────────────
     const handleId = randomUUID();
     const childActorId = `actor_${handleId}`;
     const instanceId = wfRecord.instanceId;
@@ -340,15 +297,15 @@ export class AgentExecutionCoordinator {
       });
       wfRecord = result.record;
       executionId = result.executionId;
-    } catch (err) {
-      if (err instanceof WorkflowStoreError) {
+    } catch (error) {
+      if (error instanceof WorkflowStoreError) {
         return {
           ok: false,
-          message: `phenix_delegate: workflow error [${err.code}]: ${err.message}`,
-          details: { code: err.code, ...err.context } as Record<string, unknown>,
+          message: `phenix_delegate: workflow error [${error.code}]: ${error.message}`,
+          details: { code: error.code, ...error.context } as Record<string, unknown>,
         };
       }
-      throw err;
+      throw error;
     }
 
     const rejectStartedTransition = (): boolean => {
@@ -359,7 +316,6 @@ export class AgentExecutionCoordinator {
         });
         return true;
       } catch {
-        // The transition may already be settled or persistence may have failed.
         return false;
       }
     };
@@ -369,15 +325,9 @@ export class AgentExecutionCoordinator {
         `Workflow finalization returned no record for handle ${handle.id}.`,
       );
 
-      // Retrying is useful when transition settlement succeeded but automatic
-      // workflow advancement failed afterward. finalizeHandleWorkflow is
-      // idempotent for already-completed transition executions.
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
-          const finalized = finalizeHandleWorkflow({
-            cwd: ctx.cwd,
-            handle,
-          });
+          const finalized = finalizeHandleWorkflow({ cwd: ctx.cwd, handle });
           if (finalized) return;
         } catch (error) {
           finalizationError = error;
@@ -395,10 +345,8 @@ export class AgentExecutionCoordinator {
     let ownedRun: ChildRun | undefined;
     let cleanupOwnedRunScope: (() => void) | undefined;
     try {
-      // ── Create child workflow record ──────────────────────────────────
       const role = roleForAgentClient(transition.agentClient);
       const childInitialState = initialWorkflowStateForRole(role);
-
       const childRuntimeRecord = createWorkflowRecord(ctx.cwd, {
         instanceId,
         actorId: childActorId,
@@ -452,15 +400,12 @@ export class AgentExecutionCoordinator {
         workflow: childWorkflow,
       });
 
-      // ── Resolve critic spec if required ───────────────────────────────
       let criticSpec: ResolvedChildSpec | undefined;
       if (producerSpec.criticRequired) {
         const criticTask = `Review the completed handoff: ${params.task.slice(0, 200)}`;
-        const criticOutputSchema = getOutputSchema("critic-handoff");
-        const criticActorId = `critic_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
         const criticWorkflow: ResolvedWorkflowChildInput = {
           instanceId,
-          actorId: criticActorId,
+          actorId: `critic_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           parentActorId: childActorId,
           definitionId: wfRecord.definitionId,
           definitionVersion: 1,
@@ -469,12 +414,11 @@ export class AgentExecutionCoordinator {
           transitionAuthority: { kind: "restricted", allowed: [] },
           capabilityArtifactHash: wfRecord.capabilityArtifactHash,
         };
-
         criticSpec = resolveChildSpec({
           role: "critic",
           task: criticTask,
           requirements,
-          outputSchema: criticOutputSchema,
+          outputSchema: getOutputSchema("critic-handoff"),
           tools: null,
           delegateRoles: null,
           cwd: ctx.cwd,
@@ -498,7 +442,6 @@ export class AgentExecutionCoordinator {
       const record = createHandle({
         id: handleId,
         sessionId,
-        ctx,
         producerSpec,
         criticSpec,
         task: params.task,
@@ -508,31 +451,19 @@ export class AgentExecutionCoordinator {
         ...(parent.kind === "child" && parent.handleId ? { parentId: parent.handleId } : {}),
         workflowBinding,
       });
-
       writeRecord(ctx.cwd, record);
 
-      // ── Issue contract and create channel ─────────────────────────────
       const issuedContract = await createAttemptContract({
         spec: producerSpec,
-        assignment: {
-          task: params.task,
-          requirements,
-          outputSchema,
-        },
-        identity: {
-          handleId: record.id,
-          parentHandleId: record.parentId,
-        },
+        assignment: { task: params.task, requirements, outputSchema },
+        identity: { handleId: record.id, parentHandleId: record.parentId },
         cwd: ctx.cwd,
       });
-
       const contractArtifact = issuedContract.artifact;
-
       const store = new FileContractStore(
         path.join(findProjectRoot(ctx.cwd), ".phenix-agent-state", "contracts"),
       );
       const contractChannel = new ContractSubmissionChannelImpl(store, contractArtifact);
-
       const childAuthority: DelegationAuthority = {
         roles: contractArtifact.runtime.delegation.roles,
         availableRoles: contractArtifact.runtime.delegation.availableRoles,
@@ -546,14 +477,13 @@ export class AgentExecutionCoordinator {
         activeHandles: [],
       });
 
-      // ── Compile the authorized workflow execution ──────────────────────
-      const childRunIdVal = childRunId(`child_${record.id}`);
+      const childRunIdValue = childRunId(`child_${record.id}`);
       const parentRunId =
         parent.kind === "child" && parent.childRunId ? childRunId(parent.childRunId) : undefined;
       const rootRunId =
         parent.kind === "child" && parent.rootChildRunId
           ? childRunId(parent.rootChildRunId)
-          : childRunIdVal;
+          : childRunIdValue;
       const executionCompiler = createWorkflowExecutionCompiler({
         role,
         modelSet: modelSetId(selectedModelSet),
@@ -561,7 +491,7 @@ export class AgentExecutionCoordinator {
         thinking: producerSpec.thinking,
         persistence: "file",
         runtime: {
-          id: childRunIdVal,
+          id: childRunIdValue,
           ...(parentRunId ? { parentId: parentRunId } : {}),
           rootId: rootRunId,
           handleId: record.id,
@@ -570,13 +500,13 @@ export class AgentExecutionCoordinator {
           workflowProjection,
           contractChannel,
           parentContext: {
-            kind: "child" as const,
+            kind: "child",
             sessionId,
             cwd: ctx.cwd,
             contractId: contractArtifact.id,
             contract: contractArtifact,
             handleId: record.id,
-            childRunId: childRunIdVal,
+            childRunId: childRunIdValue,
             rootChildRunId: rootRunId,
             modelSet: selectedModelSet,
             maximumDelegationDepth: contractArtifact.runtime.delegation.remainingDepth,
@@ -593,10 +523,6 @@ export class AgentExecutionCoordinator {
         acceptanceData: { handleId: record.id },
       });
 
-      // ── Start the child run ───────────────────────────────────────────
-      // One coordinator-owned scope covers model execution, deterministic
-      // verification, and critic execution. Background work is detached from
-      // the launching tool call but still receives the same total deadline.
       const runController = new AbortController();
       const abortFromParent = (): void => {
         if (!runController.signal.aborted) {
@@ -606,13 +532,9 @@ export class AgentExecutionCoordinator {
           );
         }
       };
-
       if (!isBackground) {
-        if (signal.aborted) {
-          abortFromParent();
-        } else {
-          signal.addEventListener("abort", abortFromParent, { once: true });
-        }
+        if (signal.aborted) abortFromParent();
+        else signal.addEventListener("abort", abortFromParent, { once: true });
       }
 
       let executionTimeout: NodeJS.Timeout | undefined;
@@ -631,16 +553,13 @@ export class AgentExecutionCoordinator {
       }
 
       const cleanupRunScope = (): void => {
-        if (!isBackground) {
-          signal.removeEventListener("abort", abortFromParent);
-        }
+        if (!isBackground) signal.removeEventListener("abort", abortFromParent);
         if (executionTimeout) {
           clearTimeout(executionTimeout);
           executionTimeout = undefined;
         }
       };
       cleanupOwnedRunScope = cleanupRunScope;
-
       const runSignal = runController.signal;
 
       let run: ChildRun;
@@ -669,8 +588,6 @@ export class AgentExecutionCoordinator {
         };
       }
       ownedRun = run;
-
-      // Record Pi session reference
       record.childRunId = run.id;
       record.rootChildRunId = run.snapshot().rootId;
       record.backend = run.backend;
@@ -679,9 +596,7 @@ export class AgentExecutionCoordinator {
       record.status = "running";
       writeRecord(ctx.cwd, record);
 
-      // ── Execute producer cycles ───────────────────────────────────────
       const { executeProducerCycles } = await import("./attempt-runner.ts");
-
       const executeCycles = async (): Promise<AttemptRunResult> => {
         try {
           return await executeProducerCycles({
@@ -693,8 +608,8 @@ export class AgentExecutionCoordinator {
             signal: runSignal,
             maximumProducerCycles: producerSpec.maxRepairAttempts + 1,
             completionGraceRemaining: 1,
-            verify: (verificationInput) => this.verifyProducer(verificationInput),
-            criticFactory: (backend, criticInput) => this.runCritic(backend, criticInput),
+            verify: (verificationInput) => this.quality.verify(verificationInput),
+            criticFactory: (_backend, criticInput) => this.quality.review(criticInput),
             backend: this.backend,
           });
         } finally {
@@ -709,20 +624,13 @@ export class AgentExecutionCoordinator {
       };
 
       if (isBackground) {
-        // Register the live completion promise in the registry.
         const completionPromise = executeCycles();
-
         const liveRecord: LiveChildRunRecord = {
           run,
           completion: completionPromise,
           controller: runController,
         };
-
         getChildSessionRegistry().add(liveRecord);
-
-        // Finalize the same persisted handle on either settlement path. Promise
-        // rejection must not leave a running handle after the live registry
-        // entry is removed.
         void completionPromise
           .then(
             (result) => {
@@ -747,11 +655,9 @@ export class AgentExecutionCoordinator {
             getChildSessionRegistry().remove(run.id);
           })
           .catch(() => undefined);
-
         return { ok: true, record };
       }
 
-      // Foreground — await completion
       const result = await executeCycles();
       const finalRecord = result.record as HandleRecord;
       finalizeOrRejectHandle(finalRecord);
@@ -769,7 +675,6 @@ export class AgentExecutionCoordinator {
       return { ok: true, record: finalRecord };
     } catch (error) {
       cleanupOwnedRunScope?.();
-
       if (ownedRun) {
         try {
           await ownedRun.abort("delegation execution failed");
@@ -807,226 +712,6 @@ export class AgentExecutionCoordinator {
       };
     }
   }
-
-  private async verifyProducer(input: VerificationInput): Promise<VerificationResult> {
-    const runs = await runVerificationCommands(
-      input.record.producerSpec.verificationCommands,
-      input.cwd,
-      input.signal,
-    );
-
-    const failed = runs.filter(
-      (run) => run.status === "failed" || run.status === "timed-out" || run.status === "cancelled",
-    );
-    const summary = {
-      acceptanceStatus: failed.length === 0 ? "verified" : "rejected",
-      runtimeChecks: [],
-      verifyRuns: runs.map(
-        (run) =>
-          `${run.id}: ${run.status}${run.exitCode === null ? "" : ` (exit ${run.exitCode})`}`,
-      ),
-      reviewFindings: [],
-      contract: "valid" as const,
-    };
-
-    return {
-      ok: failed.length === 0,
-      issues: failed.map((run) => ({
-        path: ["verification", run.id],
-        code: run.status,
-        message: [`Verification command "${run.id}" ${run.status}.`, run.stderr, run.stdout]
-          .filter(Boolean)
-          .join("\n"),
-      })),
-      summary,
-    };
-  }
-
-  private async runCritic(
-    backend: ChildSessionBackend,
-    input: CriticRunInput,
-  ): Promise<CriticRunResult> {
-    const criticSpec = input.record.criticSpec;
-    if (!criticSpec) {
-      throw new Error("Required critic specification is missing.");
-    }
-
-    const criticTask = [
-      `Review the completed Phenix child assignment for handle "${input.record.id}".`,
-      "",
-      `Original task: ${input.record.assignment.task}`,
-      "",
-      "Requirements:",
-      ...input.record.assignment.requirements.map(
-        (requirement, index) => `${index + 1}. ${requirement}`,
-      ),
-      "",
-      "Producer result:",
-      JSON.stringify(input.producerValue, null, 2),
-      "",
-      "Deterministic verification evidence:",
-      JSON.stringify(input.verification, null, 2),
-      "",
-      "Return an independent approve/reject verdict through phenix_complete.",
-    ].join("\n");
-
-    const issued = await createAttemptContract({
-      spec: criticSpec,
-      assignment: {
-        task: criticTask,
-        requirements: input.record.assignment.requirements,
-        outputSchema: CRITIC_OUTPUT_SCHEMA,
-      },
-      identity: {
-        handleId: `${input.record.id}-critic-${randomUUID()}`,
-        parentHandleId: input.record.id,
-      },
-      cwd: input.cwd,
-    });
-
-    const store = new FileContractStore(
-      path.join(findProjectRoot(input.cwd), ".phenix-agent-state", "contracts"),
-    );
-    const channel = new ContractSubmissionChannelImpl(store, issued.artifact);
-
-    const route = await resolveChildRoute({
-      modelSet: modelSetId(input.record.modelSet),
-      role: "critic",
-      difficulty: criticSpec.workflow.difficulty,
-    });
-    const model = {
-      provider: route.model.provider,
-      id: route.model.model,
-    };
-    if (!this.resolveModelRegistry().find(model.provider, model.id)) {
-      throw new Error(`Configured critic model ${model.provider}/${model.id} is unavailable.`);
-    }
-
-    const runId = childRunId(`critic_${input.record.id}_${randomUUID()}`);
-    const rootRunId = input.record.rootChildRunId ?? input.record.childRunId ?? runId;
-    const workflowProjection = {
-      difficulty: criticSpec.workflow.difficulty,
-      currentState: "reviewing",
-      revision: 0,
-      optionsDigest: computeOptionsDigest([]),
-      options: [],
-    } as const;
-
-    const spec: ChildSessionSpec = {
-      id: runId,
-      ...(input.record.childRunId ? { parentId: input.record.childRunId } : {}),
-      rootId: rootRunId,
-      handleId: `${input.record.id}-critic`,
-      agentClient: agentClientRef(criticSpec.agent.replace(/^phenix\./, "")),
-      role: "critic",
-      cwd: input.cwd,
-      model,
-      thinkingLevel: criticSpec.thinking,
-      initialPrompt: criticTask,
-      contract: issued.artifact,
-      workflowProjection,
-      contractChannel: channel,
-      parentContext: {
-        kind: "child",
-        sessionId: input.record.sessionId,
-        cwd: input.cwd,
-        contractId: issued.artifact.id,
-        contract: issued.artifact,
-        handleId: `${input.record.id}-critic`,
-        childRunId: runId,
-        rootChildRunId: rootRunId,
-        modelSet: input.record.modelSet,
-        maximumDelegationDepth: 0,
-      },
-      effectiveTools: criticSpec.tools.effective,
-      skillRefs: criticSpec.skills,
-      extensionRefs: criticSpec.extensions,
-      inheritProjectContext: true,
-      timeoutMs: criticSpec.timeoutMs,
-      turnBudget: criticSpec.turnBudget,
-      toolBudget: criticSpec.toolBudget,
-      persistence: "file",
-    };
-
-    const criticController = new AbortController();
-    const abortCriticFromParent = (): void => {
-      if (!criticController.signal.aborted) {
-        criticController.abort(
-          input.signal.reason ??
-            new ChildRuntimeError("ABORTED", "Critic execution was cancelled by its parent."),
-        );
-      }
-    };
-
-    if (input.signal.aborted) {
-      abortCriticFromParent();
-    } else {
-      input.signal.addEventListener("abort", abortCriticFromParent, { once: true });
-    }
-
-    let criticTimeout: NodeJS.Timeout | undefined;
-    if (criticSpec.timeoutMs > 0) {
-      criticTimeout = setTimeout(() => {
-        if (!criticController.signal.aborted) {
-          criticController.abort(
-            new ChildRuntimeError("TIMEOUT", `Critic timed out after ${criticSpec.timeoutMs}ms.`),
-          );
-        }
-      }, criticSpec.timeoutMs);
-      criticTimeout.unref?.();
-    }
-
-    let run: ChildRun | undefined;
-    try {
-      run = await backend.start(spec, criticController.signal);
-      const outcome = await run.waitForCurrentCycle(criticController.signal);
-      if (outcome.status !== "settled") {
-        const code =
-          outcome.status === "cancelled"
-            ? "ABORTED"
-            : isChildRuntimeErrorCode(outcome.error?.code)
-              ? outcome.error.code
-              : "PROVIDER_FAILED";
-        throw new ChildRuntimeError(
-          code,
-          outcome.error?.message ?? "Critic session did not settle successfully.",
-        );
-      }
-
-      const submitted = await channel.readSubmitted();
-      if (!submitted) {
-        throw new Error("Critic did not submit a structured verdict.");
-      }
-
-      const validation = validateSchema(CRITIC_OUTPUT_SCHEMA, submitted.value);
-      if (!validation.ok) {
-        throw new Error(`Critic verdict failed schema validation: ${validation.summary}`);
-      }
-
-      if (criticController.signal.aborted) {
-        const reason = criticController.signal.reason;
-        throw reason instanceof ChildRuntimeError
-          ? reason
-          : new ChildRuntimeError(
-              "ABORTED",
-              reason instanceof Error ? reason.message : "Critic execution was cancelled.",
-            );
-      }
-
-      await channel.accept(submitted.value);
-      return submitted.value as CriticValue;
-    } finally {
-      input.signal.removeEventListener("abort", abortCriticFromParent);
-      if (criticTimeout) {
-        clearTimeout(criticTimeout);
-      }
-      if (run) {
-        await run.dispose();
-      }
-    }
-  }
-
-  // ── Background handle lifecycle ───────────────────────────────────────
 
   private finalizePersistedHandle(ctx: ExtensionContext, record: HandleRecord): void {
     if (!record.workflowBinding) return;
@@ -1075,7 +760,6 @@ export class AgentExecutionCoordinator {
         cleanup();
         reject(this.abortError(signal, "Waiting for delegated execution was cancelled."));
       };
-
       signal.addEventListener("abort", onAbort, { once: true });
       completion.then(
         (result) => {
@@ -1107,7 +791,6 @@ export class AgentExecutionCoordinator {
     const record = readRecord(ctx.cwd, effectiveSessionId(ctx), id);
     if (!record || isTerminalHandleStatus(record.status)) return record;
     if (!record.childRunId) return record;
-
     const live = getChildSessionRegistry().get(record.childRunId);
     return live ? record : this.orphanHandle(ctx, record);
   }
@@ -1120,12 +803,8 @@ export class AgentExecutionCoordinator {
     const record = readRecord(ctx.cwd, effectiveSessionId(ctx), id);
     if (!record || isTerminalHandleStatus(record.status)) return record;
     if (!record.childRunId) return record;
-
     const live = getChildSessionRegistry().get(record.childRunId);
     if (!live) return this.orphanHandle(ctx, record);
-
-    // Cancelling the wait does not cancel the child. Explicit child cancellation
-    // remains the responsibility of cancelHandle().
     const result = await this.awaitLiveCompletion(live.completion, signal);
     return result.record as HandleRecord;
   }
@@ -1138,9 +817,6 @@ export class AgentExecutionCoordinator {
     const record = readRecord(ctx.cwd, effectiveSessionId(ctx), id);
     if (!record || isTerminalHandleStatus(record.status)) return record;
 
-    // Persist the terminal state before aborting the live run. The background
-    // completion observer checks persisted terminal state and therefore cannot
-    // overwrite an explicit cancellation with a generic failure.
     record.status = "cancelled";
     record.errors = [...(record.errors ?? []), reason];
     writeRecord(ctx.cwd, record);
@@ -1150,18 +826,16 @@ export class AgentExecutionCoordinator {
       const live = registry.get(record.childRunId);
       if (live) {
         const cancellation = new ChildRuntimeError("ABORTED", reason);
-        if (!live.controller.signal.aborted) {
-          live.controller.abort(cancellation);
-        }
+        if (!live.controller.signal.aborted) live.controller.abort(cancellation);
         try {
           await live.run.abort(reason);
         } catch {
-          // Provider abort is best-effort after the terminal state is persisted.
+          // Provider abort is best-effort after terminal persistence.
         }
         try {
           await live.run.dispose();
         } catch {
-          // Disposal is best-effort; the registry entry is removed regardless.
+          // Disposal is best-effort; registry removal is authoritative.
         }
         registry.remove(record.childRunId);
       }

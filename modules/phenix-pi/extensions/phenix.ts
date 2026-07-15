@@ -10,7 +10,7 @@
  * 4. Register root workflow composition.
  * 5. Construct runtime services.
  * 6. Construct the selected child-session backend.
- * 7. Construct the coordinator.
+ * 7. Construct execution services and the coordinator.
  * 8. Register Phenix tools.
  * 9. Register TUI projection and commands.
  * 10. Register shutdown cleanup.
@@ -44,9 +44,8 @@ import {
 } from "./phenix-skill-bootstrap.ts";
 import { AgentExecutionCoordinator } from "./phenix-subagents/coordinator.ts";
 import { defaultAgentClients } from "./phenix-subagents/definitions.ts";
+import { createExecutionQualityService } from "./phenix-subagents/execution-quality-service.ts";
 import phenixSubagents from "./phenix-subagents/index.ts";
-
-// ── Default configuration ──────────────────────────────────────────────────
 
 const defaultPhenixConfiguration = definePhenixConfiguration({
   activeModelSet: modelSetRef("mixed"),
@@ -62,8 +61,6 @@ const defaultPhenixConfiguration = definePhenixConfiguration({
     persistChildSessions: true,
   },
 });
-
-// ── Integration helpers ──────────────────────────────────────────────────
 
 type IntegrationResult =
   | { readonly status: "loaded" }
@@ -161,8 +158,6 @@ function hasConfiguredMcpServer(cwd: string): boolean {
   return candidates.some(exists);
 }
 
-// ── Phenix coding substrate prompt ──────────────────────────────────────────
-
 function registerPhenixCodingSubstratePrompt(pi: ExtensionAPI): void {
   pi.on("before_agent_start", async (event, ctx) => {
     const systemPrompt = shouldBootstrapPhenixSubagentsSkill(ctx.model)
@@ -192,10 +187,7 @@ function registerPhenixCodingSubstratePrompt(pi: ExtensionAPI): void {
   });
 }
 
-// ── TUI projection ──────────────────────────────────────────────────────────
-
 function registerTuiProjection(pi: ExtensionAPI): void {
-  // Status bar: current workflow state, active child count, selected model set
   pi.on("context", async (_event, ctx) => {
     try {
       const registry = getChildSessionRegistry();
@@ -205,12 +197,10 @@ function registerTuiProjection(pi: ExtensionAPI): void {
         `Phenix · ${activeCount} active child${activeCount !== 1 ? "ren" : ""}`,
       );
     } catch {
-      // UI is optional — ignore errors.
+      // UI is optional.
     }
   });
 }
-
-// ── Shutdown cleanup ────────────────────────────────────────────────────────
 
 function registerShutdown(pi: ExtensionAPI): void {
   pi.on("session_shutdown", async () => {
@@ -219,16 +209,15 @@ function registerShutdown(pi: ExtensionAPI): void {
   });
 }
 
-// ── Default export — Phenix composition entry point ────────────────────────
-
 export default async function phenix(pi: ExtensionAPI): Promise<void> {
-  // ── 1. Link configuration ───────────────────────────────────────────
   const linkResult = link(defaultPhenixConfiguration);
 
   if (!linkResult.ok) {
     console.error("[phenix] Link errors detected at startup:");
-    for (const diag of linkResult.diagnostics) {
-      console.error(`  ${diag.severity.toUpperCase()}: [${diag.code}] ${diag.message}`);
+    for (const diagnostic of linkResult.diagnostics) {
+      console.error(
+        `  ${diagnostic.severity.toUpperCase()}: [${diagnostic.code}] ${diagnostic.message}`,
+      );
     }
     throw new Error(
       `Phenix startup aborted: ${linkResult.diagnostics.length} link error(s) found.`,
@@ -243,68 +232,42 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
       `${linkResult.graph.routing.agentRoutes.size} agent routes.`,
   );
 
-  // ── 2. Register generic root integrations ────────────────────────────
-
-  // Hypa — local tool replacement layer
   await loadIntegration("hypa", pi, async (api) => {
     const mod = await import("@hypabolic/pi-hypa/extensions/index.ts");
     await mod.default(api);
   });
-
-  // LSP — language server support
   await loadIntegration("lsp", pi, async (api) => {
     const mod = await import("pi-lsp/extensions/pi-lsp/index.ts");
     await mod.default(api);
   });
-
-  // MCP adapter — single proxy tool
   await loadIntegration("mcp", pi, async (api) => {
     const mod = await import("pi-mcp-adapter/index.ts");
     await mod.default(api);
   });
-
-  // Context tools — explicit inspection and compaction
   await loadIntegration("context", pi, async (api) => {
     const mod = await import("pi-context-tools/extensions/index.ts");
     await mod.default(api);
   });
-
-  // Web tools — web search and fetch
   await loadIntegration("web", pi, async (api) => {
     const mod = await import("@juicesharp/rpiv-web-tools/index.ts");
     await mod.default(api);
   });
-
-  // ── 3. Register routing ──────────────────────────────────────────────
   await loadIntegration("phenix-routing", pi, async (api) => {
     const mod = await import("./phenix-routing/index.ts");
     await mod.default(api);
   });
 
-  // ── 4. Register root workflow composition ────────────────────────────
-
-  // Phenix coding substrate prompt injection. Register before workflow
-  // projection so the workflow authority remains the final prompt layer.
   registerPhenixCodingSubstratePrompt(pi);
-
   await loadIntegration("phenix-root-workflow", pi, async (api) => {
     const mod = await import("./phenix-composition/root-workflow-integration.ts");
     await mod.default(api);
   });
 
-  // ── 5. Construct runtime services ────────────────────────────────────
-  // The root extension receives Pi's ctx.modelRegistry via the context.
-  // We capture it lazily from the first context event.
   let capturedModelRegistry: ModelRegistry | undefined;
   const agentDir = getAgentDir();
-
   pi.on("session_start", async (_event, ctx) => {
     capturedModelRegistry = ctx.modelRegistry;
   });
-
-  // ── 6. Construct the selected child-session backend ──────────────────
-  // The backend is constructed lazily when the coordinator is first used,
-  // because the model registry is only available after session start.
 
   const getRuntimeServices = (): {
     readonly modelRegistry: ModelRegistry;
@@ -338,10 +301,6 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
         parent: spec.parentContext,
         decisionContext: spec.workflowProjection,
       });
-
-      // ToolDefinition is invariant in its schema-derived argument type.
-      // Child sessions intentionally accept heterogeneous Pi tools, so erase the
-      // concrete schema only at this composition boundary.
       return [delegationTool as unknown as ToolDefinition];
     },
   });
@@ -356,36 +315,26 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
       };
     },
   });
+  const quality = createExecutionQualityService({ sessions: sessionRuntime });
 
-  // ── 7. Construct the coordinator ─────────────────────────────────────
   coordinator = new AgentExecutionCoordinator({
     backend,
     sessionRuntime,
-    resolveModelRegistry: () => getRuntimeServices().modelRegistry,
+    quality,
     activeModelSet: linkResult.graph.activeModelSet.id,
-    agentDir,
     maximumDelegationDepth: defaultPhenixConfiguration.runtime.maximumDelegationDepth,
   });
 
-  // ── 8. Register Phenix tools ─────────────────────────────────────────
   await loadIntegration("phenix-subagents", pi, async (api) => {
     await phenixSubagents(api, { coordinator });
   });
-
-  // ── 9. Register TUI projection and commands ──────────────────────────
   registerTuiProjection(pi);
-
-  // ── 10. Register shutdown cleanup ────────────────────────────────────
   registerShutdown(pi);
-
-  // ── /phenix doctor command ─────────────────────────────────────────
 
   pi.registerCommand("phenix", {
     description: "Inspect the Phenix coding substrate; usage: /phenix doctor",
-
     handler: async (args, ctx) => {
       const action = args.trim().toLowerCase() || "doctor";
-
       if (action !== "doctor") {
         ctx.ui.notify("Usage: /phenix doctor", "warning");
         return;
@@ -412,17 +361,13 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
         "stitch",
         "stitch-mcp",
       ] as const;
-
       const missingExecutables = requiredExecutables.filter((name) => !isExecutableAvailable(name));
-
       const ghAvailable = isExecutableAvailable("gh");
       const failedIntegrations = [...integrationResults.entries()]
         .filter(([, result]) => result.status === "failed")
         .map(([name]) => name);
-
       const lspConfigPath = path.join(getAgentDir(), "lsp.json");
       const hypaMode = process.env.HYPA_PI_MODE ?? "unknown";
-
       const lines = [
         `Phenix: linked graph — ${linkResult.ok ? `${linkResult.graph.contracts.size} contracts, ${linkResult.graph.agentClients.size} clients, ${linkResult.graph.routing.modelSets.size} model sets` : "link errors"}`,
         "Backend: sdk",
@@ -434,12 +379,10 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
         `Executables: ${missingExecutables.length === 0 ? `${requiredExecutables.length}/${requiredExecutables.length} available` : `missing ${missingExecutables.join(", ")}`}`,
         `GitHub CLI: ${ghAvailable ? "installed" : "not found"}`,
       ];
-
       const level =
         failedIntegrations.length > 0 || missingExecutables.length > 0 || !exists(lspConfigPath)
           ? "warning"
           : "info";
-
       ctx.ui.notify(lines.join("\n"), level);
     },
   });
