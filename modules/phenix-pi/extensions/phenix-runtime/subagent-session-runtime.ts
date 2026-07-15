@@ -8,10 +8,7 @@
 
 import { agentClientRef } from "../phenix-kernel/refs.ts";
 import type { ChildRun, ChildSessionBackend, ChildSessionSpec } from "./child-session-types.ts";
-import type {
-  RuntimeBindings,
-  SubagentExecutionPlan,
-} from "./execution-plan.ts";
+import type { RuntimeBindings, SubagentExecutionPlan } from "./execution-plan.ts";
 import {
   resolveSubagentSessionOptions,
   type SessionRouteResolver,

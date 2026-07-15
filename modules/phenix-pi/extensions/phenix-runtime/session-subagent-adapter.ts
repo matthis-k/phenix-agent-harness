@@ -161,11 +161,7 @@ class SessionSubagentHandle<TOutput> implements SubagentHandle<TOutput> {
   private terminalError: SubagentExecutionError | undefined;
   private readonly evaluation: Promise<TOutput>;
 
-  constructor(
-    run: ChildRun,
-    plan: SubagentExecutionPlan<TOutput>,
-    acceptance: AcceptanceEngine,
-  ) {
+  constructor(run: ChildRun, plan: SubagentExecutionPlan<TOutput>, acceptance: AcceptanceEngine) {
     this.run = run;
     this.plan = plan;
     this.acceptance = acceptance;

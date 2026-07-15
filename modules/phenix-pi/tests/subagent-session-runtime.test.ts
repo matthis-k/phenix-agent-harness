@@ -4,9 +4,9 @@ import { describe, it } from "node:test";
 import { modelSetId } from "../extensions/phenix-kernel/ids.ts";
 import {
   createSubagentSessionRuntime,
+  type RuntimeBindings,
   returns,
   routing,
-  type RuntimeBindings,
   type SubagentExecutionPlan,
   SubagentSessionPlanner,
 } from "../extensions/phenix-runtime/child-session-backend.ts";
