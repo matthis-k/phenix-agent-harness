@@ -15,14 +15,8 @@ describe("workflow child-session composition", () => {
   it("starts producer sessions through the declarative session runtime", () => {
     const coordinator = readExtension("phenix-subagents/coordinator.ts");
 
-    assert.match(
-      coordinator,
-      /private readonly sessionRuntime: SubagentSessionRuntime;/,
-    );
-    assert.match(
-      coordinator,
-      /this\.sessionRuntime\.spawn\(sessionRequest, runSignal\)/,
-    );
+    assert.match(coordinator, /private readonly sessionRuntime: SubagentSessionRuntime;/);
+    assert.match(coordinator, /this\.sessionRuntime\.spawn\(sessionRequest, runSignal\)/);
     assert.match(coordinator, /modelSet: modelSetId\(selectedModelSet\)/);
     assert.match(coordinator, /difficulty: wfRecord\.difficulty/);
 
@@ -42,13 +36,7 @@ describe("workflow child-session composition", () => {
     const composition = readExtension("phenix.ts");
 
     assert.match(composition, /const sessionRuntime = createSubagentSessionRuntime\(/);
-    assert.match(
-      composition,
-      /resolveChildRoute\(\{ modelSet, role: agent, difficulty \}\)/,
-    );
-    assert.match(
-      composition,
-      /new AgentExecutionCoordinator\(\{[\s\S]*?sessionRuntime,/,
-    );
+    assert.match(composition, /resolveChildRoute\(\{ modelSet, role: agent, difficulty \}\)/);
+    assert.match(composition, /new AgentExecutionCoordinator\(\{[\s\S]*?sessionRuntime,/);
   });
 });
