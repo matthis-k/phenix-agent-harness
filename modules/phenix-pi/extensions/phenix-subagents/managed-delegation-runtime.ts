@@ -2,13 +2,12 @@
  * managed-delegation-runtime — workflow handle execution and lifecycle
  *
  * Workflow code supplies an authoritative compiler and persisted handle record.
- * This service owns manager creation, deadlines, foreground/background execution,
- * registry membership, polling, awaiting, cancellation, and orphan detection.
+ * This service owns deadlines, foreground/background settlement, polling,
+ * awaiting, cancellation, and orphan detection through the manager directory.
  */
 
 import { ChildRuntimeError } from "../phenix-runtime/child-session-types.ts";
 import type { SubagentExecutionCompiler } from "../phenix-runtime/execution-plan.ts";
-import type { ManagedSubagentRegistry } from "../phenix-runtime/managed-subagent-registry.ts";
 import type { SubagentRequest } from "../phenix-runtime/subagent-api.ts";
 import {
   type SubagentCancellation,
@@ -90,24 +89,21 @@ function terminalStatus(code: string): "cancelled" | "failed" {
 
 export interface ManagedDelegationRuntimeOptions {
   readonly managers: SubagentManagerFactory;
-  readonly registry: ManagedSubagentRegistry;
 }
 
 export class ManagedDelegationRuntime {
   private readonly managers: SubagentManagerFactory;
-  private readonly registry: ManagedSubagentRegistry;
 
   constructor(options: ManagedDelegationRuntimeOptions) {
     this.managers = options.managers;
-    this.registry = options.registry;
   }
 
   get activeCount(): number {
-    return this.registry.size;
+    return this.managers.activeCount;
   }
 
   shutdown(reason: string): Promise<void> {
-    return this.registry.shutdown(reason);
+    return this.managers.shutdown(reason);
   }
 
   async execute(input: ManagedDelegationExecutionInput): Promise<ManagedDelegationExecutionResult> {
@@ -196,12 +192,11 @@ export class ManagedDelegationRuntime {
     );
 
     if (input.mode === "background") {
-      this.registry.add(handle);
       void completion
         .then(({ record }) => input.settle(record))
         .finally(() => {
           cleanupHandle();
-          this.registry.remove(handle.id);
+          this.managers.remove(handle.id);
         })
         .catch(() => undefined);
       return { ok: true, record: input.record };
@@ -223,6 +218,7 @@ export class ManagedDelegationRuntime {
       };
     } finally {
       cleanupHandle();
+      this.managers.remove(handle.id);
     }
   }
 
@@ -230,7 +226,7 @@ export class ManagedDelegationRuntime {
     const record = readRecord(input.cwd, input.sessionId, input.id);
     if (!record || isTerminalHandleStatus(record.status)) return record;
     if (!record.subagentId) return record;
-    return this.registry.get(record.subagentId) ? record : this.orphan(input.cwd, record);
+    return this.managers.get(record.subagentId) ? record : this.orphan(input.cwd, record);
   }
 
   async awaitHandle(
@@ -241,7 +237,7 @@ export class ManagedDelegationRuntime {
     if (!record || isTerminalHandleStatus(record.status)) return record;
     if (!record.subagentId) return record;
 
-    const handle = this.registry.get(record.subagentId);
+    const handle = this.managers.get(record.subagentId);
     if (!handle) return this.orphan(input.cwd, record);
 
     try {
@@ -274,12 +270,12 @@ export class ManagedDelegationRuntime {
     writeRecord(input.cwd, record);
 
     if (record.subagentId) {
-      const handle = this.registry.get(record.subagentId);
+      const handle = this.managers.get(record.subagentId);
       if (handle) {
         try {
           await handle.cancel(reason);
         } finally {
-          this.registry.remove(record.subagentId);
+          this.managers.remove(record.subagentId);
         }
       }
     }
