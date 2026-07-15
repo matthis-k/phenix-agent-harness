@@ -240,7 +240,21 @@ export class ManagedDelegationRuntime {
     const handle = this.registry.get(record.childRunId);
     if (!handle) return this.orphan(input.cwd, record);
 
-    await handle.result(signal);
+    try {
+      await handle.result(signal);
+    } catch (error) {
+      if (signal.aborted) throw error;
+
+      const failure = executionFailure(error);
+      const current = readRecord(input.cwd, input.sessionId, input.id) ?? record;
+      if (!isTerminalHandleStatus(current.status)) {
+        current.status = terminalStatus(failure.code);
+        current.errors = [`${failure.code}: ${failure.message}`];
+        writeRecord(input.cwd, current);
+      }
+      return current;
+    }
+
     return readRecord(input.cwd, input.sessionId, input.id) ?? record;
   }
 
