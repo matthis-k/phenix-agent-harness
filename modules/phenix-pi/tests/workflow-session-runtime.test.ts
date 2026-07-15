@@ -16,12 +16,13 @@ describe("workflow child-session composition", () => {
     const coordinator = readExtension("phenix-subagents/coordinator.ts");
 
     assert.match(coordinator, /private readonly sessionRuntime: SubagentSessionRuntime;/);
-    assert.match(coordinator, /this\.sessionRuntime\.spawn\(sessionRequest, runSignal\)/);
+    assert.match(coordinator, /this\.sessionRuntime\.spawn\(executionPlan, runSignal\)/);
+    assert.match(coordinator, /createWorkflowExecutionCompiler\(\{/);
     assert.match(coordinator, /modelSet: modelSetId\(selectedModelSet\)/);
     assert.match(coordinator, /difficulty: wfRecord\.difficulty/);
 
     const producerStart = coordinator.indexOf(
-      "this.sessionRuntime.spawn(sessionRequest, runSignal)",
+      "this.sessionRuntime.spawn(executionPlan, runSignal)",
     );
     const criticStart = coordinator.indexOf("private async runCritic");
     assert.ok(producerStart >= 0);

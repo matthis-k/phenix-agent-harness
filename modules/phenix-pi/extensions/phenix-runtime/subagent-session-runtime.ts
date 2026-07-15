@@ -8,50 +8,8 @@
 
 import { agentClientRef } from "../phenix-kernel/refs.ts";
 import type { ChildRun, ChildSessionBackend, ChildSessionSpec } from "./child-session-types.ts";
-import type { RuntimeBindings, SubagentExecutionPlan } from "./execution-plan.ts";
-import {
-  resolveSubagentSessionOptions,
-  type SessionRouteResolver,
-  type SubagentSessionDefaults,
-  type SubagentSessionOptions,
-} from "./session-options.ts";
-
-/**
- * Transitional input accepted only at this boundary while workflow composition
- * is migrated. It is immediately normalized and is intentionally not exported.
- */
-interface LegacySubagentSessionRequest {
-  readonly task: string;
-  readonly session?: SubagentSessionOptions;
-  readonly defaults: SubagentSessionDefaults;
-  readonly bindings: RuntimeBindings;
-}
-
-type SessionExecutionInput = SubagentExecutionPlan<unknown> | LegacySubagentSessionRequest;
-
-function isExecutionPlan(input: SessionExecutionInput): input is SubagentExecutionPlan<unknown> {
-  return "assignment" in input && "runtime" in input && "acceptance" in input;
-}
-
-function normalizeExecutionPlan(input: SessionExecutionInput): SubagentExecutionPlan<unknown> {
-  if (isExecutionPlan(input)) return input;
-
-  return {
-    assignment: {
-      task: input.task,
-      requirements: [],
-    },
-    session: {
-      options: input.session,
-      defaults: input.defaults,
-    },
-    runtime: input.bindings,
-    acceptance: {
-      kind: "legacy-session",
-      returns: { schema: {} },
-    },
-  };
-}
+import type { SubagentExecutionPlan } from "./execution-plan.ts";
+import { resolveSubagentSessionOptions, type SessionRouteResolver } from "./session-options.ts";
 
 /** Deterministically translates a canonical plan into a backend specification. */
 export class SubagentSessionPlanner {
@@ -61,8 +19,7 @@ export class SubagentSessionPlanner {
     this.resolveRoute = resolveRoute;
   }
 
-  async plan(input: SessionExecutionInput): Promise<ChildSessionSpec> {
-    const execution = normalizeExecutionPlan(input);
+  async plan(execution: SubagentExecutionPlan<unknown>): Promise<ChildSessionSpec> {
     if (execution.assignment.task.trim().length === 0) {
       throw new Error("Subagent session task must be non-empty.");
     }
@@ -100,12 +57,12 @@ export class SubagentSessionRuntime {
     this.planner = new SubagentSessionPlanner(options.resolveRoute);
   }
 
-  plan(input: SessionExecutionInput): Promise<ChildSessionSpec> {
-    return this.planner.plan(input);
+  plan(execution: SubagentExecutionPlan<unknown>): Promise<ChildSessionSpec> {
+    return this.planner.plan(execution);
   }
 
-  async spawn(input: SessionExecutionInput, signal?: AbortSignal): Promise<ChildRun> {
-    const spec = await this.plan(input);
+  async spawn(execution: SubagentExecutionPlan<unknown>, signal?: AbortSignal): Promise<ChildRun> {
+    const spec = await this.plan(execution);
     return this.backend.start(spec, signal ?? new AbortController().signal);
   }
 }
