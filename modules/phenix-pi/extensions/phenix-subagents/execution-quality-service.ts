@@ -133,7 +133,10 @@ export class ExecutionQualityService {
     const channel = new ContractSubmissionChannelImpl(store, issued.artifact);
 
     const runId = childRunId(`critic_${input.record.id}_${randomUUID()}`);
-    const rootRunId = input.record.rootChildRunId ?? input.record.childRunId ?? runId;
+    const parentRunId = input.record.subagentId ? childRunId(input.record.subagentId) : undefined;
+    const rootRunId = input.record.rootSubagentId
+      ? childRunId(input.record.rootSubagentId)
+      : (parentRunId ?? runId);
     const workflowProjection = {
       difficulty: criticSpec.workflow.difficulty,
       currentState: "reviewing",
@@ -163,7 +166,7 @@ export class ExecutionQualityService {
       },
       runtime: {
         id: runId,
-        ...(input.record.childRunId ? { parentId: input.record.childRunId } : {}),
+        ...(parentRunId ? { parentId: parentRunId } : {}),
         rootId: rootRunId,
         handleId: `${input.record.id}-critic`,
         cwd: input.cwd,

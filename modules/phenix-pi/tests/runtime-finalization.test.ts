@@ -33,7 +33,7 @@ function temporaryDirectory(prefix: string): string {
 function makeHandle(): HandleRecord {
   const timestamp = new Date().toISOString();
   return {
-    version: 4,
+    version: 5,
     id: "handle-timeout",
     sessionId: "session-timeout",
     modelSet: "test",

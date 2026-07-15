@@ -531,7 +531,7 @@ export class AgentExecutionCoordinator {
         mode: isBackground ? "background" : "await",
         signal,
         timeoutMs: producerSpec.timeoutMs,
-        rootChildRunId: rootRunId,
+        rootSubagentId: rootRunId,
         settle: finalizeOrRejectHandle,
       });
 

@@ -102,7 +102,7 @@ function criticSpec(cwd: string): ResolvedChildSpec {
 function record(cwd: string): HandleRecord {
   const timestamp = new Date().toISOString();
   return {
-    version: 4,
+    version: 5,
     id: "quality-test",
     sessionId: "quality-session",
     modelSet: "mixed",

@@ -5,7 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import type { ChildRunId } from "../extensions/phenix-runtime/child-session-types.ts";
 import { ManagedSubagentRegistry } from "../extensions/phenix-runtime/managed-subagent-registry.ts";
 import type {
   SubagentCancellation,
@@ -24,10 +23,10 @@ function temporaryDirectory(prefix: string): string {
   return directory;
 }
 
-function runningRecord(childRunId: ChildRunId): HandleRecord {
+function runningRecord(subagentId: string): HandleRecord {
   const timestamp = new Date().toISOString();
   return {
-    version: 4,
+    version: 5,
     id: "managed-await",
     sessionId: "managed-session",
     modelSet: "mixed",
@@ -37,8 +36,8 @@ function runningRecord(childRunId: ChildRunId): HandleRecord {
       outputSchema: { type: "object" },
     },
     producerSpec: {} as HandleRecord["producerSpec"],
-    childRunId,
-    rootChildRunId: childRunId,
+    subagentId,
+    rootSubagentId: subagentId,
     producerCycles: [],
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -92,12 +91,12 @@ function runtimeWith(handle: SubagentHandle<unknown>): ManagedDelegationRuntime 
 describe("ManagedDelegationRuntime background awaits", () => {
   it("returns the persisted failed handle after child failure", async () => {
     const cwd = temporaryDirectory("phenix-managed-await-failure");
-    const childRunId = "managed-failure" as ChildRunId;
-    const record = runningRecord(childRunId);
+    const subagentId = "managed-failure";
+    const record = runningRecord(subagentId);
     writeRecord(cwd, record);
     const runtime = runtimeWith(
       new RejectingHandle(
-        childRunId,
+        subagentId,
         new SubagentExecutionError("PROVIDER_FAILED", "execution failed"),
       ),
     );
@@ -114,12 +113,12 @@ describe("ManagedDelegationRuntime background awaits", () => {
 
   it("throws for a cancelled wait and leaves the persisted child running", async () => {
     const cwd = temporaryDirectory("phenix-managed-await-cancelled");
-    const childRunId = "managed-wait-cancelled" as ChildRunId;
-    const record = runningRecord(childRunId);
+    const subagentId = "managed-wait-cancelled";
+    const record = runningRecord(subagentId);
     writeRecord(cwd, record);
     const runtime = runtimeWith(
       new RejectingHandle(
-        childRunId,
+        subagentId,
         new SubagentExecutionError("PROVIDER_FAILED", "execution failed"),
       ),
     );
