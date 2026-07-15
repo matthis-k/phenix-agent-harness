@@ -125,10 +125,7 @@ export class SubagentManager {
   }
 
   /** Spawn a child and await its accepted, decoded structured result. */
-  async run<TOutput>(
-    request: SubagentRequest<TOutput>,
-    signal?: AbortSignal,
-  ): Promise<TOutput> {
+  async run<TOutput>(request: SubagentRequest<TOutput>, signal?: AbortSignal): Promise<TOutput> {
     const handle = await this.spawn(request, signal);
     return handle.result(signal);
   }
