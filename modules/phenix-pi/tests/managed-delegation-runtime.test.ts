@@ -5,7 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { ManagedSubagentRegistry } from "../extensions/phenix-runtime/managed-subagent-registry.ts";
 import type {
   SubagentCancellation,
   SubagentEvent,
@@ -13,6 +12,7 @@ import type {
   SubagentSnapshot,
 } from "../extensions/phenix-runtime/subagent-manager.ts";
 import { SubagentExecutionError } from "../extensions/phenix-runtime/subagent-manager.ts";
+import type { SubagentManagerFactory } from "../extensions/phenix-runtime/subagent-manager-factory.ts";
 import { readRecord, writeRecord } from "../extensions/phenix-subagents/handle-store.ts";
 import type { HandleRecord } from "../extensions/phenix-subagents/handle-types.ts";
 import { ManagedDelegationRuntime } from "../extensions/phenix-subagents/managed-delegation-runtime.ts";
@@ -83,9 +83,18 @@ class RejectingHandle implements SubagentHandle<unknown> {
 }
 
 function runtimeWith(handle: SubagentHandle<unknown>): ManagedDelegationRuntime {
-  const registry = new ManagedSubagentRegistry();
-  registry.add(handle);
-  return new ManagedDelegationRuntime({ managers: {} as never, registry });
+  const managers: SubagentManagerFactory = {
+    create: () => {
+      throw new Error("not used by this test");
+    },
+    get: <TOutput = unknown>(id: string) =>
+      (id === handle.id ? handle : undefined) as SubagentHandle<TOutput> | undefined,
+    list: () => [handle.snapshot()],
+    remove: () => undefined,
+    activeCount: 1,
+    shutdown: async () => undefined,
+  };
+  return new ManagedDelegationRuntime({ managers });
 }
 
 describe("ManagedDelegationRuntime background awaits", () => {
