@@ -5,11 +5,10 @@ on:
   push:
     branches:
       - main
-      - refactor/subagent-handle-schema
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -24,20 +23,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
-
-      - name: Apply internal context correction
-        if: (github.ref_name == 'refactor/subagent-handle-schema' || github.head_ref == 'refactor/subagent-handle-schema') && github.actor != 'github-actions[bot]'
-        shell: bash
-        run: |
-          set -euo pipefail
-          python tmp-context-fix.txt
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add modules/phenix-pi/extensions/phenix-subagents/coordinator.ts
-          git commit -m "fix(runtime): preserve internal child context identifier"
-          git push origin HEAD:${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}
 
       - name: Install Nix
         uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
