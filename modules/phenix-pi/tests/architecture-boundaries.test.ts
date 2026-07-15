@@ -75,17 +75,11 @@ function selectedFiles(...relativePaths: string[]): readonly string[] {
 
 describe("Phenix architecture boundaries", () => {
   it("keeps routing independent from workflow and subagent orchestration", () => {
-    assertNoDependencies(filesIn("phenix-routing"), [
-      "../phenix-workflow",
-      "../phenix-subagents",
-    ]);
+    assertNoDependencies(filesIn("phenix-routing"), ["../phenix-workflow", "../phenix-subagents"]);
   });
 
   it("keeps workflow independent from routing and subagent orchestration", () => {
-    assertNoDependencies(filesIn("phenix-workflow"), [
-      "../phenix-routing",
-      "../phenix-subagents",
-    ]);
+    assertNoDependencies(filesIn("phenix-workflow"), ["../phenix-routing", "../phenix-subagents"]);
   });
 
   it("keeps the public subagent API independent from workflows and Pi", () => {
@@ -109,14 +103,11 @@ describe("Phenix architecture boundaries", () => {
   });
 
   it("keeps workflow compilation independent from routing and backend adapters", () => {
-    assertNoDependencies(
-      selectedFiles("phenix-subagents/workflow-execution-compiler.ts"),
-      [
-        "../phenix-routing",
-        "../phenix-runtime/child-session-backend",
-        "../phenix-runtime/sdk-child-session-backend",
-      ],
-    );
+    assertNoDependencies(selectedFiles("phenix-subagents/workflow-execution-compiler.ts"), [
+      "../phenix-routing",
+      "../phenix-runtime/child-session-backend",
+      "../phenix-runtime/sdk-child-session-backend",
+    ]);
   });
 
   it("keeps the coordinator independent from the Pi SDK adapter", () => {
