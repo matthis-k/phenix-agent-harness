@@ -1,0 +1,307 @@
+/**
+ * managed-delegation-runtime — workflow handle execution and lifecycle
+ *
+ * Workflow code supplies an authoritative compiler and persisted handle record.
+ * This service owns manager creation, deadlines, foreground/background execution,
+ * registry membership, polling, awaiting, cancellation, and orphan detection.
+ */
+
+import type { ChildRunId } from "../phenix-runtime/child-session-types.ts";
+import { ChildRuntimeError } from "../phenix-runtime/child-session-types.ts";
+import type { SubagentExecutionCompiler } from "../phenix-runtime/execution-plan.ts";
+import type { ManagedSubagentRegistry } from "../phenix-runtime/managed-subagent-registry.ts";
+import type { SubagentRequest } from "../phenix-runtime/subagent-api.ts";
+import {
+  type SubagentCancellation,
+  SubagentExecutionError,
+  type SubagentHandle,
+} from "../phenix-runtime/subagent-manager.ts";
+import type { SubagentManagerFactory } from "../phenix-runtime/subagent-manager-factory.ts";
+import { finalizeHandleWorkflow } from "../phenix-workflow/workflow-runtime.ts";
+import { readRecord, writeRecord } from "./handle-store.ts";
+import type { HandleRecord } from "./handle-types.ts";
+import { isTerminalHandleStatus } from "./handle-types.ts";
+
+export interface ManagedDelegationFailure {
+  readonly code: string;
+  readonly message: string;
+}
+
+export type ManagedDelegationExecutionResult =
+  | { readonly ok: true; readonly record: HandleRecord }
+  | {
+      readonly ok: false;
+      readonly record: HandleRecord;
+      readonly error: ManagedDelegationFailure;
+    };
+
+export interface ManagedDelegationExecutionInput {
+  readonly compiler: SubagentExecutionCompiler;
+  readonly request: SubagentRequest<unknown>;
+  readonly record: HandleRecord;
+  readonly cwd: string;
+  readonly sessionId: string;
+  readonly mode: "await" | "background";
+  readonly signal: AbortSignal;
+  readonly timeoutMs: number;
+  readonly rootChildRunId: ChildRunId;
+  readonly settle: (record: HandleRecord) => void;
+}
+
+export interface ManagedHandleLookup {
+  readonly cwd: string;
+  readonly sessionId: string;
+  readonly id: string;
+}
+
+function executionFailure(error: unknown): ManagedDelegationFailure {
+  if (error instanceof SubagentExecutionError || error instanceof ChildRuntimeError) {
+    return { code: error.code, message: error.message };
+  }
+  return {
+    code: "SUBAGENT_EXECUTION_FAILED",
+    message: error instanceof Error ? error.message : String(error),
+  };
+}
+
+function cancellationFromSignal(signal: AbortSignal, fallback: string): SubagentCancellation {
+  const reason = signal.reason;
+  if (reason instanceof SubagentExecutionError || reason instanceof ChildRuntimeError) {
+    return { code: reason.code, reason: reason.message };
+  }
+  return {
+    code: "ABORTED",
+    reason:
+      reason instanceof Error
+        ? reason.message
+        : typeof reason === "string" && reason.length > 0
+          ? reason
+          : fallback,
+  };
+}
+
+function terminalStatus(code: string): "cancelled" | "failed" {
+  return code === "ABORTED" ? "cancelled" : "failed";
+}
+
+export interface ManagedDelegationRuntimeOptions {
+  readonly managers: SubagentManagerFactory;
+  readonly registry: ManagedSubagentRegistry;
+}
+
+export class ManagedDelegationRuntime {
+  private readonly managers: SubagentManagerFactory;
+  private readonly registry: ManagedSubagentRegistry;
+
+  constructor(options: ManagedDelegationRuntimeOptions) {
+    this.managers = options.managers;
+    this.registry = options.registry;
+  }
+
+  get activeCount(): number {
+    return this.registry.size;
+  }
+
+  shutdown(reason: string): Promise<void> {
+    return this.registry.shutdown(reason);
+  }
+
+  async execute(input: ManagedDelegationExecutionInput): Promise<ManagedDelegationExecutionResult> {
+    const controller = new AbortController();
+    const followsParent = input.mode === "await";
+    const abortFromParent = (): void => {
+      if (!controller.signal.aborted) {
+        controller.abort(
+          input.signal.reason ??
+            new ChildRuntimeError("ABORTED", "Delegated execution was cancelled by its parent."),
+        );
+      }
+    };
+
+    if (followsParent) {
+      if (input.signal.aborted) abortFromParent();
+      else input.signal.addEventListener("abort", abortFromParent, { once: true });
+    }
+
+    let timeout: NodeJS.Timeout | undefined;
+    if (input.timeoutMs > 0) {
+      timeout = setTimeout(() => {
+        if (!controller.signal.aborted) {
+          controller.abort(
+            new ChildRuntimeError(
+              "TIMEOUT",
+              `Delegated execution timed out after ${input.timeoutMs}ms.`,
+            ),
+          );
+        }
+      }, input.timeoutMs);
+      timeout.unref?.();
+    }
+
+    const cleanup = (): void => {
+      if (followsParent) input.signal.removeEventListener("abort", abortFromParent);
+      if (timeout) {
+        clearTimeout(timeout);
+        timeout = undefined;
+      }
+    };
+
+    let handle: SubagentHandle<unknown>;
+    try {
+      handle = await this.managers.create(input.compiler).spawn(input.request, controller.signal);
+    } catch (error) {
+      cleanup();
+      const failure = executionFailure(error);
+      input.record.status = terminalStatus(failure.code);
+      input.record.errors = [`${failure.code}: ${failure.message}`];
+      writeRecord(input.cwd, input.record);
+      input.settle(input.record);
+      return { ok: false, record: input.record, error: failure };
+    }
+
+    const cancelFromScope = (): void => {
+      void handle.cancel(
+        cancellationFromSignal(controller.signal, "Delegated execution was cancelled."),
+      );
+    };
+    if (controller.signal.aborted) cancelFromScope();
+    else controller.signal.addEventListener("abort", cancelFromScope, { once: true });
+
+    const cleanupHandle = (): void => {
+      controller.signal.removeEventListener("abort", cancelFromScope);
+      cleanup();
+    };
+
+    input.record.childRunId = handle.id as ChildRunId;
+    input.record.rootChildRunId = input.rootChildRunId;
+    input.record.status = "running";
+    writeRecord(input.cwd, input.record);
+
+    const completion = handle.result().then(
+      () => ({ record: readRecord(input.cwd, input.sessionId, input.record.id) ?? input.record }),
+      (error) => {
+        const failure = executionFailure(error);
+        const record = readRecord(input.cwd, input.sessionId, input.record.id) ?? input.record;
+        if (!isTerminalHandleStatus(record.status)) {
+          record.status = terminalStatus(failure.code);
+          record.errors = [`${failure.code}: ${failure.message}`];
+          writeRecord(input.cwd, record);
+        }
+        return { record, error: failure };
+      },
+    );
+
+    if (input.mode === "background") {
+      this.registry.add(handle);
+      void completion
+        .then(({ record }) => input.settle(record))
+        .finally(() => {
+          cleanupHandle();
+          this.registry.remove(handle.id);
+        })
+        .catch(() => undefined);
+      return { ok: true, record: input.record };
+    }
+
+    try {
+      const settled = await completion;
+      input.settle(settled.record);
+      if (settled.record.status === "completed") {
+        return { ok: true, record: settled.record };
+      }
+      return {
+        ok: false,
+        record: settled.record,
+        error: settled.error ?? {
+          code: "CHILD_EXECUTION_FAILED",
+          message: "Delegated child execution failed.",
+        },
+      };
+    } finally {
+      cleanupHandle();
+    }
+  }
+
+  poll(input: ManagedHandleLookup): HandleRecord | undefined {
+    const record = readRecord(input.cwd, input.sessionId, input.id);
+    if (!record || isTerminalHandleStatus(record.status)) return record;
+    if (!record.childRunId) return record;
+    return this.registry.get(record.childRunId) ? record : this.orphan(input.cwd, record);
+  }
+
+  async awaitHandle(
+    input: ManagedHandleLookup,
+    signal: AbortSignal,
+  ): Promise<HandleRecord | undefined> {
+    const record = readRecord(input.cwd, input.sessionId, input.id);
+    if (!record || isTerminalHandleStatus(record.status)) return record;
+    if (!record.childRunId) return record;
+
+    const handle = this.registry.get(record.childRunId);
+    if (!handle) return this.orphan(input.cwd, record);
+
+    await handle.result(signal);
+    return readRecord(input.cwd, input.sessionId, input.id) ?? record;
+  }
+
+  async cancelHandle(input: ManagedHandleLookup, reason: string): Promise<HandleRecord | undefined> {
+    const record = readRecord(input.cwd, input.sessionId, input.id);
+    if (!record || isTerminalHandleStatus(record.status)) return record;
+
+    record.status = "cancelled";
+    record.errors = [...(record.errors ?? []), reason];
+    writeRecord(input.cwd, record);
+
+    if (record.childRunId) {
+      const handle = this.registry.get(record.childRunId);
+      if (handle) {
+        try {
+          await handle.cancel(reason);
+        } finally {
+          this.registry.remove(record.childRunId);
+        }
+      }
+    }
+
+    this.finalize(input.cwd, record);
+    return record;
+  }
+
+  private orphan(cwd: string, record: HandleRecord): HandleRecord {
+    if (!isTerminalHandleStatus(record.status)) {
+      record.status = "orphaned";
+      record.errors = [
+        ...(record.errors ?? []),
+        "ORPHANED_SESSION: no live managed subagent exists for this persisted handle.",
+      ];
+      writeRecord(cwd, record);
+      this.finalize(cwd, record);
+    }
+    return record;
+  }
+
+  private finalize(cwd: string, record: HandleRecord): void {
+    if (!record.workflowBinding) return;
+    try {
+      const finalized = finalizeHandleWorkflow({ cwd, handle: record });
+      if (!finalized) {
+        throw new Error(
+          `Workflow finalization returned no record for terminal handle ${record.id}.`,
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const diagnostic = `WORKFLOW_FINALIZATION_FAILED: ${message}`;
+      if (!record.errors?.includes(diagnostic)) {
+        record.errors = [...(record.errors ?? []), diagnostic];
+        writeRecord(cwd, record);
+      }
+    }
+  }
+}
+
+export function createManagedDelegationRuntime(
+  options: ManagedDelegationRuntimeOptions,
+): ManagedDelegationRuntime {
+  return new ManagedDelegationRuntime(options);
+}
