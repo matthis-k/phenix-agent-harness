@@ -1,16 +1,18 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { ChildRun } from "../extensions/phenix-runtime/child-session-types.ts";
-import { childRunId } from "../extensions/phenix-runtime/child-session-types.ts";
+import {
+  type ChildRun,
+  childRunId,
+} from "../extensions/phenix-runtime/child-session-types.ts";
 import type {
   AcceptanceEngine,
   AcceptancePlan,
   SubagentExecutionCompiler,
   SubagentExecutionPlan,
 } from "../extensions/phenix-runtime/execution-plan.ts";
-import { createSessionSubagentManagerFactory } from "../extensions/phenix-runtime/subagent-manager-factory.ts";
 import type { SubagentRequest } from "../extensions/phenix-runtime/subagent-api.ts";
+import { createSessionSubagentManagerFactory } from "../extensions/phenix-runtime/subagent-manager-factory.ts";
 
 class Compiler implements SubagentExecutionCompiler {
   private readonly id: string;
@@ -97,6 +99,20 @@ class Acceptance implements AcceptanceEngine {
   }
 }
 
+class PendingAcceptance implements AcceptanceEngine {
+  evaluate<TOutput>(
+    _plan: AcceptancePlan<TOutput>,
+    _run: ChildRun,
+    signal: AbortSignal,
+  ): Promise<TOutput> {
+    return new Promise<TOutput>((_resolve, reject) => {
+      const abort = (): void => reject(new Error("acceptance cancelled"));
+      if (signal.aborted) abort();
+      else signal.addEventListener("abort", abort, { once: true });
+    });
+  }
+}
+
 const request: SubagentRequest<{ readonly ok: boolean }> = {
   task: "Run a managed child.",
   returns: { schema: { type: "object" } },
@@ -124,7 +140,7 @@ describe("SessionSubagentManagerFactory directory", () => {
     const spawner = new Spawner();
     const factory = createSessionSubagentManagerFactory({
       sessions: spawner,
-      acceptance: new Acceptance(),
+      acceptance: new PendingAcceptance(),
     });
     const first = await factory.create(new Compiler("first")).spawn(request);
     const second = await factory.create(new Compiler("second")).spawn(request);
