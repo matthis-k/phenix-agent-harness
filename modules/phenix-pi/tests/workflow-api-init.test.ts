@@ -50,14 +50,16 @@ describe("workflow API session initialization", () => {
   });
 
   it("does not depend on the initial workflow projection having an option", () => {
-    const child = spec({ remainingDepth: 1, availableRoles: ["critic"] });
-    child.workflowProjection = {
-      difficulty: "D1",
-      currentState: "reviewing",
-      revision: 1,
-      optionsDigest: "0".repeat(64),
-      options: [],
-    };
+    const child = {
+      ...spec({ remainingDepth: 1, availableRoles: ["critic"] }),
+      workflowProjection: {
+        difficulty: "D1" as const,
+        currentState: "reviewing",
+        revision: 1,
+        optionsDigest: "0".repeat(64),
+        options: [],
+      },
+    } as ChildSessionSpec;
 
     assert.equal(buildEffectiveToolNames(child).includes("phenix_create_subagent"), true);
   });
