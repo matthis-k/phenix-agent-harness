@@ -1,7 +1,7 @@
 /**
  * phenix-subagents — index
  *
- * Registers the root-visible phenix_delegate and phenix_agent tools.
+ * Registers the root-visible workflow API and phenix_agent tools.
  * Each child session receives its own closure-bound tools through
  * customTools — not process-global tools.
  *
@@ -12,7 +12,11 @@
 
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { AgentParams, DelegateParams } from "./delegate-schema.ts";
+import {
+  createWorkflowApiTools,
+  type WorkflowApiPort,
+} from "../phenix-runtime/workflow-api-tools.ts";
+import { AgentParams } from "./delegate-schema.ts";
 import { effectiveSessionId, listRecords, readRecord } from "./handle-store.ts";
 import { type HandleRecord, TERMINAL_STATES } from "./handle-types.ts";
 import type { WorkflowDelegator } from "./workflow-delegator.ts";
@@ -87,6 +91,7 @@ function treePayload(records: HandleRecord[]): Record<string, unknown> {
 
 export interface PhenixSubagentsOptions {
   readonly delegator: WorkflowDelegator;
+  readonly workflow: WorkflowApiPort;
 }
 
 export default async function phenixSubagents(
@@ -95,20 +100,21 @@ export default async function phenixSubagents(
 ): Promise<void> {
   const events = pi.events as unknown as PiEvents;
   const delegator = options.delegator;
+  const workflow = options.workflow;
 
   // ── Runtime tool guard ────────────────────────────────────────────────
 
-  // Block raw subagent globally — only phenix_delegate is allowed.
+  // Block raw and legacy delegation globally — only the workflow API is allowed.
   events.on("before_tool_call" as string, async (event: unknown) => {
     const raw = event as { toolName?: string; name?: string };
     const toolName = raw.toolName ?? raw.name;
     if (!toolName) return;
 
-    if (toolName === "subagent") {
+    if (toolName === "subagent" || toolName === "phenix_delegate") {
       return {
         blocked: true,
         reason:
-          "Raw subagent calls are runtime-blocked in Phenix sessions. Use phenix_delegate instead.",
+          "Raw or legacy delegation is runtime-blocked in Phenix sessions. Call phenix_workflow, then phenix_create_subagent.",
       };
     }
 
@@ -121,43 +127,11 @@ export default async function phenixSubagents(
     }
   });
 
-  // ── phenix_delegate tool ──────────────────────────────────────────────
+  // ── Contract-bound workflow API ────────────────────────────────────────
 
-  pi.registerTool({
-    name: "phenix_delegate",
-    label: "Delegate Phenix Subagent",
-    description:
-      "Spawn a real isolated Pi subagent with a runtime-selected model and thinking level. " +
-      "The output schema is enforced by the Phenix contract protocol. Tool access, verification " +
-      "commands, critic gates, retry limits, persistence, and model routing are runtime-owned; " +
-      "this tool intentionally exposes no override for them. Use mode=await by default. " +
-      "Background mode is available only from the root session and returns a persistent handle.",
-    parameters: DelegateParams,
-
-    async execute(
-      _toolCallId: string,
-      rawParams: Record<string, unknown>,
-      signal: AbortSignal | undefined,
-      _onUpdate: ((result: AgentToolResult<Record<string, unknown>>) => void) | undefined,
-      ctx: ExtensionContext,
-    ): Promise<AgentToolResult<Record<string, unknown>>> {
-      try {
-        const result = await delegator.delegate({
-          params: rawParams as unknown as Parameters<typeof delegator.delegate>[0]["params"],
-          ctx,
-          signal: signal ?? new AbortController().signal,
-        });
-
-        if (!result.ok) {
-          return errorResult(result.message, result.details);
-        }
-
-        return toolResult(result.record);
-      } catch (error) {
-        return errorResult(error instanceof Error ? error.message : String(error));
-      }
-    },
-  });
+  for (const tool of createWorkflowApiTools({ workflow, allowCreate: true })) {
+    pi.registerTool(tool as never);
+  }
 
   // ── phenix_agent tool ─────────────────────────────────────────────────
 

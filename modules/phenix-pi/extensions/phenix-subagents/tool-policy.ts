@@ -27,12 +27,15 @@ export interface ResolvedToolConfiguration {
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
-/** Tool names that are always rejected in patches. */
+/** Tool names whose availability is owned exclusively by the runtime. */
 const FORBIDDEN_TOOLS = new Set([
   "subagent",
+  "phenix_delegate",
   "phenix_contract_get",
   "phenix_contract_submit",
   "phenix_complete",
+  "phenix_workflow",
+  "phenix_create_subagent",
 ]);
 
 const EMPTY_TOOL_PATCH: ToolPatch = {
@@ -44,13 +47,8 @@ const EMPTY_TOOL_PATCH: ToolPatch = {
 
 const VALID_TOOL_NAME = /^[a-z][a-z0-9_]*(\*)?$/;
 
-/**
- * Validate and canonicalize a list of tool names.
- * Rejects forbidden tool names (subagent, obsolete contract tools, phenix_complete).
- */
-function canonicalize(
-  tools: readonly string[],
-): readonly string[] {
+/** Validate and canonicalize user-controlled task-tool patches. */
+function canonicalize(tools: readonly string[]): readonly string[] {
   const result: string[] = [];
   for (const tool of tools) {
     if (typeof tool !== "string" || tool.length === 0) {
@@ -64,9 +62,7 @@ function canonicalize(
       );
     }
     if (FORBIDDEN_TOOLS.has(tool)) {
-      throw new Error(
-        `Tool "${tool}" cannot be added or removed. It is managed by the runtime.`,
-      );
+      throw new Error(`Tool "${tool}" cannot be added or removed. It is managed by the runtime.`);
     }
     result.push(tool);
   }
@@ -82,8 +78,6 @@ function matchTool(pattern: string, toolName: string): boolean {
   return pattern === toolName;
 }
 
-// ── Stable unique (preserves order) ─────────────────────────────────────────
-
 function stableUnique(tools: readonly string[]): readonly string[] {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -96,27 +90,17 @@ function stableUnique(tools: readonly string[]): readonly string[] {
   return result;
 }
 
-// ── Preset tool deduplication ───────────────────────────────────────────────
-
-/**
- * Given a preset tool list (which may contain patterns like "lsp_*"),
- * and an additional list of tools, remove any addition that is already
- * covered by a preset pattern.
- */
 function deduplicateAgainstPreset(
   preset: readonly string[],
   additions: readonly string[],
 ): readonly string[] {
   return additions.filter((addition) => {
-    // Keep if no preset pattern already covers it.
     for (const pattern of preset) {
       if (matchTool(pattern, addition)) return false;
     }
     return true;
   });
 }
-
-// ── Clone helpers ───────────────────────────────────────────────────────────
 
 function cloneToolPatch(patch: ToolPatch): ToolPatch {
   return {
@@ -125,43 +109,27 @@ function cloneToolPatch(patch: ToolPatch): ToolPatch {
   };
 }
 
-// ── Main resolution function ────────────────────────────────────────────────
-
 /**
  * Validate that the complete effective child tool set does not exceed the
- * creator's delegation ceiling. Every effective tool must be covered by
- * the delegable set.
- *
- * - undefined delegableTools → unrestricted root/runtime-internal authority.
- * - empty delegableTools → no task tool may be delegated.
- * - non-empty delegableTools → every effective child selector must be covered.
+ * creator's delegation ceiling.
  */
 function validateDelegationCeiling(
   effective: readonly string[],
   delegableTools: readonly string[] | undefined,
 ): void {
-  // undefined = unrestricted (root / runtime-internal authority).
   if (delegableTools === undefined) return;
 
-  // Empty = no delegation allowed at all.
   if (delegableTools.length === 0) {
     if (effective.length > 0) {
-      throw new Error(
-        "No tools may be delegated from the current context.",
-      );
+      throw new Error("No tools may be delegated from the current context.");
     }
     return;
   }
 
-  // Every effective tool must be covered by a delegable selector.
   for (const tool of effective) {
-    const covered = delegableTools.some((selector) =>
-      matchTool(selector, tool),
-    );
+    const covered = delegableTools.some((selector) => matchTool(selector, tool));
     if (!covered) {
-      throw new Error(
-        `Tool "${tool}" is not authorized for delegation from the current context.`,
-      );
+      throw new Error(`Tool "${tool}" is not authorized for delegation from the current context.`);
     }
   }
 }
@@ -175,18 +143,14 @@ export function resolveToolConfiguration(input: {
   const preset = rolePreset(input.role);
   const base = preset.tools;
 
-  // Resolve the patch.
   let source: { inherited: boolean; patch: ToolPatch };
-
   if (input.requested === null || input.requested === undefined) {
-    // Inherit creator patch (or empty patch for root/not specified).
     const inherited = input.inheritedPatch ?? EMPTY_TOOL_PATCH;
     source = {
       inherited: true,
       patch: cloneToolPatch(inherited),
     };
   } else {
-    // Explicit patch provided.
     const patch: ToolPatch = {
       additional: canonicalize(input.requested.additional ?? []),
       removed: canonicalize(input.requested.removed ?? []),
@@ -197,20 +161,11 @@ export function resolveToolConfiguration(input: {
     };
   }
 
-  // Build the effective tool list:
-  // 1. Start with preset tools
-  // 2. Add requested additions (that aren't already covered by preset patterns)
-  // 3. Remove anything listed in the removed set
-  // 4. Apply removals last (removal wins over addition)
-
   const deduplicated = deduplicateAgainstPreset(base, source.patch.additional);
-
   const merged = stableUnique([...base, ...deduplicated]);
-
   const removedSet = new Set(source.patch.removed);
   const effective = merged.filter((tool) => !removedSet.has(tool));
 
-  // Validate the complete effective tool set against the delegation ceiling.
   validateDelegationCeiling(effective, input.delegableTools);
 
   return {
@@ -221,48 +176,22 @@ export function resolveToolConfiguration(input: {
   };
 }
 
-// ── Consumer functions ──────────────────────────────────────────────────────
-
-/**
- * The tools visible to the model for task execution.
- * Does NOT include phenix_complete (that's communicated via the projection).
- */
-export function modelTaskTools(
-  config: ResolvedToolConfiguration,
-): readonly string[] {
+/** Task tools projected into the contract. */
+export function modelTaskTools(config: ResolvedToolConfiguration): readonly string[] {
   return config.effective;
 }
 
-/**
- * The tools needed at child launch time.
- * Includes phenix_complete as a runtime capability.
- */
-export function childLaunchTools(
-  config: ResolvedToolConfiguration,
-): readonly string[] {
+/** Contract task tools plus the mandatory completion capability. */
+export function childLaunchTools(config: ResolvedToolConfiguration): readonly string[] {
   return stableUnique([...config.effective, "phenix_complete"]);
 }
 
-/**
- * Determine if a given tool name is allowed by the resolved configuration.
- * For children, this checks against effective tools + phenix_complete.
- */
-export function toolAllowedByConfig(
-  config: ResolvedToolConfiguration,
-  toolName: string,
-): boolean {
-  // Always block raw subagent.
-  if (toolName === "subagent") return false;
-  // phenix_complete is always allowed for child contracts.
-  if (toolName === "phenix_complete") return true;
-  // Block obsolete contract tools.
-  if (
-    toolName === "phenix_contract_get" ||
-    toolName === "phenix_contract_submit"
-  ) {
+export function toolAllowedByConfig(config: ResolvedToolConfiguration, toolName: string): boolean {
+  if (toolName === "subagent" || toolName === "phenix_delegate") return false;
+  if (toolName === "phenix_complete" || toolName === "phenix_workflow") return true;
+  if (toolName === "phenix_contract_get" || toolName === "phenix_contract_submit") {
     return false;
   }
-  // Check against effective tools (including pattern matching).
   return config.effective.some((pattern) => matchTool(pattern, toolName));
 }
 

@@ -1,15 +1,14 @@
 import { createHash } from "node:crypto";
-
+import type { Difficulty } from "../phenix-kernel/task.ts";
+import { resolveDelegationOptions } from "./delegation-options.ts";
 import type {
   DelegationAuthority,
   DelegationOption,
   WorkflowDefinition,
+  WorkflowHandleRecord,
   WorkflowOutputSchemaId,
   WorkflowRuntimeRecord,
 } from "./workflow-types.ts";
-import type { WorkflowHandleRecord } from "./workflow-types.ts";
-import type { Difficulty } from "../phenix-kernel/task.ts";
-import { resolveDelegationOptions } from "./delegation-options.ts";
 
 export interface ModelDelegationOption {
   readonly transitionId: string;
@@ -49,9 +48,7 @@ export function projectDelegationOptions(
   }));
 }
 
-export function computeOptionsDigest(
-  options: readonly ModelDelegationOption[],
-): string {
+export function computeOptionsDigest(options: readonly ModelDelegationOption[]): string {
   const canonical = [...options]
     .sort((left, right) => left.transitionId.localeCompare(right.transitionId))
     .map((option) => ({
@@ -61,9 +58,7 @@ export function computeOptionsDigest(
       allowedModes: [...(option.allowedModes ?? [])].sort(),
       outputSchemaId: option.outputSchemaId,
     }));
-  return createHash("sha256")
-    .update(JSON.stringify(canonical))
-    .digest("hex");
+  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
 
 export function buildWorkflowDecisionContext(input: {
@@ -94,23 +89,20 @@ export function buildChildWorkflowProjection(
   return buildWorkflowDecisionContext(input);
 }
 
-export function formatWorkflowProjection(
-  projection: ModelWorkflowProjection,
-): string {
+export function formatWorkflowProjection(projection: ModelWorkflowProjection): string {
   const lines = [
     "## Phenix workflow authority",
     "",
     `Difficulty: ${projection.difficulty}`,
     `Current state: ${projection.currentState}`,
     `Workflow revision: ${projection.revision}`,
-    `Authority digest: ${projection.optionsDigest}`,
     "",
   ];
 
   if (projection.options.length === 0) {
     lines.push(
-      "No delegation transition is currently legal.",
-      "Complete the current assignment using phenix_complete.",
+      "No subagent creation transition is currently legal.",
+      "Use phenix_workflow again after workflow state changes; otherwise complete the current assignment using phenix_complete.",
       "",
     );
     return lines.join("\n");
@@ -130,14 +122,12 @@ export function formatWorkflowProjection(
   }
 
   lines.push(
-    "Call phenix_delegate with exactly:",
-    "- transitionId: one transition ID listed above",
-    "- workflowRevision: the workflow revision shown above",
-    "- authorityDigest: the authority digest shown above",
-    "- task: the bounded objective for the child",
-    "- optional: requirements, tools narrowing, delegateRoles narrowing, mode",
-    "",
-    "Do not invent a role, transition, result schema, model, or thinking level.",
+    "Workflow API protocol:",
+    "1. Call phenix_workflow immediately before creating a subagent.",
+    "2. Select one transitionId returned by that call.",
+    "3. Call phenix_create_subagent with the transitionId and bounded task.",
+    "The runtime injects the current workflow revision and authority digest.",
+    "Do not invent a role, transition, result schema, model, thinking level, tool set, or delegation depth.",
   );
   return lines.join("\n");
 }

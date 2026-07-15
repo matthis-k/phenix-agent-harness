@@ -15,10 +15,7 @@ import { modelSetId } from "../phenix-kernel/ids.ts";
 import { modelSetForModelId, PHENIX_PROVIDER } from "../phenix-routing/provider.ts";
 import { childRunId } from "../phenix-runtime/child-session-types.ts";
 import { ContractSubmissionChannelImpl } from "../phenix-runtime/contract-channel.ts";
-import type {
-  DelegateExecutionParams,
-  ParentExecutionContext,
-} from "../phenix-runtime/delegation-tool.ts";
+import type { ParentExecutionContext } from "../phenix-runtime/workflow-api-types.ts";
 import {
   buildWorkflowDecisionContext,
   buildWorkflowRuntimeDependencies,
@@ -53,6 +50,7 @@ import type {
 } from "./child-spec.ts";
 import { resolveChildSpec } from "./child-spec.ts";
 import { FileContractStore } from "./contract-store.ts";
+import type { DelegateParamsType as DelegateExecutionParams } from "./delegate-schema.ts";
 import {
   effectiveSessionId,
   findProjectRoot,

@@ -1,27 +1,16 @@
-import type {
-  AgentKind,
-  AgentRole,
-  ModelTier,
-  TaskProfile,
-  ThinkingLevel,
-} from "./agent-types.ts";
+import type { AgentKind, AgentRole, ModelTier, TaskProfile, ThinkingLevel } from "./agent-types.ts";
 
 // ── Role preset interface ───────────────────────────────────────────────────
 
 export interface RolePreset {
-  readonly agentName:
-    | `phenix.${AgentKind}`
-    | "phenix.base";
+  readonly agentName: `phenix.${AgentKind}` | "phenix.base";
 
   readonly tools: readonly string[];
-  readonly allowedChildren:
-    readonly AgentKind[];
+  readonly allowedChildren: readonly AgentKind[];
 
-  readonly profileMinimums:
-    Readonly<Partial<TaskProfile>>;
+  readonly profileMinimums: Readonly<Partial<TaskProfile>>;
 
-  readonly thinking:
-    Readonly<Record<ModelTier, ThinkingLevel>>;
+  readonly thinking: Readonly<Record<ModelTier, ThinkingLevel>>;
 
   readonly criticRequired: boolean;
 }
@@ -49,7 +38,8 @@ const COMMON_READ_TOOLS: readonly string[] = [
   "context_info",
   "context_*",
   "contact_supervisor",
-  "phenix_delegate",
+  "phenix_workflow",
+  "phenix_create_subagent",
 ] as const;
 
 // ── Role presets ────────────────────────────────────────────────────────────
@@ -98,14 +88,7 @@ const ARCHITECT_PRESET: RolePreset = {
 
 const IMPLEMENTER_PRESET: RolePreset = {
   agentName: "phenix.implementer",
-  tools: [
-    ...COMMON_READ_TOOLS,
-    "edit",
-    "write",
-    "apply_patch",
-    "ast_edit",
-    "todo",
-  ],
+  tools: [...COMMON_READ_TOOLS, "edit", "write", "apply_patch", "ast_edit", "todo"],
   allowedChildren: ["scout", "tester", "critic"],
   profileMinimums: { complexity: 1 },
   thinking: {
@@ -185,9 +168,7 @@ const EMPTY_ROLE_PRESET: RolePreset = {
 
 // ── Preset lookup ───────────────────────────────────────────────────────────
 
-export function rolePreset(
-  role: AgentRole,
-): RolePreset {
+export function rolePreset(role: AgentRole): RolePreset {
   if (role === null) return EMPTY_ROLE_PRESET;
   return ROLE_PRESETS[role as AgentKind];
 }

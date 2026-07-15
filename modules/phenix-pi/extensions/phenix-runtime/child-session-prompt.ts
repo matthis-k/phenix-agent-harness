@@ -16,12 +16,9 @@
 
 import type { AgentRole } from "../phenix-kernel/agents.ts";
 import type { ContractArtifact } from "../phenix-subagents/contract.ts";
-import type {
-  ModelWorkflowProjection,
-} from "../phenix-workflow/workflow-projection.ts";
+import { deriveProjection, formatProjection } from "../phenix-subagents/contract-projection.ts";
+import type { ModelWorkflowProjection } from "../phenix-workflow/workflow-projection.ts";
 import { formatWorkflowProjection } from "../phenix-workflow/workflow-projection.ts";
-import { formatProjection } from "../phenix-subagents/contract-projection.ts";
-import { deriveProjection } from "../phenix-subagents/contract-projection.ts";
 
 // ── Persona definition ──────────────────────────────────────────────────────
 
@@ -71,9 +68,7 @@ export function buildChildSystemPrompt(input: {
   sections.push(formatProjection(projection));
 
   // 5-6, 8. Effective tool/delegation boundaries, legal delegation options, workflow state
-  if (workflowProjection.options.length > 0) {
-    sections.push(formatWorkflowProjection(workflowProjection));
-  }
+  sections.push(formatWorkflowProjection(workflowProjection));
 
   // Effective tool boundaries
   const effectiveTools = contract.runtime.tools.effective;
@@ -86,7 +81,8 @@ export function buildChildSystemPrompt(input: {
         ...effectiveTools.map((t) => `- ${t}`),
         "",
         "The phenix_complete tool is always available for submitting your result.",
-        "The phenix_delegate tool is available only when delegation is legal and listed above.",
+        "The phenix_workflow tool is always available and is the source of truth for current workflow authority.",
+        "The phenix_create_subagent tool is installed only when the initialized contract permits delegation.",
       ].join("\n"),
     );
   }
@@ -101,8 +97,8 @@ export function buildChildSystemPrompt(input: {
       [
         "## Delegation boundary",
         "",
-        "No further delegation is permitted in this session. " +
-        "Complete the assignment directly using phenix_complete.",
+        "The initialized contract permits no further subagent creation. " +
+          "phenix_workflow will report no creatable transitions; complete the assignment directly using phenix_complete.",
       ].join("\n"),
     );
   }

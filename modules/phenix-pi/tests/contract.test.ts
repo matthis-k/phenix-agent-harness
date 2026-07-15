@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
+import type { AgentRole } from "../extensions/phenix-subagents/agent-types.ts";
 import {
   authorizeContract,
+  type CapabilityToken,
+  type ContractId,
   createCapabilityToken,
   createContractId,
   createRunId,
@@ -11,13 +13,8 @@ import {
   parseCapabilityToken,
   parseContractId,
   parseRunId,
-  type CapabilityToken,
-  type ContractId,
   type RunId,
 } from "../extensions/phenix-subagents/contract.ts";
-import type { AgentRole } from "../extensions/phenix-subagents/agent-types.ts";
-import { mkTransitionId } from "../extensions/phenix-workflow/workflow-types.ts";
-import type { WorkflowTransitionId } from "../extensions/phenix-workflow/workflow-types.ts";
 
 const TEST_SCHEMA = {
   type: "object",
@@ -34,11 +31,28 @@ const TEST_ROLE: AgentRole = "scout";
 
 // Scout preset tools for consistent effective tool construction.
 const SCOUT_PRESET_TOOLS = [
-  "read", "grep", "search", "find", "ls", "tree",
-  "bash", "lsp", "lsp_*", "ast_grep", "ast_*", "mcp",
-  "mcp_*", "web_search", "web_fetch", "fetch_content",
-  "get_search_content", "context_info", "context_*",
-  "contact_supervisor", "phenix_delegate",
+  "read",
+  "grep",
+  "search",
+  "find",
+  "ls",
+  "tree",
+  "bash",
+  "lsp",
+  "lsp_*",
+  "ast_grep",
+  "ast_*",
+  "mcp",
+  "mcp_*",
+  "web_search",
+  "web_fetch",
+  "fetch_content",
+  "get_search_content",
+  "context_info",
+  "context_*",
+  "contact_supervisor",
+  "phenix_workflow",
+  "phenix_create_subagent",
 ] as const;
 
 function makeToolConfig(
@@ -57,9 +71,7 @@ function makeToolConfig(
       effective: [...additions],
     };
   }
-  const effective = [...SCOUT_PRESET_TOOLS, ...additions].filter(
-    (t) => !removals.includes(t),
-  );
+  const effective = [...SCOUT_PRESET_TOOLS, ...additions].filter((t) => !removals.includes(t));
   const seen = new Set<string>();
   const deduped: string[] = [];
   for (const t of effective) {
@@ -181,12 +193,16 @@ describe("Contract domain", () => {
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
-        agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
+        agent: "phenix.scout",
+        cwd: "/tmp",
+        thinking: "medium",
         tools: makeToolConfig("scout"),
-        skills: [], extensions: [],
+        skills: [],
+        extensions: [],
         delegation: v4.delegation,
         workflow: v4.workflow,
-        timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
+        timeoutMs: 600_000,
+        turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
       },
       verification: { commands: [], criticRequired: false, maxRepairAttempts: 1 },
@@ -206,12 +222,16 @@ describe("Contract domain", () => {
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
-        agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
+        agent: "phenix.scout",
+        cwd: "/tmp",
+        thinking: "medium",
         tools: makeToolConfig("scout"),
-        skills: [], extensions: [],
+        skills: [],
+        extensions: [],
         delegation: v4.delegation,
         workflow: v4.workflow,
-        timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
+        timeoutMs: 600_000,
+        turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
       },
       verification: { commands: [], criticRequired: false, maxRepairAttempts: 1 },
@@ -231,12 +251,16 @@ describe("Contract domain", () => {
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
-        agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
+        agent: "phenix.scout",
+        cwd: "/tmp",
+        thinking: "medium",
         tools: makeToolConfig("scout"),
-        skills: [], extensions: [],
+        skills: [],
+        extensions: [],
         delegation: v4.delegation,
         workflow: v4.workflow,
-        timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
+        timeoutMs: 600_000,
+        turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
       },
       verification: { commands: [], criticRequired: false, maxRepairAttempts: 1 },
@@ -256,12 +280,16 @@ describe("Contract domain", () => {
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
-        agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
+        agent: "phenix.scout",
+        cwd: "/tmp",
+        thinking: "medium",
         tools: makeToolConfig("scout"),
-        skills: [], extensions: [],
+        skills: [],
+        extensions: [],
         delegation: v4.delegation,
         workflow: v4.workflow,
-        timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
+        timeoutMs: 600_000,
+        turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
       },
       verification: { commands: [], criticRequired: false, maxRepairAttempts: 1 },
@@ -281,12 +309,16 @@ describe("Contract domain", () => {
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
-        agent: "phenix.scout", cwd: "/tmp", thinking: "medium",
+        agent: "phenix.scout",
+        cwd: "/tmp",
+        thinking: "medium",
         tools: makeToolConfig("scout"),
-        skills: [], extensions: [],
+        skills: [],
+        extensions: [],
         delegation: v4.delegation,
         workflow: v4.workflow,
-        timeoutMs: 600_000, turnBudget: { maxTurns: 24, graceTurns: 2 },
+        timeoutMs: 600_000,
+        turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
       },
       verification: { commands: [], criticRequired: false, maxRepairAttempts: 1 },
@@ -333,12 +365,16 @@ describe("Contract domain", () => {
       identity: { runId, handleId: "test", role: null },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
-        agent: "phenix.base", cwd: "/tmp", thinking: "low",
+        agent: "phenix.base",
+        cwd: "/tmp",
+        thinking: "low",
         tools: makeToolConfig(null),
-        skills: [], extensions: [],
+        skills: [],
+        extensions: [],
         delegation: { ...v4.delegation, remainingDepth: 0 },
         workflow: v4.workflow,
-        timeoutMs: 300_000, turnBudget: { maxTurns: 12, graceTurns: 2 },
+        timeoutMs: 300_000,
+        turnBudget: { maxTurns: 12, graceTurns: 2 },
         toolBudget: { soft: 30, hard: 40, block: ["read"] },
       },
       verification: { commands: [], criticRequired: false, maxRepairAttempts: 0 },
@@ -361,12 +397,16 @@ describe("Contract domain", () => {
       identity: { runId, handleId: "test-null-role", role: null },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
       runtime: {
-        agent: "phenix.base", cwd: "/tmp", thinking: "low",
+        agent: "phenix.base",
+        cwd: "/tmp",
+        thinking: "low",
         tools: makeToolConfig(null),
-        skills: [], extensions: [],
+        skills: [],
+        extensions: [],
         delegation: { ...v4.delegation, remainingDepth: 0 },
         workflow: v4.workflow,
-        timeoutMs: 300_000, turnBudget: { maxTurns: 12, graceTurns: 2 },
+        timeoutMs: 300_000,
+        turnBudget: { maxTurns: 12, graceTurns: 2 },
         toolBudget: { soft: 30, hard: 40, block: [] },
       },
       verification: { commands: [], criticRequired: false, maxRepairAttempts: 0 },

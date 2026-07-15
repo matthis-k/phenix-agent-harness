@@ -129,7 +129,7 @@ export interface ChildSessionNode {
  * Explicit parent identity and authority supplied to a child session.
  *
  * This is runtime input, not persisted adapter state. It exists so a
- * closure-bound phenix_delegate tool never has to infer its parent from
+ * closure-bound workflow API never has to infer its parent from
  * process globals or environment variables.
  */
 export interface ChildParentExecutionContext {
