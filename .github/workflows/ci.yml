@@ -36,17 +36,30 @@ jobs:
         if: (github.ref_name == 'feat/contract-workflow-api' || github.head_ref == 'feat/contract-workflow-api') && github.actor != 'github-actions[bot]'
         shell: bash
         run: |
-          set -euo pipefail
-          python workflow-api-migration.py
-          mapfile -t changed_ts < <(git diff --name-only -- '*.ts')
-          if (( ${#changed_ts[@]} > 0 )); then
-            nix run nixpkgs#biome -- check --write "${changed_ts[@]}"
-          fi
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git commit -m "feat(workflow): install contract-bound workflow API"
-          git push origin HEAD:${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}
+          set -o pipefail
+          {
+            python workflow-api-migration.py
+            mapfile -t changed_ts < <(git diff --name-only -- '*.ts')
+            if (( ${#changed_ts[@]} > 0 )); then
+              nix run nixpkgs#biome -- check --write "${changed_ts[@]}"
+            fi
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add -A
+            git commit -m "feat(workflow): install contract-bound workflow API"
+            git push origin HEAD:${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}
+          } > migration.log 2>&1
+          status=$?
+          cat migration.log
+          exit "$status"
+
+      - name: Upload migration diagnostics
+        if: failure()
+        uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097 # v4.4.2
+        with:
+          name: workflow-api-migration-diagnostics
+          path: migration.log
+          if-no-files-found: error
 
       - name: Run read-only Tend CI profile
         id: tend
