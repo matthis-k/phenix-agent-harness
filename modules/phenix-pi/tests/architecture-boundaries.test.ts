@@ -86,8 +86,6 @@ describe("Phenix architecture boundaries", () => {
         "phenix-runtime/execution-plan.ts",
         "phenix-runtime/session-options.ts",
         "phenix-runtime/session-subagent-adapter.ts",
-        "phenix-runtime/managed-subagent-registry.ts",
-        "phenix-runtime/managed-subagent-registry.ts",
       ),
       [
         "../phenix-workflow",
