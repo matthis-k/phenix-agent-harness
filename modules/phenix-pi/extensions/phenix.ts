@@ -361,9 +361,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
         "stitch",
         "stitch-mcp",
       ] as const;
-      const missingExecutables = requiredExecutables.filter(
-        (name) => !isExecutableAvailable(name),
-      );
+      const missingExecutables = requiredExecutables.filter((name) => !isExecutableAvailable(name));
       const ghAvailable = isExecutableAvailable("gh");
       const failedIntegrations = [...integrationResults.entries()]
         .filter(([, result]) => result.status === "failed")
