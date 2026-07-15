@@ -7,14 +7,11 @@
  */
 
 import type { ContractSubmissionChannel } from "../phenix-runtime/child-session-types.ts";
-import { ChildRuntimeError, type ChildRun } from "../phenix-runtime/child-session-types.ts";
+import { type ChildRun, ChildRuntimeError } from "../phenix-runtime/child-session-types.ts";
 import type { AcceptanceEngine, AcceptancePlan } from "../phenix-runtime/execution-plan.ts";
 import { decodeReturnValue } from "../phenix-runtime/subagent-api.ts";
 import { SubagentExecutionError } from "../phenix-runtime/subagent-manager.ts";
-import {
-  executeProducerCycles,
-  type AttemptRunResult,
-} from "./attempt-runner.ts";
+import { type AttemptRunResult, executeProducerCycles } from "./attempt-runner.ts";
 import type { ContractArtifact } from "./contract.ts";
 import type { ExecutionQualityService } from "./execution-quality-service.ts";
 import type { HandleRecord } from "./handle-types.ts";
@@ -96,14 +93,12 @@ export class WorkflowAcceptanceEngine implements AcceptanceEngine {
     }
 
     if (!result.ok) {
-      const code = result.error?.code ??
+      const code =
+        result.error?.code ??
         (result.status === "cancelled" ? "ABORTED" : "SUBAGENT_EXECUTION_FAILED");
       const message = result.error?.message ?? `Producer execution ${result.status}.`;
       throw new SubagentExecutionError(code, message, {
-        cause: new ChildRuntimeError(
-          code === "ABORTED" ? "ABORTED" : "PROVIDER_FAILED",
-          message,
-        ),
+        cause: new ChildRuntimeError(code === "ABORTED" ? "ABORTED" : "PROVIDER_FAILED", message),
       });
     }
 

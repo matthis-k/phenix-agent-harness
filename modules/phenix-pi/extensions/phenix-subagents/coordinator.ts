@@ -21,12 +21,12 @@ import type {
   DelegateExecutionParams,
   ParentExecutionContext,
 } from "../phenix-runtime/delegation-tool.ts";
-import type { SubagentManagerFactory } from "../phenix-runtime/subagent-manager-factory.ts";
 import {
   type SubagentCancellation,
   SubagentExecutionError,
   type SubagentHandle,
 } from "../phenix-runtime/subagent-manager.ts";
+import type { SubagentManagerFactory } from "../phenix-runtime/subagent-manager-factory.ts";
 import {
   buildWorkflowDecisionContext,
   buildWorkflowRuntimeDependencies,
@@ -635,28 +635,31 @@ export class AgentExecutionCoordinator {
       };
       cleanupOwnedScope = cleanupScope;
 
-      record.childRunId = handle.id;
+      record.childRunId = childRunId(handle.id);
       record.rootChildRunId = rootRunId;
       record.status = "running";
       writeRecord(ctx.cwd, record);
 
-      const completion: Promise<ManagedCompletion> = handle.result().then(
-        () => ({ record: readRecord(ctx.cwd, sessionId, handleId) ?? record }),
-        (error) => {
-          const normalized = executionError(error);
-          const failedRecord = readRecord(ctx.cwd, sessionId, handleId) ?? record;
-          if (!isTerminalHandleStatus(failedRecord.status)) {
-            failedRecord.status = normalized.code === "ABORTED" ? "cancelled" : "failed";
-            failedRecord.errors = [`${normalized.code}: ${normalized.message}`];
-            writeRecord(ctx.cwd, failedRecord);
-          }
-          return { record: failedRecord, error: normalized };
-        },
-      ).finally(() => {
-        cleanupScope();
-        ownedHandle = undefined;
-        cleanupOwnedScope = undefined;
-      });
+      const completion: Promise<ManagedCompletion> = handle
+        .result()
+        .then(
+          () => ({ record: readRecord(ctx.cwd, sessionId, handleId) ?? record }),
+          (error) => {
+            const normalized = executionError(error);
+            const failedRecord = readRecord(ctx.cwd, sessionId, handleId) ?? record;
+            if (!isTerminalHandleStatus(failedRecord.status)) {
+              failedRecord.status = normalized.code === "ABORTED" ? "cancelled" : "failed";
+              failedRecord.errors = [`${normalized.code}: ${normalized.message}`];
+              writeRecord(ctx.cwd, failedRecord);
+            }
+            return { record: failedRecord, error: normalized };
+          },
+        )
+        .finally(() => {
+          cleanupScope();
+          ownedHandle = undefined;
+          cleanupOwnedScope = undefined;
+        });
 
       if (isBackground) {
         const liveRecord: LiveChildRunRecord = { handle, completion };

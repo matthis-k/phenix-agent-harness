@@ -58,14 +58,6 @@ export type {
 } from "./subagent-api.ts";
 export { decodeReturnValue, returns, returnsWithDecoder } from "./subagent-api.ts";
 export type {
-  SessionSubagentManagerFactoryOptions,
-  SubagentManagerFactory,
-} from "./subagent-manager-factory.ts";
-export {
-  createSessionSubagentManagerFactory,
-  SessionSubagentManagerFactory,
-} from "./subagent-manager-factory.ts";
-export type {
   SubagentCancellation,
   SubagentError,
   SubagentEvent,
@@ -79,6 +71,14 @@ export {
   SubagentExecutionError,
   SubagentManager,
 } from "./subagent-manager.ts";
+export type {
+  SessionSubagentManagerFactoryOptions,
+  SubagentManagerFactory,
+} from "./subagent-manager-factory.ts";
+export {
+  createSessionSubagentManagerFactory,
+  SessionSubagentManagerFactory,
+} from "./subagent-manager-factory.ts";
 export type { SubagentSessionRuntimeOptions } from "./subagent-session-runtime.ts";
 export {
   createSubagentSessionRuntime,

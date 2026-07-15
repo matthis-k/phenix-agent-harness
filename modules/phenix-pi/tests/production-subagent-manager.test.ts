@@ -18,8 +18,8 @@ import {
   createSessionSubagentManagerFactory,
   type SubagentSessionSpawner,
 } from "../extensions/phenix-runtime/index.ts";
-import { returnsWithDecoder } from "../extensions/phenix-runtime/subagent-api.ts";
 import type { SubagentRequest } from "../extensions/phenix-runtime/subagent-api.ts";
+import { returnsWithDecoder } from "../extensions/phenix-runtime/subagent-api.ts";
 import type { ContractArtifact } from "../extensions/phenix-subagents/contract.ts";
 import { ExecutionQualityService } from "../extensions/phenix-subagents/execution-quality-service.ts";
 import type { HandleRecord } from "../extensions/phenix-subagents/handle-types.ts";
