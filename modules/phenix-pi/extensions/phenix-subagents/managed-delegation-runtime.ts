@@ -244,7 +244,10 @@ export class ManagedDelegationRuntime {
     return readRecord(input.cwd, input.sessionId, input.id) ?? record;
   }
 
-  async cancelHandle(input: ManagedHandleLookup, reason: string): Promise<HandleRecord | undefined> {
+  async cancelHandle(
+    input: ManagedHandleLookup,
+    reason: string,
+  ): Promise<HandleRecord | undefined> {
     const record = readRecord(input.cwd, input.sessionId, input.id);
     if (!record || isTerminalHandleStatus(record.status)) return record;
 

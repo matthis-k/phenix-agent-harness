@@ -36,8 +36,8 @@ import {
   createChildSessionBackend,
   createSubagentSessionRuntime,
 } from "./phenix-runtime/child-session-backend.ts";
-import { getChildSessionRegistry } from "./phenix-runtime/child-session-registry.ts";
 import { createDelegationTool } from "./phenix-runtime/delegation-tool.ts";
+import { createManagedSubagentRegistry } from "./phenix-runtime/managed-subagent-registry.ts";
 import { createSessionSubagentManagerFactory } from "./phenix-runtime/subagent-manager-factory.ts";
 import {
   bootstrapPhenixSubagentsSkillPrompt,
@@ -47,6 +47,10 @@ import { AgentExecutionCoordinator } from "./phenix-subagents/coordinator.ts";
 import { defaultAgentClients } from "./phenix-subagents/definitions.ts";
 import { createExecutionQualityService } from "./phenix-subagents/execution-quality-service.ts";
 import phenixSubagents from "./phenix-subagents/index.ts";
+import {
+  createManagedDelegationRuntime,
+  type ManagedDelegationRuntime,
+} from "./phenix-subagents/managed-delegation-runtime.ts";
 import { createWorkflowAcceptanceEngine } from "./phenix-subagents/workflow-acceptance-engine.ts";
 
 const defaultPhenixConfiguration = definePhenixConfiguration({
@@ -189,11 +193,13 @@ function registerPhenixCodingSubstratePrompt(pi: ExtensionAPI): void {
   });
 }
 
-function registerTuiProjection(pi: ExtensionAPI): void {
+function registerTuiProjection(
+  pi: ExtensionAPI,
+  delegationRuntime: ManagedDelegationRuntime,
+): void {
   pi.on("context", async (_event, ctx) => {
     try {
-      const registry = getChildSessionRegistry();
-      const activeCount = registry.list().length;
+      const activeCount = delegationRuntime.activeCount;
       ctx.ui.setStatus(
         "phenix",
         `Phenix · ${activeCount} active child${activeCount !== 1 ? "ren" : ""}`,
@@ -204,10 +210,9 @@ function registerTuiProjection(pi: ExtensionAPI): void {
   });
 }
 
-function registerShutdown(pi: ExtensionAPI): void {
+function registerShutdown(pi: ExtensionAPI, delegationRuntime: ManagedDelegationRuntime): void {
   pi.on("session_shutdown", async () => {
-    const registry = getChildSessionRegistry();
-    await registry.shutdown("session shutdown");
+    await delegationRuntime.shutdown("session shutdown");
   });
 }
 
@@ -323,9 +328,14 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
     sessions: sessionRuntime,
     acceptance,
   });
+  const managedRegistry = createManagedSubagentRegistry();
+  const delegationRuntime = createManagedDelegationRuntime({
+    managers,
+    registry: managedRegistry,
+  });
 
   coordinator = new AgentExecutionCoordinator({
-    managers,
+    delegationRuntime,
     activeModelSet: linkResult.graph.activeModelSet.id,
     maximumDelegationDepth: defaultPhenixConfiguration.runtime.maximumDelegationDepth,
   });
@@ -333,8 +343,8 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
   await loadIntegration("phenix-subagents", pi, async (api) => {
     await phenixSubagents(api, { coordinator });
   });
-  registerTuiProjection(pi);
-  registerShutdown(pi);
+  registerTuiProjection(pi, delegationRuntime);
+  registerShutdown(pi, delegationRuntime);
 
   pi.registerCommand("phenix", {
     description: "Inspect the Phenix coding substrate; usage: /phenix doctor",

@@ -86,6 +86,8 @@ describe("Phenix architecture boundaries", () => {
         "phenix-runtime/execution-plan.ts",
         "phenix-runtime/session-options.ts",
         "phenix-runtime/session-subagent-adapter.ts",
+        "phenix-runtime/managed-subagent-registry.ts",
+        "phenix-runtime/managed-subagent-registry.ts",
       ),
       [
         "../phenix-workflow",
@@ -105,11 +107,13 @@ describe("Phenix architecture boundaries", () => {
     ]);
   });
 
-  it("keeps the coordinator on the managed subagent surface", () => {
+  it("keeps the coordinator independent from managed execution mechanics", () => {
     assertNoDependencies(selectedFiles("phenix-subagents/coordinator.ts"), [
       "../phenix-runtime/child-session-backend",
       "../phenix-runtime/sdk-child-session-backend",
       "../phenix-runtime/subagent-session-runtime",
+      "../phenix-runtime/subagent-manager",
+      "../phenix-runtime/subagent-manager-factory",
       "./execution-quality-service",
       "./attempt-runner",
     ]);
