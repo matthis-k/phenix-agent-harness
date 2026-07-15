@@ -32,6 +32,13 @@ export function createChildSessionBackend(
 }
 
 export type {
+  AcceptanceEngine,
+  AcceptancePlan,
+  RuntimeBindings,
+  SubagentExecutionCompiler,
+  SubagentExecutionPlan,
+} from "./execution-plan.ts";
+export type {
   ConcreteSessionModel,
   ResolvedSubagentSessionOptions,
   RoutedSessionModel,
@@ -59,11 +66,7 @@ export {
   SubagentExecutionError,
   SubagentManager,
 } from "./subagent-manager.ts";
-export type {
-  SubagentSessionBindings,
-  SubagentSessionRequest,
-  SubagentSessionRuntimeOptions,
-} from "./subagent-session-runtime.ts";
+export type { SubagentSessionRuntimeOptions } from "./subagent-session-runtime.ts";
 export {
   createSubagentSessionRuntime,
   SubagentSessionPlanner,
