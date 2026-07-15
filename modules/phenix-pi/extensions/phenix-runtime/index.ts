@@ -9,6 +9,16 @@ export type {
   SubagentSessionOptions,
 } from "./session-options.ts";
 export { routing } from "./session-options.ts";
+export type {
+  CompiledSubagentExecution,
+  SessionSubagentExecutionAdapterOptions,
+  SubagentExecutionCompiler,
+  SubagentSessionSpawner,
+} from "./session-subagent-adapter.ts";
+export {
+  createSessionSubagentExecutionAdapter,
+  SessionSubagentExecutionAdapter,
+} from "./session-subagent-adapter.ts";
 export type { ReturnSpec, ReturnSpecOptions, SubagentRequest } from "./subagent-api.ts";
 export { returns } from "./subagent-api.ts";
 export type {
