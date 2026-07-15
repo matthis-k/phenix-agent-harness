@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import {
-  ensureReadActive,
-  hasHypaReadTool,
-} from "../extensions/hypa-read-redirect.ts";
+import { ensureReadActive, hasHypaReadTool } from "../extensions/hypa-read-policy.ts";
 
 describe("Hypa read redirect", () => {
   it("detects the Hypa reader before overriding read", () => {
