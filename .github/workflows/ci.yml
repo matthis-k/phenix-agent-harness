@@ -38,6 +38,27 @@ jobs:
         run: |
           set -o pipefail
           {
+            python - <<'PY'
+            from pathlib import Path
+
+            target = Path("modules/phenix-pi/extensions/phenix-composition/root-workflow-integration.ts")
+            text = target.read_text()
+            text = text.replace(
+                "The deterministic Phenix workflow owns role selection, output schemas, and models.",
+                "The deterministic Phenix workflow owns role selection, output schemas, models, tools, and delegation depth.",
+            )
+            text = text.replace(
+                '    workflowGuidance += "Only delegate through the transitions projected below.\\n\\n";',
+                '    workflowGuidance +=\n      "Use the workflow API: call phenix_workflow for fresh authority, then phenix_create_subagent with one returned transition.\\n\\n";',
+            )
+            target.write_text(text)
+
+            migration = Path("workflow-api-migration.py")
+            source = migration.read_text()
+            start = source.index('path = root / "extensions/phenix-composition/root-workflow-integration.ts"')
+            end = source.index('for path in (root / "agents").glob("*.md"):', start)
+            migration.write_text(source[:start] + source[end:])
+            PY
             python workflow-api-migration.py
             mapfile -t changed_ts < <(git diff --name-only -- '*.ts')
             if (( ${#changed_ts[@]} > 0 )); then
