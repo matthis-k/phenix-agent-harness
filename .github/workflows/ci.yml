@@ -5,10 +5,11 @@ on:
   push:
     branches:
       - main
+      - feat/contract-workflow-api
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -23,12 +24,29 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
+          ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
 
       - name: Install Nix
         uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply contract workflow API migration
+        if: (github.ref_name == 'feat/contract-workflow-api' || github.head_ref == 'feat/contract-workflow-api') && github.actor != 'github-actions[bot]'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python workflow-api-migration.py
+          mapfile -t changed_ts < <(git diff --name-only -- '*.ts')
+          if (( ${#changed_ts[@]} > 0 )); then
+            nix run nixpkgs#biome -- check --write "${changed_ts[@]}"
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "feat(workflow): install contract-bound workflow API"
+          git push origin HEAD:${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}
 
       - name: Run read-only Tend CI profile
         id: tend
