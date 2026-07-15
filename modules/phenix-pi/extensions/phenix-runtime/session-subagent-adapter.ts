@@ -327,7 +327,6 @@ class SessionSubagentHandle<TOutput> implements SubagentHandle<TOutput> {
     if (code === "ABORTED") {
       await this.run.abort(reason);
     }
-    await this.evaluation.catch(() => undefined);
   }
 
   subscribe(listener: (event: SubagentEvent) => void): () => void {
