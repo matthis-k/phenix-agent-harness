@@ -301,12 +301,6 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
       agentDir,
     },
     buildCustomTools: (spec) => {
-      const canDelegate =
-        spec.contract.runtime.delegation.remainingDepth > 0 &&
-        spec.contract.runtime.delegation.availableRoles.length > 0 &&
-        spec.workflowProjection.options.length > 0;
-      if (!canDelegate) return [];
-
       return createWorkflowApiTools({
         workflow: workflowApi,
         parent: spec.parentContext,
