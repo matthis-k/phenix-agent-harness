@@ -36,7 +36,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          nix develop --command biome check --write \
+          nix run nixpkgs#biome -- check --write \
             modules/phenix-pi/extensions/phenix-runtime/execution-plan.ts \
             modules/phenix-pi/extensions/phenix-runtime/session-subagent-adapter.ts \
             modules/phenix-pi/extensions/phenix-runtime/subagent-session-runtime.ts \
