@@ -37,12 +37,14 @@ export type {
   SubagentEvent,
   SubagentExecutionAdapter,
   SubagentHandle,
+  SubagentQuery,
   SubagentSnapshot,
   SubagentStatus,
 } from "./subagent-manager.ts";
 export {
   createSubagentManager,
   SubagentExecutionError,
+  SubagentHandleDirectory,
   SubagentManager,
 } from "./subagent-manager.ts";
 export type {
