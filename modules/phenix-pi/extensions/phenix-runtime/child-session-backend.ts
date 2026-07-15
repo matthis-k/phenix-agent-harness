@@ -32,6 +32,20 @@ export function createChildSessionBackend(
 }
 
 export type {
+  ConcreteSessionModel,
+  ResolvedSubagentSessionOptions,
+  RoutedSessionModel,
+  RoutedSessionModelOptions,
+  SessionModelSelector,
+  SessionPersistence,
+  SessionRouteRequest,
+  SessionRouteResolution,
+  SessionRouteResolver,
+  SubagentSessionDefaults,
+  SubagentSessionOptions,
+} from "./session-options.ts";
+export { resolveSubagentSessionOptions, routing } from "./session-options.ts";
+export type {
   ChildSessionBackend,
   PiRuntimeServices,
   PiSessionFactory,
