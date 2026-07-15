@@ -1,84 +1,53 @@
-/**
- * child-session-registry.test.ts
- *
- * Verify:
- * - add/get/remove/list work correctly
- * - shutdown aborts and disposes all active runs
- * - repeated operations are safe
- */
+/** Managed subagent registry tests. */
 
-import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { beforeEach, describe, it } from "node:test";
 
 import {
   ChildSessionRegistry,
-  resetChildSessionRegistry,
   getChildSessionRegistry,
+  resetChildSessionRegistry,
 } from "../extensions/phenix-runtime/child-session-registry.ts";
 import type {
-  ChildRun,
-  ChildRunId,
-  ChildSessionEvent,
-  ChildCycleOutcome,
-  ChildSessionNode,
-  PiSessionReference,
-} from "../extensions/phenix-runtime/child-session-types.ts";
-import { childRunId } from "../extensions/phenix-runtime/child-session-types.ts";
+  SubagentCancellation,
+  SubagentEvent,
+  SubagentHandle,
+  SubagentSnapshot,
+} from "../extensions/phenix-runtime/subagent-manager.ts";
 
-// ── Fake child run ──────────────────────────────────────────────────────────
+class FakeManagedHandle implements SubagentHandle<unknown> {
+  readonly id: string;
+  readonly cancellations: Array<string | SubagentCancellation | undefined> = [];
 
-class FakeChildRun implements ChildRun {
-  readonly id: ChildRunId;
-  readonly backend = "sdk" as const;
-  readonly pi: PiSessionReference;
-
-  abortCalls = 0;
-  disposeCalls = 0;
-
-  constructor(id: ChildRunId) {
+  constructor(id: string) {
     this.id = id;
-    this.pi = { sessionId: `pi-${id}` };
   }
 
-  snapshot(): ChildSessionNode {
-    return {
-      id: this.id,
-      rootId: this.id,
-      handleId: "test",
-      role: "scout",
-      agentClient: { id: "scout", kind: "agent" } as any,
-      model: { provider: "test", id: "test" },
-      thinkingLevel: "medium",
-      contractId: "phx_test",
-      backend: "sdk",
-      pi: this.pi,
-      status: "running",
-      startedAt: new Date().toISOString(),
-    };
+  snapshot(): SubagentSnapshot {
+    return { id: this.id, status: "running" };
   }
 
-  subscribe(_listener: (event: ChildSessionEvent) => void): () => void {
+  poll(): Promise<SubagentSnapshot> {
+    return Promise.resolve(this.snapshot());
+  }
+
+  result(): Promise<unknown> {
+    return Promise.resolve(undefined);
+  }
+
+  send(_message: string, _signal?: AbortSignal): Promise<void> {
+    return Promise.resolve();
+  }
+
+  cancel(cancellation?: string | SubagentCancellation): Promise<void> {
+    this.cancellations.push(cancellation);
+    return Promise.resolve();
+  }
+
+  subscribe(_listener: (event: SubagentEvent) => void): () => void {
     return () => {};
   }
-
-  async continue(_message: string, _signal?: AbortSignal): Promise<ChildCycleOutcome> {
-    return { cycle: 1, status: "settled" };
-  }
-
-  async waitForCurrentCycle(_signal?: AbortSignal): Promise<ChildCycleOutcome> {
-    return { cycle: 1, status: "settled" };
-  }
-
-  async abort(_reason: string): Promise<void> {
-    this.abortCalls++;
-  }
-
-  async dispose(): Promise<void> {
-    this.disposeCalls++;
-  }
 }
-
-// ── Tests ───────────────────────────────────────────────────────────────────
 
 describe("ChildSessionRegistry", () => {
   let registry: ChildSessionRegistry;
@@ -88,93 +57,70 @@ describe("ChildSessionRegistry", () => {
   });
 
   it("add and get work correctly", () => {
-    const run = new FakeChildRun(childRunId("run-1"));
-    const controller = new AbortController();
+    const handle = new FakeManagedHandle("run-1");
     const record = {
-      run,
-      completion: Promise.resolve({ ok: true, status: "completed" as const }),
-      controller,
+      handle,
+      completion: Promise.resolve(undefined),
     };
 
     registry.add(record);
-    assert.equal(registry.get(run.id), record);
+    assert.equal(registry.get(handle.id), record);
   });
 
   it("get returns undefined for unknown id", () => {
-    assert.equal(registry.get(childRunId("unknown")), undefined);
+    assert.equal(registry.get("unknown"), undefined);
   });
 
   it("remove deletes the record", () => {
-    const run = new FakeChildRun(childRunId("run-2"));
-    const controller = new AbortController();
+    const handle = new FakeManagedHandle("run-2");
     const record = {
-      run,
-      completion: Promise.resolve({ ok: true, status: "completed" as const }),
-      controller,
+      handle,
+      completion: Promise.resolve(undefined),
     };
 
     registry.add(record);
-    registry.remove(run.id);
-    assert.equal(registry.get(run.id), undefined);
+    registry.remove(handle.id);
+    assert.equal(registry.get(handle.id), undefined);
   });
 
   it("list returns all records", () => {
-    const run1 = new FakeChildRun(childRunId("run-a"));
-    const run2 = new FakeChildRun(childRunId("run-b"));
-    const controller = new AbortController();
-
     registry.add({
-      run: run1,
-      completion: Promise.resolve({ ok: true, status: "completed" as const }),
-      controller,
+      handle: new FakeManagedHandle("run-a"),
+      completion: Promise.resolve(undefined),
     });
     registry.add({
-      run: run2,
-      completion: Promise.resolve({ ok: true, status: "completed" as const }),
-      controller,
+      handle: new FakeManagedHandle("run-b"),
+      completion: Promise.resolve(undefined),
     });
 
     assert.equal(registry.list().length, 2);
   });
 
-  it("shutdown aborts and disposes all active runs", async () => {
-    const run1 = new FakeChildRun(childRunId("s1"));
-    const run2 = new FakeChildRun(childRunId("s2"));
-    const controller1 = new AbortController();
-    const controller2 = new AbortController();
+  it("shutdown cancels all active managed handles", async () => {
+    const first = new FakeManagedHandle("s1");
+    const second = new FakeManagedHandle("s2");
 
-    registry.add({
-      run: run1,
-      completion: new Promise(() => {}),
-      controller: controller1,
-    });
-    registry.add({
-      run: run2,
-      completion: new Promise(() => {}),
-      controller: controller2,
-    });
+    registry.add({ handle: first, completion: new Promise(() => {}) });
+    registry.add({ handle: second, completion: new Promise(() => {}) });
 
     await registry.shutdown("test shutdown");
 
-    assert.equal(run1.abortCalls, 1);
-    assert.equal(run1.disposeCalls, 1);
-    assert.equal(run2.abortCalls, 1);
-    assert.equal(run2.disposeCalls, 1);
+    assert.deepEqual(first.cancellations, ["test shutdown"]);
+    assert.deepEqual(second.cancellations, ["test shutdown"]);
     assert.equal(registry.list().length, 0);
   });
 
-  it("shutdown is safe with no active runs", async () => {
+  it("shutdown is safe with no active handles", async () => {
     await registry.shutdown("empty shutdown");
     assert.equal(registry.list().length, 0);
   });
 });
 
 describe("ChildSessionRegistry singleton", () => {
-  it("getChildSessionRegistry returns a registry", () => {
+  it("getChildSessionRegistry returns one shared registry", () => {
     resetChildSessionRegistry();
     const registry = getChildSessionRegistry();
     assert.ok(registry);
-    // Same instance on subsequent calls
     assert.equal(getChildSessionRegistry(), registry);
   });
 
