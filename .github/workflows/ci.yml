@@ -5,11 +5,10 @@ on:
   push:
     branches:
       - main
-      - feat/contract-workflow-api
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -24,79 +23,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
 
       - name: Install Nix
         uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Normalize workflow API integration
-        if: (github.ref_name == 'feat/contract-workflow-api' || github.head_ref == 'feat/contract-workflow-api') && github.actor != 'github-actions[bot]'
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-
-          for path in Path("modules/phenix-pi/tests").glob("*.ts"):
-              text = path.read_text()
-              text = text.replace(
-                  '"contact_supervisor", "phenix_delegate",',
-                  '"contact_supervisor", "phenix_workflow", "phenix_create_subagent",',
-              )
-              text = text.replace(
-                  '"contact_supervisor",\n  "phenix_delegate",',
-                  '"contact_supervisor",\n  "phenix_workflow",\n  "phenix_create_subagent",',
-              )
-              text = text.replace(
-                  '"contact_supervisor", "phenix_delegate", "write",',
-                  '"contact_supervisor", "phenix_workflow", "phenix_create_subagent", "write",',
-              )
-              path.write_text(text)
-
-          path = Path("modules/phenix-pi/extensions/phenix.ts")
-          text = path.read_text()
-          old = '''    buildCustomTools: (spec) => {
-              const canDelegate =
-                spec.contract.runtime.delegation.remainingDepth > 0 &&
-                spec.contract.runtime.delegation.availableRoles.length > 0 &&
-                spec.workflowProjection.options.length > 0;
-              if (!canDelegate) return [];
-
-              return createWorkflowApiTools({
-          '''
-          new = '''    buildCustomTools: (spec) => {
-              return createWorkflowApiTools({
-          '''
-          if old not in text:
-              old = '''    buildCustomTools: (spec) => {
-                const canDelegate =
-                  spec.contract.runtime.delegation.remainingDepth > 0 &&
-                  spec.contract.runtime.delegation.availableRoles.length > 0 &&
-                  spec.workflowProjection.options.length > 0;
-                if (!canDelegate) return [];
-
-                return createWorkflowApiTools({
-          '''
-              new = '''    buildCustomTools: (spec) => {
-                return createWorkflowApiTools({
-          '''
-          text = text.replace(old, new)
-          path.write_text(text)
-          PY
-          mapfile -t changed_ts < <(git diff --name-only -- '*.ts')
-          if (( ${#changed_ts[@]} > 0 )); then
-            nix run nixpkgs#biome -- check --write "${changed_ts[@]}"
-          fi
-          if ! git diff --quiet; then
-            git config user.name github-actions[bot]
-            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-            git add -A
-            git commit -m "fix(workflow): always install workflow inspection"
-            git push origin HEAD:${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}
-          fi
 
       - name: Run read-only Tend CI profile
         id: tend
