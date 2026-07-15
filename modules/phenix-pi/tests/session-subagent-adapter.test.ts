@@ -183,7 +183,8 @@ describe("SessionSubagentExecutionAdapter", () => {
   });
 
   it("projects the live child session through the public handle", async () => {
-    const compiler = new RecordingCompiler();
+    const evaluation = deferred<SummaryResult>();
+    const compiler = new RecordingCompiler(() => evaluation.promise);
     const { manager } = managerWith(compiler);
     const handle = await manager.spawn(request());
 
@@ -198,6 +199,9 @@ describe("SessionSubagentExecutionAdapter", () => {
       provider: "opencode-go",
       id: "deepseek-v4-flash",
     });
+
+    evaluation.resolve({ summary: "done" });
+    assert.deepEqual(await handle.result(), { summary: "done" });
   });
 
   it("cancels a result wait without cancelling shared child execution", async () => {
