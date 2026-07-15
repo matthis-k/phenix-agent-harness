@@ -39,13 +39,8 @@ jobs:
           set -o pipefail
           {
             python .github/scripts/migrate-subagent-handle-schema.py
-            nix run nixpkgs#biome -- check --write \
-              modules/phenix-pi/extensions/phenix-subagents/handle-types.ts \
-              modules/phenix-pi/extensions/phenix-subagents/managed-delegation-runtime.ts \
-              modules/phenix-pi/extensions/phenix-subagents/coordinator.ts \
-              modules/phenix-pi/extensions/phenix-subagents/execution-quality-service.ts \
-              modules/phenix-pi/extensions/phenix-subagents/index.ts \
-              modules/phenix-pi/tests
+            mapfile -t changed_ts < <(git diff --name-only -- '*.ts')
+            nix run nixpkgs#biome -- check --write "${changed_ts[@]}"
             git config user.name github-actions[bot]
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
             git add -A
