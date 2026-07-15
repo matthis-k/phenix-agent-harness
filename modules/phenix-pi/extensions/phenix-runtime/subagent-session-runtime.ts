@@ -74,7 +74,6 @@ export class SubagentSessionPlanner {
 export interface SubagentSessionRuntimeOptions {
   readonly backend: ChildSessionBackend;
   readonly resolveRoute: SessionRouteResolver;
-  readonly planner?: SubagentSessionPlanner;
 }
 
 /**
@@ -89,7 +88,7 @@ export class SubagentSessionRuntime {
 
   constructor(options: SubagentSessionRuntimeOptions) {
     this.backend = options.backend;
-    this.planner = options.planner ?? new SubagentSessionPlanner(options.resolveRoute);
+    this.planner = new SubagentSessionPlanner(options.resolveRoute);
   }
 
   plan(request: SubagentSessionRequest): Promise<ChildSessionSpec> {
