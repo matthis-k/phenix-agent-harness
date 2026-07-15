@@ -4,8 +4,10 @@ import { describe, it } from "node:test";
 import { modelSetId } from "../extensions/phenix-kernel/ids.ts";
 import {
   createSubagentSessionRuntime,
+  returns,
   routing,
-  type SubagentSessionBindings,
+  type RuntimeBindings,
+  type SubagentExecutionPlan,
   SubagentSessionPlanner,
 } from "../extensions/phenix-runtime/child-session-backend.ts";
 import {
@@ -18,7 +20,7 @@ import {
   childRunId,
 } from "../extensions/phenix-runtime/child-session-types.ts";
 
-const bindings = {
+const runtime = {
   id: childRunId("child-session-runtime-test"),
   rootId: childRunId("child-session-runtime-test"),
   handleId: "handle-test",
@@ -34,7 +36,7 @@ const bindings = {
   timeoutMs: 1_000,
   turnBudget: {},
   toolBudget: {},
-} as unknown as SubagentSessionBindings;
+} as unknown as RuntimeBindings;
 
 const defaults = {
   agent: "implementer" as const,
@@ -44,8 +46,25 @@ const defaults = {
   persistence: "file" as const,
 };
 
+function executionPlan(
+  session: SubagentExecutionPlan<unknown>["session"] = { defaults },
+): SubagentExecutionPlan<unknown> {
+  return {
+    assignment: {
+      task: "Inspect the repository boundary.",
+      requirements: [],
+    },
+    session,
+    runtime,
+    acceptance: {
+      kind: "test",
+      returns: returns({ type: "object" }),
+    },
+  };
+}
+
 class FakeRun implements ChildRun {
-  readonly id = bindings.id;
+  readonly id = runtime.id;
   readonly backend = "sdk" as const;
   readonly pi = { sessionId: "pi-test" };
 
@@ -66,7 +85,6 @@ class FakeRun implements ChildRun {
   }
 
   async abort(_reason: string): Promise<void> {}
-
   async dispose(): Promise<void> {}
 }
 
@@ -84,7 +102,7 @@ class RecordingBackend implements ChildSessionBackend {
 }
 
 describe("SubagentSessionPlanner", () => {
-  it("translates declarative session options into a complete backend spec", async () => {
+  it("translates one canonical plan into a backend spec", async () => {
     const planner = new SubagentSessionPlanner(async (request) => {
       assert.deepEqual(request, {
         modelSet: modelSetId("mixed"),
@@ -97,16 +115,16 @@ describe("SubagentSessionPlanner", () => {
       };
     });
 
-    const spec = await planner.plan({
-      task: "Inspect the repository boundary.",
-      session: {
-        agent: "planner",
-        model: routing.get("scout"),
-        thinking: "high",
-      },
-      defaults,
-      bindings,
-    });
+    const spec = await planner.plan(
+      executionPlan({
+        defaults,
+        options: {
+          agent: "planner",
+          model: routing.get("scout"),
+          thinking: "high",
+        },
+      }),
+    );
 
     assert.equal(spec.role, "planner");
     assert.deepEqual(spec.agentClient, { kind: "agent-client", id: "planner" });
@@ -117,57 +135,38 @@ describe("SubagentSessionPlanner", () => {
     assert.equal(spec.thinkingLevel, "high");
     assert.equal(spec.initialPrompt, "Inspect the repository boundary.");
     assert.equal(spec.persistence, "file");
-    assert.equal(spec.contract, bindings.contract);
-    assert.equal(spec.workflowProjection, bindings.workflowProjection);
+    assert.equal(spec.contract, runtime.contract);
   });
 
-  it("keeps the base agent explicit and bypasses routing for concrete models", async () => {
+  it("keeps the base agent explicit for a concrete model", async () => {
     let routed = false;
     const planner = new SubagentSessionPlanner(async () => {
       routed = true;
       throw new Error("routing must not be used");
     });
 
-    const spec = await planner.plan({
-      task: "Return a bounded result.",
-      session: {
-        agent: null,
-        model: routing.concrete("openai-codex", "gpt-5.4-mini"),
-        persistence: "memory",
-      },
-      defaults,
-      bindings,
-    });
+    const spec = await planner.plan(
+      executionPlan({
+        defaults,
+        options: {
+          agent: null,
+          model: routing.concrete("openai-codex", "gpt-5.4-mini"),
+          persistence: "memory",
+        },
+      }),
+    );
 
     assert.equal(routed, false);
     assert.equal(spec.role, null);
     assert.deepEqual(spec.agentClient, { kind: "agent-client", id: "base" });
-    assert.deepEqual(spec.model, {
-      provider: "openai-codex",
-      id: "gpt-5.4-mini",
-    });
     assert.equal(spec.persistence, "memory");
-  });
-
-  it("rejects an empty task before consulting routing", async () => {
-    let routed = false;
-    const planner = new SubagentSessionPlanner(async () => {
-      routed = true;
-      throw new Error("not reached");
-    });
-
-    await assert.rejects(
-      planner.plan({ task: "   ", defaults, bindings }),
-      /task must be non-empty/,
-    );
-    assert.equal(routed, false);
   });
 });
 
 describe("SubagentSessionRuntime", () => {
-  it("plans and spawns through the backend port", async () => {
+  it("starts the backend from the same canonical plan", async () => {
     const backend = new RecordingBackend();
-    const runtime = createSubagentSessionRuntime({
+    const sessions = createSubagentSessionRuntime({
       backend,
       resolveRoute: async () => ({
         model: { provider: "opencode-go", id: "mimo-v2.5" },
@@ -176,13 +175,8 @@ describe("SubagentSessionRuntime", () => {
     });
     const controller = new AbortController();
 
-    const run = await runtime.spawn(
-      {
-        task: "Scout the runtime implementation.",
-        session: { agent: "scout" },
-        defaults,
-        bindings,
-      },
+    const run = await sessions.spawn(
+      executionPlan({ defaults, options: { agent: "scout" } }),
       controller.signal,
     );
 
