@@ -26,12 +26,16 @@ import { link } from "./phenix-composition/linker.ts";
 import { DEFAULT_MAXIMUM_DELEGATION_DEPTH } from "./phenix-composition/runtime-policy.ts";
 import { defaultContracts } from "./phenix-contracts/index.ts";
 import { modelSetRef } from "./phenix-kernel/refs.ts";
+import { resolveChildRoute } from "./phenix-routing/child-route.ts";
 import {
   defaultAgentRoutes,
   defaultModelPools,
   defaultModelSets,
 } from "./phenix-routing/default-routing.ts";
-import { createChildSessionBackend } from "./phenix-runtime/child-session-backend.ts";
+import {
+  createChildSessionBackend,
+  createSubagentSessionRuntime,
+} from "./phenix-runtime/child-session-backend.ts";
 import { getChildSessionRegistry } from "./phenix-runtime/child-session-registry.ts";
 import { createDelegationTool } from "./phenix-runtime/delegation-tool.ts";
 import {
@@ -342,9 +346,21 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
     },
   });
 
+  const sessionRuntime = createSubagentSessionRuntime({
+    backend,
+    resolveRoute: async ({ modelSet, agent, difficulty }) => {
+      const route = await resolveChildRoute({ modelSet, role: agent, difficulty });
+      return {
+        model: { provider: route.model.provider, id: route.model.model },
+        thinking: route.thinking,
+      };
+    },
+  });
+
   // ── 7. Construct the coordinator ─────────────────────────────────────
   coordinator = new AgentExecutionCoordinator({
     backend,
+    sessionRuntime,
     resolveModelRegistry: () => getRuntimeServices().modelRegistry,
     activeModelSet: linkResult.graph.activeModelSet.id,
     agentDir,
