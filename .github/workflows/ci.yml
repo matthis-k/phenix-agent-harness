@@ -33,8 +33,10 @@ jobs:
 
       - name: Apply workflow compiler migration
         if: github.head_ref == 'refactor/workflow-execution-compiler' && github.actor != 'github-actions[bot]'
-        shell: python
+        shell: bash
         run: |
+          set -euo pipefail
+          python - <<'PY'
           from pathlib import Path
           import re
 
@@ -136,6 +138,7 @@ jobs:
               'assert.match(coordinator, /createWorkflowExecutionCompiler\\(\\{/);\n    assert.match(coordinator, /modelSet: modelSetId\\(selectedModelSet\\)/);',
           )
           boundary.write_text(test)
+          PY
 
       - name: Format and commit migration
         if: github.head_ref == 'refactor/workflow-execution-compiler' && github.actor != 'github-actions[bot]'
