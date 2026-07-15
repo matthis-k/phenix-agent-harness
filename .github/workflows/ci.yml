@@ -5,11 +5,10 @@ on:
   push:
     branches:
       - main
-      - refactor/subagent-handle-schema
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -24,40 +23,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
 
       - name: Install Nix
         uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Apply subagent handle schema migration
-        if: (github.ref_name == 'refactor/subagent-handle-schema' || github.head_ref == 'refactor/subagent-handle-schema') && github.actor != 'github-actions[bot]'
-        shell: bash
-        run: |
-          set -o pipefail
-          {
-            python .github/scripts/migrate-subagent-handle-schema.py
-            mapfile -t changed_ts < <(git diff --name-only -- '*.ts')
-            nix run nixpkgs#biome -- check --write "${changed_ts[@]}"
-            git config user.name github-actions[bot]
-            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-            git add -A
-            git commit -m "refactor(runtime): use backend-neutral subagent handles"
-            git push origin HEAD:${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}
-          } > migration.log 2>&1
-          status=$?
-          cat migration.log
-          exit "$status"
-
-      - name: Upload migration diagnostics
-        if: failure()
-        uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097 # v4.4.2
-        with:
-          name: handle-schema-migration-diagnostics
-          path: migration.log
-          if-no-files-found: error
 
       - name: Run read-only Tend CI profile
         id: tend
