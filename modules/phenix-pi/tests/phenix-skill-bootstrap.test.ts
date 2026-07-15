@@ -20,7 +20,8 @@ describe("Phenix subagents skill bootstrap", () => {
 
     assert.match(bootstrapped, /<skill name="phenix-subagents"/);
     assert.match(bootstrapped, /Phenix workflow states, legal transitions/);
-    assert.match(bootstrapped, /Use only the delegation transitions projected into the current system prompt/);
+    assert.match(bootstrapped, /Call `phenix_workflow` immediately before deciding/);
+    assert.match(bootstrapped, /call `phenix_create_subagent`/);
 
     const again = bootstrapPhenixSubagentsSkillPrompt(bootstrapped);
     assert.equal(again, bootstrapped);
