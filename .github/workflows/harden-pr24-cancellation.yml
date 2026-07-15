@@ -1,0 +1,106 @@
+name: Harden PR 24 cancellation
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.head_ref == 'feat/session-subagent-adapter' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Apply cancellation hardening
+        shell: python
+        run: |
+          from pathlib import Path
+
+          adapter = Path("modules/phenix-pi/extensions/phenix-runtime/session-subagent-adapter.ts")
+          text = adapter.read_text()
+          old = '''      const value = await this.execution.evaluate(this.run, this.evaluationController.signal);
+                this.terminalStatus = "completed";
+                return value;
+          '''
+          new = '''      const value = await this.execution.evaluate(this.run, this.evaluationController.signal);
+                if (this.evaluationController.signal.aborted || this.terminalStatus === "cancelled") {
+                  const reason = this.evaluationController.signal.reason;
+                  throw reason instanceof SubagentExecutionError
+                    ? reason
+                    : new SubagentExecutionError("ABORTED", "Subagent execution was cancelled.", {
+                        cause: reason,
+                        snapshot: this.snapshot(),
+                      });
+                }
+                if (this.terminalStatus === "failed" || this.terminalStatus === "orphaned") {
+                  throw (
+                    this.terminalError ??
+                    new SubagentExecutionError(
+                      "INVALID_STATE",
+                      `Subagent ${this.id} settled in state ${this.terminalStatus}.`,
+                      { snapshot: this.snapshot() },
+                    )
+                  );
+                }
+                this.terminalStatus = "completed";
+                return value;
+          '''
+          if text.count(old) != 1:
+              raise RuntimeError("expected one evaluation success block")
+          text = text.replace(old, new)
+
+          old = '''      const run = await this.sessions.spawn(execution.session, start.signal);
+                return new SessionSubagentHandle(run, execution);
+          '''
+          new = '''      const run = await this.sessions.spawn(execution.session, start.signal);
+                if (start.signal.aborted) {
+                  await run.abort("subagent creation was cancelled");
+                  throw new SubagentExecutionError("ABORTED", "Subagent creation was cancelled.");
+                }
+                return new SessionSubagentHandle(run, execution);
+          '''
+          if text.count(old) != 1:
+              raise RuntimeError("expected one session spawn block")
+          adapter.write_text(text.replace(old, new))
+
+          test = Path("modules/phenix-pi/tests/session-subagent-adapter.test.ts")
+          text = test.read_text()
+          marker = '''  it("explicitly cancels both evaluation and the child run", async () => {
+          '''
+          inserted = '''  it("keeps explicit cancellation terminal when evaluation ignores abort", async () => {
+              const evaluation = deferred<SummaryResult>();
+              const compiler = new RecordingCompiler(() => evaluation.promise);
+              const { manager, spawner } = managerWith(compiler);
+              const handle = await manager.spawn(request());
+
+              await handle.cancel("stop requested");
+              evaluation.resolve({ summary: "late success" });
+
+              await assert.rejects(handle.result(), (error: unknown) => {
+                return error instanceof SubagentExecutionError && error.code === "ABORTED";
+              });
+              assert.equal(spawner.run.abortCalls, 1);
+              assert.equal(handle.snapshot().status, "cancelled");
+            });
+
+          ''' + marker
+          if text.count(marker) != 1:
+              raise RuntimeError("expected one explicit cancellation test marker")
+          test.write_text(text.replace(marker, inserted))
+
+      - name: Commit hardening
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add modules/phenix-pi/extensions/phenix-runtime/session-subagent-adapter.ts \
+            modules/phenix-pi/tests/session-subagent-adapter.test.ts
+          git commit -m "fix(runtime): make explicit cancellation terminal"
+          git push origin HEAD:${{ github.head_ref }}
