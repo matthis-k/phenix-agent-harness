@@ -1,0 +1,53 @@
+name: Fix PR 22 import order
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.head_ref == 'refactor/workflow-session-runtime' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Organize coordinator imports
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("modules/phenix-pi/extensions/phenix-subagents/coordinator.ts")
+          text = path.read_text()
+          old = '''import { ContractSubmissionChannelImpl } from "../phenix-runtime/contract-channel.ts";
+          import type { SubagentSessionRuntime } from "../phenix-runtime/subagent-session-runtime.ts";
+          import type {
+            DelegateExecutionParams,
+            ParentExecutionContext,
+          } from "../phenix-runtime/delegation-tool.ts";
+          '''
+          new = '''import { ContractSubmissionChannelImpl } from "../phenix-runtime/contract-channel.ts";
+          import type {
+            DelegateExecutionParams,
+            ParentExecutionContext,
+          } from "../phenix-runtime/delegation-tool.ts";
+          import type { SubagentSessionRuntime } from "../phenix-runtime/subagent-session-runtime.ts";
+          '''
+          if text.count(old) != 1:
+              raise RuntimeError("expected one coordinator import block")
+          path.write_text(text.replace(old, new))
+
+      - name: Commit fix
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add modules/phenix-pi/extensions/phenix-subagents/coordinator.ts
+          git commit -m "style(workflow): organize coordinator imports"
+          git push origin HEAD:${{ github.head_ref }}
