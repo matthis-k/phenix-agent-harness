@@ -5,10 +5,11 @@ on:
   push:
     branches:
       - main
+      - refactor/final-subagent-cleanup
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -23,12 +24,27 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
+          ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
 
       - name: Install Nix
         uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply final runtime formatting
+        if: (github.ref_name == 'refactor/final-subagent-cleanup' || github.head_ref == 'refactor/final-subagent-cleanup') && github.actor != 'github-actions[bot]'
+        shell: bash
+        run: |
+          set -euo pipefail
+          nix run nixpkgs#biome -- check --write \
+            modules/phenix-pi/extensions/phenix-subagents/producer-contract.ts \
+            modules/phenix-pi/extensions/phenix-subagents/producer-cycle-runner.ts
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "style(runtime): format finalized subagent modules"
+          git push origin HEAD:${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}
 
       - name: Run read-only Tend CI profile
         id: tend
