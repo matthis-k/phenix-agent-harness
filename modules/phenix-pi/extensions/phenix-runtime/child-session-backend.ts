@@ -32,6 +32,12 @@ export function createChildSessionBackend(
 }
 
 export type {
+  ReturnSpec,
+  ReturnSpecOptions,
+  SubagentRequest,
+} from "./subagent-api.ts";
+export { returns } from "./subagent-api.ts";
+export type {
   ConcreteSessionModel,
   ResolvedSubagentSessionOptions,
   RoutedSessionModel,
