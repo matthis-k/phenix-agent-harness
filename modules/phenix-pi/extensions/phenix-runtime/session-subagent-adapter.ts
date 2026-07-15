@@ -60,6 +60,38 @@ function statusForError(error: SubagentExecutionError): SubagentStatus {
   return "failed";
 }
 
+function projectChildEvent(event: ChildSessionEvent, snapshot: SubagentSnapshot): SubagentEvent {
+  switch (event.type) {
+    case "session.started":
+    case "session.disposed":
+      return { type: event.type, snapshot };
+    case "agent.event":
+      return { type: event.type, snapshot, event: event.event };
+    case "tool.started":
+      return { type: event.type, snapshot, toolName: event.toolName };
+    case "tool.completed":
+      return {
+        type: event.type,
+        snapshot,
+        toolName: event.toolName,
+        isError: event.isError,
+      };
+    case "cycle.settled":
+      return { type: event.type, snapshot, cycle: event.cycle };
+    case "session.failed":
+      return {
+        type: event.type,
+        snapshot,
+        error: {
+          code: event.error.code,
+          message: event.error.message,
+        },
+      };
+    case "session.cancelled":
+      return { type: event.type, snapshot, reason: event.reason };
+  }
+}
+
 function normalizeError(
   error: unknown,
   snapshot: SubagentSnapshot,
@@ -292,11 +324,7 @@ class SessionSubagentHandle<TOutput> implements SubagentHandle<TOutput> {
   subscribe(listener: (event: SubagentEvent) => void): () => void {
     return this.run.subscribe((event) => {
       this.observe(event);
-      listener({
-        type: event.type,
-        snapshot: this.snapshot(),
-        data: event,
-      });
+      listener(projectChildEvent(event, this.snapshot()));
     });
   }
 }

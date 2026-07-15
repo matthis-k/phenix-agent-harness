@@ -24,9 +24,19 @@ export {
   createSessionSubagentExecutionAdapter,
   SessionSubagentExecutionAdapter,
 } from "./session-subagent-adapter.ts";
-export type { ReturnSpec, ReturnSpecOptions, SubagentRequest } from "./subagent-api.ts";
-export { returns } from "./subagent-api.ts";
 export type {
+  ReturnSpec,
+  ReturnSpecMetadata,
+  ReturnSpecOptions,
+  SubagentRequest,
+} from "./subagent-api.ts";
+export {
+  decodeReturnValue,
+  returns,
+  returnsWithDecoder,
+} from "./subagent-api.ts";
+export type {
+  SubagentError,
   SubagentEvent,
   SubagentExecutionAdapter,
   SubagentHandle,

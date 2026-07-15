@@ -1,30 +1,29 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { type Static, Type } from "typebox";
 
 import {
+  decodeReturnValue,
   returns,
+  returnsWithDecoder,
   routing,
   type SubagentRequest,
 } from "../extensions/phenix-runtime/child-session-backend.ts";
 
-interface SummaryResult {
-  readonly summary: string;
-}
+const SummarySchema = Type.Object(
+  {
+    summary: Type.String(),
+  },
+  { additionalProperties: false },
+);
+
+type SummaryResult = Static<typeof SummarySchema>;
 
 describe("public subagent API", () => {
-  it("expresses task, return contract, and session selection without backend details", () => {
-    const resultContract = returns<SummaryResult>(
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["summary"],
-        properties: { summary: { type: "string" } },
-      },
-      {
-        name: "summary-result",
-        decode: (value) => value as SummaryResult,
-      },
-    );
+  it("derives the output type from a TypeBox return schema", () => {
+    const resultContract = returns(SummarySchema, {
+      name: "summary-result",
+    });
 
     const request: SubagentRequest<SummaryResult> = {
       task: "Summarize the routing boundary.",
@@ -42,10 +41,22 @@ describe("public subagent API", () => {
       kind: "route",
       agent: "scout",
     });
-    assert.deepEqual(request.returns.decode?.({ summary: "ok" }), {
-      summary: "ok",
-    });
     assert.equal("contractChannel" in request, false);
     assert.equal("workflowProjection" in request, false);
+  });
+
+  it("requires an explicit decoder to type arbitrary JSON Schema", () => {
+    const contract = returnsWithDecoder<SummaryResult>(
+      {
+        type: "object",
+        required: ["summary"],
+        properties: { summary: { type: "string" } },
+      },
+      (value) => value as SummaryResult,
+    );
+
+    assert.deepEqual(decodeReturnValue(contract, { summary: "ok" }), {
+      summary: "ok",
+    });
   });
 });

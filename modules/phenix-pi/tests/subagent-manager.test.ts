@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { type Static, Type } from "typebox";
 
 import {
   createSubagentManager,
@@ -13,19 +14,16 @@ import {
   type SubagentSnapshot,
 } from "../extensions/phenix-runtime/index.ts";
 
-interface SummaryResult {
-  readonly summary: string;
-}
+const SummarySchema = Type.Object({
+  summary: Type.String(),
+});
+
+type SummaryResult = Static<typeof SummarySchema>;
 
 function request(): SubagentRequest<SummaryResult> {
   return {
     task: "Inspect the session runtime.",
-    returns: returns<SummaryResult>({
-      type: "object",
-      additionalProperties: false,
-      required: ["summary"],
-      properties: { summary: { type: "string" } },
-    }),
+    returns: returns(SummarySchema),
     session: {
       agent: "scout",
       model: routing.get("scout"),
@@ -109,7 +107,7 @@ describe("SubagentManager", () => {
     assert.equal(adapter.signals[0], controller.signal);
   });
 
-  it("runs by spawning and awaiting the typed handle result", async () => {
+  it("runs by spawning and awaiting the schema-derived result", async () => {
     const adapter = new RecordingAdapter({ summary: "typed result" });
     const manager = createSubagentManager(adapter);
     const controller = new AbortController();
@@ -167,5 +165,19 @@ describe("SubagentManager", () => {
     assert.equal(error.code, "PROVIDER_FAILED");
     assert.equal(error.cause, cause);
     assert.equal(error.snapshot, snapshot);
+  });
+
+  it("narrows public event payloads by event type", () => {
+    const event: SubagentEvent = {
+      type: "tool.completed",
+      snapshot: { id: "handle-test", status: "running" },
+      toolName: "read",
+      isError: false,
+    };
+
+    if (event.type === "tool.completed") {
+      assert.equal(event.toolName, "read");
+      assert.equal(event.isError, false);
+    }
   });
 });
