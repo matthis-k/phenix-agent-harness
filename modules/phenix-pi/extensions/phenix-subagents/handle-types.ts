@@ -1,4 +1,5 @@
 import type { JsonSchema } from "../phenix-contracts/definitions.ts";
+import { PHENIX_API_VERSION } from "../phenix-kernel/api-version.ts";
 import type { SerializedError } from "../phenix-runtime/child-session-types.ts";
 import type { WorkflowStateId, WorkflowTransitionId } from "../phenix-workflow/workflow-types.ts";
 import type { AgentRole } from "./agent-types.ts";
@@ -6,7 +7,6 @@ import type { ResolvedChildSpec } from "./child-spec.ts";
 
 // ── Constants (used by index.ts; extracted for visibility) ──────────────────
 
-export const HANDLE_VERSION = 5;
 
 /** Persisted lifecycle states for a delegated handle. */
 export type HandleStatus =
@@ -105,10 +105,10 @@ export interface VerificationSummary {
   readonly contract: "valid" | "invalid" | "missing" | "cancelled";
 }
 
-// ── Handle record (version 5) ───────────────────────────────────────────────
+// ── Handle record ───────────────────────────────────────────────────────────
 
 export interface HandleRecord {
-  readonly version: typeof HANDLE_VERSION;
+  readonly version: typeof PHENIX_API_VERSION;
 
   readonly id: string;
   readonly sessionId: string;
@@ -146,11 +146,11 @@ export interface HandleRecord {
     readonly missingRequirements: readonly string[];
   };
 
-  /** Workflow binding set when the handle was spawned through a v5 workflow transition. */
+  /** Workflow binding set when the handle was spawned through a workflow transition. */
   workflowBinding?: WorkflowBinding;
 }
 
-// ── Workflow binding (v5) ───────────────────────────────────────────────────
+// ── Workflow binding ────────────────────────────────────────────────────────
 
 export interface WorkflowBinding {
   readonly instanceId: string;

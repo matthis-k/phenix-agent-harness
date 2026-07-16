@@ -95,11 +95,6 @@ describe("Role presets", () => {
     assert.equal(rolePreset("finalizer").criticRequired, false);
   });
 
-  it("common read tools do not include old contract tools", () => {
-    const preset = rolePreset("scout");
-    assert.ok(!preset.tools.includes("phenix_contract_get"));
-    assert.ok(!preset.tools.includes("phenix_contract_submit"));
-  });
 
   it("common read tools do not include phenix_complete", () => {
     const preset = rolePreset("scout");

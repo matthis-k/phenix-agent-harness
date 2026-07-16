@@ -1,4 +1,5 @@
 import { type AgentKind, type AgentRole, isAgentKind } from "../phenix-kernel/agents.ts";
+import { PHENIX_API_VERSION } from "../phenix-kernel/api-version.ts";
 import { type WorkflowTransitionId, workflowTransitionId } from "../phenix-kernel/ids.ts";
 import type { AgentClientRef, ContractDefinitionRef } from "../phenix-kernel/refs.ts";
 import type { Difficulty, TaskProfile } from "../phenix-kernel/task.ts";
@@ -172,7 +173,7 @@ export type WorkflowTransition = DelegateTransition | AutomaticTransition;
 
 export interface WorkflowDefinition {
   readonly id: DefaultWorkflowDefinitionId;
-  readonly version: 1;
+  readonly version: typeof PHENIX_API_VERSION;
 
   readonly initialState: WorkflowStateId;
 
@@ -242,7 +243,7 @@ export interface CompletedWorkflowTransition {
 }
 
 export interface WorkflowRuntimeRecord {
-  readonly version: 1;
+  readonly version: typeof PHENIX_API_VERSION;
 
   readonly instanceId: string;
   readonly actorId: string;
@@ -251,7 +252,7 @@ export interface WorkflowRuntimeRecord {
   readonly sessionId: string;
 
   readonly definitionId: DefaultWorkflowDefinitionId;
-  readonly definitionVersion: 1;
+  readonly definitionVersion: typeof PHENIX_API_VERSION;
 
   readonly difficulty: Difficulty;
   readonly taskProfile: TaskProfile;
@@ -281,7 +282,7 @@ export interface DelegateRolePatch {
 }
 
 export interface ResolvedDelegateRoleConfiguration {
-  readonly presetRevision: 1;
+  readonly presetRevision: typeof PHENIX_API_VERSION;
   readonly role: AgentRole;
   readonly source: {
     readonly inherited: boolean;
@@ -324,7 +325,7 @@ export interface WorkflowContractArtifact {
       readonly actorId: string;
       readonly parentActorId?: string;
       readonly definitionId: DefaultWorkflowDefinitionId;
-      readonly definitionVersion: 1;
+      readonly definitionVersion: typeof PHENIX_API_VERSION;
       readonly difficulty: Difficulty;
       readonly initialState: WorkflowStateId;
       readonly transitionAuthority: TransitionAuthority;

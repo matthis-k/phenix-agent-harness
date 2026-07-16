@@ -3,7 +3,8 @@ import type {
   ThinkingLevel,
 } from "./agent-types.ts";
 import { isAgentKind } from "./agent-types.ts";
-import { CONTRACT_SCHEMA_VERSION, type ContractArtifact } from "./contract.ts";
+import { PHENIX_API_VERSION } from "../phenix-kernel/api-version.ts";
+import type { ContractArtifact } from "./contract.ts";
 import type { ResolvedToolConfiguration } from "./tool-policy.ts";
 import type { ResolvedDelegateRoleConfiguration } from "./delegation-policy.ts";
 import { rolePreset } from "./role-presets.ts";
@@ -86,7 +87,7 @@ function validateToolConfiguration(
     throw new Error(`${ctx}: runtime.tools must be an object`);
   }
 
-  if (raw.presetRevision !== 1) {
+  if (raw.presetRevision !== PHENIX_API_VERSION) {
     throw new Error(`${ctx}: unsupported runtime.tools.presetRevision`);
   }
 
@@ -193,7 +194,7 @@ function validateDelegationRoles(
     throw new Error(`${ctx}: runtime.delegation.roles must be an object`);
   }
 
-  if (raw.presetRevision !== 1) {
+  if (raw.presetRevision !== PHENIX_API_VERSION) {
     throw new Error(`${ctx}: unsupported runtime.delegation.roles.presetRevision`);
   }
 
@@ -252,7 +253,7 @@ function validateWorkflowSection(
   if (!definition) {
     throw new Error(`${ctx}: unknown workflow definition "${defId}"`);
   }
-  if (raw.definitionVersion !== 1) {
+  if (raw.definitionVersion !== PHENIX_API_VERSION) {
     throw new Error(`${ctx}: unsupported workflow definitionVersion`);
   }
 
@@ -307,13 +308,7 @@ function validateWorkflowSection(
 
 // ── Main decoder ────────────────────────────────────────────────────────────
 
-/**
- * Decode and validate a contract artifact.
- *
- * Rejects:
- * - contract versions 1-3 with a clear unsupported-version error.
- * - structurally invalid v4 artifacts with detailed errors.
- */
+/** Decode and validate the only supported contract artifact shape. */
 export function decodeContractArtifact(
   value: unknown,
 ): ContractArtifact {
@@ -327,11 +322,10 @@ export function decodeContractArtifact(
   };
 
   // ── schemaVersion ────────────────────────────────────────────────────
-  if (value.schemaVersion !== 1) {
+  if (value.schemaVersion !== PHENIX_API_VERSION) {
     throw new Error(
       `${ctx()}: Unsupported contract schema version ${JSON.stringify(value.schemaVersion)}. ` +
-      `Expected ${CONTRACT_SCHEMA_VERSION}. This runtime does not support migration. ` +
-      `Delete .phenix-agent-state if it contains stale development artifacts.`,
+      `Expected ${PHENIX_API_VERSION}. Remove stale .phenix-agent-state artifacts before retrying.`,
     );
   }
 
@@ -428,7 +422,7 @@ export function decodeContractArtifact(
     throw new Error(`${ctx()}: runtime.extensions must be a string array`);
   }
 
-  // ── Validate delegation section (v4) ──────────────────────────────────
+  // ── Validate delegation section ───────────────────────────────────────
   if (!isRecord(runtime.delegation)) {
     throw new Error(`${ctx()}: runtime.delegation must be an object`);
   }
@@ -458,7 +452,7 @@ export function decodeContractArtifact(
     throw new Error(`${ctx()}: runtime.delegation.remainingDepth must be a non-negative integer`);
   }
 
-  // ── Validate workflow section (v4) ────────────────────────────────────
+  // ── Validate workflow section ─────────────────────────────────────────
   validateWorkflowSection(runtime.workflow, value.id);
 
   // ── Validate timeout ──────────────────────────────────────────────────

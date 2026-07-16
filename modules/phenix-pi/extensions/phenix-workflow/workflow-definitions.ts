@@ -12,6 +12,7 @@ import type {
 import { mkTransitionId } from "./workflow-types.ts";
 import type { AgentRole, AgentKind } from "../phenix-kernel/agents.ts";
 import type { Difficulty } from "../phenix-kernel/task.ts";
+import { PHENIX_API_VERSION } from "../phenix-kernel/api-version.ts";
 import { agentClientRef, contractRef } from "../phenix-kernel/refs.ts";
 
 // ── Helper factories ────────────────────────────────────────────────────────
@@ -650,7 +651,7 @@ nestedDelegate({ id: "scout.request-scout", actorRoles: SCOUT, from: "scouting",
 
 export const PHENIX_DEFAULT_WORKFLOW: WorkflowDefinition = {
   id: "phenix-default",
-  version: 1,
+  version: PHENIX_API_VERSION,
   initialState: "classified",
   transitions,
 };

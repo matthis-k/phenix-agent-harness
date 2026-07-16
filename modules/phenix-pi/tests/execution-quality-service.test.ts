@@ -39,7 +39,6 @@ const CRITIC_TOOLS = [
   "context_*",
   "contact_supervisor",
   "phenix_workflow",
-  "phenix_create_subagent",
 ] as const;
 
 function temporaryDirectory(prefix: string): string {

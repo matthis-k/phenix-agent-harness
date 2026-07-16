@@ -40,7 +40,6 @@ describe("workflow authority prompt projection", () => {
     assert.match(prompt, /never send a node ID back to the runtime/i);
     assert.doesNotMatch(prompt, /planner\.request-architect/);
     assert.doesNotMatch(prompt, /edgeId/);
-    assert.doesNotMatch(prompt, /phenix_create_subagent/);
     assert.doesNotMatch(prompt, /Authority digest:/);
   });
 

@@ -1,3 +1,4 @@
+import { PHENIX_API_VERSION } from "../phenix-kernel/api-version.ts";
 import type { AgentRole, AgentKind } from "./agent-types.ts";
 import { rolePreset } from "./role-presets.ts";
 
@@ -14,7 +15,7 @@ export interface DelegateRolePatch {
 }
 
 export interface ResolvedDelegateRoleConfiguration {
-  readonly presetRevision: 1;
+  readonly presetRevision: typeof PHENIX_API_VERSION;
 
   /**
    * Role whose preset supplied the baseline child-role set.
@@ -168,7 +169,7 @@ export function resolveDelegateRoleConfiguration(input: {
   }
 
   return {
-    presetRevision: 1,
+    presetRevision: PHENIX_API_VERSION,
     role: input.role,
     source,
     effective,

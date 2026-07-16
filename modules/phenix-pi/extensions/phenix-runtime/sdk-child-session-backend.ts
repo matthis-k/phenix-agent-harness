@@ -744,29 +744,12 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
 /**
  * Build the deterministic tool allowlist.
  *
- * Includes effective tools plus required runtime tools. `phenix_workflow` is
- * always installed; `phenix_create_subagent` is installed only when the loaded
- * contract retains delegation depth and at least one available role.
+ * Includes effective task tools plus the current runtime-owned completion and
+ * workflow capabilities. Unmanaged delegation is never exposed to a child.
  */
 export function buildEffectiveToolNames(spec: ChildSessionSpec): readonly string[] {
-  const canCreateSubagent =
-    spec.contract.runtime.delegation.remainingDepth > 0 &&
-    spec.contract.runtime.delegation.availableRoles.length > 0;
-
-  const runtimeTools = new Set([
-    "phenix_complete",
-    "phenix_workflow",
-    "phenix_create_subagent",
-    "phenix_delegate",
-  ]);
+  const runtimeTools = new Set(["subagent", "phenix_complete", "phenix_workflow"]);
   const baseTools = spec.effectiveTools.filter((tool) => !runtimeTools.has(tool));
-  const toolNames = [
-    ...baseTools,
-    "phenix_complete",
-    "phenix_workflow",
-    ...(canCreateSubagent ? ["phenix_create_subagent"] : []),
-  ];
 
-  // Deduplicate and sort for deterministic ordering.
-  return [...new Set(toolNames)].sort();
+  return [...new Set([...baseTools, "phenix_complete", "phenix_workflow"])].sort();
 }

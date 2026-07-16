@@ -195,23 +195,7 @@ describe("Tool-policy resolution", () => {
     }, /subagent/);
   });
 
-  it("phenix_contract_get is rejected", () => {
-    assert.throws(() => {
-      resolveToolConfiguration({
-        role: "scout",
-        requested: { additional: ["phenix_contract_get"] },
-      });
-    }, /phenix_contract_get/);
-  });
 
-  it("phenix_contract_submit is rejected", () => {
-    assert.throws(() => {
-      resolveToolConfiguration({
-        role: "scout",
-        requested: { additional: ["phenix_contract_submit"] },
-      });
-    }, /phenix_contract_submit/);
-  });
 
   it("phenix_complete cannot be manually added", () => {
     assert.throws(() => {
@@ -344,14 +328,6 @@ describe("Tool authorization", () => {
     assert.ok(!toolAllowedByConfig(config, "subagent"));
   });
 
-  it("old contract tools are always blocked", () => {
-    const config = resolveToolConfiguration({
-      role: "scout",
-      requested: undefined,
-    });
-    assert.ok(!toolAllowedByConfig(config, "phenix_contract_get"));
-    assert.ok(!toolAllowedByConfig(config, "phenix_contract_submit"));
-  });
 });
 
 describe("Launch tools", () => {
@@ -365,15 +341,6 @@ describe("Launch tools", () => {
     assert.ok(launch.includes("read"));
   });
 
-  it("childLaunchTools does not include old contract tools", () => {
-    const config = resolveToolConfiguration({
-      role: "scout",
-      requested: undefined,
-    });
-    const launch = childLaunchTools(config);
-    assert.ok(!launch.includes("phenix_contract_get"));
-    assert.ok(!launch.includes("phenix_contract_submit"));
-  });
 
   it("modelTaskTools does not include phenix_complete", () => {
     const config = resolveToolConfiguration({

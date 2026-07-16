@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { AgentKind } from "../phenix-kernel/agents.ts";
+import { PHENIX_API_VERSION } from "../phenix-kernel/api-version.ts";
 import type { Difficulty, TaskProfile } from "../phenix-kernel/task.ts";
 import {
   atomicWriteJson,
@@ -131,7 +132,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 export function decodeWorkflowRecord(value: unknown): WorkflowRuntimeRecord {
   if (
     !isObject(value) ||
-    value.version !== 1 ||
+    value.version !== PHENIX_API_VERSION ||
     typeof value.instanceId !== "string" ||
     typeof value.actorId !== "string" ||
     typeof value.sessionId !== "string" ||
@@ -179,13 +180,13 @@ export function createWorkflowRecord(
   },
 ): WorkflowRuntimeRecord {
   const record: WorkflowRuntimeRecord = {
-    version: 1,
+    version: PHENIX_API_VERSION,
     instanceId: input.instanceId,
     actorId: input.actorId,
     ...(input.parentActorId ? { parentActorId: input.parentActorId } : {}),
     sessionId: input.sessionId,
     definitionId: input.definitionId,
-    definitionVersion: 1,
+    definitionVersion: PHENIX_API_VERSION,
     difficulty: input.difficulty,
     taskProfile: input.taskProfile,
     actorRole: input.actorRole,

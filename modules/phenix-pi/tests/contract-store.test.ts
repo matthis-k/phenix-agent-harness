@@ -44,7 +44,6 @@ const SCOUT_PRESET_TOOLS = [
   "context_*",
   "contact_supervisor",
   "phenix_workflow",
-  "phenix_create_subagent",
 ] as const;
 
 function makeToolConfig(

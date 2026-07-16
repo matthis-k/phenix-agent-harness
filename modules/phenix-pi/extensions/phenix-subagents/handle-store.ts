@@ -2,6 +2,8 @@ import path from "node:path";
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
+import { PHENIX_API_VERSION } from "../phenix-kernel/api-version.ts";
+
 import {
   atomicWriteJson,
   findRepositoryRoot,
@@ -11,7 +13,6 @@ import {
   timestamp,
 } from "../phenix-persistence/json-files.ts";
 import type { HandleRecord, HandleStatus, ProducerCycleRecord } from "./handle-types.ts";
-import { HANDLE_VERSION } from "./handle-types.ts";
 
 const HANDLE_STATUSES: ReadonlySet<string> = new Set<HandleStatus>([
   "starting",
@@ -30,7 +31,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 export function decodeHandleRecord(value: unknown): HandleRecord {
   if (
     !isObject(value) ||
-    value.version !== HANDLE_VERSION ||
+    value.version !== PHENIX_API_VERSION ||
     typeof value.id !== "string" ||
     typeof value.sessionId !== "string" ||
     typeof value.modelSet !== "string" ||
@@ -106,4 +107,3 @@ export function effectiveSessionId(ctx: ExtensionContext): string {
 }
 
 export type { HandleRecord, ProducerCycleRecord };
-export { HANDLE_VERSION };

@@ -72,7 +72,7 @@ export default async function phenixSubagents(
   const delegator = options.delegator;
   const workflow = options.workflow;
 
-  // Raw and legacy delegation are blocked only for directly selected Phenix
+  // Unmanaged delegation is blocked only for directly selected Phenix
   // root models. Other root models retain their native tool semantics.
   pi.on("before_tool_call", async (event, ctx) => {
     if (!phenixRootModelScope.includes(ctx.model)) return;
@@ -81,18 +81,11 @@ export default async function phenixSubagents(
     const toolName = raw.toolName ?? raw.name;
     if (!toolName) return;
 
-    if (toolName === "subagent" || toolName === "phenix_delegate") {
+    if (toolName === "subagent") {
       return {
         blocked: true,
         reason:
-          "Raw or legacy delegation is runtime-blocked in Phenix sessions. Use phenix_workflow with action=spawn, one target agent advertised in the preloaded authority snapshot, and a bounded task.",
-      };
-    }
-
-    if (toolName === "phenix_contract_get" || toolName === "phenix_contract_submit") {
-      return {
-        blocked: true,
-        reason: `Tool "${toolName}" is no longer available. Use phenix_complete to submit your result.`,
+          "Unmanaged delegation is runtime-blocked in Phenix sessions. Use phenix_workflow with action=spawn, one target agent advertised in the preloaded authority snapshot, and a bounded task.",
       };
     }
   });

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { PHENIX_API_VERSION } from "../extensions/phenix-kernel/api-version.ts";
 import { decodeHandleRecord } from "../extensions/phenix-subagents/handle-store.ts";
-import { HANDLE_VERSION } from "../extensions/phenix-subagents/handle-types.ts";
 
 function persistedHandle(version: number): Record<string, unknown> {
   const timestamp = new Date().toISOString();
@@ -21,12 +21,14 @@ function persistedHandle(version: number): Record<string, unknown> {
 }
 
 describe("persisted handle schema", () => {
-  it("accepts the current backend-neutral schema", () => {
-    assert.equal(HANDLE_VERSION, 5);
-    assert.equal(decodeHandleRecord(persistedHandle(5)).version, 5);
-  });
-
-  it("rejects obsolete persisted handle versions", () => {
-    assert.throws(() => decodeHandleRecord(persistedHandle(4)), /unsupported version/);
+  it("accepts only the current Phenix API version", () => {
+    assert.equal(
+      decodeHandleRecord(persistedHandle(PHENIX_API_VERSION)).version,
+      PHENIX_API_VERSION,
+    );
+    assert.throws(
+      () => decodeHandleRecord(persistedHandle(PHENIX_API_VERSION + 1)),
+      /unsupported version/,
+    );
   });
 });

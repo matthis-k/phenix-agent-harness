@@ -106,7 +106,7 @@ export const defaultModelSets: readonly ModelSetDefinition[] = [
   },
 ];
 
-// ── Agent routes (formerly ROLE_MATRIX) ────────────────────────────────────
+// ── Agent routes ────────────────────────────────────────────────────────────
 
 export const defaultAgentRoutes: readonly AgentRouteDefinition[] = [
   {
