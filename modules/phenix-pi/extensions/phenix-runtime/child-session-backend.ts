@@ -20,13 +20,17 @@ import {
   ProductionPiSessionFactory,
   SdkChildSessionBackend,
 } from "./sdk-child-session-backend.ts";
+import { WorkflowScopedPiSessionFactory } from "./workflow-session-factory.ts";
 
 export type ChildSessionBackendOptions = SdkChildSessionBackendOptions;
 
 export function createChildSessionBackend(
   options: ChildSessionBackendOptions,
 ): ChildSessionBackend {
-  return new SdkChildSessionBackend(options);
+  return new SdkChildSessionBackend({
+    ...options,
+    sessionFactory: new WorkflowScopedPiSessionFactory(options.sessionFactory),
+  });
 }
 
 export type {
@@ -98,3 +102,7 @@ export type {
 };
 
 export { buildEffectiveToolNames, ProductionPiSessionFactory, SdkChildSessionBackend };
+export {
+  normalizeWorkflowRuntimeToolNames,
+  WorkflowScopedPiSessionFactory,
+} from "./workflow-session-factory.ts";
