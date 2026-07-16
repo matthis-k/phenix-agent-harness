@@ -2,16 +2,20 @@
  * phenix-subagents — index
  *
  * Registers the root-visible workflow API and phenix_agent tools.
- * Each child session receives its own closure-bound tools through
- * customTools — not process-global tools.
+ * Each child session receives its own closure-bound tools through customTools —
+ * not process-global tools.
  *
- * Tool authorization is no longer duplicated between
- * phenix-contract-runtime.ts and this file. The root extension registers
- * root-visible tools; child sessions get closure-bound tools.
+ * Root prompt, tool access, and raw-delegation blocking share one explicit model
+ * scope. Child authority remains contract-bound and does not depend on the
+ * concrete provider selected by routing.
  */
 
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  authorizePhenixRootCapability,
+  phenixRootModelScope,
+} from "../phenix-composition/model-scope.ts";
 import {
   createWorkflowApiTools,
   type WorkflowApiPort,
@@ -20,14 +24,6 @@ import { AgentParams } from "./delegate-schema.ts";
 import { effectiveSessionId, listRecords, readRecord } from "./handle-store.ts";
 import { type HandleRecord, TERMINAL_STATES } from "./handle-types.ts";
 import type { WorkflowDelegator } from "./workflow-delegator.ts";
-
-// ── Types ───────────────────────────────────────────────────────────────────
-
-interface PiEvents {
-  on(event: string, handler: (payload: unknown) => void): (() => void) | undefined;
-}
-
-// ── Tool result helpers ─────────────────────────────────────────────────────
 
 function toolResult(record: HandleRecord): AgentToolResult<Record<string, unknown>> {
   const min = {
@@ -70,8 +66,6 @@ function errorResult(
   };
 }
 
-// ── Tree payload ────────────────────────────────────────────────────────────
-
 function treePayload(records: HandleRecord[]): Record<string, unknown> {
   return {
     handles: records.map((r) => ({
@@ -87,8 +81,6 @@ function treePayload(records: HandleRecord[]): Record<string, unknown> {
   };
 }
 
-// ── Extension entry point ───────────────────────────────────────────────────
-
 export interface PhenixSubagentsOptions {
   readonly delegator: WorkflowDelegator;
   readonly workflow: WorkflowApiPort;
@@ -98,14 +90,14 @@ export default async function phenixSubagents(
   pi: ExtensionAPI,
   options: PhenixSubagentsOptions,
 ): Promise<void> {
-  const events = pi.events as unknown as PiEvents;
   const delegator = options.delegator;
   const workflow = options.workflow;
 
-  // ── Runtime tool guard ────────────────────────────────────────────────
+  // Raw and legacy delegation are blocked only for directly selected Phenix
+  // root models. Other root models retain their native tool semantics.
+  pi.on("before_tool_call", async (event, ctx) => {
+    if (!phenixRootModelScope.includes(ctx.model)) return;
 
-  // Block raw and legacy delegation globally — only the workflow API is allowed.
-  events.on("before_tool_call" as string, async (event: unknown) => {
     const raw = event as { toolName?: string; name?: string };
     const toolName = raw.toolName ?? raw.name;
     if (!toolName) return;
@@ -118,7 +110,6 @@ export default async function phenixSubagents(
       };
     }
 
-    // Block obsolete contract tools.
     if (toolName === "phenix_contract_get" || toolName === "phenix_contract_submit") {
       return {
         blocked: true,
@@ -127,13 +118,16 @@ export default async function phenixSubagents(
     }
   });
 
-  // ── Contract-bound workflow API ────────────────────────────────────────
-
-  for (const tool of createWorkflowApiTools({ workflow, allowCreate: true })) {
+  // Root tools are globally registered by Pi, but execution is authorized by
+  // the root-model scope. Child tools are closure-bound and omit this authorizer.
+  for (const tool of createWorkflowApiTools({
+    workflow,
+    allowCreate: true,
+    authorize: ({ ctx, tool: toolName }) =>
+      authorizePhenixRootCapability({ ctx, capability: toolName }),
+  })) {
     pi.registerTool(tool as never);
   }
-
-  // ── phenix_agent tool ─────────────────────────────────────────────────
 
   pi.registerTool({
     name: "phenix_agent",
@@ -149,6 +143,11 @@ export default async function phenixSubagents(
       _onUpdate: ((result: AgentToolResult<Record<string, unknown>>) => void) | undefined,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<Record<string, unknown>>> {
+      const denial = authorizePhenixRootCapability({ ctx, capability: "phenix_agent" });
+      if (denial !== undefined) {
+        return errorResult(denial, { status: "forbidden", tool: "phenix_agent" });
+      }
+
       const params = rawParams as {
         action: "await" | "poll" | "cancel" | "inspect" | "tree";
         id?: string;
@@ -189,7 +188,6 @@ export default async function phenixSubagents(
         return toolResult(polled ?? record);
       }
 
-      // await
       if (!TERMINAL_STATES.has(record.status)) {
         const resolved = await delegator.awaitHandle(
           ctx,
