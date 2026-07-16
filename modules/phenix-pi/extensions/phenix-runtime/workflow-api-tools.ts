@@ -1,9 +1,9 @@
 /**
- * workflow-api-tools — model-facing deterministic workflow API
+ * workflow-api-tools — graph-facing deterministic workflow API
  *
- * Every Phenix actor receives one stable workflow tool. Its discriminated
- * actions are resolved against fresh root or contract-bound authority before
- * any state change or child execution is allowed.
+ * Every Phenix actor receives one stable workflow tool. The model observes its
+ * current node and legal outgoing edges; the runtime revalidates both IDs
+ * against fresh root or contract-bound authority before execution.
  */
 
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
@@ -12,7 +12,7 @@ import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding
 import type { ModelWorkflowProjection } from "../phenix-workflow/workflow-projection.ts";
 import {
   WorkflowActionParams,
-  type WorkflowDelegateActionType,
+  type WorkflowTakeEdgeActionType,
 } from "./workflow-action-schema.ts";
 import type { ParentExecutionContext } from "./workflow-api-types.ts";
 
@@ -24,12 +24,10 @@ export interface WorkflowApiToolAuthorizationInput {
   readonly tool: WorkflowApiToolName;
 }
 
-/** Return a denial message, or undefined when the invocation is in scope. */
 export type WorkflowApiToolAuthorizer = (
   input: WorkflowApiToolAuthorizationInput,
 ) => string | undefined;
 
-/** Internal authority snapshot. The tool sanitizes this before model exposure. */
 export interface WorkflowAuthoritySnapshot {
   readonly source: "root" | "contract";
   readonly role: string;
@@ -66,7 +64,6 @@ export interface WorkflowDelegationExecutionParams {
   readonly authorityDigest: string;
 }
 
-/** Minimal authoritative workflow surface required by the model-facing adapter. */
 export interface WorkflowApiPort {
   inspect(input: {
     readonly ctx: ExtensionContext;
@@ -109,7 +106,6 @@ function authorizationResult(input: {
 
 function compactHandle(record: WorkflowApiHandleResult): Record<string, unknown> {
   return {
-    id: record.id,
     handleId: record.id,
     status: record.status,
     value: record.value,
@@ -117,7 +113,6 @@ function compactHandle(record: WorkflowApiHandleResult): Record<string, unknown>
   };
 }
 
-/** Public actor-scoped authority view; internal transition identities are omitted. */
 export function projectWorkflowInspection(
   snapshot: WorkflowAuthoritySnapshot,
 ): Record<string, unknown> {
@@ -126,18 +121,17 @@ export function projectWorkflowInspection(
       source: snapshot.source,
       role: snapshot.role,
     },
-    state: {
-      id: snapshot.workflow.currentState,
+    node: {
+      nodeId: snapshot.workflow.currentState,
       difficulty: snapshot.workflow.difficulty,
       revision: snapshot.workflow.revision,
     },
-    authority: {
-      remainingDelegationDepth: snapshot.delegation.remainingDepth,
-      effectiveTools: [...snapshot.effectiveTools],
-    },
-    actions: {
-      delegate: snapshot.workflow.options.map((option) => ({
-        agent: option.agent,
+    edges: snapshot.workflow.options.map((option) => ({
+      edgeId: option.edgeId,
+      kind: "spawn",
+      fromNodeId: option.sourceNodeId,
+      toNodeId: option.targetNodeId,
+      spawn: {
         role: option.role,
         purpose: option.purpose,
         description: option.description,
@@ -147,22 +141,28 @@ export function projectWorkflowInspection(
           schemaId: option.outputSchemaId,
           schema: option.resultSchema,
         },
-      })),
+      },
+    })),
+    authority: {
+      remainingDelegationDepth: snapshot.delegation.remainingDepth,
+      effectiveTools: [...snapshot.effectiveTools],
     },
   };
 }
 
-function availableAgentDetails(snapshot: WorkflowAuthoritySnapshot): readonly Record<string, unknown>[] {
+function availableEdgeDetails(snapshot: WorkflowAuthoritySnapshot): readonly Record<string, unknown>[] {
   return snapshot.workflow.options.map((option) => ({
-    agent: option.agent,
+    edgeId: option.edgeId,
+    kind: "spawn",
+    fromNodeId: option.sourceNodeId,
+    toNodeId: option.targetNodeId,
     role: option.role,
-    category: option.category,
     modes: [...option.allowedModes],
   }));
 }
 
-async function delegateThroughWorkflow(input: {
-  readonly params: WorkflowDelegateActionType;
+async function takeWorkflowEdge(input: {
+  readonly params: WorkflowTakeEdgeActionType;
   readonly workflow: WorkflowApiPort;
   readonly parent?: ParentExecutionContext;
   readonly signal: AbortSignal | undefined;
@@ -172,47 +172,69 @@ async function delegateThroughWorkflow(input: {
     ctx: input.ctx,
     ...(input.parent ? { parent: input.parent } : {}),
   });
-  const option = snapshot.workflow.options.find(
-    (candidate) => candidate.agent === input.params.agent,
-  );
 
-  if (!option) {
+  if (input.params.nodeId !== snapshot.workflow.currentState) {
     return errorResult(
-      `phenix_workflow: agent "${input.params.agent}" is not currently available to ` +
-        `${snapshot.role} in state "${snapshot.workflow.currentState}".`,
+      `phenix_workflow: expected node "${input.params.nodeId}" is stale; ` +
+        `the current node is "${snapshot.workflow.currentState}".`,
       {
-        code: "WORKFLOW_AGENT_NOT_AVAILABLE",
-        role: snapshot.role,
-        state: snapshot.workflow.currentState,
+        code: "WORKFLOW_NODE_STALE",
+        expectedNodeId: input.params.nodeId,
+        currentNodeId: snapshot.workflow.currentState,
         revision: snapshot.workflow.revision,
-        availableAgents: availableAgentDetails(snapshot),
+        availableEdges: availableEdgeDetails(snapshot),
       },
     );
   }
 
-  if (input.params.mode === "background" && input.parent?.kind === "child") {
-    return errorResult("phenix_workflow: background delegation is only available to the root actor.");
-  }
-  if (
-    input.params.mode === "background" &&
-    !option.allowedModes.includes("background")
-  ) {
+  const edge = snapshot.workflow.options.find(
+    (candidate) => candidate.edgeId === input.params.edgeId,
+  );
+  if (!edge) {
     return errorResult(
-      `phenix_workflow: background mode is not allowed for agent "${input.params.agent}".`,
+      `phenix_workflow: edge "${input.params.edgeId}" is not legal from node ` +
+        `"${snapshot.workflow.currentState}".`,
+      {
+        code: "WORKFLOW_EDGE_NOT_AVAILABLE",
+        nodeId: snapshot.workflow.currentState,
+        revision: snapshot.workflow.revision,
+        availableEdges: availableEdgeDetails(snapshot),
+      },
+    );
+  }
+
+  const spawn = input.params.spawn;
+  if (!spawn) {
+    return errorResult(
+      `phenix_workflow: edge "${edge.edgeId}" is a spawn edge and requires spawn.task.`,
+      {
+        code: "WORKFLOW_EDGE_INPUT_REQUIRED",
+        edgeId: edge.edgeId,
+        kind: "spawn",
+      },
+    );
+  }
+
+  if (spawn.mode === "background" && input.parent?.kind === "child") {
+    return errorResult("phenix_workflow: background spawning is only available to the root actor.");
+  }
+  if (spawn.mode === "background" && !edge.allowedModes.includes("background")) {
+    return errorResult(
+      `phenix_workflow: background mode is not allowed for edge "${edge.edgeId}".`,
       {
         code: "WORKFLOW_MODE_NOT_ALLOWED",
-        agent: option.agent,
-        allowedModes: [...option.allowedModes],
+        edgeId: edge.edgeId,
+        allowedModes: [...edge.allowedModes],
       },
     );
   }
 
   const execution = await input.workflow.delegate({
     params: {
-      transitionId: option.transitionId,
-      task: input.params.task,
-      ...(input.params.requirements ? { requirements: input.params.requirements } : {}),
-      ...(input.params.mode ? { mode: input.params.mode } : {}),
+      transitionId: edge.edgeId,
+      task: spawn.task,
+      ...(spawn.requirements ? { requirements: spawn.requirements } : {}),
+      ...(spawn.mode ? { mode: spawn.mode } : {}),
       workflowRevision: snapshot.workflow.revision,
       authorityDigest: snapshot.workflow.optionsDigest,
     },
@@ -221,7 +243,13 @@ async function delegateThroughWorkflow(input: {
     ctx: input.ctx,
   });
   if (!execution.ok) return errorResult(execution.message, execution.details);
-  return result(compactHandle(execution.record));
+
+  return result({
+    edgeId: edge.edgeId,
+    fromNodeId: edge.sourceNodeId,
+    toNodeId: edge.targetNodeId,
+    ...compactHandle(execution.record),
+  });
 }
 
 export function createWorkflowTool(input: {
@@ -233,7 +261,7 @@ export function createWorkflowTool(input: {
     name: PHENIX_WORKFLOW_TOOL,
     label: "Phenix Workflow",
     description:
-      "Inspect current workflow authority or delegate through an actor-scoped agent action. " +
+      "Inspect the current workflow node and legal outgoing edges, or take one edge. " +
       "The runtime owns roles, routing, models, tools, child authority, contracts, and state transitions.",
     parameters: WorkflowActionParams,
 
@@ -250,7 +278,7 @@ export function createWorkflowTool(input: {
           return result(projectWorkflowInspection(snapshot));
         }
 
-        return await delegateThroughWorkflow({
+        return await takeWorkflowEdge({
           params,
           workflow: input.workflow,
           ...(input.parent ? { parent: input.parent } : {}),
@@ -264,12 +292,10 @@ export function createWorkflowTool(input: {
   };
 }
 
-/** Build the exact workflow interface installed during actor initialization. */
 export function createWorkflowApiTools(input: {
   readonly workflow: WorkflowApiPort;
   readonly parent?: ParentExecutionContext;
   readonly authorize?: WorkflowApiToolAuthorizer;
-  /** Transitional composition input; one workflow tool is always installed. */
   readonly allowCreate?: boolean;
 }): readonly ToolDefinition[] {
   return [createWorkflowTool(input) as unknown as ToolDefinition];
