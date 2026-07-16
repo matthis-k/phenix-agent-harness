@@ -66,7 +66,7 @@ function unrestrictedAuthority(): DelegationAuthority {
 }
 
 describe("WorkflowDecisionContext", () => {
-  it("builds outgoing edges from the current node", () => {
+  it("builds target-agent options from the current node", () => {
     const ctx = buildWorkflowDecisionContext({
       definition: PHENIX_DEFAULT_WORKFLOW,
       runtime: baseRecord({ state: "classified" }),
@@ -95,7 +95,7 @@ describe("WorkflowDecisionContext", () => {
     );
   });
 
-  it("projects different outgoing edge sets for different nodes", () => {
+  it("projects different target sets for different nodes", () => {
     const classified = buildWorkflowDecisionContext({
       definition: PHENIX_DEFAULT_WORKFLOW,
       runtime: baseRecord({ state: "classified" }),
@@ -109,14 +109,14 @@ describe("WorkflowDecisionContext", () => {
       activeHandles: [],
     });
 
-    const classifiedEdges = new Set(classified.options.map((option) => option.edgeId));
-    const planningEdges = new Set(planning.options.map((option) => option.edgeId));
-    assert.notDeepEqual([...classifiedEdges].sort(), [...planningEdges].sort());
+    const classifiedAgents = new Set(classified.options.map((option) => option.agent));
+    const planningAgents = new Set(planning.options.map((option) => option.agent));
+    assert.notDeepEqual([...classifiedAgents].sort(), [...planningAgents].sort());
   });
 
-  it("changes the digest when an edge changes", () => {
+  it("changes the digest when target identity changes", () => {
     const base = {
-      edgeId: "edge-a",
+      agent: "scout",
       transitionId: "edge-a",
       sourceNodeId: "node-a",
       targetNodeId: "node-b",
@@ -132,7 +132,7 @@ describe("WorkflowDecisionContext", () => {
     assert.equal(computeOptionsDigest([base]), computeOptionsDigest([base]));
     assert.notEqual(
       computeOptionsDigest([base]),
-      computeOptionsDigest([{ ...base, edgeId: "edge-b", transitionId: "edge-b" }]),
+      computeOptionsDigest([{ ...base, agent: "planner-scout" }]),
     );
   });
 
@@ -160,7 +160,7 @@ describe("WorkflowDecisionContext", () => {
     assert.ok(ctx.optionsDigest);
   });
 
-  it("preserves graph and spawn metadata", () => {
+  it("preserves internal transition and public target metadata", () => {
     const rawOptions = resolveDelegationOptions({
       definition: PHENIX_DEFAULT_WORKFLOW,
       runtime: baseRecord({ state: "classified" }),
@@ -168,16 +168,36 @@ describe("WorkflowDecisionContext", () => {
       activeHandles: [],
     });
 
-    const projected = projectDelegationOptions("classified", rawOptions);
+    const projected = projectDelegationOptions(
+      PHENIX_DEFAULT_WORKFLOW,
+      "classified",
+      rawOptions,
+    );
     assert.ok(projected.length > 0);
 
-    for (const edge of projected) {
-      assert.equal(edge.edgeId, edge.transitionId);
-      assert.equal(edge.sourceNodeId, "classified");
-      assert.ok(typeof edge.targetNodeId === "string");
-      assert.ok(typeof edge.role === "string");
-      assert.ok(Array.isArray(edge.allowedModes));
-      assert.ok(edge.resultSchema && typeof edge.resultSchema === "object");
+    for (const option of projected) {
+      assert.ok(typeof option.agent === "string" && option.agent.length > 0);
+      assert.ok(typeof option.transitionId === "string" && option.transitionId.length > 0);
+      assert.equal(option.sourceNodeId, "classified");
+      assert.ok(typeof option.targetNodeId === "string");
+      assert.ok(typeof option.role === "string");
+      assert.ok(Array.isArray(option.allowedModes));
+      assert.ok(option.resultSchema && typeof option.resultSchema === "object");
     }
+  });
+
+  it("specializes parallel D3 scouts without changing their execution role", () => {
+    const ctx = buildWorkflowDecisionContext({
+      definition: PHENIX_DEFAULT_WORKFLOW,
+      runtime: baseRecord({ difficulty: "D3", state: "classified" }),
+      authority: unrestrictedAuthority(),
+      activeHandles: [],
+    });
+
+    const scoutTargets = ctx.options
+      .filter((option) => option.role === "scout")
+      .map((option) => option.agent)
+      .sort();
+    assert.deepEqual(scoutTargets, ["constraint-scout", "repository-scout", "test-scout"]);
   });
 });
