@@ -1,10 +1,11 @@
 /**
  * workflow-api-tools — model-facing deterministic workflow API
  *
- * Every Phenix model receives a workflow inspection function. A contract-bound
+ * Every Phenix actor receives a workflow inspection function. A contract-bound
  * child receives the creation function only when its initialized contract may
- * delegate. Revision and authority digests are never supplied by the model;
- * they are read immediately before creation and bound by the runtime.
+ * delegate. Root composition may additionally provide an authorization port so
+ * tool registration remains generic while model-scope ownership stays outside
+ * the runtime adapter.
  */
 
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
@@ -20,6 +21,19 @@ import type { ParentExecutionContext } from "./workflow-api-types.ts";
 
 export const PHENIX_WORKFLOW_TOOL = "phenix_workflow" as const;
 export const PHENIX_CREATE_SUBAGENT_TOOL = "phenix_create_subagent" as const;
+export type WorkflowApiToolName =
+  | typeof PHENIX_WORKFLOW_TOOL
+  | typeof PHENIX_CREATE_SUBAGENT_TOOL;
+
+export interface WorkflowApiToolAuthorizationInput {
+  readonly ctx: ExtensionContext;
+  readonly tool: WorkflowApiToolName;
+}
+
+/** Return a denial message, or undefined when the invocation is in scope. */
+export type WorkflowApiToolAuthorizer = (
+  input: WorkflowApiToolAuthorizationInput,
+) => string | undefined;
 
 export interface WorkflowAuthoritySnapshot {
   readonly source: "root" | "contract";
@@ -83,6 +97,16 @@ function errorResult(
   };
 }
 
+function authorizationResult(input: {
+  readonly authorize?: WorkflowApiToolAuthorizer;
+  readonly ctx: ExtensionContext;
+  readonly tool: WorkflowApiToolName;
+}): AgentToolResult<Record<string, unknown>> | undefined {
+  const denial = input.authorize?.({ ctx: input.ctx, tool: input.tool });
+  if (denial === undefined) return undefined;
+  return errorResult(denial, { status: "forbidden", tool: input.tool });
+}
+
 function compactHandle(record: WorkflowApiHandleResult): Record<string, unknown> {
   return {
     id: record.id,
@@ -96,6 +120,7 @@ function compactHandle(record: WorkflowApiHandleResult): Record<string, unknown>
 export function createWorkflowInspectTool(input: {
   readonly workflow: WorkflowApiPort;
   readonly parent?: ParentExecutionContext;
+  readonly authorize?: WorkflowApiToolAuthorizer;
 }): ToolDefinition<typeof WorkflowInspectParams, Record<string, unknown>> {
   return {
     name: PHENIX_WORKFLOW_TOOL,
@@ -106,6 +131,13 @@ export function createWorkflowInspectTool(input: {
     parameters: WorkflowInspectParams,
 
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      const forbidden = authorizationResult({
+        authorize: input.authorize,
+        ctx,
+        tool: PHENIX_WORKFLOW_TOOL,
+      });
+      if (forbidden) return forbidden;
+
       try {
         const snapshot = input.workflow.inspect({
           ctx,
@@ -122,6 +154,7 @@ export function createWorkflowInspectTool(input: {
 export function createWorkflowSubagentTool(input: {
   readonly workflow: WorkflowApiPort;
   readonly parent?: ParentExecutionContext;
+  readonly authorize?: WorkflowApiToolAuthorizer;
 }): ToolDefinition<typeof WorkflowCreateParams, Record<string, unknown>> {
   return {
     name: PHENIX_CREATE_SUBAGENT_TOOL,
@@ -133,6 +166,13 @@ export function createWorkflowSubagentTool(input: {
     parameters: WorkflowCreateParams,
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const forbidden = authorizationResult({
+        authorize: input.authorize,
+        ctx,
+        tool: PHENIX_CREATE_SUBAGENT_TOOL,
+      });
+      if (forbidden) return forbidden;
+
       try {
         const snapshot = input.workflow.inspect({
           ctx,
@@ -193,6 +233,7 @@ export function createWorkflowApiTools(input: {
   readonly workflow: WorkflowApiPort;
   readonly parent?: ParentExecutionContext;
   readonly allowCreate: boolean;
+  readonly authorize?: WorkflowApiToolAuthorizer;
 }): readonly ToolDefinition[] {
   return [
     createWorkflowInspectTool(input) as unknown as ToolDefinition,
