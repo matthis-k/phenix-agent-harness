@@ -12,10 +12,8 @@ import {
   authorizePhenixRootCapability,
   phenixRootModelScope,
 } from "../phenix-composition/model-scope.ts";
-import {
-  createWorkflowApiTools,
-  type WorkflowApiPort,
-} from "../phenix-runtime/workflow-api-tools.ts";
+import { createWorkflowApiTools } from "../phenix-runtime/workflow-api-tools.ts";
+import type { WorkflowRuntimePort } from "../phenix-runtime/workflow-runtime-types.ts";
 import { AgentParams } from "./delegate-schema.ts";
 import { effectiveSessionId, readRecord } from "./handle-store.ts";
 import { type HandleRecord, TERMINAL_STATES } from "./handle-types.ts";
@@ -64,7 +62,7 @@ function errorResult(
 
 export interface PhenixSubagentsOptions {
   readonly delegator: WorkflowDelegator;
-  readonly workflow: WorkflowApiPort;
+  readonly workflow: WorkflowRuntimePort;
 }
 
 export default async function phenixSubagents(

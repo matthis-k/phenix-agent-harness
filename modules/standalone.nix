@@ -54,10 +54,10 @@
 
           export HYPA_PI_MODE="''${HYPA_PI_MODE:-replace}"
 
-          # Point phenix_create_subagent at this wrapper so child pi processes inherit
+          # Point workflow spawn edges at this wrapper so child Pi sessions inherit
           # the same extension set and environment. Always replace inherited
           # values because stale repo-local result symlinks can otherwise poison
-          # nested subagent spawns with ENOTDIR.
+          # nested child sessions with ENOTDIR.
           SELF=$(readlink -f "''${BASH_SOURCE[0]:-$0}" 2>/dev/null) || SELF=pi
           export PHENIX_PI_WRAPPER="$SELF"
           export PI_SUBAGENT_PI_BINARY="$SELF"

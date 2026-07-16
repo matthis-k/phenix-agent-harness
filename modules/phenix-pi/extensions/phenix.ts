@@ -10,7 +10,7 @@
  * 4. Register root workflow composition.
  * 5. Construct runtime services.
  * 6. Construct the selected child-session backend.
- * 7. Construct execution services and the delegator.
+ * 7. Construct execution services, the delegator, and workflow runtime.
  * 8. Register Phenix tools.
  * 9. Register TUI projection and commands.
  * 10. Register shutdown cleanup.
@@ -37,10 +37,8 @@ import {
   createSubagentSessionRuntime,
 } from "./phenix-runtime/child-session-backend.ts";
 import { createSessionSubagentManagerFactory } from "./phenix-runtime/subagent-manager-factory.ts";
-import {
-  createWorkflowApiTools,
-  type WorkflowApiPort,
-} from "./phenix-runtime/workflow-api-tools.ts";
+import { createWorkflowApiTools } from "./phenix-runtime/workflow-api-tools.ts";
+import type { WorkflowRuntimePort } from "./phenix-runtime/workflow-runtime-types.ts";
 import { buildPhenixRootSystemPrompt } from "./phenix-skill-bootstrap.ts";
 import { defaultAgentClients } from "./phenix-subagents/definitions.ts";
 import { createExecutionQualityService } from "./phenix-subagents/execution-quality-service.ts";
@@ -50,8 +48,8 @@ import {
   type ManagedDelegationRuntime,
 } from "./phenix-subagents/managed-delegation-runtime.ts";
 import { createWorkflowAcceptanceEngine } from "./phenix-subagents/workflow-acceptance-engine.ts";
-import { createWorkflowApi } from "./phenix-subagents/workflow-api.ts";
 import { WorkflowDelegator } from "./phenix-subagents/workflow-delegator.ts";
+import { createWorkflowRuntime } from "./phenix-subagents/workflow-runtime.ts";
 
 const defaultPhenixConfiguration = definePhenixConfiguration({
   activeModelSet: modelSetRef("mixed"),
@@ -270,7 +268,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
   };
 
   let delegator!: WorkflowDelegator;
-  let workflowApi!: WorkflowApiPort;
+  let workflowRuntime!: WorkflowRuntimePort;
   const backend = createChildSessionBackend({
     services: {
       get modelRegistry() {
@@ -278,15 +276,11 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
       },
       agentDir,
     },
-    buildCustomTools: (spec) => {
-      return createWorkflowApiTools({
-        workflow: workflowApi,
+    buildCustomTools: (spec) =>
+      createWorkflowApiTools({
+        workflow: workflowRuntime,
         parent: spec.parentContext,
-        allowCreate:
-          spec.contract.runtime.delegation.remainingDepth > 0 &&
-          spec.contract.runtime.delegation.availableRoles.length > 0,
-      }) as readonly ToolDefinition[];
-    },
+      }) as readonly ToolDefinition[],
   });
 
   const sessionRuntime = createSubagentSessionRuntime({
@@ -312,13 +306,13 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
     activeModelSet: linkResult.graph.activeModelSet.id,
     maximumDelegationDepth: defaultPhenixConfiguration.runtime.maximumDelegationDepth,
   });
-  workflowApi = createWorkflowApi({
+  workflowRuntime = createWorkflowRuntime({
     delegator,
     maximumDelegationDepth: defaultPhenixConfiguration.runtime.maximumDelegationDepth,
   });
 
   await loadIntegration("phenix-subagents", pi, async (api) => {
-    await phenixSubagents(api, { delegator, workflow: workflowApi });
+    await phenixSubagents(api, { delegator, workflow: workflowRuntime });
   });
   registerTuiProjection(pi, delegationRuntime);
   registerShutdown(pi, delegationRuntime);

@@ -127,7 +127,7 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
-// ── Verification commands ───────────────────────────────────────────────────
+// ── Verification commands ──────────────────────────────────────────────────
 
 function verificationCommands(
   role: AgentRole,
@@ -165,7 +165,7 @@ const TIER_BUDGETS: Record<ModelTier, { turns: number; tools: number; timeout: n
   critical: { turns: 64, tools: 220, timeout: 60 * 60_000 },
 };
 
-// ── Policy resolution ───────────────────────────────────────────────────────
+// ── Policy resolution ──────────────────────────────────────────────────────
 
 export function resolveExecutionPolicy(input: {
   readonly role: AgentRole;
@@ -221,7 +221,6 @@ export function resolveExecutionPolicy(input: {
         "web_search",
         "web_fetch",
         "phenix_workflow",
-        "phenix_create_subagent",
       ],
     },
     verificationCommands: commands,
@@ -231,7 +230,7 @@ export function resolveExecutionPolicy(input: {
   };
 }
 
-// ── Environment helpers ─────────────────────────────────────────────────────
+// ── Environment helpers ────────────────────────────────────────────────────
 
 // In the Pi-native child-session architecture, the child agent role is
 // determined by the contract artifact, not by environment variables.
