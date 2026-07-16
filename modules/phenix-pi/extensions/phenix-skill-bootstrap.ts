@@ -1,19 +1,32 @@
 /**
- * phenix-skill-bootstrap — Phenix subagents skill prompt bootstrap
+ * phenix-skill-bootstrap — scoped Phenix root-model prompt contribution
  *
- * Extracted from phenix.ts so tests can verify skill bootstrap without
- * importing the full Pi SDK runtime chain.
+ * The skill and coding-substrate guidance are injected as one contribution so
+ * direct non-Phenix models never receive Phenix workflow instructions.
  */
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { PHENIX_PROVIDER } from "./phenix-routing/provider.ts";
-
-// ── Phenix coding substrate skill ───────────────────────────────────────────
+import type { ModelIdentity } from "./phenix-composition/model-scope.ts";
+import { phenixRootModelScope } from "./phenix-composition/model-scope.ts";
 
 const PHENIX_SUBAGENTS_SKILL_NAME = "phenix-subagents";
+const PHENIX_CODING_SUBSTRATE_HEADING = "## Phenix coding substrate";
+
+const PHENIX_CODING_GUIDANCE = [
+  "Use focused searches and bounded reads instead of dumping entire repositories or logs.",
+  "Prefer LSP tools for diagnostics, types, symbols, definitions, and references when a matching server exists.",
+  "Run LSP diagnostics on changed supported files before reporting completion.",
+  "Use the `mcp` proxy to discover MCP capabilities on demand instead of assuming every MCP tool is directly registered.",
+  "Use `web_search` for external discovery and `web_fetch` for specific pages; use `gh` through the shell for GitHub-native operations.",
+  "Use `context_info` and compact only at coherent boundaries during genuinely long tasks.",
+  "Use the Phenix workflow API for every subagent decision: call `phenix_workflow` to inspect current authority, then `phenix_create_subagent` with one returned transition. Raw `subagent` and legacy `phenix_delegate` calls are runtime-blocked.",
+  "Every delegated handoff must use a strict output schema. Invalid structured output is returned to the child with exact validation failures so it can repair the handoff.",
+  "Runtime verification and critic gates are authoritative. Do not treat a model's claim that tests passed as verification evidence.",
+  "The shell is intentionally permissive, but avoid destructive or unrelated operations unless the task requires them.",
+] as const;
 
 function stripFrontmatter(markdown: string): string {
   if (!markdown.startsWith("---\n")) return markdown.trim();
@@ -23,9 +36,7 @@ function stripFrontmatter(markdown: string): string {
 }
 
 function phenixSubagentsSkillBlock(): string {
-  const skillDirectory = fileURLToPath(
-    new URL("../skills/phenix-subagents", import.meta.url),
-  );
+  const skillDirectory = fileURLToPath(new URL("../skills/phenix-subagents", import.meta.url));
   const skillPath = path.join(skillDirectory, "SKILL.md");
   const skillBody = stripFrontmatter(fs.readFileSync(skillPath, "utf8"));
 
@@ -39,9 +50,9 @@ function phenixSubagentsSkillBlock(): string {
 }
 
 export function shouldBootstrapPhenixSubagentsSkill(
-  model: { readonly provider?: string } | null | undefined,
+  model: ModelIdentity | null | undefined,
 ): boolean {
-  return model?.provider === PHENIX_PROVIDER;
+  return phenixRootModelScope.includes(model);
 }
 
 export function bootstrapPhenixSubagentsSkillPrompt(systemPrompt: string): string {
@@ -50,4 +61,22 @@ export function bootstrapPhenixSubagentsSkillPrompt(systemPrompt: string): strin
   }
 
   return `${systemPrompt}\n\n${phenixSubagentsSkillBlock()}`;
+}
+
+/** Build the complete root prompt contribution, or nothing outside the scope. */
+export function buildPhenixRootSystemPrompt(input: {
+  readonly model: ModelIdentity | null | undefined;
+  readonly systemPrompt: string;
+}): string | undefined {
+  if (!phenixRootModelScope.includes(input.model)) return undefined;
+
+  const withSkill = bootstrapPhenixSubagentsSkillPrompt(input.systemPrompt);
+  if (withSkill.includes(PHENIX_CODING_SUBSTRATE_HEADING)) return withSkill;
+
+  const guidance = PHENIX_CODING_GUIDANCE.join("\n- ");
+  return phenixRootModelScope.contributeSystemPrompt({
+    model: input.model,
+    systemPrompt: withSkill,
+    contribution: `${PHENIX_CODING_SUBSTRATE_HEADING}\n\n- ${guidance}`,
+  });
 }
