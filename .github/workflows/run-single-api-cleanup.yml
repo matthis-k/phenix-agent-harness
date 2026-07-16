@@ -44,6 +44,35 @@ jobs:
               "replace(p, 'RETIRED_DELEGATION_TOOLS.has(tool)', 'UNMANAGED_DELEGATION_TOOLS.has(tool)', expected=2)",
               "replace(p, 'RETIRED_DELEGATION_TOOLS.has(tool)', 'UNMANAGED_DELEGATION_TOOLS.has(tool)')",
           )
+
+          index_section_start = "\np = 'modules/phenix-pi/extensions/phenix-subagents/index.ts'\n"
+          index_section_end = "\np = 'modules/phenix-pi/extensions/phenix-skill-bootstrap.ts'\n"
+          start = body.index(index_section_start)
+          end = body.index(index_section_end, start)
+          index_replacement = '''
+p = 'modules/phenix-pi/extensions/phenix-subagents/index.ts'
+text = read(p)
+start_marker = '    if (toolName === "subagent" || toolName === "phenix_delegate") {'
+end_marker = '  });'
+block_start = text.index(start_marker)
+block_end = text.index(end_marker, block_start)
+current_block = ''' + '"""' + '''    if (toolName === "subagent") {
+      return {
+        blocked: true,
+        reason:
+          "Unmanaged delegation is runtime-blocked in Phenix sessions. Use phenix_workflow with action=spawn, one target agent advertised in the preloaded authority snapshot, and a bounded task.",
+      };
+    }
+''' + '"""' + '''
+text = text[:block_start] + current_block + text[block_end:]
+text = text.replace(
+    '// Raw and legacy delegation are blocked only for directly selected Phenix',
+    '// Unmanaged delegation is blocked only for directly selected Phenix',
+)
+write(p, text)
+'''
+          body = body[:start] + index_replacement + body[end:]
+
           exec(compile(body, 'staged-single-api-cleanup.py', 'exec'))
 
           codec_path = Path('modules/phenix-pi/extensions/phenix-subagents/contract-codec.ts')
