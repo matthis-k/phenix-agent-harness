@@ -100,31 +100,35 @@ export function buildChildWorkflowProjection(
   return buildWorkflowDecisionContext(input);
 }
 
+/** Format the authority snapshot that is deterministically injected before inference. */
 export function formatWorkflowProjection(projection: ModelWorkflowProjection): string {
   const lines = [
     "## Phenix workflow authority",
     "",
-    `Current node ID: ${projection.currentState}`,
+    "This authority snapshot was resolved by the runtime before this agent started.",
+    "The active session or contract owns the current node; never send a node ID back to the runtime.",
+    `Current node: ${projection.currentState}`,
     `Difficulty: ${projection.difficulty}`,
-    `Workflow revision: ${projection.revision}`,
     "",
   ];
 
   if (projection.options.length === 0) {
     lines.push(
-      "The current node has no legal outgoing spawn edge.",
-      "Use phenix_workflow with action=inspect after workflow state changes; otherwise complete the current assignment using phenix_complete.",
+      "The current contract-bound node has no legal outgoing spawn edge.",
+      "Complete the current assignment directly using phenix_complete.",
       "",
     );
     return lines.join("\n");
   }
 
-  lines.push("Legal outgoing workflow edges:", "");
+  lines.push(
+    "Legal workflow edges available to this agent:",
+    "Use these when delegation would materially improve evidence, planning, implementation, testing, or review.",
+    "",
+  );
   for (const [index, option] of projection.options.entries()) {
     lines.push(
       `${index + 1}. Edge ID: ${option.edgeId}`,
-      `   From node: ${option.sourceNodeId}`,
-      `   To node after acceptance: ${option.targetNodeId}`,
       "   Kind: spawn",
       `   Spawn role: ${option.role}`,
       `   Category: ${option.category}`,
@@ -136,11 +140,10 @@ export function formatWorkflowProjection(projection: ModelWorkflowProjection): s
   }
 
   lines.push(
-    "Workflow API protocol:",
-    "1. Use phenix_workflow with action=inspect to obtain the current nodeId and legal edgeIds.",
-    "2. Use phenix_workflow with action=take, the same nodeId, one legal edgeId, and spawn input when the edge kind is spawn.",
-    "The runtime revalidates the node and edge against fresh authority before changing state or spawning a child.",
-    "Do not invent a role, result schema, model, thinking level, tool set, or delegation depth.",
+    "Workflow invocation protocol:",
+    "- Call phenix_workflow with one advertised edgeId and its spawn input.",
+    "- The runtime derives the current node from the active session or contract and verifies that the edge is still legal.",
+    "- Do not invent a role, result schema, model, thinking level, tool set, delegation depth, or node ID.",
   );
   return lines.join("\n");
 }
