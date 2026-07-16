@@ -6,6 +6,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   createWorkflowApiTools,
   createWorkflowTool,
+  projectWorkflowInspection,
 } from "../extensions/phenix-runtime/workflow-api-tools.ts";
 import type {
   WorkflowAuthoritySnapshot,
@@ -84,14 +85,11 @@ async function execute(
   return tool.execute("call-1", params as never, signal, undefined, ctx);
 }
 
-describe("contract-bound workflow graph tool", () => {
-  it("exposes the current node and legal outgoing edges", async () => {
-    const workflow = new RecordingWorkflow();
-    const tool = createWorkflowTool({ workflow });
+describe("contract-bound workflow edge tool", () => {
+  it("projects the authority snapshot for deterministic prompt bootstrap", () => {
+    const response = projectWorkflowInspection(snapshot());
 
-    const response = await execute(tool, { action: "inspect" });
-
-    assert.deepEqual(response.details, {
+    assert.deepEqual(response, {
       actor: { source: "contract", role: "planner" },
       node: { nodeId: "planning", difficulty: "D2", revision: 7 },
       edges: [
@@ -118,7 +116,7 @@ describe("contract-bound workflow graph tool", () => {
         effectiveTools: ["read", "phenix_workflow"],
       },
     });
-    assert.doesNotMatch(JSON.stringify(response.details), /optionsDigest|transitionId/);
+    assert.doesNotMatch(JSON.stringify(response), /optionsDigest|transitionId/);
   });
 
   it("installs one stable workflow tool", () => {
@@ -129,23 +127,26 @@ describe("contract-bound workflow graph tool", () => {
     );
   });
 
-  it("applies root-scope authorization before inspection", async () => {
+  it("applies root-scope authorization before edge invocation", async () => {
     const workflow = new RecordingWorkflow();
     const tool = createWorkflowTool({
       workflow,
       authorize: ({ tool: toolName }) => `${toolName} is outside this root model scope.`,
     });
 
-    const response = await execute(tool, { action: "inspect" });
+    const response = await execute(tool, {
+      edgeId: "planner.request-scout",
+      spawn: { task: "Inspect something." },
+    });
 
-    assert.equal(workflow.inspectCalls, 0);
+    assert.equal(workflow.takeEdgeCalls.length, 0);
     assert.deepEqual(response.details, {
       status: "forbidden",
       tool: "phenix_workflow",
     });
   });
 
-  it("maps a spawn edge call onto the workflow runtime port", async () => {
+  it("passes only the selected edge and edge input to the runtime", async () => {
     const workflow = new RecordingWorkflow();
     const tool = createWorkflowTool({ workflow });
     const signal = new AbortController().signal;
@@ -153,8 +154,6 @@ describe("contract-bound workflow graph tool", () => {
     const response = await execute(
       tool,
       {
-        action: "take",
-        nodeId: "planning",
         edgeId: "planner.request-scout",
         spawn: {
           task: "Inspect the workflow API boundary.",
@@ -165,7 +164,6 @@ describe("contract-bound workflow graph tool", () => {
     );
 
     assert.deepEqual(workflow.takeEdgeCalls[0], {
-      expectedNodeId: "planning",
       edgeId: "planner.request-scout",
       input: {
         kind: "spawn",
@@ -186,27 +184,25 @@ describe("contract-bound workflow graph tool", () => {
     });
   });
 
-  it("propagates deterministic workflow-runtime failures", async () => {
+  it("propagates fresh backend authority failures", async () => {
     const workflow = new RecordingWorkflow();
     workflow.execution = {
       ok: false,
-      message: "The expected node is stale.",
+      message: "The edge is no longer legal from the current contract-bound node.",
       details: {
-        code: "WORKFLOW_NODE_STALE",
-        currentNodeId: "planning",
+        code: "WORKFLOW_EDGE_NOT_AVAILABLE",
+        currentNodeId: "reviewing",
       },
     };
     const tool = createWorkflowTool({ workflow });
 
     const response = await execute(tool, {
-      action: "take",
-      nodeId: "classified",
       edgeId: "planner.request-scout",
       spawn: { task: "Inspect something." },
     });
 
     assert.equal(workflow.takeEdgeCalls.length, 1);
-    assert.equal(response.details?.code, "WORKFLOW_NODE_STALE");
-    assert.equal(response.details?.currentNodeId, "planning");
+    assert.equal(response.details?.code, "WORKFLOW_EDGE_NOT_AVAILABLE");
+    assert.equal(response.details?.currentNodeId, "reviewing");
   });
 });
