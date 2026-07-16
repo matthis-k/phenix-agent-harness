@@ -13,9 +13,9 @@ import { resolveSubagentSessionOptions, type SessionRouteResolver } from "./sess
 
 /** Deterministically translates a canonical plan into a backend specification. */
 export class SubagentSessionPlanner {
-  private readonly resolveRoute: SessionRouteResolver;
+  private readonly resolveRoute: SessionRouteResolver | undefined;
 
-  constructor(resolveRoute: SessionRouteResolver) {
+  constructor(resolveRoute?: SessionRouteResolver) {
     this.resolveRoute = resolveRoute;
   }
 
@@ -27,7 +27,7 @@ export class SubagentSessionPlanner {
     const session = await resolveSubagentSessionOptions({
       session: execution.session.options,
       defaults: execution.session.defaults,
-      resolveRoute: this.resolveRoute,
+      ...(this.resolveRoute ? { resolveRoute: this.resolveRoute } : {}),
     });
 
     return {
@@ -44,7 +44,8 @@ export class SubagentSessionPlanner {
 
 export interface SubagentSessionRuntimeOptions {
   readonly backend: ChildSessionBackend;
-  readonly resolveRoute: SessionRouteResolver;
+  /** Required only when execution plans may select routed models. */
+  readonly resolveRoute?: SessionRouteResolver;
 }
 
 /** Child-session mechanism used by workflow and standalone execution services. */
