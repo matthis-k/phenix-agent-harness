@@ -85,7 +85,7 @@ export default async function phenixSubagents(
       return {
         blocked: true,
         reason:
-          "Raw or legacy delegation is runtime-blocked in Phenix sessions. Use phenix_workflow with action=inspect, then action=take with the current nodeId and one legal edgeId.",
+          "Raw or legacy delegation is runtime-blocked in Phenix sessions. Use one legal edgeId from the workflow authority snapshot injected before inference and invoke it through phenix_workflow.",
       };
     }
 
