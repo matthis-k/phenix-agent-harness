@@ -33,7 +33,6 @@ export interface WorkflowSpawnEdgeInput {
 export type WorkflowEdgeInput = WorkflowSpawnEdgeInput;
 
 export interface WorkflowTakeEdgeRequest {
-  readonly expectedNodeId: string;
   readonly edgeId: string;
   readonly input: WorkflowEdgeInput;
   readonly parent?: ParentExecutionContext;
@@ -60,8 +59,9 @@ export type WorkflowEdgeExecutionResult =
 /**
  * Authority-bound workflow application service.
  *
- * The model adapter never talks to the generic subagent runtime directly. It
- * inspects this port and asks it to take one edge from an expected node.
+ * The model adapter never supplies actor or node state. The runtime derives both
+ * from the active root session or child contract, then verifies the requested
+ * edge against the freshly resolved outgoing edge set.
  */
 export interface WorkflowRuntimePort {
   inspect(input: {

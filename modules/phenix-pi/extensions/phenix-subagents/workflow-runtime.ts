@@ -88,11 +88,11 @@ async function takeSpawnEdge(input: {
   );
   if (!edge) {
     return failure(
-      `phenix_workflow: edge "${input.request.edgeId}" is not legal from node ` +
+      `phenix_workflow: edge "${input.request.edgeId}" is not legal from the current contract-bound node ` +
         `"${input.snapshot.workflow.currentState}".`,
       {
         code: "WORKFLOW_EDGE_NOT_AVAILABLE",
-        nodeId: input.snapshot.workflow.currentState,
+        currentNodeId: input.snapshot.workflow.currentState,
         revision: input.snapshot.workflow.revision,
         availableEdges: availableEdges(input.snapshot),
       },
@@ -157,20 +157,6 @@ export function createWorkflowRuntime(input: {
 
     async takeEdge(request) {
       const snapshot = inspect(request);
-      if (request.expectedNodeId !== snapshot.workflow.currentState) {
-        return failure(
-          `phenix_workflow: expected node "${request.expectedNodeId}" is stale; ` +
-            `the current node is "${snapshot.workflow.currentState}".`,
-          {
-            code: "WORKFLOW_NODE_STALE",
-            expectedNodeId: request.expectedNodeId,
-            currentNodeId: snapshot.workflow.currentState,
-            revision: snapshot.workflow.revision,
-            availableEdges: availableEdges(snapshot),
-          },
-        );
-      }
-
       switch (request.input.kind) {
         case "spawn":
           return takeSpawnEdge({ request, snapshot, delegator: input.delegator });

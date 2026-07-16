@@ -3,7 +3,7 @@
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
-import { WorkflowActionParams, type WorkflowTakeEdgeActionType } from "./workflow-action-schema.ts";
+import { WorkflowActionParams, type WorkflowActionParamsType } from "./workflow-action-schema.ts";
 import type { ParentExecutionContext } from "./workflow-api-types.ts";
 import type {
   WorkflowAuthoritySnapshot,
@@ -58,6 +58,7 @@ function compactHandle(record: WorkflowHandleResult): Record<string, unknown> {
   };
 }
 
+/** Projection used by deterministic session bootstrap and diagnostics. */
 export function projectWorkflowInspection(
   snapshot: WorkflowAuthoritySnapshot,
 ): Record<string, unknown> {
@@ -95,8 +96,8 @@ export function projectWorkflowInspection(
   };
 }
 
-async function takeWorkflowEdge(input: {
-  readonly params: WorkflowTakeEdgeActionType;
+async function invokeWorkflowEdge(input: {
+  readonly params: WorkflowActionParamsType;
   readonly workflow: WorkflowRuntimePort;
   readonly parent?: ParentExecutionContext;
   readonly signal: AbortSignal | undefined;
@@ -114,7 +115,6 @@ async function takeWorkflowEdge(input: {
   }
 
   const execution = await input.workflow.takeEdge({
-    expectedNodeId: input.params.nodeId,
     edgeId: input.params.edgeId,
     input: {
       kind: "spawn",
@@ -143,8 +143,8 @@ export function createWorkflowTool(input: {
     name: PHENIX_WORKFLOW_TOOL,
     label: "Phenix Workflow",
     description:
-      "Inspect the current workflow node and legal outgoing edges, or take one edge. " +
-      "The runtime owns roles, routing, models, tools, child authority, contracts, and state transitions.",
+      "Invoke one legal workflow edge advertised in the authority snapshot injected at session start. " +
+      "The runtime derives the current node and owns roles, routing, models, tools, child authority, contracts, and state transitions.",
     parameters: WorkflowActionParams,
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -152,15 +152,7 @@ export function createWorkflowTool(input: {
       if (forbidden) return forbidden;
 
       try {
-        if (params.action === "inspect") {
-          const snapshot = input.workflow.inspect({
-            ctx,
-            ...(input.parent ? { parent: input.parent } : {}),
-          });
-          return result(projectWorkflowInspection(snapshot));
-        }
-
-        return await takeWorkflowEdge({
+        return await invokeWorkflowEdge({
           params,
           workflow: input.workflow,
           ...(input.parent ? { parent: input.parent } : {}),

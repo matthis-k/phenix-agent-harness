@@ -9,7 +9,7 @@
  * 3. requirements
  * 4. output schema projection
  * 5. effective tool/delegation boundaries
- * 6. legal delegation options
+ * 6. pre-resolved legal workflow edges
  * 7. completion protocol
  * 8. relevant workflow state
  */
@@ -36,18 +36,9 @@ export interface ChildWorkflowProjection extends ModelWorkflowProjection {}
 /**
  * Compose one deterministic child system prompt.
  *
- * Contains:
- * 1. persona
- * 2. exact assignment
- * 3. requirements
- * 4. output schema projection
- * 5. effective tool/delegation boundaries
- * 6. legal delegation options
- * 7. completion protocol
- * 8. relevant workflow state
- *
- * Does NOT include capability secrets, store paths, capability tokens,
- * or implementation-specific session metadata.
+ * The workflow projection is resolved from the child contract before the model
+ * starts. It is therefore the mandatory initial authority inspection; the model
+ * never has to request or echo its current node.
  */
 export function buildChildSystemPrompt(input: {
   readonly persona: PersonaDefinition;
@@ -58,36 +49,29 @@ export function buildChildSystemPrompt(input: {
 
   const sections: string[] = [];
 
-  // 1. Persona
   if (persona.body) {
     sections.push(persona.body);
   }
 
-  // 2-4, 7. Assignment, requirements, output schema, completion protocol
   const projection = deriveProjection(contract, workflowProjection);
   sections.push(formatProjection(projection));
-
-  // 5-6, 8. Effective tool/delegation boundaries, legal delegation options, workflow state
   sections.push(formatWorkflowProjection(workflowProjection));
 
-  // Effective tool boundaries
   const effectiveTools = contract.runtime.tools.effective;
   if (effectiveTools.length > 0) {
     sections.push(
       [
         "## Effective tool boundaries",
         "",
-        "Only the following tools are available in this session:",
-        ...effectiveTools.map((t) => `- ${t}`),
+        "Only the following task tools are available in this session:",
+        ...effectiveTools.map((tool) => `- ${tool}`),
         "",
         "The phenix_complete tool is always available for submitting your result.",
-        "The phenix_workflow tool is always available and is the source of truth for current workflow authority.",
-        "The phenix_create_subagent tool is installed only when the initialized contract permits delegation.",
+        "The phenix_workflow tool is always available for invoking one legal edge from the preloaded authority snapshot.",
       ].join("\n"),
     );
   }
 
-  // Delegation boundary
   const canDelegate =
     contract.runtime.delegation.remainingDepth > 0 &&
     contract.runtime.delegation.availableRoles.length > 0;
@@ -97,8 +81,7 @@ export function buildChildSystemPrompt(input: {
       [
         "## Delegation boundary",
         "",
-        "The initialized contract permits no further subagent creation. " +
-          "phenix_workflow will report no creatable transitions; complete the assignment directly using phenix_complete.",
+        "The initialized contract permits no further subagent creation. Complete the assignment directly using phenix_complete.",
       ].join("\n"),
     );
   }
