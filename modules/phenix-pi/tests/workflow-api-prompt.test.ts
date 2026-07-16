@@ -27,13 +27,14 @@ const projection = {
 };
 
 describe("workflow authority prompt projection", () => {
-  it("preloads target agents without exposing transition identities", () => {
+  it("preloads target agents and the inspect/spawn protocol without private identities", () => {
     const prompt = formatWorkflowProjection(projection);
 
     assert.match(prompt, /resolved by the runtime before this agent started/i);
     assert.match(prompt, /Current node: planning/);
     assert.match(prompt, /Agent: architect/);
     assert.match(prompt, /Execution role: architect/);
+    assert.match(prompt, /action=inspect/);
     assert.match(prompt, /action=spawn/);
     assert.match(prompt, /unique legal transition/i);
     assert.match(prompt, /never send a node ID back to the runtime/i);
@@ -43,10 +44,20 @@ describe("workflow authority prompt projection", () => {
     assert.doesNotMatch(prompt, /Authority digest:/);
   });
 
-  it("states deterministic no-target authority", () => {
+  it("states deterministic no-target authority for a root actor", () => {
     const prompt = formatWorkflowProjection({ ...projection, options: [] });
 
     assert.match(prompt, /permits no target agent to be spawned/i);
     assert.match(prompt, /complete the current assignment directly/i);
+    assert.doesNotMatch(prompt, /phenix_complete/);
+  });
+
+  it("uses the child completion protocol for contract-bound sessions", () => {
+    const prompt = formatWorkflowProjection(
+      { ...projection, options: [] },
+      { completion: "phenix_complete" },
+    );
+
+    assert.match(prompt, /complete the current assignment directly using phenix_complete/i);
   });
 });
