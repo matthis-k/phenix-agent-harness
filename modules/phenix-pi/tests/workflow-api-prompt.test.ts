@@ -26,17 +26,19 @@ const projection = {
   ],
 };
 
-describe("workflow API prompt projection", () => {
-  it("instructs Phenix models to inspect a node and take an edge", () => {
+describe("workflow authority prompt projection", () => {
+  it("preloads legal edges without asking the model to report its node", () => {
     const prompt = formatWorkflowProjection(projection);
 
-    assert.match(prompt, /Current node ID: planning/);
+    assert.match(prompt, /resolved by the runtime before this agent started/i);
+    assert.match(prompt, /Current node: planning/);
     assert.match(prompt, /Edge ID: planner\.request-architect/);
     assert.match(prompt, /Kind: spawn/);
-    assert.match(prompt, /action=inspect/);
-    assert.match(prompt, /action=take/);
-    assert.match(prompt, /nodeId/);
-    assert.match(prompt, /edgeId/);
+    assert.match(prompt, /one advertised edgeId/i);
+    assert.match(prompt, /runtime derives the current node/i);
+    assert.doesNotMatch(prompt, /action=inspect/);
+    assert.doesNotMatch(prompt, /action=take/);
+    assert.doesNotMatch(prompt, /send a node ID/i);
     assert.doesNotMatch(prompt, /phenix_create_subagent/);
     assert.doesNotMatch(prompt, /Authority digest:/);
   });
@@ -45,6 +47,7 @@ describe("workflow API prompt projection", () => {
     const prompt = formatWorkflowProjection({ ...projection, options: [] });
 
     assert.match(prompt, /no legal outgoing spawn edge/i);
-    assert.match(prompt, /action=inspect/);
+    assert.match(prompt, /complete the current assignment directly/i);
+    assert.doesNotMatch(prompt, /action=inspect/);
   });
 });
