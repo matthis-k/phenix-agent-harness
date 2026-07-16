@@ -39,6 +39,9 @@ const COMMON_READ_TOOLS: readonly string[] = [
   "context_*",
   "contact_supervisor",
   "phenix_workflow",
+  // Retained only as a preset-level codec identity for old direct artifacts.
+  // Newly issued contracts explicitly remove it and live sessions filter it.
+  "phenix_create_subagent",
 ] as const;
 
 // ── Role presets ────────────────────────────────────────────────────────────
