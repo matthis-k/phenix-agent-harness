@@ -22,8 +22,8 @@ jobs:
           rg -n --hidden \
             --glob '!modules/pi-npm/package-lock.json' \
             --glob '!flake.lock' \
-            'PHENIX_API_VERSION|schemaVersion|definitionVersion|presetRevision|HANDLE_VERSION|CONTRACT_SCHEMA_VERSION|CONTRACT_RESULT_SCHEMA_VERSION|\bversion:\s*(?:[0-9]+|PHENIX_API_VERSION)|readonly version:' \
-            modules/phenix-pi > version-references.txt
+            'PHENIX_API_VERSION|schemaVersion|definitionVersion|presetRevision|HANDLE_VERSION|CONTRACT_SCHEMA_VERSION|CONTRACT_RESULT_SCHEMA_VERSION|readonly version:|version: PHENIX_API_VERSION|version: [0-9]+' \
+            modules/phenix-pi > version-references.txt 2>&1
           cat version-references.txt
           exit 0
       - uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097
