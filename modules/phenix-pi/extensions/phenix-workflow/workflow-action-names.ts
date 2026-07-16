@@ -1,5 +1,3 @@
-import type { ModelDelegationOption } from "./workflow-projection.ts";
-
 const WORKFLOW_AGENT_NAME = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 
 /**
@@ -30,7 +28,7 @@ export function workflowAgentName(input: {
 
 /** Fail closed when one actor projection would expose an ambiguous local name. */
 export function assertUniqueWorkflowAgentNames(
-  options: readonly Pick<ModelDelegationOption, "agent" | "transitionId">[],
+  options: readonly { readonly agent: string; readonly transitionId: string }[],
 ): void {
   const ownerByName = new Map<string, string>();
   for (const option of options) {
