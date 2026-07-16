@@ -11,6 +11,9 @@ const InternalSpawnFields = {
   }),
   requirements: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 64 })),
   mode: Type.Optional(Type.Union([Type.Literal("await"), Type.Literal("background")])),
+  /** Migration-only fields. Workflow execution never permits model-supplied patches. */
+  tools: Type.Optional(Type.Null()),
+  delegateRoles: Type.Optional(Type.Null()),
 } as const;
 
 /** Internal execution parameters after fresh node and edge authority is bound. */
