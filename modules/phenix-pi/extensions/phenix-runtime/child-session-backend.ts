@@ -91,6 +91,10 @@ export {
   SubagentSessionPlanner,
   SubagentSessionRuntime,
 } from "./subagent-session-runtime.ts";
+export {
+  normalizeWorkflowRuntimeToolNames,
+  WorkflowScopedPiSessionFactory,
+} from "./workflow-session-factory.ts";
 export type {
   ChildSessionBackend,
   PiRuntimeServices,
@@ -100,9 +104,4 @@ export type {
   PromptOptions,
   SdkChildSessionBackendOptions,
 };
-
 export { buildEffectiveToolNames, ProductionPiSessionFactory, SdkChildSessionBackend };
-export {
-  normalizeWorkflowRuntimeToolNames,
-  WorkflowScopedPiSessionFactory,
-} from "./workflow-session-factory.ts";
