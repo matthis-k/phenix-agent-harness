@@ -1,0 +1,47 @@
+name: PR formatting repair
+
+on:
+  push:
+    branches:
+      - cleanup/single-phenix-api
+    paths:
+      - .github/workflows/pr-format-repair.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Repair and format affected files
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i 's/"phenix_create_subagent"/"phenix_agent"/' \
+            modules/phenix-pi/tests/tool-policy.test.ts
+          nix develop --command biome check --write \
+            modules/phenix-pi/extensions/phenix-routing/default-routing.ts \
+            modules/phenix-pi/tests/role-presets.test.ts \
+            modules/phenix-pi/tests/tool-policy.test.ts
+          git rm .github/workflows/pr-format-repair.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            modules/phenix-pi/extensions/phenix-routing/default-routing.ts \
+            modules/phenix-pi/tests/role-presets.test.ts \
+            modules/phenix-pi/tests/tool-policy.test.ts
+          git diff --cached --check
+          git commit -m "style: format API cleanup changes"
+          git push origin HEAD:cleanup/single-phenix-api
