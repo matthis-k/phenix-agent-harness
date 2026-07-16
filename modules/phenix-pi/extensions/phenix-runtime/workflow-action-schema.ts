@@ -44,10 +44,7 @@ const WorkflowTakeEdgeAction = Type.Object(
  * kinds behind `take`; it does not require a new top-level tool or expose the
  * generic child-session runtime.
  */
-export const WorkflowActionParams = Type.Union([
-  WorkflowInspectAction,
-  WorkflowTakeEdgeAction,
-]);
+export const WorkflowActionParams = Type.Union([WorkflowInspectAction, WorkflowTakeEdgeAction]);
 
 export type WorkflowActionParamsType = Static<typeof WorkflowActionParams>;
 export type WorkflowTakeEdgeActionType = Static<typeof WorkflowTakeEdgeAction>;
