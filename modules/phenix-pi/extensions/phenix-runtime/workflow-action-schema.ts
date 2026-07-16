@@ -17,8 +17,7 @@ const WorkflowSpawnAction = Type.Object(
     }),
     agent: Type.String({
       minLength: 1,
-      description:
-        "A target agent identity advertised in the current workflow authority snapshot.",
+      description: "A target agent identity advertised in the current workflow authority snapshot.",
     }),
     task: Type.String({
       minLength: 1,
