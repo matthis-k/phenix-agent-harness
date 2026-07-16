@@ -63,9 +63,7 @@ function inspectAuthority(input: {
   };
 }
 
-function availableEdges(
-  snapshot: WorkflowAuthoritySnapshot,
-): readonly Record<string, unknown>[] {
+function availableEdges(snapshot: WorkflowAuthoritySnapshot): readonly Record<string, unknown>[] {
   return snapshot.workflow.options.map((edge) => ({
     edgeId: edge.edgeId,
     kind: "spawn",
@@ -76,10 +74,7 @@ function availableEdges(
   }));
 }
 
-function failure(
-  message: string,
-  details?: Record<string, unknown>,
-): WorkflowEdgeExecutionResult {
+function failure(message: string, details?: Record<string, unknown>): WorkflowEdgeExecutionResult {
   return { ok: false, message, ...(details ? { details } : {}) };
 }
 
@@ -104,24 +99,15 @@ async function takeSpawnEdge(input: {
     );
   }
 
-  if (
-    input.request.input.mode === "background" &&
-    input.request.parent?.kind === "child"
-  ) {
+  if (input.request.input.mode === "background" && input.request.parent?.kind === "child") {
     return failure("phenix_workflow: background spawning is only available to the root actor.");
   }
-  if (
-    input.request.input.mode === "background" &&
-    !edge.allowedModes.includes("background")
-  ) {
-    return failure(
-      `phenix_workflow: background mode is not allowed for edge "${edge.edgeId}".`,
-      {
-        code: "WORKFLOW_MODE_NOT_ALLOWED",
-        edgeId: edge.edgeId,
-        allowedModes: [...edge.allowedModes],
-      },
-    );
+  if (input.request.input.mode === "background" && !edge.allowedModes.includes("background")) {
+    return failure(`phenix_workflow: background mode is not allowed for edge "${edge.edgeId}".`, {
+      code: "WORKFLOW_MODE_NOT_ALLOWED",
+      edgeId: edge.edgeId,
+      allowedModes: [...edge.allowedModes],
+    });
   }
 
   const execution = await input.delegator.delegate({
