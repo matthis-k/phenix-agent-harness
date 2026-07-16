@@ -1,30 +1,62 @@
-import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
-
+import { afterEach, describe, it } from "node:test";
+import type { AgentCapabilityArtifact } from "../extensions/phenix-workflow/agent-capabilities.ts";
 import {
-  registerSession,
-  unregisterSession,
-  getSessionCapabilityArtifact,
-  getSessionWorkflowData,
   activeSessionCount,
   clearAllSessions,
+  getSessionCapabilityArtifact,
+  getSessionWorkflowData,
+  registerSession,
   type SessionWorkflowData,
+  unregisterSession,
 } from "../extensions/phenix-workflow/session-registry.ts";
-
-import type { AgentCapabilityArtifact } from "../extensions/phenix-workflow/agent-capabilities.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 const SAMPLE_ARTIFACT: AgentCapabilityArtifact = {
-  version: 1,
   generatedAt: new Date().toISOString(),
   artifactHash: "aa".repeat(32),
   entries: [
-    { role: "scout", logicalName: "scout", runtimeName: "phenix.scout", configured: true, spawnable: true, tools: [] },
-    { role: "planner", logicalName: "planner", runtimeName: "phenix.planner", configured: true, spawnable: true, tools: [] },
-    { role: "implementer", logicalName: "implementer", runtimeName: "phenix.implementer", configured: true, spawnable: true, tools: [] },
-    { role: "critic", logicalName: "critic", runtimeName: "phenix.critic", configured: true, spawnable: true, tools: [] },
-    { role: null, logicalName: "base", runtimeName: "phenix.base", configured: true, spawnable: true, tools: [] },
+    {
+      role: "scout",
+      logicalName: "scout",
+      runtimeName: "phenix.scout",
+      configured: true,
+      spawnable: true,
+      tools: [],
+    },
+    {
+      role: "planner",
+      logicalName: "planner",
+      runtimeName: "phenix.planner",
+      configured: true,
+      spawnable: true,
+      tools: [],
+    },
+    {
+      role: "implementer",
+      logicalName: "implementer",
+      runtimeName: "phenix.implementer",
+      configured: true,
+      spawnable: true,
+      tools: [],
+    },
+    {
+      role: "critic",
+      logicalName: "critic",
+      runtimeName: "phenix.critic",
+      configured: true,
+      spawnable: true,
+      tools: [],
+    },
+    {
+      role: null,
+      logicalName: "base",
+      runtimeName: "phenix.base",
+      configured: true,
+      spawnable: true,
+      tools: [],
+    },
   ],
 };
 
@@ -32,7 +64,6 @@ const SAMPLE_WF_DATA: SessionWorkflowData = {
   instanceId: "inst-1",
   actorId: "root-actor",
   definitionId: "phenix-default",
-  definitionVersion: 1,
 };
 
 // ── Cleanup ─────────────────────────────────────────────────────────────────

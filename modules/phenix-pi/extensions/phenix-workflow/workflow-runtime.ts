@@ -71,7 +71,6 @@ function buildRootDependencies(
     .map((entry) => entry.role);
   const authority: DelegationAuthority = {
     roles: {
-      presetRevision: 1,
       role: null,
       source: {
         inherited: false,

@@ -6,8 +6,6 @@ import type { ResolvedChildSpec } from "./child-spec.ts";
 import { type ContractArtifact, createRunId, issueContract, type RunId } from "./contract.ts";
 import { FileContractStore } from "./contract-store.ts";
 import { findProjectRoot } from "./handle-store.ts";
-import type { ResolvedToolConfiguration } from "./tool-policy.ts";
-
 
 function contractsForCwd(cwd: string): FileContractStore {
   return new FileContractStore(path.join(findProjectRoot(cwd), ".phenix-agent-state", "contracts"));
@@ -66,7 +64,6 @@ export async function createProducerContract(input: {
           ? { parentActorId: input.spec.workflow.parentActorId }
           : {}),
         definitionId: input.spec.workflow.definitionId,
-        definitionVersion: input.spec.workflow.definitionVersion,
         difficulty: input.spec.workflow.difficulty,
         initialState: input.spec.workflow.initialState,
         transitionAuthority: input.spec.workflow.transitionAuthority,

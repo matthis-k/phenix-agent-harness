@@ -181,7 +181,6 @@ export default async function rootWorkflowIntegration(pi: ExtensionAPI): Promise
         instanceId: workflowRecord.instanceId,
         actorId: workflowRecord.actorId,
         definitionId: workflowRecord.definitionId,
-        definitionVersion: workflowRecord.definitionVersion,
         cwd,
       },
     });

@@ -2,7 +2,6 @@ import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { AgentKind } from "../phenix-kernel/agents.ts";
-import { PHENIX_API_VERSION } from "../phenix-kernel/api-version.ts";
 import type { Difficulty, TaskProfile } from "../phenix-kernel/task.ts";
 import {
   atomicWriteJson,
@@ -132,12 +131,10 @@ function isObject(value: unknown): value is Record<string, unknown> {
 export function decodeWorkflowRecord(value: unknown): WorkflowRuntimeRecord {
   if (
     !isObject(value) ||
-    value.version !== PHENIX_API_VERSION ||
     typeof value.instanceId !== "string" ||
     typeof value.actorId !== "string" ||
     typeof value.sessionId !== "string" ||
     value.definitionId !== "phenix-default" ||
-    typeof value.definitionVersion !== "number" ||
     typeof value.state !== "string" ||
     typeof value.revision !== "number" ||
     !Array.isArray(value.active) ||
@@ -146,11 +143,7 @@ export function decodeWorkflowRecord(value: unknown): WorkflowRuntimeRecord {
     typeof value.createdAt !== "string" ||
     typeof value.updatedAt !== "string"
   ) {
-    throw new WorkflowStoreError(
-      "INVALID_RECORD",
-      "Persisted workflow record is malformed or uses an unsupported version.",
-      {},
-    );
+    throw new WorkflowStoreError("INVALID_RECORD", "Persisted workflow record is malformed.", {});
   }
 
   return value as unknown as WorkflowRuntimeRecord;
@@ -180,13 +173,11 @@ export function createWorkflowRecord(
   },
 ): WorkflowRuntimeRecord {
   const record: WorkflowRuntimeRecord = {
-    version: PHENIX_API_VERSION,
     instanceId: input.instanceId,
     actorId: input.actorId,
     ...(input.parentActorId ? { parentActorId: input.parentActorId } : {}),
     sessionId: input.sessionId,
     definitionId: input.definitionId,
-    definitionVersion: PHENIX_API_VERSION,
     difficulty: input.difficulty,
     taskProfile: input.taskProfile,
     actorRole: input.actorRole,

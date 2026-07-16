@@ -1,7 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
-import { PHENIX_API_VERSION } from "../phenix-kernel/api-version.ts";
-
 import type { JsonSchema } from "../phenix-contracts/definitions.ts";
 import type { Difficulty } from "../phenix-routing/types.ts";
 import type { TransitionAuthority } from "../phenix-workflow/transition-authority.ts";
@@ -42,7 +40,6 @@ export interface ContractIdentity {
   readonly runId: RunId;
   readonly capabilityToken: CapabilityToken;
 }
-
 
 // ── Contract artifact and execution manifest ───────────────────────────────
 
@@ -92,7 +89,6 @@ export interface ContractExecutionManifest {
     readonly parentActorId?: string;
 
     readonly definitionId: DefaultWorkflowDefinitionId;
-    readonly definitionVersion: typeof PHENIX_API_VERSION;
 
     readonly difficulty: Difficulty;
 
@@ -115,7 +111,6 @@ export interface ContractRuntimeInstance {
 }
 
 export interface ContractArtifact {
-  readonly schemaVersion: typeof PHENIX_API_VERSION;
   readonly id: ContractId;
 
   readonly identity: ContractRuntimeIdentity;
@@ -135,11 +130,9 @@ export interface ContractArtifact {
   readonly expiresAt?: string;
 }
 
-
 // ── Result types ────────────────────────────────────────────────────────────
 
 export interface PendingContractResult {
-  readonly schemaVersion: typeof PHENIX_API_VERSION;
   readonly state: "pending";
   readonly contractId: ContractId;
   readonly revision: number;
@@ -148,7 +141,6 @@ export interface PendingContractResult {
 }
 
 export interface SubmittedContractResult {
-  readonly schemaVersion: typeof PHENIX_API_VERSION;
   readonly state: "submitted";
   readonly contractId: ContractId;
   readonly revision: number;
@@ -158,7 +150,6 @@ export interface SubmittedContractResult {
 }
 
 export interface AcceptedContractResult {
-  readonly schemaVersion: typeof PHENIX_API_VERSION;
   readonly state: "accepted";
   readonly contractId: ContractId;
   readonly revision: number;
@@ -168,7 +159,6 @@ export interface AcceptedContractResult {
 }
 
 export interface CancelledContractResult {
-  readonly schemaVersion: typeof PHENIX_API_VERSION;
   readonly state: "cancelled";
   readonly contractId: ContractId;
   readonly revision: number;
@@ -257,7 +247,6 @@ export function issueContract(input: IssueContractInput): IssuedContract {
   const capabilityToken = createCapabilityToken();
 
   const artifact: ContractArtifact = {
-    schemaVersion: PHENIX_API_VERSION,
     id: createContractId(),
     identity: {
       runId: input.identity.runId,
@@ -291,7 +280,6 @@ export function issueContract(input: IssueContractInput): IssuedContract {
       extensions: [...input.runtime.extensions],
       delegation: {
         roles: {
-          presetRevision: PHENIX_API_VERSION,
           role: input.runtime.delegation.roles.role,
           source: {
             inherited: input.runtime.delegation.roles.source.inherited,
@@ -312,7 +300,6 @@ export function issueContract(input: IssueContractInput): IssuedContract {
           ? { parentActorId: input.runtime.workflow.parentActorId }
           : {}),
         definitionId: input.runtime.workflow.definitionId,
-        definitionVersion: input.runtime.workflow.definitionVersion,
         difficulty: input.runtime.workflow.difficulty,
         initialState: input.runtime.workflow.initialState,
         transitionAuthority:

@@ -26,7 +26,6 @@ function temporaryDirectory(prefix: string): string {
 function runningRecord(subagentId: string): HandleRecord {
   const timestamp = new Date().toISOString();
   return {
-    version: 5,
     id: "managed-await",
     sessionId: "managed-session",
     modelSet: "mixed",

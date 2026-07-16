@@ -1,12 +1,10 @@
 import type { JsonSchema } from "../phenix-contracts/definitions.ts";
-import { PHENIX_API_VERSION } from "../phenix-kernel/api-version.ts";
 import type { SerializedError } from "../phenix-runtime/child-session-types.ts";
 import type { WorkflowStateId, WorkflowTransitionId } from "../phenix-workflow/workflow-types.ts";
 import type { AgentRole } from "./agent-types.ts";
 import type { ResolvedChildSpec } from "./child-spec.ts";
 
 // ── Constants (used by index.ts; extracted for visibility) ──────────────────
-
 
 /** Persisted lifecycle states for a delegated handle. */
 export type HandleStatus =
@@ -108,8 +106,6 @@ export interface VerificationSummary {
 // ── Handle record ───────────────────────────────────────────────────────────
 
 export interface HandleRecord {
-  readonly version: typeof PHENIX_API_VERSION;
-
   readonly id: string;
   readonly sessionId: string;
   readonly parentId?: string;

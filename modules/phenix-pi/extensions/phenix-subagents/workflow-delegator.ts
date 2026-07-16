@@ -11,7 +11,6 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentRole } from "../phenix-kernel/agents.ts";
-import { PHENIX_API_VERSION } from "../phenix-kernel/api-version.ts";
 import { modelSetId } from "../phenix-kernel/ids.ts";
 import { modelSetForModelId, PHENIX_PROVIDER } from "../phenix-routing/provider.ts";
 import { childRunId } from "../phenix-runtime/child-session-types.ts";
@@ -88,7 +87,6 @@ function createHandle(input: {
   readonly workflowBinding?: WorkflowBinding;
 }): HandleRecord {
   return {
-    version: PHENIX_API_VERSION,
     id: input.id,
     sessionId: input.sessionId,
     parentId: input.parentId,
@@ -354,7 +352,6 @@ export class WorkflowDelegator {
         actorId: childActorId,
         parentActorId: workflowRecord.actorId,
         definitionId: workflowRecord.definitionId,
-        definitionVersion: PHENIX_API_VERSION,
         difficulty: workflowRecord.difficulty,
         initialState: childInitialState,
         transitionAuthority: transitionAuthorityForChild({
@@ -393,7 +390,6 @@ export class WorkflowDelegator {
           actorId: `critic_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           parentActorId: childActorId,
           definitionId: workflowRecord.definitionId,
-          definitionVersion: PHENIX_API_VERSION,
           difficulty: workflowRecord.difficulty,
           initialState: "reviewing",
           transitionAuthority: { kind: "restricted", allowed: [] },

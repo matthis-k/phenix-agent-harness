@@ -46,7 +46,8 @@ function run(command, args, options = {}) {
   });
   return {
     command: [command, ...args].join(" "),
-    status: result.error?.code === "ETIMEDOUT" ? "timed-out" : result.status === 0 ? "passed" : "failed",
+    status:
+      result.error?.code === "ETIMEDOUT" ? "timed-out" : result.status === 0 ? "passed" : "failed",
     exitCode: result.status,
     durationMs: Date.now() - started,
     stdout: trimOutput(result.stdout),
@@ -67,10 +68,7 @@ function nullSeparated(command, args, cwd) {
     maxBuffer: 16 * 1024 * 1024,
   });
   if (result.status !== 0) return [];
-  return result.stdout
-    .toString("utf-8")
-    .split("\0")
-    .filter(Boolean);
+  return result.stdout.toString("utf-8").split("\0").filter(Boolean);
 }
 
 function changedFiles(root) {
@@ -155,7 +153,13 @@ function main() {
 
   if (hasExtension(files, new Set([".rs"])) && existing(root, "Cargo.toml")) {
     pushCommand(checks, "cargo", ["check", "--workspace", "--all-targets"], root, 180_000);
-    pushCommand(checks, "cargo", ["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"], root, 240_000);
+    pushCommand(
+      checks,
+      "cargo",
+      ["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"],
+      root,
+      240_000,
+    );
   }
 
   if (hasExtension(files, new Set([".nix"])) && existing(root, "flake.nix")) {
@@ -175,14 +179,14 @@ function main() {
       status: "passed",
       exitCode: 0,
       durationMs: 0,
-      stdout: files.length === 0 ? "no changed files" : "no language-specific runtime check was required",
+      stdout:
+        files.length === 0 ? "no changed files" : "no language-specific runtime check was required",
       stderr: "",
     });
   }
 
   const failed = checks.filter((check) => check.status !== "passed");
   const report = {
-    version: 1,
     root,
     changedFiles: files,
     status: failed.length === 0 ? "passed" : "failed",
@@ -195,6 +199,8 @@ function main() {
 try {
   main();
 } catch (error) {
-  process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+  process.stderr.write(
+    `${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+  );
   process.exitCode = 1;
 }

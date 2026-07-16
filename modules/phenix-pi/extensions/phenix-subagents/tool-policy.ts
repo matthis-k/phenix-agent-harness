@@ -1,4 +1,3 @@
-import { PHENIX_API_VERSION } from "../phenix-kernel/api-version.ts";
 import type { AgentRole } from "./agent-types.ts";
 import { rolePreset } from "./role-presets.ts";
 
@@ -15,7 +14,6 @@ export interface ToolPatch {
 }
 
 export interface ResolvedToolConfiguration {
-  readonly presetRevision: typeof PHENIX_API_VERSION;
   readonly role: AgentRole;
 
   readonly source: {
@@ -29,11 +27,7 @@ export interface ResolvedToolConfiguration {
 // ── Constants ───────────────────────────────────────────────────────────────
 
 /** Tool names whose availability is owned exclusively by the runtime. */
-const FORBIDDEN_TOOLS = new Set([
-  "subagent",
-  "phenix_complete",
-  "phenix_workflow",
-]);
+const FORBIDDEN_TOOLS = new Set(["subagent", "phenix_complete", "phenix_workflow"]);
 
 const EMPTY_TOOL_PATCH: ToolPatch = {
   additional: [],
@@ -166,7 +160,6 @@ export function resolveToolConfiguration(input: {
   validateDelegationCeiling(effective, input.delegableTools);
 
   return {
-    presetRevision: PHENIX_API_VERSION,
     role: input.role,
     source,
     effective,

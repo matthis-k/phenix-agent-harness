@@ -20,7 +20,6 @@ export interface SessionWorkflowData {
   readonly actorId: string;
 
   readonly definitionId: DefaultWorkflowDefinitionId;
-  readonly definitionVersion: 1;
 
   readonly cwd: string;
 }

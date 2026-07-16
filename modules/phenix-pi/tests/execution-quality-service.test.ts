@@ -56,7 +56,6 @@ function criticSpec(cwd: string): ResolvedChildSpec {
     thinking: "medium",
     cwd,
     tools: {
-      presetRevision: 1,
       role: "critic",
       source: {
         inherited: false,
@@ -68,7 +67,6 @@ function criticSpec(cwd: string): ResolvedChildSpec {
     extensions: [],
     delegation: {
       roles: {
-        presetRevision: 1,
         role: "critic",
         source: {
           inherited: false,
@@ -84,7 +82,6 @@ function criticSpec(cwd: string): ResolvedChildSpec {
       actorId: "quality-critic",
       parentActorId: "quality-producer",
       definitionId: "phenix-default",
-      definitionVersion: 1,
       difficulty: "D2",
       initialState: "reviewing",
       transitionAuthority: { kind: "restricted", allowed: [] },
@@ -102,7 +99,6 @@ function criticSpec(cwd: string): ResolvedChildSpec {
 function record(cwd: string): HandleRecord {
   const timestamp = new Date().toISOString();
   return {
-    version: 5,
     id: "quality-test",
     sessionId: "quality-session",
     modelSet: "mixed",

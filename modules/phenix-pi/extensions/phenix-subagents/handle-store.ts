@@ -2,8 +2,6 @@ import path from "node:path";
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { PHENIX_API_VERSION } from "../phenix-kernel/api-version.ts";
-
 import {
   atomicWriteJson,
   findRepositoryRoot,
@@ -31,7 +29,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
 export function decodeHandleRecord(value: unknown): HandleRecord {
   if (
     !isObject(value) ||
-    value.version !== PHENIX_API_VERSION ||
     typeof value.id !== "string" ||
     typeof value.sessionId !== "string" ||
     typeof value.modelSet !== "string" ||
@@ -43,7 +40,7 @@ export function decodeHandleRecord(value: unknown): HandleRecord {
     !isObject(value.assignment) ||
     !isObject(value.producerSpec)
   ) {
-    throw new Error("Persisted handle record is malformed or uses an unsupported version.");
+    throw new Error("Persisted handle record is malformed.");
   }
 
   return value as unknown as HandleRecord;

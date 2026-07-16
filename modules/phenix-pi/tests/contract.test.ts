@@ -61,7 +61,6 @@ function makeToolConfig(
 ) {
   if (role === null) {
     return {
-      presetRevision: 1 as const,
       role: null,
       source: {
         inherited: false,
@@ -80,7 +79,6 @@ function makeToolConfig(
     }
   }
   return {
-    presetRevision: 1 as const,
     role,
     source: {
       inherited: false,
@@ -94,7 +92,6 @@ function makeContractRuntime(role: AgentRole) {
   return {
     delegation: {
       roles: {
-        presetRevision: 1 as const,
         role,
         source: {
           inherited: false,
@@ -109,7 +106,6 @@ function makeContractRuntime(role: AgentRole) {
       instanceId: "test-instance",
       actorId: "test-actor",
       definitionId: "phenix-default" as const,
-      definitionVersion: 1 as const,
       difficulty: "D1" as const,
       initialState: "classified" as const,
       transitionAuthority: { kind: "unrestricted" } as const,
@@ -378,8 +374,6 @@ describe("Contract domain", () => {
       },
       verification: { commands: [], criticRequired: false, maxRepairAttempts: 0 },
     });
-
-    assert.equal(issued.artifact.schemaVersion, 1);
     assert.equal(issued.artifact.identity.role, null);
     assert.equal(issued.artifact.identity.handleId, "test");
     assert.equal(issued.artifact.assignment.task, TEST_TASK);

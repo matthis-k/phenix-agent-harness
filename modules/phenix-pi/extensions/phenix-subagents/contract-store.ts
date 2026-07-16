@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { PHENIX_API_VERSION } from "../phenix-kernel/api-version.ts";
 import { atomicWriteJson, isErrno, readJsonFile } from "../phenix-persistence/json-files.ts";
 import type {
   AcceptedContractResult,
@@ -54,7 +53,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
 function decodeResult(value: unknown): ContractResult {
   if (
     !isObject(value) ||
-    value.schemaVersion !== PHENIX_API_VERSION ||
     typeof value.contractId !== "string" ||
     typeof value.revision !== "number" ||
     typeof value.state !== "string"
@@ -148,7 +146,6 @@ export class FileContractStore {
 
       // Create the initial pending result.
       const pending: PendingContractResult = {
-        schemaVersion: PHENIX_API_VERSION,
         state: "pending",
         contractId: artifact.id,
         revision: 0,
@@ -212,7 +209,6 @@ export class FileContractStore {
       };
 
       const submitted: SubmittedContractResult = {
-        schemaVersion: PHENIX_API_VERSION,
         state: "submitted",
         contractId: id,
         revision: current.result.revision + 1,
@@ -243,7 +239,6 @@ export class FileContractStore {
       }
 
       const cancelled: CancelledContractResult = {
-        schemaVersion: PHENIX_API_VERSION,
         state: "cancelled",
         contractId: id,
         revision: current.result.revision + 1,
@@ -300,7 +295,6 @@ export class FileContractStore {
       }
 
       const pending: PendingContractResult = {
-        schemaVersion: PHENIX_API_VERSION,
         state: "pending",
         contractId: id,
         revision: current.result.revision + 1,
@@ -346,7 +340,6 @@ export class FileContractStore {
       }
 
       const accepted: AcceptedContractResult = {
-        schemaVersion: PHENIX_API_VERSION,
         state: "accepted",
         contractId: id,
         revision: current.result.revision + 1,

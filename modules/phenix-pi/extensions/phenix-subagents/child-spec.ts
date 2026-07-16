@@ -60,7 +60,6 @@ export interface ResolvedChildSpec {
     readonly parentActorId?: string;
 
     readonly definitionId: DefaultWorkflowDefinitionId;
-    readonly definitionVersion: 1;
 
     readonly difficulty: Difficulty;
 
@@ -103,7 +102,6 @@ export interface ResolvedWorkflowChildInput {
   readonly actorId: string;
   readonly parentActorId?: string;
   readonly definitionId: DefaultWorkflowDefinitionId;
-  readonly definitionVersion: 1;
   readonly difficulty: Difficulty;
   readonly initialState: WorkflowStateId;
   readonly transitionAuthority: TransitionAuthority;
@@ -226,7 +224,6 @@ export function resolveChildSpec(input: ChildSpecInput): ResolvedChildSpec {
       actorId: input.workflow.actorId,
       parentActorId: input.workflow.parentActorId,
       definitionId: input.workflow.definitionId,
-      definitionVersion: input.workflow.definitionVersion,
       difficulty: input.workflow.difficulty,
       initialState: input.workflow.initialState,
       transitionAuthority:

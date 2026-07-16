@@ -120,7 +120,6 @@ class ImmediateAcceptance implements AcceptanceEngine {
 function producerRecord(): HandleRecord {
   const timestamp = new Date().toISOString();
   return {
-    version: 5,
     id: "workflow-managed",
     sessionId: "workflow-session",
     modelSet: "mixed",
