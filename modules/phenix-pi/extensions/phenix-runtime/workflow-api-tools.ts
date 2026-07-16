@@ -58,7 +58,7 @@ function compactHandle(record: WorkflowHandleResult): Record<string, unknown> {
   };
 }
 
-/** Projection used by deterministic session bootstrap and diagnostics. */
+/** Projection used by deterministic session bootstrap and model-facing inspection. */
 export function projectWorkflowInspection(
   snapshot: WorkflowAuthoritySnapshot,
 ): Record<string, unknown> {
@@ -99,6 +99,16 @@ async function invokeWorkflowAction(input: {
   readonly ctx: ExtensionContext;
 }): Promise<AgentToolResult<Record<string, unknown>>> {
   switch (input.params.action) {
+    case "inspect":
+      return result(
+        projectWorkflowInspection(
+          input.workflow.inspect({
+            ctx: input.ctx,
+            ...(input.parent ? { parent: input.parent } : {}),
+          }),
+        ),
+      );
+
     case "spawn": {
       const execution = await input.workflow.spawn({
         agent: input.params.agent,
@@ -128,8 +138,8 @@ export function createWorkflowTool(input: {
     name: PHENIX_WORKFLOW_TOOL,
     label: "Phenix Workflow",
     description:
-      "Perform one workflow action using the authority snapshot injected at session start. " +
-      "For spawning, provide one advertised target agent and a bounded task. The runtime derives the current node and owns transition selection, roles, routing, models, tools, child authority, contracts, and state changes.",
+      "Inspect current workflow authority or spawn one advertised target agent. " +
+      "The runtime derives the actor and current node from the active root session or initialized child contract, and owns transition selection, roles, routing, models, tools, child authority, contracts, and state changes.",
     parameters: WorkflowActionParams,
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
