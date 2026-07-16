@@ -1,0 +1,231 @@
+name: Migrate caretaker
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/migrate-caretaker.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: Replace Tend and align with scoped Stitch
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .tend.json modules/tend.nix
+
+          cat > flake.nix <<'EOF'
+          {
+            description = "Minimal Phenix coding-agent harness for Pi";
+            inputs = {
+              phenix-pins.url = "github:matthis-k/phenix-pins";
+              nixpkgs.follows = "phenix-pins/nixpkgs";
+              phenix-stitch = {
+                url = "github:matthis-k/phenix-stitch";
+                inputs = {
+                  flake-parts.follows = "phenix-pins/flake-parts";
+                  phenix-pins.follows = "phenix-pins";
+                };
+              };
+              devenv = {
+                url = "github:cachix/devenv";
+                inputs.nixpkgs.follows = "nixpkgs";
+              };
+              treefmt-nix = {
+                url = "github:numtide/treefmt-nix";
+                inputs.nixpkgs.follows = "nixpkgs";
+              };
+              git-hooks = {
+                url = "github:cachix/git-hooks.nix";
+                inputs.nixpkgs.follows = "nixpkgs";
+              };
+            };
+            outputs = inputs@{ phenix-pins, ... }:
+              phenix-pins.inputs.flake-parts.lib.mkFlake { inherit inputs; } {
+                systems = [ "x86_64-linux" "aarch64-linux" ];
+                imports = [
+                  inputs.devenv.flakeModule
+                  ./modules/pi-packages.nix
+                  ./modules/standalone.nix
+                  ./modules/development.nix
+                  ./modules/stitch.nix
+                ];
+                flake.flakeModules.default = import ./modules/flake-module.nix;
+              };
+          }
+          EOF
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('modules/tooling.nix')
+          s = p.read_text()
+          marker = '\n  tendRuntime ='
+          if marker in s:
+              s = s[:s.index(marker)] + '\n}\n'
+          p.write_text(s)
+
+          p = Path('modules/standalone.nix')
+          s = p.read_text().replace('          self\'.packages.tend\n', '')
+          p.write_text(s)
+
+          p = Path('modules/flake-module.nix')
+          s = p.read_text().replace('        tend = inputs.self.packages.${system}.tend;\n', '')
+          p.write_text(s)
+
+          p = Path('modules/stitch.nix')
+          s = p.read_text()
+          s = s.replace('''            stitch workspace discover \\
+              --workspace . \\
+              --repository-pattern 'phenix-*' \\
+              --json > discovery.json''', '            stitch workspace discover . --json > discovery.json')
+          p.write_text(s)
+          PY
+
+          cat > modules/development.nix <<'EOF'
+          { lib, ... }:
+          {
+            perSystem =
+              { pkgs, self', ... }:
+              let
+                tooling = import ./tooling.nix { inherit pkgs; };
+                updatePiNpmLock = pkgs.writeShellApplication {
+                  name = "update-pi-npm-lock";
+                  runtimeInputs = [ pkgs.nodejs ];
+                  text = ''
+                    npm install \
+                      --prefix modules/pi-npm \
+                      --package-lock-only \
+                      --ignore-scripts \
+                      --legacy-peer-deps \
+                      --no-audit \
+                      --no-fund
+                  '';
+                };
+              in {
+                devenv.shells.default = {
+                  imports = [ ../devenv.nix ];
+                  packages = tooling.agentRuntime ++ tooling.quality ++ [
+                    updatePiNpmLock
+                    self'.packages.stitch
+                    self'.packages.stitch-mcp
+                  ];
+                  env.PHENIX_PI_ROOT = "${toString ../modules/phenix-pi}";
+                };
+              };
+          }
+          EOF
+
+          cat > devenv.nix <<'EOF'
+          { lib, ... }:
+          let
+            caretakerModules = builtins.filter
+              (path: builtins.baseNameOf path == "caretaker.nix")
+              (lib.filesystem.listFilesRecursive ./.);
+          in {
+            imports = caretakerModules;
+            treefmt = {
+              enable = true;
+              config.programs = {
+                nixfmt.enable = true;
+                biome.enable = true;
+              };
+            };
+            git-hooks.hooks = {
+              treefmt.enable = true;
+              statix.enable = true;
+              actionlint.enable = true;
+              presentable = {
+                enable = true;
+                entry = "devenv test";
+                pass_filenames = false;
+                always_run = true;
+                stages = [ "pre-push" ];
+              };
+            };
+            enterShell = ''
+              echo "phenix-agent-harness development shell"
+              echo "  check:    devenv test"
+              echo "  fix:      devenv tasks run fix"
+              echo "  npm lock: update-pi-npm-lock"
+              echo "  workspace: stitch workspace discover . --json"
+            '';
+          }
+          EOF
+
+          cat > modules/caretaker.nix <<'EOF'
+          { ... }: {
+            tasks = {
+              "check:format" = { exec = "treefmt --fail-on-change"; before = [ "devenv:enterTest" ]; };
+              "check:statix" = { exec = "statix check"; before = [ "devenv:enterTest" ]; };
+              "check:workflows" = { exec = "actionlint .github/workflows/*.yml"; before = [ "devenv:enterTest" ]; };
+              "check:configuration" = {
+                exec = "biome ci --config-path biome.json --no-errors-on-unmatched --files-ignore-unknown=true --error-on-warnings biome.json modules";
+                before = [ "devenv:enterTest" ];
+              };
+              "check:runtime" = { exec = "nix build --no-link --print-build-logs .#phenix-runtime-tests"; before = [ "devenv:enterTest" ]; };
+              "check:typecheck" = { exec = "nix build --no-link --print-build-logs .#phenix-typecheck"; before = [ "devenv:enterTest" ]; };
+              "check:flake" = { exec = "nix flake check --print-build-logs --keep-going"; before = [ "devenv:enterTest" ]; };
+              "fix:format".exec = "treefmt";
+              "fix:statix".exec = "statix fix";
+              "fix:configuration".exec = "biome check --write --no-errors-on-unmatched --files-ignore-unknown=true biome.json modules";
+            };
+          }
+          EOF
+
+          cat > .stitch.json <<'EOF'
+          {
+            "role": "integration",
+            "layer": 3,
+            "dependencies": []
+          }
+          EOF
+
+          cat > .github/workflows/ci.yml <<'EOF'
+          name: CI
+          on:
+            pull_request:
+            push:
+              branches: [main]
+          permissions:
+            contents: read
+          jobs:
+            checks:
+              runs-on: ubuntu-latest
+              timeout-minutes: 90
+              steps:
+                - uses: actions/checkout@v5
+                  with: { fetch-depth: 0 }
+                - uses: cachix/install-nix-action@v31
+                  with:
+                    extra_nix_config: |
+                      experimental-features = nix-command flakes
+                      accept-flake-config = true
+                - run: nix flake check --print-build-logs --keep-going
+                - run: nix develop --no-pure-eval --command devenv test
+                - name: Reject retired Tend references
+                  run: '! git grep -n -i "\\btend\\b"'
+          EOF
+
+          rm -f .github/workflows/migrate-caretaker.yml
+          nix flake update
+          nix flake check --print-build-logs --keep-going
+          nix develop --no-pure-eval --command devenv test
+          ! git grep -n -i '\btend\b'
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "refactor: replace Tend and consume scoped Stitch"
+          git push
