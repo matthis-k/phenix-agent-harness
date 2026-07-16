@@ -74,14 +74,32 @@ jobs:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run Tend CI profile
+        id: tend
         shell: bash
         run: |
-          set -euo pipefail
+          set +e
           nix develop --command tend check \
             --profile ci \
             --context ci \
             --base HEAD^ \
-            --head HEAD
+            --head HEAD \
+            > tend-unversioned.log 2>&1
+          status=$?
+          cat tend-unversioned.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload Tend diagnostics
+        if: steps.tend.outputs.status != '0'
+        uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097
+        with:
+          name: tend-unversioned-diagnostics
+          path: tend-unversioned.log
+          if-no-files-found: error
+
+      - name: Fail when Tend checks fail
+        if: steps.tend.outputs.status != '0'
+        run: exit 1
 
       - name: Push validated change
         shell: bash
