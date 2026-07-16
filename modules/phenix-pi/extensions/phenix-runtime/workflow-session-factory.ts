@@ -7,11 +7,7 @@ import type {
 } from "./sdk-child-session-backend.ts";
 import { ProductionPiSessionFactory } from "./sdk-child-session-backend.ts";
 
-const RETIRED_DELEGATION_TOOLS = new Set([
-  "phenix_create_subagent",
-  "phenix_delegate",
-  "subagent",
-]);
+const RETIRED_DELEGATION_TOOLS = new Set(["phenix_create_subagent", "phenix_delegate", "subagent"]);
 
 /** Normalize the final child tool list immediately before Pi session creation. */
 export function normalizeWorkflowRuntimeToolNames(tools: readonly string[]): readonly string[] {
