@@ -18,10 +18,11 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
       - name: Execute staged transformation
+        id: transform
         shell: bash
         run: |
-          set -euo pipefail
-          python3 <<'PY'
+          set +e
+          python3 > cleanup-error.log 2>&1 <<'PY'
           from pathlib import Path
 
           workflow = Path('.github/workflows/apply-single-api-cleanup.yml').read_text()
@@ -30,13 +31,29 @@ jobs:
           body = "\n".join(line[10:] if line.startswith("          ") else line for line in body.splitlines())
           exec(compile(body, 'staged-single-api-cleanup.py', 'exec'))
           PY
-          rm -f .github/workflows/run-single-api-cleanup.yml
+          status=$?
+          cat cleanup-error.log
+          exit "$status"
+      - name: Upload transformation failure
+        if: failure() && steps.transform.conclusion == 'failure'
+        uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097
+        with:
+          name: cleanup-error
+          path: cleanup-error.log
+          if-no-files-found: error
+      - name: Commit transformation
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f cleanup-error.log .github/workflows/run-single-api-cleanup.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "refactor(api): keep only the current Phenix API"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
       - name: Reject stale API references
+        if: success()
         shell: bash
         run: |
           set -euo pipefail
@@ -46,10 +63,12 @@ jobs:
             exit 1
           fi
       - name: Install Nix
+        if: success()
         uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run Tend CI profile
+        if: success()
         shell: bash
         run: |
           nix develop --command tend check \
