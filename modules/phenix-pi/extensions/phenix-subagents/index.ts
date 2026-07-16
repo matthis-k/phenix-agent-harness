@@ -1,13 +1,9 @@
 /**
- * phenix-subagents — index
+ * phenix-subagents — composition entry point
  *
- * Registers the root-visible workflow API and phenix_agent tools.
- * Each child session receives its own closure-bound tools through customTools —
- * not process-global tools.
- *
- * Root prompt, tool access, and raw-delegation blocking share one explicit model
- * scope. Child authority remains contract-bound and does not depend on the
- * concrete provider selected by routing.
+ * Registers the root-visible workflow API and bounded handle operations. Each
+ * child session receives closure-bound tools through customTools rather than
+ * process-global tools.
  */
 
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
@@ -21,7 +17,7 @@ import {
   type WorkflowApiPort,
 } from "../phenix-runtime/workflow-api-tools.ts";
 import { AgentParams } from "./delegate-schema.ts";
-import { effectiveSessionId, listRecords, readRecord } from "./handle-store.ts";
+import { effectiveSessionId, readRecord } from "./handle-store.ts";
 import { type HandleRecord, TERMINAL_STATES } from "./handle-types.ts";
 import type { WorkflowDelegator } from "./workflow-delegator.ts";
 
@@ -66,21 +62,6 @@ function errorResult(
   };
 }
 
-function treePayload(records: HandleRecord[]): Record<string, unknown> {
-  return {
-    handles: records.map((r) => ({
-      id: r.id,
-      parentId: r.parentId,
-      status: r.status,
-      role: r.producerSpec.role,
-      agent: r.producerSpec.agent,
-      cycles: r.producerCycles.length,
-      subagentId: r.subagentId,
-      rootSubagentId: r.rootSubagentId,
-    })),
-  };
-}
-
 export interface PhenixSubagentsOptions {
   readonly delegator: WorkflowDelegator;
   readonly workflow: WorkflowApiPort;
@@ -106,7 +87,7 @@ export default async function phenixSubagents(
       return {
         blocked: true,
         reason:
-          "Raw or legacy delegation is runtime-blocked in Phenix sessions. Call phenix_workflow, then phenix_create_subagent.",
+          "Raw or legacy delegation is runtime-blocked in Phenix sessions. Use phenix_workflow with action=inspect, then action=take with the current nodeId and one legal edgeId.",
       };
     }
 
@@ -122,7 +103,6 @@ export default async function phenixSubagents(
   // the root-model scope. Child tools are closure-bound and omit this authorizer.
   for (const tool of createWorkflowApiTools({
     workflow,
-    allowCreate: true,
     authorize: ({ ctx, tool: toolName }) =>
       authorizePhenixRootCapability({ ctx, capability: toolName }),
   })) {
@@ -131,9 +111,8 @@ export default async function phenixSubagents(
 
   pi.registerTool({
     name: "phenix_agent",
-    label: "Phenix Agent",
-    description:
-      "Inspect, await, poll, cancel, or display the persistent tree of Phenix subagent handles.",
+    label: "Phenix Agent Handle",
+    description: "Inspect, await, poll, or cancel one known Phenix execution handle.",
     parameters: AgentParams,
 
     async execute(
@@ -149,27 +128,9 @@ export default async function phenixSubagents(
       }
 
       const params = rawParams as {
-        action: "await" | "poll" | "cancel" | "inspect" | "tree";
-        id?: string;
+        action: "await" | "poll" | "cancel" | "inspect";
+        id: string;
       };
-
-      if (params.action === "tree") {
-        const payload = treePayload(listRecords(ctx.cwd, effectiveSessionId(ctx)));
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(payload, null, 2),
-            },
-          ],
-          details: payload,
-        };
-      }
-
-      if (!params.id) {
-        return errorResult(`phenix_agent action '${params.action}' requires id`);
-      }
-
       const record = readRecord(ctx.cwd, effectiveSessionId(ctx), params.id);
 
       if (!record) {

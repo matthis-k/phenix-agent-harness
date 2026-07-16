@@ -10,13 +10,16 @@ const projection = {
   optionsDigest: "b".repeat(64),
   options: [
     {
-      transitionId: "delegate-architect",
+      edgeId: "planner.request-architect",
+      transitionId: "planner.request-architect",
+      sourceNodeId: "planning",
+      targetNodeId: "planning",
       workflowRevision: 4,
       role: "architect",
       purpose: "design",
       description: "Design the required boundary.",
       category: "required" as const,
-      outputSchemaId: "architecture-result" as never,
+      outputSchemaId: "architecture-handoff" as const,
       allowedModes: ["await" as const],
       resultSchema: { type: "object" },
     },
@@ -24,20 +27,24 @@ const projection = {
 };
 
 describe("workflow API prompt projection", () => {
-  it("instructs Phenix models to inspect and create through the workflow API", () => {
+  it("instructs Phenix models to inspect a node and take an edge", () => {
     const prompt = formatWorkflowProjection(projection);
 
-    assert.match(prompt, /phenix_workflow/);
-    assert.match(prompt, /phenix_create_subagent/);
-    assert.match(prompt, /runtime injects the current workflow revision and authority digest/i);
-    assert.doesNotMatch(prompt, /Call phenix_delegate/);
+    assert.match(prompt, /Current node ID: planning/);
+    assert.match(prompt, /Edge ID: planner\.request-architect/);
+    assert.match(prompt, /Kind: spawn/);
+    assert.match(prompt, /action=inspect/);
+    assert.match(prompt, /action=take/);
+    assert.match(prompt, /nodeId/);
+    assert.match(prompt, /edgeId/);
+    assert.doesNotMatch(prompt, /phenix_create_subagent/);
     assert.doesNotMatch(prompt, /Authority digest:/);
   });
 
-  it("states deterministic no-create authority when no transition is legal", () => {
+  it("states deterministic no-edge authority", () => {
     const prompt = formatWorkflowProjection({ ...projection, options: [] });
 
-    assert.match(prompt, /No subagent creation transition is currently legal/);
-    assert.match(prompt, /phenix_workflow/);
+    assert.match(prompt, /no legal outgoing spawn edge/i);
+    assert.match(prompt, /action=inspect/);
   });
 });

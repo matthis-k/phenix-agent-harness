@@ -5,8 +5,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import {
   createWorkflowApiTools,
-  createWorkflowInspectTool,
-  createWorkflowSubagentTool,
+  createWorkflowTool,
   type WorkflowApiPort,
   type WorkflowAuthoritySnapshot,
 } from "../extensions/phenix-runtime/workflow-api-tools.ts";
@@ -18,7 +17,7 @@ function snapshot(): WorkflowAuthoritySnapshot {
   return {
     source: "contract",
     role: "planner",
-    effectiveTools: ["read", "phenix_workflow", "phenix_create_subagent"],
+    effectiveTools: ["read", "phenix_workflow"],
     delegation: {
       remainingDepth: 2,
       effectiveRoles: ["scout", "architect"],
@@ -31,13 +30,16 @@ function snapshot(): WorkflowAuthoritySnapshot {
       optionsDigest: AUTHORITY_DIGEST,
       options: [
         {
-          transitionId: "delegate-scout",
+          edgeId: "planner.request-scout",
+          transitionId: "planner.request-scout",
+          sourceNodeId: "planning",
+          targetNodeId: "planning",
           workflowRevision: 7,
           role: "scout",
           purpose: "gather evidence",
           description: "Inspect the relevant implementation boundary.",
           category: "optional",
-          outputSchemaId: "scout-result" as never,
+          outputSchemaId: "scout-handoff",
           allowedModes: ["await"],
           resultSchema: { type: "object" },
         },
@@ -66,94 +68,134 @@ class RecordingWorkflow implements WorkflowApiPort {
 }
 
 async function execute(
-  tool:
-    | ReturnType<typeof createWorkflowInspectTool>
-    | ReturnType<typeof createWorkflowSubagentTool>,
+  tool: ReturnType<typeof createWorkflowTool>,
   params: Record<string, unknown>,
   signal = new AbortController().signal,
 ) {
   return tool.execute("call-1", params as never, signal, undefined, ctx);
 }
 
-describe("contract-bound workflow API tools", () => {
-  it("exposes deterministic inspection for every Phenix actor", async () => {
+describe("contract-bound workflow graph tool", () => {
+  it("exposes the current node and legal outgoing edges", async () => {
     const workflow = new RecordingWorkflow();
-    const tool = createWorkflowInspectTool({ workflow });
+    const tool = createWorkflowTool({ workflow });
 
-    const result = await execute(tool, {});
+    const response = await execute(tool, { action: "inspect" });
 
-    assert.equal(tool.name, "phenix_workflow");
-    assert.deepEqual(result.details, snapshot());
+    assert.deepEqual(response.details, {
+      actor: { source: "contract", role: "planner" },
+      node: { nodeId: "planning", difficulty: "D2", revision: 7 },
+      edges: [
+        {
+          edgeId: "planner.request-scout",
+          kind: "spawn",
+          fromNodeId: "planning",
+          toNodeId: "planning",
+          spawn: {
+            role: "scout",
+            purpose: "gather evidence",
+            description: "Inspect the relevant implementation boundary.",
+            category: "optional",
+            modes: ["await"],
+            returns: {
+              schemaId: "scout-handoff",
+              schema: { type: "object" },
+            },
+          },
+        },
+      ],
+      authority: {
+        remainingDelegationDepth: 2,
+        effectiveTools: ["read", "phenix_workflow"],
+      },
+    });
+    assert.doesNotMatch(JSON.stringify(response.details), /optionsDigest|transitionId/);
   });
 
-  it("installs creation only when contract initialization allows it", () => {
+  it("installs one stable workflow tool regardless of outgoing edges", () => {
     const workflow = new RecordingWorkflow();
-
     assert.deepEqual(
       createWorkflowApiTools({ workflow, allowCreate: false }).map((tool) => tool.name),
       ["phenix_workflow"],
     );
-    assert.deepEqual(
-      createWorkflowApiTools({ workflow, allowCreate: true }).map((tool) => tool.name),
-      ["phenix_workflow", "phenix_create_subagent"],
-    );
   });
 
-  it("applies an injected root-scope authorizer before reading authority", async () => {
+  it("applies root-scope authorization before inspection", async () => {
     const workflow = new RecordingWorkflow();
-    const tool = createWorkflowInspectTool({
+    const tool = createWorkflowTool({
       workflow,
       authorize: ({ tool: toolName }) => `${toolName} is outside this root model scope.`,
     });
 
-    const result = await execute(tool, {});
+    const response = await execute(tool, { action: "inspect" });
 
     assert.equal(workflow.inspectCalls, 0);
-    assert.deepEqual(result.details, {
+    assert.deepEqual(response.details, {
       status: "forbidden",
       tool: "phenix_workflow",
     });
-    assert.match(result.content[0]?.text ?? "", /outside this root model scope/);
   });
 
-  it("binds fresh revision and authority digest at creation time", async () => {
+  it("takes a spawn edge and binds fresh internal authority", async () => {
     const workflow = new RecordingWorkflow();
-    const tool = createWorkflowSubagentTool({ workflow });
+    const tool = createWorkflowTool({ workflow });
 
-    await execute(tool, {
-      transitionId: "delegate-scout",
-      task: "Inspect the workflow API boundary.",
-      requirements: ["Return concrete evidence."],
+    const response = await execute(tool, {
+      action: "take",
+      nodeId: "planning",
+      edgeId: "planner.request-scout",
+      spawn: {
+        task: "Inspect the workflow API boundary.",
+        requirements: ["Return concrete evidence."],
+      },
     });
 
-    assert.equal(workflow.delegateCalls.length, 1);
     assert.deepEqual(workflow.delegateCalls[0]?.params, {
-      transitionId: "delegate-scout",
+      transitionId: "planner.request-scout",
       task: "Inspect the workflow API boundary.",
       requirements: ["Return concrete evidence."],
       workflowRevision: 7,
       authorityDigest: AUTHORITY_DIGEST,
     });
+    assert.deepEqual(response.details, {
+      edgeId: "planner.request-scout",
+      fromNodeId: "planning",
+      toNodeId: "planning",
+      handleId: "handle-1",
+      status: "running",
+      value: undefined,
+      error: undefined,
+    });
   });
 
-  it("rejects a stale or invented transition without delegating", async () => {
+  it("rejects a stale node before resolving the edge", async () => {
     const workflow = new RecordingWorkflow();
-    const tool = createWorkflowSubagentTool({ workflow });
+    const tool = createWorkflowTool({ workflow });
 
-    const result = await execute(tool, {
-      transitionId: "invented-transition",
-      task: "Do something outside current authority.",
+    const response = await execute(tool, {
+      action: "take",
+      nodeId: "classified",
+      edgeId: "planner.request-scout",
+      spawn: { task: "Inspect something." },
     });
 
     assert.equal(workflow.delegateCalls.length, 0);
-    assert.match(result.content[0]?.text ?? "", /not currently legal/);
-    assert.deepEqual(result.details?.available, [
-      {
-        transitionId: "delegate-scout",
-        role: "scout",
-        category: "optional",
-        allowedModes: ["await"],
-      },
-    ]);
+    assert.equal(response.details?.code, "WORKFLOW_NODE_STALE");
+    assert.equal(response.details?.currentNodeId, "planning");
+  });
+
+  it("rejects an unavailable edge without delegating", async () => {
+    const workflow = new RecordingWorkflow();
+    const tool = createWorkflowTool({ workflow });
+
+    const response = await execute(tool, {
+      action: "take",
+      nodeId: "planning",
+      edgeId: "planner.request-implementer",
+      spawn: { task: "Do something outside current authority." },
+    });
+
+    assert.equal(workflow.delegateCalls.length, 0);
+    assert.equal(response.details?.code, "WORKFLOW_EDGE_NOT_AVAILABLE");
   });
 });

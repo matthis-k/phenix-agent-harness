@@ -10,8 +10,13 @@ import type {
   WorkflowRuntimeRecord,
 } from "./workflow-types.ts";
 
+/** Internal edge projection used to bind a graph-facing workflow call. */
 export interface ModelDelegationOption {
+  readonly edgeId: string;
+  /** Compatibility identity for runtime persistence and settlement code. */
   readonly transitionId: string;
+  readonly sourceNodeId: string;
+  readonly targetNodeId: string;
   readonly workflowRevision: number;
   readonly role: string;
   readonly purpose: string;
@@ -33,10 +38,14 @@ export interface ModelWorkflowProjection {
 export interface WorkflowDecisionContext extends ModelWorkflowProjection {}
 
 export function projectDelegationOptions(
+  sourceNodeId: string,
   options: readonly DelegationOption[],
 ): readonly ModelDelegationOption[] {
   return options.map((option) => ({
+    edgeId: option.transitionId,
     transitionId: option.transitionId,
+    sourceNodeId,
+    targetNodeId: option.targetState,
     workflowRevision: option.workflowRevision,
     role: option.role ?? "base",
     purpose: option.purpose,
@@ -50,9 +59,11 @@ export function projectDelegationOptions(
 
 export function computeOptionsDigest(options: readonly ModelDelegationOption[]): string {
   const canonical = [...options]
-    .sort((left, right) => left.transitionId.localeCompare(right.transitionId))
+    .sort((left, right) => left.edgeId.localeCompare(right.edgeId))
     .map((option) => ({
-      transitionId: option.transitionId,
+      edgeId: option.edgeId,
+      sourceNodeId: option.sourceNodeId,
+      targetNodeId: option.targetNodeId,
       workflowRevision: option.workflowRevision,
       role: option.role,
       allowedModes: [...(option.allowedModes ?? [])].sort(),
@@ -67,7 +78,7 @@ export function buildWorkflowDecisionContext(input: {
   readonly authority: DelegationAuthority;
   readonly activeHandles: readonly WorkflowHandleRecord[];
 }): WorkflowDecisionContext {
-  const options = projectDelegationOptions(resolveDelegationOptions(input));
+  const options = projectDelegationOptions(input.runtime.state, resolveDelegationOptions(input));
   return {
     difficulty: input.runtime.difficulty,
     currentState: input.runtime.state,
@@ -93,26 +104,29 @@ export function formatWorkflowProjection(projection: ModelWorkflowProjection): s
   const lines = [
     "## Phenix workflow authority",
     "",
+    `Current node ID: ${projection.currentState}`,
     `Difficulty: ${projection.difficulty}`,
-    `Current state: ${projection.currentState}`,
     `Workflow revision: ${projection.revision}`,
     "",
   ];
 
   if (projection.options.length === 0) {
     lines.push(
-      "No subagent creation transition is currently legal.",
-      "Use phenix_workflow again after workflow state changes; otherwise complete the current assignment using phenix_complete.",
+      "The current node has no legal outgoing spawn edge.",
+      "Use phenix_workflow with action=inspect after workflow state changes; otherwise complete the current assignment using phenix_complete.",
       "",
     );
     return lines.join("\n");
   }
 
-  lines.push("You may currently delegate only through these transitions:", "");
+  lines.push("Legal outgoing workflow edges:", "");
   for (const [index, option] of projection.options.entries()) {
     lines.push(
-      `${index + 1}. ${option.transitionId}`,
-      `   Role: ${option.role}`,
+      `${index + 1}. Edge ID: ${option.edgeId}`,
+      `   From node: ${option.sourceNodeId}`,
+      `   To node after acceptance: ${option.targetNodeId}`,
+      "   Kind: spawn",
+      `   Spawn role: ${option.role}`,
       `   Category: ${option.category}`,
       `   Purpose: ${option.description}`,
       `   Result schema: ${option.outputSchemaId}`,
@@ -123,11 +137,10 @@ export function formatWorkflowProjection(projection: ModelWorkflowProjection): s
 
   lines.push(
     "Workflow API protocol:",
-    "1. Call phenix_workflow immediately before creating a subagent.",
-    "2. Select one transitionId returned by that call.",
-    "3. Call phenix_create_subagent with the transitionId and bounded task.",
-    "The runtime injects the current workflow revision and authority digest.",
-    "Do not invent a role, transition, result schema, model, thinking level, tool set, or delegation depth.",
+    "1. Use phenix_workflow with action=inspect to obtain the current nodeId and legal edgeIds.",
+    "2. Use phenix_workflow with action=take, the same nodeId, one legal edgeId, and spawn input when the edge kind is spawn.",
+    "The runtime revalidates the node and edge against fresh authority before changing state or spawning a child.",
+    "Do not invent a role, result schema, model, thinking level, tool set, or delegation depth.",
   );
   return lines.join("\n");
 }
