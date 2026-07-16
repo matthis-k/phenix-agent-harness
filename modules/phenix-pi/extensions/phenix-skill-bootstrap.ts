@@ -22,7 +22,7 @@ const PHENIX_CODING_GUIDANCE = [
   "Use the `mcp` proxy to discover MCP capabilities on demand instead of assuming every MCP tool is directly registered.",
   "Use `web_search` for external discovery and `web_fetch` for specific pages; use `gh` through the shell for GitHub-native operations.",
   "Use `context_info` and compact only at coherent boundaries during genuinely long tasks.",
-  "Use `phenix_workflow` for workflow operations. Call it with `action: inspect` for fresh authority and `action: delegate` with one returned actor-scoped agent name and a bounded task. Raw `subagent`, legacy `phenix_delegate`, and direct child-session configuration are runtime-blocked.",
+  "Use `phenix_workflow` for workflow operations. Call it with `action: inspect` to obtain the current `nodeId` and legal outgoing `edgeId`s, then use `action: take` with that node, one edge, and edge-specific input. Raw `subagent`, legacy `phenix_delegate`, and direct child-session configuration are runtime-blocked.",
   "Every delegated handoff must use a strict output schema. Invalid structured output is returned to the child with exact validation failures so it can repair the handoff.",
   "Runtime verification and critic gates are authoritative. Do not treat a model's claim that tests passed as verification evidence.",
   "The shell is intentionally permissive, but avoid destructive or unrelated operations unless the task requires them.",
