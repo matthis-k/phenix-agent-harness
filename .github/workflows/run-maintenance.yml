@@ -45,6 +45,7 @@ jobs:
               if name == "devenv.nix":
                   value = re.sub(r'\n\s+presentable = \{.*?\n\s+\};', '', value, flags=re.S)
               if name == ".github/workflows/ci.yml":
+                  value = value.replace("Reject retired Tend references", "Reject retired references")
                   lines = []
                   for line in value.splitlines():
                       if "git grep" in line and "tend" in line.lower():
@@ -68,6 +69,7 @@ jobs:
           PY
           sed -n '/^        run: |$/,$p' .github/workflows/migrate-caretaker.yml | tail -n +2 | sed 's/^          //' > /tmp/migrate.sh
           sed -i 's/nix flake check /nix flake check --no-pure-eval /g' /tmp/migrate.sh
+          sed -i 's/Reject retired Tend references/Reject retired references/g' /tmp/migrate.sh
           sed -i '/git grep.*tend/Id' /tmp/migrate.sh
           sed -i '/^nix flake update$/i python3 /tmp/patch-devenv.py\ngit add -A' /tmp/migrate.sh
           set +e
