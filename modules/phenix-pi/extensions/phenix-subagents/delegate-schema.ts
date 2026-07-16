@@ -41,11 +41,11 @@ const WorkflowCreationFields = {
   transitionId: Type.String({
     minLength: 1,
     description:
-      "One transition ID returned by phenix_workflow. The runtime resolves the role, model, thinking level, output schema, and verification policy.",
+      "Internal workflow edge identity. The runtime resolves the role, model, thinking level, output schema, and verification policy.",
   }),
   task: Type.String({
     minLength: 1,
-    description: "The bounded objective for the selected workflow transition.",
+    description: "The bounded objective for the selected workflow edge.",
   }),
   requirements: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 64 })),
   tools: ToolPatchSchema,
@@ -53,10 +53,10 @@ const WorkflowCreationFields = {
   mode: Type.Optional(Type.Union([Type.Literal("await"), Type.Literal("background")])),
 } as const;
 
-/** Query the exact current workflow and contract-derived creation authority. */
+/** Legacy schema retained for internal migration tests; not registered as a model-facing tool. */
 export const WorkflowInspectParams = Type.Object({}, { additionalProperties: false });
 
-/** Model-facing creation parameters. Workflow authority metadata is runtime-injected. */
+/** Legacy schema retained for internal migration tests; not registered as a model-facing tool. */
 export const WorkflowCreateParams = Type.Object(WorkflowCreationFields, {
   additionalProperties: false,
 });
@@ -75,7 +75,7 @@ export const DelegateParams = Type.Object(
   { additionalProperties: false },
 );
 
-/** Model-facing parameters for persistent handle operations. */
+/** Model-facing parameters for one persistent handle operation. */
 export const AgentParams = Type.Object(
   {
     action: Type.Union([
@@ -83,9 +83,8 @@ export const AgentParams = Type.Object(
       Type.Literal("poll"),
       Type.Literal("cancel"),
       Type.Literal("inspect"),
-      Type.Literal("tree"),
     ]),
-    id: Type.Optional(Type.String({ minLength: 1 })),
+    id: Type.String({ minLength: 1 }),
   },
   { additionalProperties: false },
 );
