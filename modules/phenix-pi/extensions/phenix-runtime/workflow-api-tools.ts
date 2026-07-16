@@ -3,10 +3,7 @@
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
-import {
-  WorkflowActionParams,
-  type WorkflowActionParamsType,
-} from "./workflow-action-schema.ts";
+import { WorkflowActionParams, type WorkflowActionParamsType } from "./workflow-action-schema.ts";
 import type { ParentExecutionContext } from "./workflow-api-types.ts";
 import type {
   WorkflowAuthoritySnapshot,
