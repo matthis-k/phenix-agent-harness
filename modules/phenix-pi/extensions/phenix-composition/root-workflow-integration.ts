@@ -186,9 +186,8 @@ export default async function rootWorkflowIntegration(pi: ExtensionAPI): Promise
       },
     });
 
-    // Resolve and inject the initial legal edge set before model inference. This
-    // is the deterministic equivalent of a forced authority-inspection call;
-    // the model never has to ask for or echo its current node.
+    // Resolve and inject the initial legal target-agent set before model
+    // inference. The model never asks for or echoes workflow state.
     const dependencies = buildWorkflowRuntimeDependencies({
       cwd,
       sessionId,
@@ -205,9 +204,9 @@ export default async function rootWorkflowIntegration(pi: ExtensionAPI): Promise
     let workflowGuidance = "## Phenix Workflow Orchestration\n\n";
     workflowGuidance += `You are running with a Phenix model set (${runtime.modelSet}). `;
     workflowGuidance +=
-      "The deterministic Phenix workflow owns the current node, role selection, output schemas, models, tools, and delegation depth. ";
+      "The deterministic Phenix workflow owns the current node, transition selection, role selection, output schemas, models, tools, and delegation depth. ";
     workflowGuidance +=
-      "Your legal workflow edges have already been resolved and are listed below. Use an advertised edge when delegation would materially improve the result; call phenix_workflow with only that edgeId and its required input.\n\n";
+      "Your legal target agents have already been resolved and are listed below. Use one when delegation would materially improve the result; call phenix_workflow with action=spawn, that agent, and its bounded task input.\n\n";
     workflowGuidance += workflowProjection
       ? formatWorkflowProjection(workflowProjection)
       : "Workflow authority could not be projected; complete the task directly.\n";
