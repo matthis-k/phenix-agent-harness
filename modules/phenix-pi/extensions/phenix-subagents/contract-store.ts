@@ -146,7 +146,6 @@ export class FileContractStore {
 
       // Create the initial pending result.
       const pending: PendingContractResult = {
-        schemaVersion: 2,
         state: "pending",
         contractId: artifact.id,
         revision: 0,
@@ -210,7 +209,6 @@ export class FileContractStore {
       };
 
       const submitted: SubmittedContractResult = {
-        schemaVersion: 2,
         state: "submitted",
         contractId: id,
         revision: current.result.revision + 1,
@@ -241,7 +239,6 @@ export class FileContractStore {
       }
 
       const cancelled: CancelledContractResult = {
-        schemaVersion: 2,
         state: "cancelled",
         contractId: id,
         revision: current.result.revision + 1,
@@ -298,7 +295,6 @@ export class FileContractStore {
       }
 
       const pending: PendingContractResult = {
-        schemaVersion: 2,
         state: "pending",
         contractId: id,
         revision: current.result.revision + 1,
@@ -344,7 +340,6 @@ export class FileContractStore {
       }
 
       const accepted: AcceptedContractResult = {
-        schemaVersion: 2,
         state: "accepted",
         contractId: id,
         revision: current.result.revision + 1,

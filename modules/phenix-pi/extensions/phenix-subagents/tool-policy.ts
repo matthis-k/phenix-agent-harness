@@ -14,7 +14,6 @@ export interface ToolPatch {
 }
 
 export interface ResolvedToolConfiguration {
-  readonly presetRevision: 1;
   readonly role: AgentRole;
 
   readonly source: {
@@ -28,15 +27,7 @@ export interface ResolvedToolConfiguration {
 // ── Constants ───────────────────────────────────────────────────────────────
 
 /** Tool names whose availability is owned exclusively by the runtime. */
-const FORBIDDEN_TOOLS = new Set([
-  "subagent",
-  "phenix_delegate",
-  "phenix_contract_get",
-  "phenix_contract_submit",
-  "phenix_complete",
-  "phenix_workflow",
-  "phenix_create_subagent",
-]);
+const FORBIDDEN_TOOLS = new Set(["subagent", "phenix_complete", "phenix_workflow"]);
 
 const EMPTY_TOOL_PATCH: ToolPatch = {
   additional: [],
@@ -169,7 +160,6 @@ export function resolveToolConfiguration(input: {
   validateDelegationCeiling(effective, input.delegableTools);
 
   return {
-    presetRevision: 1,
     role: input.role,
     source,
     effective,
@@ -187,11 +177,8 @@ export function childLaunchTools(config: ResolvedToolConfiguration): readonly st
 }
 
 export function toolAllowedByConfig(config: ResolvedToolConfiguration, toolName: string): boolean {
-  if (toolName === "subagent" || toolName === "phenix_delegate") return false;
+  if (toolName === "subagent") return false;
   if (toolName === "phenix_complete" || toolName === "phenix_workflow") return true;
-  if (toolName === "phenix_contract_get" || toolName === "phenix_contract_submit") {
-    return false;
-  }
   return config.effective.some((pattern) => matchTool(pattern, toolName));
 }
 

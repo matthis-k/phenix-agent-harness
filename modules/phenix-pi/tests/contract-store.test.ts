@@ -44,7 +44,6 @@ const SCOUT_PRESET_TOOLS = [
   "context_*",
   "contact_supervisor",
   "phenix_workflow",
-  "phenix_create_subagent",
 ] as const;
 
 function makeToolConfig(
@@ -54,7 +53,6 @@ function makeToolConfig(
 ) {
   if (role === null) {
     return {
-      presetRevision: 1 as const,
       role: null,
       source: {
         inherited: false,
@@ -73,7 +71,6 @@ function makeToolConfig(
     }
   }
   return {
-    presetRevision: 1 as const,
     role,
     source: {
       inherited: false,
@@ -105,7 +102,6 @@ function createTestArtifact() {
       extensions: [],
       delegation: {
         roles: {
-          presetRevision: 1 as const,
           role: "scout" as const,
           source: {
             inherited: false,
@@ -120,7 +116,6 @@ function createTestArtifact() {
         instanceId: "test-instance",
         actorId: "test-actor",
         definitionId: "phenix-default",
-        definitionVersion: 1,
         difficulty: "D1" as const,
         initialState: "classified" as const,
         transitionAuthority: { kind: "unrestricted" },

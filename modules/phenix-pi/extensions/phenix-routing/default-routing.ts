@@ -4,12 +4,12 @@
  * Bundled model pools, model sets, and agent route declarations.
  */
 
+import { agentClientRef, capabilityRef } from "../phenix-kernel/refs.ts";
 import type {
   AgentRouteDefinition,
   ModelPoolDefinition,
   ModelSetDefinition,
 } from "./definitions.ts";
-import { agentClientRef, capabilityRef } from "../phenix-kernel/refs.ts";
 
 // ── Model pools ────────────────────────────────────────────────────────────
 
@@ -106,7 +106,7 @@ export const defaultModelSets: readonly ModelSetDefinition[] = [
   },
 ];
 
-// ── Agent routes (formerly ROLE_MATRIX) ────────────────────────────────────
+// ── Agent routes ────────────────────────────────────────────────────────────
 
 export const defaultAgentRoutes: readonly AgentRouteDefinition[] = [
   {

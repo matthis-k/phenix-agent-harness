@@ -41,8 +41,6 @@ export interface ContractIdentity {
   readonly capabilityToken: CapabilityToken;
 }
 
-export const CONTRACT_SCHEMA_VERSION = 1 as const;
-
 // ── Contract artifact and execution manifest ───────────────────────────────
 
 export interface ContractRuntimeIdentity {
@@ -91,7 +89,6 @@ export interface ContractExecutionManifest {
     readonly parentActorId?: string;
 
     readonly definitionId: DefaultWorkflowDefinitionId;
-    readonly definitionVersion: 1;
 
     readonly difficulty: Difficulty;
 
@@ -114,7 +111,6 @@ export interface ContractRuntimeInstance {
 }
 
 export interface ContractArtifact {
-  readonly schemaVersion: typeof CONTRACT_SCHEMA_VERSION;
   readonly id: ContractId;
 
   readonly identity: ContractRuntimeIdentity;
@@ -134,12 +130,9 @@ export interface ContractArtifact {
   readonly expiresAt?: string;
 }
 
-export const CONTRACT_RESULT_SCHEMA_VERSION = 2 as const;
-
 // ── Result types ────────────────────────────────────────────────────────────
 
 export interface PendingContractResult {
-  readonly schemaVersion: typeof CONTRACT_RESULT_SCHEMA_VERSION;
   readonly state: "pending";
   readonly contractId: ContractId;
   readonly revision: number;
@@ -148,7 +141,6 @@ export interface PendingContractResult {
 }
 
 export interface SubmittedContractResult {
-  readonly schemaVersion: typeof CONTRACT_RESULT_SCHEMA_VERSION;
   readonly state: "submitted";
   readonly contractId: ContractId;
   readonly revision: number;
@@ -158,7 +150,6 @@ export interface SubmittedContractResult {
 }
 
 export interface AcceptedContractResult {
-  readonly schemaVersion: typeof CONTRACT_RESULT_SCHEMA_VERSION;
   readonly state: "accepted";
   readonly contractId: ContractId;
   readonly revision: number;
@@ -168,7 +159,6 @@ export interface AcceptedContractResult {
 }
 
 export interface CancelledContractResult {
-  readonly schemaVersion: typeof CONTRACT_RESULT_SCHEMA_VERSION;
   readonly state: "cancelled";
   readonly contractId: ContractId;
   readonly revision: number;
@@ -257,7 +247,6 @@ export function issueContract(input: IssueContractInput): IssuedContract {
   const capabilityToken = createCapabilityToken();
 
   const artifact: ContractArtifact = {
-    schemaVersion: CONTRACT_SCHEMA_VERSION,
     id: createContractId(),
     identity: {
       runId: input.identity.runId,
@@ -291,7 +280,6 @@ export function issueContract(input: IssueContractInput): IssuedContract {
       extensions: [...input.runtime.extensions],
       delegation: {
         roles: {
-          presetRevision: input.runtime.delegation.roles.presetRevision,
           role: input.runtime.delegation.roles.role,
           source: {
             inherited: input.runtime.delegation.roles.source.inherited,
@@ -312,7 +300,6 @@ export function issueContract(input: IssueContractInput): IssuedContract {
           ? { parentActorId: input.runtime.workflow.parentActorId }
           : {}),
         definitionId: input.runtime.workflow.definitionId,
-        definitionVersion: input.runtime.workflow.definitionVersion,
         difficulty: input.runtime.workflow.difficulty,
         initialState: input.runtime.workflow.initialState,
         transitionAuthority:

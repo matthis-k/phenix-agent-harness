@@ -24,7 +24,7 @@ export interface ModelContractProjection {
 // ── Projection formatter ────────────────────────────────────────────────────
 
 /**
- * Derive the safe model-facing projection from a contract artifact (v4).
+ * Derive the safe model-facing projection from a contract artifact.
  */
 export function deriveProjection(
   contract: ContractArtifact,

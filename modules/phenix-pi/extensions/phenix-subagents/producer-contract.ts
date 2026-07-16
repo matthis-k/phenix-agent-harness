@@ -6,25 +6,6 @@ import type { ResolvedChildSpec } from "./child-spec.ts";
 import { type ContractArtifact, createRunId, issueContract, type RunId } from "./contract.ts";
 import { FileContractStore } from "./contract-store.ts";
 import { findProjectRoot } from "./handle-store.ts";
-import type { ResolvedToolConfiguration } from "./tool-policy.ts";
-
-const RETIRED_CREATION_TOOL = "phenix_create_subagent";
-
-function contractToolConfiguration(tools: ResolvedToolConfiguration): ResolvedToolConfiguration {
-  if (!tools.effective.includes(RETIRED_CREATION_TOOL)) return tools;
-
-  return {
-    ...tools,
-    source: {
-      inherited: tools.source.inherited,
-      patch: {
-        additional: [...tools.source.patch.additional],
-        removed: [...new Set([...tools.source.patch.removed, RETIRED_CREATION_TOOL])],
-      },
-    },
-    effective: tools.effective.filter((tool) => tool !== RETIRED_CREATION_TOOL),
-  };
-}
 
 function contractsForCwd(cwd: string): FileContractStore {
   return new FileContractStore(path.join(findProjectRoot(cwd), ".phenix-agent-state", "contracts"));
@@ -68,7 +49,7 @@ export async function createProducerContract(input: {
       cwd: input.cwd,
       model: input.spec.model,
       thinking: input.spec.thinking,
-      tools: contractToolConfiguration(input.spec.tools),
+      tools: input.spec.tools,
       skills: input.spec.skills,
       extensions: input.spec.extensions,
       delegation: {
@@ -83,7 +64,6 @@ export async function createProducerContract(input: {
           ? { parentActorId: input.spec.workflow.parentActorId }
           : {}),
         definitionId: input.spec.workflow.definitionId,
-        definitionVersion: input.spec.workflow.definitionVersion,
         difficulty: input.spec.workflow.difficulty,
         initialState: input.spec.workflow.initialState,
         transitionAuthority: input.spec.workflow.transitionAuthority,

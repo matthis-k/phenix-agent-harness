@@ -172,7 +172,6 @@ export type WorkflowTransition = DelegateTransition | AutomaticTransition;
 
 export interface WorkflowDefinition {
   readonly id: DefaultWorkflowDefinitionId;
-  readonly version: 1;
 
   readonly initialState: WorkflowStateId;
 
@@ -242,8 +241,6 @@ export interface CompletedWorkflowTransition {
 }
 
 export interface WorkflowRuntimeRecord {
-  readonly version: 1;
-
   readonly instanceId: string;
   readonly actorId: string;
   readonly parentActorId?: string;
@@ -251,7 +248,6 @@ export interface WorkflowRuntimeRecord {
   readonly sessionId: string;
 
   readonly definitionId: DefaultWorkflowDefinitionId;
-  readonly definitionVersion: 1;
 
   readonly difficulty: Difficulty;
   readonly taskProfile: TaskProfile;
@@ -281,7 +277,6 @@ export interface DelegateRolePatch {
 }
 
 export interface ResolvedDelegateRoleConfiguration {
-  readonly presetRevision: 1;
   readonly role: AgentRole;
   readonly source: {
     readonly inherited: boolean;
@@ -324,7 +319,6 @@ export interface WorkflowContractArtifact {
       readonly actorId: string;
       readonly parentActorId?: string;
       readonly definitionId: DefaultWorkflowDefinitionId;
-      readonly definitionVersion: 1;
       readonly difficulty: Difficulty;
       readonly initialState: WorkflowStateId;
       readonly transitionAuthority: TransitionAuthority;

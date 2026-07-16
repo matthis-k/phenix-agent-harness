@@ -62,7 +62,6 @@ const SCOUT_PRESET_TOOLS = [
   "context_*",
   "contact_supervisor",
   "phenix_workflow",
-  "phenix_create_subagent",
 ] as const;
 
 function createTestArtifact(outputSchema: Record<string, unknown>, role: string) {
@@ -83,7 +82,6 @@ function createTestArtifact(outputSchema: Record<string, unknown>, role: string)
       cwd: "/tmp",
       thinking: "medium",
       tools: {
-        presetRevision: 1,
         role: role as any,
         source: { inherited: false, patch: { additional: [], removed: [] } },
         effective: [...SCOUT_PRESET_TOOLS],
@@ -92,7 +90,6 @@ function createTestArtifact(outputSchema: Record<string, unknown>, role: string)
       extensions: [],
       delegation: {
         roles: {
-          presetRevision: 1,
           role: role as any,
           source: { inherited: false, patch: { additional: [], removed: [] } },
           effective: [],
@@ -104,7 +101,6 @@ function createTestArtifact(outputSchema: Record<string, unknown>, role: string)
         instanceId: "test",
         actorId: "test",
         definitionId: "phenix-default",
-        definitionVersion: 1,
         difficulty: "D1" as const,
         initialState: "scouting" as const,
         transitionAuthority: { kind: "unrestricted" },

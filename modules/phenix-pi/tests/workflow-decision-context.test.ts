@@ -15,12 +15,10 @@ import type {
 
 function baseRecord(overrides?: Partial<WorkflowRuntimeRecord>): WorkflowRuntimeRecord {
   return {
-    version: 1,
     instanceId: "test-instance",
     actorId: "test-actor",
     sessionId: "test-session",
     definitionId: "phenix-default",
-    definitionVersion: 1,
     difficulty: "D2",
     taskProfile: {
       complexity: 2,
@@ -46,7 +44,6 @@ function baseRecord(overrides?: Partial<WorkflowRuntimeRecord>): WorkflowRuntime
 function unrestrictedAuthority(): DelegationAuthority {
   return {
     roles: {
-      presetRevision: 1,
       role: null,
       source: { inherited: false, patch: { additional: [], removed: [] } },
       effective: ["scout", "planner", "architect", "implementer", "tester", "critic", "finalizer"],
@@ -139,7 +136,6 @@ describe("WorkflowDecisionContext", () => {
   it("fails closed when no roles or depth are available", () => {
     const restrictedAuth: DelegationAuthority = {
       roles: {
-        presetRevision: 1,
         role: null,
         source: { inherited: false, patch: { additional: [], removed: [] } },
         effective: [],

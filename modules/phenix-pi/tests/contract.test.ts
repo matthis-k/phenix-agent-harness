@@ -52,7 +52,6 @@ const SCOUT_PRESET_TOOLS = [
   "context_*",
   "contact_supervisor",
   "phenix_workflow",
-  "phenix_create_subagent",
 ] as const;
 
 function makeToolConfig(
@@ -62,7 +61,6 @@ function makeToolConfig(
 ) {
   if (role === null) {
     return {
-      presetRevision: 1 as const,
       role: null,
       source: {
         inherited: false,
@@ -81,7 +79,6 @@ function makeToolConfig(
     }
   }
   return {
-    presetRevision: 1 as const,
     role,
     source: {
       inherited: false,
@@ -95,7 +92,6 @@ function makeContractRuntime(role: AgentRole) {
   return {
     delegation: {
       roles: {
-        presetRevision: 1 as const,
         role,
         source: {
           inherited: false,
@@ -110,7 +106,6 @@ function makeContractRuntime(role: AgentRole) {
       instanceId: "test-instance",
       actorId: "test-actor",
       definitionId: "phenix-default" as const,
-      definitionVersion: 1 as const,
       difficulty: "D1" as const,
       initialState: "classified" as const,
       transitionAuthority: { kind: "unrestricted" } as const,
@@ -127,7 +122,7 @@ function issueTestContract(role: AgentRole = TEST_ROLE): {
 } {
   const runId = createRunId();
   const tools = makeToolConfig(role);
-  const v4 = makeContractRuntime(role);
+  const runtimeParts = makeContractRuntime(role);
   const issued = issueContract({
     identity: {
       runId,
@@ -146,8 +141,8 @@ function issueTestContract(role: AgentRole = TEST_ROLE): {
       tools,
       skills: [],
       extensions: [],
-      delegation: v4.delegation,
-      workflow: v4.workflow,
+      delegation: runtimeParts.delegation,
+      workflow: runtimeParts.workflow,
       timeoutMs: 600_000,
       turnBudget: { maxTurns: 24, graceTurns: 2 },
       toolBudget: { soft: 60, hard: 80, block: [] },
@@ -188,7 +183,7 @@ describe("Contract domain", () => {
 
   it("correct identity authorizes", () => {
     const runId = createRunId();
-    const v4 = makeContractRuntime("scout");
+    const runtimeParts = makeContractRuntime("scout");
     const issued = issueContract({
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
@@ -199,8 +194,8 @@ describe("Contract domain", () => {
         tools: makeToolConfig("scout"),
         skills: [],
         extensions: [],
-        delegation: v4.delegation,
-        workflow: v4.workflow,
+        delegation: runtimeParts.delegation,
+        workflow: runtimeParts.workflow,
         timeoutMs: 600_000,
         turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
@@ -217,7 +212,7 @@ describe("Contract domain", () => {
 
   it("wrong contract ID rejects", () => {
     const runId = createRunId();
-    const v4 = makeContractRuntime("scout");
+    const runtimeParts = makeContractRuntime("scout");
     const issued = issueContract({
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
@@ -228,8 +223,8 @@ describe("Contract domain", () => {
         tools: makeToolConfig("scout"),
         skills: [],
         extensions: [],
-        delegation: v4.delegation,
-        workflow: v4.workflow,
+        delegation: runtimeParts.delegation,
+        workflow: runtimeParts.workflow,
         timeoutMs: 600_000,
         turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
@@ -246,7 +241,7 @@ describe("Contract domain", () => {
 
   it("wrong run ID rejects", () => {
     const runId = createRunId();
-    const v4 = makeContractRuntime("scout");
+    const runtimeParts = makeContractRuntime("scout");
     const issued = issueContract({
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
@@ -257,8 +252,8 @@ describe("Contract domain", () => {
         tools: makeToolConfig("scout"),
         skills: [],
         extensions: [],
-        delegation: v4.delegation,
-        workflow: v4.workflow,
+        delegation: runtimeParts.delegation,
+        workflow: runtimeParts.workflow,
         timeoutMs: 600_000,
         turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
@@ -275,7 +270,7 @@ describe("Contract domain", () => {
 
   it("wrong token rejects", () => {
     const runId = createRunId();
-    const v4 = makeContractRuntime("scout");
+    const runtimeParts = makeContractRuntime("scout");
     const issued = issueContract({
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
@@ -286,8 +281,8 @@ describe("Contract domain", () => {
         tools: makeToolConfig("scout"),
         skills: [],
         extensions: [],
-        delegation: v4.delegation,
-        workflow: v4.workflow,
+        delegation: runtimeParts.delegation,
+        workflow: runtimeParts.workflow,
         timeoutMs: 600_000,
         turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
@@ -304,7 +299,7 @@ describe("Contract domain", () => {
 
   it("expired contract rejects", () => {
     const runId = createRunId();
-    const v4 = makeContractRuntime("scout");
+    const runtimeParts = makeContractRuntime("scout");
     const issued = issueContract({
       identity: { runId, handleId: "test", role: "scout" as AgentRole },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
@@ -315,8 +310,8 @@ describe("Contract domain", () => {
         tools: makeToolConfig("scout"),
         skills: [],
         extensions: [],
-        delegation: v4.delegation,
-        workflow: v4.workflow,
+        delegation: runtimeParts.delegation,
+        workflow: runtimeParts.workflow,
         timeoutMs: 600_000,
         turnBudget: { maxTurns: 24, graceTurns: 2 },
         toolBudget: { soft: 60, hard: 80, block: [] },
@@ -360,7 +355,7 @@ describe("Contract domain", () => {
 
   it("artifact has complete runtime fields", () => {
     const runId = createRunId();
-    const v4 = makeContractRuntime(null);
+    const runtimeParts = makeContractRuntime(null);
     const issued = issueContract({
       identity: { runId, handleId: "test", role: null },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
@@ -371,16 +366,14 @@ describe("Contract domain", () => {
         tools: makeToolConfig(null),
         skills: [],
         extensions: [],
-        delegation: { ...v4.delegation, remainingDepth: 0 },
-        workflow: v4.workflow,
+        delegation: { ...runtimeParts.delegation, remainingDepth: 0 },
+        workflow: runtimeParts.workflow,
         timeoutMs: 300_000,
         turnBudget: { maxTurns: 12, graceTurns: 2 },
         toolBudget: { soft: 30, hard: 40, block: ["read"] },
       },
       verification: { commands: [], criticRequired: false, maxRepairAttempts: 0 },
     });
-
-    assert.equal(issued.artifact.schemaVersion, 1);
     assert.equal(issued.artifact.identity.role, null);
     assert.equal(issued.artifact.identity.handleId, "test");
     assert.equal(issued.artifact.assignment.task, TEST_TASK);
@@ -392,7 +385,7 @@ describe("Contract domain", () => {
 
   it("role null is stored correctly in contract identity", () => {
     const runId = createRunId();
-    const v4 = makeContractRuntime(null);
+    const runtimeParts = makeContractRuntime(null);
     const issued = issueContract({
       identity: { runId, handleId: "test-null-role", role: null },
       assignment: { task: TEST_TASK, requirements: TEST_REQUIREMENTS, outputSchema: TEST_SCHEMA },
@@ -403,8 +396,8 @@ describe("Contract domain", () => {
         tools: makeToolConfig(null),
         skills: [],
         extensions: [],
-        delegation: { ...v4.delegation, remainingDepth: 0 },
-        workflow: v4.workflow,
+        delegation: { ...runtimeParts.delegation, remainingDepth: 0 },
+        workflow: runtimeParts.workflow,
         timeoutMs: 300_000,
         turnBudget: { maxTurns: 12, graceTurns: 2 },
         toolBudget: { soft: 30, hard: 40, block: [] },

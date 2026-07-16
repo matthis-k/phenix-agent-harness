@@ -25,13 +25,13 @@ describe("shared JSON persistence mechanics", () => {
     const directory = temporaryDirectory();
     const target = path.join(directory, "nested", "record.json");
 
-    atomicWriteJson(target, { version: 1, value: "stored" });
+    atomicWriteJson(target, { marker: 1, value: "stored" });
 
     const decoded = readJsonFile(target, (value) => {
       assert.equal(typeof value, "object");
       assert.ok(value);
       const record = value as Record<string, unknown>;
-      assert.equal(record.version, 1);
+      assert.equal(record.marker, 1);
       assert.equal(typeof record.value, "string");
       return record.value as string;
     });
@@ -73,13 +73,13 @@ describe("shared JSON persistence mechanics", () => {
 });
 
 describe("domain persistence codecs", () => {
-  it("rejects unsupported handle envelopes before runtime use", () => {
-    assert.throws(() => decodeHandleRecord({ version: 3, id: "old" }), /unsupported version/);
+  it("rejects malformed handle records before runtime use", () => {
+    assert.throws(() => decodeHandleRecord({ id: "incomplete" }), /malformed/);
   });
 
   it("reports malformed workflow envelopes with a domain error", () => {
     assert.throws(
-      () => decodeWorkflowRecord({ version: 1 }),
+      () => decodeWorkflowRecord({ instanceId: "incomplete" }),
       (error: unknown) => error instanceof WorkflowStoreError && error.code === "INVALID_RECORD",
     );
   });

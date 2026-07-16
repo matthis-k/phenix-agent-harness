@@ -1,4 +1,4 @@
-import type { AgentRole, AgentKind } from "./agent-types.ts";
+import type { AgentRole } from "./agent-types.ts";
 import { rolePreset } from "./role-presets.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -14,8 +14,6 @@ export interface DelegateRolePatch {
 }
 
 export interface ResolvedDelegateRoleConfiguration {
-  readonly presetRevision: 1;
-
   /**
    * Role whose preset supplied the baseline child-role set.
    */
@@ -58,8 +56,13 @@ function isValidAgentRole(value: unknown): value is AgentRole {
   if (value === null) return true;
   if (typeof value !== "string") return false;
   const AGENT_KINDS: readonly string[] = [
-    "scout", "planner", "architect", "implementer",
-    "tester", "critic", "finalizer",
+    "scout",
+    "planner",
+    "architect",
+    "implementer",
+    "tester",
+    "critic",
+    "finalizer",
   ];
   return AGENT_KINDS.includes(value);
 }
@@ -111,22 +114,18 @@ export function resolveDelegateRoleConfiguration(input: {
     };
   } else {
     // Explicit patch provided
-    const additional = (input.requested.additional ?? []).filter(
-      (r) => {
-        if (!isValidAgentRole(r)) {
-          throw new Error(`Invalid AgentRole in delegateRoles.additional: ${String(r)}`);
-        }
-        return true;
-      },
-    );
-    const removed = (input.requested.removed ?? []).filter(
-      (r) => {
-        if (!isValidAgentRole(r)) {
-          throw new Error(`Invalid AgentRole in delegateRoles.removed: ${String(r)}`);
-        }
-        return true;
-      },
-    );
+    const additional = (input.requested.additional ?? []).filter((r) => {
+      if (!isValidAgentRole(r)) {
+        throw new Error(`Invalid AgentRole in delegateRoles.additional: ${String(r)}`);
+      }
+      return true;
+    });
+    const removed = (input.requested.removed ?? []).filter((r) => {
+      if (!isValidAgentRole(r)) {
+        throw new Error(`Invalid AgentRole in delegateRoles.removed: ${String(r)}`);
+      }
+      return true;
+    });
     const patch: DelegateRolePatch = { additional, removed };
     source = {
       inherited: false,
@@ -150,9 +149,7 @@ export function resolveDelegateRoleConfiguration(input: {
     // Empty = no delegation allowed at all
     if (delegableRoles.length === 0) {
       if (effective.length > 0) {
-        throw new Error(
-          "No child roles may be delegated from the current context.",
-        );
+        throw new Error("No child roles may be delegated from the current context.");
       }
       effective = [];
     } else {
@@ -168,7 +165,6 @@ export function resolveDelegateRoleConfiguration(input: {
   }
 
   return {
-    presetRevision: 1,
     role: input.role,
     source,
     effective,

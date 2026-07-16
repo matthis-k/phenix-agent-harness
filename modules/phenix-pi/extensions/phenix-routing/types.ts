@@ -101,7 +101,6 @@ export interface ResolvedRoute {
 }
 
 export interface PhenixRoutingSettings {
-  readonly version: 1;
   readonly modelSet: ModelSetId;
 }
 

@@ -60,7 +60,7 @@ import {
   writeRecord,
 } from "./handle-store.ts";
 import type { HandleRecord, WorkflowBinding } from "./handle-types.ts";
-import { HANDLE_VERSION, isTerminalHandleStatus } from "./handle-types.ts";
+import { isTerminalHandleStatus } from "./handle-types.ts";
 import type { ManagedDelegationRuntime } from "./managed-delegation-runtime.ts";
 import { createProducerContract } from "./producer-contract.ts";
 import type { WorkflowProducerAcceptanceData } from "./workflow-acceptance-engine.ts";
@@ -87,7 +87,6 @@ function createHandle(input: {
   readonly workflowBinding?: WorkflowBinding;
 }): HandleRecord {
   return {
-    version: HANDLE_VERSION,
     id: input.id,
     sessionId: input.sessionId,
     parentId: input.parentId,
@@ -145,18 +144,18 @@ export class WorkflowDelegator {
       return {
         ok: false,
         message:
-          "phenix_delegate: transitionId is required. Select one from the projected delegation options.",
+          "phenix_workflow: transitionId is required. Select one from the projected delegation options.",
       };
     }
     if (typeof params.workflowRevision !== "number") {
       return {
         ok: false,
         message:
-          "phenix_delegate: workflowRevision is required. Copy the revision from the projected delegation options.",
+          "phenix_workflow: workflowRevision is required. Copy the revision from the projected delegation options.",
       };
     }
     if (typeof params.task !== "string" || params.task.length === 0) {
-      return { ok: false, message: "phenix_delegate: task is required." };
+      return { ok: false, message: "phenix_workflow: task is required." };
     }
 
     const requirements = [...(params.requirements ?? [])];
@@ -202,7 +201,7 @@ export class WorkflowDelegator {
     ) {
       return {
         ok: false,
-        message: "phenix_delegate: stale workflow authority digest.",
+        message: "phenix_workflow: stale workflow authority digest.",
         details: {
           code: "STALE_WORKFLOW_AUTHORITY",
           expected: decision.optionsDigest,
@@ -217,7 +216,7 @@ export class WorkflowDelegator {
       return {
         ok: false,
         message:
-          `phenix_delegate: stale workflow revision. Expected ${params.workflowRevision}, current ${workflowRecord.revision}. ` +
+          `phenix_workflow: stale workflow revision. Expected ${params.workflowRevision}, current ${workflowRecord.revision}. ` +
           `Current state: ${workflowRecord.state}. Refresh delegation options before attempting again.`,
         details: {
           currentState: workflowRecord.state,
@@ -233,7 +232,7 @@ export class WorkflowDelegator {
       return {
         ok: false,
         message:
-          `phenix_delegate: transition "${params.transitionId}" is not currently available. ` +
+          `phenix_workflow: transition "${params.transitionId}" is not currently available. ` +
           `State: ${workflowRecord.state}, Difficulty: ${workflowRecord.difficulty}. ` +
           `Available transitions: ${availableIds || "(none)"}`,
         details: {
@@ -252,7 +251,7 @@ export class WorkflowDelegator {
       return {
         ok: false,
         message:
-          `phenix_delegate: background mode is not allowed for transition "${params.transitionId}". ` +
+          `phenix_workflow: background mode is not allowed for transition "${params.transitionId}". ` +
           `Allowed modes: ${matchingOption.allowedModes.join(", ")}.`,
       };
     }
@@ -261,13 +260,13 @@ export class WorkflowDelegator {
     if (!transition) {
       return {
         ok: false,
-        message: `phenix_delegate: internal error - transition "${params.transitionId}" not found in workflow definition.`,
+        message: `phenix_workflow: internal error - transition "${params.transitionId}" not found in workflow definition.`,
       };
     }
     if (transition.kind !== "delegate") {
       return {
         ok: false,
-        message: `phenix_delegate: internal error - "${params.transitionId}" is not a delegate transition.`,
+        message: `phenix_workflow: internal error - "${params.transitionId}" is not a delegate transition.`,
       };
     }
 
@@ -290,7 +289,7 @@ export class WorkflowDelegator {
       if (error instanceof WorkflowStoreError) {
         return {
           ok: false,
-          message: `phenix_delegate: workflow error [${error.code}]: ${error.message}`,
+          message: `phenix_workflow: workflow error [${error.code}]: ${error.message}`,
           details: { code: error.code, ...error.context } as Record<string, unknown>,
         };
       }
@@ -353,7 +352,6 @@ export class WorkflowDelegator {
         actorId: childActorId,
         parentActorId: workflowRecord.actorId,
         definitionId: workflowRecord.definitionId,
-        definitionVersion: 1,
         difficulty: workflowRecord.difficulty,
         initialState: childInitialState,
         transitionAuthority: transitionAuthorityForChild({
@@ -392,7 +390,6 @@ export class WorkflowDelegator {
           actorId: `critic_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           parentActorId: childActorId,
           definitionId: workflowRecord.definitionId,
-          definitionVersion: 1,
           difficulty: workflowRecord.difficulty,
           initialState: "reviewing",
           transitionAuthority: { kind: "restricted", allowed: [] },
@@ -561,7 +558,7 @@ export class WorkflowDelegator {
 
       return {
         ok: false,
-        message: `phenix_delegate: execution preparation failed: ${message}`,
+        message: `phenix_workflow: execution preparation failed: ${message}`,
         details: {
           code: "DELEGATION_PREPARATION_FAILED",
           ...(failedRecord ? { handleId: failedRecord.id } : {}),

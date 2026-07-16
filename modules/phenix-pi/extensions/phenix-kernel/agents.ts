@@ -17,7 +17,7 @@ export const AGENT_KINDS = [
 
 export type AgentKind = (typeof AGENT_KINDS)[number];
 
-/** Null means the base/no-role execution client in the legacy runtime protocol. */
+/** Null means the base/no-role execution client. */
 export type AgentRole = AgentKind | null;
 
 export function isAgentKind(value: unknown): value is AgentKind {

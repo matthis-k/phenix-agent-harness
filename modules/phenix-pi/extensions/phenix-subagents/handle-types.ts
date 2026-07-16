@@ -6,8 +6,6 @@ import type { ResolvedChildSpec } from "./child-spec.ts";
 
 // ── Constants (used by index.ts; extracted for visibility) ──────────────────
 
-export const HANDLE_VERSION = 5;
-
 /** Persisted lifecycle states for a delegated handle. */
 export type HandleStatus =
   | "starting"
@@ -105,11 +103,9 @@ export interface VerificationSummary {
   readonly contract: "valid" | "invalid" | "missing" | "cancelled";
 }
 
-// ── Handle record (version 5) ───────────────────────────────────────────────
+// ── Handle record ───────────────────────────────────────────────────────────
 
 export interface HandleRecord {
-  readonly version: typeof HANDLE_VERSION;
-
   readonly id: string;
   readonly sessionId: string;
   readonly parentId?: string;
@@ -146,11 +142,11 @@ export interface HandleRecord {
     readonly missingRequirements: readonly string[];
   };
 
-  /** Workflow binding set when the handle was spawned through a v5 workflow transition. */
+  /** Workflow binding set when the handle was spawned through a workflow transition. */
   workflowBinding?: WorkflowBinding;
 }
 
-// ── Workflow binding (v5) ───────────────────────────────────────────────────
+// ── Workflow binding ────────────────────────────────────────────────────────
 
 export interface WorkflowBinding {
   readonly instanceId: string;

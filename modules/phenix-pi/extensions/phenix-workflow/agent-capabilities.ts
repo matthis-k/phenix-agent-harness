@@ -1,6 +1,5 @@
-import type { AgentRole, AgentKind } from "../phenix-kernel/agents.ts";
-import { AGENT_KINDS } from "../phenix-kernel/agents.ts";
-import type { DiscoveredAgentDefinition, AgentDiscoveryHelper } from "./capability-provider.ts";
+import type { AgentRole } from "../phenix-kernel/agents.ts";
+import type { DiscoveredAgentDefinition } from "./capability-provider.ts";
 
 // ── Default agent targets ───────────────────────────────────────────────────
 
@@ -40,7 +39,6 @@ export interface AgentCapabilityEntry {
 // ── Capability artifact ─────────────────────────────────────────────────────
 
 export interface AgentCapabilityArtifact {
-  readonly version: 1;
   readonly generatedAt: string;
 
   /**
@@ -69,9 +67,9 @@ export function buildCapabilityArtifact(
       // Duplicate runtime name — this is an error
       throw new Error(
         `Duplicate runtime name "${agent.runtimeName}": ` +
-        `found in source "${existing.source}" (path: ${existing.filePath ?? "unknown"}) ` +
-        `and source "${agent.source}" (path: ${agent.filePath ?? "unknown"}). ` +
-        `Each default Phenix agent runtime name must resolve to at most one effective agent.`,
+          `found in source "${existing.source}" (path: ${existing.filePath ?? "unknown"}) ` +
+          `and source "${agent.source}" (path: ${agent.filePath ?? "unknown"}). ` +
+          `Each default Phenix agent runtime name must resolve to at most one effective agent.`,
       );
     }
     discoveredMap.set(agent.runtimeName, agent);
@@ -89,7 +87,8 @@ export function buildCapabilityArtifact(
         configured: false,
         spawnable: false,
         tools: [],
-        unavailableReason: `Agent "${target.runtimeName}" was not discovered at startup. ` +
+        unavailableReason:
+          `Agent "${target.runtimeName}" was not discovered at startup. ` +
           `Check that the agent definition exists and is not disabled.`,
       });
     } else if (discoveredAgent.disabled) {
@@ -119,23 +118,24 @@ export function buildCapabilityArtifact(
   }
 
   // Compute hash from canonical content (exclude generatedAt)
-  const canonicalContent = JSON.stringify(entries.map((e) => ({
-    role: e.role,
-    logicalName: e.logicalName,
-    runtimeName: e.runtimeName,
-    configured: e.configured,
-    spawnable: e.spawnable,
-    source: e.source,
-    tools: e.tools,
-    unavailableReason: e.unavailableReason,
-  })), null, 2);
+  const canonicalContent = JSON.stringify(
+    entries.map((e) => ({
+      role: e.role,
+      logicalName: e.logicalName,
+      runtimeName: e.runtimeName,
+      configured: e.configured,
+      spawnable: e.spawnable,
+      source: e.source,
+      tools: e.tools,
+      unavailableReason: e.unavailableReason,
+    })),
+    null,
+    2,
+  );
 
-  const artifactHash = createHash("sha256")
-    .update(canonicalContent, "utf-8")
-    .digest("hex");
+  const artifactHash = createHash("sha256").update(canonicalContent, "utf-8").digest("hex");
 
   return {
-    version: 1,
     generatedAt: new Date().toISOString(),
     artifactHash,
     entries,
@@ -151,10 +151,7 @@ export function configuredAgent(
   return artifact.entries.find((e) => e.role === role);
 }
 
-export function isSpawnableAgent(
-  artifact: AgentCapabilityArtifact,
-  role: AgentRole,
-): boolean {
+export function isSpawnableAgent(artifact: AgentCapabilityArtifact, role: AgentRole): boolean {
   const entry = configuredAgent(artifact, role);
   if (!entry) return false;
   return entry.spawnable;
@@ -165,10 +162,7 @@ export function isSpawnableAgent(
 import fs from "node:fs";
 import path from "node:path";
 
-export function capabilityArtifactPath(
-  cwd: string,
-  artifactHash: string,
-): string {
+export function capabilityArtifactPath(cwd: string, artifactHash: string): string {
   return path.join(
     cwd,
     ".phenix-agent-state",
@@ -178,26 +172,18 @@ export function capabilityArtifactPath(
   );
 }
 
-export function readCapabilityArtifact(
-  cwd: string,
-  artifactHash: string,
-): AgentCapabilityArtifact {
+export function readCapabilityArtifact(cwd: string, artifactHash: string): AgentCapabilityArtifact {
   const target = capabilityArtifactPath(cwd, artifactHash);
-  const artifact = JSON.parse(
-    fs.readFileSync(target, "utf-8"),
-  ) as AgentCapabilityArtifact;
+  const artifact = JSON.parse(fs.readFileSync(target, "utf-8")) as AgentCapabilityArtifact;
   if (artifact.artifactHash !== artifactHash) {
     throw new Error(
       `Capability artifact hash mismatch at ${target}: ` +
-      `expected ${artifactHash}, got ${artifact.artifactHash}`,
+        `expected ${artifactHash}, got ${artifact.artifactHash}`,
     );
   }
   return artifact;
 }
-export function persistCapabilityArtifact(
-  cwd: string,
-  artifact: AgentCapabilityArtifact,
-): string {
+export function persistCapabilityArtifact(cwd: string, artifact: AgentCapabilityArtifact): string {
   const filePath = capabilityArtifactPath(cwd, artifact.artifactHash);
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });

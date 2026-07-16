@@ -1,18 +1,17 @@
+import type { AgentKind, AgentRole } from "../phenix-kernel/agents.ts";
+import { agentClientRef, contractRef } from "../phenix-kernel/refs.ts";
+import type { Difficulty } from "../phenix-kernel/task.ts";
 import type {
-  DelegateTransition,
   AutomaticTransition,
-  WorkflowDefinition,
-  WorkflowTransitionId,
-  WorkflowStateId,
+  DelegateTransition,
   DelegationPurpose,
-  WorkflowOutputSchemaId,
   TransitionCondition,
+  WorkflowDefinition,
+  WorkflowOutputSchemaId,
+  WorkflowStateId,
   WorkflowTransition,
 } from "./workflow-types.ts";
 import { mkTransitionId } from "./workflow-types.ts";
-import type { AgentRole, AgentKind } from "../phenix-kernel/agents.ts";
-import type { Difficulty } from "../phenix-kernel/task.ts";
-import { agentClientRef, contractRef } from "../phenix-kernel/refs.ts";
 
 // ── Helper factories ────────────────────────────────────────────────────────
 
@@ -20,9 +19,7 @@ function clientIdForRole(role: AgentRole): string {
   return role === null ? "base" : role;
 }
 
-function actorClientRefs(
-  roles: ReadonlyArray<"coordinator" | AgentKind>,
-) {
+function actorClientRefs(roles: ReadonlyArray<"coordinator" | AgentKind>) {
   return roles.map((role) => agentClientRef(role));
 }
 
@@ -70,18 +67,18 @@ function automatic(args: {
 
 // ── Common conditions ───────────────────────────────────────────────────────
 
-const ALWAYS: TransitionCondition = { kind: "always" };
+const _ALWAYS: TransitionCondition = { kind: "always" };
 
-const D023: readonly Difficulty[] = ["D0", "D2", "D3"];
-const D01: readonly Difficulty[] = ["D0", "D1"];
-const D123: readonly Difficulty[] = ["D1", "D2", "D3"];
-const D23: readonly Difficulty[] = ["D2", "D3"];
-const D3_ONLY: readonly Difficulty[] = ["D3"];
+const _D023: readonly Difficulty[] = ["D0", "D2", "D3"];
+const _D01: readonly Difficulty[] = ["D0", "D1"];
+const _D123: readonly Difficulty[] = ["D1", "D2", "D3"];
+const _D23: readonly Difficulty[] = ["D2", "D3"];
+const _D3_ONLY: readonly Difficulty[] = ["D3"];
 const ALL_DIFF: readonly Difficulty[] = ["D0", "D1", "D2", "D3"];
 
 const ROOT: "root" = "root";
 const CHILD: "child" = "child";
-const BOTH: "both" = "both";
+const _BOTH: "both" = "both";
 
 const COORDINATOR: ReadonlyArray<"coordinator" | AgentKind> = ["coordinator"];
 const PLANNER: ReadonlyArray<"coordinator" | AgentKind> = ["planner"];
@@ -99,12 +96,10 @@ const OPTIONAL: "optional" = "optional";
 
 const crossCuttingRequired: TransitionCondition = {
   kind: "all",
-  conditions: [
-    { kind: "workflow-fact", key: "crossCuttingDesignRequired", equals: true },
-  ],
+  conditions: [{ kind: "workflow-fact", key: "crossCuttingDesignRequired", equals: true }],
 };
 
-const crossCuttingNotRequired: TransitionCondition = {
+const _crossCuttingNotRequired: TransitionCondition = {
   kind: "not",
   condition: { kind: "workflow-fact", key: "crossCuttingDesignRequired", equals: true },
 };
@@ -112,7 +107,9 @@ const crossCuttingNotRequired: TransitionCondition = {
 // ── Condition: requires dedicated testing ───────────────────────────────────
 
 const requiresDedicatedTesting: TransitionCondition = {
-  kind: "workflow-fact", key: "requiresDedicatedTesting", equals: true,
+  kind: "workflow-fact",
+  key: "requiresDedicatedTesting",
+  equals: true,
 };
 
 const doesNotRequireDedicatedTesting: TransitionCondition = {
@@ -153,7 +150,7 @@ const d3DiscoveryComplete: TransitionCondition = {
 
 // ── D3 discovery not yet complete ───────────────────────────────────────────
 
-const d3DiscoveryNotComplete: TransitionCondition = {
+const _d3DiscoveryNotComplete: TransitionCondition = {
   kind: "not",
   condition: d3DiscoveryComplete,
 };
@@ -167,271 +164,303 @@ const transitions: WorkflowTransition[] = [];
 // ═════════════════════════════════════════════════════════════════════════════
 
 // D0 scout (optional discovery, max once)
-transitions.push(delegate({
-  id: "d0.scout",
-  description: "Optional scout for repository discovery",
-  difficulty: ["D0"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["classified"],
-  role: "scout",
-  purpose: "discover-repository",
-  category: OPTIONAL,
-  outputSchemaId: "scout-handoff",
-  onAccepted: "classified",
-  onRejected: "classified",
-  maxExecutions: 1,
-}));
+transitions.push(
+  delegate({
+    id: "d0.scout",
+    description: "Optional scout for repository discovery",
+    difficulty: ["D0"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["classified"],
+    role: "scout",
+    purpose: "discover-repository",
+    category: OPTIONAL,
+    outputSchemaId: "scout-handoff",
+    onAccepted: "classified",
+    onRejected: "classified",
+    maxExecutions: 1,
+  }),
+);
 
 // D0 execute-base
-transitions.push(delegate({
-  id: "d0.execute-base",
-  description: "Execute a bounded non-code task as a base agent",
-  difficulty: ["D0"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["classified"],
-  role: null,
-  purpose: "finalize",
-  category: REQUIRED,
-  outputSchemaId: "base-handoff",
-  onAccepted: "completed",
-  onRejected: "failed",
-}));
+transitions.push(
+  delegate({
+    id: "d0.execute-base",
+    description: "Execute a bounded non-code task as a base agent",
+    difficulty: ["D0"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["classified"],
+    role: null,
+    purpose: "finalize",
+    category: REQUIRED,
+    outputSchemaId: "base-handoff",
+    onAccepted: "completed",
+    onRejected: "failed",
+  }),
+);
 
 // D0 execute-code
-transitions.push(delegate({
-  id: "d0.execute-code",
-  description: "Execute a mechanical code change",
-  difficulty: ["D0"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["classified"],
-  role: "implementer",
-  purpose: "implement",
-  category: REQUIRED,
-  outputSchemaId: "implementation-handoff",
-  onAccepted: "completed",
-  onRejected: "failed",
-}));
+transitions.push(
+  delegate({
+    id: "d0.execute-code",
+    description: "Execute a mechanical code change",
+    difficulty: ["D0"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["classified"],
+    role: "implementer",
+    purpose: "implement",
+    category: REQUIRED,
+    outputSchemaId: "implementation-handoff",
+    onAccepted: "completed",
+    onRejected: "failed",
+  }),
+);
 
 // ═════════════════════════════════════════════════════════════════════════════
 // D1 — Bounded implementation task
 // ═════════════════════════════════════════════════════════════════════════════
 
 // D1 scout (optional discovery, max once)
-transitions.push(delegate({
-  id: "d1.scout",
-  description: "Optional scout for repository discovery",
-  difficulty: ["D1"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["classified"],
-  role: "scout",
-  purpose: "discover-repository",
-  category: OPTIONAL,
-  outputSchemaId: "scout-handoff",
-  onAccepted: "classified",
-  onRejected: "classified",
-  maxExecutions: 1,
-}));
+transitions.push(
+  delegate({
+    id: "d1.scout",
+    description: "Optional scout for repository discovery",
+    difficulty: ["D1"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["classified"],
+    role: "scout",
+    purpose: "discover-repository",
+    category: OPTIONAL,
+    outputSchemaId: "scout-handoff",
+    onAccepted: "classified",
+    onRejected: "classified",
+    maxExecutions: 1,
+  }),
+);
 
 // D1 plan (optional)
-transitions.push(delegate({
-  id: "d1.plan",
-  description: "Optional plan for multi-step work",
-  difficulty: ["D1"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["classified"],
-  role: "planner",
-  purpose: "produce-plan",
-  category: OPTIONAL,
-  outputSchemaId: "planner-handoff",
-  onAccepted: "plan-ready",
-  onRejected: "classified",
-  maxExecutions: 1,
-}));
+transitions.push(
+  delegate({
+    id: "d1.plan",
+    description: "Optional plan for multi-step work",
+    difficulty: ["D1"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["classified"],
+    role: "planner",
+    purpose: "produce-plan",
+    category: OPTIONAL,
+    outputSchemaId: "planner-handoff",
+    onAccepted: "plan-ready",
+    onRejected: "classified",
+    maxExecutions: 1,
+  }),
+);
 
 // D1 execute-base
-transitions.push(delegate({
-  id: "d1.execute-base",
-  description: "Execute a bounded non-code task as a base agent",
-  difficulty: ["D1"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["classified", "plan-ready"],
-  role: null,
-  purpose: "finalize",
-  category: REQUIRED,
-  outputSchemaId: "base-handoff",
-  onAccepted: "completed",
-  onRejected: "failed",
-}));
+transitions.push(
+  delegate({
+    id: "d1.execute-base",
+    description: "Execute a bounded non-code task as a base agent",
+    difficulty: ["D1"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["classified", "plan-ready"],
+    role: null,
+    purpose: "finalize",
+    category: REQUIRED,
+    outputSchemaId: "base-handoff",
+    onAccepted: "completed",
+    onRejected: "failed",
+  }),
+);
 
 // D1 implement (from classified or plan-ready)
-transitions.push(delegate({
-  id: "d1.implement",
-  description: "Implement a contained change",
-  difficulty: ["D1"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["classified", "plan-ready"],
-  role: "implementer",
-  purpose: "implement",
-  category: REQUIRED,
-  outputSchemaId: "implementation-handoff",
-  onAccepted: "implementation-ready",
-  onRejected: "failed",
-}));
+transitions.push(
+  delegate({
+    id: "d1.implement",
+    description: "Implement a contained change",
+    difficulty: ["D1"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["classified", "plan-ready"],
+    role: "implementer",
+    purpose: "implement",
+    category: REQUIRED,
+    outputSchemaId: "implementation-handoff",
+    onAccepted: "implementation-ready",
+    onRejected: "failed",
+  }),
+);
 
 // D1 test (from implementation-ready, when dedicated testing is needed)
-transitions.push(delegate({
-  id: "d1.test",
-  description: "Run dedicated testing",
-  difficulty: ["D1"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["implementation-ready"],
-  role: "tester",
-  purpose: "test",
-  category: REQUIRED,
-  outputSchemaId: "test-handoff",
-  onAccepted: "completed",
-  onRejected: "failed",
-  condition: requiresDedicatedTesting,
-}));
+transitions.push(
+  delegate({
+    id: "d1.test",
+    description: "Run dedicated testing",
+    difficulty: ["D1"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["implementation-ready"],
+    role: "tester",
+    purpose: "test",
+    category: REQUIRED,
+    outputSchemaId: "test-handoff",
+    onAccepted: "completed",
+    onRejected: "failed",
+    condition: requiresDedicatedTesting,
+  }),
+);
 
 // D1 automatic: implementation-ready → completed when no dedicated testing
-transitions.push(automatic({
-  id: "d1.auto-complete",
-  description: "Auto-complete when dedicated testing is not required",
-  difficulty: ["D1"],
-  from: "implementation-ready",
-  to: "completed",
-  condition: doesNotRequireDedicatedTesting,
-}));
+transitions.push(
+  automatic({
+    id: "d1.auto-complete",
+    description: "Auto-complete when dedicated testing is not required",
+    difficulty: ["D1"],
+    from: "implementation-ready",
+    to: "completed",
+    condition: doesNotRequireDedicatedTesting,
+  }),
+);
 
 // ═════════════════════════════════════════════════════════════════════════════
 // D2 — Complex or cross-component task
 // ═════════════════════════════════════════════════════════════════════════════
 
 // D2 scout (optional, max once)
-transitions.push(delegate({
-  id: "d2.scout",
-  description: "Optional scout for repository discovery",
-  difficulty: ["D2"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["classified"],
-  role: "scout",
-  purpose: "discover-repository",
-  category: OPTIONAL,
-  outputSchemaId: "scout-handoff",
-  onAccepted: "classified",
-  onRejected: "classified",
-  maxExecutions: 1,
-}));
+transitions.push(
+  delegate({
+    id: "d2.scout",
+    description: "Optional scout for repository discovery",
+    difficulty: ["D2"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["classified"],
+    role: "scout",
+    purpose: "discover-repository",
+    category: OPTIONAL,
+    outputSchemaId: "scout-handoff",
+    onAccepted: "classified",
+    onRejected: "classified",
+    maxExecutions: 1,
+  }),
+);
 
 // D2 plan (required)
-transitions.push(delegate({
-  id: "d2.plan",
-  description: "Produce a plan for complex work",
-  difficulty: ["D2"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["classified"],
-  role: "planner",
-  purpose: "produce-plan",
-  category: REQUIRED,
-  outputSchemaId: "planner-handoff",
-  onAccepted: "plan-ready",
-  onRejected: "failed",
-  maxExecutions: 1,
-}));
+transitions.push(
+  delegate({
+    id: "d2.plan",
+    description: "Produce a plan for complex work",
+    difficulty: ["D2"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["classified"],
+    role: "planner",
+    purpose: "produce-plan",
+    category: REQUIRED,
+    outputSchemaId: "planner-handoff",
+    onAccepted: "plan-ready",
+    onRejected: "failed",
+    maxExecutions: 1,
+  }),
+);
 
 // D2 architect (required when cross-cutting or high coupling/breadth)
-transitions.push(delegate({
-  id: "d2.architect",
-  description: "Produce cross-cutting architecture design",
-  difficulty: ["D2"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["plan-ready"],
-  role: "architect",
-  purpose: "produce-architecture",
-  category: REQUIRED,
-  outputSchemaId: "architecture-handoff",
-  onAccepted: "design-ready",
-  onRejected: "failed",
-  condition: architectureRequired,
-  maxExecutions: 1,
-}));
+transitions.push(
+  delegate({
+    id: "d2.architect",
+    description: "Produce cross-cutting architecture design",
+    difficulty: ["D2"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["plan-ready"],
+    role: "architect",
+    purpose: "produce-architecture",
+    category: REQUIRED,
+    outputSchemaId: "architecture-handoff",
+    onAccepted: "design-ready",
+    onRejected: "failed",
+    condition: architectureRequired,
+    maxExecutions: 1,
+  }),
+);
 
 // D2 implement-from-plan (when architecture not required)
-transitions.push(delegate({
-  id: "d2.implement-from-plan",
-  description: "Implement from an accepted plan (no architecture needed)",
-  difficulty: ["D2"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["plan-ready"],
-  role: "implementer",
-  purpose: "implement",
-  category: REQUIRED,
-  outputSchemaId: "implementation-handoff",
-  onAccepted: "implementation-ready",
-  onRejected: "failed",
-  condition: architectureNotRequired,
-}));
+transitions.push(
+  delegate({
+    id: "d2.implement-from-plan",
+    description: "Implement from an accepted plan (no architecture needed)",
+    difficulty: ["D2"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["plan-ready"],
+    role: "implementer",
+    purpose: "implement",
+    category: REQUIRED,
+    outputSchemaId: "implementation-handoff",
+    onAccepted: "implementation-ready",
+    onRejected: "failed",
+    condition: architectureNotRequired,
+  }),
+);
 
 // D2 implement-from-design
-transitions.push(delegate({
-  id: "d2.implement-from-design",
-  description: "Implement from an accepted architecture design",
-  difficulty: ["D2"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["design-ready"],
-  role: "implementer",
-  purpose: "implement",
-  category: REQUIRED,
-  outputSchemaId: "implementation-handoff",
-  onAccepted: "implementation-ready",
-  onRejected: "failed",
-}));
+transitions.push(
+  delegate({
+    id: "d2.implement-from-design",
+    description: "Implement from an accepted architecture design",
+    difficulty: ["D2"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["design-ready"],
+    role: "implementer",
+    purpose: "implement",
+    category: REQUIRED,
+    outputSchemaId: "implementation-handoff",
+    onAccepted: "implementation-ready",
+    onRejected: "failed",
+  }),
+);
 
 // D2 test (required)
-transitions.push(delegate({
-  id: "d2.test",
-  description: "Run dedicated testing",
-  difficulty: ["D2"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["implementation-ready"],
-  role: "tester",
-  purpose: "test",
-  category: REQUIRED,
-  outputSchemaId: "test-handoff",
-  onAccepted: "tests-ready",
-  onRejected: "failed",
-}));
+transitions.push(
+  delegate({
+    id: "d2.test",
+    description: "Run dedicated testing",
+    difficulty: ["D2"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["implementation-ready"],
+    role: "tester",
+    purpose: "test",
+    category: REQUIRED,
+    outputSchemaId: "test-handoff",
+    onAccepted: "tests-ready",
+    onRejected: "failed",
+  }),
+);
 
 // D2 finalize (required)
-transitions.push(delegate({
-  id: "d2.finalize",
-  description: "Integrate handoffs and report final result",
-  difficulty: ["D2"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["tests-ready"],
-  role: "finalizer",
-  purpose: "finalize",
-  category: REQUIRED,
-  outputSchemaId: "finalizer-handoff",
-  onAccepted: "completed",
-  onRejected: "failed",
-}));
+transitions.push(
+  delegate({
+    id: "d2.finalize",
+    description: "Integrate handoffs and report final result",
+    difficulty: ["D2"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["tests-ready"],
+    role: "finalizer",
+    purpose: "finalize",
+    category: REQUIRED,
+    outputSchemaId: "finalizer-handoff",
+    onAccepted: "completed",
+    onRejected: "failed",
+  }),
+);
 
 // ═════════════════════════════════════════════════════════════════════════════
 // D3 — Critical, broad, or high-consequence task
@@ -440,159 +469,177 @@ transitions.push(delegate({
 const D3_DISCOVERY_GROUP = "d3.discovery";
 
 // D3 discovery scouts (parallel, root background allowed)
-transitions.push(delegate({
-  id: "d3.scout-repository",
-  description: "Discover repository code topology",
-  difficulty: ["D3"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["classified"],
-  role: "scout",
-  purpose: "discover-repository",
-  category: REQUIRED,
-  outputSchemaId: "scout-handoff",
-  allowedModes: ["await", "background"],
-  onAccepted: "classified",
-  onRejected: "failed",
-  maxExecutions: 1,
-  parallelGroup: D3_DISCOVERY_GROUP,
-}));
+transitions.push(
+  delegate({
+    id: "d3.scout-repository",
+    description: "Discover repository code topology",
+    difficulty: ["D3"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["classified"],
+    role: "scout",
+    purpose: "discover-repository",
+    category: REQUIRED,
+    outputSchemaId: "scout-handoff",
+    allowedModes: ["await", "background"],
+    onAccepted: "classified",
+    onRejected: "failed",
+    maxExecutions: 1,
+    parallelGroup: D3_DISCOVERY_GROUP,
+  }),
+);
 
-transitions.push(delegate({
-  id: "d3.scout-tests",
-  description: "Discover tests and runtime behavior",
-  difficulty: ["D3"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["classified"],
-  role: "scout",
-  purpose: "discover-tests",
-  category: REQUIRED,
-  outputSchemaId: "scout-handoff",
-  allowedModes: ["await", "background"],
-  onAccepted: "classified",
-  onRejected: "failed",
-  maxExecutions: 1,
-  parallelGroup: D3_DISCOVERY_GROUP,
-}));
+transitions.push(
+  delegate({
+    id: "d3.scout-tests",
+    description: "Discover tests and runtime behavior",
+    difficulty: ["D3"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["classified"],
+    role: "scout",
+    purpose: "discover-tests",
+    category: REQUIRED,
+    outputSchemaId: "scout-handoff",
+    allowedModes: ["await", "background"],
+    onAccepted: "classified",
+    onRejected: "failed",
+    maxExecutions: 1,
+    parallelGroup: D3_DISCOVERY_GROUP,
+  }),
+);
 
-transitions.push(delegate({
-  id: "d3.scout-constraints",
-  description: "Discover external constraints and dependencies",
-  difficulty: ["D3"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["classified"],
-  role: "scout",
-  purpose: "discover-constraints",
-  category: REQUIRED,
-  outputSchemaId: "scout-handoff",
-  allowedModes: ["await", "background"],
-  onAccepted: "classified",
-  onRejected: "failed",
-  maxExecutions: 1,
-  parallelGroup: D3_DISCOVERY_GROUP,
-}));
+transitions.push(
+  delegate({
+    id: "d3.scout-constraints",
+    description: "Discover external constraints and dependencies",
+    difficulty: ["D3"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["classified"],
+    role: "scout",
+    purpose: "discover-constraints",
+    category: REQUIRED,
+    outputSchemaId: "scout-handoff",
+    allowedModes: ["await", "background"],
+    onAccepted: "classified",
+    onRejected: "failed",
+    maxExecutions: 1,
+    parallelGroup: D3_DISCOVERY_GROUP,
+  }),
+);
 
 // D3 plan (only after all discovery scouts complete)
-transitions.push(delegate({
-  id: "d3.plan",
-  description: "Produce a comprehensive plan",
-  difficulty: ["D3"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["classified"],
-  role: "planner",
-  purpose: "produce-plan",
-  category: REQUIRED,
-  outputSchemaId: "planner-handoff",
-  onAccepted: "plan-ready",
-  onRejected: "failed",
-  condition: d3DiscoveryComplete,
-  maxExecutions: 1,
-}));
+transitions.push(
+  delegate({
+    id: "d3.plan",
+    description: "Produce a comprehensive plan",
+    difficulty: ["D3"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["classified"],
+    role: "planner",
+    purpose: "produce-plan",
+    category: REQUIRED,
+    outputSchemaId: "planner-handoff",
+    onAccepted: "plan-ready",
+    onRejected: "failed",
+    condition: d3DiscoveryComplete,
+    maxExecutions: 1,
+  }),
+);
 
 // D3 architect (required)
-transitions.push(delegate({
-  id: "d3.architect",
-  description: "Produce architecture design",
-  difficulty: ["D3"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["plan-ready"],
-  role: "architect",
-  purpose: "produce-architecture",
-  category: REQUIRED,
-  outputSchemaId: "architecture-handoff",
-  onAccepted: "design-ready",
-  onRejected: "failed",
-  maxExecutions: 1,
-}));
+transitions.push(
+  delegate({
+    id: "d3.architect",
+    description: "Produce architecture design",
+    difficulty: ["D3"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["plan-ready"],
+    role: "architect",
+    purpose: "produce-architecture",
+    category: REQUIRED,
+    outputSchemaId: "architecture-handoff",
+    onAccepted: "design-ready",
+    onRejected: "failed",
+    maxExecutions: 1,
+  }),
+);
 
 // D3 implement
-transitions.push(delegate({
-  id: "d3.implement",
-  description: "Implement according to architecture",
-  difficulty: ["D3"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["design-ready"],
-  role: "implementer",
-  purpose: "implement",
-  category: REQUIRED,
-  outputSchemaId: "implementation-handoff",
-  onAccepted: "implementation-ready",
-  onRejected: "failed",
-}));
+transitions.push(
+  delegate({
+    id: "d3.implement",
+    description: "Implement according to architecture",
+    difficulty: ["D3"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["design-ready"],
+    role: "implementer",
+    purpose: "implement",
+    category: REQUIRED,
+    outputSchemaId: "implementation-handoff",
+    onAccepted: "implementation-ready",
+    onRejected: "failed",
+  }),
+);
 
 // D3 test
-transitions.push(delegate({
-  id: "d3.test",
-  description: "Run comprehensive testing",
-  difficulty: ["D3"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["implementation-ready"],
-  role: "tester",
-  purpose: "test",
-  category: REQUIRED,
-  outputSchemaId: "test-handoff",
-  onAccepted: "tests-ready",
-  onRejected: "failed",
-}));
+transitions.push(
+  delegate({
+    id: "d3.test",
+    description: "Run comprehensive testing",
+    difficulty: ["D3"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["implementation-ready"],
+    role: "tester",
+    purpose: "test",
+    category: REQUIRED,
+    outputSchemaId: "test-handoff",
+    onAccepted: "tests-ready",
+    onRejected: "failed",
+  }),
+);
 
 // D3 finalize
-transitions.push(delegate({
-  id: "d3.finalize",
-  description: "Integrate and finalize all handoffs",
-  difficulty: ["D3"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["tests-ready"],
-  role: "finalizer",
-  purpose: "finalize",
-  category: REQUIRED,
-  outputSchemaId: "finalizer-handoff",
-  onAccepted: "final-review-ready",
-  onRejected: "failed",
-}));
+transitions.push(
+  delegate({
+    id: "d3.finalize",
+    description: "Integrate and finalize all handoffs",
+    difficulty: ["D3"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["tests-ready"],
+    role: "finalizer",
+    purpose: "finalize",
+    category: REQUIRED,
+    outputSchemaId: "finalizer-handoff",
+    onAccepted: "final-review-ready",
+    onRejected: "failed",
+  }),
+);
 
 // D3 final-review (required critic gate)
-transitions.push(delegate({
-  id: "d3.final-review",
-  description: "Final consistency review",
-  difficulty: ["D3"],
-  scope: ROOT,
-  actorRoles: COORDINATOR,
-  from: ["final-review-ready"],
-  role: "critic",
-  purpose: "review-final",
-  category: REQUIRED,
-  outputSchemaId: "critic-handoff",
-  onAccepted: "completed",
-  onRejected: "failed",
-  maxExecutions: 1,
-}));
+transitions.push(
+  delegate({
+    id: "d3.final-review",
+    description: "Final consistency review",
+    difficulty: ["D3"],
+    scope: ROOT,
+    actorRoles: COORDINATOR,
+    from: ["final-review-ready"],
+    role: "critic",
+    purpose: "review-final",
+    category: REQUIRED,
+    outputSchemaId: "critic-handoff",
+    onAccepted: "completed",
+    onRejected: "failed",
+    maxExecutions: 1,
+  }),
+);
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Child-local nested transitions
@@ -607,50 +654,155 @@ function nestedDelegate(args: {
   readonly description: string;
   readonly outputSchemaId: WorkflowOutputSchemaId;
 }): void {
-  transitions.push(delegate({
-    ...args,
-    difficulty: ALL_DIFF,
-    scope: CHILD,
-    from: [args.from],
-    category: OPTIONAL,
-    onAccepted: args.from,
-    onRejected: args.from,
-    allowedModes: ["await"],
-  }));
+  transitions.push(
+    delegate({
+      ...args,
+      difficulty: ALL_DIFF,
+      scope: CHILD,
+      from: [args.from],
+      category: OPTIONAL,
+      onAccepted: args.from,
+      onRejected: args.from,
+      allowedModes: ["await"],
+    }),
+  );
 }
 
 // Planner nested children
-nestedDelegate({ id: "planner.request-scout", actorRoles: PLANNER, from: "planning", role: "scout", purpose: "nested-evidence", description: "Planner requests scout for evidence", outputSchemaId: "scout-handoff" });
-nestedDelegate({ id: "planner.request-architect", actorRoles: PLANNER, from: "planning", role: "architect", purpose: "nested-review", description: "Planner requests architecture review", outputSchemaId: "architecture-handoff" });
-nestedDelegate({ id: "planner.request-critic", actorRoles: PLANNER, from: "planning", role: "critic", purpose: "nested-review", description: "Planner requests critic review", outputSchemaId: "critic-handoff" });
+nestedDelegate({
+  id: "planner.request-scout",
+  actorRoles: PLANNER,
+  from: "planning",
+  role: "scout",
+  purpose: "nested-evidence",
+  description: "Planner requests scout for evidence",
+  outputSchemaId: "scout-handoff",
+});
+nestedDelegate({
+  id: "planner.request-architect",
+  actorRoles: PLANNER,
+  from: "planning",
+  role: "architect",
+  purpose: "nested-review",
+  description: "Planner requests architecture review",
+  outputSchemaId: "architecture-handoff",
+});
+nestedDelegate({
+  id: "planner.request-critic",
+  actorRoles: PLANNER,
+  from: "planning",
+  role: "critic",
+  purpose: "nested-review",
+  description: "Planner requests critic review",
+  outputSchemaId: "critic-handoff",
+});
 
 // Architect nested children
-nestedDelegate({ id: "architect.request-scout", actorRoles: ARCHITECT, from: "designing", role: "scout", purpose: "nested-evidence", description: "Architect requests scout for evidence", outputSchemaId: "scout-handoff" });
-nestedDelegate({ id: "architect.request-critic", actorRoles: ARCHITECT, from: "designing", role: "critic", purpose: "nested-review", description: "Architect requests critic review", outputSchemaId: "critic-handoff" });
+nestedDelegate({
+  id: "architect.request-scout",
+  actorRoles: ARCHITECT,
+  from: "designing",
+  role: "scout",
+  purpose: "nested-evidence",
+  description: "Architect requests scout for evidence",
+  outputSchemaId: "scout-handoff",
+});
+nestedDelegate({
+  id: "architect.request-critic",
+  actorRoles: ARCHITECT,
+  from: "designing",
+  role: "critic",
+  purpose: "nested-review",
+  description: "Architect requests critic review",
+  outputSchemaId: "critic-handoff",
+});
 
 // Implementer nested children
-nestedDelegate({ id: "implementer.request-scout", actorRoles: IMPLEMENTER, from: "implementing", role: "scout", purpose: "nested-evidence", description: "Implementer requests scout for evidence", outputSchemaId: "scout-handoff" });
-nestedDelegate({ id: "implementer.request-tester", actorRoles: IMPLEMENTER, from: "implementing", role: "tester", purpose: "nested-testing", description: "Implementer requests tester", outputSchemaId: "test-handoff" });
-nestedDelegate({ id: "implementer.request-critic", actorRoles: IMPLEMENTER, from: "implementing", role: "critic", purpose: "nested-review", description: "Implementer requests critic review", outputSchemaId: "critic-handoff" });
+nestedDelegate({
+  id: "implementer.request-scout",
+  actorRoles: IMPLEMENTER,
+  from: "implementing",
+  role: "scout",
+  purpose: "nested-evidence",
+  description: "Implementer requests scout for evidence",
+  outputSchemaId: "scout-handoff",
+});
+nestedDelegate({
+  id: "implementer.request-tester",
+  actorRoles: IMPLEMENTER,
+  from: "implementing",
+  role: "tester",
+  purpose: "nested-testing",
+  description: "Implementer requests tester",
+  outputSchemaId: "test-handoff",
+});
+nestedDelegate({
+  id: "implementer.request-critic",
+  actorRoles: IMPLEMENTER,
+  from: "implementing",
+  role: "critic",
+  purpose: "nested-review",
+  description: "Implementer requests critic review",
+  outputSchemaId: "critic-handoff",
+});
 
 // Tester nested children
-nestedDelegate({ id: "tester.request-scout", actorRoles: TESTER, from: "testing", role: "scout", purpose: "nested-evidence", description: "Tester requests scout for evidence", outputSchemaId: "scout-handoff" });
+nestedDelegate({
+  id: "tester.request-scout",
+  actorRoles: TESTER,
+  from: "testing",
+  role: "scout",
+  purpose: "nested-evidence",
+  description: "Tester requests scout for evidence",
+  outputSchemaId: "scout-handoff",
+});
 
 // Critic nested children
-nestedDelegate({ id: "critic.request-scout", actorRoles: CRITIC, from: "reviewing", role: "scout", purpose: "nested-evidence", description: "Critic requests scout for evidence", outputSchemaId: "scout-handoff" });
-nestedDelegate({ id: "critic.request-tester", actorRoles: CRITIC, from: "reviewing", role: "tester", purpose: "nested-testing", description: "Critic requests tester", outputSchemaId: "test-handoff" });
+nestedDelegate({
+  id: "critic.request-scout",
+  actorRoles: CRITIC,
+  from: "reviewing",
+  role: "scout",
+  purpose: "nested-evidence",
+  description: "Critic requests scout for evidence",
+  outputSchemaId: "scout-handoff",
+});
+nestedDelegate({
+  id: "critic.request-tester",
+  actorRoles: CRITIC,
+  from: "reviewing",
+  role: "tester",
+  purpose: "nested-testing",
+  description: "Critic requests tester",
+  outputSchemaId: "test-handoff",
+});
 
 // Finalizer nested children
-nestedDelegate({ id: "finalizer.request-critic", actorRoles: FINALIZER, from: "finalizing", role: "critic", purpose: "nested-review", description: "Finalizer requests critic review", outputSchemaId: "critic-handoff" });
+nestedDelegate({
+  id: "finalizer.request-critic",
+  actorRoles: FINALIZER,
+  from: "finalizing",
+  role: "critic",
+  purpose: "nested-review",
+  description: "Finalizer requests critic review",
+  outputSchemaId: "critic-handoff",
+});
 
 // Scout nested children
-nestedDelegate({ id: "scout.request-scout", actorRoles: SCOUT, from: "scouting", role: "scout", purpose: "nested-evidence", description: "Scout requests nested scout", outputSchemaId: "scout-handoff" });
+nestedDelegate({
+  id: "scout.request-scout",
+  actorRoles: SCOUT,
+  from: "scouting",
+  role: "scout",
+  purpose: "nested-evidence",
+  description: "Scout requests nested scout",
+  outputSchemaId: "scout-handoff",
+});
 
 // ── Definition ──────────────────────────────────────────────────────────────
 
 export const PHENIX_DEFAULT_WORKFLOW: WorkflowDefinition = {
   id: "phenix-default",
-  version: 1,
   initialState: "classified",
   transitions,
 };

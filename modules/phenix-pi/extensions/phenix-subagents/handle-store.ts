@@ -11,7 +11,6 @@ import {
   timestamp,
 } from "../phenix-persistence/json-files.ts";
 import type { HandleRecord, HandleStatus, ProducerCycleRecord } from "./handle-types.ts";
-import { HANDLE_VERSION } from "./handle-types.ts";
 
 const HANDLE_STATUSES: ReadonlySet<string> = new Set<HandleStatus>([
   "starting",
@@ -30,7 +29,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
 export function decodeHandleRecord(value: unknown): HandleRecord {
   if (
     !isObject(value) ||
-    value.version !== HANDLE_VERSION ||
     typeof value.id !== "string" ||
     typeof value.sessionId !== "string" ||
     typeof value.modelSet !== "string" ||
@@ -42,7 +40,7 @@ export function decodeHandleRecord(value: unknown): HandleRecord {
     !isObject(value.assignment) ||
     !isObject(value.producerSpec)
   ) {
-    throw new Error("Persisted handle record is malformed or uses an unsupported version.");
+    throw new Error("Persisted handle record is malformed.");
   }
 
   return value as unknown as HandleRecord;
@@ -106,4 +104,3 @@ export function effectiveSessionId(ctx: ExtensionContext): string {
 }
 
 export type { HandleRecord, ProducerCycleRecord };
-export { HANDLE_VERSION };
