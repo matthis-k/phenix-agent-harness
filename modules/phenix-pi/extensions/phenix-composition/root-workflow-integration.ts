@@ -204,7 +204,7 @@ export default async function rootWorkflowIntegration(pi: ExtensionAPI): Promise
     workflowGuidance +=
       "The deterministic Phenix workflow owns role selection, output schemas, models, tools, and delegation depth. ";
     workflowGuidance +=
-      "Use the single phenix_workflow interface: action=inspect returns current authority, and action=delegate follows one returned actor-scoped agent action.\n\n";
+      "Use phenix_workflow with action=inspect to obtain the current nodeId and legal edgeIds, then action=take with that node and one edge.\n\n";
     workflowGuidance += workflowProjection
       ? formatWorkflowProjection(workflowProjection)
       : "Workflow state not yet initialized. Start by classifying the task.\n";
