@@ -24,6 +24,10 @@ describe("Phenix root prompt bootstrap", () => {
     assert.match(bootstrapped, /one advertised target `agent`/);
     assert.match(bootstrapped, /unique\s+legal transition/i);
     assert.match(bootstrapped, /action: "spawn"/);
+    assert.match(bootstrapped, /substantial intermediate context/i);
+    assert.match(bootstrapped, /not needed for your remaining work/i);
+    assert.match(bootstrapped, /read the files required for your own task/i);
+    assert.match(bootstrapped, /work\s+you would need to repeat/i);
     assert.doesNotMatch(bootstrapped, /edgeId/);
     assert.doesNotMatch(bootstrapped, /phenix_create_subagent/);
 
@@ -44,6 +48,9 @@ describe("Phenix root prompt bootstrap", () => {
     assert.match(phenix ?? "", /## Phenix coding substrate/);
     assert.match(phenix ?? "", /target agents available from the current node/i);
     assert.match(phenix ?? "", /phenix_workflow/);
+    assert.match(phenix ?? "", /broad repository reconnaissance/i);
+    assert.match(phenix ?? "", /mechanical execution of an already-settled plan/i);
+    assert.match(phenix ?? "", /decision-critical source inspection/i);
     assert.equal(external, undefined);
   });
 });
