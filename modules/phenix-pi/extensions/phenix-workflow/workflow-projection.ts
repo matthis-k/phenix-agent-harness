@@ -1,10 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Difficulty } from "../phenix-kernel/task.ts";
 import { resolveDelegationOptions } from "./delegation-options.ts";
-import {
-  delegateTransitionById,
-  targetAgentForTransition,
-} from "./workflow-target-agents.ts";
+import { delegateTransitionById, targetAgentForTransition } from "./workflow-target-agents.ts";
 import type {
   DelegationAuthority,
   DelegationOption,
@@ -49,7 +46,9 @@ export function projectDelegationOptions(
   return options.map((option) => {
     const transition = delegateTransitionById(definition, option.transitionId);
     if (!transition) {
-      throw new Error(`Workflow transition "${option.transitionId}" is missing or is not a delegate transition`);
+      throw new Error(
+        `Workflow transition "${option.transitionId}" is missing or is not a delegate transition`,
+      );
     }
 
     return {
