@@ -78,10 +78,7 @@ export function buildWorkflowDecisionContext(input: {
   readonly authority: DelegationAuthority;
   readonly activeHandles: readonly WorkflowHandleRecord[];
 }): WorkflowDecisionContext {
-  const options = projectDelegationOptions(
-    input.runtime.state,
-    resolveDelegationOptions(input),
-  );
+  const options = projectDelegationOptions(input.runtime.state, resolveDelegationOptions(input));
   return {
     difficulty: input.runtime.difficulty,
     currentState: input.runtime.state,
