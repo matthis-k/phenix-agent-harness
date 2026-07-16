@@ -3,10 +3,11 @@ import { describe, it } from "node:test";
 
 import {
   bootstrapPhenixSubagentsSkillPrompt,
+  buildPhenixRootSystemPrompt,
   shouldBootstrapPhenixSubagentsSkill,
 } from "../extensions/phenix-skill-bootstrap.ts";
 
-describe("Phenix subagents skill bootstrap", () => {
+describe("Phenix root prompt bootstrap", () => {
   it("is enabled only for phenix provider models", () => {
     assert.equal(shouldBootstrapPhenixSubagentsSkill({ provider: "phenix" }), true);
     assert.equal(shouldBootstrapPhenixSubagentsSkill({ provider: "openai-codex" }), false);
@@ -25,5 +26,20 @@ describe("Phenix subagents skill bootstrap", () => {
 
     const again = bootstrapPhenixSubagentsSkillPrompt(bootstrapped);
     assert.equal(again, bootstrapped);
+  });
+
+  it("contributes the complete substrate only to Phenix root models", () => {
+    const phenix = buildPhenixRootSystemPrompt({
+      model: { provider: "phenix" },
+      systemPrompt: "base prompt",
+    });
+    const external = buildPhenixRootSystemPrompt({
+      model: { provider: "openai-codex" },
+      systemPrompt: "base prompt",
+    });
+
+    assert.match(phenix ?? "", /## Phenix coding substrate/);
+    assert.match(phenix ?? "", /phenix_workflow/);
+    assert.equal(external, undefined);
   });
 });
