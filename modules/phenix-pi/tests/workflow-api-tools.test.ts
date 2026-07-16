@@ -6,9 +6,12 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   createWorkflowApiTools,
   createWorkflowTool,
-  type WorkflowApiPort,
-  type WorkflowAuthoritySnapshot,
 } from "../extensions/phenix-runtime/workflow-api-tools.ts";
+import type {
+  WorkflowAuthoritySnapshot,
+  WorkflowEdgeExecutionResult,
+  WorkflowRuntimePort,
+} from "../extensions/phenix-runtime/workflow-runtime-types.ts";
 
 const AUTHORITY_DIGEST = "a".repeat(64);
 const ctx = { cwd: "/tmp/workflow-api" } as ExtensionContext;
@@ -48,22 +51,28 @@ function snapshot(): WorkflowAuthoritySnapshot {
   };
 }
 
-class RecordingWorkflow implements WorkflowApiPort {
-  readonly delegateCalls: Parameters<WorkflowApiPort["delegate"]>[0][] = [];
+class RecordingWorkflow implements WorkflowRuntimePort {
+  readonly takeEdgeCalls: Parameters<WorkflowRuntimePort["takeEdge"]>[0][] = [];
   inspectCalls = 0;
   authority = snapshot();
+  execution: WorkflowEdgeExecutionResult = {
+    ok: true,
+    edge: {
+      edgeId: "planner.request-scout",
+      fromNodeId: "planning",
+      toNodeId: "planning",
+    },
+    record: { id: "handle-1", status: "running" },
+  };
 
   inspect(): WorkflowAuthoritySnapshot {
     this.inspectCalls += 1;
     return this.authority;
   }
 
-  delegate(input: Parameters<WorkflowApiPort["delegate"]>[0]) {
-    this.delegateCalls.push(input);
-    return Promise.resolve({
-      ok: true as const,
-      record: { id: "handle-1", status: "running" },
-    });
+  takeEdge(input: Parameters<WorkflowRuntimePort["takeEdge"]>[0]) {
+    this.takeEdgeCalls.push(input);
+    return Promise.resolve(this.execution);
   }
 }
 
@@ -112,12 +121,11 @@ describe("contract-bound workflow graph tool", () => {
     assert.doesNotMatch(JSON.stringify(response.details), /optionsDigest|transitionId/);
   });
 
-  it("installs one stable workflow tool regardless of outgoing edges", () => {
+  it("installs one stable workflow tool", () => {
     const workflow = new RecordingWorkflow();
-    assert.deepEqual(
-      createWorkflowApiTools({ workflow, allowCreate: false }).map((tool) => tool.name),
-      ["phenix_workflow"],
-    );
+    assert.deepEqual(createWorkflowApiTools({ workflow }).map((tool) => tool.name), [
+      "phenix_workflow",
+    ]);
   });
 
   it("applies root-scope authorization before inspection", async () => {
@@ -136,26 +144,35 @@ describe("contract-bound workflow graph tool", () => {
     });
   });
 
-  it("takes a spawn edge and binds fresh internal authority", async () => {
+  it("maps a spawn edge call onto the workflow runtime port", async () => {
     const workflow = new RecordingWorkflow();
     const tool = createWorkflowTool({ workflow });
+    const signal = new AbortController().signal;
 
-    const response = await execute(tool, {
-      action: "take",
-      nodeId: "planning",
+    const response = await execute(
+      tool,
+      {
+        action: "take",
+        nodeId: "planning",
+        edgeId: "planner.request-scout",
+        spawn: {
+          task: "Inspect the workflow API boundary.",
+          requirements: ["Return concrete evidence."],
+        },
+      },
+      signal,
+    );
+
+    assert.deepEqual(workflow.takeEdgeCalls[0], {
+      expectedNodeId: "planning",
       edgeId: "planner.request-scout",
-      spawn: {
+      input: {
+        kind: "spawn",
         task: "Inspect the workflow API boundary.",
         requirements: ["Return concrete evidence."],
       },
-    });
-
-    assert.deepEqual(workflow.delegateCalls[0]?.params, {
-      transitionId: "planner.request-scout",
-      task: "Inspect the workflow API boundary.",
-      requirements: ["Return concrete evidence."],
-      workflowRevision: 7,
-      authorityDigest: AUTHORITY_DIGEST,
+      signal,
+      ctx,
     });
     assert.deepEqual(response.details, {
       edgeId: "planner.request-scout",
@@ -168,8 +185,16 @@ describe("contract-bound workflow graph tool", () => {
     });
   });
 
-  it("rejects a stale node before resolving the edge", async () => {
+  it("propagates deterministic workflow-runtime failures", async () => {
     const workflow = new RecordingWorkflow();
+    workflow.execution = {
+      ok: false,
+      message: "The expected node is stale.",
+      details: {
+        code: "WORKFLOW_NODE_STALE",
+        currentNodeId: "planning",
+      },
+    };
     const tool = createWorkflowTool({ workflow });
 
     const response = await execute(tool, {
@@ -179,23 +204,8 @@ describe("contract-bound workflow graph tool", () => {
       spawn: { task: "Inspect something." },
     });
 
-    assert.equal(workflow.delegateCalls.length, 0);
+    assert.equal(workflow.takeEdgeCalls.length, 1);
     assert.equal(response.details?.code, "WORKFLOW_NODE_STALE");
     assert.equal(response.details?.currentNodeId, "planning");
-  });
-
-  it("rejects an unavailable edge without delegating", async () => {
-    const workflow = new RecordingWorkflow();
-    const tool = createWorkflowTool({ workflow });
-
-    const response = await execute(tool, {
-      action: "take",
-      nodeId: "planning",
-      edgeId: "planner.request-implementer",
-      spawn: { task: "Do something outside current authority." },
-    });
-
-    assert.equal(workflow.delegateCalls.length, 0);
-    assert.equal(response.details?.code, "WORKFLOW_EDGE_NOT_AVAILABLE");
   });
 });
