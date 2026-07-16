@@ -10,10 +10,7 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 import type { ModelWorkflowProjection } from "../phenix-workflow/workflow-projection.ts";
-import {
-  WorkflowActionParams,
-  type WorkflowTakeEdgeActionType,
-} from "./workflow-action-schema.ts";
+import { WorkflowActionParams, type WorkflowTakeEdgeActionType } from "./workflow-action-schema.ts";
 import type { ParentExecutionContext } from "./workflow-api-types.ts";
 
 export const PHENIX_WORKFLOW_TOOL = "phenix_workflow" as const;
@@ -58,7 +55,7 @@ export type WorkflowApiExecutionResult =
 export interface WorkflowDelegationExecutionParams {
   readonly transitionId: string;
   readonly task: string;
-  readonly requirements?: readonly string[];
+  readonly requirements?: string[];
   readonly mode?: "await" | "background";
   readonly workflowRevision: number;
   readonly authorityDigest: string;
@@ -150,7 +147,9 @@ export function projectWorkflowInspection(
   };
 }
 
-function availableEdgeDetails(snapshot: WorkflowAuthoritySnapshot): readonly Record<string, unknown>[] {
+function availableEdgeDetails(
+  snapshot: WorkflowAuthoritySnapshot,
+): readonly Record<string, unknown>[] {
   return snapshot.workflow.options.map((option) => ({
     edgeId: option.edgeId,
     kind: "spawn",
