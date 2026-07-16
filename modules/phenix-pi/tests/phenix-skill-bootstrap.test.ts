@@ -22,7 +22,7 @@ describe("Phenix root prompt bootstrap", () => {
     assert.match(bootstrapped, /Phenix workflow nodes, legal transitions/);
     assert.match(bootstrapped, /mandatory initial\s+authority inspection/i);
     assert.match(bootstrapped, /one advertised target `agent`/);
-    assert.match(bootstrapped, /unique legal transition/i);
+    assert.match(bootstrapped, /unique\s+legal transition/i);
     assert.match(bootstrapped, /action: "spawn"/);
     assert.doesNotMatch(bootstrapped, /edgeId/);
     assert.doesNotMatch(bootstrapped, /phenix_create_subagent/);
