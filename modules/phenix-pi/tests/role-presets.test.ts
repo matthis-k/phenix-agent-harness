@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { rolePreset } from "../extensions/phenix-subagents/role-presets.ts";
 import type { AgentKind } from "../extensions/phenix-subagents/policy.ts";
+import { rolePreset } from "../extensions/phenix-subagents/role-presets.ts";
 
 describe("Role presets", () => {
   it("scout has read-only tools", () => {
@@ -23,8 +23,13 @@ describe("Role presets", () => {
 
   it("all roles have agentName starting with phenix.", () => {
     const roles: AgentKind[] = [
-      "scout", "planner", "architect", "implementer",
-      "tester", "critic", "finalizer",
+      "scout",
+      "planner",
+      "architect",
+      "implementer",
+      "tester",
+      "critic",
+      "finalizer",
     ];
     for (const role of roles) {
       const preset = rolePreset(role);
@@ -43,8 +48,13 @@ describe("Role presets", () => {
 
   it("all presets have thinking levels for all tiers", () => {
     const roles: AgentKind[] = [
-      "scout", "planner", "architect", "implementer",
-      "tester", "critic", "finalizer",
+      "scout",
+      "planner",
+      "architect",
+      "implementer",
+      "tester",
+      "critic",
+      "finalizer",
     ];
     for (const role of roles) {
       const preset = rolePreset(role);
@@ -94,7 +104,6 @@ describe("Role presets", () => {
     assert.equal(rolePreset("critic").criticRequired, false);
     assert.equal(rolePreset("finalizer").criticRequired, false);
   });
-
 
   it("common read tools do not include phenix_complete", () => {
     const preset = rolePreset("scout");
