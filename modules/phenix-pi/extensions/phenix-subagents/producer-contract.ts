@@ -10,9 +10,7 @@ import type { ResolvedToolConfiguration } from "./tool-policy.ts";
 
 const RETIRED_CREATION_TOOL = "phenix_create_subagent";
 
-function contractToolConfiguration(
-  tools: ResolvedToolConfiguration,
-): ResolvedToolConfiguration {
+function contractToolConfiguration(tools: ResolvedToolConfiguration): ResolvedToolConfiguration {
   if (!tools.effective.includes(RETIRED_CREATION_TOOL)) return tools;
 
   return {
