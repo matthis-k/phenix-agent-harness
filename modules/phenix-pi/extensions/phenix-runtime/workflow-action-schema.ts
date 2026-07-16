@@ -7,7 +7,8 @@ const WorkflowSpawnAction = Type.Object(
     }),
     agent: Type.String({
       minLength: 1,
-      description: "A target agent identity advertised in the authority snapshot injected at session start.",
+      description:
+        "A target agent identity advertised in the authority snapshot injected at session start.",
     }),
     task: Type.String({
       minLength: 1,
