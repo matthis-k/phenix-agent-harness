@@ -18,14 +18,30 @@ jobs:
       - name: Collect version references
         shell: bash
         run: |
-          set +e
-          rg -n --hidden \
-            --glob '!modules/pi-npm/package-lock.json' \
-            --glob '!flake.lock' \
-            'PHENIX_API_VERSION|schemaVersion|definitionVersion|presetRevision|HANDLE_VERSION|CONTRACT_SCHEMA_VERSION|CONTRACT_RESULT_SCHEMA_VERSION|readonly version:|version: PHENIX_API_VERSION|version: [0-9]+' \
-            modules/phenix-pi > version-references.txt 2>&1
-          cat version-references.txt
-          exit 0
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('modules/phenix-pi')
+          pattern = re.compile(
+              r'PHENIX_API_VERSION|schemaVersion|definitionVersion|presetRevision|'
+              r'HANDLE_VERSION|CONTRACT_SCHEMA_VERSION|CONTRACT_RESULT_SCHEMA_VERSION|'
+              r'readonly version:|version:\s*(?:PHENIX_API_VERSION|[0-9]+)'
+          )
+          results = []
+          for path in sorted(root.rglob('*')):
+              if not path.is_file() or path.name == 'package-lock.json':
+                  continue
+              try:
+                  lines = path.read_text().splitlines()
+              except UnicodeDecodeError:
+                  continue
+              for number, line in enumerate(lines, 1):
+                  if pattern.search(line):
+                      results.append(f'{path}:{number}:{line}')
+          Path('version-references.txt').write_text('\n'.join(results) + ('\n' if results else ''))
+          print('\n'.join(results))
+          PY
       - uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097
         with:
           name: version-references
