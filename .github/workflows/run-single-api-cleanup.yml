@@ -40,6 +40,10 @@ jobs:
               "replace(p, 'definitionVersion: 1,', 'definitionVersion: PHENIX_API_VERSION,', expected=2)",
               1,
           )
+          body = body.replace(
+              "replace(p, 'RETIRED_DELEGATION_TOOLS.has(tool)', 'UNMANAGED_DELEGATION_TOOLS.has(tool)', expected=2)",
+              "replace(p, 'RETIRED_DELEGATION_TOOLS.has(tool)', 'UNMANAGED_DELEGATION_TOOLS.has(tool)')",
+          )
           exec(compile(body, 'staged-single-api-cleanup.py', 'exec'))
 
           codec_path = Path('modules/phenix-pi/extensions/phenix-subagents/contract-codec.ts')
@@ -63,6 +67,13 @@ jobs:
               'import { PHENIX_API_VERSION } from "../phenix-kernel/api-version.ts";\n' + old_import,
           )
           definitions_path.write_text(definitions)
+
+          factory_path = Path('modules/phenix-pi/extensions/phenix-runtime/workflow-session-factory.ts')
+          factory = factory_path.read_text()
+          old_filter = 'RETIRED_DELEGATION_TOOLS.has(tool.name)'
+          if factory.count(old_filter) != 1:
+              raise RuntimeError('custom tool delegation filter was not unique')
+          factory_path.write_text(factory.replace(old_filter, 'UNMANAGED_DELEGATION_TOOLS.has(tool.name)'))
           PY
           status=$?
           cat cleanup-error.log
