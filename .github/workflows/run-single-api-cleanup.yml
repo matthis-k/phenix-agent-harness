@@ -24,12 +24,28 @@ jobs:
           set +e
           python3 > cleanup-error.log 2>&1 <<'PY'
           from pathlib import Path
+          import re
 
           workflow = Path('.github/workflows/apply-single-api-cleanup.yml').read_text()
           marker = "          python3 <<'PY'\n"
           body = workflow.split(marker, 1)[1].split("\n          PY", 1)[0]
           body = "\n".join(line[10:] if line.startswith("          ") else line for line in body.splitlines())
+          body = "\n".join(
+              line for line in body.splitlines()
+              if "Expected ${CONTRACT_SCHEMA_VERSION}" not in line
+          )
           exec(compile(body, 'staged-single-api-cleanup.py', 'exec'))
+
+          codec_path = Path('modules/phenix-pi/extensions/phenix-subagents/contract-codec.ts')
+          codec = codec_path.read_text()
+          codec, count = re.subn(
+              r'`Expected \$\{CONTRACT_SCHEMA_VERSION\}\. This runtime does not support migration\. ` \+\n\s*`Delete \.phenix-agent-state if it contains stale development artifacts\.`,',
+              '`Expected ${PHENIX_API_VERSION}. Remove stale .phenix-agent-state artifacts before retrying.`,',
+              codec,
+          )
+          if count != 1:
+              raise RuntimeError(f'contract codec version message matches={count}')
+          codec_path.write_text(codec)
           PY
           status=$?
           cat cleanup-error.log
