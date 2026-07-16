@@ -36,9 +36,9 @@ describe("workflow authority prompt projection", () => {
     assert.match(prompt, /Kind: spawn/);
     assert.match(prompt, /one advertised edgeId/i);
     assert.match(prompt, /runtime derives the current node/i);
+    assert.match(prompt, /never send a node ID back to the runtime/i);
     assert.doesNotMatch(prompt, /action=inspect/);
     assert.doesNotMatch(prompt, /action=take/);
-    assert.doesNotMatch(prompt, /send a node ID/i);
     assert.doesNotMatch(prompt, /phenix_create_subagent/);
     assert.doesNotMatch(prompt, /Authority digest:/);
   });
