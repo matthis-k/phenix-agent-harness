@@ -34,6 +34,11 @@ jobs:
               line for line in body.splitlines()
               if "Expected ${CONTRACT_SCHEMA_VERSION}" not in line
           )
+          body = body.replace(
+              "replace(p, 'definitionVersion: 1,', 'definitionVersion: PHENIX_API_VERSION,')",
+              "replace(p, 'definitionVersion: 1,', 'definitionVersion: PHENIX_API_VERSION,', expected=2)",
+              1,
+          )
           exec(compile(body, 'staged-single-api-cleanup.py', 'exec'))
 
           codec_path = Path('modules/phenix-pi/extensions/phenix-subagents/contract-codec.ts')
