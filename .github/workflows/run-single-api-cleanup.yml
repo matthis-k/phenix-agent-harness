@@ -33,6 +33,7 @@ jobs:
           body = "\n".join(
               line for line in body.splitlines()
               if "Expected ${CONTRACT_SCHEMA_VERSION}" not in line
+              and "contractDefinitionRef" not in line
           )
           body = body.replace(
               "replace(p, 'definitionVersion: 1,', 'definitionVersion: PHENIX_API_VERSION,')",
@@ -51,6 +52,17 @@ jobs:
           if count != 1:
               raise RuntimeError(f'contract codec version message matches={count}')
           codec_path.write_text(codec)
+
+          definitions_path = Path('modules/phenix-pi/extensions/phenix-workflow/workflow-definitions.ts')
+          definitions = definitions_path.read_text()
+          old_import = 'import { agentClientRef, contractRef } from "../phenix-kernel/refs.ts";\n'
+          if definitions.count(old_import) != 1:
+              raise RuntimeError('workflow definition refs import was not unique')
+          definitions = definitions.replace(
+              old_import,
+              'import { PHENIX_API_VERSION } from "../phenix-kernel/api-version.ts";\n' + old_import,
+          )
+          definitions_path.write_text(definitions)
           PY
           status=$?
           cat cleanup-error.log
