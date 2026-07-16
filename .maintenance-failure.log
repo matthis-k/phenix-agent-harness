@@ -1,0 +1,300 @@
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:792:9:
+          791|       declsByName = zipAttrs (
+          792|         map (
+             |         ^
+          793|           module:
+
+       … from call site
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:274:37:
+          273|
+          274|       merged = mergeModules prefix (reverseList (doCollect { }).modules);
+             |                                     ^
+          275|
+
+       … while calling 'reverseList'
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/lists.nix:1126:5:
+         1125|   reverseList =
+         1126|     xs:
+             |     ^
+         1127|     let
+
+       … while calling the 'genList' builtin
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/lists.nix:1131:5:
+         1130|     in
+         1131|     genList (n: elemAt xs (lastIndex - n)) (lastIndex + 1);
+             |     ^
+         1132|
+
+       … while evaluating the second argument passed to builtins.genList
+
+       … while calling the 'sub' builtin
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/lists.nix:1129:29:
+         1128|       # subtract one to save an __sub call on every element
+         1129|       lastIndex = length xs - 1;
+             |                             ^
+         1130|     in
+
+       … while calling the 'length' builtin
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/lists.nix:1129:19:
+         1128|       # subtract one to save an __sub call on every element
+         1129|       lastIndex = length xs - 1;
+             |                   ^
+         1130|     in
+
+       … while evaluating the attribute 'modules'
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:590:7:
+          589|     modulesPath: initialModules: args: {
+          590|       modules = filterModules modulesPath (collectStructuredModules unknownModule "" initialModules args);
+             |       ^
+          591|       # Intentionally not shared with `modules` above: this allows
+
+       … from call site
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:590:17:
+          589|     modulesPath: initialModules: args: {
+          590|       modules = filterModules modulesPath (collectStructuredModules unknownModule "" initialModules args);
+             |                 ^
+          591|       # Intentionally not shared with `modules` above: this allows
+
+       … while calling 'filterModules'
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:565:9:
+          564|         modulesPath:
+          565|         { disabled, modules }:
+             |         ^
+          566|         let
+
+       … while calling the 'map' builtin
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:569:9:
+          568|         in
+          569|         map (attrs: attrs.module) (genericClosure {
+             |         ^
+          570|           startSet = keyFilter modules;
+
+       … while calling the 'genericClosure' builtin
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:569:36:
+          568|         in
+          569|         map (attrs: attrs.module) (genericClosure {
+             |                                    ^
+          570|           startSet = keyFilter modules;
+
+       … while calling the 'filter' builtin
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:570:22:
+          569|         map (attrs: attrs.module) (genericClosure {
+          570|           startSet = keyFilter modules;
+             |                      ^
+          571|           operator = attrs: keyFilter attrs.modules;
+
+       … while calling anonymous lambda
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:567:31:
+          566|         let
+          567|           keyFilter = filter (attrs: !isDisabled modulesPath disabled attrs);
+             |                               ^
+          568|         in
+
+       … in the argument of the not operator
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:567:39:
+          566|         let
+          567|           keyFilter = filter (attrs: !isDisabled modulesPath disabled attrs);
+             |                                       ^
+          568|         in
+
+       … from call site
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:567:39:
+          566|         let
+          567|           keyFilter = filter (attrs: !isDisabled modulesPath disabled attrs);
+             |                                       ^
+          568|         in
+
+       … while calling anonymous lambda
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:496:9:
+          495|         in
+          496|         structuredModule: elem structuredModule.key disabledKeys;
+             |         ^
+          497|
+
+       … while calling the 'elem' builtin
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:496:27:
+          495|         in
+          496|         structuredModule: elem structuredModule.key disabledKeys;
+             |                           ^
+          497|
+
+       … while calling the 'concatMap' builtin
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:494:26:
+          493|
+          494|           disabledKeys = concatMap ({ file, disabled }: map (moduleKey file) disabled) disabledList;
+             |                          ^
+          495|         in
+
+       … while calling the 'concatLists' builtin
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:526:24:
+          525|           collectResults = modules: {
+          526|             disabled = concatLists (catAttrs "disabled" modules);
+             |                        ^
+          527|             inherit modules;
+
+       … while evaluating the attribute 'disabled'
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:526:13:
+          525|           collectResults = modules: {
+          526|             disabled = concatLists (catAttrs "disabled" modules);
+             |             ^
+          527|             inherit modules;
+
+       … while calling the 'concatLists' builtin
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:526:24:
+          525|           collectResults = modules: {
+          526|             disabled = concatLists (catAttrs "disabled" modules);
+             |                        ^
+          527|             inherit modules;
+
+       … while evaluating the attribute 'disabled'
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:526:13:
+          525|           collectResults = modules: {
+          526|             disabled = concatLists (catAttrs "disabled" modules);
+             |             ^
+          527|             inherit modules;
+
+       … while calling the 'concatLists' builtin
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:526:24:
+          525|           collectResults = modules: {
+          526|             disabled = concatLists (catAttrs "disabled" modules);
+             |                        ^
+          527|             inherit modules;
+
+       … while evaluating a branch condition
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:544:19:
+          543|                 (
+          544|                   if module.disabledModules != [ ] then
+             |                   ^
+          545|                     [
+
+       … from call site
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:535:24:
+          534|             let
+          535|               module = checkModule (loadModule args parentFile "${parentKey}:anon-${toString n}" x);
+             |                        ^
+          536|               collectedImports = collectStructuredModules module._file module.key module.imports args;
+
+       … while calling anonymous lambda
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:454:11:
+          453|         if class != null then
+          454|           m:
+             |           ^
+          455|           if m._class == null || m._class == class then
+
+       … while evaluating a branch condition
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:455:11:
+          454|           m:
+          455|           if m._class == null || m._class == class then
+             |           ^
+          456|             m
+
+       … in the left operand of the OR (||) operator
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:455:31:
+          454|           m:
+          455|           if m._class == null || m._class == class then
+             |                               ^
+          456|             m
+
+       … from call site
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:535:37:
+          534|             let
+          535|               module = checkModule (loadModule args parentFile "${parentKey}:anon-${toString n}" x);
+             |                                     ^
+          536|               collectedImports = collectStructuredModules module._file module.key module.imports args;
+
+       … while calling 'loadModule'
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:419:42:
+          418|       loadModule =
+          419|         args: fallbackFile: fallbackKey: m:
+             |                                          ^
+          420|         if isFunction m then
+
+       … from call site
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:448:11:
+          447|         else
+          448|           unifyModuleSyntax (toString m) (toString m) (
+             |           ^
+          449|             applyModuleArgsIfFunction (toString m) (import m) args
+
+       … while calling 'unifyModuleSyntax'
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:634:16:
+          633|   unifyModuleSyntax =
+          634|     file: key: m:
+             |                ^
+          635|     let
+
+       … while evaluating a branch condition
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:655:5:
+          654|     in
+          655|     if m ? config || m ? options then
+             |     ^
+          656|       let
+
+       … in the left operand of the OR (||) operator
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:655:19:
+          654|     in
+          655|     if m ? config || m ? options then
+             |                   ^
+          656|       let
+
+       … from call site
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:449:13:
+          448|           unifyModuleSyntax (toString m) (toString m) (
+          449|             applyModuleArgsIfFunction (toString m) (import m) args
+             |             ^
+          450|           );
+
+       … while calling 'applyModuleArgsIfFunction'
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:707:13:
+          706|   applyModuleArgsIfFunction =
+          707|     key: f: args@{ config, ... }: if isFunction f then applyModuleArgs key f args else f;
+             |             ^
+          708|
+
+       … while evaluating a branch condition
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:707:35:
+          706|   applyModuleArgsIfFunction =
+          707|     key: f: args@{ config, ... }: if isFunction f then applyModuleArgs key f args else f;
+             |                                   ^
+          708|
+
+       … from call site
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:707:38:
+          706|   applyModuleArgsIfFunction =
+          707|     key: f: args@{ config, ... }: if isFunction f then applyModuleArgs key f args else f;
+             |                                      ^
+          708|
+
+       … while calling anonymous lambda
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/trivial.nix:1131:5:
+         1130|     in
+         1131|     f: isFunction f || (f ? __functor && isFunction (f.__functor f));
+             |     ^
+         1132|
+
+       … in the left operand of the OR (||) operator
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/trivial.nix:1131:21:
+         1130|     in
+         1131|     f: isFunction f || (f ? __functor && isFunction (f.__functor f));
+             |                     ^
+         1132|
+
+       … while calling the 'isFunction' builtin
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/trivial.nix:1131:8:
+         1130|     in
+         1131|     f: isFunction f || (f ? __functor && isFunction (f.__functor f));
+             |        ^
+         1132|
+
+       … while calling the 'import' builtin
+         at «github:NixOS/nixpkgs/e7a3ca8092b61ff85b6a45bf863ea2b2d6a661b3?narHash=sha256-UgCQzxeWI75XM8G%2BhPrPh%2BMKzEPjG3SpAj7dtqSbksA%3D»/lib/modules.nix:449:53:
+          448|           unifyModuleSyntax (toString m) (toString m) (
+          449|             applyModuleArgsIfFunction (toString m) (import m) args
+             |                                                     ^
+          450|           );
+
+       error: Path 'modules/development.nix' in the repository "/home/runner/work/phenix-agent-harness/phenix-agent-harness" is not tracked by Git.
+
+       To make it visible to Nix, run:
+
+       git -C "/home/runner/work/phenix-agent-harness/phenix-agent-harness" add -N "modules/development.nix"
