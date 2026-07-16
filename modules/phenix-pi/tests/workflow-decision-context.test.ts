@@ -168,11 +168,7 @@ describe("WorkflowDecisionContext", () => {
       activeHandles: [],
     });
 
-    const projected = projectDelegationOptions(
-      PHENIX_DEFAULT_WORKFLOW,
-      "classified",
-      rawOptions,
-    );
+    const projected = projectDelegationOptions(PHENIX_DEFAULT_WORKFLOW, "classified", rawOptions);
     assert.ok(projected.length > 0);
 
     for (const option of projected) {
