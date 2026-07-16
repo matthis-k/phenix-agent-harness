@@ -28,7 +28,7 @@ function spec(input: {
 }
 
 describe("workflow API session initialization", () => {
-  it("always installs workflow inspection and completion", () => {
+  it("always installs workflow and completion", () => {
     const tools = buildEffectiveToolNames(spec({ remainingDepth: 0, availableRoles: [] }));
 
     assert.deepEqual(tools, ["phenix_complete", "phenix_workflow", "read"]);
@@ -36,18 +36,13 @@ describe("workflow API session initialization", () => {
     assert.equal(tools.includes("phenix_create_subagent"), false);
   });
 
-  it("installs subagent creation from contract delegation settings", () => {
+  it("uses the same workflow surface when delegation remains available", () => {
     const tools = buildEffectiveToolNames(spec({ remainingDepth: 2, availableRoles: ["scout"] }));
 
-    assert.deepEqual(tools, [
-      "phenix_complete",
-      "phenix_create_subagent",
-      "phenix_workflow",
-      "read",
-    ]);
+    assert.deepEqual(tools, ["phenix_complete", "phenix_workflow", "read"]);
   });
 
-  it("does not depend on the initial workflow projection having an option", () => {
+  it("does not depend on the initial projection containing an outgoing edge", () => {
     const child = {
       ...spec({ remainingDepth: 1, availableRoles: ["critic"] }),
       workflowProjection: {
@@ -59,6 +54,6 @@ describe("workflow API session initialization", () => {
       },
     } as ChildSessionSpec;
 
-    assert.equal(buildEffectiveToolNames(child).includes("phenix_create_subagent"), true);
+    assert.deepEqual(buildEffectiveToolNames(child), ["phenix_complete", "phenix_workflow", "read"]);
   });
 });
