@@ -19,6 +19,11 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
+      - name: Install Nix
+        uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Remove API versioning
         shell: bash
         run: |
@@ -28,6 +33,12 @@ jobs:
             .github/scripts/remove-api-versioning.py \
             .github/workflows/apply-unversioned-api.yml \
             .github/workflows/audit-unversioned-api.yml
+
+      - name: Format current source shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          nix develop --command biome format --write modules/phenix-pi
 
       - name: Commit candidate
         shell: bash
@@ -67,11 +78,6 @@ jobs:
           if findings:
               raise SystemExit("\n".join(findings))
           PY
-
-      - name: Install Nix
-        uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
-        with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run Tend CI profile
         id: tend
