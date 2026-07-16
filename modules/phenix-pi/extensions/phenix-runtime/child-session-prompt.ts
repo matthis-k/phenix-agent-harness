@@ -55,7 +55,7 @@ export function buildChildSystemPrompt(input: {
 
   const projection = deriveProjection(contract, workflowProjection);
   sections.push(formatProjection(projection));
-  sections.push(formatWorkflowProjection(workflowProjection));
+  sections.push(formatWorkflowProjection(workflowProjection, { completion: "phenix_complete" }));
 
   const effectiveTools = contract.runtime.tools.effective;
   if (effectiveTools.length > 0) {
@@ -67,7 +67,7 @@ export function buildChildSystemPrompt(input: {
         ...effectiveTools.map((tool) => `- ${tool}`),
         "",
         "The phenix_complete tool is always available for submitting your result.",
-        "The phenix_workflow tool is always available for spawning one advertised target agent from the preloaded authority snapshot.",
+        "The phenix_workflow tool is always available for inspecting current authority and spawning one advertised target agent.",
       ].join("\n"),
     );
   }

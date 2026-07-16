@@ -1,5 +1,15 @@
 import { type Static, Type } from "typebox";
 
+const WorkflowInspectAction = Type.Object(
+  {
+    action: Type.Literal("inspect", {
+      description:
+        "Return the current contract-bound workflow authority and the target agents that may be spawned.",
+    }),
+  },
+  { additionalProperties: false },
+);
+
 const WorkflowSpawnAction = Type.Object(
   {
     action: Type.Literal("spawn", {
@@ -7,8 +17,7 @@ const WorkflowSpawnAction = Type.Object(
     }),
     agent: Type.String({
       minLength: 1,
-      description:
-        "A target agent identity advertised in the authority snapshot injected at session start.",
+      description: "A target agent identity advertised in the current workflow authority snapshot.",
     }),
     task: Type.String({
       minLength: 1,
@@ -24,9 +33,9 @@ const WorkflowSpawnAction = Type.Object(
  * Model-facing workflow action.
  *
  * The current node and actor authority are derived from the active root session
- * or child contract. The model states only its intent: which advertised target
- * agent it wants to spawn and the bounded assignment for that agent.
+ * or child contract. The model may inspect that derived authority or state only
+ * its spawn intent: one advertised target agent and a bounded assignment.
  */
-export const WorkflowActionParams = Type.Union([WorkflowSpawnAction]);
+export const WorkflowActionParams = Type.Union([WorkflowInspectAction, WorkflowSpawnAction]);
 
 export type WorkflowActionParamsType = Static<typeof WorkflowActionParams>;

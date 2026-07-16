@@ -38,6 +38,10 @@ export interface ModelWorkflowProjection {
 
 export interface WorkflowDecisionContext extends ModelWorkflowProjection {}
 
+export interface WorkflowProjectionPromptOptions {
+  readonly completion: "direct" | "phenix_complete";
+}
+
 export function projectDelegationOptions(
   definition: WorkflowDefinition,
   sourceNodeId: string,
@@ -117,7 +121,10 @@ export function buildChildWorkflowProjection(
 }
 
 /** Format the authority snapshot that is deterministically injected before inference. */
-export function formatWorkflowProjection(projection: ModelWorkflowProjection): string {
+export function formatWorkflowProjection(
+  projection: ModelWorkflowProjection,
+  options: WorkflowProjectionPromptOptions = { completion: "direct" },
+): string {
   const lines = [
     "## Phenix workflow authority",
     "",
@@ -131,7 +138,9 @@ export function formatWorkflowProjection(projection: ModelWorkflowProjection): s
   if (projection.options.length === 0) {
     lines.push(
       "The current contract-bound node permits no target agent to be spawned.",
-      "Complete the current assignment directly using phenix_complete.",
+      options.completion === "phenix_complete"
+        ? "Complete the current assignment directly using phenix_complete."
+        : "Complete the current assignment directly without creating a subagent.",
       "",
     );
     return lines.join("\n");
@@ -156,7 +165,9 @@ export function formatWorkflowProjection(projection: ModelWorkflowProjection): s
 
   lines.push(
     "Workflow invocation protocol:",
-    "- Call phenix_workflow with action=spawn, one advertised agent, and its bounded task input.",
+    "- The preloaded snapshot is the initial authority inspection; do not call a separate discovery mechanism before the first workflow action.",
+    "- Call phenix_workflow with action=inspect after a workflow action may have changed the current node or legal target set.",
+    "- Call phenix_workflow with action=spawn, one currently advertised agent, and its bounded task input.",
     "- The runtime derives the current node and resolves that target agent to the unique legal transition.",
     "- Do not invent a transition ID, role, result schema, model, thinking level, tool set, delegation depth, or node ID.",
   );
