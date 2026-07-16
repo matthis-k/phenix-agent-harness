@@ -1,34 +1,134 @@
+stitch-unwrapped> test exec::tests::test_invalid_order_fails ... ok
+stitch-unwrapped> test exec::tests::test_explicit_node_unknown_fails ... ok
+stitch-unwrapped> test exec::tests::test_mutating_recipe_requires_apply ... ok
+stitch-unwrapped> test exec::tests::test_explicit_node_selection_single ... ok
+stitch-unwrapped> test exec::tests::test_parse_closure_mode ... ok
+stitch-unwrapped> test exec::tests::test_parse_condition ... ok
+stitch-unwrapped> test exec::tests::test_parse_execution_mode ... ok
+stitch-unwrapped> test exec::tests::test_parse_order_mode ... ok
+stitch-unwrapped> test exec::tests::test_parse_selection_mode ... ok
+stitch-unwrapped> test exec::tests::test_mutating_with_dry_run_ok ... ok
+stitch-unwrapped> test exec::tests::test_stable_order_returns_config_order ... ok
+stitch-unwrapped> test exec::tests::test_step_condition_always_included ... ok
+stitch-unwrapped> test exec::tests::test_topological_sort_consumers_first ... ok
+stitch-unwrapped> test exec::tests::test_topological_sort_cycle_fails ... ok
+stitch-unwrapped> test exec::tests::test_topological_sort_providers_first ... ok
+stitch-unwrapped> test git::tests::parse_porcelain_copy_arrow_format ... ok
+stitch-unwrapped> test git::tests::parse_porcelain_ignored_skipped ... ok
+stitch-unwrapped> test git::tests::parse_porcelain_rename_arrow_format ... ok
+stitch-unwrapped> test git::tests::parse_porcelain_staged_and_unstaged_same_file ... ok
+stitch-unwrapped> test git::tests::parse_porcelain_staged_modified ... ok
+stitch-unwrapped> test git::tests::parse_porcelain_untracked ... ok
+stitch-unwrapped> test exec::tests::test_unknown_builtin_fails ... ok
+stitch-unwrapped> test git::tests::parse_porcelain_worktree_modified_preserves_leading_space ... ok
+stitch-unwrapped> test git::tests::test_parse_porcelain_all_staged ... ok
+stitch-unwrapped> test git::tests::test_parse_porcelain_clean ... ok
+stitch-unwrapped> test git::tests::test_parse_porcelain_dirty ... ok
+stitch-unwrapped> test git::tests::test_parse_porcelain_untracked_only ... ok
+stitch-unwrapped> test git::tests::test_parse_porcelain_staged_unstaged_same_file ... ok
+stitch-unwrapped> test graph::canonical::tests::canonical_graph_provider_consumer_edge_direction ... ok
+stitch-unwrapped> test graph::canonical::tests::canonical_graph_uses_stable_digraph_and_preserves_input_name ... ok
+stitch-unwrapped> test graph::canonical::tests::canonical_graph_preserves_layers ... ok
+stitch-unwrapped> test graph::inventory::tests::metadata_cannot_add_workspace_members ... ok
+stitch-unwrapped> test graph::inventory::tests::metadata_only_classifies_existing_members ... ok
+stitch-unwrapped> test graph::lock::tests::test_build_workspace_aliases ... ok
+stitch-unwrapped> test graph::inventory::tests::workspace_config_is_the_membership_authority ... ok
+stitch-unwrapped> test graph::lock::tests::test_input_target_name_string ... ok
+stitch-unwrapped> test graph::lock::tests::test_input_target_name_array ... ok
+stitch-unwrapped> test graph::lock::tests::test_normalize_github_id ... ok
+stitch-unwrapped> test graph::lock::tests::test_normalize_git_url_ssh ... ok
+stitch-unwrapped> test graph::planner::tests::planner_orders_providers_before_consumers ... ok
+stitch-unwrapped> test graph::lock::tests::test_parse_synthetic_lock ... ok
+stitch-unwrapped> test graph::spec::tests::draft_dedups_by_input_name_not_repo_only ... ok
+stitch-unwrapped> test graph::planner::tests::planner_tracks_exact_direct_input_name ... ok
+stitch-unwrapped> test exec::tests::test_git_builtin_ok ... ok
+stitch-unwrapped> test graph::strategy::tests::composite_dedups_strategy_edges ... ok
+stitch-unwrapped> test graph::tests::sync_graph_orders_dependencies_first ... ok
+stitch-unwrapped> test graph::tests::sync_graph_rejects_cycles ... ok
+stitch-unwrapped> test graph::topo::tests::cycles_are_rejected ... ok
+stitch-unwrapped> test graph::topo::tests::providers_precede_consumers ... ok
+stitch-unwrapped> test graph::validate::tests::test_cycle_detection ... ok
+stitch-unwrapped> test graph::validate::tests::test_cycle_report_string ... ok
+stitch-unwrapped> test graph::validate::tests::test_duplicate_edge_warning ... ok
+stitch-unwrapped> test graph::validate::tests::test_external_input_multi_owner_warning ... ok
+stitch-unwrapped> test graph::validate::tests::test_folder_layer ... ok
+stitch-unwrapped> test graph::validate::tests::test_layer_violation ... ok
+stitch-unwrapped> test graph::validate::tests::test_missing_repo_path_detected ... ok
+stitch-unwrapped> test graph::validate::tests::test_missing_repo_path_ok_with_tempdir ... ok
+stitch-unwrapped> test graph::validate::tests::test_missing_repo_path_skips_empty_path ... ok
+stitch-unwrapped> test graph::validate::tests::test_layer_ok ... ok
+stitch-unwrapped> test graph::validate::tests::test_non_strict_mode_missing_layer_info ... ok
+stitch-unwrapped> test graph::validate::tests::test_no_layer_violation ... ok
+stitch-unwrapped> test exec::tests::test_readonly_does_not_require_apply ... ok
+stitch-unwrapped> test graph::validate::tests::test_path_layer_match_ok ... ok
+stitch-unwrapped> test graph::validate::tests::test_path_layer_mismatch_ignores_root ... ok
+stitch-unwrapped> test graph::validate::tests::test_producer_depends_on_pkgs_aggregator ... ok
+stitch-unwrapped> test graph::validate::tests::test_root_dependency_violation ... ok
+stitch-unwrapped> test graph::validate::tests::test_path_layer_mismatch ... ok
+stitch-unwrapped> test graph::validate::tests::test_same_layer_violation_detected ... ok
+stitch-unwrapped> test graph::validate::tests::test_producer_depends_on_producer ... ok
+stitch-unwrapped> test graph::validate::tests::test_unknown_source_node ... ok
+stitch-unwrapped> test graph::validate::tests::test_url_mismatch_detected ... ok
+stitch-unwrapped> test graph::validate::tests::test_unknown_target_node ... ok
+stitch-unwrapped> test graph::validate::tests::test_url_mismatch_ok ... ok
+stitch-unwrapped> test graph::validate::tests::test_url_mismatch_ok_no_git_suffix ... ok
+stitch-unwrapped> test graph::validate::tests::test_same_layer_violation_mutual ... ok
+stitch-unwrapped> test graph::validate::tests::test_strict_mode_missing_layer_info ... ok
+stitch-unwrapped> test graph::validate::tests::test_url_mismatch_ok_ssh ... ok
+stitch-unwrapped> test graph::validate::tests::test_url_repo_name_https ... ok
+stitch-unwrapped> test graph::validate::tests::test_url_repo_name_https_no_git_suffix ... ok
+stitch-unwrapped> test graph::validate::tests::test_url_repo_name_ssh_no_git_suffix ... ok
+stitch-unwrapped> test graph::validate::tests::test_valid_graph ... ok
+stitch-unwrapped> test graph::validate::tests::test_valid_workspace_full_path_layer_consistency ... ok
+stitch-unwrapped> test graph::validate::tests::test_validate_graph_preserves_rule_coverage ... ok
+stitch-unwrapped> test model::tests::retired_version_selectors_are_rejected ... ok
+stitch-unwrapped> test model::tests::test_add_trailers ... ok
+stitch-unwrapped> test graph::validate::tests::test_url_repo_name_plain_path ... ok
+stitch-unwrapped> test graph::validate::tests::test_url_mismatch_ssh_style ... ok
+stitch-unwrapped> test graph::validate::tests::test_url_repo_name_ssh ... ok
+stitch-unwrapped> test model::tests::test_add_trailers_trailing_newline ... ok
+stitch-unwrapped> test model::tests::test_slugify ... ok
+stitch-unwrapped> test model::tests::test_generate_changeset_id ... ok
+stitch-unwrapped> test recipe::tests::test_resolve_recipe_invalid_closure ... ok
+stitch-unwrapped> test recipe::tests::test_resolve_recipe_invalid_condition ... ok
+stitch-unwrapped> test recipe::tests::test_resolve_recipe_invalid_order ... ok
+stitch-unwrapped> test sync::tests::action_commit_message_carries_replay_identity ... ok
+stitch-unwrapped> test recipe::tests::test_resolve_recipe_status ... ok
+stitch-unwrapped> test recipe::tests::test_resolve_recipe_unknown_builtin_fails ... ok
+stitch-unwrapped> test sync::tests::test_generate_transaction_id ... ok
+stitch-unwrapped> test sync::tests::test_input_sync_message ... ok
+stitch-unwrapped> test sync::tests::test_plan_push_order_equals_commit_order ... ok
+stitch-unwrapped> test sync::tests::test_plan_sync_dirty_shell ... ok
 stitch-unwrapped> test sync::tests::test_plan_sync_dirty_tools ... ok
-stitch-unwrapped> test sync::tests::test_plan_sync_dirty_tools_and_shell ... ok
 stitch-unwrapped> test sync::tests::test_plan_sync_no_dirty ... ok
 stitch-unwrapped> test sync::tests::test_plan_sync_uses_exact_flake_input_name ... ok
-stitch-unwrapped> test sync::tests::test_plan_push_order_equals_commit_order ... ok
 stitch-unwrapped> test sync::tests::test_plan_sync_dirty_root ... ok
-stitch-unwrapped> test time::tests::timestamp_is_second_precision_rfc3339 ... ok
+stitch-unwrapped> test sync::tests::test_plan_sync_dirty_tools_and_shell ... ok
 stitch-unwrapped> test sync::tests::test_update_flake_lock_input_fails_without_nix ... ok
 stitch-unwrapped> test validate::tests::test_validate_non_existent_repo ... ok
+stitch-unwrapped> test time::tests::timestamp_is_second_precision_rfc3339 ... ok
 stitch-unwrapped> test workloop::tests::test_blocker_kinds_serialize ... ok
 stitch-unwrapped> test workloop::tests::test_detect_backend_on_nonexistent_repo ... ok
 stitch-unwrapped> test validate::tests::test_validate_no_message_for_commit_action ... ok
-stitch-unwrapped> test workloop::tests::test_git_checkpoint ... ok
 stitch-unwrapped> test sync::tests::committed_action_head_recovers_the_exact_action ... ok
+stitch-unwrapped> test workloop::tests::test_git_checkpoint ... ok
 stitch-unwrapped> test workloop::tests::test_git_current_change ... ok
+stitch-unwrapped> test workloop::tests::git_publish_verifies_remote_and_is_idempotent ... ok
 stitch-unwrapped> test workloop::tests::test_git_create_rc ... ok
-stitch-unwrapped> test workloop::tests::test_git_publish_no_remote ... ok
 stitch-unwrapped> test workloop::tests::test_handoff_packet ... ok
 stitch-unwrapped> test workloop::tests::test_jj_backend_auto_detect_path ... ok
 stitch-unwrapped> test workloop::tests::test_jj_backend_detect_on_temp_dir ... ok
 stitch-unwrapped> test workloop::tests::test_jj_create_rc ... ok
+stitch-unwrapped> test workloop::tests::test_git_publish_no_remote ... ok
 stitch-unwrapped> test workloop::tests::test_jj_finalize_candidate ... ok
-stitch-unwrapped> test workloop::tests::test_jj_publish_no_remote ... ok
 stitch-unwrapped> test workloop::tests::test_state_machine_valid_transitions ... ok
 stitch-unwrapped> test workloop::tests::test_timestamp_now ... ok
-stitch-unwrapped> test workloop::tests::git_publish_verifies_remote_and_is_idempotent ... ok
+stitch-unwrapped> test workloop::tests::test_jj_publish_no_remote ... ok
 stitch-unwrapped> test workloop::tests::test_valid_actions_for_states ... ok
 stitch-unwrapped> test workloop::tests::transition_updates_revision_and_actions ... ok
 stitch-unwrapped> test workloop::tests::wallet_feature_cannot_escape_wallet_directory ... ok
-stitch-unwrapped> test workloop::tests::test_wallet_roundtrip ... ok
 stitch-unwrapped> test workspace::tests::empty_repository_pattern_is_rejected ... ok
+stitch-unwrapped> test workloop::tests::test_wallet_roundtrip ... ok
 stitch-unwrapped> test workspace::tests::glob_pattern_supports_star_and_question_mark ... ok
 stitch-unwrapped> test workspace::tests::parses_supported_remote_forms ... ok
 stitch-unwrapped> test workspace::tests::repository_matcher_combines_owner_and_pattern ... ok
@@ -37,7 +137,7 @@ stitch-unwrapped> test workspace::tests::unconstrained_policy_does_not_promote_e
 stitch-unwrapped> test workloop::tests::test_git_snapshot ... ok
 stitch-unwrapped> test workloop::tests::test_git_finalize_candidate ... ok
 stitch-unwrapped> 
-stitch-unwrapped> test result: ok. 152 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+stitch-unwrapped> test result: ok. 152 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
 stitch-unwrapped> 
 stitch-unwrapped>      Running unittests src/main.rs (target/x86_64-unknown-linux-gnu/release/deps/stitch-86063e30f83ab20d)
 stitch-unwrapped> 
@@ -68,32 +168,32 @@ stitch-unwrapped>
 stitch-unwrapped> test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 stitch-unwrapped> 
 stitch-unwrapped> Finished cargoCheckHook
-stitch-unwrapped> checkPhase completed in 51 seconds
+stitch-unwrapped> checkPhase completed in 52 seconds
 stitch-unwrapped> Running phase: installPhase
 stitch-unwrapped> Executing cargoInstallHook
 stitch-unwrapped> Finished cargoInstallHook
 stitch-unwrapped> Running phase: fixupPhase
-stitch-unwrapped> shrinking RPATHs of ELF executables and libraries in /nix/store/2fmwf1cv2plnfc2qh9xrkjz82p44hl98-stitch-unwrapped-0.1.0
-stitch-unwrapped> shrinking /nix/store/2fmwf1cv2plnfc2qh9xrkjz82p44hl98-stitch-unwrapped-0.1.0/bin/stitch
-stitch-unwrapped> checking for references to /build/ in /nix/store/2fmwf1cv2plnfc2qh9xrkjz82p44hl98-stitch-unwrapped-0.1.0...
-stitch-unwrapped> patching script interpreter paths in /nix/store/2fmwf1cv2plnfc2qh9xrkjz82p44hl98-stitch-unwrapped-0.1.0
-stitch-unwrapped> stripping (with command strip and flags -S -p) in  /nix/store/2fmwf1cv2plnfc2qh9xrkjz82p44hl98-stitch-unwrapped-0.1.0/bin
-building '/nix/store/zfqfidbnzdg6jrazk5zw55gj4qhwmrbp-stitch.drv'...
-building '/nix/store/dadjjym6zmnhnjw1956wz8lgrmf1c69j-stitch.drv'...
-building '/nix/store/7n23k00n8l707drfvmnx0x75hkvc4fgl-phenix-stitch-runtime-smoke.drv'...
+stitch-unwrapped> shrinking RPATHs of ELF executables and libraries in /nix/store/mig598kzqssyccr44d285vym3x7blrv0-stitch-unwrapped-0.1.0
+stitch-unwrapped> shrinking /nix/store/mig598kzqssyccr44d285vym3x7blrv0-stitch-unwrapped-0.1.0/bin/stitch
+stitch-unwrapped> checking for references to /build/ in /nix/store/mig598kzqssyccr44d285vym3x7blrv0-stitch-unwrapped-0.1.0...
+stitch-unwrapped> patching script interpreter paths in /nix/store/mig598kzqssyccr44d285vym3x7blrv0-stitch-unwrapped-0.1.0
+stitch-unwrapped> stripping (with command strip and flags -S -p) in  /nix/store/mig598kzqssyccr44d285vym3x7blrv0-stitch-unwrapped-0.1.0/bin
+building '/nix/store/imzw4z4g3gjlmm6r3bx0xp3xj98l3hgx-stitch.drv'...
+building '/nix/store/4z42f4wgvq3rk0fi8bb22kwk5mg97snf-stitch.drv'...
+building '/nix/store/xmw2099j57qq8a0b80g8w6k7ikw5wj58-phenix-stitch-runtime-smoke.drv'...
 phenix-stitch-runtime-smoke> true
 phenix-stitch-runtime-smoke> stitch 0.1.0
 phenix-stitch-runtime-smoke> true
 stitch-mcp-unwrapped>    Compiling stitch-mcp v0.1.0 (/build/source/crates/stitch-mcp)
 stitch-mcp-unwrapped>    Compiling stitch-cli v0.1.0 (/build/source/crates/stitch-cli)
-stitch-mcp-unwrapped>     Finished `release` profile [optimized] target(s) in 1m 19s
+stitch-mcp-unwrapped>     Finished `release` profile [optimized] target(s) in 1m 20s
 stitch-mcp-unwrapped>      Running unittests src/lib.rs (target/x86_64-unknown-linux-gnu/release/deps/phenix_mcp_core-887c4121514d4e7c)
 stitch-mcp-unwrapped> 
 stitch-mcp-unwrapped> running 4 tests
 stitch-mcp-unwrapped> test mcp::tests::all_supported_path_fields_are_collected ... ok
-stitch-mcp-unwrapped> test mcp::tests::repo_argument_is_subject_to_root_validation ... ok
 stitch-mcp-unwrapped> test result::tests::failure_text_strips_terminal_control_sequences ... ok
 stitch-mcp-unwrapped> test result::tests::tail_is_unicode_safe ... ok
+stitch-mcp-unwrapped> test mcp::tests::repo_argument_is_subject_to_root_validation ... ok
 stitch-mcp-unwrapped> 
 stitch-mcp-unwrapped> test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 stitch-mcp-unwrapped> 
@@ -101,165 +201,165 @@ stitch-mcp-unwrapped>      Running unittests src/lib.rs (target/x86_64-unknown-l
 stitch-mcp-unwrapped> 
 stitch-mcp-unwrapped> running 152 tests
 stitch-mcp-unwrapped> test exec::condition_tests::named_step_predicates_express_domain_conditions ... ok
-stitch-mcp-unwrapped> test config::tests::nearest_workspace_container_wins ... ok
 stitch-mcp-unwrapped> test config::tests::explicit_marker_defines_workspace_without_repos_directory ... ok
-stitch-mcp-unwrapped> test exec::tests::discovered_graph_does_not_require_topology_metadata ... ok
+stitch-mcp-unwrapped> test config::tests::nearest_workspace_container_wins ... ok
 stitch-mcp-unwrapped> test exec::tests::test_closure_connected_combines_both ... ok
 stitch-mcp-unwrapped> test exec::tests::test_closure_downstream_traversal ... ok
-stitch-mcp-unwrapped> test exec::tests::test_closure_expand_self ... ok
-stitch-mcp-unwrapped> test exec::tests::test_closure_upstream_traversal ... ok
 stitch-mcp-unwrapped> test exec::tests::test_closure_expand_all ... ok
+stitch-mcp-unwrapped> test exec::tests::test_closure_expand_self ... ok
+stitch-mcp-unwrapped> test exec::tests::discovered_graph_does_not_require_topology_metadata ... ok
+stitch-mcp-unwrapped> test exec::tests::test_closure_upstream_traversal ... ok
+stitch-mcp-unwrapped> test exec::tests::test_dry_run_returns_ok_report ... ok
 stitch-mcp-unwrapped> test exec::tests::test_downstream_only_excludes_direct_selection ... ok
 stitch-mcp-unwrapped> test exec::tests::test_execute_empty_shell_argv_fails_clearly ... ok
-stitch-mcp-unwrapped> test exec::tests::test_dry_run_returns_ok_report ... ok
-stitch-mcp-unwrapped> test exec::tests::test_invalid_closure_fails ... ok
 stitch-mcp-unwrapped> test exec::tests::test_explicit_node_selection_single ... ok
-stitch-mcp-unwrapped> test exec::tests::test_invalid_condition_fails ... ok
-stitch-mcp-unwrapped> test exec::tests::test_invalid_order_fails ... ok
 stitch-mcp-unwrapped> test exec::tests::test_explicit_node_unknown_fails ... ok
-stitch-mcp-unwrapped> test exec::tests::test_mutating_recipe_requires_apply ... ok
+stitch-mcp-unwrapped> test exec::tests::test_invalid_condition_fails ... ok
+stitch-mcp-unwrapped> test exec::tests::test_invalid_closure_fails ... ok
+stitch-mcp-unwrapped> test exec::tests::test_invalid_order_fails ... ok
 stitch-mcp-unwrapped> test exec::tests::test_parse_closure_mode ... ok
 stitch-mcp-unwrapped> test exec::tests::test_parse_condition ... ok
 stitch-mcp-unwrapped> test exec::tests::test_parse_execution_mode ... ok
 stitch-mcp-unwrapped> test exec::tests::test_parse_order_mode ... ok
 stitch-mcp-unwrapped> test exec::tests::test_parse_selection_mode ... ok
-stitch-mcp-unwrapped> test exec::tests::test_git_builtin_ok ... ok
 stitch-mcp-unwrapped> test exec::tests::test_mutating_with_dry_run_ok ... ok
+stitch-mcp-unwrapped> test exec::tests::test_mutating_recipe_requires_apply ... ok
 stitch-mcp-unwrapped> test exec::tests::test_stable_order_returns_config_order ... ok
 stitch-mcp-unwrapped> test exec::tests::test_topological_sort_consumers_first ... ok
 stitch-mcp-unwrapped> test exec::tests::test_topological_sort_cycle_fails ... ok
+stitch-mcp-unwrapped> test exec::tests::test_git_builtin_ok ... ok
 stitch-mcp-unwrapped> test exec::tests::test_step_condition_always_included ... ok
 stitch-mcp-unwrapped> test exec::tests::test_topological_sort_providers_first ... ok
 stitch-mcp-unwrapped> test git::tests::parse_porcelain_copy_arrow_format ... ok
-stitch-mcp-unwrapped> test exec::tests::test_unknown_builtin_fails ... ok
 stitch-mcp-unwrapped> test git::tests::parse_porcelain_ignored_skipped ... ok
-stitch-mcp-unwrapped> test git::tests::parse_porcelain_staged_and_unstaged_same_file ... ok
 stitch-mcp-unwrapped> test git::tests::parse_porcelain_rename_arrow_format ... ok
+stitch-mcp-unwrapped> test git::tests::parse_porcelain_staged_and_unstaged_same_file ... ok
 stitch-mcp-unwrapped> test git::tests::parse_porcelain_staged_modified ... ok
-stitch-mcp-unwrapped> test git::tests::parse_porcelain_untracked ... ok
 stitch-mcp-unwrapped> test git::tests::parse_porcelain_worktree_modified_preserves_leading_space ... ok
-stitch-mcp-unwrapped> test git::tests::test_parse_porcelain_all_staged ... ok
+stitch-mcp-unwrapped> test exec::tests::test_unknown_builtin_fails ... ok
+stitch-mcp-unwrapped> test git::tests::parse_porcelain_untracked ... ok
 stitch-mcp-unwrapped> test git::tests::test_parse_porcelain_clean ... ok
 stitch-mcp-unwrapped> test git::tests::test_parse_porcelain_dirty ... ok
+stitch-mcp-unwrapped> test git::tests::test_parse_porcelain_all_staged ... ok
 stitch-mcp-unwrapped> test git::tests::test_parse_porcelain_staged_unstaged_same_file ... ok
 stitch-mcp-unwrapped> test git::tests::test_parse_porcelain_untracked_only ... ok
-stitch-mcp-unwrapped> test graph::canonical::tests::canonical_graph_preserves_layers ... ok
 stitch-mcp-unwrapped> test graph::canonical::tests::canonical_graph_provider_consumer_edge_direction ... ok
 stitch-mcp-unwrapped> test graph::canonical::tests::canonical_graph_uses_stable_digraph_and_preserves_input_name ... ok
+stitch-mcp-unwrapped> test graph::canonical::tests::canonical_graph_preserves_layers ... ok
 stitch-mcp-unwrapped> test graph::inventory::tests::metadata_cannot_add_workspace_members ... ok
 stitch-mcp-unwrapped> test graph::inventory::tests::metadata_only_classifies_existing_members ... ok
-stitch-mcp-unwrapped> test graph::inventory::tests::workspace_config_is_the_membership_authority ... ok
+stitch-mcp-unwrapped> test graph::lock::tests::test_build_workspace_aliases ... ok
 stitch-mcp-unwrapped> test graph::lock::tests::test_input_target_name_array ... ok
+stitch-mcp-unwrapped> test graph::lock::tests::test_input_target_name_string ... ok
 stitch-mcp-unwrapped> test graph::lock::tests::test_normalize_git_url_ssh ... ok
 stitch-mcp-unwrapped> test graph::lock::tests::test_normalize_github_id ... ok
-stitch-mcp-unwrapped> test graph::lock::tests::test_build_workspace_aliases ... ok
-stitch-mcp-unwrapped> test graph::lock::tests::test_input_target_name_string ... ok
+stitch-mcp-unwrapped> test graph::inventory::tests::workspace_config_is_the_membership_authority ... ok
 stitch-mcp-unwrapped> test graph::lock::tests::test_parse_synthetic_lock ... ok
 stitch-mcp-unwrapped> test graph::planner::tests::planner_orders_providers_before_consumers ... ok
 stitch-mcp-unwrapped> test graph::planner::tests::planner_tracks_exact_direct_input_name ... ok
 stitch-mcp-unwrapped> test graph::spec::tests::draft_dedups_by_input_name_not_repo_only ... ok
 stitch-mcp-unwrapped> test graph::strategy::tests::composite_dedups_strategy_edges ... ok
 stitch-mcp-unwrapped> test graph::tests::sync_graph_orders_dependencies_first ... ok
-stitch-mcp-unwrapped> test graph::tests::sync_graph_rejects_cycles ... ok
 stitch-mcp-unwrapped> test graph::topo::tests::cycles_are_rejected ... ok
+stitch-mcp-unwrapped> test graph::tests::sync_graph_rejects_cycles ... ok
 stitch-mcp-unwrapped> test graph::topo::tests::providers_precede_consumers ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_cycle_detection ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_cycle_report_string ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_duplicate_edge_warning ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_external_input_multi_owner_warning ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_folder_layer ... ok
-stitch-mcp-unwrapped> test graph::validate::tests::test_layer_ok ... ok
-stitch-mcp-unwrapped> test graph::validate::tests::test_missing_repo_path_detected ... ok
-stitch-mcp-unwrapped> test graph::validate::tests::test_layer_violation ... ok
 stitch-mcp-unwrapped> test exec::tests::test_readonly_does_not_require_apply ... ok
-stitch-mcp-unwrapped> test graph::validate::tests::test_non_strict_mode_missing_layer_info ... ok
+stitch-mcp-unwrapped> test graph::validate::tests::test_layer_ok ... ok
+stitch-mcp-unwrapped> test graph::validate::tests::test_layer_violation ... ok
+stitch-mcp-unwrapped> test graph::validate::tests::test_missing_repo_path_detected ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_missing_repo_path_skips_empty_path ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_missing_repo_path_ok_with_tempdir ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_no_layer_violation ... ok
+stitch-mcp-unwrapped> test graph::validate::tests::test_non_strict_mode_missing_layer_info ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_path_layer_match_ok ... ok
-stitch-mcp-unwrapped> test graph::validate::tests::test_producer_depends_on_pkgs_aggregator ... ok
-stitch-mcp-unwrapped> test graph::validate::tests::test_path_layer_mismatch_ignores_root ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_path_layer_mismatch ... ok
-stitch-mcp-unwrapped> test graph::validate::tests::test_producer_depends_on_producer ... ok
-stitch-mcp-unwrapped> test graph::validate::tests::test_same_layer_violation_mutual ... ok
+stitch-mcp-unwrapped> test graph::validate::tests::test_producer_depends_on_pkgs_aggregator ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_root_dependency_violation ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_same_layer_violation_detected ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_strict_mode_missing_layer_info ... ok
-stitch-mcp-unwrapped> test graph::validate::tests::test_url_mismatch_detected ... ok
+stitch-mcp-unwrapped> test graph::validate::tests::test_producer_depends_on_producer ... ok
+stitch-mcp-unwrapped> test graph::validate::tests::test_same_layer_violation_mutual ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_unknown_source_node ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_unknown_target_node ... ok
-stitch-mcp-unwrapped> test graph::validate::tests::test_url_mismatch_ok_no_git_suffix ... ok
+stitch-mcp-unwrapped> test graph::validate::tests::test_url_mismatch_detected ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_url_mismatch_ok ... ok
+stitch-mcp-unwrapped> test graph::validate::tests::test_url_mismatch_ok_no_git_suffix ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_url_mismatch_ok_ssh ... ok
-stitch-mcp-unwrapped> test graph::validate::tests::test_url_mismatch_ssh_style ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_url_repo_name_https ... ok
+stitch-mcp-unwrapped> test graph::validate::tests::test_url_mismatch_ssh_style ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_url_repo_name_https_no_git_suffix ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_url_repo_name_plain_path ... ok
+stitch-mcp-unwrapped> test graph::validate::tests::test_path_layer_mismatch_ignores_root ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_url_repo_name_ssh ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_url_repo_name_ssh_no_git_suffix ... ok
+stitch-mcp-unwrapped> test graph::validate::tests::test_valid_workspace_full_path_layer_consistency ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_valid_graph ... ok
 stitch-mcp-unwrapped> test graph::validate::tests::test_validate_graph_preserves_rule_coverage ... ok
-stitch-mcp-unwrapped> test graph::validate::tests::test_valid_workspace_full_path_layer_consistency ... ok
 stitch-mcp-unwrapped> test model::tests::retired_version_selectors_are_rejected ... ok
 stitch-mcp-unwrapped> test model::tests::test_add_trailers ... ok
 stitch-mcp-unwrapped> test model::tests::test_add_trailers_trailing_newline ... ok
-stitch-mcp-unwrapped> test model::tests::test_generate_changeset_id ... ok
-stitch-mcp-unwrapped> test recipe::tests::test_resolve_recipe_invalid_condition ... ok
 stitch-mcp-unwrapped> test model::tests::test_slugify ... ok
 stitch-mcp-unwrapped> test recipe::tests::test_resolve_recipe_invalid_closure ... ok
+stitch-mcp-unwrapped> test model::tests::test_generate_changeset_id ... ok
 stitch-mcp-unwrapped> test recipe::tests::test_resolve_recipe_invalid_order ... ok
+stitch-mcp-unwrapped> test recipe::tests::test_resolve_recipe_invalid_condition ... ok
+stitch-mcp-unwrapped> test recipe::tests::test_resolve_recipe_unknown_builtin_fails ... ok
 stitch-mcp-unwrapped> test sync::tests::action_commit_message_carries_replay_identity ... ok
 stitch-mcp-unwrapped> test recipe::tests::test_resolve_recipe_status ... ok
-stitch-mcp-unwrapped> test recipe::tests::test_resolve_recipe_unknown_builtin_fails ... ok
-stitch-mcp-unwrapped> test sync::tests::test_plan_push_order_equals_commit_order ... ok
-stitch-mcp-unwrapped> test sync::tests::test_input_sync_message ... ok
 stitch-mcp-unwrapped> test sync::tests::test_generate_transaction_id ... ok
+stitch-mcp-unwrapped> test sync::tests::test_input_sync_message ... ok
+stitch-mcp-unwrapped> test sync::tests::test_plan_push_order_equals_commit_order ... ok
 stitch-mcp-unwrapped> test sync::tests::test_plan_sync_dirty_root ... ok
-stitch-mcp-unwrapped> test sync::tests::test_plan_sync_dirty_tools ... ok
 stitch-mcp-unwrapped> test sync::tests::test_plan_sync_dirty_shell ... ok
 stitch-mcp-unwrapped> test sync::tests::test_plan_sync_dirty_tools_and_shell ... ok
+stitch-mcp-unwrapped> test sync::tests::test_plan_sync_dirty_tools ... ok
 stitch-mcp-unwrapped> test sync::tests::test_plan_sync_no_dirty ... ok
-stitch-mcp-unwrapped> test sync::tests::test_plan_sync_uses_exact_flake_input_name ... ok
 stitch-mcp-unwrapped> test time::tests::timestamp_is_second_precision_rfc3339 ... ok
-stitch-mcp-unwrapped> test validate::tests::test_validate_non_existent_repo ... ok
+stitch-mcp-unwrapped> test sync::tests::test_plan_sync_uses_exact_flake_input_name ... ok
 stitch-mcp-unwrapped> test sync::tests::test_update_flake_lock_input_fails_without_nix ... ok
+stitch-mcp-unwrapped> test validate::tests::test_validate_non_existent_repo ... ok
 stitch-mcp-unwrapped> test workloop::tests::test_blocker_kinds_serialize ... ok
 stitch-mcp-unwrapped> test workloop::tests::test_detect_backend_on_nonexistent_repo ... ok
 stitch-mcp-unwrapped> test validate::tests::test_validate_no_message_for_commit_action ... ok
-stitch-mcp-unwrapped> test workloop::tests::test_git_checkpoint ... ok
 stitch-mcp-unwrapped> test sync::tests::committed_action_head_recovers_the_exact_action ... ok
+stitch-mcp-unwrapped> test workloop::tests::test_git_checkpoint ... ok
 stitch-mcp-unwrapped> test workloop::tests::test_git_current_change ... ok
-stitch-mcp-unwrapped> test workloop::tests::git_publish_verifies_remote_and_is_idempotent ... ok
 stitch-mcp-unwrapped> test workloop::tests::test_git_create_rc ... ok
+stitch-mcp-unwrapped> test workloop::tests::git_publish_verifies_remote_and_is_idempotent ... ok
 stitch-mcp-unwrapped> test workloop::tests::test_handoff_packet ... ok
 stitch-mcp-unwrapped> test workloop::tests::test_jj_backend_auto_detect_path ... ok
 stitch-mcp-unwrapped> test workloop::tests::test_jj_backend_detect_on_temp_dir ... ok
 stitch-mcp-unwrapped> test workloop::tests::test_jj_create_rc ... ok
 stitch-mcp-unwrapped> test workloop::tests::test_jj_finalize_candidate ... ok
-stitch-mcp-unwrapped> test workloop::tests::test_git_publish_no_remote ... ok
-stitch-mcp-unwrapped> test workloop::tests::test_state_machine_valid_transitions ... ok
 stitch-mcp-unwrapped> test workloop::tests::test_jj_publish_no_remote ... ok
-stitch-mcp-unwrapped> test workloop::tests::test_valid_actions_for_states ... ok
+stitch-mcp-unwrapped> test workloop::tests::test_state_machine_valid_transitions ... ok
 stitch-mcp-unwrapped> test workloop::tests::test_timestamp_now ... ok
+stitch-mcp-unwrapped> test workloop::tests::test_valid_actions_for_states ... ok
+stitch-mcp-unwrapped> test workloop::tests::test_git_publish_no_remote ... ok
 stitch-mcp-unwrapped> test workloop::tests::transition_updates_revision_and_actions ... ok
 stitch-mcp-unwrapped> test workloop::tests::wallet_feature_cannot_escape_wallet_directory ... ok
 stitch-mcp-unwrapped> test workspace::tests::empty_repository_pattern_is_rejected ... ok
+stitch-mcp-unwrapped> test workloop::tests::test_wallet_roundtrip ... ok
 stitch-mcp-unwrapped> test workspace::tests::glob_pattern_supports_star_and_question_mark ... ok
 stitch-mcp-unwrapped> test workspace::tests::parses_supported_remote_forms ... ok
 stitch-mcp-unwrapped> test workspace::tests::repository_matcher_combines_owner_and_pattern ... ok
 stitch-mcp-unwrapped> test workspace::tests::state_file_uses_workspace_name ... ok
 stitch-mcp-unwrapped> test workspace::tests::unconstrained_policy_does_not_promote_external_locked_inputs ... ok
-stitch-mcp-unwrapped> test workloop::tests::test_wallet_roundtrip ... ok
-stitch-mcp-unwrapped> test workloop::tests::test_git_snapshot ... ok
 stitch-mcp-unwrapped> test workloop::tests::test_git_finalize_candidate ... ok
+stitch-mcp-unwrapped> test workloop::tests::test_git_snapshot ... ok
 stitch-mcp-unwrapped> 
-stitch-mcp-unwrapped> test result: ok. 152 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+stitch-mcp-unwrapped> test result: ok. 152 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
 stitch-mcp-unwrapped> 
 stitch-mcp-unwrapped>      Running unittests src/main.rs (target/x86_64-unknown-linux-gnu/release/deps/stitch-86063e30f83ab20d)
 stitch-mcp-unwrapped> 
 stitch-mcp-unwrapped> running 3 tests
-stitch-mcp-unwrapped> test tests::selection_rejects_ambiguous_modes ... ok
 stitch-mcp-unwrapped> test tests::exec_selection_requires_selection ... ok
+stitch-mcp-unwrapped> test tests::selection_rejects_ambiguous_modes ... ok
 stitch-mcp-unwrapped> test tests::verify_selection_allows_empty_default ... ok
 stitch-mcp-unwrapped> 
 stitch-mcp-unwrapped> test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
@@ -284,17 +384,17 @@ stitch-mcp-unwrapped>
 stitch-mcp-unwrapped> test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 stitch-mcp-unwrapped> 
 stitch-mcp-unwrapped> Finished cargoCheckHook
-stitch-mcp-unwrapped> checkPhase completed in 1 minutes 20 seconds
+stitch-mcp-unwrapped> checkPhase completed in 1 minutes 22 seconds
 stitch-mcp-unwrapped> Running phase: installPhase
 stitch-mcp-unwrapped> Executing cargoInstallHook
 stitch-mcp-unwrapped> Finished cargoInstallHook
 stitch-mcp-unwrapped> Running phase: fixupPhase
-stitch-mcp-unwrapped> shrinking RPATHs of ELF executables and libraries in /nix/store/603fplhranp3nd56hwqls02s03zld220-stitch-mcp-unwrapped-0.1.0
-stitch-mcp-unwrapped> shrinking /nix/store/603fplhranp3nd56hwqls02s03zld220-stitch-mcp-unwrapped-0.1.0/bin/stitch-mcp
-stitch-mcp-unwrapped> checking for references to /build/ in /nix/store/603fplhranp3nd56hwqls02s03zld220-stitch-mcp-unwrapped-0.1.0...
-stitch-mcp-unwrapped> patching script interpreter paths in /nix/store/603fplhranp3nd56hwqls02s03zld220-stitch-mcp-unwrapped-0.1.0
-stitch-mcp-unwrapped> stripping (with command strip and flags -S -p) in  /nix/store/603fplhranp3nd56hwqls02s03zld220-stitch-mcp-unwrapped-0.1.0/bin
-building '/nix/store/9kfhwnjd8w27jknz4jb7waxm0svvvkzy-stitch-mcp.drv'...
-building '/nix/store/vc28sjpkn2h9dksdrr3fg06cij8q6lp2-stitch-mcp.drv'...
-building '/nix/store/wl38m7h6az8fi88vfjdy63vg1w5wnh0p-pi.drv'...
+stitch-mcp-unwrapped> shrinking RPATHs of ELF executables and libraries in /nix/store/2czc4dmsf4fmsdgffcbx92q2czv2wcbj-stitch-mcp-unwrapped-0.1.0
+stitch-mcp-unwrapped> shrinking /nix/store/2czc4dmsf4fmsdgffcbx92q2czv2wcbj-stitch-mcp-unwrapped-0.1.0/bin/stitch-mcp
+stitch-mcp-unwrapped> checking for references to /build/ in /nix/store/2czc4dmsf4fmsdgffcbx92q2czv2wcbj-stitch-mcp-unwrapped-0.1.0...
+stitch-mcp-unwrapped> patching script interpreter paths in /nix/store/2czc4dmsf4fmsdgffcbx92q2czv2wcbj-stitch-mcp-unwrapped-0.1.0
+stitch-mcp-unwrapped> stripping (with command strip and flags -S -p) in  /nix/store/2czc4dmsf4fmsdgffcbx92q2czv2wcbj-stitch-mcp-unwrapped-0.1.0/bin
+building '/nix/store/n7gf56266hn8pjkcc8f83ric2hhgjjkb-stitch-mcp.drv'...
+building '/nix/store/w16ycx6kmkf0ysbrw1zjxwq33qhqpqii-stitch-mcp.drv'...
+building '/nix/store/1k3rrslwnby8bwhpiz823x953lsgbs22-pi.drv'...
 error: some errors were encountered during the evaluation
