@@ -50,12 +50,6 @@ export {
   PHENIX_DEFAULT_WORKFLOW,
   validateDefinition,
 } from "./workflow-definitions.ts";
-// Target agent identities
-export {
-  delegateTransitionById,
-  targetAgentForTransition,
-  validateTargetAgentDeterminism,
-} from "./workflow-target-agents.ts";
 // Projection
 export type {
   ModelDelegationOption,
@@ -112,6 +106,12 @@ export {
   readWorkflowRecord,
   rejectTransition,
 } from "./workflow-store.ts";
+// Target agent identities
+export {
+  delegateTransitionById,
+  targetAgentForTransition,
+  validateTargetAgentDeterminism,
+} from "./workflow-target-agents.ts";
 // Types
 export type {
   ActiveWorkflowTransition,
