@@ -49,7 +49,7 @@ async function initializeRootWorkflow(input: {
   });
 }
 
-/** Register deterministic root routing and workflow projection. */
+/** Register deterministic root routing and workflow authority bootstrap. */
 export default async function rootWorkflowIntegration(pi: ExtensionAPI): Promise<void> {
   const config = loadRoutingConfig();
   const startupErrors = validateConfig(config).filter(
@@ -186,6 +186,9 @@ export default async function rootWorkflowIntegration(pi: ExtensionAPI): Promise
       },
     });
 
+    // Resolve and inject the initial legal edge set before model inference. This
+    // is the deterministic equivalent of a forced authority-inspection call;
+    // the model never has to ask for or echo its current node.
     const dependencies = buildWorkflowRuntimeDependencies({
       cwd,
       sessionId,
@@ -202,12 +205,12 @@ export default async function rootWorkflowIntegration(pi: ExtensionAPI): Promise
     let workflowGuidance = "## Phenix Workflow Orchestration\n\n";
     workflowGuidance += `You are running with a Phenix model set (${runtime.modelSet}). `;
     workflowGuidance +=
-      "The deterministic Phenix workflow owns role selection, output schemas, models, tools, and delegation depth. ";
+      "The deterministic Phenix workflow owns the current node, role selection, output schemas, models, tools, and delegation depth. ";
     workflowGuidance +=
-      "Use phenix_workflow with action=inspect to obtain the current nodeId and legal edgeIds, then action=take with that node and one edge.\n\n";
+      "Your legal workflow edges have already been resolved and are listed below. Use an advertised edge when delegation would materially improve the result; call phenix_workflow with only that edgeId and its required input.\n\n";
     workflowGuidance += workflowProjection
       ? formatWorkflowProjection(workflowProjection)
-      : "Workflow state not yet initialized. Start by classifying the task.\n";
+      : "Workflow authority could not be projected; complete the task directly.\n";
 
     const systemPrompt = phenixRootModelScope.contributeSystemPrompt({
       model: selectedModel,
