@@ -122,6 +122,17 @@ describe("contract-bound workflow target-agent tool", () => {
     );
   });
 
+  it("returns fresh authority through inspect without spawning", async () => {
+    const workflow = new RecordingWorkflow();
+    const tool = createWorkflowTool({ workflow });
+
+    const response = await execute(tool, { action: "inspect" });
+
+    assert.equal(workflow.inspectCalls, 1);
+    assert.equal(workflow.spawnCalls.length, 0);
+    assert.deepEqual(response.details, projectWorkflowInspection(workflow.authority));
+  });
+
   it("applies root-scope authorization before spawning", async () => {
     const workflow = new RecordingWorkflow();
     const tool = createWorkflowTool({
