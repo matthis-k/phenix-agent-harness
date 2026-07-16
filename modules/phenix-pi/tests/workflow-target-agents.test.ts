@@ -6,11 +6,11 @@ import {
   targetAgentForTransition,
   validateTargetAgentDeterminism,
 } from "../extensions/phenix-workflow/workflow-target-agents.ts";
-import { mkTransitionId } from "../extensions/phenix-workflow/workflow-types.ts";
 import type {
   DelegateTransition,
   WorkflowDefinition,
 } from "../extensions/phenix-workflow/workflow-types.ts";
+import { mkTransitionId } from "../extensions/phenix-workflow/workflow-types.ts";
 
 function delegate(id: string): DelegateTransition {
   const transition = PHENIX_DEFAULT_WORKFLOW.transitions.find(
