@@ -39,7 +39,6 @@ const COMMON_READ_TOOLS: readonly string[] = [
   "context_*",
   "contact_supervisor",
   "phenix_workflow",
-  "phenix_create_subagent",
 ] as const;
 
 // ── Role presets ────────────────────────────────────────────────────────────
