@@ -13,6 +13,8 @@ import type {
 /** Internal edge projection used to bind a graph-facing workflow call. */
 export interface ModelDelegationOption {
   readonly edgeId: string;
+  /** Compatibility identity for runtime persistence and settlement code. */
+  readonly transitionId: string;
   readonly sourceNodeId: string;
   readonly targetNodeId: string;
   readonly workflowRevision: number;
@@ -41,6 +43,7 @@ export function projectDelegationOptions(
 ): readonly ModelDelegationOption[] {
   return options.map((option) => ({
     edgeId: option.transitionId,
+    transitionId: option.transitionId,
     sourceNodeId,
     targetNodeId: option.targetState,
     workflowRevision: option.workflowRevision,
