@@ -19,12 +19,12 @@ describe("Phenix root prompt bootstrap", () => {
   it("injects the phenix-subagents skill content once", () => {
     const bootstrapped = bootstrapPhenixSubagentsSkillPrompt("base prompt");
 
-    assert.match(bootstrapped, /Phenix workflow nodes, legal edges/);
-    assert.match(bootstrapped, /mandatory initial authority inspection/i);
-    assert.match(bootstrapped, /one advertised `edgeId`/);
-    assert.match(bootstrapped, /runtime derives the current node/i);
-    assert.doesNotMatch(bootstrapped, /action: "inspect"/);
-    assert.doesNotMatch(bootstrapped, /action: "take"/);
+    assert.match(bootstrapped, /Phenix workflow nodes, legal transitions/);
+    assert.match(bootstrapped, /mandatory initial\s+authority inspection/i);
+    assert.match(bootstrapped, /one advertised target `agent`/);
+    assert.match(bootstrapped, /unique\s+legal transition/i);
+    assert.match(bootstrapped, /action: "spawn"/);
+    assert.doesNotMatch(bootstrapped, /edgeId/);
     assert.doesNotMatch(bootstrapped, /phenix_create_subagent/);
 
     const again = bootstrapPhenixSubagentsSkillPrompt(bootstrapped);
@@ -42,7 +42,7 @@ describe("Phenix root prompt bootstrap", () => {
     });
 
     assert.match(phenix ?? "", /## Phenix coding substrate/);
-    assert.match(phenix ?? "", /legal outgoing edges into the system prompt/i);
+    assert.match(phenix ?? "", /target agents available from the current node/i);
     assert.match(phenix ?? "", /phenix_workflow/);
     assert.equal(external, undefined);
   });

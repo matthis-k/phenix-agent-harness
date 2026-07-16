@@ -106,6 +106,12 @@ export {
   readWorkflowRecord,
   rejectTransition,
 } from "./workflow-store.ts";
+// Target agent identities
+export {
+  delegateTransitionById,
+  targetAgentForTransition,
+  validateTargetAgentDeterminism,
+} from "./workflow-target-agents.ts";
 // Types
 export type {
   ActiveWorkflowTransition,

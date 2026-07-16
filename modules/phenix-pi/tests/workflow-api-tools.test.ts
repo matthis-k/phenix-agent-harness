@@ -10,8 +10,8 @@ import {
 } from "../extensions/phenix-runtime/workflow-api-tools.ts";
 import type {
   WorkflowAuthoritySnapshot,
-  WorkflowEdgeExecutionResult,
   WorkflowRuntimePort,
+  WorkflowSpawnResult,
 } from "../extensions/phenix-runtime/workflow-runtime-types.ts";
 
 const AUTHORITY_DIGEST = "a".repeat(64);
@@ -34,7 +34,7 @@ function snapshot(): WorkflowAuthoritySnapshot {
       optionsDigest: AUTHORITY_DIGEST,
       options: [
         {
-          edgeId: "planner.request-scout",
+          agent: "scout",
           transitionId: "planner.request-scout",
           sourceNodeId: "planning",
           targetNodeId: "planning",
@@ -53,13 +53,13 @@ function snapshot(): WorkflowAuthoritySnapshot {
 }
 
 class RecordingWorkflow implements WorkflowRuntimePort {
-  readonly takeEdgeCalls: Parameters<WorkflowRuntimePort["takeEdge"]>[0][] = [];
+  readonly spawnCalls: Parameters<WorkflowRuntimePort["spawn"]>[0][] = [];
   inspectCalls = 0;
   authority = snapshot();
-  execution: WorkflowEdgeExecutionResult = {
+  execution: WorkflowSpawnResult = {
     ok: true,
-    edge: {
-      edgeId: "planner.request-scout",
+    transition: {
+      agent: "scout",
       fromNodeId: "planning",
       toNodeId: "planning",
     },
@@ -71,8 +71,8 @@ class RecordingWorkflow implements WorkflowRuntimePort {
     return this.authority;
   }
 
-  takeEdge(input: Parameters<WorkflowRuntimePort["takeEdge"]>[0]) {
-    this.takeEdgeCalls.push(input);
+  spawn(input: Parameters<WorkflowRuntimePort["spawn"]>[0]) {
+    this.spawnCalls.push(input);
     return Promise.resolve(this.execution);
   }
 }
@@ -85,29 +85,24 @@ async function execute(
   return tool.execute("call-1", params as never, signal, undefined, ctx);
 }
 
-describe("contract-bound workflow edge tool", () => {
-  it("projects the authority snapshot for deterministic prompt bootstrap", () => {
+describe("contract-bound workflow target-agent tool", () => {
+  it("projects the authority snapshot without exposing transition identities", () => {
     const response = projectWorkflowInspection(snapshot());
 
     assert.deepEqual(response, {
       actor: { source: "contract", role: "planner" },
       node: { nodeId: "planning", difficulty: "D2", revision: 7 },
-      edges: [
+      agents: [
         {
-          edgeId: "planner.request-scout",
-          kind: "spawn",
-          fromNodeId: "planning",
-          toNodeId: "planning",
-          spawn: {
-            role: "scout",
-            purpose: "gather evidence",
-            description: "Inspect the relevant implementation boundary.",
-            category: "optional",
-            modes: ["await"],
-            returns: {
-              schemaId: "scout-handoff",
-              schema: { type: "object" },
-            },
+          agent: "scout",
+          role: "scout",
+          purpose: "gather evidence",
+          description: "Inspect the relevant implementation boundary.",
+          category: "optional",
+          modes: ["await"],
+          returns: {
+            schemaId: "scout-handoff",
+            schema: { type: "object" },
           },
         },
       ],
@@ -116,7 +111,7 @@ describe("contract-bound workflow edge tool", () => {
         effectiveTools: ["read", "phenix_workflow"],
       },
     });
-    assert.doesNotMatch(JSON.stringify(response), /optionsDigest|transitionId/);
+    assert.doesNotMatch(JSON.stringify(response), /optionsDigest|transitionId|edgeId/);
   });
 
   it("installs one stable workflow tool", () => {
@@ -127,7 +122,7 @@ describe("contract-bound workflow edge tool", () => {
     );
   });
 
-  it("applies root-scope authorization before edge invocation", async () => {
+  it("applies root-scope authorization before spawning", async () => {
     const workflow = new RecordingWorkflow();
     const tool = createWorkflowTool({
       workflow,
@@ -135,18 +130,19 @@ describe("contract-bound workflow edge tool", () => {
     });
 
     const response = await execute(tool, {
-      edgeId: "planner.request-scout",
-      spawn: { task: "Inspect something." },
+      action: "spawn",
+      agent: "scout",
+      task: "Inspect something.",
     });
 
-    assert.equal(workflow.takeEdgeCalls.length, 0);
+    assert.equal(workflow.spawnCalls.length, 0);
     assert.deepEqual(response.details, {
       status: "forbidden",
       tool: "phenix_workflow",
     });
   });
 
-  it("passes only the selected edge and edge input to the runtime", async () => {
+  it("passes only target intent and assignment to the runtime", async () => {
     const workflow = new RecordingWorkflow();
     const tool = createWorkflowTool({ workflow });
     const signal = new AbortController().signal;
@@ -154,27 +150,23 @@ describe("contract-bound workflow edge tool", () => {
     const response = await execute(
       tool,
       {
-        edgeId: "planner.request-scout",
-        spawn: {
-          task: "Inspect the workflow API boundary.",
-          requirements: ["Return concrete evidence."],
-        },
-      },
-      signal,
-    );
-
-    assert.deepEqual(workflow.takeEdgeCalls[0], {
-      edgeId: "planner.request-scout",
-      input: {
-        kind: "spawn",
+        action: "spawn",
+        agent: "scout",
         task: "Inspect the workflow API boundary.",
         requirements: ["Return concrete evidence."],
       },
       signal,
+    );
+
+    assert.deepEqual(workflow.spawnCalls[0], {
+      agent: "scout",
+      task: "Inspect the workflow API boundary.",
+      requirements: ["Return concrete evidence."],
+      signal,
       ctx,
     });
     assert.deepEqual(response.details, {
-      edgeId: "planner.request-scout",
+      agent: "scout",
       fromNodeId: "planning",
       toNodeId: "planning",
       handleId: "handle-1",
@@ -188,21 +180,22 @@ describe("contract-bound workflow edge tool", () => {
     const workflow = new RecordingWorkflow();
     workflow.execution = {
       ok: false,
-      message: "The edge is no longer legal from the current contract-bound node.",
+      message: "The target agent is no longer legal from the current contract-bound node.",
       details: {
-        code: "WORKFLOW_EDGE_NOT_AVAILABLE",
+        code: "WORKFLOW_AGENT_NOT_AVAILABLE",
         currentNodeId: "reviewing",
       },
     };
     const tool = createWorkflowTool({ workflow });
 
     const response = await execute(tool, {
-      edgeId: "planner.request-scout",
-      spawn: { task: "Inspect something." },
+      action: "spawn",
+      agent: "scout",
+      task: "Inspect something.",
     });
 
-    assert.equal(workflow.takeEdgeCalls.length, 1);
-    assert.equal(response.details?.code, "WORKFLOW_EDGE_NOT_AVAILABLE");
+    assert.equal(workflow.spawnCalls.length, 1);
+    assert.equal(response.details?.code, "WORKFLOW_AGENT_NOT_AVAILABLE");
     assert.equal(response.details?.currentNodeId, "reviewing");
   });
 });

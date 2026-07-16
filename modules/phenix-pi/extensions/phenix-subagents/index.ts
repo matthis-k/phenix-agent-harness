@@ -85,7 +85,7 @@ export default async function phenixSubagents(
       return {
         blocked: true,
         reason:
-          "Raw or legacy delegation is runtime-blocked in Phenix sessions. Use one legal edgeId from the workflow authority snapshot injected before inference and invoke it through phenix_workflow.",
+          "Raw or legacy delegation is runtime-blocked in Phenix sessions. Use phenix_workflow with action=spawn, one target agent advertised in the preloaded authority snapshot, and a bounded task.",
       };
     }
 

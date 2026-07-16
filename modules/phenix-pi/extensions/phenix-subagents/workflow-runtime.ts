@@ -5,14 +5,16 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ParentExecutionContext } from "../phenix-runtime/workflow-api-types.ts";
 import type {
   WorkflowAuthoritySnapshot,
-  WorkflowEdgeExecutionResult,
   WorkflowRuntimePort,
-  WorkflowTakeEdgeRequest,
+  WorkflowSpawnRequest,
+  WorkflowSpawnResult,
 } from "../phenix-runtime/workflow-runtime-types.ts";
 import {
   buildWorkflowDecisionContext,
   buildWorkflowRuntimeDependencies,
+  PHENIX_DEFAULT_WORKFLOW,
 } from "../phenix-workflow/index.ts";
+import { validateTargetAgentDeterminism } from "../phenix-workflow/workflow-target-agents.ts";
 import { effectiveSessionId, listRecords } from "./handle-store.ts";
 import type { WorkflowDelegator } from "./workflow-delegator.ts";
 
@@ -63,61 +65,73 @@ function inspectAuthority(input: {
   };
 }
 
-function availableEdges(snapshot: WorkflowAuthoritySnapshot): readonly Record<string, unknown>[] {
-  return snapshot.workflow.options.map((edge) => ({
-    edgeId: edge.edgeId,
-    kind: "spawn",
-    fromNodeId: edge.sourceNodeId,
-    toNodeId: edge.targetNodeId,
-    role: edge.role,
-    modes: [...edge.allowedModes],
+function availableAgents(snapshot: WorkflowAuthoritySnapshot): readonly Record<string, unknown>[] {
+  return snapshot.workflow.options.map((option) => ({
+    agent: option.agent,
+    role: option.role,
+    category: option.category,
+    purpose: option.description,
+    modes: [...option.allowedModes],
   }));
 }
 
-function failure(message: string, details?: Record<string, unknown>): WorkflowEdgeExecutionResult {
+function failure(message: string, details?: Record<string, unknown>): WorkflowSpawnResult {
   return { ok: false, message, ...(details ? { details } : {}) };
 }
 
-async function takeSpawnEdge(input: {
-  readonly request: WorkflowTakeEdgeRequest;
+async function spawnTargetAgent(input: {
+  readonly request: WorkflowSpawnRequest;
   readonly snapshot: WorkflowAuthoritySnapshot;
   readonly delegator: WorkflowDelegator;
-}): Promise<WorkflowEdgeExecutionResult> {
-  const edge = input.snapshot.workflow.options.find(
-    (candidate) => candidate.edgeId === input.request.edgeId,
+}): Promise<WorkflowSpawnResult> {
+  const matches = input.snapshot.workflow.options.filter(
+    (candidate) => candidate.agent === input.request.agent,
   );
-  if (!edge) {
+  if (matches.length === 0) {
     return failure(
-      `phenix_workflow: edge "${input.request.edgeId}" is not legal from the current contract-bound node ` +
+      `phenix_workflow: target agent "${input.request.agent}" is not legal from the current contract-bound node ` +
         `"${input.snapshot.workflow.currentState}".`,
       {
-        code: "WORKFLOW_EDGE_NOT_AVAILABLE",
+        code: "WORKFLOW_AGENT_NOT_AVAILABLE",
+        agent: input.request.agent,
         currentNodeId: input.snapshot.workflow.currentState,
         revision: input.snapshot.workflow.revision,
-        availableEdges: availableEdges(input.snapshot),
+        availableAgents: availableAgents(input.snapshot),
+      },
+    );
+  }
+  if (matches.length > 1) {
+    return failure(
+      `phenix_workflow: target agent "${input.request.agent}" resolves to multiple legal transitions.`,
+      {
+        code: "WORKFLOW_AGENT_AMBIGUOUS",
+        agent: input.request.agent,
+        currentNodeId: input.snapshot.workflow.currentState,
       },
     );
   }
 
-  if (input.request.input.mode === "background" && input.request.parent?.kind === "child") {
+  const option = matches[0];
+  if (input.request.mode === "background" && input.request.parent?.kind === "child") {
     return failure("phenix_workflow: background spawning is only available to the root actor.");
   }
-  if (input.request.input.mode === "background" && !edge.allowedModes.includes("background")) {
-    return failure(`phenix_workflow: background mode is not allowed for edge "${edge.edgeId}".`, {
-      code: "WORKFLOW_MODE_NOT_ALLOWED",
-      edgeId: edge.edgeId,
-      allowedModes: [...edge.allowedModes],
-    });
+  if (input.request.mode === "background" && !option.allowedModes.includes("background")) {
+    return failure(
+      `phenix_workflow: background mode is not allowed for target agent "${option.agent}".`,
+      {
+        code: "WORKFLOW_MODE_NOT_ALLOWED",
+        agent: option.agent,
+        allowedModes: [...option.allowedModes],
+      },
+    );
   }
 
   const execution = await input.delegator.delegate({
     params: {
-      transitionId: edge.transitionId,
-      task: input.request.input.task,
-      ...(input.request.input.requirements
-        ? { requirements: input.request.input.requirements }
-        : {}),
-      ...(input.request.input.mode ? { mode: input.request.input.mode } : {}),
+      transitionId: option.transitionId,
+      task: input.request.task,
+      ...(input.request.requirements ? { requirements: input.request.requirements } : {}),
+      ...(input.request.mode ? { mode: input.request.mode } : {}),
       workflowRevision: input.snapshot.workflow.revision,
       authorityDigest: input.snapshot.workflow.optionsDigest,
     },
@@ -129,10 +143,10 @@ async function takeSpawnEdge(input: {
 
   return {
     ok: true,
-    edge: {
-      edgeId: edge.edgeId,
-      fromNodeId: edge.sourceNodeId,
-      toNodeId: edge.targetNodeId,
+    transition: {
+      agent: option.agent,
+      fromNodeId: option.sourceNodeId,
+      toNodeId: option.targetNodeId,
     },
     record: execution.record,
   };
@@ -142,6 +156,11 @@ export function createWorkflowRuntime(input: {
   readonly delegator: WorkflowDelegator;
   readonly maximumDelegationDepth: number;
 }): WorkflowRuntimePort {
+  const definitionErrors = validateTargetAgentDeterminism(PHENIX_DEFAULT_WORKFLOW);
+  if (definitionErrors.length > 0) {
+    throw new Error(`Invalid workflow target-agent mapping:\n${definitionErrors.join("\n")}`);
+  }
+
   const inspect = (request: {
     readonly ctx: ExtensionContext;
     readonly parent?: ParentExecutionContext;
@@ -155,12 +174,9 @@ export function createWorkflowRuntime(input: {
   return {
     inspect,
 
-    async takeEdge(request) {
+    async spawn(request) {
       const snapshot = inspect(request);
-      switch (request.input.kind) {
-        case "spawn":
-          return takeSpawnEdge({ request, snapshot, delegator: input.delegator });
-      }
+      return spawnTargetAgent({ request, snapshot, delegator: input.delegator });
     },
   };
 }

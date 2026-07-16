@@ -9,7 +9,7 @@
  * 3. requirements
  * 4. output schema projection
  * 5. effective tool/delegation boundaries
- * 6. pre-resolved legal workflow edges
+ * 6. pre-resolved legal target agents
  * 7. completion protocol
  * 8. relevant workflow state
  */
@@ -67,7 +67,7 @@ export function buildChildSystemPrompt(input: {
         ...effectiveTools.map((tool) => `- ${tool}`),
         "",
         "The phenix_complete tool is always available for submitting your result.",
-        "The phenix_workflow tool is always available for invoking one legal edge from the preloaded authority snapshot.",
+        "The phenix_workflow tool is always available for spawning one advertised target agent from the preloaded authority snapshot.",
       ].join("\n"),
     );
   }

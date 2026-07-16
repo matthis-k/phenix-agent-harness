@@ -10,7 +10,7 @@ const projection = {
   optionsDigest: "b".repeat(64),
   options: [
     {
-      edgeId: "planner.request-architect",
+      agent: "architect",
       transitionId: "planner.request-architect",
       sourceNodeId: "planning",
       targetNodeId: "planning",
@@ -27,27 +27,26 @@ const projection = {
 };
 
 describe("workflow authority prompt projection", () => {
-  it("preloads legal edges without asking the model to report its node", () => {
+  it("preloads target agents without exposing transition identities", () => {
     const prompt = formatWorkflowProjection(projection);
 
     assert.match(prompt, /resolved by the runtime before this agent started/i);
     assert.match(prompt, /Current node: planning/);
-    assert.match(prompt, /Edge ID: planner\.request-architect/);
-    assert.match(prompt, /Kind: spawn/);
-    assert.match(prompt, /one advertised edgeId/i);
-    assert.match(prompt, /runtime derives the current node/i);
+    assert.match(prompt, /Agent: architect/);
+    assert.match(prompt, /Execution role: architect/);
+    assert.match(prompt, /action=spawn/);
+    assert.match(prompt, /unique legal transition/i);
     assert.match(prompt, /never send a node ID back to the runtime/i);
-    assert.doesNotMatch(prompt, /action=inspect/);
-    assert.doesNotMatch(prompt, /action=take/);
+    assert.doesNotMatch(prompt, /planner\.request-architect/);
+    assert.doesNotMatch(prompt, /edgeId/);
     assert.doesNotMatch(prompt, /phenix_create_subagent/);
     assert.doesNotMatch(prompt, /Authority digest:/);
   });
 
-  it("states deterministic no-edge authority", () => {
+  it("states deterministic no-target authority", () => {
     const prompt = formatWorkflowProjection({ ...projection, options: [] });
 
-    assert.match(prompt, /no legal outgoing spawn edge/i);
+    assert.match(prompt, /permits no target agent to be spawned/i);
     assert.match(prompt, /complete the current assignment directly/i);
-    assert.doesNotMatch(prompt, /action=inspect/);
   });
 });

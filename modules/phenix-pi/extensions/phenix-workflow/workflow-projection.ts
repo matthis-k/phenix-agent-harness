@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Difficulty } from "../phenix-kernel/task.ts";
 import { resolveDelegationOptions } from "./delegation-options.ts";
+import { delegateTransitionById, targetAgentForTransition } from "./workflow-target-agents.ts";
 import type {
   DelegationAuthority,
   DelegationOption,
@@ -10,10 +11,10 @@ import type {
   WorkflowRuntimeRecord,
 } from "./workflow-types.ts";
 
-/** Internal edge projection used to bind a graph-facing workflow call. */
+/** Internal authority projection used to bind model intent to one transition. */
 export interface ModelDelegationOption {
-  readonly edgeId: string;
-  /** Compatibility identity for runtime persistence and settlement code. */
+  readonly agent: string;
+  /** Private runtime identity; never required from the model. */
   readonly transitionId: string;
   readonly sourceNodeId: string;
   readonly targetNodeId: string;
@@ -38,30 +39,41 @@ export interface ModelWorkflowProjection {
 export interface WorkflowDecisionContext extends ModelWorkflowProjection {}
 
 export function projectDelegationOptions(
+  definition: WorkflowDefinition,
   sourceNodeId: string,
   options: readonly DelegationOption[],
 ): readonly ModelDelegationOption[] {
-  return options.map((option) => ({
-    edgeId: option.transitionId,
-    transitionId: option.transitionId,
-    sourceNodeId,
-    targetNodeId: option.targetState,
-    workflowRevision: option.workflowRevision,
-    role: option.role ?? "base",
-    purpose: option.purpose,
-    description: option.description,
-    category: option.category,
-    outputSchemaId: option.outputSchemaId,
-    allowedModes: [...option.allowedModes],
-    resultSchema: option.outputSchema,
-  }));
+  return options.map((option) => {
+    const transition = delegateTransitionById(definition, option.transitionId);
+    if (!transition) {
+      throw new Error(
+        `Workflow transition "${option.transitionId}" is missing or is not a delegate transition`,
+      );
+    }
+
+    return {
+      agent: targetAgentForTransition(transition),
+      transitionId: option.transitionId,
+      sourceNodeId,
+      targetNodeId: option.targetState,
+      workflowRevision: option.workflowRevision,
+      role: option.role ?? "base",
+      purpose: option.purpose,
+      description: option.description,
+      category: option.category,
+      outputSchemaId: option.outputSchemaId,
+      allowedModes: [...option.allowedModes],
+      resultSchema: option.outputSchema,
+    };
+  });
 }
 
 export function computeOptionsDigest(options: readonly ModelDelegationOption[]): string {
   const canonical = [...options]
-    .sort((left, right) => left.edgeId.localeCompare(right.edgeId))
+    .sort((left, right) => left.agent.localeCompare(right.agent))
     .map((option) => ({
-      edgeId: option.edgeId,
+      agent: option.agent,
+      transitionId: option.transitionId,
       sourceNodeId: option.sourceNodeId,
       targetNodeId: option.targetNodeId,
       workflowRevision: option.workflowRevision,
@@ -78,7 +90,11 @@ export function buildWorkflowDecisionContext(input: {
   readonly authority: DelegationAuthority;
   readonly activeHandles: readonly WorkflowHandleRecord[];
 }): WorkflowDecisionContext {
-  const options = projectDelegationOptions(input.runtime.state, resolveDelegationOptions(input));
+  const options = projectDelegationOptions(
+    input.definition,
+    input.runtime.state,
+    resolveDelegationOptions(input),
+  );
   return {
     difficulty: input.runtime.difficulty,
     currentState: input.runtime.state,
@@ -114,7 +130,7 @@ export function formatWorkflowProjection(projection: ModelWorkflowProjection): s
 
   if (projection.options.length === 0) {
     lines.push(
-      "The current contract-bound node has no legal outgoing spawn edge.",
+      "The current contract-bound node permits no target agent to be spawned.",
       "Complete the current assignment directly using phenix_complete.",
       "",
     );
@@ -122,15 +138,14 @@ export function formatWorkflowProjection(projection: ModelWorkflowProjection): s
   }
 
   lines.push(
-    "Legal workflow edges available to this agent:",
-    "Use these when delegation would materially improve evidence, planning, implementation, testing, or review.",
+    "Target agents available from the current workflow node:",
+    "Use them when delegation would materially improve evidence, planning, implementation, testing, or review.",
     "",
   );
   for (const [index, option] of projection.options.entries()) {
     lines.push(
-      `${index + 1}. Edge ID: ${option.edgeId}`,
-      "   Kind: spawn",
-      `   Spawn role: ${option.role}`,
+      `${index + 1}. Agent: ${option.agent}`,
+      `   Execution role: ${option.role}`,
       `   Category: ${option.category}`,
       `   Purpose: ${option.description}`,
       `   Result schema: ${option.outputSchemaId}`,
@@ -141,9 +156,9 @@ export function formatWorkflowProjection(projection: ModelWorkflowProjection): s
 
   lines.push(
     "Workflow invocation protocol:",
-    "- Call phenix_workflow with one advertised edgeId and its spawn input.",
-    "- The runtime derives the current node from the active session or contract and verifies that the edge is still legal.",
-    "- Do not invent a role, result schema, model, thinking level, tool set, delegation depth, or node ID.",
+    "- Call phenix_workflow with action=spawn, one advertised agent, and its bounded task input.",
+    "- The runtime derives the current node and resolves that target agent to the unique legal transition.",
+    "- Do not invent a transition ID, role, result schema, model, thinking level, tool set, delegation depth, or node ID.",
   );
   return lines.join("\n");
 }

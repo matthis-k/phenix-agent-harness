@@ -22,29 +22,21 @@ export interface WorkflowHandleResult {
   readonly errors?: readonly string[];
 }
 
-export interface WorkflowSpawnEdgeInput {
-  readonly kind: "spawn";
+export interface WorkflowSpawnRequest {
+  readonly agent: string;
   readonly task: string;
   readonly requirements?: string[];
   readonly mode?: "await" | "background";
-}
-
-/** Extend this union when the workflow gains another executable edge kind. */
-export type WorkflowEdgeInput = WorkflowSpawnEdgeInput;
-
-export interface WorkflowTakeEdgeRequest {
-  readonly edgeId: string;
-  readonly input: WorkflowEdgeInput;
   readonly parent?: ParentExecutionContext;
   readonly signal: AbortSignal;
   readonly ctx: ExtensionContext;
 }
 
-export type WorkflowEdgeExecutionResult =
+export type WorkflowSpawnResult =
   | {
       readonly ok: true;
-      readonly edge: {
-        readonly edgeId: string;
+      readonly transition: {
+        readonly agent: string;
         readonly fromNodeId: string;
         readonly toNodeId: string;
       };
@@ -59,9 +51,9 @@ export type WorkflowEdgeExecutionResult =
 /**
  * Authority-bound workflow application service.
  *
- * The model adapter never supplies actor or node state. The runtime derives both
- * from the active root session or child contract, then verifies the requested
- * edge against the freshly resolved outgoing edge set.
+ * The model adapter supplies only a target agent and assignment. The runtime
+ * derives actor and node state from the active root session or child contract,
+ * resolves the unique legal transition for that target, and executes it.
  */
 export interface WorkflowRuntimePort {
   inspect(input: {
@@ -69,5 +61,5 @@ export interface WorkflowRuntimePort {
     readonly parent?: ParentExecutionContext;
   }): WorkflowAuthoritySnapshot;
 
-  takeEdge(input: WorkflowTakeEdgeRequest): Promise<WorkflowEdgeExecutionResult>;
+  spawn(input: WorkflowSpawnRequest): Promise<WorkflowSpawnResult>;
 }
