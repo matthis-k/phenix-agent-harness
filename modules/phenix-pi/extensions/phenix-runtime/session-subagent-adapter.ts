@@ -324,9 +324,10 @@ class SessionSubagentHandle<TOutput> implements SubagentHandle<TOutput> {
     this.terminalStatus = statusForError(error);
     this.evaluationController.abort(error);
 
-    if (code === "ABORTED") {
-      await this.run.abort(reason);
-    }
+    // Every terminal cancellation reason must stop backend execution. The code
+    // classifies the public result (for example TIMEOUT -> failed); it must not
+    // decide whether the child process/session continues running.
+    await this.run.abort(reason);
   }
 
   subscribe(listener: (event: SubagentEvent) => void): () => void {
