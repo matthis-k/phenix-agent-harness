@@ -1,0 +1,33 @@
+name: Audit unversioned Phenix API
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Collect version references
+        shell: bash
+        run: |
+          set +e
+          rg -n --hidden \
+            --glob '!modules/pi-npm/package-lock.json' \
+            --glob '!flake.lock' \
+            'PHENIX_API_VERSION|schemaVersion|definitionVersion|presetRevision|HANDLE_VERSION|CONTRACT_SCHEMA_VERSION|CONTRACT_RESULT_SCHEMA_VERSION|\bversion:\s*(?:[0-9]+|PHENIX_API_VERSION)|readonly version:' \
+            modules/phenix-pi > version-references.txt
+          cat version-references.txt
+          exit 0
+      - uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097
+        with:
+          name: version-references
+          path: version-references.txt
+          if-no-files-found: error
