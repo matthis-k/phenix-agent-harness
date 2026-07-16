@@ -1,8 +1,9 @@
 # Agent-facing workflow API
 
 `phenix_workflow` is the only model-facing entry point for workflow operations.
-The active root session or child contract supplies actor identity, the current
-workflow node, and delegation authority. The model never supplies those values.
+The active root session or initialized child contract supplies actor identity, the
+current workflow node, and delegation authority. The model never supplies those
+values.
 
 ## Initial authority bootstrap
 
@@ -14,6 +15,22 @@ deterministic code rather than requested by the model.
 The injected snapshot describes each target agent, including its public identity,
 execution role, purpose, allowed execution modes, and result contract. Models
 should use these targets when delegation would materially improve the task.
+
+## Refresh current authority
+
+After a workflow action may have changed the current node or legal target set, the
+model can request a fresh deterministic projection:
+
+```json
+{
+  "action": "inspect"
+}
+```
+
+The result is derived from the active root session or initialized child contract.
+It exposes the current node, legal target agents, result schemas, modes, remaining
+depth, and effective tools, but never exposes private transition identities or
+lets the model mutate authority.
 
 ## Spawn a target agent
 
@@ -46,5 +63,5 @@ call shape.
 
 New workflow capabilities should be represented as additional workflow actions,
 not unrelated top-level tools or direct access to the generic child-session
-runtime. Spawn actions preserve the same target-agent interaction model while
-internal transition IDs remain private implementation details.
+runtime. Inspect and spawn preserve the same authority-bound interaction model
+while internal transition IDs remain private implementation details.
