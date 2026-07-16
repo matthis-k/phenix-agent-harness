@@ -100,7 +100,7 @@ jobs:
                 done
           )
           if (( ${#changed_sources[@]} > 0 )); then
-            nix develop --command biome check --write "${changed_sources[@]}"
+            nix develop --command biome check --write --unsafe "${changed_sources[@]}"
           fi
 
       - name: Commit candidate
