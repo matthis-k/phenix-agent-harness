@@ -29,16 +29,79 @@ jobs:
         run: |
           set -euo pipefail
           python3 .github/scripts/remove-api-versioning.py
+
+          python3 <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          allowed = {
+              "modules/phenix-pi/extensions/phenix-composition/root-workflow-integration.ts",
+              "modules/phenix-pi/extensions/phenix-kernel/api-version.ts",
+              "modules/phenix-pi/extensions/phenix-routing/types.ts",
+              "modules/phenix-pi/extensions/phenix-subagents/child-spec.ts",
+              "modules/phenix-pi/extensions/phenix-subagents/contract-codec.ts",
+              "modules/phenix-pi/extensions/phenix-subagents/contract-projection.ts",
+              "modules/phenix-pi/extensions/phenix-subagents/contract-store.ts",
+              "modules/phenix-pi/extensions/phenix-subagents/contract.ts",
+              "modules/phenix-pi/extensions/phenix-subagents/delegation-policy.ts",
+              "modules/phenix-pi/extensions/phenix-subagents/handle-store.ts",
+              "modules/phenix-pi/extensions/phenix-subagents/handle-types.ts",
+              "modules/phenix-pi/extensions/phenix-subagents/producer-contract.ts",
+              "modules/phenix-pi/extensions/phenix-subagents/tool-policy.ts",
+              "modules/phenix-pi/extensions/phenix-subagents/workflow-delegator.ts",
+              "modules/phenix-pi/extensions/phenix-workflow/agent-capabilities.ts",
+              "modules/phenix-pi/extensions/phenix-workflow/session-registry.ts",
+              "modules/phenix-pi/extensions/phenix-workflow/workflow-definitions.ts",
+              "modules/phenix-pi/extensions/phenix-workflow/workflow-runtime.ts",
+              "modules/phenix-pi/extensions/phenix-workflow/workflow-store.ts",
+              "modules/phenix-pi/extensions/phenix-workflow/workflow-types.ts",
+              "modules/phenix-pi/runtime/verify.mjs",
+              "modules/phenix-pi/tests/contract-store.test.ts",
+              "modules/phenix-pi/tests/contract-tool-isolation.test.ts",
+              "modules/phenix-pi/tests/contract.test.ts",
+              "modules/phenix-pi/tests/execution-quality-service.test.ts",
+              "modules/phenix-pi/tests/handle-schema.test.ts",
+              "modules/phenix-pi/tests/managed-delegation-runtime.test.ts",
+              "modules/phenix-pi/tests/persistence-json-files.test.ts",
+              "modules/phenix-pi/tests/production-subagent-manager.test.ts",
+              "modules/phenix-pi/tests/runtime-finalization.test.ts",
+              "modules/phenix-pi/tests/session-isolation.test.ts",
+              "modules/phenix-pi/tests/workflow-decision-context.test.ts",
+          }
+
+          changed = subprocess.check_output(
+              ["git", "diff", "--name-only", "--", "modules/phenix-pi"],
+              text=True,
+          ).splitlines()
+          for relative in changed:
+              if relative in allowed:
+                  continue
+              content = subprocess.check_output(["git", "show", f"HEAD:{relative}"])
+              path = Path(relative)
+              path.parent.mkdir(parents=True, exist_ok=True)
+              path.write_bytes(content)
+          PY
+
           rm -f \
             .github/scripts/remove-api-versioning.py \
             .github/workflows/apply-unversioned-api.yml \
             .github/workflows/audit-unversioned-api.yml
 
-      - name: Format current source shape
+      - name: Format focused source diff
         shell: bash
         run: |
           set -euo pipefail
-          nix develop --command biome format --write modules/phenix-pi
+          mapfile -d '' changed_sources < <(
+            git diff --name-only -z --diff-filter=ACMR -- modules/phenix-pi \
+              | while IFS= read -r -d '' path; do
+                  case "$path" in
+                    *.ts|*.mjs) printf '%s\0' "$path" ;;
+                  esac
+                done
+          )
+          if (( ${#changed_sources[@]} > 0 )); then
+            nix develop --command biome check --write "${changed_sources[@]}"
+          fi
 
       - name: Commit candidate
         shell: bash
