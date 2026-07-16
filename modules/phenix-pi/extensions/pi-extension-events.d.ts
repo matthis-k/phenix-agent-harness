@@ -12,9 +12,7 @@ declare module "@earendil-works/pi-coding-agent" {
       handler: (
         event: { readonly toolName?: string; readonly name?: string },
         ctx: ExtensionContext,
-      ) => void | ToolCallBlock | Promise<void | ToolCallBlock>,
+      ) => ToolCallBlock | undefined | Promise<ToolCallBlock | undefined>,
     ): void;
   }
 }
-
-export {};
