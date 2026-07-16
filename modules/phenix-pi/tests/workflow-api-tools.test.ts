@@ -123,9 +123,10 @@ describe("contract-bound workflow graph tool", () => {
 
   it("installs one stable workflow tool", () => {
     const workflow = new RecordingWorkflow();
-    assert.deepEqual(createWorkflowApiTools({ workflow }).map((tool) => tool.name), [
-      "phenix_workflow",
-    ]);
+    assert.deepEqual(
+      createWorkflowApiTools({ workflow }).map((tool) => tool.name),
+      ["phenix_workflow"],
+    );
   });
 
   it("applies root-scope authorization before inspection", async () => {
