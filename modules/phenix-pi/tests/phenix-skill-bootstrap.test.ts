@@ -27,7 +27,7 @@ describe("Phenix root prompt bootstrap", () => {
     assert.match(bootstrapped, /substantial intermediate context/i);
     assert.match(bootstrapped, /not needed for your remaining work/i);
     assert.match(bootstrapped, /read the files required for your own task/i);
-    assert.match(bootstrapped, /work you would need to repeat/i);
+    assert.match(bootstrapped, /work\s+you would need to repeat/i);
     assert.doesNotMatch(bootstrapped, /edgeId/);
     assert.doesNotMatch(bootstrapped, /phenix_create_subagent/);
 
