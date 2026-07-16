@@ -47,3 +47,8 @@ jobs:
           name: version-references
           path: version-references.txt
           if-no-files-found: error
+      - uses: actions/upload-artifact@84480863f228bb9747b473957fcc9e309aa96097
+        with:
+          name: phenix-pi-source
+          path: modules/phenix-pi
+          if-no-files-found: error
