@@ -72,21 +72,16 @@ export function projectWorkflowInspection(
       difficulty: snapshot.workflow.difficulty,
       revision: snapshot.workflow.revision,
     },
-    edges: snapshot.workflow.options.map((option) => ({
-      edgeId: option.edgeId,
-      kind: "spawn",
-      fromNodeId: option.sourceNodeId,
-      toNodeId: option.targetNodeId,
-      spawn: {
-        role: option.role,
-        purpose: option.purpose,
-        description: option.description,
-        category: option.category,
-        modes: [...option.allowedModes],
-        returns: {
-          schemaId: option.outputSchemaId,
-          schema: option.resultSchema,
-        },
+    agents: snapshot.workflow.options.map((option) => ({
+      agent: option.agent,
+      role: option.role,
+      purpose: option.purpose,
+      description: option.description,
+      category: option.category,
+      modes: [...option.allowedModes],
+      returns: {
+        schemaId: option.outputSchemaId,
+        schema: option.resultSchema,
       },
     })),
     authority: {
@@ -96,42 +91,32 @@ export function projectWorkflowInspection(
   };
 }
 
-async function invokeWorkflowEdge(input: {
+async function invokeWorkflowAction(input: {
   readonly params: WorkflowActionParamsType;
   readonly workflow: WorkflowRuntimePort;
   readonly parent?: ParentExecutionContext;
   readonly signal: AbortSignal | undefined;
   readonly ctx: ExtensionContext;
 }): Promise<AgentToolResult<Record<string, unknown>>> {
-  const spawn = input.params.spawn;
-  if (!spawn) {
-    return errorResult(
-      `phenix_workflow: edge "${input.params.edgeId}" requires edge-specific input.`,
-      {
-        code: "WORKFLOW_EDGE_INPUT_REQUIRED",
-        edgeId: input.params.edgeId,
-      },
-    );
+  switch (input.params.action) {
+    case "spawn": {
+      const execution = await input.workflow.spawn({
+        agent: input.params.agent,
+        task: input.params.task,
+        ...(input.params.requirements ? { requirements: input.params.requirements } : {}),
+        ...(input.params.mode ? { mode: input.params.mode } : {}),
+        ...(input.parent ? { parent: input.parent } : {}),
+        signal: input.signal ?? new AbortController().signal,
+        ctx: input.ctx,
+      });
+      if (!execution.ok) return errorResult(execution.message, execution.details);
+
+      return result({
+        ...execution.transition,
+        ...compactHandle(execution.record),
+      });
+    }
   }
-
-  const execution = await input.workflow.takeEdge({
-    edgeId: input.params.edgeId,
-    input: {
-      kind: "spawn",
-      task: spawn.task,
-      ...(spawn.requirements ? { requirements: spawn.requirements } : {}),
-      ...(spawn.mode ? { mode: spawn.mode } : {}),
-    },
-    ...(input.parent ? { parent: input.parent } : {}),
-    signal: input.signal ?? new AbortController().signal,
-    ctx: input.ctx,
-  });
-  if (!execution.ok) return errorResult(execution.message, execution.details);
-
-  return result({
-    ...execution.edge,
-    ...compactHandle(execution.record),
-  });
 }
 
 export function createWorkflowTool(input: {
@@ -143,8 +128,8 @@ export function createWorkflowTool(input: {
     name: PHENIX_WORKFLOW_TOOL,
     label: "Phenix Workflow",
     description:
-      "Invoke one legal workflow edge advertised in the authority snapshot injected at session start. " +
-      "The runtime derives the current node and owns roles, routing, models, tools, child authority, contracts, and state transitions.",
+      "Perform one workflow action using the authority snapshot injected at session start. " +
+      "For spawning, provide one advertised target agent and a bounded task. The runtime derives the current node and owns transition selection, roles, routing, models, tools, child authority, contracts, and state changes.",
     parameters: WorkflowActionParams,
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -152,7 +137,7 @@ export function createWorkflowTool(input: {
       if (forbidden) return forbidden;
 
       try {
-        return await invokeWorkflowEdge({
+        return await invokeWorkflowAction({
           params,
           workflow: input.workflow,
           ...(input.parent ? { parent: input.parent } : {}),
