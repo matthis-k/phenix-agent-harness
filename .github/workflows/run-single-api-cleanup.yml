@@ -1,0 +1,59 @@
+name: Run staged single API cleanup
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: Execute staged transformation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/apply-single-api-cleanup.yml').read_text()
+          marker = "          python3 <<'PY'\n"
+          body = workflow.split(marker, 1)[1].split("\n          PY", 1)[0]
+          body = "\n".join(line[10:] if line.startswith("          ") else line for line in body.splitlines())
+          exec(compile(body, 'staged-single-api-cleanup.py', 'exec'))
+          PY
+          rm -f .github/workflows/run-single-api-cleanup.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "refactor(api): keep only the current Phenix API"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+      - name: Reject stale API references
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RInE 'phenix_delegate|phenix_create_subagent|phenix_contract_get|phenix_contract_submit|\bv[1-9][0-9]*\b|version [2-9][0-9]*' \
+            --exclude='flake.lock' --exclude='package-lock.json' --exclude-dir='.git' .; then
+            echo 'Stale Phenix API reference found.' >&2
+            exit 1
+          fi
+      - name: Install Nix
+        uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run Tend CI profile
+        shell: bash
+        run: |
+          nix develop --command tend check \
+            --profile ci \
+            --context ci \
+            --base HEAD^ \
+            --head HEAD
