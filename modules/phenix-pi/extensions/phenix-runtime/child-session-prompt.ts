@@ -76,7 +76,18 @@ export function buildChildSystemPrompt(input: {
     contract.runtime.delegation.remainingDepth > 0 &&
     contract.runtime.delegation.availableRoles.length > 0;
 
-  if (!canDelegate) {
+  if (canDelegate) {
+    sections.push(
+      [
+        "## Delegation discipline",
+        "",
+        "Delegate only a bounded subproblem with a clean, verifiable handoff.",
+        "Prefer an advertised child when it can isolate substantial intermediate context that this session will not need later, or when independent execution improves evidence, testing, or review.",
+        "Keep source inspection and reasoning in this session when their details are required to complete, integrate, or verify this assignment.",
+        "Do not delegate trivial work or work this session would need to repeat after the handoff.",
+      ].join("\n"),
+    );
+  } else {
     sections.push(
       [
         "## Delegation boundary",
