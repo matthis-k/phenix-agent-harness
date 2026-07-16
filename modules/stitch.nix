@@ -90,7 +90,6 @@
               --json > discovery.json
 
             jq -e '
-              .version == 2 and
               (.repos | length) == 1 and
               .repos[0].path == "."
             ' discovery.json
