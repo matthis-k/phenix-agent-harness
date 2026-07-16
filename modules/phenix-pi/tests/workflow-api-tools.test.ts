@@ -48,9 +48,11 @@ function snapshot(): WorkflowAuthoritySnapshot {
 
 class RecordingWorkflow implements WorkflowApiPort {
   readonly delegateCalls: Parameters<WorkflowApiPort["delegate"]>[0][] = [];
+  inspectCalls = 0;
   authority = snapshot();
 
   inspect(): WorkflowAuthoritySnapshot {
+    this.inspectCalls += 1;
     return this.authority;
   }
 
@@ -74,7 +76,7 @@ async function execute(
 }
 
 describe("contract-bound workflow API tools", () => {
-  it("exposes deterministic inspection for every Phenix model", async () => {
+  it("exposes deterministic inspection for every Phenix actor", async () => {
     const workflow = new RecordingWorkflow();
     const tool = createWorkflowInspectTool({ workflow });
 
@@ -95,6 +97,23 @@ describe("contract-bound workflow API tools", () => {
       createWorkflowApiTools({ workflow, allowCreate: true }).map((tool) => tool.name),
       ["phenix_workflow", "phenix_create_subagent"],
     );
+  });
+
+  it("applies an injected root-scope authorizer before reading authority", async () => {
+    const workflow = new RecordingWorkflow();
+    const tool = createWorkflowInspectTool({
+      workflow,
+      authorize: ({ tool: toolName }) => `${toolName} is outside this root model scope.`,
+    });
+
+    const result = await execute(tool, {});
+
+    assert.equal(workflow.inspectCalls, 0);
+    assert.deepEqual(result.details, {
+      status: "forbidden",
+      tool: "phenix_workflow",
+    });
+    assert.match(result.content[0]?.text ?? "", /outside this root model scope/);
   });
 
   it("binds fresh revision and authority digest at creation time", async () => {

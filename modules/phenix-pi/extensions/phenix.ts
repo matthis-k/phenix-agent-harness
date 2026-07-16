@@ -41,10 +41,7 @@ import {
   createWorkflowApiTools,
   type WorkflowApiPort,
 } from "./phenix-runtime/workflow-api-tools.ts";
-import {
-  bootstrapPhenixSubagentsSkillPrompt,
-  shouldBootstrapPhenixSubagentsSkill,
-} from "./phenix-skill-bootstrap.ts";
+import { buildPhenixRootSystemPrompt } from "./phenix-skill-bootstrap.ts";
 import { defaultAgentClients } from "./phenix-subagents/definitions.ts";
 import { createExecutionQualityService } from "./phenix-subagents/execution-quality-service.ts";
 import phenixSubagents from "./phenix-subagents/index.ts";
@@ -169,30 +166,11 @@ function hasConfiguredMcpServer(cwd: string): boolean {
 
 function registerPhenixCodingSubstratePrompt(pi: ExtensionAPI): void {
   pi.on("before_agent_start", async (event, ctx) => {
-    const systemPrompt = shouldBootstrapPhenixSubagentsSkill(ctx.model)
-      ? bootstrapPhenixSubagentsSkillPrompt(event.systemPrompt)
-      : event.systemPrompt;
-
-    const guidance = [
-      "Use focused searches and bounded reads instead of dumping entire repositories or logs.",
-      "Prefer LSP tools for diagnostics, types, symbols, definitions, and references when a matching server exists.",
-      "Run LSP diagnostics on changed supported files before reporting completion.",
-      "Use the `mcp` proxy to discover MCP capabilities on demand instead of assuming every MCP tool is directly registered.",
-      "Use `web_search` for external discovery and `web_fetch` for specific pages; use `gh` through the shell for GitHub-native operations.",
-      "Use `context_info` and compact only at coherent boundaries during genuinely long tasks.",
-      "Use the Phenix workflow API for every subagent decision: call `phenix_workflow` to inspect current authority, then `phenix_create_subagent` with one returned transition. Raw `subagent` and legacy `phenix_delegate` calls are runtime-blocked.",
-      "Every delegated handoff must use a strict output schema. Invalid structured output is returned to the child with exact validation failures so it can repair the handoff.",
-      "Runtime verification and critic gates are authoritative. Do not treat a model's claim that tests passed as verification evidence.",
-      "The shell is intentionally permissive, but avoid destructive or unrelated operations unless the task requires them.",
-    ].join("\n- ");
-
-    return {
-      systemPrompt: `${systemPrompt}
-
-## Phenix coding substrate
-
-- ${guidance}`,
-    };
+    const systemPrompt = buildPhenixRootSystemPrompt({
+      model: ctx.model,
+      systemPrompt: event.systemPrompt,
+    });
+    return systemPrompt === undefined ? undefined : { systemPrompt };
   });
 }
 
