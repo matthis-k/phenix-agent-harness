@@ -9,7 +9,7 @@ import {
   type TaskProfile,
 } from "../phenix-kernel/task.ts";
 import { loadRoutingConfig, validateConfig } from "../phenix-routing/config.ts";
-import { modelSetForModelId, PHENIX_PROVIDER } from "../phenix-routing/provider.ts";
+import { modelSetForModelId } from "../phenix-routing/provider.ts";
 import { modelRegistry } from "../phenix-routing/registry.ts";
 import { resolveRoute } from "../phenix-routing/resolver.ts";
 import { extractRootTurnInput } from "../phenix-routing/root-turn.ts";
@@ -28,6 +28,7 @@ import {
   registerSession,
   type WorkflowRuntimeRecord,
 } from "../phenix-workflow/index.ts";
+import { phenixRootModelScope } from "./model-scope.ts";
 
 async function initializeRootWorkflow(input: {
   readonly cwd: string;
@@ -96,7 +97,7 @@ export default async function rootWorkflowIntegration(pi: ExtensionAPI): Promise
 
     const sessionId = ctx.sessionManager.getSessionId() ?? "default";
     const selectedModel = ctx.model;
-    if (selectedModel?.provider !== PHENIX_PROVIDER) return;
+    if (!phenixRootModelScope.includes(selectedModel)) return;
 
     const runtime = getSessionRuntime(sessionId);
     const cachedMessages = runtime.cachedMessages;
@@ -208,8 +209,11 @@ export default async function rootWorkflowIntegration(pi: ExtensionAPI): Promise
       ? formatWorkflowProjection(workflowProjection)
       : "Workflow state not yet initialized. Start by classifying the task.\n";
 
-    return {
-      systemPrompt: `${event.systemPrompt}\n\n${workflowGuidance}`,
-    };
+    const systemPrompt = phenixRootModelScope.contributeSystemPrompt({
+      model: selectedModel,
+      systemPrompt: event.systemPrompt,
+      contribution: workflowGuidance,
+    });
+    return systemPrompt === undefined ? undefined : { systemPrompt };
   });
 }
