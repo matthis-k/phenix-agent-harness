@@ -21,9 +21,7 @@ import type { ParentExecutionContext } from "./workflow-api-types.ts";
 
 export const PHENIX_WORKFLOW_TOOL = "phenix_workflow" as const;
 export const PHENIX_CREATE_SUBAGENT_TOOL = "phenix_create_subagent" as const;
-export type WorkflowApiToolName =
-  | typeof PHENIX_WORKFLOW_TOOL
-  | typeof PHENIX_CREATE_SUBAGENT_TOOL;
+export type WorkflowApiToolName = typeof PHENIX_WORKFLOW_TOOL | typeof PHENIX_CREATE_SUBAGENT_TOOL;
 
 export interface WorkflowApiToolAuthorizationInput {
   readonly ctx: ExtensionContext;
