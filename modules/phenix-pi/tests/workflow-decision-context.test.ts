@@ -1,22 +1,17 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
+import { resolveDelegationOptions } from "../extensions/phenix-workflow/delegation-options.ts";
+import { PHENIX_DEFAULT_WORKFLOW } from "../extensions/phenix-workflow/workflow-definitions.ts";
 import {
   buildWorkflowDecisionContext,
   computeOptionsDigest,
   projectDelegationOptions,
 } from "../extensions/phenix-workflow/workflow-projection.ts";
-
-import {
-  resolveDelegationOptions,
-} from "../extensions/phenix-workflow/delegation-options.ts";
-
-import { PHENIX_DEFAULT_WORKFLOW } from "../extensions/phenix-workflow/workflow-definitions.ts";
-
-import type { WorkflowRuntimeRecord } from "../extensions/phenix-workflow/workflow-types.ts";
-import type { DelegationAuthority } from "../extensions/phenix-workflow/workflow-types.ts";
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
+import type {
+  DelegationAuthority,
+  WorkflowRuntimeRecord,
+} from "../extensions/phenix-workflow/workflow-types.ts";
 
 function baseRecord(overrides?: Partial<WorkflowRuntimeRecord>): WorkflowRuntimeRecord {
   return {
@@ -62,10 +57,8 @@ function unrestrictedAuthority(): DelegationAuthority {
   };
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
-
 describe("WorkflowDecisionContext", () => {
-  it("builds context with options from current state", () => {
+  it("builds outgoing edges from the current node", () => {
     const ctx = buildWorkflowDecisionContext({
       definition: PHENIX_DEFAULT_WORKFLOW,
       runtime: baseRecord({ state: "classified" }),
@@ -73,80 +66,69 @@ describe("WorkflowDecisionContext", () => {
       activeHandles: [],
     });
 
-    assert.ok(ctx.options.length > 0, "should have options from classified state");
+    assert.ok(ctx.options.length > 0);
     assert.equal(ctx.currentState, "classified");
     assert.equal(ctx.difficulty, "D2");
     assert.equal(ctx.revision, 0);
-    assert.ok(typeof ctx.optionsDigest === "string");
-    assert.ok(ctx.optionsDigest.length === 64, "digest should be 64 hex chars (SHA-256)");
+    assert.equal(ctx.options[0]?.sourceNodeId, "classified");
+    assert.ok(ctx.optionsDigest.length === 64);
   });
 
-  it("produces deterministic digest for same options", () => {
-    const ctx1 = buildWorkflowDecisionContext({
+  it("produces deterministic authority digests", () => {
+    const input = {
       definition: PHENIX_DEFAULT_WORKFLOW,
       runtime: baseRecord({ state: "classified" }),
       authority: unrestrictedAuthority(),
       activeHandles: [],
-    });
-
-    const ctx2 = buildWorkflowDecisionContext({
-      definition: PHENIX_DEFAULT_WORKFLOW,
-      runtime: baseRecord({ state: "classified" }),
-      authority: unrestrictedAuthority(),
-      activeHandles: [],
-    });
-
-    assert.equal(ctx1.optionsDigest, ctx2.optionsDigest);
+    };
+    assert.equal(
+      buildWorkflowDecisionContext(input).optionsDigest,
+      buildWorkflowDecisionContext(input).optionsDigest,
+    );
   });
 
-  it("produces different digest for different states", () => {
-    const ctx1 = buildWorkflowDecisionContext({
+  it("projects different outgoing edge sets for different nodes", () => {
+    const classified = buildWorkflowDecisionContext({
       definition: PHENIX_DEFAULT_WORKFLOW,
       runtime: baseRecord({ state: "classified" }),
       authority: unrestrictedAuthority(),
       activeHandles: [],
     });
-
-    // State "planning" has different available transitions.
-    const ctx2 = buildWorkflowDecisionContext({
+    const planning = buildWorkflowDecisionContext({
       definition: PHENIX_DEFAULT_WORKFLOW,
       runtime: baseRecord({ state: "planning" }),
       authority: unrestrictedAuthority(),
       activeHandles: [],
     });
 
-    // Digests may or may not differ depending on transition set.
-    // But the options sets should differ.
-    const ids1 = new Set(ctx1.options.map((o) => o.transitionId));
-    const ids2 = new Set(ctx2.options.map((o) => o.transitionId));
-    assert.notDeepEqual([...ids1].sort(), [...ids2].sort());
+    const classifiedEdges = new Set(classified.options.map((option) => option.edgeId));
+    const planningEdges = new Set(planning.options.map((option) => option.edgeId));
+    assert.notDeepEqual([...classifiedEdges].sort(), [...planningEdges].sort());
   });
 
-  it("computeOptionsDigest is stable across calls", () => {
-    const options = [
-      { transitionId: "delegate_to_planner", workflowRevision: 0 },
-      { transitionId: "delegate_to_scout", workflowRevision: 0 },
-    ] as any;
-
-    const d1 = computeOptionsDigest(options);
-    const d2 = computeOptionsDigest(options);
-    assert.equal(d1, d2);
+  it("changes the digest when an edge changes", () => {
+    const base = {
+      edgeId: "edge-a",
+      transitionId: "edge-a",
+      sourceNodeId: "node-a",
+      targetNodeId: "node-b",
+      workflowRevision: 0,
+      role: "scout",
+      purpose: "evidence",
+      description: "Gather evidence",
+      category: "optional" as const,
+      outputSchemaId: "scout-handoff" as const,
+      allowedModes: ["await" as const],
+      resultSchema: { type: "object" },
+    };
+    assert.equal(computeOptionsDigest([base]), computeOptionsDigest([base]));
+    assert.notEqual(
+      computeOptionsDigest([base]),
+      computeOptionsDigest([{ ...base, edgeId: "edge-b", transitionId: "edge-b" }]),
+    );
   });
 
-  it("computeOptionsDigest changes when options change", () => {
-    const opts1 = [
-      { transitionId: "delegate_to_planner", workflowRevision: 0 },
-    ] as any;
-
-    const opts2 = [
-      { transitionId: "delegate_to_planner", workflowRevision: 0 },
-      { transitionId: "delegate_to_scout", workflowRevision: 0 },
-    ] as any;
-
-    assert.notEqual(computeOptionsDigest(opts1), computeOptionsDigest(opts2));
-  });
-
-  it("context with no available roles produces empty options (fail-closed)", () => {
+  it("fails closed when no roles or depth are available", () => {
     const restrictedAuth: DelegationAuthority = {
       roles: {
         presetRevision: 1,
@@ -166,12 +148,11 @@ describe("WorkflowDecisionContext", () => {
       activeHandles: [],
     });
 
-    // Empty restricted authority means no transitions are permitted.
     assert.equal(ctx.options.length, 0);
     assert.ok(ctx.optionsDigest);
   });
 
-  it("projectDelegationOptions preserves transition metadata", () => {
+  it("preserves graph and spawn metadata", () => {
     const rawOptions = resolveDelegationOptions({
       definition: PHENIX_DEFAULT_WORKFLOW,
       runtime: baseRecord({ state: "classified" }),
@@ -179,17 +160,16 @@ describe("WorkflowDecisionContext", () => {
       activeHandles: [],
     });
 
-    const projected = projectDelegationOptions(rawOptions);
+    const projected = projectDelegationOptions("classified", rawOptions);
     assert.ok(projected.length > 0);
 
-    for (const opt of projected) {
-      assert.ok(typeof opt.transitionId === "string");
-      assert.ok(typeof opt.workflowRevision === "number");
-      assert.ok(typeof opt.role === "string");
-      assert.ok(typeof opt.description === "string");
-      assert.ok(["required", "optional", "repair"].includes(opt.category));
-      assert.ok(Array.isArray(opt.allowedModes));
-      assert.ok(opt.resultSchema && typeof opt.resultSchema === "object");
+    for (const edge of projected) {
+      assert.equal(edge.edgeId, edge.transitionId);
+      assert.equal(edge.sourceNodeId, "classified");
+      assert.ok(typeof edge.targetNodeId === "string");
+      assert.ok(typeof edge.role === "string");
+      assert.ok(Array.isArray(edge.allowedModes));
+      assert.ok(edge.resultSchema && typeof edge.resultSchema === "object");
     }
   });
 });
