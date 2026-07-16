@@ -10,8 +10,10 @@ const projection = {
   optionsDigest: "b".repeat(64),
   options: [
     {
-      agent: "architect",
+      edgeId: "planner.request-architect",
       transitionId: "planner.request-architect",
+      sourceNodeId: "planning",
+      targetNodeId: "planning",
       workflowRevision: 4,
       role: "architect",
       purpose: "design",
@@ -25,23 +27,24 @@ const projection = {
 };
 
 describe("workflow API prompt projection", () => {
-  it("instructs Phenix models to use scoped workflow actions", () => {
+  it("instructs Phenix models to inspect a node and take an edge", () => {
     const prompt = formatWorkflowProjection(projection);
 
-    assert.match(prompt, /phenix_workflow/);
+    assert.match(prompt, /Current node ID: planning/);
+    assert.match(prompt, /Edge ID: planner\.request-architect/);
+    assert.match(prompt, /Kind: spawn/);
     assert.match(prompt, /action=inspect/);
-    assert.match(prompt, /action=delegate/);
-    assert.match(prompt, /architect/);
-    assert.match(prompt, /runtime resolves the local name/i);
+    assert.match(prompt, /action=take/);
+    assert.match(prompt, /nodeId/);
+    assert.match(prompt, /edgeId/);
     assert.doesNotMatch(prompt, /phenix_create_subagent/);
-    assert.doesNotMatch(prompt, /planner\.request-architect/);
     assert.doesNotMatch(prompt, /Authority digest:/);
   });
 
-  it("states deterministic no-delegation authority when no action is legal", () => {
+  it("states deterministic no-edge authority", () => {
     const prompt = formatWorkflowProjection({ ...projection, options: [] });
 
-    assert.match(prompt, /No delegation action is currently legal/);
+    assert.match(prompt, /no legal outgoing spawn edge/i);
     assert.match(prompt, /action=inspect/);
   });
 });
