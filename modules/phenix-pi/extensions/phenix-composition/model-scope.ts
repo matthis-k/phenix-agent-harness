@@ -19,7 +19,7 @@ export interface RootModelScope {
   readonly provider: string;
   readonly label: string;
 
-  includes(model: ModelIdentity | null | undefined): boolean;
+  includes(model: ModelIdentity | null | undefined): model is ModelIdentity;
 
   contributeSystemPrompt(input: {
     readonly model: ModelIdentity | null | undefined;
@@ -48,7 +48,7 @@ export function createProviderRootModelScope(input: {
     provider: input.provider,
     label: input.label,
 
-    includes(model: ModelIdentity | null | undefined): boolean {
+    includes(model: ModelIdentity | null | undefined): model is ModelIdentity {
       return model?.provider === input.provider;
     },
 
