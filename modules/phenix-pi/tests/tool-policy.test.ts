@@ -195,8 +195,6 @@ describe("Tool-policy resolution", () => {
     }, /subagent/);
   });
 
-
-
   it("phenix_complete cannot be manually added", () => {
     assert.throws(() => {
       resolveToolConfiguration({
@@ -269,7 +267,6 @@ describe("Tool-policy resolution", () => {
       "context_*",
       "contact_supervisor",
       "phenix_workflow",
-      "phenix_create_subagent",
       "write",
     ];
     const config = resolveToolConfiguration({
@@ -327,7 +324,6 @@ describe("Tool authorization", () => {
     });
     assert.ok(!toolAllowedByConfig(config, "subagent"));
   });
-
 });
 
 describe("Launch tools", () => {
@@ -340,7 +336,6 @@ describe("Launch tools", () => {
     assert.ok(launch.includes("phenix_complete"));
     assert.ok(launch.includes("read"));
   });
-
 
   it("modelTaskTools does not include phenix_complete", () => {
     const config = resolveToolConfiguration({
