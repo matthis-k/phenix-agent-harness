@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import type { ChildSessionSpec } from "../extensions/phenix-runtime/child-session-types.ts";
 import { buildEffectiveToolNames } from "../extensions/phenix-runtime/sdk-child-session-backend.ts";
+import { normalizeWorkflowRuntimeToolNames } from "../extensions/phenix-runtime/workflow-session-factory.ts";
 
 function spec(input: {
   readonly remainingDepth: number;
@@ -27,9 +28,13 @@ function spec(input: {
   } as unknown as ChildSessionSpec;
 }
 
+function finalTools(child: ChildSessionSpec): readonly string[] {
+  return normalizeWorkflowRuntimeToolNames(buildEffectiveToolNames(child));
+}
+
 describe("workflow API session initialization", () => {
   it("always installs workflow and completion", () => {
-    const tools = buildEffectiveToolNames(spec({ remainingDepth: 0, availableRoles: [] }));
+    const tools = finalTools(spec({ remainingDepth: 0, availableRoles: [] }));
 
     assert.deepEqual(tools, ["phenix_complete", "phenix_workflow", "read"]);
     assert.equal(tools.includes("phenix_delegate"), false);
@@ -37,7 +42,7 @@ describe("workflow API session initialization", () => {
   });
 
   it("uses the same workflow surface when delegation remains available", () => {
-    const tools = buildEffectiveToolNames(spec({ remainingDepth: 2, availableRoles: ["scout"] }));
+    const tools = finalTools(spec({ remainingDepth: 2, availableRoles: ["scout"] }));
 
     assert.deepEqual(tools, ["phenix_complete", "phenix_workflow", "read"]);
   });
@@ -54,6 +59,6 @@ describe("workflow API session initialization", () => {
       },
     } as ChildSessionSpec;
 
-    assert.deepEqual(buildEffectiveToolNames(child), ["phenix_complete", "phenix_workflow", "read"]);
+    assert.deepEqual(finalTools(child), ["phenix_complete", "phenix_workflow", "read"]);
   });
 });
