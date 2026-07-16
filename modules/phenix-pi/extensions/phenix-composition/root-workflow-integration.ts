@@ -206,7 +206,7 @@ export default async function rootWorkflowIntegration(pi: ExtensionAPI): Promise
     workflowGuidance +=
       "The deterministic Phenix workflow owns the current node, transition selection, role selection, output schemas, models, tools, and delegation depth. ";
     workflowGuidance +=
-      "Your legal target agents have already been resolved and are listed below. Use one when delegation would materially improve the result; call phenix_workflow with action=spawn, that agent, and its bounded task input.\n\n";
+      "Your legal target agents have already been resolved and are listed below. Use phenix_workflow with action=spawn, one advertised agent, and a bounded task when an isolated child can absorb substantial intermediate context that you will not need for your remaining work, or when independent execution materially improves evidence, planning, implementation, testing, or review. Prefer delegation for broad reconnaissance that can be compressed into relevant files, symbols, constraints, and uncertainties, and for mechanical execution of an already-settled plan. Keep decision-critical source inspection and reasoning in this session when their details are required for architecture, integration, acceptance, or final synthesis. Do not delegate trivial work or work you would need to repeat after the handoff.\n\n";
     workflowGuidance += workflowProjection
       ? formatWorkflowProjection(workflowProjection)
       : "Workflow authority could not be projected; complete the task directly.\n";
