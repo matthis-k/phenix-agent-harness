@@ -4,7 +4,7 @@
 The current root session or child contract supplies actor identity and authority;
 the model never supplies those values.
 
-## Inspect
+## Inspect the current node
 
 ```json
 {
@@ -12,35 +12,39 @@ the model never supplies those values.
 }
 ```
 
-Inspection returns the current actor and state plus the actions that are legal
-at that instant. Delegation entries use names scoped to the current actor, for
-example `scout` or `repository-scout`. Internal transition IDs, workflow
-authority digests, and persistence identities are intentionally omitted.
+Inspection returns one current `nodeId` and the legal outgoing `edgeId`s. Each
+edge declares its kind, source node, accepted target node, and required input.
+The current implementation exposes spawn edges; state-only edge kinds can be
+added behind the same graph contract later.
 
-## Delegate
+## Take an edge
 
 ```json
 {
-  "action": "delegate",
-  "agent": "scout",
-  "task": "Inspect the routing boundary.",
-  "requirements": ["Return concrete evidence."],
-  "mode": "await"
+  "action": "take",
+  "nodeId": "planning",
+  "edgeId": "planner.request-scout",
+  "spawn": {
+    "task": "Inspect the routing boundary.",
+    "requirements": ["Return concrete evidence."],
+    "mode": "await"
+  }
 }
 ```
 
-The adapter refreshes authority, resolves `agent` within the current actor's
-outgoing workflow actions, and injects the internal transition identity,
-revision, and authority digest. The workflow/compiler layers then derive the
-child role, preset, provider/model route, thinking level, tools, child
-authority, output contract, budgets, verification, and critic policy.
+`nodeId` is an optimistic concurrency guard. The adapter refreshes authority,
+rejects the call when the actor has moved to another node, and verifies that the
+requested edge is still outgoing and legal. For a spawn edge, the workflow and
+compiler layers derive the child role, preset, provider/model route, thinking
+level, tools, child authority, output contract, budgets, verification, and
+critic policy.
 
 The model-facing request cannot override those derived values.
 
 ## Extension rule
 
-New workflow capabilities extend the discriminated `action` union and are
-implemented behind the same authority-bound port. They should not introduce a
-new top-level tool unless they are not workflow operations. This permits later
-state-change or execution-inspection actions without exposing the generic
-subagent runtime or persistence model.
+New workflow capabilities should be represented as new edge kinds and handled
+behind `action: "take"`. They should not introduce unrelated top-level tools or
+expose the generic child-session runtime. This permits later state-transition,
+join, approval, cancellation, or execution-inspection edges while preserving the
+same node-and-edge interaction model.
