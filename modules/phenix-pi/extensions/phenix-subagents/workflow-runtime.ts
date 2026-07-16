@@ -2,13 +2,13 @@
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
+import type { ParentExecutionContext } from "../phenix-runtime/workflow-api-types.ts";
 import type {
   WorkflowAuthoritySnapshot,
   WorkflowEdgeExecutionResult,
   WorkflowRuntimePort,
   WorkflowTakeEdgeRequest,
 } from "../phenix-runtime/workflow-runtime-types.ts";
-import type { ParentExecutionContext } from "../phenix-runtime/workflow-api-types.ts";
 import {
   buildWorkflowDecisionContext,
   buildWorkflowRuntimeDependencies,
@@ -63,7 +63,9 @@ function inspectAuthority(input: {
   };
 }
 
-function availableEdges(snapshot: WorkflowAuthoritySnapshot): readonly Record<string, unknown>[] {
+function availableEdges(
+  snapshot: WorkflowAuthoritySnapshot,
+): readonly Record<string, unknown>[] {
   return snapshot.workflow.options.map((edge) => ({
     edgeId: edge.edgeId,
     kind: "spawn",
@@ -102,7 +104,10 @@ async function takeSpawnEdge(input: {
     );
   }
 
-  if (input.request.input.mode === "background" && input.request.parent?.kind === "child") {
+  if (
+    input.request.input.mode === "background" &&
+    input.request.parent?.kind === "child"
+  ) {
     return failure("phenix_workflow: background spawning is only available to the root actor.");
   }
   if (
