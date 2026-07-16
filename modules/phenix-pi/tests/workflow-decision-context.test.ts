@@ -51,7 +51,15 @@ function unrestrictedAuthority(): DelegationAuthority {
       source: { inherited: false, patch: { additional: [], removed: [] } },
       effective: ["scout", "planner", "architect", "implementer", "tester", "critic", "finalizer"],
     },
-    availableRoles: ["scout", "planner", "architect", "implementer", "tester", "critic", "finalizer"],
+    availableRoles: [
+      "scout",
+      "planner",
+      "architect",
+      "implementer",
+      "tester",
+      "critic",
+      "finalizer",
+    ],
     remainingDepth: 4,
     transitionAuthority: { kind: "unrestricted" },
   };
