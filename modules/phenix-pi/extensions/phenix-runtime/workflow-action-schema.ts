@@ -3,25 +3,17 @@ import { type Static, Type } from "typebox";
 const WorkflowInspectAction = Type.Object(
   {
     action: Type.Literal("inspect", {
-      description: "Inspect current workflow state and actor-scoped actions.",
+      description: "Return the current workflow node and legal outgoing edges.",
     }),
   },
   { additionalProperties: false },
 );
 
-const WorkflowDelegateAction = Type.Object(
+const WorkflowSpawnInput = Type.Object(
   {
-    action: Type.Literal("delegate", {
-      description: "Delegate a bounded task through one currently allowed agent action.",
-    }),
-    agent: Type.String({
-      minLength: 1,
-      description:
-        "Actor-scoped agent name returned by action=inspect, such as scout or repository-scout.",
-    }),
     task: Type.String({
       minLength: 1,
-      description: "The bounded objective for the selected workflow action.",
+      description: "The bounded objective for a spawn edge.",
     }),
     requirements: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 64 })),
     mode: Type.Optional(Type.Union([Type.Literal("await"), Type.Literal("background")])),
@@ -29,14 +21,33 @@ const WorkflowDelegateAction = Type.Object(
   { additionalProperties: false },
 );
 
+const WorkflowTakeEdgeAction = Type.Object(
+  {
+    action: Type.Literal("take", {
+      description: "Take one legal outgoing edge from the expected current node.",
+    }),
+    nodeId: Type.String({
+      minLength: 1,
+      description: "Current node ID returned by action=inspect.",
+    }),
+    edgeId: Type.String({
+      minLength: 1,
+      description: "Outgoing edge ID returned by action=inspect.",
+    }),
+    spawn: Type.Optional(WorkflowSpawnInput),
+  },
+  { additionalProperties: false },
+);
+
 /**
- * Stable workflow-tool envelope. New workflow capabilities extend this union
- * with another action instead of introducing unrelated top-level tools.
+ * Stable graph-facing workflow envelope. Future workflow behavior adds edge
+ * kinds behind `take`; it does not require a new top-level tool or expose the
+ * generic child-session runtime.
  */
 export const WorkflowActionParams = Type.Union([
   WorkflowInspectAction,
-  WorkflowDelegateAction,
+  WorkflowTakeEdgeAction,
 ]);
 
 export type WorkflowActionParamsType = Static<typeof WorkflowActionParams>;
-export type WorkflowDelegateActionType = Static<typeof WorkflowDelegateAction>;
+export type WorkflowTakeEdgeActionType = Static<typeof WorkflowTakeEdgeAction>;
