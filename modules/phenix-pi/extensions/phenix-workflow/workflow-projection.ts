@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import type { Difficulty } from "../phenix-kernel/task.ts";
 import { resolveDelegationOptions } from "./delegation-options.ts";
+import {
+  assertUniqueWorkflowAgentNames,
+  workflowAgentName,
+} from "./workflow-action-names.ts";
 import type {
   DelegationAuthority,
   DelegationOption,
@@ -10,7 +14,11 @@ import type {
   WorkflowRuntimeRecord,
 } from "./workflow-types.ts";
 
+/** Internal projection used to bind a model-facing action to workflow authority. */
 export interface ModelDelegationOption {
+  /** Actor-scoped name accepted by the workflow tool. */
+  readonly agent: string;
+  /** Stable internal transition identity. Never required from the model. */
   readonly transitionId: string;
   readonly workflowRevision: number;
   readonly role: string;
@@ -35,23 +43,31 @@ export interface WorkflowDecisionContext extends ModelWorkflowProjection {}
 export function projectDelegationOptions(
   options: readonly DelegationOption[],
 ): readonly ModelDelegationOption[] {
-  return options.map((option) => ({
-    transitionId: option.transitionId,
-    workflowRevision: option.workflowRevision,
-    role: option.role ?? "base",
-    purpose: option.purpose,
-    description: option.description,
-    category: option.category,
-    outputSchemaId: option.outputSchemaId,
-    allowedModes: [...option.allowedModes],
-    resultSchema: option.outputSchema,
-  }));
+  const projected = options.map((option) => {
+    const role = option.role ?? "base";
+    return {
+      agent: workflowAgentName({ transitionId: option.transitionId, role }),
+      transitionId: option.transitionId,
+      workflowRevision: option.workflowRevision,
+      role,
+      purpose: option.purpose,
+      description: option.description,
+      category: option.category,
+      outputSchemaId: option.outputSchemaId,
+      allowedModes: [...option.allowedModes],
+      resultSchema: option.outputSchema,
+    };
+  });
+
+  assertUniqueWorkflowAgentNames(projected);
+  return projected;
 }
 
 export function computeOptionsDigest(options: readonly ModelDelegationOption[]): string {
   const canonical = [...options]
     .sort((left, right) => left.transitionId.localeCompare(right.transitionId))
     .map((option) => ({
+      agent: option.agent,
       transitionId: option.transitionId,
       workflowRevision: option.workflowRevision,
       role: option.role,
@@ -101,17 +117,17 @@ export function formatWorkflowProjection(projection: ModelWorkflowProjection): s
 
   if (projection.options.length === 0) {
     lines.push(
-      "No subagent creation transition is currently legal.",
-      "Use phenix_workflow again after workflow state changes; otherwise complete the current assignment using phenix_complete.",
+      "No delegation action is currently legal.",
+      "Use phenix_workflow with action=inspect after workflow state changes; otherwise complete the current assignment using phenix_complete.",
       "",
     );
     return lines.join("\n");
   }
 
-  lines.push("You may currently delegate only through these transitions:", "");
+  lines.push("Available actor-scoped delegation actions:", "");
   for (const [index, option] of projection.options.entries()) {
     lines.push(
-      `${index + 1}. ${option.transitionId}`,
+      `${index + 1}. ${option.agent}`,
       `   Role: ${option.role}`,
       `   Category: ${option.category}`,
       `   Purpose: ${option.description}`,
@@ -123,10 +139,9 @@ export function formatWorkflowProjection(projection: ModelWorkflowProjection): s
 
   lines.push(
     "Workflow API protocol:",
-    "1. Call phenix_workflow immediately before creating a subagent.",
-    "2. Select one transitionId returned by that call.",
-    "3. Call phenix_create_subagent with the transitionId and bounded task.",
-    "The runtime injects the current workflow revision and authority digest.",
+    "1. Use phenix_workflow with action=inspect when fresh workflow authority is needed.",
+    "2. Use phenix_workflow with action=delegate, one listed agent name, and a bounded task.",
+    "The runtime resolves the local name in the current actor scope and binds the internal transition, revision, and authority digest.",
     "Do not invent a role, transition, result schema, model, thinking level, tool set, or delegation depth.",
   );
   return lines.join("\n");
