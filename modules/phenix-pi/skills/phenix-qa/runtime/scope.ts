@@ -231,11 +231,15 @@ function matchSimpleGlob(filePath: string, pattern: string): boolean {
 
   let index = 0;
   for (let i = 0; i < parts.length; i++) {
-    const part = parts[i]!;
+    const part = parts[i];
+    if (part === undefined) return false;
+
     if (part === "") {
       // Just a wildcard - skip to the next literal part
       if (i === parts.length - 1) return true; // trailing wildcard
-      const nextPart = parts[i + 1]!;
+      const nextPart = parts[i + 1];
+      if (nextPart === undefined) return true;
+
       index = filePath.indexOf(nextPart, index);
       if (index === -1) return false;
       i++; // consumed the next literal
