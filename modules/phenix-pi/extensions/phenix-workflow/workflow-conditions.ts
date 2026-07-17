@@ -39,10 +39,11 @@ export function conditionSatisfied(
     case "not":
       return !conditionSatisfied(condition.condition, context);
 
-    default:
+    default: {
       // Exhaustive check
       const _exhaustive: never = condition;
       void _exhaustive;
       return false;
+    }
   }
 }

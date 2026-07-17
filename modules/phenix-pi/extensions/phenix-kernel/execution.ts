@@ -10,11 +10,7 @@
  * (AgentSession, RpcClient, etc.) are imported.
  */
 
-import type {
-  WorkflowActorId,
-  WorkflowInstanceId,
-  WorkflowTransitionId,
-} from "./ids.ts";
+import type { WorkflowActorId, WorkflowInstanceId, WorkflowTransitionId } from "./ids.ts";
 import type { AgentClientRef, ContractDefinitionRef } from "./refs.ts";
 import type { Difficulty } from "./task.ts";
 

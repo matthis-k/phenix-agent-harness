@@ -57,4 +57,3 @@ export function authorityFromCeiling(
     allowed: ceiling,
   };
 }
-

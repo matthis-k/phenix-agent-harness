@@ -8,16 +8,10 @@
  * Agent clients are configuration data, not runtime logic.
  */
 
-import type {
-  AgentClientId,
-  AgentKindId,
-} from "../phenix-kernel/ids.ts";
-import type {
-  AgentClientRef,
-  ContractDefinitionRef,
-} from "../phenix-kernel/refs.ts";
-import { agentClientRef, contractRef } from "../phenix-kernel/refs.ts";
+import type { AgentClientId, AgentKindId } from "../phenix-kernel/ids.ts";
 import { agentClientId, agentKindId } from "../phenix-kernel/ids.ts";
+import type { AgentClientRef, ContractDefinitionRef } from "../phenix-kernel/refs.ts";
+import { agentClientRef, contractRef } from "../phenix-kernel/refs.ts";
 
 // ── Agent client definition ────────────────────────────────────────────────
 
@@ -56,9 +50,7 @@ export interface AgentClientDefinition {
 
 // ── Helper ─────────────────────────────────────────────────────────────────
 
-export function defineAgentClient(
-  def: AgentClientDefinition,
-): AgentClientDefinition {
+export function defineAgentClient(def: AgentClientDefinition): AgentClientDefinition {
   return def;
 }
 
@@ -150,10 +142,7 @@ export const architectClient = defineAgentClient({
   accepts: [contractRef("scout-handoff")],
   produces: [contractRef("architecture-handoff")],
   delegation: {
-    allowedClients: [
-      agentClientRef("scout"),
-      agentClientRef("critic"),
-    ],
+    allowedClients: [agentClientRef("scout"), agentClientRef("critic")],
     maxDepth: 2,
   },
 });
@@ -172,11 +161,7 @@ export const implementerClient = defineAgentClient({
   ],
   produces: [contractRef("implementation-handoff")],
   delegation: {
-    allowedClients: [
-      agentClientRef("scout"),
-      agentClientRef("tester"),
-      agentClientRef("critic"),
-    ],
+    allowedClients: [agentClientRef("scout"), agentClientRef("tester"), agentClientRef("critic")],
     maxDepth: 2,
   },
 });
@@ -212,10 +197,7 @@ export const criticClient = defineAgentClient({
   ],
   produces: [contractRef("critic-handoff")],
   delegation: {
-    allowedClients: [
-      agentClientRef("scout"),
-      agentClientRef("tester"),
-    ],
+    allowedClients: [agentClientRef("scout"), agentClientRef("tester")],
     maxDepth: 1,
   },
 });

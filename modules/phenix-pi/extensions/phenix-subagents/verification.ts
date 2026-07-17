@@ -88,10 +88,7 @@ function runOne(
     };
 
     const abort = () => terminate("cancel");
-    const timeout = setTimeout(
-      () => terminate("timeout"),
-      command.timeoutMs ?? 120_000,
-    );
+    const timeout = setTimeout(() => terminate("timeout"), command.timeoutMs ?? 120_000);
     timeout.unref?.();
 
     if (signal.aborted) abort();
@@ -118,7 +115,12 @@ export async function runVerificationCommands(
     if (signal.aborted) break;
     const result = await runOne(command, cwd, signal);
     results.push(result);
-    if (result.status === "failed" || result.status === "timed-out" || result.status === "cancelled") break;
+    if (
+      result.status === "failed" ||
+      result.status === "timed-out" ||
+      result.status === "cancelled"
+    )
+      break;
   }
   return results;
 }

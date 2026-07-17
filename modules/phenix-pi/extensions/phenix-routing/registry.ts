@@ -5,11 +5,11 @@
  * circular imports with stream-proxy.ts.
  */
 
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type {
   ExtensionContext,
   ModelRegistry as PiModelRegistry,
 } from "@earendil-works/pi-coding-agent";
-import type { Api, Model } from "@earendil-works/pi-ai";
 
 export class PhenixUpstreamRuntime {
   private registry?: PiModelRegistry;
@@ -36,7 +36,9 @@ export class PhenixUpstreamRuntime {
     return auth.ok;
   }
 
-  getApiKeyAndHeaders(concreteModel: Model<Api>): ReturnType<PiModelRegistry["getApiKeyAndHeaders"]> {
+  getApiKeyAndHeaders(
+    concreteModel: Model<Api>,
+  ): ReturnType<PiModelRegistry["getApiKeyAndHeaders"]> {
     return this.requireRegistry().getApiKeyAndHeaders(concreteModel);
   }
 }

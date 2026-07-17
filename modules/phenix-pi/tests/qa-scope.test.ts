@@ -5,10 +5,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import {
-  resolveScopeFiles,
-  isIgnoredPath,
-} from "../skills/phenix-qa/runtime/scope.ts";
+import { isIgnoredPath, resolveScopeFiles } from "../skills/phenix-qa/runtime/scope.ts";
 import type { ProcessResult, ProcessRunner } from "../skills/phenix-qa/runtime/types.ts";
 
 function fakeRunner(
@@ -63,7 +60,14 @@ describe("Scope resolution", () => {
   describe("Diff scope", () => {
     it("falls back to all files when not a git repo", async () => {
       const responses = new Map<string, ProcessResult>();
-      responses.set("git", { exitCode: 1, signal: null, stdout: "", stderr: "", durationMs: 0, timedOut: false });
+      responses.set("git", {
+        exitCode: 1,
+        signal: null,
+        stdout: "",
+        stderr: "",
+        durationMs: 0,
+        timedOut: false,
+      });
 
       const scope = {
         kind: "diff" as const,
@@ -111,28 +115,57 @@ describe("Scope resolution", () => {
           callCount++;
           // First call: "git rev-parse --git-dir"
           if (callCount === 1) {
-            return { exitCode: 0, signal: null, stdout: "/fake/.git\n", stderr: "", durationMs: 0, timedOut: false };
+            return {
+              exitCode: 0,
+              signal: null,
+              stdout: "/fake/.git\n",
+              stderr: "",
+              durationMs: 0,
+              timedOut: false,
+            };
           }
           // Subsequent calls: depends on args
           if (args.includes("--abbrev-ref")) {
-            return { exitCode: 0, signal: null, stdout: "feature-x\n", stderr: "", durationMs: 0, timedOut: false };
+            return {
+              exitCode: 0,
+              signal: null,
+              stdout: "feature-x\n",
+              stderr: "",
+              durationMs: 0,
+              timedOut: false,
+            };
           }
           if (args.includes("merge-base")) {
             // Fail so it falls back to HEAD~1, which diff will use
-            return { exitCode: 1, signal: null, stdout: "", stderr: "", durationMs: 0, timedOut: false };
+            return {
+              exitCode: 1,
+              signal: null,
+              stdout: "",
+              stderr: "",
+              durationMs: 0,
+              timedOut: false,
+            };
           }
           if (args.includes("--name-status")) {
             // Simulate diff output: added, modified, deleted
             return {
               exitCode: 0,
               signal: null,
-              stdout: "M\0src/a.ts\0A\0src/b.ts\0D\0src/old.ts\0R100\0src/old-name.ts\0src/new-name.ts\0",
+              stdout:
+                "M\0src/a.ts\0A\0src/b.ts\0D\0src/old.ts\0R100\0src/old-name.ts\0src/new-name.ts\0",
               stderr: "",
               durationMs: 0,
               timedOut: false,
             };
           }
-          return { exitCode: 0, signal: null, stdout: "", stderr: "", durationMs: 0, timedOut: false };
+          return {
+            exitCode: 0,
+            signal: null,
+            stdout: "",
+            stderr: "",
+            durationMs: 0,
+            timedOut: false,
+          };
         },
       };
 
@@ -156,44 +189,26 @@ describe("Scope resolution", () => {
 
 describe("Path ignoring", () => {
   it("ignores node_modules", () => {
-    assert.equal(
-      isIgnoredPath("node_modules/pkg/index.js", ["node_modules"], [], []),
-      true,
-    );
+    assert.equal(isIgnoredPath("node_modules/pkg/index.js", ["node_modules"], [], []), true);
   });
 
   it("ignores .git directory", () => {
-    assert.equal(
-      isIgnoredPath(".git/config", [".git"], [], []),
-      true,
-    );
+    assert.equal(isIgnoredPath(".git/config", [".git"], [], []), true);
   });
 
   it("ignores generated patterns", () => {
-    assert.equal(
-      isIgnoredPath("src/file.generated.ts", [], ["*.generated.*"], []),
-      true,
-    );
+    assert.equal(isIgnoredPath("src/file.generated.ts", [], ["*.generated.*"], []), true);
   });
 
   it("ignores vendor paths", () => {
-    assert.equal(
-      isIgnoredPath("vendor/foo/bar.ts", [], [], ["vendor/"]),
-      true,
-    );
+    assert.equal(isIgnoredPath("vendor/foo/bar.ts", [], [], ["vendor/"]), true);
   });
 
   it("does not ignore normal source files", () => {
-    assert.equal(
-      isIgnoredPath("src/main.ts", [], [], []),
-      false,
-    );
+    assert.equal(isIgnoredPath("src/main.ts", [], [], []), false);
   });
 
   it("does not ignore files when patterns don't match", () => {
-    assert.equal(
-      isIgnoredPath("src/file.ts", [], ["*.generated.*"], []),
-      false,
-    );
+    assert.equal(isIgnoredPath("src/file.ts", [], ["*.generated.*"], []), false);
   });
 });

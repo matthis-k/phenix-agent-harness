@@ -5,8 +5,8 @@
  * Cross-reference validation is handled in the separate semantic-validation pass.
  */
 
+import { type Static, Type } from "typebox";
 import { Compile } from "typebox/compile";
-import { Type, type Static } from "typebox";
 
 // ── QA Levels ───────────────────────────────────────────────────────────────
 
@@ -21,9 +21,7 @@ export const QA_LEVELS = [
   "level-7-security",
 ] as const;
 
-export const QaLevelSchema = Type.Union(
-  QA_LEVELS.map((level) => Type.Literal(level)),
-);
+export const QaLevelSchema = Type.Union(QA_LEVELS.map((level) => Type.Literal(level)));
 
 export type QaLevel = Static<typeof QaLevelSchema>;
 
@@ -97,25 +95,15 @@ export type QaEvidence = Static<typeof QaEvidenceSchema>;
 
 // ── Findings ─────────────────────────────────────────────────────────────────
 
-export const FINDING_SEVERITIES = [
-  "info",
-  "low",
-  "medium",
-  "high",
-  "critical",
-] as const;
+export const FINDING_SEVERITIES = ["info", "low", "medium", "high", "critical"] as const;
 
-export const FindingSeveritySchema = Type.Union(
-  FINDING_SEVERITIES.map((s) => Type.Literal(s)),
-);
+export const FindingSeveritySchema = Type.Union(FINDING_SEVERITIES.map((s) => Type.Literal(s)));
 
 export type FindingSeverity = Static<typeof FindingSeveritySchema>;
 
 export const FINDING_CONFIDENCES = ["low", "medium", "high"] as const;
 
-export const FindingConfidenceSchema = Type.Union(
-  FINDING_CONFIDENCES.map((c) => Type.Literal(c)),
-);
+export const FindingConfidenceSchema = Type.Union(FINDING_CONFIDENCES.map((c) => Type.Literal(c)));
 
 export type FindingConfidence = Static<typeof FindingConfidenceSchema>;
 
@@ -127,9 +115,7 @@ export const REMEDIATION_SCOPES = [
   "system-change",
 ] as const;
 
-export const RemediationScopeSchema = Type.Union(
-  REMEDIATION_SCOPES.map((s) => Type.Literal(s)),
-);
+export const RemediationScopeSchema = Type.Union(REMEDIATION_SCOPES.map((s) => Type.Literal(s)));
 
 export type RemediationScope = Static<typeof RemediationScopeSchema>;
 
@@ -201,9 +187,7 @@ export type RiskAssessment = Static<typeof RiskAssessmentSchema>;
 
 export const GATE_RESULTS = ["PASS", "FAIL", "REVIEW", "NOT_RUN"] as const;
 
-export const GateResultSchema = Type.Union(
-  GATE_RESULTS.map((r) => Type.Literal(r)),
-);
+export const GateResultSchema = Type.Union(GATE_RESULTS.map((r) => Type.Literal(r)));
 
 export type GateResult = Static<typeof GateResultSchema>;
 
@@ -246,9 +230,7 @@ export const REVIEW_SCOPE_KINDS = [
   "architecture",
 ] as const;
 
-export const ReviewScopeKindSchema = Type.Union(
-  REVIEW_SCOPE_KINDS.map((k) => Type.Literal(k)),
-);
+export const ReviewScopeKindSchema = Type.Union(REVIEW_SCOPE_KINDS.map((k) => Type.Literal(k)));
 
 export type ReviewScopeKind = Static<typeof ReviewScopeKindSchema>;
 
@@ -301,19 +283,13 @@ export const ArchitectureAssessmentSchema = Type.Union(
   ARCHITECTURE_ASSESSMENTS.map((a) => Type.Literal(a)),
 );
 
-export type ArchitectureAssessment = Static<
-  typeof ArchitectureAssessmentSchema
->;
+export type ArchitectureAssessment = Static<typeof ArchitectureAssessmentSchema>;
 
 // ── Executive Summary ────────────────────────────────────────────────────────
 
 export const ExecutiveSummarySchema = Type.Object(
   {
-    overallResult: Type.Union([
-      Type.Literal("PASS"),
-      Type.Literal("REVIEW"),
-      Type.Literal("FAIL"),
-    ]),
+    overallResult: Type.Union([Type.Literal("PASS"), Type.Literal("REVIEW"), Type.Literal("FAIL")]),
     blockingIssues: Type.Array(Type.String()),
     highestRiskLevel: Type.Optional(QaLevelSchema),
     architectureAssessment: ArchitectureAssessmentSchema,
@@ -392,7 +368,6 @@ interface CompileResult {
     path?: string;
     message?: string;
   }>;
-
 }
 
 function compileAndCheck<T>(
@@ -406,9 +381,7 @@ function compileAndCheck<T>(
       return { ok: true, decoded: value as T };
     }
     const violations = [...compiled.Errors(value)].slice(0, 20).map((e) => ({
-      path:
-        (e.instancePath ?? e.path ?? "").replace(/^\//, "").replaceAll("/", ".") ||
-        "root",
+      path: (e.instancePath ?? e.path ?? "").replace(/^\//, "").replaceAll("/", ".") || "root",
       message: e.message ?? "validation failed",
     }));
     return { ok: false, violations };
@@ -425,9 +398,7 @@ function compileAndCheck<T>(
   }
 }
 
-function makeValidator<T>(
-  schema: unknown,
-): (value: unknown) => ValidationResult<T> {
+function makeValidator<T>(schema: unknown): (value: unknown) => ValidationResult<T> {
   return (value: unknown): ValidationResult<T> => {
     const result = compileAndCheck<T>(schema, value);
     if (result.ok) {
@@ -435,9 +406,7 @@ function makeValidator<T>(
     }
     return {
       ok: false,
-      summary: result.violations
-        .map((v) => `${v.path}: ${v.message}`)
-        .join("; "),
+      summary: result.violations.map((v) => `${v.path}: ${v.message}`).join("; "),
       violations: result.violations,
     };
   };
@@ -466,13 +435,9 @@ export const validateQaEvidenceArray = makeValidator<readonly QaEvidence[]>(
 export const validateQaFindingArray = makeValidator<readonly QaFinding[]>(
   Type.Array(QaFindingSchema),
 );
-export const validateRiskAssessment =
-  makeValidator<RiskAssessment>(RiskAssessmentSchema);
-export const validateReviewScope =
-  makeValidator<ReviewScope>(ReviewScopeSchema);
-export const validateAnalysisCoverage = makeValidator<AnalysisCoverage>(
-  AnalysisCoverageSchema,
-);
+export const validateRiskAssessment = makeValidator<RiskAssessment>(RiskAssessmentSchema);
+export const validateReviewScope = makeValidator<ReviewScope>(ReviewScopeSchema);
+export const validateAnalysisCoverage = makeValidator<AnalysisCoverage>(AnalysisCoverageSchema);
 
 export const assertQaReport = makeAsserter(validateQaReport);
 export const assertQaEvidence = makeAsserter(validateQaEvidence);
@@ -502,9 +467,8 @@ export const ModelReviewContributionSchema = Type.Object(
   },
 );
 
-export type ModelReviewContribution = Static<
-  typeof ModelReviewContributionSchema
->;
+export type ModelReviewContribution = Static<typeof ModelReviewContributionSchema>;
 
-export const validateModelReviewContribution =
-  makeValidator<ModelReviewContribution>(ModelReviewContributionSchema);
+export const validateModelReviewContribution = makeValidator<ModelReviewContribution>(
+  ModelReviewContributionSchema,
+);

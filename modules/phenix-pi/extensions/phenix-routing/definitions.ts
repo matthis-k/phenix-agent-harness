@@ -7,14 +7,8 @@
  * They must not embed arbitrary runtime callbacks.
  */
 
-import type {
-  AgentClientRef,
-  CapabilityRef,
-} from "../phenix-kernel/refs.ts";
-import type {
-  Difficulty,
-  ThinkingLevel,
-} from "../phenix-kernel/task.ts";
+import type { AgentClientRef, CapabilityRef } from "../phenix-kernel/refs.ts";
+import type { Difficulty, ThinkingLevel } from "../phenix-kernel/task.ts";
 
 // ── Agent difficulty route ─────────────────────────────────────────────────
 
@@ -28,9 +22,7 @@ export interface AgentDifficultyRoute {
 export interface AgentRouteDefinition {
   readonly agentClient: AgentClientRef;
 
-  readonly difficulties: Readonly<
-    Record<Difficulty, AgentDifficultyRoute>
-  >;
+  readonly difficulties: Readonly<Record<Difficulty, AgentDifficultyRoute>>;
 }
 
 // ── Model pool ─────────────────────────────────────────────────────────────
@@ -45,9 +37,7 @@ export interface ModelPoolDefinition {
 export interface ModelSetDefinition {
   readonly id: string;
 
-  readonly capabilityPools: Readonly<
-    Record<string, string>
-  >;
+  readonly capabilityPools: Readonly<Record<string, string>>;
 
   readonly allowedProviders?: readonly string[];
 
@@ -77,14 +67,8 @@ export interface ModelRef {
 
 export function parseModelRef(ref: string): ModelRef {
   const slashIndex = ref.indexOf("/");
-  if (
-    slashIndex === -1 ||
-    slashIndex === 0 ||
-    slashIndex === ref.length - 1
-  ) {
-    throw new Error(
-      `Invalid model reference "${ref}": expected "provider/model" format`,
-    );
+  if (slashIndex === -1 || slashIndex === 0 || slashIndex === ref.length - 1) {
+    throw new Error(`Invalid model reference "${ref}": expected "provider/model" format`);
   }
   return {
     provider: ref.slice(0, slashIndex),

@@ -1,5 +1,4 @@
-{ ... }:
-{
+_: {
   perSystem =
     {
       pkgs,
@@ -34,14 +33,12 @@
 
       devShells.default = pkgs.mkShell {
         name = "phenix-agent-harness-dev";
-        packages =
-          tooling.agentRuntime
-          ++ [
-            pkgs.devenv
-            updatePiNpmLock
-            self'.packages.stitch
-            self'.packages.stitch-mcp
-          ];
+        packages = tooling.agentRuntime ++ [
+          pkgs.devenv
+          updatePiNpmLock
+          self'.packages.stitch
+          self'.packages.stitch-mcp
+        ];
         shellHook = ''
           echo "phenix-agent-harness dev shell"
           echo "  maintenance: devenv test"

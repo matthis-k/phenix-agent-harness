@@ -6,11 +6,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  fileLocation,
   makeEvidence,
   makeFinding,
-  mapSeverity,
   mapMetricToSeverity,
-  fileLocation,
+  mapSeverity,
   normalizeSarif,
   resetIdCounter,
 } from "../skills/phenix-qa/runtime/normalize.ts";
@@ -78,8 +78,18 @@ describe("Evidence normalization", () => {
 
   it("generates sequential IDs", () => {
     resetIdCounter(0);
-    const ev1 = makeEvidence({ level: "level-0-correctness", source: "test", category: "c", message: "m1" });
-    const ev2 = makeEvidence({ level: "level-0-correctness", source: "test", category: "c", message: "m2" });
+    const ev1 = makeEvidence({
+      level: "level-0-correctness",
+      source: "test",
+      category: "c",
+      message: "m1",
+    });
+    const ev2 = makeEvidence({
+      level: "level-0-correctness",
+      source: "test",
+      category: "c",
+      message: "m2",
+    });
     assert.notEqual(ev1.id, ev2.id);
     const num1 = parseInt(ev1.id.match(/\d+/)![0], 10);
     const num2 = parseInt(ev2.id.match(/\d+/)![0], 10);
@@ -233,12 +243,7 @@ describe("SARIF normalization", () => {
         },
       ],
     };
-    const result = normalizeSarif(
-      sarif,
-      "semgrep",
-      "security-tool",
-      "level-7-security",
-    );
+    const result = normalizeSarif(sarif, "semgrep", "security-tool", "level-7-security");
     assert.equal(result.length, 1);
     assert.equal(result[0]!.ruleId, "test-rule-001");
     assert.equal(result[0]!.message, "Found an issue");
@@ -266,12 +271,7 @@ describe("SARIF normalization", () => {
         },
       ],
     };
-    const result = normalizeSarif(
-      sarif,
-      "test",
-      "structural-rule",
-      "level-3-patterns",
-    );
+    const result = normalizeSarif(sarif, "test", "structural-rule", "level-3-patterns");
     assert.equal(result.length, 1);
     assert.equal(result[0]!.locations[0]!.path, "src/indexed.ts");
   });

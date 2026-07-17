@@ -4,22 +4,21 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
+import type {
+  AnalysisCoverage,
+  QaEvidence,
+  QaFinding,
+  ReviewScope,
+} from "../skills/phenix-qa/contracts/contracts.ts";
+import { DEFAULT_QA_CONFIG } from "../skills/phenix-qa/runtime/config.ts";
+import { renderTextReport } from "../skills/phenix-qa/runtime/render-text.ts";
 import {
   buildReportSkeleton,
+  calculateCompositeScore,
   calculateGates,
   calculateRiskScores,
-  calculateCompositeScore,
   mergeModelContribution,
 } from "../skills/phenix-qa/runtime/report.ts";
-import { renderTextReport } from "../skills/phenix-qa/runtime/render-text.ts";
-import { DEFAULT_QA_CONFIG } from "../skills/phenix-qa/runtime/config.ts";
-import type {
-  QaFinding,
-  QaEvidence,
-  ReviewScope,
-  AnalysisCoverage,
-} from "../skills/phenix-qa/contracts/contracts.ts";
 
 const scope: ReviewScope = {
   kind: "diff",
@@ -108,10 +107,14 @@ describe("Gate calculation", () => {
       blocking: true,
     };
 
-    const gates = calculateGates([finding], {
-      ...emptyCoverage(),
-      completedAnalyzers: ["project-native"],
-    }, DEFAULT_QA_CONFIG);
+    const gates = calculateGates(
+      [finding],
+      {
+        ...emptyCoverage(),
+        completedAnalyzers: ["project-native"],
+      },
+      DEFAULT_QA_CONFIG,
+    );
 
     assert.equal(gates.correctness.result, "FAIL");
     assert.deepEqual(gates.correctness.failingFindings, ["f-1"]);
@@ -169,7 +172,10 @@ describe("Risk scoring", () => {
 
     const scores = calculateRiskScores([], [finding]);
     // Security risk should be elevated
-    assert.ok(scores.securityRisk.value > 60, `Expected security risk > 60, got ${scores.securityRisk.value}`);
+    assert.ok(
+      scores.securityRisk.value > 60,
+      `Expected security risk > 60, got ${scores.securityRisk.value}`,
+    );
   });
 
   it("composite score is between 0 and 100", () => {

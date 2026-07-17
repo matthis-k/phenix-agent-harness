@@ -1,5 +1,5 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
 import {
   extractRootTurnInput,
@@ -51,9 +51,7 @@ describe("RootTurnInput extraction", () => {
   });
 
   it("handles single user message", () => {
-    const messages: TestMessage[] = [
-      { role: "user", content: "Do this task" },
-    ];
+    const messages: TestMessage[] = [{ role: "user", content: "Do this task" }];
 
     const result = extractRootTurnInput(messages as any[], makeCtx());
     assert.equal(result.userMessage, "Do this task");
@@ -78,9 +76,7 @@ describe("RootTurnInput extraction", () => {
   });
 
   it("generates stable turn ID for same session + message", () => {
-    const messages: TestMessage[] = [
-      { role: "user", content: "task" },
-    ];
+    const messages: TestMessage[] = [{ role: "user", content: "task" }];
 
     const result1 = extractRootTurnInput(messages as any[], makeCtx("s1"));
     const result2 = extractRootTurnInput(messages as any[], makeCtx("s1"));
@@ -88,9 +84,7 @@ describe("RootTurnInput extraction", () => {
   });
 
   it("generates different turn IDs for different sessions", () => {
-    const messages: TestMessage[] = [
-      { role: "user", content: "task" },
-    ];
+    const messages: TestMessage[] = [{ role: "user", content: "task" }];
 
     const result1 = extractRootTurnInput(messages as any[], makeCtx("s1"));
     const result2 = extractRootTurnInput(messages as any[], makeCtx("s2"));
@@ -98,12 +92,8 @@ describe("RootTurnInput extraction", () => {
   });
 
   it("generates different turn IDs for different messages", () => {
-    const messages1: TestMessage[] = [
-      { role: "user", content: "task A" },
-    ];
-    const messages2: TestMessage[] = [
-      { role: "user", content: "task B" },
-    ];
+    const messages1: TestMessage[] = [{ role: "user", content: "task A" }];
+    const messages2: TestMessage[] = [{ role: "user", content: "task B" }];
 
     const result1 = extractRootTurnInput(messages1 as any[], makeCtx());
     const result2 = extractRootTurnInput(messages2 as any[], makeCtx());
@@ -125,9 +115,7 @@ describe("RootTurnInput extraction", () => {
     const messages: any[] = [
       {
         role: "user",
-        content: [
-          { type: "text", text: "Hello from block" },
-        ],
+        content: [{ type: "text", text: "Hello from block" }],
       },
     ];
 

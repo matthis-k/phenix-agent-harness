@@ -2,17 +2,16 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  getSessionRuntime,
   clearSessionRuntime,
-  resolveModelSet,
   cycleModelSet,
+  getSessionRuntime,
+  resolveModelSet,
   validateModelSet,
 } from "../extensions/phenix-routing/state.ts";
 import type { ModelSetId } from "../extensions/phenix-routing/types.ts";
 import { MODEL_SET_IDS } from "../extensions/phenix-routing/types.ts";
 
 describe("Session routing state", () => {
-
   it("getSessionRuntime creates default state", () => {
     const runtime = getSessionRuntime("test-session");
     assert.equal(runtime.modelSet, "mixed");

@@ -1,13 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
-import type { ModelRef, RoutingRole } from "../extensions/phenix-routing/types.ts";
 import { buildBundledConfig } from "../extensions/phenix-routing/config.ts";
-import { resolveRoute, type ModelRegistry } from "../extensions/phenix-routing/resolver.ts";
-import {
-  getSessionRuntime,
-} from "../extensions/phenix-routing/state.ts";
-import type { ModelSetId } from "../extensions/phenix-routing/types.ts";
+import { type ModelRegistry, resolveRoute } from "../extensions/phenix-routing/resolver.ts";
+import { getSessionRuntime } from "../extensions/phenix-routing/state.ts";
+import type { ModelRef, ModelSetId, RoutingRole } from "../extensions/phenix-routing/types.ts";
 
 class FakeRegistry implements ModelRegistry {
   private readonly available: Set<string>;
@@ -49,11 +45,16 @@ function fullRegistry(): ModelRegistry {
 const config = buildBundledConfig();
 
 describe("Routing integration", () => {
-
   it("CI: every role/difficulty pair resolves across all model sets", async () => {
     const roles: RoutingRole[] = [
-      "coordinator", "scout", "planner", "architect",
-      "implementer", "tester", "critic", "finalizer",
+      "coordinator",
+      "scout",
+      "planner",
+      "architect",
+      "implementer",
+      "tester",
+      "critic",
+      "finalizer",
     ];
     const difficulties = ["D0", "D1", "D2", "D3"] as const;
     const sets: ModelSetId[] = ["free", "opencode-go", "gpt", "mixed"];
@@ -157,7 +158,8 @@ describe("Routing integration", () => {
 
   it("CI: free mode denies security and invalid targets", () => {
     // Validate that the free guard has the expected denials
-    const guard = config.guards?.free!;
+    const guard = config.guards?.free;
+    assert.ok(guard, "Missing free routing guard");
     assert.deepEqual(guard.denySecrecy, ["private", "secret"]);
     assert.deepEqual(guard.denyChangeKinds, ["security", "auth", "ci", "deployment"]);
     assert.deepEqual(guard.denyTargetStates, ["main-bound"]);

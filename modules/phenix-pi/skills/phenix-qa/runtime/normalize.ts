@@ -5,14 +5,14 @@
  */
 
 import type {
-  QaEvidence,
-  QaLevel,
   EvidenceSource,
-  SourceLocation,
-  FindingSeverity,
   FindingConfidence,
-  RemediationScope,
+  FindingSeverity,
+  QaEvidence,
   QaFinding,
+  QaLevel,
+  RemediationScope,
+  SourceLocation,
 } from "../contracts/contracts.ts";
 
 let nextId = 0;
@@ -107,10 +107,7 @@ export function mapSeverity(raw: string): FindingSeverity {
 /**
  * Map a metric value to severity based on thresholds.
  */
-export function mapMetricToSeverity(
-  value: number,
-  threshold: number | undefined,
-): FindingSeverity {
+export function mapMetricToSeverity(value: number, threshold: number | undefined): FindingSeverity {
   if (threshold === undefined) return "info";
   const ratio = value / threshold;
   if (ratio >= 3.0) return "critical";

@@ -12,18 +12,14 @@ export {
 
 export type {
   Difficulty,
-  ThinkingLevel,
-  TaskProfile,
   ProfileHint,
+  TaskProfile,
+  ThinkingLevel,
 } from "../phenix-kernel/task.ts";
 
 // ── Subagent-local types ──────────────────────────────────────────────────
 
-export type ModelTier =
-  | "low"
-  | "standard"
-  | "high"
-  | "critical";
+export type ModelTier = "low" | "standard" | "high" | "critical";
 
 export interface TurnBudget {
   readonly maxTurns: number;
@@ -43,4 +39,3 @@ export interface VerificationCommand {
   readonly cwd?: string;
   readonly allowFailure?: boolean;
 }
-

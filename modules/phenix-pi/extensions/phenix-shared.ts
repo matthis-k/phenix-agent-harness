@@ -9,10 +9,7 @@ import fs from "node:fs";
  * Arrays are replaced wholesale, not merged element-by-element.
  * Null values in the overlay are preserved.
  */
-export function mergeObjects<T extends Record<string, unknown>>(
-  base: T,
-  overlay: unknown,
-): T {
+export function mergeObjects<T extends Record<string, unknown>>(base: T, overlay: unknown): T {
   if (!overlay || typeof overlay !== "object" || Array.isArray(overlay)) return base;
   const output: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(overlay)) {

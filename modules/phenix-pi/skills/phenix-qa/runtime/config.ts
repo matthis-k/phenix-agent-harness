@@ -39,12 +39,7 @@ export const DEFAULT_QA_CONFIG: QaConfig = {
       "result",
       "vendor",
     ],
-    generatedPaths: [
-      "*.generated.*",
-      "*.gen.*",
-      "*-lock.*",
-      ".git",
-    ],
+    generatedPaths: ["*.generated.*", "*.gen.*", "*-lock.*", ".git"],
     vendorPaths: ["vendor/", "third_party/"],
   },
 
@@ -70,10 +65,7 @@ export const DEFAULT_QA_CONFIG: QaConfig = {
 /**
  * Override defaults with partial config. Deep-mutates defaults.
  */
-export function mergeConfig(
-  defaults: QaConfig,
-  overrides?: Partial<QaConfig>,
-): QaConfig {
+export function mergeConfig(defaults: QaConfig, overrides?: Partial<QaConfig>): QaConfig {
   if (!overrides) return defaults;
 
   return {

@@ -1,0 +1,11 @@
+warning: Git tree '/home/runner/work/phenix-agent-harness/phenix-agent-harness' is dirty
+unpacking 'github:matthis-k/phenix-stitch/d6453d3ad3156b027ec7241fdc7d3a4aad99ffca' into the Git cache...
+warning: updating lock file "/home/runner/work/phenix-agent-harness/phenix-agent-harness/flake.lock":
+• Updated input 'phenix-stitch':
+    'github:matthis-k/phenix-stitch/63520f303c9f37bce51cf8c49b4145d69b8aab4d?narHash=sha256-HJSnlWm4luXRRsWspJzYDdwabflx%2BREvxKjdl2hRznQ%3D' (2026-07-16)
+  → 'github:matthis-k/phenix-stitch/d6453d3ad3156b027ec7241fdc7d3a4aad99ffca?narHash=sha256-74Q5KKKWtg9hOen/5/4QbuRpUvlsWN7YWfDEATRF6lw%3D' (2026-07-17)
+• Removed input 'phenix-stitch/phenix-tend'
+• Removed input 'phenix-tend'
+• Removed input 'phenix-tend/flake-parts'
+• Removed input 'phenix-tend/nixpkgs'
+• Removed input 'phenix-tend/phenix-pins'

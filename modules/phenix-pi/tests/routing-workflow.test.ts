@@ -16,23 +16,22 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
-import type { ModelRef, RoutingRole } from "../extensions/phenix-routing/types.ts";
-import { MODEL_SET_IDS, type ModelSetId } from "../extensions/phenix-routing/types.ts";
 import { buildBundledConfig } from "../extensions/phenix-routing/config.ts";
-import { resolveRoute, type ModelRegistry } from "../extensions/phenix-routing/resolver.ts";
 import {
-  PHENIX_PROVIDER,
+  modelSetForModelId,
   PHENIX_MODEL,
   PHENIX_MODEL_SETS,
-  modelSetForModelId,
+  PHENIX_PROVIDER,
 } from "../extensions/phenix-routing/provider.ts";
+import { type ModelRegistry, resolveRoute } from "../extensions/phenix-routing/resolver.ts";
 import {
-  getSessionRuntime,
   clearSessionRuntime,
+  getSessionRuntime,
   resolveModelSet,
   validateModelSet,
 } from "../extensions/phenix-routing/state.ts";
+import type { ModelRef, RoutingRole } from "../extensions/phenix-routing/types.ts";
+import { MODEL_SET_IDS, type ModelSetId } from "../extensions/phenix-routing/types.ts";
 
 // ---------------------------------------------------------------------------
 // Fake model registry — simulates Pi's getModelRegistry() response
@@ -92,7 +91,6 @@ const config = buildBundledConfig();
 // ---------------------------------------------------------------------------
 
 describe("Workflow: model selection → route resolution", () => {
-
   it("unknown model id returns undefined from modelSetForModelId", () => {
     // Only explicit model-set models are registered. Any other model id
     // (e.g. "workflow") is unknown and must return undefined.
@@ -116,7 +114,8 @@ describe("Workflow: model selection → route resolution", () => {
     // Step 2: The before_agent_start handler would set runtime.modelSet
     const sessionId = "test-opencode-session";
     const runtime = getSessionRuntime(sessionId);
-    runtime.modelSet = explicitModelSet!;
+    assert.ok(explicitModelSet, "Expected an explicit model set");
+    runtime.modelSet = explicitModelSet;
     assert.equal(runtime.modelSet, "opencode-go");
 
     // Step 3: Route resolves using opencode-go model set
@@ -139,7 +138,8 @@ describe("Workflow: model selection → route resolution", () => {
 
     const sessionId = "test-gpt-session";
     const runtime = getSessionRuntime(sessionId);
-    runtime.modelSet = explicitModelSet!;
+    assert.ok(explicitModelSet, "Expected an explicit model set");
+    runtime.modelSet = explicitModelSet;
 
     // coordinator D2 → reasoning → gpt.reasoning → openai-codex provider
     const route = await resolveRoute({
@@ -160,7 +160,8 @@ describe("Workflow: model selection → route resolution", () => {
 
     const sessionId = "test-free-session";
     const runtime = getSessionRuntime(sessionId);
-    runtime.modelSet = explicitModelSet!;
+    assert.ok(explicitModelSet, "Expected an explicit model set");
+    runtime.modelSet = explicitModelSet;
 
     const route = await resolveRoute({
       modelSet: runtime.modelSet,
@@ -181,7 +182,6 @@ describe("Workflow: model selection → route resolution", () => {
 // ---------------------------------------------------------------------------
 
 describe("Workflow: route lifecycle", () => {
-
   it("model set persists across turns in the same session", async () => {
     const sessionId = "test-lifecycle";
 
@@ -286,7 +286,6 @@ describe("Workflow: route lifecycle", () => {
 // ---------------------------------------------------------------------------
 
 describe("Workflow: error handling", () => {
-
   it("missing concrete models produce clear failure message", async () => {
     await assert.rejects(
       resolveRoute({
@@ -297,9 +296,11 @@ describe("Workflow: error handling", () => {
         config,
       }),
       (err: Error) => {
-        return err.message.includes("No available candidates") &&
-               err.message.includes("opencode-go") &&
-               err.message.includes("code");
+        return (
+          err.message.includes("No available candidates") &&
+          err.message.includes("opencode-go") &&
+          err.message.includes("code")
+        );
       },
     );
   });
@@ -336,14 +337,11 @@ describe("Workflow: error handling", () => {
     // Even if a pool accidentally contained phenix/<setId>, it would be skipped.
     for (const setId of PHENIX_MODEL_SETS) {
       const ref = `phenix/${setId}`;
-      assert.throws(
-        () => {
-          // parseModelRef would succeed, but the resolver's boundary filter
-          // would skip it. This test verifies the boundary logic works.
-          if (ref.startsWith("phenix/")) throw new Error(`rejected: ${ref}`);
-        },
-        /rejected/,
-      );
+      assert.throws(() => {
+        // parseModelRef would succeed, but the resolver's boundary filter
+        // would skip it. This test verifies the boundary logic works.
+        if (ref.startsWith("phenix/")) throw new Error(`rejected: ${ref}`);
+      }, /rejected/);
     }
   });
 });
@@ -353,7 +351,6 @@ describe("Workflow: error handling", () => {
 // ---------------------------------------------------------------------------
 
 describe("Workflow: mixed model set routing", () => {
-
   it("mixed routes implementer through opencode-go and critic through openai-codex", async () => {
     const implRoute = await resolveRoute({
       modelSet: "mixed",
@@ -435,7 +432,6 @@ describe("Workflow: mixed model set routing", () => {
 // ---------------------------------------------------------------------------
 
 describe("Workflow: model set persistence", () => {
-
   it("modelSetForModelId is deterministic (no side effects)", () => {
     // Pure function — calling it multiple times returns the same result
     assert.equal(modelSetForModelId("free"), "free");
@@ -485,8 +481,14 @@ describe("Workflow: model set persistence", () => {
 
 describe("Workflow: full matrix coverage", () => {
   const roles: RoutingRole[] = [
-    "coordinator", "scout", "planner", "architect",
-    "implementer", "tester", "critic", "finalizer",
+    "coordinator",
+    "scout",
+    "planner",
+    "architect",
+    "implementer",
+    "tester",
+    "critic",
+    "finalizer",
   ];
   const difficulties = ["D0", "D1", "D2", "D3"] as const;
   const sets: ModelSetId[] = ["free", "opencode-go", "gpt", "mixed"];

@@ -4,23 +4,21 @@
  * Currently optional/unavailable by default. Implements the adapter contract.
  */
 
+import { writeRawArtifact } from "../artifacts.ts";
 import { makeEvidence, normalizeSarif } from "../normalize.ts";
 import type {
-  QaAnalyzer,
-  QaAnalyzerContext,
-  QaAnalyzerAvailability,
-  QaAnalyzerResult,
   ProcessRunner,
+  QaAnalyzer,
+  QaAnalyzerAvailability,
+  QaAnalyzerContext,
+  QaAnalyzerResult,
 } from "../types.ts";
-import { writeRawArtifact } from "../artifacts.ts";
 
 export const SECURITY_ANALYZER: QaAnalyzer = {
   id: "security",
   categories: ["security", "vulnerability"],
 
-  async checkAvailability(
-    _context: QaAnalyzerContext,
-  ): Promise<QaAnalyzerAvailability> {
+  async checkAvailability(_context: QaAnalyzerContext): Promise<QaAnalyzerAvailability> {
     const { DEFAULT_PROCESS_RUNNER } = await import("../process.ts");
     const runner: ProcessRunner = DEFAULT_PROCESS_RUNNER;
 
@@ -45,9 +43,7 @@ export const SECURITY_ANALYZER: QaAnalyzer = {
     };
   },
 
-  async run(
-    context: QaAnalyzerContext,
-  ): Promise<QaAnalyzerResult> {
+  async run(context: QaAnalyzerContext): Promise<QaAnalyzerResult> {
     const start = Date.now();
     const { DEFAULT_PROCESS_RUNNER } = await import("../process.ts");
     const runner: ProcessRunner = DEFAULT_PROCESS_RUNNER;
@@ -69,19 +65,12 @@ export const SECURITY_ANALYZER: QaAnalyzer = {
       }
 
       const timeoutMs =
-        context.config.timeouts.byAnalyzer?.["security"] ??
-        context.config.timeouts.defaultMs;
+        context.config.timeouts.byAnalyzer?.["security"] ?? context.config.timeouts.defaultMs;
 
       // Run semgrep with SARIF output
       const result = await runner.exec(
         "semgrep",
-        [
-          "scan",
-          "--config=auto",
-          "--sarif",
-          "--quiet",
-          context.cwd,
-        ],
+        ["scan", "--config=auto", "--sarif", "--quiet", context.cwd],
         {
           cwd: context.cwd,
           timeoutMs,
@@ -114,12 +103,7 @@ export const SECURITY_ANALYZER: QaAnalyzer = {
         // semgrep wraps in runs[]
         const runs = sarif?.runs ?? (Array.isArray(sarif) ? sarif : []);
         for (const run of runs) {
-          const runEvidence = normalizeSarif(
-            run,
-            "semgrep",
-            "security-tool",
-            "level-7-security",
-          );
+          const runEvidence = normalizeSarif(run, "semgrep", "security-tool", "level-7-security");
           evidence = evidence.concat(runEvidence);
         }
 
@@ -153,9 +137,7 @@ export const SECURITY_ANALYZER: QaAnalyzer = {
         status: "unavailable",
         evidence: [],
         artifacts: [],
-        diagnostics: [
-          `Semgrep error: ${error instanceof Error ? error.message : String(error)}`,
-        ],
+        diagnostics: [`Semgrep error: ${error instanceof Error ? error.message : String(error)}`],
         durationMs: Date.now() - start,
       };
     }

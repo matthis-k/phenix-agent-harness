@@ -1,0 +1,907 @@
+• Validating lock
+• Downloading https://api.github.com/repos/cachix/devenv/tarball/46adb0ff57f6ec39b80497cc01ed261a699b3eac
+✓ Downloading https://api.github.com/repos/cachix/devenv/tarball/46adb0ff57f6ec39b80497cc01ed261a699b3eac in 723ms
+• Downloading https://api.github.com/repos/NixOS/nixpkgs/tarball/753cc8a3a87467296ddd1fa93f0cc3e81120ee46
+✓ Downloading https://api.github.com/repos/NixOS/nixpkgs/tarball/753cc8a3a87467296ddd1fa93f0cc3e81120ee46 in 2.19s
+✓ Validating lock in 20.3s
+• Configuring cachix
+• Downloading https://cache.nixos.org/nix-cache-info
+✓ Downloading https://cache.nixos.org/nix-cache-info in 15.2ms
+• Downloading https://devenv.cachix.org/nix-cache-info
+✓ Downloading https://devenv.cachix.org/nix-cache-info in 24.4ms
+• [35;1mwarning:[0m Substituter '[35;1mhttps://devenv.cachix.org[0m' is already present in the substituters list
+✓ Configuring cachix in 55.4ms
+• Configuring shell
+• Evaluating shell
+• Downloading bash-5.3p9
+• Downloading https://cache.nixos.org/nar/1n1a7mjh9dv6dkk1f2s9xly9syknhjbbcs9vwdfpkxz46sv06xzx.nar.xz
+• Downloading bzip2-1.0.8-bin
+• Downloading https://cache.nixos.org/nar/09rihgxapd4ipvknz1b781p8cjip6s3zn3jxj9mgqq111yi838g4.nar.xz
+• Downloading file-5.48
+• Downloading findutils-4.10.0
+• Downloading gnutar-1.35
+• Downloading gawk-5.4.0
+• Downloading gnugrep-3.12
+• Downloading https://cache.nixos.org/nar/03pfp50xrz55rks54353azpalqha0ynassq0k0hv7npnrzb2s20p.nar.xz
+• Downloading https://cache.nixos.org/nar/1a59li3bgfm87pm13b5bb1fa2xc4ipzvi7fpl6cxfd8g0kw8s2yg.nar.xz
+• Downloading https://cache.nixos.org/nar/081n5f7km2y0d0za0zhq0jk02vwmjj1fjk63wf423ixd9k1318b0.nar.xz
+• Downloading https://cache.nixos.org/nar/12sz2bxvnfva77bg0dvcqqyrdkxjd922mriv2m0csxn04ilb08vf.nar.xz
+• Downloading https://cache.nixos.org/nar/1h3msdwm65ppgw7w587n90mkn6x5npdvvrxgg93yblvrigdkmgw7.nar.xz
+✓ Downloading https://cache.nixos.org/nar/1n1a7mjh9dv6dkk1f2s9xly9syknhjbbcs9vwdfpkxz46sv06xzx.nar.xz in 16.1ms
+✓ Downloading https://cache.nixos.org/nar/09rihgxapd4ipvknz1b781p8cjip6s3zn3jxj9mgqq111yi838g4.nar.xz in 7.51ms
+• Downloading gnumake-4.4.1
+• Downloading patchelf-0.15.2
+• Downloading pkg-config-0.29.2
+• Downloading diffutils-3.12
+• Downloading gnused-4.10
+• Downloading expand-response-params
+• Downloading xz-5.8.3-bin
+✓ Downloading bzip2-1.0.8-bin in 9.31ms
+• Downloading readline-8.3p3
+• Downloading https://cache.nixos.org/nar/1ag8lnv4p21b50im2qws0qzmy9pvzhmd8a2y01c6jmb5ad1n1840.nar.xz
+• Downloading https://cache.nixos.org/nar/130s4blvxb9fa51hxjx7bc8j7n11bnsmrjy81qfq4idq1gz80bhv.nar.xz
+• Downloading https://cache.nixos.org/nar/19d9yam44byzv1yr1yz16xij57j1g5jjk3qnlsriwv5w0xhfs36w.nar.zst
+• Downloading https://cache.nixos.org/nar/0wy4hp8kpn0zzxdn24frxdq483xp0v5f3r3kdfxga64inynibzda.nar.zst
+• Downloading https://cache.nixos.org/nar/1sia1i2miz2c8yq0n7rmvxwgishw65l9crgn6y08mf0lnajwagx2.nar.xz
+• Downloading https://cache.nixos.org/nar/1i3y3km4cd88b8cba8qq3qn834ywjp9vqz95mk4pxfhi4jdzd7zz.nar.zst
+• Downloading https://cache.nixos.org/nar/14715glrijy52f32spz17iplfvlkbbp3gcs99hmfaghspis4cf8w.nar.xz
+• Downloading https://cache.nixos.org/nar/0if02rnz6kk4172q9khwf836632ygyw7zzazlghiy9i195hrmk2b.nar.xz
+• Downloading ed-1.22.5
+• Downloading https://cache.nixos.org/nar/09d7mi1b85vnzr0wi9yxcpk89834frj3vyiv8xn0vn1k2qvn9mdq.nar.xz
+• Downloading https://cache.nixos.org/nar/1abf59iac8i3js70m2jahchjkr9p12xxnxbn10zar00ibmljc657.nar.xz
+✓ Downloading https://cache.nixos.org/nar/1a59li3bgfm87pm13b5bb1fa2xc4ipzvi7fpl6cxfd8g0kw8s2yg.nar.xz in 16.1ms
+✓ Downloading https://cache.nixos.org/nar/19d9yam44byzv1yr1yz16xij57j1g5jjk3qnlsriwv5w0xhfs36w.nar.zst in 23.2ms
+✓ Downloading bash-5.3p9 in 43.4ms
+• Downloading glibc-2.42-67-bin
+✓ Downloading expand-response-params in 31.3ms
+• Downloading gzip-1.14
+✓ Downloading https://cache.nixos.org/nar/03pfp50xrz55rks54353azpalqha0ynassq0k0hv7npnrzb2s20p.nar.xz in 35.5ms
+• Downloading https://cache.nixos.org/nar/0cigk38rc3jmiqa2wj6nb3bcl31zf9yr7p58dzayhk9fnj7fmirb.nar.xz
+• Downloading https://cache.nixos.org/nar/02clg9kfx6icnlb8kby9vrs2gqc38vkc0nvp0lx7wcvzgvzk23qx.nar.xz
+✓ Downloading https://cache.nixos.org/nar/14715glrijy52f32spz17iplfvlkbbp3gcs99hmfaghspis4cf8w.nar.xz in 39.5ms
+✓ Downloading https://cache.nixos.org/nar/0if02rnz6kk4172q9khwf836632ygyw7zzazlghiy9i195hrmk2b.nar.xz in 39.5ms
+✓ Downloading https://cache.nixos.org/nar/12sz2bxvnfva77bg0dvcqqyrdkxjd922mriv2m0csxn04ilb08vf.nar.xz in 46.4ms
+✓ Downloading https://cache.nixos.org/nar/1abf59iac8i3js70m2jahchjkr9p12xxnxbn10zar00ibmljc657.nar.xz in 32.4ms
+✓ Downloading xz-5.8.3-bin in 46.1ms
+• Downloading gnu-config-2024-01-01
+• Downloading gmp-6.3.0
+✓ Downloading patchelf-0.15.2 in 50.0ms
+• Downloading linux-headers-7.0
+✓ Downloading gnugrep-3.12 in 60.8ms
+• Downloading https://cache.nixos.org/nar/17whpq42rsqfz1apwg853iz230py9rnyaa3p66370vayq5200ak6.nar.xz
+• Downloading https://cache.nixos.org/nar/13q2rdwz695rmyjqifhf5k54nqjf1vrkfs7rn77lfrfsr76bd982.nar.xz
+• Downloading https://cache.nixos.org/nar/1dm70wkmb9ij4y8sn7ayxmypf92hbl22a98y695qhkzvf2cqc8h6.nar.xz
+✓ Downloading https://cache.nixos.org/nar/09d7mi1b85vnzr0wi9yxcpk89834frj3vyiv8xn0vn1k2qvn9mdq.nar.xz in 48.8ms
+✓ Downloading ed-1.22.5 in 56.4ms
+✓ Downloading https://cache.nixos.org/nar/1i3y3km4cd88b8cba8qq3qn834ywjp9vqz95mk4pxfhi4jdzd7zz.nar.zst in 59.1ms
+• Downloading patch-2.8
+✓ Downloading https://cache.nixos.org/nar/130s4blvxb9fa51hxjx7bc8j7n11bnsmrjy81qfq4idq1gz80bhv.nar.xz in 64.9ms
+✓ Downloading https://cache.nixos.org/nar/1sia1i2miz2c8yq0n7rmvxwgishw65l9crgn6y08mf0lnajwagx2.nar.xz in 64.3ms
+✓ Downloading readline-8.3p3 in 66.7ms
+• Downloading bash-interactive-5.3p9
+✓ Downloading https://cache.nixos.org/nar/1h3msdwm65ppgw7w587n90mkn6x5npdvvrxgg93yblvrigdkmgw7.nar.xz in 72.8ms
+✓ Downloading https://cache.nixos.org/nar/1ag8lnv4p21b50im2qws0qzmy9pvzhmd8a2y01c6jmb5ad1n1840.nar.xz in 70.2ms
+✓ Downloading https://cache.nixos.org/nar/0wy4hp8kpn0zzxdn24frxdq483xp0v5f3r3kdfxga64inynibzda.nar.zst in 69.4ms
+• Downloading https://cache.nixos.org/nar/07c14b7fgx2scrp3vgshps0395lxwaf94n2ka0yg2pv0jjzrjkxh.nar.zst
+✓ Downloading pkg-config-0.29.2 in 73.6ms
+• Downloading https://cache.nixos.org/nar/1z5s3xvk1g9hfd4b8kspf2d5ps437b6phz3z2jvbv1bhd7g20ffk.nar.xz
+• Downloading pkg-config-wrapper-0.29.2
+✓ Downloading gnused-4.10 in 87.5ms
+✓ Downloading diffutils-3.12 in 88.6ms
+✓ Downloading gnumake-4.4.1 in 91.4ms
+✓ Downloading https://cache.nixos.org/nar/081n5f7km2y0d0za0zhq0jk02vwmjj1fjk63wf423ixd9k1318b0.nar.xz in 92.2ms
+• Downloading https://cache.nixos.org/nar/1kvhvmyv3kikk0prbj1vica5s05akbz56s54a0d85sq57s6iv6sx.nar.zst
+• Downloading binutils-2.46-lib
+✓ Downloading https://cache.nixos.org/nar/02clg9kfx6icnlb8kby9vrs2gqc38vkc0nvp0lx7wcvzgvzk23qx.nar.xz in 51.1ms
+• Downloading https://cache.nixos.org/nar/1rnq53jjm1rnkhg331nx6kk685bmy4gajf975xhvw3rcy39i7p0x.nar.xz
+✓ Downloading findutils-4.10.0 in 99.5ms
+✓ Downloading https://cache.nixos.org/nar/0cigk38rc3jmiqa2wj6nb3bcl31zf9yr7p58dzayhk9fnj7fmirb.nar.xz in 55.0ms
+✓ Downloading https://cache.nixos.org/nar/17whpq42rsqfz1apwg853iz230py9rnyaa3p66370vayq5200ak6.nar.xz in 33.4ms
+✓ Downloading https://cache.nixos.org/nar/13q2rdwz695rmyjqifhf5k54nqjf1vrkfs7rn77lfrfsr76bd982.nar.xz in 37.7ms
+✓ Downloading gnu-config-2024-01-01 in 50.2ms
+• Downloading update-autotools-gnu-config-scripts-hook
+• Downloading https://cache.nixos.org/nar/1h2w0g0vkbajqsgvbayzm4yqm3k5s5xrgc4jaridx6w4jxj5gmjp.nar.xz
+✓ Downloading gnutar-1.35 in 111ms
+✓ Downloading gzip-1.14 in 79.0ms
+✓ Downloading https://cache.nixos.org/nar/1kvhvmyv3kikk0prbj1vica5s05akbz56s54a0d85sq57s6iv6sx.nar.zst in 28.5ms
+✓ Downloading https://cache.nixos.org/nar/1z5s3xvk1g9hfd4b8kspf2d5ps437b6phz3z2jvbv1bhd7g20ffk.nar.xz in 43.8ms
+✓ Downloading pkg-config-wrapper-0.29.2 in 42.3ms
+✓ Downloading gmp-6.3.0 in 75.9ms
+• Downloading isl-0.20
+• Downloading mpfr-4.2.2
+• Downloading https://cache.nixos.org/nar/0pzh7vrssxkv1xfdbhrgwgxc4vb8i6qzam75258yf1zishpm3zgy.nar.xz
+✓ Downloading patch-2.8 in 64.3ms
+• Downloading https://cache.nixos.org/nar/0k94w0zvkl26kv90s82a26l8syvcrrgz55mc2c6vqdfhxhh9hf7y.nar.xz
+✓ Downloading gawk-5.4.0 in 157ms
+✓ Downloading glibc-2.42-67-bin in 127ms
+✓ Downloading https://cache.nixos.org/nar/1h2w0g0vkbajqsgvbayzm4yqm3k5s5xrgc4jaridx6w4jxj5gmjp.nar.xz in 53.3ms
+✓ Downloading update-autotools-gnu-config-scripts-hook in 54.8ms
+✓ Downloading file-5.48 in 166ms
+✓ Downloading https://cache.nixos.org/nar/1rnq53jjm1rnkhg331nx6kk685bmy4gajf975xhvw3rcy39i7p0x.nar.xz in 65.8ms
+✓ Downloading https://cache.nixos.org/nar/07c14b7fgx2scrp3vgshps0395lxwaf94n2ka0yg2pv0jjzrjkxh.nar.zst in 88.7ms
+✓ Downloading https://cache.nixos.org/nar/0k94w0zvkl26kv90s82a26l8syvcrrgz55mc2c6vqdfhxhh9hf7y.nar.xz in 43.3ms
+✓ Downloading bash-interactive-5.3p9 in 117ms
+• Downloading bash-interactive-5.3p9-dev
+• Downloading https://cache.nixos.org/nar/0asbdgr5i0xy446nqaca5rk4fxibsnwrhzq0f57mzriyyapsm7hr.nar.zst
+✓ Downloading https://cache.nixos.org/nar/0pzh7vrssxkv1xfdbhrgwgxc4vb8i6qzam75258yf1zishpm3zgy.nar.xz in 60.8ms
+✓ Downloading mpfr-4.2.2 in 64.0ms
+✓ Downloading binutils-2.46-lib in 97.6ms
+• Downloading binutils-2.46
+• Downloading libmpc-1.4.1
+• Downloading https://cache.nixos.org/nar/0pkz52a5xwii5bqpdlibfj6aa79bk64i2rhvnpg24rhgd7275psg.nar.xz
+• Downloading https://cache.nixos.org/nar/1850jwy6g331jbdwmysclvzsxw02g22sb4xfpvar27xwqp1w2p89.nar.xz
+✓ Downloading https://cache.nixos.org/nar/0asbdgr5i0xy446nqaca5rk4fxibsnwrhzq0f57mzriyyapsm7hr.nar.zst in 9.45ms
+✓ Downloading https://cache.nixos.org/nar/1850jwy6g331jbdwmysclvzsxw02g22sb4xfpvar27xwqp1w2p89.nar.xz in 10.00ms
+✓ Downloading bash-interactive-5.3p9-dev in 18.3ms
+✓ Downloading libmpc-1.4.1 in 15.8ms
+✓ Downloading isl-0.20 in 97.8ms
+✓ Downloading https://cache.nixos.org/nar/1dm70wkmb9ij4y8sn7ayxmypf92hbl22a98y695qhkzvf2cqc8h6.nar.xz in 195ms
+✓ Downloading linux-headers-7.0 in 220ms
+• Downloading glibc-2.42-67-dev
+• Downloading https://cache.nixos.org/nar/1ylrv9hqsfzipy525zcmr4dygniljbwskqxpyqkh8824wnkvhipi.nar.xz
+• Downloading perl-5.42.0
+✓ Downloading https://cache.nixos.org/nar/1ylrv9hqsfzipy525zcmr4dygniljbwskqxpyqkh8824wnkvhipi.nar.xz in 28.9ms
+• Downloading bash-interactive-5.3p9-info
+• Downloading bash-interactive-5.3p9-man
+• Downloading bash-interactive-5.3p9-doc
+• Downloading https://cache.nixos.org/nar/1qalpdmb5gb14r8y6nj45rpw7a9jb5k8rcyshrxdz0k6915xswdw.nar.zst
+• Downloading builder.pl
+• Downloading https://cache.nixos.org/nar/0whd59p7ypbgb70s38dkp5vyc3pkj03ca09qv1xzidi6car06ycj.nar.zst
+• Downloading https://cache.nixos.org/nar/167b9gh9s6p9hdbfbnx4zgg7jckmyr7lgdgbmya6kvyqkk5p2hlx.nar.zst
+• Downloading https://cache.nixos.org/nar/12k6wahxw8wr8fxmy22fb9xwa2pnfa7brdpd76hqnjn9szszgi1w.nar.zst
+• Downloading https://cache.nixos.org/nar/14vhkdpv3dxgk51yg8c1z5jhxp2rxdg11380ngj0hpy3l75csq7p.nar.zst
+• Downloading stdenv-linux-no-cc
+• Downloading nixfmt-1.4.0
+• Downloading https://cache.nixos.org/nar/1dwaqanhhbqw7x8i666gky81ydgjjy3bxi7agyivvsw3wll8cb4q.nar.zst
+• Downloading https://cache.nixos.org/nar/0hj9rqm5gidavbghbm8frjnzk1wlxjnkzh062ky1dqizmnj5qarx.nar.zst
+✓ Downloading https://cache.nixos.org/nar/0whd59p7ypbgb70s38dkp5vyc3pkj03ca09qv1xzidi6car06ycj.nar.zst in 24.8ms
+✓ Downloading https://cache.nixos.org/nar/12k6wahxw8wr8fxmy22fb9xwa2pnfa7brdpd76hqnjn9szszgi1w.nar.zst in 24.5ms
+• Downloading bash-5.3.tar.gz
+✓ Downloading bash-interactive-5.3p9-man in 29.5ms
+• Downloading tzdata-2026b
+✓ Downloading bash-interactive-5.3p9-doc in 31.0ms
+• Downloading https://cache.nixos.org/nar/0anss240i3h4pp67napys7v8c4caqhzi5jmzzikjp222d17xbici.nar.zst
+✓ Downloading builder.pl in 32.9ms
+✓ Downloading https://cache.nixos.org/nar/14vhkdpv3dxgk51yg8c1z5jhxp2rxdg11380ngj0hpy3l75csq7p.nar.zst in 31.6ms
+• Downloading pkg-config-0.29.2-doc
+• Downloading pkg-config-0.29.2-man
+• Downloading https://cache.nixos.org/nar/1q741m5h1ab012b2v98vvai8wvczam2737bmnla08zhb5f89i34q.nar.zst
+• Downloading https://cache.nixos.org/nar/10bvyy7biakdysv2jz61cylmxzfyj7fbwlbnq7h9zzyxzjliayxy.nar.zst
+• Downloading https://cache.nixos.org/nar/1xrangyy2q18dq033jj5gvi4v163gfxf6hrw1lsf334zc2p2w25g.nar.zst
+✓ Downloading https://cache.nixos.org/nar/167b9gh9s6p9hdbfbnx4zgg7jckmyr7lgdgbmya6kvyqkk5p2hlx.nar.zst in 40.7ms
+✓ Downloading bash-interactive-5.3p9-info in 44.8ms
+• Downloading git-2.54.0-doc
+✓ Downloading https://cache.nixos.org/nar/0hj9rqm5gidavbghbm8frjnzk1wlxjnkzh062ky1dqizmnj5qarx.nar.zst in 34.8ms
+• Downloading perl5.42.0-Digest-HMAC-1.05
+• Downloading perl5.42.0-HTML-TagCloud-0.38
+• Downloading https://cache.nixos.org/nar/0pxrarl3xsds1qgv4w8m2ph0ac1c32zjpsc4zhmypr4l260jpn9h.nar.zst
+• Downloading perl5.42.0-URI-5.21
+• Downloading perl5.42.0-libnet-3.15
+• Downloading expat-2.8.2
+✓ Downloading stdenv-linux-no-cc in 50.3ms
+• Downloading https://cache.nixos.org/nar/0020h2f9jz3wrkgcqp60yfwcf5wghs954py372fkn9zhw28v32rd.nar.zst
+• Downloading perl5.42.0-FCGI-ProcManager-0.28
+• Downloading devenv-enterShell
+• Downloading https://cache.nixos.org/nar/1dvnpp6hz6xvh5rfxj11f38rifsckpy135qs83c629hc75fl7dvq.nar.zst
+✓ Downloading glibc-2.42-67-dev in 98.3ms
+• Downloading shellcheck-0.11.0-bin
+• Downloading https://cache.nixos.org/nar/0c9s6n249m04m6ybws8siim94zgkgndlvmz9dfpdr6q8km3j8ims.nar.zst
+• Downloading https://devenv.cachix.org/nar/eb9f515e-9c74-4fcb-a07f-cb527c4e9dfb.nar.zst
+• Downloading https://cache.nixos.org/nar/0h092wkmdi1xg18x4g9wyrdz6cdmnrs0m6ycvbj2nh522krj9kar.nar.zst
+• Downloading https://cache.nixos.org/nar/1ib3xfyzzi8w1zx7r6zgkd0q9rbwdahgjhbj39ly0arm6710lpxw.nar.zst
+• Downloading https://cache.nixos.org/nar/04ww96z2rjav0yx9w0hk13a9xfmpa8zp8f6czwpck9zqyrd42jvg.nar.zst
+• Downloading https://cache.nixos.org/nar/04rxab3d3zsyrq40ph3bjgs3iirbfxf2gw91h1hng3nxl0ldac3c.nar.zst
+✓ Downloading https://cache.nixos.org/nar/1dwaqanhhbqw7x8i666gky81ydgjjy3bxi7agyivvsw3wll8cb4q.nar.zst in 71.0ms
+✓ Downloading nixfmt-1.4.0 in 75.6ms
+• Downloading gcc-15.2.0
+• Downloading https://cache.nixos.org/nar/1axdb2kd7ppk39lzahszrqs2b9bzs6hk87b9a8r40sn2cnd4kzcr.nar.xz
+✓ Downloading https://cache.nixos.org/nar/1xrangyy2q18dq033jj5gvi4v163gfxf6hrw1lsf334zc2p2w25g.nar.zst in 51.5ms
+✓ Downloading pkg-config-0.29.2-man in 60.1ms
+• Downloading perl5.42.0-TermReadKey-2.38
+✓ Downloading https://cache.nixos.org/nar/1q741m5h1ab012b2v98vvai8wvczam2737bmnla08zhb5f89i34q.nar.zst in 58.7ms
+✓ Downloading https://cache.nixos.org/nar/10bvyy7biakdysv2jz61cylmxzfyj7fbwlbnq7h9zzyxzjliayxy.nar.zst in 58.3ms
+✓ Downloading https://devenv.cachix.org/nar/eb9f515e-9c74-4fcb-a07f-cb527c4e9dfb.nar.zst in 27.3ms
+✓ Downloading pkg-config-0.29.2-doc in 64.6ms
+✓ Downloading devenv-enterShell in 43.1ms
+• Downloading https://cache.nixos.org/nar/132bxr7jn6x9yagffmplckqh4r6cc9p9ivw1wyr1r79d61idqa8n.nar.zst
+✓ Downloading https://cache.nixos.org/nar/0020h2f9jz3wrkgcqp60yfwcf5wghs954py372fkn9zhw28v32rd.nar.zst in 46.0ms
+✓ Downloading https://cache.nixos.org/nar/1dvnpp6hz6xvh5rfxj11f38rifsckpy135qs83c629hc75fl7dvq.nar.zst in 45.4ms
+✓ Downloading perl5.42.0-Digest-HMAC-1.05 in 57.1ms
+✓ Downloading perl5.42.0-HTML-TagCloud-0.38 in 57.3ms
+• Downloading gettext-1.0
+• Downloading jemalloc-5.3.1
+• Downloading perl5.42.0-Encode-Locale-1.05
+• Downloading perl5.42.0-HTML-Tagset-3.20
+• Downloading https://cache.nixos.org/nar/0fzgmy52x5sz725djk0gf3dmg0hjqadl9bnayxv50rlzxvrmagm5.nar.zst
+• Downloading https://cache.nixos.org/nar/1aima5ramasyy1y9vvabr2pxdb7g73r1fgdvmfakkxz9kv0id1vj.nar.zst
+• Downloading https://cache.nixos.org/nar/11lfd3x3nj1wq7m00g4mmayy999kh7nzvyvlbdgsg7jrs83zqgjx.nar.zst
+• Downloading https://cache.nixos.org/nar/13cf7v2an95xxr48a482887rai6wriycr4sv8bzv7zw2h0drfhw3.nar.zst
+✓ Downloading https://cache.nixos.org/nar/0h092wkmdi1xg18x4g9wyrdz6cdmnrs0m6ycvbj2nh522krj9kar.nar.zst in 51.8ms
+✓ Downloading perl5.42.0-FCGI-ProcManager-0.28 in 70.0ms
+• Downloading pkg-config-wrapper-0.29.2-doc
+✓ Downloading https://cache.nixos.org/nar/0c9s6n249m04m6ybws8siim94zgkgndlvmz9dfpdr6q8km3j8ims.nar.zst in 57.0ms
+✓ Downloading https://cache.nixos.org/nar/04ww96z2rjav0yx9w0hk13a9xfmpa8zp8f6czwpck9zqyrd42jvg.nar.zst in 55.3ms
+• Downloading https://cache.nixos.org/nar/1rkal9b9widss2z4qcvncq8wc2kfpzcwn8n5y1h1ck1v8rb980c2.nar.zst
+✓ Downloading https://cache.nixos.org/nar/1ib3xfyzzi8w1zx7r6zgkd0q9rbwdahgjhbj39ly0arm6710lpxw.nar.zst in 59.3ms
+✓ Downloading perl5.42.0-libnet-3.15 in 79.3ms
+• Downloading pkg-config-wrapper-0.29.2-man
+✓ Downloading expat-2.8.2 in 82.3ms
+• Downloading zlib-ng-2.3.3
+✓ Downloading perl5.42.0-URI-5.21 in 83.5ms
+• Downloading perl5.42.0-LWP-MediaTypes-6.04
+• Downloading https://cache.nixos.org/nar/1kasj0vg3mjihc19i49gvi5ai5ji1vg7qbs80y77nyd7l5qplr50.nar.zst
+• Downloading https://cache.nixos.org/nar/1im5nrsx9wbnbn9iizch7jaydpihb4152k304d6ny4fg0i1ccmcf.nar.zst
+• Downloading https://cache.nixos.org/nar/0z58zr0v3nynmilswndp1r3s3aj2d4ms3lcksji1ykyy5lh5ll5j.nar.zst
+✓ Downloading https://cache.nixos.org/nar/132bxr7jn6x9yagffmplckqh4r6cc9p9ivw1wyr1r79d61idqa8n.nar.zst in 76.4ms
+✓ Downloading perl5.42.0-TermReadKey-2.38 in 82.5ms
+✓ Downloading https://cache.nixos.org/nar/11lfd3x3nj1wq7m00g4mmayy999kh7nzvyvlbdgsg7jrs83zqgjx.nar.zst in 62.3ms
+• Downloading perl5.42.0-Net-HTTP-6.23
+✓ Downloading https://cache.nixos.org/nar/13cf7v2an95xxr48a482887rai6wriycr4sv8bzv7zw2h0drfhw3.nar.zst in 63.3ms
+✓ Downloading perl5.42.0-Encode-Locale-1.05 in 71.8ms
+• Downloading perl5.42.0-WWW-RobotRules-6.02
+✓ Downloading perl5.42.0-HTML-Tagset-3.20 in 72.8ms
+• Downloading perl5.42.0-IO-HTML-1.004
+• Downloading https://cache.nixos.org/nar/1j261md713ji10d47bxv7y2hs77sap9hzq5kjixafxrdi08habsn.nar.zst
+• Downloading https://cache.nixos.org/nar/0d5sw0qrg5608x46gihqfh0xkb1xvb33nd02ni8x0jh7qn0jhvn9.nar.zst
+• Downloading https://cache.nixos.org/nar/0v9myj3fn2m6vvk7l06wfd9mpc6l5bl52hsr6nnh6q8hvp3a2d2k.nar.zst
+✓ Downloading tzdata-2026b in 177ms
+• Downloading perl5.42.0-Test-RequiresInternet-0.05
+✓ Downloading https://cache.nixos.org/nar/1rkal9b9widss2z4qcvncq8wc2kfpzcwn8n5y1h1ck1v8rb980c2.nar.zst in 78.2ms
+✓ Downloading pkg-config-wrapper-0.29.2-doc in 83.2ms
+• Downloading perl5.42.0-Compress-Raw-Zlib-2.222
+• Downloading https://cache.nixos.org/nar/0philb6rdww2g1prq6qnj08dw4772kfq1n0hb986cpw87xqs44ai.nar.zst
+• Downloading https://cache.nixos.org/nar/0gwfbl3xgnb5xry9a74zvv2k4xv5qivl8p3d34f6l00w78x35xjc.nar.zst
+✓ Downloading https://cache.nixos.org/nar/1kasj0vg3mjihc19i49gvi5ai5ji1vg7qbs80y77nyd7l5qplr50.nar.zst in 76.7ms
+✓ Downloading pkg-config-wrapper-0.29.2-man in 86.3ms
+• Downloading perl5.42.0-Net-SSLeay-1.92
+• Downloading https://cache.nixos.org/nar/006if8f2mq7hz9d3lfjaxkhx499mbmfiic3lchjmg70yjb3ys7lr.nar.zst
+✓ Downloading https://cache.nixos.org/nar/1im5nrsx9wbnbn9iizch7jaydpihb4152k304d6ny4fg0i1ccmcf.nar.zst in 85.2ms
+✓ Downloading perl5.42.0-LWP-MediaTypes-6.04 in 94.0ms
+• Downloading perl5.42.0-Crypt-URandom-0.55
+✓ Downloading https://cache.nixos.org/nar/0fzgmy52x5sz725djk0gf3dmg0hjqadl9bnayxv50rlzxvrmagm5.nar.zst in 118ms
+✓ Downloading jemalloc-5.3.1 in 124ms
+• Downloading https://cache.nixos.org/nar/0jwlfsyv2m5fxk9dcmgg6yfwfr1sdql9v5sjxbi68327wi185gws.nar.zst
+✓ Downloading https://cache.nixos.org/nar/0z58zr0v3nynmilswndp1r3s3aj2d4ms3lcksji1ykyy5lh5ll5j.nar.zst in 94.0ms
+• Downloading perl5.42.0-FCGI-0.82
+✓ Downloading zlib-ng-2.3.3 in 105ms
+• Downloading biome-2.5.0
+• Downloading https://cache.nixos.org/nar/00ya0w96s8wl301pm602dy8cpw8w8zrm5awmszc7g6pail813jvk.nar.zst
+• Downloading https://cache.nixos.org/nar/113yadds7gfx5zp2r80rkiv0yd9bl67cxf91na2p8ns0i1i6w8q1.nar.zst
+✓ Downloading https://cache.nixos.org/nar/1j261md713ji10d47bxv7y2hs77sap9hzq5kjixafxrdi08habsn.nar.zst in 70.8ms
+✓ Downloading perl5.42.0-Net-HTTP-6.23 in 87.6ms
+• Downloading oniguruma-6.9.10-lib
+• Downloading https://cache.nixos.org/nar/1rrk5669f27pdwnqwl93lc9f8r5ixxayriwzkj7h53897wgz8qg4.nar.zst
+✓ Downloading https://cache.nixos.org/nar/0d5sw0qrg5608x46gihqfh0xkb1xvb33nd02ni8x0jh7qn0jhvn9.nar.zst in 75.6ms
+✓ Downloading https://cache.nixos.org/nar/0v9myj3fn2m6vvk7l06wfd9mpc6l5bl52hsr6nnh6q8hvp3a2d2k.nar.zst in 73.9ms
+✓ Downloading perl5.42.0-WWW-RobotRules-6.02 in 94.6ms
+• Downloading perl5.42.0-Mozilla-CA-20230821
+✓ Downloading perl5.42.0-IO-HTML-1.004 in 93.4ms
+• Downloading perl5.42.0-Try-Tiny-0.31
+• Downloading https://cache.nixos.org/nar/00byl1761rvm9iicqdyxkfgh7fr02bcd47sw59kyjc0ys0nqrd1w.nar.zst
+• Downloading https://cache.nixos.org/nar/12bsw1j8gx90zffc4ky68dwmpaqva1144v401z2ih2v8fipda030.nar.zst
+✓ Downloading https://cache.nixos.org/nar/04rxab3d3zsyrq40ph3bjgs3iirbfxf2gw91h1hng3nxl0ldac3c.nar.zst in 206ms
+✓ Downloading https://cache.nixos.org/nar/0philb6rdww2g1prq6qnj08dw4772kfq1n0hb986cpw87xqs44ai.nar.zst in 72.5ms
+✓ Downloading shellcheck-0.11.0-bin in 220ms
+• Downloading perl5.42.0-Test-Needs-0.002010
+✓ Downloading perl5.42.0-Test-RequiresInternet-0.05 in 82.4ms
+✓ Downloading https://cache.nixos.org/nar/0gwfbl3xgnb5xry9a74zvv2k4xv5qivl8p3d34f6l00w78x35xjc.nar.zst in 73.0ms
+• Downloading perl5.42.0-Clone-0.46
+✓ Downloading perl5.42.0-Compress-Raw-Zlib-2.222 in 82.3ms
+• Downloading perl5.42.0-TimeDate-2.33
+• Downloading https://cache.nixos.org/nar/1w7fbpdqnjdk2lg4wfqgg8f981yf25nl29xan8s6c30w4w0zpxn0.nar.zst
+• Downloading https://cache.nixos.org/nar/1zsws1rpahi8bhc0n7yhh5jy15x3ifpsmdm5gqhhcc8bn22vp9a8.nar.zst
+• Downloading https://cache.nixos.org/nar/1hpdd11ygcda6rgk4q5yd6kaxqmvkpzx6pydhxyc3qpvp84kvalq.nar.zst
+✓ Downloading https://cache.nixos.org/nar/0pxrarl3xsds1qgv4w8m2ph0ac1c32zjpsc4zhmypr4l260jpn9h.nar.zst in 256ms
+✓ Downloading https://cache.nixos.org/nar/0jwlfsyv2m5fxk9dcmgg6yfwfr1sdql9v5sjxbi68327wi185gws.nar.zst in 69.1ms
+✓ Downloading perl5.42.0-Crypt-URandom-0.55 in 76.6ms
+• Downloading perl5.42.0-Compress-Raw-Bzip2-2.218
+• Downloading https://cache.nixos.org/nar/0h5rkj4hbki2703iz7rhcqx5y6r116lgjh0b9g9g0x4b9s7qxgm1.nar.zst
+✓ Downloading https://cache.nixos.org/nar/006if8f2mq7hz9d3lfjaxkhx499mbmfiic3lchjmg70yjb3ys7lr.nar.zst in 95.2ms
+✓ Downloading https://cache.nixos.org/nar/00ya0w96s8wl301pm602dy8cpw8w8zrm5awmszc7g6pail813jvk.nar.zst in 74.1ms
+✓ Downloading perl5.42.0-FCGI-0.82 in 86.0ms
+• Downloading perl5.42.0-Authen-SASL-2.1900
+✓ Downloading perl5.42.0-Net-SSLeay-1.92 in 110ms
+• Downloading nix-2.34.8
+• Downloading https://cache.nixos.org/nar/0wlx6c5a7kn5v636mr1jg1fihc93pqqyaz2bz97gsxlbhrfqmirq.nar.zst
+• Downloading https://cache.nixos.org/nar/0vn7l2r5lknnspknvcmgj0518409s274gqamjscphsjc0dgga533.nar.zst
+✓ Downloading git-2.54.0-doc in 303ms
+• Downloading gdbm-1.26-lib
+✓ Downloading https://cache.nixos.org/nar/00byl1761rvm9iicqdyxkfgh7fr02bcd47sw59kyjc0ys0nqrd1w.nar.zst in 65.2ms
+✓ Downloading perl5.42.0-Try-Tiny-0.31 in 71.6ms
+• Downloading mailcap-2.1.54
+• Downloading https://cache.nixos.org/nar/1mwgvshm9dflw7mvakvhx1vbdkzzbvmgd47g9fqqywrn6qv565jp.nar.zst
+• Downloading https://cache.nixos.org/nar/1xbjd7qddfb3r809w1dyp7bhbpa8xvll9n295q1x38fa05v68spz.nar.zst
+✓ Downloading https://cache.nixos.org/nar/1rrk5669f27pdwnqwl93lc9f8r5ixxayriwzkj7h53897wgz8qg4.nar.zst in 93.1ms
+✓ Downloading https://cache.nixos.org/nar/12bsw1j8gx90zffc4ky68dwmpaqva1144v401z2ih2v8fipda030.nar.zst in 86.1ms
+✓ Downloading https://cache.nixos.org/nar/1w7fbpdqnjdk2lg4wfqgg8f981yf25nl29xan8s6c30w4w0zpxn0.nar.zst in 72.0ms
+✓ Downloading https://cache.nixos.org/nar/1zsws1rpahi8bhc0n7yhh5jy15x3ifpsmdm5gqhhcc8bn22vp9a8.nar.zst in 71.2ms
+✓ Downloading oniguruma-6.9.10-lib in 101ms
+• Downloading perl5.42.0-Test-Fatal-0.017
+✓ Downloading perl5.42.0-Test-Needs-0.002010 in 85.6ms
+✓ Downloading perl5.42.0-Clone-0.46 in 85.1ms
+✓ Downloading perl5.42.0-Mozilla-CA-20230821 in 94.1ms
+• Downloading mpdecimal-4.0.1
+• Downloading nix-nswrapper-2.34.8
+✓ Downloading https://cache.nixos.org/nar/1hpdd11ygcda6rgk4q5yd6kaxqmvkpzx6pydhxyc3qpvp84kvalq.nar.zst in 75.8ms
+• Downloading jq-1.8.2
+• Downloading https://cache.nixos.org/nar/12756a940vwr62p1ybdgqf5kpx5s89ax7z40wk0s6n9jpzajvqrw.nar.zst
+✓ Downloading perl5.42.0-TimeDate-2.33 in 88.2ms
+• Downloading https://cache.nixos.org/nar/0ln97frh265smml1sbspv8w1hdm2incdhs9plpc21naflix1v3c7.nar.zst
+• Downloading https://cache.nixos.org/nar/06608wdw3vvrrgany0npdrabx50ywsb98s4vfv4i67c2hc0df20c.nar.zst
+• Downloading https://cache.nixos.org/nar/0jbikigp99mhjbbvr2g9x5w68r8cqj7bcnchymkm8smgffa5nhhi.nar.zst
+✓ Downloading https://cache.nixos.org/nar/0h5rkj4hbki2703iz7rhcqx5y6r116lgjh0b9g9g0x4b9s7qxgm1.nar.zst in 81.6ms
+✓ Downloading perl5.42.0-Compress-Raw-Bzip2-2.218 in 90.1ms
+✓ Downloading https://cache.nixos.org/nar/0wlx6c5a7kn5v636mr1jg1fihc93pqqyaz2bz97gsxlbhrfqmirq.nar.zst in 89.8ms
+• Building maintenance-check-workflows-script
+• Downloading perl5.42.0-IO-Socket-SSL-2.083
+• Downloading statix-0.5.8-unstable-2026-07-10
+✓ Downloading perl5.42.0-Authen-SASL-2.1900 in 102ms
+• Downloading https://cache.nixos.org/nar/0ixjnb5wjhv8pqyr3954366j5sjmx6kaclz1szcz9iiz6vwdfrkk.nar.zst
+• Downloading https://cache.nixos.org/nar/1gy4mccsqbvpxwv4m8p1jwlr8yn3wpzh8h9v23w18lpcbrfqisvr.nar.zst
+• Downloading perl5.42.0-HTTP-Date-6.06
+• Downloading https://cache.nixos.org/nar/14pfdgrrl6413gd156pab5hgzbk0p7s25a8qm5318m0iwvbppaad.nar.zst
+✓ Downloading https://cache.nixos.org/nar/0pkz52a5xwii5bqpdlibfj6aa79bk64i2rhvnpg24rhgd7275psg.nar.xz in 559ms
+✓ Downloading https://cache.nixos.org/nar/1xbjd7qddfb3r809w1dyp7bhbpa8xvll9n295q1x38fa05v68spz.nar.zst in 91.6ms
+✓ Downloading mailcap-2.1.54 in 99.7ms
+✓ Downloading https://cache.nixos.org/nar/1mwgvshm9dflw7mvakvhx1vbdkzzbvmgd47g9fqqywrn6qv565jp.nar.zst in 105ms
+✓ Downloading binutils-2.46 in 570ms
+• Downloading binutils-wrapper-2.46
+✓ Downloading gdbm-1.26-lib in 113ms
+✓ Downloading https://cache.nixos.org/nar/12756a940vwr62p1ybdgqf5kpx5s89ax7z40wk0s6n9jpzajvqrw.nar.zst in 84.2ms
+✓ Downloading perl5.42.0-Test-Fatal-0.017 in 90.5ms
+• Downloading https://cache.nixos.org/nar/0y8gmvqd6z8y5a1jr4hm84vfwf8w46ldvsx0n7r1r0z6v03j7a3z.nar.xz
+✓ Downloading https://cache.nixos.org/nar/0ln97frh265smml1sbspv8w1hdm2incdhs9plpc21naflix1v3c7.nar.zst in 82.6ms
+✓ Downloading nix-nswrapper-2.34.8 in 93.8ms
+✓ Downloading https://cache.nixos.org/nar/0jbikigp99mhjbbvr2g9x5w68r8cqj7bcnchymkm8smgffa5nhhi.nar.zst in 87.1ms
+✓ Downloading mpdecimal-4.0.1 in 102ms
+• Downloading python3-3.14.6
+✓ Downloading https://cache.nixos.org/nar/06608wdw3vvrrgany0npdrabx50ywsb98s4vfv4i67c2hc0df20c.nar.zst in 94.8ms
+✓ Downloading jq-1.8.2 in 105ms
+• Downloading jq-1.8.2-bin
+• Downloading https://cache.nixos.org/nar/1rh39nq0yqg2g6hqyrrfc427w1c0c0xa2kjf5v78b5glsw8cshfv.nar.zst
+• Downloading https://cache.nixos.org/nar/1pdw4v08r1dx6k8h3n7gpkdiwxnqs7h469z7sd30d9ihlawwfv3f.nar.zst
+✓ Downloading https://cache.nixos.org/nar/14pfdgrrl6413gd156pab5hgzbk0p7s25a8qm5318m0iwvbppaad.nar.zst in 47.5ms
+✓ Downloading https://cache.nixos.org/nar/0ixjnb5wjhv8pqyr3954366j5sjmx6kaclz1szcz9iiz6vwdfrkk.nar.zst in 63.6ms
+✓ Downloading perl5.42.0-HTTP-Date-6.06 in 55.1ms
+• Downloading perl5.42.0-File-Listing-6.16
+• Downloading perl5.42.0-HTTP-CookieJar-0.014
+✓ Downloading perl5.42.0-IO-Socket-SSL-2.083 in 74.0ms
+• Downloading perl5.42.0-Net-SMTP-SSL-1.04
+• Downloading https://cache.nixos.org/nar/1g78zy8l02zvyyz9bnzirkpnr8ydxm4m5syx3z688ci3j2nm9ffr.nar.zst
+• Downloading https://cache.nixos.org/nar/0fmnmn41303figs9j5kbk37myc68nwfxdc05abpdzaafns8m91nh.nar.zst
+• Downloading https://cache.nixos.org/nar/1a8pbf5cad0m3nqjyf5h3jdy58dxxqlwdjvhaayjvdz0pmz3iq3w.nar.zst
+✓ Downloading https://cache.nixos.org/nar/0y8gmvqd6z8y5a1jr4hm84vfwf8w46ldvsx0n7r1r0z6v03j7a3z.nar.xz in 47.3ms
+✓ Downloading binutils-wrapper-2.46 in 55.9ms
+✓ Building maintenance-check-workflows-script in 95.0ms
+✓ Downloading https://cache.nixos.org/nar/0vn7l2r5lknnspknvcmgj0518409s274gqamjscphsjc0dgga533.nar.zst in 212ms
+✓ Downloading https://cache.nixos.org/nar/1pdw4v08r1dx6k8h3n7gpkdiwxnqs7h469z7sd30d9ihlawwfv3f.nar.zst in 60.2ms
+• Building maintenance-check-format-script
+✓ Downloading jq-1.8.2-bin in 67.3ms
+✓ Downloading nix-2.34.8 in 230ms
+• Downloading jq-1.8.2-dev
+• Downloading devenv-container-copy
+• Downloading nix-2.34.8
+• Downloading https://cache.nixos.org/nar/0pmacsrzbjyib7via2v0bl3284nif28hp0fyql13c7wf1qr1c4lz.nar.zst
+• Downloading https://cache.nixos.org/nar/1gp085cd37n79r34ffkay4v3nm184wzy9mh3saxkzpd22v992w6a.nar.zst
+• Downloading https://devenv.cachix.org/nar/487af2a5-ee16-49b8-abe7-fc98da02add4.nar.zst
+✓ Downloading https://cache.nixos.org/nar/0fmnmn41303figs9j5kbk37myc68nwfxdc05abpdzaafns8m91nh.nar.zst in 69.5ms
+✓ Downloading https://cache.nixos.org/nar/1g78zy8l02zvyyz9bnzirkpnr8ydxm4m5syx3z688ci3j2nm9ffr.nar.zst in 72.0ms
+✓ Downloading perl5.42.0-HTTP-CookieJar-0.014 in 75.9ms
+✓ Downloading https://cache.nixos.org/nar/1a8pbf5cad0m3nqjyf5h3jdy58dxxqlwdjvhaayjvdz0pmz3iq3w.nar.zst in 69.5ms
+✓ Downloading perl5.42.0-File-Listing-6.16 in 79.2ms
+✓ Downloading perl5.42.0-Net-SMTP-SSL-1.04 in 77.8ms
+✓ Downloading https://devenv.cachix.org/nar/487af2a5-ee16-49b8-abe7-fc98da02add4.nar.zst in 21.7ms
+✓ Downloading devenv-container-copy in 28.8ms
+✓ Downloading https://cache.nixos.org/nar/1gp085cd37n79r34ffkay4v3nm184wzy9mh3saxkzpd22v992w6a.nar.zst in 53.0ms
+✓ Downloading jq-1.8.2-dev in 59.7ms
+✓ Downloading https://cache.nixos.org/nar/0pmacsrzbjyib7via2v0bl3284nif28hp0fyql13c7wf1qr1c4lz.nar.zst in 57.9ms
+✓ Downloading nix-2.34.8 in 68.8ms
+✓ Building maintenance-check-format-script in 86.0ms
+✓ Downloading https://cache.nixos.org/nar/1gy4mccsqbvpxwv4m8p1jwlr8yn3wpzh8h9v23w18lpcbrfqisvr.nar.zst in 209ms
+✓ Downloading statix-0.5.8-unstable-2026-07-10 in 224ms
+• Building maintenance-typecheck
+✓ Downloading https://cache.nixos.org/nar/1aima5ramasyy1y9vvabr2pxdb7g73r1fgdvmfakkxz9kv0id1vj.nar.zst in 568ms
+✓ Downloading gettext-1.0 in 594ms
+✓ Building maintenance-typecheck in 83.0ms
+• Building maintenance-fix
+✓ Downloading https://cache.nixos.org/nar/1qalpdmb5gb14r8y6nj45rpw7a9jb5k8rcyshrxdz0k6915xswdw.nar.zst in 826ms
+✓ Building maintenance-fix in 78.4ms
+• Building maintenance-runtime
+✓ Downloading https://cache.nixos.org/nar/0anss240i3h4pp67napys7v8c4caqhzi5jmzzikjp222d17xbici.nar.zst in 874ms
+✓ Downloading perl-5.42.0 in 922ms
+• Downloading perl5.42.0-IO-Compress-2.221
+• Downloading https://cache.nixos.org/nar/02xwwwd5qqw1y0732grq0w4wavczxpzjvnrsnf5d0byiflrqkdza.nar.zst
+✓ Downloading bash-5.3.tar.gz in 899ms
+• Downloading bash-interactive-5.3p9-debug
+• Downloading https://cache.nixos.org/nar/03nnnc4b5l2jgss7m65xl99lr9qin25h5xs4flki2fcn5r7x926h.nar.zst
+✓ Downloading https://cache.nixos.org/nar/02xwwwd5qqw1y0732grq0w4wavczxpzjvnrsnf5d0byiflrqkdza.nar.zst in 31.9ms
+✓ Downloading perl5.42.0-IO-Compress-2.221 in 50.6ms
+✓ Building maintenance-runtime in 96.3ms
+• Building maintenance-format
+• Downloading perl5.42.0-HTTP-Message-7.02
+• Downloading https://cache.nixos.org/nar/17hqjspiv126phd5cz653ss2pnjg7448q9z8z7g5gnv0ip71g4dk.nar.zst
+✓ Downloading https://cache.nixos.org/nar/03nnnc4b5l2jgss7m65xl99lr9qin25h5xs4flki2fcn5r7x926h.nar.zst in 106ms
+✓ Downloading bash-interactive-5.3p9-debug in 114ms
+✓ Downloading https://cache.nixos.org/nar/17hqjspiv126phd5cz653ss2pnjg7448q9z8z7g5gnv0ip71g4dk.nar.zst in 48.0ms
+✓ Downloading perl5.42.0-HTTP-Message-7.02 in 56.5ms
+• Downloading perl5.42.0-HTML-Parser-3.85
+• Downloading perl5.42.0-HTTP-Daemon-6.17
+• Downloading perl5.42.0-HTTP-Cookies-6.10
+• Downloading https://cache.nixos.org/nar/1s09i5yidd86f8xx7f8raxqiajhv5vmw80yjmcp3pnl9nyjkghkl.nar.zst
+• Downloading perl5.42.0-HTTP-Negotiate-6.01
+• Downloading https://cache.nixos.org/nar/0vpfpwds7zfbcv5xgyrc54gp93x9m0l8612n1d1mxgag19czy2hz.nar.zst
+• Downloading https://cache.nixos.org/nar/1gf4vwl7jii7adig2rlfwg5a0xajrv153wphzd3ixs5yhg60x72m.nar.zst
+• Downloading https://cache.nixos.org/nar/08z7xh22d0xa9vh4g91dwp0h69n5mwvnhfn6byzzihx600nyslf4.nar.zst
+✓ Building maintenance-format in 83.7ms
+✓ Downloading https://cache.nixos.org/nar/0vpfpwds7zfbcv5xgyrc54gp93x9m0l8612n1d1mxgag19czy2hz.nar.zst in 42.8ms
+✓ Downloading https://cache.nixos.org/nar/1gf4vwl7jii7adig2rlfwg5a0xajrv153wphzd3ixs5yhg60x72m.nar.zst in 42.5ms
+✓ Downloading https://cache.nixos.org/nar/08z7xh22d0xa9vh4g91dwp0h69n5mwvnhfn6byzzihx600nyslf4.nar.zst in 45.7ms
+✓ Downloading https://cache.nixos.org/nar/1s09i5yidd86f8xx7f8raxqiajhv5vmw80yjmcp3pnl9nyjkghkl.nar.zst in 71.0ms
+✓ Downloading perl5.42.0-HTTP-Daemon-6.17 in 72.6ms
+• Building maintenance-check
+✓ Downloading perl5.42.0-HTTP-Negotiate-6.01 in 73.9ms
+✓ Downloading perl5.42.0-HTTP-Cookies-6.10 in 76.3ms
+✓ Downloading perl5.42.0-HTML-Parser-3.85 in 80.3ms
+• Downloading perl5.42.0-CGI-4.59
+• Downloading perl5.42.0-libwww-perl-6.83
+• Downloading https://cache.nixos.org/nar/1xpcwg3x908flgj8psm7r2ai960j7r5hhrsplvcmi6ci45jzk9sv.nar.zst
+• Downloading https://cache.nixos.org/nar/1a4cg0aj7wa30cwy9nkc95drr7a9w0sx3x55ldnjjgkjn7w7pzpa.nar.zst
+✓ Downloading https://cache.nixos.org/nar/1xpcwg3x908flgj8psm7r2ai960j7r5hhrsplvcmi6ci45jzk9sv.nar.zst in 27.1ms
+✓ Downloading https://cache.nixos.org/nar/1a4cg0aj7wa30cwy9nkc95drr7a9w0sx3x55ldnjjgkjn7w7pzpa.nar.zst in 28.0ms
+✓ Downloading perl5.42.0-CGI-4.59 in 32.1ms
+• Downloading perl5.42.0-CGI-Fast-2.16
+• Downloading https://cache.nixos.org/nar/016lwk6ykhgkcyji2k6p8yrisqy0lrl8hqqjl7n01ppd474i8bmb.nar.zst
+✓ Downloading perl5.42.0-libwww-perl-6.83 in 38.2ms
+✓ Downloading https://cache.nixos.org/nar/016lwk6ykhgkcyji2k6p8yrisqy0lrl8hqqjl7n01ppd474i8bmb.nar.zst in 30.9ms
+✓ Building maintenance-check in 77.4ms
+✓ Downloading perl5.42.0-CGI-Fast-2.16 in 41.4ms
+• Building maintenance-fix-format-script
+✓ Downloading https://cache.nixos.org/nar/113yadds7gfx5zp2r80rkiv0yd9bl67cxf91na2p8ns0i1i6w8q1.nar.zst in 1.06s
+✓ Building maintenance-fix-format-script in 80.4ms
+• Building maintenance-check-statix-script
+✓ Downloading biome-2.5.0 in 1.12s
+✓ Building maintenance-check-statix-script in 94.9ms
+• Building maintenance-check-typecheck-script
+✓ Building maintenance-check-typecheck-script in 72.1ms
+• Building maintenance-fix-statix-script
+✓ Building maintenance-fix-statix-script in 68.0ms
+• Building maintenance-check-flake-script
+✓ Building maintenance-check-flake-script in 222ms
+• Building maintenance-check-runtime-script
+✓ Building maintenance-check-runtime-script in 63.7ms
+• Building maintenance-fix-format
+✓ Building maintenance-fix-format in 83.1ms
+• Building maintenance-fix-statix
+✓ Downloading https://cache.nixos.org/nar/1rh39nq0yqg2g6hqyrrfc427w1c0c0xa2kjf5v78b5glsw8cshfv.nar.zst in 1.74s
+✓ Building maintenance-fix-statix in 81.4ms
+• Building maintenance-statix
+✓ Downloading python3-3.14.6 in 1.84s
+• Downloading git-2.54.0
+• Downloading python3.14-pyflakes-3.4.0
+• Downloading https://cache.nixos.org/nar/1hg866llhxyx450h7vhg4aidcjjmvajxrllk8242fx8f8vay1gyw.nar.zst
+• Downloading https://cache.nixos.org/nar/0adpq5s1pm06i159yp3jg1hrz7vzxfh2gx91khhr3diww7jcnx23.nar.zst
+✓ Downloading https://cache.nixos.org/nar/0adpq5s1pm06i159yp3jg1hrz7vzxfh2gx91khhr3diww7jcnx23.nar.zst in 5.17ms
+✓ Downloading python3.14-pyflakes-3.4.0 in 29.3ms
+✓ Building maintenance-statix in 83.9ms
+• Building maintenance-flake
+• Downloading actionlint-1.7.12
+• Downloading https://cache.nixos.org/nar/0ibxjwcysh496f44dbgpg4j2f5j81ldm5mnsq6nk7qc89zh48bs2.nar.zst
+✓ Building maintenance-flake in 84.1ms
+✓ Downloading https://cache.nixos.org/nar/0ibxjwcysh496f44dbgpg4j2f5j81ldm5mnsq6nk7qc89zh48bs2.nar.zst in 88.6ms
+• Building maintenance-workflows
+✓ Downloading actionlint-1.7.12 in 144ms
+✓ Building maintenance-workflows in 69.9ms
+• Building devenv-files-cleanup
+✓ Building devenv-files-cleanup in 86.6ms
+• Building tasks.json
+structuredAttrs is enabled
+✓ Building tasks.json in 92.1ms
+✓ Downloading https://cache.nixos.org/nar/1hg866llhxyx450h7vhg4aidcjjmvajxrllk8242fx8f8vay1gyw.nar.zst in 520ms
+✓ Downloading git-2.54.0 in 542ms
+• Building maintenance-check-flake
+✓ Building maintenance-check-flake in 79.1ms
+• Building maintenance-check-typecheck
+✓ Building maintenance-check-typecheck in 76.5ms
+• Building maintenance-check-workflows
+✓ Building maintenance-check-workflows in 78.1ms
+• Building maintenance-fix-format
+✓ Building maintenance-fix-format in 56.0ms
+• Building maintenance-fix-statix
+✓ Building maintenance-fix-statix in 53.0ms
+• Building maintenance-check-format
+✓ Building maintenance-check-format in 51.1ms
+• Building maintenance-check-runtime
+✓ Building maintenance-check-runtime in 56.4ms
+• Building maintenance-check-statix
+✓ Building maintenance-check-statix in 56.0ms
+• Building devenv-profile
+structuredAttrs is enabled
+created 25 symlinks in user environment
+✓ Building devenv-profile in 89.3ms
+✓ Downloading https://cache.nixos.org/nar/1axdb2kd7ppk39lzahszrqs2b9bzs6hk87b9a8r40sn2cnd4kzcr.nar.xz in 4.55s
+✓ Downloading gcc-15.2.0 in 4.62s
+• Downloading gcc-wrapper-15.2.0
+• Downloading https://cache.nixos.org/nar/0hb54s1gza24rpqrpmcg3frn5zr04dyxg8xkzqvadx20vckny2p9.nar.xz
+✓ Downloading https://cache.nixos.org/nar/0hb54s1gza24rpqrpmcg3frn5zr04dyxg8xkzqvadx20vckny2p9.nar.xz in 4.37ms
+✓ Downloading gcc-wrapper-15.2.0 in 7.43ms
+• Downloading stdenv-linux
+• Downloading https://cache.nixos.org/nar/111h7pq6wklgfwkl3bl1aa7cdjg0kqfr21v7h8gcw8s6fr4bbs6m.nar.xz
+✓ Downloading https://cache.nixos.org/nar/111h7pq6wklgfwkl3bl1aa7cdjg0kqfr21v7h8gcw8s6fr4bbs6m.nar.xz in 4.32ms
+✓ Downloading stdenv-linux in 6.12ms
+• Building devenv-shell
+Running phase: buildPhase
+✓ Building devenv-shell in 116ms
+• Building devenv-shell-env
+✓ Building devenv-shell-env in 221ms
+✓ Evaluating shell in 8.74s
+✓ Configuring shell in 8.74s
+• Evaluating bash
+✓ Evaluating bash in 7.04ms
+• Loading tasks
+• Evaluating devenv.config.task.config
+✓ Evaluating devenv.config.task.config in 8.00ms
+✓ Loading tasks in 8.26ms
+• Running tasks
+• Running maintenance:fix:statix
+✓ Running maintenance:fix:statix in 17.8ms
+• Running maintenance:fix:format
+modules/phenix-pi/skills/phenix-qa/runtime/analyzers/duplication.ts:71:48 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    70 │         const timeoutMs =
+  > 71 │           context.config.timeouts.byAnalyzer?.["duplication"] ?? context.config.timeouts.defaultMs;
+       │                                                ^^^^^^^^^^^^^
+    72 │ 
+    73 │         // Run jscpd with JSON reporter
+  
+  i Unsafe fix: Use a literal key instead.
+  
+    71 │ ··········context.config.timeouts.byAnalyzer?.["duplication"]·??·context.config.timeouts.defaultMs;
+       │                                               --           --                                      
+
+modules/phenix-pi/extensions/phenix-runtime/contract-channel.ts:94:33 lint/suspicious/noExplicitAny ━━━━━━━━━━
+
+  ! Unexpected any. Specify a different type.
+  
+    92 │     } catch (error) {
+    93 │       if (error instanceof ContractStoreError) {
+  > 94 │         const cause = (error as any).cause;
+       │                                 ^^^
+    95 │         return {
+    96 │           ok: false,
+  
+  i any disables many type checking rules. Its use should be avoided.
+  
+
+modules/phenix-pi/extensions/phenix-workflow/capability-provider.ts:48:24 lint/correctness/noUnusedFunctionParameters  FIXABLE  ━━━━━━━━━━
+
+  ! This parameter input is unused.
+  
+    46 │   }
+    47 │ 
+  > 48 │   async discoverAgents(input: {
+       │                        ^^^^^
+    49 │     readonly cwd: string;
+    50 │     readonly scope: "both";
+  
+  i Unused parameters might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: If this is intentional, prepend input with an underscore.
+  
+     46  46 │     }
+     47  47 │   
+     48     │ - ··async·discoverAgents(input:·{
+         48 │ + ··async·discoverAgents(_input:·{
+     49  49 │       readonly cwd: string;
+     50  50 │       readonly scope: "both";
+  
+
+modules/phenix-pi/extensions/phenix-workflow/delegation-options.ts:69:9 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━
+
+  ! This variable activeHandleIds is unused.
+  
+    68 │   // Pre-compute active handle IDs for conflict detection
+  > 69 │   const activeHandleIds = new Set(runtime.active.map((a) => a.handleId));
+       │         ^^^^^^^^^^^^^^^
+    70 │ 
+    71 │   for (const transition of definition.transitions) {
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend activeHandleIds with an underscore.
+  
+     67  67 │   
+     68  68 │     // Pre-compute active handle IDs for conflict detection
+     69     │ - ··const·activeHandleIds·=·new·Set(runtime.active.map((a)·=>·a.handleId));
+         69 │ + ··const·_activeHandleIds·=·new·Set(runtime.active.map((a)·=>·a.handleId));
+     70  70 │   
+     71  71 │     for (const transition of definition.transitions) {
+  
+
+modules/phenix-pi/extensions/phenix-workflow/workflow-reducer.ts:65:3 lint/correctness/noUnusedFunctionParameters  FIXABLE  ━━━━━━━━━━
+
+  ! This parameter record is unused.
+  
+    63 │  */
+    64 │ export function advanceWorkflowState(
+  > 65 │   record: WorkflowRuntimeRecord,
+       │   ^^^^^^
+    66 │   transition: DelegateTransition,
+    67 │   accepted: boolean,
+  
+  i Unused parameters might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: If this is intentional, prepend record with an underscore.
+  
+    63 63 │    */
+    64 64 │   export function advanceWorkflowState(
+    65    │ - ··record:·WorkflowRuntimeRecord,
+       65 │ + ··_record:·WorkflowRuntimeRecord,
+    66 66 │     transition: DelegateTransition,
+    67 67 │     accepted: boolean,
+  
+
+modules/phenix-pi/skills/phenix-qa/runtime/analyzers/git-history.ts:192:7 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━
+
+  ! This variable currentCommit is unused.
+  
+    190 │   const counts = new Map<string, { count: number; authors: Set<string>; seenFirst: boolean }>();
+    191 │   const lines = output.split("\n");
+  > 192 │   let currentCommit = "";
+        │       ^^^^^^^^^^^^^
+    193 │ 
+    194 │   for (const line of lines) {
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend currentCommit with an underscore.
+  
+    190 190 │     const counts = new Map<string, { count: number; authors: Set<string>; seenFirst: boolean }>();
+    191 191 │     const lines = output.split("\n");
+    192     │ - ··let·currentCommit·=·"";
+        192 │ + ··let·_currentCommit·=·"";
+    193 193 │   
+    194 194 │     for (const line of lines) {
+    195 195 │       if (!line.trim()) {
+    196     │ - ······currentCommit·=·"";
+        196 │ + ······_currentCommit·=·"";
+    197 197 │         continue;
+    198 198 │       }
+    199 199 │   
+    200 200 │       if (line.length === 40 && /^[0-9a-f]{40}$/.test(line)) {
+    201     │ - ······currentCommit·=·line;
+        201 │ + ······_currentCommit·=·line;
+    202 202 │         continue;
+    203 203 │       }
+  
+
+modules/phenix-pi/tests/root-turn.test.ts:49:53 lint/suspicious/noExplicitAny ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Unexpected any. Specify a different type.
+  
+    47 │     ];
+    48 │ 
+  > 49 │     const result = extractRootTurnInput(messages as any[], makeCtx());
+       │                                                     ^^^
+    50 │     assert.equal(result.userMessage, "Now multiply by 3");
+    51 │   });
+  
+  i any disables many type checking rules. Its use should be avoided.
+  
+
+modules/phenix-pi/tests/root-turn.test.ts:56:53 lint/suspicious/noExplicitAny ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Unexpected any. Specify a different type.
+  
+    54 │     const messages: TestMessage[] = [{ role: "user", content: "Do this task" }];
+    55 │ 
+  > 56 │     const result = extractRootTurnInput(messages as any[], makeCtx());
+       │                                                     ^^^
+    57 │     assert.equal(result.userMessage, "Do this task");
+    58 │   });
+  
+  i any disables many type checking rules. Its use should be avoided.
+  
+
+modules/phenix-pi/tests/root-turn.test.ts:63:13 lint/suspicious/noExplicitAny ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Unexpected any. Specify a different type.
+  
+    61 │     assert.throws(
+    62 │       () => extractRootTurnInput([], makeCtx()),
+  > 63 │       (err: any) => err.code === "MISSING_USER_MESSAGE",
+       │             ^^^
+    64 │     );
+    65 │   });
+  
+  i any disables many type checking rules. Its use should be avoided.
+  
+
+modules/phenix-pi/tests/root-turn.test.ts:73:46 lint/suspicious/noExplicitAny ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Unexpected any. Specify a different type.
+  
+    71 │     ];
+    72 │     assert.throws(
+  > 73 │       () => extractRootTurnInput(messages as any[], makeCtx()),
+       │                                              ^^^
+    74 │       (err: any) => err.code === "MISSING_USER_MESSAGE",
+    75 │     );
+  
+  i any disables many type checking rules. Its use should be avoided.
+  
+
+modules/phenix-pi/tests/root-turn.test.ts:74:13 lint/suspicious/noExplicitAny ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Unexpected any. Specify a different type.
+  
+    72 │     assert.throws(
+    73 │       () => extractRootTurnInput(messages as any[], makeCtx()),
+  > 74 │       (err: any) => err.code === "MISSING_USER_MESSAGE",
+       │             ^^^
+    75 │     );
+    76 │   });
+  
+  i any disables many type checking rules. Its use should be avoided.
+  
+
+modules/phenix-pi/tests/root-turn.test.ts:81:54 lint/suspicious/noExplicitAny ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Unexpected any. Specify a different type.
+  
+    79 │     const messages: TestMessage[] = [{ role: "user", content: "task" }];
+    80 │ 
+  > 81 │     const result1 = extractRootTurnInput(messages as any[], makeCtx("s1"));
+       │                                                      ^^^
+    82 │     const result2 = extractRootTurnInput(messages as any[], makeCtx("s1"));
+    83 │     assert.equal(result1.turnId, result2.turnId);
+  
+  i any disables many type checking rules. Its use should be avoided.
+  
+
+modules/phenix-pi/tests/root-turn.test.ts:82:54 lint/suspicious/noExplicitAny ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Unexpected any. Specify a different type.
+  
+    81 │     const result1 = extractRootTurnInput(messages as any[], makeCtx("s1"));
+  > 82 │     const result2 = extractRootTurnInput(messages as any[], makeCtx("s1"));
+       │                                                      ^^^
+    83 │     assert.equal(result1.turnId, result2.turnId);
+    84 │   });
+  
+  i any disables many type checking rules. Its use should be avoided.
+  
+
+modules/phenix-pi/tests/root-turn.test.ts:89:54 lint/suspicious/noExplicitAny ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Unexpected any. Specify a different type.
+  
+    87 │     const messages: TestMessage[] = [{ role: "user", content: "task" }];
+    88 │ 
+  > 89 │     const result1 = extractRootTurnInput(messages as any[], makeCtx("s1"));
+       │                                                      ^^^
+    90 │     const result2 = extractRootTurnInput(messages as any[], makeCtx("s2"));
+    91 │     assert.notEqual(result1.turnId, result2.turnId);
+  
+  i any disables many type checking rules. Its use should be avoided.
+  
+
+modules/phenix-pi/tests/root-turn.test.ts:90:54 lint/suspicious/noExplicitAny ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Unexpected any. Specify a different type.
+  
+    89 │     const result1 = extractRootTurnInput(messages as any[], makeCtx("s1"));
+  > 90 │     const result2 = extractRootTurnInput(messages as any[], makeCtx("s2"));
+       │                                                      ^^^
+    91 │     assert.notEqual(result1.turnId, result2.turnId);
+    92 │   });
+  
+  i any disables many type checking rules. Its use should be avoided.
+  
+
+modules/phenix-pi/tests/root-turn.test.ts:98:55 lint/suspicious/noExplicitAny ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Unexpected any. Specify a different type.
+  
+     96 │     const messages2: TestMessage[] = [{ role: "user", content: "task B" }];
+     97 │ 
+   > 98 │     const result1 = extractRootTurnInput(messages1 as any[], makeCtx());
+        │                                                       ^^^
+     99 │     const result2 = extractRootTurnInput(messages2 as any[], makeCtx());
+    100 │     assert.notEqual(result1.turnId, result2.turnId);
+  
+  i any disables many type checking rules. Its use should be avoided.
+  
+
+modules/phenix-pi/tests/root-turn.test.ts:99:55 lint/suspicious/noExplicitAny ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Unexpected any. Specify a different type.
+  
+     98 │     const result1 = extractRootTurnInput(messages1 as any[], makeCtx());
+   > 99 │     const result2 = extractRootTurnInput(messages2 as any[], makeCtx());
+        │                                                       ^^^
+    100 │     assert.notEqual(result1.turnId, result2.turnId);
+    101 │   });
+  
+  i any disables many type checking rules. Its use should be avoided.
+  
+
+modules/phenix-pi/tests/routing-workflow.test.ts:22:3 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━
+
+  ! Several of these imports are unused.
+  
+    20 │ import {
+    21 │   modelSetForModelId,
+  > 22 │   PHENIX_MODEL,
+       │   ^^^^^^^^^^^^^
+  > 23 │   PHENIX_MODEL_SETS,
+  > 24 │   PHENIX_PROVIDER,
+       │   ^^^^^^^^^^^^^^^
+    25 │ } from "../extensions/phenix-routing/provider.ts";
+    26 │ import { type ModelRegistry, resolveRoute } from "../extensions/phenix-routing/resolver.ts";
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+     20  20 │   import {
+     21  21 │     modelSetForModelId,
+     22     │ - ··PHENIX_MODEL,
+     23  22 │     PHENIX_MODEL_SETS,
+     24     │ - ··PHENIX_PROVIDER,
+     25  23 │   } from "../extensions/phenix-routing/provider.ts";
+     26  24 │   import { type ModelRegistry, resolveRoute } from "../extensions/phenix-routing/resolver.ts";
+  
+
+modules/phenix-pi/tests/routing-workflow.test.ts:78:10 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━
+
+  ! This function goOnlyRegistry is unused.
+  
+    76 │ }
+    77 │ 
+  > 78 │ function goOnlyRegistry(): ModelRegistry {
+       │          ^^^^^^^^^^^^^^
+    79 │   return new FakeRegistry(ALL_POOL_MODELS.filter((m) => m.provider === "opencode-go"));
+    80 │ }
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend goOnlyRegistry with an underscore.
+  
+     76  76 │   }
+     77  77 │   
+     78     │ - function·goOnlyRegistry():·ModelRegistry·{
+         78 │ + function·_goOnlyRegistry():·ModelRegistry·{
+     79  79 │     return new FakeRegistry(ALL_POOL_MODELS.filter((m) => m.provider === "opencode-go"));
+     80  80 │   }
+  
+
+modules/phenix-pi/tests/routing-workflow.test.ts:82:10 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━
+
+  ! This function gptOnlyRegistry is unused.
+  
+    80 │ }
+    81 │ 
+  > 82 │ function gptOnlyRegistry(): ModelRegistry {
+       │          ^^^^^^^^^^^^^^^
+    83 │   return new FakeRegistry(ALL_POOL_MODELS.filter((m) => m.provider === "openai-codex"));
+    84 │ }
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend gptOnlyRegistry with an underscore.
+  
+     80  80 │   }
+     81  81 │   
+     82     │ - function·gptOnlyRegistry():·ModelRegistry·{
+         82 │ + function·_gptOnlyRegistry():·ModelRegistry·{
+     83  83 │     return new FakeRegistry(ALL_POOL_MODELS.filter((m) => m.provider === "openai-codex"));
+     84  84 │   }
+  
+
+✓ Running maintenance:fix:format in 669ms
+• Running maintenance:fix
+✓ Running maintenance:fix in 4.00ms
+✓ Running tasks in 691ms
+{}

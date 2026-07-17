@@ -4,15 +4,14 @@
  * Lists all available analyzer adapters and provides factory functions.
  */
 
-import type { QaAnalyzer } from "./types.ts";
-
+import { DUPLICATION_ANALYZER } from "./duplication.ts";
+import { GIT_HISTORY_ANALYZER } from "./git-history.ts";
+import { METRICS_ANALYZER } from "./metrics.ts";
 // Analyzer imports
 import { PROJECT_NATIVE_ANALYZER } from "./project-native.ts";
-import { METRICS_ANALYZER } from "./metrics.ts";
-import { STRUCTURAL_ANALYZER } from "./structural.ts";
-import { DUPLICATION_ANALYZER } from "./duplication.ts";
 import { SECURITY_ANALYZER } from "./security.ts";
-import { GIT_HISTORY_ANALYZER } from "./git-history.ts";
+import { STRUCTURAL_ANALYZER } from "./structural.ts";
+import type { QaAnalyzer } from "./types.ts";
 
 /**
  * All registered analyzer adapters.

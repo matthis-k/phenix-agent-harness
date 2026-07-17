@@ -3,26 +3,24 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
-
 import { mkdtempSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
-
+import { join } from "node:path";
+import { describe, it } from "node:test";
+import { DUPLICATION_ANALYZER } from "../skills/phenix-qa/runtime/analyzers/duplication.ts";
+import { GIT_HISTORY_ANALYZER } from "../skills/phenix-qa/runtime/analyzers/git-history.ts";
+import { METRICS_ANALYZER } from "../skills/phenix-qa/runtime/analyzers/metrics.ts";
+import { PROJECT_NATIVE_ANALYZER } from "../skills/phenix-qa/runtime/analyzers/project-native.ts";
+import { ALL_ANALYZERS } from "../skills/phenix-qa/runtime/analyzers/registry.ts";
+import { SECURITY_ANALYZER } from "../skills/phenix-qa/runtime/analyzers/security.ts";
+import { STRUCTURAL_ANALYZER } from "../skills/phenix-qa/runtime/analyzers/structural.ts";
+import { DEFAULT_QA_CONFIG } from "../skills/phenix-qa/runtime/config.ts";
 import type {
+  ProcessResult,
+  ProcessRunner,
   QaAnalyzer,
   QaAnalyzerContext,
-  ProcessRunner,
-  ProcessResult,
 } from "../skills/phenix-qa/runtime/types.ts";
-import { PROJECT_NATIVE_ANALYZER } from "../skills/phenix-qa/runtime/analyzers/project-native.ts";
-import { METRICS_ANALYZER } from "../skills/phenix-qa/runtime/analyzers/metrics.ts";
-import { STRUCTURAL_ANALYZER } from "../skills/phenix-qa/runtime/analyzers/structural.ts";
-import { DUPLICATION_ANALYZER } from "../skills/phenix-qa/runtime/analyzers/duplication.ts";
-import { SECURITY_ANALYZER } from "../skills/phenix-qa/runtime/analyzers/security.ts";
-import { GIT_HISTORY_ANALYZER } from "../skills/phenix-qa/runtime/analyzers/git-history.ts";
-import { ALL_ANALYZERS } from "../skills/phenix-qa/runtime/analyzers/registry.ts";
-import { DEFAULT_QA_CONFIG } from "../skills/phenix-qa/runtime/config.ts";
 
 function makeContext(overrides: Partial<QaAnalyzerContext> = {}): QaAnalyzerContext {
   const dir = mkdtempSync(join(tmpdir(), "qa-test-"));
@@ -59,9 +57,7 @@ describe("QA Analyzers", () => {
 
       const ctx = makeContext({ cwd: dir });
       const result = await GIT_HISTORY_ANALYZER.run(ctx);
-      assert.ok(
-        result.status === "not-applicable" || result.status === "unavailable",
-      );
+      assert.ok(result.status === "not-applicable" || result.status === "unavailable");
     });
 
     it("reports availability accurately", async () => {

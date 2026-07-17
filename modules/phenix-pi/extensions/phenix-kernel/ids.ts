@@ -47,10 +47,7 @@ export type RunId = Brand<string, "RunId">;
 
 // ── Constructors (validate non-empty) ───────────────────────────────────────
 
-function brandValue<T extends Brand<string, string>>(
-  value: string,
-  prefix: string,
-): T {
+function brandValue<T extends Brand<string, string>>(value: string, prefix: string): T {
   if (!value || value.trim().length === 0) {
     throw new Error(`${prefix} ID must be non-empty`);
   }

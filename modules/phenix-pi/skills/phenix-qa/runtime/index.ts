@@ -5,33 +5,30 @@
  */
 
 import type {
-  QaReport,
-  QaFinding,
-  QaEvidence,
-  ReviewScope,
   AnalysisCoverage,
   ModelReviewContribution,
+  QaEvidence,
+  QaFinding,
+  QaReport,
+  ReviewScope,
 } from "../contracts/contracts.ts";
 import {
-  validateQaReport,
   assertQaReport,
   validateModelReviewContribution,
+  validateQaReport,
 } from "../contracts/contracts.ts";
-import type {
-  QaConfig,
-  QaAnalyzerResult,
-} from "./types.ts";
-import { DEFAULT_QA_CONFIG, mergeConfig, discoverRepoConfig } from "./config.ts";
-import { resolveScopeFiles, isIgnoredPath } from "./scope.ts";
-import { discoverGuidance } from "./guidance.ts";
-import { DEFAULT_PROCESS_RUNNER } from "./process.ts";
-import { checkAllAvailability } from "./availability.ts";
+import { ALL_ANALYZERS, getAnalyzers, listAnalyzerIds } from "./analyzers/registry.ts";
 import { ensureArtifactDir, writeJsonArtifact, writeTextArtifact } from "./artifacts.ts";
-import { buildReportSkeleton, mergeModelContribution, calculateRiskScores } from "./report.ts";
-import { validateReportSemantics } from "./semantic-validation.ts";
-import { renderTextReport } from "./render-text.ts";
-import { getAnalyzers, ALL_ANALYZERS, listAnalyzerIds } from "./analyzers/registry.ts";
+import { checkAllAvailability } from "./availability.ts";
+import { DEFAULT_QA_CONFIG, discoverRepoConfig, mergeConfig } from "./config.ts";
+import { discoverGuidance } from "./guidance.ts";
 import { resetIdCounter } from "./normalize.ts";
+import { DEFAULT_PROCESS_RUNNER } from "./process.ts";
+import { renderTextReport } from "./render-text.ts";
+import { buildReportSkeleton, calculateRiskScores, mergeModelContribution } from "./report.ts";
+import { isIgnoredPath, resolveScopeFiles } from "./scope.ts";
+import { validateReportSemantics } from "./semantic-validation.ts";
+import type { QaAnalyzerResult, QaConfig } from "./types.ts";
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -68,7 +65,12 @@ export async function review(options: QaReviewOptions): Promise<QaReviewResult> 
       },
       async (path) => {
         const { access } = await import("node:fs/promises");
-        try { await access(path); return true; } catch { return false; }
+        try {
+          await access(path);
+          return true;
+        } catch {
+          return false;
+        }
       },
     );
     config = mergeConfig(DEFAULT_QA_CONFIG, repoConfig);
@@ -85,12 +87,13 @@ export async function review(options: QaReviewOptions): Promise<QaReviewResult> 
 
   // 4. Filter scope files for ignored paths
   const scopedFiles = scopeFiles.files.filter(
-    (f) => !isIgnoredPath(
-      f,
-      config.ignore.paths,
-      config.ignore.generatedPaths,
-      config.ignore.vendorPaths,
-    ),
+    (f) =>
+      !isIgnoredPath(
+        f,
+        config.ignore.paths,
+        config.ignore.generatedPaths,
+        config.ignore.vendorPaths,
+      ),
   );
 
   // 5. Discover repository guidance
@@ -134,14 +137,12 @@ export async function review(options: QaReviewOptions): Promise<QaReviewResult> 
 
     try {
       const result: QaAnalyzerResult = await analyzer.run(context);
-      allDiagnostics.push(
-        `${analyzer.id}: ${result.status} (${result.durationMs}ms)`,
-      );
+      allDiagnostics.push(`${analyzer.id}: ${result.status} (${result.durationMs}ms)`);
 
       if (result.status === "completed") {
         completedAnalyzers.push(analyzer.id);
         allEvidence.push(...result.evidence);
-        allFindings.push(...result.evidence.map((_e) => []).flat()); // no auto-findings from evidence
+        allFindings.push(...result.evidence.flatMap((_e) => [])); // no auto-findings from evidence
         allArtifacts.push(...result.artifacts);
         allDiagnostics.push(...result.diagnostics.map((d) => `  ${d}`));
       } else if (result.status === "failed") {
@@ -216,7 +217,9 @@ export async function review(options: QaReviewOptions): Promise<QaReviewResult> 
 export function submitModelReview(
   skeleton: QaReport,
   contribution: unknown,
-): { ok: true; report: QaReport } | { ok: false; summary: string; violations: readonly { path: string; message: string }[] } {
+):
+  | { ok: true; report: QaReport }
+  | { ok: false; summary: string; violations: readonly { path: string; message: string }[] } {
   const validation = validateModelReviewContribution(contribution);
   if (!validation.ok) {
     return {
@@ -227,7 +230,7 @@ export function submitModelReview(
   }
 
   // Merge and recalculate
-  let merged = mergeModelContribution(skeleton, validation.value);
+  const merged = mergeModelContribution(skeleton, validation.value);
 
   // Recalculate risk scores
   merged.riskAssessment = calculateRiskScores(merged.evidence, merged.findings);
@@ -260,7 +263,9 @@ export function submitModelReview(
  */
 export function validateReport(
   value: unknown,
-): { ok: true; report: QaReport } | { ok: false; summary: string; violations: readonly { path: string; message: string }[] } {
+):
+  | { ok: true; report: QaReport }
+  | { ok: false; summary: string; violations: readonly { path: string; message: string }[] } {
   const schemaResult = validateQaReport(value);
   if (!schemaResult.ok) {
     return {
@@ -285,9 +290,9 @@ export function validateReport(
 /**
  * List available analyzers and their status.
  */
-export async function listAnalyzers(cwd: string): Promise<
-  { id: string; categories: readonly string[]; available: boolean; reason?: string }[]
-> {
+export async function listAnalyzers(
+  cwd: string,
+): Promise<{ id: string; categories: readonly string[]; available: boolean; reason?: string }[]> {
   const result: {
     id: string;
     categories: readonly string[];
@@ -324,6 +329,11 @@ export async function listAnalyzers(cwd: string): Promise<
   return result;
 }
 
+export {
+  assertQaReport,
+  validateQaEvidence,
+  validateQaFinding,
+  validateQaReport,
+} from "../contracts/contracts.ts";
 export { listAnalyzerIds } from "./analyzers/registry.ts";
-export { assertQaReport, validateQaReport, validateQaFinding, validateQaEvidence } from "../contracts/contracts.ts";
 export { renderTextReport } from "./render-text.ts";
