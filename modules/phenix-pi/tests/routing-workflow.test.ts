@@ -17,10 +17,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildBundledConfig } from "../extensions/phenix-routing/config.ts";
-import {
-  modelSetForModelId,
-  PHENIX_MODEL_SETS,
-} from "../extensions/phenix-routing/provider.ts";
+import { modelSetForModelId, PHENIX_MODEL_SETS } from "../extensions/phenix-routing/provider.ts";
 import { type ModelRegistry, resolveRoute } from "../extensions/phenix-routing/resolver.ts";
 import {
   clearSessionRuntime,
