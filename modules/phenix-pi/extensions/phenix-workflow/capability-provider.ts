@@ -11,12 +11,7 @@ export interface DiscoveredAgentDefinition {
   readonly localName: string;
   readonly description: string;
   readonly tools: readonly string[];
-  readonly source:
-    | "builtin"
-    | "package"
-    | "user"
-    | "project"
-    | "generated";
+  readonly source: "builtin" | "package" | "user" | "project" | "generated";
   readonly filePath?: string;
   readonly disabled: boolean;
 }
@@ -38,8 +33,8 @@ export interface AgentDiscoveryHelper {
  * Agents are markdown files under the package's agents/ directory.
  * No external subagents config is consulted.
  */
-import { readdirSync, readFileSync, existsSync } from "node:fs";
-import { join, basename } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export class BuiltinAgentDiscovery implements AgentDiscoveryHelper {
@@ -47,12 +42,10 @@ export class BuiltinAgentDiscovery implements AgentDiscoveryHelper {
 
   constructor() {
     // Resolve the agents directory relative to this module
-    this.agentsDir = fileURLToPath(
-      new URL("../../agents", import.meta.url),
-    );
+    this.agentsDir = fileURLToPath(new URL("../../agents", import.meta.url));
   }
 
-  async discoverAgents(input: {
+  async discoverAgents(_input: {
     readonly cwd: string;
     readonly scope: "both";
   }): Promise<readonly DiscoveredAgentDefinition[]> {
@@ -132,8 +125,6 @@ export function getAgentDiscoveryHelper(): AgentDiscoveryHelper {
   return _discoveryHelper;
 }
 
-export function setAgentDiscoveryHelper(
-  helper: AgentDiscoveryHelper,
-): void {
+export function setAgentDiscoveryHelper(helper: AgentDiscoveryHelper): void {
   _discoveryHelper = helper;
 }

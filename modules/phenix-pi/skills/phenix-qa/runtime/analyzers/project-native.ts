@@ -4,27 +4,22 @@
  * Discovers and runs project-native verification commands.
  */
 
-import {
-  makeEvidence,
-  nextEvidenceId,
-} from "../normalize.ts";
-import type {
-  QaAnalyzer,
-  QaAnalyzerContext,
-  QaAnalyzerAvailability,
-  QaAnalyzerResult,
-  ProcessRunner,
-} from "../types.ts";
-import { discoverGuidance } from "../guidance.ts";
 import { writeRawArtifact } from "../artifacts.ts";
+import { discoverGuidance } from "../guidance.ts";
+import { makeEvidence } from "../normalize.ts";
+import type {
+  ProcessRunner,
+  QaAnalyzer,
+  QaAnalyzerAvailability,
+  QaAnalyzerContext,
+  QaAnalyzerResult,
+} from "../types.ts";
 
 export const PROJECT_NATIVE_ANALYZER: QaAnalyzer = {
   id: "project-native",
   categories: ["build", "test", "lint", "format"],
 
-  async checkAvailability(
-    context: QaAnalyzerContext,
-  ): Promise<QaAnalyzerAvailability> {
+  async checkAvailability(context: QaAnalyzerContext): Promise<QaAnalyzerAvailability> {
     // This analyzer depends on the project having build/test/lint commands.
     const guidance = discoverGuidance(context.cwd);
 
@@ -42,9 +37,7 @@ export const PROJECT_NATIVE_ANALYZER: QaAnalyzer = {
     };
   },
 
-  async run(
-    context: QaAnalyzerContext,
-  ): Promise<QaAnalyzerResult> {
+  async run(context: QaAnalyzerContext): Promise<QaAnalyzerResult> {
     const start = Date.now();
     const guidance = discoverGuidance(context.cwd);
     const evidence: ReturnType<typeof makeEvidence>[] = [];
@@ -82,9 +75,11 @@ export const PROJECT_NATIVE_ANALYZER: QaAnalyzer = {
 
       try {
         // Parse command: handle "npm run test", "make check", etc.
-        const parts = command.split(/\s+/);
-        const cmd = parts[0]!;
-        const args = parts.slice(1);
+        const [cmd, ...args] = command.trim().split(/\s+/);
+        if (!cmd) {
+          diagnostics.push("Skipped an empty project-native command.");
+          continue;
+        }
 
         const timeoutMs = context.config.timeouts.defaultMs;
         const result = await runner.exec(cmd, args, {
@@ -104,7 +99,7 @@ export const PROJECT_NATIVE_ANALYZER: QaAnalyzer = {
         artifacts.push(rawPath);
 
         // Summarize output
-        const stdoutTail = result.stdout.slice(-500);
+        const _stdoutTail = result.stdout.slice(-500);
         const stderrTail = result.stderr.slice(-500);
 
         if (result.timedOut) {
@@ -145,9 +140,7 @@ export const PROJECT_NATIVE_ANALYZER: QaAnalyzer = {
               rawReference: rawPath,
             }),
           );
-          diagnostics.push(
-            `${command}: failed (exit ${result.exitCode}, ${result.durationMs}ms)`,
-          );
+          diagnostics.push(`${command}: failed (exit ${result.exitCode}, ${result.durationMs}ms)`);
         }
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
@@ -164,8 +157,7 @@ export const PROJECT_NATIVE_ANALYZER: QaAnalyzer = {
       }
     }
 
-    const status =
-      evidence.some((e) => e.message.includes("failed")) ? "completed" : "completed";
+    const status = evidence.some((e) => e.message.includes("failed")) ? "completed" : "completed";
 
     return {
       analyzer: "project-native",

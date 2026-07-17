@@ -4,25 +4,23 @@
  * Runs ast-grep scan with project and repository-owned rules.
  */
 
-import { makeEvidence, normalizeSarif } from "../normalize.ts";
-import type {
-  QaAnalyzer,
-  QaAnalyzerContext,
-  QaAnalyzerAvailability,
-  QaAnalyzerResult,
-  ProcessRunner,
-} from "../types.ts";
-import { writeRawArtifact, writeJsonArtifact } from "../artifacts.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { writeJsonArtifact, writeRawArtifact } from "../artifacts.ts";
+import { makeEvidence, normalizeSarif } from "../normalize.ts";
+import type {
+  ProcessRunner,
+  QaAnalyzer,
+  QaAnalyzerAvailability,
+  QaAnalyzerContext,
+  QaAnalyzerResult,
+} from "../types.ts";
 
 export const STRUCTURAL_ANALYZER: QaAnalyzer = {
   id: "structural",
   categories: ["patterns", "structural-rules"],
 
-  async checkAvailability(
-    _context: QaAnalyzerContext,
-  ): Promise<QaAnalyzerAvailability> {
+  async checkAvailability(_context: QaAnalyzerContext): Promise<QaAnalyzerAvailability> {
     const { DEFAULT_PROCESS_RUNNER } = await import("../process.ts");
     const runner: ProcessRunner = DEFAULT_PROCESS_RUNNER;
 
@@ -47,9 +45,7 @@ export const STRUCTURAL_ANALYZER: QaAnalyzer = {
     };
   },
 
-  async run(
-    context: QaAnalyzerContext,
-  ): Promise<QaAnalyzerResult> {
+  async run(context: QaAnalyzerContext): Promise<QaAnalyzerResult> {
     const start = Date.now();
     const { DEFAULT_PROCESS_RUNNER } = await import("../process.ts");
     const runner: ProcessRunner = DEFAULT_PROCESS_RUNNER;
@@ -95,20 +91,12 @@ export const STRUCTURAL_ANALYZER: QaAnalyzer = {
 
       try {
         const timeoutMs =
-          context.config.timeouts.byAnalyzer?.["structural"] ??
-          context.config.timeouts.defaultMs;
+          context.config.timeouts.byAnalyzer?.structural ?? context.config.timeouts.defaultMs;
 
         // Use ast-grep scan with SARIF output
         const result = await runner.exec(
           "ast-grep",
-          [
-            "scan",
-            "--config",
-            join(ruleDir, "sgconfig.yml"),
-            "--format",
-            "json",
-            context.cwd,
-          ],
+          ["scan", "--config", join(ruleDir, "sgconfig.yml"), "--format", "json", context.cwd],
           {
             cwd: context.cwd,
             timeoutMs,
@@ -120,7 +108,7 @@ export const STRUCTURAL_ANALYZER: QaAnalyzer = {
         const rawPath = writeRawArtifact(
           context.artifactDirectory,
           `structural-${ruleDir.replace(/[^a-zA-Z0-9]/g, "-")}`,
-          result.stdout + "\n" + result.stderr,
+          `${result.stdout}\n${result.stderr}`,
           "txt",
         );
         artifacts.push(rawPath);
@@ -143,9 +131,7 @@ export const STRUCTURAL_ANALYZER: QaAnalyzer = {
           if (Array.isArray(parsed)) {
             // Direct array of results
             for (const item of parsed) {
-              allEvidence.push(
-                normalizeAstGrepResult(item, `ast-grep:${ruleDir}`),
-              );
+              allEvidence.push(normalizeAstGrepResult(item, `ast-grep:${ruleDir}`));
             }
           } else if (parsed?.results) {
             // SARIF-like

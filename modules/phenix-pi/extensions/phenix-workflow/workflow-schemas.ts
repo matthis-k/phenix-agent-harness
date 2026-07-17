@@ -250,9 +250,7 @@ export const BASE_HANDOFF_SCHEMA: Record<string, unknown> = {
 
 // ── Schema lookup map ───────────────────────────────────────────────────────
 
-export const OUTPUT_SCHEMAS: Readonly<
-  Record<WorkflowOutputSchemaId, Record<string, unknown>>
-> = {
+export const OUTPUT_SCHEMAS: Readonly<Record<WorkflowOutputSchemaId, Record<string, unknown>>> = {
   "scout-handoff": SCOUT_HANDOFF_SCHEMA,
   "planner-handoff": PLANNER_HANDOFF_SCHEMA,
   "architecture-handoff": ARCHITECTURE_HANDOFF_SCHEMA,

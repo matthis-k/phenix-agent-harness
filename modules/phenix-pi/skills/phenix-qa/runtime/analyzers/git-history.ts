@@ -5,15 +5,15 @@
  * Produces evidence about churn, authors, co-change frequency, etc.
  */
 
+import { writeRawArtifact } from "../artifacts.ts";
 import { makeEvidence } from "../normalize.ts";
 import type {
-  QaAnalyzer,
-  QaAnalyzerContext,
-  QaAnalyzerAvailability,
-  QaAnalyzerResult,
   ProcessRunner,
+  QaAnalyzer,
+  QaAnalyzerAvailability,
+  QaAnalyzerContext,
+  QaAnalyzerResult,
 } from "../types.ts";
-import { writeRawArtifact } from "../artifacts.ts";
 
 interface ChurnResult {
   file: string;
@@ -26,9 +26,7 @@ export const GIT_HISTORY_ANALYZER: QaAnalyzer = {
   id: "git-history",
   categories: ["version-control", "churn", "hotspots"],
 
-  async checkAvailability(
-    _context: QaAnalyzerContext,
-  ): Promise<QaAnalyzerAvailability> {
+  async checkAvailability(_context: QaAnalyzerContext): Promise<QaAnalyzerAvailability> {
     const { DEFAULT_PROCESS_RUNNER } = await import("../process.ts");
     const runner: ProcessRunner = DEFAULT_PROCESS_RUNNER;
 
@@ -57,9 +55,7 @@ export const GIT_HISTORY_ANALYZER: QaAnalyzer = {
     };
   },
 
-  async run(
-    context: QaAnalyzerContext,
-  ): Promise<QaAnalyzerResult> {
+  async run(context: QaAnalyzerContext): Promise<QaAnalyzerResult> {
     const start = Date.now();
     const { DEFAULT_PROCESS_RUNNER } = await import("../process.ts");
     const runner: ProcessRunner = DEFAULT_PROCESS_RUNNER;
@@ -95,21 +91,13 @@ export const GIT_HISTORY_ANALYZER: QaAnalyzer = {
     }
 
     const timeoutMs =
-      context.config.timeouts.byAnalyzer?.["git-history"] ??
-      context.config.timeouts.defaultMs;
+      context.config.timeouts.byAnalyzer?.["git-history"] ?? context.config.timeouts.defaultMs;
 
     try {
       // Get churn data (commit count per file)
       const churnResult = await runner.exec(
         "git",
-        [
-          "log",
-          "--format=format:%H",
-          "--name-only",
-          "--diff-filter=AM",
-          "-n",
-          "500",
-        ],
+        ["log", "--format=format:%H", "--name-only", "--diff-filter=AM", "-n", "500"],
         {
           cwd: context.cwd,
           timeoutMs,
@@ -134,15 +122,11 @@ export const GIT_HISTORY_ANALYZER: QaAnalyzer = {
         if (context.signal?.aborted) break;
 
         try {
-          const authorResult = await runner.exec(
-            "git",
-            ["shortlog", "-sne", "--", file.file],
-            {
-              cwd: context.cwd,
-              timeoutMs: 10_000,
-              signal: context.signal,
-            },
-          );
+          const authorResult = await runner.exec("git", ["shortlog", "-sne", "--", file.file], {
+            cwd: context.cwd,
+            timeoutMs: 10_000,
+            signal: context.signal,
+          });
 
           const authorCount = authorResult.stdout.trim().split("\n").filter(Boolean).length;
 
@@ -172,23 +156,19 @@ export const GIT_HISTORY_ANALYZER: QaAnalyzer = {
               }),
             );
           }
-        } catch {
-          continue;
-        }
+        } catch {}
       }
 
       // Get current branch info
       try {
-        const branchResult = await runner.exec(
-          "git",
-          ["rev-parse", "--abbrev-ref", "HEAD"],
-          { cwd: context.cwd, timeoutMs: 5_000 },
-        );
+        const branchResult = await runner.exec("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+          cwd: context.cwd,
+          timeoutMs: 5_000,
+        });
         diagnostics.push(`Current branch: ${branchResult.stdout.trim()}`);
       } catch {
         // ignore
       }
-
     } catch (error) {
       diagnostics.push(
         `Git history analysis error: ${error instanceof Error ? error.message : String(error)}`,
@@ -209,16 +189,16 @@ export const GIT_HISTORY_ANALYZER: QaAnalyzer = {
 function parseChurn(output: string): ChurnResult[] {
   const counts = new Map<string, { count: number; authors: Set<string>; seenFirst: boolean }>();
   const lines = output.split("\n");
-  let currentCommit = "";
+  let _currentCommit = "";
 
   for (const line of lines) {
     if (!line.trim()) {
-      currentCommit = "";
+      _currentCommit = "";
       continue;
     }
 
     if (line.length === 40 && /^[0-9a-f]{40}$/.test(line)) {
-      currentCommit = line;
+      _currentCommit = line;
       continue;
     }
 

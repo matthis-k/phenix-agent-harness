@@ -16,16 +16,13 @@
  * returns validation errors directly without calling submit().
  */
 
-import type {
-  ContractArtifact,
-  ContractId,
-} from "../phenix-subagents/contract.ts";
-import { FileContractStore, ContractStoreError } from "../phenix-subagents/contract-store.ts";
+import type { ContractArtifact, ContractId } from "../phenix-subagents/contract.ts";
+import { ContractStoreError, type FileContractStore } from "../phenix-subagents/contract-store.ts";
 import type {
   ActiveContractAttempt,
+  ContractResultState,
   ContractSubmissionChannel,
   ContractSubmissionResult,
-  ContractResultState,
   ExecutionIssue,
 } from "./child-session-types.ts";
 
@@ -37,10 +34,7 @@ export class ContractSubmissionChannelImpl implements ContractSubmissionChannel 
   private readonly artifact: ContractArtifact;
   private _cached: ActiveContractAttempt;
 
-  constructor(
-    store: FileContractStore,
-    artifact: ContractArtifact,
-  ) {
+  constructor(store: FileContractStore, artifact: ContractArtifact) {
     this.store = store;
     this.contractId = artifact.id;
     this.artifact = artifact;
@@ -81,11 +75,7 @@ export class ContractSubmissionChannelImpl implements ContractSubmissionChannel 
         };
       }
 
-      const submitted = await this.store.submit(
-        this.contractId,
-        current.result.revision,
-        value,
-      );
+      const submitted = await this.store.submit(this.contractId, current.result.revision, value);
 
       this._cached = {
         contractId: this.contractId,
@@ -101,12 +91,23 @@ export class ContractSubmissionChannelImpl implements ContractSubmissionChannel 
       };
     } catch (error) {
       if (error instanceof ContractStoreError) {
-        const cause = (error as any).cause;
+        const cause = "cause" in error ? error.cause : undefined;
+        const causeMessage =
+          cause instanceof Error ? cause.message : cause === undefined ? undefined : String(cause);
         return {
           ok: false,
           state: "cancelled" as ContractResultState,
           revision: 0,
-          ...(error.message ? { issues: [{ path: ["store"], message: error.message + (cause ? ` Cause: ${cause.message ?? cause}` : "") }] } : {}),
+          ...(error.message
+            ? {
+                issues: [
+                  {
+                    path: ["store"],
+                    message: error.message + (causeMessage ? ` Cause: ${causeMessage}` : ""),
+                  },
+                ],
+              }
+            : {}),
         };
       }
       throw error;
@@ -129,12 +130,7 @@ export class ContractSubmissionChannelImpl implements ContractSubmissionChannel 
           ? "verification-rejected"
           : "critic-rejected";
 
-    await this.store.reopen(
-      this.contractId,
-      current.result.revision,
-      disposition,
-      input.issues,
-    );
+    await this.store.reopen(this.contractId, current.result.revision, disposition, input.issues);
 
     this._cached = {
       contractId: this.contractId,
@@ -150,10 +146,7 @@ export class ContractSubmissionChannelImpl implements ContractSubmissionChannel 
 
     if (current.result.state !== "submitted") return;
 
-    await this.store.accept(
-      this.contractId,
-      current.result.revision,
-    );
+    await this.store.accept(this.contractId, current.result.revision);
 
     this._cached = {
       contractId: this.contractId,
@@ -179,7 +172,9 @@ export class ContractSubmissionChannelImpl implements ContractSubmissionChannel 
     };
   }
 
-  async readSubmitted(): Promise<{ readonly value: unknown; readonly revision: number } | undefined> {
+  async readSubmitted(): Promise<
+    { readonly value: unknown; readonly revision: number } | undefined
+  > {
     const current = await this.store.load(this.contractId);
     if (!current) return undefined;
 

@@ -12,12 +12,7 @@
 
 export type Difficulty = "D0" | "D1" | "D2" | "D3";
 
-export const ALL_DIFFICULTIES: readonly Difficulty[] = [
-  "D0",
-  "D1",
-  "D2",
-  "D3",
-];
+export const ALL_DIFFICULTIES: readonly Difficulty[] = ["D0", "D1", "D2", "D3"];
 
 export function isDifficulty(value: string): value is Difficulty {
   return ["D0", "D1", "D2", "D3"].includes(value);
@@ -25,12 +20,7 @@ export function isDifficulty(value: string): value is Difficulty {
 
 // ── Thinking level ─────────────────────────────────────────────────────────
 
-export type ThinkingLevel =
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
+export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export function isThinkingLevel(value: string): value is ThinkingLevel {
   return ["minimal", "low", "medium", "high", "xhigh"].includes(value);
@@ -81,17 +71,31 @@ export function deriveTaskProfileFromText(
 ): TaskProfile {
   const text = `${task}\n${requirements.join("\n")}`.toLowerCase();
 
-  const highRisk = /\b(security|auth|permission|secret|credential|migration|data loss|destructive|concurren|race|deadlock|protocol|public api)\b/.test(text);
-  const architecture = /\b(architect|redesign|state machine|workflow|persistent|database|schema|interface|cross[- ]cutting)\b/.test(text);
-  const uncertainty = /\b(investigate|unknown|unclear|research|diagnose|why|root cause)\b/.test(text);
+  const highRisk =
+    /\b(security|auth|permission|secret|credential|migration|data loss|destructive|concurren|race|deadlock|protocol|public api)\b/.test(
+      text,
+    );
+  const architecture =
+    /\b(architect|redesign|state machine|workflow|persistent|database|schema|interface|cross[- ]cutting)\b/.test(
+      text,
+    );
+  const uncertainty = /\b(investigate|unknown|unclear|research|diagnose|why|root cause)\b/.test(
+    text,
+  );
   const novelty = /\b(new|introduce|design|invent|prototype|replace)\b/.test(text);
 
   const inferred: TaskProfile = {
-    complexity:
-      task.length > 4_000 ? 4 : task.length > 1_800 ? 3 : task.length > 700 ? 2 : 1,
+    complexity: task.length > 4_000 ? 4 : task.length > 1_800 ? 3 : task.length > 700 ? 2 : 1,
     uncertainty: uncertainty ? 2 : 0,
     consequence: highRisk ? 3 : 0,
-    breadth: requirements.length >= 9 ? 4 : requirements.length >= 5 ? 3 : requirements.length >= 2 ? 2 : 0,
+    breadth:
+      requirements.length >= 9
+        ? 4
+        : requirements.length >= 5
+          ? 3
+          : requirements.length >= 2
+            ? 2
+            : 0,
     coupling: architecture ? 3 : 0,
     novelty: novelty ? 2 : 0,
   };

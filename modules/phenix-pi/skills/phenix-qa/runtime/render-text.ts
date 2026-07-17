@@ -4,7 +4,7 @@
  * Produces human-readable QA report output.
  */
 
-import type { QaReport, QaFinding, QaEvidence, RiskAssessment } from "../contracts/contracts.ts";
+import type { QaReport } from "../contracts/contracts.ts";
 
 export function renderTextReport(report: QaReport): string {
   const lines: string[] = [];
@@ -31,7 +31,9 @@ export function renderTextReport(report: QaReport): string {
     lines.push(`Highest Risk Level: ${report.executiveSummary.highestRiskLevel}`);
   }
   lines.push(`Architecture: ${report.executiveSummary.architectureAssessment}`);
-  lines.push(`Current Change Increases Debt: ${report.executiveSummary.currentChangeIncreasesDebt}`);
+  lines.push(
+    `Current Change Increases Debt: ${report.executiveSummary.currentChangeIncreasesDebt}`,
+  );
 
   if (report.executiveSummary.blockingIssues.length > 0) {
     lines.push(`Blocking Issues: ${report.executiveSummary.blockingIssues.length}`);
@@ -69,9 +71,14 @@ export function renderTextReport(report: QaReport): string {
   ];
 
   for (const gate of gateEntries) {
-    const icon = gate.result === "PASS" ? "✓" :
-      gate.result === "FAIL" ? "✗" :
-      gate.result === "REVIEW" ? "?" : "-";
+    const icon =
+      gate.result === "PASS"
+        ? "✓"
+        : gate.result === "FAIL"
+          ? "✗"
+          : gate.result === "REVIEW"
+            ? "?"
+            : "-";
     lines.push(`  [${icon}] ${gate.name}: ${gate.result}`);
     if (gate.notes) {
       lines.push(`      ${gate.notes}`);
@@ -96,14 +103,21 @@ export function renderTextReport(report: QaReport): string {
 
       for (const f of findings) {
         const severityIcon =
-          f.severity === "critical" ? "🔴" :
-          f.severity === "high" ? "🟠" :
-          f.severity === "medium" ? "🟡" :
-          f.severity === "low" ? "🔵" : "⚪";
+          f.severity === "critical"
+            ? "🔴"
+            : f.severity === "high"
+              ? "🟠"
+              : f.severity === "medium"
+                ? "🟡"
+                : f.severity === "low"
+                  ? "🔵"
+                  : "⚪";
         const newTag = f.introducedByCurrentChange === true ? " [NEW]" : "";
 
         lines.push(`    ${severityIcon} ${f.id}: ${f.title}${newTag}`);
-        lines.push(`       Severity: ${f.severity} | Confidence: ${f.confidence} | Scope: ${f.remediationScope}`);
+        lines.push(
+          `       Severity: ${f.severity} | Confidence: ${f.confidence} | Scope: ${f.remediationScope}`,
+        );
         if (f.blocking) {
           lines.push(`       ⚠ BLOCKING`);
         }
@@ -214,7 +228,7 @@ function groupBy<T, K extends string>(
   for (const item of items) {
     const key = keyFn(item);
     if (!result[key]) result[key] = [];
-    result[key]!.push(item);
+    result[key]?.push(item);
   }
   return result;
 }

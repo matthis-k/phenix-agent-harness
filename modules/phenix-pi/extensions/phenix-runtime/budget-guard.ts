@@ -8,14 +8,9 @@
  * verification, and critic failures through structured runtime error codes.
  */
 
-import type {
-  ChildRuntimeErrorCode,
-  ChildSessionEvent,
-} from "./child-session-types.ts";
-import {
-  ChildRuntimeError,
-} from "./child-session-types.ts";
-import type { TurnBudget, ToolBudget } from "../phenix-subagents/agent-types.ts";
+import type { ToolBudget, TurnBudget } from "../phenix-subagents/agent-types.ts";
+import type { ChildRuntimeErrorCode, ChildSessionEvent } from "./child-session-types.ts";
+import { ChildRuntimeError } from "./child-session-types.ts";
 
 // ── Budget guard state ──────────────────────────────────────────────────────
 
@@ -45,9 +40,7 @@ export class BudgetGuard {
   private readonly startTime = Date.now();
   private softToolWarned = false;
 
-  constructor(
-    config: BudgetGuardConfig,
-  ) {
+  constructor(config: BudgetGuardConfig) {
     this.config = config;
   }
 
@@ -58,9 +51,10 @@ export class BudgetGuard {
    * Returns a soft warning string if the soft tool limit was reached.
    * Returns undefined otherwise.
    */
-  observe(
-    event: ChildSessionEvent,
-  ): { readonly violation?: BudgetViolation; readonly softWarning?: string } {
+  observe(event: ChildSessionEvent): {
+    readonly violation?: BudgetViolation;
+    readonly softWarning?: string;
+  } {
     // Check timeout on every event
     if (this.config.timeoutMs > 0) {
       const elapsed = Date.now() - this.startTime;
@@ -93,10 +87,7 @@ export class BudgetGuard {
       }
 
       // Hard tool limit — abort
-      if (
-        this.config.toolBudget.hard > 0 &&
-        this.toolCalls > this.config.toolBudget.hard
-      ) {
+      if (this.config.toolBudget.hard > 0 && this.toolCalls > this.config.toolBudget.hard) {
         return {
           violation: {
             code: "TOOL_BUDGET_EXCEEDED",
@@ -166,8 +157,6 @@ export class BudgetGuard {
 
 // ── Budget violation → ChildRuntimeError ────────────────────────────────────
 
-export function budgetViolationToError(
-  violation: BudgetViolation,
-): ChildRuntimeError {
+export function budgetViolationToError(violation: BudgetViolation): ChildRuntimeError {
   return new ChildRuntimeError(violation.code, violation.message);
 }

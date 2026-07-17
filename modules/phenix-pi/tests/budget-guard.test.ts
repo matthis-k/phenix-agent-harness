@@ -9,11 +9,14 @@
  * - budget violations are distinguishable from each other
  */
 
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
 import { BudgetGuard } from "../extensions/phenix-runtime/budget-guard.ts";
-import type { ChildSessionEvent, ChildRunId } from "../extensions/phenix-runtime/child-session-types.ts";
+import type {
+  ChildRunId,
+  ChildSessionEvent,
+} from "../extensions/phenix-runtime/child-session-types.ts";
 import { childRunId } from "../extensions/phenix-runtime/child-session-types.ts";
 
 const runId: ChildRunId = childRunId("test-run");

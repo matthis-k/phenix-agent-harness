@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
-import type { ModelRef } from "../extensions/phenix-routing/types.ts";
 import { buildBundledConfig } from "../extensions/phenix-routing/config.ts";
-import { resolveRoute, type ModelRegistry } from "../extensions/phenix-routing/resolver.ts";
+import { type ModelRegistry, resolveRoute } from "../extensions/phenix-routing/resolver.ts";
+import type { ModelRef } from "../extensions/phenix-routing/types.ts";
 
 /** Fake model registry for unit tests — no network calls. */
 class FakeRegistry implements ModelRegistry {
@@ -41,16 +40,10 @@ const ALL_GPT_AVAILABLE: readonly ModelRef[] = [
   mr("openai-codex", "gpt-5.5"),
 ];
 
-const FREE_AVAILABLE: readonly ModelRef[] = [
-  mr("opencode", "deepseek-v4-flash-free"),
-];
+const FREE_AVAILABLE: readonly ModelRef[] = [mr("opencode", "deepseek-v4-flash-free")];
 
 function goRegistry(): ModelRegistry {
-  return new FakeRegistry([
-    ...ALL_GO_AVAILABLE,
-    ...ALL_GPT_AVAILABLE,
-    ...FREE_AVAILABLE,
-  ]);
+  return new FakeRegistry([...ALL_GO_AVAILABLE, ...ALL_GPT_AVAILABLE, ...FREE_AVAILABLE]);
 }
 
 describe("Route resolution", () => {
@@ -72,9 +65,7 @@ describe("Route resolution", () => {
   });
 
   it("missing candidates are skipped, next available is used", async () => {
-    const partial = new FakeRegistry([
-      mr("opencode-go", "qwen3.7-max"),
-    ]);
+    const partial = new FakeRegistry([mr("opencode-go", "qwen3.7-max")]);
     const route = await resolveRoute({
       modelSet: "opencode-go",
       role: "critic",
@@ -97,8 +88,9 @@ describe("Route resolution", () => {
         config,
       }),
       (err: Error) => {
-        return err.message.includes("No available candidates") &&
-               err.message.includes("opencode-go");
+        return (
+          err.message.includes("No available candidates") && err.message.includes("opencode-go")
+        );
       },
     );
   });
@@ -126,8 +118,7 @@ describe("Route resolution", () => {
         config,
       }),
       (err: Error) => {
-        return err.message.includes("No available candidates") &&
-               err.message.includes("gpt");
+        return err.message.includes("No available candidates") && err.message.includes("gpt");
       },
     );
   });
@@ -149,9 +140,7 @@ describe("Route resolution", () => {
   it("same-model critic fallback is explicitly recorded", async () => {
     // critic D0 in opencode-go → "general" → "go.general" → [deepseek-v4-pro, qwen3.7-plus]
     // Make only deepseek-v4-pro available and avoid it
-    const registry = new FakeRegistry([
-      mr("opencode-go", "deepseek-v4-pro"),
-    ]);
+    const registry = new FakeRegistry([mr("opencode-go", "deepseek-v4-pro")]);
     const route = await resolveRoute({
       modelSet: "opencode-go",
       role: "critic",
@@ -199,7 +188,14 @@ describe("Route resolution profile → difficulty", () => {
     const route = await resolveRoute({
       modelSet: "mixed",
       role: "coordinator",
-      profile: { complexity: 0, uncertainty: 0, consequence: 0, breadth: 0, coupling: 0, novelty: 0 },
+      profile: {
+        complexity: 0,
+        uncertainty: 0,
+        consequence: 0,
+        breadth: 0,
+        coupling: 0,
+        novelty: 0,
+      },
       modelRegistry: goRegistry(),
       config,
     });
@@ -210,7 +206,14 @@ describe("Route resolution profile → difficulty", () => {
     const route = await resolveRoute({
       modelSet: "mixed",
       role: "coordinator",
-      profile: { complexity: 4, uncertainty: 4, consequence: 4, breadth: 4, coupling: 4, novelty: 4 },
+      profile: {
+        complexity: 4,
+        uncertainty: 4,
+        consequence: 4,
+        breadth: 4,
+        coupling: 4,
+        novelty: 4,
+      },
       modelRegistry: goRegistry(),
       config,
     });

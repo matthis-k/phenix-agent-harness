@@ -6,19 +6,19 @@
  */
 
 import type {
-  QaReport,
-  QaEvidence,
-  QaFinding,
-  ReviewScope,
-  QualityGateReport,
-  QualityGate,
-  RiskScore,
-  RiskAssessment,
   AnalysisCoverage,
   ModelReviewContribution,
+  QaEvidence,
+  QaFinding,
+  QaReport,
+  QualityGate,
+  QualityGateReport,
+  ReviewScope,
+  RiskAssessment,
+  RiskScore,
 } from "../contracts/contracts.ts";
-import type { QaConfig } from "./types.ts";
 import { DEFAULT_QA_CONFIG } from "./config.ts";
+import type { QaConfig } from "./types.ts";
 
 // ── Report Skeleton ──────────────────────────────────────────────────────────
 
@@ -64,14 +64,8 @@ export function buildReportSkeleton(params: {
       "Architecture Risk",
       evidenceIdsForSource(params.evidence, "dependency-graph"),
     ),
-    integrationRisk: emptyRiskScore(
-      "System Integration Risk",
-      [],
-    ),
-    operationalRisk: emptyRiskScore(
-      "Operational Risk",
-      [],
-    ),
+    integrationRisk: emptyRiskScore("System Integration Risk", []),
+    operationalRisk: emptyRiskScore("Operational Risk", []),
     securityRisk: emptyRiskScore(
       "Security Risk",
       evidenceIdsForSource(params.evidence, "security-tool"),
@@ -85,9 +79,7 @@ export function buildReportSkeleton(params: {
 
   const overallResult = determineOverallResult(gates);
 
-  const blockingIssues = params.findings
-    .filter((f) => f.blocking)
-    .map((f) => f.id);
+  const blockingIssues = params.findings.filter((f) => f.blocking).map((f) => f.id);
 
   // Find the highest risk level from findings
   const levelOrder = [
@@ -102,9 +94,7 @@ export function buildReportSkeleton(params: {
   ] as const;
 
   const levelsWithFindings = new Set(params.findings.map((f) => f.level));
-  const highestRiskLevel = levelOrder.findLast((l) =>
-    levelsWithFindings.has(l),
-  );
+  const highestRiskLevel = levelOrder.findLast((l) => levelsWithFindings.has(l));
 
   return {
     scope: params.scope,
@@ -133,32 +123,16 @@ export function buildReportSkeleton(params: {
 export function calculateGates(
   findings: readonly QaFinding[],
   coverage: AnalysisCoverage,
-  config: QaConfig,
+  _config: QaConfig,
 ): QualityGateReport {
-  const correctnessFindings = findings.filter(
-    (f) => f.level === "level-0-correctness",
-  );
-  const metricsFindings = findings.filter(
-    (f) => f.level === "level-1-metrics",
-  );
-  const readabilityFindings = findings.filter(
-    (f) => f.level === "level-2-readability",
-  );
-  const patternFindings = findings.filter(
-    (f) => f.level === "level-3-patterns",
-  );
-  const archFindings = findings.filter(
-    (f) => f.level === "level-4-architecture",
-  );
-  const sysFindings = findings.filter(
-    (f) => f.level === "level-5-system",
-  );
-  const opFindings = findings.filter(
-    (f) => f.level === "level-6-operability",
-  );
-  const secFindings = findings.filter(
-    (f) => f.level === "level-7-security",
-  );
+  const correctnessFindings = findings.filter((f) => f.level === "level-0-correctness");
+  const metricsFindings = findings.filter((f) => f.level === "level-1-metrics");
+  const readabilityFindings = findings.filter((f) => f.level === "level-2-readability");
+  const patternFindings = findings.filter((f) => f.level === "level-3-patterns");
+  const archFindings = findings.filter((f) => f.level === "level-4-architecture");
+  const sysFindings = findings.filter((f) => f.level === "level-5-system");
+  const opFindings = findings.filter((f) => f.level === "level-6-operability");
+  const secFindings = findings.filter((f) => f.level === "level-7-security");
 
   return {
     correctness: gateFromFindings(
@@ -176,11 +150,7 @@ export function calculateGates(
       [...readabilityFindings, ...patternFindings],
       false,
     ),
-    architecture: gateFromFindings(
-      "Gate D — Architecture",
-      archFindings,
-      false,
-    ),
+    architecture: gateFromFindings("Gate D — Architecture", archFindings, false),
     productionReadiness: gateFromFindings(
       "Gate E — Production Readiness",
       [...sysFindings, ...opFindings, ...secFindings],
@@ -195,7 +165,12 @@ function gateFromFindings(
   notRun: boolean,
 ): QualityGate {
   if (notRun) {
-    return { name, result: "NOT_RUN", failingFindings: [], notes: "Required analyzer unavailable." };
+    return {
+      name,
+      result: "NOT_RUN",
+      failingFindings: [],
+      notes: "Required analyzer unavailable.",
+    };
   }
   if (findings.length === 0) {
     return { name, result: "PASS", failingFindings: [], notes: "" };
@@ -247,8 +222,7 @@ function determineOverallResult(gates: QualityGateReport): "PASS" | "REVIEW" | "
     return "REVIEW";
   }
   const anyNotRun =
-    gates.correctness.result === "NOT_RUN" ||
-    gates.changeSafety.result === "NOT_RUN";
+    gates.correctness.result === "NOT_RUN" || gates.changeSafety.result === "NOT_RUN";
   if (anyNotRun) return "REVIEW";
   return "PASS";
 }
@@ -309,26 +283,20 @@ export function calculateRiskScores(
             ? "medium"
             : "low",
       rationale:
-        scored.value > 0
-          ? `Based on ${levelFindings.length} finding(s).`
-          : "No issues detected.",
-      evidenceIds:
-        scored.evidenceIds.length > 0
-          ? scored.evidenceIds
-          : [...fallbackEvidenceIds],
+        scored.value > 0 ? `Based on ${levelFindings.length} finding(s).` : "No issues detected.",
+      evidenceIds: scored.evidenceIds.length > 0 ? scored.evidenceIds : [...fallbackEvidenceIds],
       unavailableInputs: [...unavailableInputs],
     };
   };
 
-  const allUnavailable = evidence
-    .filter((e) => {
+  const _allUnavailable = evidence
+    .filter((_e) => {
       // Heuristic: evidence from unavailable analyzers
       return false; // TODO: propagate from analyzer results
     })
     .map((e) => e.id);
 
-  const findingsByLevel = (level: string) =>
-    findings.filter((f) => f.level === level);
+  const findingsByLevel = (level: string) => findings.filter((f) => f.level === level);
 
   const complexityRisk = makeScore(
     "Local Complexity Risk",
@@ -415,13 +383,13 @@ export function calculateCompositeScore(scores: {
 }): number {
   const weights = {
     complexityRisk: 0.15,
-    readabilityRisk: 0.10,
-    patternConsistencyRisk: 0.10,
-    architectureRisk: 0.20,
+    readabilityRisk: 0.1,
+    patternConsistencyRisk: 0.1,
+    architectureRisk: 0.2,
     integrationRisk: 0.15,
-    operationalRisk: 0.10,
-    securityRisk: 0.10,
-    changeRisk: 0.10,
+    operationalRisk: 0.1,
+    securityRisk: 0.1,
+    changeRisk: 0.1,
   };
 
   let weighted = 0;
@@ -441,37 +409,23 @@ export function mergeModelContribution(
 ): QaReport {
   // Merge findings (deduplicate by id)
   const existingIds = new Set(skeleton.findings.map((f) => f.id));
-  const newFindings = contribution.findings.filter(
-    (f) => !existingIds.has(f.id),
-  );
+  const newFindings = contribution.findings.filter((f) => !existingIds.has(f.id));
 
   const merged: QaReport = {
     ...skeleton,
     findings: [...skeleton.findings, ...newFindings],
     riskAssessment: {
       ...skeleton.riskAssessment,
-      readabilityRisk:
-        contribution.readabilityRisk ?? skeleton.riskAssessment.readabilityRisk,
+      readabilityRisk: contribution.readabilityRisk ?? skeleton.riskAssessment.readabilityRisk,
       patternConsistencyRisk:
-        contribution.patternConsistencyRisk ??
-        skeleton.riskAssessment.patternConsistencyRisk,
-      architectureRisk:
-        contribution.architectureRisk ?? skeleton.riskAssessment.architectureRisk,
-      integrationRisk:
-        contribution.integrationRisk ?? skeleton.riskAssessment.integrationRisk,
-      operationalRisk:
-        contribution.operationalRisk ?? skeleton.riskAssessment.operationalRisk,
-      securityRisk:
-        contribution.securityRisk ?? skeleton.riskAssessment.securityRisk,
+        contribution.patternConsistencyRisk ?? skeleton.riskAssessment.patternConsistencyRisk,
+      architectureRisk: contribution.architectureRisk ?? skeleton.riskAssessment.architectureRisk,
+      integrationRisk: contribution.integrationRisk ?? skeleton.riskAssessment.integrationRisk,
+      operationalRisk: contribution.operationalRisk ?? skeleton.riskAssessment.operationalRisk,
+      securityRisk: contribution.securityRisk ?? skeleton.riskAssessment.securityRisk,
     },
-    positiveObservations: [
-      ...skeleton.positiveObservations,
-      ...contribution.positiveObservations,
-    ],
-    remediationPlan: [
-      ...skeleton.remediationPlan,
-      ...contribution.remediationPlan,
-    ],
+    positiveObservations: [...skeleton.positiveObservations, ...contribution.positiveObservations],
+    remediationPlan: [...skeleton.remediationPlan, ...contribution.remediationPlan],
   };
 
   // Recalculate composite score
@@ -491,12 +445,11 @@ export function mergeModelContribution(
   merged.executiveSummary = {
     ...merged.executiveSummary,
     overallResult: determineOverallResult(merged.qualityGates),
-    architectureAssessment:
-      contribution.architectureRisk
-        ? contribution.architectureRisk.value > 40
-          ? "inconsistent"
-          : "consistent"
-        : "not-reviewed",
+    architectureAssessment: contribution.architectureRisk
+      ? contribution.architectureRisk.value > 40
+        ? "inconsistent"
+        : "consistent"
+      : "not-reviewed",
   };
 
   return merged;
@@ -504,9 +457,6 @@ export function mergeModelContribution(
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function evidenceIdsForSource(
-  evidence: readonly QaEvidence[],
-  source: string,
-): string[] {
+function evidenceIdsForSource(evidence: readonly QaEvidence[], source: string): string[] {
   return evidence.filter((e) => e.source === source).map((e) => e.id);
 }

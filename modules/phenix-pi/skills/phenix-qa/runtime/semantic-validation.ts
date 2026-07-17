@@ -5,9 +5,7 @@
  * JSON Schema alone.
  */
 
-import type {
-  QaReport,
-} from "../contracts/contracts.ts";
+import type { QaReport } from "../contracts/contracts.ts";
 
 export interface SemanticValidationIssue {
   readonly path: string;
@@ -22,9 +20,7 @@ export interface SemanticValidationResult {
 /**
  * Perform all semantic validations on a QA report.
  */
-export function validateReportSemantics(
-  report: QaReport,
-): SemanticValidationResult {
+export function validateReportSemantics(report: QaReport): SemanticValidationResult {
   const issues: SemanticValidationIssue[] = [];
 
   // Validate evidence references
@@ -63,10 +59,7 @@ export function validateReportSemantics(
   };
 }
 
-function validateEvidenceReferences(
-  report: QaReport,
-  issues: SemanticValidationIssue[],
-): void {
+function validateEvidenceReferences(report: QaReport, issues: SemanticValidationIssue[]): void {
   const evidenceIds = new Set(report.evidence.map((e) => e.id));
 
   for (const finding of report.findings) {
@@ -81,10 +74,7 @@ function validateEvidenceReferences(
   }
 }
 
-function validateGateReferences(
-  report: QaReport,
-  issues: SemanticValidationIssue[],
-): void {
+function validateGateReferences(report: QaReport, issues: SemanticValidationIssue[]): void {
   const findingIds = new Set(report.findings.map((f) => f.id));
 
   const gates = [
@@ -107,10 +97,7 @@ function validateGateReferences(
   }
 }
 
-function validateRiskEvidence(
-  report: QaReport,
-  issues: SemanticValidationIssue[],
-): void {
+function validateRiskEvidence(report: QaReport, issues: SemanticValidationIssue[]): void {
   const evidenceIds = new Set(report.evidence.map((e) => e.id));
 
   const riskFields = [
@@ -136,10 +123,7 @@ function validateRiskEvidence(
   }
 }
 
-function validateTimestamp(
-  report: QaReport,
-  issues: SemanticValidationIssue[],
-): void {
+function validateTimestamp(report: QaReport, issues: SemanticValidationIssue[]): void {
   const timestamp = report.generatedAt;
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(timestamp)) {
     issues.push({
@@ -149,10 +133,7 @@ function validateTimestamp(
   }
 }
 
-function validateUniqueIds(
-  report: QaReport,
-  issues: SemanticValidationIssue[],
-): void {
+function validateUniqueIds(report: QaReport, issues: SemanticValidationIssue[]): void {
   const seen = new Set<string>();
   for (const finding of report.findings) {
     if (seen.has(finding.id)) {
@@ -165,10 +146,7 @@ function validateUniqueIds(
   }
 }
 
-function validateUniqueEvidenceIds(
-  report: QaReport,
-  issues: SemanticValidationIssue[],
-): void {
+function validateUniqueEvidenceIds(report: QaReport, issues: SemanticValidationIssue[]): void {
   const seen = new Set<string>();
   for (const evidence of report.evidence) {
     if (seen.has(evidence.id)) {
@@ -204,10 +182,7 @@ function validateModelFindingsHaveEvidence(
   }
 }
 
-function validateBlockingSeverity(
-  report: QaReport,
-  issues: SemanticValidationIssue[],
-): void {
+function validateBlockingSeverity(report: QaReport, issues: SemanticValidationIssue[]): void {
   for (const finding of report.findings) {
     if (finding.blocking && finding.severity !== "high" && finding.severity !== "critical") {
       issues.push({
@@ -218,10 +193,7 @@ function validateBlockingSeverity(
   }
 }
 
-function validateCompositeScore(
-  report: QaReport,
-  issues: SemanticValidationIssue[],
-): void {
+function validateCompositeScore(report: QaReport, issues: SemanticValidationIssue[]): void {
   const score = report.riskAssessment.compositeScore;
   if (typeof score !== "number" || score < 0 || score > 100 || !Number.isFinite(score)) {
     issues.push({
@@ -231,18 +203,14 @@ function validateCompositeScore(
   }
 }
 
-function validateRemediationReferences(
-  report: QaReport,
-  issues: SemanticValidationIssue[],
-): void {
+function validateRemediationReferences(report: QaReport, issues: SemanticValidationIssue[]): void {
   const findingIds = new Set(report.findings.map((f) => f.id));
 
-  for (let i = 0; i < report.remediationPlan.length; i++) {
-    const item = report.remediationPlan[i]!;
+  for (const [index, item] of report.remediationPlan.entries()) {
     for (const findingId of item.findingIds) {
       if (!findingIds.has(findingId)) {
         issues.push({
-          path: `remediationPlan.${i}.findingIds`,
+          path: `remediationPlan.${index}.findingIds`,
           message: `Remediation reference "${findingId}" not found in report findings.`,
         });
       }

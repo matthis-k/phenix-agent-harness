@@ -1,11 +1,11 @@
+import type { Difficulty } from "../phenix-kernel/task.ts";
 import type {
   DelegateTransition,
+  WorkflowFactKey,
   WorkflowRuntimeRecord,
   WorkflowStateId,
-  WorkflowFactKey,
 } from "./workflow-types.ts";
 import { outputSchemaIdForContract } from "./workflow-types.ts";
-import type { Difficulty } from "../phenix-kernel/task.ts";
 
 // ── Facts extractor ─────────────────────────────────────────────────────────
 
@@ -18,11 +18,7 @@ export function factsFromTransitionResult(
 ): Readonly<Record<WorkflowFactKey, unknown>> {
   const facts: Record<WorkflowFactKey, unknown> = {};
 
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    Array.isArray(value)
-  ) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return facts;
   }
 
@@ -66,7 +62,7 @@ export function factsFromTransitionResult(
  * This handles the state transition itself - the store manages revision and concurrency.
  */
 export function advanceWorkflowState(
-  record: WorkflowRuntimeRecord,
+  _record: WorkflowRuntimeRecord,
   transition: DelegateTransition,
   accepted: boolean,
 ): WorkflowStateId {
@@ -75,11 +71,7 @@ export function advanceWorkflowState(
 
 // ── Transition path helpers ─────────────────────────────────────────────────
 
-const TERMINAL_STATES: ReadonlySet<WorkflowStateId> = new Set([
-  "completed",
-  "failed",
-  "cancelled",
-]);
+const TERMINAL_STATES: ReadonlySet<WorkflowStateId> = new Set(["completed", "failed", "cancelled"]);
 
 export function isTerminalState(state: WorkflowStateId): boolean {
   return TERMINAL_STATES.has(state);

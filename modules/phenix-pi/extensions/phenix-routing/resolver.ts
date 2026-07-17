@@ -1,17 +1,17 @@
+import { difficultyForProfile } from "./classifier.ts";
+import { isProviderAllowed, providerBoundaryForSet } from "./config.ts";
 import { ROLE_MATRIX } from "./matrix.ts";
 import {
   type Capability,
   type Difficulty,
+  formatModelRef,
   type ModelRef,
   type ModelSetId,
+  parseModelRef,
   type ResolvedRoute,
   type RoutingConfig,
   type RoutingRole,
-  formatModelRef,
-  parseModelRef,
 } from "./types.ts";
-import { difficultyForProfile } from "./classifier.ts";
-import { providerBoundaryForSet, isProviderAllowed } from "./config.ts";
 
 const PHENIX_PREFIX = "phenix/";
 
@@ -44,16 +44,8 @@ export interface ResolveRouteInput {
 /**
  * Resolve a concrete route from the fixed matrix and runtime inventory.
  */
-export async function resolveRoute(
-  input: ResolveRouteInput,
-): Promise<ResolvedRoute> {
-  const {
-    modelSet,
-    role,
-    modelRegistry,
-    config,
-    avoidModels,
-  } = input;
+export async function resolveRoute(input: ResolveRouteInput): Promise<ResolvedRoute> {
+  const { modelSet, role, modelRegistry, config, avoidModels } = input;
 
   // 1. Determine difficulty
   let difficulty: Difficulty;
@@ -184,19 +176,16 @@ export async function resolveRoute(
       pool: poolName,
       configuredCandidates: [...candidates],
       missingCandidates: missingCandidates.length > 0 ? missingCandidates : undefined,
-      unauthenticatedCandidates: unauthenticatedCandidates.length > 0 ? unauthenticatedCandidates : undefined,
+      unauthenticatedCandidates:
+        unauthenticatedCandidates.length > 0 ? unauthenticatedCandidates : undefined,
       boundaryViolations: boundaryViolations.length > 0 ? boundaryViolations : undefined,
     });
   }
 
   // 8. Apply avoidModels: prefer a candidate not in avoidModels
-  const avoidSet = new Set(
-    (avoidModels ?? []).map((ref) => formatModelRef(ref)),
-  );
+  const avoidSet = new Set((avoidModels ?? []).map((ref) => formatModelRef(ref)));
 
-  const preferred = available.find(
-    (a) => !avoidSet.has(formatModelRef(a.ref)),
-  );
+  const preferred = available.find((a) => !avoidSet.has(formatModelRef(a.ref)));
 
   const chosen = preferred ?? available[0];
   const usedAvoidedModelFallback = preferred === undefined && avoidSet.size > 0;
@@ -211,9 +200,10 @@ export async function resolveRoute(
     model: chosen.ref,
     candidateIndex: chosen.index,
     thinking,
-    avoidedModel: usedAvoidedModelFallback && avoidSet.size > 0
-      ? avoidModels?.find((ref) => formatModelRef(ref) === formatModelRef(chosen.ref))
-      : undefined,
+    avoidedModel:
+      usedAvoidedModelFallback && avoidSet.size > 0
+        ? avoidModels?.find((ref) => formatModelRef(ref) === formatModelRef(chosen.ref))
+        : undefined,
     usedAvoidedModelFallback,
   };
 }
@@ -260,4 +250,10 @@ class RoutingError extends Error {
   }
 }
 
-type RoutingErrorCode = "NO_CANDIDATES" | "BOUNDARY_VIOLATION" | "UNKNOWN_POOL" | "MALFORMED_REF" | "DENIED_ROUTE" | "EMPTY_POOL";
+type RoutingErrorCode =
+  | "NO_CANDIDATES"
+  | "BOUNDARY_VIOLATION"
+  | "UNKNOWN_POOL"
+  | "MALFORMED_REF"
+  | "DENIED_ROUTE"
+  | "EMPTY_POOL";

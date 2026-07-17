@@ -1,9 +1,13 @@
 /**
  * Tests for workflow definitions integrity.
  */
-import { describe, it } from "node:test";
+
 import assert from "node:assert/strict";
-import { PHENIX_DEFAULT_WORKFLOW, validateDefinition } from "../extensions/phenix-workflow/workflow-definitions.ts";
+import { describe, it } from "node:test";
+import {
+  PHENIX_DEFAULT_WORKFLOW,
+  validateDefinition,
+} from "../extensions/phenix-workflow/workflow-definitions.ts";
 
 describe("Workflow definitions", () => {
   it("has no duplicate transition IDs", () => {
@@ -20,9 +24,7 @@ describe("Workflow definitions", () => {
   });
 
   it("has a D0 path to completed via base execution", () => {
-    const d0Base = PHENIX_DEFAULT_WORKFLOW.transitions.find(
-      (t) => t.id === "d0.execute-base",
-    );
+    const d0Base = PHENIX_DEFAULT_WORKFLOW.transitions.find((t) => t.id === "d0.execute-base");
     assert.ok(d0Base, "D0 base execution transition exists");
     if (d0Base && d0Base.kind === "delegate") {
       assert.equal(d0Base.onAccepted, "completed");
@@ -31,9 +33,7 @@ describe("Workflow definitions", () => {
   });
 
   it("has a D0 path to completed via implementer execution", () => {
-    const d0Impl = PHENIX_DEFAULT_WORKFLOW.transitions.find(
-      (t) => t.id === "d0.execute-code",
-    );
+    const d0Impl = PHENIX_DEFAULT_WORKFLOW.transitions.find((t) => t.id === "d0.execute-code");
     assert.ok(d0Impl, "D0 code execution transition exists");
     if (d0Impl && d0Impl.kind === "delegate") {
       assert.equal(d0Impl.onAccepted, "completed");
@@ -42,12 +42,8 @@ describe("Workflow definitions", () => {
   });
 
   it("has D2 plan before implementation", () => {
-    const plan = PHENIX_DEFAULT_WORKFLOW.transitions.find(
-      (t) => t.id === "d2.plan",
-    );
-    const impl = PHENIX_DEFAULT_WORKFLOW.transitions.find(
-      (t) => t.id === "d2.implement-from-plan",
-    );
+    const plan = PHENIX_DEFAULT_WORKFLOW.transitions.find((t) => t.id === "d2.plan");
+    const impl = PHENIX_DEFAULT_WORKFLOW.transitions.find((t) => t.id === "d2.implement-from-plan");
     assert.ok(plan, "D2 plan transition exists");
     assert.ok(impl, "D2 implement transition exists");
     if (plan && plan.kind === "delegate") {
@@ -63,9 +59,7 @@ describe("Workflow definitions", () => {
     const scoutRepo = PHENIX_DEFAULT_WORKFLOW.transitions.find(
       (t) => t.id === "d3.scout-repository",
     );
-    const scoutTests = PHENIX_DEFAULT_WORKFLOW.transitions.find(
-      (t) => t.id === "d3.scout-tests",
-    );
+    const scoutTests = PHENIX_DEFAULT_WORKFLOW.transitions.find((t) => t.id === "d3.scout-tests");
     const scoutConstraints = PHENIX_DEFAULT_WORKFLOW.transitions.find(
       (t) => t.id === "d3.scout-constraints",
     );
@@ -75,12 +69,8 @@ describe("Workflow definitions", () => {
   });
 
   it("has D3 final review after finalizer", () => {
-    const finalize = PHENIX_DEFAULT_WORKFLOW.transitions.find(
-      (t) => t.id === "d3.finalize",
-    );
-    const finalReview = PHENIX_DEFAULT_WORKFLOW.transitions.find(
-      (t) => t.id === "d3.final-review",
-    );
+    const finalize = PHENIX_DEFAULT_WORKFLOW.transitions.find((t) => t.id === "d3.finalize");
+    const finalReview = PHENIX_DEFAULT_WORKFLOW.transitions.find((t) => t.id === "d3.final-review");
     assert.ok(finalize, "D3 finalize exists");
     assert.ok(finalReview, "D3 final review exists");
     if (finalReview && finalReview.kind === "delegate") {
@@ -94,9 +84,7 @@ describe("Workflow definitions", () => {
     );
     assert.ok(childTransitions.length > 0, "Has child-local transitions");
     // Planner can request scout
-    const plannerScout = childTransitions.find(
-      (t) => t.id === "planner.request-scout",
-    );
+    const plannerScout = childTransitions.find((t) => t.id === "planner.request-scout");
     assert.ok(plannerScout, "Planner can request scout");
   });
 });

@@ -5,7 +5,7 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, it, before } from "node:test";
+import { before, describe, it } from "node:test";
 
 // We can't typebox-resolve at the top level in test environment.
 // These tests verify the schema shapes at runtime by constructing
@@ -20,9 +20,7 @@ let assertQaReport: (value: unknown) => unknown;
 let schemasAvailable = false;
 
 try {
-  const mod = await import(
-    "../skills/phenix-qa/contracts/contracts.ts"
-  );
+  const mod = await import("../skills/phenix-qa/contracts/contracts.ts");
   validateQaEvidence = mod.validateQaEvidence;
   validateQaFinding = mod.validateQaFinding;
   validateQaReport = mod.validateQaReport;
@@ -209,9 +207,7 @@ describeValidation("QaEvidence validation", () => {
   });
 
   it("rejects evidence with invalid QA level", () => {
-    const result = validateQaEvidence(
-      makeValidEvidence({ level: "invalid-level" }),
-    );
+    const result = validateQaEvidence(makeValidEvidence({ level: "invalid-level" }));
     assert.equal(result.ok, false);
   });
 
@@ -226,9 +222,7 @@ describeValidation("QaEvidence validation", () => {
   });
 
   it("rejects evidence with invalid source", () => {
-    const result = validateQaEvidence(
-      makeValidEvidence({ source: "made-up-source" }),
-    );
+    const result = validateQaEvidence(makeValidEvidence({ source: "made-up-source" }));
     assert.equal(result.ok, false);
   });
 });
@@ -260,23 +254,17 @@ describeValidation("QaFinding validation", () => {
   });
 
   it("rejects finding with invalid severity", () => {
-    const result = validateQaFinding(
-      makeValidFinding({ severity: "extreme" }),
-    );
+    const result = validateQaFinding(makeValidFinding({ severity: "extreme" }));
     assert.equal(result.ok, false);
   });
 
   it("rejects finding with invalid introducedByCurrentChange", () => {
-    const result = validateQaFinding(
-      makeValidFinding({ introducedByCurrentChange: "maybe" }),
-    );
+    const result = validateQaFinding(makeValidFinding({ introducedByCurrentChange: "maybe" }));
     assert.equal(result.ok, false);
   });
 
   it("rejects finding with invalid remediation scope", () => {
-    const result = validateQaFinding(
-      makeValidFinding({ remediationScope: "total-rewrite" }),
-    );
+    const result = validateQaFinding(makeValidFinding({ remediationScope: "total-rewrite" }));
     assert.equal(result.ok, false);
   });
 });
@@ -362,7 +350,10 @@ describeValidation("assertQaReport", () => {
 // ── Semantic Validation Tests ────────────────────────────────────────────────
 
 describe("Semantic validation", () => {
-  let validateReportSemantics: (report: unknown) => { ok: boolean; issues: readonly { path: string; message: string }[] };
+  let validateReportSemantics: (report: unknown) => {
+    ok: boolean;
+    issues: readonly { path: string; message: string }[];
+  };
 
   before(async () => {
     const mod = await import("../skills/phenix-qa/runtime/semantic-validation.ts");
@@ -380,9 +371,7 @@ describe("Semantic validation", () => {
     report.findings = [makeValidFinding({ evidenceIds: ["nonexistent-evidence"] })];
     const result = validateReportSemantics(report);
     assert.equal(result.ok, false);
-    assert.ok(
-      result.issues.some((i) => i.message.includes("not found in report evidence")),
-    );
+    assert.ok(result.issues.some((i) => i.message.includes("not found in report evidence")));
   });
 
   it("detects gate reference mismatch", () => {
@@ -390,9 +379,7 @@ describe("Semantic validation", () => {
     report.qualityGates.correctness.failingFindings = ["nonexistent-finding"];
     const result = validateReportSemantics(report);
     assert.equal(result.ok, false);
-    assert.ok(
-      result.issues.some((i) => i.message.includes("not found in report findings")),
-    );
+    assert.ok(result.issues.some((i) => i.message.includes("not found in report findings")));
   });
 
   it("detects duplicate finding IDs", () => {
@@ -415,9 +402,7 @@ describe("Semantic validation", () => {
 
   it("detects blocking with non-high/non-critical severity", () => {
     const report = makeValidReport();
-    report.findings = [
-      makeValidFinding({ severity: "low", blocking: true }),
-    ];
+    report.findings = [makeValidFinding({ severity: "low", blocking: true })];
     const result = validateReportSemantics(report);
     assert.equal(result.ok, false);
     assert.ok(
@@ -432,9 +417,7 @@ describe("Semantic validation", () => {
 
   it("allows blocking with high severity", () => {
     const report = makeValidReport();
-    report.findings = [
-      makeValidFinding({ severity: "high", blocking: true }),
-    ];
+    report.findings = [makeValidFinding({ severity: "high", blocking: true })];
     const result = validateReportSemantics(report);
     // This should not have a blocking-related issue
     const blockingIssues = result.issues.filter((i) => i.message.includes("blocking"));
@@ -460,9 +443,7 @@ describe("Semantic validation", () => {
     ];
     const result = validateReportSemantics(report);
     assert.equal(result.ok, false);
-    assert.ok(
-      result.issues.some((i) => i.message.includes("not found in report findings")),
-    );
+    assert.ok(result.issues.some((i) => i.message.includes("not found in report findings")));
   });
 
   it("detects model-level finding with no evidence", () => {
@@ -478,9 +459,7 @@ describe("Semantic validation", () => {
     assert.equal(result.ok, false);
     assert.ok(
       result.issues.some(
-        (i) =>
-          i.message.includes("Model-assisted") &&
-          i.message.includes("at least one evidence"),
+        (i) => i.message.includes("Model-assisted") && i.message.includes("at least one evidence"),
       ),
     );
   });
@@ -491,9 +470,7 @@ describe("Semantic validation", () => {
     report.evidence = [makeValidEvidence({ id: "ev-1" })];
     const result = validateReportSemantics(report);
     assert.equal(result.ok, false);
-    assert.ok(
-      result.issues.some((i) => i.message.includes("Risk evidence reference")),
-    );
+    assert.ok(result.issues.some((i) => i.message.includes("Risk evidence reference")));
   });
 });
 

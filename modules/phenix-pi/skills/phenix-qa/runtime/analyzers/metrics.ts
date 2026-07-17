@@ -7,11 +7,11 @@
 
 import { makeEvidence } from "../normalize.ts";
 import type {
-  QaAnalyzer,
-  QaAnalyzerContext,
-  QaAnalyzerAvailability,
-  QaAnalyzerResult,
   ProcessRunner,
+  QaAnalyzer,
+  QaAnalyzerAvailability,
+  QaAnalyzerContext,
+  QaAnalyzerResult,
 } from "../types.ts";
 
 const SUPPORTED_COMMANDS = ["codehawk-cli", "codehawk"] as const;
@@ -20,9 +20,7 @@ export const METRICS_ANALYZER: QaAnalyzer = {
   id: "metrics",
   categories: ["metrics", "complexity"],
 
-  async checkAvailability(
-    context: QaAnalyzerContext,
-  ): Promise<QaAnalyzerAvailability> {
+  async checkAvailability(_context: QaAnalyzerContext): Promise<QaAnalyzerAvailability> {
     const { DEFAULT_PROCESS_RUNNER } = await import("../process.ts");
     const runner: ProcessRunner = DEFAULT_PROCESS_RUNNER;
 
@@ -57,9 +55,7 @@ export const METRICS_ANALYZER: QaAnalyzer = {
             version: (npxResult.stdout + npxResult.stderr).trim().split("\n")[0],
           };
         }
-      } catch {
-        continue;
-      }
+      } catch {}
     }
 
     return {
@@ -68,9 +64,7 @@ export const METRICS_ANALYZER: QaAnalyzer = {
     };
   },
 
-  async run(
-    context: QaAnalyzerContext,
-  ): Promise<QaAnalyzerResult> {
+  async run(context: QaAnalyzerContext): Promise<QaAnalyzerResult> {
     const start = Date.now();
     const { DEFAULT_PROCESS_RUNNER } = await import("../process.ts");
     const runner: ProcessRunner = DEFAULT_PROCESS_RUNNER;
@@ -96,8 +90,7 @@ export const METRICS_ANALYZER: QaAnalyzer = {
         }
 
         const timeoutMs =
-          context.config.timeouts.byAnalyzer?.["metrics"] ??
-          context.config.timeouts.defaultMs;
+          context.config.timeouts.byAnalyzer?.metrics ?? context.config.timeouts.defaultMs;
 
         const result = await runner.exec(execCmd, execArgs, {
           cwd: context.cwd,
@@ -151,10 +144,7 @@ export const METRICS_ANALYZER: QaAnalyzer = {
           durationMs: Date.now() - start,
         };
       } catch (error) {
-        diagnostics.push(
-          `${cmd}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        continue;
+        diagnostics.push(`${cmd}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
@@ -172,10 +162,7 @@ export const METRICS_ANALYZER: QaAnalyzer = {
 /**
  * Parse metrics output from codehawk-cli or similar tools.
  */
-function parseMetricsOutput(
-  output: string,
-  _tool: string,
-): ReturnType<typeof makeEvidence>[] {
+function parseMetricsOutput(output: string, _tool: string): ReturnType<typeof makeEvidence>[] {
   const evidence: ReturnType<typeof makeEvidence>[] = [];
 
   // Try to find common metric patterns in the output

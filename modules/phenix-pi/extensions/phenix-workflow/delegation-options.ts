@@ -1,19 +1,16 @@
-import type {
-  WorkflowDefinition,
-  WorkflowRuntimeRecord,
-  DelegateTransition,
-  DelegationAuthority,
-  DelegationOption,
-} from "./workflow-types.ts";
-import {
-  roleForAgentClient,
-  outputSchemaIdForContract,
-} from "./workflow-types.ts";
+import { isTransitionPermitted } from "./transition-authority.ts";
 import { conditionSatisfied } from "./workflow-conditions.ts";
 import { transitionMatchesDifficulty } from "./workflow-reducer.ts";
 import { getOutputSchema } from "./workflow-schemas.ts";
-import { isTransitionPermitted } from "./transition-authority.ts";
-import type { WorkflowHandleRecord } from "./workflow-types.ts";
+import type {
+  DelegateTransition,
+  DelegationAuthority,
+  DelegationOption,
+  WorkflowDefinition,
+  WorkflowHandleRecord,
+  WorkflowRuntimeRecord,
+} from "./workflow-types.ts";
+import { outputSchemaIdForContract, roleForAgentClient } from "./workflow-types.ts";
 
 // ── Resolve current delegation options ──────────────────────────────────────
 
@@ -69,7 +66,7 @@ export function resolveDelegationOptions(input: {
   };
 
   // Pre-compute active handle IDs for conflict detection
-  const activeHandleIds = new Set(runtime.active.map((a) => a.handleId));
+  const _activeHandleIds = new Set(runtime.active.map((a) => a.handleId));
 
   for (const transition of definition.transitions) {
     // Only delegate transitions
@@ -88,7 +85,19 @@ export function resolveDelegationOptions(input: {
     if (dt.scope === "child" && isRoot) continue;
 
     // 5. Actor role match
-    if (!dt.actorRoles.includes(runtime.actorRole as "coordinator" | "planner" | "architect" | "implementer" | "tester" | "critic" | "finalizer" | "scout")) {
+    if (
+      !dt.actorRoles.includes(
+        runtime.actorRole as
+          | "coordinator"
+          | "planner"
+          | "architect"
+          | "implementer"
+          | "tester"
+          | "critic"
+          | "finalizer"
+          | "scout",
+      )
+    ) {
       continue;
     }
 
@@ -107,31 +116,19 @@ export function resolveDelegationOptions(input: {
     //    array membership works for base agents too.
     const targetRole = roleForAgentClient(dt.agentClient);
 
-    if (
-      !authority.roles.effective.includes(
-        targetRole,
-      )
-    ) {
+    if (!authority.roles.effective.includes(targetRole)) {
       continue;
     }
 
     // 10. Role availability check
-    if (
-      !authority.availableRoles.includes(
-        targetRole,
-      )
-    ) {
+    if (!authority.availableRoles.includes(targetRole)) {
       continue;
     }
 
     // 11. Max executions check
     if (dt.maxExecutions !== undefined) {
-      const completedCount = runtime.completed.filter(
-        (c) => c.transitionId === dt.id,
-      ).length;
-      const activeCount = runtime.active.filter(
-        (a) => a.transitionId === dt.id,
-      ).length;
+      const completedCount = runtime.completed.filter((c) => c.transitionId === dt.id).length;
+      const activeCount = runtime.active.filter((a) => a.transitionId === dt.id).length;
       if (completedCount + activeCount >= dt.maxExecutions) {
         continue;
       }
@@ -146,16 +143,12 @@ export function resolveDelegationOptions(input: {
       // unless this is a retry/repair of the same transition
       if (hasActiveNonParallel && runtime.active.length > 0) {
         // Allow if it's the same transition and maxExecutions allows it
-        const sameAlreadyActive = runtime.active.some(
-          (a) => a.transitionId === dt.id,
-        );
+        const sameAlreadyActive = runtime.active.some((a) => a.transitionId === dt.id);
         if (!sameAlreadyActive) continue;
       }
     } else {
       // Parallel group: allow only if no same-transition is active
-      const sameActive = runtime.active.filter(
-        (a) => a.transitionId === dt.id,
-      );
+      const sameActive = runtime.active.filter((a) => a.transitionId === dt.id);
       if (sameActive.length > 0) continue;
     }
 

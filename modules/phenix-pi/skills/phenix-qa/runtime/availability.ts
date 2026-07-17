@@ -3,8 +3,7 @@
  *
  * Records which analyzers are installed and usable.
  */
-import type { QaAnalyzerAvailability, QaAnalyzerContext } from "./types.ts";
-import type { ProcessRunner } from "./types.ts";
+import type { ProcessRunner, QaAnalyzerAvailability, QaAnalyzerContext } from "./types.ts";
 
 /**
  * Check if a command is available on PATH.
@@ -42,9 +41,7 @@ export async function checkCommandAvailable(
 export async function checkAllAvailability(
   analyzers: {
     id: string;
-    checkAvailability: (
-      ctx: QaAnalyzerContext,
-    ) => Promise<QaAnalyzerAvailability>;
+    checkAvailability: (ctx: QaAnalyzerContext) => Promise<QaAnalyzerAvailability>;
   }[],
   context: QaAnalyzerContext,
 ): Promise<Map<string, QaAnalyzerAvailability>> {

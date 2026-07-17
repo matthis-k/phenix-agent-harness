@@ -15,7 +15,6 @@
       wrappedPi = pkgs.writeShellApplication {
         name = "pi";
         runtimeInputs = tooling.harnessRuntime ++ [
-          self'.packages.tend
           self'.packages.stitch
           self'.packages.stitch-mcp
         ];

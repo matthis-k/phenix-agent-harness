@@ -1,9 +1,9 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
 import {
-  isTransitionPermitted,
   authorityFromCeiling,
+  isTransitionPermitted,
   type TransitionAuthority,
 } from "../extensions/phenix-workflow/transition-authority.ts";
 import type { WorkflowTransitionId } from "../extensions/phenix-workflow/workflow-types.ts";
@@ -53,7 +53,10 @@ describe("TransitionAuthority", () => {
     const auth = authorityFromCeiling([t("delegate_to_scout"), t("delegate_to_tester")]);
     assert.equal(auth.kind, "restricted");
     if (auth.kind === "restricted") {
-      assert.deepEqual([...auth.allowed].sort(), [t("delegate_to_scout"), t("delegate_to_tester")].sort());
+      assert.deepEqual(
+        [...auth.allowed].sort(),
+        [t("delegate_to_scout"), t("delegate_to_tester")].sort(),
+      );
     }
   });
 

@@ -5,100 +5,91 @@
  * or subagent implementation logic.
  */
 
-// Branded IDs
-export type {
-  Brand,
-  AgentKindId,
-  AgentClientId,
-  ContractDefinitionId,
-  ContractInstanceId,
-  WorkflowDefinitionId,
-  WorkflowStateId,
-  WorkflowTransitionId,
-  WorkflowInstanceId,
-  WorkflowActorId,
-  ModelSetId,
-  CapabilityId,
-  RunId,
-} from "./ids.ts";
-
-export {
-  agentKindId,
-  agentClientId,
-  contractDefinitionId,
-  contractInstanceId,
-  workflowDefinitionId,
-  workflowStateId,
-  workflowTransitionId,
-  workflowInstanceId,
-  workflowActorId,
-  modelSetId,
-  capabilityId,
-  runId,
-} from "./ids.ts";
-
-// Typed symbolic references
-export type {
-  ResourceKind,
-  ResourceRef,
-  AgentClientRef,
-  AgentKindRef,
-  ContractDefinitionRef,
-  WorkflowRef,
-  ModelSetRef,
-  CapabilityRef,
-} from "./refs.ts";
-
-export {
-  agentClientRef,
-  agentKindRef,
-  contractRef,
-  workflowRef,
-  modelSetRef,
-  capabilityRef,
-  refEquals,
-} from "./refs.ts";
-
-// Task semantics
-export type {
-  Difficulty,
-  ThinkingLevel,
-  TaskProfile,
-  ProfileHint,
-} from "./task.ts";
-
-export {
-  ALL_DIFFICULTIES,
-  isDifficulty,
-  isThinkingLevel,
-  deriveTaskProfileFromText,
-  difficultyForProfile,
-} from "./task.ts";
-
 // Agent vocabulary
 export type {
   AgentKind,
   AgentRole,
 } from "./agents.ts";
-
 export {
   AGENT_KINDS,
   isAgentKind,
   isAgentRole,
 } from "./agents.ts";
-
+// Diagnostics
+export type {
+  ConfigDiagnostic,
+  DiagnosticSeverity,
+  LinkDiagnostic,
+} from "./diagnostics.ts";
 // Execution protocol
 export type {
   AgentExecutionMode,
-  WorkflowExecutionBinding,
   AgentExecutionRequest,
-  ExecutionIssue,
   AgentExecutionResult,
+  ExecutionIssue,
+  WorkflowExecutionBinding,
 } from "./execution.ts";
-
-// Diagnostics
+// Branded IDs
 export type {
-  DiagnosticSeverity,
-  LinkDiagnostic,
-  ConfigDiagnostic,
-} from "./diagnostics.ts";
+  AgentClientId,
+  AgentKindId,
+  Brand,
+  CapabilityId,
+  ContractDefinitionId,
+  ContractInstanceId,
+  ModelSetId,
+  RunId,
+  WorkflowActorId,
+  WorkflowDefinitionId,
+  WorkflowInstanceId,
+  WorkflowStateId,
+  WorkflowTransitionId,
+} from "./ids.ts";
+export {
+  agentClientId,
+  agentKindId,
+  capabilityId,
+  contractDefinitionId,
+  contractInstanceId,
+  modelSetId,
+  runId,
+  workflowActorId,
+  workflowDefinitionId,
+  workflowInstanceId,
+  workflowStateId,
+  workflowTransitionId,
+} from "./ids.ts";
+// Typed symbolic references
+export type {
+  AgentClientRef,
+  AgentKindRef,
+  CapabilityRef,
+  ContractDefinitionRef,
+  ModelSetRef,
+  ResourceKind,
+  ResourceRef,
+  WorkflowRef,
+} from "./refs.ts";
+export {
+  agentClientRef,
+  agentKindRef,
+  capabilityRef,
+  contractRef,
+  modelSetRef,
+  refEquals,
+  workflowRef,
+} from "./refs.ts";
+// Task semantics
+export type {
+  Difficulty,
+  ProfileHint,
+  TaskProfile,
+  ThinkingLevel,
+} from "./task.ts";
+export {
+  ALL_DIFFICULTIES,
+  deriveTaskProfileFromText,
+  difficultyForProfile,
+  isDifficulty,
+  isThinkingLevel,
+} from "./task.ts";

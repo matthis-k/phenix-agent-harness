@@ -2,7 +2,7 @@
  * Phenix QA — Process execution with AbortSignal support.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import type { ProcessResult, ProcessRunner } from "./types.ts";
 
 export const DEFAULT_PROCESS_RUNNER: ProcessRunner = {
@@ -41,10 +41,7 @@ export const DEFAULT_PROCESS_RUNNER: ProcessRunner = {
 
       let resolved = false;
 
-      function finish(
-        exitCode: number | null,
-        signal: string | null,
-      ): void {
+      function finish(exitCode: number | null, signal: string | null): void {
         if (resolved) return;
         resolved = true;
         const result: ProcessResult = {

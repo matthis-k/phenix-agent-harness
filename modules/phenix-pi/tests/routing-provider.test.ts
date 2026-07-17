@@ -1,16 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
-import type { ModelRef } from "../extensions/phenix-routing/types.ts";
 import { buildBundledConfig } from "../extensions/phenix-routing/config.ts";
-import { resolveRoute, type ModelRegistry } from "../extensions/phenix-routing/resolver.ts";
 import {
-  PHENIX_PROVIDER,
+  modelSetForModelId,
+  PHENIX_API,
   PHENIX_MODEL,
   PHENIX_MODEL_SETS,
-  PHENIX_API,
-  modelSetForModelId,
+  PHENIX_PROVIDER,
 } from "../extensions/phenix-routing/provider.ts";
+import { type ModelRegistry, resolveRoute } from "../extensions/phenix-routing/resolver.ts";
+import type { ModelRef } from "../extensions/phenix-routing/types.ts";
 
 /** Fake model registry for unit tests — no network calls. */
 class FakeRegistry implements ModelRegistry {
@@ -42,16 +41,10 @@ const GPT_MODELS: readonly ModelRef[] = [
   mr("openai-codex", "gpt-5.5"),
 ];
 
-const FREE_MODELS: readonly ModelRef[] = [
-  mr("opencode", "deepseek-v4-flash-free"),
-];
+const FREE_MODELS: readonly ModelRef[] = [mr("opencode", "deepseek-v4-flash-free")];
 
 function fullRegistry(): ModelRegistry {
-  return new FakeRegistry([
-    ...GO_MODELS,
-    ...GPT_MODELS,
-    ...FREE_MODELS,
-  ]);
+  return new FakeRegistry([...GO_MODELS, ...GPT_MODELS, ...FREE_MODELS]);
 }
 
 describe("Provider integration tests", () => {
@@ -99,7 +92,11 @@ describe("Provider integration tests", () => {
     // Verify no pool contains phenix/workflow
     for (const [poolName, candidates] of Object.entries(config.pools)) {
       for (const candidate of candidates) {
-        assert.notEqual(candidate, "phenix/workflow", `Pool ${poolName} illegally contains phenix/workflow`);
+        assert.notEqual(
+          candidate,
+          "phenix/workflow",
+          `Pool ${poolName} illegally contains phenix/workflow`,
+        );
       }
     }
   });
@@ -108,11 +105,7 @@ describe("Provider integration tests", () => {
     for (const setId of PHENIX_MODEL_SETS) {
       for (const [, candidates] of Object.entries(config.pools)) {
         for (const candidate of candidates) {
-          assert.notEqual(
-            candidate,
-            `phenix/${setId}`,
-            `Pool illegally contains phenix/${setId}`,
-          );
+          assert.notEqual(candidate, `phenix/${setId}`, `Pool illegally contains phenix/${setId}`);
         }
       }
     }
@@ -169,9 +162,11 @@ describe("Provider integration tests", () => {
         config,
       }),
       (err: Error) => {
-        return err.message.includes("No available candidates") &&
-               err.message.includes("gpt") &&
-               err.message.includes("reasoning");
+        return (
+          err.message.includes("No available candidates") &&
+          err.message.includes("gpt") &&
+          err.message.includes("reasoning")
+        );
       },
     );
   });

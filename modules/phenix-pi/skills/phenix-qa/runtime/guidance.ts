@@ -4,7 +4,7 @@
  * Discovers project-native commands and guidance documents.
  */
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RepositoryGuidance } from "./types.ts";
 
@@ -20,8 +20,8 @@ export function discoverGuidance(cwd: string): RepositoryGuidance {
     "package.json": "npm",
     "Cargo.toml": "cargo",
     "pyproject.toml": "python",
-    "Makefile": "make",
-    "justfile": "just",
+    Makefile: "make",
+    justfile: "just",
     "flake.nix": "nix",
     "go.mod": "go",
   });
@@ -79,12 +79,7 @@ export function discoverGuidance(cwd: string): RepositoryGuidance {
   const guidanceDocs: string[] = [];
   const architectureDocs: string[] = [];
 
-  const guidanceNames = [
-    "AGENTS.md",
-    "CLAUDE.md",
-    "CONTRIBUTING.md",
-    "README.md",
-  ];
+  const guidanceNames = ["AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "README.md"];
 
   for (const name of guidanceNames) {
     const candidate = join(guidanceRoot, name);
@@ -158,10 +153,7 @@ export function findProjectRoot(cwd: string): string {
   return cwd;
 }
 
-function discoverFileMarkers(
-  root: string,
-  markers: Record<string, string>,
-): string[] {
+function discoverFileMarkers(root: string, markers: Record<string, string>): string[] {
   const found: string[] = [];
   for (const [file, label] of Object.entries(markers)) {
     if (existsSync(join(root, file))) {

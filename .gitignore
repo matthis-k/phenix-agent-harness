@@ -1,4 +1,18 @@
-.phenix-agent-state/
+# Build outputs
+/target/
+/node_modules/
 result
+result-*
+
+# Local development state
 /.cache/
 /.pi-subagents
+.devenv/
+.direnv/
+.phenix-agent-state/
+.pre-commit-config.yaml
+
+# Diagnostics and temporary migration state
+*.log
+*.log.*
+.maintenance-trigger

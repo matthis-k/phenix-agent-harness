@@ -55,12 +55,7 @@ async function resolveDiffScope(
   const target = scope.targetRevision ?? "HEAD";
 
   // Get diff file list
-  const diffArgs = [
-    "diff",
-    "--name-status",
-    "-z",
-    `${base}...${target}`,
-  ];
+  const diffArgs = ["diff", "--name-status", "-z", `${base}...${target}`];
 
   // Also include unstaged changes if worktree is dirty
   try {
@@ -78,33 +73,26 @@ async function resolveDiffScope(
 /**
  * Resolve merge base against the default branch.
  */
-async function resolveMergeBase(
-  cwd: string,
-  runner: ProcessRunner,
-): Promise<string> {
+async function resolveMergeBase(cwd: string, runner: ProcessRunner): Promise<string> {
   // Try to detect the default branch
   try {
-    const result = await runner.exec(
-      "git",
-      ["rev-parse", "--abbrev-ref", "HEAD"],
-      { cwd, timeoutMs: 5_000 },
-    );
+    const result = await runner.exec("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd,
+      timeoutMs: 5_000,
+    });
     const branch = result.stdout.trim();
 
     // If on a branch, find merge base with origin/main or origin/master
     for (const defaultBranch of ["origin/main", "origin/master", "main", "master"]) {
       try {
-        const mbResult = await runner.exec(
-          "git",
-          ["merge-base", branch, defaultBranch],
-          { cwd, timeoutMs: 10_000 },
-        );
+        const mbResult = await runner.exec("git", ["merge-base", branch, defaultBranch], {
+          cwd,
+          timeoutMs: 10_000,
+        });
         if (mbResult.exitCode === 0 && mbResult.stdout.trim()) {
           return mbResult.stdout.trim();
         }
-      } catch {
-        continue;
-      }
+      } catch {}
     }
 
     return "HEAD~1";
@@ -116,10 +104,7 @@ async function resolveMergeBase(
 /**
  * Parse `git diff --name-status -z` output.
  */
-function parseDiffNameStatus(
-  output: string,
-  _success: boolean,
-): ScopeFiles {
+function parseDiffNameStatus(output: string, _success: boolean): ScopeFiles {
   const added: string[] = [];
   const modified: string[] = [];
   const renamed: string[] = [];
@@ -141,7 +126,7 @@ function parseDiffNameStatus(
     if (code === "R" || code === "C") {
       // Rename/copy: status contains old and new file names with tab
       i++;
-      const oldName = parts[i] ?? "";
+      const _oldName = parts[i] ?? "";
       i++;
       const newName = parts[i] ?? "";
       if (newName) {
@@ -194,7 +179,7 @@ function resolveExplicitFiles(scope: ReviewScope): ScopeFiles {
 /**
  * Resolve all tracked files in the repository.
  */
-async function resolveAllFiles(cwd: string): Promise<ScopeFiles> {
+async function resolveAllFiles(_cwd: string): Promise<ScopeFiles> {
   return {
     files: [],
     added: [],
@@ -215,7 +200,7 @@ export function isIgnoredPath(
 ): boolean {
   // Check literal path prefixes
   for (const ignore of ignorePaths) {
-    if (filePath.startsWith(ignore + "/") || filePath === ignore) {
+    if (filePath.startsWith(`${ignore}/`) || filePath === ignore) {
       return true;
     }
   }
@@ -246,11 +231,15 @@ function matchSimpleGlob(filePath: string, pattern: string): boolean {
 
   let index = 0;
   for (let i = 0; i < parts.length; i++) {
-    const part = parts[i]!;
+    const part = parts[i];
+    if (part === undefined) return false;
+
     if (part === "") {
       // Just a wildcard - skip to the next literal part
       if (i === parts.length - 1) return true; // trailing wildcard
-      const nextPart = parts[i + 1]!;
+      const nextPart = parts[i + 1];
+      if (nextPart === undefined) return true;
+
       index = filePath.indexOf(nextPart, index);
       if (index === -1) return false;
       i++; // consumed the next literal
@@ -273,7 +262,9 @@ export function isInChangedLines(
 ): boolean {
   if (!scopeFiles) return false;
   if (!line) return scopeFiles.files.includes(filePath);
-  return scopeFiles.modified.includes(filePath) ||
+  return (
+    scopeFiles.modified.includes(filePath) ||
     scopeFiles.added.includes(filePath) ||
-    scopeFiles.renamed.includes(filePath);
+    scopeFiles.renamed.includes(filePath)
+  );
 }

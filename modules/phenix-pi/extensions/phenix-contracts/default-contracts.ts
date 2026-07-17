@@ -7,8 +7,8 @@
  * - A fixed JSON Schema for output validation
  */
 
-import type { ContractDefinition } from "./definitions.ts";
 import { contractDefinitionId } from "../phenix-kernel/ids.ts";
+import type { ContractDefinition } from "./definitions.ts";
 
 // ── Scout handoff ──────────────────────────────────────────────────────────
 

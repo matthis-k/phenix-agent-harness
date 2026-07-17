@@ -3,8 +3,8 @@ import { describe, it } from "node:test";
 
 import {
   deriveTaskProfile,
-  resolveExecutionPolicy,
   type RuntimePolicyConfig,
+  resolveExecutionPolicy,
 } from "../extensions/phenix-subagents/policy.ts";
 
 const config: RuntimePolicyConfig = {

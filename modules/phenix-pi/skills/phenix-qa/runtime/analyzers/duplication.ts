@@ -7,11 +7,11 @@
 
 import { makeEvidence } from "../normalize.ts";
 import type {
-  QaAnalyzer,
-  QaAnalyzerContext,
-  QaAnalyzerAvailability,
-  QaAnalyzerResult,
   ProcessRunner,
+  QaAnalyzer,
+  QaAnalyzerAvailability,
+  QaAnalyzerContext,
+  QaAnalyzerResult,
 } from "../types.ts";
 
 const SUPPORTED_COMMANDS = ["jscpd"] as const;
@@ -20,9 +20,7 @@ export const DUPLICATION_ANALYZER: QaAnalyzer = {
   id: "duplication",
   categories: ["duplication", "clone-detection"],
 
-  async checkAvailability(
-    _context: QaAnalyzerContext,
-  ): Promise<QaAnalyzerAvailability> {
+  async checkAvailability(_context: QaAnalyzerContext): Promise<QaAnalyzerAvailability> {
     const { DEFAULT_PROCESS_RUNNER } = await import("../process.ts");
     const runner: ProcessRunner = DEFAULT_PROCESS_RUNNER;
 
@@ -43,9 +41,7 @@ export const DUPLICATION_ANALYZER: QaAnalyzer = {
             return { available: true, executable: result.stdout.trim() };
           }
         }
-      } catch {
-        continue;
-      }
+      } catch {}
     }
 
     return {
@@ -54,9 +50,7 @@ export const DUPLICATION_ANALYZER: QaAnalyzer = {
     };
   },
 
-  async run(
-    context: QaAnalyzerContext,
-  ): Promise<QaAnalyzerResult> {
+  async run(context: QaAnalyzerContext): Promise<QaAnalyzerResult> {
     const start = Date.now();
     const { DEFAULT_PROCESS_RUNNER } = await import("../process.ts");
     const runner: ProcessRunner = DEFAULT_PROCESS_RUNNER;
@@ -74,20 +68,12 @@ export const DUPLICATION_ANALYZER: QaAnalyzer = {
         if (whichResult.exitCode !== 0) continue;
 
         const timeoutMs =
-          context.config.timeouts.byAnalyzer?.["duplication"] ??
-          context.config.timeouts.defaultMs;
+          context.config.timeouts.byAnalyzer?.duplication ?? context.config.timeouts.defaultMs;
 
         // Run jscpd with JSON reporter
         const result = await runner.exec(
           cmd,
-          [
-            context.cwd,
-            "--reporters",
-            "json",
-            "--output",
-            context.artifactDirectory,
-            "--silent",
-          ],
+          [context.cwd, "--reporters", "json", "--output", context.artifactDirectory, "--silent"],
           {
             cwd: context.cwd,
             timeoutMs,
@@ -165,9 +151,7 @@ export const DUPLICATION_ANALYZER: QaAnalyzer = {
           durationMs: Date.now() - start,
         };
       } catch (error) {
-        diagnostics.push(
-          `${cmd}: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        diagnostics.push(`${cmd}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
@@ -182,9 +166,7 @@ export const DUPLICATION_ANALYZER: QaAnalyzer = {
   },
 };
 
-function normalizeJscpdOutput(
-  data: Record<string, unknown>,
-): ReturnType<typeof makeEvidence>[] {
+function normalizeJscpdOutput(data: Record<string, unknown>): ReturnType<typeof makeEvidence>[] {
   const evidence: ReturnType<typeof makeEvidence>[] = [];
   const clones = (data?.clones ?? data?.duplicates ?? []) as Array<Record<string, unknown>>;
 
@@ -201,10 +183,7 @@ function normalizeJscpdOutput(
         category: "duplicate-block",
         message: `Duplicate block: ${firstFile} ↔ ${secondFile} (${lines} lines, ${tokens} tokens)`,
         tool: "jscpd",
-        locations: [
-          { path: firstFile },
-          { path: secondFile },
-        ],
+        locations: [{ path: firstFile }, { path: secondFile }],
         metric: {
           name: "duplicatedLines",
           value: lines ?? 0,

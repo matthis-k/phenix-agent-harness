@@ -2,12 +2,7 @@ import type { AgentRole } from "../phenix-kernel/agents.ts";
 import { loadRoutingConfig } from "./config.ts";
 import { modelRegistry } from "./registry.ts";
 import { resolveRoute } from "./resolver.ts";
-import type {
-  Difficulty,
-  ModelSetId,
-  ResolvedRoute,
-  RoutingRole,
-} from "./types.ts";
+import type { Difficulty, ModelSetId, ResolvedRoute, RoutingRole } from "./types.ts";
 
 function routingRole(role: AgentRole): RoutingRole {
   return role === null ? "base" : role;

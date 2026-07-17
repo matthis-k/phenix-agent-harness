@@ -6,31 +6,31 @@
  */
 
 import type {
-  QaLevel,
-  QaEvidence,
-  QaFinding,
-  ReviewScope,
-  QaReport,
-  RiskScore,
-  RiskAssessment,
-  QualityGateReport,
   AnalysisCoverage,
   ArchitectureAssessment,
   ModelReviewContribution,
+  QaEvidence,
+  QaFinding,
+  QaLevel,
+  QaReport,
+  QualityGateReport,
+  ReviewScope,
+  RiskAssessment,
+  RiskScore,
 } from "../contracts/contracts.ts";
 
 export type {
-  QaLevel,
-  QaEvidence,
-  QaFinding,
-  ReviewScope,
-  QaReport,
-  RiskScore,
-  RiskAssessment,
-  QualityGateReport,
   AnalysisCoverage,
   ArchitectureAssessment,
   ModelReviewContribution,
+  QaEvidence,
+  QaFinding,
+  QaLevel,
+  QaReport,
+  QualityGateReport,
+  ReviewScope,
+  RiskAssessment,
+  RiskScore,
 };
 
 // ── Configuration ────────────────────────────────────────────────────────────
@@ -107,9 +107,7 @@ export interface QaAnalyzer {
   readonly id: string;
   readonly categories: readonly string[];
 
-  checkAvailability(
-    context: QaAnalyzerContext,
-  ): Promise<QaAnalyzerAvailability>;
+  checkAvailability(context: QaAnalyzerContext): Promise<QaAnalyzerAvailability>;
 
   run(context: QaAnalyzerContext): Promise<QaAnalyzerResult>;
 }

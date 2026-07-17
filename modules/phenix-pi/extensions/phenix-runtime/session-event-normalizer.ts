@@ -6,10 +6,7 @@
  * to produce the same normalized format.
  */
 
-import type {
-  ChildRunId,
-  ChildSessionEvent,
-} from "./child-session-types.ts";
+import type { ChildRunId, ChildSessionEvent } from "./child-session-types.ts";
 
 // ── Pi event shapes (structural — no Pi import required here) ───────────────
 
@@ -102,8 +99,5 @@ export function isSettlementEvent(raw: PiAgentEvent): boolean {
  * Determine whether a Pi event indicates a provider/model failure.
  */
 export function isFailureEvent(raw: PiAgentEvent): boolean {
-  return (
-    raw.type === "error" ||
-    (raw.type === "agent_end" && raw.error != null)
-  );
+  return raw.type === "error" || (raw.type === "agent_end" && raw.error != null);
 }
