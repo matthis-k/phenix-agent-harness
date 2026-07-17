@@ -75,9 +75,11 @@ export const PROJECT_NATIVE_ANALYZER: QaAnalyzer = {
 
       try {
         // Parse command: handle "npm run test", "make check", etc.
-        const parts = command.split(/\s+/);
-        const cmd = parts[0]!;
-        const args = parts.slice(1);
+        const [cmd, ...args] = command.trim().split(/\s+/);
+        if (!cmd) {
+          diagnostics.push("Skipped an empty project-native command.");
+          continue;
+        }
 
         const timeoutMs = context.config.timeouts.defaultMs;
         const result = await runner.exec(cmd, args, {
