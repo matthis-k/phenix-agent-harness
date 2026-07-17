@@ -7,7 +7,13 @@ import {
 } from "../extensions/phenix-integrations/opencode-go-compat.ts";
 
 describe("OpenCode Go payload compatibility", () => {
-  it("removes Anthropic cache markers from nested OpenAI payloads", () => {
+  it("removes wire cache markers without changing tool schemas", () => {
+    const parameters = {
+      type: "object",
+      properties: {
+        cache_control: { type: "string" },
+      },
+    };
     const payload = {
       model: "deepseek-v4-flash",
       messages: [
@@ -29,7 +35,7 @@ describe("OpenCode Go payload compatibility", () => {
       tools: [
         {
           type: "function",
-          function: { name: "read", parameters: { type: "object" } },
+          function: { name: "read", parameters },
           cache_control: { type: "ephemeral" },
         },
       ],
@@ -50,7 +56,7 @@ describe("OpenCode Go payload compatibility", () => {
       tools: [
         {
           type: "function",
-          function: { name: "read", parameters: { type: "object" } },
+          function: { name: "read", parameters },
         },
       ],
     });
