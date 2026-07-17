@@ -1,4 +1,4 @@
-name: Normalize maintenance PR
+name: Normalize harness maintenance PR
 
 on:
   push:
