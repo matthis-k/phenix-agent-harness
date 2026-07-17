@@ -57,15 +57,4 @@ let
 in
 {
   inherit agentRuntime harnessRuntime quality;
-
-  tendRuntime =
-    quality
-    ++ (with pkgs; [
-      ast-grep
-      bash
-      git
-      nix
-      nodejs
-      typescript
-    ]);
 }
