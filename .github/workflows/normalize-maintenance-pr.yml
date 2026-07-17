@@ -26,9 +26,16 @@ jobs:
         with: { name: devenv }
       - run: nix profile add nixpkgs#devenv
       - name: Apply safe maintenance fixes
+        shell: bash
         run: |
+          set +e
+          devenv tasks run maintenance:fix > normalize.log 2>&1
+          status=$?
+          tail -n 260 normalize.log
+          if (( status != 0 )); then
+            exit "$status"
+          fi
           set -euo pipefail
-          devenv tasks run maintenance:fix
           nix flake lock
           rm .github/workflows/normalize-maintenance-pr.yml
           git config user.name github-actions[bot]
@@ -36,3 +43,10 @@ jobs:
           git add -A
           git diff --cached --quiet || git commit -m "chore: normalize standalone maintenance"
           git push origin HEAD:refactor/standalone-devenv-maintenance
+      - name: Upload normalization diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-normalize-log
+          path: normalize.log
+          if-no-files-found: error
