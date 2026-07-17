@@ -42,26 +42,33 @@ function sanitizeTool(value: unknown): unknown {
 export function stripAnthropicCacheControl(value: unknown): unknown {
   if (!isJsonObject(value)) return value;
 
-  let changed = false;
+  let messagesChanged = false;
   let messages = value.messages;
   if (Array.isArray(value.messages)) {
     messages = value.messages.map((message) => {
       const next = sanitizeMessage(message);
-      changed ||= next !== message;
+      messagesChanged ||= next !== message;
       return next;
     });
   }
 
+  let toolsChanged = false;
   let tools = value.tools;
   if (Array.isArray(value.tools)) {
     tools = value.tools.map((tool) => {
       const next = sanitizeTool(tool);
-      changed ||= next !== tool;
+      toolsChanged ||= next !== tool;
       return next;
     });
   }
 
-  return changed ? { ...value, messages, tools } : value;
+  if (!messagesChanged && !toolsChanged) return value;
+
+  return {
+    ...value,
+    ...(messagesChanged ? { messages } : {}),
+    ...(toolsChanged ? { tools } : {}),
+  };
 }
 
 export function requiresOpenCodeGoPayloadSanitization(
