@@ -6,7 +6,7 @@
     nixpkgs.follows = "phenix-pins/nixpkgs";
 
     phenix-stitch = {
-      url = "github:matthis-k/phenix-stitch?ref=refactor/scoped-stitch-maintenance";
+      url = "github:matthis-k/phenix-stitch";
       inputs = {
         flake-parts.follows = "phenix-pins/flake-parts";
         phenix-pins.follows = "phenix-pins";
