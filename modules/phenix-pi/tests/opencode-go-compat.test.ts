@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import {
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import registerOpenCodeGoCompatibility, {
   requiresOpenCodeGoPayloadSanitization,
   stripAnthropicCacheControl,
 } from "../extensions/phenix-integrations/opencode-go-compat.ts";
@@ -93,5 +94,44 @@ describe("OpenCode Go payload compatibility", () => {
       }),
       false,
     );
+  });
+
+  it("rewrites the matching provider payload before dispatch", () => {
+    type Handler = (
+      event: { payload: unknown },
+      ctx: { model: { provider: string; api: string } },
+    ) => unknown;
+
+    let handler: Handler | undefined;
+    const pi = {
+      on(event: string, candidate: Handler) {
+        if (event === "before_provider_request") handler = candidate;
+      },
+    } as unknown as ExtensionAPI;
+
+    registerOpenCodeGoCompatibility(pi);
+
+    const payload = {
+      messages: [
+        {
+          role: "system",
+          content: [{ type: "text", text: "prompt", cache_control: { type: "ephemeral" } }],
+        },
+      ],
+    };
+    const result = handler?.(
+      { payload },
+      { model: { provider: "opencode-go", api: "openai-completions" } },
+    );
+
+    assert.deepEqual(result, {
+      messages: [
+        {
+          role: "system",
+          content: [{ type: "text", text: "prompt" }],
+        },
+      ],
+      tools: undefined,
+    });
   });
 });
