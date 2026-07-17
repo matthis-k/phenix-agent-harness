@@ -1,8 +1,11 @@
-import type { ExtensionAPI, Model } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 type JsonObject = Record<string, unknown>;
 
-type ProviderModel = Pick<Model<any>, "api" | "provider">;
+type ProviderModel = {
+  readonly api?: string;
+  readonly provider?: string;
+};
 
 function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
