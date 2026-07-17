@@ -7,10 +7,7 @@ import {
 import { getExecArgs, resolveHypaBinary } from "@hypabolic/pi-hypa/extensions/rewrite-client.ts";
 import { buildReadCommand } from "@hypabolic/pi-hypa/extensions/tools.ts";
 import { Type } from "typebox";
-import {
-  createDeferredHypaReadRegistration,
-  ensureReadActive,
-} from "./hypa-read-policy.ts";
+import { createDeferredHypaReadRegistration, ensureReadActive } from "./hypa-read-policy.ts";
 
 const readSchema = Type.Object({
   path: Type.String({ description: "Path to the file to read (relative or absolute)" }),
