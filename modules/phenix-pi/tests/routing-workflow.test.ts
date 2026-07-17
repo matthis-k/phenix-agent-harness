@@ -19,9 +19,7 @@ import { describe, it } from "node:test";
 import { buildBundledConfig } from "../extensions/phenix-routing/config.ts";
 import {
   modelSetForModelId,
-  PHENIX_MODEL,
   PHENIX_MODEL_SETS,
-  PHENIX_PROVIDER,
 } from "../extensions/phenix-routing/provider.ts";
 import { type ModelRegistry, resolveRoute } from "../extensions/phenix-routing/resolver.ts";
 import {
@@ -73,14 +71,6 @@ const ALL_POOL_MODELS: readonly ModelRef[] = [
 
 function fullRegistry(): ModelRegistry {
   return new FakeRegistry(ALL_POOL_MODELS);
-}
-
-function goOnlyRegistry(): ModelRegistry {
-  return new FakeRegistry(ALL_POOL_MODELS.filter((m) => m.provider === "opencode-go"));
-}
-
-function gptOnlyRegistry(): ModelRegistry {
-  return new FakeRegistry(ALL_POOL_MODELS.filter((m) => m.provider === "openai-codex"));
 }
 
 const EMPTY_REGISTRY = new FakeRegistry([]);
