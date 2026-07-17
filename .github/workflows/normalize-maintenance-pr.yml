@@ -1,0 +1,38 @@
+name: Normalize maintenance PR
+
+on:
+  push:
+    branches: [refactor/standalone-devenv-maintenance]
+    paths: [.github/workflows/normalize-maintenance-pr.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: refactor/standalone-devenv-maintenance
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - uses: cachix/cachix-action@v17
+        with: { name: devenv }
+      - run: nix profile add nixpkgs#devenv
+      - name: Apply safe maintenance fixes
+        run: |
+          set -euo pipefail
+          devenv tasks run maintenance:fix
+          nix flake lock
+          rm .github/workflows/normalize-maintenance-pr.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --quiet || git commit -m "chore: normalize standalone maintenance"
+          git push origin HEAD:refactor/standalone-devenv-maintenance
