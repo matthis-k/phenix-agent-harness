@@ -25,9 +25,66 @@ jobs:
       - uses: cachix/cachix-action@v17
         with: { name: devenv }
       - run: nix profile add nixpkgs#devenv
-      - name: Apply safe maintenance fixes
+      - name: Repair lint blockers and apply safe fixes
         shell: bash
         run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          integration = Path("modules/phenix-pi/tests/routing-integration.test.ts")
+          text = integration.read_text()
+          text = text.replace(
+              "const guard = config.guards?.free!;",
+              "const guard = config.guards?.free;\n    assert.ok(guard, \"Missing free routing guard\");",
+          )
+          integration.write_text(text)
+
+          matrix = Path("modules/phenix-pi/tests/routing-matrix.test.ts")
+          text = matrix.read_text()
+          replacements = {
+              "const guard = config.guards?.free!;": "const guard = config.guards?.free;\n    assert.ok(guard, \"Missing free routing guard\");",
+              'const guard = config.guards?.["opencode-go"]!;': 'const guard = config.guards?.["opencode-go"];\n    assert.ok(guard, "Missing opencode-go routing guard");',
+              "const guard = config.guards?.gpt!;": "const guard = config.guards?.gpt;\n    assert.ok(guard, \"Missing GPT routing guard\");",
+              "const guard = config.guards?.mixed!;": "const guard = config.guards?.mixed;\n    assert.ok(guard, \"Missing mixed routing guard\");",
+          }
+          for old, new in replacements.items():
+              text = text.replace(old, new)
+          matrix.write_text(text)
+
+          workflow = Path("modules/phenix-pi/tests/routing-workflow.test.ts")
+          text = workflow.read_text()
+          text = text.replace(
+              '''import {
+            PHENIX_PROVIDER,
+            PHENIX_MODEL,
+            PHENIX_MODEL_SETS,
+            modelSetForModelId,
+          } from "../extensions/phenix-routing/provider.ts";''',
+              '''import {
+            PHENIX_MODEL_SETS,
+            modelSetForModelId,
+          } from "../extensions/phenix-routing/provider.ts";''',
+          )
+          text = text.replace(
+              '''function goOnlyRegistry(): ModelRegistry {
+            return new FakeRegistry(ALL_POOL_MODELS.filter((m) => m.provider === "opencode-go"));
+          }
+
+          function gptOnlyRegistry(): ModelRegistry {
+            return new FakeRegistry(ALL_POOL_MODELS.filter((m) => m.provider === "openai-codex"));
+          }
+
+          ''',
+              "",
+          )
+          text = text.replace(
+              "runtime.modelSet = explicitModelSet!;",
+              'assert.ok(explicitModelSet, "Expected an explicit model set");\n    runtime.modelSet = explicitModelSet;',
+          )
+          workflow.write_text(text)
+          PY
+
           set +e
           devenv tasks run maintenance:fix > normalize.log 2>&1
           status=$?
@@ -35,13 +92,14 @@ jobs:
           if (( status != 0 )); then
             exit "$status"
           fi
+
           set -euo pipefail
           nix flake lock
           rm .github/workflows/normalize-maintenance-pr.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git diff --cached --quiet || git commit -m "chore: normalize standalone maintenance"
+          git diff --cached --quiet || git commit -m "fix: satisfy harness maintenance policy"
           git push origin HEAD:refactor/standalone-devenv-maintenance
       - name: Upload normalization diagnostics
         if: failure()
