@@ -84,10 +84,7 @@
             git commit --quiet -m init
 
             stitch --version
-            stitch workspace discover \
-              --workspace . \
-              --repository-pattern 'phenix-*' \
-              --json > discovery.json
+            stitch workspace discover . --json > discovery.json
 
             jq -e '
               (.repos | length) == 1 and
