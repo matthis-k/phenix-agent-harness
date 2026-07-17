@@ -91,7 +91,9 @@ export class ContractSubmissionChannelImpl implements ContractSubmissionChannel 
       };
     } catch (error) {
       if (error instanceof ContractStoreError) {
-        const cause = (error as any).cause;
+        const cause = "cause" in error ? error.cause : undefined;
+        const causeMessage =
+          cause instanceof Error ? cause.message : cause === undefined ? undefined : String(cause);
         return {
           ok: false,
           state: "cancelled" as ContractResultState,
@@ -101,7 +103,7 @@ export class ContractSubmissionChannelImpl implements ContractSubmissionChannel 
                 issues: [
                   {
                     path: ["store"],
-                    message: error.message + (cause ? ` Cause: ${cause.message ?? cause}` : ""),
+                    message: error.message + (causeMessage ? ` Cause: ${causeMessage}` : ""),
                   },
                 ],
               }
