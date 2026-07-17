@@ -91,7 +91,7 @@ export const STRUCTURAL_ANALYZER: QaAnalyzer = {
 
       try {
         const timeoutMs =
-          context.config.timeouts.byAnalyzer?.["structural"] ?? context.config.timeouts.defaultMs;
+          context.config.timeouts.byAnalyzer?.structural ?? context.config.timeouts.defaultMs;
 
         // Use ast-grep scan with SARIF output
         const result = await runner.exec(
@@ -108,7 +108,7 @@ export const STRUCTURAL_ANALYZER: QaAnalyzer = {
         const rawPath = writeRawArtifact(
           context.artifactDirectory,
           `structural-${ruleDir.replace(/[^a-zA-Z0-9]/g, "-")}`,
-          result.stdout + "\n" + result.stderr,
+          `${result.stdout}\n${result.stderr}`,
           "txt",
         );
         artifacts.push(rawPath);

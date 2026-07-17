@@ -126,7 +126,7 @@ function parseDiffNameStatus(output: string, _success: boolean): ScopeFiles {
     if (code === "R" || code === "C") {
       // Rename/copy: status contains old and new file names with tab
       i++;
-      const oldName = parts[i] ?? "";
+      const _oldName = parts[i] ?? "";
       i++;
       const newName = parts[i] ?? "";
       if (newName) {
@@ -179,7 +179,7 @@ function resolveExplicitFiles(scope: ReviewScope): ScopeFiles {
 /**
  * Resolve all tracked files in the repository.
  */
-async function resolveAllFiles(cwd: string): Promise<ScopeFiles> {
+async function resolveAllFiles(_cwd: string): Promise<ScopeFiles> {
   return {
     files: [],
     added: [],
@@ -200,7 +200,7 @@ export function isIgnoredPath(
 ): boolean {
   // Check literal path prefixes
   for (const ignore of ignorePaths) {
-    if (filePath.startsWith(ignore + "/") || filePath === ignore) {
+    if (filePath.startsWith(`${ignore}/`) || filePath === ignore) {
       return true;
     }
   }

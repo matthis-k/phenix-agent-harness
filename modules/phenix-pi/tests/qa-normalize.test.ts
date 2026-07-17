@@ -43,8 +43,8 @@ describe("Evidence normalization", () => {
       locations: [{ path: "src/a.ts", startLine: 10, endLine: 20 }],
     });
     assert.equal(ev.locations.length, 1);
-    assert.equal(ev.locations[0]!.path, "src/a.ts");
-    assert.equal(ev.locations[0]!.startLine, 10);
+    assert.equal(ev.locations[0]?.path, "src/a.ts");
+    assert.equal(ev.locations[0]?.startLine, 10);
   });
 
   it("preserves metrics", () => {
@@ -57,9 +57,9 @@ describe("Evidence normalization", () => {
       metric: { name: "cyclomaticComplexity", value: 25, threshold: 20, unit: "count" },
     });
     assert.ok(ev.metric);
-    assert.equal(ev.metric!.name, "cyclomaticComplexity");
-    assert.equal(ev.metric!.value, 25);
-    assert.equal(ev.metric!.threshold, 20);
+    assert.equal(ev.metric?.name, "cyclomaticComplexity");
+    assert.equal(ev.metric?.value, 25);
+    assert.equal(ev.metric?.threshold, 20);
   });
 
   it("preserves tool and ruleId", () => {
@@ -91,8 +91,8 @@ describe("Evidence normalization", () => {
       message: "m2",
     });
     assert.notEqual(ev1.id, ev2.id);
-    const num1 = parseInt(ev1.id.match(/\d+/)![0], 10);
-    const num2 = parseInt(ev2.id.match(/\d+/)![0], 10);
+    const num1 = parseInt(ev1.id.match(/\d+/)?.[0], 10);
+    const num2 = parseInt(ev2.id.match(/\d+/)?.[0], 10);
     assert.equal(num2, num1 + 1);
   });
 });
@@ -245,11 +245,11 @@ describe("SARIF normalization", () => {
     };
     const result = normalizeSarif(sarif, "semgrep", "security-tool", "level-7-security");
     assert.equal(result.length, 1);
-    assert.equal(result[0]!.ruleId, "test-rule-001");
-    assert.equal(result[0]!.message, "Found an issue");
-    assert.equal(result[0]!.locations[0]!.path, "src/test.ts");
-    assert.equal(result[0]!.locations[0]!.startLine, 10);
-    assert.equal(result[0]!.rawReference, "1.0.0");
+    assert.equal(result[0]?.ruleId, "test-rule-001");
+    assert.equal(result[0]?.message, "Found an issue");
+    assert.equal(result[0]?.locations[0]?.path, "src/test.ts");
+    assert.equal(result[0]?.locations[0]?.startLine, 10);
+    assert.equal(result[0]?.rawReference, "1.0.0");
   });
 
   it("normalizes SARIF with artifact index references", () => {
@@ -273,6 +273,6 @@ describe("SARIF normalization", () => {
     };
     const result = normalizeSarif(sarif, "test", "structural-rule", "level-3-patterns");
     assert.equal(result.length, 1);
-    assert.equal(result[0]!.locations[0]!.path, "src/indexed.ts");
+    assert.equal(result[0]?.locations[0]?.path, "src/indexed.ts");
   });
 });

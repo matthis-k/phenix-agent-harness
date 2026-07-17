@@ -123,7 +123,7 @@ export function buildReportSkeleton(params: {
 export function calculateGates(
   findings: readonly QaFinding[],
   coverage: AnalysisCoverage,
-  config: QaConfig,
+  _config: QaConfig,
 ): QualityGateReport {
   const correctnessFindings = findings.filter((f) => f.level === "level-0-correctness");
   const metricsFindings = findings.filter((f) => f.level === "level-1-metrics");
@@ -289,8 +289,8 @@ export function calculateRiskScores(
     };
   };
 
-  const allUnavailable = evidence
-    .filter((e) => {
+  const _allUnavailable = evidence
+    .filter((_e) => {
       // Heuristic: evidence from unavailable analyzers
       return false; // TODO: propagate from analyzer results
     })

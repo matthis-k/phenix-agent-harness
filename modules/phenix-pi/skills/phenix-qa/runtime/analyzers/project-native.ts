@@ -6,7 +6,7 @@
 
 import { writeRawArtifact } from "../artifacts.ts";
 import { discoverGuidance } from "../guidance.ts";
-import { makeEvidence, nextEvidenceId } from "../normalize.ts";
+import { makeEvidence } from "../normalize.ts";
 import type {
   ProcessRunner,
   QaAnalyzer,
@@ -97,7 +97,7 @@ export const PROJECT_NATIVE_ANALYZER: QaAnalyzer = {
         artifacts.push(rawPath);
 
         // Summarize output
-        const stdoutTail = result.stdout.slice(-500);
+        const _stdoutTail = result.stdout.slice(-500);
         const stderrTail = result.stderr.slice(-500);
 
         if (result.timedOut) {

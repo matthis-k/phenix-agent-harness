@@ -66,7 +66,7 @@ export function resolveDelegationOptions(input: {
   };
 
   // Pre-compute active handle IDs for conflict detection
-  const activeHandleIds = new Set(runtime.active.map((a) => a.handleId));
+  const _activeHandleIds = new Set(runtime.active.map((a) => a.handleId));
 
   for (const transition of definition.transitions) {
     // Only delegate transitions

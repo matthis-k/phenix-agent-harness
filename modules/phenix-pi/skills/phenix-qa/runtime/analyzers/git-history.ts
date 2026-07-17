@@ -189,16 +189,16 @@ export const GIT_HISTORY_ANALYZER: QaAnalyzer = {
 function parseChurn(output: string): ChurnResult[] {
   const counts = new Map<string, { count: number; authors: Set<string>; seenFirst: boolean }>();
   const lines = output.split("\n");
-  let currentCommit = "";
+  let _currentCommit = "";
 
   for (const line of lines) {
     if (!line.trim()) {
-      currentCommit = "";
+      _currentCommit = "";
       continue;
     }
 
     if (line.length === 40 && /^[0-9a-f]{40}$/.test(line)) {
-      currentCommit = line;
+      _currentCommit = line;
       continue;
     }
 

@@ -45,7 +45,7 @@ export class BuiltinAgentDiscovery implements AgentDiscoveryHelper {
     this.agentsDir = fileURLToPath(new URL("../../agents", import.meta.url));
   }
 
-  async discoverAgents(input: {
+  async discoverAgents(_input: {
     readonly cwd: string;
     readonly scope: "both";
   }): Promise<readonly DiscoveredAgentDefinition[]> {

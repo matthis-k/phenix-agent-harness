@@ -65,7 +65,7 @@ export const SECURITY_ANALYZER: QaAnalyzer = {
       }
 
       const timeoutMs =
-        context.config.timeouts.byAnalyzer?.["security"] ?? context.config.timeouts.defaultMs;
+        context.config.timeouts.byAnalyzer?.security ?? context.config.timeouts.defaultMs;
 
       // Run semgrep with SARIF output
       const result = await runner.exec(

@@ -4,7 +4,7 @@
  * Produces human-readable QA report output.
  */
 
-import type { QaEvidence, QaFinding, QaReport, RiskAssessment } from "../contracts/contracts.ts";
+import type { QaReport } from "../contracts/contracts.ts";
 
 export function renderTextReport(report: QaReport): string {
   const lines: string[] = [];
@@ -228,7 +228,7 @@ function groupBy<T, K extends string>(
   for (const item of items) {
     const key = keyFn(item);
     if (!result[key]) result[key] = [];
-    result[key]!.push(item);
+    result[key]?.push(item);
   }
   return result;
 }

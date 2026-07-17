@@ -68,7 +68,7 @@ export const DUPLICATION_ANALYZER: QaAnalyzer = {
         if (whichResult.exitCode !== 0) continue;
 
         const timeoutMs =
-          context.config.timeouts.byAnalyzer?.["duplication"] ?? context.config.timeouts.defaultMs;
+          context.config.timeouts.byAnalyzer?.duplication ?? context.config.timeouts.defaultMs;
 
         // Run jscpd with JSON reporter
         const result = await runner.exec(

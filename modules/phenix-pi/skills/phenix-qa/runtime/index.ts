@@ -6,18 +6,13 @@
 
 import type {
   AnalysisCoverage,
-  ModelReviewContribution,
   QaEvidence,
   QaFinding,
   QaReport,
   ReviewScope,
 } from "../contracts/contracts.ts";
-import {
-  assertQaReport,
-  validateModelReviewContribution,
-  validateQaReport,
-} from "../contracts/contracts.ts";
-import { ALL_ANALYZERS, getAnalyzers, listAnalyzerIds } from "./analyzers/registry.ts";
+import { validateModelReviewContribution, validateQaReport } from "../contracts/contracts.ts";
+import { ALL_ANALYZERS, getAnalyzers } from "./analyzers/registry.ts";
 import { ensureArtifactDir, writeJsonArtifact, writeTextArtifact } from "./artifacts.ts";
 import { checkAllAvailability } from "./availability.ts";
 import { DEFAULT_QA_CONFIG, discoverRepoConfig, mergeConfig } from "./config.ts";
@@ -97,7 +92,7 @@ export async function review(options: QaReviewOptions): Promise<QaReviewResult> 
   );
 
   // 5. Discover repository guidance
-  const guidance = discoverGuidance(cwd);
+  const _guidance = discoverGuidance(cwd);
 
   // 6. Create analyzer context
   const context = {

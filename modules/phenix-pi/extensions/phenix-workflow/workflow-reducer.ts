@@ -62,7 +62,7 @@ export function factsFromTransitionResult(
  * This handles the state transition itself - the store manages revision and concurrency.
  */
 export function advanceWorkflowState(
-  record: WorkflowRuntimeRecord,
+  _record: WorkflowRuntimeRecord,
   transition: DelegateTransition,
   accepted: boolean,
 ): WorkflowStateId {

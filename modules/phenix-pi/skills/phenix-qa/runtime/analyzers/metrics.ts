@@ -20,7 +20,7 @@ export const METRICS_ANALYZER: QaAnalyzer = {
   id: "metrics",
   categories: ["metrics", "complexity"],
 
-  async checkAvailability(context: QaAnalyzerContext): Promise<QaAnalyzerAvailability> {
+  async checkAvailability(_context: QaAnalyzerContext): Promise<QaAnalyzerAvailability> {
     const { DEFAULT_PROCESS_RUNNER } = await import("../process.ts");
     const runner: ProcessRunner = DEFAULT_PROCESS_RUNNER;
 
@@ -90,7 +90,7 @@ export const METRICS_ANALYZER: QaAnalyzer = {
         }
 
         const timeoutMs =
-          context.config.timeouts.byAnalyzer?.["metrics"] ?? context.config.timeouts.defaultMs;
+          context.config.timeouts.byAnalyzer?.metrics ?? context.config.timeouts.defaultMs;
 
         const result = await runner.exec(execCmd, execArgs, {
           cwd: context.cwd,

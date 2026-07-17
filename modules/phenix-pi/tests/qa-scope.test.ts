@@ -108,7 +108,7 @@ describe("Scope resolution", () => {
       let callCount = 0;
       const runner: ProcessRunner = {
         async exec(
-          command: string,
+          _command: string,
           args: readonly string[],
           _options?: unknown,
         ): Promise<ProcessResult> {

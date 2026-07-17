@@ -333,7 +333,7 @@ describe("Model contribution merging", () => {
     const merged = mergeModelContribution(skeleton, contribution);
     assert.equal(merged.findings.length, 1);
     assert.equal(merged.positiveObservations.length, 1);
-    assert.ok(merged.positiveObservations[0]!.includes("Good code."));
+    assert.ok(merged.positiveObservations[0]?.includes("Good code."));
   });
 
   it("does not duplicate findings with same ID", () => {

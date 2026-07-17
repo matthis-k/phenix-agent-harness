@@ -10,17 +10,11 @@ import { describe, it } from "node:test";
 import { DUPLICATION_ANALYZER } from "../skills/phenix-qa/runtime/analyzers/duplication.ts";
 import { GIT_HISTORY_ANALYZER } from "../skills/phenix-qa/runtime/analyzers/git-history.ts";
 import { METRICS_ANALYZER } from "../skills/phenix-qa/runtime/analyzers/metrics.ts";
-import { PROJECT_NATIVE_ANALYZER } from "../skills/phenix-qa/runtime/analyzers/project-native.ts";
 import { ALL_ANALYZERS } from "../skills/phenix-qa/runtime/analyzers/registry.ts";
 import { SECURITY_ANALYZER } from "../skills/phenix-qa/runtime/analyzers/security.ts";
 import { STRUCTURAL_ANALYZER } from "../skills/phenix-qa/runtime/analyzers/structural.ts";
 import { DEFAULT_QA_CONFIG } from "../skills/phenix-qa/runtime/config.ts";
-import type {
-  ProcessResult,
-  ProcessRunner,
-  QaAnalyzer,
-  QaAnalyzerContext,
-} from "../skills/phenix-qa/runtime/types.ts";
+import type { QaAnalyzerContext } from "../skills/phenix-qa/runtime/types.ts";
 
 function makeContext(overrides: Partial<QaAnalyzerContext> = {}): QaAnalyzerContext {
   const dir = mkdtempSync(join(tmpdir(), "qa-test-"));
