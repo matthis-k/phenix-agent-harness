@@ -131,7 +131,6 @@ describe("OpenCode Go payload compatibility", () => {
           content: [{ type: "text", text: "prompt" }],
         },
       ],
-      tools: undefined,
     });
   });
 });
