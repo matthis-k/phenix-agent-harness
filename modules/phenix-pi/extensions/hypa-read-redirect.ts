@@ -23,49 +23,56 @@ function formatFailure(stdout: string, stderr: string, code: number): string {
 }
 
 export default function registerHypaReadRedirect(pi: ExtensionAPI): void {
-  if (!hasHypaReadTool(pi.getAllTools())) return;
-
   const configuredBinary = process.env.HYPA_BIN?.trim() || "hypa";
   const binary = resolveHypaBinary(configuredBinary);
+  let registered = false;
 
-  pi.registerTool({
-    name: "read",
-    label: "read",
-    description:
-      "Read file contents through Hypa compression. Supports offset/limit line slices. " +
-      `Output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB.`,
-    promptSnippet: "Read file contents through Hypa compression",
-    promptGuidelines: [
-      "Use read to inspect files instead of cat or sed; Phenix routes read through Hypa " +
-        "when Hypa is available.",
-    ],
-    parameters: readSchema,
-    async execute(_toolCallId, params, signal) {
-      const command = buildReadCommand(params.path, params.offset, params.limit);
-      const [execBin, execArgs] = getExecArgs(binary, ["-c", command]);
-      const result = await pi.exec(execBin, execArgs, { signal });
+  const registerReadTool = (): void => {
+    if (registered || !hasHypaReadTool(pi.getAllTools())) return;
 
-      if (result.killed) {
-        throw new Error("Hypa read was cancelled or timed out.");
-      }
-      if (result.code !== 0) {
-        throw new Error(formatFailure(result.stdout, result.stderr, result.code));
-      }
+    pi.registerTool({
+      name: "read",
+      label: "read",
+      description:
+        "Read file contents through Hypa compression. Supports offset/limit line slices. " +
+        `Output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB.`,
+      promptSnippet: "Read file contents through Hypa compression",
+      promptGuidelines: [
+        "Use read to inspect files instead of cat or sed; Phenix routes read through Hypa " +
+          "when Hypa is available.",
+      ],
+      parameters: readSchema,
+      async execute(_toolCallId, params, signal) {
+        const command = buildReadCommand(params.path, params.offset, params.limit);
+        const [execBin, execArgs] = getExecArgs(binary, ["-c", command]);
+        const result = await pi.exec(execBin, execArgs, { signal });
 
-      const combined = [result.stdout, result.stderr]
-        .filter((part) => part.length > 0)
-        .join(result.stdout && result.stderr ? "\n" : "");
-      const truncation = truncateHead(combined);
-      const text = truncation.truncated
-        ? `${truncation.content}\n\n[Hypa read output truncated at ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB.]`
-        : truncation.content || "(empty file)";
+        if (result.killed) {
+          throw new Error("Hypa read was cancelled or timed out.");
+        }
+        if (result.code !== 0) {
+          throw new Error(formatFailure(result.stdout, result.stderr, result.code));
+        }
 
-      return {
-        content: [{ type: "text" as const, text }],
-        details: truncation.truncated ? { truncation } : undefined,
-      };
-    },
-  });
+        const combined = [result.stdout, result.stderr]
+          .filter((part) => part.length > 0)
+          .join(result.stdout && result.stderr ? "\n" : "");
+        const truncation = truncateHead(combined);
+        const text = truncation.truncated
+          ? `${truncation.content}\n\n[Hypa read output truncated at ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB.]`
+          : truncation.content || "(empty file)";
+
+        return {
+          content: [{ type: "text" as const, text }],
+          details: truncation.truncated ? { truncation } : undefined,
+        };
+      },
+    });
+
+    registered = true;
+  };
+
+  pi.on("session_start", registerReadTool);
 
   if ((process.env.HYPA_PI_MODE ?? "additive") === "replace") {
     pi.on("before_agent_start", () => {
