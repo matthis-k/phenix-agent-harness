@@ -206,12 +206,11 @@ function validateCompositeScore(report: QaReport, issues: SemanticValidationIssu
 function validateRemediationReferences(report: QaReport, issues: SemanticValidationIssue[]): void {
   const findingIds = new Set(report.findings.map((f) => f.id));
 
-  for (let i = 0; i < report.remediationPlan.length; i++) {
-    const item = report.remediationPlan[i]!;
+  for (const [index, item] of report.remediationPlan.entries()) {
     for (const findingId of item.findingIds) {
       if (!findingIds.has(findingId)) {
         issues.push({
-          path: `remediationPlan.${i}.findingIds`,
+          path: `remediationPlan.${index}.findingIds`,
           message: `Remediation reference "${findingId}" not found in report findings.`,
         });
       }
