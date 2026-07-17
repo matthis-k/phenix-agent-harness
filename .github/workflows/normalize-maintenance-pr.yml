@@ -1,15 +1,15 @@
 name: Normalize harness maintenance PR
 
 on:
-  push:
-    branches: [refactor/standalone-devenv-maintenance]
-    paths: [.github/workflows/normalize-maintenance-pr.yml]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: write
 
 jobs:
   normalize:
+    if: github.event.pull_request.head.ref == 'refactor/standalone-devenv-maintenance'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
