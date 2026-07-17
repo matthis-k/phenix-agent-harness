@@ -2,3 +2,6 @@
 result
 /.cache/
 /.pi-subagents
+.devenv/
+.direnv/
+.pre-commit-config.yaml
