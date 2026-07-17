@@ -1,0 +1,44 @@
+name: Repair Biome backlog
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.event.pull_request.head.ref == 'refactor/standalone-devenv-maintenance'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: refactor/standalone-devenv-maintenance
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: Apply deterministic Biome fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          nix profile add nixpkgs#biome
+          biome check \
+            --write \
+            --unsafe \
+            --no-errors-on-unmatched \
+            --files-ignore-unknown=true \
+            biome.json modules
+
+          if git diff --quiet -- biome.json modules; then
+            exit 0
+          fi
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add biome.json modules
+          git commit -m "style: apply deterministic Biome fixes"
+          git push origin HEAD:refactor/standalone-devenv-maintenance
