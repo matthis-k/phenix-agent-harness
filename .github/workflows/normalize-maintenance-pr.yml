@@ -11,7 +11,9 @@ jobs:
   normalize:
     if: github.event.pull_request.head.ref == 'refactor/standalone-devenv-maintenance'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -25,16 +27,40 @@ jobs:
       - uses: cachix/cachix-action@v17
         with: { name: devenv }
       - run: nix profile add nixpkgs#devenv
-      - name: Repair lint blockers and apply safe fixes
+      - name: Wait for scoped Stitch branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 90); do
+            flake="$({ gh api \
+              -H 'Accept: application/vnd.github.raw+json' \
+              'repos/matthis-k/phenix-stitch/contents/flake.nix?ref=refactor%2Fscoped-stitch-maintenance' \
+              2>/dev/null || true; })"
+            if [[ "$flake" == *'Dependency-aware ordered execution'* ]] \
+              && [[ "$flake" != *'phenix-tend'* ]]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Scoped Stitch branch did not become ready' >&2
+          exit 1
+      - name: Repair lint blockers and normalize
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
 
+          flake = Path("flake.nix")
+          flake.write_text(
+              flake.read_text().replace(
+                  'url = "github:matthis-k/phenix-stitch";',
+                  'url = "github:matthis-k/phenix-stitch?ref=refactor/scoped-stitch-maintenance";',
+              )
+          )
+
           integration = Path("modules/phenix-pi/tests/routing-integration.test.ts")
-          text = integration.read_text()
-          text = text.replace(
+          text = integration.read_text().replace(
               "const guard = config.guards?.free!;",
               "const guard = config.guards?.free;\n    assert.ok(guard, \"Missing free routing guard\");",
           )
@@ -55,30 +81,6 @@ jobs:
           workflow = Path("modules/phenix-pi/tests/routing-workflow.test.ts")
           text = workflow.read_text()
           text = text.replace(
-              '''import {
-            PHENIX_PROVIDER,
-            PHENIX_MODEL,
-            PHENIX_MODEL_SETS,
-            modelSetForModelId,
-          } from "../extensions/phenix-routing/provider.ts";''',
-              '''import {
-            PHENIX_MODEL_SETS,
-            modelSetForModelId,
-          } from "../extensions/phenix-routing/provider.ts";''',
-          )
-          text = text.replace(
-              '''function goOnlyRegistry(): ModelRegistry {
-            return new FakeRegistry(ALL_POOL_MODELS.filter((m) => m.provider === "opencode-go"));
-          }
-
-          function gptOnlyRegistry(): ModelRegistry {
-            return new FakeRegistry(ALL_POOL_MODELS.filter((m) => m.provider === "openai-codex"));
-          }
-
-          ''',
-              "",
-          )
-          text = text.replace(
               "runtime.modelSet = explicitModelSet!;",
               'assert.ok(explicitModelSet, "Expected an explicit model set");\n    runtime.modelSet = explicitModelSet;',
           )
@@ -87,24 +89,32 @@ jobs:
 
           set +e
           devenv tasks run maintenance:fix > normalize.log 2>&1
-          status=$?
+          fix_status=$?
+          if (( fix_status == 0 )); then
+            nix flake lock > lock.log 2>&1
+            lock_status=$?
+          else
+            lock_status=1
+          fi
           tail -n 260 normalize.log
-          if (( status != 0 )); then
-            exit "$status"
+          [[ -f lock.log ]] && tail -n 160 lock.log
+          if (( fix_status != 0 || lock_status != 0 )); then
+            exit 1
           fi
 
           set -euo pipefail
-          nix flake lock
           rm .github/workflows/normalize-maintenance-pr.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git diff --cached --quiet || git commit -m "fix: satisfy harness maintenance policy"
+          git diff --cached --quiet || git commit -m "refactor: normalize harness maintenance"
           git push origin HEAD:refactor/standalone-devenv-maintenance
       - name: Upload normalization diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: harness-normalize-log
-          path: normalize.log
-          if-no-files-found: error
+          path: |
+            normalize.log
+            lock.log
+          if-no-files-found: warn
