@@ -71,9 +71,7 @@ export function stripAnthropicCacheControl(value: unknown): unknown {
   };
 }
 
-export function requiresOpenCodeGoPayloadSanitization(
-  model: ProviderModel | undefined,
-): boolean {
+export function requiresOpenCodeGoPayloadSanitization(model: ProviderModel | undefined): boolean {
   return model?.provider === "opencode-go" && model.api === "openai-completions";
 }
 
