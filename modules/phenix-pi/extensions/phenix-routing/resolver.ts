@@ -47,15 +47,8 @@ export interface ResolveRouteInput {
 export async function resolveRoute(input: ResolveRouteInput): Promise<ResolvedRoute> {
   const { modelSet, role, modelRegistry, config, avoidModels } = input;
 
-  // 1. Determine difficulty
-  let difficulty: Difficulty;
-  if (input.difficulty) {
-    difficulty = input.difficulty;
-  } else if (input.profile) {
-    difficulty = difficultyForProfile(input.profile);
-  } else {
-    difficulty = "D1";
-  }
+  // 1. Difficulty is workflow-owned and must be resolved before routing.
+  const difficulty = input.difficulty;
 
   // 2. Look up role × difficulty in matrix
   const route = ROLE_MATRIX[role]?.[difficulty];
