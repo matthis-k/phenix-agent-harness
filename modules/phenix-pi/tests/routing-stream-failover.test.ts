@@ -246,6 +246,7 @@ test("router does not fail over after public output starts", async () => {
   const attempts: string[] = [];
   const sessionId = "routing-failover-after-output";
   clearActiveRouteForSession(sessionId);
+  primeEntryRoute(sessionId, [first, second]);
 
   const events = await collect(
     createRouterStream(

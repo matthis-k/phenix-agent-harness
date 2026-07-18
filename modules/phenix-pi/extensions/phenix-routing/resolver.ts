@@ -1,4 +1,3 @@
-import { difficultyForProfile } from "./classifier.ts";
 import { isProviderAllowed, providerBoundaryForSet } from "./config.ts";
 import { ROLE_MATRIX } from "./matrix.ts";
 import {
@@ -26,15 +25,7 @@ export interface ModelRegistry {
 export interface ResolveRouteInput {
   readonly modelSet: ModelSetId;
   readonly role: RoutingRole;
-  readonly difficulty?: Difficulty;
-  readonly profile?: {
-    readonly complexity: number;
-    readonly uncertainty: number;
-    readonly consequence: number;
-    readonly breadth: number;
-    readonly coupling: number;
-    readonly novelty: number;
-  };
+  readonly difficulty: Difficulty;
   readonly modelRegistry: ModelRegistry;
   readonly config: RoutingConfig;
   readonly avoidModels?: readonly ModelRef[];
