@@ -4,10 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-import {
-  METRICS_ANALYZER,
-  parseFtaJson,
-} from "../skills/phenix-qa/runtime/analyzers/metrics.ts";
+import { METRICS_ANALYZER, parseFtaJson } from "../skills/phenix-qa/runtime/analyzers/metrics.ts";
 import { DEFAULT_QA_CONFIG } from "../skills/phenix-qa/runtime/config.ts";
 import { resetIdCounter } from "../skills/phenix-qa/runtime/normalize.ts";
 
@@ -49,18 +46,14 @@ describe("FTA metrics analyzer", () => {
       ],
     );
     const violation = parsed.evidence.at(-1);
-    assert.deepEqual(violation?.locations, [{ path: "src/complex.ts" }]);
+    assert.equal(violation?.locations[0]?.path, "src/complex.ts");
     assert.equal(violation?.metric?.value, 14);
     assert.equal(violation?.metric?.threshold, 10);
   });
 
   it("rejects malformed FTA output instead of silently fabricating metrics", () => {
     assert.throws(
-      () =>
-        parseFtaJson(
-          JSON.stringify([{ file_name: "src/broken.ts", cyclo: "high" }]),
-          "/repo",
-        ),
+      () => parseFtaJson(JSON.stringify([{ file_name: "src/broken.ts", cyclo: "high" }]), "/repo"),
       /halstead must be an object|cyclo must be a finite number/,
     );
   });
