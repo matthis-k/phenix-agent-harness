@@ -14,7 +14,14 @@ import type {
 // ── Model pools ────────────────────────────────────────────────────────────
 
 export const defaultModelPools: readonly ModelPoolDefinition[] = [
-  { id: "free.universal", candidates: ["opencode/deepseek-v4-flash-free"] },
+  {
+    id: "free.universal",
+    candidates: [
+      "opencode/north-mini-code-free",
+      "opencode/mimo-v2.5-free",
+      "opencode/deepseek-v4-flash-free",
+    ],
+  },
 
   // Keep DeepSeek V4 as a secondary candidate while OpenCode Go still rejects
   // some tool-enabled requests for those models at the gateway boundary.
