@@ -19,6 +19,9 @@ import { formatModelRef, type ModelRef, type ResolvedRoute, type RoutingConfig }
 
 const PHENIX_PROVIDER = "phenix";
 const PHENIX_API = "phenix-router";
+const REPETITION_COUNT = 4;
+const REPETITION_MIN_SEGMENT_LENGTH = 32;
+const REPETITION_MAX_SEGMENT_LENGTH = 512;
 
 export type RouterStreamFunction = (
   model: Model<Api>,
@@ -87,6 +90,48 @@ function isSubstantiveEvent(event: AssistantMessageEvent): boolean {
     default:
       return false;
   }
+}
+
+function repeatedSuffix(text: string): string | undefined {
+  const normalized = text.replace(/\s+/g, " ").trimEnd();
+  const maxSegmentLength = Math.min(
+    REPETITION_MAX_SEGMENT_LENGTH,
+    Math.floor(normalized.length / REPETITION_COUNT),
+  );
+
+  for (
+    let segmentLength = maxSegmentLength;
+    segmentLength >= REPETITION_MIN_SEGMENT_LENGTH;
+    segmentLength -= 1
+  ) {
+    const segment = normalized.slice(-segmentLength);
+    if (segment.trim().length < REPETITION_MIN_SEGMENT_LENGTH) continue;
+    if (normalized.endsWith(segment.repeat(REPETITION_COUNT))) return segment.trim();
+  }
+
+  return undefined;
+}
+
+function repeatedOutputSegment(event: AssistantMessageEvent): string | undefined {
+  if (event.type === "text_delta") {
+    const block = event.partial.content[event.contentIndex];
+    return block?.type === "text" ? repeatedSuffix(block.text) : undefined;
+  }
+
+  if (event.type === "thinking_delta") {
+    const block = event.partial.content[event.contentIndex];
+    return block?.type === "thinking" ? repeatedSuffix(block.thinking) : undefined;
+  }
+
+  return undefined;
+}
+
+function repeatedOutputError(segment: string): string {
+  const preview = segment.length > 120 ? `${segment.slice(0, 117)}...` : segment;
+  return (
+    `Provider stream stopped after detecting ${REPETITION_COUNT} consecutive copies ` +
+    `of substantial output: ${JSON.stringify(preview)}`
+  );
 }
 
 function createTerminalError(provider: string, model: string, errorMessage: string): ErrorEvent {
@@ -312,6 +357,19 @@ async function runRouteAttempt(
       stream.push(maskEvent(event, virtualModelId));
       stream.end();
       return { type: "completed" };
+    }
+
+    const repeatedSegment = repeatedOutputSegment(event);
+    if (repeatedSegment) {
+      return {
+        type: "error",
+        event: createTerminalError(
+          concreteModel.provider,
+          concreteModel.id,
+          repeatedOutputError(repeatedSegment),
+        ),
+        substantiveOutputSeen: true,
+      };
     }
 
     const masked = maskEvent(event, virtualModelId);
