@@ -93,7 +93,7 @@ function isSubstantiveEvent(event: AssistantMessageEvent): boolean {
 }
 
 function repeatedSuffix(text: string): string | undefined {
-  const normalized = text.replace(/\s+/g, " ").trimEnd();
+  const normalized = text.replace(/\s+/g, " ");
   const maxSegmentLength = Math.min(
     REPETITION_MAX_SEGMENT_LENGTH,
     Math.floor(normalized.length / REPETITION_COUNT),
