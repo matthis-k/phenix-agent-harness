@@ -196,8 +196,7 @@ describe("OpenCode Go payload compatibility", () => {
           tools.some(
             (tool) =>
               isObject(tool) &&
-              ("cache_control" in tool ||
-                (isObject(tool.function) && "strict" in tool.function)),
+              ("cache_control" in tool || (isObject(tool.function) && "strict" in tool.function)),
           );
 
         if (
