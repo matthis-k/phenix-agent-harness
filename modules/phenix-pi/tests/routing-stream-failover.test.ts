@@ -17,11 +17,7 @@ import {
   type RouterStreamDependencies,
   type RouterStreamFunction,
 } from "../extensions/phenix-routing/stream-proxy.ts";
-import type {
-  ModelRef,
-  ResolvedRoute,
-  RoutingConfig,
-} from "../extensions/phenix-routing/types.ts";
+import type { ModelRef, ResolvedRoute, RoutingConfig } from "../extensions/phenix-routing/types.ts";
 
 function makeModel(provider: string, id: string): Model<Api> {
   return {
@@ -276,7 +272,10 @@ test("router does not fail over after substantive output has started", async () 
   }
 
   assert.deepEqual(attempts, ["opencode/partial-free"]);
-  assert.equal(events.some((event) => event.type === "text_delta"), true);
+  assert.equal(
+    events.some((event) => event.type === "text_delta"),
+    true,
+  );
   const terminal = events.at(-1);
   assert.equal(terminal?.type, "error");
   if (terminal?.type === "error") {
