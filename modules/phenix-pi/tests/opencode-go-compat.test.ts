@@ -164,7 +164,11 @@ describe("OpenCode Go payload compatibility", () => {
               message.content.some((part) => isObject(part) && "cache_control" in part),
           ) || tools.some((tool) => isObject(tool) && "cache_control" in tool);
 
-        if (request.method !== "POST" || request.url !== "/chat/completions" || hasForbiddenMarker) {
+        if (
+          request.method !== "POST" ||
+          request.url !== "/chat/completions" ||
+          hasForbiddenMarker
+        ) {
           response.writeHead(400, { "content-type": "application/json" });
           response.end(
             JSON.stringify({
@@ -222,10 +226,8 @@ describe("OpenCode Go payload compatibility", () => {
         ],
       };
       const requestPayload =
-        handler?.(
-          { payload },
-          { model: { provider: "opencode-go", api: "openai-completions" } },
-        ) ?? payload;
+        handler?.({ payload }, { model: { provider: "opencode-go", api: "openai-completions" } }) ??
+        payload;
       const { port } = server.address() as AddressInfo;
       const providerResponse = await fetch(`http://127.0.0.1:${port}/chat/completions`, {
         method: "POST",
@@ -237,7 +239,8 @@ describe("OpenCode Go payload compatibility", () => {
       assert.equal(providerResponse.status, 200, responseBody);
       assert.match(responseBody, /data: \[DONE\]/);
       assert.deepEqual(
-        (received as { tools: Array<{ function: { parameters: unknown } }> }).tools[0]?.function.parameters,
+        (received as { tools: Array<{ function: { parameters: unknown } }> }).tools[0]?.function
+          .parameters,
         parameters,
       );
     } finally {
