@@ -16,11 +16,13 @@ import type {
 export const defaultModelPools: readonly ModelPoolDefinition[] = [
   { id: "free.universal", candidates: ["opencode/deepseek-v4-flash-free"] },
 
-  { id: "go.fast", candidates: ["opencode-go/deepseek-v4-flash", "opencode-go/mimo-v2.5"] },
-  { id: "go.general", candidates: ["opencode-go/deepseek-v4-pro", "opencode-go/qwen3.7-plus"] },
+  // Keep DeepSeek V4 as a fallback while OpenCode Go still rejects some
+  // tool-enabled requests for those models at the gateway boundary.
+  { id: "go.fast", candidates: ["opencode-go/mimo-v2.5", "opencode-go/deepseek-v4-flash"] },
+  { id: "go.general", candidates: ["opencode-go/qwen3.7-plus", "opencode-go/deepseek-v4-pro"] },
   { id: "go.reasoning", candidates: ["opencode-go/glm-5.1", "opencode-go/qwen3.7-max"] },
   { id: "go.reasoning-max", candidates: ["opencode-go/glm-5.2", "opencode-go/glm-5.1"] },
-  { id: "go.code-fast", candidates: ["opencode-go/deepseek-v4-flash", "opencode-go/kimi-k2.6"] },
+  { id: "go.code-fast", candidates: ["opencode-go/kimi-k2.6", "opencode-go/deepseek-v4-flash"] },
   { id: "go.code", candidates: ["opencode-go/kimi-k2.7-code", "opencode-go/deepseek-v4-pro"] },
   { id: "go.code-max", candidates: ["opencode-go/kimi-k2.7-code", "opencode-go/glm-5.1"] },
   { id: "go.review", candidates: ["opencode-go/qwen3.7-max", "opencode-go/deepseek-v4-pro"] },
