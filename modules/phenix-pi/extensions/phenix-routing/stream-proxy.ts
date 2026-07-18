@@ -18,7 +18,6 @@ import { getSessionRuntime } from "./state.ts";
 import { formatModelRef, type ModelRef, type ResolvedRoute, type RoutingConfig } from "./types.ts";
 
 const PHENIX_PROVIDER = "phenix";
-const PHENIX_MODEL = "workflow";
 const PHENIX_API = "phenix-router";
 
 export type RouterStreamFunction = (
@@ -27,7 +26,13 @@ export type RouterStreamFunction = (
   options?: SimpleStreamOptions,
 ) => AssistantMessageEventStream;
 
-type UpstreamRuntime = Pick<
+/**
+ * Pi-owned upstream model and authentication boundary.
+ *
+ * Phenix chooses a concrete model, but Pi's registry remains the sole authority
+ * for model discovery and credential/header/environment resolution.
+ */
+type PiUpstreamRuntime = Pick<
   typeof modelRegistry,
   "getApiKeyAndHeaders" | "getModel" | "isAvailable"
 >;
@@ -37,7 +42,7 @@ type ErrorEvent = Extract<AssistantMessageEvent, { type: "error" }>;
 export interface RouterStreamDependencies {
   readonly getSessionRuntime: typeof getSessionRuntime;
   readonly loadRoutingConfig: typeof loadRoutingConfig;
-  readonly modelRegistry: UpstreamRuntime;
+  readonly modelRegistry: PiUpstreamRuntime;
   readonly resolveRoute: typeof resolveRoute;
   readonly streamSimple: RouterStreamFunction;
 }
@@ -50,23 +55,26 @@ const DEFAULT_DEPENDENCIES: RouterStreamDependencies = {
   streamSimple,
 };
 
-function maskMessage(message: AssistantMessage): AssistantMessage {
+function maskMessage(message: AssistantMessage, virtualModelId: string): AssistantMessage {
   return {
     ...message,
     api: PHENIX_API as Api,
     provider: PHENIX_PROVIDER,
-    model: PHENIX_MODEL,
+    model: virtualModelId,
   };
 }
 
-function maskEvent(event: AssistantMessageEvent): AssistantMessageEvent {
+function maskEvent(
+  event: AssistantMessageEvent,
+  virtualModelId: string,
+): AssistantMessageEvent {
   if (event.type === "done") {
-    return { ...event, message: maskMessage(event.message) };
+    return { ...event, message: maskMessage(event.message, virtualModelId) };
   }
   if (event.type === "error") {
-    return { ...event, error: maskMessage(event.error) };
+    return { ...event, error: maskMessage(event.error, virtualModelId) };
   }
-  return { ...event, partial: maskMessage(event.partial) };
+  return { ...event, partial: maskMessage(event.partial, virtualModelId) };
 }
 
 function isSubstantiveEvent(event: AssistantMessageEvent): boolean {
@@ -141,9 +149,10 @@ export function createRouterStream(
         maskEvent(
           createTerminalError(
             PHENIX_PROVIDER,
-            PHENIX_MODEL,
+            model.id,
             error instanceof Error ? error.message : String(error),
           ),
+          model.id,
         ),
       );
       stream.end();
@@ -165,17 +174,16 @@ async function runRouter(
 ): Promise<void> {
   const sessionId = options?.sessionId ?? "default";
   const config = dependencies.loadRoutingConfig();
+  const runtime = dependencies.getSessionRuntime(sessionId);
+  const requestedModelSet =
+    model.provider === PHENIX_PROVIDER
+      ? (modelSetForModelId(model.id) ?? runtime.modelSet)
+      : runtime.modelSet;
   let route = getActiveRouteForSession(sessionId);
 
-  if (!route) {
-    const runtime = dependencies.getSessionRuntime(sessionId);
-    const modelSet =
-      model.provider === PHENIX_PROVIDER
-        ? (modelSetForModelId(model.id) ?? runtime.modelSet)
-        : runtime.modelSet;
-
+  if (!route || route.modelSet !== requestedModelSet) {
     route = await dependencies.resolveRoute({
-      modelSet,
+      modelSet: requestedModelSet,
       role: "coordinator",
       modelRegistry: dependencies.modelRegistry,
       config,
@@ -183,10 +191,18 @@ async function runRouter(
     setActiveRouteForSession(sessionId, route);
   }
 
+  const virtualModelId = route.modelSet;
   const attemptedModels: ModelRef[] = [];
 
   while (true) {
-    const attempt = await runRouteAttempt(stream, route, context, options, dependencies);
+    const attempt = await runRouteAttempt(
+      stream,
+      route,
+      virtualModelId,
+      context,
+      options,
+      dependencies,
+    );
 
     if (attempt.type === "completed") {
       return;
@@ -195,7 +211,7 @@ async function runRouter(
     attemptedModels.push(route.model);
 
     if (attempt.substantiveOutputSeen) {
-      stream.push(maskEvent(attempt.event));
+      stream.push(maskEvent(attempt.event, virtualModelId));
       stream.end();
       return;
     }
@@ -204,7 +220,12 @@ async function runRouter(
 
     if (!fallback) {
       clearActiveRouteForSession(sessionId);
-      stream.push(maskEvent(annotateExhaustedCandidates(attempt.event, attemptedModels)));
+      stream.push(
+        maskEvent(
+          annotateExhaustedCandidates(attempt.event, attemptedModels),
+          virtualModelId,
+        ),
+      );
       stream.end();
       return;
     }
@@ -225,6 +246,7 @@ type RouteAttemptResult =
 async function runRouteAttempt(
   stream: AssistantMessageEventStream,
   route: ResolvedRoute,
+  virtualModelId: string,
   context: Context,
   options: SimpleStreamOptions | undefined,
   dependencies: RouterStreamDependencies,
@@ -290,12 +312,12 @@ async function runRouteAttempt(
       for (const pending of pendingEvents) {
         stream.push(pending);
       }
-      stream.push(maskEvent(event));
+      stream.push(maskEvent(event, virtualModelId));
       stream.end();
       return { type: "completed" };
     }
 
-    const masked = maskEvent(event);
+    const masked = maskEvent(event, virtualModelId);
     if (!substantiveOutputSeen && isSubstantiveEvent(event)) {
       substantiveOutputSeen = true;
       for (const pending of pendingEvents) {
