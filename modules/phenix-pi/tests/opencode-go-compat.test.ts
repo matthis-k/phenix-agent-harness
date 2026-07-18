@@ -7,19 +7,27 @@ import { describe, it } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import registerOpenCodeGoCompatibility, {
   requiresOpenCodeGoPayloadSanitization,
-  stripAnthropicCacheControl,
+  sanitizeOpenCodeGoPayload,
 } from "../extensions/phenix-integrations/opencode-go-compat.ts";
 
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
 describe("OpenCode Go payload compatibility", () => {
-  it("removes wire cache markers without changing tool schemas", () => {
+  it("removes optional wire fields without changing tool schemas", () => {
     const parameters = {
       type: "object",
       properties: {
         cache_control: { type: "string" },
+        strict: { type: "boolean" },
       },
     };
     const payload = {
       model: "deepseek-v4-flash",
+      prompt_cache_key: "session",
+      prompt_cache_retention: "24h",
+      store: false,
+      stream_options: { include_usage: true },
       messages: [
         {
           role: "system",
@@ -39,13 +47,13 @@ describe("OpenCode Go payload compatibility", () => {
       tools: [
         {
           type: "function",
-          function: { name: "read", parameters },
+          function: { name: "read", parameters, strict: false },
           cache_control: { type: "ephemeral" },
         },
       ],
     };
 
-    assert.deepEqual(stripAnthropicCacheControl(payload), {
+    assert.deepEqual(sanitizeOpenCodeGoPayload(payload), {
       model: "deepseek-v4-flash",
       messages: [
         {
@@ -66,13 +74,22 @@ describe("OpenCode Go payload compatibility", () => {
     });
   });
 
-  it("preserves payload identity when no cache markers are present", () => {
+  it("preserves payload identity when no incompatible fields are present", () => {
     const payload = {
       model: "deepseek-v4-flash",
       messages: [{ role: "user", content: "hello" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "read",
+            parameters: { type: "object", properties: {} },
+          },
+        },
+      ],
     };
 
-    assert.equal(stripAnthropicCacheControl(payload), payload);
+    assert.equal(sanitizeOpenCodeGoPayload(payload), payload);
   });
 
   it("sanitizes only OpenCode Go OpenAI-completions requests", () => {
@@ -115,10 +132,17 @@ describe("OpenCode Go payload compatibility", () => {
     registerOpenCodeGoCompatibility(pi);
 
     const payload = {
+      stream_options: { include_usage: true },
       messages: [
         {
           role: "system",
           content: [{ type: "text", text: "prompt", cache_control: { type: "ephemeral" } }],
+        },
+      ],
+      tools: [
+        {
+          type: "function",
+          function: { name: "read", parameters: {}, strict: false },
         },
       ],
     };
@@ -134,17 +158,20 @@ describe("OpenCode Go payload compatibility", () => {
           content: [{ type: "text", text: "prompt" }],
         },
       ],
+      tools: [
+        {
+          type: "function",
+          function: { name: "read", parameters: {} },
+        },
+      ],
     });
   });
 
-  it("passes a strict first-turn provider contract over HTTP", async () => {
+  it("passes a minimal first-turn provider contract over HTTP", async () => {
     type Handler = (
       event: { payload: unknown },
       ctx: { model: { provider: string; api: string } },
     ) => unknown;
-
-    const isObject = (value: unknown): value is Record<string, unknown> =>
-      typeof value === "object" && value !== null && !Array.isArray(value);
 
     let received: unknown;
     const server = http.createServer(async (request, response) => {
@@ -157,12 +184,20 @@ describe("OpenCode Go payload compatibility", () => {
         const messages = Array.isArray(payload.messages) ? payload.messages : [];
         const tools = Array.isArray(payload.tools) ? payload.tools : [];
         const hasForbiddenMarker =
+          ["prompt_cache_key", "prompt_cache_retention", "store", "stream_options"].some(
+            (field) => field in payload,
+          ) ||
           messages.some(
             (message) =>
               isObject(message) &&
               Array.isArray(message.content) &&
               message.content.some((part) => isObject(part) && "cache_control" in part),
-          ) || tools.some((tool) => isObject(tool) && "cache_control" in tool);
+          ) ||
+          tools.some(
+            (tool) =>
+              isObject(tool) &&
+              ("cache_control" in tool || (isObject(tool.function) && "strict" in tool.function)),
+          );
 
         if (
           request.method !== "POST" ||
@@ -205,11 +240,18 @@ describe("OpenCode Go payload compatibility", () => {
 
       const parameters = {
         type: "object",
-        properties: { cache_control: { type: "string" } },
+        properties: {
+          cache_control: { type: "string" },
+          strict: { type: "boolean" },
+        },
       };
       const payload = {
         model: "deepseek-v4-flash",
         stream: true,
+        stream_options: { include_usage: true },
+        prompt_cache_key: "session",
+        prompt_cache_retention: "24h",
+        store: false,
         messages: [
           {
             role: "system",
@@ -220,7 +262,7 @@ describe("OpenCode Go payload compatibility", () => {
         tools: [
           {
             type: "function",
-            function: { name: "read", parameters },
+            function: { name: "read", parameters, strict: false },
             cache_control: { type: "ephemeral" },
           },
         ],
