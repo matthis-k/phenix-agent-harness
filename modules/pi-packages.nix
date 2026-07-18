@@ -122,6 +122,7 @@
             ];
           }
           ''
+            export PHENIX_QA_FTA=${phenixPiPackage}/bin/fta
             cd ${phenixPiPackage}
             node --experimental-strip-types --test tests/*.test.ts
             node --check runtime/verify.mjs
