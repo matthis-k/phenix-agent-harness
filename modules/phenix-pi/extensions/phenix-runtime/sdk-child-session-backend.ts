@@ -100,7 +100,7 @@ export interface PiSessionLike {
 export interface PreparedPiSessionSpec {
   readonly cwd: string;
   readonly model: Model<any>;
-  readonly modelRegistry: ModelRegistry;
+  readonly agentDir: string;
   readonly thinkingLevel: ThinkingLevel;
   readonly tools: readonly string[];
   readonly excludeTools?: readonly string[];
@@ -128,7 +128,7 @@ export class ProductionPiSessionFactory implements PiSessionFactory {
     const { session } = await createAgentSession({
       cwd: spec.cwd,
       model: spec.model,
-      modelRegistry: spec.modelRegistry,
+      agentDir: spec.agentDir,
       thinkingLevel: spec.thinkingLevel,
       tools: [...spec.tools],
       ...(spec.excludeTools && spec.excludeTools.length > 0
@@ -680,7 +680,7 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
     const preparedSpec: PreparedPiSessionSpec = {
       cwd: spec.cwd,
       model,
-      modelRegistry,
+      agentDir: this.services.agentDir,
       thinkingLevel: spec.thinkingLevel,
       tools: toolNames,
       customTools,

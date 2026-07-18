@@ -186,6 +186,23 @@
         "type": "github"
       }
     },
+    "pi-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1784239181,
+        "narHash": "sha256-Vs/ndHYzFyfN4CjPV2zMYblLXe9IuM13UrPJI1VsZEQ=",
+        "owner": "earendil-works",
+        "repo": "pi",
+        "rev": "8dc78834cde4e329284cf505f9e3f99763df5529",
+        "type": "github"
+      },
+      "original": {
+        "owner": "earendil-works",
+        "ref": "v0.80.10",
+        "repo": "pi",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "nixpkgs": [
@@ -193,7 +210,8 @@
           "nixpkgs"
         ],
         "phenix-pins": "phenix-pins",
-        "phenix-stitch": "phenix-stitch"
+        "phenix-stitch": "phenix-stitch",
+        "pi-src": "pi-src"
       }
     },
     "sops-nix": {
