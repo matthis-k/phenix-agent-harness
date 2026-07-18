@@ -5,10 +5,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import {
-  mergeModelDefaults,
-  mergeModelDefaultsFile,
-} from "../runtime/merge-model-defaults.mjs";
+import { mergeModelDefaults, mergeModelDefaultsFile } from "../runtime/merge-model-defaults.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const defaultsPath = path.join(packageRoot, "config", "models.json");
