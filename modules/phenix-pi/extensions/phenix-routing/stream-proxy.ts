@@ -1,6 +1,7 @@
 import type {
   Api,
   AssistantMessage,
+  AssistantMessageEvent,
   AssistantMessageEventStream,
   Context,
   Model,
@@ -14,24 +15,40 @@ import { modelSetForModelId } from "./provider.ts";
 import { modelRegistry } from "./registry.ts";
 import { resolveRoute } from "./resolver.ts";
 import { getSessionRuntime } from "./state.ts";
-import type { ResolvedRoute } from "./types.ts";
+import { formatModelRef, type ModelRef, type ResolvedRoute, type RoutingConfig } from "./types.ts";
 
 const PHENIX_PROVIDER = "phenix";
 const PHENIX_MODEL = "workflow";
 const PHENIX_API = "phenix-router";
 
-const MASKED_EVENT_TYPES = new Set([
-  "start",
-  "text_start",
-  "text_delta",
-  "text_end",
-  "thinking_start",
-  "thinking_delta",
-  "thinking_end",
-  "toolcall_start",
-  "toolcall_delta",
-  "toolcall_end",
-]);
+export type RouterStreamFunction = (
+  model: Model<Api>,
+  context: Context,
+  options?: SimpleStreamOptions,
+) => AssistantMessageEventStream;
+
+type UpstreamRuntime = Pick<
+  typeof modelRegistry,
+  "getApiKeyAndHeaders" | "getModel" | "isAvailable"
+>;
+
+type ErrorEvent = Extract<AssistantMessageEvent, { type: "error" }>;
+
+export interface RouterStreamDependencies {
+  readonly getSessionRuntime: typeof getSessionRuntime;
+  readonly loadRoutingConfig: typeof loadRoutingConfig;
+  readonly modelRegistry: UpstreamRuntime;
+  readonly resolveRoute: typeof resolveRoute;
+  readonly streamSimple: RouterStreamFunction;
+}
+
+const DEFAULT_DEPENDENCIES: RouterStreamDependencies = {
+  getSessionRuntime,
+  loadRoutingConfig,
+  modelRegistry,
+  resolveRoute,
+  streamSimple,
+};
 
 function maskMessage(message: AssistantMessage): AssistantMessage {
   return {
@@ -42,21 +59,41 @@ function maskMessage(message: AssistantMessage): AssistantMessage {
   };
 }
 
-/** Route a virtual Phenix model request to the selected concrete model. */
-export function routerStream(
-  model: Model<Api>,
-  context: Context,
-  options?: SimpleStreamOptions,
-): AssistantMessageEventStream {
-  const stream = createAssistantMessageEventStream();
+function maskEvent(event: AssistantMessageEvent): AssistantMessageEvent {
+  if (event.type === "done") {
+    return { ...event, message: maskMessage(event.message) };
+  }
+  if (event.type === "error") {
+    return { ...event, error: maskMessage(event.error) };
+  }
+  return { ...event, partial: maskMessage(event.partial) };
+}
 
-  void runRouter(stream, model, context, options).catch((error) => {
-    const errorMessage: AssistantMessage = {
+function isSubstantiveEvent(event: AssistantMessageEvent): boolean {
+  switch (event.type) {
+    case "text_delta":
+    case "thinking_delta":
+    case "toolcall_delta":
+    case "toolcall_end":
+      return true;
+    case "text_end":
+    case "thinking_end":
+      return event.content.length > 0;
+    default:
+      return false;
+  }
+}
+
+function createTerminalError(provider: string, model: string, errorMessage: string): ErrorEvent {
+  return {
+    type: "error",
+    reason: "error",
+    error: {
       role: "assistant",
       content: [],
       api: PHENIX_API as Api,
-      provider: PHENIX_PROVIDER,
-      model: PHENIX_MODEL,
+      provider,
+      model,
       usage: {
         input: 0,
         output: 0,
@@ -66,58 +103,159 @@ export function routerStream(
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
       },
       stopReason: "error",
-      errorMessage: error instanceof Error ? error.message : String(error),
+      errorMessage,
       timestamp: Date.now(),
-    };
-    stream.push({
-      type: "error",
-      reason: "error",
-      error: maskMessage(errorMessage),
-    });
-    stream.end();
-  });
-
-  return stream;
+    },
+  };
 }
+
+function annotateExhaustedCandidates(
+  event: ErrorEvent,
+  attemptedModels: readonly ModelRef[],
+): ErrorEvent {
+  const attempted = attemptedModels.map(formatModelRef).join(", ");
+  const lastError = event.error.errorMessage ?? "Unknown provider error";
+  return {
+    ...event,
+    error: {
+      ...event.error,
+      errorMessage: `All routed models failed before producing output (${attempted}). Last error: ${lastError}`,
+    },
+  };
+}
+
+/** Build a routed stream function with injectable dependencies for deterministic tests. */
+export function createRouterStream(
+  overrides: Partial<RouterStreamDependencies> = {},
+): RouterStreamFunction {
+  const dependencies: RouterStreamDependencies = {
+    ...DEFAULT_DEPENDENCIES,
+    ...overrides,
+  };
+
+  return (model, context, options) => {
+    const stream = createAssistantMessageEventStream();
+
+    void runRouter(stream, model, context, options, dependencies).catch((error) => {
+      stream.push(
+        maskEvent(
+          createTerminalError(
+            PHENIX_PROVIDER,
+            PHENIX_MODEL,
+            error instanceof Error ? error.message : String(error),
+          ),
+        ),
+      );
+      stream.end();
+    });
+
+    return stream;
+  };
+}
+
+/** Route a virtual Phenix model request to the selected concrete model. */
+export const routerStream = createRouterStream();
 
 async function runRouter(
   stream: AssistantMessageEventStream,
   model: Model<Api>,
   context: Context,
-  options?: SimpleStreamOptions,
+  options: SimpleStreamOptions | undefined,
+  dependencies: RouterStreamDependencies,
 ): Promise<void> {
-  let route = getActiveRouteForSession(options?.sessionId ?? "default");
+  const sessionId = options?.sessionId ?? "default";
+  const config = dependencies.loadRoutingConfig();
+  let route = getActiveRouteForSession(sessionId);
 
   if (!route) {
-    const sessionId = options?.sessionId ?? "default";
-    const runtime = getSessionRuntime(sessionId);
+    const runtime = dependencies.getSessionRuntime(sessionId);
     const modelSet =
       model.provider === PHENIX_PROVIDER
         ? (modelSetForModelId(model.id) ?? runtime.modelSet)
         : runtime.modelSet;
 
-    route = await resolveRoute({
+    route = await dependencies.resolveRoute({
       modelSet,
       role: "coordinator",
-      modelRegistry,
-      config: loadRoutingConfig(),
+      modelRegistry: dependencies.modelRegistry,
+      config,
     });
     setActiveRouteForSession(sessionId, route);
   }
 
-  const concreteModel: Model<Api> | undefined = modelRegistry.getModel(
+  const attemptedModels: ModelRef[] = [];
+
+  while (true) {
+    const attempt = await runRouteAttempt(stream, route, context, options, dependencies);
+
+    if (attempt.type === "completed") {
+      return;
+    }
+
+    attemptedModels.push(route.model);
+
+    if (attempt.substantiveOutputSeen) {
+      stream.push(maskEvent(attempt.event));
+      stream.end();
+      return;
+    }
+
+    const fallback = await resolveFallbackRoute(route, attemptedModels, config, dependencies);
+
+    if (!fallback) {
+      clearActiveRouteForSession(sessionId);
+      stream.push(maskEvent(annotateExhaustedCandidates(attempt.event, attemptedModels)));
+      stream.end();
+      return;
+    }
+
+    route = fallback;
+    setActiveRouteForSession(sessionId, route);
+  }
+}
+
+type RouteAttemptResult =
+  | { readonly type: "completed" }
+  | {
+      readonly type: "error";
+      readonly event: ErrorEvent;
+      readonly substantiveOutputSeen: boolean;
+    };
+
+async function runRouteAttempt(
+  stream: AssistantMessageEventStream,
+  route: ResolvedRoute,
+  context: Context,
+  options: SimpleStreamOptions | undefined,
+  dependencies: RouterStreamDependencies,
+): Promise<RouteAttemptResult> {
+  const concreteModel: Model<Api> | undefined = dependencies.modelRegistry.getModel(
     route.model.provider,
     route.model.model,
   );
   if (!concreteModel) {
-    throw new Error(`Model is not registered in Pi: ${route.model.provider}/${route.model.model}`);
+    return {
+      type: "error",
+      event: createTerminalError(
+        route.model.provider,
+        route.model.model,
+        `Model is not registered in Pi: ${formatModelRef(route.model)}`,
+      ),
+      substantiveOutputSeen: false,
+    };
   }
 
-  const auth = await modelRegistry.getApiKeyAndHeaders(concreteModel);
+  const auth = await dependencies.modelRegistry.getApiKeyAndHeaders(concreteModel);
   if (!auth.ok) {
-    throw new Error(
-      `Authentication unavailable for ${concreteModel.provider}/${concreteModel.id}: ${auth.error}`,
-    );
+    return {
+      type: "error",
+      event: createTerminalError(
+        concreteModel.provider,
+        concreteModel.id,
+        `Authentication unavailable for ${concreteModel.provider}/${concreteModel.id}: ${auth.error}`,
+      ),
+      substantiveOutputSeen: false,
+    };
   }
 
   const reasoning = route.thinking === "minimal" ? undefined : route.thinking;
@@ -135,45 +273,82 @@ async function runRouter(
     reasoning,
   };
 
-  const upstreamStream = streamSimple(concreteModel, context, upstreamOptions);
+  const upstreamStream = dependencies.streamSimple(concreteModel, context, upstreamOptions);
+  const pendingEvents: AssistantMessageEvent[] = [];
   let substantiveOutputSeen = false;
 
   for await (const event of upstreamStream) {
-    if (
-      event.type === "text_delta" ||
-      event.type === "thinking_delta" ||
-      event.type === "toolcall_delta" ||
-      event.type === "toolcall_end" ||
-      event.type === "done"
-    ) {
-      substantiveOutputSeen = true;
-    }
-
     if (event.type === "error") {
-      stream.push({ ...event, error: maskMessage(event.error) });
-      stream.end();
-      return;
+      return {
+        type: "error",
+        event,
+        substantiveOutputSeen,
+      };
     }
 
     if (event.type === "done") {
-      stream.push({ ...event, message: maskMessage(event.message) });
+      for (const pending of pendingEvents) {
+        stream.push(pending);
+      }
+      stream.push(maskEvent(event));
       stream.end();
-      return;
+      return { type: "completed" };
     }
 
-    if (MASKED_EVENT_TYPES.has(event.type)) {
-      stream.push({
-        ...event,
-        partial: maskMessage(event.partial as AssistantMessage),
-      } as typeof event);
+    const masked = maskEvent(event);
+    if (!substantiveOutputSeen && isSubstantiveEvent(event)) {
+      substantiveOutputSeen = true;
+      for (const pending of pendingEvents) {
+        stream.push(pending);
+      }
+      pendingEvents.length = 0;
+    }
+
+    if (substantiveOutputSeen) {
+      stream.push(masked);
     } else {
-      stream.push(event);
+      pendingEvents.push(masked);
     }
   }
 
-  // Keep the variable explicit: fallback is permitted only before output.
-  void substantiveOutputSeen;
-  stream.end();
+  return {
+    type: "error",
+    event: createTerminalError(
+      concreteModel.provider,
+      concreteModel.id,
+      `Provider stream ended without a terminal event for ${concreteModel.provider}/${concreteModel.id}`,
+    ),
+    substantiveOutputSeen,
+  };
+}
+
+async function resolveFallbackRoute(
+  currentRoute: ResolvedRoute,
+  attemptedModels: readonly ModelRef[],
+  config: RoutingConfig,
+  dependencies: RouterStreamDependencies,
+): Promise<ResolvedRoute | undefined> {
+  try {
+    const next = await dependencies.resolveRoute({
+      modelSet: currentRoute.modelSet,
+      role: currentRoute.role,
+      difficulty: currentRoute.difficulty,
+      modelRegistry: dependencies.modelRegistry,
+      config,
+      avoidModels: attemptedModels,
+    });
+
+    const repeated = attemptedModels.some(
+      (model) => formatModelRef(model) === formatModelRef(next.model),
+    );
+    if (next.usedAvoidedModelFallback || repeated) {
+      return undefined;
+    }
+
+    return next;
+  } catch {
+    return undefined;
+  }
 }
 
 const activeRoutes = new Map<string, ResolvedRoute>();
