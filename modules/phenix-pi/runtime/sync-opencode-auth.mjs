@@ -1,4 +1,5 @@
 import { chmod, readFile, rename, writeFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 
 function isObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -50,7 +51,7 @@ export async function syncOpenCodeAuthFile(path) {
   return true;
 }
 
-if (import.meta.url === new URL(`file://${process.argv[1] ?? ""}`).href) {
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const path = process.argv[2];
   if (!path) {
     console.error("usage: sync-opencode-auth.mjs <auth.json>");
