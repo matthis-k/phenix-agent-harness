@@ -16,8 +16,8 @@ import type {
 export const defaultModelPools: readonly ModelPoolDefinition[] = [
   { id: "free.universal", candidates: ["opencode/deepseek-v4-flash-free"] },
 
-  // Keep DeepSeek V4 as a fallback while OpenCode Go still rejects some
-  // tool-enabled requests for those models at the gateway boundary.
+  // Keep DeepSeek V4 as a secondary candidate while OpenCode Go still rejects
+  // some tool-enabled requests for those models at the gateway boundary.
   { id: "go.fast", candidates: ["opencode-go/mimo-v2.5", "opencode-go/deepseek-v4-flash"] },
   { id: "go.general", candidates: ["opencode-go/qwen3.7-plus", "opencode-go/deepseek-v4-pro"] },
   { id: "go.reasoning", candidates: ["opencode-go/glm-5.1", "opencode-go/qwen3.7-max"] },
