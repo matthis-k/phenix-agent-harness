@@ -7,6 +7,7 @@ import type {
   AssistantMessageEvent,
   Context,
   Model,
+  SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 
@@ -132,6 +133,7 @@ function primeRoute(sessionId: string, concreteModel: Model<Api>): void {
 function dependencies(
   concreteModel: Model<Api>,
   stream: ReturnType<RouterStreamFunction>,
+  onOptions?: (options: SimpleStreamOptions | undefined) => void,
 ): Partial<RouterStreamDependencies> {
   return {
     getSessionRuntime: (() => ({
@@ -154,7 +156,8 @@ function dependencies(
     async resolveRoute() {
       throw new Error("A stream with public output must not fail over");
     },
-    streamSimple() {
+    streamSimple(_model, _context, options) {
+      onOptions?.(options);
       return stream;
     },
   };
@@ -173,21 +176,25 @@ const context: Context = {
 const repeatedSegment =
   "Let me check if there's a pi-binary-fix in the extensions directory. ";
 
-test("router stops a pathological repeated-output stream", async () => {
+test("router stops and aborts a pathological repeated-output stream", async () => {
   const concreteModel = makeModel("opencode", "repetition-test");
   const sessionId = "routing-repetition-breaker";
   clearActiveRouteForSession(sessionId);
   primeRoute(sessionId, concreteModel);
 
+  let upstreamSignal: AbortSignal | undefined;
   const upstream = textStream(concreteModel, repeatedSegment, 8);
   const events = await collect(
-    createRouterStream(dependencies(concreteModel, upstream))(virtualModel, context, {
-      sessionId,
-    }),
+    createRouterStream(
+      dependencies(concreteModel, upstream, (options) => {
+        upstreamSignal = options?.signal;
+      }),
+    )(virtualModel, context, { sessionId }),
   );
 
   assert.equal(events.filter((event) => event.type === "text_delta").length, 3);
   assert.equal(events.some((event) => event.type === "done"), false);
+  assert.equal(upstreamSignal?.aborted, true);
   const terminal = events.at(-1);
   assert.equal(terminal?.type, "error");
   if (terminal?.type === "error") {
