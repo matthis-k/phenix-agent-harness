@@ -1,0 +1,274 @@
+name: Generate Pi 0.80.10 upgrade
+
+on:
+  push:
+    branches: [fix/upgrade-pi-0.80.10]
+    paths: [.github/workflows/upgrade-pi.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: fix/upgrade-pi-0.80.10
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: Pin and package official Pi source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          flake = Path("flake.nix")
+          text = flake.read_text()
+          needle = '    nixpkgs.follows = "phenix-pins/nixpkgs";\n'
+          addition = '''    nixpkgs.follows = "phenix-pins/nixpkgs";
+
+    pi-src = {
+      url = "github:earendil-works/pi/v0.80.10";
+      flake = false;
+    };
+'''
+          if "pi-src" not in text:
+              if needle not in text:
+                  raise SystemExit("flake.nix insertion point not found")
+              text = text.replace(needle, addition, 1)
+              flake.write_text(text)
+
+          standalone = Path("modules/standalone.nix")
+          text = standalone.read_text()
+          old = 'exec "${pkgs.pi-coding-agent}/bin/pi" \\\n'
+          new = 'exec "${self\'.packages.pi-coding-agent}/bin/pi" \\\n'
+          if old not in text and new not in text:
+              raise SystemExit("standalone Pi executable reference not found")
+          standalone.write_text(text.replace(old, new, 1))
+
+          sdk = Path("modules/phenix-pi/extensions/phenix-runtime/sdk-child-session-backend.ts")
+          text = sdk.read_text()
+          replacements = [
+              (
+                  "  readonly modelRegistry: ModelRegistry;\n  readonly thinkingLevel: ThinkingLevel;",
+                  "  readonly agentDir: string;\n  readonly thinkingLevel: ThinkingLevel;",
+              ),
+              (
+                  "      modelRegistry: spec.modelRegistry,\n      thinkingLevel: spec.thinkingLevel,",
+                  "      agentDir: spec.agentDir,\n      thinkingLevel: spec.thinkingLevel,",
+              ),
+              (
+                  "      model,\n      modelRegistry,\n      thinkingLevel: spec.thinkingLevel,",
+                  "      model,\n      agentDir: this.services.agentDir,\n      thinkingLevel: spec.thinkingLevel,",
+              ),
+          ]
+          for old, new in replacements:
+              if old not in text and new not in text:
+                  raise SystemExit(f"SDK migration pattern not found: {old!r}")
+              text = text.replace(old, new, 1)
+          sdk.write_text(text)
+          PY
+
+          cat > modules/pi-packages.nix <<'NIX'
+          { inputs, ... }:
+
+          {
+            perSystem =
+              { pkgs, ... }:
+              let
+                piVersion = "0.80.10";
+
+                # Pi is intentionally pinned independently from Nixpkgs. The harness
+                # needs both the CLI and the public SDK module tree, so binary-only
+                # third-party flakes are insufficient.
+                piCodingAgent = pkgs.buildNpmPackage {
+                  pname = "pi-coding-agent";
+                  version = piVersion;
+                  src = inputs.pi-src;
+
+                  npmDepsHash = pkgs.lib.fakeHash;
+                  npmWorkspace = "packages/coding-agent";
+                  npmRebuildFlags = [ "--ignore-scripts" ];
+
+                  nativeBuildInputs = [ pkgs.makeBinaryWrapper ];
+
+                  # Build workspace dependencies in dependency order. The generated
+                  # model catalog is committed upstream, so no network generation is
+                  # required during the Nix build.
+                  buildPhase = ''
+                    runHook preBuild
+
+                    npx tsgo -p packages/ai/tsconfig.build.json
+                    npx tsgo -p packages/tui/tsconfig.build.json
+                    npx tsgo -p packages/agent/tsconfig.build.json
+                    npm run build --workspace=packages/coding-agent
+
+                    runHook postBuild
+                  '';
+
+                  # Replace workspace links with the built SDK packages. Phenix
+                  # imports these directly for in-process child sessions.
+                  postInstall = ''
+                    local nm="$out/lib/node_modules/pi-monorepo/node_modules"
+
+                    for ws in @earendil-works/pi-ai:packages/ai \
+                              @earendil-works/pi-agent-core:packages/agent \
+                              @earendil-works/pi-tui:packages/tui; do
+                      IFS=: read -r pkg src <<< "$ws"
+                      rm "$nm/$pkg"
+                      cp -r "$src" "$nm/$pkg"
+                    done
+
+                    find "$nm" -type l -lname '*/packages/*' -delete
+                    find "$nm/.bin" -xtype l -delete
+                  ''
+                  + pkgs.lib.optionalString pkgs.stdenvNoCC.hostPlatform.isDarwin ''
+                    rm -rf \
+                      "$nm/@anthropic-ai/sandbox-runtime/dist/vendor/seccomp" \
+                      "$nm/@anthropic-ai/sandbox-runtime/vendor/seccomp"
+                  '';
+
+                  postFixup = ''
+                    wrapProgram $out/bin/pi --prefix PATH : ${
+                      pkgs.lib.makeBinPath [
+                        pkgs.ripgrep
+                        pkgs.fd
+                      ]
+                    } \
+                      --set-default PI_SKIP_VERSION_CHECK 1 \
+                      --set-default PI_TELEMETRY 0
+                  '';
+
+                  doInstallCheck = true;
+                  nativeInstallCheckInputs = [
+                    pkgs.writableTmpDirAsHomeHook
+                    pkgs.versionCheckHook
+                  ];
+                  versionCheckKeepEnvironment = [ "HOME" ];
+                  versionCheckProgram = "${placeholder "out"}/bin/pi";
+                  versionCheckProgramArg = "--version";
+                };
+
+                piNpmRoot = ./pi-npm;
+
+                # package-lock.json is the sole authority for third-party extension
+                # dependencies. Pi itself is supplied by piCodingAgent below.
+                piNpmPackages = pkgs.importNpmLock.buildNodeModules {
+                  npmRoot = piNpmRoot;
+                  inherit (pkgs) nodejs;
+                  derivationArgs = {
+                    pname = "phenix-pi-npm-packages";
+                    version = "1.0.0";
+                    npmFlags = [ "--legacy-peer-deps" ];
+                    npm_config_ignore_scripts = true;
+                  };
+                };
+
+                phenixPiPackage = pkgs.runCommand "phenix-pi-package" { } ''
+                  mkdir -p "$out"
+                  cp -R ${./phenix-pi}/. "$out/"
+                  chmod -R u+w "$out"
+
+                  rm -rf "$out/node_modules"
+                  cp -R ${piNpmPackages}/node_modules "$out/node_modules"
+                  chmod -R u+w "$out/node_modules"
+
+                  piRoot=${piCodingAgent}/lib/node_modules/pi-monorepo
+                  mkdir -p "$out/node_modules/@earendil-works"
+                  ln -s "$piRoot" "$out/node_modules/@earendil-works/pi-coding-agent"
+                  for package in pi-agent-core pi-ai; do
+                    source="$piRoot/node_modules/@earendil-works/$package"
+                    test -e "$source"
+                    rm -rf "$out/node_modules/@earendil-works/$package"
+                    ln -s "$source" "$out/node_modules/@earendil-works/$package"
+                  done
+                '';
+
+                phenixRuntimeTests =
+                  pkgs.runCommand "phenix-runtime-tests"
+                    {
+                      nativeBuildInputs = [
+                        pkgs.nodejs
+                        pkgs.ast-grep
+                        pkgs.git
+                      ];
+                    }
+                    ''
+                      cd ${phenixPiPackage}
+                      node --experimental-strip-types --test tests/*.test.ts
+                      node --check runtime/verify.mjs
+                      touch "$out"
+                    '';
+
+                phenixTypecheck =
+                  pkgs.runCommand "phenix-typecheck"
+                    {
+                      nativeBuildInputs = [
+                        pkgs.nodejs
+                        pkgs.typescript
+                      ];
+                    }
+                    ''
+                      cd ${phenixPiPackage}
+                      tsc --project tsconfig.json --pretty false
+                      touch "$out"
+                    '';
+              in
+              {
+                packages = {
+                  pi-coding-agent = piCodingAgent;
+                  phenix-pi-package = phenixPiPackage;
+                  phenix-shell = phenixPiPackage;
+                  phenix-pi-npm-packages = piNpmPackages;
+                  phenix-runtime-tests = phenixRuntimeTests;
+                  phenix-typecheck = phenixTypecheck;
+                };
+              };
+          }
+          NIX
+
+          nix flake lock --update-input pi-src
+
+          set +e
+          nix build .#pi-coding-agent --no-link > /tmp/pi-first-build.log 2>&1
+          first_status=$?
+          set -e
+
+          if [[ $first_status -ne 0 ]]; then
+            dependency_hash=$(sed -n 's/.*got:[[:space:]]*\(sha256-[^[:space:]]*\).*/\1/p' /tmp/pi-first-build.log | tail -n 1)
+            if [[ -z "$dependency_hash" ]]; then
+              cat /tmp/pi-first-build.log
+              exit "$first_status"
+            fi
+            python3 - "$dependency_hash" <<'PY'
+          from pathlib import Path
+          import sys
+          path = Path("modules/pi-packages.nix")
+          text = path.read_text()
+          marker = "npmDepsHash = pkgs.lib.fakeHash;"
+          if marker not in text:
+              raise SystemExit("fake npm dependency hash marker not found")
+          path.write_text(text.replace(marker, f'npmDepsHash = "{sys.argv[1]}";', 1))
+          PY
+          fi
+
+          nix build .#pi-coding-agent .#phenix-typecheck .#phenix-runtime-tests .#pi --no-link
+
+          rm .github/workflows/upgrade-pi.yml
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add flake.nix flake.lock modules/pi-packages.nix modules/standalone.nix \
+            modules/phenix-pi/extensions/phenix-runtime/sdk-child-session-backend.ts \
+            .github/workflows/upgrade-pi.yml
+          git commit -m "fix(pi): pin official Pi 0.80.10 source"
+          git push origin HEAD:fix/upgrade-pi-0.80.10
