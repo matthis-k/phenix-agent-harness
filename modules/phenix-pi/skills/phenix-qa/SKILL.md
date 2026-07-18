@@ -70,20 +70,35 @@ Semantic validation (`runtime/semantic-validation.ts`) additionally checks: evid
 | Analyzer | Status | Tool | Categories |
 |---|---|---|---|
 | `project-native` | Available | Discovers package.json scripts, .tend.json commands | build, test, lint, format |
-| `metrics` | Optional | codehawk-cli (when installed) | metrics, complexity |
+| `metrics` | Available for JavaScript/TypeScript | Packaged FTA 3.0.0 | metrics, cyclomatic complexity, Halstead, maintainability |
 | `structural` | Available | ast-grep 0.44.0 | patterns, structural-rules |
 | `duplication` | Optional | jscpd (when installed) | duplication, clone-detection |
 | `security` | Optional | semgrep (when installed) | security, vulnerability |
 | `git-history` | Available | git | version-control, churn, hotspots |
 
 **Required**: `project-native`
-**Optional**: `metrics`, `duplication`, `security` (report as unavailable when not installed; never claim clean results)
+
+**Packaged**: `metrics`, `structural`, `git-history`. The metrics analyzer reports `not-applicable` when FTA finds no supported JavaScript or TypeScript files.
+
+**Optional**: `duplication`, `security` (report as unavailable when not installed; never claim clean results).
+
+### Metrics semantics
+
+FTA parses JavaScript and TypeScript with SWC and returns structured JSON per file. The QA adapter records the complete JSON as a raw artifact and emits compact summary evidence plus files that meet the configured review threshold.
+
+- `cyclo` is reported as cyclomatic complexity: the number of linearly independent control-flow paths, conventionally starting at one and increasing with decision points.
+- `fta_score` is FTA's composite maintainability/complexity score; lower is better.
+- Halstead volume, difficulty, and effort are retained in threshold-violation evidence.
+- `line_count` is the physical line count reported by FTA.
+
+The default cyclomatic review threshold is configured in `runtime/config.ts`. A threshold crossing is evidence for review, not an automatic defect.
 
 ### Scope resolution (`runtime/scope.ts`)
 
 Supports: `diff`, `files`, `module`, `repository`, `architecture`.
 
 For `diff` scope:
+
 - Accepts explicit base revision
 - Determines merge base against default branch
 - Handles dirty worktrees
@@ -93,6 +108,7 @@ For `diff` scope:
 ### Report pipeline (`runtime/report.ts`)
 
 The runtime:
+
 1. Builds a deterministic skeleton with empty model-review sections
 2. Accepts model-review contributions
 3. Validates contribution structure
@@ -130,6 +146,7 @@ Missing analyzers reduce confidence and increase `unavailableInputs` — they do
 ### Analysis coverage (`AnalysisCoverage`)
 
 Structured coverage replaces the free-form string:
+
 - Requested, completed, unavailable, and failed analyzers
 - Covered vs. total scoped files
 - Covered and uncovered languages
@@ -161,15 +178,15 @@ All model findings must reference existing evidence IDs. The runtime rejects fin
 
 These analyzers are implemented but require tools not currently in the Nix package set:
 
-- **Metrics**: Requires `codehawk-cli` (`npm install -g codehawk-cli`). Reports as unavailable otherwise.
 - **Duplication**: Requires `jscpd` (`npm install -g jscpd`). Reports as unavailable otherwise.
 - **Security**: Requires `semgrep` (`pip install semgrep`). Reports as unavailable otherwise.
 
-`git-history` and `structural` analyzers are available when ast-grep and git are present (they are in the current Nix environment).
+`metrics`, `git-history`, and `structural` are available in the current Nix environment.
 
 ## Future work
 
-- Package codehawk-cli or an equivalent metrics tool in Nix
+- Add deterministic metrics adapters for Rust, QML, Python, Go, and Nix
+- Package duplication and security analyzers when their closure and update policy are acceptable
 - Add dead-code analysis adapter
 - Add dependency graph adapter (e.g., `madge` or `dependency-cruiser`)
 - Add coverage analysis adapter
