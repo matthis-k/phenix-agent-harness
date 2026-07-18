@@ -25,6 +25,9 @@
           mkdir -p "$agent_dir"
           chmod 0700 "$agent_dir" 2>/dev/null || true
 
+          node "${phenixPiPackage}/runtime/sync-opencode-auth.mjs" \
+            "$agent_dir/auth.json"
+
           lsp_defaults_file="$agent_dir/lsp.phenix-defaults.json"
 
           install -m 0600 \
