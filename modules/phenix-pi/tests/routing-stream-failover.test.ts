@@ -109,9 +109,7 @@ function dependencies(
     const avoided = new Set(
       (input.avoidModels ?? []).map((model) => `${model.provider}/${model.model}`),
     );
-    const nextIndex = refs.findIndex(
-      (model) => !avoided.has(`${model.provider}/${model.model}`),
-    );
+    const nextIndex = refs.findIndex((model) => !avoided.has(`${model.provider}/${model.model}`));
     const index = nextIndex === -1 ? 0 : nextIndex;
     return {
       modelSet: modelSetId("free"),
@@ -149,7 +147,9 @@ function dependencies(
   } as RoutingConfig;
 
   return {
-    getSessionRuntime: (() => ({ modelSet: modelSetId("free") })) as RouterStreamDependencies["getSessionRuntime"],
+    getSessionRuntime: (() => ({
+      modelSet: modelSetId("free"),
+    })) as RouterStreamDependencies["getSessionRuntime"],
     loadRoutingConfig: () => config,
     modelRegistry: {
       getModel(provider: string, model: string) {
@@ -183,7 +183,8 @@ async function collect(stream: ReturnType<RouterStreamFunction>): Promise<Assist
 
 function assertVirtualIdentity(events: readonly AssistantMessageEvent[]): void {
   for (const event of events) {
-    const publicMessage = event.type === "done" ? event.message : event.type === "error" ? event.error : event.partial;
+    const publicMessage =
+      event.type === "done" ? event.message : event.type === "error" ? event.error : event.partial;
     assert.equal(publicMessage.provider, "phenix");
     assert.equal(publicMessage.model, "free");
   }
@@ -201,7 +202,9 @@ test("router retries before output while preserving phenix/free", async () => {
       dependencies(
         [first, second],
         (model) =>
-          model.id === first.id ? failure(model, "400 upstream failure") : success(model, "recovered"),
+          model.id === first.id
+            ? failure(model, "400 upstream failure")
+            : success(model, "recovered"),
         attempts,
       ),
     )(virtualModel, context, { sessionId }),
