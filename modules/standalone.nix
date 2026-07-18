@@ -47,6 +47,16 @@
             chmod 0600 "$agent_dir/mcp.json"
           fi
 
+          models_defaults_file="$agent_dir/models.phenix-defaults.json"
+
+          install -m 0600 \
+            "${phenixPiPackage}/config/models.json" \
+            "$models_defaults_file"
+
+          node "${phenixPiPackage}/runtime/merge-model-defaults.mjs" \
+            "$models_defaults_file" \
+            "$agent_dir/models.json"
+
           export PI_CODING_AGENT_DIR="$agent_dir"
           export PI_SKIP_VERSION_CHECK=1
           export PI_TELEMETRY=0
