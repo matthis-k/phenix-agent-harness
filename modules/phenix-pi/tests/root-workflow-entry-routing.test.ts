@@ -143,9 +143,7 @@ describe("root workflow entry routing", () => {
       },
     });
 
-    const events = await collect(
-      stream(makeModel("phenix", "free"), context, { sessionId }),
-    );
+    const events = await collect(stream(makeModel("phenix", "free"), context, { sessionId }));
 
     assert.equal(unexpectedInitialResolution, false);
     assert.equal(routedModel, concreteModel);
@@ -153,7 +151,11 @@ describe("root workflow entry routing", () => {
     assert.equal(routedOptions?.reasoning, "high");
     for (const event of events) {
       const publicMessage =
-        event.type === "done" ? event.message : event.type === "error" ? event.error : event.partial;
+        event.type === "done"
+          ? event.message
+          : event.type === "error"
+            ? event.error
+            : event.partial;
       assert.equal(publicMessage.provider, "phenix");
       assert.equal(publicMessage.model, "free");
     }
@@ -189,9 +191,7 @@ describe("root workflow entry routing", () => {
       },
     });
 
-    const events = await collect(
-      stream(makeModel("phenix", "free"), context, { sessionId }),
-    );
+    const events = await collect(stream(makeModel("phenix", "free"), context, { sessionId }));
     const terminal = events.at(-1);
 
     assert.equal(routeResolutionCalled, false);

@@ -14,9 +14,9 @@ import { modelSetId } from "../extensions/phenix-kernel/ids.ts";
 import {
   clearActiveRouteForSession,
   createRouterStream,
-  setActiveRouteForSession,
   type RouterStreamDependencies,
   type RouterStreamFunction,
+  setActiveRouteForSession,
 } from "../extensions/phenix-routing/stream-proxy.ts";
 import type { ModelRef, ResolvedRoute, RoutingConfig } from "../extensions/phenix-routing/types.ts";
 
