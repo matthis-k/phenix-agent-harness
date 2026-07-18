@@ -176,7 +176,7 @@ async function runRouter(
     model.provider === PHENIX_PROVIDER
       ? (modelSetForModelId(model.id) ?? runtime.modelSet)
       : runtime.modelSet;
-  const route = getActiveRouteForSession(sessionId);
+  let route = getActiveRouteForSession(sessionId);
   if (!route) {
     throw new Error(
       `Phenix workflow entry route is missing for session "${sessionId}". ` +

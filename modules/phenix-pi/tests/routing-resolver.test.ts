@@ -181,39 +181,25 @@ describe("Route resolution", () => {
   });
 });
 
-describe("Route resolution profile → difficulty", () => {
+describe("Workflow-owned route difficulty", () => {
   const config = buildBundledConfig();
 
-  it("D0 profile resolves to D0 route", async () => {
+  it("resolves the workflow-derived D0 route", async () => {
     const route = await resolveRoute({
       modelSet: "mixed",
       role: "coordinator",
-      profile: {
-        complexity: 0,
-        uncertainty: 0,
-        consequence: 0,
-        breadth: 0,
-        coupling: 0,
-        novelty: 0,
-      },
+      difficulty: "D0",
       modelRegistry: goRegistry(),
       config,
     });
     assert.equal(route.difficulty, "D0");
   });
 
-  it("D3 profile resolves to D3 route", async () => {
+  it("resolves the workflow-derived D3 route", async () => {
     const route = await resolveRoute({
       modelSet: "mixed",
       role: "coordinator",
-      profile: {
-        complexity: 4,
-        uncertainty: 4,
-        consequence: 4,
-        breadth: 4,
-        coupling: 4,
-        novelty: 4,
-      },
+      difficulty: "D3",
       modelRegistry: goRegistry(),
       config,
     });
