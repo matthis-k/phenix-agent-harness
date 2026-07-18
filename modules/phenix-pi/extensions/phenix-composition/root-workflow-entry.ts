@@ -1,4 +1,4 @@
-import type { TaskProfile, Difficulty } from "../phenix-kernel/task.ts";
+import type { Difficulty, TaskProfile } from "../phenix-kernel/task.ts";
 import { deriveTaskProfileFromText, difficultyForProfile } from "../phenix-kernel/task.ts";
 import { modelSetForModelId } from "../phenix-routing/provider.ts";
 import { modelRegistry } from "../phenix-routing/registry.ts";
