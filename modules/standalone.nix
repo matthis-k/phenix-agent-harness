@@ -73,7 +73,7 @@
           export HYPA_PI_ENABLE_MCP_PROXY="''${HYPA_PI_ENABLE_MCP_PROXY:-0}"
           export HYPA_PI_ASK_NON_INTERACTIVE="''${HYPA_PI_ASK_NON_INTERACTIVE:-allow}"
 
-          exec "${pkgs.pi-coding-agent}/bin/pi" \
+          exec "${self'.packages.pi-coding-agent}/bin/pi" \
             -e "${phenixPiPackage}" \
             "$@"
         '';
