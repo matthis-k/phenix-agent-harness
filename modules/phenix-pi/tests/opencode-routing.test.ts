@@ -7,10 +7,7 @@ describe("OpenCode primary routes", () => {
   it("uses DeepSeek V4 Flash Free first", () => {
     const config = buildBundledConfig();
 
-    assert.equal(
-      config.pools["free.universal"]?.[0],
-      "opencode/deepseek-v4-flash-free",
-    );
+    assert.equal(config.pools["free.universal"]?.[0], "opencode/deepseek-v4-flash-free");
   });
 
   it("keeps paid DeepSeek V4 behind the primary OpenCode Go candidates", () => {
