@@ -64,10 +64,7 @@ function maskMessage(message: AssistantMessage, virtualModelId: string): Assista
   };
 }
 
-function maskEvent(
-  event: AssistantMessageEvent,
-  virtualModelId: string,
-): AssistantMessageEvent {
+function maskEvent(event: AssistantMessageEvent, virtualModelId: string): AssistantMessageEvent {
   if (event.type === "done") {
     return { ...event, message: maskMessage(event.message, virtualModelId) };
   }
@@ -221,10 +218,7 @@ async function runRouter(
     if (!fallback) {
       clearActiveRouteForSession(sessionId);
       stream.push(
-        maskEvent(
-          annotateExhaustedCandidates(attempt.event, attemptedModels),
-          virtualModelId,
-        ),
+        maskEvent(annotateExhaustedCandidates(attempt.event, attemptedModels), virtualModelId),
       );
       stream.end();
       return;
