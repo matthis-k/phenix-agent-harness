@@ -7,13 +7,21 @@ type ProviderModel = {
   readonly provider?: string;
 };
 
+const UNSUPPORTED_TOP_LEVEL_FIELDS = [
+  "prompt_cache_key",
+  "prompt_cache_retention",
+  "store",
+  "stream_options",
+] as const;
+
 function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function withoutCacheControl(value: JsonObject): JsonObject {
-  const { cache_control: _cacheControl, ...rest } = value;
-  return rest;
+function withoutKeys(value: JsonObject, keys: readonly string[]): JsonObject {
+  const next = { ...value };
+  for (const key of keys) delete next[key];
+  return next;
 }
 
 function sanitizeMessage(value: unknown): unknown {
@@ -23,51 +31,71 @@ function sanitizeMessage(value: unknown): unknown {
   const content = value.content.map((part) => {
     if (!isJsonObject(part) || !("cache_control" in part)) return part;
     changed = true;
-    return withoutCacheControl(part);
+    return withoutKeys(part, ["cache_control"]);
   });
 
   return changed ? { ...value, content } : value;
 }
 
 function sanitizeTool(value: unknown): unknown {
-  return isJsonObject(value) && "cache_control" in value ? withoutCacheControl(value) : value;
+  if (!isJsonObject(value)) return value;
+
+  let changed = false;
+  let next = value;
+
+  if ("cache_control" in next) {
+    next = withoutKeys(next, ["cache_control"]);
+    changed = true;
+  }
+
+  if (isJsonObject(next.function) && "strict" in next.function) {
+    next = {
+      ...next,
+      function: withoutKeys(next.function, ["strict"]),
+    };
+    changed = true;
+  }
+
+  return changed ? next : value;
 }
 
 /**
- * OpenCode Go's OpenAI-compatible endpoint rejects Anthropic-style
- * `cache_control` members with a generic upstream 400. Pi emits those markers
- * only on message content blocks and top-level tool declarations, so sanitize
- * those locations without traversing user-defined tool schemas.
+ * OpenCode Go fronts several upstream providers behind an OpenAI-compatible
+ * endpoint. Those upstreams accept the core Chat Completions contract but do
+ * not consistently accept optional OpenAI fields. Keep the wire payload to the
+ * common subset without traversing user-defined tool parameter schemas.
  */
-export function stripAnthropicCacheControl(value: unknown): unknown {
+export function sanitizeOpenCodeGoPayload(value: unknown): unknown {
   if (!isJsonObject(value)) return value;
 
-  let messagesChanged = false;
-  let messages = value.messages;
-  if (Array.isArray(value.messages)) {
-    messages = value.messages.map((message) => {
+  const unsupportedFields = UNSUPPORTED_TOP_LEVEL_FIELDS.filter((field) => field in value);
+  let changed = unsupportedFields.length > 0;
+  const payload = changed ? withoutKeys(value, unsupportedFields) : value;
+
+  let messages = payload.messages;
+  if (Array.isArray(payload.messages)) {
+    messages = payload.messages.map((message) => {
       const next = sanitizeMessage(message);
-      messagesChanged ||= next !== message;
+      changed ||= next !== message;
       return next;
     });
   }
 
-  let toolsChanged = false;
-  let tools = value.tools;
-  if (Array.isArray(value.tools)) {
-    tools = value.tools.map((tool) => {
+  let tools = payload.tools;
+  if (Array.isArray(payload.tools)) {
+    tools = payload.tools.map((tool) => {
       const next = sanitizeTool(tool);
-      toolsChanged ||= next !== tool;
+      changed ||= next !== tool;
       return next;
     });
   }
 
-  if (!messagesChanged && !toolsChanged) return value;
+  if (!changed) return value;
 
   return {
-    ...value,
-    ...(messagesChanged ? { messages } : {}),
-    ...(toolsChanged ? { tools } : {}),
+    ...payload,
+    ...(messages !== payload.messages ? { messages } : {}),
+    ...(tools !== payload.tools ? { tools } : {}),
   };
 }
 
@@ -79,7 +107,7 @@ export default function registerOpenCodeGoCompatibility(pi: ExtensionAPI): void 
   pi.on("before_provider_request", (event, ctx) => {
     if (!requiresOpenCodeGoPayloadSanitization(ctx.model)) return;
 
-    const payload = stripAnthropicCacheControl(event.payload);
+    const payload = sanitizeOpenCodeGoPayload(event.payload);
     return payload === event.payload ? undefined : payload;
   });
 }
