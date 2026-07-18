@@ -15,6 +15,14 @@ import { modelSetForModelId } from "./provider.ts";
 import { modelRegistry } from "./registry.ts";
 import { resolveRoute } from "./resolver.ts";
 import { getSessionRuntime } from "./state.ts";
+import {
+  newStreamTraceId,
+  streamTraceEnabled,
+  streamTraceHash,
+  streamTracePreview,
+  streamTraceReasoningEnabled,
+  writeStreamTrace,
+} from "./stream-trace.ts";
 import { formatModelRef, type ModelRef, type ResolvedRoute, type RoutingConfig } from "./types.ts";
 
 const PHENIX_PROVIDER = "phenix";
@@ -41,6 +49,64 @@ type PiUpstreamRuntime = Pick<
 >;
 
 type ErrorEvent = Extract<AssistantMessageEvent, { type: "error" }>;
+
+type RouterTrace = { readonly id: string; ingressSequence: number; egressSequence: number };
+
+function eventTraceFields(event: AssistantMessageEvent): Record<string, unknown> {
+  const partial =
+    event.type === "done" ? event.message : event.type === "error" ? event.error : event.partial;
+  const contentIndex = "contentIndex" in event ? event.contentIndex : undefined;
+  const block = contentIndex === undefined ? undefined : partial.content[contentIndex];
+  const partialText =
+    block?.type === "text" ? block.text : block?.type === "thinking" ? block.thinking : undefined;
+  const delta = "delta" in event && typeof event.delta === "string" ? event.delta : undefined;
+  const exposePreview = event.type !== "thinking_delta" || streamTraceReasoningEnabled();
+  return {
+    eventType: event.type,
+    ...(contentIndex === undefined ? {} : { contentIndex }),
+    ...(delta === undefined
+      ? {}
+      : {
+          deltaLength: delta.length,
+          deltaSha256: streamTraceHash(delta),
+          ...(exposePreview ? { deltaPreview: streamTracePreview(delta) } : {}),
+        }),
+    ...(partialText === undefined
+      ? {}
+      : {
+          partialBlockLength: partialText.length,
+          partialBlockSha256: streamTraceHash(partialText),
+        }),
+    ...(event.type === "done" || event.type === "error"
+      ? { stopReason: event.type === "done" ? event.message.stopReason : event.error.stopReason }
+      : {}),
+  };
+}
+
+function pushRouterEvent(
+  stream: AssistantMessageEventStream,
+  event: AssistantMessageEvent,
+  trace: RouterTrace,
+  routeAttempt: number,
+  provider: string,
+  concreteModel: string,
+  ingressSequence?: number,
+): void {
+  if (streamTraceEnabled()) {
+    trace.egressSequence += 1;
+    writeStreamTrace({
+      boundary: "router_egress",
+      traceId: trace.id,
+      routeAttempt,
+      egressSequence: trace.egressSequence,
+      ...(ingressSequence === undefined ? {} : { ingressSequence }),
+      provider,
+      concreteModel,
+      ...eventTraceFields(event),
+    });
+  }
+  stream.push(event);
+}
 
 export interface RouterStreamDependencies {
   readonly getSessionRuntime: typeof getSessionRuntime;
@@ -186,8 +252,14 @@ export function createRouterStream(
   return (model, context, options) => {
     const stream = createAssistantMessageEventStream();
 
-    void runRouter(stream, model, context, options, dependencies).catch((error) => {
-      stream.push(
+    const trace: RouterTrace = {
+      id: streamTraceEnabled() ? newStreamTraceId() : "",
+      ingressSequence: 0,
+      egressSequence: 0,
+    };
+    void runRouter(stream, model, context, options, dependencies, trace).catch((error) => {
+      pushRouterEvent(
+        stream,
         maskEvent(
           createTerminalError(
             PHENIX_PROVIDER,
@@ -196,6 +268,10 @@ export function createRouterStream(
           ),
           model.id,
         ),
+        trace,
+        0,
+        PHENIX_PROVIDER,
+        model.id,
       );
       stream.end();
     });
@@ -213,6 +289,7 @@ async function runRouter(
   context: Context,
   options: SimpleStreamOptions | undefined,
   dependencies: RouterStreamDependencies,
+  trace: RouterTrace,
 ): Promise<void> {
   const sessionId = options?.sessionId ?? "default";
   const config = dependencies.loadRoutingConfig();
@@ -238,8 +315,10 @@ async function runRouter(
 
   const virtualModelId = route.modelSet;
   const attemptedModels: ModelRef[] = [];
+  let routeAttempt = 0;
 
   while (true) {
+    routeAttempt += 1;
     const attempt = await runRouteAttempt(
       stream,
       route,
@@ -247,6 +326,8 @@ async function runRouter(
       context,
       options,
       dependencies,
+      trace,
+      routeAttempt,
     );
 
     if (attempt.type === "completed") {
@@ -256,7 +337,15 @@ async function runRouter(
     attemptedModels.push(route.model);
 
     if (attempt.substantiveOutputSeen) {
-      stream.push(maskEvent(attempt.event, virtualModelId));
+      pushRouterEvent(
+        stream,
+        maskEvent(attempt.event, virtualModelId),
+        trace,
+        routeAttempt,
+        route.model.provider,
+        route.model.model,
+        attempt.ingressSequence,
+      );
       stream.end();
       return;
     }
@@ -265,8 +354,14 @@ async function runRouter(
 
     if (!fallback) {
       clearActiveRouteForSession(sessionId);
-      stream.push(
+      pushRouterEvent(
+        stream,
         maskEvent(annotateExhaustedCandidates(attempt.event, attemptedModels), virtualModelId),
+        trace,
+        routeAttempt,
+        route.model.provider,
+        route.model.model,
+        attempt.ingressSequence,
       );
       stream.end();
       return;
@@ -283,6 +378,7 @@ type RouteAttemptResult =
       readonly type: "error";
       readonly event: ErrorEvent;
       readonly substantiveOutputSeen: boolean;
+      readonly ingressSequence?: number;
     };
 
 async function runRouteAttempt(
@@ -292,6 +388,8 @@ async function runRouteAttempt(
   context: Context,
   options: SimpleStreamOptions | undefined,
   dependencies: RouterStreamDependencies,
+  trace: RouterTrace,
+  routeAttempt: number,
 ): Promise<RouteAttemptResult> {
   const concreteModel: Model<Api> | undefined = dependencies.modelRegistry.getModel(
     route.model.provider,
@@ -336,30 +434,65 @@ async function runRouteAttempt(
   const upstreamOptions: SimpleStreamOptions = {
     ...requestOptions,
     ...(auth.apiKey !== undefined ? { apiKey: auth.apiKey } : {}),
-    headers: { ...virtualHeaders, ...auth.headers },
+    headers: {
+      ...virtualHeaders,
+      ...auth.headers,
+      ...(streamTraceEnabled()
+        ? { "x-phenix-trace-id": trace.id, "x-phenix-route-attempt": String(routeAttempt) }
+        : {}),
+    },
     env: { ...virtualEnv, ...auth.env },
     reasoning,
     signal: upstreamSignal,
   };
 
   const upstreamStream = dependencies.streamSimple(concreteModel, context, upstreamOptions);
-  const pendingEvents: AssistantMessageEvent[] = [];
+  const pendingEvents: Array<{ event: AssistantMessageEvent; ingressSequence: number }> = [];
   let substantiveOutputSeen = false;
 
   for await (const event of upstreamStream) {
+    trace.ingressSequence += 1;
+    const ingressSequence = trace.ingressSequence;
+    if (streamTraceEnabled()) {
+      writeStreamTrace({
+        boundary: "pi_ingress",
+        traceId: trace.id,
+        routeAttempt,
+        ingressSequence,
+        provider: concreteModel.provider,
+        concreteModel: concreteModel.id,
+        ...eventTraceFields(event),
+      });
+    }
     if (event.type === "error") {
       return {
         type: "error",
         event,
         substantiveOutputSeen,
+        ingressSequence,
       };
     }
 
     if (event.type === "done") {
-      for (const pending of pendingEvents) {
-        stream.push(pending);
-      }
-      stream.push(maskEvent(event, virtualModelId));
+      for (const pending of pendingEvents)
+        pushRouterEvent(
+          stream,
+          pending.event,
+          trace,
+          routeAttempt,
+          concreteModel.provider,
+          concreteModel.id,
+          pending.ingressSequence,
+        );
+      pushRouterEvent(
+        stream,
+        maskEvent(event, virtualModelId),
+        trace,
+        routeAttempt,
+        concreteModel.provider,
+        concreteModel.id,
+        ingressSequence,
+      );
       stream.end();
       return { type: "completed" };
     }
@@ -372,22 +505,38 @@ async function runRouteAttempt(
         type: "error",
         event: createTerminalError(concreteModel.provider, concreteModel.id, errorMessage),
         substantiveOutputSeen: true,
+        ingressSequence,
       };
     }
 
     const masked = maskEvent(event, virtualModelId);
     if (!substantiveOutputSeen && isSubstantiveEvent(event)) {
       substantiveOutputSeen = true;
-      for (const pending of pendingEvents) {
-        stream.push(pending);
-      }
+      for (const pending of pendingEvents)
+        pushRouterEvent(
+          stream,
+          pending.event,
+          trace,
+          routeAttempt,
+          concreteModel.provider,
+          concreteModel.id,
+          pending.ingressSequence,
+        );
       pendingEvents.length = 0;
     }
 
     if (substantiveOutputSeen) {
-      stream.push(masked);
+      pushRouterEvent(
+        stream,
+        masked,
+        trace,
+        routeAttempt,
+        concreteModel.provider,
+        concreteModel.id,
+        ingressSequence,
+      );
     } else {
-      pendingEvents.push(masked);
+      pendingEvents.push({ event: masked, ingressSequence });
     }
   }
 

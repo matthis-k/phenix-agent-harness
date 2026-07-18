@@ -173,8 +173,7 @@ const virtualModel = makeModel("phenix", "free");
 const context: Context = {
   messages: [{ role: "user", content: "Inspect the extensions directory.", timestamp: Date.now() }],
 };
-const repeatedSegment =
-  "Let me check if there's a pi-binary-fix in the extensions directory. ";
+const repeatedSegment = "Let me check if there's a pi-binary-fix in the extensions directory. ";
 
 test("router stops and aborts a pathological repeated-output stream", async () => {
   const concreteModel = makeModel("opencode", "repetition-test");
@@ -193,7 +192,10 @@ test("router stops and aborts a pathological repeated-output stream", async () =
   );
 
   assert.equal(events.filter((event) => event.type === "text_delta").length, 3);
-  assert.equal(events.some((event) => event.type === "done"), false);
+  assert.equal(
+    events.some((event) => event.type === "done"),
+    false,
+  );
   assert.equal(upstreamSignal?.aborted, true);
   const terminal = events.at(-1);
   assert.equal(terminal?.type, "error");
