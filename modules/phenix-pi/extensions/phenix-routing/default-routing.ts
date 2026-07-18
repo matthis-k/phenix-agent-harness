@@ -17,9 +17,9 @@ export const defaultModelPools: readonly ModelPoolDefinition[] = [
   {
     id: "free.universal",
     candidates: [
-      "opencode/north-mini-code-free",
-      "opencode/mimo-v2.5-free",
       "opencode/deepseek-v4-flash-free",
+      "opencode/mimo-v2.5-free",
+      "opencode/north-mini-code-free",
     ],
   },
 
