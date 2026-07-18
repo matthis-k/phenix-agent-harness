@@ -4,10 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import {
-  syncOpenCodeAuth,
-  syncOpenCodeAuthFile,
-} from "../runtime/sync-opencode-auth.mjs";
+import { syncOpenCodeAuth, syncOpenCodeAuthFile } from "../runtime/sync-opencode-auth.mjs";
 
 const zenCredential = { type: "api_key", key: "zen-key" };
 const goCredential = { type: "api_key", key: "go-key" };
