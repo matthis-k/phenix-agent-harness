@@ -5,7 +5,6 @@ import { routerStream } from "./stream-proxy.ts";
 import { MODEL_SET_IDS, type ModelSetId } from "./types.ts";
 
 export const PHENIX_PROVIDER = "phenix";
-export const PHENIX_MODEL = "workflow";
 export const PHENIX_API = "phenix-router";
 
 /** Each built-in model set is exposed as one virtual model under Phenix. */
@@ -19,18 +18,22 @@ export function modelSetForModelId(modelId: string): ModelSetId | undefined {
 /**
  * Register the virtual routing provider.
  *
- * The placeholder URL and key satisfy Pi's provider registration contract but
- * are removed before concrete upstream requests are sent by `routerStream`.
+ * The provider itself performs no authentication. Pi currently requires every
+ * registered provider to declare an authentication method, so the inert local
+ * sentinel only satisfies that registration invariant and is never forwarded.
+ * Concrete routed requests resolve credentials exclusively through Pi's model
+ * registry for the selected upstream provider.
  */
 export function registerPhenixProvider(pi: ExtensionAPI): void {
   pi.registerProvider(PHENIX_PROVIDER, {
     name: "Phenix",
     baseUrl: "https://phenix.invalid/router",
     apiKey: "phenix-internal",
+    authHeader: false,
     api: PHENIX_API as Api,
     models: PHENIX_MODEL_SETS.map((setId) => ({
       id: setId,
-      name: `Phenix ${setId}`,
+      name: setId,
       api: PHENIX_API as Api,
       reasoning: true,
       input: ["text", "image"] satisfies Model<Api>["input"],
