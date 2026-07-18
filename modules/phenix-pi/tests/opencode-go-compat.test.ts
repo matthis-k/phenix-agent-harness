@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -132,5 +135,117 @@ describe("OpenCode Go payload compatibility", () => {
         },
       ],
     });
+  });
+
+  it("passes a strict first-turn provider contract over HTTP", async () => {
+    type Handler = (
+      event: { payload: unknown },
+      ctx: { model: { provider: string; api: string } },
+    ) => unknown;
+
+    const isObject = (value: unknown): value is Record<string, unknown> =>
+      typeof value === "object" && value !== null && !Array.isArray(value);
+
+    let received: unknown;
+    const server = http.createServer(async (request, response) => {
+      try {
+        let body = "";
+        for await (const chunk of request) body += chunk.toString();
+        received = JSON.parse(body);
+
+        const payload = isObject(received) ? received : {};
+        const messages = Array.isArray(payload.messages) ? payload.messages : [];
+        const tools = Array.isArray(payload.tools) ? payload.tools : [];
+        const hasForbiddenMarker =
+          messages.some(
+            (message) =>
+              isObject(message) &&
+              Array.isArray(message.content) &&
+              message.content.some((part) => isObject(part) && "cache_control" in part),
+          ) || tools.some((tool) => isObject(tool) && "cache_control" in tool);
+
+        if (
+          request.method !== "POST" ||
+          request.url !== "/chat/completions" ||
+          hasForbiddenMarker
+        ) {
+          response.writeHead(400, { "content-type": "application/json" });
+          response.end(
+            JSON.stringify({
+              message: "Error from provider (Console Go): Upstream request failed",
+              type: "invalid_request_error",
+            }),
+          );
+          return;
+        }
+
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.end(
+          `data: ${JSON.stringify({
+            id: "chatcmpl-contract",
+            object: "chat.completion.chunk",
+            choices: [{ index: 0, delta: { content: "ok" }, finish_reason: "stop" }],
+          })}\n\ndata: [DONE]\n\n`,
+        );
+      } catch {
+        response.writeHead(400).end();
+      }
+    });
+
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+
+    try {
+      let handler: Handler | undefined;
+      registerOpenCodeGoCompatibility({
+        on(event: string, candidate: Handler) {
+          if (event === "before_provider_request") handler = candidate;
+        },
+      } as unknown as ExtensionAPI);
+
+      const parameters = {
+        type: "object",
+        properties: { cache_control: { type: "string" } },
+      };
+      const payload = {
+        model: "deepseek-v4-flash",
+        stream: true,
+        messages: [
+          {
+            role: "system",
+            content: [{ type: "text", text: "prompt", cache_control: { type: "ephemeral" } }],
+          },
+          { role: "user", content: "hello" },
+        ],
+        tools: [
+          {
+            type: "function",
+            function: { name: "read", parameters },
+            cache_control: { type: "ephemeral" },
+          },
+        ],
+      };
+      const requestPayload =
+        handler?.({ payload }, { model: { provider: "opencode-go", api: "openai-completions" } }) ??
+        payload;
+      const { port } = server.address() as AddressInfo;
+      const providerResponse = await fetch(`http://127.0.0.1:${port}/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(requestPayload),
+      });
+      const responseBody = await providerResponse.text();
+
+      assert.equal(providerResponse.status, 200, responseBody);
+      assert.match(responseBody, /data: \[DONE\]/);
+      assert.deepEqual(
+        (received as { tools: Array<{ function: { parameters: unknown } }> }).tools[0]?.function
+          .parameters,
+        parameters,
+      );
+    } finally {
+      server.close();
+      await once(server, "close");
+    }
   });
 });
