@@ -177,15 +177,18 @@ async function runRouter(
       ? (modelSetForModelId(model.id) ?? runtime.modelSet)
       : runtime.modelSet;
   let route = getActiveRouteForSession(sessionId);
-
-  if (!route || route.modelSet !== requestedModelSet) {
-    route = await dependencies.resolveRoute({
-      modelSet: requestedModelSet,
-      role: "coordinator",
-      modelRegistry: dependencies.modelRegistry,
-      config,
-    });
-    setActiveRouteForSession(sessionId, route);
+  if (!route) {
+    throw new Error(
+      `Phenix workflow entry route is missing for session "${sessionId}". ` +
+        "The before_agent_start workflow bootstrap must derive difficulty and install " +
+        "the coordinator route before provider streaming begins.",
+    );
+  }
+  if (route.modelSet !== requestedModelSet) {
+    throw new Error(
+      `Phenix workflow entry route targets model set "${route.modelSet}", ` +
+        `but the selected virtual model requires "${requestedModelSet}".`,
+    );
   }
 
   const virtualModelId = route.modelSet;

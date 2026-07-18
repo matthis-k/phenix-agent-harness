@@ -2,19 +2,11 @@ import { randomUUID } from "node:crypto";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import {
-  type Difficulty,
-  deriveTaskProfileFromText,
-  difficultyForProfile,
-  type TaskProfile,
-} from "../phenix-kernel/task.ts";
+import type { Difficulty, TaskProfile } from "../phenix-kernel/task.ts";
 import { loadRoutingConfig, validateConfig } from "../phenix-routing/config.ts";
-import { modelSetForModelId } from "../phenix-routing/provider.ts";
 import { modelRegistry } from "../phenix-routing/registry.ts";
-import { resolveRoute } from "../phenix-routing/resolver.ts";
 import { extractRootTurnInput } from "../phenix-routing/root-turn.ts";
 import { getSessionRuntime } from "../phenix-routing/state.ts";
-import { setActiveRouteForSession } from "../phenix-routing/stream-proxy.ts";
 import { listRecords } from "../phenix-subagents/handle-store.ts";
 import {
   type AgentCapabilityArtifact,
@@ -29,6 +21,7 @@ import {
   type WorkflowRuntimeRecord,
 } from "../phenix-workflow/index.ts";
 import { phenixRootModelScope } from "./model-scope.ts";
+import { prepareRootWorkflowEntry } from "./root-workflow-entry.ts";
 
 async function initializeRootWorkflow(input: {
   readonly cwd: string;
@@ -114,8 +107,6 @@ export default async function rootWorkflowIntegration(pi: ExtensionAPI): Promise
           ctx,
         );
 
-    const profile = deriveTaskProfileFromText(turn.userMessage, []);
-    const difficulty = difficultyForProfile(profile);
     const isNewTurn = runtime.currentTurnId !== turn.turnId;
     if (isNewTurn) runtime.currentTurnId = turn.turnId;
 
@@ -127,24 +118,12 @@ export default async function rootWorkflowIntegration(pi: ExtensionAPI): Promise
       );
     }
 
-    const explicitModelSet = modelSetForModelId(selectedModel.id);
-    if (explicitModelSet) runtime.modelSet = explicitModelSet;
-
-    const route = await resolveRoute({
-      modelSet: runtime.modelSet,
-      role: "coordinator",
-      difficulty,
-      modelRegistry,
+    const { profile, difficulty } = await prepareRootWorkflowEntry({
+      sessionId,
+      selectedModel,
+      userMessage: turn.userMessage,
       config,
     });
-    if (route.difficulty !== difficulty) {
-      throw new Error(
-        `Coordinator route difficulty mismatch: workflow=${difficulty}, route=${route.difficulty}`,
-      );
-    }
-
-    runtime.activeRoute = route;
-    setActiveRouteForSession(sessionId, route);
 
     let workflowRecord: WorkflowRuntimeRecord;
     if (!runtime.activeWorkflow || isNewTurn) {

@@ -16,6 +16,7 @@ import {
   createRouterStream,
   type RouterStreamDependencies,
   type RouterStreamFunction,
+  setActiveRouteForSession,
 } from "../extensions/phenix-routing/stream-proxy.ts";
 import type { ModelRef, ResolvedRoute, RoutingConfig } from "../extensions/phenix-routing/types.ts";
 
@@ -190,12 +191,31 @@ function assertVirtualIdentity(events: readonly AssistantMessageEvent[]): void {
   }
 }
 
+function primeEntryRoute(sessionId: string, candidates: readonly Model<Api>[]): void {
+  const refs = candidates.map((model) => ({ provider: model.provider, model: model.id }));
+  const first = refs[0];
+  if (!first) throw new Error("Cannot prime an empty route");
+  setActiveRouteForSession(sessionId, {
+    modelSet: modelSetId("free"),
+    role: "coordinator",
+    difficulty: "D1",
+    capability: "general",
+    pool: "free.universal",
+    candidates: refs,
+    model: first,
+    candidateIndex: 0,
+    thinking: "low",
+    usedAvoidedModelFallback: false,
+  });
+}
+
 test("router retries before output while preserving phenix/free", async () => {
   const first = makeModel("opencode", "first-free");
   const second = makeModel("opencode", "second-free");
   const attempts: string[] = [];
   const sessionId = "routing-failover-success";
   clearActiveRouteForSession(sessionId);
+  primeEntryRoute(sessionId, [first, second]);
 
   const events = await collect(
     createRouterStream(
@@ -226,6 +246,7 @@ test("router does not fail over after public output starts", async () => {
   const attempts: string[] = [];
   const sessionId = "routing-failover-after-output";
   clearActiveRouteForSession(sessionId);
+  primeEntryRoute(sessionId, [first, second]);
 
   const events = await collect(
     createRouterStream(
@@ -258,6 +279,7 @@ test("router reports internal attempts without leaking their identity", async ()
   const attempts: string[] = [];
   const sessionId = "routing-failover-exhausted";
   clearActiveRouteForSession(sessionId);
+  primeEntryRoute(sessionId, candidates);
 
   const events = await collect(
     createRouterStream(
