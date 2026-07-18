@@ -15,12 +15,7 @@ import { modelSetForModelId } from "./provider.ts";
 import { modelRegistry } from "./registry.ts";
 import { resolveRoute } from "./resolver.ts";
 import { getSessionRuntime } from "./state.ts";
-import {
-  formatModelRef,
-  type ModelRef,
-  type ResolvedRoute,
-  type RoutingConfig,
-} from "./types.ts";
+import { formatModelRef, type ModelRef, type ResolvedRoute, type RoutingConfig } from "./types.ts";
 
 const PHENIX_PROVIDER = "phenix";
 const PHENIX_MODEL = "workflow";
@@ -89,11 +84,7 @@ function isSubstantiveEvent(event: AssistantMessageEvent): boolean {
   }
 }
 
-function createTerminalError(
-  provider: string,
-  model: string,
-  errorMessage: string,
-): ErrorEvent {
+function createTerminalError(provider: string, model: string, errorMessage: string): ErrorEvent {
   return {
     type: "error",
     reason: "error",
@@ -209,12 +200,7 @@ async function runRouter(
       return;
     }
 
-    const fallback = await resolveFallbackRoute(
-      route,
-      attemptedModels,
-      config,
-      dependencies,
-    );
+    const fallback = await resolveFallbackRoute(route, attemptedModels, config, dependencies);
 
     if (!fallback) {
       clearActiveRouteForSession(sessionId);
