@@ -60,10 +60,12 @@ function sanitizeTool(value: unknown): unknown {
 }
 
 /**
- * OpenCode Go fronts several upstream providers behind an OpenAI-compatible
- * endpoint. Those upstreams accept the core Chat Completions contract but do
- * not consistently accept optional OpenAI fields. Keep the wire payload to the
- * common subset without traversing user-defined tool parameter schemas.
+ * Pi 0.80.10 supplies the normal OpenCode Go model metadata and common OpenAI
+ * compatibility flags. The Go gateway still fronts heterogeneous upstreams
+ * that reject optional request members not fully expressible through those
+ * flags, including prompt-cache markers and streaming/tool extensions. Keep the
+ * provider-bound payload to their common subset without traversing user-defined
+ * tool parameter schemas.
  */
 export function sanitizeOpenCodeGoPayload(value: unknown): unknown {
   if (!isJsonObject(value)) return value;
