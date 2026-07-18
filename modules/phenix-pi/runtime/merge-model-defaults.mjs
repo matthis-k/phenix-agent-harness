@@ -32,14 +32,17 @@ function mergeModels(current, defaults) {
 
 export function mergeModelDefaults(current, defaults) {
   const output = isObject(current) ? structuredClone(current) : {};
-  const defaultProviders = isObject(defaults) && isObject(defaults.providers) ? defaults.providers : {};
+  const defaultProviders =
+    isObject(defaults) && isObject(defaults.providers) ? defaults.providers : {};
   const currentProviders = isObject(output.providers) ? output.providers : {};
   output.providers = currentProviders;
 
   for (const [providerId, defaultProvider] of Object.entries(defaultProviders)) {
     if (!isObject(defaultProvider)) continue;
 
-    const currentProvider = isObject(currentProviders[providerId]) ? currentProviders[providerId] : {};
+    const currentProvider = isObject(currentProviders[providerId])
+      ? currentProviders[providerId]
+      : {};
     const mergedProvider = { ...currentProvider, ...defaultProvider };
     const currentModels = Array.isArray(currentProvider.models) ? currentProvider.models : [];
     const defaultModels = Array.isArray(defaultProvider.models) ? defaultProvider.models : [];
