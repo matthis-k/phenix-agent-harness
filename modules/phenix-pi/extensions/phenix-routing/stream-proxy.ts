@@ -329,12 +329,17 @@ async function runRouteAttempt(
     env: virtualEnv,
     ...requestOptions
   } = options ?? {};
+  const repetitionAbortController = new AbortController();
+  const upstreamSignal = options?.signal
+    ? AbortSignal.any([options.signal, repetitionAbortController.signal])
+    : repetitionAbortController.signal;
   const upstreamOptions: SimpleStreamOptions = {
     ...requestOptions,
     ...(auth.apiKey !== undefined ? { apiKey: auth.apiKey } : {}),
     headers: { ...virtualHeaders, ...auth.headers },
     env: { ...virtualEnv, ...auth.env },
     reasoning,
+    signal: upstreamSignal,
   };
 
   const upstreamStream = dependencies.streamSimple(concreteModel, context, upstreamOptions);
@@ -361,13 +366,11 @@ async function runRouteAttempt(
 
     const repeatedSegment = repeatedOutputSegment(event);
     if (repeatedSegment) {
+      const errorMessage = repeatedOutputError(repeatedSegment);
+      repetitionAbortController.abort(errorMessage);
       return {
         type: "error",
-        event: createTerminalError(
-          concreteModel.provider,
-          concreteModel.id,
-          repeatedOutputError(repeatedSegment),
-        ),
+        event: createTerminalError(concreteModel.provider, concreteModel.id, errorMessage),
         substantiveOutputSeen: true,
       };
     }
