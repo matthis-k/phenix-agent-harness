@@ -11,6 +11,7 @@
     let
       tooling = import ./tooling.nix { inherit pkgs; };
       phenixPiPackage = self'.packages.phenix-pi-package;
+      mcpConfig = ./phenix-pi/config/mcp.json;
 
       wrappedPi = pkgs.writeShellApplication {
         name = "pi";
@@ -76,6 +77,23 @@
             "$@"
         '';
       };
+
+      mcpDefaultsSmoke = pkgs.runCommand "phenix-mcp-defaults-smoke" { nativeBuildInputs = [ pkgs.jq ]; } ''
+        jq -e '
+          .settings.directTools == false and
+          .mcpServers.stitch.command == "stitch-mcp" and
+          .mcpServers.stitch.lifecycle == "lazy" and
+          .mcpServers.nixos.command == "mcp-nixos" and
+          .mcpServers.nixos.lifecycle == "lazy" and
+          .mcpServers."qt-docs".url == "https://qt-docs-mcp.qt.io/mcp" and
+          .mcpServers."qt-docs".lifecycle == "lazy" and
+          .mcpServers.context7.url == "https://mcp.context7.com/mcp" and
+          .mcpServers.context7.lifecycle == "lazy"
+        ' ${mcpConfig}
+
+        test -x ${pkgs.mcp-nixos}/bin/mcp-nixos
+        touch "$out"
+      '';
     in
     {
       packages = {
@@ -84,6 +102,7 @@
       };
 
       checks = {
+        mcp-defaults = mcpDefaultsSmoke;
         pi-wrapper = wrappedPi;
       };
     };
