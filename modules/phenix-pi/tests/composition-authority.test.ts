@@ -3,18 +3,15 @@ import { describe, it } from "node:test";
 
 import { agentClientId, contractDefinitionId } from "@matthis-k/phenix-kernel/ids.ts";
 import { modelSetRef } from "@matthis-k/phenix-kernel/refs.ts";
+import { definePhenixConfiguration, link } from "@matthis-k/phenix-suite/composition/index.ts";
+import { DEFAULT_MAXIMUM_DELEGATION_DEPTH } from "@matthis-k/phenix-suite/composition/runtime-policy.ts";
+import { defaultAgentClients } from "@matthis-k/phenix-suite/defaults/agents.ts";
+import { defaultContracts } from "@matthis-k/phenix-suite/defaults/contracts.ts";
 import {
   defaultAgentRoutes,
   defaultModelPools,
   defaultModelSets,
-} from "@matthis-k/phenix-routing/default-routing.ts";
-import {
-  definePhenixConfiguration,
-  link,
-} from "@matthis-k/phenix-suite/composition/index.ts";
-import { DEFAULT_MAXIMUM_DELEGATION_DEPTH } from "@matthis-k/phenix-suite/composition/runtime-policy.ts";
-import { defaultAgentClients } from "@matthis-k/phenix-suite/defaults/agents.ts";
-import { defaultContracts } from "@matthis-k/phenix-suite/defaults/contracts.ts";
+} from "@matthis-k/phenix-suite/defaults/routing.ts";
 
 function defaultConfiguration() {
   return definePhenixConfiguration({
