@@ -4,23 +4,21 @@
  * Creates and persists raw and normalized reports.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 
-/**
- * Ensure the artifact directory exists.
- */
+/** Ensure the artifact directory exists and return its absolute path. */
 export function ensureArtifactDir(dir: string): string {
-  const resolved = join(process.cwd(), dir);
-  if (!existsSync(resolved)) {
-    mkdirSync(resolved, { recursive: true });
-  }
+  const resolved = resolve(dir);
+  mkdirSync(resolved, { recursive: true });
   return resolved;
 }
 
-/**
- * Write raw analyzer output to a timestamped artifact file.
- */
+function artifactPath(artifactDir: string, filename: string): string {
+  return join(ensureArtifactDir(artifactDir), filename);
+}
+
+/** Write raw analyzer output to a timestamped artifact file. */
 export function writeRawArtifact(
   artifactDir: string,
   analyzer: string,
@@ -28,33 +26,26 @@ export function writeRawArtifact(
   extension: string,
 ): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const filename = `${analyzer}-${timestamp}.${extension}`;
-  const filePath = join(artifactDir, filename);
+  const filePath = artifactPath(artifactDir, `${analyzer}-${timestamp}.${extension}`);
   writeFileSync(filePath, content, "utf-8");
   return filePath;
 }
 
-/**
- * Write a JSON artifact.
- */
+/** Write a JSON artifact. */
 export function writeJsonArtifact(artifactDir: string, name: string, data: unknown): string {
-  const filePath = join(artifactDir, `${name}.json`);
-  writeFileSync(filePath, JSON.stringify(data, null, 2), "utf-8");
+  const filePath = artifactPath(artifactDir, `${name}.json`);
+  writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
   return filePath;
 }
 
-/**
- * Write a text artifact.
- */
+/** Write a text artifact. */
 export function writeTextArtifact(artifactDir: string, name: string, content: string): string {
-  const filePath = join(artifactDir, `${name}.txt`);
+  const filePath = artifactPath(artifactDir, `${name}.txt`);
   writeFileSync(filePath, content, "utf-8");
   return filePath;
 }
 
-/**
- * Read a text artifact.
- */
+/** Read a text artifact. */
 export function readTextArtifact(path: string): string {
   return readFileSync(path, "utf-8");
 }
