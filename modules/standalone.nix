@@ -79,7 +79,9 @@
 
       mcpDefaultsSmoke =
         pkgs.runCommand "phenix-mcp-defaults-smoke"
-          { nativeBuildInputs = [ pkgs.jq ]; }
+          {
+            nativeBuildInputs = [ pkgs.jq ];
+          }
           ''
             jq -e '
               .settings.directTools == false and
