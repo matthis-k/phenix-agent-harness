@@ -1,6 +1,6 @@
 # Development
 
-The repository uses [Tend](https://github.com/matthis-k/phenix-tend) as the sole task-selection and quality-assurance interface. Nix provides dependencies, builds, and the reproducibility boundary. Shell scripts and individual Nix derivations are private task implementations rather than parallel workflows.
+The repository uses a standalone devenv task graph for maintenance. Nix provides the toolchain, build closures, and reproducibility boundary; `maintenance.nix` is the canonical source for local and CI checks.
 
 ## Enter the development shell
 
@@ -8,49 +8,53 @@ The repository uses [Tend](https://github.com/matthis-k/phenix-tend) as the sole
 nix develop
 ```
 
-The shell contains Tend, the Pi runtime tools, TypeScript and Node.js, and every formatter or linter referenced by `.tend.json`.
+The shell includes devenv, the Pi runtime toolchain, Stitch, and the repository helpers shown at startup.
 
 ## Canonical commands
 
-Every Tend invocation selects two independent dimensions:
-
-- `--profile` selects what should run.
-- `--context` selects how it should run.
-
-| Profile | Selection | Purpose | Command |
-| --- | --- | --- | --- |
-| `git-hook` | Staged | Fast pre-commit checks | `tend check --profile git-hook --context local` |
-| `manual` | Changed | Incremental development checks | `tend check --profile manual --context local` |
-| `full` | Full | Complete direct verification task set | `tend check --profile full --context local` |
-| `pre-push` | Full | Reproducible Nix flake gate | `tend check --profile pre-push --context local` |
-| `ci` | Git range | CI diagnostics and reproducible gate | `tend check --profile ci --context local --base <sha> --head <sha>` |
-| `fix` | Staged | Explicit staged-file formatting | `tend check --profile fix --context local` |
-
-The Nix sandbox invokes the same logical `full` profile with a different mechanism:
+Run the complete read-only maintenance graph:
 
 ```sh
-tend check --profile full --context nix-sandbox
+devenv test
 ```
 
-This selects the direct runtime-test and TypeScript implementations and excludes the recursive flake gate by profile membership. There is no separate sandbox-specific task graph.
-
-Do not add top-level check wrappers or duplicate task selection in GitHub Actions, hooks, shell scripts, or Nix applications.
-
-## Inspect the configured model
+The equivalent explicit task is:
 
 ```sh
-tend validate
-tend list
-tend plan --profile manual --context local
-tend plan --profile full --context nix-sandbox
+devenv tasks run maintenance:check
 ```
 
-## Git hooks
-
-Install the repository-managed hooks once:
+Apply the repository-owned mechanical fixes, then review the resulting diff:
 
 ```sh
-setup-git-hooks
+devenv tasks run maintenance:fix
 ```
 
-Both hooks invoke Tend profiles. The pre-commit hook is non-mutating; formatting changes are explicit through the `fix` profile.
+Update the independently locked Pi extension dependencies after editing `modules/pi-npm/package.json`:
+
+```sh
+update-pi-npm-lock
+```
+
+## Maintenance graph
+
+| Task | Responsibility |
+| --- | --- |
+| `maintenance:format` | Check Nix formatting and Biome formatting/lint rules |
+| `maintenance:statix` | Check Nix static-analysis rules |
+| `maintenance:workflows` | Validate GitHub Actions workflows with actionlint |
+| `maintenance:runtime` | Build and run the packaged Phenix runtime tests |
+| `maintenance:typecheck` | Build the TypeScript compiler gate |
+| `maintenance:flake` | Run the complete flake check |
+| `maintenance:check` | Aggregate every read-only maintenance task |
+| `maintenance:fix` | Apply statix and formatter fixes |
+
+Do not duplicate task selection in GitHub Actions, shell wrappers, or extra Nix applications. CI installs devenv and runs `devenv test`, so local and remote verification use the same graph.
+
+## Stitch
+
+Inspect the repository workspace graph with:
+
+```sh
+stitch workspace discover --json
+```
