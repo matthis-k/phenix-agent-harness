@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { METRICS_ANALYZER, parseFtaJson } from "../skills/phenix-qa/runtime/analyzers/metrics.ts";
 import { ensureArtifactDir } from "../skills/phenix-qa/runtime/artifacts.ts";
