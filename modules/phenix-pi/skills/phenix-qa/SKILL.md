@@ -69,7 +69,7 @@ Semantic validation (`runtime/semantic-validation.ts`) additionally checks: evid
 
 | Analyzer | Status | Tool | Categories |
 |---|---|---|---|
-| `project-native` | Available | Discovers package.json scripts, .tend.json commands | build, test, lint, format |
+| `project-native` | Available | Discovers package.json verification scripts | build, test, lint, format |
 | `metrics` | Available for JavaScript/TypeScript | Packaged FTA 3.0.0 | metrics, cyclomatic complexity, Halstead, maintainability |
 | `structural` | Available | ast-grep 0.44.0 | patterns, structural-rules |
 | `duplication` | Optional | jscpd (when installed) | duplication, clone-detection |
