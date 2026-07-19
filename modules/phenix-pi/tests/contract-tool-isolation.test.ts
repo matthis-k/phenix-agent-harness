@@ -12,6 +12,7 @@
 
 /* biome-ignore-all lint/suspicious/noExplicitAny: isolated tool-boundary fixture. */
 import assert from "node:assert/strict";
+import "./support/default-workflow-fixture.ts";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./support/default-workflow-fixture.ts";
 import { describe, it } from "node:test";
 
 import { agentClientRef, contractRef } from "@matthis-k/phenix-kernel/refs.ts";

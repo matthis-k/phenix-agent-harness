@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { resolveDelegationOptions } from "@matthis-k/phenix-flow/delegation-options.ts";
-import { PHENIX_DEFAULT_WORKFLOW } from "@matthis-k/phenix-flow/workflow-definitions.ts";
+import { PHENIX_DEFAULT_WORKFLOW } from "./support/default-workflow-fixture.ts";
 import {
   buildWorkflowDecisionContext,
   computeOptionsDigest,

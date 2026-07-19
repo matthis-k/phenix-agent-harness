@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./support/default-workflow-fixture.ts";
 import { describe, it } from "node:test";
 import type { AgentRole } from "@matthis-k/phenix-suite/subagents/agent-types.ts";
 import {

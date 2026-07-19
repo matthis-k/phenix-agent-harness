@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 import {
   PHENIX_DEFAULT_WORKFLOW,
   validateDefinition,
-} from "@matthis-k/phenix-flow/workflow-definitions.ts";
+} from "./support/default-workflow-fixture.ts";
 
 describe("Workflow definitions", () => {
   it("has no duplicate transition IDs", () => {

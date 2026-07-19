@@ -12,6 +12,7 @@ import type {
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 
 import { modelSetId } from "@matthis-k/phenix-kernel/ids.ts";
+import "./support/default-routing-fixture.ts";
 import {
   clearActiveRouteForSession,
   createRouterStream,

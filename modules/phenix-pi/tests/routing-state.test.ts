@@ -9,7 +9,7 @@ import {
   validateModelSet,
 } from "@matthis-k/phenix-routing/state.ts";
 import type { ModelSetId } from "@matthis-k/phenix-routing/types.ts";
-import { MODEL_SET_IDS } from "@matthis-k/phenix-routing/types.ts";
+import { DEFAULT_MODEL_SET_IDS } from "./support/default-routing-fixture.ts";
 
 describe("Session routing state", () => {
   it("getSessionRuntime creates default state", () => {
@@ -50,7 +50,7 @@ describe("Session routing state", () => {
   });
 
   it("validateModelSet returns valid sets", () => {
-    for (const id of MODEL_SET_IDS) {
+    for (const id of DEFAULT_MODEL_SET_IDS) {
       assert.equal(validateModelSet(id), id);
     }
   });

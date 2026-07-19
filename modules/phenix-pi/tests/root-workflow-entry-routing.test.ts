@@ -12,7 +12,7 @@ import type {
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 
 import { prepareRootWorkflowEntry } from "@matthis-k/phenix-suite/composition/root-workflow-entry.ts";
-import { buildBundledConfig } from "@matthis-k/phenix-routing/config.ts";
+import { buildDefaultRoutingConfig } from "./support/default-routing-fixture.ts";
 import { clearSessionRuntime, getSessionRuntime } from "@matthis-k/phenix-routing/state.ts";
 import {
   clearActiveRouteForSession,
@@ -110,7 +110,7 @@ describe("root workflow entry routing", () => {
         sessionId,
         selectedModel: { provider: "phenix", id: "free" },
         userMessage: "Investigate and redesign the authentication workflow root cause.",
-        config: buildBundledConfig(),
+        config: buildDefaultRoutingConfig(),
       },
       { modelRegistry: registry },
     );

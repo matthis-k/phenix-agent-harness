@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildBundledConfig } from "@matthis-k/phenix-routing/config.ts";
+import { buildDefaultRoutingConfig } from "./support/default-routing-fixture.ts";
 import { type ModelRegistry, resolveRoute } from "@matthis-k/phenix-routing/resolver.ts";
 import { getSessionRuntime } from "@matthis-k/phenix-routing/state.ts";
 import type { ModelRef, ModelSetId, RoutingRole } from "@matthis-k/phenix-routing/types.ts";
@@ -44,7 +44,7 @@ function fullRegistry(): ModelRegistry {
   return new FakeRegistry(ALL_MODELS);
 }
 
-const config = buildBundledConfig();
+const config = buildDefaultRoutingConfig();
 
 describe("Routing integration", () => {
   it("CI: every role/difficulty pair resolves across all model sets", async () => {

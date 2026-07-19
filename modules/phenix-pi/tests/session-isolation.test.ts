@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./support/default-workflow-fixture.ts";
 import { afterEach, describe, it } from "node:test";
 import type { AgentCapabilityArtifact } from "@matthis-k/phenix-flow/agent-capabilities.ts";
 import {

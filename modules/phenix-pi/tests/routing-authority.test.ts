@@ -1,17 +1,20 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildBundledConfig, validateConfig } from "@matthis-k/phenix-routing/config.ts";
+import { validateConfig } from "@matthis-k/phenix-routing/config.ts";
 import {
   defaultAgentRoutes,
   defaultModelPools,
   defaultModelSets,
 } from "@matthis-k/phenix-suite/defaults/routing.ts";
-import { ROLE_MATRIX } from "@matthis-k/phenix-routing/matrix.ts";
+import {
+  buildDefaultRoutingConfig,
+  DEFAULT_ROLE_MATRIX,
+} from "./support/default-routing-fixture.ts";
 import { capabilityFromId, routingRoleFromId } from "@matthis-k/phenix-routing/types.ts";
 
 describe("routing declaration authority", () => {
   it("projects every pool without changing candidates", () => {
-    const config = buildBundledConfig();
+    const config = buildDefaultRoutingConfig();
 
     assert.deepEqual(
       config.pools,
@@ -22,7 +25,7 @@ describe("routing declaration authority", () => {
   });
 
   it("projects every model set, provider boundary, and guard", () => {
-    const config = buildBundledConfig();
+    const config = buildDefaultRoutingConfig();
 
     for (const definition of defaultModelSets) {
       assert.deepEqual(config.modelSets[definition.id], definition.capabilityPools);
@@ -45,7 +48,7 @@ describe("routing declaration authority", () => {
     for (const definition of defaultAgentRoutes) {
       const role = routingRoleFromId(definition.agentClient.id);
       for (const [difficulty, declared] of Object.entries(definition.difficulties)) {
-        assert.deepEqual(ROLE_MATRIX[role][difficulty as keyof typeof definition.difficulties], {
+        assert.deepEqual(DEFAULT_ROLE_MATRIX[role][difficulty as keyof typeof definition.difficulties], {
           capability: capabilityFromId(declared.capability.id),
           thinking: declared.thinking,
         });

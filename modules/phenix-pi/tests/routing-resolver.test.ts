@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildBundledConfig } from "@matthis-k/phenix-routing/config.ts";
+import { buildDefaultRoutingConfig } from "./support/default-routing-fixture.ts";
 import { type ModelRegistry, resolveRoute } from "@matthis-k/phenix-routing/resolver.ts";
 import type { ModelRef } from "@matthis-k/phenix-routing/types.ts";
 
@@ -49,7 +49,7 @@ function goRegistry(): ModelRegistry {
 }
 
 describe("Route resolution", () => {
-  const config = buildBundledConfig();
+  const config = buildDefaultRoutingConfig();
 
   it("first available authenticated candidate wins", async () => {
     const route = await resolveRoute({
@@ -184,7 +184,7 @@ describe("Route resolution", () => {
 });
 
 describe("Workflow-owned route difficulty", () => {
-  const config = buildBundledConfig();
+  const config = buildDefaultRoutingConfig();
 
   it("resolves the workflow-derived D0 route", async () => {
     const route = await resolveRoute({
