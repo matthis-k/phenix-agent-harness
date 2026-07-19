@@ -3,6 +3,11 @@ import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-w
 import { type Static, Type } from "typebox";
 
 import { PhenixTaskService, type TaskAuthority } from "./core.ts";
+import {
+  type BoundTaskClient,
+  createInProcessTaskClient,
+  taskClientFromEnvironment,
+} from "./transport.ts";
 
 export const PHENIX_TASKS_TOOL = "phenix_tasks" as const;
 
@@ -48,7 +53,7 @@ export type TaskActionParamsType = Static<typeof TaskActionParams>;
 export type TaskAuthorityResolver = (
   ctx: ExtensionContext,
 ) => TaskAuthority | string | undefined;
-
+export type TaskClientResolver = (ctx: ExtensionContext) => BoundTaskClient | undefined;
 export type TaskToolAuthorizer = (ctx: ExtensionContext) => string | undefined;
 
 function result(payload: unknown): AgentToolResult<Record<string, unknown>> {
@@ -66,9 +71,8 @@ function errorResult(message: string): AgentToolResult<Record<string, unknown>> 
   };
 }
 
-export function createTaskTools(input: {
-  readonly service: PhenixTaskService;
-  readonly resolveAuthority: TaskAuthorityResolver;
+export function createTaskClientTools(input: {
+  readonly resolveClient: TaskClientResolver;
   readonly authorize?: TaskToolAuthorizer;
 }): readonly ToolDefinition[] {
   return [
@@ -85,9 +89,8 @@ export function createTaskTools(input: {
         const denial = input.authorize?.(ctx);
         if (denial !== undefined) return errorResult(denial);
 
-        const resolved = input.resolveAuthority(ctx);
-        const authorityToken = typeof resolved === "string" ? resolved : resolved?.token;
-        if (!authorityToken) {
+        const client = input.resolveClient(ctx);
+        if (!client) {
           return errorResult("No active Phenix task authority is bound to this session.");
         }
 
@@ -95,10 +98,10 @@ export function createTaskTools(input: {
           const action = params as TaskActionParamsType;
           switch (action.action) {
             case "inspect":
-              return result(input.service.inspect(authorityToken));
+              return result(await client.inspect());
             case "add":
               return result(
-                input.service.addTask(authorityToken, {
+                await client.add({
                   ...(action.parentId ? { parentId: action.parentId } : {}),
                   title: action.title,
                   ...(action.description !== undefined
@@ -108,7 +111,7 @@ export function createTaskTools(input: {
               );
             case "update":
               return result(
-                input.service.updateTask(authorityToken, {
+                await client.update({
                   taskId: action.taskId,
                   ...(action.title !== undefined ? { title: action.title } : {}),
                   ...(action.description !== undefined
@@ -126,8 +129,39 @@ export function createTaskTools(input: {
   ];
 }
 
-/** Standalone fallback. The Phenix suite normally supplies workflow-scoped authority. */
+export function createTaskTools(input: {
+  readonly service: PhenixTaskService;
+  readonly resolveAuthority: TaskAuthorityResolver;
+  readonly authorize?: TaskToolAuthorizer;
+}): readonly ToolDefinition[] {
+  return createTaskClientTools({
+    resolveClient: (ctx) => {
+      const resolved = input.resolveAuthority(ctx);
+      const authorityToken = typeof resolved === "string" ? resolved : resolved?.token;
+      return authorityToken
+        ? createInProcessTaskClient(input.service, authorityToken)
+        : undefined;
+    },
+    ...(input.authorize ? { authorize: input.authorize } : {}),
+  });
+}
+
+/**
+ * Standalone process entry.
+ *
+ * A process-backed child receives a Unix-socket endpoint and opaque subtree
+ * capability from its backend. An ordinary standalone session gets a local
+ * root tree instead.
+ */
 export default async function phenixTasks(pi: ExtensionAPI): Promise<void> {
+  const remoteClient = taskClientFromEnvironment();
+  if (remoteClient) {
+    for (const tool of createTaskClientTools({ resolveClient: () => remoteClient })) {
+      pi.registerTool(tool as never);
+    }
+    return;
+  }
+
   const service = new PhenixTaskService();
   pi.on("session_start", async (_event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId() ?? "default";
