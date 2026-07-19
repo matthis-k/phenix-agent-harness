@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { definePhenixConfiguration, link } from "../extensions/phenix-composition/index.ts";
-import { DEFAULT_MAXIMUM_DELEGATION_DEPTH } from "../extensions/phenix-composition/runtime-policy.ts";
-import { defaultContracts } from "../extensions/phenix-contracts/default-contracts.ts";
-import { modelSetRef } from "../extensions/phenix-kernel/refs.ts";
+
+import { agentClientId, contractDefinitionId } from "@matthis-k/phenix-kernel/ids.ts";
+import { modelSetRef } from "@matthis-k/phenix-kernel/refs.ts";
+import { definePhenixConfiguration, link } from "@matthis-k/phenix-suite/composition/index.ts";
+import { DEFAULT_MAXIMUM_DELEGATION_DEPTH } from "@matthis-k/phenix-suite/composition/runtime-policy.ts";
+import { defaultAgentClients } from "@matthis-k/phenix-suite/defaults/agents.ts";
+import { defaultContracts } from "@matthis-k/phenix-suite/defaults/contracts.ts";
 import {
   defaultAgentRoutes,
   defaultModelPools,
   defaultModelSets,
-} from "../extensions/phenix-routing/default-routing.ts";
-import { defaultAgentClients } from "../extensions/phenix-subagents/definitions.ts";
+} from "@matthis-k/phenix-suite/defaults/routing.ts";
 
 function defaultConfiguration() {
   return definePhenixConfiguration({
@@ -40,6 +42,8 @@ describe("composition authority", () => {
     assert.equal(result.graph.routing.modelSets.size, defaultModelSets.length);
     assert.equal(result.graph.routing.pools.size, defaultModelPools.length);
     assert.equal(result.graph.routing.agentRoutes.size, defaultAgentRoutes.length);
+    assert.equal(result.graph.agentClients.has(agentClientId("coordinator")), true);
+    assert.equal(result.graph.contracts.has(contractDefinitionId("planner-handoff")), true);
   });
 
   it("freezes linked declarations at the composition boundary", () => {

@@ -4,29 +4,8 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { definePhenixConfiguration } from "../extensions/phenix-composition/configuration.ts";
-import { link } from "../extensions/phenix-composition/linker.ts";
-import { defaultContracts } from "../extensions/phenix-contracts/index.ts";
-import { modelSetRef } from "../extensions/phenix-kernel/refs.ts";
-import {
-  defaultAgentRoutes,
-  defaultModelPools,
-  defaultModelSets,
-} from "../extensions/phenix-routing/default-routing.ts";
-import { defaultAgentClients } from "../extensions/phenix-subagents/definitions.ts";
-
 const testDir = path.dirname(fileURLToPath(import.meta.url));
-const extensionsDir = path.resolve(testDir, "../extensions");
-
-function readTsFiles(dir: string): readonly string[] {
-  const out: string[] = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...readTsFiles(full));
-    if (entry.isFile() && entry.name.endsWith(".ts")) out.push(full);
-  }
-  return out;
-}
+const suiteDir = path.resolve(testDir, "../packages/phenix-suite");
 
 function moduleSpecifiers(file: string): readonly string[] {
   const source = fs.readFileSync(file, "utf-8");
@@ -53,43 +32,30 @@ function assertNoDependencies(files: readonly string[], forbidden: readonly stri
       assert.equal(
         forbidden.some((prefix) => specifier === prefix || specifier.startsWith(`${prefix}/`)),
         false,
-        `${path.relative(extensionsDir, file)} must not import ${specifier}`,
+        `${path.relative(suiteDir, file)} must not import ${specifier}`,
       );
     }
   }
 }
 
-function filesIn(relativeDir: string): readonly string[] {
-  return readTsFiles(path.join(extensionsDir, relativeDir));
+function suiteFiles(...relativePaths: string[]): readonly string[] {
+  return relativePaths.map((relativePath) => path.join(suiteDir, relativePath));
 }
 
-function selectedFiles(...relativePaths: string[]): readonly string[] {
-  return relativePaths.map((relativePath) => path.join(extensionsDir, relativePath));
-}
-
-describe("Phenix architecture boundaries", () => {
-  it("keeps routing independent from workflow and subagent orchestration", () => {
-    assertNoDependencies(filesIn("phenix-routing"), ["../phenix-workflow", "../phenix-subagents"]);
-  });
-
-  it("keeps workflow independent from routing and subagent orchestration", () => {
-    assertNoDependencies(filesIn("phenix-workflow"), ["../phenix-routing", "../phenix-subagents"]);
-  });
-
-  it("keeps the public subagent API independent from workflows and Pi", () => {
+describe("Phenix suite architecture boundaries", () => {
+  it("keeps the public subagent API independent from workflow and Pi adapters", () => {
     assertNoDependencies(
-      selectedFiles(
-        "phenix-runtime/index.ts",
-        "phenix-runtime/subagent-api.ts",
-        "phenix-runtime/subagent-manager.ts",
-        "phenix-runtime/subagent-manager-factory.ts",
-        "phenix-runtime/execution-plan.ts",
-        "phenix-runtime/session-options.ts",
-        "phenix-runtime/session-subagent-adapter.ts",
+      suiteFiles(
+        "runtime/index.ts",
+        "runtime/subagent-api.ts",
+        "runtime/subagent-manager.ts",
+        "runtime/subagent-manager-factory.ts",
+        "runtime/execution-plan.ts",
+        "runtime/session-options.ts",
+        "runtime/session-subagent-adapter.ts",
       ),
       [
-        "../phenix-workflow",
-        "../phenix-subagents",
+        "@matthis-k/phenix-flow",
         "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-agent-core",
         "@earendil-works/pi-ai",
@@ -98,53 +64,22 @@ describe("Phenix architecture boundaries", () => {
   });
 
   it("keeps workflow compilation independent from routing and backend adapters", () => {
-    assertNoDependencies(selectedFiles("phenix-subagents/workflow-execution-compiler.ts"), [
-      "../phenix-routing",
-      "../phenix-runtime/child-session-backend",
-      "../phenix-runtime/sdk-child-session-backend",
+    assertNoDependencies(suiteFiles("subagents/workflow-execution-compiler.ts"), [
+      "@matthis-k/phenix-routing",
+      "../runtime/child-session-backend",
+      "../runtime/sdk-child-session-backend",
     ]);
   });
 
-  it("keeps the workflow delegator independent from managed execution mechanics", () => {
-    assertNoDependencies(selectedFiles("phenix-subagents/workflow-delegator.ts"), [
-      "../phenix-runtime/child-session-backend",
-      "../phenix-runtime/sdk-child-session-backend",
-      "../phenix-runtime/subagent-session-runtime",
-      "../phenix-runtime/subagent-manager",
-      "../phenix-runtime/subagent-manager-factory",
+  it("keeps workflow delegation independent from managed execution mechanics", () => {
+    assertNoDependencies(suiteFiles("subagents/workflow-delegator.ts"), [
+      "../runtime/child-session-backend",
+      "../runtime/sdk-child-session-backend",
+      "../runtime/subagent-session-runtime",
+      "../runtime/subagent-manager",
+      "../runtime/subagent-manager-factory",
       "./execution-quality-service",
       "./producer-cycle-runner",
     ]);
-  });
-
-  it("links the default declarative graph", () => {
-    const result = link(
-      definePhenixConfiguration({
-        activeModelSet: modelSetRef("mixed"),
-        contracts: defaultContracts,
-        agentClients: defaultAgentClients,
-        routing: {
-          modelSets: defaultModelSets,
-          pools: defaultModelPools,
-          agentRoutes: defaultAgentRoutes,
-        },
-        workflows: [],
-        runtime: {
-          childSessionBackend: "sdk",
-          maximumDelegationDepth: 3,
-          persistChildSessions: true,
-        },
-      }),
-    );
-
-    assert.equal(
-      result.ok,
-      true,
-      result.ok ? undefined : result.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
-    );
-    if (result.ok) {
-      assert.equal(result.graph.agentClients.has("coordinator" as never), true);
-      assert.equal(result.graph.contracts.has("planner-handoff" as never), true);
-    }
   });
 });
