@@ -124,10 +124,10 @@
               pkgs.nodejs
               pkgs.ast-grep
               pkgs.git
-              phenixPiPackage
             ];
           }
           ''
+            export PATH=${pkgs.lib.makeBinPath [ phenixPiPackage ]}:$PATH
             cd ${phenixPiPackage}
             node --experimental-strip-types --test tests/*.test.ts
             node --check runtime/verify.mjs
