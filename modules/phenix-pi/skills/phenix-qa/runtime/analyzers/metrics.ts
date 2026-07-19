@@ -12,7 +12,6 @@ import type {
 
 const FTA_COMMAND = "fta";
 const FTA_VERSION = "3.0.0";
-const FTA_PATH_ENV = "PHENIX_QA_FTA";
 
 interface FtaHalsteadMetrics {
   readonly volume: number;
@@ -157,26 +156,12 @@ export const METRICS_ANALYZER: QaAnalyzer = {
 };
 
 async function resolveFtaExecutable(runner: ProcessRunner): Promise<string | undefined> {
-  const configured = process.env[FTA_PATH_ENV]?.trim();
-  if (configured && (await isExecutable(runner, configured))) {
-    return configured;
-  }
-
   try {
     const result = await runner.exec("which", [FTA_COMMAND], { timeoutMs: 5_000 });
     const executable = result.stdout.trim();
     return result.exitCode === 0 && executable.length > 0 ? executable : undefined;
   } catch {
     return undefined;
-  }
-}
-
-async function isExecutable(runner: ProcessRunner, path: string): Promise<boolean> {
-  try {
-    const result = await runner.exec("test", ["-x", path], { timeoutMs: 5_000 });
-    return result.exitCode === 0;
-  } catch {
-    return false;
   }
 }
 
