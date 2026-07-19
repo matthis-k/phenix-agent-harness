@@ -5,7 +5,8 @@ import { isObject, readJson, writeJsonIfChanged } from "./managed-json.mjs";
 export function mergeMcpDefaults(current, defaults) {
   const output = isObject(current) ? structuredClone(current) : {};
 
-  const defaultSettings = isObject(defaults) && isObject(defaults.settings) ? defaults.settings : {};
+  const defaultSettings =
+    isObject(defaults) && isObject(defaults.settings) ? defaults.settings : {};
   const currentSettings = isObject(output.settings) ? output.settings : {};
   output.settings = { ...defaultSettings, ...currentSettings };
 
