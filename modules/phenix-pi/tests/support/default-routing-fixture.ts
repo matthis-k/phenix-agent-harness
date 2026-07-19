@@ -1,3 +1,5 @@
+/** Test-only projection of suite declarations through the generic routing interfaces. */
+
 import { modelSetId } from "@matthis-k/phenix-kernel/ids.ts";
 import {
   buildRoutingConfigFromDeclarations,
