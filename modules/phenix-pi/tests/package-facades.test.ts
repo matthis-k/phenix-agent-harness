@@ -11,6 +11,7 @@ const packageNames = [
   "phenix-flow",
   "phenix-routing",
   "phenix-contracts",
+  "phenix-tasks",
   "phenix-suite",
 ] as const;
 const sourceExtensions = new Set([".json", ".md", ".mjs", ".nix", ".ts", ".yaml", ".yml"]);
