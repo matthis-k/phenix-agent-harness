@@ -124,6 +124,7 @@
               pkgs.nodejs
               pkgs.ast-grep
               pkgs.git
+              pkgs.which
             ];
           }
           ''
