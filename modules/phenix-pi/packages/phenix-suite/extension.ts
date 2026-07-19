@@ -52,6 +52,11 @@ import {
 import { createWorkflowAcceptanceEngine } from "./subagents/workflow-acceptance-engine.ts";
 import { WorkflowDelegator } from "./subagents/workflow-delegator.ts";
 import { createWorkflowRuntime } from "./subagents/workflow-runtime.ts";
+import {
+  createTaskBoundChildSessionBackend,
+  taskAuthorityTokenFromSpec,
+} from "./tasks/task-child-session-backend.ts";
+import { createTaskServiceHost } from "./tasks/task-service-host.ts";
 import { registerSuiteTasks } from "./tasks/suite-integration.ts";
 import { createTaskWorkflowBridge, type TaskWorkflowBridge } from "./tasks/task-workflow-bridge.ts";
 
@@ -178,9 +183,14 @@ function registerTuiProjection(
   });
 }
 
-function registerShutdown(pi: ExtensionAPI, delegationRuntime: ManagedDelegationRuntime): void {
+function registerShutdown(
+  pi: ExtensionAPI,
+  delegationRuntime: ManagedDelegationRuntime,
+  closeTaskHost: () => Promise<void>,
+): void {
   pi.on("session_shutdown", async () => {
     await delegationRuntime.shutdown("session shutdown");
+    await closeTaskHost();
   });
 }
 
@@ -270,10 +280,11 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
   };
 
   const taskService = new PhenixTaskService();
+  const taskHost = createTaskServiceHost(taskService);
   let taskBridge!: TaskWorkflowBridge;
   let delegator!: WorkflowDelegator;
   let workflowRuntime!: WorkflowRuntimePort;
-  const backend = createChildSessionBackend({
+  const sdkBackend = createChildSessionBackend({
     services: {
       get modelRegistry() {
         return getRuntimeServices().modelRegistry;
@@ -281,7 +292,10 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
       agentDir,
     },
     buildCustomTools: (spec) => {
-      const taskAuthority = taskBridge.claimChildAuthority(spec.parentContext);
+      const taskAuthorityToken = taskAuthorityTokenFromSpec(spec);
+      if (!taskAuthorityToken) {
+        throw new Error(`Child ${spec.id} started without Phenix task authority.`);
+      }
       return [
         ...createWorkflowApiTools({
           workflow: workflowRuntime,
@@ -289,10 +303,16 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
         }),
         ...createTaskTools({
           service: taskService,
-          resolveAuthority: () => taskAuthority,
+          resolveAuthority: () => taskAuthorityToken,
         }),
       ] as readonly ToolDefinition[];
     },
+  });
+  const backend = createTaskBoundChildSessionBackend({
+    delegate: sdkBackend,
+    tasks: taskService,
+    getBridge: () => taskBridge,
+    getEndpoint: () => taskHost.endpoint(),
   });
 
   const sessionRuntime = createSubagentSessionRuntime({
@@ -331,7 +351,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
     await phenixSubagents(api, { delegator, workflow: workflowRuntime });
   });
   registerTuiProjection(pi, delegationRuntime);
-  registerShutdown(pi, delegationRuntime);
+  registerShutdown(pi, delegationRuntime, () => taskHost.close());
 
   pi.registerCommand("phenix", {
     description: "Inspect the Phenix coding substrate; usage: /phenix doctor",
