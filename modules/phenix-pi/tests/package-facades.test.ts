@@ -13,6 +13,7 @@ const packageNames = [
   "phenix-contracts",
   "phenix-suite",
 ] as const;
+const sourceExtensions = new Set([".json", ".md", ".mjs", ".nix", ".ts", ".yaml", ".yml"]);
 
 function resolve(relativePath: string): string {
   return path.join(phenixRoot, relativePath);
@@ -24,6 +25,17 @@ function read(relativePath: string): string {
 
 function readJson(relativePath: string): Record<string, unknown> {
   return JSON.parse(read(relativePath)) as Record<string, unknown>;
+}
+
+function sourceFiles(directory: string): readonly string[] {
+  const files: string[] = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (entry.name === "node_modules") continue;
+    const candidate = path.join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...sourceFiles(candidate));
+    if (entry.isFile() && sourceExtensions.has(path.extname(entry.name))) files.push(candidate);
+  }
+  return files;
 }
 
 describe("Phenix package facades", () => {
@@ -57,10 +69,16 @@ describe("Phenix package facades", () => {
     }
   });
 
-  it("contains no legacy Phenix extension compatibility tree", () => {
+  it("contains no legacy Phenix extension compatibility surface", () => {
     const legacyEntries = fs
       .readdirSync(resolve("extensions"))
       .filter((entry) => entry.startsWith("phenix-"));
     assert.deepEqual(legacyEntries, []);
+
+    const legacyImportMarker = `extensions${"/"}phenix-`;
+    const legacyReferences = sourceFiles(phenixRoot).filter((file) =>
+      fs.readFileSync(file, "utf8").includes(legacyImportMarker),
+    );
+    assert.deepEqual(legacyReferences, []);
   });
 });
