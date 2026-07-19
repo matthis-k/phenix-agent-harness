@@ -1,0 +1,20 @@
+{
+  "name": "@matthis-k/phenix-flow",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Phenix workflow engine — generic state machine, transitions, delegation, and execution lifecycle",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "pi": {
+    "extensions": [
+      "./extension.ts"
+    ]
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@matthis-k/phenix-kernel": "workspace:*"
+  }
+}

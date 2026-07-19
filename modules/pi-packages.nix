@@ -105,6 +105,12 @@
           rm -rf "$out/node_modules/@earendil-works/$package"
           ln -s "$source" "$out/node_modules/@earendil-works/$package"
         done
+
+        mkdir -p "$out/node_modules/@matthis-k"
+        for package in phenix-kernel phenix-flow phenix-routing phenix-contracts phenix-suite; do
+          rm -rf "$out/node_modules/@matthis-k/$package"
+          ln -s "$out/packages/$package" "$out/node_modules/@matthis-k/$package"
+        done
       '';
 
       phenixRuntimeTests =

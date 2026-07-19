@@ -1,0 +1,20 @@
+{
+  "name": "@matthis-k/phenix-routing",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Phenix routing engine — model pools, capabilities, agent routes, and resolution",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@matthis-k/phenix-kernel": "workspace:*"
+  }
+}
