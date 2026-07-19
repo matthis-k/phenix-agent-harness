@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { writeStreamTrace } from "../extensions/phenix-routing/stream-trace.ts";
+import { writeStreamTrace } from "@matthis-k/phenix-routing/stream-trace.ts";
 
 test("stream tracing is inert when disabled", () => {
   const directory = mkdtempSync(join(tmpdir(), "phenix-trace-disabled-"));
