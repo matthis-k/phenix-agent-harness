@@ -34,10 +34,12 @@ const ALL_GO_AVAILABLE: readonly ModelRef[] = [
 ];
 
 const ALL_GPT_AVAILABLE: readonly ModelRef[] = [
-  mr("openai-codex", "gpt-5.4-mini"),
+  mr("openai-codex", "gpt-5.6"),
+  mr("openai-codex", "gpt-5.6-terra"),
+  mr("openai-codex", "gpt-5.6-luna"),
   mr("openai-codex", "gpt-5.5"),
   mr("openai-codex", "gpt-5.4"),
-  mr("openai-codex", "gpt-5.5"),
+  mr("openai-codex", "gpt-5.4-mini"),
 ];
 
 const FREE_AVAILABLE: readonly ModelRef[] = [mr("opencode", "deepseek-v4-flash-free")];
@@ -176,7 +178,7 @@ describe("Route resolution", () => {
       config,
       avoidModels: [implRoute.model],
     });
-    // critic D1 / mixed → review → gpt.review → [gpt-5.5-thinking, gpt-5.5-pro]
+    // critic D1 / mixed → review → gpt.review → [gpt-5.6-terra, gpt-5.5, gpt-5.4]
     assert.equal(critRoute.model.provider, "openai-codex");
   });
 });

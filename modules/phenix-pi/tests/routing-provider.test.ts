@@ -35,9 +35,12 @@ const GO_MODELS: readonly ModelRef[] = [
 ];
 
 const GPT_MODELS: readonly ModelRef[] = [
+  mr("openai-codex", "gpt-5.6"),
+  mr("openai-codex", "gpt-5.6-terra"),
+  mr("openai-codex", "gpt-5.6-luna"),
   mr("openai-codex", "gpt-5.5"),
   mr("openai-codex", "gpt-5.4"),
-  mr("openai-codex", "gpt-5.5"),
+  mr("openai-codex", "gpt-5.4-mini"),
 ];
 
 const FREE_MODELS: readonly ModelRef[] = [mr("opencode", "deepseek-v4-flash-free")];

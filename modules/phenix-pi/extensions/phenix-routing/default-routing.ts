@@ -35,14 +35,14 @@ export const defaultModelPools: readonly ModelPoolDefinition[] = [
   { id: "go.review", candidates: ["opencode-go/qwen3.7-max", "opencode-go/deepseek-v4-pro"] },
   { id: "go.review-max", candidates: ["opencode-go/glm-5.2", "opencode-go/qwen3.7-max"] },
 
-  { id: "gpt.fast", candidates: ["openai-codex/gpt-5.5", "openai-codex/gpt-5.4-mini"] },
-  { id: "gpt.general", candidates: ["openai-codex/gpt-5.5", "openai-codex/gpt-5.4"] },
-  { id: "gpt.reasoning", candidates: ["openai-codex/gpt-5.5", "openai-codex/gpt-5.4"] },
-  { id: "gpt.pro", candidates: ["openai-codex/gpt-5.5", "openai-codex/gpt-5.4"] },
-  { id: "gpt.code-fast", candidates: ["openai-codex/gpt-5.5", "openai-codex/gpt-5.4-mini"] },
-  { id: "gpt.code", candidates: ["openai-codex/gpt-5.5", "openai-codex/gpt-5.4"] },
-  { id: "gpt.code-max", candidates: ["openai-codex/gpt-5.5", "openai-codex/gpt-5.4"] },
-  { id: "gpt.review", candidates: ["openai-codex/gpt-5.5", "openai-codex/gpt-5.4"] },
+  { id: "gpt.fast", candidates: ["openai-codex/gpt-5.6-luna", "openai-codex/gpt-5.4-mini"] },
+  { id: "gpt.general", candidates: ["openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.5", "openai-codex/gpt-5.4"] },
+  { id: "gpt.reasoning", candidates: ["openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.5", "openai-codex/gpt-5.4"] },
+  { id: "gpt.pro", candidates: ["openai-codex/gpt-5.6", "openai-codex/gpt-5.5", "openai-codex/gpt-5.4"] },
+  { id: "gpt.code-fast", candidates: ["openai-codex/gpt-5.6-luna", "openai-codex/gpt-5.4-mini"] },
+  { id: "gpt.code", candidates: ["openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.5", "openai-codex/gpt-5.4"] },
+  { id: "gpt.code-max", candidates: ["openai-codex/gpt-5.6", "openai-codex/gpt-5.5", "openai-codex/gpt-5.4"] },
+  { id: "gpt.review", candidates: ["openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.5", "openai-codex/gpt-5.4"] },
 ];
 
 // ── Model sets ─────────────────────────────────────────────────────────────
