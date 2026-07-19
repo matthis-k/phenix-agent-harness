@@ -1,0 +1,45 @@
+name: Finalize package facades
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    name: Finalize package facades
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: Separate passive facades from extension implementations
+        run: python3 scripts/finalize-phenix-facades.py
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
+      - name: Apply repository formatting
+        run: devenv shell maintenance-fix-format
+      - name: Commit final facade structure
+        shell: bash
+        env:
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          rm -f .github/workflows/finalize-facades.yml
+          rm -f scripts/finalize-phenix-facades.py
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit --no-verify -m "refactor(pi): make package facades passive"
+          git push origin "HEAD:${HEAD_BRANCH}"
