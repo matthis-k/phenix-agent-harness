@@ -96,6 +96,10 @@
         cp -R ${piNpmPackages}/node_modules "$out/node_modules"
         chmod -R u+w "$out/node_modules"
 
+        mkdir -p "$out/bin"
+        test -x "$out/node_modules/.bin/fta"
+        ln -s "$out/node_modules/.bin/fta" "$out/bin/fta"
+
         piRoot=${piCodingAgent}/lib/node_modules/pi-monorepo
         mkdir -p "$out/node_modules/@earendil-works"
         ln -s "$piRoot" "$out/node_modules/@earendil-works/pi-coding-agent"
@@ -120,9 +124,11 @@
               pkgs.nodejs
               pkgs.ast-grep
               pkgs.git
+              pkgs.which
             ];
           }
           ''
+            export PATH=${pkgs.lib.makeBinPath [ phenixPiPackage ]}:$PATH
             cd ${phenixPiPackage}
             node --experimental-strip-types --test tests/*.test.ts
             node --check runtime/verify.mjs

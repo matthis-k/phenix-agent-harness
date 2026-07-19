@@ -2,7 +2,7 @@
 
 Measure code complexity, readability risk, and local maintainability using deterministic analyzers.
 
-Prefer language-agnostic or multi-language tools backed by Tree-sitter where practical. Never estimate metrics manually.
+Prefer language-appropriate analyzers with structured output. Never estimate metrics manually.
 
 ## Metric categories
 
@@ -13,7 +13,7 @@ Prefer language-agnostic or multi-language tools backed by Tree-sitter where pra
 - NPath or execution-path approximation.
 - ABC metrics.
 - Halstead metrics.
-- Maintainability Index.
+- Maintainability Index or a documented composite maintainability score.
 - Statement count.
 - Logical lines of code.
 - Physical lines of code.
@@ -85,14 +85,27 @@ A threshold violation is not automatically a defect. It is evidence requiring in
 
 ## Tool discovery
 
-1. Check if the repository has a configured metric tool (e.g., in CI, `package.json` scripts, or Makefile).
-2. Look for language-specific tools:
-   - TypeScript/JavaScript: `eslint` with complexity rules, `tslint`, `radon` (for JS)
+1. Run the repository's configured metric tool when it is already part of CI or project maintenance.
+2. Use the packaged Phenix analyzer when it supports the language:
+   - JavaScript/TypeScript: FTA 3.0.0 using SWC and JSON output.
+3. Otherwise look for a deterministic language-specific analyzer:
    - Python: `radon`, `wily`, `xenon`
-   - Rust: `cargo clippy` (has cognitive complexity lint), `cargo geiger`
+   - Rust: `cargo clippy` complexity lints or `rust-code-analysis`
    - Go: `gocyclo`, `gocognit`, `golangci-lint`
-   - Multi-language Tree-sitter: `codehawk`, `rust-code-analysis`, custom Tree-sitter queries
-3. If no tool is available, report the metric analysis as unavailable rather than estimating.
+   - QML: documented AST-based tooling when available
+4. If no analyzer supports the scoped language, report metric analysis as unavailable or not applicable rather than estimating.
+
+## FTA interpretation
+
+For JavaScript and TypeScript, the runtime consumes FTA's structured per-file output:
+
+- `cyclo`: cyclomatic complexity, interpreted as independent control-flow paths.
+- `fta_score`: composite score where lower is better.
+- `halstead.volume`, `halstead.difficulty`, `halstead.effort`: Halstead measures.
+- `line_count`: physical lines.
+- `assessment`: FTA's textual classification.
+
+The complete JSON belongs in the raw artifact. The main report should contain summary statistics and files crossing configured thresholds.
 
 ## Report format
 

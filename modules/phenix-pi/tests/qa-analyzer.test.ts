@@ -46,7 +46,6 @@ describe("QA Analyzers", () => {
 
   describe("Git history analyzer", () => {
     it("reports not-applicable when not in a git repo", async () => {
-      // Run in a temp directory that is not a git repo
       const dir = mkdtempSync(join(tmpdir(), "qa-git-test-"));
 
       const ctx = makeContext({ cwd: dir });
@@ -75,20 +74,19 @@ describe("QA Analyzers", () => {
         config: { ...DEFAULT_QA_CONFIG, structuralRuleDirectories: [] },
       });
       const result = await STRUCTURAL_ANALYZER.run(ctx);
-      // Without rules or built-in rule dir, it should be not-applicable
       assert.equal(result.status, "not-applicable");
     });
   });
 
   describe("Metrics analyzer", () => {
-    it("reports unavailable when codehawk-cli is not installed", async () => {
-      // codehawk-cli isn't expected to be globally installed
+    it("reports a valid packaged FTA availability shape", async () => {
       const ctx = makeContext();
       const av = await METRICS_ANALYZER.checkAvailability(ctx);
-      // Could be available or not depending on environment
-      // Just verify it returns a valid shape
       assert.equal(typeof av.available, "boolean");
-      if (!av.available) {
+      if (av.available) {
+        assert.equal(av.version, "3.0.0");
+        assert.ok(av.executable);
+      } else {
         assert.ok(av.reason);
       }
     });

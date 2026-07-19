@@ -5,13 +5,13 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 /**
  * Ensure the artifact directory exists.
  */
 export function ensureArtifactDir(dir: string): string {
-  const resolved = join(process.cwd(), dir);
+  const resolved = resolve(dir);
   if (!existsSync(resolved)) {
     mkdirSync(resolved, { recursive: true });
   }
