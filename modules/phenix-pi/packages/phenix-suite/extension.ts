@@ -30,6 +30,8 @@ import {
   buildRoutingConfigFromDeclarations,
   configureRoutingConfig,
 } from "@matthis-k/phenix-routing/config.ts";
+import { createTaskTools } from "@matthis-k/phenix-tasks/extension.ts";
+import { PhenixTaskService } from "@matthis-k/phenix-tasks/index.ts";
 import { link } from "./composition/linker.ts";
 import { loadPhenixSuiteConfiguration } from "./config-loader.ts";
 import { defaultOutputSchemas, outputSchemasFromContracts } from "./defaults/output-schemas.ts";
@@ -50,6 +52,8 @@ import {
 import { createWorkflowAcceptanceEngine } from "./subagents/workflow-acceptance-engine.ts";
 import { WorkflowDelegator } from "./subagents/workflow-delegator.ts";
 import { createWorkflowRuntime } from "./subagents/workflow-runtime.ts";
+import { registerSuiteTasks } from "./tasks/suite-integration.ts";
+import { createTaskWorkflowBridge, type TaskWorkflowBridge } from "./tasks/task-workflow-bridge.ts";
 
 type IntegrationResult =
   | { readonly status: "loaded" }
@@ -265,6 +269,8 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
     return { modelRegistry: capturedModelRegistry, agentDir };
   };
 
+  const taskService = new PhenixTaskService();
+  let taskBridge!: TaskWorkflowBridge;
   let delegator!: WorkflowDelegator;
   let workflowRuntime!: WorkflowRuntimePort;
   const backend = createChildSessionBackend({
@@ -274,11 +280,19 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
       },
       agentDir,
     },
-    buildCustomTools: (spec) =>
-      createWorkflowApiTools({
-        workflow: workflowRuntime,
-        parent: spec.parentContext,
-      }) as readonly ToolDefinition[],
+    buildCustomTools: (spec) => {
+      const taskAuthority = taskBridge.claimChildAuthority(spec.parentContext);
+      return [
+        ...createWorkflowApiTools({
+          workflow: workflowRuntime,
+          parent: spec.parentContext,
+        }),
+        ...createTaskTools({
+          service: taskService,
+          resolveAuthority: () => taskAuthority,
+        }),
+      ] as readonly ToolDefinition[];
+    },
   });
 
   const sessionRuntime = createSubagentSessionRuntime({
@@ -304,12 +318,15 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
     activeModelSet: linkResult.graph.activeModelSet.id,
     maximumDelegationDepth: suiteConfiguration.composition.runtime.maximumDelegationDepth,
   });
-  workflowRuntime = createWorkflowRuntime({
+  const baseWorkflowRuntime = createWorkflowRuntime({
     delegator,
     maximumDelegationDepth: suiteConfiguration.composition.runtime.maximumDelegationDepth,
     definitions: suiteConfiguration.workflows,
   });
+  taskBridge = createTaskWorkflowBridge({ workflow: baseWorkflowRuntime, tasks: taskService });
+  workflowRuntime = taskBridge.workflow;
 
+  registerSuiteTasks({ pi, service: taskService });
   await loadIntegration("phenix-subagents", pi, async (api) => {
     await phenixSubagents(api, { delegator, workflow: workflowRuntime });
   });
