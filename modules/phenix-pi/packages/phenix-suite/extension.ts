@@ -30,8 +30,8 @@ import {
   buildRoutingConfigFromDeclarations,
   configureRoutingConfig,
 } from "@matthis-k/phenix-routing/config.ts";
-import { createTaskTools } from "@matthis-k/phenix-tasks/extension.ts";
 import { PhenixTaskService } from "@matthis-k/phenix-tasks/index.ts";
+import { createTaskTools } from "@matthis-k/phenix-tasks/pi-tools.ts";
 import { link } from "./composition/linker.ts";
 import { loadPhenixSuiteConfiguration } from "./config-loader.ts";
 import { defaultOutputSchemas, outputSchemasFromContracts } from "./defaults/output-schemas.ts";
