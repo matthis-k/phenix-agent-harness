@@ -752,7 +752,5 @@ export function buildEffectiveToolNames(spec: ChildSessionSpec): readonly string
   const runtimeTools = new Set(["subagent", "phenix_complete", "phenix_tasks", "phenix_workflow"]);
   const baseTools = spec.effectiveTools.filter((tool) => !runtimeTools.has(tool));
 
-  return [
-    ...new Set([...baseTools, "phenix_complete", "phenix_tasks", "phenix_workflow"]),
-  ].sort();
+  return [...new Set([...baseTools, "phenix_complete", "phenix_tasks", "phenix_workflow"])].sort();
 }
