@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 import { discoverGuidance, findProjectRoot } from "../skills/phenix-qa/runtime/guidance.ts";
 
 describe("QA repository guidance", () => {
-  it("discovers current project markers, commands, and guidance", (t) => {
+  it("discovers project-native commands and guidance", (t) => {
     const root = mkdtempSync(join(tmpdir(), "phenix-qa-guidance-"));
     const nested = join(root, "src", "feature");
     mkdirSync(nested, { recursive: true });
@@ -24,15 +24,13 @@ describe("QA repository guidance", () => {
         },
       }),
     );
-    writeFileSync(join(root, "devenv.nix"), "{}\n");
-    writeFileSync(join(root, "devenv.yaml"), "inputs: {}\n");
     writeFileSync(join(root, "DEVELOPMENT.md"), "# Development\n");
 
     const guidance = discoverGuidance(nested);
 
     assert.equal(findProjectRoot(nested), root);
     assert.equal(guidance.projectRoot, root);
-    assert.deepEqual(guidance.packageManagers, ["npm", "devenv"]);
+    assert.deepEqual(guidance.packageManagers, ["npm"]);
     assert.deepEqual(guidance.buildCommands, ["npm run build"]);
     assert.deepEqual(guidance.testCommands, ["npm run test"]);
     assert.deepEqual(guidance.lintCommands, ["npm run lint"]);
