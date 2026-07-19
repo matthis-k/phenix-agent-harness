@@ -18,6 +18,7 @@
       "@matthis-k/phenix-flow/*": ["packages/phenix-flow/*"],
       "@matthis-k/phenix-routing/*": ["packages/phenix-routing/*"],
       "@matthis-k/phenix-contracts/*": ["packages/phenix-contracts/*"],
+      "@matthis-k/phenix-tasks/*": ["packages/phenix-tasks/*"],
       "@hypabolic/pi-hypa/extensions/index.ts": ["extensions/optional-integrations.d.ts"],
       "@hypabolic/pi-hypa/extensions/rewrite-client.ts": ["extensions/optional-integrations.d.ts"],
       "@hypabolic/pi-hypa/extensions/tools.ts": ["extensions/optional-integrations.d.ts"],
