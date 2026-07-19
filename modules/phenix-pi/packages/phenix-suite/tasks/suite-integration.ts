@@ -1,4 +1,8 @@
-import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
 import { getSessionRuntime } from "@matthis-k/phenix-routing/state.ts";
 import type { PhenixTaskService } from "@matthis-k/phenix-tasks/index.ts";
 import { createTaskTools } from "@matthis-k/phenix-tasks/pi-tools.ts";
@@ -59,8 +63,7 @@ export function registerSuiteTasks(input: {
   for (const tool of createTaskTools({
     service: input.service,
     resolveAuthority: (ctx) => input.service.rootAuthorityForSession(sessionId(ctx)),
-    authorize: (ctx) =>
-      authorizePhenixRootCapability({ ctx, capability: "phenix_tasks" }),
+    authorize: (ctx) => authorizePhenixRootCapability({ ctx, capability: "phenix_tasks" }),
   })) {
     input.pi.registerTool(tool as ToolDefinition as never);
   }
@@ -99,10 +102,7 @@ export function registerSuiteTasks(input: {
     const activeWorkflow = getSessionRuntime(sessionId(ctx)).activeWorkflow;
     if (!activeWorkflow) return;
     try {
-      ctx.ui.setStatus(
-        "phenix-tasks",
-        statusText(input.service, activeWorkflow.instanceId),
-      );
+      ctx.ui.setStatus("phenix-tasks", statusText(input.service, activeWorkflow.instanceId));
     } catch {
       // UI projection is optional.
     }
