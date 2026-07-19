@@ -266,7 +266,9 @@ export class PhenixTaskService {
         (child) => this.effectiveState(child.id) !== "done",
       );
       if (unfinished.length > 0) {
-        throw new Error(`Task ${current.id} cannot be completed while child tasks remain unfinished.`);
+        throw new Error(
+          `Task ${current.id} cannot be completed while child tasks remain unfinished.`,
+        );
       }
     }
     if (mutation.state === "not_started") {
@@ -421,7 +423,10 @@ export class PhenixTaskService {
 
   private assertOwned(authority: TaskAuthority, taskId: string): void {
     const task = this.requireTask(taskId);
-    if (task.workflowId !== authority.workflowId || !this.isDescendantOrSelf(task.id, authority.scopeTaskId)) {
+    if (
+      task.workflowId !== authority.workflowId ||
+      !this.isDescendantOrSelf(task.id, authority.scopeTaskId)
+    ) {
       throw new Error(`Task ${taskId} is outside the actor-owned subtree.`);
     }
   }
