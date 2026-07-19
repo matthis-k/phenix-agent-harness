@@ -30,6 +30,8 @@ import {
   buildRoutingConfigFromDeclarations,
   configureRoutingConfig,
 } from "@matthis-k/phenix-routing/config.ts";
+import { PhenixTaskService } from "@matthis-k/phenix-tasks/index.ts";
+import { createTaskTools } from "@matthis-k/phenix-tasks/pi-tools.ts";
 import { link } from "./composition/linker.ts";
 import { loadPhenixSuiteConfiguration } from "./config-loader.ts";
 import { defaultOutputSchemas, outputSchemasFromContracts } from "./defaults/output-schemas.ts";
@@ -50,6 +52,13 @@ import {
 import { createWorkflowAcceptanceEngine } from "./subagents/workflow-acceptance-engine.ts";
 import { WorkflowDelegator } from "./subagents/workflow-delegator.ts";
 import { createWorkflowRuntime } from "./subagents/workflow-runtime.ts";
+import { registerSuiteTasks } from "./tasks/suite-integration.ts";
+import {
+  createTaskBoundChildSessionBackend,
+  taskAuthorityTokenFromSpec,
+} from "./tasks/task-child-session-backend.ts";
+import { createTaskServiceHost } from "./tasks/task-service-host.ts";
+import { createTaskWorkflowBridge, type TaskWorkflowBridge } from "./tasks/task-workflow-bridge.ts";
 
 type IntegrationResult =
   | { readonly status: "loaded" }
@@ -174,9 +183,14 @@ function registerTuiProjection(
   });
 }
 
-function registerShutdown(pi: ExtensionAPI, delegationRuntime: ManagedDelegationRuntime): void {
+function registerShutdown(
+  pi: ExtensionAPI,
+  delegationRuntime: ManagedDelegationRuntime,
+  closeTaskHost: () => Promise<void>,
+): void {
   pi.on("session_shutdown", async () => {
     await delegationRuntime.shutdown("session shutdown");
+    await closeTaskHost();
   });
 }
 
@@ -265,20 +279,40 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
     return { modelRegistry: capturedModelRegistry, agentDir };
   };
 
+  const taskService = new PhenixTaskService();
+  const taskHost = createTaskServiceHost(taskService);
+  let taskBridge!: TaskWorkflowBridge;
   let delegator!: WorkflowDelegator;
   let workflowRuntime!: WorkflowRuntimePort;
-  const backend = createChildSessionBackend({
+  const sdkBackend = createChildSessionBackend({
     services: {
       get modelRegistry() {
         return getRuntimeServices().modelRegistry;
       },
       agentDir,
     },
-    buildCustomTools: (spec) =>
-      createWorkflowApiTools({
-        workflow: workflowRuntime,
-        parent: spec.parentContext,
-      }) as readonly ToolDefinition[],
+    buildCustomTools: (spec) => {
+      const taskAuthorityToken = taskAuthorityTokenFromSpec(spec);
+      if (!taskAuthorityToken) {
+        throw new Error(`Child ${spec.id} started without Phenix task authority.`);
+      }
+      return [
+        ...createWorkflowApiTools({
+          workflow: workflowRuntime,
+          parent: spec.parentContext,
+        }),
+        ...createTaskTools({
+          service: taskService,
+          resolveAuthority: () => taskAuthorityToken,
+        }),
+      ] as readonly ToolDefinition[];
+    },
+  });
+  const backend = createTaskBoundChildSessionBackend({
+    delegate: sdkBackend,
+    tasks: taskService,
+    getBridge: () => taskBridge,
+    getEndpoint: () => taskHost.endpoint(),
   });
 
   const sessionRuntime = createSubagentSessionRuntime({
@@ -304,17 +338,20 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
     activeModelSet: linkResult.graph.activeModelSet.id,
     maximumDelegationDepth: suiteConfiguration.composition.runtime.maximumDelegationDepth,
   });
-  workflowRuntime = createWorkflowRuntime({
+  const baseWorkflowRuntime = createWorkflowRuntime({
     delegator,
     maximumDelegationDepth: suiteConfiguration.composition.runtime.maximumDelegationDepth,
     definitions: suiteConfiguration.workflows,
   });
+  taskBridge = createTaskWorkflowBridge({ workflow: baseWorkflowRuntime, tasks: taskService });
+  workflowRuntime = taskBridge.workflow;
 
+  registerSuiteTasks({ pi, service: taskService });
   await loadIntegration("phenix-subagents", pi, async (api) => {
     await phenixSubagents(api, { delegator, workflow: workflowRuntime });
   });
   registerTuiProjection(pi, delegationRuntime);
-  registerShutdown(pi, delegationRuntime);
+  registerShutdown(pi, delegationRuntime, () => taskHost.close());
 
   pi.registerCommand("phenix", {
     description: "Inspect the Phenix coding substrate; usage: /phenix doctor",

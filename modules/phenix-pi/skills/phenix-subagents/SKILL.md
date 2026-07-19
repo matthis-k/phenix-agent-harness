@@ -1,6 +1,6 @@
 ---
 name: phenix-subagents
-description: Use the deterministic Phenix workflow and contract-owned isolated subagents.
+description: Use the deterministic Phenix workflow, shared task tree, and contract-owned isolated subagents.
 disable-model-invocation: true
 ---
 
@@ -8,7 +8,8 @@ disable-model-invocation: true
 
 Phenix workflow nodes, legal transitions, configured-agent availability,
 delegation depth, role authority, output schemas, model routing, verification,
-critics, and repair limits are owned by the TypeScript runtime.
+critics, repair limits, and task-subtree ownership are owned by the TypeScript
+runtime.
 
 Before the model starts, the runtime resolves the current root-session or child-
 contract authority and injects the target agents that may be spawned from the
@@ -25,7 +26,14 @@ Use the single `phenix_workflow` interface with:
 The runtime derives the current node from the active root session or child
 contract, resolves fresh authority, maps the requested target agent to the unique
 legal transition, then derives the child role, model, thinking level, output
-schema, tools, budgets, verification, and critic gates.
+schema, tools, budgets, verification, critic gates, and owned task subtree.
+
+Use `phenix_tasks` to keep that subtree synchronized with actual execution. Add
+bounded child tasks before independent work, mark a task `wip` when beginning it,
+and mark it `done` immediately after completion and verification. Do not use the
+tree as a narrative log. A child may update its assigned task and descendants,
+but cannot update ancestors or sibling subtrees. Spawning a child automatically
+creates and assigns its task.
 
 Delegate when a bounded child can absorb substantial intermediate context whose
 underlying details are not needed for your remaining work, or when independent
@@ -40,6 +48,6 @@ must remain available downstream. After scouting identifies the relevant files,
 read the files required for your own task. Do not delegate trivial work or work
 you would need to repeat after the handoff.
 
-Never invent or cache workflow authority, and never supply arbitrary child-
-session configuration. Each accepted child must finish through
-`phenix_complete`.
+Never invent or cache workflow or task authority, and never supply arbitrary
+child-session configuration. Each accepted child must finish through
+`phenix_complete` after completing its owned task subtree.

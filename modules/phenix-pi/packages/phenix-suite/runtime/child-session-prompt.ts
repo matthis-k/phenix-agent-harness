@@ -68,9 +68,23 @@ export function buildChildSystemPrompt(input: {
         "",
         "The phenix_complete tool is always available for submitting your result.",
         "The phenix_workflow tool is always available for inspecting current authority and spawning one advertised target agent.",
+        "The phenix_tasks tool is always available for maintaining the task subtree owned by this session.",
       ].join("\n"),
     );
   }
+
+  sections.push(
+    [
+      "## Task tracking discipline",
+      "",
+      "Your assignment task is the root of the task subtree owned by this session.",
+      "Use phenix_tasks to inspect that subtree before planning substantial work.",
+      "Add child tasks before independent steps, mark each task wip when beginning it, and mark it done immediately after completion and verification.",
+      "Keep tasks outcome-oriented rather than using them as a narrative log.",
+      "You may update your assignment task and its descendants, but not ancestors or sibling subtrees.",
+      "Before calling phenix_complete, ensure every task you created is done and mark your assignment task done.",
+    ].join("\n"),
+  );
 
   const canDelegate =
     contract.runtime.delegation.remainingDepth > 0 &&

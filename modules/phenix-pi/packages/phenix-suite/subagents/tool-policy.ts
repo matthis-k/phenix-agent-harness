@@ -27,7 +27,8 @@ export interface ResolvedToolConfiguration {
 // ── Constants ───────────────────────────────────────────────────────────────
 
 /** Tool names whose availability is owned exclusively by the runtime. */
-const FORBIDDEN_TOOLS = new Set(["subagent", "phenix_complete", "phenix_workflow"]);
+const RUNTIME_TOOLS = new Set(["subagent", "phenix_complete", "phenix_tasks", "phenix_workflow"]);
+const CHILD_RUNTIME_TOOLS = ["phenix_complete", "phenix_tasks", "phenix_workflow"] as const;
 
 const EMPTY_TOOL_PATCH: ToolPatch = {
   additional: [],
@@ -52,7 +53,7 @@ function canonicalize(tools: readonly string[]): readonly string[] {
         `Invalid tool name: "${tool}". Tool names must match /^[a-z][a-z0-9_]*(\\*)?$/.`,
       );
     }
-    if (FORBIDDEN_TOOLS.has(tool)) {
+    if (RUNTIME_TOOLS.has(tool)) {
       throw new Error(`Tool "${tool}" cannot be added or removed. It is managed by the runtime.`);
     }
     result.push(tool);
@@ -171,14 +172,14 @@ export function modelTaskTools(config: ResolvedToolConfiguration): readonly stri
   return config.effective;
 }
 
-/** Contract task tools plus the mandatory completion capability. */
+/** Contract task tools plus the mandatory runtime capabilities. */
 export function childLaunchTools(config: ResolvedToolConfiguration): readonly string[] {
-  return stableUnique([...config.effective, "phenix_complete"]);
+  return stableUnique([...config.effective, ...CHILD_RUNTIME_TOOLS]);
 }
 
 export function toolAllowedByConfig(config: ResolvedToolConfiguration, toolName: string): boolean {
   if (toolName === "subagent") return false;
-  if (toolName === "phenix_complete" || toolName === "phenix_workflow") return true;
+  if (CHILD_RUNTIME_TOOLS.includes(toolName as (typeof CHILD_RUNTIME_TOOLS)[number])) return true;
   return config.effective.some((pattern) => matchTool(pattern, toolName));
 }
 

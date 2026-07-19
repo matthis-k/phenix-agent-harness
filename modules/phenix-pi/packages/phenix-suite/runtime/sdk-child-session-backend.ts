@@ -658,7 +658,7 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
       : await this.buildDefaultResourceLoader(spec, systemPrompt);
 
     // 4. Every SDK child gets its own closure-bound completion tool.
-    // Contract-derived workflow API tools are supplied by the composition root.
+    // Contract-derived workflow and task tools are supplied by the composition root.
     const customTools: readonly ToolDefinition[] = [
       createCompletionTool(spec.contractChannel) as unknown as ToolDefinition,
       ...(this.buildCustomToolsFn ? this.buildCustomToolsFn(spec) : []),
@@ -744,12 +744,13 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
 /**
  * Build the deterministic tool allowlist.
  *
- * Includes effective task tools plus the current runtime-owned completion and
- * workflow capabilities. Unmanaged delegation is never exposed to a child.
+ * Includes effective task tools plus the current runtime-owned completion,
+ * workflow, and task-tree capabilities. Unmanaged delegation is never exposed
+ * to a child.
  */
 export function buildEffectiveToolNames(spec: ChildSessionSpec): readonly string[] {
-  const runtimeTools = new Set(["subagent", "phenix_complete", "phenix_workflow"]);
+  const runtimeTools = new Set(["subagent", "phenix_complete", "phenix_tasks", "phenix_workflow"]);
   const baseTools = spec.effectiveTools.filter((tool) => !runtimeTools.has(tool));
 
-  return [...new Set([...baseTools, "phenix_complete", "phenix_workflow"])].sort();
+  return [...new Set([...baseTools, "phenix_complete", "phenix_tasks", "phenix_workflow"])].sort();
 }
