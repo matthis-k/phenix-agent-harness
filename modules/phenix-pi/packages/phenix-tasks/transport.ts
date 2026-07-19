@@ -52,7 +52,10 @@ function socketPathFromEndpoint(endpoint: string): string {
   return normalized;
 }
 
-function applyOperation(service: PhenixTaskService, request: TaskRpcRequest): TaskNode | TaskRecord {
+function applyOperation(
+  service: PhenixTaskService,
+  request: TaskRpcRequest,
+): TaskNode | TaskRecord {
   switch (request.operation.method) {
     case "inspect":
       return service.inspect(request.capability);
@@ -164,12 +167,11 @@ export async function startTaskRpcServer(input: {
 
 export class TaskRpcClient implements BoundTaskClient {
   private readonly socketPath: string;
+  private readonly capability: string;
 
-  constructor(
-    endpoint: string,
-    private readonly capability: string,
-  ) {
+  constructor(endpoint: string, capability: string) {
     this.socketPath = socketPathFromEndpoint(endpoint);
+    this.capability = capability;
   }
 
   inspect(): Promise<TaskNode> {
@@ -210,14 +212,16 @@ export class TaskRpcClient implements BoundTaskClient {
         }
       });
       socket.once("connect", () => {
-        socket.write(encode({ id, capability: this.capability, operation } satisfies TaskRpcRequest));
+        socket.write(
+          encode({ id, capability: this.capability, operation } satisfies TaskRpcRequest),
+        );
       });
     });
   }
 }
 
 export function taskClientFromEnvironment(
-  environment: NodeJS.ProcessEnv = process.env,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
 ): TaskRpcClient | undefined {
   const endpoint = environment.PHENIX_TASKS_ENDPOINT?.trim();
   const capability = environment.PHENIX_TASKS_CAPABILITY?.trim();
