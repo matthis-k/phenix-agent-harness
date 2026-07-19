@@ -60,10 +60,12 @@ const ALL_POOL_MODELS: readonly ModelRef[] = [
   mr("opencode-go", "glm-5.2"),
   mr("opencode-go", "kimi-k2.6"),
   mr("opencode-go", "kimi-k2.7-code"),
-  mr("openai-codex", "gpt-5.4-mini"),
+  mr("openai-codex", "gpt-5.6"),
+  mr("openai-codex", "gpt-5.6-terra"),
+  mr("openai-codex", "gpt-5.6-luna"),
   mr("openai-codex", "gpt-5.5"),
   mr("openai-codex", "gpt-5.4"),
-  mr("openai-codex", "gpt-5.5"),
+  mr("openai-codex", "gpt-5.4-mini"),
 ];
 
 function fullRegistry(): ModelRegistry {

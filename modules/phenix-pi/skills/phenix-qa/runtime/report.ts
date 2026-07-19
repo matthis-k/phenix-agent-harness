@@ -289,13 +289,6 @@ export function calculateRiskScores(
     };
   };
 
-  const _allUnavailable = evidence
-    .filter((_e) => {
-      // Heuristic: evidence from unavailable analyzers
-      return false; // TODO: propagate from analyzer results
-    })
-    .map((e) => e.id);
-
   const findingsByLevel = (level: string) => findings.filter((f) => f.level === level);
 
   const complexityRisk = makeScore(

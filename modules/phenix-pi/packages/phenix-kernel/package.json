@@ -1,0 +1,17 @@
+{
+  "name": "@matthis-k/phenix-kernel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Phenix kernel — branded identifiers, shared vocabulary, and typed references",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "pi": {
+    "extensions": [
+      "./extension.ts"
+    ]
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

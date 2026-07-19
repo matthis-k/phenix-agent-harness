@@ -34,10 +34,12 @@ const ALL_GO_AVAILABLE: readonly ModelRef[] = [
 ];
 
 const ALL_GPT_AVAILABLE: readonly ModelRef[] = [
-  mr("openai-codex", "gpt-5.4-mini"),
+  mr("openai-codex", "gpt-5.6"),
+  mr("openai-codex", "gpt-5.6-terra"),
+  mr("openai-codex", "gpt-5.6-luna"),
   mr("openai-codex", "gpt-5.5"),
   mr("openai-codex", "gpt-5.4"),
-  mr("openai-codex", "gpt-5.5"),
+  mr("openai-codex", "gpt-5.4-mini"),
 ];
 
 const FREE_AVAILABLE: readonly ModelRef[] = [mr("opencode", "deepseek-v4-flash-free")];
@@ -176,44 +178,30 @@ describe("Route resolution", () => {
       config,
       avoidModels: [implRoute.model],
     });
-    // critic D1 / mixed → review → gpt.review → [gpt-5.5-thinking, gpt-5.5-pro]
+    // critic D1 / mixed → review → gpt.review → [gpt-5.6-terra, gpt-5.5, gpt-5.4]
     assert.equal(critRoute.model.provider, "openai-codex");
   });
 });
 
-describe("Route resolution profile → difficulty", () => {
+describe("Workflow-owned route difficulty", () => {
   const config = buildBundledConfig();
 
-  it("D0 profile resolves to D0 route", async () => {
+  it("resolves the workflow-derived D0 route", async () => {
     const route = await resolveRoute({
       modelSet: "mixed",
       role: "coordinator",
-      profile: {
-        complexity: 0,
-        uncertainty: 0,
-        consequence: 0,
-        breadth: 0,
-        coupling: 0,
-        novelty: 0,
-      },
+      difficulty: "D0",
       modelRegistry: goRegistry(),
       config,
     });
     assert.equal(route.difficulty, "D0");
   });
 
-  it("D3 profile resolves to D3 route", async () => {
+  it("resolves the workflow-derived D3 route", async () => {
     const route = await resolveRoute({
       modelSet: "mixed",
       role: "coordinator",
-      profile: {
-        complexity: 4,
-        uncertainty: 4,
-        consequence: 4,
-        breadth: 4,
-        coupling: 4,
-        novelty: 4,
-      },
+      difficulty: "D3",
       modelRegistry: goRegistry(),
       config,
     });

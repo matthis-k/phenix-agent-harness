@@ -26,9 +26,6 @@
           mkdir -p "$agent_dir"
           chmod 0700 "$agent_dir" 2>/dev/null || true
 
-          node "${phenixPiPackage}/runtime/sync-opencode-auth.mjs" \
-            "$agent_dir/auth.json"
-
           lsp_defaults_file="$agent_dir/lsp.phenix-defaults.json"
 
           install -m 0600 \
@@ -68,10 +65,6 @@
 
           export HYPA_PI_MODE="''${HYPA_PI_MODE:-replace}"
 
-          # Point workflow spawn edges at this wrapper so child Pi sessions inherit
-          # the same extension set and environment. Always replace inherited
-          # values because stale repo-local result symlinks can otherwise poison
-          # nested child sessions with ENOTDIR.
           SELF=$(readlink -f "''${BASH_SOURCE[0]:-$0}" 2>/dev/null) || SELF=pi
           export PHENIX_PI_WRAPPER="$SELF"
           export PI_SUBAGENT_PI_BINARY="$SELF"

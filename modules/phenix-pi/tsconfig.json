@@ -14,6 +14,10 @@
     "types": ["node"],
     "baseUrl": ".",
     "paths": {
+      "@matthis-k/phenix-kernel/*": ["packages/phenix-kernel/*"],
+      "@matthis-k/phenix-flow/*": ["packages/phenix-flow/*"],
+      "@matthis-k/phenix-routing/*": ["packages/phenix-routing/*"],
+      "@matthis-k/phenix-contracts/*": ["packages/phenix-contracts/*"],
       "@hypabolic/pi-hypa/extensions/index.ts": ["extensions/optional-integrations.d.ts"],
       "@hypabolic/pi-hypa/extensions/rewrite-client.ts": ["extensions/optional-integrations.d.ts"],
       "@hypabolic/pi-hypa/extensions/tools.ts": ["extensions/optional-integrations.d.ts"],
@@ -23,6 +27,6 @@
       "@juicesharp/rpiv-web-tools/index.ts": ["extensions/optional-integrations.d.ts"]
     }
   },
-  "include": ["extensions/**/*.ts"],
+  "include": ["extensions/**/*.ts", "packages/**/*.ts"],
   "exclude": ["node_modules"]
 }
