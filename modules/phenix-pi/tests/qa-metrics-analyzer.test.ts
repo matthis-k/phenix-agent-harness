@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
 import { METRICS_ANALYZER, parseFtaJson } from "../skills/phenix-qa/runtime/analyzers/metrics.ts";
@@ -58,17 +59,11 @@ describe("FTA metrics analyzer", () => {
     );
   });
 
-  it("runs the packaged FTA executable against TypeScript", async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "phenix-qa-fta-"));
-    const artifactDirectory = join(cwd, "artifacts");
-    writeFileSync(
-      join(cwd, "sample.ts"),
-      `export function classify(value: number): string {
-  if (value > 10) return "high";
-  if (value > 0) return "positive";
-  return "other";
-}\n`,
-    );
+  it("runs the packaged FTA executable against packaged TypeScript sources", async (t) => {
+    const cwd = fileURLToPath(new URL("../skills/phenix-qa/runtime/analyzers", import.meta.url));
+    const artifactRoot = mkdtempSync(join(tmpdir(), "phenix-qa-fta-artifacts-"));
+    const artifactDirectory = join(artifactRoot, "nested", "artifacts");
+    t.after(() => rmSync(artifactRoot, { recursive: true, force: true }));
 
     const availability = await METRICS_ANALYZER.checkAvailability({
       cwd,
