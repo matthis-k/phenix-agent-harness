@@ -342,7 +342,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
         "taplo",
         "yaml-language-server",
         "basedpyright-langserver",
-        "tend",
+        "fta",
         "stitch",
         "stitch-mcp",
       ] as const;
