@@ -238,111 +238,124 @@ class SdkChildRun implements ChildRun {
 
   // ── Event handling ───────────────────────────────────────────────────
 
-  private readonly handlePiEvent = (event: AgentSessionEvent): void => {
-    const normalized = normalizePiEvent(this.id, event);
-    if (normalized) this.emit(normalized);
+  private handlePiEvent = (raw: AgentSessionEvent): void => {
+    if (this.disposed) return;
 
-    const message = event as unknown as {
-      type?: string;
-      message?: { role?: string; content?: unknown };
-    };
-    if (message.type === "message_end" && message.message?.role === "assistant") {
-      this.lastAssistantText = extractAssistantText(message.message.content);
-    }
+    const normalized = normalizePiEvent(this.id, raw as unknown as { type: string });
 
-    try {
-      const violation = this.budgetGuard.observe(event);
+    for (const event of normalized) {
+      const { violation, softWarning } = this.budgetGuard.observe(event);
+
       if (violation) {
         void this.failAndAbort(budgetViolationToError(violation));
         return;
       }
-    } catch (error) {
-      void this.failAndAbort(
-        error instanceof ChildRuntimeError
-          ? error
-          : new ChildRuntimeError(
-              "PROVIDER_FAILED",
-              error instanceof Error ? error.message : String(error),
-              { cause: error },
-            ),
-      );
-      return;
+
+      this.emit(event);
+
+      if (softWarning) {
+        this.emit({
+          type: "agent.event",
+          runId: this.id,
+          event: { type: "budget_soft_warning", message: softWarning },
+        });
+        // A soft budget warning must reach the model, not only observers.
+        void this.session.steer(softWarning).catch(() => undefined);
+      }
     }
 
-    if (isFailureEvent(event)) {
-      const failure = event as unknown as { error?: unknown };
-      void this.failAndAbort(
-        new ChildRuntimeError(
-          "PROVIDER_FAILED",
-          failure.error instanceof Error
-            ? failure.error.message
-            : typeof failure.error === "string"
-              ? failure.error
-              : "Child provider failed.",
-          { cause: failure.error },
-        ),
-      );
-      return;
+    if (isFailureEvent(raw as unknown as { type: string })) {
+      if (this.currentCycle) {
+        this.currentCycle.error = serializeError(raw);
+      }
     }
 
-    if (event.type === "agent_end") {
-      this.status = "settled";
-      this.completeCycle({
-        cycle: this.currentCycle?.number ?? this.cycle,
-        status: "settled",
-        ...(this.lastAssistantText ? { lastAssistantText: this.lastAssistantText } : {}),
-      });
+    // agent_settled is Pi's authoritative overall idle boundary. turn_end
+    // and agent_end may be followed by retries, compaction, or continuations.
+    const rawType = (raw as unknown as { type: string }).type;
+    if (rawType === "agent_settled") {
+      this.settleCycle();
     }
   };
 
   private beginCycle(): {
     readonly number: number;
     readonly promise: Promise<ChildCycleOutcome>;
+    readonly resolve: (outcome: ChildCycleOutcome) => void;
+    error?: SerializedError;
   } {
-    const number = ++this.cycle;
+    if (this.currentCycle) {
+      throw new ChildRuntimeError(
+        "SESSION_START_FAILED",
+        `Child session ${this.id} already has an active cycle.`,
+      );
+    }
+
+    this.status = "running";
+    this.cycle++;
     let resolve!: (outcome: ChildCycleOutcome) => void;
-    const promise = new Promise<ChildCycleOutcome>((complete) => {
-      resolve = complete;
+    const promise = new Promise<ChildCycleOutcome>((r) => {
+      resolve = r;
     });
-    this.currentCycle = { number, promise, resolve };
-    return { number, promise };
+    const cycle = {
+      number: this.cycle,
+      promise,
+      resolve,
+    };
+    this.currentCycle = cycle;
+    return cycle;
   }
 
-  private completeCycle(outcome: ChildCycleOutcome): void {
-    this.lastCycleOutcome = outcome;
-    const current = this.currentCycle;
+  private settleCycle(): void {
+    const cycle = this.currentCycle;
+    if (!cycle) return;
+
+    const outcome: ChildCycleOutcome = {
+      cycle: cycle.number,
+      status: cycle.error ? "failed" : "settled",
+      ...(this.lastAssistantText ? { lastAssistantText: this.lastAssistantText } : {}),
+      ...(cycle.error ? { error: cycle.error } : {}),
+    };
+
     this.currentCycle = undefined;
-    current?.resolve(outcome);
+    this.lastCycleOutcome = outcome;
+    this.status = outcome.status === "failed" ? "failed" : "settled";
     this.emit({
       type: "cycle.settled",
       runId: this.id,
-      cycle: outcome.cycle,
+      cycle: cycle.number,
     });
+    cycle.resolve(outcome);
+  }
+
+  private completeCycle(outcome: ChildCycleOutcome): void {
+    const cycle = this.currentCycle;
+    this.currentCycle = undefined;
+    this.lastCycleOutcome = outcome;
+    if (cycle) cycle.resolve(outcome);
   }
 
   private async failAndAbort(error: ChildRuntimeError): Promise<void> {
     if (this.disposed || this.status === "failed") return;
+
     this.status = "failed";
-
     const serialized = serializeError(error);
-    if (this.currentCycle) this.currentCycle.error = serialized;
-
-    try {
-      await this.session.abort();
-    } catch {
-      // Best-effort abort.
-    }
-
-    this.completeCycle({
-      cycle: this.currentCycle?.number ?? this.cycle,
-      status: "failed",
-      error: serialized,
-    });
     this.emit({
       type: "session.failed",
       runId: this.id,
       error: serialized,
     });
+    this.completeCycle({
+      cycle: this.currentCycle?.number ?? this.cycle,
+      status: "failed",
+      error: serialized,
+    });
+
+    try {
+      await this.session.abort();
+    } catch {
+      // Best-effort provider abort.
+    }
   }
 
   private bindSignal(signal?: AbortSignal): void {
@@ -736,15 +749,10 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
  * to a child.
  */
 export function buildEffectiveToolNames(spec: ChildSessionSpec): readonly string[] {
-  const runtimeTools = new Set([
-    "subagent",
-    "phenix_complete",
-    "phenix_workflow",
-    "phenix_tasks",
-  ]);
+  const runtimeTools = new Set(["subagent", "phenix_complete", "phenix_tasks", "phenix_workflow"]);
   const baseTools = spec.effectiveTools.filter((tool) => !runtimeTools.has(tool));
 
   return [
-    ...new Set([...baseTools, "phenix_complete", "phenix_workflow", "phenix_tasks"]),
+    ...new Set([...baseTools, "phenix_complete", "phenix_tasks", "phenix_workflow"]),
   ].sort();
 }
