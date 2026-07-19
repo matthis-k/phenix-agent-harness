@@ -54,29 +54,43 @@ describe("published Phenix package boundaries", () => {
       "@matthis-k/phenix-flow",
       "@matthis-k/phenix-routing",
       "@matthis-k/phenix-contracts",
+      "@matthis-k/phenix-tasks",
       "@matthis-k/phenix-suite",
     ]);
   });
 
-  it("keeps contracts independent from flow, routing, and suite", () => {
+  it("keeps contracts independent from flow, routing, tasks, and suite", () => {
     assertNoPackageDependencies("phenix-contracts", [
       "@matthis-k/phenix-flow",
       "@matthis-k/phenix-routing",
+      "@matthis-k/phenix-tasks",
       "@matthis-k/phenix-suite",
     ]);
   });
 
-  it("keeps flow independent from routing, contracts, and suite defaults", () => {
+  it("keeps flow independent from routing, contracts, tasks, and suite defaults", () => {
     assertNoPackageDependencies("phenix-flow", [
       "@matthis-k/phenix-routing",
       "@matthis-k/phenix-contracts",
+      "@matthis-k/phenix-tasks",
       "@matthis-k/phenix-suite",
     ]);
   });
 
-  it("keeps routing independent from flow, contracts, and suite", () => {
+  it("keeps routing independent from flow, contracts, tasks, and suite", () => {
     assertNoPackageDependencies("phenix-routing", [
       "@matthis-k/phenix-flow",
+      "@matthis-k/phenix-contracts",
+      "@matthis-k/phenix-tasks",
+      "@matthis-k/phenix-suite",
+    ]);
+  });
+
+  it("keeps tasks independent from workflow, routing, contracts, and suite", () => {
+    assertNoPackageDependencies("phenix-tasks", [
+      "@matthis-k/phenix-kernel",
+      "@matthis-k/phenix-flow",
+      "@matthis-k/phenix-routing",
       "@matthis-k/phenix-contracts",
       "@matthis-k/phenix-suite",
     ]);
