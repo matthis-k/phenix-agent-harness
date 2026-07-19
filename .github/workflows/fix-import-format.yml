@@ -26,7 +26,7 @@ jobs:
       - name: Install devenv
         run: nix profile add nixpkgs#devenv
       - name: Run repository format fixer
-        run: devenv tasks run maintenance:fix:format
+        run: devenv shell maintenance-fix-format
       - name: Commit formatting
         shell: bash
         env:
