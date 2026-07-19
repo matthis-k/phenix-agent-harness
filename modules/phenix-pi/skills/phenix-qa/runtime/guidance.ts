@@ -8,14 +8,10 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RepositoryGuidance } from "./types.ts";
 
-/**
- * Discover repository guidance from well-known locations.
- */
+/** Discover repository guidance from well-known locations. */
 export function discoverGuidance(cwd: string): RepositoryGuidance {
-  const projectRoot = findProjectRoot(cwd);
-  const guidanceRoot = projectRoot;
+  const guidanceRoot = findProjectRoot(cwd);
 
-  // Discover package managers
   const packageManagers = discoverFileMarkers(guidanceRoot, {
     "package.json": "npm",
     "Cargo.toml": "cargo",
@@ -23,10 +19,11 @@ export function discoverGuidance(cwd: string): RepositoryGuidance {
     Makefile: "make",
     justfile: "just",
     "flake.nix": "nix",
+    "devenv.nix": "devenv",
+    "devenv.yaml": "devenv",
     "go.mod": "go",
   });
 
-  // Discover commands from package.json scripts
   const buildCommands: string[] = [];
   const testCommands: string[] = [];
   const lintCommands: string[] = [];
@@ -51,35 +48,18 @@ export function discoverGuidance(cwd: string): RepositoryGuidance {
       }
     }
   } catch {
-    // No package.json or unparseable
+    // No package.json or unparseable.
   }
 
-  // Discover from .tend.json
-  try {
-    const tendPath = join(guidanceRoot, ".tend.json");
-    if (existsSync(tendPath)) {
-      const tend = JSON.parse(readFileSync(tendPath, "utf-8"));
-      if (tend?.commands) {
-        if (Array.isArray(tend.commands.build)) {
-          buildCommands.push(...tend.commands.build);
-        }
-        if (Array.isArray(tend.commands.test)) {
-          testCommands.push(...tend.commands.test);
-        }
-        if (Array.isArray(tend.commands.lint)) {
-          lintCommands.push(...tend.commands.lint);
-        }
-      }
-    }
-  } catch {
-    // No .tend.json or unparseable
-  }
-
-  // Discover guidance docs
   const guidanceDocs: string[] = [];
   const architectureDocs: string[] = [];
-
-  const guidanceNames = ["AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "README.md"];
+  const guidanceNames = [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "CONTRIBUTING.md",
+    "DEVELOPMENT.md",
+    "README.md",
+  ];
 
   for (const name of guidanceNames) {
     const candidate = join(guidanceRoot, name);
@@ -88,9 +68,8 @@ export function discoverGuidance(cwd: string): RepositoryGuidance {
     }
   }
 
-  // Discover architecture docs
   const docsDir = join(guidanceRoot, "docs");
-  const archDir = join(guidanceRoot, "docs", "architecture");
+  const archDir = join(docsDir, "architecture");
 
   if (existsSync(docsDir)) {
     try {
@@ -101,7 +80,7 @@ export function discoverGuidance(cwd: string): RepositoryGuidance {
         }
       }
     } catch {
-      // Can't read docs dir
+      // The docs directory is unreadable.
     }
   }
 
@@ -111,7 +90,7 @@ export function discoverGuidance(cwd: string): RepositoryGuidance {
         architectureDocs.push(join(archDir, entry));
       }
     } catch {
-      // Can't read architecture dir
+      // The architecture directory is unreadable.
     }
   }
 
@@ -128,9 +107,7 @@ export function discoverGuidance(cwd: string): RepositoryGuidance {
   };
 }
 
-/**
- * Walk up from cwd to find the project root.
- */
+/** Walk up from cwd to find the project root. */
 export function findProjectRoot(cwd: string): string {
   let current = cwd;
 
@@ -138,9 +115,10 @@ export function findProjectRoot(cwd: string): string {
     if (
       existsSync(join(current, ".git")) ||
       existsSync(join(current, "flake.nix")) ||
+      existsSync(join(current, "devenv.nix")) ||
+      existsSync(join(current, "devenv.yaml")) ||
       existsSync(join(current, "package.json")) ||
-      existsSync(join(current, "Cargo.toml")) ||
-      existsSync(join(current, ".tend.json"))
+      existsSync(join(current, "Cargo.toml"))
     ) {
       return current;
     }
@@ -154,11 +132,8 @@ export function findProjectRoot(cwd: string): string {
 }
 
 function discoverFileMarkers(root: string, markers: Record<string, string>): string[] {
-  const found: string[] = [];
-  for (const [file, label] of Object.entries(markers)) {
-    if (existsSync(join(root, file))) {
-      found.push(label);
-    }
-  }
-  return found;
+  const found = Object.entries(markers)
+    .filter(([file]) => existsSync(join(root, file)))
+    .map(([, label]) => label);
+  return [...new Set(found)];
 }
