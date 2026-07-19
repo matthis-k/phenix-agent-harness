@@ -7,13 +7,7 @@ import { normalizeWorkflowRuntimeToolNames } from "@matthis-k/phenix-suite/runti
 
 function spec(): ChildSessionSpec {
   return {
-    effectiveTools: [
-      "read",
-      "subagent",
-      "phenix_workflow",
-      "phenix_complete",
-      "phenix_tasks",
-    ],
+    effectiveTools: ["read", "subagent", "phenix_workflow", "phenix_complete", "phenix_tasks"],
   } as unknown as ChildSessionSpec;
 }
 
