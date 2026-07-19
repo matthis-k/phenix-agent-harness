@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { createTaskTools, type PhenixTaskService } from "@matthis-k/phenix-tasks/extension.ts";
+import { createTaskTools } from "@matthis-k/phenix-tasks/extension.ts";
+import type { PhenixTaskService } from "@matthis-k/phenix-tasks/index.ts";
 import { getSessionRuntime } from "@matthis-k/phenix-routing/state.ts";
 
 import { authorizePhenixRootCapability, phenixRootModelScope } from "../composition/model-scope.ts";
@@ -84,7 +85,10 @@ export function registerSuiteTasks(input: {
               : event.kind === "task.delegated"
                 ? "Delegated"
                 : "Working";
-        ctx.ui.notify(`${verb}: ${event.task.title}`, event.kind === "task.failed" ? "warning" : "info");
+        ctx.ui.notify(
+          `${verb}: ${event.task.title}`,
+          event.kind === "task.failed" ? "warning" : "info",
+        );
       }
     } catch {
       // The task service remains authoritative when the UI is unavailable.
