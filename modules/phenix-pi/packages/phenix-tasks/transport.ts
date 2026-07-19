@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 
@@ -150,7 +151,7 @@ export class TaskRpcClient {
   }
 
   private request<T extends TaskNode | TaskRecord>(operation: TaskRpcOperation): Promise<T> {
-    const id = crypto.randomUUID();
+    const id = randomUUID();
     return new Promise<T>((resolve, reject) => {
       const socket = net.createConnection(this.socketPath);
       socket.setEncoding("utf8");
