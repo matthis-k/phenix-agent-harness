@@ -55,8 +55,36 @@ function extractUserContent(message: RootTurnMessage): string {
     .join("\n");
 }
 
+/** Build input for a newly submitted root turn before Pi assembles provider context. */
+export function createRootTurnInput(
+  userMessage: string,
+  sessionId: string,
+  ordinal: number,
+): RootTurnInput {
+  if (userMessage.length === 0) {
+    throw Object.assign(new Error("Root turn input: the submitted user message is empty."), {
+      code: "MISSING_USER_MESSAGE",
+    });
+  }
+  if (!Number.isSafeInteger(ordinal) || ordinal < 1) {
+    throw new Error(`Root turn input: invalid turn ordinal ${ordinal}.`);
+  }
+
+  const userContentHash = createHash("sha256")
+    .update(userMessage, "utf-8")
+    .digest("hex")
+    .slice(0, 16);
+  return {
+    turnId: `${sessionId}#turn${ordinal}#${userContentHash}`,
+    userMessage,
+  };
+}
+
 /**
  * Extract the final user message from a Pi context snapshot.
+ *
+ * This adapter is intended for context inspection only. Lifecycle code should
+ * use createRootTurnInput() because compaction rewrites context positions.
  *
  * @throws an error with code `MISSING_USER_MESSAGE` when no valid user message
  * exists in the supplied context values.

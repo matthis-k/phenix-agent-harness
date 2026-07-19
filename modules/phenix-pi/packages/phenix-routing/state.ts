@@ -20,8 +20,8 @@ export interface SessionRoutingRuntime {
   /** Stable identity of the current logical user turn. */
   currentTurnId?: string;
 
-  /** Messages cached from Pi's context event until boundary validation. */
-  cachedMessages?: unknown[];
+  /** Number of user-submitted root turns seen by before_agent_start. */
+  rootTurnCount: number;
 
   /** Immutable agent-capability artifact discovered at session startup. */
   capabilityArtifact?: SessionCapabilityArtifactView;
@@ -44,6 +44,7 @@ export function getSessionRuntime(sessionId: string): SessionRoutingRuntime {
     modelSet: loadRoutingConfig().defaultModelSet,
     activeRoute: null,
     turnCount: 0,
+    rootTurnCount: 0,
   };
   sessionState.set(sessionId, state);
   return state;

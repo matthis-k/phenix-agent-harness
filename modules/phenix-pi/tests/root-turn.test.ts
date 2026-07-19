@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { extractRootTurnInput } from "../extensions/phenix-routing/root-turn.ts";
+import {
+  createRootTurnInput,
+  extractRootTurnInput,
+} from "../extensions/phenix-routing/root-turn.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -47,6 +50,27 @@ function makeCtx(sessionId = "test-session") {
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
+
+describe("RootTurnInput creation", () => {
+  it("keeps identity independent of compacted context positions", () => {
+    const beforeCompaction = createRootTurnInput("continue the task", "session", 3);
+    const afterCompaction = createRootTurnInput("continue the task", "session", 3);
+
+    assert.deepEqual(afterCompaction, beforeCompaction);
+    assert.match(beforeCompaction.turnId, /^session#turn3#[a-f0-9]{16}$/);
+  });
+
+  it("distinguishes repeated prompts submitted as separate turns", () => {
+    const first = createRootTurnInput("try again", "session", 3);
+    const second = createRootTurnInput("try again", "session", 4);
+
+    assert.notEqual(first.turnId, second.turnId);
+  });
+
+  it("rejects invalid turn ordinals", () => {
+    assert.throws(() => createRootTurnInput("task", "session", 0), /invalid turn ordinal/i);
+  });
+});
 
 describe("RootTurnInput extraction", () => {
   it("extracts last user message from messages array", () => {

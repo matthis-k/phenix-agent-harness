@@ -16,7 +16,7 @@ import {
 import type { Difficulty, TaskProfile } from "@matthis-k/phenix-kernel/task.ts";
 import { loadRoutingConfig, validateConfig } from "@matthis-k/phenix-routing/config.ts";
 import { modelRegistry } from "@matthis-k/phenix-routing/registry.ts";
-import { extractRootTurnInput } from "@matthis-k/phenix-routing/root-turn.ts";
+import { createRootTurnInput } from "@matthis-k/phenix-routing/root-turn.ts";
 import { getSessionRuntime } from "@matthis-k/phenix-routing/state.ts";
 import { listRecords } from "../subagents/handle-store.ts";
 import { phenixRootModelScope } from "./model-scope.ts";
@@ -87,11 +87,6 @@ export default async function rootWorkflowIntegration(
     }
   });
 
-  pi.on("context", (event, ctx) => {
-    const sessionId = ctx.sessionManager.getSessionId() ?? "default";
-    getSessionRuntime(sessionId).cachedMessages = event.messages;
-  });
-
   pi.on("before_agent_start", async (event, ctx) => {
     modelRegistry.bind(ctx);
 
@@ -100,22 +95,12 @@ export default async function rootWorkflowIntegration(
     if (!phenixRootModelScope.includes(selectedModel)) return;
 
     const runtime = getSessionRuntime(sessionId);
-    const cachedMessages = runtime.cachedMessages;
-    const turn = Array.isArray(cachedMessages)
-      ? extractRootTurnInput(cachedMessages, ctx)
-      : extractRootTurnInput(
-          [
-            {
-              role: "user",
-              content: event.prompt,
-              timestamp: Date.now(),
-            },
-          ],
-          ctx,
-        );
-
-    const isNewTurn = runtime.currentTurnId !== turn.turnId;
-    if (isNewTurn) runtime.currentTurnId = turn.turnId;
+    // before_agent_start is Pi's user-submission boundary. Build identity from
+    // that event rather than a cached context snapshot: snapshots are emitted
+    // later and compaction can rewrite their message positions.
+    runtime.rootTurnCount += 1;
+    const turn = createRootTurnInput(event.prompt, sessionId, runtime.rootTurnCount);
+    runtime.currentTurnId = turn.turnId;
 
     const cwd = ctx.cwd;
     const artifact = runtime.capabilityArtifact as AgentCapabilityArtifact | undefined;
@@ -132,34 +117,18 @@ export default async function rootWorkflowIntegration(
       config,
     });
 
-    let workflowRecord: WorkflowRuntimeRecord;
-    if (!runtime.activeWorkflow || isNewTurn) {
-      workflowRecord = await initializeRootWorkflow({
-        cwd,
-        sessionId,
-        definitionId: options.workflowDefinitionId,
-        difficulty,
-        taskProfile: profile,
-        capabilityArtifactHash: artifact.artifactHash,
-      });
-      runtime.activeWorkflow = {
-        instanceId: workflowRecord.instanceId,
-        actorId: workflowRecord.actorId,
-      };
-    } else {
-      const { readWorkflowRecord } = await import("@matthis-k/phenix-flow/workflow-store.ts");
-      const existing = readWorkflowRecord(
-        cwd,
-        runtime.activeWorkflow.instanceId,
-        runtime.activeWorkflow.actorId,
-      );
-      if (!existing) {
-        throw new Error(
-          `Root workflow record not found for instance "${runtime.activeWorkflow.instanceId}".`,
-        );
-      }
-      workflowRecord = existing;
-    }
+    const workflowRecord = await initializeRootWorkflow({
+      cwd,
+      sessionId,
+      definitionId: options.workflowDefinitionId,
+      difficulty,
+      taskProfile: profile,
+      capabilityArtifactHash: artifact.artifactHash,
+    });
+    runtime.activeWorkflow = {
+      instanceId: workflowRecord.instanceId,
+      actorId: workflowRecord.actorId,
+    };
 
     registerSession(sessionId, {
       capabilityArtifact: artifact,
