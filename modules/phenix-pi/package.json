@@ -11,7 +11,7 @@
     "extensions": [
       "./extensions/phenix.ts",
       "./extensions/hypa-read-redirect.ts",
-      "./extensions/phenix-integrations/opencode-go-compat.ts"
+      "./extensions/phenix-integrations/opencode-compat.ts"
     ],
     "skills": [
       "./skills"

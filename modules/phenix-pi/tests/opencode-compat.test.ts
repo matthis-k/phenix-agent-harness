@@ -5,15 +5,17 @@ import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import registerOpenCodeGoCompatibility, {
+import registerOpenCodeCompatibility, {
   requiresOpenCodeGoPayloadSanitization,
+  requiresOpenCodeToolPreambleSanitization,
   sanitizeOpenCodeGoPayload,
-} from "../extensions/phenix-integrations/opencode-go-compat.ts";
+  sanitizeOpenCodeToolPreambles,
+} from "../extensions/phenix-integrations/opencode-compat.ts";
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-describe("OpenCode Go payload compatibility", () => {
+describe("OpenCode payload compatibility", () => {
   it("removes optional wire fields without changing tool schemas", () => {
     const parameters = {
       type: "object",
@@ -116,6 +118,87 @@ describe("OpenCode Go payload compatibility", () => {
     );
   });
 
+  it("omits replayed prose from OpenCode assistant tool calls", () => {
+    const toolCalls = [
+      { id: "call-1", type: "function", function: { name: "read", arguments: "{}" } },
+    ];
+    const payload = {
+      messages: [
+        { role: "user", content: "inspect" },
+        {
+          role: "assistant",
+          content: "Let me check the extensions directory.",
+          tool_calls: toolCalls,
+        },
+        { role: "tool", tool_call_id: "call-1", content: "result" },
+        { role: "assistant", content: "Final answer." },
+      ],
+    };
+
+    assert.deepEqual(sanitizeOpenCodeToolPreambles(payload), {
+      messages: [
+        { role: "user", content: "inspect" },
+        { role: "assistant", content: null, tool_calls: toolCalls },
+        { role: "tool", tool_call_id: "call-1", content: "result" },
+        { role: "assistant", content: "Final answer." },
+      ],
+    });
+    assert.equal(
+      requiresOpenCodeToolPreambleSanitization({
+        provider: "opencode",
+        api: "openai-completions",
+      }),
+      true,
+    );
+    assert.equal(
+      requiresOpenCodeToolPreambleSanitization({
+        provider: "opencode-go",
+        api: "openai-completions",
+      }),
+      false,
+    );
+  });
+
+  it("preserves assistant prose when no tool call accompanies it", () => {
+    const payload = {
+      messages: [{ role: "assistant", content: "Repeat this intentionally." }],
+    };
+
+    assert.equal(sanitizeOpenCodeToolPreambles(payload), payload);
+  });
+
+  it("sanitizes OpenCode tool history before dispatch", () => {
+    type Handler = (
+      event: { payload: unknown },
+      ctx: { model: { provider: string; api: string } },
+    ) => unknown;
+
+    let handler: Handler | undefined;
+    registerOpenCodeCompatibility({
+      on(event: string, candidate: Handler) {
+        if (event === "before_provider_request") handler = candidate;
+      },
+    } as unknown as ExtensionAPI);
+
+    const toolCall = {
+      id: "call-1",
+      type: "function",
+      function: { name: "read", arguments: "{}" },
+    };
+    const result = handler?.(
+      {
+        payload: {
+          messages: [{ role: "assistant", content: "Let me inspect it.", tool_calls: [toolCall] }],
+        },
+      },
+      { model: { provider: "opencode", api: "openai-completions" } },
+    );
+
+    assert.deepEqual(result, {
+      messages: [{ role: "assistant", content: null, tool_calls: [toolCall] }],
+    });
+  });
+
   it("rewrites the matching provider payload before dispatch", () => {
     type Handler = (
       event: { payload: unknown },
@@ -129,7 +212,7 @@ describe("OpenCode Go payload compatibility", () => {
       },
     } as unknown as ExtensionAPI;
 
-    registerOpenCodeGoCompatibility(pi);
+    registerOpenCodeCompatibility(pi);
 
     const payload = {
       stream_options: { include_usage: true },
@@ -232,7 +315,7 @@ describe("OpenCode Go payload compatibility", () => {
 
     try {
       let handler: Handler | undefined;
-      registerOpenCodeGoCompatibility({
+      registerOpenCodeCompatibility({
         on(event: string, candidate: Handler) {
           if (event === "before_provider_request") handler = candidate;
         },

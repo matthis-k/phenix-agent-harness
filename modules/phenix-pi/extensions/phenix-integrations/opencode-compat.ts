@@ -105,11 +105,51 @@ export function requiresOpenCodeGoPayloadSanitization(model: ProviderModel | und
   return model?.provider === "opencode-go" && model.api === "openai-completions";
 }
 
-export default function registerOpenCodeGoCompatibility(pi: ExtensionAPI): void {
-  pi.on("before_provider_request", (event, ctx) => {
-    if (!requiresOpenCodeGoPayloadSanitization(ctx.model)) return;
+export function requiresOpenCodeToolPreambleSanitization(
+  model: ProviderModel | undefined,
+): boolean {
+  return model?.provider === "opencode" && model.api === "openai-completions";
+}
 
-    const payload = sanitizeOpenCodeGoPayload(event.payload);
+/**
+ * Tool calls contain the authoritative action. Replaying an assistant's optional
+ * prose preamble alongside that call caused OpenCode free models to imitate and
+ * amplify the preamble on every following tool turn, eventually producing a
+ * 32,000-token repetition. Preserve the tool call exactly while omitting only
+ * its non-semantic accompanying prose from subsequent provider requests.
+ */
+export function sanitizeOpenCodeToolPreambles(value: unknown): unknown {
+  if (!isJsonObject(value) || !Array.isArray(value.messages)) return value;
+
+  let changed = false;
+  const messages = value.messages.map((message) => {
+    if (
+      !isJsonObject(message) ||
+      message.role !== "assistant" ||
+      !Array.isArray(message.tool_calls) ||
+      message.tool_calls.length === 0 ||
+      typeof message.content !== "string" ||
+      message.content.length === 0
+    ) {
+      return message;
+    }
+
+    changed = true;
+    return { ...message, content: null };
+  });
+
+  return changed ? { ...value, messages } : value;
+}
+
+export default function registerOpenCodeCompatibility(pi: ExtensionAPI): void {
+  pi.on("before_provider_request", (event, ctx) => {
+    let payload = event.payload;
+    if (requiresOpenCodeGoPayloadSanitization(ctx.model)) {
+      payload = sanitizeOpenCodeGoPayload(payload);
+    }
+    if (requiresOpenCodeToolPreambleSanitization(ctx.model)) {
+      payload = sanitizeOpenCodeToolPreambles(payload);
+    }
     return payload === event.payload ? undefined : payload;
   });
 }
