@@ -27,7 +27,7 @@ describe("QA artifact persistence", () => {
     assert.equal(dirname(jsonPath), resolve(artifactDirectory));
     assert.equal(dirname(textPath), resolve(artifactDirectory));
     assert.equal(readFileSync(rawPath, "utf-8"), "raw output");
-    assert.equal(readFileSync(jsonPath, "utf-8"), '{\n  "ok": true\n}\n');
+    assert.equal(readFileSync(jsonPath, "utf-8"), '{\n  "ok": true\n}');
     assert.equal(readFileSync(textPath, "utf-8"), "complete");
     assert.equal(existsSync(artifactDirectory), true);
   });
