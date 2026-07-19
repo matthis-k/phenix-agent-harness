@@ -33,11 +33,7 @@ const UpdateAction = Type.Object(
     title: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
     description: Type.Optional(Type.String({ maxLength: 4000 })),
     state: Type.Optional(
-      Type.Union([
-        Type.Literal("not_started"),
-        Type.Literal("wip"),
-        Type.Literal("done"),
-      ]),
+      Type.Union([Type.Literal("not_started"), Type.Literal("wip"), Type.Literal("done")]),
     ),
   },
   { additionalProperties: false },
@@ -46,9 +42,10 @@ const UpdateAction = Type.Object(
 export const TaskActionParams = Type.Union([InspectAction, AddAction, UpdateAction]);
 export type TaskActionParamsType = Static<typeof TaskActionParams>;
 
-export type TaskAuthorityResolver = (
-  ctx: ExtensionContext,
-) => TaskAuthority | string | undefined;
+export type TaskAuthorityResolver = (ctx: ExtensionContext) =>
+  | TaskAuthority
+  | string
+  | undefined;
 export type TaskClientResolver = (ctx: ExtensionContext) => BoundTaskClient | undefined;
 export type TaskToolAuthorizer = (ctx: ExtensionContext) => string | undefined;
 
@@ -134,9 +131,7 @@ export function createTaskTools(input: {
     resolveClient: (ctx) => {
       const resolved = input.resolveAuthority(ctx);
       const authorityToken = typeof resolved === "string" ? resolved : resolved?.token;
-      return authorityToken
-        ? createInProcessTaskClient(input.service, authorityToken)
-        : undefined;
+      return authorityToken ? createInProcessTaskClient(input.service, authorityToken) : undefined;
     },
     ...(input.authorize ? { authorize: input.authorize } : {}),
   });
