@@ -11,11 +11,13 @@
     let
       tooling = import ./tooling.nix { inherit pkgs; };
       phenixPiPackage = self'.packages.phenix-pi-package;
+      mcpConfig = ./phenix-pi/config/mcp.json;
 
       wrappedPi = pkgs.writeShellApplication {
         name = "pi";
         runtimeInputs = tooling.harnessRuntime ++ [
           phenixPiPackage
+          pkgs.mcp-nixos
           self'.packages.stitch
           self'.packages.stitch-mcp
         ];
@@ -43,10 +45,9 @@
             "${phenixPiPackage}/config/mcp.json" \
             "$mcp_defaults_file"
 
-          if [[ ! -e "$agent_dir/mcp.json" ]]; then
-            cp "$mcp_defaults_file" "$agent_dir/mcp.json"
-            chmod 0600 "$agent_dir/mcp.json"
-          fi
+          node "${phenixPiPackage}/runtime/merge-mcp-defaults.mjs" \
+            "$mcp_defaults_file" \
+            "$agent_dir/mcp.json"
 
           models_defaults_file="$agent_dir/models.phenix-defaults.json"
 
@@ -75,6 +76,28 @@
             "$@"
         '';
       };
+
+      mcpDefaultsSmoke =
+        pkgs.runCommand "phenix-mcp-defaults-smoke"
+          {
+            nativeBuildInputs = [ pkgs.jq ];
+          }
+          ''
+            jq -e '
+              .settings.directTools == false and
+              .mcpServers.stitch.command == "stitch-mcp" and
+              .mcpServers.stitch.lifecycle == "lazy" and
+              .mcpServers.nixos.command == "mcp-nixos" and
+              .mcpServers.nixos.lifecycle == "lazy" and
+              .mcpServers."qt-docs".url == "https://qt-docs-mcp.qt.io/mcp" and
+              .mcpServers."qt-docs".lifecycle == "lazy" and
+              .mcpServers.context7.url == "https://mcp.context7.com/mcp" and
+              .mcpServers.context7.lifecycle == "lazy"
+            ' ${mcpConfig}
+
+            test -x ${pkgs.mcp-nixos}/bin/mcp-nixos
+            touch "$out"
+          '';
     in
     {
       packages = {
@@ -83,6 +106,7 @@
       };
 
       checks = {
+        mcp-defaults = mcpDefaultsSmoke;
         pi-wrapper = wrappedPi;
       };
     };

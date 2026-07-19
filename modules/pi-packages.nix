@@ -131,6 +131,9 @@
             export PATH=${pkgs.lib.makeBinPath [ phenixPiPackage ]}:$PATH
             cd ${phenixPiPackage}
             node --experimental-strip-types --test tests/*.test.ts
+            node --check runtime/managed-json.mjs
+            node --check runtime/merge-mcp-defaults.mjs
+            node --check runtime/merge-model-defaults.mjs
             node --check runtime/verify.mjs
             touch "$out"
           '';
