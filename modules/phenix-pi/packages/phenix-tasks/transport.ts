@@ -5,6 +5,16 @@ import net from "node:net";
 import type { TaskAuthority, TaskMutation, TaskNode, TaskRecord } from "./core.ts";
 import { PhenixTaskService } from "./core.ts";
 
+export interface BoundTaskClient {
+  inspect(): Promise<TaskNode>;
+  add(input: {
+    readonly parentId?: string;
+    readonly title: string;
+    readonly description?: string;
+  }): Promise<TaskRecord>;
+  update(input: TaskMutation): Promise<TaskRecord>;
+}
+
 export type TaskRpcOperation =
   | { readonly method: "inspect" }
   | {
@@ -36,6 +46,12 @@ function encode(value: unknown): string {
   return `${JSON.stringify(value)}\n`;
 }
 
+function socketPathFromEndpoint(endpoint: string): string {
+  const normalized = endpoint.trim();
+  if (normalized.startsWith("unix://")) return normalized.slice("unix://".length);
+  return normalized;
+}
+
 function applyOperation(service: PhenixTaskService, request: TaskRpcRequest): TaskNode | TaskRecord {
   switch (request.operation.method) {
     case "inspect":
@@ -45,6 +61,24 @@ function applyOperation(service: PhenixTaskService, request: TaskRpcRequest): Ta
     case "update":
       return service.updateTask(request.capability, request.operation.params);
   }
+}
+
+/** Bind the in-process service to one opaque subtree capability. */
+export function createInProcessTaskClient(
+  service: PhenixTaskService,
+  capability: string,
+): BoundTaskClient {
+  return {
+    async inspect(): Promise<TaskNode> {
+      return service.inspect(capability);
+    },
+    async add(input): Promise<TaskRecord> {
+      return service.addTask(capability, input);
+    },
+    async update(input): Promise<TaskRecord> {
+      return service.updateTask(capability, input);
+    },
+  };
 }
 
 /**
@@ -128,11 +162,15 @@ export async function startTaskRpcServer(input: {
   };
 }
 
-export class TaskRpcClient {
+export class TaskRpcClient implements BoundTaskClient {
+  private readonly socketPath: string;
+
   constructor(
-    private readonly socketPath: string,
+    endpoint: string,
     private readonly capability: string,
-  ) {}
+  ) {
+    this.socketPath = socketPathFromEndpoint(endpoint);
+  }
 
   inspect(): Promise<TaskNode> {
     return this.request<TaskNode>({ method: "inspect" });
@@ -176,6 +214,15 @@ export class TaskRpcClient {
       });
     });
   }
+}
+
+export function taskClientFromEnvironment(
+  environment: NodeJS.ProcessEnv = process.env,
+): TaskRpcClient | undefined {
+  const endpoint = environment.PHENIX_TASKS_ENDPOINT?.trim();
+  const capability = environment.PHENIX_TASKS_CAPABILITY?.trim();
+  if (!endpoint || !capability) return undefined;
+  return new TaskRpcClient(endpoint, capability);
 }
 
 export function taskProcessEnvironment(input: {
