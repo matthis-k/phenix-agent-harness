@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
 import { METRICS_ANALYZER, parseFtaJson } from "../skills/phenix-qa/runtime/analyzers/metrics.ts";
+import { ensureArtifactDir } from "../skills/phenix-qa/runtime/artifacts.ts";
 import { DEFAULT_QA_CONFIG } from "../skills/phenix-qa/runtime/config.ts";
 import { resetIdCounter } from "../skills/phenix-qa/runtime/normalize.ts";
 
@@ -62,7 +63,7 @@ describe("FTA metrics analyzer", () => {
   it("runs the packaged FTA executable against packaged TypeScript sources", async (t) => {
     const cwd = fileURLToPath(new URL("../skills/phenix-qa/runtime/analyzers", import.meta.url));
     const artifactRoot = mkdtempSync(join(tmpdir(), "phenix-qa-fta-artifacts-"));
-    const artifactDirectory = join(artifactRoot, "nested", "artifacts");
+    const artifactDirectory = ensureArtifactDir(join(artifactRoot, "nested", "artifacts"));
     t.after(() => rmSync(artifactRoot, { recursive: true, force: true }));
 
     const availability = await METRICS_ANALYZER.checkAvailability({
