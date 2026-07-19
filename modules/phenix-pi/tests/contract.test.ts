@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { AgentRole } from "../extensions/phenix-subagents/agent-types.ts";
+import type { AgentRole } from "@matthis-k/phenix-suite/subagents/agent-types.ts";
 import {
   authorizeContract,
   type CapabilityToken,
@@ -14,7 +14,7 @@ import {
   parseContractId,
   parseRunId,
   type RunId,
-} from "../extensions/phenix-subagents/contract.ts";
+} from "@matthis-k/phenix-suite/subagents/contract.ts";
 
 const TEST_SCHEMA = {
   type: "object",

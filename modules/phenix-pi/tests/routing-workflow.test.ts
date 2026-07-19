@@ -16,17 +16,17 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildBundledConfig } from "../extensions/phenix-routing/config.ts";
-import { modelSetForModelId, PHENIX_MODEL_SETS } from "../extensions/phenix-routing/provider.ts";
-import { type ModelRegistry, resolveRoute } from "../extensions/phenix-routing/resolver.ts";
+import { buildBundledConfig } from "@matthis-k/phenix-routing/config.ts";
+import { modelSetForModelId, PHENIX_MODEL_SETS } from "@matthis-k/phenix-routing/provider.ts";
+import { type ModelRegistry, resolveRoute } from "@matthis-k/phenix-routing/resolver.ts";
 import {
   clearSessionRuntime,
   getSessionRuntime,
   resolveModelSet,
   validateModelSet,
-} from "../extensions/phenix-routing/state.ts";
-import type { ModelRef, RoutingRole } from "../extensions/phenix-routing/types.ts";
-import { MODEL_SET_IDS, type ModelSetId } from "../extensions/phenix-routing/types.ts";
+} from "@matthis-k/phenix-routing/state.ts";
+import type { ModelRef, RoutingRole } from "@matthis-k/phenix-routing/types.ts";
+import { MODEL_SET_IDS, type ModelSetId } from "@matthis-k/phenix-routing/types.ts";
 
 // ---------------------------------------------------------------------------
 // Fake model registry — simulates Pi's getModelRegistry() response

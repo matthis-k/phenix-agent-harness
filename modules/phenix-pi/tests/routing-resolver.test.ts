@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildBundledConfig } from "../extensions/phenix-routing/config.ts";
-import { type ModelRegistry, resolveRoute } from "../extensions/phenix-routing/resolver.ts";
-import type { ModelRef } from "../extensions/phenix-routing/types.ts";
+import { buildBundledConfig } from "@matthis-k/phenix-routing/config.ts";
+import { type ModelRegistry, resolveRoute } from "@matthis-k/phenix-routing/resolver.ts";
+import type { ModelRef } from "@matthis-k/phenix-routing/types.ts";
 
 /** Fake model registry for unit tests — no network calls. */
 class FakeRegistry implements ModelRegistry {

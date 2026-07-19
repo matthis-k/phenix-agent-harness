@@ -14,7 +14,7 @@ import {
   type SubagentRequest,
   type SubagentSnapshot,
   type SubagentStatus,
-} from "../extensions/phenix-runtime/index.ts";
+} from "@matthis-k/phenix-suite/runtime/index.ts";
 
 const SummarySchema = Type.Object({
   summary: Type.String(),

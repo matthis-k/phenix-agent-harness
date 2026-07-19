@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { modelSetId } from "../extensions/phenix-kernel/ids.ts";
+import { modelSetId } from "@matthis-k/phenix-kernel/ids.ts";
 import {
   createSubagentSessionRuntime,
   type RuntimeBindings,
@@ -9,7 +9,7 @@ import {
   routing,
   type SubagentExecutionPlan,
   SubagentSessionPlanner,
-} from "../extensions/phenix-runtime/child-session-backend.ts";
+} from "@matthis-k/phenix-suite/runtime/child-session-backend.ts";
 import {
   type ChildCycleOutcome,
   type ChildRun,
@@ -18,7 +18,7 @@ import {
   type ChildSessionNode,
   type ChildSessionSpec,
   childRunId,
-} from "../extensions/phenix-runtime/child-session-types.ts";
+} from "@matthis-k/phenix-suite/runtime/child-session-types.ts";
 
 const runtime = {
   id: childRunId("child-session-runtime-test"),

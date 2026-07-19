@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { type ChildRun, childRunId } from "../extensions/phenix-runtime/child-session-types.ts";
+import { type ChildRun, childRunId } from "@matthis-k/phenix-suite/runtime/child-session-types.ts";
 import type {
   AcceptanceEngine,
   AcceptancePlan,
   SubagentExecutionCompiler,
   SubagentExecutionPlan,
-} from "../extensions/phenix-runtime/execution-plan.ts";
-import type { SubagentRequest } from "../extensions/phenix-runtime/subagent-api.ts";
-import { createSessionSubagentManagerFactory } from "../extensions/phenix-runtime/subagent-manager-factory.ts";
+} from "@matthis-k/phenix-suite/runtime/execution-plan.ts";
+import type { SubagentRequest } from "@matthis-k/phenix-suite/runtime/subagent-api.ts";
+import { createSessionSubagentManagerFactory } from "@matthis-k/phenix-suite/runtime/subagent-manager-factory.ts";
 
 class Compiler implements SubagentExecutionCompiler {
   private readonly id: string;

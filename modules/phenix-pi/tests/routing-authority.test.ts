@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildBundledConfig, validateConfig } from "../extensions/phenix-routing/config.ts";
+import { buildBundledConfig, validateConfig } from "@matthis-k/phenix-routing/config.ts";
 import {
   defaultAgentRoutes,
   defaultModelPools,
   defaultModelSets,
-} from "../extensions/phenix-routing/default-routing.ts";
-import { ROLE_MATRIX } from "../extensions/phenix-routing/matrix.ts";
-import { capabilityFromId, routingRoleFromId } from "../extensions/phenix-routing/types.ts";
+} from "@matthis-k/phenix-suite/defaults/routing.ts";
+import { ROLE_MATRIX } from "@matthis-k/phenix-routing/matrix.ts";
+import { capabilityFromId, routingRoleFromId } from "@matthis-k/phenix-routing/types.ts";
 
 describe("routing declaration authority", () => {
   it("projects every pool without changing candidates", () => {

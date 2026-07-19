@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import {
   createRootTurnInput,
   extractRootTurnInput,
-} from "../extensions/phenix-routing/root-turn.ts";
+} from "@matthis-k/phenix-routing/root-turn.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

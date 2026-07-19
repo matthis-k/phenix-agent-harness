@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { agentClientRef } from "../extensions/phenix-kernel/refs.ts";
+import { agentClientRef } from "@matthis-k/phenix-kernel/refs.ts";
 import {
   type ChildCycleOutcome,
   type ChildRun,
   type ChildSessionEvent,
   type ChildSessionNode,
   childRunId,
-} from "../extensions/phenix-runtime/child-session-types.ts";
+} from "@matthis-k/phenix-suite/runtime/child-session-types.ts";
 import {
   type AcceptanceEngine,
   createSessionSubagentExecutionAdapter,
@@ -22,7 +22,7 @@ import {
   type SubagentExecutionPlan,
   type SubagentRequest,
   type SubagentSessionSpawner,
-} from "../extensions/phenix-runtime/index.ts";
+} from "@matthis-k/phenix-suite/runtime/index.ts";
 
 interface SummaryResult {
   readonly summary: string;

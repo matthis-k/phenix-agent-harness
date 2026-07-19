@@ -8,14 +8,14 @@ import { describe, it } from "node:test";
 import type {
   ChildRun,
   ContractSubmissionChannel,
-} from "../extensions/phenix-runtime/child-session-types.ts";
-import type { SubagentExecutionPlan } from "../extensions/phenix-runtime/execution-plan.ts";
-import type { ResolvedChildSpec } from "../extensions/phenix-subagents/child-spec.ts";
+} from "@matthis-k/phenix-suite/runtime/child-session-types.ts";
+import type { SubagentExecutionPlan } from "@matthis-k/phenix-suite/runtime/execution-plan.ts";
+import type { ResolvedChildSpec } from "@matthis-k/phenix-suite/subagents/child-spec.ts";
 import {
   ExecutionQualityService,
   type ExecutionQualitySessionRuntime,
-} from "../extensions/phenix-subagents/execution-quality-service.ts";
-import type { HandleRecord } from "../extensions/phenix-subagents/handle-types.ts";
+} from "@matthis-k/phenix-suite/subagents/execution-quality-service.ts";
+import type { HandleRecord } from "@matthis-k/phenix-suite/subagents/handle-types.ts";
 
 const CRITIC_TOOLS = [
   "read",

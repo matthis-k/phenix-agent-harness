@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildBundledConfig } from "../extensions/phenix-routing/config.ts";
-import { allMatrixKeys, ROLE_MATRIX, validateMatrix } from "../extensions/phenix-routing/matrix.ts";
+import { buildBundledConfig } from "@matthis-k/phenix-routing/config.ts";
+import { allMatrixKeys, ROLE_MATRIX, validateMatrix } from "@matthis-k/phenix-routing/matrix.ts";
 import {
   type Capability,
   type Difficulty,
   MODEL_SET_IDS,
   type RoutingRole,
-} from "../extensions/phenix-routing/types.ts";
+} from "@matthis-k/phenix-routing/types.ts";
 
 const ALL_ROLES: RoutingRole[] = [
   "coordinator",

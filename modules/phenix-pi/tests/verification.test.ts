@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { runVerificationCommands } from "../extensions/phenix-subagents/verification.ts";
+import { runVerificationCommands } from "@matthis-k/phenix-suite/subagents/verification.ts";
 
 function nodeCommand(source: string): string {
   const quoted = JSON.stringify(source);

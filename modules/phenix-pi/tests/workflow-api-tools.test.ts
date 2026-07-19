@@ -7,12 +7,12 @@ import {
   createWorkflowApiTools,
   createWorkflowTool,
   projectWorkflowInspection,
-} from "../extensions/phenix-runtime/workflow-api-tools.ts";
+} from "@matthis-k/phenix-suite/runtime/workflow-api-tools.ts";
 import type {
   WorkflowAuthoritySnapshot,
   WorkflowRuntimePort,
   WorkflowSpawnResult,
-} from "../extensions/phenix-runtime/workflow-runtime-types.ts";
+} from "@matthis-k/phenix-suite/runtime/workflow-runtime-types.ts";
 
 const AUTHORITY_DIGEST = "a".repeat(64);
 const ctx = { cwd: "/tmp/workflow-api" } as ExtensionContext;

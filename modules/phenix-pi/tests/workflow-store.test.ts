@@ -15,9 +15,9 @@ import {
   releaseWorkflowLock,
   verifyWorkflowActorExists,
   WorkflowStoreError,
-} from "../extensions/phenix-workflow/workflow-store.ts";
-import type { WorkflowRuntimeRecord } from "../extensions/phenix-workflow/workflow-types.ts";
-import { mkTransitionId } from "../extensions/phenix-workflow/workflow-types.ts";
+} from "@matthis-k/phenix-flow/workflow-store.ts";
+import type { WorkflowRuntimeRecord } from "@matthis-k/phenix-flow/workflow-types.ts";
+import { mkTransitionId } from "@matthis-k/phenix-flow/workflow-types.ts";
 
 function makeRecordParams(overrides?: Record<string, unknown>) {
   return {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { buildBundledConfig } from "../extensions/phenix-routing/config.ts";
+import { buildBundledConfig } from "@matthis-k/phenix-routing/config.ts";
 
 describe("OpenCode primary routes", () => {
   it("uses DeepSeek V4 Flash Free first", () => {

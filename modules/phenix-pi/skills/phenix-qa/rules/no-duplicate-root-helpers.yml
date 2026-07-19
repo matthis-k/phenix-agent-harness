@@ -11,7 +11,7 @@ rule:
       any:
         - pattern: import { findProjectRoot }
 files:
-  - extensions/phenix-subagents/
+  - @matthis-k/phenix-suite/subagents/
 note: |
   Multiple modules in this repository implement their own project-root
   discovery. Use the central helper from handle-store.ts instead.

@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { agentClientRef, contractRef } from "../extensions/phenix-kernel/refs.ts";
+import { agentClientRef, contractRef } from "@matthis-k/phenix-kernel/refs.ts";
 import {
   actorRoleForAgentClient,
   type DefaultWorkflowDefinitionId,
   mkTransitionId,
   outputSchemaIdForContract,
   roleForAgentClient,
-} from "../extensions/phenix-workflow/workflow-types.ts";
+} from "@matthis-k/phenix-flow/workflow-types.ts";
 
 describe("workflow identifier authority", () => {
   it("uses the kernel transition-ID validator", () => {

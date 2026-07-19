@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { modelSetId } from "../extensions/phenix-kernel/ids.ts";
+import { modelSetId } from "@matthis-k/phenix-kernel/ids.ts";
 import {
   resolveSubagentSessionOptions,
   routing,
   type SessionRouteRequest,
   type SessionRouteResolver,
-} from "../extensions/phenix-runtime/child-session-backend.ts";
+} from "@matthis-k/phenix-suite/runtime/child-session-backend.ts";
 
 const defaults = {
   agent: "implementer" as const,

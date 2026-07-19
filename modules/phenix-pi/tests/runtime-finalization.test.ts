@@ -10,19 +10,19 @@ import {
   ChildRuntimeError,
   type ContractSubmissionChannel,
   childRunId,
-} from "../extensions/phenix-runtime/child-session-types.ts";
-import type { HandleRecord } from "../extensions/phenix-subagents/handle-types.ts";
-import { isTerminalHandleStatus } from "../extensions/phenix-subagents/handle-types.ts";
-import { executeProducerCycles } from "../extensions/phenix-subagents/producer-cycle-runner.ts";
+} from "@matthis-k/phenix-suite/runtime/child-session-types.ts";
+import type { HandleRecord } from "@matthis-k/phenix-suite/subagents/handle-types.ts";
+import { isTerminalHandleStatus } from "@matthis-k/phenix-suite/subagents/handle-types.ts";
+import { executeProducerCycles } from "@matthis-k/phenix-suite/subagents/producer-cycle-runner.ts";
 import {
   finalizeHandleWorkflow,
   initialWorkflowStateForRole,
-} from "../extensions/phenix-workflow/workflow-runtime.ts";
+} from "@matthis-k/phenix-flow/workflow-runtime.ts";
 import {
   beginTransition,
   createWorkflowRecord,
   readWorkflowRecord,
-} from "../extensions/phenix-workflow/workflow-store.ts";
+} from "@matthis-k/phenix-flow/workflow-store.ts";
 
 function temporaryDirectory(prefix: string): string {
   const directory = path.join(os.tmpdir(), `${prefix}-${randomUUID().slice(0, 8)}`);

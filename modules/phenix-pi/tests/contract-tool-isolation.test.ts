@@ -17,10 +17,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
-import { createCompletionTool } from "../extensions/phenix-runtime/completion-tool.ts";
-import { ContractSubmissionChannelImpl } from "../extensions/phenix-runtime/contract-channel.ts";
-import { createRunId, issueContract } from "../extensions/phenix-subagents/contract.ts";
-import { FileContractStore } from "../extensions/phenix-subagents/contract-store.ts";
+import { createCompletionTool } from "@matthis-k/phenix-suite/runtime/completion-tool.ts";
+import { ContractSubmissionChannelImpl } from "@matthis-k/phenix-suite/runtime/contract-channel.ts";
+import { createRunId, issueContract } from "@matthis-k/phenix-suite/subagents/contract.ts";
+import { FileContractStore } from "@matthis-k/phenix-suite/subagents/contract-store.ts";
 
 // ── Test schema ─────────────────────────────────────────────────────────────
 

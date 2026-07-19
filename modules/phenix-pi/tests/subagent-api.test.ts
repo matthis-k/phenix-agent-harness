@@ -8,7 +8,7 @@ import {
   returnsWithDecoder,
   routing,
   type SubagentRequest,
-} from "../extensions/phenix-runtime/child-session-backend.ts";
+} from "@matthis-k/phenix-suite/runtime/child-session-backend.ts";
 
 const SummarySchema = Type.Object(
   {

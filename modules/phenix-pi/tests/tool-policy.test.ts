@@ -6,7 +6,7 @@ import {
   modelTaskTools,
   resolveToolConfiguration,
   toolAllowedByConfig,
-} from "../extensions/phenix-subagents/tool-policy.ts";
+} from "@matthis-k/phenix-suite/subagents/tool-policy.ts";
 
 describe("Tool-policy resolution", () => {
   it("scout preset without patch", () => {

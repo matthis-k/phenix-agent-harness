@@ -11,15 +11,15 @@ import type {
 } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 
-import { prepareRootWorkflowEntry } from "../extensions/phenix-composition/root-workflow-entry.ts";
-import { buildBundledConfig } from "../extensions/phenix-routing/config.ts";
-import { clearSessionRuntime, getSessionRuntime } from "../extensions/phenix-routing/state.ts";
+import { prepareRootWorkflowEntry } from "@matthis-k/phenix-suite/composition/root-workflow-entry.ts";
+import { buildBundledConfig } from "@matthis-k/phenix-routing/config.ts";
+import { clearSessionRuntime, getSessionRuntime } from "@matthis-k/phenix-routing/state.ts";
 import {
   clearActiveRouteForSession,
   createRouterStream,
   getActiveRouteForSession,
   type RouterStreamFunction,
-} from "../extensions/phenix-routing/stream-proxy.ts";
+} from "@matthis-k/phenix-routing/stream-proxy.ts";
 
 function makeModel(provider: string, id: string): Model<Api> {
   return {

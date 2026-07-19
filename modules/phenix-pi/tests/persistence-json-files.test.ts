@@ -9,12 +9,12 @@ import {
   readDirectory,
   readJsonFile,
   sanitizePathSegment,
-} from "../extensions/phenix-persistence/json-files.ts";
-import { decodeHandleRecord } from "../extensions/phenix-subagents/handle-store.ts";
+} from "@matthis-k/phenix-suite/persistence/json-files.ts";
+import { decodeHandleRecord } from "@matthis-k/phenix-suite/subagents/handle-store.ts";
 import {
   decodeWorkflowRecord,
   WorkflowStoreError,
-} from "../extensions/phenix-workflow/workflow-store.ts";
+} from "@matthis-k/phenix-flow/workflow-store.ts";
 
 function temporaryDirectory(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "phenix-persistence-"));

@@ -4,16 +4,16 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
-import type { AgentRole } from "../extensions/phenix-subagents/agent-types.ts";
+import type { AgentRole } from "@matthis-k/phenix-suite/subagents/agent-types.ts";
 import {
   type ContractId,
   createRunId,
   issueContract,
-} from "../extensions/phenix-subagents/contract.ts";
+} from "@matthis-k/phenix-suite/subagents/contract.ts";
 import {
   ContractStoreError,
   FileContractStore,
-} from "../extensions/phenix-subagents/contract-store.ts";
+} from "@matthis-k/phenix-suite/subagents/contract-store.ts";
 
 const TEST_SCHEMA = {
   type: "object",

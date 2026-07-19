@@ -5,7 +5,7 @@ import {
   deriveTaskProfile,
   type RuntimePolicyConfig,
   resolveExecutionPolicy,
-} from "../extensions/phenix-subagents/policy.ts";
+} from "@matthis-k/phenix-suite/subagents/policy.ts";
 
 const config: RuntimePolicyConfig = {
   verification: {

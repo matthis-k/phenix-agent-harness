@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import {
   createProviderRootModelScope,
   phenixRootModelScope,
-} from "../extensions/phenix-composition/model-scope.ts";
+} from "@matthis-k/phenix-suite/composition/model-scope.ts";
 
 describe("root model scope", () => {
   it("matches only the configured directly selected provider", () => {
