@@ -42,7 +42,7 @@ import { createSessionSubagentManagerFactory } from "./runtime/subagent-manager-
 import { createWorkflowApiTools } from "./runtime/workflow-api-tools.ts";
 import type { WorkflowRuntimePort } from "./runtime/workflow-runtime-types.ts";
 import { createExecutionQualityService } from "./subagents/execution-quality-service.ts";
-import phenixSubagents from "./subagents/index.ts";
+import phenixSubagents from "./subagents/extension.ts";
 import {
   createManagedDelegationRuntime,
   type ManagedDelegationRuntime,
@@ -235,7 +235,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
     await mod.default(api);
   });
   await loadIntegration("phenix-routing", pi, async (api) => {
-    const mod = await import("@matthis-k/phenix-routing/index.ts");
+    const mod = await import("@matthis-k/phenix-routing/extension.ts");
     await mod.default(api);
   });
 

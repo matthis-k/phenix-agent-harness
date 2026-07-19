@@ -10,11 +10,10 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { authorizePhenixRootCapability, phenixRootModelScope } from "../composition/model-scope.ts";
 import { createWorkflowApiTools } from "../runtime/workflow-api-tools.ts";
-import type { WorkflowRuntimePort } from "../runtime/workflow-runtime-types.ts";
 import { AgentParams } from "./delegate-schema.ts";
 import { effectiveSessionId, readRecord } from "./handle-store.ts";
 import { type HandleRecord, TERMINAL_STATES } from "./handle-types.ts";
-import type { WorkflowDelegator } from "./workflow-delegator.ts";
+import type { PhenixSubagentsOptions } from "./registration.ts";
 
 function toolResult(record: HandleRecord): AgentToolResult<Record<string, unknown>> {
   const min = {
@@ -55,11 +54,6 @@ function errorResult(
     content: [{ type: "text", text: message }],
     details: details ?? { status: "failed" },
   };
-}
-
-export interface PhenixSubagentsOptions {
-  readonly delegator: WorkflowDelegator;
-  readonly workflow: WorkflowRuntimePort;
 }
 
 export default async function phenixSubagents(

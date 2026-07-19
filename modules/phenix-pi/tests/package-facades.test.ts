@@ -70,7 +70,11 @@ describe("Phenix package facades", () => {
       assert.equal(facade.includes("function phenix"), false, packageName);
       assert.equal(facade.includes("pi.on("), false, packageName);
       assert.equal(facade.includes("pi.register"), false, packageName);
+      assert.equal(facade.includes("./extension.ts"), false, packageName);
     }
+
+    const subagentFacade = read("packages/phenix-suite/subagents/index.ts");
+    assert.equal(subagentFacade.includes("./extension.ts"), false, "phenix-suite/subagents");
   });
 
   it("contains no legacy Phenix extension compatibility surface", () => {
