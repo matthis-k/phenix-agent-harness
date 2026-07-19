@@ -16,6 +16,7 @@
         name = "pi";
         runtimeInputs = tooling.harnessRuntime ++ [
           phenixPiPackage
+          pkgs.mcp-nixos
           self'.packages.stitch
           self'.packages.stitch-mcp
         ];
