@@ -13,6 +13,7 @@ import { dirname, extname, join, relative } from "node:path";
 
 const root = process.cwd();
 const legacyRoot = join(root, "modules", "phenix-pi", "extensions");
+const migrationSource = join(root, "scripts", "migrate-legacy-phenix-imports.mjs");
 const artifactRoot = "/tmp/phenix-canonical-migration";
 const textExtensions = new Set([
   ".cjs",
@@ -114,8 +115,12 @@ function isLegacyShim(path) {
   return !relativePath.startsWith("../") && relativePath.startsWith("phenix-");
 }
 
+function isMigrationSource(path) {
+  return path === migrationSource;
+}
+
 for (const path of walk(root)) {
-  if (isLegacyShim(path)) continue;
+  if (isLegacyShim(path) || isMigrationSource(path)) continue;
   const original = readFileSync(path, "utf8");
   const migrated = replacements.reduce(
     (content, [pattern, replacement]) => content.replace(pattern, replacement),
@@ -129,7 +134,7 @@ for (const name of readdirSync(legacyRoot)) {
 }
 
 const leftovers = walk(root).filter((path) => {
-  if (isLegacyShim(path)) return false;
+  if (isLegacyShim(path) || isMigrationSource(path)) return false;
   return readFileSync(path, "utf8").includes("extensions/phenix-");
 });
 if (leftovers.length > 0) {
