@@ -2,8 +2,13 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 
-import type { TaskAuthority, TaskMutation, TaskNode, TaskRecord } from "./core.ts";
-import { PhenixTaskService } from "./core.ts";
+import type {
+  PhenixTaskService,
+  TaskAuthority,
+  TaskMutation,
+  TaskNode,
+  TaskRecord,
+} from "./core.ts";
 
 export interface BoundTaskClient {
   inspect(): Promise<TaskNode>;
