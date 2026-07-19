@@ -42,10 +42,7 @@ const UpdateAction = Type.Object(
 export const TaskActionParams = Type.Union([InspectAction, AddAction, UpdateAction]);
 export type TaskActionParamsType = Static<typeof TaskActionParams>;
 
-export type TaskAuthorityResolver = (ctx: ExtensionContext) =>
-  | TaskAuthority
-  | string
-  | undefined;
+export type TaskAuthorityResolver = (ctx: ExtensionContext) => TaskAuthority | string | undefined;
 export type TaskClientResolver = (ctx: ExtensionContext) => BoundTaskClient | undefined;
 export type TaskToolAuthorizer = (ctx: ExtensionContext) => string | undefined;
 
@@ -97,9 +94,7 @@ export function createTaskClientTools(input: {
                 await client.add({
                   ...(action.parentId ? { parentId: action.parentId } : {}),
                   title: action.title,
-                  ...(action.description !== undefined
-                    ? { description: action.description }
-                    : {}),
+                  ...(action.description !== undefined ? { description: action.description } : {}),
                 }),
               );
             case "update":
@@ -107,9 +102,7 @@ export function createTaskClientTools(input: {
                 await client.update({
                   taskId: action.taskId,
                   ...(action.title !== undefined ? { title: action.title } : {}),
-                  ...(action.description !== undefined
-                    ? { description: action.description }
-                    : {}),
+                  ...(action.description !== undefined ? { description: action.description } : {}),
                   ...(action.state !== undefined ? { state: action.state } : {}),
                 }),
               );
