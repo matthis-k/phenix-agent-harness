@@ -4,10 +4,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  PHENIX_DEFAULT_WORKFLOW,
-  validateDefinition,
-} from "./support/default-workflow-fixture.ts";
+import { PHENIX_DEFAULT_WORKFLOW, validateDefinition } from "./support/default-workflow-fixture.ts";
 
 describe("Workflow definitions", () => {
   it("has no duplicate transition IDs", () => {

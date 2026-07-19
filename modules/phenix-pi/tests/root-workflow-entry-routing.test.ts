@@ -10,9 +10,6 @@ import type {
   SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
-
-import { prepareRootWorkflowEntry } from "@matthis-k/phenix-suite/composition/root-workflow-entry.ts";
-import { buildDefaultRoutingConfig } from "./support/default-routing-fixture.ts";
 import { clearSessionRuntime, getSessionRuntime } from "@matthis-k/phenix-routing/state.ts";
 import {
   clearActiveRouteForSession,
@@ -20,6 +17,8 @@ import {
   getActiveRouteForSession,
   type RouterStreamFunction,
 } from "@matthis-k/phenix-routing/stream-proxy.ts";
+import { prepareRootWorkflowEntry } from "@matthis-k/phenix-suite/composition/root-workflow-entry.ts";
+import { buildDefaultRoutingConfig } from "./support/default-routing-fixture.ts";
 
 function makeModel(provider: string, id: string): Model<Api> {
   return {

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { resolveDelegationOptions } from "@matthis-k/phenix-flow/delegation-options.ts";
-import { PHENIX_DEFAULT_WORKFLOW } from "./support/default-workflow-fixture.ts";
 import {
   buildWorkflowDecisionContext,
   computeOptionsDigest,
@@ -12,6 +11,7 @@ import type {
   DelegationAuthority,
   WorkflowRuntimeRecord,
 } from "@matthis-k/phenix-flow/workflow-types.ts";
+import { PHENIX_DEFAULT_WORKFLOW } from "./support/default-workflow-fixture.ts";
 
 function baseRecord(overrides?: Partial<WorkflowRuntimeRecord>): WorkflowRuntimeRecord {
   return {

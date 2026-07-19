@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { type Static, Type } from "typebox";
-
 import {
   decodeReturnValue,
   returns,
@@ -9,6 +7,7 @@ import {
   routing,
   type SubagentRequest,
 } from "@matthis-k/phenix-suite/runtime/child-session-backend.ts";
+import { type Static, Type } from "typebox";
 
 const SummarySchema = Type.Object(
   {

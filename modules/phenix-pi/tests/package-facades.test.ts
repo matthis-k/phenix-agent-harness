@@ -53,7 +53,11 @@ describe("Phenix package facades", () => {
         pi: { extensions: readonly string[] };
       };
       assert.deepEqual(packageJson.pi.extensions, ["./extension.ts"], packageName);
-      assert.equal(fs.existsSync(resolve(`packages/${packageName}/extension.ts`)), true, packageName);
+      assert.equal(
+        fs.existsSync(resolve(`packages/${packageName}/extension.ts`)),
+        true,
+        packageName,
+      );
     }
   });
 

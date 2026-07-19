@@ -1,16 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { PHENIX_API, PHENIX_PROVIDER } from "@matthis-k/phenix-routing/provider.ts";
+import { type ModelRegistry, resolveRoute } from "@matthis-k/phenix-routing/resolver.ts";
+import type { ModelRef } from "@matthis-k/phenix-routing/types.ts";
 import {
   buildDefaultRoutingConfig,
   DEFAULT_PHENIX_MODEL_SETS,
   defaultModelSetForModelId,
 } from "./support/default-routing-fixture.ts";
-import {
-  PHENIX_API,
-  PHENIX_PROVIDER,
-} from "@matthis-k/phenix-routing/provider.ts";
-import { type ModelRegistry, resolveRoute } from "@matthis-k/phenix-routing/resolver.ts";
-import type { ModelRef } from "@matthis-k/phenix-routing/types.ts";
 
 /** Fake model registry for unit tests — no network calls. */
 class FakeRegistry implements ModelRegistry {

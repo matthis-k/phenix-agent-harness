@@ -16,12 +16,6 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  buildDefaultRoutingConfig,
-  DEFAULT_MODEL_SET_IDS,
-  DEFAULT_PHENIX_MODEL_SETS,
-  defaultModelSetForModelId,
-} from "./support/default-routing-fixture.ts";
 import { type ModelRegistry, resolveRoute } from "@matthis-k/phenix-routing/resolver.ts";
 import {
   clearSessionRuntime,
@@ -29,11 +23,13 @@ import {
   resolveModelSet,
   validateModelSet,
 } from "@matthis-k/phenix-routing/state.ts";
-import type {
-  ModelRef,
-  ModelSetId,
-  RoutingRole,
-} from "@matthis-k/phenix-routing/types.ts";
+import type { ModelRef, ModelSetId, RoutingRole } from "@matthis-k/phenix-routing/types.ts";
+import {
+  buildDefaultRoutingConfig,
+  DEFAULT_MODEL_SET_IDS,
+  DEFAULT_PHENIX_MODEL_SETS,
+  defaultModelSetForModelId,
+} from "./support/default-routing-fixture.ts";
 
 // ---------------------------------------------------------------------------
 // Fake model registry — simulates Pi's getModelRegistry() response

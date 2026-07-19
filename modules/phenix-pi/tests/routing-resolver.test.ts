@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildDefaultRoutingConfig } from "./support/default-routing-fixture.ts";
 import { type ModelRegistry, resolveRoute } from "@matthis-k/phenix-routing/resolver.ts";
 import type { ModelRef } from "@matthis-k/phenix-routing/types.ts";
+import { buildDefaultRoutingConfig } from "./support/default-routing-fixture.ts";
 
 /** Fake model registry for unit tests — no network calls. */
 class FakeRegistry implements ModelRegistry {

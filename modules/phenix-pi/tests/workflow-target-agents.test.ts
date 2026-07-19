@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
-import { PHENIX_DEFAULT_WORKFLOW } from "./support/default-workflow-fixture.ts";
 import {
   targetAgentForTransition,
   validateTargetAgentDeterminism,
@@ -11,6 +9,7 @@ import type {
   WorkflowDefinition,
 } from "@matthis-k/phenix-flow/workflow-types.ts";
 import { mkTransitionId } from "@matthis-k/phenix-flow/workflow-types.ts";
+import { PHENIX_DEFAULT_WORKFLOW } from "./support/default-workflow-fixture.ts";
 
 function delegate(id: string): DelegateTransition {
   const transition = PHENIX_DEFAULT_WORKFLOW.transitions.find(

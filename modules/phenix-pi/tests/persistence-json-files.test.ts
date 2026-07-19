@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
-
+import { decodeWorkflowRecord, WorkflowStoreError } from "@matthis-k/phenix-flow/workflow-store.ts";
 import {
   atomicWriteJson,
   readDirectory,
@@ -11,10 +11,6 @@ import {
   sanitizePathSegment,
 } from "@matthis-k/phenix-suite/persistence/json-files.ts";
 import { decodeHandleRecord } from "@matthis-k/phenix-suite/subagents/handle-store.ts";
-import {
-  decodeWorkflowRecord,
-  WorkflowStoreError,
-} from "@matthis-k/phenix-flow/workflow-store.ts";
 
 function temporaryDirectory(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "phenix-persistence-"));

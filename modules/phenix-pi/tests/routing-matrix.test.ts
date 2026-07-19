@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { Capability, Difficulty, RoutingRole } from "@matthis-k/phenix-routing/types.ts";
 import {
   allDefaultMatrixKeys,
   buildDefaultRoutingConfig,
@@ -7,11 +8,6 @@ import {
   DEFAULT_ROLE_MATRIX,
   validateDefaultMatrix,
 } from "./support/default-routing-fixture.ts";
-import type {
-  Capability,
-  Difficulty,
-  RoutingRole,
-} from "@matthis-k/phenix-routing/types.ts";
 
 const ALL_ROLES: RoutingRole[] = [
   "coordinator",

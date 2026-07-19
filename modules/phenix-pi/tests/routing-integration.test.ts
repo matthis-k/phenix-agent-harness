@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildDefaultRoutingConfig } from "./support/default-routing-fixture.ts";
 import { type ModelRegistry, resolveRoute } from "@matthis-k/phenix-routing/resolver.ts";
 import { getSessionRuntime } from "@matthis-k/phenix-routing/state.ts";
 import type { ModelRef, ModelSetId, RoutingRole } from "@matthis-k/phenix-routing/types.ts";
+import { buildDefaultRoutingConfig } from "./support/default-routing-fixture.ts";
 
 class FakeRegistry implements ModelRegistry {
   private readonly available: Set<string>;

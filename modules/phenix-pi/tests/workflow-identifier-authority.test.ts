@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import "./support/default-workflow-fixture.ts";
 import { describe, it } from "node:test";
-
-import { agentClientRef, contractRef } from "@matthis-k/phenix-kernel/refs.ts";
 import {
   actorRoleForAgentClient,
   type DefaultWorkflowDefinitionId,
@@ -10,6 +8,7 @@ import {
   outputSchemaIdForContract,
   roleForAgentClient,
 } from "@matthis-k/phenix-flow/workflow-types.ts";
+import { agentClientRef, contractRef } from "@matthis-k/phenix-kernel/refs.ts";
 
 describe("workflow identifier authority", () => {
   it("uses the kernel transition-ID validator", () => {
