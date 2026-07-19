@@ -1,10 +1,6 @@
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 
-function isObject(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+import { isObject, readJson, writeJsonIfChanged } from "./managed-json.mjs";
 
 function modelId(value) {
   return isObject(value) && typeof value.id === "string" ? value.id : undefined;
@@ -53,31 +49,13 @@ export function mergeModelDefaults(current, defaults) {
   return output;
 }
 
-async function readJson(path, fallback) {
-  try {
-    return JSON.parse(await readFile(path, "utf8"));
-  } catch (error) {
-    if (error?.code === "ENOENT") return fallback;
-    throw error;
-  }
-}
-
 export async function mergeModelDefaultsFile(defaultsPath, targetPath) {
   const [defaults, current] = await Promise.all([
     readJson(defaultsPath, {}),
     readJson(targetPath, {}),
   ]);
   const merged = mergeModelDefaults(current, defaults);
-  const rendered = `${JSON.stringify(merged, null, 2)}\n`;
-  const currentRendered = `${JSON.stringify(current, null, 2)}\n`;
-  if (rendered === currentRendered) return false;
-
-  await mkdir(dirname(targetPath), { recursive: true });
-  const temporaryPath = `${targetPath}.tmp-${process.pid}`;
-  await writeFile(temporaryPath, rendered, { mode: 0o600 });
-  await rename(temporaryPath, targetPath);
-  await chmod(targetPath, 0o600);
-  return true;
+  return writeJsonIfChanged(targetPath, current, merged);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
