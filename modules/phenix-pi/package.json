@@ -9,7 +9,7 @@
   },
   "pi": {
     "extensions": [
-      "./packages/phenix-suite/index.ts",
+      "./packages/phenix-suite/extension.ts",
       "./extensions/hypa-read-redirect.ts"
     ],
     "skills": [
