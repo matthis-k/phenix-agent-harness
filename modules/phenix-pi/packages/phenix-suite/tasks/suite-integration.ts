@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { createTaskTools } from "@matthis-k/phenix-tasks/extension.ts";
-import type { PhenixTaskService } from "@matthis-k/phenix-tasks/index.ts";
 import { getSessionRuntime } from "@matthis-k/phenix-routing/state.ts";
+import type { PhenixTaskService } from "@matthis-k/phenix-tasks/index.ts";
+import { createTaskTools } from "@matthis-k/phenix-tasks/pi-tools.ts";
 
 import { authorizePhenixRootCapability, phenixRootModelScope } from "../composition/model-scope.ts";
 
