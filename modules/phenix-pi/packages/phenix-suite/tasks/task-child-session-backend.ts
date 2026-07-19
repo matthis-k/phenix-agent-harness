@@ -1,3 +1,5 @@
+import type { PhenixTaskService } from "@matthis-k/phenix-tasks/index.ts";
+import { taskProcessEnvironment } from "@matthis-k/phenix-tasks/index.ts";
 import type {
   ChildRun,
   ChildSessionBackend,
@@ -5,8 +7,6 @@ import type {
   ContractSubmissionChannel,
   ContractSubmissionResult,
 } from "../runtime/child-session-types.ts";
-import type { PhenixTaskService } from "@matthis-k/phenix-tasks/index.ts";
-import { taskProcessEnvironment } from "@matthis-k/phenix-tasks/index.ts";
 
 import type { TaskWorkflowBridge } from "./task-workflow-bridge.ts";
 
