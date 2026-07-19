@@ -8,6 +8,19 @@
       "command": "stitch-mcp",
       "args": [],
       "lifecycle": "lazy"
+    },
+    "nixos": {
+      "command": "mcp-nixos",
+      "args": [],
+      "lifecycle": "lazy"
+    },
+    "qt-docs": {
+      "url": "https://qt-docs-mcp.qt.io/mcp",
+      "lifecycle": "lazy"
+    },
+    "context7": {
+      "url": "https://mcp.context7.com/mcp",
+      "lifecycle": "lazy"
     }
   }
 }
