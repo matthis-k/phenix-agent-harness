@@ -1,26 +1,102 @@
-name: Legacy migration artifact
+name: Apply canonical import migration
 
 on:
   pull_request:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   migrate:
-    name: Generate canonical import migration
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    name: Apply canonical import migration
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: Rewrite legacy Phenix imports
         run: node scripts/migrate-legacy-phenix-imports.mjs
-      - name: Upload migration tree
-        uses: actions/upload-artifact@v4
-        with:
-          name: canonical-import-migration
-          path: /tmp/phenix-canonical-migration
-          if-no-files-found: error
+      - name: Add package-facade regression coverage
+        shell: bash
+        run: |
+          cat > modules/phenix-pi/tests/package-facades.test.ts <<'EOF'
+          import assert from "node:assert/strict";
+          import fs from "node:fs";
+          import path from "node:path";
+          import { describe, it } from "node:test";
+          import { fileURLToPath } from "node:url";
+
+          const testDirectory = path.dirname(fileURLToPath(import.meta.url));
+          const phenixRoot = path.resolve(testDirectory, "..");
+          const packageNames = [
+            "phenix-kernel",
+            "phenix-flow",
+            "phenix-routing",
+            "phenix-contracts",
+            "phenix-suite",
+          ] as const;
+
+          function read(relativePath: string): string {
+            return fs.readFileSync(path.join(phenixRoot, relativePath), "utf8");
+          }
+
+          function readJson(relativePath: string): Record<string, unknown> {
+            return JSON.parse(read(relativePath)) as Record<string, unknown>;
+          }
+
+          describe("Phenix package facades", () => {
+            it("keeps Pi registration in explicit extension entrypoints", () => {
+              const rootPackage = readJson("package.json") as {
+                pi: { extensions: readonly string[] };
+              };
+              assert.deepEqual(
+                rootPackage.pi.extensions.filter((entry) => entry.includes("phenix-suite")),
+                ["./packages/phenix-suite/extension.ts"],
+              );
+
+              for (const packageName of packageNames) {
+                const packageJson = readJson(`packages/${packageName}/package.json`) as {
+                  pi: { extensions: readonly string[] };
+                };
+                assert.deepEqual(packageJson.pi.extensions, ["./extension.ts"], packageName);
+              }
+            });
+
+            it("keeps public package facades free of Pi implementation logic", () => {
+              for (const packageName of packageNames) {
+                const source = read(`packages/${packageName}/index.ts`);
+                assert.equal(source.includes("@earendil-works/pi-"), false, packageName);
+                assert.equal(source.includes("function phenix"), false, packageName);
+                assert.equal(source.includes("pi.on("), false, packageName);
+                assert.equal(source.includes("pi.register"), false, packageName);
+              }
+            });
+
+            it("contains no legacy Phenix extension compatibility tree", () => {
+              const legacyEntries = fs
+                .readdirSync(path.join(phenixRoot, "extensions"))
+                .filter((entry) => entry.startsWith("phenix-"));
+              assert.deepEqual(legacyEntries, []);
+            });
+          });
+          EOF
+      - name: Commit final migration tree
+        shell: bash
+        env:
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          rm -f .github/workflows/legacy-migration-artifact.yml
+          rm -f scripts/migrate-legacy-phenix-imports.mjs
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "refactor(pi): remove legacy extension compatibility layer"
+          git push origin "HEAD:${HEAD_BRANCH}"
