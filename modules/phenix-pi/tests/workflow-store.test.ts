@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./support/default-workflow-fixture.ts";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -15,9 +16,9 @@ import {
   releaseWorkflowLock,
   verifyWorkflowActorExists,
   WorkflowStoreError,
-} from "../extensions/phenix-workflow/workflow-store.ts";
-import type { WorkflowRuntimeRecord } from "../extensions/phenix-workflow/workflow-types.ts";
-import { mkTransitionId } from "../extensions/phenix-workflow/workflow-types.ts";
+} from "@matthis-k/phenix-flow/workflow-store.ts";
+import type { WorkflowRuntimeRecord } from "@matthis-k/phenix-flow/workflow-types.ts";
+import { mkTransitionId } from "@matthis-k/phenix-flow/workflow-types.ts";
 
 function makeRecordParams(overrides?: Record<string, unknown>) {
   return {

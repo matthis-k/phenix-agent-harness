@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import {
-  createRootTurnInput,
-  extractRootTurnInput,
-} from "../extensions/phenix-routing/root-turn.ts";
+import { createRootTurnInput, extractRootTurnInput } from "@matthis-k/phenix-routing/root-turn.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

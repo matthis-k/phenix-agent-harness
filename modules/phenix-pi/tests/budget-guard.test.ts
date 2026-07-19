@@ -12,12 +12,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { BudgetGuard } from "../extensions/phenix-runtime/budget-guard.ts";
+import { BudgetGuard } from "@matthis-k/phenix-suite/runtime/budget-guard.ts";
 import type {
   ChildRunId,
   ChildSessionEvent,
-} from "../extensions/phenix-runtime/child-session-types.ts";
-import { childRunId } from "../extensions/phenix-runtime/child-session-types.ts";
+} from "@matthis-k/phenix-suite/runtime/child-session-types.ts";
+import { childRunId } from "@matthis-k/phenix-suite/runtime/child-session-types.ts";
 
 const runId: ChildRunId = childRunId("test-run");
 

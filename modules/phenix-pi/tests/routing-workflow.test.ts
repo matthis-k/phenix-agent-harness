@@ -16,17 +16,20 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildBundledConfig } from "../extensions/phenix-routing/config.ts";
-import { modelSetForModelId, PHENIX_MODEL_SETS } from "../extensions/phenix-routing/provider.ts";
-import { type ModelRegistry, resolveRoute } from "../extensions/phenix-routing/resolver.ts";
+import { type ModelRegistry, resolveRoute } from "@matthis-k/phenix-routing/resolver.ts";
 import {
   clearSessionRuntime,
   getSessionRuntime,
   resolveModelSet,
   validateModelSet,
-} from "../extensions/phenix-routing/state.ts";
-import type { ModelRef, RoutingRole } from "../extensions/phenix-routing/types.ts";
-import { MODEL_SET_IDS, type ModelSetId } from "../extensions/phenix-routing/types.ts";
+} from "@matthis-k/phenix-routing/state.ts";
+import type { ModelRef, ModelSetId, RoutingRole } from "@matthis-k/phenix-routing/types.ts";
+import {
+  buildDefaultRoutingConfig,
+  DEFAULT_MODEL_SET_IDS,
+  DEFAULT_PHENIX_MODEL_SETS,
+  defaultModelSetForModelId,
+} from "./support/default-routing-fixture.ts";
 
 // ---------------------------------------------------------------------------
 // Fake model registry — simulates Pi's getModelRegistry() response
@@ -73,31 +76,31 @@ function fullRegistry(): ModelRegistry {
 }
 
 const EMPTY_REGISTRY = new FakeRegistry([]);
-const config = buildBundledConfig();
+const config = buildDefaultRoutingConfig();
 
 // ---------------------------------------------------------------------------
 // Workflow tests: selecting a model → resolving a route
 // ---------------------------------------------------------------------------
 
 describe("Workflow: model selection → route resolution", () => {
-  it("unknown model id returns undefined from modelSetForModelId", () => {
+  it("unknown model id returns undefined from defaultModelSetForModelId", () => {
     // Only explicit model-set models are registered. Any other model id
     // (e.g. "workflow") is unknown and must return undefined.
-    assert.equal(modelSetForModelId("workflow"), undefined);
-    assert.equal(modelSetForModelId("unknown"), undefined);
-    assert.equal(modelSetForModelId(""), undefined);
+    assert.equal(defaultModelSetForModelId("workflow"), undefined);
+    assert.equal(defaultModelSetForModelId("unknown"), undefined);
+    assert.equal(defaultModelSetForModelId(""), undefined);
     // Valid model-set models must be recognized
-    assert.equal(modelSetForModelId("mixed"), "mixed");
-    assert.equal(modelSetForModelId("free"), "free");
-    assert.equal(modelSetForModelId("opencode-go"), "opencode-go");
-    assert.equal(modelSetForModelId("gpt"), "gpt");
+    assert.equal(defaultModelSetForModelId("mixed"), "mixed");
+    assert.equal(defaultModelSetForModelId("free"), "free");
+    assert.equal(defaultModelSetForModelId("opencode-go"), "opencode-go");
+    assert.equal(defaultModelSetForModelId("gpt"), "gpt");
   });
 
   it("selecting phenix/opencode-go explicitly sets model set to opencode-go", async () => {
     const selectedModelId = "opencode-go";
 
-    // Step 1: modelSetForModelId extracts the model set
-    const explicitModelSet = modelSetForModelId(selectedModelId);
+    // Step 1: defaultModelSetForModelId extracts the model set
+    const explicitModelSet = defaultModelSetForModelId(selectedModelId);
     assert.equal(explicitModelSet, "opencode-go");
 
     // Step 2: The before_agent_start handler would set runtime.modelSet
@@ -122,7 +125,7 @@ describe("Workflow: model selection → route resolution", () => {
   });
 
   it("selecting phenix/gpt sets model set to gpt and routes through OpenAI", async () => {
-    const explicitModelSet = modelSetForModelId("gpt");
+    const explicitModelSet = defaultModelSetForModelId("gpt");
     assert.equal(explicitModelSet, "gpt");
 
     const sessionId = "test-gpt-session";
@@ -144,7 +147,7 @@ describe("Workflow: model selection → route resolution", () => {
   });
 
   it("selecting phenix/free restricts to opencode provider only", async () => {
-    const explicitModelSet = modelSetForModelId("free");
+    const explicitModelSet = defaultModelSetForModelId("free");
     assert.equal(explicitModelSet, "free");
 
     const sessionId = "test-free-session";
@@ -324,7 +327,7 @@ describe("Workflow: error handling", () => {
   it("all model-set models are rejected by the resolver boundary filter", () => {
     // The resolver explicitly skips "phenix/*" candidates.
     // Even if a pool accidentally contained phenix/<setId>, it would be skipped.
-    for (const setId of PHENIX_MODEL_SETS) {
+    for (const setId of DEFAULT_PHENIX_MODEL_SETS) {
       const ref = `phenix/${setId}`;
       assert.throws(() => {
         // parseModelRef would succeed, but the resolver's boundary filter
@@ -421,17 +424,17 @@ describe("Workflow: mixed model set routing", () => {
 // ---------------------------------------------------------------------------
 
 describe("Workflow: model set persistence", () => {
-  it("modelSetForModelId is deterministic (no side effects)", () => {
+  it("defaultModelSetForModelId is deterministic (no side effects)", () => {
     // Pure function — calling it multiple times returns the same result
-    assert.equal(modelSetForModelId("free"), "free");
-    assert.equal(modelSetForModelId("free"), "free");
-    assert.equal(modelSetForModelId("opencode-go"), "opencode-go");
-    assert.equal(modelSetForModelId("opencode-go"), "opencode-go");
+    assert.equal(defaultModelSetForModelId("free"), "free");
+    assert.equal(defaultModelSetForModelId("free"), "free");
+    assert.equal(defaultModelSetForModelId("opencode-go"), "opencode-go");
+    assert.equal(defaultModelSetForModelId("opencode-go"), "opencode-go");
   });
 
   it("validateModelSet ensures only valid model sets are accepted", () => {
     // These should all be valid
-    for (const id of MODEL_SET_IDS) {
+    for (const id of DEFAULT_MODEL_SET_IDS) {
       assert.equal(validateModelSet(id), id);
     }
 

@@ -11,15 +11,16 @@ import type {
 } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 
-import { modelSetId } from "../extensions/phenix-kernel/ids.ts";
+import { modelSetId } from "@matthis-k/phenix-kernel/ids.ts";
+import "./support/default-routing-fixture.ts";
 import {
   clearActiveRouteForSession,
   createRouterStream,
   type RouterStreamDependencies,
   type RouterStreamFunction,
   setActiveRouteForSession,
-} from "../extensions/phenix-routing/stream-proxy.ts";
-import type { ResolvedRoute, RoutingConfig } from "../extensions/phenix-routing/types.ts";
+} from "@matthis-k/phenix-routing/stream-proxy.ts";
+import type { ResolvedRoute, RoutingConfig } from "@matthis-k/phenix-routing/types.ts";
 
 function makeModel(provider: string, id: string): Model<Api> {
   return {

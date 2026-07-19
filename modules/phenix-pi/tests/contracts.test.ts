@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { assertOutputSchema, validateSchema } from "../extensions/phenix-contracts/validator.ts";
+import { assertOutputSchema, validateSchema } from "@matthis-k/phenix-contracts/validator.ts";
 
 describe("Phenix handoff contracts", () => {
   const schema = {

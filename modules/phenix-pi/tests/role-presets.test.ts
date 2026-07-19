@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { AgentKind } from "../extensions/phenix-subagents/policy.ts";
-import { rolePreset } from "../extensions/phenix-subagents/role-presets.ts";
+import type { AgentKind } from "@matthis-k/phenix-suite/subagents/policy.ts";
+import { rolePreset } from "@matthis-k/phenix-suite/subagents/role-presets.ts";
 
 describe("Role presets", () => {
   it("scout has read-only tools", () => {

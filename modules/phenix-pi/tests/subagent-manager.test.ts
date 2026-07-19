@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { type Static, Type } from "typebox";
-
 import {
   createSubagentManager,
   returns,
@@ -14,7 +12,8 @@ import {
   type SubagentRequest,
   type SubagentSnapshot,
   type SubagentStatus,
-} from "../extensions/phenix-runtime/index.ts";
+} from "@matthis-k/phenix-suite/runtime/index.ts";
+import { type Static, Type } from "typebox";
 
 const SummarySchema = Type.Object({
   summary: Type.String(),

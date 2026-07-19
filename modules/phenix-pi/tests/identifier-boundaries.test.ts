@@ -9,8 +9,9 @@ import {
   modelSetRef,
   refEquals,
   workflowRef,
-} from "../extensions/phenix-kernel/refs.ts";
-import { cycleModelSet, validateModelSet } from "../extensions/phenix-routing/state.ts";
+} from "@matthis-k/phenix-kernel/refs.ts";
+import { cycleModelSet, validateModelSet } from "@matthis-k/phenix-routing/state.ts";
+import "./support/default-routing-fixture.ts";
 
 describe("identifier boundaries", () => {
   it("rejects empty symbolic reference identifiers", () => {

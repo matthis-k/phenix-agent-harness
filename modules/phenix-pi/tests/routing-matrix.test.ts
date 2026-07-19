@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildBundledConfig } from "../extensions/phenix-routing/config.ts";
-import { allMatrixKeys, ROLE_MATRIX, validateMatrix } from "../extensions/phenix-routing/matrix.ts";
+import type { Capability, Difficulty, RoutingRole } from "@matthis-k/phenix-routing/types.ts";
 import {
-  type Capability,
-  type Difficulty,
-  MODEL_SET_IDS,
-  type RoutingRole,
-} from "../extensions/phenix-routing/types.ts";
+  allDefaultMatrixKeys,
+  buildDefaultRoutingConfig,
+  DEFAULT_MODEL_SET_IDS,
+  DEFAULT_ROLE_MATRIX,
+  validateDefaultMatrix,
+} from "./support/default-routing-fixture.ts";
 
 const ALL_ROLES: RoutingRole[] = [
   "coordinator",
@@ -87,7 +87,7 @@ describe("Routing matrix cells (9 roles × 4 difficulties)", () => {
 
     for (const role of ALL_ROLES) {
       for (const difficulty of ALL_DIFFICULTIES) {
-        const route = ROLE_MATRIX[role]?.[difficulty];
+        const route = DEFAULT_ROLE_MATRIX[role]?.[difficulty];
         assert.ok(route, `Missing matrix entry for ${role}/${difficulty}`);
         const expect = expected[role][difficulty];
         assert.equal(
@@ -100,20 +100,20 @@ describe("Routing matrix cells (9 roles × 4 difficulties)", () => {
     }
   });
 
-  it("allMatrixKeys returns all 36 pairs", () => {
-    const keys = allMatrixKeys();
+  it("allDefaultMatrixKeys returns all 36 pairs", () => {
+    const keys = allDefaultMatrixKeys();
     assert.equal(keys.length, 9 * 4);
   });
 
-  it("validateMatrix does not throw", () => {
-    validateMatrix();
+  it("validateDefaultMatrix does not throw", () => {
+    validateDefaultMatrix();
   });
 });
 
 describe("Model set capability mappings", () => {
-  const config = buildBundledConfig();
+  const config = buildDefaultRoutingConfig();
 
-  for (const setId of MODEL_SET_IDS) {
+  for (const setId of DEFAULT_MODEL_SET_IDS) {
     it(`${setId} maps every capability to a pool`, () => {
       const ms = config.modelSets[setId];
       assert.ok(ms, `Missing modelSet ${setId}`);
@@ -135,7 +135,7 @@ describe("Model set capability mappings", () => {
     });
   }
 
-  for (const setId of MODEL_SET_IDS) {
+  for (const setId of DEFAULT_MODEL_SET_IDS) {
     it(`${setId} every pool candidate parses as provider/model`, () => {
       const ms = config.modelSets[setId];
       for (const cap of [
@@ -164,7 +164,7 @@ describe("Model set capability mappings", () => {
 });
 
 describe("Provider provider boundaries", () => {
-  const config = buildBundledConfig();
+  const config = buildDefaultRoutingConfig();
 
   it("free routes never use a non-opencode provider", () => {
     const guard = config.guards?.free;

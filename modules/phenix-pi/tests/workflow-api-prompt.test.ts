@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { formatWorkflowProjection } from "../extensions/phenix-workflow/workflow-projection.ts";
+import { formatWorkflowProjection } from "@matthis-k/phenix-flow/workflow-projection.ts";
 
 const projection = {
   difficulty: "D2" as const,

@@ -1,16 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
-import { PHENIX_DEFAULT_WORKFLOW } from "../extensions/phenix-workflow/workflow-definitions.ts";
 import {
   targetAgentForTransition,
   validateTargetAgentDeterminism,
-} from "../extensions/phenix-workflow/workflow-target-agents.ts";
+} from "@matthis-k/phenix-flow/workflow-target-agents.ts";
 import type {
   DelegateTransition,
   WorkflowDefinition,
-} from "../extensions/phenix-workflow/workflow-types.ts";
-import { mkTransitionId } from "../extensions/phenix-workflow/workflow-types.ts";
+} from "@matthis-k/phenix-flow/workflow-types.ts";
+import { mkTransitionId } from "@matthis-k/phenix-flow/workflow-types.ts";
+import { PHENIX_DEFAULT_WORKFLOW } from "./support/default-workflow-fixture.ts";
 
 function delegate(id: string): DelegateTransition {
   const transition = PHENIX_DEFAULT_WORKFLOW.transitions.find(

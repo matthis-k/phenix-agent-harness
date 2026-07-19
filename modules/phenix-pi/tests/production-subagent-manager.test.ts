@@ -1,29 +1,29 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { agentClientRef } from "../extensions/phenix-kernel/refs.ts";
+import { agentClientRef } from "@matthis-k/phenix-kernel/refs.ts";
 import type {
   ChildRun,
   ContractSubmissionChannel,
-} from "../extensions/phenix-runtime/child-session-types.ts";
-import { childRunId } from "../extensions/phenix-runtime/child-session-types.ts";
+} from "@matthis-k/phenix-suite/runtime/child-session-types.ts";
+import { childRunId } from "@matthis-k/phenix-suite/runtime/child-session-types.ts";
 import type {
   AcceptanceEngine,
   AcceptancePlan,
   RuntimeBindings,
   SubagentExecutionCompiler,
   SubagentExecutionPlan,
-} from "../extensions/phenix-runtime/execution-plan.ts";
+} from "@matthis-k/phenix-suite/runtime/execution-plan.ts";
 import {
   createSessionSubagentManagerFactory,
   type SubagentSessionSpawner,
-} from "../extensions/phenix-runtime/index.ts";
-import type { SubagentRequest } from "../extensions/phenix-runtime/subagent-api.ts";
-import { returnsWithDecoder } from "../extensions/phenix-runtime/subagent-api.ts";
-import type { ContractArtifact } from "../extensions/phenix-subagents/contract.ts";
-import { ExecutionQualityService } from "../extensions/phenix-subagents/execution-quality-service.ts";
-import type { HandleRecord } from "../extensions/phenix-subagents/handle-types.ts";
-import { WorkflowAcceptanceEngine } from "../extensions/phenix-subagents/workflow-acceptance-engine.ts";
+} from "@matthis-k/phenix-suite/runtime/index.ts";
+import type { SubagentRequest } from "@matthis-k/phenix-suite/runtime/subagent-api.ts";
+import { returnsWithDecoder } from "@matthis-k/phenix-suite/runtime/subagent-api.ts";
+import type { ContractArtifact } from "@matthis-k/phenix-suite/subagents/contract.ts";
+import { ExecutionQualityService } from "@matthis-k/phenix-suite/subagents/execution-quality-service.ts";
+import type { HandleRecord } from "@matthis-k/phenix-suite/subagents/handle-types.ts";
+import { WorkflowAcceptanceEngine } from "@matthis-k/phenix-suite/subagents/workflow-acceptance-engine.ts";
 
 interface SummaryResult {
   readonly summary: string;

@@ -5,8 +5,8 @@ import {
   authorityFromCeiling,
   isTransitionPermitted,
   type TransitionAuthority,
-} from "../extensions/phenix-workflow/transition-authority.ts";
-import type { WorkflowTransitionId } from "../extensions/phenix-workflow/workflow-types.ts";
+} from "@matthis-k/phenix-flow/transition-authority.ts";
+import type { WorkflowTransitionId } from "@matthis-k/phenix-flow/workflow-types.ts";
 
 // Cast helper for tests — WorkflowTransitionId is a branded string.
 function t(id: string): WorkflowTransitionId {

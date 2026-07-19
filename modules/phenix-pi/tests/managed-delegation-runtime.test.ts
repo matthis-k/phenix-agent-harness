@@ -10,12 +10,12 @@ import type {
   SubagentEvent,
   SubagentHandle,
   SubagentSnapshot,
-} from "../extensions/phenix-runtime/subagent-manager.ts";
-import { SubagentExecutionError } from "../extensions/phenix-runtime/subagent-manager.ts";
-import type { SubagentManagerFactory } from "../extensions/phenix-runtime/subagent-manager-factory.ts";
-import { readRecord, writeRecord } from "../extensions/phenix-subagents/handle-store.ts";
-import type { HandleRecord } from "../extensions/phenix-subagents/handle-types.ts";
-import { ManagedDelegationRuntime } from "../extensions/phenix-subagents/managed-delegation-runtime.ts";
+} from "@matthis-k/phenix-suite/runtime/subagent-manager.ts";
+import { SubagentExecutionError } from "@matthis-k/phenix-suite/runtime/subagent-manager.ts";
+import type { SubagentManagerFactory } from "@matthis-k/phenix-suite/runtime/subagent-manager-factory.ts";
+import { readRecord, writeRecord } from "@matthis-k/phenix-suite/subagents/handle-store.ts";
+import type { HandleRecord } from "@matthis-k/phenix-suite/subagents/handle-types.ts";
+import { ManagedDelegationRuntime } from "@matthis-k/phenix-suite/subagents/managed-delegation-runtime.ts";
 
 function temporaryDirectory(prefix: string): string {
   const directory = path.join(os.tmpdir(), `${prefix}-${randomUUID().slice(0, 8)}`);

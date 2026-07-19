@@ -1,14 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildBundledConfig } from "../extensions/phenix-routing/config.ts";
+import { PHENIX_API, PHENIX_PROVIDER } from "@matthis-k/phenix-routing/provider.ts";
+import { type ModelRegistry, resolveRoute } from "@matthis-k/phenix-routing/resolver.ts";
+import type { ModelRef } from "@matthis-k/phenix-routing/types.ts";
 import {
-  modelSetForModelId,
-  PHENIX_API,
-  PHENIX_MODEL_SETS,
-  PHENIX_PROVIDER,
-} from "../extensions/phenix-routing/provider.ts";
-import { type ModelRegistry, resolveRoute } from "../extensions/phenix-routing/resolver.ts";
-import type { ModelRef } from "../extensions/phenix-routing/types.ts";
+  buildDefaultRoutingConfig,
+  DEFAULT_PHENIX_MODEL_SETS,
+  defaultModelSetForModelId,
+} from "./support/default-routing-fixture.ts";
 
 /** Fake model registry for unit tests — no network calls. */
 class FakeRegistry implements ModelRegistry {
@@ -50,41 +49,41 @@ function fullRegistry(): ModelRegistry {
 }
 
 describe("Provider integration tests", () => {
-  const config = buildBundledConfig();
+  const config = buildDefaultRoutingConfig();
 
   it("provider constants are exported correctly", () => {
     assert.equal(PHENIX_PROVIDER, "phenix");
     assert.equal(PHENIX_API, "phenix-router");
   });
 
-  it("PHENIX_MODEL_SETS matches the declared model-set IDs", () => {
-    assert.equal(PHENIX_MODEL_SETS.length, 4);
-    assert.ok(PHENIX_MODEL_SETS.includes("free"));
-    assert.ok(PHENIX_MODEL_SETS.includes("opencode-go"));
-    assert.ok(PHENIX_MODEL_SETS.includes("gpt"));
-    assert.ok(PHENIX_MODEL_SETS.includes("mixed"));
+  it("DEFAULT_PHENIX_MODEL_SETS matches the declared model-set IDs", () => {
+    assert.equal(DEFAULT_PHENIX_MODEL_SETS.length, 4);
+    assert.ok(DEFAULT_PHENIX_MODEL_SETS.includes("free"));
+    assert.ok(DEFAULT_PHENIX_MODEL_SETS.includes("opencode-go"));
+    assert.ok(DEFAULT_PHENIX_MODEL_SETS.includes("gpt"));
+    assert.ok(DEFAULT_PHENIX_MODEL_SETS.includes("mixed"));
   });
 
-  it("modelSetForModelId maps each virtual model correctly", () => {
-    assert.equal(modelSetForModelId("free"), "free");
-    assert.equal(modelSetForModelId("opencode-go"), "opencode-go");
-    assert.equal(modelSetForModelId("gpt"), "gpt");
-    assert.equal(modelSetForModelId("mixed"), "mixed");
+  it("defaultModelSetForModelId maps each virtual model correctly", () => {
+    assert.equal(defaultModelSetForModelId("free"), "free");
+    assert.equal(defaultModelSetForModelId("opencode-go"), "opencode-go");
+    assert.equal(defaultModelSetForModelId("gpt"), "gpt");
+    assert.equal(defaultModelSetForModelId("mixed"), "mixed");
   });
 
-  it("modelSetForModelId returns undefined for non-model-set IDs", () => {
-    assert.equal(modelSetForModelId("workflow"), undefined);
-    assert.equal(modelSetForModelId("unknown"), undefined);
-    assert.equal(modelSetForModelId(""), undefined);
+  it("defaultModelSetForModelId returns undefined for non-model-set IDs", () => {
+    assert.equal(defaultModelSetForModelId("workflow"), undefined);
+    assert.equal(defaultModelSetForModelId("unknown"), undefined);
+    assert.equal(defaultModelSetForModelId(""), undefined);
   });
 
   it("selecting a virtual model sets the routing backend explicitly", () => {
-    const modelSet = modelSetForModelId("opencode-go");
+    const modelSet = defaultModelSetForModelId("opencode-go");
     assert.equal(modelSet, "opencode-go");
   });
 
   it("virtual Phenix models are never concrete pool candidates", () => {
-    for (const setId of PHENIX_MODEL_SETS) {
+    for (const setId of DEFAULT_PHENIX_MODEL_SETS) {
       for (const [, candidates] of Object.entries(config.pools)) {
         for (const candidate of candidates) {
           assert.notEqual(candidate, `phenix/${setId}`, `Pool illegally contains phenix/${setId}`);
@@ -158,7 +157,7 @@ describe("Provider integration tests", () => {
 });
 
 describe("Full pipeline: profile → matrix → resolver", () => {
-  const config = buildBundledConfig();
+  const config = buildDefaultRoutingConfig();
 
   it("coordinator D0 → fast/minimal → go.fast → opencode-go model", async () => {
     const route = await resolveRoute({
@@ -198,8 +197,8 @@ describe("Session integrity", () => {
   });
 
   it("the public session identity remains the selected Phenix model set", () => {
-    for (const modelSet of PHENIX_MODEL_SETS) {
-      assert.equal(modelSetForModelId(modelSet), modelSet);
+    for (const modelSet of DEFAULT_PHENIX_MODEL_SETS) {
+      assert.equal(defaultModelSetForModelId(modelSet), modelSet);
     }
   });
 });

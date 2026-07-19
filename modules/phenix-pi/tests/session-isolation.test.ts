@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import "./support/default-workflow-fixture.ts";
 import { afterEach, describe, it } from "node:test";
-import type { AgentCapabilityArtifact } from "../extensions/phenix-workflow/agent-capabilities.ts";
+import type { AgentCapabilityArtifact } from "@matthis-k/phenix-flow/agent-capabilities.ts";
 import {
   activeSessionCount,
   clearAllSessions,
@@ -9,7 +10,7 @@ import {
   registerSession,
   type SessionWorkflowData,
   unregisterSession,
-} from "../extensions/phenix-workflow/session-registry.ts";
+} from "@matthis-k/phenix-flow/session-registry.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

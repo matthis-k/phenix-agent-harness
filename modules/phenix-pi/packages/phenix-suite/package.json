@@ -11,7 +11,7 @@
   },
   "pi": {
     "extensions": [
-      "./index.ts"
+      "./extension.ts"
     ]
   },
   "dependencies": {

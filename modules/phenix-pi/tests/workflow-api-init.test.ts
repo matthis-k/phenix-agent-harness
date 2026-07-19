@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { ChildSessionSpec } from "../extensions/phenix-runtime/child-session-types.ts";
-import { buildEffectiveToolNames } from "../extensions/phenix-runtime/sdk-child-session-backend.ts";
-import { normalizeWorkflowRuntimeToolNames } from "../extensions/phenix-runtime/workflow-session-factory.ts";
+import type { ChildSessionSpec } from "@matthis-k/phenix-suite/runtime/child-session-types.ts";
+import { buildEffectiveToolNames } from "@matthis-k/phenix-suite/runtime/sdk-child-session-backend.ts";
+import { normalizeWorkflowRuntimeToolNames } from "@matthis-k/phenix-suite/runtime/workflow-session-factory.ts";
 
 function spec(): ChildSessionSpec {
   return {

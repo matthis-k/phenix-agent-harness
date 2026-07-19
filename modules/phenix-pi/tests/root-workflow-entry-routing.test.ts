@@ -10,16 +10,15 @@ import type {
   SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
-
-import { prepareRootWorkflowEntry } from "../extensions/phenix-composition/root-workflow-entry.ts";
-import { buildBundledConfig } from "../extensions/phenix-routing/config.ts";
-import { clearSessionRuntime, getSessionRuntime } from "../extensions/phenix-routing/state.ts";
+import { clearSessionRuntime, getSessionRuntime } from "@matthis-k/phenix-routing/state.ts";
 import {
   clearActiveRouteForSession,
   createRouterStream,
   getActiveRouteForSession,
   type RouterStreamFunction,
-} from "../extensions/phenix-routing/stream-proxy.ts";
+} from "@matthis-k/phenix-routing/stream-proxy.ts";
+import { prepareRootWorkflowEntry } from "@matthis-k/phenix-suite/composition/root-workflow-entry.ts";
+import { buildDefaultRoutingConfig } from "./support/default-routing-fixture.ts";
 
 function makeModel(provider: string, id: string): Model<Api> {
   return {
@@ -110,7 +109,7 @@ describe("root workflow entry routing", () => {
         sessionId,
         selectedModel: { provider: "phenix", id: "free" },
         userMessage: "Investigate and redesign the authentication workflow root cause.",
-        config: buildBundledConfig(),
+        config: buildDefaultRoutingConfig(),
       },
       { modelRegistry: registry },
     );

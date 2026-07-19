@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { Type } from "typebox";
-
-import { modelSetId } from "../extensions/phenix-kernel/ids.ts";
-import type { RuntimeBindings } from "../extensions/phenix-runtime/execution-plan.ts";
-import { routing } from "../extensions/phenix-runtime/index.ts";
-import { returns } from "../extensions/phenix-runtime/subagent-api.ts";
+import { modelSetId } from "@matthis-k/phenix-kernel/ids.ts";
+import type { RuntimeBindings } from "@matthis-k/phenix-suite/runtime/execution-plan.ts";
+import { routing } from "@matthis-k/phenix-suite/runtime/index.ts";
+import { returns } from "@matthis-k/phenix-suite/runtime/subagent-api.ts";
 import {
   createWorkflowExecutionCompiler,
   WorkflowExecutionCompiler,
-} from "../extensions/phenix-subagents/workflow-execution-compiler.ts";
+} from "@matthis-k/phenix-suite/subagents/workflow-execution-compiler.ts";
+import { Type } from "typebox";
 
 const runtime = {
   id: "child-test",
