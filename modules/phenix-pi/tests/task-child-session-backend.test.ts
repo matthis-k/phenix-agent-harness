@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
-import { PhenixTaskService } from "@matthis-k/phenix-tasks/index.ts";
 import type {
   ChildRun,
   ChildSessionBackend,
@@ -13,6 +11,7 @@ import {
   taskRuntimeEnvironment,
 } from "@matthis-k/phenix-suite/tasks/task-child-session-backend.ts";
 import type { TaskWorkflowBridge } from "@matthis-k/phenix-suite/tasks/task-workflow-bridge.ts";
+import { PhenixTaskService } from "@matthis-k/phenix-tasks/index.ts";
 
 function contractChannel(onSubmit: () => void): ContractSubmissionChannel {
   return {
