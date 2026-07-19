@@ -42,7 +42,11 @@ export function discoverGuidance(cwd: string): RepositoryGuidance {
           testCommands.push(`npm run ${name}`);
         } else if (/^lint/.test(name)) {
           lintCommands.push(`npm run ${name}`);
-        } else if (/^format/.test(name) || /check-format/.test(name) || /^prettier/.test(name)) {
+        } else if (
+          /^format/.test(name) ||
+          /check-format/.test(name) ||
+          /^prettier/.test(name)
+        ) {
           formatCheckCommands.push(`npm run ${name}`);
         }
       }
