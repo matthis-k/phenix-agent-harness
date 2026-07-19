@@ -20,7 +20,6 @@ export const PROJECT_NATIVE_ANALYZER: QaAnalyzer = {
   categories: ["build", "test", "lint", "format"],
 
   async checkAvailability(context: QaAnalyzerContext): Promise<QaAnalyzerAvailability> {
-    // This analyzer depends on the project having build/test/lint commands.
     const guidance = discoverGuidance(context.cwd);
 
     if (guidance.buildCommands.length === 0 && guidance.testCommands.length === 0) {
@@ -44,16 +43,13 @@ export const PROJECT_NATIVE_ANALYZER: QaAnalyzer = {
     const artifacts: string[] = [];
     const diagnostics: string[] = [];
 
-    // Dynamically choose a process runner
     const { DEFAULT_PROCESS_RUNNER } = await import("../process.ts");
     const runner: ProcessRunner = DEFAULT_PROCESS_RUNNER;
-
-    // Run discovered commands
     const commands = [
-      ...guidance.buildCommands.map((c) => ({ command: c, category: "build" })),
-      ...guidance.testCommands.map((c) => ({ command: c, category: "test" })),
-      ...guidance.lintCommands.map((c) => ({ command: c, category: "lint" })),
-      ...guidance.formatCheckCommands.map((c) => ({ command: c, category: "format" })),
+      ...guidance.buildCommands.map((command) => ({ command, category: "build" })),
+      ...guidance.testCommands.map((command) => ({ command, category: "test" })),
+      ...guidance.lintCommands.map((command) => ({ command, category: "lint" })),
+      ...guidance.formatCheckCommands.map((command) => ({ command, category: "format" })),
     ];
 
     if (commands.length === 0) {
@@ -74,7 +70,6 @@ export const PROJECT_NATIVE_ANALYZER: QaAnalyzer = {
       }
 
       try {
-        // Parse command: handle "npm run test", "make check", etc.
         const [cmd, ...args] = command.trim().split(/\s+/);
         if (!cmd) {
           diagnostics.push("Skipped an empty project-native command.");
@@ -88,7 +83,6 @@ export const PROJECT_NATIVE_ANALYZER: QaAnalyzer = {
           signal: context.signal,
         });
 
-        // Save raw output
         const safeName = command.replace(/[^a-zA-Z0-9-]/g, "-");
         const rawPath = writeRawArtifact(
           context.artifactDirectory,
@@ -98,8 +92,6 @@ export const PROJECT_NATIVE_ANALYZER: QaAnalyzer = {
         );
         artifacts.push(rawPath);
 
-        // Summarize output
-        const _stdoutTail = result.stdout.slice(-500);
         const stderrTail = result.stderr.slice(-500);
 
         if (result.timedOut) {
@@ -143,25 +135,23 @@ export const PROJECT_NATIVE_ANALYZER: QaAnalyzer = {
           diagnostics.push(`${command}: failed (exit ${result.exitCode}, ${result.durationMs}ms)`);
         }
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        diagnostics.push(`${command}: error - ${msg}`);
+        const message = error instanceof Error ? error.message : String(error);
+        diagnostics.push(`${command}: error - ${message}`);
         evidence.push(
           makeEvidence({
             level: "level-0-correctness",
             source: "test",
             category,
-            message: `${command} could not be executed: ${msg}.`,
+            message: `${command} could not be executed: ${message}.`,
             tool: "project-native",
           }),
         );
       }
     }
 
-    const status = evidence.some((e) => e.message.includes("failed")) ? "completed" : "completed";
-
     return {
       analyzer: "project-native",
-      status,
+      status: "completed",
       evidence,
       artifacts,
       diagnostics,
