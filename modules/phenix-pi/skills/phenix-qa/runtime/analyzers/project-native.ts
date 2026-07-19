@@ -127,12 +127,16 @@ export const PROJECT_NATIVE_ANALYZER: QaAnalyzer = {
               level: "level-0-correctness",
               source: "test",
               category,
-              message: `${command} failed with exit code ${result.exitCode}.${stderrTail ? `\n${stderrTail}` : ""}`,
+              message: `${command} failed with exit code ${result.exitCode}.${
+                stderrTail ? `\n${stderrTail}` : ""
+              }`,
               tool: "project-native",
               rawReference: rawPath,
             }),
           );
-          diagnostics.push(`${command}: failed (exit ${result.exitCode}, ${result.durationMs}ms)`);
+          diagnostics.push(
+            `${command}: failed (exit ${result.exitCode}, ${result.durationMs}ms)`,
+          );
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
