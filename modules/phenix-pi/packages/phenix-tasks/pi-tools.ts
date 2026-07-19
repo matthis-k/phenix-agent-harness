@@ -2,7 +2,7 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 
-import { PhenixTaskService, type TaskAuthority } from "./core.ts";
+import type { PhenixTaskService, TaskAuthority } from "./core.ts";
 import { type BoundTaskClient, createInProcessTaskClient } from "./transport.ts";
 
 export const PHENIX_TASKS_TOOL = "phenix_tasks" as const;
