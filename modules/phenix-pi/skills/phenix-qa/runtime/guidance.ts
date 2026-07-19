@@ -8,7 +8,9 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RepositoryGuidance } from "./types.ts";
 
-/** Discover repository guidance from well-known locations. */
+/**
+ * Discover repository guidance from well-known locations.
+ */
 export function discoverGuidance(cwd: string): RepositoryGuidance {
   const guidanceRoot = findProjectRoot(cwd);
 
@@ -19,8 +21,6 @@ export function discoverGuidance(cwd: string): RepositoryGuidance {
     Makefile: "make",
     justfile: "just",
     "flake.nix": "nix",
-    "devenv.nix": "devenv",
-    "devenv.yaml": "devenv",
     "go.mod": "go",
   });
 
@@ -69,7 +69,7 @@ export function discoverGuidance(cwd: string): RepositoryGuidance {
   }
 
   const docsDir = join(guidanceRoot, "docs");
-  const archDir = join(docsDir, "architecture");
+  const archDir = join(guidanceRoot, "docs", "architecture");
 
   if (existsSync(docsDir)) {
     try {
@@ -80,7 +80,7 @@ export function discoverGuidance(cwd: string): RepositoryGuidance {
         }
       }
     } catch {
-      // The docs directory is unreadable.
+      // Can't read docs dir.
     }
   }
 
@@ -90,7 +90,7 @@ export function discoverGuidance(cwd: string): RepositoryGuidance {
         architectureDocs.push(join(archDir, entry));
       }
     } catch {
-      // The architecture directory is unreadable.
+      // Can't read architecture dir.
     }
   }
 
@@ -107,7 +107,9 @@ export function discoverGuidance(cwd: string): RepositoryGuidance {
   };
 }
 
-/** Walk up from cwd to find the project root. */
+/**
+ * Walk up from cwd to find the project root.
+ */
 export function findProjectRoot(cwd: string): string {
   let current = cwd;
 
@@ -115,8 +117,6 @@ export function findProjectRoot(cwd: string): string {
     if (
       existsSync(join(current, ".git")) ||
       existsSync(join(current, "flake.nix")) ||
-      existsSync(join(current, "devenv.nix")) ||
-      existsSync(join(current, "devenv.yaml")) ||
       existsSync(join(current, "package.json")) ||
       existsSync(join(current, "Cargo.toml"))
     ) {
@@ -132,8 +132,11 @@ export function findProjectRoot(cwd: string): string {
 }
 
 function discoverFileMarkers(root: string, markers: Record<string, string>): string[] {
-  const found = Object.entries(markers)
-    .filter(([file]) => existsSync(join(root, file)))
-    .map(([, label]) => label);
-  return [...new Set(found)];
+  const found: string[] = [];
+  for (const [file, label] of Object.entries(markers)) {
+    if (existsSync(join(root, file))) {
+      found.push(label);
+    }
+  }
+  return found;
 }
