@@ -62,9 +62,7 @@ export const DEFAULT_QA_CONFIG: QaConfig = {
   },
 };
 
-/**
- * Override defaults with partial config. Deep-mutates defaults.
- */
+/** Merge a partial repository configuration over the supplied defaults. */
 export function mergeConfig(defaults: QaConfig, overrides?: Partial<QaConfig>): QaConfig {
   if (!overrides) return defaults;
 
@@ -95,13 +93,12 @@ export function mergeConfig(defaults: QaConfig, overrides?: Partial<QaConfig>): 
 }
 
 /**
- * Discover repo-local QA configuration if it exists.
+ * Discover repository-local QA configuration.
  *
- * Looks for:
+ * Supported locations, in precedence order:
  * - .phenix-qa.json
  * - .phenix-qa/config.json
- * - phenix-qa key in package.json
- * - .tend.json (Phenix tender config)
+ * - the `phenixQa` key in package.json
  */
 export async function discoverRepoConfig(
   cwd: string,
@@ -124,11 +121,10 @@ export async function discoverRepoConfig(
         return parsed;
       }
     } catch {
-      // continue
+      // Continue to the next supported location.
     }
   }
 
-  // Check package.json
   try {
     const pkgPath = pathModule.join(cwd, "package.json");
     if (!(await fileExists(pkgPath))) return undefined;
@@ -138,7 +134,7 @@ export async function discoverRepoConfig(
       return pkg.phenixQa;
     }
   } catch {
-    // continue
+    // No valid package-level configuration.
   }
 
   return undefined;
