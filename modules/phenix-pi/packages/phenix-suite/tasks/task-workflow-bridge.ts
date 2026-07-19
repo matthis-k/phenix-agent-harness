@@ -34,13 +34,12 @@ export function createTaskWorkflowBridge(input: {
     },
 
     async spawn(request: WorkflowSpawnRequest): Promise<WorkflowSpawnResult> {
-      const parent: ParentExecutionContext =
-        request.parent ?? {
-          kind: "root",
-          sessionId: request.ctx.sessionManager.getSessionId() ?? "default",
-          cwd: request.ctx.cwd,
-          maximumDelegationDepth: Number.MAX_SAFE_INTEGER,
-        };
+      const parent: ParentExecutionContext = request.parent ?? {
+        kind: "root",
+        sessionId: request.ctx.sessionManager.getSessionId() ?? "default",
+        cwd: request.ctx.cwd,
+        maximumDelegationDepth: Number.MAX_SAFE_INTEGER,
+      };
       const authority = resolveParentAuthority(parent);
       if (!authority) {
         return {
