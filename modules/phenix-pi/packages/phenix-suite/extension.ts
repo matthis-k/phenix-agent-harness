@@ -52,12 +52,12 @@ import {
 import { createWorkflowAcceptanceEngine } from "./subagents/workflow-acceptance-engine.ts";
 import { WorkflowDelegator } from "./subagents/workflow-delegator.ts";
 import { createWorkflowRuntime } from "./subagents/workflow-runtime.ts";
+import { registerSuiteTasks } from "./tasks/suite-integration.ts";
 import {
   createTaskBoundChildSessionBackend,
   taskAuthorityTokenFromSpec,
 } from "./tasks/task-child-session-backend.ts";
 import { createTaskServiceHost } from "./tasks/task-service-host.ts";
-import { registerSuiteTasks } from "./tasks/suite-integration.ts";
 import { createTaskWorkflowBridge, type TaskWorkflowBridge } from "./tasks/task-workflow-bridge.ts";
 
 type IntegrationResult =
