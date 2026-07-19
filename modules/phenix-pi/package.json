@@ -10,8 +10,7 @@
   "pi": {
     "extensions": [
       "./extensions/phenix.ts",
-      "./extensions/hypa-read-redirect.ts",
-      "./extensions/phenix-integrations/opencode-compat.ts"
+      "./extensions/hypa-read-redirect.ts"
     ],
     "skills": [
       "./skills"
