@@ -4,8 +4,8 @@ import path from "node:path";
 
 import {
   type PhenixTaskService,
-  type TaskRpcServer,
   startTaskRpcServer,
+  type TaskRpcServer,
 } from "@matthis-k/phenix-tasks/index.ts";
 
 export interface TaskServiceHost {
