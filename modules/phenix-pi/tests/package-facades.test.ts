@@ -14,8 +14,12 @@ const packageNames = [
   "phenix-suite",
 ] as const;
 
+function resolve(relativePath: string): string {
+  return path.join(phenixRoot, relativePath);
+}
+
 function read(relativePath: string): string {
-  return fs.readFileSync(path.join(phenixRoot, relativePath), "utf8");
+  return fs.readFileSync(resolve(relativePath), "utf8");
 }
 
 function readJson(relativePath: string): Record<string, unknown> {
@@ -37,22 +41,25 @@ describe("Phenix package facades", () => {
         pi: { extensions: readonly string[] };
       };
       assert.deepEqual(packageJson.pi.extensions, ["./extension.ts"], packageName);
+      assert.equal(fs.existsSync(resolve(`packages/${packageName}/extension.ts`)), true, packageName);
     }
   });
 
-  it("keeps public package facades free of Pi implementation logic", () => {
+  it("keeps public package facades separate from Pi implementations", () => {
     for (const packageName of packageNames) {
-      const source = read(`packages/${packageName}/index.ts`);
-      assert.equal(source.includes("@earendil-works/pi-"), false, packageName);
-      assert.equal(source.includes("function phenix"), false, packageName);
-      assert.equal(source.includes("pi.on("), false, packageName);
-      assert.equal(source.includes("pi.register"), false, packageName);
+      const facade = read(`packages/${packageName}/index.ts`);
+      const implementation = read(`packages/${packageName}/extension.ts`);
+      assert.notEqual(facade, implementation, packageName);
+      assert.equal(facade.includes("@earendil-works/pi-"), false, packageName);
+      assert.equal(facade.includes("function phenix"), false, packageName);
+      assert.equal(facade.includes("pi.on("), false, packageName);
+      assert.equal(facade.includes("pi.register"), false, packageName);
     }
   });
 
   it("contains no legacy Phenix extension compatibility tree", () => {
     const legacyEntries = fs
-      .readdirSync(path.join(phenixRoot, "extensions"))
+      .readdirSync(resolve("extensions"))
       .filter((entry) => entry.startsWith("phenix-"));
     assert.deepEqual(legacyEntries, []);
   });
