@@ -5,7 +5,7 @@ import {
   bootstrapPhenixSubagentsSkillPrompt,
   buildPhenixRootSystemPrompt,
   shouldBootstrapPhenixSubagentsSkill,
-} from "../extensions/phenix-skill-bootstrap.ts";
+} from "../packages/phenix-suite/phenix-skill-bootstrap.ts";
 
 describe("Phenix root prompt bootstrap", () => {
   it("is enabled only for phenix provider models", () => {

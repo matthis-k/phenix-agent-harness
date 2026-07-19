@@ -38,7 +38,7 @@ function stripFrontmatter(markdown: string): string {
 }
 
 function phenixSubagentsSkillBlock(): string {
-  const skillDirectory = fileURLToPath(new URL("../skills/phenix-subagents", import.meta.url));
+  const skillDirectory = fileURLToPath(new URL("../../skills/phenix-subagents", import.meta.url));
   const skillPath = path.join(skillDirectory, "SKILL.md");
   const skillBody = stripFrontmatter(fs.readFileSync(skillPath, "utf8"));
 
