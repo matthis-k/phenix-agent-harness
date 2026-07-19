@@ -7,7 +7,8 @@ import { describe, it } from "node:test";
 import {
   PhenixTaskService,
   startTaskRpcServer,
-  TaskRpcClient,
+  taskClientFromEnvironment,
+  taskProcessEnvironment,
 } from "@matthis-k/phenix-tasks/index.ts";
 
 function createWorkflow(service: PhenixTaskService) {
@@ -85,7 +86,7 @@ describe("phenix-tasks", () => {
     );
   });
 
-  it("uses the same capability checks over a Unix socket", async () => {
+  it("uses the same capability checks from a process environment", async () => {
     const service = new PhenixTaskService();
     const root = createWorkflow(service);
     const directory = await mkdtemp(path.join(os.tmpdir(), "phenix-tasks-"));
@@ -93,7 +94,10 @@ describe("phenix-tasks", () => {
     const server = await startTaskRpcServer({ service, socketPath });
 
     try {
-      const client = new TaskRpcClient(socketPath, root.token);
+      const environment = taskProcessEnvironment({ endpoint: server.endpoint, authority: root });
+      const client = taskClientFromEnvironment(environment);
+      assert.ok(client);
+
       const initial = await client.inspect();
       assert.equal(initial.title, "Implement task tracking");
 
