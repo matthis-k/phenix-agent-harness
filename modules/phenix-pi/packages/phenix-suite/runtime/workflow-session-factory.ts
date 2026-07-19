@@ -8,11 +8,12 @@ import type {
 import { ProductionPiSessionFactory } from "./sdk-child-session-backend.ts";
 
 const UNMANAGED_DELEGATION_TOOLS = new Set(["subagent"]);
+const PHENIX_RUNTIME_TOOLS = ["phenix_complete", "phenix_tasks", "phenix_workflow"] as const;
 
 /** Normalize the final child tool list immediately before Pi session creation. */
 export function normalizeWorkflowRuntimeToolNames(tools: readonly string[]): readonly string[] {
   const retained = tools.filter((tool) => !UNMANAGED_DELEGATION_TOOLS.has(tool));
-  return [...new Set([...retained, "phenix_complete", "phenix_workflow"])].sort();
+  return [...new Set([...retained, ...PHENIX_RUNTIME_TOOLS])].sort();
 }
 
 function normalizeCustomTools(tools: readonly ToolDefinition[]): readonly ToolDefinition[] {
