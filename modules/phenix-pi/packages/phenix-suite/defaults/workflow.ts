@@ -51,7 +51,7 @@ function delegate(args: {
     actorClients: actorClientRefs(rest.actorRoles),
     agentClient: agentClientRef(clientIdForRole(role)),
     outputContract: contractRef(outputSchemaId),
-    allowedModes: allowedModes ?? ["await"],
+    allowedModes: allowedModes ?? (rest.scope === "root" ? ["await", "background"] : ["await"]),
   };
 }
 

@@ -66,6 +66,12 @@ function authorizationResult(input: {
 function compactHandle(record: WorkflowHandleResult): Record<string, unknown> {
   return {
     handleId: record.id,
+    subagentId: record.subagentId,
+    handle: {
+      id: record.id,
+      tool: "phenix_agent",
+      actions: ["inspect", "poll", "await", "send", "cancel"],
+    },
     status: record.status,
     value: record.value,
     error: record.errors?.join(" | "),
@@ -118,12 +124,13 @@ async function spawn(input: {
   readonly ctx: ExtensionContext;
 }): Promise<AgentToolResult<Record<string, unknown>>> {
   const requirements = normalizeWorkflowRequirements(input.requirements);
+  const mode = input.mode ?? (input.parent?.kind === "child" ? "await" : "background");
   const execution = await input.workflow.spawn({
     agent: input.agent,
     task: input.task,
     ...(input.userTask ? { userTask: input.userTask } : {}),
     ...(requirements && requirements.length > 0 ? { requirements } : {}),
-    ...(input.mode ? { mode: input.mode } : {}),
+    mode,
     ...(input.parent ? { parent: input.parent } : {}),
     signal: input.signal ?? new AbortController().signal,
     ctx: input.ctx,
@@ -182,7 +189,7 @@ export function createWorkflowTool(input: {
     name: PHENIX_WORKFLOW_TOOL,
     label: "Phenix Workflow",
     description:
-      "Inspect current workflow authority or spawn one advertised target agent. " +
+      "Inspect current workflow authority or spawn one advertised target agent. Root spawns default to background mode and return a persistent handle immediately; use phenix_agent to poll, await, steer, or cancel it. " +
       "Use this whenever the user explicitly requests workflow delegation or subagents. " +
       "The runtime derives the actor and current node from the active root session or initialized child contract, and owns transition selection, roles, routing, models, tools, child authority, contracts, assignments, and state changes.",
     parameters: WorkflowActionParams,
@@ -222,7 +229,7 @@ export function createDirectSubagentTool(input: {
     name: PHENIX_SUBAGENT_TOOL,
     label: "Phenix Subagent",
     description:
-      "Spawn the sole legal contract-owned Phenix child directly. The tool is rejected whenever zero or multiple workflow targets are legal. " +
+      "Spawn the sole legal contract-owned Phenix child directly. Root spawns return a persistent handle immediately by default; use phenix_agent for lifecycle and steering. The tool is rejected whenever zero or multiple workflow targets are legal. " +
       "Normally use phenix_workflow instead. This tool never bypasses workflow contracts, routing, task-subtree ownership, or verification.",
     parameters: DirectSubagentParams,
 

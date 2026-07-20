@@ -5,7 +5,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { getSessionRuntime } from "@matthis-k/phenix-routing/state.ts";
 import { authorizePhenixRootCapability, phenixRootModelScope } from "../composition/model-scope.ts";
 import { createWorkflowApiTools } from "../runtime/workflow-api-tools.ts";
-import { AgentParams } from "./delegate-schema.ts";
+import { AgentParams, type AgentParamsType } from "./delegate-schema.ts";
 import type { SubagentHandleView } from "./facade.ts";
 import { TERMINAL_STATES } from "./handle-types.ts";
 import type { PhenixSubagentsOptions } from "./registration.ts";
@@ -14,6 +14,11 @@ function toolResult(record: SubagentHandleView): AgentToolResult<Record<string, 
   const details = {
     id: record.id,
     handleId: record.id,
+    handle: {
+      id: record.id,
+      tool: "phenix_agent",
+      actions: ["inspect", "poll", "await", "send", "cancel"],
+    },
     subagentId: record.subagentId,
     status: record.status,
     value: record.value,
@@ -118,7 +123,8 @@ export default async function phenixSubagents(
   pi.registerTool({
     name: "phenix_agent",
     label: "Phenix Agent Handle",
-    description: "Inspect, await, poll, or cancel one known Phenix execution handle.",
+    description:
+      "Inspect, poll, await, steer, or cancel one known Phenix execution handle. Use action=send to provide a concise clarification to a live child.",
     parameters: AgentParams,
     async execute(
       _toolCallId: string,
@@ -129,7 +135,7 @@ export default async function phenixSubagents(
     ): Promise<AgentToolResult<Record<string, unknown>>> {
       const denial = authorizePhenixRootCapability({ ctx, capability: "phenix_agent" });
       if (denial !== undefined) return fail(denial, { status: "forbidden", tool: "phenix_agent" });
-      const params = rawParams as { action: "await" | "poll" | "cancel" | "inspect"; id: string };
+      const params = rawParams as AgentParamsType;
       const record = facade.inspectHandle(ctx, params.id);
       if (!record) return fail(`Phenix handle not found: ${params.id}`);
       if (params.action === "inspect") return toolResult(record);
@@ -140,6 +146,16 @@ export default async function phenixSubagents(
       }
       if (params.action === "poll")
         return toolResult((await facade.pollHandle(ctx, params.id)) ?? record);
+      if (params.action === "send") {
+        return toolResult(
+          (await facade.sendHandle(
+            ctx,
+            params.id,
+            params.message,
+            signal ?? new AbortController().signal,
+          )) ?? record,
+        );
+      }
       if (!TERMINAL_STATES.has(record.status)) {
         return toolResult(
           (await facade.awaitHandle(ctx, params.id, signal ?? new AbortController().signal)) ??
