@@ -26,7 +26,8 @@ export function resolveWorkflowAssignment(
 ): ResolvedWorkflowAssignment {
   const requestedRequirements = input.requestedRequirements ?? [];
   const userTask = input.userTask?.trim();
-  const isRequiredRoot = input.source === "root" && input.category === "required" && Boolean(userTask);
+  const isRequiredRoot =
+    input.source === "root" && input.category === "required" && Boolean(userTask);
 
   if (!isRequiredRoot || !userTask) {
     return {
@@ -73,8 +74,6 @@ export function resolveWorkflowSpawnRequest(
   return {
     ...requestWithoutRequirements,
     task: assignment.task,
-    ...(assignment.requirements.length > 0
-      ? { requirements: [...assignment.requirements] }
-      : {}),
+    ...(assignment.requirements.length > 0 ? { requirements: [...assignment.requirements] } : {}),
   };
 }
