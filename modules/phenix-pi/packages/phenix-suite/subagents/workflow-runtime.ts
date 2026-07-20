@@ -15,7 +15,7 @@ import type {
   WorkflowSpawnResult,
 } from "../runtime/workflow-runtime-types.ts";
 import { effectiveSessionId, listRecords } from "./handle-store.ts";
-import { resolveWorkflowAssignment } from "./workflow-assignment.ts";
+import { resolveWorkflowSpawnRequest } from "./workflow-assignment.ts";
 import type { WorkflowDelegator } from "./workflow-delegator.ts";
 
 function inspectAuthority(input: {
@@ -126,26 +126,19 @@ async function spawnTargetAgent(input: {
     );
   }
 
-  const assignment = resolveWorkflowAssignment({
-    source: input.snapshot.source,
-    category: option.category,
-    transitionDescription: option.description,
-    requestedTask: input.request.task,
-    ...(input.request.userTask ? { userTask: input.request.userTask } : {}),
-    ...(input.request.requirements ? { requestedRequirements: input.request.requirements } : {}),
-  });
+  const request = resolveWorkflowSpawnRequest(input.snapshot, input.request);
   const execution = await input.delegator.delegate({
     params: {
       transitionId: option.transitionId,
-      task: assignment.task,
-      ...(assignment.requirements.length > 0 ? { requirements: [...assignment.requirements] } : {}),
-      ...(input.request.mode ? { mode: input.request.mode } : {}),
+      task: request.task,
+      ...(request.requirements?.length ? { requirements: [...request.requirements] } : {}),
+      ...(request.mode ? { mode: request.mode } : {}),
       workflowRevision: input.snapshot.workflow.revision,
       authorityDigest: input.snapshot.workflow.optionsDigest,
     },
-    ...(input.request.parent ? { parent: input.request.parent } : {}),
-    signal: input.request.signal,
-    ctx: input.request.ctx,
+    ...(request.parent ? { parent: request.parent } : {}),
+    signal: request.signal,
+    ctx: request.ctx,
   });
   if (!execution.ok) return execution;
 
