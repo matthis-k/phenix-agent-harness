@@ -55,24 +55,11 @@ jobs:
           path: patch.log
           if-no-files-found: error
       - name: Clean staging and format
-        id: format
-        shell: bash
         run: |
           rm scripts/fix-handle-stager.py
           rm scripts/apply-handle-first-subagent-fix.py
           rm .github/workflows/apply-handle-first-subagent-fix.yml
-          set +e
-          nix fmt > format.log 2>&1
-          status=$?
-          cat format.log
-          exit "$status"
-      - name: Upload format diagnostics
-        if: failure() && steps.format.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: handle-format-log
-          path: format.log
-          if-no-files-found: error
+          devenv tasks run maintenance:fix
       - name: Run repository maintenance
         run: devenv test
       - name: Commit clean source change
