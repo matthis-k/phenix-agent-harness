@@ -26,18 +26,10 @@ jobs:
 
           sdk = Path('modules/phenix-pi/packages/phenix-suite/runtime/sdk-child-session-backend.ts')
           text = sdk.read_text()
-          old = '''      (error) => {
-            if (!preflightSeen) reject(error);
-            void this.failAndAbort(
-              new ChildRuntimeError(
-                "PROVIDER_FAILED",
-                error instanceof Error ? error.message : String(error),
-                { cause: error },
-              ),
-            );
-          },
-          '''
-          new = '''      (error) => {
+          start_marker = '      (error) => {\n        if (!preflightSeen) reject(error);'
+          start = text.index(start_marker)
+          end = text.index('      },\n    );', start) + len('      },')
+          replacement = '''      (error) => {
             const providerMessage = this.lastProviderFailure?.message;
             const message =
               providerMessage ?? (error instanceof Error ? error.message : String(error));
@@ -46,30 +38,16 @@ jobs:
             });
             if (!preflightSeen) reject(providerError);
             void this.failAndAbort(providerError);
-          },
-          '''
-          if old not in text:
-              raise SystemExit('SDK provider rejection block not found')
-          sdk.write_text(text.replace(old, new, 1))
+          },'''
+          sdk.write_text(text[:start] + replacement + text[end:])
 
           delegator = Path('modules/phenix-pi/packages/phenix-suite/subagents/workflow-delegator.ts')
           text = delegator.read_text()
-          old = '''          details: {
-            code: execution.error.code,
-            handleId: execution.record.id,
-            status: execution.record.status,
-          },
-          '''
-          new = '''          details: {
-            code: execution.error.code,
-            handleId: execution.record.id,
-            status: execution.record.status,
-            errors: execution.record.errors,
-          },
-          '''
-          if old not in text:
-              raise SystemExit('Workflow failure detail block not found')
-          delegator.write_text(text.replace(old, new, 1))
+          marker = '            status: execution.record.status,\n'
+          index = text.index(marker, text.index('code: execution.error.code')) + len(marker)
+          if 'errors: execution.record.errors' not in text[index:index + 80]:
+              text = text[:index] + '            errors: execution.record.errors,\n' + text[index:]
+          delegator.write_text(text)
           PY
           git checkout origin/main -- .github/workflows/ci.yml
           git config user.name github-actions[bot]
