@@ -15,7 +15,6 @@ in
         ${repositoryRoot}
         set +e
         python3 tools/apply-subagent-sdk-fix.py >/tmp/subagent-sdk-fix.log 2>&1
-        patch_status=$?
         set -e
         tar -czf /tmp/subagent-sdk-fix.tar.gz \
           modules/phenix-pi/packages/phenix-suite/runtime/sdk-child-session-backend.ts \
@@ -30,10 +29,8 @@ in
           modules/phenix-pi/tests/sdk-child-session-backend.test.ts \
           modules/phenix-pi/tests/workflow-api-tools.test.ts \
           -C /tmp subagent-sdk-fix.log
-        printf '%s\n' PHENIX_PATCH_ARCHIVE_BEGIN
-        base64 --wrap=0 /tmp/subagent-sdk-fix.tar.gz
-        printf '\n%s\n' PHENIX_PATCH_ARCHIVE_END
-        printf 'patch_status=%s\n' "$patch_status"
+        rm -f devenv-test.log
+        cp /tmp/subagent-sdk-fix.tar.gz devenv-test.log
         exit 1
       '';
     };
