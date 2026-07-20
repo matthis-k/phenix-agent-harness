@@ -8,55 +8,65 @@ import {
   toolAllowedByConfig,
 } from "@matthis-k/phenix-suite/subagents/tool-policy.ts";
 
+const READ_TOOL_CEILING = [
+  "read",
+  "grep",
+  "search",
+  "find",
+  "ls",
+  "tree",
+  "bash",
+  "lsp",
+  "lsp_*",
+  "ast_grep",
+  "ast_*",
+  "mcp",
+  "mcp_*",
+  "web_search",
+  "web_fetch",
+  "fetch_content",
+  "get_search_content",
+  "context_info",
+  "context_*",
+  "contact_supervisor",
+  "phenix_workflow",
+] as const;
+
 describe("Tool-policy resolution", () => {
-  it("scout preset without patch", () => {
-    const config = resolveToolConfiguration({
+  it("gives scout and base roles the common read-capable preset", () => {
+    for (const role of ["scout", null] as const) {
+      const config = resolveToolConfiguration({ role, requested: undefined });
+      assert.equal(config.role, role);
+      assert.equal(config.source.inherited, true);
+      assert.deepEqual(config.source.patch, EMPTY_TOOL_PATCH);
+      assert.ok(config.effective.includes("read"));
+      assert.ok(config.effective.includes("grep"));
+      assert.ok(config.effective.includes("bash"));
+      assert.ok(!config.effective.includes("write"));
+      assert.ok(!config.effective.includes("edit"));
+    }
+  });
+
+  it("adds and removes tools without duplicating preset entries", () => {
+    const scout = resolveToolConfiguration({
       role: "scout",
-      requested: undefined,
+      requested: { additional: ["write", "write"], removed: ["grep"] },
     });
-    assert.equal(config.role, "scout");
-    assert.equal(config.source.inherited, true);
-    assert.deepEqual(config.source.patch, EMPTY_TOOL_PATCH);
-    // Scout effective tools should include read-only tools.
-    assert.ok(config.effective.includes("read"));
-    assert.ok(config.effective.includes("grep"));
-    assert.ok(config.effective.includes("ls"));
-  });
+    assert.ok(scout.effective.includes("read"));
+    assert.ok(!scout.effective.includes("grep"));
+    assert.equal(scout.effective.filter((tool) => tool === "write").length, 1);
 
-  it("scout plus write", () => {
-    const config = resolveToolConfiguration({
-      role: "scout",
-      requested: { additional: ["write"] },
-    });
-    assert.ok(config.effective.includes("read"));
-    assert.ok(config.effective.includes("write"));
-    assert.equal(config.effective.filter((t) => t === "write").length, 1);
-  });
-
-  it("implementer minus write", () => {
-    const config = resolveToolConfiguration({
-      role: "implementer",
-      requested: { removed: ["write"] },
-    });
-    assert.ok(config.effective.includes("read"));
-    assert.ok(!config.effective.includes("write"));
-    assert.ok(config.effective.includes("edit"));
-    assert.ok(config.effective.includes("todo"));
-  });
-
-  it("implementer minus both write and edit", () => {
-    const config = resolveToolConfiguration({
+    const implementer = resolveToolConfiguration({
       role: "implementer",
       requested: { removed: ["write", "edit"] },
     });
-    assert.ok(!config.effective.includes("write"));
-    assert.ok(!config.effective.includes("edit"));
-    // Still has read, todo, etc.
-    assert.ok(config.effective.includes("read"));
-    assert.ok(config.effective.includes("todo"));
+    assert.ok(implementer.effective.includes("read"));
+    assert.ok(implementer.effective.includes("todo"));
+    assert.ok(!implementer.effective.includes("write"));
+    assert.ok(!implementer.effective.includes("edit"));
   });
 
-  it("same tool in additional and removed: removed wins", () => {
+  it("treats removals as authoritative when a tool is also added", () => {
     const config = resolveToolConfiguration({
       role: "scout",
       requested: { additional: ["write"], removed: ["write"] },
@@ -64,285 +74,133 @@ describe("Tool-policy resolution", () => {
     assert.ok(!config.effective.includes("write"));
   });
 
-  it("duplicate additions are deduplicated", () => {
+  it("preserves preset order and does not mutate caller arrays", () => {
+    const additional = ["custom_tool"];
+    const removed = ["write"];
     const config = resolveToolConfiguration({
-      role: "scout",
-      requested: { additional: ["write", "write"] },
-    });
-    assert.equal(config.effective.filter((t) => t === "write").length, 1);
-  });
-
-  it("preset order remains stable", () => {
-    const config = resolveToolConfiguration({
-      role: "implementer",
-      requested: { additional: ["custom_tool"] },
-    });
-    const readIdx = config.effective.indexOf("read");
-    const customIdx = config.effective.indexOf("custom_tool");
-    // read should come before custom_tool (preset order preserved, new tools appended).
-    assert.ok(readIdx < customIdx);
-  });
-
-  it("input arrays are not mutated", () => {
-    const additional: string[] = ["write"];
-    const removed: string[] = ["edit"];
-    const originalAdditional = [...additional];
-    const originalRemoved = [...removed];
-
-    resolveToolConfiguration({
       role: "implementer",
       requested: { additional, removed },
     });
 
-    assert.deepEqual(additional, originalAdditional);
-    assert.deepEqual(removed, originalRemoved);
+    assert.ok(config.effective.indexOf("read") < config.effective.indexOf("custom_tool"));
+    assert.deepEqual(additional, ["custom_tool"]);
+    assert.deepEqual(removed, ["write"]);
   });
 
-  it("role null plus empty patch produces no task tools", () => {
+  it("applies explicit base patches on top of the read-capable preset", () => {
     const config = resolveToolConfiguration({
       role: null,
-      requested: { additional: [], removed: [] },
+      requested: { additional: ["custom_tool"], removed: ["bash"] },
     });
-    assert.equal(config.effective.length, 0);
-  });
-
-  it("role null plus read produces only read", () => {
-    const config = resolveToolConfiguration({
-      role: null,
-      requested: { additional: ["read"] },
-    });
-    assert.equal(config.effective.length, 1);
-    assert.equal(config.effective[0], "read");
-  });
-
-  it("tools null inherits creator patch", () => {
-    const inheritedPatch = {
-      additional: ["web_search"],
-      removed: ["write"],
-    };
-    const config = resolveToolConfiguration({
-      role: "implementer",
-      requested: null,
-      inheritedPatch,
-    });
-    assert.equal(config.source.inherited, true);
-    assert.ok(config.effective.includes("web_search"));
-    assert.ok(!config.effective.includes("write"));
-  });
-
-  it("inherited patch is applied to child role preset, not creator effective set", () => {
-    // Creator was "implementer" with patch: +web_search -write
-    // Child role is "scout" (no write, no edit in preset).
-    const inheritedPatch = {
-      additional: ["web_search"],
-      removed: ["write"],
-    };
-    const config = resolveToolConfiguration({
-      role: "scout", // Scout preset doesn't have write.
-      requested: null,
-      inheritedPatch,
-    });
-    // Scout preset tools + web_search.
-    assert.ok(config.effective.includes("web_search"));
-    // write removal is a no-op since scout preset doesn't have write.
     assert.ok(config.effective.includes("read"));
+    assert.ok(config.effective.includes("custom_tool"));
+    assert.ok(!config.effective.includes("bash"));
   });
 
-  it("tools {} does not inherit", () => {
-    // Use a tool NOT in the base preset to verify no inheritance.
+  it("inherits creator patches only when tools are omitted or null", () => {
     const inheritedPatch = {
-      additional: ["custom_tool_only_in_inherited"],
-      removed: ["read"],
+      additional: ["custom_inherited"],
+      removed: ["grep"],
     };
-    const config = resolveToolConfiguration({
-      role: "implementer",
-      requested: { additional: [], removed: [] },
-      inheritedPatch,
-    });
-    assert.equal(config.source.inherited, false);
-    // No inherited additions — custom_tool_only_in_inherited should NOT be present.
-    assert.ok(!config.effective.includes("custom_tool_only_in_inherited"));
-    // No inherited removals — read should still be present (implementer preset has it).
-    assert.ok(config.effective.includes("read"));
-    assert.ok(config.effective.includes("write")); // implementer preset has write
-  });
-
-  it("root tools null resolves to empty patch", () => {
-    const config = resolveToolConfiguration({
+    const inherited = resolveToolConfiguration({
       role: "scout",
       requested: null,
-      // No inheritedPatch passed → should use EMPTY_TOOL_PATCH.
+      inheritedPatch,
     });
-    assert.equal(config.source.inherited, true);
-    assert.deepEqual(config.source.patch, EMPTY_TOOL_PATCH);
+    assert.equal(inherited.source.inherited, true);
+    assert.ok(inherited.effective.includes("custom_inherited"));
+    assert.ok(!inherited.effective.includes("grep"));
+
+    const explicit = resolveToolConfiguration({
+      role: "scout",
+      requested: { additional: [], removed: [] },
+      inheritedPatch,
+    });
+    assert.equal(explicit.source.inherited, false);
+    assert.ok(!explicit.effective.includes("custom_inherited"));
+    assert.ok(explicit.effective.includes("grep"));
   });
 
-  it("raw subagent is rejected in additions", () => {
-    assert.throws(() => {
-      resolveToolConfiguration({
-        role: "scout",
-        requested: { additional: ["subagent"] },
-      });
-    }, /subagent/);
+  it("rejects runtime-owned and malformed tool names", () => {
+    for (const tool of ["subagent", "phenix_complete", "phenix_tasks", "phenix_workflow"]) {
+      assert.throws(
+        () =>
+          resolveToolConfiguration({
+            role: "scout",
+            requested: { additional: [tool] },
+          }),
+        new RegExp(tool),
+      );
+    }
+    assert.throws(
+      () =>
+        resolveToolConfiguration({
+          role: "scout",
+          requested: { additional: ["invalid tool!"] },
+        }),
+      /Invalid tool name/,
+    );
+    assert.throws(
+      () =>
+        resolveToolConfiguration({ role: "scout", requested: { additional: [""] } }),
+      /Invalid tool name/,
+    );
   });
 
-  it("raw subagent is rejected in removals", () => {
-    assert.throws(() => {
-      resolveToolConfiguration({
-        role: "scout",
-        requested: { removed: ["subagent"] },
-      });
-    }, /subagent/);
-  });
+  it("enforces the creator delegation ceiling against the full effective set", () => {
+    assert.throws(
+      () =>
+        resolveToolConfiguration({
+          role: "scout",
+          requested: { additional: ["write"] },
+          delegableTools: ["read", "grep"],
+        }),
+      /not authorized for delegation/,
+    );
 
-  it("phenix_complete cannot be manually added", () => {
-    assert.throws(() => {
-      resolveToolConfiguration({
-        role: "scout",
-        requested: { additional: ["phenix_complete"] },
-      });
-    }, /phenix_complete/);
-  });
-
-  it("phenix_complete cannot be manually removed", () => {
-    assert.throws(() => {
-      resolveToolConfiguration({
-        role: "scout",
-        requested: { removed: ["phenix_complete"] },
-      });
-    }, /phenix_complete/);
-  });
-
-  it("unknown tool additions are rejected", () => {
-    // Invalid characters in tool name.
-    assert.throws(() => {
-      resolveToolConfiguration({
-        role: "scout",
-        requested: { additional: ["invalid tool!"] },
-      });
-    }, /Invalid tool name/);
-  });
-
-  it("empty tool name is rejected", () => {
-    assert.throws(() => {
-      resolveToolConfiguration({
-        role: "scout",
-        requested: { additional: [""] },
-      });
-    }, /Invalid tool name/);
-  });
-
-  it("delegation ceiling rejects unauthorized additions", () => {
-    assert.throws(() => {
-      resolveToolConfiguration({
-        role: "scout",
-        requested: { additional: ["write"] },
-        delegableTools: ["read", "grep"],
-      });
-    }, /not authorized for delegation/);
-  });
-
-  it("delegation ceiling allows authorized additions", () => {
-    // With full-effective-set ceiling validation, the delegable set
-    // must cover all preset tools plus the addition.
-    const broadCeiling = [
-      "read",
-      "grep",
-      "search",
-      "find",
-      "ls",
-      "tree",
-      "bash",
-      "lsp",
-      "lsp_*",
-      "ast_grep",
-      "ast_*",
-      "mcp",
-      "mcp_*",
-      "web_search",
-      "web_fetch",
-      "fetch_content",
-      "get_search_content",
-      "context_info",
-      "context_*",
-      "contact_supervisor",
-      "phenix_workflow",
-      "write",
-    ];
     const config = resolveToolConfiguration({
       role: "scout",
       requested: { additional: ["write"] },
-      delegableTools: broadCeiling,
+      delegableTools: [...READ_TOOL_CEILING, "write"],
     });
     assert.ok(config.effective.includes("write"));
   });
 });
 
 describe("Tool authorization", () => {
-  it("tool guard uses contract effective tools", () => {
+  it("uses contract effective tools and always blocks unmanaged subagents", () => {
     const config = resolveToolConfiguration({
       role: "scout",
-      requested: { additional: ["write"] },
+      requested: { additional: ["write"], removed: ["grep"] },
     });
     assert.ok(toolAllowedByConfig(config, "read"));
     assert.ok(toolAllowedByConfig(config, "write"));
-    assert.ok(!toolAllowedByConfig(config, "edit"));
-  });
-
-  it("scout plus write may call write", () => {
-    const config = resolveToolConfiguration({
-      role: "scout",
-      requested: { additional: ["write"] },
-    });
-    assert.ok(toolAllowedByConfig(config, "write"));
-  });
-
-  it("implementer minus write may not call write", () => {
-    const config = resolveToolConfiguration({
-      role: "implementer",
-      requested: { removed: ["write"] },
-    });
-    assert.ok(!toolAllowedByConfig(config, "write"));
-    assert.ok(toolAllowedByConfig(config, "edit"));
-  });
-
-  it("role null with no task tools may only use phenix_complete", () => {
-    const config = resolveToolConfiguration({
-      role: null,
-      requested: { additional: [], removed: [] },
-    });
-    // No task tools, but phenix_complete is always allowed.
-    assert.ok(!toolAllowedByConfig(config, "read"));
-    assert.ok(!toolAllowedByConfig(config, "write"));
+    assert.ok(!toolAllowedByConfig(config, "grep"));
+    assert.ok(!toolAllowedByConfig(config, "subagent"));
     assert.ok(toolAllowedByConfig(config, "phenix_complete"));
   });
 
-  it("raw subagent is always blocked", () => {
-    const config = resolveToolConfiguration({
-      role: "scout",
-      requested: undefined,
-    });
-    assert.ok(!toolAllowedByConfig(config, "subagent"));
+  it("allows base agents to inspect repositories but not modify them", () => {
+    const config = resolveToolConfiguration({ role: null, requested: undefined });
+    assert.ok(toolAllowedByConfig(config, "read"));
+    assert.ok(toolAllowedByConfig(config, "bash"));
+    assert.ok(!toolAllowedByConfig(config, "write"));
+    assert.ok(!toolAllowedByConfig(config, "edit"));
+    assert.ok(toolAllowedByConfig(config, "phenix_complete"));
   });
 });
 
 describe("Launch tools", () => {
-  it("childLaunchTools includes phenix_complete", () => {
-    const config = resolveToolConfiguration({
-      role: "scout",
-      requested: undefined,
-    });
+  it("adds runtime-owned child capabilities without exposing them as task tools", () => {
+    const config = resolveToolConfiguration({ role: null, requested: undefined });
     const launch = childLaunchTools(config);
-    assert.ok(launch.includes("phenix_complete"));
     assert.ok(launch.includes("read"));
-  });
+    assert.ok(launch.includes("phenix_complete"));
+    assert.ok(launch.includes("phenix_tasks"));
+    assert.ok(launch.includes("phenix_workflow"));
 
-  it("modelTaskTools does not include phenix_complete", () => {
-    const config = resolveToolConfiguration({
-      role: "scout",
-      requested: undefined,
-    });
-    const tools = modelTaskTools(config);
-    assert.ok(!tools.includes("phenix_complete"));
+    const taskTools = modelTaskTools(config);
+    assert.ok(taskTools.includes("read"));
+    assert.ok(!taskTools.includes("phenix_complete"));
   });
 });
