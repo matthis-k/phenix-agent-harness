@@ -123,6 +123,7 @@ describe("workflow turn gate", () => {
         task: "Plan the full repository migration.",
       }),
       isError: true,
+      authorityResolved: false,
       nextRequiredAgents: [],
     });
     assert.match(gate.authorize(invocation("read")) ?? "", /requires delegation before read/i);
@@ -134,6 +135,8 @@ describe("workflow turn gate", () => {
         task: "Plan the full repository migration.",
       }),
       isError: false,
+      authorityResolved: true,
+      currentState: "implementation-ready",
       nextRequiredAgents: ["tester"],
     });
     assert.match(gate.authorize(invocation("read")) ?? "", /tester/i);
@@ -147,6 +150,8 @@ describe("workflow turn gate", () => {
     gate.observe({
       ...invocation("phenix_workflow", { action: "spawn", agent: "tester", task: "Test" }),
       isError: false,
+      authorityResolved: true,
+      currentState: "completed",
       nextRequiredAgents: [],
     });
     assert.equal(gate.authorize(invocation("read")), undefined);
@@ -155,6 +160,42 @@ describe("workflow turn gate", () => {
     assert.ok(records.some((record) => record.boundary === "workflow_gate.blocked"));
     assert.ok(records.some((record) => record.boundary === "workflow_gate.failed"));
     assert.ok(records.some((record) => record.boundary === "workflow_gate.fulfilled"));
+  });
+
+  it("reconciles a failed workflow node instead of advertising stale agents", () => {
+    const records: Record<string, unknown>[] = [];
+    const gate = createWorkflowTurnGate({ trace: (record) => records.push({ ...record }) });
+    gate.beginTurn({
+      sessionId,
+      turnId,
+      userTask: "Do a full QA pass on this repository.",
+      requiredAgents: ["base", "implementer"],
+    });
+
+    gate.observe({
+      ...invocation("phenix_workflow", {
+        action: "spawn",
+        agent: "base",
+        task: "Perform the full repository QA pass.",
+      }),
+      isError: true,
+      authorityResolved: true,
+      currentState: "failed",
+      nextRequiredAgents: [],
+    });
+
+    assert.match(gate.authorize(invocation("read")) ?? "", /terminal state "failed"/i);
+    assert.match(
+      gate.authorize(
+        invocation("phenix_workflow", {
+          action: "spawn",
+          agent: "base",
+          task: "Retry the repository QA pass.",
+        }),
+      ) ?? "",
+      /new user turn may retry/i,
+    );
+    assert.ok(records.some((record) => record.boundary === "workflow_gate.terminal"));
   });
 
   it("leaves direct execution open when authority has no required transition", () => {
