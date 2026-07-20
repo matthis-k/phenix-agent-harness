@@ -20,6 +20,8 @@ describe("Phenix root prompt bootstrap", () => {
     const bootstrapped = bootstrapPhenixSubagentsSkillPrompt("base prompt");
 
     assert.match(bootstrapped, /Phenix workflow nodes, legal transitions/);
+    assert.match(bootstrapped, /turn-scoped runtime gate/i);
+    assert.match(bootstrapped, /blocks every other execution tool/i);
     assert.match(bootstrapped, /first substantive\s+execution action/i);
     assert.match(bootstrapped, /phenix_subagent/);
     assert.match(bootstrapped, /one advertised target `agent`/);
@@ -47,6 +49,8 @@ describe("Phenix root prompt bootstrap", () => {
 
     assert.match(phenix ?? "", /## Phenix coding substrate/);
     assert.match(phenix ?? "", /target agents available from the current node/i);
+    assert.match(phenix ?? "", /blocks every non-workflow execution tool/i);
+    assert.match(phenix ?? "", /re-evaluated/i);
     assert.match(phenix ?? "", /phenix_workflow/);
     assert.match(phenix ?? "", /broad repository reconnaissance/i);
     assert.match(phenix ?? "", /mechanical execution of an already-settled plan/i);
