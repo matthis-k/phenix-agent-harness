@@ -44,13 +44,6 @@ function sessionId(ctx: ExtensionContext): string {
   return ctx.sessionManager.getSessionId() ?? "default";
 }
 
-function requiredAgents(ctx: ExtensionContext, options: PhenixSubagentsOptions): readonly string[] {
-  return options.facade.workflow
-    .inspect({ ctx })
-    .workflow.options.filter((option) => option.category === "required")
-    .map((option) => option.agent);
-}
-
 export default async function phenixSubagents(
   pi: ExtensionAPI,
   options: PhenixSubagentsOptions,
@@ -84,13 +77,18 @@ export default async function phenixSubagents(
 
     const id = sessionId(ctx);
     let isError = event.isError;
+    let authorityResolved = false;
+    let currentState: string | undefined;
     let nextRequiredAgents: readonly string[] = [];
-    if (!isError) {
-      try {
-        nextRequiredAgents = requiredAgents(ctx, options);
-      } catch {
-        isError = true;
-      }
+    try {
+      const workflow = facade.workflow.inspect({ ctx }).workflow;
+      authorityResolved = true;
+      currentState = workflow.currentState;
+      nextRequiredAgents = workflow.options
+        .filter((option) => option.category === "required")
+        .map((option) => option.agent);
+    } catch {
+      if (!isError) isError = true;
     }
 
     options.workflowGate.observe({
@@ -99,6 +97,8 @@ export default async function phenixSubagents(
       toolName: event.toolName,
       input: event.input,
       isError,
+      authorityResolved,
+      ...(currentState ? { currentState } : {}),
       nextRequiredAgents,
     });
   });
@@ -110,6 +110,7 @@ export default async function phenixSubagents(
   for (const tool of createWorkflowApiTools({
     workflow: facade.workflow,
     authorize: ({ ctx, tool }) => authorizePhenixRootCapability({ ctx, capability: tool }),
+    rootUserTask: (ctx) => getSessionRuntime(sessionId(ctx)).currentUserTask,
   })) {
     pi.registerTool(tool as never);
   }
