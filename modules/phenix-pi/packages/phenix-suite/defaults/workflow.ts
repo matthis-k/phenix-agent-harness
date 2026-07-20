@@ -5,6 +5,7 @@ import type {
   DelegateTransition,
   DelegationPurpose,
   TransitionCondition,
+  WorkflowActorRole,
   WorkflowDefinition,
   WorkflowOutputSchemaId,
   WorkflowStateId,
@@ -21,7 +22,7 @@ function clientIdForRole(role: AgentRole): string {
   return role === null ? "base" : role;
 }
 
-function actorClientRefs(roles: ReadonlyArray<"coordinator" | AgentKind>) {
+function actorClientRefs(roles: readonly WorkflowActorRole[]) {
   return roles.map((role) => agentClientRef(role));
 }
 
@@ -29,7 +30,7 @@ function delegate(args: {
   readonly id: string;
   readonly difficulty: readonly Difficulty[];
   readonly scope: "root" | "child" | "both";
-  readonly actorRoles: ReadonlyArray<"coordinator" | AgentKind>;
+  readonly actorRoles: readonly WorkflowActorRole[];
   readonly from: readonly WorkflowStateId[];
   readonly role: AgentRole;
   readonly purpose: DelegationPurpose;
@@ -82,14 +83,15 @@ const ROOT: "root" = "root";
 const CHILD: "child" = "child";
 const _BOTH: "both" = "both";
 
-const COORDINATOR: ReadonlyArray<"coordinator" | AgentKind> = ["coordinator"];
-const PLANNER: ReadonlyArray<"coordinator" | AgentKind> = ["planner"];
-const ARCHITECT: ReadonlyArray<"coordinator" | AgentKind> = ["architect"];
-const IMPLEMENTER: ReadonlyArray<"coordinator" | AgentKind> = ["implementer"];
-const TESTER: ReadonlyArray<"coordinator" | AgentKind> = ["tester"];
-const CRITIC: ReadonlyArray<"coordinator" | AgentKind> = ["critic"];
-const FINALIZER: ReadonlyArray<"coordinator" | AgentKind> = ["finalizer"];
-const SCOUT: ReadonlyArray<"coordinator" | AgentKind> = ["scout"];
+const COORDINATOR: readonly WorkflowActorRole[] = ["coordinator"];
+const BASE: readonly WorkflowActorRole[] = ["base"];
+const PLANNER: readonly WorkflowActorRole[] = ["planner"];
+const ARCHITECT: readonly WorkflowActorRole[] = ["architect"];
+const IMPLEMENTER: readonly WorkflowActorRole[] = ["implementer"];
+const TESTER: readonly WorkflowActorRole[] = ["tester"];
+const CRITIC: readonly WorkflowActorRole[] = ["critic"];
+const FINALIZER: readonly WorkflowActorRole[] = ["finalizer"];
+const SCOUT: readonly WorkflowActorRole[] = ["scout"];
 
 const REQUIRED: "required" = "required";
 const OPTIONAL: "optional" = "optional";
@@ -649,7 +651,7 @@ transitions.push(
 
 function nestedDelegate(args: {
   readonly id: string;
-  readonly actorRoles: ReadonlyArray<"coordinator" | AgentKind>;
+  readonly actorRoles: readonly WorkflowActorRole[];
   readonly from: WorkflowStateId;
   readonly role: AgentKind;
   readonly purpose: DelegationPurpose;
@@ -669,6 +671,45 @@ function nestedDelegate(args: {
     }),
   );
 }
+
+// Base/no-role nested children for concern-isolated analysis
+nestedDelegate({
+  id: "base.request-scout",
+  actorRoles: BASE,
+  from: "executing",
+  role: "scout",
+  purpose: "nested-evidence",
+  description: "Base agent delegates repository topology and evidence discovery",
+  outputSchemaId: "scout-handoff",
+});
+nestedDelegate({
+  id: "base.request-tester",
+  actorRoles: BASE,
+  from: "executing",
+  role: "tester",
+  purpose: "nested-testing",
+  description: "Base agent delegates deterministic QA runtime, code metrics, and verification",
+  outputSchemaId: "test-handoff",
+});
+nestedDelegate({
+  id: "base.request-architect",
+  actorRoles: BASE,
+  from: "executing",
+  role: "architect",
+  purpose: "nested-review",
+  description: "Base agent delegates architecture and dependency-boundary analysis",
+  outputSchemaId: "architecture-handoff",
+});
+nestedDelegate({
+  id: "base.request-critic",
+  actorRoles: BASE,
+  from: "executing",
+  role: "critic",
+  purpose: "nested-review",
+  description:
+    "Base agent delegates readability, patterns, system, operability, and security review",
+  outputSchemaId: "critic-handoff",
+});
 
 // Planner nested children
 nestedDelegate({

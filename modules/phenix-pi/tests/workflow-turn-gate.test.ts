@@ -162,6 +162,56 @@ describe("workflow turn gate", () => {
     assert.ok(records.some((record) => record.boundary === "workflow_gate.fulfilled"));
   });
 
+  it("allows lifecycle operations for the active required-delegation handle", () => {
+    const gate = createWorkflowTurnGate();
+    gate.beginTurn({
+      sessionId,
+      turnId,
+      userTask: "Do a full QA for this repo.",
+      requiredAgents: ["base"],
+    });
+
+    gate.observe({
+      ...invocation("phenix_workflow", {
+        action: "spawn",
+        agent: "base",
+        task: "Run the repository QA review.",
+      }),
+      isError: false,
+      authorityResolved: true,
+      currentState: "classified",
+      nextRequiredAgents: ["base"],
+      handleId: "handle-qa",
+      handleStatus: "running",
+    });
+
+    assert.equal(
+      gate.authorize(invocation("phenix_agent", { action: "poll", id: "handle-qa" })),
+      undefined,
+    );
+    assert.equal(
+      gate.authorize(invocation("phenix_agent", { action: "await", id: "handle-qa" })),
+      undefined,
+    );
+    assert.match(
+      gate.authorize(invocation("phenix_agent", { action: "poll", id: "other-handle" })) ?? "",
+      /handle-qa/i,
+    );
+    assert.match(gate.authorize(invocation("read", { path: "src/index.ts" })) ?? "", /active/i);
+
+    gate.observe({
+      ...invocation("phenix_agent", { action: "await", id: "handle-qa" }),
+      isError: false,
+      authorityResolved: true,
+      currentState: "completed",
+      nextRequiredAgents: [],
+      handleId: "handle-qa",
+      handleStatus: "completed",
+    });
+
+    assert.equal(gate.authorize(invocation("read", { path: "src/index.ts" })), undefined);
+  });
+
   it("reconciles a failed workflow node instead of advertising stale agents", () => {
     const records: Record<string, unknown>[] = [];
     const gate = createWorkflowTurnGate({ trace: (record) => records.push({ ...record }) });

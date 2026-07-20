@@ -49,6 +49,21 @@ node --experimental-strip-types skills/phenix-qa/runtime/index.ts validate-repor
 node --experimental-strip-types skills/phenix-qa/runtime/index.ts analyzers
 ```
 
+## Required subsession decomposition for full QA
+
+For a full repository or module QA, the base child is the **review integrator**, not the sole reviewer. Keep unrelated evidence and judgment in separate child contexts. When the corresponding child targets are advertised, delegate these bounded concerns individually:
+
+1. **Scout** — repository topology, module boundaries, test inventory, hotspots, and evidence locations.
+2. **Tester** — deterministic QA runtime, project-native checks, code metrics, structural analysis, analyzer coverage, and reproducible command results.
+3. **Architect** — dependency direction, facade/implementation boundaries, cohesion, state-machine design, and cross-module coupling.
+4. **Critic** — readability, pattern consistency, system integration, operability, security, and challenge of provisional findings.
+
+Use one `phenix_workflow` child execution per concern. Child-local specialist transitions are foreground: collect each handoff before composing the next dependent review. Do not duplicate the same concern in multiple children unless a critic is explicitly challenging another handoff.
+
+The root coordinator must spawn the required base transition only once. A background root spawn returns a handle; while it is active, use `phenix_agent` with that exact handle for `inspect`, `poll`, `await`, `send`, or `cancel`. Never retry the same required transition merely because collection is still in progress.
+
+The base integrator must merge specialist handoffs into the runtime-backed QA contribution, preserve evidence IDs, distinguish unavailable analyzers from clean results, and let the QA runtime calculate gates and risk scores.
+
 ## Implemented runtime capability
 
 ### Runtime schemas (`contracts/contracts.ts`)

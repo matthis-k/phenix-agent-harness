@@ -17,6 +17,8 @@ export interface WorkflowToolOutcome extends WorkflowToolInvocation {
   readonly authorityResolved: boolean;
   readonly currentState?: string;
   readonly nextRequiredAgents: readonly string[];
+  readonly handleId?: string;
+  readonly handleStatus?: string;
 }
 
 export interface WorkflowTurnGate {
@@ -35,13 +37,24 @@ interface RequiredTurnState {
   readonly requiredAgents: readonly string[];
 }
 
+interface DelegatedTurnState {
+  readonly kind: "delegated";
+  readonly turnId: string;
+  readonly userTask: string;
+  readonly requiredAgents: readonly string[];
+  readonly agent: string;
+  readonly handleId: string;
+}
+
 interface TerminalTurnState {
   readonly kind: "terminal";
   readonly turnId: string;
   readonly workflowState: string;
 }
 
-type TurnGateState = RequiredTurnState | TerminalTurnState;
+type TurnGateState = RequiredTurnState | DelegatedTurnState | TerminalTurnState;
+
+const TERMINAL_HANDLE_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]);
 
 function uniqueAgents(agents: readonly string[]): readonly string[] {
   return [...new Set(agents.map((agent) => agent.trim()).filter(Boolean))].sort();
@@ -57,6 +70,10 @@ function workflowAgent(input: Readonly<Record<string, unknown>>): string | undef
 
 function workflowTask(input: Readonly<Record<string, unknown>>): string | undefined {
   return typeof input.task === "string" ? input.task.trim() : undefined;
+}
+
+function handleId(input: Readonly<Record<string, unknown>>): string | undefined {
+  return typeof input.id === "string" ? input.id : undefined;
 }
 
 function skillReadPath(invocation: WorkflowToolInvocation): string | undefined {
@@ -155,6 +172,29 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
       );
     }
 
+    if (state.kind === "delegated") {
+      if (invocation.toolName === "phenix_agent") {
+        const requestedHandle = handleId(invocation.input);
+        if (requestedHandle === state.handleId) return undefined;
+        return deny(
+          `Required delegation is active under handle ${JSON.stringify(state.handleId)}. ` +
+            `Use phenix_agent with id=${JSON.stringify(state.handleId)}; do not address a different handle.`,
+          state.requiredAgents,
+        );
+      }
+      if (
+        invocation.toolName === "phenix_workflow" &&
+        workflowAction(invocation.input) === "inspect"
+      ) {
+        return undefined;
+      }
+      return deny(
+        `Required delegation is already active under handle ${JSON.stringify(state.handleId)}. ` +
+          "Use phenix_agent with action=inspect, poll, await, send, or cancel to settle that execution before other repository work.",
+        state.requiredAgents,
+      );
+    }
+
     const preflightPath = skillReadPath(invocation);
     if (preflightPath) {
       this.emit({
@@ -221,93 +261,149 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
 
   observe(outcome: WorkflowToolOutcome): void {
     const state = this.stateBySession.get(outcome.sessionId);
-    if (state?.kind !== "required" || outcome.turnId !== state.turnId) return;
-    if (outcome.toolName !== "phenix_workflow" || workflowAction(outcome.input) !== "spawn") {
-      return;
-    }
+    if (!state || outcome.turnId !== state.turnId) return;
 
-    const nextRequiredAgents = uniqueAgents(outcome.nextRequiredAgents);
-    if (outcome.isError) {
-      this.emit({
-        boundary: "workflow_gate.failed",
-        sessionId: outcome.sessionId,
-        turnId: state.turnId,
-        agent: workflowAgent(outcome.input),
-        requiredAgents: state.requiredAgents,
-        authorityResolved: outcome.authorityResolved,
-        currentState: outcome.currentState,
-      });
+    const reconcileAuthority = (
+      requiredState: RequiredTurnState | DelegatedTurnState,
+      reason: string,
+      agent: string | undefined,
+    ): void => {
+      const nextRequiredAgents = uniqueAgents(outcome.nextRequiredAgents);
 
-      if (!outcome.authorityResolved) return;
+      if (outcome.isError) {
+        this.emit({
+          boundary: "workflow_gate.failed",
+          sessionId: outcome.sessionId,
+          turnId: requiredState.turnId,
+          agent,
+          requiredAgents: requiredState.requiredAgents,
+          authorityResolved: outcome.authorityResolved,
+          currentState: outcome.currentState,
+          reason,
+        });
+
+        if (!outcome.authorityResolved) return;
+        if (nextRequiredAgents.length > 0) {
+          this.stateBySession.set(outcome.sessionId, {
+            kind: "required",
+            turnId: requiredState.turnId,
+            userTask: requiredState.userTask,
+            requiredAgents: nextRequiredAgents,
+          });
+          this.emit({
+            boundary: "workflow_gate.required",
+            sessionId: outcome.sessionId,
+            turnId: requiredState.turnId,
+            requiredAgents: nextRequiredAgents,
+            reason: "authority-reconciled-after-failure",
+          });
+          return;
+        }
+
+        if (outcome.currentState === "failed") {
+          this.stateBySession.set(outcome.sessionId, {
+            kind: "terminal",
+            turnId: requiredState.turnId,
+            workflowState: outcome.currentState,
+          });
+          this.emit({
+            boundary: "workflow_gate.terminal",
+            sessionId: outcome.sessionId,
+            turnId: requiredState.turnId,
+            workflowState: outcome.currentState,
+          });
+          return;
+        }
+
+        this.stateBySession.delete(outcome.sessionId);
+        this.emit({
+          boundary: "workflow_gate.open",
+          sessionId: outcome.sessionId,
+          turnId: requiredState.turnId,
+          reason: "authority-reconciled-after-failure",
+          currentState: outcome.currentState,
+        });
+        return;
+      }
+
       if (nextRequiredAgents.length > 0) {
         this.stateBySession.set(outcome.sessionId, {
           kind: "required",
-          turnId: state.turnId,
-          userTask: state.userTask,
+          turnId: requiredState.turnId,
+          userTask: requiredState.userTask,
           requiredAgents: nextRequiredAgents,
         });
         this.emit({
           boundary: "workflow_gate.required",
           sessionId: outcome.sessionId,
-          turnId: state.turnId,
+          turnId: requiredState.turnId,
           requiredAgents: nextRequiredAgents,
-          taskMatchRequired: false,
-          reason: "authority-reconciled-after-failure",
-        });
-        return;
-      }
-
-      if (outcome.currentState === "failed") {
-        this.stateBySession.set(outcome.sessionId, {
-          kind: "terminal",
-          turnId: state.turnId,
-          workflowState: outcome.currentState,
-        });
-        this.emit({
-          boundary: "workflow_gate.terminal",
-          sessionId: outcome.sessionId,
-          turnId: state.turnId,
-          workflowState: outcome.currentState,
+          reason: "authority-advanced",
         });
         return;
       }
 
       this.stateBySession.delete(outcome.sessionId);
       this.emit({
-        boundary: "workflow_gate.open",
+        boundary: "workflow_gate.fulfilled",
         sessionId: outcome.sessionId,
-        turnId: state.turnId,
-        reason: "authority-reconciled-after-failure",
-        currentState: outcome.currentState,
+        turnId: requiredState.turnId,
+        agent,
+        reason,
       });
+    };
+
+    if (state.kind === "delegated") {
+      if (outcome.toolName !== "phenix_agent" || outcome.handleId !== state.handleId) return;
+      if (!outcome.handleStatus || !TERMINAL_HANDLE_STATES.has(outcome.handleStatus)) {
+        this.emit({
+          boundary: "workflow_gate.delegated",
+          sessionId: outcome.sessionId,
+          turnId: state.turnId,
+          agent: state.agent,
+          handleId: state.handleId,
+          handleStatus: outcome.handleStatus,
+          reason: "handle-still-active",
+        });
+        return;
+      }
+      reconcileAuthority(state, "handle-terminal", state.agent);
       return;
     }
 
-    if (nextRequiredAgents.length > 0) {
+    if (state.kind !== "required") return;
+    if (outcome.toolName !== "phenix_workflow" || workflowAction(outcome.input) !== "spawn") {
+      return;
+    }
+
+    const agent = workflowAgent(outcome.input);
+    if (
+      !outcome.isError &&
+      agent &&
+      outcome.handleId &&
+      (!outcome.handleStatus || !TERMINAL_HANDLE_STATES.has(outcome.handleStatus))
+    ) {
       this.stateBySession.set(outcome.sessionId, {
-        kind: "required",
+        kind: "delegated",
         turnId: state.turnId,
         userTask: state.userTask,
-        requiredAgents: nextRequiredAgents,
+        requiredAgents: state.requiredAgents,
+        agent,
+        handleId: outcome.handleId,
       });
       this.emit({
-        boundary: "workflow_gate.required",
+        boundary: "workflow_gate.delegated",
         sessionId: outcome.sessionId,
         turnId: state.turnId,
-        requiredAgents: nextRequiredAgents,
-        taskMatchRequired: false,
-        reason: "authority-advanced",
+        agent,
+        handleId: outcome.handleId,
+        handleStatus: outcome.handleStatus,
+        reason: "background-spawn-admitted",
       });
       return;
     }
 
-    this.stateBySession.delete(outcome.sessionId);
-    this.emit({
-      boundary: "workflow_gate.fulfilled",
-      sessionId: outcome.sessionId,
-      turnId: state.turnId,
-      agent: workflowAgent(outcome.input),
-    });
+    reconcileAuthority(state, "spawn-terminal", agent);
   }
 
   clearSession(sessionId: string): void {
