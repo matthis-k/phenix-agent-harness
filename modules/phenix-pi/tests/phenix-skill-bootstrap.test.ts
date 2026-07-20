@@ -21,7 +21,7 @@ describe("Phenix root prompt bootstrap", () => {
 
     assert.match(bootstrapped, /Phenix workflow nodes, legal transitions/);
     assert.match(bootstrapped, /turn-scoped runtime gate/i);
-    assert.match(bootstrapped, /SKILL\.md files may be read locally/i);
+    assert.match(bootstrapped, /Required `?SKILL\.md`? files may be read locally/i);
     assert.match(bootstrapped, /harness preparation are not delegated tasks/i);
     assert.match(bootstrapped, /bounded task\s+derived from the user's request/i);
     assert.match(bootstrapped, /first substantive execution action/i);
