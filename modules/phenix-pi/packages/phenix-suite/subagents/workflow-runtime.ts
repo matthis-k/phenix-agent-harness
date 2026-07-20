@@ -78,6 +78,37 @@ function failure(message: string, details?: Record<string, unknown>): WorkflowSp
   return { ok: false, message, ...(details ? { details } : {}) };
 }
 
+function uniqueRequirements(requirements: readonly string[]): readonly string[] {
+  return [...new Set(requirements.map((item) => item.trim()).filter(Boolean))];
+}
+
+function resolveAssignment(input: {
+  readonly request: WorkflowSpawnRequest;
+  readonly snapshot: WorkflowAuthoritySnapshot;
+  readonly option: WorkflowAuthoritySnapshot["workflow"]["options"][number];
+}): { readonly task: string; readonly requirements: readonly string[] } {
+  const requestedRequirements = input.request.requirements ?? [];
+  const userTask = input.request.userTask?.trim();
+  const isRequiredRoot =
+    input.snapshot.source === "root" && input.option.category === "required" && Boolean(userTask);
+
+  if (!isRequiredRoot || !userTask) {
+    return {
+      task: input.request.task,
+      requirements: uniqueRequirements(requestedRequirements),
+    };
+  }
+
+  return {
+    task: `${input.option.description}\n\nComplete the full user request:\n${userTask}`,
+    requirements: uniqueRequirements([
+      ...requestedRequirements,
+      "Complete the entire user request, not only setup, discovery, or one intermediate command.",
+      "Follow the applicable repository instructions and skills, and return the complete contract result.",
+    ]),
+  };
+}
+
 async function spawnTargetAgent(input: {
   readonly request: WorkflowSpawnRequest;
   readonly snapshot: WorkflowAuthoritySnapshot;
@@ -125,11 +156,12 @@ async function spawnTargetAgent(input: {
     );
   }
 
+  const assignment = resolveAssignment({ request: input.request, snapshot: input.snapshot, option });
   const execution = await input.delegator.delegate({
     params: {
       transitionId: option.transitionId,
-      task: input.request.task,
-      ...(input.request.requirements ? { requirements: input.request.requirements } : {}),
+      task: assignment.task,
+      ...(assignment.requirements.length > 0 ? { requirements: assignment.requirements } : {}),
       ...(input.request.mode ? { mode: input.request.mode } : {}),
       workflowRevision: input.snapshot.workflow.revision,
       authorityDigest: input.snapshot.workflow.optionsDigest,
