@@ -47,7 +47,7 @@ const BASE_PRESET: RolePreset = {
   agentName: "phenix.base",
   tools: COMMON_READ_TOOLS,
   allowedChildren: [],
-  profileMinimums: {},
+  profileMinimums: { breadth: 2 },
   thinking: {
     low: "low",
     standard: "medium",
