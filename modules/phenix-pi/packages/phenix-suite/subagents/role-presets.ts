@@ -43,6 +43,20 @@ const COMMON_READ_TOOLS: readonly string[] = [
 
 // ── Role presets ────────────────────────────────────────────────────────────
 
+const BASE_PRESET: RolePreset = {
+  agentName: "phenix.base",
+  tools: COMMON_READ_TOOLS,
+  allowedChildren: [],
+  profileMinimums: {},
+  thinking: {
+    low: "low",
+    standard: "medium",
+    high: "high",
+    critical: "high",
+  },
+  criticRequired: false,
+};
+
 const SCOUT_PRESET: RolePreset = {
   agentName: "phenix.scout",
   tools: COMMON_READ_TOOLS,
@@ -151,23 +165,9 @@ const ROLE_PRESETS: Record<AgentKind, RolePreset> = {
   finalizer: FINALIZER_PRESET,
 };
 
-const EMPTY_ROLE_PRESET: RolePreset = {
-  agentName: "phenix.base",
-  tools: [],
-  allowedChildren: [],
-  profileMinimums: {},
-  thinking: {
-    low: "low",
-    standard: "medium",
-    high: "high",
-    critical: "high",
-  },
-  criticRequired: false,
-} as const;
-
 // ── Preset lookup ───────────────────────────────────────────────────────────
 
 export function rolePreset(role: AgentRole): RolePreset {
-  if (role === null) return EMPTY_ROLE_PRESET;
+  if (role === null) return BASE_PRESET;
   return ROLE_PRESETS[role as AgentKind];
 }
