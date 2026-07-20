@@ -83,9 +83,7 @@ function contentBlockFields(block: unknown, index: number): Record<string, unkno
       type,
       length: record.thinking.length,
       sha256: streamTraceHash(record.thinking),
-      ...(streamTraceReasoningEnabled()
-        ? { preview: streamTracePreview(record.thinking) }
-        : {}),
+      ...(streamTraceReasoningEnabled() ? { preview: streamTracePreview(record.thinking) } : {}),
     };
   }
 
@@ -125,7 +123,9 @@ export function streamTraceMessageFields(message: unknown): Record<string, unkno
     ...(typeof record.responseId === "string" ? { responseId: record.responseId } : {}),
     contentBlockCount: content.length,
     contentBlockTypes: content.map((block) =>
-      typeof block === "object" && block !== null && typeof (block as Record<string, unknown>).type === "string"
+      typeof block === "object" &&
+      block !== null &&
+      typeof (block as Record<string, unknown>).type === "string"
         ? (block as Record<string, unknown>).type
         : "unknown",
     ),
