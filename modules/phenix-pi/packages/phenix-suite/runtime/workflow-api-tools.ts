@@ -200,9 +200,7 @@ export function createWorkflowTool(input: {
           params,
           workflow: input.workflow,
           ...(input.parent ? { parent: input.parent } : {}),
-          ...(!input.parent && input.rootUserTask
-            ? { userTask: input.rootUserTask(ctx) }
-            : {}),
+          ...(!input.parent && input.rootUserTask ? { userTask: input.rootUserTask(ctx) } : {}),
           signal,
           ctx,
         });
@@ -275,9 +273,7 @@ export function createDirectSubagentTool(input: {
           ...(input.parent ? { parent: input.parent } : {}),
           agent,
           task: params.task,
-          ...(!input.parent && input.rootUserTask
-            ? { userTask: input.rootUserTask(ctx) }
-            : {}),
+          ...(!input.parent && input.rootUserTask ? { userTask: input.rootUserTask(ctx) } : {}),
           ...(params.requirements !== undefined ? { requirements: params.requirements } : {}),
           ...(params.mode ? { mode: params.mode } : {}),
           signal,
