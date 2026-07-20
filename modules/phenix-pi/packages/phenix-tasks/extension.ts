@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import { PhenixTaskService } from "./core.ts";
+import { createTaskRuntimeFacade } from "./index.ts";
 import { createTaskClientTools, createTaskTools } from "./pi-tools.ts";
 import { taskClientFromEnvironment } from "./transport.ts";
 
@@ -20,7 +20,7 @@ export default async function phenixTasks(pi: ExtensionAPI): Promise<void> {
     return;
   }
 
-  const service = new PhenixTaskService();
+  const service = createTaskRuntimeFacade();
   pi.on("session_start", async (_event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId() ?? "default";
     service.ensureWorkflow({
