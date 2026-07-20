@@ -184,8 +184,8 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
   }
 }
 
-export function createWorkflowTurnGate(input: {
-  readonly trace?: WorkflowTurnGateTrace;
-} = {}): WorkflowTurnGate {
+export function createWorkflowTurnGate(
+  input: { readonly trace?: WorkflowTurnGateTrace } = {},
+): WorkflowTurnGate {
   return new WorkflowTurnGateImpl(input.trace);
 }
