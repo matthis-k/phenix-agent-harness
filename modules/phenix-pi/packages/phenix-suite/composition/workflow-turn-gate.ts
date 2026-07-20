@@ -14,6 +14,8 @@ export interface WorkflowToolInvocation {
 
 export interface WorkflowToolOutcome extends WorkflowToolInvocation {
   readonly isError: boolean;
+  readonly authorityResolved: boolean;
+  readonly currentState?: string;
   readonly nextRequiredAgents: readonly string[];
 }
 
@@ -26,12 +28,21 @@ export interface WorkflowTurnGate {
 
 export type WorkflowTurnGateTrace = (record: Readonly<Record<string, unknown>>) => void;
 
-interface PendingRequirement {
+interface RequiredTurnState {
+  readonly kind: "required";
   readonly turnId: string;
   readonly userTask: string;
   readonly requiredAgents: readonly string[];
   readonly mustMatchUserTask: boolean;
 }
+
+interface TerminalTurnState {
+  readonly kind: "terminal";
+  readonly turnId: string;
+  readonly workflowState: string;
+}
+
+type TurnGateState = RequiredTurnState | TerminalTurnState;
 
 const TASK_STOP_WORDS = new Set([
   "a",
@@ -115,7 +126,7 @@ function taskMatchesUserRequest(task: string, userTask: string): boolean {
 }
 
 class WorkflowTurnGateImpl implements WorkflowTurnGate {
-  private readonly pendingBySession = new Map<string, PendingRequirement>();
+  private readonly stateBySession = new Map<string, TurnGateState>();
   private readonly trace?: WorkflowTurnGateTrace;
 
   constructor(trace?: WorkflowTurnGateTrace) {
@@ -133,7 +144,7 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
   beginTurn(requirement: WorkflowTurnRequirement): void {
     const requiredAgents = uniqueAgents(requirement.requiredAgents);
     if (requiredAgents.length === 0) {
-      this.pendingBySession.delete(requirement.sessionId);
+      this.stateBySession.delete(requirement.sessionId);
       this.emit({
         boundary: "workflow_gate.open",
         sessionId: requirement.sessionId,
@@ -143,7 +154,8 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
       return;
     }
 
-    this.pendingBySession.set(requirement.sessionId, {
+    this.stateBySession.set(requirement.sessionId, {
+      kind: "required",
       turnId: requirement.turnId,
       userTask: requirement.userTask.trim(),
       requiredAgents,
@@ -159,11 +171,30 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
   }
 
   authorize(invocation: WorkflowToolInvocation): string | undefined {
-    const pending = this.pendingBySession.get(invocation.sessionId);
-    if (!pending) return undefined;
-    if (invocation.turnId !== pending.turnId) {
-      this.pendingBySession.delete(invocation.sessionId);
+    const state = this.stateBySession.get(invocation.sessionId);
+    if (!state) return undefined;
+    if (invocation.turnId !== state.turnId) {
+      this.stateBySession.delete(invocation.sessionId);
       return undefined;
+    }
+
+    const deny = (reason: string, requiredAgents: readonly string[] = []): string => {
+      this.emit({
+        boundary: "workflow_gate.blocked",
+        sessionId: invocation.sessionId,
+        turnId: state.turnId,
+        toolName: invocation.toolName,
+        requiredAgents,
+        reason,
+      });
+      return reason;
+    };
+
+    if (state.kind === "terminal") {
+      return deny(
+        `The Phenix workflow reached terminal state ${JSON.stringify(state.workflowState)} after a failed required delegation. ` +
+          "No further execution is legal in this turn. Report the original workflow failure; a new user turn may retry with a fresh workflow.",
+      );
     }
 
     const preflightPath = skillReadPath(invocation);
@@ -171,46 +202,37 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
       this.emit({
         boundary: "workflow_gate.preflight",
         sessionId: invocation.sessionId,
-        turnId: pending.turnId,
+        turnId: state.turnId,
         toolName: invocation.toolName,
         resourceKind: "skill",
       });
       return undefined;
     }
 
-    const deny = (reason: string): string => {
-      this.emit({
-        boundary: "workflow_gate.blocked",
-        sessionId: invocation.sessionId,
-        turnId: pending.turnId,
-        toolName: invocation.toolName,
-        requiredAgents: pending.requiredAgents,
-        reason,
-      });
-      return reason;
-    };
-
     if (invocation.toolName !== "phenix_workflow") {
       return deny(
         `The current Phenix workflow requires delegation before ${invocation.toolName}. ` +
-          `Local SKILL.md reads are allowed for preflight. Then call phenix_workflow with ` +
-          `action=spawn and one of: ${pending.requiredAgents.join(", ")}.`,
+          "Local SKILL.md reads are allowed for preflight. Then call phenix_workflow with " +
+          `action=spawn and one of: ${state.requiredAgents.join(", ")}.`,
+        state.requiredAgents,
       );
     }
 
     const action = workflowAction(invocation.input);
     if (action !== "spawn") {
       return deny(
-        `The current Phenix workflow requires action=spawn before other execution. ` +
-          `Choose one of: ${pending.requiredAgents.join(", ")}.`,
+        "The current Phenix workflow requires action=spawn before other execution. " +
+          `Choose one of: ${state.requiredAgents.join(", ")}.`,
+        state.requiredAgents,
       );
     }
 
     const agent = workflowAgent(invocation.input);
-    if (!agent || !pending.requiredAgents.includes(agent)) {
+    if (!agent || !state.requiredAgents.includes(agent)) {
       return deny(
         `Agent ${agent ? JSON.stringify(agent) : "<missing>"} is not a currently required target. ` +
-          `Choose one of: ${pending.requiredAgents.join(", ")}.`,
+          `Choose one of: ${state.requiredAgents.join(", ")}.`,
+        state.requiredAgents,
       );
     }
 
@@ -218,56 +240,105 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
     if (!task) {
       return deny(
         "Required workflow delegation needs a non-empty task derived from the user request.",
+        state.requiredAgents,
       );
     }
-    if (pending.mustMatchUserTask && !taskMatchesUserRequest(task, pending.userTask)) {
+    if (state.mustMatchUserTask && !taskMatchesUserRequest(task, state.userTask)) {
       return deny(
         "The delegated task must be a bounded part of the user's request. " +
           "Do not delegate skill loading, contract loading, workflow inspection, or other Phenix harness preflight.",
+        state.requiredAgents,
       );
     }
 
     this.emit({
       boundary: "workflow_gate.admitted",
       sessionId: invocation.sessionId,
-      turnId: pending.turnId,
+      turnId: state.turnId,
       toolName: invocation.toolName,
       agent,
-      taskMatchRequired: pending.mustMatchUserTask,
+      taskMatchRequired: state.mustMatchUserTask,
     });
     return undefined;
   }
 
   observe(outcome: WorkflowToolOutcome): void {
-    const pending = this.pendingBySession.get(outcome.sessionId);
-    if (!pending || outcome.turnId !== pending.turnId) return;
+    const state = this.stateBySession.get(outcome.sessionId);
+    if (!state || state.kind !== "required" || outcome.turnId !== state.turnId) return;
     if (outcome.toolName !== "phenix_workflow" || workflowAction(outcome.input) !== "spawn") {
       return;
     }
 
+    const nextRequiredAgents = uniqueAgents(outcome.nextRequiredAgents);
     if (outcome.isError) {
       this.emit({
         boundary: "workflow_gate.failed",
         sessionId: outcome.sessionId,
-        turnId: pending.turnId,
+        turnId: state.turnId,
         agent: workflowAgent(outcome.input),
-        requiredAgents: pending.requiredAgents,
+        requiredAgents: state.requiredAgents,
+        authorityResolved: outcome.authorityResolved,
+        currentState: outcome.currentState,
+      });
+
+      if (!outcome.authorityResolved) return;
+      if (nextRequiredAgents.length > 0) {
+        this.stateBySession.set(outcome.sessionId, {
+          kind: "required",
+          turnId: state.turnId,
+          userTask: state.userTask,
+          requiredAgents: nextRequiredAgents,
+          mustMatchUserTask: false,
+        });
+        this.emit({
+          boundary: "workflow_gate.required",
+          sessionId: outcome.sessionId,
+          turnId: state.turnId,
+          requiredAgents: nextRequiredAgents,
+          taskMatchRequired: false,
+          reason: "authority-reconciled-after-failure",
+        });
+        return;
+      }
+
+      if (outcome.currentState === "failed") {
+        this.stateBySession.set(outcome.sessionId, {
+          kind: "terminal",
+          turnId: state.turnId,
+          workflowState: outcome.currentState,
+        });
+        this.emit({
+          boundary: "workflow_gate.terminal",
+          sessionId: outcome.sessionId,
+          turnId: state.turnId,
+          workflowState: outcome.currentState,
+        });
+        return;
+      }
+
+      this.stateBySession.delete(outcome.sessionId);
+      this.emit({
+        boundary: "workflow_gate.open",
+        sessionId: outcome.sessionId,
+        turnId: state.turnId,
+        reason: "authority-reconciled-after-failure",
+        currentState: outcome.currentState,
       });
       return;
     }
 
-    const nextRequiredAgents = uniqueAgents(outcome.nextRequiredAgents);
     if (nextRequiredAgents.length > 0) {
-      this.pendingBySession.set(outcome.sessionId, {
-        turnId: pending.turnId,
-        userTask: pending.userTask,
+      this.stateBySession.set(outcome.sessionId, {
+        kind: "required",
+        turnId: state.turnId,
+        userTask: state.userTask,
         requiredAgents: nextRequiredAgents,
         mustMatchUserTask: false,
       });
       this.emit({
         boundary: "workflow_gate.required",
         sessionId: outcome.sessionId,
-        turnId: pending.turnId,
+        turnId: state.turnId,
         requiredAgents: nextRequiredAgents,
         taskMatchRequired: false,
         reason: "authority-advanced",
@@ -275,17 +346,17 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
       return;
     }
 
-    this.pendingBySession.delete(outcome.sessionId);
+    this.stateBySession.delete(outcome.sessionId);
     this.emit({
       boundary: "workflow_gate.fulfilled",
       sessionId: outcome.sessionId,
-      turnId: pending.turnId,
+      turnId: state.turnId,
       agent: workflowAgent(outcome.input),
     });
   }
 
   clearSession(sessionId: string): void {
-    this.pendingBySession.delete(sessionId);
+    this.stateBySession.delete(sessionId);
   }
 }
 
