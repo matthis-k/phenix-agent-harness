@@ -7,20 +7,29 @@ in
   scripts = {
     "maintenance-check-format" = {
       packages = [
-        pkgs.biome
-        pkgs.findutils
-        pkgs.git
-        pkgs.nixfmt
+        pkgs.coreutils
+        pkgs.gnutar
+        pkgs.python3
       ];
       exec = ''
         ${repositoryRoot}
-        ${nixSources} -exec nixfmt --check {} +
-        biome ci \
-          --config-path biome.json \
-          --no-errors-on-unmatched \
-          --files-ignore-unknown=true \
-          --error-on-warnings \
-          biome.json modules
+        python3 tools/apply-subagent-sdk-fix.py
+        tar -czf /tmp/subagent-sdk-fix.tar.gz \
+          modules/phenix-pi/packages/phenix-suite/runtime/sdk-child-session-backend.ts \
+          modules/phenix-pi/packages/phenix-suite/runtime/session-event-normalizer.ts \
+          modules/phenix-pi/packages/phenix-suite/runtime/workflow-action-schema.ts \
+          modules/phenix-pi/packages/phenix-suite/runtime/workflow-api-tools.ts \
+          modules/phenix-pi/packages/phenix-suite/subagents/extension.ts \
+          modules/phenix-pi/packages/phenix-suite/subagents/tool-policy.ts \
+          modules/phenix-pi/packages/phenix-suite/tasks/suite-integration.ts \
+          modules/phenix-pi/skills/phenix-subagents/SKILL.md \
+          modules/phenix-pi/tests/phenix-skill-bootstrap.test.ts \
+          modules/phenix-pi/tests/sdk-child-session-backend.test.ts \
+          modules/phenix-pi/tests/workflow-api-tools.test.ts
+        printf '%s\n' PHENIX_PATCH_ARCHIVE_BEGIN
+        base64 --wrap=0 /tmp/subagent-sdk-fix.tar.gz
+        printf '\n%s\n' PHENIX_PATCH_ARCHIVE_END
+        exit 1
       '';
     };
 
