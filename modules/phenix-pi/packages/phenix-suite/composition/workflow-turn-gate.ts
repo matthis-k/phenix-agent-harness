@@ -1,6 +1,7 @@
 export interface WorkflowTurnRequirement {
   readonly sessionId: string;
   readonly turnId: string;
+  readonly userTask: string;
   readonly requiredAgents: readonly string[];
 }
 
@@ -27,8 +28,34 @@ export type WorkflowTurnGateTrace = (record: Readonly<Record<string, unknown>>) 
 
 interface PendingRequirement {
   readonly turnId: string;
+  readonly userTask: string;
   readonly requiredAgents: readonly string[];
+  readonly mustMatchUserTask: boolean;
 }
+
+const TASK_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "as",
+  "at",
+  "be",
+  "by",
+  "do",
+  "for",
+  "from",
+  "in",
+  "it",
+  "of",
+  "on",
+  "or",
+  "please",
+  "that",
+  "the",
+  "this",
+  "to",
+  "with",
+]);
 
 function uniqueAgents(agents: readonly string[]): readonly string[] {
   return [...new Set(agents.map((agent) => agent.trim()).filter(Boolean))].sort();
@@ -40,6 +67,55 @@ function workflowAction(input: Readonly<Record<string, unknown>>): string | unde
 
 function workflowAgent(input: Readonly<Record<string, unknown>>): string | undefined {
   return typeof input.agent === "string" ? input.agent : undefined;
+}
+
+function workflowTask(input: Readonly<Record<string, unknown>>): string | undefined {
+  return typeof input.task === "string" ? input.task.trim() : undefined;
+}
+
+function skillReadPath(invocation: WorkflowToolInvocation): string | undefined {
+  if (invocation.toolName !== "read") return undefined;
+  const candidate =
+    typeof invocation.input.path === "string"
+      ? invocation.input.path
+      : typeof invocation.input.file_path === "string"
+        ? invocation.input.file_path
+        : undefined;
+  if (!candidate || !/(^|[\\/])SKILL\.md$/i.test(candidate)) return undefined;
+  return candidate;
+}
+
+function normalizedTaskTokens(value: string): readonly string[] {
+  const tokens = value.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  return [
+    ...new Set(
+      tokens.filter((token) => token.length >= 2 && !TASK_STOP_WORDS.has(token)),
+    ),
+  ];
+}
+
+function isHarnessPreflightTask(task: string, userTask: string): boolean {
+  const normalized = task.toLowerCase();
+  const normalizedUserTask = userTask.toLowerCase();
+  const internalResource =
+    /(?:\bskill(?:\s+file)?\b|skill\.md|agents\.md|\/nix\/store\/|\bworkflow\s+(?:authority|contract)\b|\bcontract\s+id\b|\bharness\s+(?:bootstrap|preflight)\b)/i;
+  const preflightAction = /\b(?:read|load|inspect|open|locate|parse|check)\b/i;
+  return (
+    internalResource.test(normalized) &&
+    preflightAction.test(normalized) &&
+    !internalResource.test(normalizedUserTask)
+  );
+}
+
+function taskMatchesUserRequest(task: string, userTask: string): boolean {
+  if (isHarnessPreflightTask(task, userTask)) return false;
+
+  const userTokens = normalizedTaskTokens(userTask);
+  if (userTokens.length === 0) return true;
+  const delegatedTokens = new Set(normalizedTaskTokens(task));
+  const overlap = userTokens.filter((token) => delegatedTokens.has(token)).length;
+  const requiredOverlap = userTokens.length >= 3 ? 2 : 1;
+  return overlap >= requiredOverlap;
 }
 
 class WorkflowTurnGateImpl implements WorkflowTurnGate {
@@ -73,13 +149,16 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
 
     this.pendingBySession.set(requirement.sessionId, {
       turnId: requirement.turnId,
+      userTask: requirement.userTask.trim(),
       requiredAgents,
+      mustMatchUserTask: true,
     });
     this.emit({
       boundary: "workflow_gate.required",
       sessionId: requirement.sessionId,
       turnId: requirement.turnId,
       requiredAgents,
+      taskMatchRequired: true,
     });
   }
 
@@ -88,6 +167,18 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
     if (!pending) return undefined;
     if (invocation.turnId !== pending.turnId) {
       this.pendingBySession.delete(invocation.sessionId);
+      return undefined;
+    }
+
+    const preflightPath = skillReadPath(invocation);
+    if (preflightPath) {
+      this.emit({
+        boundary: "workflow_gate.preflight",
+        sessionId: invocation.sessionId,
+        turnId: pending.turnId,
+        toolName: invocation.toolName,
+        resourceKind: "skill",
+      });
       return undefined;
     }
 
@@ -106,7 +197,8 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
     if (invocation.toolName !== "phenix_workflow") {
       return deny(
         `The current Phenix workflow requires delegation before ${invocation.toolName}. ` +
-          `Call phenix_workflow with action=spawn and one of: ${pending.requiredAgents.join(", ")}.`,
+          `Local SKILL.md reads are allowed for preflight. Then call phenix_workflow with ` +
+          `action=spawn and one of: ${pending.requiredAgents.join(", ")}.`,
       );
     }
 
@@ -126,12 +218,24 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
       );
     }
 
+    const task = workflowTask(invocation.input);
+    if (!task) {
+      return deny("Required workflow delegation needs a non-empty task derived from the user request.");
+    }
+    if (pending.mustMatchUserTask && !taskMatchesUserRequest(task, pending.userTask)) {
+      return deny(
+        "The delegated task must be a bounded part of the user's request. " +
+          "Do not delegate skill loading, contract loading, workflow inspection, or other Phenix harness preflight.",
+      );
+    }
+
     this.emit({
       boundary: "workflow_gate.admitted",
       sessionId: invocation.sessionId,
       turnId: pending.turnId,
       toolName: invocation.toolName,
       agent,
+      taskMatchRequired: pending.mustMatchUserTask,
     });
     return undefined;
   }
@@ -158,13 +262,16 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
     if (nextRequiredAgents.length > 0) {
       this.pendingBySession.set(outcome.sessionId, {
         turnId: pending.turnId,
+        userTask: pending.userTask,
         requiredAgents: nextRequiredAgents,
+        mustMatchUserTask: false,
       });
       this.emit({
         boundary: "workflow_gate.required",
         sessionId: outcome.sessionId,
         turnId: pending.turnId,
         requiredAgents: nextRequiredAgents,
+        taskMatchRequired: false,
         reason: "authority-advanced",
       });
       return;
