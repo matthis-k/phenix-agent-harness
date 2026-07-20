@@ -1,4 +1,4 @@
-name: Apply final facade architecture
+name: Diagnose final facade architecture
 
 on:
   pull_request:
@@ -8,35 +8,31 @@ permissions:
   contents: write
 
 jobs:
-  apply:
+  diagnose:
     if: github.head_ref == 'fix/subagent-tools-task-tree'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
           ref: fix/subagent-tools-task-tree
           fetch-depth: 0
           show-progress: false
-      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
-      - name: Apply facade patch and clean staging
+      - name: Capture exact patch failure
         run: |
-          set -euo pipefail
+          set -uo pipefail
           cat tools/final-patch/part1-* > /tmp/part1.py
           cat tools/final-patch/part2-* > /tmp/part2.py
           cat tools/final-patch/part3-* > /tmp/part3.py
           cat tools/final-patch/part4-* > /tmp/part4.py
-          python3 /tmp/part1.py
-          python3 /tmp/part2.py
-          python3 /tmp/part3.py
-          python3 /tmp/part4.py
-          nix profile add nixpkgs#devenv
-          devenv tasks run maintenance:fix
-          git checkout origin/main -- .github/workflows/ci.yml maintenance.nix
-          rm -rf tools/final-patch
-          rmdir tools 2>/dev/null || true
+          : > tools/final-patch/error.log
+          status=0
+          for script in /tmp/part1.py /tmp/part2.py /tmp/part3.py /tmp/part4.py; do
+            printf '\n=== %s ===\n' "$script" >> tools/final-patch/error.log
+            python3 "$script" >> tools/final-patch/error.log 2>&1 || { status=$?; break; }
+          done
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git commit -m "feat: expose facade-bound task logs and subagents"
+          git add tools/final-patch/error.log
+          git commit -m "ci: capture facade patch failure"
           git push origin HEAD:fix/subagent-tools-task-tree
+          exit "$status"
