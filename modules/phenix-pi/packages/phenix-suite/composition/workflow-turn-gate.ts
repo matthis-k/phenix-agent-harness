@@ -44,14 +44,25 @@ function workflowAgent(input: Readonly<Record<string, unknown>>): string | undef
 
 class WorkflowTurnGateImpl implements WorkflowTurnGate {
   private readonly pendingBySession = new Map<string, PendingRequirement>();
+  private readonly trace?: WorkflowTurnGateTrace;
 
-  constructor(private readonly trace?: WorkflowTurnGateTrace) {}
+  constructor(trace?: WorkflowTurnGateTrace) {
+    this.trace = trace;
+  }
+
+  private emit(record: Readonly<Record<string, unknown>>): void {
+    try {
+      this.trace?.(record);
+    } catch {
+      // Diagnostics must never alter workflow authorization or execution.
+    }
+  }
 
   beginTurn(requirement: WorkflowTurnRequirement): void {
     const requiredAgents = uniqueAgents(requirement.requiredAgents);
     if (requiredAgents.length === 0) {
       this.pendingBySession.delete(requirement.sessionId);
-      this.trace?.({
+      this.emit({
         boundary: "workflow_gate.open",
         sessionId: requirement.sessionId,
         turnId: requirement.turnId,
@@ -64,7 +75,7 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
       turnId: requirement.turnId,
       requiredAgents,
     });
-    this.trace?.({
+    this.emit({
       boundary: "workflow_gate.required",
       sessionId: requirement.sessionId,
       turnId: requirement.turnId,
@@ -81,7 +92,7 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
     }
 
     const deny = (reason: string): string => {
-      this.trace?.({
+      this.emit({
         boundary: "workflow_gate.blocked",
         sessionId: invocation.sessionId,
         turnId: pending.turnId,
@@ -115,7 +126,7 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
       );
     }
 
-    this.trace?.({
+    this.emit({
       boundary: "workflow_gate.admitted",
       sessionId: invocation.sessionId,
       turnId: pending.turnId,
@@ -133,7 +144,7 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
     }
 
     if (outcome.isError) {
-      this.trace?.({
+      this.emit({
         boundary: "workflow_gate.failed",
         sessionId: outcome.sessionId,
         turnId: pending.turnId,
@@ -149,7 +160,7 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
         turnId: pending.turnId,
         requiredAgents: nextRequiredAgents,
       });
-      this.trace?.({
+      this.emit({
         boundary: "workflow_gate.required",
         sessionId: outcome.sessionId,
         turnId: pending.turnId,
@@ -160,7 +171,7 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
     }
 
     this.pendingBySession.delete(outcome.sessionId);
-    this.trace?.({
+    this.emit({
       boundary: "workflow_gate.fulfilled",
       sessionId: outcome.sessionId,
       turnId: pending.turnId,
