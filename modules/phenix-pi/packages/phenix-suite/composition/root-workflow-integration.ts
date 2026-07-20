@@ -21,6 +21,7 @@ import { getSessionRuntime } from "@matthis-k/phenix-routing/state.ts";
 import { listRecords } from "../subagents/handle-store.ts";
 import { phenixRootModelScope } from "./model-scope.ts";
 import { prepareRootWorkflowEntry } from "./root-workflow-entry.ts";
+import type { WorkflowTurnGate } from "./workflow-turn-gate.ts";
 
 async function initializeRootWorkflow(input: {
   readonly cwd: string;
@@ -44,12 +45,22 @@ async function initializeRootWorkflow(input: {
 
 export interface RootWorkflowIntegrationOptions {
   readonly workflowDefinitionId: string;
+  readonly workflowGate: WorkflowTurnGate;
+}
+
+function requiredAgents(
+  projection: ReturnType<typeof buildRootWorkflowProjection>,
+): readonly string[] {
+  if (!projection) return [];
+  return projection.options
+    .filter((option) => option.category === "required")
+    .map((option) => option.agent);
 }
 
 /** Register deterministic root routing and workflow authority bootstrap. */
 export default async function rootWorkflowIntegration(
   pi: ExtensionAPI,
-  options: RootWorkflowIntegrationOptions = { workflowDefinitionId: "phenix-default" },
+  options: RootWorkflowIntegrationOptions,
 ): Promise<void> {
   const config = loadRoutingConfig();
   const startupErrors = validateConfig(config).filter(
@@ -142,7 +153,7 @@ export default async function rootWorkflowIntegration(
     });
 
     // Resolve and inject the initial legal target-agent set before model
-    // inference. The model never asks for or echoes workflow state.
+    // inference. Required transitions are enforced by the shared turn gate.
     const dependencies = buildWorkflowRuntimeDependencies({
       cwd,
       sessionId,
@@ -155,13 +166,25 @@ export default async function rootWorkflowIntegration(
       authority: dependencies.authority,
       activeHandles: dependencies.activeHandles,
     });
+    const required = requiredAgents(workflowProjection);
+    options.workflowGate.beginTurn({
+      sessionId,
+      turnId: turn.turnId,
+      requiredAgents: required,
+    });
 
     let workflowGuidance = "## Phenix Workflow Orchestration\n\n";
     workflowGuidance += `You are running with a Phenix model set (${runtime.modelSet}). `;
     workflowGuidance +=
       "The deterministic Phenix workflow owns the current node, transition selection, role selection, output schemas, models, tools, and delegation depth. ";
-    workflowGuidance +=
-      "Your legal target agents have already been resolved and are listed below. Use phenix_workflow with action=spawn, one advertised agent, and a bounded task when an isolated child can absorb substantial intermediate context that you will not need for your remaining work, or when independent execution materially improves evidence, planning, implementation, testing, or review. Prefer delegation for broad reconnaissance that can be compressed into relevant files, symbols, constraints, and uncertainties, and for mechanical execution of an already-settled plan. Keep decision-critical source inspection and reasoning in this session when their details are required for architecture, integration, acceptance, or final synthesis. Do not delegate trivial work or work you would need to repeat after the handoff.\n\n";
+    if (required.length > 0) {
+      workflowGuidance +=
+        `This node has required workflow transitions. Before any repository read, shell command, MCP call, task mutation, or other execution tool, call phenix_workflow with action=spawn and one required target agent: ${required.join(", ")}. ` +
+        "The runtime blocks other tool calls until the required workflow action succeeds and re-evaluates authority after every successful spawn.\n\n";
+    } else {
+      workflowGuidance +=
+        "No required target transition is currently pending. Optional delegation remains available when it materially reduces isolated context.\n\n";
+    }
     workflowGuidance += workflowProjection
       ? formatWorkflowProjection(workflowProjection)
       : "Workflow authority could not be projected; complete the task directly.\n";
