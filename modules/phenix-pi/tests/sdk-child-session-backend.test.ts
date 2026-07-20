@@ -5,17 +5,18 @@ import type {
   AgentSessionEvent,
   DefaultResourceLoader,
   ModelRegistry,
+  ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
+import {
+  type ChildSessionSpec,
+  childRunId,
+} from "@matthis-k/phenix-suite/runtime/child-session-types.ts";
 import {
   type PiSessionFactory,
   type PiSessionLike,
   type PreparedPiSessionSpec,
   SdkChildSessionBackend,
 } from "@matthis-k/phenix-suite/runtime/sdk-child-session-backend.ts";
-import {
-  type ChildSessionSpec,
-  childRunId,
-} from "@matthis-k/phenix-suite/runtime/child-session-types.ts";
 
 class RecordingSession implements PiSessionLike {
   readonly sessionId = "pi-child";
@@ -89,9 +90,11 @@ function childSpec(): ChildSessionSpec {
 }
 
 describe("SdkChildSessionBackend", () => {
-  it("passes the captured root model registry into the child Pi session", async () => {
+  it("passes the captured root model runtime into the child Pi session", async () => {
     const concreteModel = { provider: "test-provider", id: "test-model" };
+    const modelRuntime = {} as ModelRuntime;
     const registry = {
+      runtime: modelRuntime,
       find(provider: string, id: string) {
         return provider === concreteModel.provider && id === concreteModel.id
           ? concreteModel
@@ -108,13 +111,14 @@ describe("SdkChildSessionBackend", () => {
 
     const run = await backend.start(childSpec(), new AbortController().signal);
 
-    assert.equal(factory.spec?.modelRegistry, registry);
+    assert.equal(factory.spec?.modelRuntime, modelRuntime);
     assert.equal(factory.spec?.model, concreteModel);
     await run.dispose();
   });
 
   it("preserves provider diagnostics when Pi later rejects an accepted prompt", async () => {
     const registry = {
+      runtime: {} as ModelRuntime,
       find() {
         return { provider: "test-provider", id: "test-model" };
       },

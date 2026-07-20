@@ -86,7 +86,7 @@ export function normalizeWorkflowRequirements(
     return requirements.length > 0 ? requirements : [];
   };
 
-  if (Array.isArray(value)) return normalize(value);
+  if (typeof value !== "string") return normalize(value);
 
   const encoded = value.trim();
   if (encoded.startsWith("[")) {

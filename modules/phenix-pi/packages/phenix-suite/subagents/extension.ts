@@ -46,15 +46,10 @@ function toolResult(record: HandleRecord): AgentToolResult<Record<string, unknow
   };
 }
 
-function errorResult(
-  message: string,
-  details?: Record<string, unknown>,
-): AgentToolResult<Record<string, unknown>> {
-  return {
-    content: [{ type: "text", text: message }],
-    isError: true,
-    details: details ?? { status: "failed" },
-  };
+function errorResult(message: string, details?: Record<string, unknown>): never {
+  const error = new Error(message) as Error & { details?: Record<string, unknown> };
+  error.details = details ?? { status: "failed" };
+  throw error;
 }
 
 export default async function phenixSubagents(

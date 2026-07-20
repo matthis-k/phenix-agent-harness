@@ -8,6 +8,7 @@ import {
   createWorkflowApiTools,
   createWorkflowTool,
   projectWorkflowInspection,
+  WorkflowToolError,
 } from "@matthis-k/phenix-suite/runtime/workflow-api-tools.ts";
 import type {
   WorkflowAuthoritySnapshot,
@@ -86,6 +87,17 @@ async function execute(
   return tool.execute("call-1", params as never, signal, undefined, ctx);
 }
 
+async function assertToolFailure(
+  promise: Promise<unknown>,
+  expectedDetails: Record<string, unknown>,
+): Promise<void> {
+  await assert.rejects(promise, (error: unknown) => {
+    assert.ok(error instanceof WorkflowToolError);
+    assert.deepEqual(error.details, expectedDetails);
+    return true;
+  });
+}
+
 describe("contract-bound workflow target-agent tools", () => {
   it("projects the authority snapshot without exposing transition identities", () => {
     const response = projectWorkflowInspection(snapshot());
@@ -141,18 +153,16 @@ describe("contract-bound workflow target-agent tools", () => {
       authorize: ({ tool: toolName }) => `${toolName} is outside this root model scope.`,
     });
 
-    const response = await execute(tool, {
-      action: "spawn",
-      agent: "scout",
-      task: "Inspect something.",
-    });
+    await assertToolFailure(
+      execute(tool, {
+        action: "spawn",
+        agent: "scout",
+        task: "Inspect something.",
+      }),
+      { status: "forbidden", tool: "phenix_workflow" },
+    );
 
     assert.equal(workflow.spawnCalls.length, 0);
-    assert.equal(response.isError, true);
-    assert.deepEqual(response.details, {
-      status: "forbidden",
-      tool: "phenix_workflow",
-    });
   });
 
   it("passes only target intent and assignment to the runtime", async () => {
@@ -201,10 +211,7 @@ describe("contract-bound workflow target-agent tools", () => {
       requirements: '["Return evidence", "Do not edit"]',
     });
 
-    assert.deepEqual(workflow.spawnCalls[0]?.requirements, [
-      "Return evidence",
-      "Do not edit",
-    ]);
+    assert.deepEqual(workflow.spawnCalls[0]?.requirements, ["Return evidence", "Do not edit"]);
   });
 
   it("marks backend authority failures as tool errors", async () => {
@@ -219,36 +226,39 @@ describe("contract-bound workflow target-agent tools", () => {
     };
     const tool = createWorkflowTool({ workflow });
 
-    const response = await execute(tool, {
-      action: "spawn",
-      agent: "scout",
-      task: "Inspect something.",
-    });
+    await assertToolFailure(
+      execute(tool, {
+        action: "spawn",
+        agent: "scout",
+        task: "Inspect something.",
+      }),
+      {
+        code: "WORKFLOW_AGENT_NOT_AVAILABLE",
+        currentNodeId: "reviewing",
+      },
+    );
 
     assert.equal(workflow.spawnCalls.length, 1);
-    assert.equal(response.isError, true);
-    assert.equal(response.details?.code, "WORKFLOW_AGENT_NOT_AVAILABLE");
-    assert.equal(response.details?.currentNodeId, "reviewing");
   });
 
   it("denies the direct tool unless current authority enables it", async () => {
     const workflow = new RecordingWorkflow();
     const tool = createDirectSubagentTool({ workflow });
 
-    const response = await execute(tool, { task: "Inspect directly." });
+    workflow.authority = {
+      ...workflow.authority,
+      workflow: { ...workflow.authority.workflow, options: [] },
+    };
+    await assertToolFailure(execute(tool, { task: "Inspect directly." }), {
+      code: "DIRECT_SUBAGENT_NOT_DETERMINISTIC",
+      availableAgents: [],
+    });
 
     assert.equal(workflow.spawnCalls.length, 0);
-    assert.equal(response.isError, true);
-    assert.equal(response.details?.code, "DIRECT_SUBAGENT_NOT_AUTHORIZED");
-    assert.deepEqual(response.details?.availableAgents, ["scout"]);
   });
 
   it("directly spawns the sole legal target when explicitly authorized", async () => {
     const workflow = new RecordingWorkflow();
-    workflow.authority = {
-      ...workflow.authority,
-      effectiveTools: [...workflow.authority.effectiveTools, "phenix_subagent"],
-    };
     const tool = createDirectSubagentTool({ workflow });
 
     const response = await execute(tool, {
@@ -256,7 +266,6 @@ describe("contract-bound workflow target-agent tools", () => {
       requirements: "Return evidence.",
     });
 
-    assert.equal(response.isError, undefined);
     assert.equal(workflow.spawnCalls[0]?.agent, "scout");
     assert.deepEqual(workflow.spawnCalls[0]?.requirements, ["Return evidence."]);
   });

@@ -30,6 +30,7 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   type ModelRegistry,
+  type ModelRuntime,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -76,6 +77,17 @@ function abortErrorFromSignal(signal: AbortSignal, fallbackMessage: string): Chi
   );
 }
 
+function modelRuntimeFromRegistry(registry: ModelRegistry): ModelRuntime {
+  const runtime = (registry as unknown as { readonly runtime?: ModelRuntime }).runtime;
+  if (!runtime) {
+    throw new ChildRuntimeError(
+      "SESSION_START_FAILED",
+      "The active Pi model runtime is unavailable to the child-session adapter.",
+    );
+  }
+  return runtime;
+}
+
 // ── PiSessionLike — injectable session interface for testing ────────────────
 
 export interface PromptOptions {
@@ -104,7 +116,7 @@ export interface PiSessionLike {
 export interface PreparedPiSessionSpec {
   readonly cwd: string;
   readonly model: Model<any>;
-  readonly modelRegistry: ModelRegistry;
+  readonly modelRuntime: ModelRuntime;
   readonly agentDir: string;
   readonly thinkingLevel: ThinkingLevel;
   readonly tools: readonly string[];
@@ -133,7 +145,7 @@ export class ProductionPiSessionFactory implements PiSessionFactory {
     const { session } = await createAgentSession({
       cwd: spec.cwd,
       model: spec.model,
-      modelRegistry: spec.modelRegistry,
+      modelRuntime: spec.modelRuntime,
       agentDir: spec.agentDir,
       thinkingLevel: spec.thinkingLevel,
       tools: [...spec.tools],
@@ -425,15 +437,14 @@ class SdkChildRun implements ChildRun {
         if (!preflightSeen) accept();
       },
       (error) => {
-  const providerMessage = this.lastProviderFailure?.message;
-  const message =
-    providerMessage ?? (error instanceof Error ? error.message : String(error));
-  const providerError = new ChildRuntimeError("PROVIDER_FAILED", message, {
-    cause: error,
-  });
-  if (!preflightSeen) reject(providerError);
-  void this.failAndAbort(providerError);
-},
+        const providerMessage = this.lastProviderFailure?.message;
+        const message = providerMessage ?? (error instanceof Error ? error.message : String(error));
+        const providerError = new ChildRuntimeError("PROVIDER_FAILED", message, {
+          cause: error,
+        });
+        if (!preflightSeen) reject(providerError);
+        void this.failAndAbort(providerError);
+      },
     );
 
     await accepted;
@@ -690,7 +701,7 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
     const preparedSpec: PreparedPiSessionSpec = {
       cwd: spec.cwd,
       model,
-      modelRegistry,
+      modelRuntime: modelRuntimeFromRegistry(modelRegistry),
       agentDir: this.services.agentDir,
       thinkingLevel: spec.thinkingLevel,
       tools: toolNames,
@@ -760,8 +771,23 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
  * to a child.
  */
 export function buildEffectiveToolNames(spec: ChildSessionSpec): readonly string[] {
-  const runtimeTools = new Set(["subagent", "phenix_complete", "phenix_tasks", "phenix_workflow"]);
+  const runtimeTools = new Set([
+    "subagent",
+    "phenix_complete",
+    "phenix_subagent",
+    "phenix_tasks",
+    "phenix_workflow",
+  ]);
   const baseTools = spec.effectiveTools.filter((tool) => !runtimeTools.has(tool));
+  const directSubagent = spec.workflowProjection.options.length === 1 ? ["phenix_subagent"] : [];
 
-  return [...new Set([...baseTools, "phenix_complete", "phenix_tasks", "phenix_workflow"])].sort();
+  return [
+    ...new Set([
+      ...baseTools,
+      "phenix_complete",
+      ...directSubagent,
+      "phenix_tasks",
+      "phenix_workflow",
+    ]),
+  ].sort();
 }

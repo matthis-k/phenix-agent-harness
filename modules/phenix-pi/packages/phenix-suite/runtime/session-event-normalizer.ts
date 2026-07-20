@@ -1,10 +1,6 @@
 /** Normalize Pi session events into the runtime-neutral child event stream. */
 
-import type {
-  ChildRunId,
-  ChildSessionEvent,
-  SerializedError,
-} from "./child-session-types.ts";
+import type { ChildRunId, ChildSessionEvent, SerializedError } from "./child-session-types.ts";
 
 interface PiAgentEvent {
   readonly type: string;

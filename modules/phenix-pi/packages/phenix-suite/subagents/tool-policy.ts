@@ -27,7 +27,13 @@ export interface ResolvedToolConfiguration {
 // ── Constants ───────────────────────────────────────────────────────────────
 
 /** Tool names whose availability is owned exclusively by the runtime. */
-const RUNTIME_TOOLS = new Set(["subagent", "phenix_complete", "phenix_tasks", "phenix_workflow"]);
+const RUNTIME_TOOLS = new Set([
+  "subagent",
+  "phenix_complete",
+  "phenix_subagent",
+  "phenix_tasks",
+  "phenix_workflow",
+]);
 const CHILD_RUNTIME_TOOLS = ["phenix_complete", "phenix_tasks", "phenix_workflow"] as const;
 
 const EMPTY_TOOL_PATCH: ToolPatch = {

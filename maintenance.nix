@@ -7,31 +7,20 @@ in
   scripts = {
     "maintenance-check-format" = {
       packages = [
-        pkgs.coreutils
-        pkgs.gnutar
-        pkgs.python3
+        pkgs.biome
+        pkgs.findutils
+        pkgs.git
+        pkgs.nixfmt
       ];
       exec = ''
         ${repositoryRoot}
-        set +e
-        python3 tools/apply-subagent-sdk-fix.py >/tmp/subagent-sdk-fix.log 2>&1
-        set -e
-        tar -czf /tmp/subagent-sdk-fix.tar.gz \
-          modules/phenix-pi/packages/phenix-suite/runtime/sdk-child-session-backend.ts \
-          modules/phenix-pi/packages/phenix-suite/runtime/session-event-normalizer.ts \
-          modules/phenix-pi/packages/phenix-suite/runtime/workflow-action-schema.ts \
-          modules/phenix-pi/packages/phenix-suite/runtime/workflow-api-tools.ts \
-          modules/phenix-pi/packages/phenix-suite/subagents/extension.ts \
-          modules/phenix-pi/packages/phenix-suite/subagents/tool-policy.ts \
-          modules/phenix-pi/packages/phenix-suite/tasks/suite-integration.ts \
-          modules/phenix-pi/skills/phenix-subagents/SKILL.md \
-          modules/phenix-pi/tests/phenix-skill-bootstrap.test.ts \
-          modules/phenix-pi/tests/sdk-child-session-backend.test.ts \
-          modules/phenix-pi/tests/workflow-api-tools.test.ts \
-          -C /tmp subagent-sdk-fix.log
-        rm -f devenv-test.log
-        cp /tmp/subagent-sdk-fix.tar.gz devenv-test.log
-        exit 1
+        ${nixSources} -exec nixfmt --check {} +
+        biome ci \
+          --config-path biome.json \
+          --no-errors-on-unmatched \
+          --files-ignore-unknown=true \
+          --error-on-warnings \
+          biome.json modules
       '';
     };
 

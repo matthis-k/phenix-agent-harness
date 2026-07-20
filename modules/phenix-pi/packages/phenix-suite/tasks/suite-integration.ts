@@ -43,8 +43,7 @@ function stateGlyph(state: TaskState): string {
 }
 
 function assignmentSuffix(task: TaskNode): string {
-  const owner =
-    task.completedBySessionId ?? task.startedBySessionId ?? task.assignedSessionId;
+  const owner = task.completedBySessionId ?? task.startedBySessionId ?? task.assignedSessionId;
   return owner ? ` · @${owner.slice(0, 8)}` : "";
 }
 
@@ -61,11 +60,7 @@ export function renderTaskTree(
   const body: string[] = [];
   let omitted = 0;
 
-  const visit = (
-    task: TaskNode,
-    prefix: string,
-    connector: "" | "├─ " | "└─ ",
-  ): void => {
+  const visit = (task: TaskNode, prefix: string, connector: "" | "├─ " | "└─ "): void => {
     if (body.length >= Math.max(1, maximumLines - 1)) {
       omitted += 1;
       return;

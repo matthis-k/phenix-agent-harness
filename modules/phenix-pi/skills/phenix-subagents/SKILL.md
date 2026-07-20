@@ -29,7 +29,7 @@ Use the primary `phenix_workflow` interface with:
 - a bounded `task`, with optional requirements and execution mode.
 
 `phenix_subagent` is an optional convenience tool. Use it only when the current
-authority explicitly lists it in `effectiveTools`. It still executes through the
+workflow node advertises exactly one legal target. It still executes through the
 workflow runtime and never bypasses contracts, routing, task ownership, or
 verification. Raw `subagent` remains unmanaged and is blocked in Phenix sessions.
 
