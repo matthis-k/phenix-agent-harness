@@ -16,25 +16,29 @@ current workflow node. Required `SKILL.md` files may be read locally before
 spawning. Skill loading, contract loading, workflow inspection, and other Phenix
 harness preparation are not delegated tasks. When authority includes required
 transitions, a turn-scoped runtime gate blocks repository execution until
-`phenix_workflow` successfully spawns one required target with a bounded task
-derived from the user's request. After each successful spawn, the runtime
-resolves authority again and enforces the next required transition, if any.
+`phenix_workflow` is called with one required target. For required root
+transitions, the model-provided `task` is only a focus hint: the runtime builds
+the child assignment from the transition purpose and the complete user request.
+After every spawn result, the runtime resolves authority again and either
+enforces the next required transition or records a terminal workflow failure.
 
 When the user explicitly asks to use subagents, delegation, or the Phenix
 workflow, do not silently continue as a single agent. After local skill preflight,
 your first substantive execution action must use `phenix_workflow` to spawn an
-advertised target for part or all of the user's actual task. Use `action:
-"inspect"` only when no required transition is pending and a prior workflow
-action may have changed optional authority. If spawning fails, surface the exact
-runtime/provider error and do not claim subagents were used.
+advertised target for the user's actual task. Use `action: "inspect"` only when
+no required transition is pending and a prior workflow action may have changed
+optional authority. If spawning fails, surface the exact runtime/provider error
+and do not claim subagents were used. A terminal failed workflow does not permit
+further execution in the same turn; report the failure and retry from a new user
+turn.
 
 Do not send a node or transition ID back to the runtime. Use the primary
 `phenix_workflow` interface with:
 
 - `action: "spawn"`;
 - one advertised target `agent`;
-- a bounded `task` directly tied to the user request, with optional requirements
-  and execution mode.
+- a concise `task` focus tied to the user request, with optional requirements and
+  execution mode. Required root scope remains owned by the runtime.
 
 `phenix_subagent` is an optional convenience tool. Use it only when the current
 workflow node advertises exactly one legal target. It still executes through the
@@ -44,7 +48,8 @@ verification. Raw `subagent` remains unmanaged and is blocked in Phenix sessions
 The runtime derives the current node from the active root session or child
 contract, resolves fresh authority, maps the requested target agent to the unique
 legal transition, then derives the child role, model, thinking level, output
-schema, tools, budgets, verification, critic gates, and owned task subtree.
+schema, tools, budgets, verification, critic gates, assignment, and owned task
+subtree.
 
 Use `phenix_tasks` to keep that subtree synchronized with actual execution. Add
 bounded child tasks before independent work, mark a task `wip` when beginning it,

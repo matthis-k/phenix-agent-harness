@@ -112,6 +112,7 @@ export default async function rootWorkflowIntegration(
     runtime.rootTurnCount += 1;
     const turn = createRootTurnInput(event.prompt, sessionId, runtime.rootTurnCount);
     runtime.currentTurnId = turn.turnId;
+    runtime.currentUserTask = turn.userMessage;
 
     const cwd = ctx.cwd;
     const artifact = runtime.capabilityArtifact as AgentCapabilityArtifact | undefined;
@@ -181,8 +182,8 @@ export default async function rootWorkflowIntegration(
     if (required.length > 0) {
       workflowGuidance +=
         `This node has required workflow transitions. You may first read any required SKILL.md files locally. Do not delegate skill loading, contract loading, workflow inspection, or other Phenix harness preparation. ` +
-        `Then call phenix_workflow with action=spawn, one required target agent (${required.join(", ")}), and a bounded task directly derived from the user's request: ${JSON.stringify(turn.userMessage)}. ` +
-        "The runtime blocks repository reads and other execution tools until that required workflow action succeeds, and re-evaluates authority after every successful spawn.\n\n";
+        `Then call phenix_workflow with action=spawn and one required target agent (${required.join(", ")}). The task field may identify a useful focus, but the runtime binds required root execution to the complete user request: ${JSON.stringify(turn.userMessage)}. ` +
+        "The runtime blocks repository reads and other execution tools until that required workflow action succeeds, and re-evaluates authority after every spawn result.\n\n";
     } else {
       workflowGuidance +=
         "No required target transition is currently pending. Optional delegation remains available when it materially reduces isolated context.\n\n";

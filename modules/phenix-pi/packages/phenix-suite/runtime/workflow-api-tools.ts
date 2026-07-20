@@ -30,6 +30,8 @@ export type WorkflowApiToolAuthorizer = (
   input: WorkflowApiToolAuthorizationInput,
 ) => string | undefined;
 
+export type RootUserTaskResolver = (ctx: ExtensionContext) => string | undefined;
+
 function result(payload: Record<string, unknown>): AgentToolResult<Record<string, unknown>> {
   return {
     content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
@@ -109,6 +111,7 @@ async function spawn(input: {
   readonly parent?: ParentExecutionContext;
   readonly agent: string;
   readonly task: string;
+  readonly userTask?: string;
   readonly requirements?: readonly string[] | string;
   readonly mode?: "await" | "background";
   readonly signal: AbortSignal | undefined;
@@ -118,6 +121,7 @@ async function spawn(input: {
   const execution = await input.workflow.spawn({
     agent: input.agent,
     task: input.task,
+    ...(input.userTask ? { userTask: input.userTask } : {}),
     ...(requirements && requirements.length > 0 ? { requirements } : {}),
     ...(input.mode ? { mode: input.mode } : {}),
     ...(input.parent ? { parent: input.parent } : {}),
@@ -136,6 +140,7 @@ async function invokeWorkflowAction(input: {
   readonly params: WorkflowActionParamsType;
   readonly workflow: WorkflowRuntimePort;
   readonly parent?: ParentExecutionContext;
+  readonly userTask?: string;
   readonly signal: AbortSignal | undefined;
   readonly ctx: ExtensionContext;
 }): Promise<AgentToolResult<Record<string, unknown>>> {
@@ -156,6 +161,7 @@ async function invokeWorkflowAction(input: {
         ...(input.parent ? { parent: input.parent } : {}),
         agent: input.params.agent,
         task: input.params.task,
+        ...(input.userTask ? { userTask: input.userTask } : {}),
         ...(input.params.requirements !== undefined
           ? { requirements: input.params.requirements }
           : {}),
@@ -170,6 +176,7 @@ export function createWorkflowTool(input: {
   readonly workflow: WorkflowRuntimePort;
   readonly parent?: ParentExecutionContext;
   readonly authorize?: WorkflowApiToolAuthorizer;
+  readonly rootUserTask?: RootUserTaskResolver;
 }): ToolDefinition<typeof WorkflowActionParams, Record<string, unknown>> {
   return {
     name: PHENIX_WORKFLOW_TOOL,
@@ -177,7 +184,7 @@ export function createWorkflowTool(input: {
     description:
       "Inspect current workflow authority or spawn one advertised target agent. " +
       "Use this whenever the user explicitly requests workflow delegation or subagents. " +
-      "The runtime derives the actor and current node from the active root session or initialized child contract, and owns transition selection, roles, routing, models, tools, child authority, contracts, and state changes.",
+      "The runtime derives the actor and current node from the active root session or initialized child contract, and owns transition selection, roles, routing, models, tools, child authority, contracts, assignments, and state changes.",
     parameters: WorkflowActionParams,
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -193,6 +200,7 @@ export function createWorkflowTool(input: {
           params,
           workflow: input.workflow,
           ...(input.parent ? { parent: input.parent } : {}),
+          ...(!input.parent && input.rootUserTask ? { userTask: input.rootUserTask(ctx) } : {}),
           signal,
           ctx,
         });
@@ -208,6 +216,7 @@ export function createDirectSubagentTool(input: {
   readonly workflow: WorkflowRuntimePort;
   readonly parent?: ParentExecutionContext;
   readonly authorize?: WorkflowApiToolAuthorizer;
+  readonly rootUserTask?: RootUserTaskResolver;
 }): ToolDefinition<typeof DirectSubagentParams, Record<string, unknown>> {
   return {
     name: PHENIX_SUBAGENT_TOOL,
@@ -264,6 +273,7 @@ export function createDirectSubagentTool(input: {
           ...(input.parent ? { parent: input.parent } : {}),
           agent,
           task: params.task,
+          ...(!input.parent && input.rootUserTask ? { userTask: input.rootUserTask(ctx) } : {}),
           ...(params.requirements !== undefined ? { requirements: params.requirements } : {}),
           ...(params.mode ? { mode: params.mode } : {}),
           signal,
@@ -281,6 +291,7 @@ export function createWorkflowApiTools(input: {
   readonly workflow: WorkflowRuntimePort;
   readonly parent?: ParentExecutionContext;
   readonly authorize?: WorkflowApiToolAuthorizer;
+  readonly rootUserTask?: RootUserTaskResolver;
 }): readonly ToolDefinition[] {
   return [
     createWorkflowTool(input) as unknown as ToolDefinition,

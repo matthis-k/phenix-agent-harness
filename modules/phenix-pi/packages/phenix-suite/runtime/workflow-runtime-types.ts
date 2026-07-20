@@ -25,6 +25,7 @@ export interface WorkflowHandleResult {
 export interface WorkflowSpawnRequest {
   readonly agent: string;
   readonly task: string;
+  readonly userTask?: string;
   readonly requirements?: string[];
   readonly mode?: "await" | "background";
   readonly parent?: ParentExecutionContext;
@@ -51,9 +52,10 @@ export type WorkflowSpawnResult =
 /**
  * Authority-bound workflow application service.
  *
- * The model adapter supplies only a target agent and assignment. The runtime
+ * The model adapter supplies only a target agent and optional focus. The runtime
  * derives actor and node state from the active root session or child contract,
- * resolves the unique legal transition for that target, and executes it.
+ * resolves the unique legal transition, canonicalizes required root assignments,
+ * and executes them.
  */
 export interface WorkflowRuntimePort {
   inspect(input: {
