@@ -5,8 +5,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadRoutingConfig } from "./config.ts";
 import {
   getActiveRouteForSession,
-  routerStream,
   type RouterStreamFunction,
+  routerStream,
 } from "./stream-proxy.ts";
 import {
   createStreamTraceContext,
