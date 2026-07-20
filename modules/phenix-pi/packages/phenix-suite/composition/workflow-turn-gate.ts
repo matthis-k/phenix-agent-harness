@@ -87,11 +87,7 @@ function skillReadPath(invocation: WorkflowToolInvocation): string | undefined {
 
 function normalizedTaskTokens(value: string): readonly string[] {
   const tokens = value.toLowerCase().match(/[a-z0-9]+/g) ?? [];
-  return [
-    ...new Set(
-      tokens.filter((token) => token.length >= 2 && !TASK_STOP_WORDS.has(token)),
-    ),
-  ];
+  return [...new Set(tokens.filter((token) => token.length >= 2 && !TASK_STOP_WORDS.has(token)))];
 }
 
 function isHarnessPreflightTask(task: string, userTask: string): boolean {
@@ -220,7 +216,9 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
 
     const task = workflowTask(invocation.input);
     if (!task) {
-      return deny("Required workflow delegation needs a non-empty task derived from the user request.");
+      return deny(
+        "Required workflow delegation needs a non-empty task derived from the user request.",
+      );
     }
     if (pending.mustMatchUserTask && !taskMatchesUserRequest(task, pending.userTask)) {
       return deny(
