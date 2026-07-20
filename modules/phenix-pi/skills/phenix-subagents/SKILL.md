@@ -1,6 +1,6 @@
 ---
 name: phenix-subagents
-description: Use whenever the user explicitly requests Phenix workflows, delegation, or subagents; also use for bounded isolated work that materially reduces context.
+description: Use whenever the user explicitly requests Phenix workflows, delegation, or subagents. Also use for bounded isolated work that materially reduces context.
 ---
 
 # Phenix workflow
