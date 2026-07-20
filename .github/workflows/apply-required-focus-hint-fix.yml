@@ -37,7 +37,9 @@ jobs:
       - name: Apply source patch
         run: |
           python scripts/apply-required-focus-hint-fix.py
+          python scripts/remove-residual-task-match-field.py
           rm scripts/apply-required-focus-hint-fix.py
+          rm scripts/remove-residual-task-match-field.py
           rm .github/workflows/apply-required-focus-hint-fix.yml
           devenv tasks run maintenance:fix
       - name: Run repository maintenance
