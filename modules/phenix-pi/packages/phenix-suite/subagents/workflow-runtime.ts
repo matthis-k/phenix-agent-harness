@@ -138,9 +138,7 @@ async function spawnTargetAgent(input: {
     params: {
       transitionId: option.transitionId,
       task: assignment.task,
-      ...(assignment.requirements.length > 0
-        ? { requirements: [...assignment.requirements] }
-        : {}),
+      ...(assignment.requirements.length > 0 ? { requirements: [...assignment.requirements] } : {}),
       ...(input.request.mode ? { mode: input.request.mode } : {}),
       workflowRevision: input.snapshot.workflow.revision,
       authorityDigest: input.snapshot.workflow.optionsDigest,
