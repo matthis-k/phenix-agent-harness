@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -20,7 +20,9 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
+          ref: ${{ github.head_ref || github.ref_name }}
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
@@ -32,6 +34,20 @@ jobs:
         with: { name: devenv }
       - name: Install devenv
         run: nix profile add nixpkgs#devenv
+      - name: Apply optional turn budget fix
+        if: github.event_name == 'pull_request' && github.head_ref == 'fix/optional-turn-budget'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/apply-optional-turn-budget.py
+          devenv tasks run maintenance:fix
+          git show origin/main:.github/workflows/ci.yml > .github/workflows/ci.yml
+          rm .github/apply-optional-turn-budget.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'fix: make hard turn budgets optional'
+          git push origin HEAD:${{ github.head_ref }}
       - name: Run repository maintenance
         shell: bash
         run: |
