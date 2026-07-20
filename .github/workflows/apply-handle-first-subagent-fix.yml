@@ -23,7 +23,7 @@ jobs:
           ref: fix/handle-first-subagent-collection
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+      - uses: cachix/install-nix-action@a49548c11d98431cddfb8368fd83d5badbf9bfd # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
           extra_nix_config: |
@@ -36,7 +36,9 @@ jobs:
         run: nix profile add nixpkgs#devenv
       - name: Apply source patch
         run: |
+          python scripts/fix-handle-stager.py
           python scripts/apply-handle-first-subagent-fix.py
+          rm scripts/fix-handle-stager.py
           rm scripts/apply-handle-first-subagent-fix.py
           rm .github/workflows/apply-handle-first-subagent-fix.yml
           nix fmt
