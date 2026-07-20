@@ -27,8 +27,8 @@ jobs:
           start = next(index for index, line in enumerate(source) if line.strip() == 'run: |') + 1
           script = '\n'.join(line[10:] if line.startswith('          ') else line for line in source[start:])
           script = script.replace(
-              '                  raise SystemExit(f"pattern not found in {path}: {old[:80]!r}")',
-              '                  print(f"warning: pattern not found in {path}: {old[:80]!r}")\n                  return',
+              'raise SystemExit(f"pattern not found in {path}: {old[:80]!r}")',
+              'print(f"warning: pattern not found in {path}: {old[:80]!r}")\n        return',
           )
           Path('/tmp/implement-subagent-tools.sh').write_text(script + '\n')
           PY
