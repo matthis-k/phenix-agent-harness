@@ -32,7 +32,7 @@ function turnEndEvent(): ChildSessionEvent {
 describe("BudgetGuard", () => {
   it("soft tool limit emits one warning", () => {
     const guard = new BudgetGuard({
-      turnBudget: { maxTurns: 100, graceTurns: 0 },
+      turnBudget: {},
       toolBudget: { soft: 3, hard: 10, block: [] },
       timeoutMs: 0,
     });
@@ -52,7 +52,7 @@ describe("BudgetGuard", () => {
 
   it("hard tool limit aborts with TOOL_BUDGET_EXCEEDED", () => {
     const guard = new BudgetGuard({
-      turnBudget: { maxTurns: 100, graceTurns: 0 },
+      turnBudget: {},
       toolBudget: { soft: 2, hard: 3, block: [] },
       timeoutMs: 0,
     });
@@ -63,6 +63,19 @@ describe("BudgetGuard", () => {
     const result = guard.observe(toolStartedEvent("t4"));
     assert.ok(result.violation);
     assert.equal(result.violation.code, "TOOL_BUDGET_EXCEEDED");
+  });
+
+  it("does not impose a turn limit when maxTurns is omitted", () => {
+    const guard = new BudgetGuard({
+      turnBudget: {},
+      toolBudget: { soft: 100, hard: 100, block: [] },
+      timeoutMs: 0,
+    });
+
+    for (let index = 0; index < 200; index++) {
+      assert.equal(guard.observe(turnEndEvent()).violation, undefined);
+    }
+    assert.equal(guard.getTurns(), 200);
   });
 
   it("turn limit aborts with TURN_BUDGET_EXCEEDED", () => {
@@ -85,7 +98,7 @@ describe("BudgetGuard", () => {
 
   it("timeout aborts with TIMEOUT", () => {
     const guard = new BudgetGuard({
-      turnBudget: { maxTurns: 100, graceTurns: 0 },
+      turnBudget: {},
       toolBudget: { soft: 100, hard: 100, block: [] },
       timeoutMs: 1, // 1ms — will expire immediately
     });
@@ -103,7 +116,7 @@ describe("BudgetGuard", () => {
 
   it("budget violations are distinguishable", () => {
     const toolGuard = new BudgetGuard({
-      turnBudget: { maxTurns: 100, graceTurns: 0 },
+      turnBudget: {},
       toolBudget: { soft: 1, hard: 1, block: [] },
       timeoutMs: 0,
     });
@@ -127,7 +140,7 @@ describe("BudgetGuard", () => {
 
   it("checkTimeout returns violation after timeout", () => {
     const guard = new BudgetGuard({
-      turnBudget: { maxTurns: 100, graceTurns: 0 },
+      turnBudget: {},
       toolBudget: { soft: 100, hard: 100, block: [] },
       timeoutMs: 1,
     });
