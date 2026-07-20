@@ -21,6 +21,20 @@ workflow_path.write_text(
 '''
 if text.count(old) != 2:
     raise RuntimeError(f"expected two staged actorRoles replacements, found {text.count(old)}")
-# Replace the first block with one exact two-occurrence source edit and remove the duplicate block.
 text = text.replace(old, new, 1).replace(old, "", 1)
+
+anchor = '''replace_once(
+    "modules/phenix-pi/packages/phenix-suite/defaults/workflow.ts",
+    """  WorkflowOutputSchemaId,
+'''
+addition = '''replace_once(
+    "modules/phenix-pi/packages/phenix-suite/defaults/workflow.ts",
+    'function actorClientRefs(roles: ReadonlyArray<"coordinator" | AgentKind>) {',
+    "function actorClientRefs(roles: readonly WorkflowActorRole[]) {",
+)
+
+'''
+if text.count(anchor) != 1:
+    raise RuntimeError(f"workflow import anchor count was {text.count(anchor)}")
+text = text.replace(anchor, addition + anchor, 1)
 path.write_text(text)
