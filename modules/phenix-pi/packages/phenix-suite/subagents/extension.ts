@@ -78,7 +78,9 @@ export default async function phenixSubagents(
 
   pi.on("tool_result", async (event, ctx) => {
     if (!phenixRootModelScope.includes(ctx.model)) return;
-    if (event.toolName !== "phenix_workflow" || event.input.action !== "spawn") return;
+    const isWorkflowSpawn = event.toolName === "phenix_workflow" && event.input.action === "spawn";
+    const isHandleLifecycle = event.toolName === "phenix_agent";
+    if (!isWorkflowSpawn && !isHandleLifecycle) return;
 
     const id = sessionId(ctx);
     let isError = event.isError;
@@ -96,6 +98,19 @@ export default async function phenixSubagents(
       if (!isError) isError = true;
     }
 
+    const rawDetails = (event as { readonly details?: unknown }).details;
+    const details =
+      typeof rawDetails === "object" && rawDetails !== null && !Array.isArray(rawDetails)
+        ? (rawDetails as Readonly<Record<string, unknown>>)
+        : {};
+    const resultHandleId =
+      typeof details.handleId === "string"
+        ? details.handleId
+        : typeof details.id === "string"
+          ? details.id
+          : undefined;
+    const handleStatus = typeof details.status === "string" ? details.status : undefined;
+
     options.workflowGate.observe({
       sessionId: id,
       turnId: getSessionRuntime(id).currentTurnId,
@@ -105,6 +120,8 @@ export default async function phenixSubagents(
       authorityResolved,
       ...(currentState ? { currentState } : {}),
       nextRequiredAgents,
+      ...(resultHandleId ? { handleId: resultHandleId } : {}),
+      ...(handleStatus ? { handleStatus } : {}),
     });
   });
 

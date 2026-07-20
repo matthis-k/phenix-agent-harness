@@ -75,6 +75,29 @@ describe("Workflow definitions", () => {
     }
   });
 
+  it("allows a base child to isolate QA concerns in specialist subsessions", () => {
+    const expected = [
+      ["base.request-scout", "scout"],
+      ["base.request-tester", "tester"],
+      ["base.request-architect", "architect"],
+      ["base.request-critic", "critic"],
+    ] as const;
+
+    for (const [id, role] of expected) {
+      const transition = PHENIX_DEFAULT_WORKFLOW.transitions.find(
+        (candidate) => candidate.id === id,
+      );
+      assert.ok(transition, `${id} exists`);
+      assert.equal(transition.kind, "delegate");
+      if (transition.kind === "delegate") {
+        assert.equal(transition.scope, "child");
+        assert.ok(transition.actorRoles.includes("base"));
+        assert.equal(transition.agentClient.id, role);
+        assert.ok(transition.from.includes("executing"));
+      }
+    }
+  });
+
   it("has child-local nested transitions", () => {
     const childTransitions = PHENIX_DEFAULT_WORKFLOW.transitions.filter(
       (t) => t.kind === "delegate" && t.scope === "child",

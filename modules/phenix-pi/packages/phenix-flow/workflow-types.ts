@@ -23,6 +23,8 @@ export const mkTransitionId = workflowTransitionId;
 
 export type WorkflowStateId = string;
 
+export type WorkflowActorRole = "base" | "coordinator" | AgentKind;
+
 // ── Delegation purposes ─────────────────────────────────────────────────────
 
 export type DelegationPurpose =
@@ -98,7 +100,7 @@ export interface DelegateTransition extends TransitionBase {
 
   readonly scope: "root" | "child" | "both";
 
-  readonly actorRoles: ReadonlyArray<"coordinator" | AgentKind>;
+  readonly actorRoles: readonly WorkflowActorRole[];
 
   /** Agent clients authorized to start this transition. */
   readonly actorClients: readonly AgentClientRef[];
@@ -177,7 +179,7 @@ export function roleForAgentClient(ref: AgentClientRef): AgentRole {
 }
 
 /** Convert a linked agent client into the workflow actor vocabulary. */
-export function actorRoleForAgentClient(ref: AgentClientRef): "base" | "coordinator" | AgentKind {
+export function actorRoleForAgentClient(ref: AgentClientRef): WorkflowActorRole {
   if (ref.id === "base") return "base";
   if (ref.id === "coordinator") return "coordinator";
   if (isAgentKind(ref.id)) return ref.id;
@@ -221,7 +223,7 @@ export interface WorkflowRuntimeRecord {
   readonly difficulty: Difficulty;
   readonly taskProfile: TaskProfile;
 
-  readonly actorRole: "coordinator" | AgentKind | "base";
+  readonly actorRole: WorkflowActorRole;
 
   state: WorkflowStateId;
   revision: number;
