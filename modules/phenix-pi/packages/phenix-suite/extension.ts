@@ -30,7 +30,7 @@ import {
   buildRoutingConfigFromDeclarations,
   configureRoutingConfig,
 } from "@matthis-k/phenix-routing/config.ts";
-import { PhenixTaskService } from "@matthis-k/phenix-tasks/index.ts";
+import { createTaskRuntimeFacade } from "@matthis-k/phenix-tasks/index.ts";
 import { createTaskTools } from "@matthis-k/phenix-tasks/pi-tools.ts";
 import { link } from "./composition/linker.ts";
 import { loadPhenixSuiteConfiguration } from "./config-loader.ts";
@@ -45,6 +45,7 @@ import { createWorkflowApiTools } from "./runtime/workflow-api-tools.ts";
 import type { WorkflowRuntimePort } from "./runtime/workflow-runtime-types.ts";
 import { createExecutionQualityService } from "./subagents/execution-quality-service.ts";
 import phenixSubagents from "./subagents/extension.ts";
+import { createPhenixSubagentFacade } from "./subagents/facade.ts";
 import {
   createManagedDelegationRuntime,
   type ManagedDelegationRuntime,
@@ -279,7 +280,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
     return { modelRegistry: capturedModelRegistry, agentDir };
   };
 
-  const taskService = new PhenixTaskService();
+  const taskService = createTaskRuntimeFacade();
   const taskHost = createTaskServiceHost(taskService);
   let taskBridge!: TaskWorkflowBridge;
   let delegator!: WorkflowDelegator;
@@ -348,7 +349,9 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
 
   registerSuiteTasks({ pi, service: taskService });
   await loadIntegration("phenix-subagents", pi, async (api) => {
-    await phenixSubagents(api, { delegator, workflow: workflowRuntime });
+    await phenixSubagents(api, {
+      facade: createPhenixSubagentFacade({ delegator, workflow: workflowRuntime }),
+    });
   });
   registerTuiProjection(pi, delegationRuntime);
   registerShutdown(pi, delegationRuntime, () => taskHost.close());

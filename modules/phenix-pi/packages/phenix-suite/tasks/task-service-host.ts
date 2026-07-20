@@ -3,9 +3,9 @@ import os from "node:os";
 import path from "node:path";
 
 import {
-  type PhenixTaskService,
   startTaskRpcServer,
   type TaskRpcServer,
+  type TaskRuntimeFacade,
 } from "@matthis-k/phenix-tasks/index.ts";
 
 export interface TaskServiceHost {
@@ -14,7 +14,7 @@ export interface TaskServiceHost {
 }
 
 /** Lazily hosts the suite task authority on a private local Unix socket. */
-export function createTaskServiceHost(service: PhenixTaskService): TaskServiceHost {
+export function createTaskServiceHost(service: TaskRuntimeFacade): TaskServiceHost {
   let directory: string | undefined;
   let serverPromise: Promise<TaskRpcServer> | undefined;
 

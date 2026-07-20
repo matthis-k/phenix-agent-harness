@@ -2,6 +2,15 @@ import { randomBytes, randomUUID } from "node:crypto";
 
 export type TaskState = "not_started" | "wip" | "done";
 
+export interface TaskLogEntry {
+  readonly sequence: number;
+  readonly taskId: string;
+  readonly actorId: string;
+  readonly sessionId: string;
+  readonly message: string;
+  readonly timestamp: string;
+}
+
 export interface TaskRecord {
   readonly id: string;
   readonly workflowId: string;
@@ -47,6 +56,7 @@ export type TaskEventKind =
   | "task.completed"
   | "task.delegated"
   | "task.claimed"
+  | "task.logged"
   | "task.failed";
 
 export interface TaskEvent {
@@ -136,7 +146,9 @@ export class PhenixTaskService {
   private readonly authorityByActor = new Map<string, string>();
   private readonly pendingByKey = new Map<string, PendingDelegation[]>();
   private readonly listeners = new Set<(event: TaskEvent) => void>();
+  private readonly taskLogs = new Map<string, TaskLogEntry[]>();
   private sequence = 0;
+  private logSequence = 0;
 
   subscribe(listener: (event: TaskEvent) => void): () => void {
     this.listeners.add(listener);
@@ -324,6 +336,38 @@ export class PhenixTaskService {
           : "task.updated";
     this.emit(kind, authority, updated);
     return updated;
+  }
+
+  appendLog(
+    authorityToken: string,
+    input: { readonly taskId: string; readonly message: string },
+  ): TaskLogEntry {
+    const authority = this.requireAuthority(authorityToken);
+    const task = this.requireTask(input.taskId);
+    this.assertOwned(authority, task.id);
+    const message = input.message.trim().replace(/\s+/g, " ");
+    if (!message) throw new Error("Phenix task progress update cannot be empty.");
+    if (message.length > 500) {
+      throw new Error("Phenix task progress updates are limited to 500 characters.");
+    }
+    const entry: TaskLogEntry = {
+      sequence: ++this.logSequence,
+      taskId: task.id,
+      actorId: authority.actorId,
+      sessionId: authority.sessionId,
+      message,
+      timestamp: now(),
+    };
+    const entries = this.taskLogs.get(task.id) ?? [];
+    entries.push(entry);
+    this.taskLogs.set(task.id, entries);
+    this.emit("task.logged", authority, task);
+    return entry;
+  }
+
+  logsForTask(taskId: string): readonly TaskLogEntry[] {
+    this.requireTask(taskId);
+    return [...(this.taskLogs.get(taskId) ?? [])];
   }
 
   prepareDelegation(

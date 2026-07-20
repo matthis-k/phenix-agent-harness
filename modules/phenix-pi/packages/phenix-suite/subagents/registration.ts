@@ -1,8 +1,6 @@
-import type { WorkflowRuntimePort } from "../runtime/workflow-runtime-types.ts";
-import type { WorkflowDelegator } from "./workflow-delegator.ts";
+import type { PhenixSubagentFacade } from "./facade.ts";
 
-/** Passive inputs required by the Pi subagent registration implementation. */
+/** Public registration dependency; concrete delegation/store internals stay behind the facade. */
 export interface PhenixSubagentsOptions {
-  readonly delegator: WorkflowDelegator;
-  readonly workflow: WorkflowRuntimePort;
+  readonly facade: PhenixSubagentFacade;
 }

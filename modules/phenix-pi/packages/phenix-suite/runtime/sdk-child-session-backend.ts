@@ -18,6 +18,8 @@
  */
 
 /* biome-ignore-all lint/suspicious/noExplicitAny: Pi SDK compatibility adapter. */
+import path from "node:path";
+
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai/compat";
 import type {
@@ -30,6 +32,7 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   type ModelRegistry,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -56,7 +59,11 @@ import type {
 } from "./child-session-types.ts";
 import { ChildRuntimeError, serializeError } from "./child-session-types.ts";
 import { createCompletionTool } from "./completion-tool.ts";
-import { isFailureEvent, normalizePiEvent } from "./session-event-normalizer.ts";
+import {
+  isFailureEvent,
+  normalizePiEvent,
+  providerFailureFromPiEvent,
+} from "./session-event-normalizer.ts";
 
 function abortErrorFromSignal(signal: AbortSignal, fallbackMessage: string): ChildRuntimeError {
   const reason = signal.reason;
@@ -70,6 +77,21 @@ function abortErrorFromSignal(signal: AbortSignal, fallbackMessage: string): Chi
         ? reason
         : fallbackMessage,
   );
+}
+
+async function createChildModelRuntime(
+  registry: ModelRegistry,
+  agentDir: string,
+): Promise<ModelRuntime> {
+  const runtime = await ModelRuntime.create({
+    authPath: path.join(agentDir, "auth.json"),
+    modelsPath: path.join(agentDir, "models.json"),
+  });
+  for (const providerId of registry.getRegisteredProviderIds()) {
+    const configuration = registry.getRegisteredProviderConfig(providerId);
+    if (configuration) runtime.registerProvider(providerId, configuration);
+  }
+  return runtime;
 }
 
 // ── PiSessionLike — injectable session interface for testing ────────────────
@@ -100,6 +122,7 @@ export interface PiSessionLike {
 export interface PreparedPiSessionSpec {
   readonly cwd: string;
   readonly model: Model<any>;
+  readonly modelRuntime: ModelRuntime;
   readonly agentDir: string;
   readonly thinkingLevel: ThinkingLevel;
   readonly tools: readonly string[];
@@ -128,6 +151,7 @@ export class ProductionPiSessionFactory implements PiSessionFactory {
     const { session } = await createAgentSession({
       cwd: spec.cwd,
       model: spec.model,
+      modelRuntime: spec.modelRuntime,
       agentDir: spec.agentDir,
       thinkingLevel: spec.thinkingLevel,
       tools: [...spec.tools],
@@ -224,6 +248,7 @@ class SdkChildRun implements ChildRun {
   private unsub: (() => void) | undefined;
   private readonly boundSignals = new WeakSet<AbortSignal>();
   private lastAssistantText: string | undefined;
+  private lastProviderFailure: SerializedError | undefined;
 
   constructor(session: PiSessionLike, spec: ChildSessionSpec, budgetGuard: BudgetGuard) {
     this.session = session;
@@ -265,8 +290,10 @@ class SdkChildRun implements ChildRun {
     }
 
     if (isFailureEvent(raw as unknown as { type: string })) {
-      if (this.currentCycle) {
-        this.currentCycle.error = serializeError(raw);
+      const failure = providerFailureFromPiEvent(raw as unknown as { type: string });
+      if (failure) {
+        this.lastProviderFailure = failure;
+        if (this.currentCycle) this.currentCycle.error = failure;
       }
     }
 
@@ -292,6 +319,7 @@ class SdkChildRun implements ChildRun {
     }
 
     this.status = "running";
+    this.lastProviderFailure = undefined;
     this.cycle++;
     let resolve!: (outcome: ChildCycleOutcome) => void;
     const promise = new Promise<ChildCycleOutcome>((r) => {
@@ -415,14 +443,13 @@ class SdkChildRun implements ChildRun {
         if (!preflightSeen) accept();
       },
       (error) => {
-        if (!preflightSeen) reject(error);
-        void this.failAndAbort(
-          new ChildRuntimeError(
-            "PROVIDER_FAILED",
-            error instanceof Error ? error.message : String(error),
-            { cause: error },
-          ),
-        );
+        const providerMessage = this.lastProviderFailure?.message;
+        const message = providerMessage ?? (error instanceof Error ? error.message : String(error));
+        const providerError = new ChildRuntimeError("PROVIDER_FAILED", message, {
+          cause: error,
+        });
+        if (!preflightSeen) reject(providerError);
+        void this.failAndAbort(providerError);
       },
     );
 
@@ -595,6 +622,10 @@ class SdkChildRun implements ChildRun {
 export interface SdkChildSessionBackendOptions {
   readonly services: PiRuntimeServices;
   readonly sessionFactory?: PiSessionFactory;
+  readonly createModelRuntime?: (
+    registry: ModelRegistry,
+    agentDir: string,
+  ) => Promise<ModelRuntime>;
   readonly buildCustomTools?: (spec: ChildSessionSpec) => readonly ToolDefinition[];
   readonly buildResourceLoader?: (
     spec: ChildSessionSpec,
@@ -615,6 +646,10 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
 
   private readonly services: PiRuntimeServices;
   private readonly sessionFactory: PiSessionFactory;
+  private readonly createModelRuntimeFn: (
+    registry: ModelRegistry,
+    agentDir: string,
+  ) => Promise<ModelRuntime>;
   private readonly buildCustomToolsFn:
     | ((spec: ChildSessionSpec) => readonly ToolDefinition[])
     | undefined;
@@ -626,6 +661,7 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
   constructor(options: SdkChildSessionBackendOptions) {
     this.services = options.services;
     this.sessionFactory = options.sessionFactory ?? new ProductionPiSessionFactory();
+    this.createModelRuntimeFn = options.createModelRuntime ?? createChildModelRuntime;
     this.buildCustomToolsFn = options.buildCustomTools;
     this.buildResourceLoaderFn = options.buildResourceLoader;
     this.buildSystemPromptFn = options.buildSystemPrompt;
@@ -680,6 +716,7 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
     const preparedSpec: PreparedPiSessionSpec = {
       cwd: spec.cwd,
       model,
+      modelRuntime: await this.createModelRuntimeFn(modelRegistry, this.services.agentDir),
       agentDir: this.services.agentDir,
       thinkingLevel: spec.thinkingLevel,
       tools: toolNames,
@@ -749,8 +786,23 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
  * to a child.
  */
 export function buildEffectiveToolNames(spec: ChildSessionSpec): readonly string[] {
-  const runtimeTools = new Set(["subagent", "phenix_complete", "phenix_tasks", "phenix_workflow"]);
+  const runtimeTools = new Set([
+    "subagent",
+    "phenix_complete",
+    "phenix_subagent",
+    "phenix_tasks",
+    "phenix_workflow",
+  ]);
   const baseTools = spec.effectiveTools.filter((tool) => !runtimeTools.has(tool));
+  const directSubagent = spec.workflowProjection.options.length === 1 ? ["phenix_subagent"] : [];
 
-  return [...new Set([...baseTools, "phenix_complete", "phenix_tasks", "phenix_workflow"])].sort();
+  return [
+    ...new Set([
+      ...baseTools,
+      "phenix_complete",
+      ...directSubagent,
+      "phenix_tasks",
+      "phenix_workflow",
+    ]),
+  ].sort();
 }

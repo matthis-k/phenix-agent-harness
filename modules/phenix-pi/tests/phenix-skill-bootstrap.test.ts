@@ -20,7 +20,8 @@ describe("Phenix root prompt bootstrap", () => {
     const bootstrapped = bootstrapPhenixSubagentsSkillPrompt("base prompt");
 
     assert.match(bootstrapped, /Phenix workflow nodes, legal transitions/);
-    assert.match(bootstrapped, /mandatory initial\s+authority inspection/i);
+    assert.match(bootstrapped, /first substantive\s+execution action/i);
+    assert.match(bootstrapped, /phenix_subagent/);
     assert.match(bootstrapped, /one advertised target `agent`/);
     assert.match(bootstrapped, /unique\s+legal transition/i);
     assert.match(bootstrapped, /action: "spawn"/);

@@ -1,7 +1,6 @@
 ---
 name: phenix-subagents
-description: Use the deterministic Phenix workflow, shared task tree, and contract-owned isolated subagents.
-disable-model-invocation: true
+description: Use whenever the user explicitly requests Phenix workflows, delegation, or subagents. Also use for bounded isolated work that materially reduces context.
 ---
 
 # Phenix workflow
@@ -11,17 +10,28 @@ delegation depth, role authority, output schemas, model routing, verification,
 critics, repair limits, and task-subtree ownership are owned by the TypeScript
 runtime.
 
+When the user explicitly asks to use subagents, delegation, or the Phenix
+workflow, do not silently continue as a single agent. Your first substantive
+execution action must use `phenix_workflow` to spawn an advertised target.
+Use `action: "inspect"` first only when the current authority was not injected
+or a prior workflow action may have changed it. If spawning fails, surface the
+exact runtime/provider error and do not claim subagents were used.
+
 Before the model starts, the runtime resolves the current root-session or child-
 contract authority and injects the target agents that may be spawned from the
-current workflow node into the system prompt. This is the mandatory initial
-authority inspection. Do not call a listing operation and do not send a node or
-transition ID back to the runtime.
+current workflow node into the system prompt. Do not send a node or transition
+ID back to the runtime.
 
-Use the single `phenix_workflow` interface with:
+Use the primary `phenix_workflow` interface with:
 
 - `action: "spawn"`;
 - one advertised target `agent`;
 - a bounded `task`, with optional requirements and execution mode.
+
+`phenix_subagent` is an optional convenience tool. Use it only when the current
+workflow node advertises exactly one legal target. It still executes through the
+workflow runtime and never bypasses contracts, routing, task ownership, or
+verification. Raw `subagent` remains unmanaged and is blocked in Phenix sessions.
 
 The runtime derives the current node from the active root session or child
 contract, resolves fresh authority, maps the requested target agent to the unique
@@ -33,7 +43,7 @@ bounded child tasks before independent work, mark a task `wip` when beginning it
 and mark it `done` immediately after completion and verification. Do not use the
 tree as a narrative log. A child may update its assigned task and descendants,
 but cannot update ancestors or sibling subtrees. Spawning a child automatically
-creates and assigns its task.
+creates and assigns its task; do not manually mark a delegation task WIP first.
 
 Delegate when a bounded child can absorb substantial intermediate context whose
 underlying details are not needed for your remaining work, or when independent

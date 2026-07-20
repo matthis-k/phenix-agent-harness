@@ -1,4 +1,4 @@
-import type { PhenixTaskService } from "@matthis-k/phenix-tasks/index.ts";
+import type { TaskRuntimeFacade } from "@matthis-k/phenix-tasks/index.ts";
 import { taskProcessEnvironment } from "@matthis-k/phenix-tasks/index.ts";
 import type {
   ChildRun,
@@ -31,7 +31,7 @@ export function taskAuthorityTokenFromSpec(spec: ChildSessionSpec): string | und
 
 function incompleteTaskResult(
   channel: ContractSubmissionChannel,
-  taskId: string,
+  taskUid: string,
 ): ContractSubmissionResult {
   const attempt = channel.current();
   return {
@@ -43,7 +43,7 @@ function incompleteTaskResult(
         path: [],
         code: "TASK_SUBTREE_INCOMPLETE",
         message:
-          `Owned task ${taskId} is not done. Complete and update the task subtree ` +
+          `Owned task ${taskUid} is not done. Complete and update the task subtree ` +
           "before submitting the child result.",
       },
     ],
@@ -52,15 +52,15 @@ function incompleteTaskResult(
 
 function guardCompletion(input: {
   readonly channel: ContractSubmissionChannel;
-  readonly tasks: PhenixTaskService;
+  readonly tasks: TaskRuntimeFacade;
   readonly authorityToken: string;
 }): ContractSubmissionChannel {
   return {
     current: () => input.channel.current(),
     async submit(value) {
       const root = input.tasks.inspect(input.authorityToken);
-      if (root.explicitState !== "done") {
-        return incompleteTaskResult(input.channel, root.id);
+      if (root.ownStatus !== "done") {
+        return incompleteTaskResult(input.channel, root.uid);
       }
       return input.channel.submit(value);
     },
@@ -78,7 +78,7 @@ function guardCompletion(input: {
  */
 export function createTaskBoundChildSessionBackend(input: {
   readonly delegate: ChildSessionBackend;
-  readonly tasks: PhenixTaskService;
+  readonly tasks: TaskRuntimeFacade;
   readonly getBridge: () => TaskWorkflowBridge;
   readonly getEndpoint: () => Promise<string>;
 }): ChildSessionBackend {

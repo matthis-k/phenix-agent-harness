@@ -4,9 +4,11 @@ import { describe, it } from "node:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import {
+  createDirectSubagentTool,
   createWorkflowApiTools,
   createWorkflowTool,
   projectWorkflowInspection,
+  WorkflowToolError,
 } from "@matthis-k/phenix-suite/runtime/workflow-api-tools.ts";
 import type {
   WorkflowAuthoritySnapshot,
@@ -78,14 +80,25 @@ class RecordingWorkflow implements WorkflowRuntimePort {
 }
 
 async function execute(
-  tool: ReturnType<typeof createWorkflowTool>,
+  tool: ReturnType<typeof createWorkflowTool> | ReturnType<typeof createDirectSubagentTool>,
   params: Record<string, unknown>,
   signal = new AbortController().signal,
 ) {
   return tool.execute("call-1", params as never, signal, undefined, ctx);
 }
 
-describe("contract-bound workflow target-agent tool", () => {
+async function assertToolFailure(
+  promise: Promise<unknown>,
+  expectedDetails: Record<string, unknown>,
+): Promise<void> {
+  await assert.rejects(promise, (error: unknown) => {
+    assert.ok(error instanceof WorkflowToolError);
+    assert.deepEqual(error.details, expectedDetails);
+    return true;
+  });
+}
+
+describe("contract-bound workflow target-agent tools", () => {
   it("projects the authority snapshot without exposing transition identities", () => {
     const response = projectWorkflowInspection(snapshot());
 
@@ -114,11 +127,11 @@ describe("contract-bound workflow target-agent tool", () => {
     assert.doesNotMatch(JSON.stringify(response), /optionsDigest|transitionId|edgeId/);
   });
 
-  it("installs one stable workflow tool", () => {
+  it("installs workflow and gated direct-subagent tools", () => {
     const workflow = new RecordingWorkflow();
     assert.deepEqual(
       createWorkflowApiTools({ workflow }).map((tool) => tool.name),
-      ["phenix_workflow"],
+      ["phenix_workflow", "phenix_subagent"],
     );
   });
 
@@ -140,17 +153,16 @@ describe("contract-bound workflow target-agent tool", () => {
       authorize: ({ tool: toolName }) => `${toolName} is outside this root model scope.`,
     });
 
-    const response = await execute(tool, {
-      action: "spawn",
-      agent: "scout",
-      task: "Inspect something.",
-    });
+    await assertToolFailure(
+      execute(tool, {
+        action: "spawn",
+        agent: "scout",
+        task: "Inspect something.",
+      }),
+      { status: "forbidden", tool: "phenix_workflow" },
+    );
 
     assert.equal(workflow.spawnCalls.length, 0);
-    assert.deepEqual(response.details, {
-      status: "forbidden",
-      tool: "phenix_workflow",
-    });
   });
 
   it("passes only target intent and assignment to the runtime", async () => {
@@ -184,10 +196,25 @@ describe("contract-bound workflow target-agent tool", () => {
       status: "running",
       value: undefined,
       error: undefined,
+      errors: undefined,
     });
   });
 
-  it("propagates fresh backend authority failures", async () => {
+  it("normalizes JSON-encoded requirement arrays from model transports", async () => {
+    const workflow = new RecordingWorkflow();
+    const tool = createWorkflowTool({ workflow });
+
+    await execute(tool, {
+      action: "spawn",
+      agent: "scout",
+      task: "Inspect the boundary.",
+      requirements: '["Return evidence", "Do not edit"]',
+    });
+
+    assert.deepEqual(workflow.spawnCalls[0]?.requirements, ["Return evidence", "Do not edit"]);
+  });
+
+  it("marks backend authority failures as tool errors", async () => {
     const workflow = new RecordingWorkflow();
     workflow.execution = {
       ok: false,
@@ -199,14 +226,48 @@ describe("contract-bound workflow target-agent tool", () => {
     };
     const tool = createWorkflowTool({ workflow });
 
-    const response = await execute(tool, {
-      action: "spawn",
-      agent: "scout",
-      task: "Inspect something.",
-    });
+    await assertToolFailure(
+      execute(tool, {
+        action: "spawn",
+        agent: "scout",
+        task: "Inspect something.",
+      }),
+      {
+        code: "WORKFLOW_AGENT_NOT_AVAILABLE",
+        currentNodeId: "reviewing",
+      },
+    );
 
     assert.equal(workflow.spawnCalls.length, 1);
-    assert.equal(response.details?.code, "WORKFLOW_AGENT_NOT_AVAILABLE");
-    assert.equal(response.details?.currentNodeId, "reviewing");
+  });
+
+  it("denies the direct tool unless current authority enables it", async () => {
+    const workflow = new RecordingWorkflow();
+    const tool = createDirectSubagentTool({ workflow });
+
+    workflow.authority = {
+      ...workflow.authority,
+      workflow: { ...workflow.authority.workflow, options: [] },
+    };
+    await assertToolFailure(execute(tool, { task: "Inspect directly." }), {
+      code: "DIRECT_SUBAGENT_NOT_DETERMINISTIC",
+      availableAgents: [],
+    });
+
+    assert.equal(workflow.spawnCalls.length, 0);
+  });
+
+  it("directly spawns the sole legal target when explicitly authorized", async () => {
+    const workflow = new RecordingWorkflow();
+    const tool = createDirectSubagentTool({ workflow });
+
+    const response = await execute(tool, {
+      task: "Inspect directly.",
+      requirements: "Return evidence.",
+    });
+
+    assert.equal(response.details?.agent, "scout");
+    assert.equal(workflow.spawnCalls[0]?.agent, "scout");
+    assert.deepEqual(workflow.spawnCalls[0]?.requirements, ["Return evidence."]);
   });
 });

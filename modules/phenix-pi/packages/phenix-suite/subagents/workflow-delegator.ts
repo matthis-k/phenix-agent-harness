@@ -537,6 +537,7 @@ export class WorkflowDelegator {
             code: execution.error.code,
             handleId: execution.record.id,
             status: execution.record.status,
+            errors: execution.record.errors,
           },
         };
       }
