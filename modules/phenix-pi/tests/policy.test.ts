@@ -48,7 +48,7 @@ describe("Phenix runtime policy", () => {
     assert.equal(policy.criticRequired, true);
   });
 
-  it("null role has no critic, no verification, base agent", () => {
+  it("base execution has a standard non-code budget floor", () => {
     const policy = resolveExecutionPolicy({
       role: null,
       task: "Do something minimal",
@@ -57,6 +57,9 @@ describe("Phenix runtime policy", () => {
       config,
     });
     assert.equal(policy.agent, "phenix.base");
+    assert.equal(policy.tier, "standard");
+    assert.equal(policy.turnBudget.maxTurns, 24);
+    assert.equal(policy.thinking, "medium");
     assert.equal(policy.criticRequired, false);
     assert.equal(policy.verificationCommands.length, 0);
     assert.equal(policy.allowedChildren.length, 0);
