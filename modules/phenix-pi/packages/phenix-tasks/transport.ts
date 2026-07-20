@@ -162,12 +162,11 @@ export async function startTaskRpcServer(input: {
 
 export class TaskRpcClient implements BoundTaskClient {
   private readonly socketPath: string;
+  private readonly capability: string;
 
-  constructor(
-    endpoint: string,
-    private readonly capability: string,
-  ) {
+  constructor(endpoint: string, capability: string) {
     this.socketPath = socketPathFromEndpoint(endpoint);
+    this.capability = capability;
   }
 
   inspect(): Promise<TaskTreeNode> {
