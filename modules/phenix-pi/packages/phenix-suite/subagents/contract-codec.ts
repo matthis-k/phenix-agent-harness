@@ -449,18 +449,25 @@ export function decodeContractArtifact(value: unknown): ContractArtifact {
   }
   const turnBudget = runtime.turnBudget;
   if (
-    typeof turnBudget.maxTurns !== "number" ||
-    turnBudget.maxTurns < 1 ||
-    !Number.isInteger(turnBudget.maxTurns)
+    turnBudget.maxTurns !== undefined &&
+    (typeof turnBudget.maxTurns !== "number" ||
+      turnBudget.maxTurns < 1 ||
+      !Number.isInteger(turnBudget.maxTurns))
   ) {
-    throw new Error(`${ctx()}: runtime.turnBudget.maxTurns must be a positive integer`);
+    throw new Error(`${ctx()}: runtime.turnBudget.maxTurns must be a positive integer when set`);
   }
   if (
-    typeof turnBudget.graceTurns !== "number" ||
-    turnBudget.graceTurns < 0 ||
-    !Number.isInteger(turnBudget.graceTurns)
+    turnBudget.graceTurns !== undefined &&
+    (typeof turnBudget.graceTurns !== "number" ||
+      turnBudget.graceTurns < 0 ||
+      !Number.isInteger(turnBudget.graceTurns))
   ) {
-    throw new Error(`${ctx()}: runtime.turnBudget.graceTurns must be a non-negative integer`);
+    throw new Error(
+      `${ctx()}: runtime.turnBudget.graceTurns must be a non-negative integer when set`,
+    );
+  }
+  if (turnBudget.maxTurns === undefined && turnBudget.graceTurns !== undefined) {
+    throw new Error(`${ctx()}: runtime.turnBudget.graceTurns requires maxTurns`);
   }
 
   // ── Validate toolBudget ───────────────────────────────────────────────

@@ -106,19 +106,20 @@ export class BudgetGuard {
       if (raw?.type === "turn_end") {
         this.turns++;
 
-        // Turn limit — abort (accounting for grace turns)
-        if (
-          this.config.turnBudget.maxTurns > 0 &&
-          this.turns > this.config.turnBudget.maxTurns + this.config.turnBudget.graceTurns
-        ) {
-          return {
-            violation: {
-              code: "TURN_BUDGET_EXCEEDED",
-              message:
-                `Turn budget exceeded: ${this.turns} turns, limit is ` +
-                `${this.config.turnBudget.maxTurns} + ${this.config.turnBudget.graceTurns} grace.`,
-            },
-          };
+        // Turn limits are opt-in. Open-ended work is not aborted by tier heuristics.
+        const maxTurns = this.config.turnBudget.maxTurns;
+        if (maxTurns !== undefined) {
+          const graceTurns = this.config.turnBudget.graceTurns ?? 0;
+          if (this.turns > maxTurns + graceTurns) {
+            return {
+              violation: {
+                code: "TURN_BUDGET_EXCEEDED",
+                message:
+                  `Turn budget exceeded: ${this.turns} turns, limit is ` +
+                  `${maxTurns} + ${graceTurns} grace.`,
+              },
+            };
+          }
         }
       }
     }

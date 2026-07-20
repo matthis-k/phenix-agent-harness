@@ -37,7 +37,13 @@ interface VerificationConfig {
   readonly roleCommands?: Partial<Record<AgentKind, readonly VerificationCommand[]>>;
 }
 
+interface ExecutionConfig {
+  /** Explicit hard turn limit. Omitted by default for open-ended execution. */
+  readonly turnBudget?: TurnBudget;
+}
+
 export interface RuntimePolicyConfig {
+  readonly execution?: ExecutionConfig;
   readonly verification?: VerificationConfig;
 }
 
@@ -158,12 +164,37 @@ function verificationCommands(
 
 // ── Budget tables ───────────────────────────────────────────────────────────
 
-const TIER_BUDGETS: Record<ModelTier, { turns: number; tools: number; timeout: number }> = {
-  low: { turns: 12, tools: 40, timeout: 10 * 60_000 },
-  standard: { turns: 24, tools: 80, timeout: 20 * 60_000 },
-  high: { turns: 40, tools: 140, timeout: 35 * 60_000 },
-  critical: { turns: 64, tools: 220, timeout: 60 * 60_000 },
+const TIER_BUDGETS: Record<ModelTier, { tools: number; timeout: number }> = {
+  low: { tools: 40, timeout: 10 * 60_000 },
+  standard: { tools: 80, timeout: 20 * 60_000 },
+  high: { tools: 140, timeout: 35 * 60_000 },
+  critical: { tools: 220, timeout: 60 * 60_000 },
 };
+
+function resolveTurnBudget(config: RuntimePolicyConfig): TurnBudget {
+  const configured = config.execution?.turnBudget;
+  if (!configured) return {};
+
+  const maxTurns = configured.maxTurns;
+  const graceTurns = configured.graceTurns;
+  if (maxTurns === undefined) {
+    if (graceTurns !== undefined) {
+      throw new Error("execution.turnBudget.graceTurns requires maxTurns");
+    }
+    return {};
+  }
+  if (!Number.isInteger(maxTurns) || maxTurns < 1) {
+    throw new Error("execution.turnBudget.maxTurns must be a positive integer");
+  }
+  if (graceTurns !== undefined && (!Number.isInteger(graceTurns) || graceTurns < 0)) {
+    throw new Error("execution.turnBudget.graceTurns must be a non-negative integer");
+  }
+
+  return {
+    maxTurns,
+    ...(graceTurns !== undefined ? { graceTurns } : {}),
+  };
+}
 
 // ── Policy resolution ──────────────────────────────────────────────────────
 
@@ -203,7 +234,7 @@ export function resolveExecutionPolicy(input: {
     tier,
     thinking,
     timeoutMs: budget.timeout,
-    turnBudget: { maxTurns: budget.turns, graceTurns: 2 },
+    turnBudget: resolveTurnBudget(config),
     toolBudget: {
       soft: Math.max(1, Math.floor(budget.tools * 0.75)),
       hard: budget.tools,

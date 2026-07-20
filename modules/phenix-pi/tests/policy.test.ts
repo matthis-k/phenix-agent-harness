@@ -48,7 +48,7 @@ describe("Phenix runtime policy", () => {
     assert.equal(policy.criticRequired, true);
   });
 
-  it("base execution has a standard non-code budget floor", () => {
+  it("base execution has a standard profile without a default turn cap", () => {
     const policy = resolveExecutionPolicy({
       role: null,
       task: "Do something minimal",
@@ -58,11 +58,25 @@ describe("Phenix runtime policy", () => {
     });
     assert.equal(policy.agent, "phenix.base");
     assert.equal(policy.tier, "standard");
-    assert.equal(policy.turnBudget.maxTurns, 24);
+    assert.deepEqual(policy.turnBudget, {});
     assert.equal(policy.thinking, "medium");
     assert.equal(policy.criticRequired, false);
     assert.equal(policy.verificationCommands.length, 0);
     assert.equal(policy.allowedChildren.length, 0);
+  });
+
+  it("preserves an explicitly configured hard turn cap", () => {
+    const policy = resolveExecutionPolicy({
+      role: "scout",
+      task: "Perform one bounded lookup",
+      requirements: [],
+      cwd: process.cwd(),
+      config: {
+        ...config,
+        execution: { turnBudget: { maxTurns: 8, graceTurns: 1 } },
+      },
+    });
+    assert.deepEqual(policy.turnBudget, { maxTurns: 8, graceTurns: 1 });
   });
 
   it("includes routing metadata fields in policy", () => {

@@ -22,8 +22,10 @@ export type {
 export type ModelTier = "low" | "standard" | "high" | "critical";
 
 export interface TurnBudget {
-  readonly maxTurns: number;
-  readonly graceTurns: number;
+  /** Optional hard cap. Omit it for open-ended work such as repository QA. */
+  readonly maxTurns?: number;
+  /** Additional turns allowed after an explicit hard cap. */
+  readonly graceTurns?: number;
 }
 
 export interface ToolBudget {
