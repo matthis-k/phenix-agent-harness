@@ -141,8 +141,7 @@ describe("Tool-policy resolution", () => {
       /Invalid tool name/,
     );
     assert.throws(
-      () =>
-        resolveToolConfiguration({ role: "scout", requested: { additional: [""] } }),
+      () => resolveToolConfiguration({ role: "scout", requested: { additional: [""] } }),
       /Invalid tool name/,
     );
   });
