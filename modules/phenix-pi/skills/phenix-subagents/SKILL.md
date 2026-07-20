@@ -10,19 +10,23 @@ delegation depth, role authority, output schemas, model routing, verification,
 critics, repair limits, and task-subtree ownership are owned by the TypeScript
 runtime.
 
-When the user explicitly asks to use subagents, delegation, or the Phenix
-workflow, do not silently continue as a single agent. Your first substantive
-execution action must use `phenix_workflow` to spawn an advertised target.
-Use `action: "inspect"` first only when the current authority was not injected
-or a prior workflow action may have changed it. If spawning fails, surface the
-exact runtime/provider error and do not claim subagents were used.
-
 Before the model starts, the runtime resolves the current root-session or child-
 contract authority and injects the target agents that may be spawned from the
-current workflow node into the system prompt. Do not send a node or transition
-ID back to the runtime.
+current workflow node. When that authority includes required transitions, a
+turn-scoped runtime gate blocks every other execution tool until
+`phenix_workflow` successfully spawns one required target. After each successful
+spawn, the runtime resolves authority again and enforces the next required
+transition, if any.
 
-Use the primary `phenix_workflow` interface with:
+When the user explicitly asks to use subagents, delegation, or the Phenix
+workflow, do not silently continue as a single agent. Your first substantive
+execution action must use `phenix_workflow` to spawn an advertised target. Use
+`action: "inspect"` only when no required transition is pending and a prior
+workflow action may have changed optional authority. If spawning fails, surface
+the exact runtime/provider error and do not claim subagents were used.
+
+Do not send a node or transition ID back to the runtime. Use the primary
+`phenix_workflow` interface with:
 
 - `action: "spawn"`;
 - one advertised target `agent`;
