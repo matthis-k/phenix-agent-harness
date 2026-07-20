@@ -179,7 +179,11 @@ function resolve(root: TaskTreeNode, selector: string): { node: TaskTreeNode; pa
 }
 
 class TaskRuntimeFacadeImpl implements TaskRuntimeFacade {
-  constructor(private readonly service: PhenixTaskService) {}
+  private readonly service: PhenixTaskService;
+
+  constructor(service: PhenixTaskService) {
+    this.service = service;
+  }
 
   subscribe(listener: (event: TaskEvent) => void): () => void {
     return this.service.subscribe((event: InternalTaskEvent) => {
