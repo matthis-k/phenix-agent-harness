@@ -30,9 +30,11 @@ import {
   buildRoutingConfigFromDeclarations,
   configureRoutingConfig,
 } from "@matthis-k/phenix-routing/config.ts";
+import { writeStreamTrace } from "@matthis-k/phenix-routing/stream-trace.ts";
 import { createTaskRuntimeFacade } from "@matthis-k/phenix-tasks/index.ts";
 import { createTaskTools } from "@matthis-k/phenix-tasks/pi-tools.ts";
 import { link } from "./composition/linker.ts";
+import { createWorkflowTurnGate } from "./composition/workflow-turn-gate.ts";
 import { loadPhenixSuiteConfiguration } from "./config-loader.ts";
 import { defaultOutputSchemas, outputSchemasFromContracts } from "./defaults/output-schemas.ts";
 import { buildPhenixRootSystemPrompt } from "./phenix-skill-bootstrap.ts";
@@ -229,6 +231,8 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
       `${linkResult.graph.routing.agentRoutes.size} agent routes.`,
   );
 
+  const workflowGate = createWorkflowTurnGate({ trace: writeStreamTrace });
+
   await loadIntegration("hypa", pi, async (api) => {
     const mod = await import("@hypabolic/pi-hypa/extensions/index.ts");
     await mod.default(api);
@@ -259,6 +263,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
     const mod = await import("./composition/root-workflow-integration.ts");
     await mod.default(api, {
       workflowDefinitionId: suiteConfiguration.activeWorkflowDefinitionId,
+      workflowGate,
     });
   });
 
@@ -351,6 +356,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
   await loadIntegration("phenix-subagents", pi, async (api) => {
     await phenixSubagents(api, {
       facade: createPhenixSubagentFacade({ delegator, workflow: workflowRuntime }),
+      workflowGate,
     });
   });
   registerTuiProjection(pi, delegationRuntime);

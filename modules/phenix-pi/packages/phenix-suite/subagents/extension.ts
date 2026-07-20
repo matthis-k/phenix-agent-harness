@@ -2,6 +2,7 @@
 
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getSessionRuntime } from "@matthis-k/phenix-routing/state.ts";
 import { authorizePhenixRootCapability, phenixRootModelScope } from "../composition/model-scope.ts";
 import { createWorkflowApiTools } from "../runtime/workflow-api-tools.ts";
 import { AgentParams } from "./delegate-schema.ts";
@@ -39,23 +40,71 @@ function fail(message: string, details?: Record<string, unknown>): never {
   throw error;
 }
 
+function sessionId(ctx: ExtensionContext): string {
+  return ctx.sessionManager.getSessionId() ?? "default";
+}
+
+function requiredAgents(ctx: ExtensionContext, options: PhenixSubagentsOptions): readonly string[] {
+  return options.facade.workflow
+    .inspect({ ctx })
+    .workflow.options.filter((option) => option.category === "required")
+    .map((option) => option.agent);
+}
+
 export default async function phenixSubagents(
   pi: ExtensionAPI,
   options: PhenixSubagentsOptions,
 ): Promise<void> {
   const facade = options.facade;
 
-  pi.on("before_tool_call", async (event, ctx) => {
+  pi.on("tool_call", async (event, ctx) => {
     if (!phenixRootModelScope.includes(ctx.model)) return;
-    const raw = event as { toolName?: string; name?: string };
-    const toolName = raw.toolName ?? raw.name;
-    if (toolName === "subagent") {
+    const id = sessionId(ctx);
+
+    if (event.toolName === "subagent") {
       return {
-        blocked: true,
+        block: true,
         reason:
           "Unmanaged delegation is blocked in Phenix sessions. Use phenix_workflow; use phenix_subagent only when current authority enables it.",
       };
     }
+
+    const denial = options.workflowGate.authorize({
+      sessionId: id,
+      turnId: getSessionRuntime(id).currentTurnId,
+      toolName: event.toolName,
+      input: event.input,
+    });
+    return denial === undefined ? undefined : { block: true, reason: denial };
+  });
+
+  pi.on("tool_result", async (event, ctx) => {
+    if (!phenixRootModelScope.includes(ctx.model)) return;
+    if (event.toolName !== "phenix_workflow" || event.input.action !== "spawn") return;
+
+    const id = sessionId(ctx);
+    let isError = event.isError;
+    let nextRequiredAgents: readonly string[] = [];
+    if (!isError) {
+      try {
+        nextRequiredAgents = requiredAgents(ctx, options);
+      } catch {
+        isError = true;
+      }
+    }
+
+    options.workflowGate.observe({
+      sessionId: id,
+      turnId: getSessionRuntime(id).currentTurnId,
+      toolName: event.toolName,
+      input: event.input,
+      isError,
+      nextRequiredAgents,
+    });
+  });
+
+  pi.on("session_shutdown", async (_event, ctx) => {
+    options.workflowGate.clearSession(sessionId(ctx));
   });
 
   for (const tool of createWorkflowApiTools({
