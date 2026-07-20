@@ -35,9 +35,27 @@ jobs:
       - name: Install devenv
         run: nix profile add nixpkgs#devenv
       - name: Apply source patch
+        id: patch
+        shell: bash
         run: |
-          python scripts/fix-handle-stager.py
-          python scripts/apply-handle-first-subagent-fix.py
+          set +e
+          python scripts/fix-handle-stager.py > patch.log 2>&1
+          status=$?
+          if [ "$status" -eq 0 ]; then
+            python scripts/apply-handle-first-subagent-fix.py >> patch.log 2>&1
+            status=$?
+          fi
+          cat patch.log
+          exit "$status"
+      - name: Upload patch diagnostics
+        if: failure() && steps.patch.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: handle-patch-log
+          path: patch.log
+          if-no-files-found: error
+      - name: Clean staging and format
+        run: |
           rm scripts/fix-handle-stager.py
           rm scripts/apply-handle-first-subagent-fix.py
           rm .github/workflows/apply-handle-first-subagent-fix.yml
