@@ -1,0 +1,52 @@
+name: Apply workflow handle deadlock and QA fanout fix
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-workflow-handle-deadlock-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'fix/workflow-handle-deadlock-qa-fanout'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: fix/workflow-handle-deadlock-qa-fanout
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+      - uses: cachix/cachix-action@v17
+        with: { name: devenv }
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
+      - name: Apply source patch
+        run: |
+          python scripts/apply-workflow-handle-deadlock-qa-fanout.py
+          rm scripts/apply-workflow-handle-deadlock-qa-fanout.py
+          rm .github/workflows/apply-workflow-handle-deadlock-qa-fanout.yml
+          devenv tasks run maintenance:fix
+      - name: Run repository maintenance
+        run: devenv test
+      - name: Commit clean source change
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: settle required delegation through its handle"
+          git push origin HEAD:fix/workflow-handle-deadlock-qa-fanout
