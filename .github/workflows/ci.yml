@@ -1,4 +1,4 @@
-name: Diagnose final facade architecture
+name: Apply final facade architecture
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  diagnose:
+  apply:
     if: github.head_ref == 'fix/subagent-tools-task-tree'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -19,16 +19,15 @@ jobs:
           fetch-depth: 0
           show-progress: false
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
-      - name: Capture exact decoded failure
+      - name: Apply facade patch and clean staging
         run: |
-          set -uo pipefail
+          set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           import re
           bad = [
               *Path('tools/final-patch').glob('part1-0[234]'),
               *Path('tools/final-patch').glob('part2-*'),
-              *Path('tools/final-patch').glob('part3-*'),
               *Path('tools/final-patch').glob('part4-*'),
           ]
           for path in bad:
@@ -38,24 +37,17 @@ jobs:
           cat tools/final-patch/part2-* > /tmp/part2.py
           cat tools/final-patch/part3-* > /tmp/part3.py
           cat tools/final-patch/part4-* > /tmp/part4.py
-          : > /tmp/facade-error.txt
-          status=0
-          for script in /tmp/part1.py /tmp/part2.py /tmp/part3.py /tmp/part4.py; do
-            printf '\n=== %s ===\n' "$script" >> /tmp/facade-error.txt
-            python3 "$script" >> /tmp/facade-error.txt 2>&1 || { status=$?; break; }
-          done
-          if [ "$status" -eq 0 ]; then
-            printf '\n=== maintenance:fix ===\n' >> /tmp/facade-error.txt
-            nix profile add nixpkgs#devenv >> /tmp/facade-error.txt 2>&1 || status=$?
-          fi
-          if [ "$status" -eq 0 ]; then
-            devenv tasks run maintenance:fix >> /tmp/facade-error.txt 2>&1 || status=$?
-          fi
-          git reset --hard HEAD
-          cp /tmp/facade-error.txt tools/final-patch/error.txt
+          python3 /tmp/part1.py
+          python3 /tmp/part2.py
+          python3 /tmp/part3.py
+          python3 /tmp/part4.py
+          nix profile add nixpkgs#devenv
+          devenv tasks run maintenance:fix
+          git checkout origin/main -- .github/workflows/ci.yml maintenance.nix
+          rm -rf tools/final-patch
+          rmdir tools 2>/dev/null || true
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add tools/final-patch/error.txt
-          git commit -m "ci: capture decoded facade failure"
+          git add -A
+          git commit -m "feat: expose facade-bound task logs and subagents"
           git push origin HEAD:fix/subagent-tools-task-tree
-          exit "$status"
