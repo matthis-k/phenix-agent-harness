@@ -33,7 +33,6 @@ interface RequiredTurnState {
   readonly turnId: string;
   readonly userTask: string;
   readonly requiredAgents: readonly string[];
-  readonly mustMatchUserTask: boolean;
 }
 
 interface TerminalTurnState {
@@ -43,30 +42,6 @@ interface TerminalTurnState {
 }
 
 type TurnGateState = RequiredTurnState | TerminalTurnState;
-
-const TASK_STOP_WORDS = new Set([
-  "a",
-  "an",
-  "and",
-  "as",
-  "at",
-  "be",
-  "by",
-  "do",
-  "for",
-  "from",
-  "in",
-  "it",
-  "of",
-  "on",
-  "or",
-  "please",
-  "that",
-  "the",
-  "this",
-  "to",
-  "with",
-]);
 
 function uniqueAgents(agents: readonly string[]): readonly string[] {
   return [...new Set(agents.map((agent) => agent.trim()).filter(Boolean))].sort();
@@ -96,11 +71,6 @@ function skillReadPath(invocation: WorkflowToolInvocation): string | undefined {
   return candidate;
 }
 
-function normalizedTaskTokens(value: string): readonly string[] {
-  const tokens = value.toLowerCase().match(/[a-z0-9]+/g) ?? [];
-  return [...new Set(tokens.filter((token) => token.length >= 2 && !TASK_STOP_WORDS.has(token)))];
-}
-
 function isHarnessPreflightTask(task: string, userTask: string): boolean {
   const normalized = task.toLowerCase();
   const normalizedUserTask = userTask.toLowerCase();
@@ -112,17 +82,6 @@ function isHarnessPreflightTask(task: string, userTask: string): boolean {
     preflightAction.test(normalized) &&
     !internalResource.test(normalizedUserTask)
   );
-}
-
-function taskMatchesUserRequest(task: string, userTask: string): boolean {
-  if (isHarnessPreflightTask(task, userTask)) return false;
-
-  const userTokens = normalizedTaskTokens(userTask);
-  if (userTokens.length === 0) return true;
-  const delegatedTokens = new Set(normalizedTaskTokens(task));
-  const overlap = userTokens.filter((token) => delegatedTokens.has(token)).length;
-  const requiredOverlap = userTokens.length >= 3 ? 2 : 1;
-  return overlap >= requiredOverlap;
 }
 
 class WorkflowTurnGateImpl implements WorkflowTurnGate {
@@ -159,14 +118,13 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
       turnId: requirement.turnId,
       userTask: requirement.userTask.trim(),
       requiredAgents,
-      mustMatchUserTask: true,
     });
     this.emit({
       boundary: "workflow_gate.required",
       sessionId: requirement.sessionId,
       turnId: requirement.turnId,
       requiredAgents,
-      taskMatchRequired: true,
+      preflightTaskRejected: true,
     });
   }
 
@@ -243,10 +201,9 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
         state.requiredAgents,
       );
     }
-    if (state.mustMatchUserTask && !taskMatchesUserRequest(task, state.userTask)) {
+    if (isHarnessPreflightTask(task, state.userTask)) {
       return deny(
-        "The delegated task must be a bounded part of the user's request. " +
-          "Do not delegate skill loading, contract loading, workflow inspection, or other Phenix harness preflight.",
+        "Required workflow delegation must describe user work, not skill loading, contract loading, workflow inspection, or other Phenix harness preflight.",
         state.requiredAgents,
       );
     }
@@ -257,7 +214,7 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
       turnId: state.turnId,
       toolName: invocation.toolName,
       agent,
-      taskMatchRequired: state.mustMatchUserTask,
+      preflightTaskRejected: true,
     });
     return undefined;
   }
@@ -288,7 +245,6 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
           turnId: state.turnId,
           userTask: state.userTask,
           requiredAgents: nextRequiredAgents,
-          mustMatchUserTask: false,
         });
         this.emit({
           boundary: "workflow_gate.required",
@@ -333,7 +289,6 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
         turnId: state.turnId,
         userTask: state.userTask,
         requiredAgents: nextRequiredAgents,
-        mustMatchUserTask: false,
       });
       this.emit({
         boundary: "workflow_gate.required",

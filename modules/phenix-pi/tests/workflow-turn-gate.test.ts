@@ -38,7 +38,7 @@ describe("workflow turn gate", () => {
     assert.ok(records.some((record) => record.boundary === "workflow_gate.preflight"));
   });
 
-  it("rejects harness preflight and unrelated tasks as required delegation", () => {
+  it("rejects harness preflight but treats the required root task as a focus hint", () => {
     const gate = createWorkflowTurnGate();
     gate.beginTurn({
       sessionId,
@@ -55,17 +55,17 @@ describe("workflow turn gate", () => {
           task: "Read the phenix-qa skill file from /nix/store/example/skills/phenix-qa/SKILL.md",
         }),
       ) ?? "",
-      /bounded part of the user's request/i,
+      /must describe user work/i,
     );
-    assert.match(
+    assert.equal(
       gate.authorize(
         invocation("phenix_workflow", {
           action: "spawn",
           agent: "base",
           task: "Summarize an unrelated deployment guide.",
         }),
-      ) ?? "",
-      /bounded part of the user's request/i,
+      ),
+      undefined,
     );
     assert.equal(
       gate.authorize(
