@@ -23,7 +23,7 @@ jobs:
           ref: fix/handle-first-subagent-collection
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: cachix/install-nix-action@a49548c11d98431cddfb8368fd83d5badbf9bfd # v31
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
           extra_nix_config: |
