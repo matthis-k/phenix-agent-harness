@@ -21,8 +21,10 @@ describe("Phenix root prompt bootstrap", () => {
 
     assert.match(bootstrapped, /Phenix workflow nodes, legal transitions/);
     assert.match(bootstrapped, /turn-scoped runtime gate/i);
-    assert.match(bootstrapped, /blocks every other execution tool/i);
-    assert.match(bootstrapped, /first substantive\s+execution action/i);
+    assert.match(bootstrapped, /Required `?SKILL\.md`? files may be read locally/i);
+    assert.match(bootstrapped, /harness preparation are not delegated tasks/i);
+    assert.match(bootstrapped, /bounded task\s+derived from the user's request/i);
+    assert.match(bootstrapped, /first substantive execution action/i);
     assert.match(bootstrapped, /phenix_subagent/);
     assert.match(bootstrapped, /one advertised target `agent`/);
     assert.match(bootstrapped, /unique\s+legal transition/i);
@@ -49,7 +51,9 @@ describe("Phenix root prompt bootstrap", () => {
 
     assert.match(phenix ?? "", /## Phenix coding substrate/);
     assert.match(phenix ?? "", /target agents available from the current node/i);
-    assert.match(phenix ?? "", /blocks every non-workflow execution tool/i);
+    assert.match(phenix ?? "", /Required SKILL\.md files may be read locally/i);
+    assert.match(phenix ?? "", /blocks repository execution/i);
+    assert.match(phenix ?? "", /task derived from the user request/i);
     assert.match(phenix ?? "", /re-evaluated/i);
     assert.match(phenix ?? "", /phenix_workflow/);
     assert.match(phenix ?? "", /broad repository reconnaissance/i);
