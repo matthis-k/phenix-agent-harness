@@ -15,8 +15,8 @@ import type {
   WorkflowSpawnResult,
 } from "../runtime/workflow-runtime-types.ts";
 import { effectiveSessionId, listRecords } from "./handle-store.ts";
-import type { WorkflowDelegator } from "./workflow-delegator.ts";
 import { resolveWorkflowAssignment } from "./workflow-assignment.ts";
+import type { WorkflowDelegator } from "./workflow-delegator.ts";
 
 function inspectAuthority(input: {
   readonly ctx: ExtensionContext;
@@ -132,15 +132,15 @@ async function spawnTargetAgent(input: {
     transitionDescription: option.description,
     requestedTask: input.request.task,
     ...(input.request.userTask ? { userTask: input.request.userTask } : {}),
-    ...(input.request.requirements
-      ? { requestedRequirements: input.request.requirements }
-      : {}),
+    ...(input.request.requirements ? { requestedRequirements: input.request.requirements } : {}),
   });
   const execution = await input.delegator.delegate({
     params: {
       transitionId: option.transitionId,
       task: assignment.task,
-      ...(assignment.requirements.length > 0 ? { requirements: assignment.requirements } : {}),
+      ...(assignment.requirements.length > 0
+        ? { requirements: [...assignment.requirements] }
+        : {}),
       ...(input.request.mode ? { mode: input.request.mode } : {}),
       workflowRevision: input.snapshot.workflow.revision,
       authorityDigest: input.snapshot.workflow.optionsDigest,
