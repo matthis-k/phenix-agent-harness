@@ -19,10 +19,6 @@ export {
 } from "./stream-proxy.ts";
 export { modelRegistry };
 
-function sessionId(ctx: Parameters<Parameters<ExtensionAPI["on"]>[1]>[1]): string {
-  return ctx.sessionManager.getSessionId() ?? "default";
-}
-
 function isAssistantMessage(message: unknown): boolean {
   return (
     typeof message === "object" &&
