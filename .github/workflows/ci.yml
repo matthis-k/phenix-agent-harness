@@ -17,6 +17,7 @@ jobs:
         with:
           ref: fix/subagent-tools-task-tree
           fetch-depth: 0
+          show-progress: false
       - name: Apply staged implementation
         run: |
           set -euo pipefail
@@ -28,4 +29,16 @@ jobs:
           Path('/tmp/implement-subagent-tools.sh').write_text(script + '\n')
           PY
           git checkout origin/main -- .github/workflows/ci.yml
-          bash /tmp/implement-subagent-tools.sh
+          set +e
+          bash -x /tmp/implement-subagent-tools.sh > implementation.log 2>&1
+          status=$?
+          set -e
+          tail -n 160 implementation.log
+          exit "$status"
+      - name: Upload implementation diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: implementation-log
+          path: implementation.log
+          if-no-files-found: error
