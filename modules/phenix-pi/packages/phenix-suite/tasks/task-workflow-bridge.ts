@@ -14,6 +14,43 @@ export interface TaskWorkflowBridge {
   resolveParentAuthority(parent: ParentExecutionContext): TaskAuthority | undefined;
 }
 
+function compactDiagnostic(message: string): string {
+  const normalized = message.trim().replace(/\s+/g, " ");
+  return normalized.length <= 500 ? normalized : `${normalized.slice(0, 497)}...`;
+}
+
+function appendDiagnostic(
+  tasks: TaskRuntimeFacade,
+  authority: TaskAuthority,
+  taskUid: string,
+  message: string,
+): void {
+  try {
+    tasks.appendLog(authority.token, { uid: taskUid, message: compactDiagnostic(message) });
+  } catch {
+    // Diagnostics must never alter workflow execution semantics.
+  }
+}
+
+function failureDiagnostic(result: Extract<WorkflowSpawnResult, { readonly ok: false }>): string {
+  const code = typeof result.details?.code === "string" ? result.details.code : undefined;
+  const handleId =
+    typeof result.details?.handleId === "string" ? result.details.handleId : undefined;
+  const status = typeof result.details?.status === "string" ? result.details.status : undefined;
+  const errors = Array.isArray(result.details?.errors)
+    ? result.details.errors.filter((value): value is string => typeof value === "string")
+    : [];
+  const context = [
+    code ? `code=${code}` : undefined,
+    handleId ? `handle=${handleId}` : undefined,
+    status ? `status=${status}` : undefined,
+  ]
+    .filter((value): value is string => value !== undefined)
+    .join(", ");
+  const suffix = errors.length > 0 ? ` Errors: ${errors.join(" | ")}` : "";
+  return `Workflow delegation failed${context ? ` (${context})` : ""}: ${result.message}${suffix}`;
+}
+
 export function createTaskWorkflowBridge(input: {
   readonly workflow: WorkflowRuntimePort;
   readonly tasks: TaskRuntimeFacade;
@@ -53,11 +90,38 @@ export function createTaskWorkflowBridge(input: {
         task: request.task,
         requirements: request.requirements,
       });
-      const result = await input.workflow.spawn(request);
-      if (!result.ok) {
+      appendDiagnostic(
+        input.tasks,
+        authority,
+        pending.taskUid,
+        `Delegation requested: agent=${request.agent}, mode=${request.mode ?? "await"}.`,
+      );
+
+      try {
+        const result = await input.workflow.spawn(request);
+        if (!result.ok) {
+          appendDiagnostic(input.tasks, authority, pending.taskUid, failureDiagnostic(result));
+          input.tasks.failDelegation(authority.token, pending.taskUid);
+          return result;
+        }
+
+        appendDiagnostic(
+          input.tasks,
+          authority,
+          pending.taskUid,
+          `Delegation started: handle=${result.record.id}, status=${result.record.status}, transition=${result.transition.fromNodeId}->${result.transition.toNodeId}.`,
+        );
+        return result;
+      } catch (error) {
+        appendDiagnostic(
+          input.tasks,
+          authority,
+          pending.taskUid,
+          `Workflow delegation threw before returning a result: ${error instanceof Error ? error.message : String(error)}`,
+        );
         input.tasks.failDelegation(authority.token, pending.taskUid);
+        throw error;
       }
-      return result;
     },
   };
 
