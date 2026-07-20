@@ -425,15 +425,15 @@ class SdkChildRun implements ChildRun {
         if (!preflightSeen) accept();
       },
       (error) => {
-        if (!preflightSeen) reject(error);
-        void this.failAndAbort(
-          new ChildRuntimeError(
-            "PROVIDER_FAILED",
-            error instanceof Error ? error.message : String(error),
-            { cause: error },
-          ),
-        );
-      },
+  const providerMessage = this.lastProviderFailure?.message;
+  const message =
+    providerMessage ?? (error instanceof Error ? error.message : String(error));
+  const providerError = new ChildRuntimeError("PROVIDER_FAILED", message, {
+    cause: error,
+  });
+  if (!preflightSeen) reject(providerError);
+  void this.failAndAbort(providerError);
+},
     );
 
     await accepted;
