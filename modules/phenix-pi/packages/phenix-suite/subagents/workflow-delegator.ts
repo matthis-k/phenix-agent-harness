@@ -590,6 +590,23 @@ export class WorkflowDelegator {
     );
   }
 
+  async sendHandle(
+    ctx: ExtensionContext,
+    id: string,
+    message: string,
+    signal: AbortSignal,
+  ): Promise<HandleRecord | undefined> {
+    return this.delegationRuntime.sendHandle(
+      {
+        cwd: ctx.cwd,
+        sessionId: effectiveSessionId(ctx),
+        id,
+      },
+      message,
+      signal,
+    );
+  }
+
   async cancelHandle(
     ctx: ExtensionContext,
     id: string,

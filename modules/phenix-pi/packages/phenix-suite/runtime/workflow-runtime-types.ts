@@ -17,6 +17,7 @@ export interface WorkflowAuthoritySnapshot {
 
 export interface WorkflowHandleResult {
   readonly id: string;
+  readonly subagentId?: string;
   readonly status: string;
   readonly value?: unknown;
   readonly errors?: readonly string[];

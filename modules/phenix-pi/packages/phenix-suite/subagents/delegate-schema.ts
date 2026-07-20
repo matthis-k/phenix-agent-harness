@@ -30,19 +30,34 @@ export const DelegateParams = Type.Object(
   { additionalProperties: false },
 );
 
+const AgentHandleId = Type.String({ minLength: 1 });
+
 /** Model-facing parameters for one persistent handle operation. */
-export const AgentParams = Type.Object(
-  {
-    action: Type.Union([
-      Type.Literal("await"),
-      Type.Literal("poll"),
-      Type.Literal("cancel"),
-      Type.Literal("inspect"),
-    ]),
-    id: Type.String({ minLength: 1 }),
-  },
-  { additionalProperties: false },
-);
+export const AgentParams = Type.Union([
+  Type.Object(
+    {
+      action: Type.Union([
+        Type.Literal("await"),
+        Type.Literal("poll"),
+        Type.Literal("cancel"),
+        Type.Literal("inspect"),
+      ]),
+      id: AgentHandleId,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      action: Type.Literal("send"),
+      id: AgentHandleId,
+      message: Type.String({
+        minLength: 1,
+        description: "A concise steering or clarification message for the live child session.",
+      }),
+    },
+    { additionalProperties: false },
+  ),
+]);
 
 export type DelegateParamsType = Static<typeof DelegateParams>;
 export type AgentParamsType = Static<typeof AgentParams>;

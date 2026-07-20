@@ -185,6 +185,7 @@ describe("contract-bound workflow target-agent tools", () => {
       agent: "scout",
       task: "Inspect the workflow API boundary.",
       requirements: ["Return concrete evidence."],
+      mode: "background",
       signal,
       ctx,
     });
@@ -193,11 +194,31 @@ describe("contract-bound workflow target-agent tools", () => {
       fromNodeId: "planning",
       toNodeId: "planning",
       handleId: "handle-1",
+      subagentId: undefined,
+      handle: {
+        id: "handle-1",
+        tool: "phenix_agent",
+        actions: ["inspect", "poll", "await", "send", "cancel"],
+      },
       status: "running",
       value: undefined,
       error: undefined,
       errors: undefined,
     });
+  });
+
+  it("defaults child-local workflow execution to await", async () => {
+    const workflow = new RecordingWorkflow();
+    const parent = { kind: "child" } as never;
+    const tool = createWorkflowTool({ workflow, parent });
+
+    await execute(tool, {
+      action: "spawn",
+      agent: "scout",
+      task: "Inspect the child boundary.",
+    });
+
+    assert.equal(workflow.spawnCalls[0]?.mode, "await");
   });
 
   it("normalizes JSON-encoded requirement arrays from model transports", async () => {
@@ -212,6 +233,7 @@ describe("contract-bound workflow target-agent tools", () => {
     });
 
     assert.deepEqual(workflow.spawnCalls[0]?.requirements, ["Return evidence", "Do not edit"]);
+    assert.equal(workflow.spawnCalls[0]?.mode, "background");
   });
 
   it("marks backend authority failures as tool errors", async () => {
@@ -269,5 +291,6 @@ describe("contract-bound workflow target-agent tools", () => {
     assert.equal(response.details?.agent, "scout");
     assert.equal(workflow.spawnCalls[0]?.agent, "scout");
     assert.deepEqual(workflow.spawnCalls[0]?.requirements, ["Return evidence."]);
+    assert.equal(workflow.spawnCalls[0]?.mode, "background");
   });
 });

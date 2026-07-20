@@ -258,6 +258,39 @@ export class ManagedDelegationRuntime {
     return readRecord(input.cwd, input.sessionId, input.id) ?? record;
   }
 
+  async sendHandle(
+    input: ManagedHandleLookup,
+    message: string,
+    signal: AbortSignal,
+  ): Promise<HandleRecord | undefined> {
+    const record = readRecord(input.cwd, input.sessionId, input.id);
+    if (!record) return undefined;
+    if (isTerminalHandleStatus(record.status)) {
+      throw new SubagentExecutionError(
+        "SUBAGENT_NOT_RUNNING",
+        `Cannot send to terminal Phenix handle ${record.id} (${record.status}).`,
+      );
+    }
+    if (!record.subagentId) {
+      throw new SubagentExecutionError(
+        "SUBAGENT_NOT_READY",
+        `Phenix handle ${record.id} has not attached a live child session yet.`,
+      );
+    }
+
+    const handle = this.managers.get(record.subagentId);
+    if (!handle) {
+      const orphaned = this.orphan(input.cwd, record);
+      throw new SubagentExecutionError(
+        "ORPHANED_SESSION",
+        orphaned.errors?.at(-1) ?? `No live managed subagent exists for handle ${record.id}.`,
+      );
+    }
+
+    await handle.send(message, signal);
+    return readRecord(input.cwd, input.sessionId, input.id) ?? record;
+  }
+
   async cancelHandle(
     input: ManagedHandleLookup,
     reason: string,

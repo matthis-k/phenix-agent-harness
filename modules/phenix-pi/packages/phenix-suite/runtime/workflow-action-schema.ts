@@ -22,6 +22,11 @@ const WorkflowInspectAction = Type.Object(
   { additionalProperties: false },
 );
 
+const WorkflowModeInput = Type.Union([Type.Literal("await"), Type.Literal("background")], {
+  description:
+    "Root execution defaults to background and returns a handle immediately. Child-local nested execution defaults to await.",
+});
+
 const WorkflowSpawnAction = Type.Object(
   {
     action: Type.Literal("spawn", {
@@ -36,7 +41,7 @@ const WorkflowSpawnAction = Type.Object(
       description: "The bounded objective for the target agent.",
     }),
     requirements: Type.Optional(WorkflowRequirementsInput),
-    mode: Type.Optional(Type.Union([Type.Literal("await"), Type.Literal("background")])),
+    mode: Type.Optional(WorkflowModeInput),
   },
   { additionalProperties: false },
 );
@@ -55,7 +60,7 @@ export const DirectSubagentParams = Type.Object(
       description: "The bounded objective for the target agent.",
     }),
     requirements: Type.Optional(WorkflowRequirementsInput),
-    mode: Type.Optional(Type.Union([Type.Literal("await"), Type.Literal("background")])),
+    mode: Type.Optional(WorkflowModeInput),
   },
   { additionalProperties: false },
 );

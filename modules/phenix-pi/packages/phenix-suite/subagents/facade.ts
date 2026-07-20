@@ -28,6 +28,12 @@ export interface PhenixSubagentFacade {
     id: string,
     signal: AbortSignal,
   ): Promise<SubagentHandleView | undefined>;
+  sendHandle(
+    ctx: ExtensionContext,
+    id: string,
+    message: string,
+    signal: AbortSignal,
+  ): Promise<SubagentHandleView | undefined>;
   cancelHandle(
     ctx: ExtensionContext,
     id: string,
@@ -70,6 +76,9 @@ export function createPhenixSubagentFacade(input: {
     },
     async awaitHandle(ctx, id, signal) {
       return handle(await input.delegator.awaitHandle(ctx, id, signal));
+    },
+    async sendHandle(ctx, id, message, signal) {
+      return handle(await input.delegator.sendHandle(ctx, id, message, signal));
     },
     async cancelHandle(ctx, id, reason) {
       return handle(await input.delegator.cancelHandle(ctx, id, reason));

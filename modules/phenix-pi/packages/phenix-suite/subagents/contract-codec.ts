@@ -1,4 +1,5 @@
 import { getWorkflowDefinition } from "@matthis-k/phenix-flow/workflow-definitions.ts";
+import { initialWorkflowStateForRole } from "@matthis-k/phenix-flow/workflow-runtime.ts";
 import type { AgentRole, ThinkingLevel } from "./agent-types.ts";
 import { isAgentKind } from "./agent-types.ts";
 import type { ContractArtifact } from "./contract.ts";
@@ -212,7 +213,7 @@ function validateDelegationRoles(
 
 // ── Workflow validation ─────────────────────────────────────────────────────
 
-function validateWorkflowSection(raw: unknown, contractId: string): void {
+function validateWorkflowSection(raw: unknown, contractId: string, role: AgentRole): void {
   const ctx = `Contract ${contractId}`;
 
   if (!isRecord(raw)) {
@@ -248,7 +249,9 @@ function validateWorkflowSection(raw: unknown, contractId: string): void {
       (t) =>
         (t.kind === "delegate" && t.from.includes(initialState as never)) ||
         (t.kind === "automatic" && t.from === initialState),
-    ) || definition.initialState === initialState;
+    ) ||
+    definition.initialState === initialState ||
+    initialWorkflowStateForRole(role) === initialState;
   if (!stateExists) {
     throw new Error(
       `${ctx}: workflow initialState "${initialState}" is not a valid state in definition "${defId}"`,
@@ -432,7 +435,7 @@ export function decodeContractArtifact(value: unknown): ContractArtifact {
   }
 
   // ── Validate workflow section ─────────────────────────────────────────
-  validateWorkflowSection(runtime.workflow, value.id);
+  validateWorkflowSection(runtime.workflow, value.id, role);
 
   // ── Validate timeout ──────────────────────────────────────────────────
   if (
