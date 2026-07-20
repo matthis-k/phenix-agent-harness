@@ -4,10 +4,18 @@ import type {
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { getSessionRuntime } from "@matthis-k/phenix-routing/state.ts";
-import type { PhenixTaskService } from "@matthis-k/phenix-tasks/index.ts";
+import type {
+  PhenixTaskService,
+  TaskNode,
+  TaskState,
+  TaskSummary,
+} from "@matthis-k/phenix-tasks/index.ts";
 import { createTaskTools } from "@matthis-k/phenix-tasks/pi-tools.ts";
 
 import { authorizePhenixRootCapability, phenixRootModelScope } from "../composition/model-scope.ts";
+
+const TASK_WIDGET_ID = "phenix-tasks";
+const MAX_TREE_LINES = 12;
 
 function sessionId(ctx: ExtensionContext): string {
   return ctx.sessionManager.getSessionId() ?? "default";
@@ -24,9 +32,71 @@ function taskGuidance(): string {
   ].join("\n");
 }
 
-function statusText(service: PhenixTaskService, workflowId: string): string {
-  const summary = service.summary(workflowId);
+function statusText(summary: TaskSummary): string {
   return `Tasks · ${summary.done}/${summary.total} done · ${summary.wip} wip`;
+}
+
+function stateGlyph(state: TaskState): string {
+  if (state === "done") return "✓";
+  if (state === "wip") return "◐";
+  return "○";
+}
+
+function assignmentSuffix(task: TaskNode): string {
+  const owner =
+    task.completedBySessionId ?? task.startedBySessionId ?? task.assignedSessionId;
+  return owner ? ` · @${owner.slice(0, 8)}` : "";
+}
+
+function compactTitle(title: string): string {
+  return title.length <= 72 ? title : `${title.slice(0, 69)}...`;
+}
+
+/** Render a bounded, stable tree suitable for Pi's small above-editor widget. */
+export function renderTaskTree(
+  root: TaskNode,
+  summary: TaskSummary,
+  maximumLines = MAX_TREE_LINES,
+): readonly string[] {
+  const body: string[] = [];
+  let omitted = 0;
+
+  const visit = (
+    task: TaskNode,
+    prefix: string,
+    connector: "" | "├─ " | "└─ ",
+  ): void => {
+    if (body.length >= Math.max(1, maximumLines - 1)) {
+      omitted += 1;
+      return;
+    }
+    body.push(
+      `${prefix}${connector}${stateGlyph(task.effectiveState)} ${compactTitle(task.title)}${assignmentSuffix(task)}`,
+    );
+    task.children.forEach((child, index) => {
+      const last = index === task.children.length - 1;
+      const childPrefix = connector === "" ? "" : `${prefix}${connector === "└─ " ? "   " : "│  "}`;
+      visit(child, childPrefix, last ? "└─ " : "├─ ");
+    });
+  };
+
+  visit(root, "", "");
+  const lines = [statusText(summary), ...body];
+  if (omitted > 0 && lines.length < maximumLines) lines.push(`… ${omitted} more`);
+  return lines.slice(0, maximumLines);
+}
+
+function updateProjection(
+  service: PhenixTaskService,
+  workflowId: string,
+  ctx: ExtensionContext,
+): void {
+  const summary = service.summary(workflowId);
+  ctx.ui.setStatus(TASK_WIDGET_ID, statusText(summary));
+  const ownerSessionId = service.workflowOwnerSessionId(workflowId);
+  const authority = ownerSessionId ? service.rootAuthorityForSession(ownerSessionId) : undefined;
+  if (!authority) return;
+  ctx.ui.setWidget(TASK_WIDGET_ID, [...renderTaskTree(service.inspect(authority.token), summary)]);
 }
 
 export function registerSuiteTasks(input: {
@@ -52,6 +122,7 @@ export function registerSuiteTasks(input: {
       title: event.prompt,
     });
 
+    updateProjection(input.service, activeWorkflow.instanceId, ctx);
     const systemPrompt = phenixRootModelScope.contributeSystemPrompt({
       model: ctx.model,
       systemPrompt: event.systemPrompt,
@@ -73,7 +144,7 @@ export function registerSuiteTasks(input: {
     const ctx = ownerSessionId ? contexts.get(ownerSessionId) : undefined;
     if (!ctx) return;
     try {
-      ctx.ui.setStatus("phenix-tasks", statusText(input.service, event.workflowId));
+      updateProjection(input.service, event.workflowId, ctx);
       if (
         event.kind === "task.started" ||
         event.kind === "task.completed" ||
@@ -102,7 +173,7 @@ export function registerSuiteTasks(input: {
     const activeWorkflow = getSessionRuntime(sessionId(ctx)).activeWorkflow;
     if (!activeWorkflow) return;
     try {
-      ctx.ui.setStatus("phenix-tasks", statusText(input.service, activeWorkflow.instanceId));
+      updateProjection(input.service, activeWorkflow.instanceId, ctx);
     } catch {
       // UI projection is optional.
     }

@@ -56,7 +56,11 @@ import type {
 } from "./child-session-types.ts";
 import { ChildRuntimeError, serializeError } from "./child-session-types.ts";
 import { createCompletionTool } from "./completion-tool.ts";
-import { isFailureEvent, normalizePiEvent } from "./session-event-normalizer.ts";
+import {
+  isFailureEvent,
+  normalizePiEvent,
+  providerFailureFromPiEvent,
+} from "./session-event-normalizer.ts";
 
 function abortErrorFromSignal(signal: AbortSignal, fallbackMessage: string): ChildRuntimeError {
   const reason = signal.reason;
@@ -100,6 +104,7 @@ export interface PiSessionLike {
 export interface PreparedPiSessionSpec {
   readonly cwd: string;
   readonly model: Model<any>;
+  readonly modelRegistry: ModelRegistry;
   readonly agentDir: string;
   readonly thinkingLevel: ThinkingLevel;
   readonly tools: readonly string[];
@@ -128,6 +133,7 @@ export class ProductionPiSessionFactory implements PiSessionFactory {
     const { session } = await createAgentSession({
       cwd: spec.cwd,
       model: spec.model,
+      modelRegistry: spec.modelRegistry,
       agentDir: spec.agentDir,
       thinkingLevel: spec.thinkingLevel,
       tools: [...spec.tools],
@@ -224,6 +230,7 @@ class SdkChildRun implements ChildRun {
   private unsub: (() => void) | undefined;
   private readonly boundSignals = new WeakSet<AbortSignal>();
   private lastAssistantText: string | undefined;
+  private lastProviderFailure: SerializedError | undefined;
 
   constructor(session: PiSessionLike, spec: ChildSessionSpec, budgetGuard: BudgetGuard) {
     this.session = session;
@@ -265,8 +272,10 @@ class SdkChildRun implements ChildRun {
     }
 
     if (isFailureEvent(raw as unknown as { type: string })) {
-      if (this.currentCycle) {
-        this.currentCycle.error = serializeError(raw);
+      const failure = providerFailureFromPiEvent(raw as unknown as { type: string });
+      if (failure) {
+        this.lastProviderFailure = failure;
+        if (this.currentCycle) this.currentCycle.error = failure;
       }
     }
 
@@ -292,6 +301,7 @@ class SdkChildRun implements ChildRun {
     }
 
     this.status = "running";
+    this.lastProviderFailure = undefined;
     this.cycle++;
     let resolve!: (outcome: ChildCycleOutcome) => void;
     const promise = new Promise<ChildCycleOutcome>((r) => {
@@ -680,6 +690,7 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
     const preparedSpec: PreparedPiSessionSpec = {
       cwd: spec.cwd,
       model,
+      modelRegistry,
       agentDir: this.services.agentDir,
       thinkingLevel: spec.thinkingLevel,
       tools: toolNames,

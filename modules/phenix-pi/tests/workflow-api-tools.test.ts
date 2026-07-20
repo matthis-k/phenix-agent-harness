@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import {
+  createDirectSubagentTool,
   createWorkflowApiTools,
   createWorkflowTool,
   projectWorkflowInspection,
@@ -78,14 +79,14 @@ class RecordingWorkflow implements WorkflowRuntimePort {
 }
 
 async function execute(
-  tool: ReturnType<typeof createWorkflowTool>,
+  tool: ReturnType<typeof createWorkflowTool> | ReturnType<typeof createDirectSubagentTool>,
   params: Record<string, unknown>,
   signal = new AbortController().signal,
 ) {
   return tool.execute("call-1", params as never, signal, undefined, ctx);
 }
 
-describe("contract-bound workflow target-agent tool", () => {
+describe("contract-bound workflow target-agent tools", () => {
   it("projects the authority snapshot without exposing transition identities", () => {
     const response = projectWorkflowInspection(snapshot());
 
@@ -114,11 +115,11 @@ describe("contract-bound workflow target-agent tool", () => {
     assert.doesNotMatch(JSON.stringify(response), /optionsDigest|transitionId|edgeId/);
   });
 
-  it("installs one stable workflow tool", () => {
+  it("installs workflow and gated direct-subagent tools", () => {
     const workflow = new RecordingWorkflow();
     assert.deepEqual(
       createWorkflowApiTools({ workflow }).map((tool) => tool.name),
-      ["phenix_workflow"],
+      ["phenix_workflow", "phenix_subagent"],
     );
   });
 
@@ -147,6 +148,7 @@ describe("contract-bound workflow target-agent tool", () => {
     });
 
     assert.equal(workflow.spawnCalls.length, 0);
+    assert.equal(response.isError, true);
     assert.deepEqual(response.details, {
       status: "forbidden",
       tool: "phenix_workflow",
@@ -184,10 +186,28 @@ describe("contract-bound workflow target-agent tool", () => {
       status: "running",
       value: undefined,
       error: undefined,
+      errors: undefined,
     });
   });
 
-  it("propagates fresh backend authority failures", async () => {
+  it("normalizes JSON-encoded requirement arrays from model transports", async () => {
+    const workflow = new RecordingWorkflow();
+    const tool = createWorkflowTool({ workflow });
+
+    await execute(tool, {
+      action: "spawn",
+      agent: "scout",
+      task: "Inspect the boundary.",
+      requirements: '["Return evidence", "Do not edit"]',
+    });
+
+    assert.deepEqual(workflow.spawnCalls[0]?.requirements, [
+      "Return evidence",
+      "Do not edit",
+    ]);
+  });
+
+  it("marks backend authority failures as tool errors", async () => {
     const workflow = new RecordingWorkflow();
     workflow.execution = {
       ok: false,
@@ -206,7 +226,38 @@ describe("contract-bound workflow target-agent tool", () => {
     });
 
     assert.equal(workflow.spawnCalls.length, 1);
+    assert.equal(response.isError, true);
     assert.equal(response.details?.code, "WORKFLOW_AGENT_NOT_AVAILABLE");
     assert.equal(response.details?.currentNodeId, "reviewing");
+  });
+
+  it("denies the direct tool unless current authority enables it", async () => {
+    const workflow = new RecordingWorkflow();
+    const tool = createDirectSubagentTool({ workflow });
+
+    const response = await execute(tool, { task: "Inspect directly." });
+
+    assert.equal(workflow.spawnCalls.length, 0);
+    assert.equal(response.isError, true);
+    assert.equal(response.details?.code, "DIRECT_SUBAGENT_NOT_AUTHORIZED");
+    assert.deepEqual(response.details?.availableAgents, ["scout"]);
+  });
+
+  it("directly spawns the sole legal target when explicitly authorized", async () => {
+    const workflow = new RecordingWorkflow();
+    workflow.authority = {
+      ...workflow.authority,
+      effectiveTools: [...workflow.authority.effectiveTools, "phenix_subagent"],
+    };
+    const tool = createDirectSubagentTool({ workflow });
+
+    const response = await execute(tool, {
+      task: "Inspect directly.",
+      requirements: "Return evidence.",
+    });
+
+    assert.equal(response.isError, undefined);
+    assert.equal(workflow.spawnCalls[0]?.agent, "scout");
+    assert.deepEqual(workflow.spawnCalls[0]?.requirements, ["Return evidence."]);
   });
 });

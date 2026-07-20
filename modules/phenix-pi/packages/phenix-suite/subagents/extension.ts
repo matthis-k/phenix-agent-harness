@@ -52,6 +52,7 @@ function errorResult(
 ): AgentToolResult<Record<string, unknown>> {
   return {
     content: [{ type: "text", text: message }],
+    isError: true,
     details: details ?? { status: "failed" },
   };
 }
@@ -76,7 +77,7 @@ export default async function phenixSubagents(
       return {
         blocked: true,
         reason:
-          "Unmanaged delegation is runtime-blocked in Phenix sessions. Use phenix_workflow with action=spawn, one target agent advertised in the preloaded authority snapshot, and a bounded task.",
+          "Unmanaged delegation is runtime-blocked in Phenix sessions. Use phenix_workflow with action=spawn and an advertised target. Use phenix_subagent only when the current authority explicitly enables it.",
       };
     }
   });
