@@ -20,6 +20,9 @@ export interface SessionRoutingRuntime {
   /** Stable identity of the current logical user turn. */
   currentTurnId?: string;
 
+  /** Canonical user request for the current logical root turn. */
+  currentUserTask?: string;
+
   /** Number of user-submitted root turns seen by before_agent_start. */
   rootTurnCount: number;
 
