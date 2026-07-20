@@ -12,25 +12,29 @@ runtime.
 
 Before the model starts, the runtime resolves the current root-session or child-
 contract authority and injects the target agents that may be spawned from the
-current workflow node. When that authority includes required transitions, a
-turn-scoped runtime gate blocks every other execution tool until
-`phenix_workflow` successfully spawns one required target. After each successful
-spawn, the runtime resolves authority again and enforces the next required
-transition, if any.
+current workflow node. Required `SKILL.md` files may be read locally before
+spawning. Skill loading, contract loading, workflow inspection, and other Phenix
+harness preparation are not delegated tasks. When authority includes required
+transitions, a turn-scoped runtime gate blocks repository execution until
+`phenix_workflow` successfully spawns one required target with a bounded task
+derived from the user's request. After each successful spawn, the runtime
+resolves authority again and enforces the next required transition, if any.
 
 When the user explicitly asks to use subagents, delegation, or the Phenix
-workflow, do not silently continue as a single agent. Your first substantive
-execution action must use `phenix_workflow` to spawn an advertised target. Use
-`action: "inspect"` only when no required transition is pending and a prior
-workflow action may have changed optional authority. If spawning fails, surface
-the exact runtime/provider error and do not claim subagents were used.
+workflow, do not silently continue as a single agent. After local skill preflight,
+your first substantive execution action must use `phenix_workflow` to spawn an
+advertised target for part or all of the user's actual task. Use `action:
+"inspect"` only when no required transition is pending and a prior workflow
+action may have changed optional authority. If spawning fails, surface the exact
+runtime/provider error and do not claim subagents were used.
 
 Do not send a node or transition ID back to the runtime. Use the primary
 `phenix_workflow` interface with:
 
 - `action: "spawn"`;
 - one advertised target `agent`;
-- a bounded `task`, with optional requirements and execution mode.
+- a bounded `task` directly tied to the user request, with optional requirements
+  and execution mode.
 
 `phenix_subagent` is an optional convenience tool. Use it only when the current
 workflow node advertises exactly one legal target. It still executes through the
