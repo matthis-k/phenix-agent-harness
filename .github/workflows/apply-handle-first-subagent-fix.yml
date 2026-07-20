@@ -1,0 +1,52 @@
+name: Apply handle-first subagent fix
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-handle-first-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'fix/handle-first-subagent-collection'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: fix/handle-first-subagent-collection
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+      - uses: cachix/cachix-action@v17
+        with: { name: devenv }
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
+      - name: Apply source patch
+        run: |
+          python scripts/apply-handle-first-subagent-fix.py
+          rm scripts/apply-handle-first-subagent-fix.py
+          rm .github/workflows/apply-handle-first-subagent-fix.yml
+          nix fmt
+      - name: Run repository maintenance
+        run: devenv test
+      - name: Commit clean source change
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: make subagent collection handle-first"
+          git push origin HEAD:fix/handle-first-subagent-collection
