@@ -24,15 +24,15 @@ jobs:
           cat tools/final-patch/part2-* > /tmp/part2.py
           cat tools/final-patch/part3-* > /tmp/part3.py
           cat tools/final-patch/part4-* > /tmp/part4.py
-          : > tools/final-patch/error.log
+          : > tools/final-patch/error.txt
           status=0
           for script in /tmp/part1.py /tmp/part2.py /tmp/part3.py /tmp/part4.py; do
-            printf '\n=== %s ===\n' "$script" >> tools/final-patch/error.log
-            python3 "$script" >> tools/final-patch/error.log 2>&1 || { status=$?; break; }
+            printf '\n=== %s ===\n' "$script" >> tools/final-patch/error.txt
+            python3 "$script" >> tools/final-patch/error.txt 2>&1 || { status=$?; break; }
           done
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add tools/final-patch/error.log
+          git add tools/final-patch/error.txt
           git commit -m "ci: capture facade patch failure"
           git push origin HEAD:fix/subagent-tools-task-tree
           exit "$status"
