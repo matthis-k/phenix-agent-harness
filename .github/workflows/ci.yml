@@ -3,373 +3,47 @@ name: CI
 on:
   pull_request:
   push:
-    branches:
-      - fix/subagent-tools-task-tree
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  patch:
-    runs-on: ubuntu-24.04
+  checks:
+    name: Final maintenance checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with: { fetch-depth: 0 }
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
-          ref: fix/subagent-tools-task-tree
-          fetch-depth: 0
-          show-progress: false
-      - name: Apply SDK contract fixes
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+      - uses: cachix/cachix-action@v17
+        with: { name: devenv }
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
+      - name: Run repository maintenance
+        shell: bash
         run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-
-          def replace(path: str, old: str, new: str) -> None:
-              file = Path(path)
-              text = file.read_text()
-              if old not in text:
-                  raise SystemExit(f"pattern not found in {path}: {old[:100]!r}")
-              file.write_text(text.replace(old, new, 1))
-
-          sdk = 'modules/phenix-pi/packages/phenix-suite/runtime/sdk-child-session-backend.ts'
-          replace(
-              sdk,
-              '  type ModelRegistry,\n  SessionManager,',
-              '  type ModelRegistry,\n  type ModelRuntime,\n  SessionManager,',
-          )
-          replace(
-              sdk,
-              '  readonly modelRegistry: ModelRegistry;\n',
-              '  readonly modelRuntime: ModelRuntime;\n',
-          )
-          replace(
-              sdk,
-              '      modelRegistry: spec.modelRegistry,\n',
-              '      modelRuntime: spec.modelRuntime,\n',
-          )
-          marker = '// ── PiSessionLike — injectable session interface for testing ────────────────\n'
-          helper = '''function modelRuntimeFromRegistry(registry: ModelRegistry): ModelRuntime {
-  const runtime = (registry as unknown as { readonly runtime?: ModelRuntime }).runtime;
-  if (!runtime) {
-    throw new ChildRuntimeError(
-      "SESSION_START_FAILED",
-      "The active Pi model runtime is unavailable to the child-session adapter.",
-    );
-  }
-  return runtime;
-}
-
-'''
-          replace(sdk, marker, helper + marker)
-          replace(
-              sdk,
-              '      modelRegistry,\n      agentDir: this.services.agentDir,',
-              '      modelRuntime: modelRuntimeFromRegistry(modelRegistry),\n      agentDir: this.services.agentDir,',
-          )
-          replace(
-              sdk,
-              '''      (error) => {
-  const providerMessage = this.lastProviderFailure?.message;
-  const message =
-    providerMessage ?? (error instanceof Error ? error.message : String(error));
-  const providerError = new ChildRuntimeError("PROVIDER_FAILED", message, {
-    cause: error,
-  });
-  if (!preflightSeen) reject(providerError);
-  void this.failAndAbort(providerError);
-},
-''',
-              '''      (error) => {
-        const providerMessage = this.lastProviderFailure?.message;
-        const message = providerMessage ?? (error instanceof Error ? error.message : String(error));
-        const providerError = new ChildRuntimeError("PROVIDER_FAILED", message, {
-          cause: error,
-        });
-        if (!preflightSeen) reject(providerError);
-        void this.failAndAbort(providerError);
-      },
-''',
-          )
-
-          schema = 'modules/phenix-pi/packages/phenix-suite/runtime/workflow-action-schema.ts'
-          replace(
-              schema,
-              '  if (Array.isArray(value)) return normalize(value);\n\n  const encoded = value.trim();',
-              '  if (typeof value !== "string") return normalize(value);\n\n  const encoded = value.trim();',
-          )
-
-          normalizer = 'modules/phenix-pi/packages/phenix-suite/runtime/session-event-normalizer.ts'
-          replace(
-              normalizer,
-              '''import type {
-  ChildRunId,
-  ChildSessionEvent,
-  SerializedError,
-} from "./child-session-types.ts";
-''',
-              'import type { ChildRunId, ChildSessionEvent, SerializedError } from "./child-session-types.ts";\n',
-          )
-
-          workflow_tools = 'modules/phenix-pi/packages/phenix-suite/runtime/workflow-api-tools.ts'
-          file = Path(workflow_tools)
-          text = file.read_text()
-          old = '''function errorResult(
-  message: string,
-  details?: Record<string, unknown>,
-): AgentToolResult<Record<string, unknown>> {
-  return {
-    content: [{ type: "text", text: message }],
-    isError: true,
-    details: details ?? { status: "failed" },
-  };
-}
-'''
-          new = '''export class WorkflowToolError extends Error {
-  readonly details: Record<string, unknown>;
-
-  constructor(message: string, details?: Record<string, unknown>) {
-    super(message);
-    this.name = "WorkflowToolError";
-    this.details = details ?? { status: "failed" };
-  }
-}
-
-function fail(message: string, details?: Record<string, unknown>): never {
-  throw new WorkflowToolError(message, details);
-}
-'''
-          if old not in text:
-              raise SystemExit('workflow error result block not found')
-          text = text.replace(old, new, 1).replace('errorResult(', 'fail(')
-          text = text.replace(
-              '} catch (error) {\n        return fail(error instanceof Error ? error.message : String(error));\n      }',
-              '} catch (error) {\n        if (error instanceof WorkflowToolError) throw error;\n        return fail(error instanceof Error ? error.message : String(error));\n      }',
-          )
-          text = text.replace(
-              'export type WorkflowApiToolName =\n  | typeof PHENIX_WORKFLOW_TOOL\n  | typeof PHENIX_SUBAGENT_TOOL;',
-              'export type WorkflowApiToolName = typeof PHENIX_WORKFLOW_TOOL | typeof PHENIX_SUBAGENT_TOOL;',
-          )
-          text = text.replace(
-              '''          ...(params.requirements !== undefined
-            ? { requirements: params.requirements }
-            : {}),''',
-              '          ...(params.requirements !== undefined ? { requirements: params.requirements } : {}),',
-          )
-          file.write_text(text)
-
-          subagents = 'modules/phenix-pi/packages/phenix-suite/subagents/extension.ts'
-          replace(
-              subagents,
-              '''function errorResult(
-  message: string,
-  details?: Record<string, unknown>,
-): AgentToolResult<Record<string, unknown>> {
-  return {
-    content: [{ type: "text", text: message }],
-    isError: true,
-    details: details ?? { status: "failed" },
-  };
-}
-''',
-              '''function errorResult(message: string, details?: Record<string, unknown>): never {
-  const error = new Error(message) as Error & { details?: Record<string, unknown> };
-  error.details = details ?? { status: "failed" };
-  throw error;
-}
-''',
-          )
-
-          tasks = 'modules/phenix-pi/packages/phenix-suite/tasks/suite-integration.ts'
-          replace(
-              tasks,
-              '''  const owner =
-    task.completedBySessionId ?? task.startedBySessionId ?? task.assignedSessionId;''',
-              '  const owner = task.completedBySessionId ?? task.startedBySessionId ?? task.assignedSessionId;',
-          )
-          replace(
-              tasks,
-              '''  const visit = (
-    task: TaskNode,
-    prefix: string,
-    connector: "" | "├─ " | "└─ ",
-  ): void => {''',
-              '  const visit = (task: TaskNode, prefix: string, connector: "" | "├─ " | "└─ "): void => {',
-          )
-
-          sdk_test = 'modules/phenix-pi/tests/sdk-child-session-backend.test.ts'
-          file = Path(sdk_test)
-          text = file.read_text()
-          text = text.replace(
-              '''import type {
-  AgentSessionEvent,
-  DefaultResourceLoader,
-  ModelRegistry,
-} from "@earendil-works/pi-coding-agent";
-import {
-  type PiSessionFactory,
-  type PiSessionLike,
-  type PreparedPiSessionSpec,
-  SdkChildSessionBackend,
-} from "@matthis-k/phenix-suite/runtime/sdk-child-session-backend.ts";
-import {
-  type ChildSessionSpec,
-  childRunId,
-} from "@matthis-k/phenix-suite/runtime/child-session-types.ts";
-''',
-              '''import type {
-  AgentSessionEvent,
-  DefaultResourceLoader,
-  ModelRegistry,
-  ModelRuntime,
-} from "@earendil-works/pi-coding-agent";
-import {
-  type ChildSessionSpec,
-  childRunId,
-} from "@matthis-k/phenix-suite/runtime/child-session-types.ts";
-import {
-  type PiSessionFactory,
-  type PiSessionLike,
-  type PreparedPiSessionSpec,
-  SdkChildSessionBackend,
-} from "@matthis-k/phenix-suite/runtime/sdk-child-session-backend.ts";
-''',
-          )
-          text = text.replace(
-              '  it("passes the captured root model registry into the child Pi session", async () => {\n    const concreteModel',
-              '  it("passes the captured root model runtime into the child Pi session", async () => {\n    const concreteModel',
-          )
-          text = text.replace(
-              '    const registry = {\n      find(provider: string, id: string) {',
-              '    const modelRuntime = {} as ModelRuntime;\n    const registry = {\n      runtime: modelRuntime,\n      find(provider: string, id: string) {',
-              1,
-          )
-          text = text.replace(
-              '    assert.equal(factory.spec?.modelRegistry, registry);',
-              '    assert.equal(factory.spec?.modelRuntime, modelRuntime);',
-          )
-          second = '    const registry = {\n      find() {\n        return { provider: "test-provider", id: "test-model" };\n      },\n    } as unknown as ModelRegistry;'
-          second_new = '    const registry = {\n      runtime: {} as ModelRuntime,\n      find() {\n        return { provider: "test-provider", id: "test-model" };\n      },\n    } as unknown as ModelRegistry;'
-          if second not in text:
-              raise SystemExit('second SDK registry fixture not found')
-          file.write_text(text.replace(second, second_new, 1))
-
-          workflow_test = 'modules/phenix-pi/tests/workflow-api-tools.test.ts'
-          file = Path(workflow_test)
-          text = file.read_text()
-          text = text.replace(
-              '  projectWorkflowInspection,\n} from "@matthis-k/phenix-suite/runtime/workflow-api-tools.ts";',
-              '  projectWorkflowInspection,\n  WorkflowToolError,\n} from "@matthis-k/phenix-suite/runtime/workflow-api-tools.ts";',
-          )
-          helper_marker = '''async function execute(
-  tool: ReturnType<typeof createWorkflowTool> | ReturnType<typeof createDirectSubagentTool>,
-  params: Record<string, unknown>,
-  signal = new AbortController().signal,
-) {
-  return tool.execute("call-1", params as never, signal, undefined, ctx);
-}
-'''
-          helper_new = helper_marker + '''
-async function assertToolFailure(
-  promise: Promise<unknown>,
-  expectedDetails: Record<string, unknown>,
-): Promise<void> {
-  await assert.rejects(promise, (error: unknown) => {
-    assert.ok(error instanceof WorkflowToolError);
-    assert.deepEqual(error.details, expectedDetails);
-    return true;
-  });
-}
-'''
-          if helper_marker not in text:
-              raise SystemExit('workflow execute helper not found')
-          text = text.replace(helper_marker, helper_new, 1)
-          old = '''    const response = await execute(tool, {
-      action: "spawn",
-      agent: "scout",
-      task: "Inspect something.",
-    });
-
-    assert.equal(workflow.spawnCalls.length, 0);
-    assert.equal(response.isError, true);
-    assert.deepEqual(response.details, {
-      status: "forbidden",
-      tool: "phenix_workflow",
-    });'''
-          new = '''    await assertToolFailure(
-      execute(tool, {
-        action: "spawn",
-        agent: "scout",
-        task: "Inspect something.",
-      }),
-      { status: "forbidden", tool: "phenix_workflow" },
-    );
-
-    assert.equal(workflow.spawnCalls.length, 0);'''
-          if old not in text:
-              raise SystemExit('authorization test block not found')
-          text = text.replace(old, new, 1)
-          old = '''    const response = await execute(tool, {
-      action: "spawn",
-      agent: "scout",
-      task: "Inspect something.",
-    });
-
-    assert.equal(workflow.spawnCalls.length, 1);
-    assert.equal(response.isError, true);
-    assert.equal(response.details?.code, "WORKFLOW_AGENT_NOT_AVAILABLE");
-    assert.equal(response.details?.currentNodeId, "reviewing");'''
-          new = '''    await assertToolFailure(
-      execute(tool, {
-        action: "spawn",
-        agent: "scout",
-        task: "Inspect something.",
-      }),
-      {
-        code: "WORKFLOW_AGENT_NOT_AVAILABLE",
-        currentNodeId: "reviewing",
-      },
-    );
-
-    assert.equal(workflow.spawnCalls.length, 1);'''
-          if old not in text:
-              raise SystemExit('backend failure test block not found')
-          text = text.replace(old, new, 1)
-          old = '''    const response = await execute(tool, { task: "Inspect directly." });
-
-    assert.equal(workflow.spawnCalls.length, 0);
-    assert.equal(response.isError, true);
-    assert.equal(response.details?.code, "DIRECT_SUBAGENT_NOT_AUTHORIZED");
-    assert.deepEqual(response.details?.availableAgents, ["scout"]);'''
-          new = '''    await assertToolFailure(execute(tool, { task: "Inspect directly." }), {
-      code: "DIRECT_SUBAGENT_NOT_AUTHORIZED",
-      availableAgents: ["scout"],
-    });
-
-    assert.equal(workflow.spawnCalls.length, 0);'''
-          if old not in text:
-              raise SystemExit('direct denial test block not found')
-          text = text.replace(old, new, 1)
-          text = text.replace('    assert.equal(response.isError, undefined);\n', '')
-          text = text.replace(
-              '''    assert.deepEqual(workflow.spawnCalls[0]?.requirements, [
-      "Return evidence",
-      "Do not edit",
-    ]);''',
-              '    assert.deepEqual(workflow.spawnCalls[0]?.requirements, ["Return evidence", "Do not edit"]);',
-          )
-          file.write_text(text)
-
-          bootstrap_test = 'modules/phenix-pi/tests/phenix-skill-bootstrap.test.ts'
-          replace(
-              bootstrap_test,
-              '    assert.match(bootstrapped, /mandatory initial\\s+authority inspection/i);',
-              '    assert.match(bootstrapped, /first substantive\\s+execution action/i);\n    assert.match(bootstrapped, /phenix_subagent/);',
-          )
-          PY
-          git checkout origin/main -- .github/workflows/ci.yml
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git commit -m "fix: align subagent tools with Pi SDK contracts"
-          git pull --rebase origin fix/subagent-tools-task-tree
-          git push origin HEAD:fix/subagent-tools-task-tree
+          set +e
+          devenv test > devenv-test.log 2>&1
+          status=$?
+          tail -n 320 devenv-test.log
+          exit "$status"
+      - name: Upload devenv diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: devenv-test-log
+          path: devenv-test.log
+          if-no-files-found: error
