@@ -37,6 +37,7 @@ jobs:
       - name: Apply source patch
         run: |
           set +e
+          python scripts/fix-workflow-handle-stager.py
           python scripts/apply-workflow-handle-deadlock-qa-fanout.py > patch.log 2>&1
           status=$?
           cat patch.log
@@ -50,6 +51,7 @@ jobs:
           if-no-files-found: error
       - name: Clean staging and format
         run: |
+          rm scripts/fix-workflow-handle-stager.py
           rm scripts/apply-workflow-handle-deadlock-qa-fanout.py
           rm .github/workflows/apply-workflow-handle-deadlock-qa-fanout.yml
           devenv tasks run maintenance:fix
