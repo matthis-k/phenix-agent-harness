@@ -11,7 +11,7 @@ import {
   taskRuntimeEnvironment,
 } from "@matthis-k/phenix-suite/tasks/task-child-session-backend.ts";
 import type { TaskWorkflowBridge } from "@matthis-k/phenix-suite/tasks/task-workflow-bridge.ts";
-import { PhenixTaskService } from "@matthis-k/phenix-tasks/index.ts";
+import { createTaskRuntimeFacade } from "@matthis-k/phenix-tasks/index.ts";
 
 function contractChannel(onSubmit: () => void): ContractSubmissionChannel {
   return {
@@ -36,7 +36,7 @@ function contractChannel(onSubmit: () => void): ContractSubmissionChannel {
 
 describe("task-bound child backend", () => {
   it("hands process authority to the backend and gates completion", async () => {
-    const tasks = new PhenixTaskService();
+    const tasks = createTaskRuntimeFacade();
     const authority = tasks.ensureWorkflow({
       workflowId: "wf_test",
       ownerSessionId: "root-session",
@@ -85,7 +85,7 @@ describe("task-bound child backend", () => {
     assert.equal(rejected.issues?.[0]?.code, "TASK_SUBTREE_INCOMPLETE");
     assert.equal(submissions, 0);
 
-    tasks.updateTask(authority.token, { taskId: authority.scopeTaskId, state: "done" });
+    tasks.update(authority.token, { uid: authority.scopeTaskId, status: "done" });
     const accepted = await capturedSpec.contractChannel.submit({ result: "complete" });
     assert.equal(accepted.ok, true);
     assert.equal(submissions, 1);
