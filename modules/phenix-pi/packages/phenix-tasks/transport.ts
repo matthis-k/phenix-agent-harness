@@ -3,34 +3,30 @@ import fs from "node:fs";
 import net from "node:net";
 
 import type {
-  PhenixTaskService,
+  TaskAddInput,
   TaskAuthority,
-  TaskMutation,
-  TaskNode,
-  TaskRecord,
-} from "./core.ts";
+  TaskProgressUpdate,
+  TaskRuntimeFacade,
+  TaskTreeNode,
+  TaskUpdateInput,
+  TaskView,
+} from "./facade.ts";
 
 export interface BoundTaskClient {
-  inspect(): Promise<TaskNode>;
-  add(input: {
-    readonly parentId?: string;
-    readonly title: string;
-    readonly description?: string;
-  }): Promise<TaskRecord>;
-  update(input: TaskMutation): Promise<TaskRecord>;
+  inspect(): Promise<TaskTreeNode>;
+  add(input: TaskAddInput): Promise<TaskView>;
+  update(input: TaskUpdateInput): Promise<TaskView>;
+  appendLog(input: { readonly uid: string; readonly message: string }): Promise<TaskProgressUpdate>;
 }
 
 export type TaskRpcOperation =
   | { readonly method: "inspect" }
+  | { readonly method: "add"; readonly params: TaskAddInput }
+  | { readonly method: "update"; readonly params: TaskUpdateInput }
   | {
-      readonly method: "add";
-      readonly params: {
-        readonly parentId?: string;
-        readonly title: string;
-        readonly description?: string;
-      };
-    }
-  | { readonly method: "update"; readonly params: TaskMutation };
+      readonly method: "append_log";
+      readonly params: { readonly uid: string; readonly message: string };
+    };
 
 export interface TaskRpcRequest {
   readonly id: string;
@@ -38,8 +34,9 @@ export interface TaskRpcRequest {
   readonly operation: TaskRpcOperation;
 }
 
+export type TaskRpcValue = TaskTreeNode | TaskView | TaskProgressUpdate;
 export type TaskRpcResponse =
-  | { readonly id: string; readonly ok: true; readonly value: TaskNode | TaskRecord }
+  | { readonly id: string; readonly ok: true; readonly value: TaskRpcValue }
   | { readonly id: string; readonly ok: false; readonly error: string };
 
 export interface TaskRpcServer {
@@ -53,51 +50,44 @@ function encode(value: unknown): string {
 
 function socketPathFromEndpoint(endpoint: string): string {
   const normalized = endpoint.trim();
-  if (normalized.startsWith("unix://")) return normalized.slice("unix://".length);
-  return normalized;
+  return normalized.startsWith("unix://") ? normalized.slice("unix://".length) : normalized;
 }
 
-function applyOperation(
-  service: PhenixTaskService,
-  request: TaskRpcRequest,
-): TaskNode | TaskRecord {
+function applyOperation(service: TaskRuntimeFacade, request: TaskRpcRequest): TaskRpcValue {
   switch (request.operation.method) {
     case "inspect":
       return service.inspect(request.capability);
     case "add":
-      return service.addTask(request.capability, request.operation.params);
+      return service.add(request.capability, request.operation.params);
     case "update":
-      return service.updateTask(request.capability, request.operation.params);
+      return service.update(request.capability, request.operation.params);
+    case "append_log":
+      return service.appendLog(request.capability, request.operation.params);
   }
 }
 
-/** Bind the in-process service to one opaque subtree capability. */
 export function createInProcessTaskClient(
-  service: PhenixTaskService,
+  service: TaskRuntimeFacade,
   capability: string,
 ): BoundTaskClient {
   return {
-    async inspect(): Promise<TaskNode> {
+    async inspect() {
       return service.inspect(capability);
     },
-    async add(input): Promise<TaskRecord> {
-      return service.addTask(capability, input);
+    async add(input) {
+      return service.add(capability, input);
     },
-    async update(input): Promise<TaskRecord> {
-      return service.updateTask(capability, input);
+    async update(input) {
+      return service.update(capability, input);
+    },
+    async appendLog(input) {
+      return service.appendLog(capability, input);
     },
   };
 }
 
-/**
- * Expose one authoritative task service over a local Unix-domain socket.
- *
- * Child-process backends receive only the endpoint and their opaque subtree
- * capability. They never open the state store directly, so authorization and
- * ordering remain identical to the in-process backend.
- */
 export async function startTaskRpcServer(input: {
-  readonly service: PhenixTaskService;
+  readonly service: TaskRuntimeFacade;
   readonly socketPath: string;
 }): Promise<TaskRpcServer> {
   if (process.platform !== "win32") {
@@ -155,7 +145,7 @@ export async function startTaskRpcServer(input: {
 
   return {
     endpoint: `unix://${input.socketPath}`,
-    async close(): Promise<void> {
+    async close() {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
       });
@@ -172,30 +162,34 @@ export async function startTaskRpcServer(input: {
 
 export class TaskRpcClient implements BoundTaskClient {
   private readonly socketPath: string;
-  private readonly capability: string;
 
-  constructor(endpoint: string, capability: string) {
+  constructor(
+    endpoint: string,
+    private readonly capability: string,
+  ) {
     this.socketPath = socketPathFromEndpoint(endpoint);
-    this.capability = capability;
   }
 
-  inspect(): Promise<TaskNode> {
-    return this.request<TaskNode>({ method: "inspect" });
+  inspect(): Promise<TaskTreeNode> {
+    return this.request<TaskTreeNode>({ method: "inspect" });
   }
 
-  add(input: {
-    readonly parentId?: string;
-    readonly title: string;
-    readonly description?: string;
-  }): Promise<TaskRecord> {
-    return this.request<TaskRecord>({ method: "add", params: input });
+  add(input: TaskAddInput): Promise<TaskView> {
+    return this.request<TaskView>({ method: "add", params: input });
   }
 
-  update(input: TaskMutation): Promise<TaskRecord> {
-    return this.request<TaskRecord>({ method: "update", params: input });
+  update(input: TaskUpdateInput): Promise<TaskView> {
+    return this.request<TaskView>({ method: "update", params: input });
   }
 
-  private request<T extends TaskNode | TaskRecord>(operation: TaskRpcOperation): Promise<T> {
+  appendLog(input: {
+    readonly uid: string;
+    readonly message: string;
+  }): Promise<TaskProgressUpdate> {
+    return this.request<TaskProgressUpdate>({ method: "append_log", params: input });
+  }
+
+  private request<T extends TaskRpcValue>(operation: TaskRpcOperation): Promise<T> {
     const id = randomUUID();
     return new Promise<T>((resolve, reject) => {
       const socket = net.createConnection(this.socketPath);
@@ -208,13 +202,10 @@ export class TaskRpcClient implements BoundTaskClient {
         if (newline < 0) return;
         const response = JSON.parse(buffer.slice(0, newline)) as TaskRpcResponse;
         socket.end();
-        if (response.id !== id) {
+        if (response.id !== id)
           reject(new Error(`Unexpected Phenix task response id: ${response.id}`));
-        } else if (!response.ok) {
-          reject(new Error(response.error));
-        } else {
-          resolve(response.value as T);
-        }
+        else if (!response.ok) reject(new Error(response.error));
+        else resolve(response.value as T);
       });
       socket.once("connect", () => {
         socket.write(
@@ -230,8 +221,7 @@ export function taskClientFromEnvironment(
 ): TaskRpcClient | undefined {
   const endpoint = environment.PHENIX_TASKS_ENDPOINT?.trim();
   const capability = environment.PHENIX_TASKS_CAPABILITY?.trim();
-  if (!endpoint || !capability) return undefined;
-  return new TaskRpcClient(endpoint, capability);
+  return endpoint && capability ? new TaskRpcClient(endpoint, capability) : undefined;
 }
 
 export function taskProcessEnvironment(input: {

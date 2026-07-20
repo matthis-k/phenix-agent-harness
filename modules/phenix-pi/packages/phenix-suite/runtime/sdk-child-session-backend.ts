@@ -18,6 +18,8 @@
  */
 
 /* biome-ignore-all lint/suspicious/noExplicitAny: Pi SDK compatibility adapter. */
+import path from "node:path";
+
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai/compat";
 import type {
@@ -30,7 +32,7 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   type ModelRegistry,
-  type ModelRuntime,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -77,13 +79,17 @@ function abortErrorFromSignal(signal: AbortSignal, fallbackMessage: string): Chi
   );
 }
 
-function modelRuntimeFromRegistry(registry: ModelRegistry): ModelRuntime {
-  const runtime = (registry as unknown as { readonly runtime?: ModelRuntime }).runtime;
-  if (!runtime) {
-    throw new ChildRuntimeError(
-      "SESSION_START_FAILED",
-      "The active Pi model runtime is unavailable to the child-session adapter.",
-    );
+async function createChildModelRuntime(
+  registry: ModelRegistry,
+  agentDir: string,
+): Promise<ModelRuntime> {
+  const runtime = await ModelRuntime.create({
+    authPath: path.join(agentDir, "auth.json"),
+    modelsPath: path.join(agentDir, "models.json"),
+  });
+  for (const providerId of registry.getRegisteredProviderIds()) {
+    const configuration = registry.getRegisteredProviderConfig(providerId);
+    if (configuration) runtime.registerProvider(providerId, configuration);
   }
   return runtime;
 }
@@ -616,6 +622,10 @@ class SdkChildRun implements ChildRun {
 export interface SdkChildSessionBackendOptions {
   readonly services: PiRuntimeServices;
   readonly sessionFactory?: PiSessionFactory;
+  readonly createModelRuntime?: (
+    registry: ModelRegistry,
+    agentDir: string,
+  ) => Promise<ModelRuntime>;
   readonly buildCustomTools?: (spec: ChildSessionSpec) => readonly ToolDefinition[];
   readonly buildResourceLoader?: (
     spec: ChildSessionSpec,
@@ -636,6 +646,10 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
 
   private readonly services: PiRuntimeServices;
   private readonly sessionFactory: PiSessionFactory;
+  private readonly createModelRuntimeFn: (
+    registry: ModelRegistry,
+    agentDir: string,
+  ) => Promise<ModelRuntime>;
   private readonly buildCustomToolsFn:
     | ((spec: ChildSessionSpec) => readonly ToolDefinition[])
     | undefined;
@@ -647,6 +661,7 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
   constructor(options: SdkChildSessionBackendOptions) {
     this.services = options.services;
     this.sessionFactory = options.sessionFactory ?? new ProductionPiSessionFactory();
+    this.createModelRuntimeFn = options.createModelRuntime ?? createChildModelRuntime;
     this.buildCustomToolsFn = options.buildCustomTools;
     this.buildResourceLoaderFn = options.buildResourceLoader;
     this.buildSystemPromptFn = options.buildSystemPrompt;
@@ -701,7 +716,7 @@ export class SdkChildSessionBackend implements ChildSessionBackend {
     const preparedSpec: PreparedPiSessionSpec = {
       cwd: spec.cwd,
       model,
-      modelRuntime: modelRuntimeFromRegistry(modelRegistry),
+      modelRuntime: await this.createModelRuntimeFn(modelRegistry, this.services.agentDir),
       agentDir: this.services.agentDir,
       thinkingLevel: spec.thinkingLevel,
       tools: toolNames,

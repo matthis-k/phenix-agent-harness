@@ -1,4 +1,4 @@
-import type { PhenixTaskService } from "@matthis-k/phenix-tasks/index.ts";
+import type { TaskRuntimeFacade } from "@matthis-k/phenix-tasks/index.ts";
 import { taskProcessEnvironment } from "@matthis-k/phenix-tasks/index.ts";
 import type {
   ChildRun,
@@ -52,7 +52,7 @@ function incompleteTaskResult(
 
 function guardCompletion(input: {
   readonly channel: ContractSubmissionChannel;
-  readonly tasks: PhenixTaskService;
+  readonly tasks: TaskRuntimeFacade;
   readonly authorityToken: string;
 }): ContractSubmissionChannel {
   return {
@@ -78,7 +78,7 @@ function guardCompletion(input: {
  */
 export function createTaskBoundChildSessionBackend(input: {
   readonly delegate: ChildSessionBackend;
-  readonly tasks: PhenixTaskService;
+  readonly tasks: TaskRuntimeFacade;
   readonly getBridge: () => TaskWorkflowBridge;
   readonly getEndpoint: () => Promise<string>;
 }): ChildSessionBackend {

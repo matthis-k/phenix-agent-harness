@@ -1,4 +1,4 @@
-import type { PhenixTaskService, TaskAuthority } from "@matthis-k/phenix-tasks/index.ts";
+import type { TaskAuthority, TaskRuntimeFacade } from "@matthis-k/phenix-tasks/index.ts";
 
 import type { ChildParentExecutionContext } from "../runtime/child-session-types.ts";
 import type { ParentExecutionContext } from "../runtime/workflow-api-types.ts";
@@ -16,7 +16,7 @@ export interface TaskWorkflowBridge {
 
 export function createTaskWorkflowBridge(input: {
   readonly workflow: WorkflowRuntimePort;
-  readonly tasks: PhenixTaskService;
+  readonly tasks: TaskRuntimeFacade;
 }): TaskWorkflowBridge {
   const resolveParentAuthority = (parent: ParentExecutionContext): TaskAuthority | undefined => {
     if (parent.kind === "root") {
@@ -55,7 +55,7 @@ export function createTaskWorkflowBridge(input: {
       });
       const result = await input.workflow.spawn(request);
       if (!result.ok) {
-        input.tasks.failDelegation(authority.token, pending.taskId);
+        input.tasks.failDelegation(authority.token, pending.taskUid);
       }
       return result;
     },

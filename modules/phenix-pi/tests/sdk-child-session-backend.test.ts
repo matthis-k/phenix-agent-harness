@@ -94,7 +94,8 @@ describe("SdkChildSessionBackend", () => {
     const concreteModel = { provider: "test-provider", id: "test-model" };
     const modelRuntime = {} as ModelRuntime;
     const registry = {
-      runtime: modelRuntime,
+      getRegisteredProviderIds: () => [],
+      getRegisteredProviderConfig: () => undefined,
       find(provider: string, id: string) {
         return provider === concreteModel.provider && id === concreteModel.id
           ? concreteModel
@@ -105,6 +106,7 @@ describe("SdkChildSessionBackend", () => {
     const backend = new SdkChildSessionBackend({
       services: { modelRegistry: registry, agentDir: "/tmp/agent" },
       sessionFactory: factory,
+      createModelRuntime: async () => modelRuntime,
       buildSystemPrompt: () => "system",
       buildResourceLoader: () => ({}) as DefaultResourceLoader,
     });
@@ -118,7 +120,8 @@ describe("SdkChildSessionBackend", () => {
 
   it("preserves provider diagnostics when Pi later rejects an accepted prompt", async () => {
     const registry = {
-      runtime: {} as ModelRuntime,
+      getRegisteredProviderIds: () => [],
+      getRegisteredProviderConfig: () => undefined,
       find() {
         return { provider: "test-provider", id: "test-model" };
       },
@@ -139,6 +142,7 @@ describe("SdkChildSessionBackend", () => {
     const backend = new SdkChildSessionBackend({
       services: { modelRegistry: registry, agentDir: "/tmp/agent" },
       sessionFactory: factory,
+      createModelRuntime: async () => ({}) as ModelRuntime,
       buildSystemPrompt: () => "system",
       buildResourceLoader: () => ({}) as DefaultResourceLoader,
     });
