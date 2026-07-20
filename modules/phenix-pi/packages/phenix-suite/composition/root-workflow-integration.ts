@@ -170,6 +170,7 @@ export default async function rootWorkflowIntegration(
     options.workflowGate.beginTurn({
       sessionId,
       turnId: turn.turnId,
+      userTask: turn.userMessage,
       requiredAgents: required,
     });
 
@@ -179,8 +180,9 @@ export default async function rootWorkflowIntegration(
       "The deterministic Phenix workflow owns the current node, transition selection, role selection, output schemas, models, tools, and delegation depth. ";
     if (required.length > 0) {
       workflowGuidance +=
-        `This node has required workflow transitions. Before any repository read, shell command, MCP call, task mutation, or other execution tool, call phenix_workflow with action=spawn and one required target agent: ${required.join(", ")}. ` +
-        "The runtime blocks other tool calls until the required workflow action succeeds and re-evaluates authority after every successful spawn.\n\n";
+        `This node has required workflow transitions. You may first read any required SKILL.md files locally. Do not delegate skill loading, contract loading, workflow inspection, or other Phenix harness preparation. ` +
+        `Then call phenix_workflow with action=spawn, one required target agent (${required.join(", ")}), and a bounded task directly derived from the user's request: ${JSON.stringify(turn.userMessage)}. ` +
+        "The runtime blocks repository reads and other execution tools until that required workflow action succeeds, and re-evaluates authority after every successful spawn.\n\n";
     } else {
       workflowGuidance +=
         "No required target transition is currently pending. Optional delegation remains available when it materially reduces isolated context.\n\n";
