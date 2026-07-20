@@ -31,7 +31,7 @@ export function taskAuthorityTokenFromSpec(spec: ChildSessionSpec): string | und
 
 function incompleteTaskResult(
   channel: ContractSubmissionChannel,
-  taskId: string,
+  taskUid: string,
 ): ContractSubmissionResult {
   const attempt = channel.current();
   return {
@@ -43,7 +43,7 @@ function incompleteTaskResult(
         path: [],
         code: "TASK_SUBTREE_INCOMPLETE",
         message:
-          `Owned task ${taskId} is not done. Complete and update the task subtree ` +
+          `Owned task ${taskUid} is not done. Complete and update the task subtree ` +
           "before submitting the child result.",
       },
     ],
@@ -59,8 +59,8 @@ function guardCompletion(input: {
     current: () => input.channel.current(),
     async submit(value) {
       const root = input.tasks.inspect(input.authorityToken);
-      if (root.explicitState !== "done") {
-        return incompleteTaskResult(input.channel, root.id);
+      if (root.ownStatus !== "done") {
+        return incompleteTaskResult(input.channel, root.uid);
       }
       return input.channel.submit(value);
     },
