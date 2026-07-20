@@ -75,6 +75,10 @@ function decodeResult(value: unknown): ContractResult {
   return value as unknown as ContractResult;
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 // ── Store implementation ────────────────────────────────────────────────────
 
 export class FileContractStore {
@@ -105,7 +109,6 @@ export class FileContractStore {
     const next = new Promise<void>((r) => {
       resolve = r;
     });
-
     const queued = next.finally(() => {
       if (this.locks.get(id) === queued) {
         this.locks.delete(id);
@@ -173,9 +176,11 @@ export class FileContractStore {
         throw error;
       }
 
-      throw new ContractStoreError("io-failure", `Failed to load contract ${id}.`, {
-        cause: error,
-      });
+      throw new ContractStoreError(
+        "io-failure",
+        `Failed to load contract ${id}: ${errorMessage(error)}`,
+        { cause: error },
+      );
     }
   }
 
@@ -283,7 +288,6 @@ export class FileContractStore {
         throw new ContractStoreError("revision-conflict", `Contract ${id} revision mismatch.`);
       }
 
-      // Update the last submission record with rejection disposition.
       const history = [...current.result.history];
       const lastRecord = history[history.length - 1];
       if (lastRecord) {
@@ -329,7 +333,6 @@ export class FileContractStore {
         throw new ContractStoreError("revision-conflict", `Contract ${id} revision mismatch.`);
       }
 
-      // Mark the last submission record as accepted.
       const history = [...current.result.history];
       const lastRecord = history[history.length - 1];
       if (lastRecord) {
