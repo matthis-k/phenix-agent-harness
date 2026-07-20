@@ -7,6 +7,7 @@ import type {
   WorkflowSpawnRequest,
   WorkflowSpawnResult,
 } from "../runtime/workflow-runtime-types.ts";
+import { resolveWorkflowSpawnRequest } from "../subagents/workflow-assignment.ts";
 
 export interface TaskWorkflowBridge {
   readonly workflow: WorkflowRuntimePort;
@@ -86,19 +87,21 @@ export function createTaskWorkflowBridge(input: {
         };
       }
 
+      const snapshot = input.workflow.inspect(request);
+      const resolvedRequest = resolveWorkflowSpawnRequest(snapshot, request);
       const pending = input.tasks.prepareDelegation(authority.token, {
-        task: request.task,
-        requirements: request.requirements,
+        task: resolvedRequest.task,
+        requirements: resolvedRequest.requirements,
       });
       appendDiagnostic(
         input.tasks,
         authority,
         pending.taskUid,
-        `Delegation requested: agent=${request.agent}, mode=${request.mode ?? "await"}.`,
+        `Delegation requested: agent=${resolvedRequest.agent}, mode=${resolvedRequest.mode ?? "await"}.`,
       );
 
       try {
-        const result = await input.workflow.spawn(request);
+        const result = await input.workflow.spawn(resolvedRequest);
         if (!result.ok) {
           appendDiagnostic(input.tasks, authority, pending.taskUid, failureDiagnostic(result));
           input.tasks.failDelegation(authority.token, pending.taskUid);

@@ -1,3 +1,8 @@
+import type {
+  WorkflowAuthoritySnapshot,
+  WorkflowSpawnRequest,
+} from "../runtime/workflow-runtime-types.ts";
+
 export interface WorkflowAssignmentInput {
   readonly source: "root" | "contract";
   readonly category: "required" | "optional" | "repair";
@@ -38,5 +43,37 @@ export function resolveWorkflowAssignment(
       "Complete the entire user request, not only setup, discovery, or one intermediate command.",
       "Follow the applicable repository instructions and skills, and return the complete contract result.",
     ]),
+  };
+}
+
+/**
+ * Resolve the immutable assignment used by task preparation and child contracts.
+ *
+ * Required root assignments are canonicalized from workflow authority and the
+ * original user request. Other assignments retain the model-supplied bounded
+ * task. Returning the original request when no unique target is available lets
+ * the workflow runtime report the authoritative transition error.
+ */
+export function resolveWorkflowSpawnRequest(
+  snapshot: WorkflowAuthoritySnapshot,
+  request: WorkflowSpawnRequest,
+): WorkflowSpawnRequest {
+  const matches = snapshot.workflow.options.filter((option) => option.agent === request.agent);
+  if (matches.length !== 1) return request;
+
+  const option = matches[0];
+  const assignment = resolveWorkflowAssignment({
+    source: snapshot.source,
+    category: option.category,
+    transitionDescription: option.description,
+    requestedTask: request.task,
+    ...(request.userTask ? { userTask: request.userTask } : {}),
+    ...(request.requirements ? { requestedRequirements: request.requirements } : {}),
+  });
+  const { requirements: _requirements, ...requestWithoutRequirements } = request;
+  return {
+    ...requestWithoutRequirements,
+    task: assignment.task,
+    ...(assignment.requirements.length > 0 ? { requirements: [...assignment.requirements] } : {}),
   };
 }
