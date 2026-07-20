@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
+import type {
+  Api,
+  AssistantMessage,
+  AssistantMessageEvent,
+  Context,
+  Model,
+} from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 
 import { createTracedPhenixProviderStream } from "@matthis-k/phenix-routing/provider.ts";
@@ -73,7 +79,7 @@ test("virtual provider and router share one trace id", async () => {
       return stream;
     };
 
-    const events = [];
+    const events: AssistantMessageEvent[] = [];
     const traced = createTracedPhenixProviderStream(delegate)(virtualModel, context, {
       sessionId: "provider-trace-session",
     });
