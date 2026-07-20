@@ -264,7 +264,7 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
 
   observe(outcome: WorkflowToolOutcome): void {
     const state = this.stateBySession.get(outcome.sessionId);
-    if (!state || state.kind !== "required" || outcome.turnId !== state.turnId) return;
+    if (state?.kind !== "required" || outcome.turnId !== state.turnId) return;
     if (outcome.toolName !== "phenix_workflow" || workflowAction(outcome.input) !== "spawn") {
       return;
     }
