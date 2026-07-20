@@ -96,10 +96,22 @@ test("virtual provider and router share one trace id", async () => {
       .map((line) => JSON.parse(line) as Record<string, unknown>);
     const traceIds = new Set(records.map((record) => record.traceId));
     assert.deepEqual([...traceIds], [routerTraceId]);
-    assert.equal(records.filter((record) => record.boundary === "phenix_provider_request").length, 1);
-    assert.equal(records.filter((record) => record.boundary === "phenix_provider_egress").length, 3);
-    assert.equal(records.filter((record) => record.boundary === "phenix_provider_terminal").length, 1);
-    assert.equal(records.filter((record) => record.boundary === "phenix_provider_stream_end").length, 1);
+    assert.equal(
+      records.filter((record) => record.boundary === "phenix_provider_request").length,
+      1,
+    );
+    assert.equal(
+      records.filter((record) => record.boundary === "phenix_provider_egress").length,
+      3,
+    );
+    assert.equal(
+      records.filter((record) => record.boundary === "phenix_provider_terminal").length,
+      1,
+    );
+    assert.equal(
+      records.filter((record) => record.boundary === "phenix_provider_stream_end").length,
+      1,
+    );
 
     const delta = records.find(
       (record) => record.boundary === "phenix_provider_egress" && record.eventType === "text_delta",
