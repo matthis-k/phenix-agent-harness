@@ -41,7 +41,21 @@ jobs:
           rm .github/workflows/apply-required-focus-hint-fix.yml
           devenv tasks run maintenance:fix
       - name: Run repository maintenance
-        run: devenv test
+        id: maintenance
+        shell: bash
+        run: |
+          set +e
+          devenv test > maintenance.log 2>&1
+          status=$?
+          tail -n 400 maintenance.log
+          exit "$status"
+      - name: Upload maintenance diagnostics
+        if: failure() && steps.maintenance.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: required-focus-hint-maintenance-log
+          path: maintenance.log
+          if-no-files-found: error
       - name: Commit clean source change
         run: |
           git config user.name github-actions[bot]
