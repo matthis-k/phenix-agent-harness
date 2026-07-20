@@ -266,6 +266,7 @@ describe("contract-bound workflow target-agent tools", () => {
       requirements: "Return evidence.",
     });
 
+    assert.equal(response.details?.agent, "scout");
     assert.equal(workflow.spawnCalls[0]?.agent, "scout");
     assert.deepEqual(workflow.spawnCalls[0]?.requirements, ["Return evidence."]);
   });
