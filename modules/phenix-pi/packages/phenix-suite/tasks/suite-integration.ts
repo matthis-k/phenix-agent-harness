@@ -84,7 +84,7 @@ export function renderTaskTree(
 export function taskCommandCompletions(
   prefix: string,
   references: readonly TaskReference[],
-): readonly { value: string; label: string; description?: string }[] | null {
+): { value: string; label: string; description?: string }[] | null {
   if (!prefix.startsWith("log ")) {
     return "log ".startsWith(prefix)
       ? [{ value: "log ", label: "log <task>", description: "Open an exact task log" }]
