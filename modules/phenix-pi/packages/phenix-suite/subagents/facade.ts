@@ -46,7 +46,7 @@ function handle(record: HandleRecord | undefined): SubagentHandleView | undefine
     modelSet: record.modelSet,
     ...(record.producerSpec
       ? {
-          role: record.producerSpec.role,
+          ...(record.producerSpec.role !== null ? { role: record.producerSpec.role } : {}),
           agent: record.producerSpec.agent,
           model: record.producerSpec.model,
           thinking: record.producerSpec.thinking,
