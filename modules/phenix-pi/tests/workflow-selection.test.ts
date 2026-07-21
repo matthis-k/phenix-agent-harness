@@ -22,7 +22,11 @@ describe("workflow selection", () => {
     assert.equal(workflow.workflowDefinitionId, PHENIX_QA_WORKFLOW.id);
     assert.equal(workflow.source, "classifier");
     assert.equal(
-      difficultyForWorkflow({ selected: "D0", workflow, userMessage: "do a full qa for this repo" }),
+      difficultyForWorkflow({
+        selected: "D0",
+        workflow,
+        userMessage: "do a full qa for this repo",
+      }),
       "D3",
     );
   });
