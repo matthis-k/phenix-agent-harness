@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import "./support/default-workflow-fixture.ts";
 import { describe, it } from "node:test";
-
-import { decodeContractArtifact } from "@matthis-k/phenix-suite/subagents/contract-codec.ts";
 import { createRunId, issueContract } from "@matthis-k/phenix-suite/subagents/contract.ts";
+import { decodeContractArtifact } from "@matthis-k/phenix-suite/subagents/contract-codec.ts";
 import { rolePreset } from "@matthis-k/phenix-suite/subagents/role-presets.ts";
 
 describe("contract tool budgets", () => {
