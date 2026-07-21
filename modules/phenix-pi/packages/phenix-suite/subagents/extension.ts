@@ -66,7 +66,6 @@ export default async function phenixSubagents(
         handleId: record.id,
         subagentId: record.subagentId,
         status: record.status,
-        value: record.value,
         errors: record.errors,
       };
       pi.sendMessage(
