@@ -45,14 +45,15 @@ workflow node advertises exactly one legal target. It still executes through the
 workflow runtime and never bypasses contracts, routing, task ownership, or
 verification. Raw `subagent` remains unmanaged and is blocked in Phenix sessions.
 
-Root workflow spawns are handle-first: unless `mode: "await"` is explicitly
-requested, `phenix_workflow` and `phenix_subagent` return immediately with a
-persistent `handleId`. Keep that ID and use `phenix_agent` with `inspect`, `poll`,
-`await`, `send`, or `cancel`. Use `await` to collect the final structured handoff;
-do not spawn a replacement child merely to retrieve an existing result. Use
-`send` only for concise clarification or steering while the child is live. Nested
-child delegation remains foreground by default because child actors must consume
-that handoff before continuing their own contract.
+Workflow spawns use call/return semantics by default. With omitted `mode`, the
+`phenix_workflow` or `phenix_subagent` tool call remains open until the child
+finishes, then returns the structured handoff and lets the parent session continue
+naturally. Use `mode: "background"` only for work that is intentionally managed
+through a persistent handle. Keep that `handleId` and use `phenix_agent` with
+`inspect`, `poll`, `await`, `send`, or `cancel` before the parent turn ends; handle
+settlement is persisted but does not independently restart an already-ended Pi
+turn. Never spawn a replacement child merely to retrieve an existing result. Use
+`send` only for concise clarification or steering while the child is live.
 
 The runtime derives the current node from the active root session or child
 contract, resolves fresh authority, maps the requested target agent to the unique
