@@ -18,6 +18,7 @@ import {
   type RouterStreamFunction,
 } from "@matthis-k/phenix-routing/stream-proxy.ts";
 import { prepareRootWorkflowEntry } from "@matthis-k/phenix-suite/composition/root-workflow-entry.ts";
+import { PHENIX_GENERAL_WORKFLOW } from "@matthis-k/phenix-suite/defaults/workflow-presets.ts";
 import { buildDefaultRoutingConfig } from "./support/default-routing-fixture.ts";
 
 function makeModel(provider: string, id: string): Model<Api> {
@@ -110,11 +111,14 @@ describe("root workflow entry routing", () => {
         selectedModel: { provider: "phenix", id: "free" },
         userMessage: "Investigate and redesign the authentication workflow root cause.",
         config: buildDefaultRoutingConfig(),
+        fallbackWorkflowDefinitionId: PHENIX_GENERAL_WORKFLOW.id,
       },
       { modelRegistry: registry },
     );
 
     assert.equal(entry.difficulty, "D2");
+    assert.equal(entry.workflow.preset, "general");
+    assert.equal(entry.workflow.workflowDefinitionId, PHENIX_GENERAL_WORKFLOW.id);
     assert.equal(entry.route.modelSet, "free");
     assert.equal(entry.route.role, "coordinator");
     assert.equal(entry.route.capability, "reasoning");

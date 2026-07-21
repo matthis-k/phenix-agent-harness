@@ -46,9 +46,10 @@ const COMMON_READ_TOOLS: readonly string[] = [
 const BASE_PRESET: RolePreset = {
   agentName: "phenix.base",
   tools: COMMON_READ_TOOLS,
-  // The default workflow exposes these child-local transitions specifically so
-  // a base integrator can isolate independent review concerns such as full QA.
-  allowedChildren: ["scout", "tester", "architect", "critic"],
+  // Workflow definitions decide which of these capabilities are actually
+  // available. QA exposes review specialists; general may also expose an
+  // implementer as a managed escape hatch without granting base edit tools.
+  allowedChildren: ["scout", "implementer", "tester", "architect", "critic"],
   profileMinimums: { breadth: 2 },
   thinking: {
     low: "low",
