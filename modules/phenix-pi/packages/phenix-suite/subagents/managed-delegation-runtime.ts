@@ -16,7 +16,10 @@ import {
   type SubagentHandle,
 } from "../runtime/subagent-manager.ts";
 import type { SubagentManagerFactory } from "../runtime/subagent-manager-factory.ts";
-import { publishManagedBackgroundSettlement } from "./background-settlement-channel.ts";
+import {
+  type ManagedBackgroundSettlement,
+  publishManagedBackgroundSettlement,
+} from "./background-settlement-channel.ts";
 import { readRecord, writeRecord } from "./handle-store.ts";
 import type { HandleRecord } from "./handle-types.ts";
 import { isTerminalHandleStatus } from "./handle-types.ts";
@@ -38,16 +41,6 @@ interface ManagedCompletion {
   readonly record: HandleRecord;
   readonly error?: ManagedDelegationFailure;
 }
-
-export interface ManagedBackgroundSettlement {
-  readonly cwd: string;
-  readonly sessionId: string;
-  readonly record: HandleRecord;
-}
-
-export type ManagedBackgroundSettlementListener = (
-  settlement: ManagedBackgroundSettlement,
-) => void | Promise<void>;
 
 export interface ManagedDelegationExecutionInput {
   readonly compiler: SubagentExecutionCompiler;
@@ -100,31 +93,20 @@ function terminalStatus(code: string): "cancelled" | "failed" {
 
 export interface ManagedDelegationRuntimeOptions {
   readonly managers: SubagentManagerFactory;
-  readonly onBackgroundSettled?: ManagedBackgroundSettlementListener;
 }
 
 export class ManagedDelegationRuntime {
   private readonly managers: SubagentManagerFactory;
-  private readonly backgroundSettlementListeners = new Set<ManagedBackgroundSettlementListener>();
 
   constructor(options: ManagedDelegationRuntimeOptions) {
     this.managers = options.managers;
-    if (options.onBackgroundSettled) {
-      this.backgroundSettlementListeners.add(options.onBackgroundSettled);
-    }
   }
 
   get activeCount(): number {
     return this.managers.activeCount;
   }
 
-  subscribeBackgroundSettlement(listener: ManagedBackgroundSettlementListener): () => void {
-    this.backgroundSettlementListeners.add(listener);
-    return () => this.backgroundSettlementListeners.delete(listener);
-  }
-
   shutdown(reason: string): Promise<void> {
-    this.backgroundSettlementListeners.clear();
     return this.managers.shutdown(reason);
   }
 
@@ -217,15 +199,11 @@ export class ManagedDelegationRuntime {
       void completion
         .then(async ({ record }) => {
           input.settle(record);
-          const settlement = {
+          await publishManagedBackgroundSettlement({
             cwd: input.cwd,
             sessionId: input.sessionId,
             record,
-          } satisfies ManagedBackgroundSettlement;
-          await Promise.allSettled(
-            [...this.backgroundSettlementListeners].map((listener) => listener(settlement)),
-          );
-          await publishManagedBackgroundSettlement(settlement);
+          } satisfies ManagedBackgroundSettlement);
         })
         .finally(() => {
           cleanupHandle();
