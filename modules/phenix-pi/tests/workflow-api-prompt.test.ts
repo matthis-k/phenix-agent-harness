@@ -37,10 +37,22 @@ describe("workflow authority prompt projection", () => {
     assert.match(prompt, /action=inspect/);
     assert.match(prompt, /action=spawn/);
     assert.match(prompt, /unique legal transition/i);
+    assert.match(prompt, /every target marked required must be spawned/i);
+    assert.match(prompt, /await each required target/i);
+    assert.match(prompt, /until inspection advertises no required target/i);
     assert.match(prompt, /never send a node ID back to the runtime/i);
     assert.doesNotMatch(prompt, /planner\.request-architect/);
     assert.doesNotMatch(prompt, /edgeId/);
     assert.doesNotMatch(prompt, /Authority digest:/);
+  });
+
+  it("does not make optional targets mandatory", () => {
+    const prompt = formatWorkflowProjection({
+      ...projection,
+      options: projection.options.map((option) => ({ ...option, category: "optional" as const })),
+    });
+
+    assert.doesNotMatch(prompt, /every target marked required must be spawned/i);
   });
 
   it("states deterministic no-target authority for a root actor", () => {
