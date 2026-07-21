@@ -21,6 +21,7 @@ function makeContext(overrides: Partial<QaAnalyzerContext> = {}): QaAnalyzerCont
   return {
     cwd: process.cwd(),
     scope: { kind: "repository", description: "test" },
+    scopedFiles: [],
     artifactDirectory: dir,
     config: DEFAULT_QA_CONFIG,
     ...overrides,
