@@ -50,7 +50,7 @@ describe("workflow selection", () => {
 
   it("honors an explicit per-turn preset before classification", () => {
     const workflow = selectWorkflow({
-      userMessage: "/workflow general fix the issue directly",
+      userMessage: "workflow: general fix the issue directly",
       fallbackWorkflowDefinitionId: PHENIX_IMPLEMENT_WORKFLOW.id,
     });
 
