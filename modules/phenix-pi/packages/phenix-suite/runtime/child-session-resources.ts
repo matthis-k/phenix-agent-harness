@@ -106,26 +106,11 @@ export function inferChildIntegrationRefs(
   const has = (prefix: string): boolean =>
     tools.some((tool) => tool === prefix || tool.startsWith(`${prefix}_`));
 
-  if (
-    tools.some((tool) =>
-      [
-        "read",
-        "grep",
-        "search",
-        "find",
-        "ls",
-        "tree",
-        "edit",
-        "write",
-        "apply_patch",
-        "ast_grep",
-        "ast_edit",
-        "todo",
-      ].includes(tool),
-    )
-  ) {
-    refs.add("hypa");
-  }
+  // Pi owns read/bash/grep/find/ls as built-ins. Do not infer the full Hypa
+  // extension from those logical names: HYPA_PI_MODE=replace removes the exact
+  // built-in names while contracts and tool allowlists still advertise them.
+  // Hypa remains available through an explicit extension ref or hypa_* tools.
+  if (has("hypa")) refs.add("hypa");
   if (has("lsp")) refs.add("lsp");
   if (has("mcp")) refs.add("mcp");
   if (has("context")) refs.add("context");
