@@ -149,12 +149,19 @@ function matchesQuery(snapshot: SubagentSnapshot, query: SubagentQuery): boolean
   return statuses.includes(snapshot.status);
 }
 
+const ACTIVE_SUBAGENT_STATUSES = ["starting", "running"] as const;
+
+export type ActiveSubagentCountListener = (activeCount: number) => void;
+
 /** Shared directory for managers created with different authoritative compilers. */
 export class SubagentHandleDirectory {
   private readonly handles = new Map<string, SubagentHandle<unknown>>();
+  private readonly activeCountListeners = new Set<ActiveSubagentCountListener>();
 
   add(handle: SubagentHandle<unknown>): void {
+    const previousActiveCount = this.activeCount;
     this.handles.set(handle.id, handle);
+    this.emitActiveCountIfChanged(previousActiveCount);
   }
 
   get<TOutput = unknown>(id: string): SubagentHandle<TOutput> | undefined {
@@ -162,7 +169,9 @@ export class SubagentHandleDirectory {
   }
 
   remove(id: string): void {
-    this.handles.delete(id);
+    const previousActiveCount = this.activeCount;
+    if (!this.handles.delete(id)) return;
+    this.emitActiveCountIfChanged(previousActiveCount);
   }
 
   list(query: SubagentQuery = {}): readonly SubagentSnapshot[] {
@@ -175,10 +184,40 @@ export class SubagentHandleDirectory {
     return this.handles.size;
   }
 
+  get activeCount(): number {
+    return this.list({ status: ACTIVE_SUBAGENT_STATUSES }).length;
+  }
+
+  subscribeActiveCount(listener: ActiveSubagentCountListener): () => void {
+    this.activeCountListeners.add(listener);
+    this.notifyActiveCountListener(listener, this.activeCount);
+    return () => {
+      this.activeCountListeners.delete(listener);
+    };
+  }
+
   async shutdown(reason: string): Promise<void> {
+    const previousActiveCount = this.activeCount;
     const active = [...this.handles.values()];
     this.handles.clear();
+    this.emitActiveCountIfChanged(previousActiveCount);
     await Promise.allSettled(active.map((handle) => handle.cancel(reason)));
+  }
+
+  private emitActiveCountIfChanged(previousActiveCount: number): void {
+    const activeCount = this.activeCount;
+    if (activeCount === previousActiveCount) return;
+    for (const listener of [...this.activeCountListeners]) {
+      this.notifyActiveCountListener(listener, activeCount);
+    }
+  }
+
+  private notifyActiveCountListener(listener: ActiveSubagentCountListener, activeCount: number): void {
+    try {
+      listener(activeCount);
+    } catch {
+      // Lifecycle observers must not disrupt child execution.
+    }
   }
 }
 
