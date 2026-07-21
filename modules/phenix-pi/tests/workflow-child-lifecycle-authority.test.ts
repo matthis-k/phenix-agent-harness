@@ -16,12 +16,7 @@ describe("child workflow lifecycle authority", () => {
     assert.equal(authority.kind, "restricted");
     if (authority.kind !== "restricted") return;
 
-    assert.deepEqual(authority.allowed, [
-      "qa.scout",
-      "qa.test",
-      "qa.architecture",
-      "qa.critic",
-    ]);
+    assert.deepEqual(authority.allowed, ["qa.scout", "qa.test", "qa.architecture", "qa.critic"]);
   });
 
   it("still applies the child role ceiling", () => {
