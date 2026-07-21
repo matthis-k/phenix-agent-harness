@@ -29,8 +29,10 @@ export interface TurnBudget {
 }
 
 export interface ToolBudget {
+  /** Advisory threshold that emits one progress/convergence warning. */
   readonly soft: number;
-  readonly hard: number;
+  /** Optional hard cap. Omit it for open-ended work such as repository QA. */
+  readonly hard?: number;
   readonly block: readonly string[];
 }
 
