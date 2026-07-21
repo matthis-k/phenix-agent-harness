@@ -3,6 +3,7 @@ import type { TaskAuthority, TaskRuntimeFacade } from "@matthis-k/phenix-tasks/i
 import type { ChildParentExecutionContext } from "../runtime/child-session-types.ts";
 import type { ParentExecutionContext } from "../runtime/workflow-api-types.ts";
 import type {
+  WorkflowAuthoritySnapshot,
   WorkflowRuntimePort,
   WorkflowSpawnRequest,
   WorkflowSpawnResult,
@@ -52,6 +53,25 @@ function failureDiagnostic(result: Extract<WorkflowSpawnResult, { readonly ok: f
   return `Workflow delegation failed${context ? ` (${context})` : ""}: ${result.message}${suffix}`;
 }
 
+function reconcileTerminalRootTask(input: {
+  readonly tasks: TaskRuntimeFacade;
+  readonly authority: TaskAuthority;
+  readonly snapshot: WorkflowAuthoritySnapshot;
+}): void {
+  if (input.snapshot.source !== "root" || input.snapshot.workflow.options.length > 0) return;
+
+  const root = input.tasks.inspect(input.authority.token);
+  if (root.ownStatus === "done") return;
+
+  try {
+    input.tasks.update(input.authority.token, { uid: root.uid, status: "done" });
+  } catch {
+    // A terminal workflow may still have an active background child. The next
+    // workflow inspection or awaited completion will reconcile the root once
+    // every owned descendant is done.
+  }
+}
+
 export function createTaskWorkflowBridge(input: {
   readonly workflow: WorkflowRuntimePort;
   readonly tasks: TaskRuntimeFacade;
@@ -66,18 +86,27 @@ export function createTaskWorkflowBridge(input: {
     );
   };
 
+  const rootParent = (request: {
+    readonly ctx: WorkflowSpawnRequest["ctx"];
+    readonly parent?: ParentExecutionContext;
+  }): ParentExecutionContext =>
+    request.parent ?? {
+      kind: "root",
+      sessionId: request.ctx.sessionManager.getSessionId() ?? "default",
+      cwd: request.ctx.cwd,
+      maximumDelegationDepth: Number.MAX_SAFE_INTEGER,
+    };
+
   const workflow: WorkflowRuntimePort = {
     inspect(request) {
-      return input.workflow.inspect(request);
+      const snapshot = input.workflow.inspect(request);
+      const authority = resolveParentAuthority(rootParent(request));
+      if (authority) reconcileTerminalRootTask({ tasks: input.tasks, authority, snapshot });
+      return snapshot;
     },
 
     async spawn(request: WorkflowSpawnRequest): Promise<WorkflowSpawnResult> {
-      const parent: ParentExecutionContext = request.parent ?? {
-        kind: "root",
-        sessionId: request.ctx.sessionManager.getSessionId() ?? "default",
-        cwd: request.ctx.cwd,
-        maximumDelegationDepth: Number.MAX_SAFE_INTEGER,
-      };
+      const parent = rootParent(request);
       const authority = resolveParentAuthority(parent);
       if (!authority) {
         return {
@@ -114,6 +143,11 @@ export function createTaskWorkflowBridge(input: {
           pending.taskUid,
           `Delegation started: handle=${result.record.id}, status=${result.record.status}, transition=${result.transition.fromNodeId}->${result.transition.toNodeId}.`,
         );
+        const postSpawn = input.workflow.inspect({
+          ctx: request.ctx,
+          ...(request.parent ? { parent: request.parent } : {}),
+        });
+        reconcileTerminalRootTask({ tasks: input.tasks, authority, snapshot: postSpawn });
         return result;
       } catch (error) {
         appendDiagnostic(
