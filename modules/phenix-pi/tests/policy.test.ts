@@ -14,6 +14,8 @@ const config: RuntimePolicyConfig = {
   },
 };
 
+const QA_SPECIALISTS = ["scout", "tester", "architect", "critic"] as const;
+
 describe("Phenix runtime policy", () => {
   it("raises consequence for security-sensitive work", () => {
     const profile = deriveTaskProfile(
@@ -48,7 +50,7 @@ describe("Phenix runtime policy", () => {
     assert.equal(policy.criticRequired, true);
   });
 
-  it("base execution has a standard profile without a default turn cap", () => {
+  it("base execution has a standard open-ended QA profile", () => {
     const policy = resolveExecutionPolicy({
       role: null,
       task: "Do something minimal",
@@ -59,10 +61,11 @@ describe("Phenix runtime policy", () => {
     assert.equal(policy.agent, "phenix.base");
     assert.equal(policy.tier, "standard");
     assert.deepEqual(policy.turnBudget, {});
+    assert.equal(policy.toolBudget.hard, undefined);
     assert.equal(policy.thinking, "medium");
     assert.equal(policy.criticRequired, false);
     assert.equal(policy.verificationCommands.length, 0);
-    assert.equal(policy.allowedChildren.length, 0);
+    assert.deepEqual(policy.allowedChildren, QA_SPECIALISTS);
   });
 
   it("preserves an explicitly configured hard turn cap", () => {
