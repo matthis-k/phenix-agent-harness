@@ -10,6 +10,7 @@ import type { AcceptanceEngine, SubagentExecutionCompiler } from "./execution-pl
 import type { SubagentSessionSpawner } from "./session-subagent-adapter.ts";
 import { createSessionSubagentExecutionAdapter } from "./session-subagent-adapter.ts";
 import {
+  type ActiveSubagentCountListener,
   createSubagentManager,
   type SubagentHandle,
   SubagentHandleDirectory,
@@ -24,6 +25,7 @@ export interface SubagentManagerFactory {
   list(query?: SubagentQuery): readonly SubagentSnapshot[];
   remove(id: string): void;
   readonly activeCount: number;
+  subscribeActiveCount(listener: ActiveSubagentCountListener): () => void;
   shutdown(reason: string): Promise<void>;
 }
 
@@ -66,7 +68,11 @@ export class SessionSubagentManagerFactory implements SubagentManagerFactory {
   }
 
   get activeCount(): number {
-    return this.directory.size;
+    return this.directory.activeCount;
+  }
+
+  subscribeActiveCount(listener: ActiveSubagentCountListener): () => void {
+    return this.directory.subscribeActiveCount(listener);
   }
 
   shutdown(reason: string): Promise<void> {
