@@ -133,6 +133,25 @@ describe("SessionSubagentManagerFactory directory", () => {
     assert.equal(factory.activeCount, 1);
   });
 
+  it("publishes active count changes for add, remove, and shutdown", async () => {
+    const factory = createSessionSubagentManagerFactory({
+      sessions: new Spawner(),
+      acceptance: new PendingAcceptance(),
+    });
+    const activeCounts: number[] = [];
+    const unsubscribe = factory.subscribeActiveCount((activeCount) => {
+      activeCounts.push(activeCount);
+    });
+
+    const first = await factory.create(new Compiler("first")).spawn(request);
+    await factory.create(new Compiler("second")).spawn(request);
+    factory.remove(first.id);
+    await factory.shutdown("session shutdown");
+    unsubscribe();
+
+    assert.deepEqual(activeCounts, [0, 1, 2, 1, 0]);
+  });
+
   it("removes handles centrally and shuts down remaining children", async () => {
     const spawner = new Spawner();
     const factory = createSessionSubagentManagerFactory({
