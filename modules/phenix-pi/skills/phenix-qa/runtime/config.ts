@@ -16,6 +16,10 @@ export const DEFAULT_QA_CONFIG: QaConfig = {
 
   requiredAnalyzers: ["project-native"],
 
+  execution: {
+    trustedRepository: false,
+  },
+
   timeouts: {
     defaultMs: 120_000,
     byAnalyzer: {
@@ -69,6 +73,10 @@ export function mergeConfig(defaults: QaConfig, overrides?: Partial<QaConfig>): 
   return {
     ...defaults,
     ...overrides,
+    execution: {
+      ...defaults.execution,
+      ...overrides.execution,
+    },
     timeouts: {
       ...defaults.timeouts,
       ...overrides.timeouts,
