@@ -104,18 +104,26 @@ export interface ManagedDelegationRuntimeOptions {
 
 export class ManagedDelegationRuntime {
   private readonly managers: SubagentManagerFactory;
-  private readonly onBackgroundSettled: ManagedBackgroundSettlementListener | undefined;
+  private readonly backgroundSettlementListeners = new Set<ManagedBackgroundSettlementListener>();
 
   constructor(options: ManagedDelegationRuntimeOptions) {
     this.managers = options.managers;
-    this.onBackgroundSettled = options.onBackgroundSettled;
+    if (options.onBackgroundSettled) {
+      this.backgroundSettlementListeners.add(options.onBackgroundSettled);
+    }
   }
 
   get activeCount(): number {
     return this.managers.activeCount;
   }
 
+  subscribeBackgroundSettlement(listener: ManagedBackgroundSettlementListener): () => void {
+    this.backgroundSettlementListeners.add(listener);
+    return () => this.backgroundSettlementListeners.delete(listener);
+  }
+
   shutdown(reason: string): Promise<void> {
+    this.backgroundSettlementListeners.clear();
     return this.managers.shutdown(reason);
   }
 
@@ -208,11 +216,14 @@ export class ManagedDelegationRuntime {
       void completion
         .then(async ({ record }) => {
           input.settle(record);
-          await this.onBackgroundSettled?.({
+          const settlement = {
             cwd: input.cwd,
             sessionId: input.sessionId,
             record,
-          });
+          } satisfies ManagedBackgroundSettlement;
+          await Promise.allSettled(
+            [...this.backgroundSettlementListeners].map((listener) => listener(settlement)),
+          );
         })
         .finally(() => {
           cleanupHandle();
