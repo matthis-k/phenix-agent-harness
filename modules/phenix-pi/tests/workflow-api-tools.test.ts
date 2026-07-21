@@ -185,7 +185,7 @@ describe("contract-bound workflow target-agent tools", () => {
       agent: "scout",
       task: "Inspect the workflow API boundary.",
       requirements: ["Return concrete evidence."],
-      mode: "background",
+      mode: "await",
       signal,
       ctx,
     });
@@ -207,6 +207,50 @@ describe("contract-bound workflow target-agent tools", () => {
     });
   });
 
+  it("keeps the parent-facing tool call open until awaited execution settles", async () => {
+    let resolveExecution!: (result: WorkflowSpawnResult) => void;
+    const completion = new Promise<WorkflowSpawnResult>((resolve) => {
+      resolveExecution = resolve;
+    });
+    const spawnCalls: Parameters<WorkflowRuntimePort["spawn"]>[0][] = [];
+    const workflow: WorkflowRuntimePort = {
+      inspect: snapshot,
+      spawn(input) {
+        spawnCalls.push(input);
+        return completion;
+      },
+    };
+    const tool = createWorkflowTool({ workflow });
+    let returned = false;
+    const responsePromise = execute(tool, {
+      action: "spawn",
+      agent: "scout",
+      task: "Inspect the parent return boundary.",
+    }).then((response) => {
+      returned = true;
+      return response;
+    });
+
+    await Promise.resolve();
+    assert.equal(spawnCalls[0]?.mode, "await");
+    assert.equal(returned, false);
+
+    resolveExecution({
+      ok: true,
+      transition: {
+        agent: "scout",
+        fromNodeId: "planning",
+        toNodeId: "planning",
+      },
+      record: { id: "handle-return", status: "completed", value: { summary: "done" } },
+    });
+
+    const response = await responsePromise;
+    assert.equal(returned, true);
+    assert.equal(response.details?.status, "completed");
+    assert.deepEqual(response.details?.value, { summary: "done" });
+  });
+
   it("defaults child-local workflow execution to await", async () => {
     const workflow = new RecordingWorkflow();
     const parent = { kind: "child" } as never;
@@ -221,6 +265,20 @@ describe("contract-bound workflow target-agent tools", () => {
     assert.equal(workflow.spawnCalls[0]?.mode, "await");
   });
 
+  it("preserves explicit background execution as a handle-managed opt-in", async () => {
+    const workflow = new RecordingWorkflow();
+    const tool = createWorkflowTool({ workflow });
+
+    await execute(tool, {
+      action: "spawn",
+      agent: "scout",
+      task: "Inspect independently.",
+      mode: "background",
+    });
+
+    assert.equal(workflow.spawnCalls[0]?.mode, "background");
+  });
+
   it("normalizes JSON-encoded requirement arrays from model transports", async () => {
     const workflow = new RecordingWorkflow();
     const tool = createWorkflowTool({ workflow });
@@ -233,7 +291,7 @@ describe("contract-bound workflow target-agent tools", () => {
     });
 
     assert.deepEqual(workflow.spawnCalls[0]?.requirements, ["Return evidence", "Do not edit"]);
-    assert.equal(workflow.spawnCalls[0]?.mode, "background");
+    assert.equal(workflow.spawnCalls[0]?.mode, "await");
   });
 
   it("marks backend authority failures as tool errors", async () => {
@@ -291,6 +349,6 @@ describe("contract-bound workflow target-agent tools", () => {
     assert.equal(response.details?.agent, "scout");
     assert.equal(workflow.spawnCalls[0]?.agent, "scout");
     assert.deepEqual(workflow.spawnCalls[0]?.requirements, ["Return evidence."]);
-    assert.equal(workflow.spawnCalls[0]?.mode, "background");
+    assert.equal(workflow.spawnCalls[0]?.mode, "await");
   });
 });
