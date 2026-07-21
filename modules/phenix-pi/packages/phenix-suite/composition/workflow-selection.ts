@@ -93,7 +93,8 @@ export function selectWorkflow(input: {
 }
 
 function maxDifficulty(left: Difficulty, right: Difficulty): Difficulty {
-  return DIFFICULTY_ORDER[Math.max(DIFFICULTY_ORDER.indexOf(left), DIFFICULTY_ORDER.indexOf(right))];
+  const index = Math.max(DIFFICULTY_ORDER.indexOf(left), DIFFICULTY_ORDER.indexOf(right));
+  return DIFFICULTY_ORDER[index] ?? right;
 }
 
 export function difficultyForWorkflow(input: {
