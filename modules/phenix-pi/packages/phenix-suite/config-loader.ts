@@ -11,10 +11,7 @@ import { DEFAULT_MAXIMUM_DELEGATION_DEPTH } from "./composition/runtime-policy.t
 import { defaultAgentClients } from "./defaults/agents.ts";
 import { defaultContracts } from "./defaults/contracts.ts";
 import { defaultAgentRoutes, defaultModelPools, defaultModelSets } from "./defaults/routing.ts";
-import {
-  DEFAULT_WORKFLOWS,
-  PHENIX_GENERAL_WORKFLOW,
-} from "./defaults/workflow-presets.ts";
+import { DEFAULT_WORKFLOWS, PHENIX_GENERAL_WORKFLOW } from "./defaults/workflow-presets.ts";
 import type { AgentClientDefinition } from "./subagents/definitions.ts";
 
 export interface PhenixSuiteConfiguration {
