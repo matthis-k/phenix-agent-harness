@@ -486,13 +486,14 @@ export function decodeContractArtifact(value: unknown): ContractArtifact {
     throw new Error(`${ctx()}: runtime.toolBudget.soft must be a positive integer`);
   }
   if (
-    typeof toolBudget.hard !== "number" ||
-    toolBudget.hard < 1 ||
-    !Number.isInteger(toolBudget.hard)
+    toolBudget.hard !== undefined &&
+    (typeof toolBudget.hard !== "number" ||
+      toolBudget.hard < 1 ||
+      !Number.isInteger(toolBudget.hard))
   ) {
-    throw new Error(`${ctx()}: runtime.toolBudget.hard must be a positive integer`);
+    throw new Error(`${ctx()}: runtime.toolBudget.hard must be a positive integer when set`);
   }
-  if (toolBudget.soft > toolBudget.hard) {
+  if (toolBudget.hard !== undefined && toolBudget.soft > toolBudget.hard) {
     throw new Error(
       `${ctx()}: runtime.toolBudget.soft (${toolBudget.soft}) must be <= hard (${toolBudget.hard})`,
     );

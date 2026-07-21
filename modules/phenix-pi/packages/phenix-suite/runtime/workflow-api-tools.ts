@@ -15,6 +15,7 @@ import type {
   WorkflowAuthoritySnapshot,
   WorkflowHandleResult,
   WorkflowRuntimePort,
+  WorkflowSpawnResult,
 } from "./workflow-runtime-types.ts";
 
 export const PHENIX_WORKFLOW_TOOL = "phenix_workflow" as const;
@@ -112,6 +113,38 @@ export function projectWorkflowInspection(
   };
 }
 
+function failSpawn(input: {
+  readonly execution: Extract<WorkflowSpawnResult, { readonly ok: false }>;
+  readonly workflow: WorkflowRuntimePort;
+  readonly parent?: ParentExecutionContext;
+  readonly ctx: ExtensionContext;
+}): never {
+  const details: Record<string, unknown> = { ...(input.execution.details ?? {}) };
+  let message = input.execution.message;
+
+  try {
+    const authority = input.workflow.inspect({
+      ctx: input.ctx,
+      ...(input.parent ? { parent: input.parent } : {}),
+    });
+    const currentState = authority.workflow.currentState;
+
+    if (currentState === "failed" || currentState === "completed") {
+      details.currentState = currentState;
+      details.workflowRevision = authority.workflow.revision;
+      message +=
+        ` The Phenix workflow is now terminal (${currentState}); ` +
+        "do not retry this transition in the current turn.";
+    } else {
+      message += " Refresh current workflow authority before attempting another transition.";
+    }
+  } catch {
+    // Preserve the original execution failure when authority cannot be resolved.
+  }
+
+  return fail(message, details);
+}
+
 async function spawn(input: {
   readonly workflow: WorkflowRuntimePort;
   readonly parent?: ParentExecutionContext;
@@ -139,7 +172,14 @@ async function spawn(input: {
     signal: input.signal ?? new AbortController().signal,
     ctx: input.ctx,
   });
-  if (!execution.ok) return fail(execution.message, execution.details);
+  if (!execution.ok) {
+    return failSpawn({
+      execution,
+      workflow: input.workflow,
+      ...(input.parent ? { parent: input.parent } : {}),
+      ctx: input.ctx,
+    });
+  }
 
   return result({
     ...execution.transition,

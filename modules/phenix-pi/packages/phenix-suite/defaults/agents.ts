@@ -93,9 +93,22 @@ export const baseClient = defineAgentClient({
   tools: ["*"],
   skills: [],
   extensions: [],
-  accepts: [],
+  accepts: [
+    contractRef("scout-handoff"),
+    contractRef("test-handoff"),
+    contractRef("architecture-handoff"),
+    contractRef("critic-handoff"),
+  ],
   produces: [contractRef("base-handoff")],
-  delegation: { allowedClients: [], maxDepth: 0 },
+  delegation: {
+    allowedClients: [
+      agentClientRef("scout"),
+      agentClientRef("tester"),
+      agentClientRef("architect"),
+      agentClientRef("critic"),
+    ],
+    maxDepth: 1,
+  },
 });
 
 export const scoutClient = defineAgentClient({

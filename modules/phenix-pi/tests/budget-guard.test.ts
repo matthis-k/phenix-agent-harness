@@ -3,7 +3,8 @@
  *
  * Verify:
  * - soft tool limit emits one warning
- * - hard tool limit aborts with TOOL_BUDGET_EXCEEDED
+ * - omitted hard tool limit remains advisory-only
+ * - explicit hard tool limit aborts with TOOL_BUDGET_EXCEEDED
  * - turn limit aborts with TURN_BUDGET_EXCEEDED
  * - timeout aborts with TIMEOUT
  * - budget violations are distinguishable from each other
@@ -50,6 +51,24 @@ describe("BudgetGuard", () => {
     assert.equal(guard.observe(toolStartedEvent("t4")).softWarning, undefined);
   });
 
+  it("does not abort when the hard tool limit is omitted", () => {
+    const guard = new BudgetGuard({
+      turnBudget: {},
+      toolBudget: { soft: 3, block: [] },
+      timeoutMs: 0,
+    });
+
+    let warning: string | undefined;
+    for (let index = 0; index < 200; index++) {
+      const result = guard.observe(toolStartedEvent(`t${index}`));
+      assert.equal(result.violation, undefined);
+      warning ??= result.softWarning;
+    }
+
+    assert.match(warning ?? "", /No hard tool-call limit is configured/);
+    assert.equal(guard.getToolCalls(), 200);
+  });
+
   it("hard tool limit aborts with TOOL_BUDGET_EXCEEDED", () => {
     const guard = new BudgetGuard({
       turnBudget: {},
@@ -68,7 +87,7 @@ describe("BudgetGuard", () => {
   it("does not impose a turn limit when maxTurns is omitted", () => {
     const guard = new BudgetGuard({
       turnBudget: {},
-      toolBudget: { soft: 100, hard: 100, block: [] },
+      toolBudget: { soft: 100, block: [] },
       timeoutMs: 0,
     });
 
@@ -81,7 +100,7 @@ describe("BudgetGuard", () => {
   it("turn limit aborts with TURN_BUDGET_EXCEEDED", () => {
     const guard = new BudgetGuard({
       turnBudget: { maxTurns: 2, graceTurns: 1 },
-      toolBudget: { soft: 100, hard: 100, block: [] },
+      toolBudget: { soft: 100, block: [] },
       timeoutMs: 0,
     });
 
@@ -99,7 +118,7 @@ describe("BudgetGuard", () => {
   it("timeout aborts with TIMEOUT", () => {
     const guard = new BudgetGuard({
       turnBudget: {},
-      toolBudget: { soft: 100, hard: 100, block: [] },
+      toolBudget: { soft: 100, block: [] },
       timeoutMs: 1, // 1ms — will expire immediately
     });
 
@@ -127,7 +146,7 @@ describe("BudgetGuard", () => {
 
     const turnGuard = new BudgetGuard({
       turnBudget: { maxTurns: 1, graceTurns: 0 },
-      toolBudget: { soft: 100, hard: 100, block: [] },
+      toolBudget: { soft: 100, block: [] },
       timeoutMs: 0,
     });
 
@@ -141,7 +160,7 @@ describe("BudgetGuard", () => {
   it("checkTimeout returns violation after timeout", () => {
     const guard = new BudgetGuard({
       turnBudget: {},
-      toolBudget: { soft: 100, hard: 100, block: [] },
+      toolBudget: { soft: 100, block: [] },
       timeoutMs: 1,
     });
 
