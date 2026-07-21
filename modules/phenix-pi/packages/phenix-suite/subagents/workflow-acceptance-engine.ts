@@ -2,10 +2,14 @@
  * workflow-acceptance-engine — interpret producer acceptance policy
  *
  * This is the production AcceptanceEngine for workflow-owned producer sessions.
- * It runs schema validation, repair cycles, deterministic verification, and
- * critic review, then returns the decoded structured result.
+ * It runs schema validation, required workflow completion checks, repair cycles,
+ * deterministic verification, and critic review, then returns the decoded result.
  */
 
+import {
+  buildWorkflowDecisionContext,
+  buildWorkflowRuntimeDependencies,
+} from "@matthis-k/phenix-flow/index.ts";
 import type { ContractSubmissionChannel } from "../runtime/child-session-types.ts";
 import { type ChildRun, ChildRuntimeError } from "../runtime/child-session-types.ts";
 import type { AcceptanceEngine, AcceptancePlan } from "../runtime/execution-plan.ts";
@@ -13,11 +17,13 @@ import { decodeReturnValue } from "../runtime/subagent-api.ts";
 import { SubagentExecutionError } from "../runtime/subagent-manager.ts";
 import type { ContractArtifact } from "./contract.ts";
 import type { ExecutionQualityService } from "./execution-quality-service.ts";
+import { listRecords } from "./handle-store.ts";
 import type { HandleRecord } from "./handle-types.ts";
 import {
   executeProducerCycles,
   type ProducerCycleExecutionResult,
 } from "./producer-cycle-runner.ts";
+import { requiredWorkflowCompletionGate } from "./workflow-completion-gate.ts";
 
 export interface WorkflowProducerAcceptanceData {
   readonly record: HandleRecord;
@@ -88,7 +94,22 @@ export class WorkflowAcceptanceEngine implements AcceptanceEngine {
         signal,
         maximumProducerCycles: data.maximumProducerCycles,
         completionGraceRemaining: data.completionGraceRemaining,
-        verify: (input) => this.quality.verify(input),
+        verify: async (input) => {
+          const dependencies = buildWorkflowRuntimeDependencies({
+            cwd: data.cwd,
+            sessionId: data.record.sessionId,
+            source: { kind: "child", contract: data.contractArtifact },
+            handleStore: { listRecords },
+          });
+          const projection = buildWorkflowDecisionContext({
+            definition: dependencies.definition,
+            runtime: dependencies.record,
+            authority: dependencies.authority,
+            activeHandles: dependencies.activeHandles,
+          });
+          const workflowGate = requiredWorkflowCompletionGate(projection);
+          return workflowGate ?? this.quality.verify(input);
+        },
         criticFactory: (input) => this.quality.review(input),
       });
     } finally {

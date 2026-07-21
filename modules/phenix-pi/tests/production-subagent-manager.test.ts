@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
+import "./support/default-workflow-fixture.ts";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, it } from "node:test";
 
+import {
+  buildCapabilityArtifact,
+  persistCapabilityArtifact,
+} from "@matthis-k/phenix-flow/agent-capabilities.ts";
+import { createWorkflowRecord } from "@matthis-k/phenix-flow/workflow-store.ts";
 import { agentClientRef } from "@matthis-k/phenix-kernel/refs.ts";
 import type {
   ChildRun,
@@ -164,6 +173,12 @@ describe("production SubagentManager composition", () => {
   });
 
   it("runs workflow producer acceptance and disposes the child session", async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "phenix-production-acceptance-"));
+    const instanceId = "workflow-instance";
+    const actorId = "workflow-actor";
+    const capabilityArtifact = buildCapabilityArtifact([]);
+    persistCapabilityArtifact(cwd, capabilityArtifact);
+
     let accepted = false;
     let disposed = false;
     const channel: ContractSubmissionChannel = {
@@ -182,6 +197,25 @@ describe("production SubagentManager composition", () => {
       readSubmitted: async () => ({ value: { summary: "accepted" }, revision: 1 }),
     };
     const record = producerRecord();
+    createWorkflowRecord(cwd, {
+      instanceId,
+      actorId,
+      sessionId: record.sessionId,
+      definitionId: "phenix-default",
+      difficulty: "D1",
+      taskProfile: {
+        complexity: 0,
+        uncertainty: 0,
+        consequence: 0,
+        breadth: 0,
+        coupling: 0,
+        novelty: 0,
+      },
+      actorRole: "scout",
+      capabilityArtifactHash: capabilityArtifact.artifactHash,
+      initialState: "scouting",
+    });
+
     const quality = new ExecutionQualityService({
       sessions: new RecordingSpawner(),
       runVerification: async () => [],
@@ -189,6 +223,26 @@ describe("production SubagentManager composition", () => {
     const engine = new WorkflowAcceptanceEngine({ quality });
     const contractArtifact = {
       assignment: { outputSchema: { type: "object" } },
+      runtime: {
+        workflow: {
+          instanceId,
+          actorId,
+          definitionId: "phenix-default",
+          difficulty: "D1",
+          initialState: "scouting",
+          transitionAuthority: { kind: "restricted", allowed: [] },
+          capabilityArtifactHash: capabilityArtifact.artifactHash,
+        },
+        delegation: {
+          roles: {
+            role: "scout",
+            source: { inherited: false, patch: { additional: [], removed: [] } },
+            effective: [],
+          },
+          availableRoles: [],
+          remainingDepth: 0,
+        },
+      },
     } as ContractArtifact;
     const run: ChildRun = {
       id: childRunId("workflow-managed"),
@@ -215,7 +269,7 @@ describe("production SubagentManager composition", () => {
           record,
           contractArtifact,
           contractChannel: channel,
-          cwd: "/tmp",
+          cwd,
           maximumProducerCycles: 1,
           completionGraceRemaining: 0,
         },
@@ -228,5 +282,6 @@ describe("production SubagentManager composition", () => {
     assert.equal(record.status, "completed");
     assert.equal(accepted, true);
     assert.equal(disposed, true);
+    fs.rmSync(cwd, { recursive: true, force: true });
   });
 });
