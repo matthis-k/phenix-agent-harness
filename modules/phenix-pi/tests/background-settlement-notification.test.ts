@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import {
-  publishManagedBackgroundSettlement,
-} from "@matthis-k/phenix-suite/subagents/background-settlement-channel.ts";
+import { publishManagedBackgroundSettlement } from "@matthis-k/phenix-suite/subagents/background-settlement-channel.ts";
 import phenixSubagents from "@matthis-k/phenix-suite/subagents/extension.ts";
 import type { PhenixSubagentsOptions } from "@matthis-k/phenix-suite/subagents/registration.ts";
 
@@ -19,7 +17,8 @@ function context(id: string): ExtensionContext {
 describe("background settlement parent notification", () => {
   it("wakes the owning parent session and points it at the exact terminal handle", async () => {
     const handlers = new Map<string, Array<(event: unknown, ctx: ExtensionContext) => unknown>>();
-    const messages: Array<{ message: Record<string, unknown>; options: Record<string, unknown> }> = [];
+    const messages: Array<{ message: Record<string, unknown>; options: Record<string, unknown> }> =
+      [];
     const pi = {
       on(event: string, handler: (event: unknown, ctx: ExtensionContext) => unknown) {
         const registered = handlers.get(event) ?? [];
