@@ -16,6 +16,7 @@ import {
   type SubagentHandle,
 } from "../runtime/subagent-manager.ts";
 import type { SubagentManagerFactory } from "../runtime/subagent-manager-factory.ts";
+import { publishManagedBackgroundSettlement } from "./background-settlement-channel.ts";
 import { readRecord, writeRecord } from "./handle-store.ts";
 import type { HandleRecord } from "./handle-types.ts";
 import { isTerminalHandleStatus } from "./handle-types.ts";
@@ -224,6 +225,7 @@ export class ManagedDelegationRuntime {
           await Promise.allSettled(
             [...this.backgroundSettlementListeners].map((listener) => listener(settlement)),
           );
+          await publishManagedBackgroundSettlement(settlement);
         })
         .finally(() => {
           cleanupHandle();
