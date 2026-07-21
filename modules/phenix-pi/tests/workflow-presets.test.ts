@@ -30,9 +30,7 @@ describe("workflow presets", () => {
   it("keeps the existing graph as the implementation preset", () => {
     assert.equal(PHENIX_IMPLEMENT_WORKFLOW.id, "phenix-default");
     assert.ok(
-      PHENIX_IMPLEMENT_WORKFLOW.transitions.some(
-        (transition) => transition.id === "d3.implement",
-      ),
+      PHENIX_IMPLEMENT_WORKFLOW.transitions.some((transition) => transition.id === "d3.implement"),
     );
   });
 
