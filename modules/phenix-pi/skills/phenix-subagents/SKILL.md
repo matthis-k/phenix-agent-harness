@@ -48,12 +48,13 @@ verification. Raw `subagent` remains unmanaged and is blocked in Phenix sessions
 Workflow spawns use call/return semantics by default. With omitted `mode`, the
 `phenix_workflow` or `phenix_subagent` tool call remains open until the child
 finishes, then returns the structured handoff and lets the parent session continue
-naturally. Use `mode: "background"` only for work that is intentionally managed
-through a persistent handle. Keep that `handleId` and use `phenix_agent` with
-`inspect`, `poll`, `await`, `send`, or `cancel` before the parent turn ends; handle
-settlement is persisted but does not independently restart an already-ended Pi
-turn. Never spawn a replacement child merely to retrieve an existing result. Use
-`send` only for concise clarification or steering while the child is live.
+naturally. Use `mode: "background"` only for intentionally parallel or independently
+managed work. Keep the returned `handleId`. When that child settles, the runtime
+injects a parent-session notification and triggers or steers the next model turn.
+Follow that notification by calling `phenix_agent` with `action: "await"` for the
+exact handle; this returns the persisted handoff and reconciles the workflow gate.
+Never spawn a replacement child merely to retrieve an existing result. Use `send`
+only for concise clarification or steering while the child is live.
 
 The runtime derives the current node from the active root session or child
 contract, resolves fresh authority, maps the requested target agent to the unique
