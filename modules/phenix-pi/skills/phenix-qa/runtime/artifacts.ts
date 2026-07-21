@@ -5,13 +5,24 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 /**
- * Ensure the artifact directory exists.
+ * Resolve and create an artifact directory relative to the reviewed repository.
+ * External paths require an explicit trusted caller override.
  */
-export function ensureArtifactDir(dir: string): string {
-  const resolved = resolve(dir);
+export function ensureArtifactDir(
+  cwd: string,
+  dir: string,
+  allowExternal = false,
+): string {
+  const root = resolve(cwd);
+  const resolved = isAbsolute(dir) ? resolve(dir) : resolve(root, dir);
+  const relation = relative(root, resolved);
+  const escapes = relation === ".." || relation.startsWith("../") || isAbsolute(relation);
+  if (escapes && !allowExternal) {
+    throw new Error(`QA artifact directory escapes the reviewed repository: ${dir}`);
+  }
   if (!existsSync(resolved)) {
     mkdirSync(resolved, { recursive: true });
   }
