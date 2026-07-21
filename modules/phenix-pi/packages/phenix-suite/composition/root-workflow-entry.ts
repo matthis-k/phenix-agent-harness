@@ -12,6 +12,11 @@ import {
   setActiveRouteForSession,
 } from "@matthis-k/phenix-routing/stream-proxy.ts";
 import type { ResolvedRoute, RoutingConfig } from "@matthis-k/phenix-routing/types.ts";
+import {
+  difficultyForWorkflow,
+  selectWorkflow,
+  type WorkflowSelection,
+} from "./workflow-selection.ts";
 
 export interface SelectedRootModel {
   readonly provider: string;
@@ -22,6 +27,7 @@ export interface RootWorkflowEntry {
   readonly profile: TaskProfile;
   readonly difficulty: Difficulty;
   readonly route: ResolvedRoute;
+  readonly workflow: WorkflowSelection;
 }
 
 export interface RootWorkflowEntryDependencies {
@@ -41,11 +47,11 @@ const DEFAULT_DEPENDENCIES: RootWorkflowEntryDependencies = {
 };
 
 /**
- * Resolve and publish the coordinator route that authorizes a root workflow turn.
+ * Resolve the workflow preset and coordinator route for one root turn.
  *
- * This is the only legal entry path from a virtual `phenix/<model-set>` model to
- * a concrete provider model. Difficulty is derived before any model request and
- * the previous route is invalidated before the new turn is resolved.
+ * Intent selects the workflow graph while task profile selects its difficulty.
+ * The two decisions are independent so a full QA request cannot accidentally
+ * enter the D0 implementation graph merely because its wording is short.
  */
 export async function prepareRootWorkflowEntry(
   input: {
@@ -53,6 +59,7 @@ export async function prepareRootWorkflowEntry(
     readonly selectedModel: SelectedRootModel;
     readonly userMessage: string;
     readonly config: RoutingConfig;
+    readonly fallbackWorkflowDefinitionId: string;
   },
   overrides: Partial<RootWorkflowEntryDependencies> = {},
 ): Promise<RootWorkflowEntry> {
@@ -74,7 +81,15 @@ export async function prepareRootWorkflowEntry(
   }
 
   const profile = deriveTaskProfileFromText(input.userMessage, []);
-  const difficulty = difficultyForProfile(profile);
+  const workflow = selectWorkflow({
+    userMessage: input.userMessage,
+    fallbackWorkflowDefinitionId: input.fallbackWorkflowDefinitionId,
+  });
+  const difficulty = difficultyForWorkflow({
+    selected: difficultyForProfile(profile),
+    workflow,
+    userMessage: input.userMessage,
+  });
   const route = await dependencies.resolveRoute({
     modelSet: runtime.modelSet,
     role: "coordinator",
@@ -96,5 +111,5 @@ export async function prepareRootWorkflowEntry(
 
   runtime.activeRoute = route;
   dependencies.setActiveRouteForSession(input.sessionId, route);
-  return { profile, difficulty, route };
+  return { profile, difficulty, route, workflow };
 }
