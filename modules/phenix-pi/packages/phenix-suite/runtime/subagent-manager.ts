@@ -212,7 +212,10 @@ export class SubagentHandleDirectory {
     }
   }
 
-  private notifyActiveCountListener(listener: ActiveSubagentCountListener, activeCount: number): void {
+  private notifyActiveCountListener(
+    listener: ActiveSubagentCountListener,
+    activeCount: number,
+  ): void {
     try {
       listener(activeCount);
     } catch {
