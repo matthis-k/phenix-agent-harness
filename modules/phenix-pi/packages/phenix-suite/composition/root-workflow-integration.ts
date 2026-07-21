@@ -44,6 +44,7 @@ async function initializeRootWorkflow(input: {
 }
 
 export interface RootWorkflowIntegrationOptions {
+  /** Fallback definition for tasks that do not match a specialized preset. */
   readonly workflowDefinitionId: string;
   readonly workflowGate: WorkflowTurnGate;
 }
@@ -57,7 +58,7 @@ function requiredAgents(
     .map((option) => option.agent);
 }
 
-/** Register deterministic root routing and workflow authority bootstrap. */
+/** Register deterministic root routing and per-turn workflow selection. */
 export default async function rootWorkflowIntegration(
   pi: ExtensionAPI,
   options: RootWorkflowIntegrationOptions,
@@ -122,17 +123,17 @@ export default async function rootWorkflowIntegration(
       );
     }
 
-    const { profile, difficulty } = await prepareRootWorkflowEntry({
+    const { profile, difficulty, workflow } = await prepareRootWorkflowEntry({
       sessionId,
       selectedModel,
       userMessage: turn.userMessage,
       config,
+      fallbackWorkflowDefinitionId: options.workflowDefinitionId,
     });
-
     const workflowRecord = await initializeRootWorkflow({
       cwd,
       sessionId,
-      definitionId: options.workflowDefinitionId,
+      definitionId: workflow.workflowDefinitionId,
       difficulty,
       taskProfile: profile,
       capabilityArtifactHash: artifact.artifactHash,
@@ -176,6 +177,11 @@ export default async function rootWorkflowIntegration(
     });
 
     let workflowGuidance = "## Phenix Workflow Orchestration\n\n";
+    workflowGuidance += `Workflow preset: ${workflow.preset}\n`;
+    workflowGuidance += `Workflow definition: ${workflow.workflowDefinitionId}\n`;
+    workflowGuidance += `Selection source: ${workflow.source}\n`;
+    workflowGuidance += `Selection reason: ${workflow.reason}\n`;
+    workflowGuidance += `Difficulty: ${difficulty}\n\n`;
     workflowGuidance += `You are running with a Phenix model set (${runtime.modelSet}). `;
     workflowGuidance +=
       "The deterministic Phenix workflow owns the current node, transition selection, role selection, output schemas, models, tools, and delegation depth. ";
