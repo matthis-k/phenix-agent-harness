@@ -4,6 +4,8 @@ import { describe, it } from "node:test";
 import type { AgentKind } from "@matthis-k/phenix-suite/subagents/policy.ts";
 import { rolePreset } from "@matthis-k/phenix-suite/subagents/role-presets.ts";
 
+const QA_SPECIALISTS = ["scout", "tester", "architect", "critic"] as const;
+
 describe("Role presets", () => {
   it("scout and base have read-only tools", () => {
     for (const role of ["scout", null] as const) {
@@ -40,13 +42,13 @@ describe("Role presets", () => {
     }
   });
 
-  it("null role returns a read-capable non-delegating base preset", () => {
+  it("null role returns a read-capable base integrator preset", () => {
     const preset = rolePreset(null);
     assert.equal(preset.agentName, "phenix.base");
     assert.ok(preset.tools.includes("read"));
     assert.ok(preset.tools.includes("bash"));
     assert.ok(!preset.tools.includes("write"));
-    assert.equal(preset.allowedChildren.length, 0);
+    assert.deepEqual(preset.allowedChildren, QA_SPECIALISTS);
     assert.equal(preset.criticRequired, false);
   });
 
@@ -71,7 +73,7 @@ describe("Role presets", () => {
   });
 
   it("preserves role-specific child authority", () => {
-    assert.deepEqual(rolePreset(null).allowedChildren, []);
+    assert.deepEqual(rolePreset(null).allowedChildren, QA_SPECIALISTS);
     assert.deepEqual(rolePreset("scout").allowedChildren, ["scout"]);
 
     const planner = rolePreset("planner").allowedChildren;
