@@ -3,8 +3,8 @@ import { describe, it } from "node:test";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
-  activeSubsessionStatusText,
   type ActiveSubagentCountSource,
+  activeSubsessionStatusText,
   registerActiveChildStatusProjection,
 } from "@matthis-k/phenix-suite/runtime/active-child-status.ts";
 import type { ActiveSubagentCountListener } from "@matthis-k/phenix-suite/runtime/subagent-manager.ts";
