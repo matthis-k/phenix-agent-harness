@@ -128,10 +128,10 @@ function failSpawn(input: {
       ...(input.parent ? { parent: input.parent } : {}),
     });
     const currentState = authority.workflow.currentState;
-    details.currentState = currentState;
-    details.workflowRevision = authority.workflow.revision;
 
     if (currentState === "failed" || currentState === "completed") {
+      details.currentState = currentState;
+      details.workflowRevision = authority.workflow.revision;
       message +=
         ` The Phenix workflow is now terminal (${currentState}); ` +
         "do not retry this transition in the current turn.";
