@@ -15,10 +15,7 @@ describe("child integration inference", () => {
 
   it("continues to infer compact child integrations", () => {
     assert.deepEqual(
-      inferChildIntegrationRefs(
-        ["lsp", "mcp", "context_info", "web_search", "fetch_content"],
-        [],
-      ),
+      inferChildIntegrationRefs(["lsp", "mcp", "context_info", "web_search", "fetch_content"], []),
       ["context", "lsp", "mcp", "web"],
     );
   });
