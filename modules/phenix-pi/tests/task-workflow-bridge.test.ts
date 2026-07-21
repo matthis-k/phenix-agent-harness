@@ -53,6 +53,24 @@ function authority(): WorkflowAuthoritySnapshot {
   };
 }
 
+function terminalAuthority(): WorkflowAuthoritySnapshot {
+  return {
+    ...authority(),
+    delegation: {
+      remainingDepth: 3,
+      effectiveRoles: [],
+      availableRoles: [],
+    },
+    workflow: {
+      difficulty: "D3",
+      currentState: "completed",
+      revision: 2,
+      optionsDigest: "b".repeat(64),
+      options: [],
+    },
+  };
+}
+
 describe("task workflow diagnostics", () => {
   it("records the complete workflow failure before marking the task failed", async () => {
     const tasks = createTaskRuntimeFacade();
@@ -150,5 +168,35 @@ describe("task workflow diagnostics", () => {
       requirements: forwarded.requirements,
     });
     assert.equal(childAuthority.actorId, "child-base");
+  });
+
+  it("reconciles the root task when the workflow is terminal", () => {
+    const tasks = createTaskRuntimeFacade();
+    const root = tasks.ensureWorkflow({
+      workflowId: "wf_terminal",
+      ownerSessionId: "root-session",
+      rootActorId: "root-actor",
+      title: "Full repository QA",
+    });
+    const child = tasks.add(root.token, { name: "Integrate QA results" });
+    tasks.update(root.token, { uid: child.uid, status: "done" });
+
+    const workflow: WorkflowRuntimePort = {
+      inspect: terminalAuthority,
+      async spawn() {
+        throw new Error("not used");
+      },
+    };
+    const bridge = createTaskWorkflowBridge({ workflow, tasks });
+
+    bridge.workflow.inspect({ ctx: context() });
+
+    assert.deepEqual(tasks.summary("wf_terminal"), {
+      total: 2,
+      notStarted: 0,
+      wip: 0,
+      done: 2,
+    });
+    assert.equal(tasks.inspect(root.token).ownStatus, "done");
   });
 });
