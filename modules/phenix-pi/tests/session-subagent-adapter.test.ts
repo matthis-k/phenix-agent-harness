@@ -107,6 +107,7 @@ class FakeRun implements ChildRun {
   readonly pi = { sessionId: "pi-adapter-child" };
   readonly messages: string[] = [];
   abortCalls = 0;
+  disposeCalls = 0;
 
   private status: ChildSessionNode["status"] = "running";
   private listener?: (event: ChildSessionEvent) => void;
@@ -155,6 +156,7 @@ class FakeRun implements ChildRun {
   }
 
   dispose(): Promise<void> {
+    this.disposeCalls++;
     this.status = "disposed";
     return Promise.resolve();
   }
@@ -287,6 +289,7 @@ describe("SessionSubagentExecutionAdapter", () => {
       return error instanceof SubagentExecutionError && error.code === "ABORTED";
     });
     assert.equal(sessions.run.abortCalls, 0);
+    assert.equal(sessions.run.disposeCalls, 0);
 
     acceptance.pending.resolve({ summary: "completed after detached wait" });
     assert.deepEqual(await handle.result(), {
@@ -294,7 +297,7 @@ describe("SessionSubagentExecutionAdapter", () => {
     });
   });
 
-  it("maps explicit cancellation to the child run", async () => {
+  it("maps explicit cancellation to child termination and disposal", async () => {
     const { manager, sessions, acceptance } = managerWith();
     const handle = await manager.spawn(request());
 
@@ -305,6 +308,24 @@ describe("SessionSubagentExecutionAdapter", () => {
       return error instanceof SubagentExecutionError && error.code === "ABORTED";
     });
     assert.equal(sessions.run.abortCalls, 1);
+    assert.equal(sessions.run.disposeCalls, 1);
     assert.equal(handle.snapshot().status, "cancelled");
+  });
+
+  it("terminates the child for timeout and provider cancellation codes", async () => {
+    for (const code of ["TIMEOUT", "PROVIDER_FAILED"] as const) {
+      const { manager, sessions, acceptance } = managerWith();
+      const handle = await manager.spawn(request());
+
+      await handle.cancel({ code, reason: `${code} terminal cancellation` });
+      acceptance.pending.resolve({ summary: "late success" });
+
+      await assert.rejects(handle.result(), (error: unknown) => {
+        return error instanceof SubagentExecutionError && error.code === code;
+      });
+      assert.equal(sessions.run.abortCalls, 1);
+      assert.equal(sessions.run.disposeCalls, 1);
+      assert.equal(handle.snapshot().status, "failed");
+    }
   });
 });
