@@ -148,7 +148,7 @@ export function formatWorkflowProjection(
 
   lines.push(
     "Target agents available from the current workflow node:",
-    "Use them when delegation would materially improve evidence, planning, implementation, testing, or review.",
+    "Use optional targets when delegation would materially improve evidence, planning, implementation, testing, or review.",
     "",
   );
   for (const [index, option] of projection.options.entries()) {
@@ -159,6 +159,18 @@ export function formatWorkflowProjection(
       `   Purpose: ${option.description}`,
       `   Result schema: ${option.outputSchemaId}`,
       `   Modes: ${option.allowedModes.join(", ")}`,
+      "",
+    );
+  }
+
+  const required = projection.options.filter((option) => option.category === "required");
+  if (required.length > 0) {
+    lines.push(
+      "Required workflow protocol:",
+      "- Every target marked required must be spawned; it is not optional guidance.",
+      "- Await each required target and collect its structured handoff.",
+      "- After each workflow action, call phenix_workflow with action=inspect and execute the next advertised required target.",
+      "- Continue until inspection advertises no required target before calling phenix_complete or otherwise completing the assignment.",
       "",
     );
   }
