@@ -38,6 +38,7 @@ import { createWorkflowTurnGate } from "./composition/workflow-turn-gate.ts";
 import { loadPhenixSuiteConfiguration } from "./config-loader.ts";
 import { defaultOutputSchemas, outputSchemasFromContracts } from "./defaults/output-schemas.ts";
 import { buildPhenixRootSystemPrompt } from "./phenix-skill-bootstrap.ts";
+import { registerActiveChildStatusProjection } from "./runtime/active-child-status.ts";
 import {
   createChildSessionBackend,
   createSubagentSessionRuntime,
@@ -169,29 +170,14 @@ function registerPhenixCodingSubstratePrompt(pi: ExtensionAPI): void {
   });
 }
 
-function registerTuiProjection(
-  pi: ExtensionAPI,
-  delegationRuntime: ManagedDelegationRuntime,
-): void {
-  pi.on("context", async (_event, ctx) => {
-    try {
-      const activeCount = delegationRuntime.activeCount;
-      ctx.ui.setStatus(
-        "phenix",
-        `Phenix · ${activeCount} active child${activeCount !== 1 ? "ren" : ""}`,
-      );
-    } catch {
-      // UI is optional.
-    }
-  });
-}
-
 function registerShutdown(
   pi: ExtensionAPI,
   delegationRuntime: ManagedDelegationRuntime,
+  disposeTuiProjection: () => void,
   closeTaskHost: () => Promise<void>,
 ): void {
   pi.on("session_shutdown", async () => {
+    disposeTuiProjection();
     await delegationRuntime.shutdown("session shutdown");
     await closeTaskHost();
   });
@@ -359,8 +345,8 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
       workflowGate,
     });
   });
-  registerTuiProjection(pi, delegationRuntime);
-  registerShutdown(pi, delegationRuntime, () => taskHost.close());
+  const disposeTuiProjection = registerActiveChildStatusProjection({ pi, source: managers });
+  registerShutdown(pi, delegationRuntime, disposeTuiProjection, () => taskHost.close());
 
   pi.registerCommand("phenix", {
     description: "Inspect the Phenix coding substrate; usage: /phenix doctor",
