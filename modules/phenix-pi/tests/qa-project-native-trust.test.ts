@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -10,7 +10,7 @@ import { discoverGuidance } from "../skills/phenix-qa/runtime/guidance.ts";
 import type { QaAnalyzerContext } from "../skills/phenix-qa/runtime/types.ts";
 
 function repository(): string {
-  const cwd = mkdirSync(path.join(os.tmpdir(), "phenix-qa-trust-"), { recursive: true });
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "phenix-qa-trust-"));
   writeFileSync(path.join(cwd, "flake.nix"), "{ outputs = _: {}; }\n", "utf-8");
   writeFileSync(path.join(cwd, "maintenance.nix"), "{}\n", "utf-8");
   writeFileSync(
