@@ -37,9 +37,18 @@ interface VerificationConfig {
   readonly roleCommands?: Partial<Record<AgentKind, readonly VerificationCommand[]>>;
 }
 
+interface ToolBudgetConfig {
+  /** Advisory warning threshold. Defaults to the model tier's convergence hint. */
+  readonly soft?: number;
+  /** Explicit hard cap. Omitted by default, including for repository QA. */
+  readonly hard?: number;
+}
+
 interface ExecutionConfig {
   /** Explicit hard turn limit. Omitted by default for open-ended execution. */
   readonly turnBudget?: TurnBudget;
+  /** Tool-call policy. Hard limits are opt-in; soft limits remain advisory. */
+  readonly toolBudget?: ToolBudgetConfig;
 }
 
 export interface RuntimePolicyConfig {
@@ -164,12 +173,28 @@ function verificationCommands(
 
 // ── Budget tables ───────────────────────────────────────────────────────────
 
-const TIER_BUDGETS: Record<ModelTier, { tools: number; timeout: number }> = {
-  low: { tools: 40, timeout: 10 * 60_000 },
-  standard: { tools: 80, timeout: 20 * 60_000 },
-  high: { tools: 140, timeout: 35 * 60_000 },
-  critical: { tools: 220, timeout: 60 * 60_000 },
+const TIER_BUDGETS: Record<ModelTier, { advisoryTools: number; timeout: number }> = {
+  low: { advisoryTools: 30, timeout: 10 * 60_000 },
+  standard: { advisoryTools: 60, timeout: 20 * 60_000 },
+  high: { advisoryTools: 105, timeout: 35 * 60_000 },
+  critical: { advisoryTools: 165, timeout: 60 * 60_000 },
 };
+
+const BLOCKED_AFTER_HARD_LIMIT: readonly string[] = [
+  "read",
+  "grep",
+  "search",
+  "find",
+  "ls",
+  "bash",
+  "edit",
+  "write",
+  "lsp",
+  "mcp",
+  "web_search",
+  "web_fetch",
+  "phenix_workflow",
+];
 
 function resolveTurnBudget(config: RuntimePolicyConfig): TurnBudget {
   const configured = config.execution?.turnBudget;
@@ -193,6 +218,29 @@ function resolveTurnBudget(config: RuntimePolicyConfig): TurnBudget {
   return {
     maxTurns,
     ...(graceTurns !== undefined ? { graceTurns } : {}),
+  };
+}
+
+function resolveToolBudget(tier: ModelTier, config: RuntimePolicyConfig): ToolBudget {
+  const configured = config.execution?.toolBudget;
+  const hard = configured?.hard;
+  if (hard !== undefined && (!Number.isInteger(hard) || hard < 1)) {
+    throw new Error("execution.toolBudget.hard must be a positive integer");
+  }
+
+  const tierSoft = TIER_BUDGETS[tier].advisoryTools;
+  const soft = configured?.soft ?? (hard === undefined ? tierSoft : Math.min(tierSoft, hard));
+  if (!Number.isInteger(soft) || soft < 1) {
+    throw new Error("execution.toolBudget.soft must be a positive integer");
+  }
+  if (hard !== undefined && soft > hard) {
+    throw new Error("execution.toolBudget.soft must be less than or equal to hard");
+  }
+
+  return {
+    soft,
+    ...(hard !== undefined ? { hard } : {}),
+    block: BLOCKED_AFTER_HARD_LIMIT,
   };
 }
 
@@ -235,25 +283,7 @@ export function resolveExecutionPolicy(input: {
     thinking,
     timeoutMs: budget.timeout,
     turnBudget: resolveTurnBudget(config),
-    toolBudget: {
-      soft: Math.max(1, Math.floor(budget.tools * 0.75)),
-      hard: budget.tools,
-      block: [
-        "read",
-        "grep",
-        "search",
-        "find",
-        "ls",
-        "bash",
-        "edit",
-        "write",
-        "lsp",
-        "mcp",
-        "web_search",
-        "web_fetch",
-        "phenix_workflow",
-      ],
-    },
+    toolBudget: resolveToolBudget(tier, config),
     verificationCommands: commands,
     criticRequired: preset.criticRequired,
     maxRepairAttempts,
