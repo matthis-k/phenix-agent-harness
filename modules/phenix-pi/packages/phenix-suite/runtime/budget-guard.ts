@@ -2,7 +2,8 @@
  * budget-guard — enforce turn/tool/timeout budgets through normalized events
  *
  * Observes turn_end, tool_execution_start, tool_execution_end, and elapsed
- * wall-clock time. Emits deterministic warnings and aborts on hard limits.
+ * wall-clock time. Emits deterministic warnings and aborts on configured hard
+ * limits.
  *
  * Budget failures are distinguishable from provider, model, contract,
  * verification, and critic failures through structured runtime error codes.
@@ -47,8 +48,8 @@ export class BudgetGuard {
   /**
    * Observe a normalized event.
    *
-   * Returns a BudgetViolation if a hard limit was exceeded.
-   * Returns a soft warning string if the soft tool limit was reached.
+   * Returns a BudgetViolation if a configured hard limit was exceeded.
+   * Returns a soft warning string if the advisory tool threshold was reached.
    * Returns undefined otherwise.
    */
   observe(event: ChildSessionEvent): {
@@ -71,29 +72,33 @@ export class BudgetGuard {
     if (event.type === "tool.started") {
       this.toolCalls++;
 
-      // Soft tool limit — emit one deterministic warning
+      // Soft tool threshold — emit one deterministic convergence warning.
       if (
         !this.softToolWarned &&
         this.config.toolBudget.soft > 0 &&
         this.toolCalls >= this.config.toolBudget.soft
       ) {
         this.softToolWarned = true;
+        const hard = this.config.toolBudget.hard;
         return {
           softWarning:
-            `Tool call count (${this.toolCalls}) has reached the soft limit ` +
-            `(${this.config.toolBudget.soft}). Be mindful of remaining tool budget ` +
-            `(${this.config.toolBudget.hard - this.toolCalls} calls remaining to hard limit).`,
+            hard === undefined
+              ? `Tool call count (${this.toolCalls}) has reached the soft limit ` +
+                `(${this.config.toolBudget.soft}). No hard tool-call limit is configured; ` +
+                "delegate independent concerns or conclude when progress stalls."
+              : `Tool call count (${this.toolCalls}) has reached the soft limit ` +
+                `(${this.config.toolBudget.soft}). Be mindful of remaining tool budget ` +
+                `(${hard - this.toolCalls} calls remaining to hard limit).`,
         };
       }
 
-      // Hard tool limit — abort
-      if (this.config.toolBudget.hard > 0 && this.toolCalls > this.config.toolBudget.hard) {
+      // Hard tool limit — abort only when explicitly configured.
+      const hard = this.config.toolBudget.hard;
+      if (hard !== undefined && this.toolCalls > hard) {
         return {
           violation: {
             code: "TOOL_BUDGET_EXCEEDED",
-            message:
-              `Tool budget exceeded: ${this.toolCalls} calls, hard limit is ` +
-              `${this.config.toolBudget.hard}.`,
+            message: `Tool budget exceeded: ${this.toolCalls} calls, hard limit is ${hard}.`,
           },
         };
       }
