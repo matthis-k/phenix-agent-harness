@@ -4,6 +4,7 @@
  * Resolves diff, files, module, repository, or architecture scope.
  */
 
+import { isAbsolute, relative, resolve } from "node:path";
 import type { ReviewScope, ScopeFiles } from "../contracts/contracts.ts";
 import type { ProcessRunner } from "./types.ts";
 
@@ -21,9 +22,10 @@ export async function resolveScopeFiles(
     case "files":
       return resolveExplicitFiles(scope);
     case "module":
+      return resolveModuleFiles(scope, cwd, runner);
     case "repository":
     case "architecture":
-      return resolveAllFiles(cwd);
+      return resolveAllFiles(cwd, runner);
     default:
       return { files: [], added: [], modified: [], renamed: [], deleted: [] };
   }
@@ -48,7 +50,7 @@ async function resolveDiffScope(
     }
   } catch {
     // Fall back to all files if not a git repo
-    return resolveAllFiles(cwd);
+    return resolveAllFiles(cwd, runner);
   }
 
   const base = scope.baseRevision ?? (await resolveMergeBase(cwd, runner));
@@ -66,7 +68,7 @@ async function resolveDiffScope(
 
     return parseDiffNameStatus(result.stdout, result.exitCode === 0);
   } catch {
-    return resolveAllFiles(cwd);
+    return resolveAllFiles(cwd, runner);
   }
 }
 
@@ -176,17 +178,98 @@ function resolveExplicitFiles(scope: ReviewScope): ScopeFiles {
   };
 }
 
-/**
- * Resolve all tracked files in the repository.
- */
-async function resolveAllFiles(_cwd: string): Promise<ScopeFiles> {
+async function resolveModuleFiles(
+  scope: ReviewScope,
+  cwd: string,
+  runner: ProcessRunner,
+): Promise<ScopeFiles> {
+  const all = await resolveAllFiles(cwd, runner);
+  const requested = scope.module?.trim();
+  if (!requested) return all;
+
+  const relativeModule = relative(cwd, resolve(cwd, requested)).replaceAll("\\", "/");
+  if (!relativeModule || relativeModule === ".") return all;
+  if (relativeModule === ".." || relativeModule.startsWith("../") || isAbsolute(relativeModule)) {
+    throw new Error(`QA module scope escapes the reviewed repository: ${requested}`);
+  }
+
+  const files = all.files.filter(
+    (file) => file === relativeModule || file.startsWith(`${relativeModule}/`),
+  );
   return {
-    files: [],
+    files,
     added: [],
-    modified: [],
+    modified: [...files],
     renamed: [],
     deleted: [],
   };
+}
+
+/**
+ * Resolve all tracked and non-ignored untracked files in the repository.
+ */
+async function resolveAllFiles(cwd: string, runner: ProcessRunner): Promise<ScopeFiles> {
+  try {
+    const result = await runner.exec(
+      "git",
+      ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+      { cwd, timeoutMs: 30_000 },
+    );
+    if (result.exitCode === 0) {
+      const files = uniqueRepositoryFiles(result.stdout.split("\0"));
+      return {
+        files,
+        added: [],
+        modified: [...files],
+        renamed: [],
+        deleted: [],
+      };
+    }
+  } catch {
+    // Fall through to a bounded filesystem walk for non-git repositories.
+  }
+
+  const files = await listFilesystemFiles(cwd);
+  return {
+    files,
+    added: [],
+    modified: [...files],
+    renamed: [],
+    deleted: [],
+  };
+}
+
+function uniqueRepositoryFiles(files: readonly string[]): string[] {
+  return [
+    ...new Set(
+      files
+        .map((file) => file.trim().replaceAll("\\", "/").replace(/^\.\//, ""))
+        .filter((file) => file.length > 0 && file !== ".." && !file.startsWith("../")),
+    ),
+  ].sort();
+}
+
+async function listFilesystemFiles(cwd: string): Promise<string[]> {
+  const { readdir } = await import("node:fs/promises");
+  const files: string[] = [];
+  const skipped = new Set([".git", ".direnv", ".devenv", "node_modules"]);
+
+  const visit = async (directory: string): Promise<void> => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory() && skipped.has(entry.name)) continue;
+      const absolute = resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        await visit(absolute);
+      } else if (entry.isFile()) {
+        files.push(relative(cwd, absolute).replaceAll("\\", "/"));
+      }
+    }
+  };
+
+  await visit(cwd);
+  return uniqueRepositoryFiles(files);
 }
 
 /**
