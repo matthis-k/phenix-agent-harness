@@ -25,9 +25,7 @@ const PRESET_DEFINITION_IDS: Readonly<Record<WorkflowPreset, string>> = {
 const DIFFICULTY_ORDER: readonly Difficulty[] = ["D0", "D1", "D2", "D3"];
 
 function explicitPreset(message: string): WorkflowPreset | undefined {
-  const match =
-    /^\s*\/workflow\s+(general|implement|qa)\b/i.exec(message) ??
-    /(?:^|\s)(?:workflow|preset)\s*[:=]\s*(general|implement|qa)\b/i.exec(message);
+  const match = /(?:^|\s)(?:workflow|preset)\s*[:=]\s*(general|implement|qa)\b/i.exec(message);
   return match?.[1]?.toLowerCase() as WorkflowPreset | undefined;
 }
 
