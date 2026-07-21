@@ -5,6 +5,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { getSessionRuntime } from "@matthis-k/phenix-routing/state.ts";
 import { authorizePhenixRootCapability, phenixRootModelScope } from "../composition/model-scope.ts";
 import { createWorkflowApiTools } from "../runtime/workflow-api-tools.ts";
+import { subscribeManagedBackgroundSettlements } from "./background-settlement-channel.ts";
 import { AgentParams, type AgentParamsType } from "./delegate-schema.ts";
 import type { SubagentHandleView } from "./facade.ts";
 import { TERMINAL_STATES } from "./handle-types.ts";
@@ -54,6 +55,42 @@ export default async function phenixSubagents(
   options: PhenixSubagentsOptions,
 ): Promise<void> {
   const facade = options.facade;
+  let activeSessionId: string | undefined;
+
+  pi.on("session_start", async (_event, ctx) => {
+    activeSessionId = sessionId(ctx);
+  });
+
+  const unsubscribeBackgroundSettlements = subscribeManagedBackgroundSettlements(
+    ({ sessionId: settledSessionId, record }) => {
+      if (activeSessionId !== settledSessionId) return;
+
+      const details = {
+        handleId: record.id,
+        subagentId: record.subagentId,
+        status: record.status,
+        value: record.value,
+        errors: record.errors,
+      };
+      pi.sendMessage(
+        {
+          customType: "phenix-background-settled",
+          content: [
+            `Phenix background delegation ${record.id} settled with status ${record.status}.`,
+            `Call phenix_agent with action=await and id=${JSON.stringify(record.id)} to reconcile the workflow gate and collect the persisted handoff, then continue the existing parent task.`,
+            "Do not spawn a replacement child.",
+            JSON.stringify(details, null, 2),
+          ].join("\n"),
+          display: true,
+          details,
+        },
+        {
+          deliverAs: "steer",
+          triggerTurn: true,
+        },
+      );
+    },
+  );
 
   pi.on("tool_call", async (event, ctx) => {
     if (!phenixRootModelScope.includes(ctx.model)) return;
@@ -126,6 +163,8 @@ export default async function phenixSubagents(
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    activeSessionId = undefined;
+    unsubscribeBackgroundSettlements();
     options.workflowGate.clearSession(sessionId(ctx));
   });
 
