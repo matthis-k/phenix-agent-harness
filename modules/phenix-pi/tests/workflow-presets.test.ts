@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
+import { validateDefinition } from "@matthis-k/phenix-suite/defaults/workflow.ts";
 import {
   DEFAULT_WORKFLOWS,
   PHENIX_GENERAL_WORKFLOW,
   PHENIX_IMPLEMENT_WORKFLOW,
   PHENIX_QA_WORKFLOW,
 } from "@matthis-k/phenix-suite/defaults/workflow-presets.ts";
-import { validateDefinition } from "@matthis-k/phenix-suite/defaults/workflow.ts";
 
 function delegate(id: string, workflow = PHENIX_QA_WORKFLOW) {
   const transition = workflow.transitions.find((candidate) => candidate.id === id);
@@ -30,7 +29,11 @@ describe("workflow presets", () => {
 
   it("keeps the existing graph as the implementation preset", () => {
     assert.equal(PHENIX_IMPLEMENT_WORKFLOW.id, "phenix-default");
-    assert.ok(PHENIX_IMPLEMENT_WORKFLOW.transitions.some((transition) => transition.id === "d3.implement"));
+    assert.ok(
+      PHENIX_IMPLEMENT_WORKFLOW.transitions.some(
+        (transition) => transition.id === "d3.implement",
+      ),
+    );
   });
 
   it("gives general tasks a managed implementation escape hatch", () => {
