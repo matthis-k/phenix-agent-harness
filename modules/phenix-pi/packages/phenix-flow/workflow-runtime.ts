@@ -157,6 +157,11 @@ export function initialWorkflowStateForRole(role: AgentRole): WorkflowStateId {
   }
 }
 
+/**
+ * Authorize every child-local transition that may belong to this actor during
+ * its workflow lifecycle. The current state, revision, conditions, execution
+ * count, and active handles remain the deterministic per-step authority gate.
+ */
 export function transitionAuthorityForChild(input: {
   readonly definition: WorkflowDefinition;
   readonly role: AgentRole;
@@ -168,7 +173,6 @@ export function transitionAuthorityForChild(input: {
     .filter((transition) => transition.kind === "delegate")
     .filter((transition) => transition.scope !== "root")
     .filter((transition) => transition.actorRoles.includes(actorRole as never))
-    .filter((transition) => transition.from.includes(input.initialState))
     .filter((transition) =>
       input.authorizedRoles.includes(roleForAgentClient(transition.agentClient)),
     )
