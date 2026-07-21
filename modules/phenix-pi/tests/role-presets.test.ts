@@ -6,7 +6,7 @@ import { rolePreset } from "@matthis-k/phenix-suite/subagents/role-presets.ts";
 
 const BASE_CHILDREN = ["scout", "implementer", "tester", "architect", "critic"] as const;
 
- describe("Role presets", () => {
+describe("Role presets", () => {
   it("scout and base have read-only tools", () => {
     for (const role of ["scout", null] as const) {
       const preset = rolePreset(role);
