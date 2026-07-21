@@ -124,7 +124,11 @@ async function spawn(input: {
   readonly ctx: ExtensionContext;
 }): Promise<AgentToolResult<Record<string, unknown>>> {
   const requirements = normalizeWorkflowRequirements(input.requirements);
-  const mode = input.mode ?? (input.parent?.kind === "child" ? "await" : "background");
+  // Await is the only mode with native Pi tool-call return semantics: the
+  // completed handoff is delivered as this tool result and inference resumes in
+  // the parent session. Background execution is intentionally explicit because
+  // persisted handle settlement alone cannot restart an already-ended Pi turn.
+  const mode = input.mode ?? "await";
   const execution = await input.workflow.spawn({
     agent: input.agent,
     task: input.task,
@@ -189,7 +193,7 @@ export function createWorkflowTool(input: {
     name: PHENIX_WORKFLOW_TOOL,
     label: "Phenix Workflow",
     description:
-      "Inspect current workflow authority or spawn one advertised target agent. Root spawns default to background mode and return a persistent handle immediately; use phenix_agent to poll, await, steer, or cancel it. " +
+      "Inspect current workflow authority or spawn one advertised target agent. Spawns default to await mode so the completed handoff returns through the tool call and the parent session continues; use background mode explicitly only for independently managed work, then retain the handle and use phenix_agent for lifecycle operations. " +
       "Use this whenever the user explicitly requests workflow delegation or subagents. " +
       "The runtime derives the actor and current node from the active root session or initialized child contract, and owns transition selection, roles, routing, models, tools, child authority, contracts, assignments, and state changes.",
     parameters: WorkflowActionParams,
@@ -229,7 +233,7 @@ export function createDirectSubagentTool(input: {
     name: PHENIX_SUBAGENT_TOOL,
     label: "Phenix Subagent",
     description:
-      "Spawn the sole legal contract-owned Phenix child directly. Root spawns return a persistent handle immediately by default; use phenix_agent for lifecycle and steering. The tool is rejected whenever zero or multiple workflow targets are legal. " +
+      "Spawn the sole legal contract-owned Phenix child directly. Spawns default to await mode so the completed handoff returns through the tool call and the parent session continues; background mode is explicit and requires handle lifecycle management. The tool is rejected whenever zero or multiple workflow targets are legal. " +
       "Normally use phenix_workflow instead. This tool never bypasses workflow contracts, routing, task-subtree ownership, or verification.",
     parameters: DirectSubagentParams,
 

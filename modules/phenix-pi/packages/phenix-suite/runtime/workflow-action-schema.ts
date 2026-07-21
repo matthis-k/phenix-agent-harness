@@ -24,7 +24,7 @@ const WorkflowInspectAction = Type.Object(
 
 const WorkflowModeInput = Type.Union([Type.Literal("await"), Type.Literal("background")], {
   description:
-    "Root execution defaults to background and returns a handle immediately. Child-local nested execution defaults to await.",
+    "Execution defaults to await so the completed handoff returns through the tool call and the parent session continues. Use background explicitly only when the caller will retain and manage the returned handle.",
 });
 
 const WorkflowSpawnAction = Type.Object(

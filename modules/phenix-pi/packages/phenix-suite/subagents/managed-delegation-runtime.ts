@@ -16,6 +16,10 @@ import {
   type SubagentHandle,
 } from "../runtime/subagent-manager.ts";
 import type { SubagentManagerFactory } from "../runtime/subagent-manager-factory.ts";
+import {
+  type ManagedBackgroundSettlement,
+  publishManagedBackgroundSettlement,
+} from "./background-settlement-channel.ts";
 import { readRecord, writeRecord } from "./handle-store.ts";
 import type { HandleRecord } from "./handle-types.ts";
 import { isTerminalHandleStatus } from "./handle-types.ts";
@@ -193,7 +197,14 @@ export class ManagedDelegationRuntime {
 
     if (input.mode === "background") {
       void completion
-        .then(({ record }) => input.settle(record))
+        .then(async ({ record }) => {
+          input.settle(record);
+          await publishManagedBackgroundSettlement({
+            cwd: input.cwd,
+            sessionId: input.sessionId,
+            record,
+          } satisfies ManagedBackgroundSettlement);
+        })
         .finally(() => {
           cleanupHandle();
           this.managers.remove(handle.id);
