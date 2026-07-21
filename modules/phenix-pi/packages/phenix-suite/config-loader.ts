@@ -11,7 +11,10 @@ import { DEFAULT_MAXIMUM_DELEGATION_DEPTH } from "./composition/runtime-policy.t
 import { defaultAgentClients } from "./defaults/agents.ts";
 import { defaultContracts } from "./defaults/contracts.ts";
 import { defaultAgentRoutes, defaultModelPools, defaultModelSets } from "./defaults/routing.ts";
-import { PHENIX_DEFAULT_WORKFLOW } from "./defaults/workflow.ts";
+import {
+  DEFAULT_WORKFLOWS,
+  PHENIX_GENERAL_WORKFLOW,
+} from "./defaults/workflow-presets.ts";
 import type { AgentClientDefinition } from "./subagents/definitions.ts";
 
 export interface PhenixSuiteConfiguration {
@@ -22,6 +25,7 @@ export interface PhenixSuiteConfiguration {
 
 interface SuiteSettingsFile {
   readonly activeModelSet?: string;
+  /** Fallback workflow used when no specialized per-turn preset matches. */
   readonly activeWorkflow?: string;
   readonly runtime?: {
     readonly maximumDelegationDepth?: number;
@@ -56,10 +60,12 @@ function readRouting(fallback: RoutingConfiguration): RoutingConfiguration {
 
 function readWorkflows(): readonly WorkflowDefinition[] {
   const value = readJson<unknown>(configPath("workflow.json"));
-  if (!value) return [PHENIX_DEFAULT_WORKFLOW];
-  return Array.isArray(value)
-    ? (value as readonly WorkflowDefinition[])
-    : [value as WorkflowDefinition];
+  if (!value) return DEFAULT_WORKFLOWS;
+
+  const configured = (Array.isArray(value) ? value : [value]) as readonly WorkflowDefinition[];
+  const merged = new Map(DEFAULT_WORKFLOWS.map((workflow) => [workflow.id, workflow]));
+  for (const workflow of configured) merged.set(workflow.id, workflow);
+  return [...merged.values()];
 }
 
 export function loadPhenixSuiteConfiguration(): PhenixSuiteConfiguration {
@@ -72,8 +78,7 @@ export function loadPhenixSuiteConfiguration(): PhenixSuiteConfiguration {
     agentRoutes: defaultAgentRoutes,
   });
   const workflows = readWorkflows();
-  const activeWorkflowDefinitionId =
-    settings.activeWorkflow ?? workflows[0]?.id ?? "phenix-default";
+  const activeWorkflowDefinitionId = settings.activeWorkflow ?? PHENIX_GENERAL_WORKFLOW.id;
 
   return {
     workflows,
