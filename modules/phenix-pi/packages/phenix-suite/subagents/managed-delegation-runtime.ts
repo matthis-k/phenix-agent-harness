@@ -38,6 +38,16 @@ interface ManagedCompletion {
   readonly error?: ManagedDelegationFailure;
 }
 
+export interface ManagedBackgroundSettlement {
+  readonly cwd: string;
+  readonly sessionId: string;
+  readonly record: HandleRecord;
+}
+
+export type ManagedBackgroundSettlementListener = (
+  settlement: ManagedBackgroundSettlement,
+) => void | Promise<void>;
+
 export interface ManagedDelegationExecutionInput {
   readonly compiler: SubagentExecutionCompiler;
   readonly request: SubagentRequest<unknown>;
@@ -89,13 +99,16 @@ function terminalStatus(code: string): "cancelled" | "failed" {
 
 export interface ManagedDelegationRuntimeOptions {
   readonly managers: SubagentManagerFactory;
+  readonly onBackgroundSettled?: ManagedBackgroundSettlementListener;
 }
 
 export class ManagedDelegationRuntime {
   private readonly managers: SubagentManagerFactory;
+  private readonly onBackgroundSettled: ManagedBackgroundSettlementListener | undefined;
 
   constructor(options: ManagedDelegationRuntimeOptions) {
     this.managers = options.managers;
+    this.onBackgroundSettled = options.onBackgroundSettled;
   }
 
   get activeCount(): number {
@@ -193,7 +206,14 @@ export class ManagedDelegationRuntime {
 
     if (input.mode === "background") {
       void completion
-        .then(({ record }) => input.settle(record))
+        .then(async ({ record }) => {
+          input.settle(record);
+          await this.onBackgroundSettled?.({
+            cwd: input.cwd,
+            sessionId: input.sessionId,
+            record,
+          });
+        })
         .finally(() => {
           cleanupHandle();
           this.managers.remove(handle.id);
