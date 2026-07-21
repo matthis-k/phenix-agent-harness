@@ -53,6 +53,35 @@ describe("FTA metrics analyzer", () => {
     assert.equal(violation?.metric?.threshold, 10);
   });
 
+  it("filters FTA output to the resolved file scope", () => {
+    const parsed = parseFtaJson(
+      JSON.stringify([
+        {
+          file_name: "src/in-scope.ts",
+          cyclo: 2,
+          halstead: { volume: 10, difficulty: 2, effort: 20 },
+          line_count: 12,
+          fta_score: 22.5,
+          assessment: "OK",
+        },
+        {
+          file_name: "src/out-of-scope.ts",
+          cyclo: 99,
+          halstead: { volume: 80, difficulty: 8, effort: 640 },
+          line_count: 90,
+          fta_score: 90,
+          assessment: "Needs improvement",
+        },
+      ]),
+      "/repo",
+      10,
+      ["src/in-scope.ts"],
+    );
+
+    assert.equal(parsed.filesAnalyzed, 1);
+    assert.doesNotMatch(JSON.stringify(parsed.evidence), /out-of-scope/);
+  });
+
   it("rejects malformed FTA output instead of silently fabricating metrics", () => {
     assert.throws(
       () => parseFtaJson(JSON.stringify([{ file_name: "src/broken.ts", cyclo: "high" }]), "/repo"),
@@ -63,12 +92,14 @@ describe("FTA metrics analyzer", () => {
   it("runs the packaged FTA executable against packaged TypeScript sources", async (t) => {
     const cwd = fileURLToPath(new URL("../skills/phenix-qa/runtime/analyzers", import.meta.url));
     const artifactRoot = mkdtempSync(join(tmpdir(), "phenix-qa-fta-artifacts-"));
-    const artifactDirectory = ensureArtifactDir(join(artifactRoot, "nested", "artifacts"));
+    const artifactDirectory = ensureArtifactDir(artifactRoot, "nested/artifacts");
+    const scopedFiles = ["metrics.ts"];
     t.after(() => rmSync(artifactRoot, { recursive: true, force: true }));
 
     const availability = await METRICS_ANALYZER.checkAvailability({
       cwd,
       scope: { kind: "repository", description: "FTA integration test" },
+      scopedFiles,
       artifactDirectory,
       config: DEFAULT_QA_CONFIG,
     });
@@ -79,6 +110,7 @@ describe("FTA metrics analyzer", () => {
     const result = await METRICS_ANALYZER.run({
       cwd,
       scope: { kind: "repository", description: "FTA integration test" },
+      scopedFiles,
       artifactDirectory,
       config: {
         ...DEFAULT_QA_CONFIG,
