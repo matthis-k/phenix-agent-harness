@@ -91,6 +91,10 @@ function runtimeWith(handle: SubagentHandle<unknown>): ManagedDelegationRuntime 
     list: () => [handle.snapshot()],
     remove: () => undefined,
     activeCount: 1,
+    subscribeActiveCount: (listener) => {
+      listener(1);
+      return () => undefined;
+    },
     shutdown: async () => undefined,
   };
   return new ManagedDelegationRuntime({ managers });

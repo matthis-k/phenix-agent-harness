@@ -32,6 +32,7 @@ export type {
 } from "./subagent-api.ts";
 export { decodeReturnValue, returns, returnsWithDecoder } from "./subagent-api.ts";
 export type {
+  ActiveSubagentCountListener,
   SubagentCancellation,
   SubagentError,
   SubagentEvent,

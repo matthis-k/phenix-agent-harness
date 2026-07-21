@@ -90,12 +90,6 @@ class Spawner {
   }
 }
 
-class Acceptance implements AcceptanceEngine {
-  evaluate<TOutput>(plan: AcceptancePlan<TOutput>): Promise<TOutput> {
-    return Promise.resolve((plan.returns.decode?.({ ok: true }) ?? { ok: true }) as TOutput);
-  }
-}
-
 class PendingAcceptance implements AcceptanceEngine {
   evaluate<TOutput>(
     _plan: AcceptancePlan<TOutput>,
@@ -119,7 +113,7 @@ describe("SessionSubagentManagerFactory directory", () => {
   it("shares handles across compiler-scoped managers", async () => {
     const factory = createSessionSubagentManagerFactory({
       sessions: new Spawner(),
-      acceptance: new Acceptance(),
+      acceptance: new PendingAcceptance(),
     });
     const first = factory.create(new Compiler("first"));
     const second = factory.create(new Compiler("second"));
@@ -131,6 +125,27 @@ describe("SessionSubagentManagerFactory directory", () => {
     assert.equal(factory.get(handle.id), handle);
     assert.deepEqual(second.list(), [handle.snapshot()]);
     assert.equal(factory.activeCount, 1);
+
+    await factory.shutdown("test complete");
+  });
+
+  it("publishes active count changes for add, remove, and shutdown", async () => {
+    const factory = createSessionSubagentManagerFactory({
+      sessions: new Spawner(),
+      acceptance: new PendingAcceptance(),
+    });
+    const activeCounts: number[] = [];
+    const unsubscribe = factory.subscribeActiveCount((activeCount) => {
+      activeCounts.push(activeCount);
+    });
+
+    const first = await factory.create(new Compiler("first")).spawn(request);
+    await factory.create(new Compiler("second")).spawn(request);
+    factory.remove(first.id);
+    await factory.shutdown("session shutdown");
+    unsubscribe();
+
+    assert.deepEqual(activeCounts, [0, 1, 2, 1, 0]);
   });
 
   it("removes handles centrally and shuts down remaining children", async () => {
