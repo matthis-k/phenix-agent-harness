@@ -7,20 +7,21 @@ import { resolveDelegateRoleConfiguration } from "@matthis-k/phenix-suite/subage
 import { resolveExecutionPolicy } from "@matthis-k/phenix-suite/subagents/policy.ts";
 import { rolePreset } from "@matthis-k/phenix-suite/subagents/role-presets.ts";
 
-const QA_SPECIALISTS = ["scout", "tester", "architect", "critic"] as const;
+const BASE_CHILDREN = ["scout", "implementer", "tester", "architect", "critic"] as const;
 
 describe("QA execution policy", () => {
-  it("authorizes the base integrator to delegate isolated QA concerns", () => {
-    assert.deepEqual(rolePreset(null).allowedChildren, QA_SPECIALISTS);
+  it("authorizes the base integrator for preset-specific child workflows", () => {
+    assert.deepEqual(rolePreset(null).allowedChildren, BASE_CHILDREN);
     assert.deepEqual(
       resolveDelegateRoleConfiguration({
         role: null,
         requested: null,
       }).effective,
-      QA_SPECIALISTS,
+      BASE_CHILDREN,
     );
     assert.deepEqual(baseClient.delegation.allowedClients, [
       agentClientRef("scout"),
+      agentClientRef("implementer"),
       agentClientRef("tester"),
       agentClientRef("architect"),
       agentClientRef("critic"),
