@@ -10,6 +10,7 @@ import type {
   ModelReviewContribution,
   QaEvidence,
   QaFinding,
+  QaLevel,
   QaReport,
   QualityGate,
   QualityGateReport,
@@ -19,6 +20,17 @@ import type {
 } from "../contracts/contracts.ts";
 import { DEFAULT_QA_CONFIG } from "./config.ts";
 import type { QaConfig } from "./types.ts";
+
+const QA_LEVEL_ORDER: readonly QaLevel[] = [
+  "level-0-correctness",
+  "level-1-metrics",
+  "level-2-readability",
+  "level-3-patterns",
+  "level-4-architecture",
+  "level-5-system",
+  "level-6-operability",
+  "level-7-security",
+];
 
 // ── Report Skeleton ──────────────────────────────────────────────────────────
 
@@ -78,23 +90,7 @@ export function buildReportSkeleton(params: {
   };
 
   const overallResult = determineOverallResult(gates);
-
-  const blockingIssues = params.findings.filter((f) => f.blocking).map((f) => f.id);
-
-  // Find the highest risk level from findings
-  const levelOrder = [
-    "level-0-correctness",
-    "level-1-metrics",
-    "level-2-readability",
-    "level-3-patterns",
-    "level-4-architecture",
-    "level-5-system",
-    "level-6-operability",
-    "level-7-security",
-  ] as const;
-
-  const levelsWithFindings = new Set(params.findings.map((f) => f.level));
-  const highestRiskLevel = levelOrder.findLast((l) => levelsWithFindings.has(l));
+  const blockingIssues = params.findings.filter((finding) => finding.blocking).map((finding) => finding.id);
 
   return {
     scope: params.scope,
@@ -102,7 +98,7 @@ export function buildReportSkeleton(params: {
     executiveSummary: {
       overallResult,
       blockingIssues,
-      highestRiskLevel,
+      highestRiskLevel: highestRiskLevel(params.findings),
       architectureAssessment: "not-reviewed",
       currentChangeIncreasesDebt: "unknown",
       analysisCoverage: params.coverage,
@@ -434,21 +430,36 @@ export function mergeModelContribution(
     DEFAULT_QA_CONFIG,
   );
 
-  // Update overall result and highest risk level
+  const introduced = merged.findings.map((finding) => finding.introducedByCurrentChange);
+  const currentChangeIncreasesDebt = introduced.some((value) => value === true)
+    ? true
+    : introduced.length > 0 && introduced.every((value) => value === false)
+      ? false
+      : "unknown";
+
+  // Recompute every finding-derived executive summary field after merging.
   merged.executiveSummary = {
     ...merged.executiveSummary,
     overallResult: determineOverallResult(merged.qualityGates),
+    blockingIssues: merged.findings.filter((finding) => finding.blocking).map((finding) => finding.id),
+    highestRiskLevel: highestRiskLevel(merged.findings),
+    currentChangeIncreasesDebt,
     architectureAssessment: contribution.architectureRisk
       ? contribution.architectureRisk.value > 40
         ? "inconsistent"
         : "consistent"
-      : "not-reviewed",
+      : merged.executiveSummary.architectureAssessment,
   };
 
   return merged;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+function highestRiskLevel(findings: readonly QaFinding[]): QaLevel | undefined {
+  const levelsWithFindings = new Set(findings.map((finding) => finding.level));
+  return QA_LEVEL_ORDER.findLast((level) => levelsWithFindings.has(level));
+}
 
 function evidenceIdsForSource(evidence: readonly QaEvidence[], source: string): string[] {
   return evidence.filter((e) => e.source === source).map((e) => e.id);
