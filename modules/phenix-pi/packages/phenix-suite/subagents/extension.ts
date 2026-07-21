@@ -8,6 +8,7 @@ import { createWorkflowApiTools } from "../runtime/workflow-api-tools.ts";
 import { subscribeManagedBackgroundSettlements } from "./background-settlement-channel.ts";
 import { AgentParams, type AgentParamsType } from "./delegate-schema.ts";
 import type { SubagentHandleView } from "./facade.ts";
+import { effectiveSessionId } from "./handle-store.ts";
 import { TERMINAL_STATES } from "./handle-types.ts";
 import type { PhenixSubagentsOptions } from "./registration.ts";
 
@@ -46,10 +47,6 @@ function fail(message: string, details?: Record<string, unknown>): never {
   throw error;
 }
 
-function sessionId(ctx: ExtensionContext): string {
-  return ctx.sessionManager.getSessionId() ?? "default";
-}
-
 export default async function phenixSubagents(
   pi: ExtensionAPI,
   options: PhenixSubagentsOptions,
@@ -58,7 +55,7 @@ export default async function phenixSubagents(
   let activeSessionId: string | undefined;
 
   pi.on("session_start", async (_event, ctx) => {
-    activeSessionId = sessionId(ctx);
+    activeSessionId = effectiveSessionId(ctx);
   });
 
   const unsubscribeBackgroundSettlements = subscribeManagedBackgroundSettlements(
@@ -94,7 +91,7 @@ export default async function phenixSubagents(
 
   pi.on("tool_call", async (event, ctx) => {
     if (!phenixRootModelScope.includes(ctx.model)) return;
-    const id = sessionId(ctx);
+    const id = effectiveSessionId(ctx);
 
     if (event.toolName === "subagent") {
       return {
@@ -119,7 +116,7 @@ export default async function phenixSubagents(
     const isHandleLifecycle = event.toolName === "phenix_agent";
     if (!isWorkflowSpawn && !isHandleLifecycle) return;
 
-    const id = sessionId(ctx);
+    const id = effectiveSessionId(ctx);
     let isError = event.isError;
     let authorityResolved = false;
     let currentState: string | undefined;
@@ -165,13 +162,13 @@ export default async function phenixSubagents(
   pi.on("session_shutdown", async (_event, ctx) => {
     activeSessionId = undefined;
     unsubscribeBackgroundSettlements();
-    options.workflowGate.clearSession(sessionId(ctx));
+    options.workflowGate.clearSession(effectiveSessionId(ctx));
   });
 
   for (const tool of createWorkflowApiTools({
     workflow: facade.workflow,
     authorize: ({ ctx, tool }) => authorizePhenixRootCapability({ ctx, capability: tool }),
-    rootUserTask: (ctx) => getSessionRuntime(sessionId(ctx)).currentUserTask,
+    rootUserTask: (ctx) => getSessionRuntime(effectiveSessionId(ctx)).currentUserTask,
   })) {
     pi.registerTool(tool as never);
   }
