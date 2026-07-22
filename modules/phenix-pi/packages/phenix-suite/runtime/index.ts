@@ -7,6 +7,8 @@ export type {
   SubagentExecutionCompiler,
   SubagentExecutionPlan,
 } from "./execution-plan.ts";
+export type { PiRuntimeAdapter } from "./runtime-adapter.ts";
+export { SelectingChildSessionBackend } from "./runtime-adapter.ts";
 export type {
   ConcreteSessionModel,
   RoutedSessionModel,
