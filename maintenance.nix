@@ -49,10 +49,7 @@ in
     };
 
     "maintenance-check-runtime" = {
-      packages = [
-        pkgs.git
-        pkgs.nix
-      ];
+      packages = [ pkgs.git ];
       exec = ''
         ${repositoryRoot}
         nix build --no-link --print-build-logs .#phenix-runtime-tests
@@ -60,10 +57,7 @@ in
     };
 
     "maintenance-check-typecheck" = {
-      packages = [
-        pkgs.git
-        pkgs.nix
-      ];
+      packages = [ pkgs.git ];
       exec = ''
         ${repositoryRoot}
         nix build --no-link --print-build-logs .#phenix-typecheck
@@ -71,10 +65,7 @@ in
     };
 
     "maintenance-check-flake" = {
-      packages = [
-        pkgs.git
-        pkgs.nix
-      ];
+      packages = [ pkgs.git ];
       exec = ''
         ${repositoryRoot}
         nix flake check --print-build-logs --keep-going
