@@ -14,6 +14,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
@@ -23,7 +25,10 @@ jobs:
       - name: Install devenv
         run: nix profile add nixpkgs#devenv
       - name: Apply repository formatter
-        run: devenv tasks run maintenance:fix:format
+        run: |
+          set +e
+          devenv tasks run maintenance:fix:format
+          exit 0
       - name: Record changed files
         run: git diff --name-only > formatted-files.txt
       - name: Upload formatted source tree
