@@ -126,7 +126,9 @@ export const METRICS_ANALYZER: QaAnalyzer = {
           status: "not-applicable",
           evidence: [],
           artifacts: [rawPath],
-          diagnostics: ["FTA found no supported JavaScript or TypeScript files in the resolved scope."],
+          diagnostics: [
+            "FTA found no supported JavaScript or TypeScript files in the resolved scope.",
+          ],
           durationMs: Date.now() - start,
         };
       }
