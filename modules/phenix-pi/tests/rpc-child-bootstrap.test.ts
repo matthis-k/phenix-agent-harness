@@ -8,7 +8,9 @@ import {
   clearWorkflowDefinitions,
   getWorkflowDefinition,
 } from "@matthis-k/phenix-flow/workflow-definitions.ts";
-import { registerRpcChildWorkflowDefinitions } from "@matthis-k/phenix-suite/runtime/rpc-child-extension.ts";
+import {
+  registerRpcChildWorkflowDefinitions,
+} from "@matthis-k/phenix-suite/runtime/rpc-child-extension.ts";
 
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 const temporaryDirectories: string[] = [];
@@ -62,7 +64,10 @@ describe("isolated RPC child bootstrap", () => {
   });
 
   it("configures the wrapper to give RPC children the raw Pi binary", () => {
-    const standalone = fs.readFileSync(new URL("../../standalone.nix", import.meta.url), "utf8");
+    const standalone = fs.readFileSync(
+      new URL("../../standalone.nix", import.meta.url),
+      "utf8",
+    );
 
     assert.ok(
       standalone.includes(
