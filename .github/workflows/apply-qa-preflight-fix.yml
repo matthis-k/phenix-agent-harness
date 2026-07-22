@@ -31,14 +31,13 @@ jobs:
 
           gate = Path("modules/phenix-pi/packages/phenix-suite/composition/workflow-turn-gate.ts")
           text = gate.read_text()
-          old = '''  const preflightAction = /\\b(?:read|load|inspect|open|locate|parse|check)\\b/i;
-          return (
-            internalResource.test(normalized) &&
-            preflightAction.test(normalized) &&
-            !internalResource.test(normalizedUserTask)
-          );
-          '''
-          new = '''  const preflightAction = /\\b(?:read|load|inspect|open|locate|parse|check)\\b/i;
+          start_marker = "  const preflightAction = "
+          end_marker = "\n}\n\nclass WorkflowTurnGateImpl"
+          start = text.find(start_marker, text.find("function isHarnessPreflightTask"))
+          end = text.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit("preflight classifier function boundary not found")
+          classifier = '''  const preflightAction = /\\b(?:read|load|inspect|open|locate|parse|check)\\b/i;
           const userWorkAction =
             /\\b(?:run|execute|perform|complete|inspect|analy[sz]e|investigate|assess|audit|review|test|verify|validate|implement|fix|repair|refactor|maintain)\\b/i;
           const userWorkTarget =
@@ -52,45 +51,41 @@ jobs:
             !internalResource.test(normalizedUserTask)
           );
           '''
-          if old not in text:
-              raise SystemExit("expected preflight classifier block not found")
-          gate.write_text(text.replace(old, new, 1))
+          gate.write_text(text[:start] + classifier + text[end:])
 
           tests = Path("modules/phenix-pi/tests/workflow-turn-gate.test.ts")
           text = tests.read_text()
-          marker = '''  });
-
-            it("blocks non-workflow tools until a required spawn succeeds", () => {
-          '''
-          insertion = '''  });
-
-            it("allows AGENTS.md prerequisites when the delegation contains concrete QA work", () => {
-              const gate = createWorkflowTurnGate();
-              gate.beginTurn({
-                sessionId,
-                turnId,
-                userTask: "Do a full QA for this repo.",
-                requiredAgents: ["base"],
-              });
-
-              assert.equal(
-                gate.authorize(
-                  invocation("phenix_workflow", {
-                    action: "spawn",
-                    agent: "base",
-                    task:
-                      "Run the canonical deterministic QA gate and all available maintenance-defined checks after reading AGENTS.md.",
-                  }),
-                ),
-                undefined,
-              );
+          title = '  it("allows AGENTS.md prerequisites when the delegation contains concrete QA work", () => {'
+          marker = '  it("blocks non-workflow tools until a required spawn succeeds", () => {'
+          if title not in text:
+              index = text.find(marker)
+              if index < 0:
+                  raise SystemExit("workflow gate test insertion point not found")
+              regression = '''  it("allows AGENTS.md prerequisites when the delegation contains concrete QA work", () => {
+            const gate = createWorkflowTurnGate();
+            gate.beginTurn({
+              sessionId,
+              turnId,
+              userTask: "Do a full QA for this repo.",
+              requiredAgents: ["base"],
             });
 
-            it("blocks non-workflow tools until a required spawn succeeds", () => {
+            assert.equal(
+              gate.authorize(
+                invocation("phenix_workflow", {
+                  action: "spawn",
+                  agent: "base",
+                  task:
+                    "Run the canonical deterministic QA gate and all available maintenance-defined checks after reading AGENTS.md.",
+                }),
+              ),
+              undefined,
+            );
+          });
+
           '''
-          if marker not in text:
-              raise SystemExit("expected workflow gate test insertion point not found")
-          tests.write_text(text.replace(marker, insertion, 1))
+              text = text[:index] + regression + text[index:]
+              tests.write_text(text)
           PY
       - name: Install devenv
         run: nix profile add nixpkgs#devenv
