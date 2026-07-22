@@ -1,5 +1,8 @@
 import type { TaskAuthority, TaskRuntimeFacade } from "@matthis-k/phenix-tasks/index.ts";
 
+import { executionAuthorityForProject } from "../authority/registry.ts";
+import { registerAuthorityTaskProjection } from "../authority/task-projection.ts";
+import { createAuthorityBoundWorkflowRuntime } from "../authority/workflow-bridge.ts";
 import type { ChildParentExecutionContext } from "../runtime/child-session-types.ts";
 import type { ParentExecutionContext } from "../runtime/workflow-api-types.ts";
 import type {
@@ -76,6 +79,16 @@ export function createTaskWorkflowBridge(input: {
   readonly workflow: WorkflowRuntimePort;
   readonly tasks: TaskRuntimeFacade;
 }): TaskWorkflowBridge {
+  const projectedAuthorities = new WeakSet<object>();
+  const authorityWorkflow = (request: { readonly ctx: WorkflowSpawnRequest["ctx"] }) => {
+    const authority = executionAuthorityForProject(request.ctx.cwd);
+    if (!projectedAuthorities.has(authority)) {
+      registerAuthorityTaskProjection({ tasks: input.tasks, authority });
+      projectedAuthorities.add(authority);
+    }
+    return createAuthorityBoundWorkflowRuntime({ workflow: input.workflow, authority });
+  };
+
   const resolveParentAuthority = (parent: ParentExecutionContext): TaskAuthority | undefined => {
     if (parent.kind === "root") {
       return input.tasks.rootAuthorityForSession(parent.sessionId);
@@ -99,7 +112,8 @@ export function createTaskWorkflowBridge(input: {
 
   const workflow: WorkflowRuntimePort = {
     inspect(request) {
-      const snapshot = input.workflow.inspect(request);
+      const projectedWorkflow = authorityWorkflow(request);
+      const snapshot = projectedWorkflow.inspect(request);
       const authority = resolveParentAuthority(rootParent(request));
       if (authority) reconcileTerminalRootTask({ tasks: input.tasks, authority, snapshot });
       return snapshot;
@@ -116,7 +130,8 @@ export function createTaskWorkflowBridge(input: {
         };
       }
 
-      const snapshot = input.workflow.inspect(request);
+      const projectedWorkflow = authorityWorkflow(request);
+      const snapshot = projectedWorkflow.inspect(request);
       const resolvedRequest = resolveWorkflowSpawnRequest(snapshot, request);
       const pending = input.tasks.prepareDelegation(authority.token, {
         task: resolvedRequest.task,
@@ -130,7 +145,7 @@ export function createTaskWorkflowBridge(input: {
       );
 
       try {
-        const result = await input.workflow.spawn(resolvedRequest);
+        const result = await projectedWorkflow.spawn(resolvedRequest);
         if (!result.ok) {
           appendDiagnostic(input.tasks, authority, pending.taskUid, failureDiagnostic(result));
           input.tasks.failDelegation(authority.token, pending.taskUid);
@@ -143,7 +158,7 @@ export function createTaskWorkflowBridge(input: {
           pending.taskUid,
           `Delegation started: handle=${result.record.id}, status=${result.record.status}, transition=${result.transition.fromNodeId}->${result.transition.toNodeId}.`,
         );
-        const postSpawn = input.workflow.inspect({
+        const postSpawn = projectedWorkflow.inspect({
           ctx: request.ctx,
           ...(request.parent ? { parent: request.parent } : {}),
         });
