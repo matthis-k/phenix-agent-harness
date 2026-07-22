@@ -75,6 +75,32 @@ function reconcileTerminalRootTask(input: {
   }
 }
 
+function prepareRuntimeInternalDelegation(
+  tasks: TaskRuntimeFacade,
+  parent: ChildParentExecutionContext,
+): void {
+  if (parent.taskAuthoritySource !== "runtime-internal") return;
+
+  const workflowId = parent.contract.runtime.workflow.instanceId;
+  const actorId = parent.contract.runtime.workflow.actorId;
+  const parentActorId = parent.contract.runtime.workflow.parentActorId;
+  if (!parentActorId) {
+    throw new Error(`Runtime-internal child task authority ${actorId} has no parent workflow actor.`);
+  }
+
+  const parentAuthority = tasks.authorityForActor(workflowId, parentActorId);
+  if (!parentAuthority) {
+    throw new Error(
+      `Runtime-internal child task authority cannot resolve parent actor ${parentActorId} in ${workflowId}.`,
+    );
+  }
+
+  tasks.prepareDelegation(parentAuthority.token, {
+    task: parent.contract.assignment.task,
+    requirements: parent.contract.assignment.requirements,
+  });
+}
+
 export function createTaskWorkflowBridge(input: {
   readonly workflow: WorkflowRuntimePort;
   readonly tasks: TaskRuntimeFacade;
@@ -186,6 +212,7 @@ export function createTaskWorkflowBridge(input: {
       const existing = input.tasks.authorityForActor(workflowId, actorId);
       if (existing) return existing;
 
+      prepareRuntimeInternalDelegation(input.tasks, parent);
       const parentActorId = parent.contract.runtime.workflow.parentActorId;
       if (!parentActorId) {
         throw new Error(`Child task authority ${actorId} has no parent workflow actor.`);
