@@ -44,6 +44,15 @@ function hasImplementationIntent(message: string): boolean {
   );
 }
 
+function hasReviewFindingFixIntent(message: string): boolean {
+  const mentionsReview = /\b(?:qa|quality[- ]assurance|review|audit)\b/i.test(message);
+  const mentionsExistingFindings =
+    /\b(?:finding|findings|defect|defects|report|reported|discovered)\b/i.test(message) ||
+    /\bissues?\b.*\b(?:discovered|reported|found)\b/i.test(message) ||
+    /\b(?:discovered|reported|found)\b.*\bissues?\b/i.test(message);
+  return hasImplementationIntent(message) && mentionsReview && mentionsExistingFindings;
+}
+
 function presetForDefinitionId(definitionId: string): WorkflowPreset | undefined {
   return (Object.entries(PRESET_DEFINITION_IDS) as ReadonlyArray<[WorkflowPreset, string]>).find(
     ([, id]) => id === definitionId,
@@ -61,6 +70,16 @@ export function selectWorkflow(input: {
       workflowDefinitionId: PRESET_DEFINITION_IDS[explicit],
       source: "explicit",
       reason: `The user explicitly selected the ${explicit} workflow preset.`,
+    };
+  }
+
+  if (hasReviewFindingFixIntent(input.userMessage)) {
+    return {
+      preset: "implement",
+      workflowDefinitionId: PRESET_DEFINITION_IDS.implement,
+      source: "classifier",
+      reason:
+        "The request asks to implement fixes for existing QA/review findings, not to run a new QA review.",
     };
   }
 

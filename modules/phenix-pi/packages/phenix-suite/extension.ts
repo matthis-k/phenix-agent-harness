@@ -20,21 +20,32 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import type { ExtensionAPI, ModelRegistry, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  ModelRegistry,
+  ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
 import {
+  abandonWorkflowRecord,
+  isTerminalState,
+  readWorkflowRecord,
   registerOutputSchemas,
   registerWorkflowDefinitions,
+  unregisterSession,
 } from "@matthis-k/phenix-flow/index.ts";
 import { resolveChildRoute } from "@matthis-k/phenix-routing/child-route.ts";
 import {
   buildRoutingConfigFromDeclarations,
   configureRoutingConfig,
 } from "@matthis-k/phenix-routing/config.ts";
+import { getSessionRuntime } from "@matthis-k/phenix-routing/state.ts";
+import { clearActiveRouteForSession } from "@matthis-k/phenix-routing/stream-proxy.ts";
 import { writeStreamTrace } from "@matthis-k/phenix-routing/stream-trace.ts";
 import { createTaskRuntimeFacade } from "@matthis-k/phenix-tasks/index.ts";
 import { createTaskTools } from "@matthis-k/phenix-tasks/pi-tools.ts";
 import { link } from "./composition/linker.ts";
-import { createWorkflowTurnGate } from "./composition/workflow-turn-gate.ts";
+import { createWorkflowTurnGate, type WorkflowTurnGate } from "./composition/workflow-turn-gate.ts";
 import { loadPhenixSuiteConfiguration } from "./config-loader.ts";
 import { defaultOutputSchemas, outputSchemasFromContracts } from "./defaults/output-schemas.ts";
 import { buildPhenixRootSystemPrompt } from "./phenix-skill-bootstrap.ts";
@@ -49,6 +60,8 @@ import type { WorkflowRuntimePort } from "./runtime/workflow-runtime-types.ts";
 import { createExecutionQualityService } from "./subagents/execution-quality-service.ts";
 import phenixSubagents from "./subagents/extension.ts";
 import { createPhenixSubagentFacade } from "./subagents/facade.ts";
+import { listRecords } from "./subagents/handle-store.ts";
+import { TERMINAL_STATES } from "./subagents/handle-types.ts";
 import {
   createManagedDelegationRuntime,
   type ManagedDelegationRuntime,
@@ -180,6 +193,108 @@ function registerShutdown(
     disposeTuiProjection();
     await delegationRuntime.shutdown("session shutdown");
     await closeTaskHost();
+  });
+}
+
+function releaseWorkflowSessionState(sessionId: string, workflowGate: WorkflowTurnGate): void {
+  const runtime = getSessionRuntime(sessionId);
+  unregisterSession(sessionId);
+  delete runtime.activeWorkflow;
+  runtime.currentUserTask = undefined;
+  runtime.activeRoute = null;
+  clearActiveRouteForSession(sessionId);
+  workflowGate.clearSession(sessionId);
+}
+
+async function discardActiveWorkflow(input: {
+  readonly ctx: ExtensionContext;
+  readonly workflowGate: WorkflowTurnGate;
+  readonly delegator: WorkflowDelegator;
+  readonly reason: string;
+}): Promise<{
+  readonly state: "none" | "terminal" | "abandoned";
+  readonly cancelledHandles: number;
+}> {
+  const sessionId = input.ctx.sessionManager.getSessionId() ?? "default";
+  const runtime = getSessionRuntime(sessionId);
+  const active = runtime.activeWorkflow;
+  if (!active) {
+    releaseWorkflowSessionState(sessionId, input.workflowGate);
+    return { state: "none", cancelledHandles: 0 };
+  }
+
+  const record = readWorkflowRecord(input.ctx.cwd, active.instanceId, active.actorId);
+  if (!record || isTerminalState(record.state)) {
+    releaseWorkflowSessionState(sessionId, input.workflowGate);
+    return { state: "terminal", cancelledHandles: 0 };
+  }
+
+  const runningHandles = listRecords(input.ctx.cwd, sessionId).filter((handle) => {
+    const binding = handle.workflowBinding;
+    return (
+      !TERMINAL_STATES.has(handle.status) &&
+      binding !== undefined &&
+      binding.instanceId === active.instanceId &&
+      binding.actorId === active.actorId
+    );
+  });
+  abandonWorkflowRecord(input.ctx.cwd, record, input.reason);
+  await Promise.allSettled(
+    runningHandles.map((handle) =>
+      input.delegator.cancelHandle(input.ctx, handle.id, input.reason),
+    ),
+  );
+  releaseWorkflowSessionState(sessionId, input.workflowGate);
+  return { state: "abandoned", cancelledHandles: runningHandles.length };
+}
+
+function registerWorkflowLifecycleCommand(input: {
+  readonly pi: ExtensionAPI;
+  readonly workflowGate: WorkflowTurnGate;
+  readonly delegator: WorkflowDelegator;
+}): void {
+  input.pi.registerCommand("workflow", {
+    description: "Control the active Phenix workflow; usage: /workflow resume|discard",
+    handler: async (args: string, ctx: ExtensionContext) => {
+      const action = args.trim().toLowerCase();
+      const sessionId = ctx.sessionManager.getSessionId() ?? "default";
+      if (action === "resume") {
+        const active = getSessionRuntime(sessionId).activeWorkflow;
+        const record = active
+          ? readWorkflowRecord(ctx.cwd, active.instanceId, active.actorId)
+          : undefined;
+        if (record && !isTerminalState(record.state)) {
+          ctx.ui.notify(
+            "Active Phenix workflow is preserved and will resume on the next model turn.",
+            "info",
+          );
+        } else {
+          releaseWorkflowSessionState(sessionId, input.workflowGate);
+          ctx.ui.notify("No active Phenix workflow is available to resume.", "warning");
+        }
+        return;
+      }
+
+      if (action === "discard") {
+        const result = await discardActiveWorkflow({
+          ctx,
+          workflowGate: input.workflowGate,
+          delegator: input.delegator,
+          reason: "workflow discarded by user command",
+        });
+        if (result.state === "abandoned") {
+          ctx.ui.notify(
+            `Phenix workflow abandoned; cancelled ${result.cancelledHandles} active handle(s).`,
+            "info",
+          );
+        } else {
+          ctx.ui.notify("No non-terminal Phenix workflow was active.", "warning");
+        }
+        return;
+      }
+
+      ctx.ui.notify("Usage: /workflow resume|discard", "warning");
+    },
   });
 }
 
@@ -339,6 +454,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
   workflowRuntime = taskBridge.workflow;
 
   registerSuiteTasks({ pi, service: taskService });
+  registerWorkflowLifecycleCommand({ pi, workflowGate, delegator });
   await loadIntegration("phenix-subagents", pi, async (api) => {
     await phenixSubagents(api, {
       facade: createPhenixSubagentFacade({ delegator, workflow: workflowRuntime }),

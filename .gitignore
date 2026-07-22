@@ -16,3 +16,7 @@ result-*
 *.log
 *.log.*
 .maintenance-trigger
+
+# Generated QA output
+/.phenix-qa/
+/qa-results/

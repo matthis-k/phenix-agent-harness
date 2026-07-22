@@ -4,9 +4,12 @@ message: "QA reports and findings must be validated with runtime schemas before 
 severity: warning
 rule:
   any:
-    - pattern: type QaReport
-    - pattern: type QaFinding
-    - pattern: type QaEvidence
+    - kind: type_alias_declaration
+      pattern: type QaReport
+    - kind: type_alias_declaration
+      pattern: type QaFinding
+    - kind: type_alias_declaration
+      pattern: type QaEvidence
 files:
   - skills/phenix-qa/
 note: |

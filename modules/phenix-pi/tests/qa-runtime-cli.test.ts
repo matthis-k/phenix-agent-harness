@@ -56,6 +56,59 @@ describe("QA runtime CLI", () => {
     }
   });
 
+  it("produces FAIL and CLI exit 1 for a failing project-native command", async () => {
+    const cwd = mkdtempSync(path.join(os.tmpdir(), "phenix-qa-cli-fail-"));
+    writeFileSync(
+      path.join(cwd, "package.json"),
+      JSON.stringify({ scripts: { test: "exit 1" } }),
+      "utf-8",
+    );
+    writeFileSync(
+      path.join(cwd, ".phenix-qa.json"),
+      JSON.stringify({
+        enabledAnalyzers: ["project-native"],
+        requiredAnalyzers: [],
+      }),
+      "utf-8",
+    );
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    try {
+      const exitCode = await runQaCli(
+        ["review", "--scope", "repository", "--cwd", cwd, "--trust-repository"],
+        {
+          stdout: (message) => stdout.push(message),
+          stderr: (message) => stderr.push(message),
+        },
+      );
+
+      assert.equal(exitCode, 1, `expected FAIL exit code, got: ${exitCode}\n${stderr.join("\n")}`);
+      assert.ok(stdout.some((line) => line === "QA FAIL"));
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("produces FAIL when a required analyzer is unavailable", async () => {
+    const cwd = repository({
+      enabledAnalyzers: [],
+      requiredAnalyzers: ["project-native"],
+    });
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    try {
+      const exitCode = await runQaCli(["review", "--scope", "repository", "--cwd", cwd], {
+        stdout: (message) => stdout.push(message),
+        stderr: (message) => stderr.push(message),
+      });
+
+      assert.equal(exitCode, 1, `expected FAIL exit code, got: ${exitCode}\n${stderr.join("\n")}`);
+      assert.ok(stdout.some((line) => line === "QA FAIL"));
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("requires an explicit flag for caller-owned external output", async () => {
     const cwd = repository({ enabledAnalyzers: [], requiredAnalyzers: [] });
     const externalRoot = mkdtempSync(path.join(os.tmpdir(), "phenix-qa-external-"));

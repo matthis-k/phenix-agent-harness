@@ -1,6 +1,6 @@
 import { isTransitionPermitted } from "./transition-authority.ts";
 import { conditionSatisfied } from "./workflow-conditions.ts";
-import { transitionMatchesDifficulty } from "./workflow-reducer.ts";
+import { isTerminalState, transitionMatchesDifficulty } from "./workflow-reducer.ts";
 import { getOutputSchema } from "./workflow-schemas.ts";
 import type {
   DelegateTransition,
@@ -43,8 +43,7 @@ export function resolveDelegationOptions(input: {
   const options: DelegationOption[] = [];
 
   // 1. Terminal state check
-  const terminalStates = new Set(["completed", "failed", "cancelled"]);
-  if (terminalStates.has(runtime.state)) {
+  if (isTerminalState(runtime.state)) {
     return options;
   }
 

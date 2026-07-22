@@ -1,3 +1,6 @@
 # ast-grep root config for Phenix QA structural rules
-ruleDirs:
-  - .
+rules:
+  - no-direct-phenix-state-writes.yml
+  - no-duplicate-root-helpers.yml
+  - no-raw-subagent.yml
+  - no-unvalidated-qa.yml

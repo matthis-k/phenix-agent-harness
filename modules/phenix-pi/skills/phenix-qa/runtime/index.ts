@@ -20,7 +20,7 @@ import { ensureArtifactDir, writeJsonArtifact, writeTextArtifact } from "./artif
 import { checkAllAvailability } from "./availability.ts";
 import { DEFAULT_QA_CONFIG, discoverRepoConfig, mergeConfig } from "./config.ts";
 import { discoverGuidance } from "./guidance.ts";
-import { resetIdCounter } from "./normalize.ts";
+import { makeFinding, resetIdCounter } from "./normalize.ts";
 import { DEFAULT_PROCESS_RUNNER } from "./process.ts";
 import { renderTextReport } from "./render-text.ts";
 import { buildReportSkeleton, calculateRiskScores, mergeModelContribution } from "./report.ts";
@@ -150,7 +150,32 @@ export async function review(options: QaReviewOptions): Promise<QaReviewResult> 
       if (result.status === "completed") {
         completedAnalyzers.push(analyzer.id);
         allEvidence.push(...result.evidence);
-        allFindings.push(...result.evidence.flatMap((_e) => [])); // no auto-findings from evidence
+        // Convert project-native failures into blocking correctness findings
+        if (analyzer.id === "project-native") {
+          for (const evidence of result.evidence) {
+            if (
+              evidence.source === "test" &&
+              /(?:failed|timed out|could not be executed)/i.test(evidence.message)
+            ) {
+              allFindings.push(
+                makeFinding({
+                  level: "level-0-correctness",
+                  severity: "high",
+                  confidence: "high",
+                  title: evidence.category
+                    ? `Project-native ${evidence.category} failure`
+                    : "Project-native verification failure",
+                  explanation: evidence.message,
+                  evidenceIds: [evidence.id],
+                  impact: "Repository verification command did not pass.",
+                  recommendation: "Fix the failing command or adjust the verification setup.",
+                  remediationScope: "local",
+                  blocking: true,
+                }),
+              );
+            }
+          }
+        }
         allArtifacts.push(...result.artifacts);
         allDiagnostics.push(...result.diagnostics.map((d) => `  ${d}`));
       } else if (result.status === "failed") {
@@ -170,6 +195,31 @@ export async function review(options: QaReviewOptions): Promise<QaReviewResult> 
       failedAnalyzers.push(analyzer.id);
       allDiagnostics.push(
         `${analyzer.id}: error - ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  // Enforce required analyzers: missing or failed required analyzers become blocking findings
+  for (const required of config.requiredAnalyzers) {
+    if (!completedAnalyzers.includes(required)) {
+      const reason = unavailableAnalyzers.includes(required)
+        ? "unavailable"
+        : failedAnalyzers.includes(required)
+          ? "failed"
+          : "not enabled";
+      allFindings.push(
+        makeFinding({
+          level: "level-0-correctness",
+          severity: "high",
+          confidence: "high",
+          title: `Required analyzer ${required} did not complete`,
+          explanation: `The required analyzer "${required}" was ${reason}.`,
+          evidenceIds: [],
+          impact: "A required QA analyzer did not run, leaving a coverage gap that must be closed.",
+          recommendation: "Ensure the required analyzer is installed, enabled, and passes.",
+          remediationScope: "local",
+          blocking: true,
+        }),
       );
     }
   }

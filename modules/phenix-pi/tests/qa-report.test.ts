@@ -376,3 +376,37 @@ describe("Model contribution merging", () => {
     assert.equal(merged.findings.length, 1);
   });
 });
+
+describe("Overall gate result", () => {
+  for (const level of ["level-1-metrics", "level-2-readability", "level-3-patterns"] as const) {
+    it(`fails the overall result for a blocking ${level} finding`, () => {
+      const report = buildReportSkeleton({
+        scope,
+        evidence: [],
+        findings: [
+          {
+            id: `blocking-${level}`,
+            level,
+            severity: "high",
+            confidence: "high",
+            title: "Blocking issue",
+            explanation: "Must be fixed.",
+            evidenceIds: [],
+            locations: [],
+            impact: "Quality gate cannot pass.",
+            recommendation: "Fix it.",
+            remediationScope: "local",
+            introducedByCurrentChange: true,
+            blocking: true,
+          },
+        ],
+        coverage: {
+          ...emptyCoverage(),
+          completedAnalyzers: ["project-native", "metrics"],
+        },
+      });
+
+      assert.equal(report.executiveSummary.overallResult, "FAIL");
+    });
+  }
+});

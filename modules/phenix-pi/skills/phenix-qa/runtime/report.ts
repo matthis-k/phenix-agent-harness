@@ -162,18 +162,6 @@ function gateFromFindings(
   findings: readonly QaFinding[],
   notRun: boolean,
 ): QualityGate {
-  if (notRun) {
-    return {
-      name,
-      result: "NOT_RUN",
-      failingFindings: [],
-      notes: "Required analyzer unavailable.",
-    };
-  }
-  if (findings.length === 0) {
-    return { name, result: "PASS", failingFindings: [], notes: "" };
-  }
-
   const blocking = findings.filter((f) => f.blocking);
   const review = findings.filter(
     (f) => !f.blocking && (f.severity === "high" || f.severity === "critical"),
@@ -187,6 +175,20 @@ function gateFromFindings(
       notes: `${blocking.length} blocking finding(s).`,
     };
   }
+
+  if (notRun) {
+    return {
+      name,
+      result: "NOT_RUN",
+      failingFindings: [],
+      notes: "Required analyzer unavailable.",
+    };
+  }
+
+  if (findings.length === 0) {
+    return { name, result: "PASS", failingFindings: [], notes: "" };
+  }
+
   if (review.length > 0) {
     return {
       name,
@@ -204,11 +206,7 @@ function gateFromFindings(
 }
 
 function determineOverallResult(gates: QualityGateReport): "PASS" | "REVIEW" | "FAIL" {
-  if (
-    gates.correctness.result === "FAIL" ||
-    gates.architecture.result === "FAIL" ||
-    gates.productionReadiness.result === "FAIL"
-  ) {
+  if (Object.values(gates).some((gate) => gate.result === "FAIL")) {
     return "FAIL";
   }
   if (

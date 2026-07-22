@@ -263,3 +263,38 @@ describe("workflow turn gate", () => {
     );
   });
 });
+
+describe("workflow turn gate resumption", () => {
+  it("preserves a delegated handle across a resumed parent turn", () => {
+    const gate = createWorkflowTurnGate();
+    gate.beginTurn({
+      sessionId,
+      turnId,
+      userTask,
+      requiredAgents: ["planner"],
+    });
+    gate.observe({
+      ...invocation("phenix_workflow", {
+        action: "spawn",
+        agent: "planner",
+        task: "Plan the repository migration.",
+      }),
+      isError: false,
+      authorityResolved: true,
+      nextRequiredAgents: [],
+      handleId: "background-handle",
+      handleStatus: "running",
+    });
+
+    gate.resumeTurn(sessionId, "settlement-turn");
+    assert.equal(
+      gate.authorize({
+        sessionId,
+        turnId: "settlement-turn",
+        toolName: "phenix_agent",
+        input: { action: "await", id: "background-handle" },
+      }),
+      undefined,
+    );
+  });
+});

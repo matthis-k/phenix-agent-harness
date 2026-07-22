@@ -25,6 +25,7 @@ export interface WorkflowTurnGate {
   beginTurn(requirement: WorkflowTurnRequirement): void;
   authorize(invocation: WorkflowToolInvocation): string | undefined;
   observe(outcome: WorkflowToolOutcome): void;
+  resumeTurn(sessionId: string, turnId: string): void;
   clearSession(sessionId: string): void;
 }
 
@@ -404,6 +405,18 @@ class WorkflowTurnGateImpl implements WorkflowTurnGate {
     }
 
     reconcileAuthority(state, "spawn-terminal", agent);
+  }
+
+  resumeTurn(sessionId: string, turnId: string): void {
+    const state = this.stateBySession.get(sessionId);
+    if (!state) return;
+    this.stateBySession.set(sessionId, { ...state, turnId });
+    this.emit({
+      boundary: "workflow_gate.resumed",
+      sessionId,
+      turnId,
+      state: state.kind,
+    });
   }
 
   clearSession(sessionId: string): void {

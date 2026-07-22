@@ -71,7 +71,12 @@ export function advanceWorkflowState(
 
 // ── Transition path helpers ─────────────────────────────────────────────────
 
-const TERMINAL_STATES: ReadonlySet<WorkflowStateId> = new Set(["completed", "failed", "cancelled"]);
+const TERMINAL_STATES: ReadonlySet<WorkflowStateId> = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+  "abandoned",
+]);
 
 export function isTerminalState(state: WorkflowStateId): boolean {
   return TERMINAL_STATES.has(state);

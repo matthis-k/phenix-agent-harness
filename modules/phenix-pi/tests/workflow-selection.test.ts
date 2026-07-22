@@ -42,6 +42,17 @@ describe("workflow selection", () => {
     assert.equal(difficultyForWorkflow({ selected: "D1", workflow, userMessage: "fix it" }), "D1");
   });
 
+  it("does not rerun QA when asked to fix existing QA findings", () => {
+    const workflow = selectWorkflow({
+      userMessage: "fix the issues discovered by the QA report",
+      fallbackWorkflowDefinitionId: PHENIX_GENERAL_WORKFLOW.id,
+    });
+
+    assert.equal(workflow.preset, "implement");
+    assert.equal(workflow.workflowDefinitionId, PHENIX_IMPLEMENT_WORKFLOW.id);
+    assert.match(workflow.reason, /not to run a new QA review/i);
+  });
+
   it("uses general as the managed fallback for ambiguous follow-ups", () => {
     const workflow = selectWorkflow({
       userMessage: "go ahead",

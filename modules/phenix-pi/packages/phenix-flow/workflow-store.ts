@@ -402,6 +402,21 @@ export function rejectTransition(
   });
 }
 
+export function abandonWorkflowRecord(
+  cwd: string,
+  record: WorkflowRuntimeRecord,
+  reason: string,
+): WorkflowRuntimeRecord {
+  return mutateLatestWorkflowRecord(cwd, record.instanceId, record.actorId, (current) => {
+    if (isTerminalState(current.state)) return current;
+    current.state = "abandoned";
+    current.active = [];
+    current.facts = { ...current.facts, abandonedReason: reason };
+    current.revision += 1;
+    return current;
+  });
+}
+
 export function hashCapabilityContent(content: string): string {
   return createHash("sha256").update(content).digest("hex");
 }

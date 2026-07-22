@@ -7,6 +7,7 @@ import path from "node:path";
 import { beforeEach, describe, it } from "node:test";
 
 import {
+  abandonWorkflowRecord,
   acceptTransition,
   acquireWorkflowLock,
   beginTransition,
@@ -167,6 +168,24 @@ describe("Workflow Store", () => {
     assert.equal(updated.revision, record.revision);
     assert.equal(updated.instanceId, record.instanceId);
     assert.equal(updated.actorId, record.actorId);
+  });
+
+  it("abandons an active workflow as a terminal session-release state", () => {
+    const params = makeRecordParams();
+    const record = createWorkflowRecord(directory, params);
+    beginTransition(directory, record, {
+      expectedRevision: 0,
+      transitionId: mkTransitionId("delegate_to_scout"),
+      handleId: "handle-abandon",
+    });
+
+    const active = requireRecord(readWorkflowRecord(directory, params.instanceId, params.actorId));
+    const abandoned = abandonWorkflowRecord(directory, active, "user discarded workflow");
+
+    assert.equal(abandoned.state, "abandoned");
+    assert.equal(abandoned.active.length, 0);
+    assert.equal(abandoned.facts.abandonedReason, "user discarded workflow");
+    assert.equal(abandoned.revision, active.revision + 1);
   });
 
   it("verifyWorkflowActorExists throws for missing record", () => {

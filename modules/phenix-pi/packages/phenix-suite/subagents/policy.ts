@@ -149,7 +149,7 @@ function verificationCommands(
   cwd: string,
   config: RuntimePolicyConfig,
 ): readonly VerificationCommand[] {
-  const scriptPath = fileURLToPath(new URL("../../runtime/verify.mjs", import.meta.url));
+  const scriptPath = fileURLToPath(new URL("../../../runtime/verify.mjs", import.meta.url));
   const commands: VerificationCommand[] = [];
 
   // Only implementer and tester roles get the default runtime verification.

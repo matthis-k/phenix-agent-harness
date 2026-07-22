@@ -98,6 +98,7 @@ export {
 } from "./workflow-schemas.ts";
 // Store
 export {
+  abandonWorkflowRecord,
   acceptTransition,
   beginTransition,
   createWorkflowRecord,

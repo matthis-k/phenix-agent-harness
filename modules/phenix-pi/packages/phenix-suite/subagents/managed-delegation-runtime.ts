@@ -97,6 +97,7 @@ export interface ManagedDelegationRuntimeOptions {
 
 export class ManagedDelegationRuntime {
   private readonly managers: SubagentManagerFactory;
+  private readonly settlementByHandle = new Map<string, Promise<HandleRecord>>();
 
   constructor(options: ManagedDelegationRuntimeOptions) {
     this.managers = options.managers;
@@ -196,7 +197,7 @@ export class ManagedDelegationRuntime {
     );
 
     if (input.mode === "background") {
-      void completion
+      const settlement = completion
         .then(async ({ record }) => {
           input.settle(record);
           await publishManagedBackgroundSettlement({
@@ -204,11 +205,15 @@ export class ManagedDelegationRuntime {
             sessionId: input.sessionId,
             record,
           } satisfies ManagedBackgroundSettlement);
+          return record;
         })
         .finally(() => {
           cleanupHandle();
           this.managers.remove(handle.id);
-        })
+        });
+      this.settlementByHandle.set(input.record.id, settlement);
+      void settlement
+        .finally(() => this.settlementByHandle.delete(input.record.id))
         .catch(() => undefined);
       return { ok: true, record: input.record };
     }
@@ -244,6 +249,9 @@ export class ManagedDelegationRuntime {
     input: ManagedHandleLookup,
     signal: AbortSignal,
   ): Promise<HandleRecord | undefined> {
+    const settlement = this.settlementByHandle.get(input.id);
+    if (settlement) return settlement;
+
     const record = readRecord(input.cwd, input.sessionId, input.id);
     if (!record || isTerminalHandleStatus(record.status)) return record;
     if (!record.subagentId) return record;

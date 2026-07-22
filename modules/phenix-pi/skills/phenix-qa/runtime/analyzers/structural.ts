@@ -25,9 +25,7 @@ export const STRUCTURAL_ANALYZER: QaAnalyzer = {
     const runner: ProcessRunner = DEFAULT_PROCESS_RUNNER;
 
     try {
-      const result = await runner.exec("ast-grep", ["--version"], {
-        timeoutMs: 5_000,
-      });
+      const result = await runner.exec("ast-grep", ["--version"], { timeoutMs: 5_000 });
       if (result.exitCode === 0) {
         return {
           available: true,
@@ -39,10 +37,7 @@ export const STRUCTURAL_ANALYZER: QaAnalyzer = {
       // unavailable
     }
 
-    return {
-      available: false,
-      reason: "ast-grep is not installed.",
-    };
+    return { available: false, reason: "ast-grep is not installed." };
   },
 
   async run(context: QaAnalyzerContext): Promise<QaAnalyzerResult> {
@@ -52,26 +47,20 @@ export const STRUCTURAL_ANALYZER: QaAnalyzer = {
     const diagnostics: string[] = [];
     const artifacts: string[] = [];
     const allEvidence: ReturnType<typeof makeEvidence>[] = [];
+    let failureStatus: "failed" | "timed-out" | "cancelled" | undefined;
 
-    // Collect rule directories
     const ruleDirs: string[] = [];
-
-    // Built-in rules directory (relative to this module)
     const builtinRulesDir = join(
-      import.meta.dirname ?? join(process.cwd(), "modules/phenix-pi/skills/phenix-qa"),
-      "..",
+      import.meta.dirname ??
+        join(process.cwd(), "modules/phenix-pi/skills/phenix-qa/runtime/analyzers"),
+      "../..",
       "rules",
     );
-    if (existsSync(builtinRulesDir)) {
-      ruleDirs.push(builtinRulesDir);
-    }
+    if (existsSync(builtinRulesDir)) ruleDirs.push(builtinRulesDir);
 
-    // Repository-owned rules
     for (const dir of context.config.structuralRuleDirectories) {
       const resolved = join(context.cwd, dir);
-      if (existsSync(resolved)) {
-        ruleDirs.push(resolved);
-      }
+      if (existsSync(resolved)) ruleDirs.push(resolved);
     }
 
     if (ruleDirs.length === 0) {
@@ -85,79 +74,70 @@ export const STRUCTURAL_ANALYZER: QaAnalyzer = {
       };
     }
 
-    // Run ast-grep scan for each rule directory
     for (const ruleDir of ruleDirs) {
-      if (context.signal?.aborted) break;
+      if (context.signal?.aborted) {
+        failureStatus ??= "cancelled";
+        break;
+      }
 
       try {
         const timeoutMs =
           context.config.timeouts.byAnalyzer?.structural ?? context.config.timeouts.defaultMs;
-
-        // Use ast-grep scan with SARIF output
         const result = await runner.exec(
           "ast-grep",
-          ["scan", "--config", join(ruleDir, "sgconfig.yml"), "--format", "json", context.cwd],
-          {
-            cwd: context.cwd,
-            timeoutMs,
-            signal: context.signal,
-          },
+          ["scan", "--config", join(ruleDir, "sgconfig.yml"), "--json=compact", context.cwd],
+          { cwd: context.cwd, timeoutMs, signal: context.signal },
         );
 
-        // Save raw output
-        const rawPath = writeRawArtifact(
-          context.artifactDirectory,
-          `structural-${ruleDir.replace(/[^a-zA-Z0-9]/g, "-")}`,
-          `${result.stdout}\n${result.stderr}`,
-          "txt",
+        const safeName = ruleDir.replace(/[^a-zA-Z0-9]/g, "-");
+        artifacts.push(
+          writeRawArtifact(
+            context.artifactDirectory,
+            `structural-${safeName}`,
+            `${result.stdout}\n${result.stderr}`,
+            "txt",
+          ),
         );
-        artifacts.push(rawPath);
 
         if (result.timedOut) {
+          failureStatus = "timed-out";
           diagnostics.push(`ast-grep scan timed out for ${ruleDir}`);
           continue;
         }
-
         if (result.exitCode !== 0 && result.exitCode !== null) {
+          failureStatus ??= "failed";
           diagnostics.push(
             `ast-grep exited ${result.exitCode} for ${ruleDir}: ${result.stderr.slice(0, 200)}`,
           );
-          // ast-grep may still produce output on non-zero exit
+          continue;
         }
 
-        // Try to parse JSON output
         try {
           const parsed = JSON.parse(result.stdout);
           if (Array.isArray(parsed)) {
-            // Direct array of results
             for (const item of parsed) {
               allEvidence.push(normalizeAstGrepResult(item, `ast-grep:${ruleDir}`));
             }
           } else if (parsed?.results) {
-            // SARIF-like
-            const sarifResults = normalizeSarif(
-              parsed,
-              "ast-grep",
-              "structural-rule",
-              "level-3-patterns",
+            allEvidence.push(
+              ...normalizeSarif(parsed, "ast-grep", "structural-rule", "level-3-patterns"),
             );
-            allEvidence.push(...sarifResults);
+          } else {
+            throw new Error("ast-grep JSON contained no result collection");
           }
-
-          // Save parsed JSON
           artifacts.push(
-            writeJsonArtifact(
-              context.artifactDirectory,
-              `structural-${ruleDir.replace(/[^a-zA-Z0-9]/g, "-")}`,
-              parsed,
-            ),
+            writeJsonArtifact(context.artifactDirectory, `structural-${safeName}`, parsed),
           );
-        } catch {
-          diagnostics.push(`ast-grep output for ${ruleDir} was not valid JSON.`);
+        } catch (error) {
+          failureStatus ??= "failed";
+          diagnostics.push(
+            `ast-grep output for ${ruleDir} was not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          continue;
         }
-
         diagnostics.push(`ast-grep scan completed for ${ruleDir}`);
       } catch (error) {
+        failureStatus ??= context.signal?.aborted ? "cancelled" : "failed";
         diagnostics.push(
           `ast-grep scan failed for ${ruleDir}: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -166,7 +146,7 @@ export const STRUCTURAL_ANALYZER: QaAnalyzer = {
 
     return {
       analyzer: "structural",
-      status: allEvidence.length > 0 ? "completed" : "completed",
+      status: failureStatus ?? "completed",
       evidence: allEvidence,
       artifacts,
       diagnostics,

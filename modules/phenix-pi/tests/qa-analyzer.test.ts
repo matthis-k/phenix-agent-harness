@@ -3,7 +3,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -67,7 +67,7 @@ describe("QA Analyzers", () => {
   });
 
   describe("Structural analyzer", () => {
-    it("reports not-applicable when no rules exist", async () => {
+    it("completes bundled rules even when no repository rules exist", async () => {
       const dir = mkdtempSync(join(tmpdir(), "qa-struct-test-"));
 
       const ctx = makeContext({
@@ -75,7 +75,21 @@ describe("QA Analyzers", () => {
         config: { ...DEFAULT_QA_CONFIG, structuralRuleDirectories: [] },
       });
       const result = await STRUCTURAL_ANALYZER.run(ctx);
-      assert.equal(result.status, "not-applicable");
+      assert.equal(result.status, "completed");
+      assert.ok(
+        result.diagnostics.some((d) => d.includes("ast-grep scan completed")),
+        "expected bundled rules to execute",
+      );
+    });
+
+    it("discovers and executes bundled rules in the real repository", async () => {
+      const ctx = makeContext();
+      const result = await STRUCTURAL_ANALYZER.run(ctx);
+      assert.equal(result.status, "completed");
+      assert.ok(
+        result.diagnostics.some((d) => d.includes("ast-grep scan completed")),
+        "expected ast-grep to execute bundled rules",
+      );
     });
   });
 
@@ -113,5 +127,27 @@ describe("QA Analyzers", () => {
         assert.ok(av.reason);
       }
     });
+  });
+});
+
+describe("Structural analyzer failures", () => {
+  it("fails closed when a configured ast-grep rules directory is invalid", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "qa-struct-invalid-"));
+    const rules = join(cwd, "rules");
+    mkdirSync(rules);
+    writeFileSync(join(rules, "sgconfig.yml"), "rules: [\n", "utf-8");
+
+    const result = await STRUCTURAL_ANALYZER.run(
+      makeContext({
+        cwd,
+        config: {
+          ...DEFAULT_QA_CONFIG,
+          structuralRuleDirectories: ["rules"],
+        },
+      }),
+    );
+
+    assert.equal(result.status, "failed");
+    assert.ok(result.diagnostics.some((diagnostic) => diagnostic.includes("ast-grep")));
   });
 });
