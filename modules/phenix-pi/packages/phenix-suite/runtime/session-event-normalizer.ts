@@ -116,10 +116,21 @@ function nestedFailure(value: unknown): boolean {
   );
 }
 
-/** Determine whether a Pi event indicates a provider/model failure. */
+const PROVIDER_LIFECYCLE_EVENTS = new Set([
+  "agent_end",
+  "message_end",
+  "turn_end",
+  "response_end",
+]);
+
+/** Determine whether a Pi lifecycle event indicates a provider/model failure. */
 export function isFailureEvent(raw: PiAgentEvent): boolean {
   if (raw.type === "error" || raw.stopReason === "error") return true;
-  if (raw.error != null || raw.errorMessage != null) return true;
   if (nestedFailure(raw.message)) return true;
-  return raw.messages?.some(nestedFailure) ?? false;
+  if (raw.messages?.some(nestedFailure)) return true;
+  return (
+    PROVIDER_LIFECYCLE_EVENTS.has(raw.type) &&
+    (raw.error != null ||
+      (typeof raw.errorMessage === "string" && raw.errorMessage.trim().length > 0))
+  );
 }
