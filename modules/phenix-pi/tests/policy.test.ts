@@ -14,7 +14,16 @@ const config: RuntimePolicyConfig = {
   },
 };
 
-const BASE_CHILDREN = ["scout", "implementer", "tester", "architect", "critic"] as const;
+const BASE_CHILDREN = [
+  null,
+  "scout",
+  "planner",
+  "architect",
+  "implementer",
+  "tester",
+  "critic",
+  "finalizer",
+] as const;
 
 describe("Phenix runtime policy", () => {
   it("raises consequence for security-sensitive work", () => {
