@@ -85,7 +85,9 @@ function prepareRuntimeInternalDelegation(
   const actorId = parent.contract.runtime.workflow.actorId;
   const parentActorId = parent.contract.runtime.workflow.parentActorId;
   if (!parentActorId) {
-    throw new Error(`Runtime-internal child task authority ${actorId} has no parent workflow actor.`);
+    throw new Error(
+      `Runtime-internal child task authority ${actorId} has no parent workflow actor.`,
+    );
   }
 
   const parentAuthority = tasks.authorityForActor(workflowId, parentActorId);
