@@ -67,6 +67,7 @@
 
           SELF=$(readlink -f "''${BASH_SOURCE[0]:-$0}" 2>/dev/null) || SELF=pi
           export PHENIX_PI_WRAPPER="$SELF"
+          export PHENIX_PI_BINARY="${self'.packages.pi-coding-agent}/bin/pi"
           export PI_SUBAGENT_PI_BINARY="$SELF"
           export HYPA_PI_ENABLE_MCP_PROXY="''${HYPA_PI_ENABLE_MCP_PROXY:-0}"
           export HYPA_PI_ASK_NON_INTERACTIVE="''${HYPA_PI_ASK_NON_INTERACTIVE:-allow}"
