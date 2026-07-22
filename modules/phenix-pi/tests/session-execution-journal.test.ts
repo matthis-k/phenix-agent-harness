@@ -84,7 +84,7 @@ describe("root session execution journal", () => {
     assert.deepEqual(payload?.reasoning, {
       redacted: true,
       length: 13,
-      sha256: "3a00a93c8aee8058a58e04aa5d49deafec86e55106647bb27cfa5be39101ca50",
+      sha256: "068afbec21096e0c6ae744c94b2a6131a050648be8cce054fe63fab57d7e59b4",
     });
     const output = payload?.output as Readonly<Record<string, unknown>>;
     assert.equal(output.truncated, true);
