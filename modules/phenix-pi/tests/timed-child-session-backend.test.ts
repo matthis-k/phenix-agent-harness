@@ -53,8 +53,9 @@ describe("TimedChildSessionBackend", () => {
     );
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(adapterSignal?.aborted, true);
-    assert.ok(adapterSignal?.reason instanceof ChildRuntimeError);
-    assert.equal((adapterSignal?.reason as ChildRuntimeError).code, "TIMEOUT");
+    const timeoutReason = adapterSignal?.reason;
+    assert.ok(timeoutReason instanceof ChildRuntimeError);
+    assert.equal(timeoutReason.code, "TIMEOUT");
     await run.dispose();
   });
 

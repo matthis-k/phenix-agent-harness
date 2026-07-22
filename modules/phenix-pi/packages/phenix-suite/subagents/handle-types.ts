@@ -135,6 +135,13 @@ export interface HandleRecord {
   updatedAt: string;
   status: HandleStatus;
   value?: unknown;
+  /** Schema-valid producer output retained even when a later assurance stage is unavailable. */
+  candidateValue?: unknown;
+  assuranceFailure?: {
+    readonly stage: "critic";
+    readonly code: string;
+    readonly message: string;
+  };
   errors?: string[];
 
   verification?: VerificationSummary;

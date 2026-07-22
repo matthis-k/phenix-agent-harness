@@ -128,7 +128,12 @@
             ];
           }
           ''
-            export PATH=${pkgs.lib.makeBinPath [ phenixPiPackage ]}:$PATH
+            export PATH=${
+              pkgs.lib.makeBinPath [
+                phenixPiPackage
+                piCodingAgent
+              ]
+            }:$PATH
             cd ${phenixPiPackage}
             node --experimental-strip-types --test tests/*.test.ts
             node --check runtime/managed-json.mjs

@@ -13,6 +13,7 @@ interface PiAgentEvent {
   readonly isError?: boolean;
   readonly message?: unknown;
   readonly messages?: readonly unknown[];
+  readonly stopReason?: unknown;
 }
 
 function messageFromUnknown(value: unknown): string | undefined {
@@ -105,7 +106,26 @@ export function isSettlementEvent(raw: PiAgentEvent): boolean {
   return raw.type === "agent_settled";
 }
 
-/** Determine whether a Pi event indicates a provider/model failure. */
+function nestedFailure(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    record.stopReason === "error" ||
+    record.error != null ||
+    (typeof record.errorMessage === "string" && record.errorMessage.trim().length > 0)
+  );
+}
+
+const PROVIDER_LIFECYCLE_EVENTS = new Set(["agent_end", "message_end", "turn_end", "response_end"]);
+
+/** Determine whether a Pi lifecycle event indicates a provider/model failure. */
 export function isFailureEvent(raw: PiAgentEvent): boolean {
-  return raw.type === "error" || (raw.type === "agent_end" && raw.error != null);
+  if (raw.type === "error" || raw.stopReason === "error") return true;
+  if (nestedFailure(raw.message)) return true;
+  if (raw.messages?.some(nestedFailure)) return true;
+  return (
+    PROVIDER_LIFECYCLE_EVENTS.has(raw.type) &&
+    (raw.error != null ||
+      (typeof raw.errorMessage === "string" && raw.errorMessage.trim().length > 0))
+  );
 }

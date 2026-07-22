@@ -58,6 +58,7 @@ import {
   sessionExecutionJournalPath,
   unregisterSessionExecutionContext,
 } from "./journal/session-execution-journal-registry.ts";
+import { generateSessionTreeJournal } from "./journal/session-tree-journal.ts";
 import { buildPhenixRootSystemPrompt } from "./phenix-skill-bootstrap.ts";
 import { registerActiveChildStatusProjection } from "./runtime/active-child-status.ts";
 import {
@@ -129,6 +130,18 @@ function getAgentDir(): string {
 
 function getConfigHome(): string {
   return process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config");
+}
+
+function currentSessionFile(ctx: ExtensionContext): string | undefined {
+  const manager = ctx.sessionManager as unknown as {
+    readonly sessionFile?: string;
+    getSessionFile?: () => string | undefined;
+  };
+  try {
+    return manager.getSessionFile?.() ?? manager.sessionFile;
+  } catch {
+    return manager.sessionFile;
+  }
 }
 
 function exists(candidate: string): boolean {
@@ -399,6 +412,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
       type: "root.session.started",
       payload: {
         journalPath: sessionExecutionJournalPath(ctx.cwd, rootSessionId),
+        ...(currentSessionFile(ctx) ? { sessionFile: currentSessionFile(ctx) } : {}),
         ...(ctx.model ? { model: { provider: ctx.model.provider, id: ctx.model.id } } : {}),
       },
     });
@@ -505,7 +519,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
   registerShutdown(pi, delegationRuntime, disposeTuiProjection, () => taskHost.close());
 
   pi.registerCommand("phenix", {
-    description: "Inspect the Phenix coding substrate; usage: /phenix doctor|journal",
+    description: "Inspect the Phenix coding substrate; usage: /phenix doctor|journal|journal-full",
     handler: async (args, ctx) => {
       const action = args.trim().toLowerCase() || "doctor";
       const rootSessionId = ctx.sessionManager.getSessionId() ?? "default";
@@ -514,8 +528,20 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
         ctx.ui.notify(`Root-session execution journal: ${journalPath}`, "info");
         return;
       }
+      if (action === "journal-full") {
+        const result = generateSessionTreeJournal({
+          cwd: ctx.cwd,
+          rootSessionId,
+          ...(currentSessionFile(ctx) ? { rootSessionFile: currentSessionFile(ctx) } : {}),
+        });
+        ctx.ui.notify(
+          `Merged session-tree journal (${result.recordCount} records from ${result.sourceFiles.length} source files): ${result.filePath}`,
+          "info",
+        );
+        return;
+      }
       if (action !== "doctor") {
-        ctx.ui.notify("Usage: /phenix doctor|journal", "warning");
+        ctx.ui.notify("Usage: /phenix doctor|journal|journal-full", "warning");
         return;
       }
 

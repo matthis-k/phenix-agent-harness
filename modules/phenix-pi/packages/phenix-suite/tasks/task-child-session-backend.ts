@@ -221,7 +221,7 @@ export function createTaskBoundChildSessionBackend(input: {
       appendDiagnostic(
         input.tasks,
         authority,
-        `Child backend starting: backend=${input.delegate.kind}, run=${spec.id}, model=${spec.model.provider}/${spec.model.id}, thinking=${spec.thinkingLevel}.`,
+        `Child backend starting: backend=auto, preferred=${spec.isolationRequired ? "rpc" : "sdk"}, run=${spec.id}, model=${spec.model.provider}/${spec.model.id}, thinking=${spec.thinkingLevel}.`,
       );
 
       try {
