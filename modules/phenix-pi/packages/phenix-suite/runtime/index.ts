@@ -9,6 +9,7 @@ export type {
 } from "./execution-plan.ts";
 export type { PiRuntimeAdapter } from "./runtime-adapter.ts";
 export { SelectingChildSessionBackend } from "./runtime-adapter.ts";
+export { TimedChildSessionBackend } from "./timed-child-session-backend.ts";
 export type {
   ConcreteSessionModel,
   RoutedSessionModel,
