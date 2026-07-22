@@ -28,6 +28,15 @@ describe("objectiveControl", () => {
       expectedRevision: objective.revision,
     });
     assert.equal(paused.state, "paused");
+    assert.throws(
+      () =>
+        control.resume(objective.id, {
+          idempotencyKey: "stale-resume",
+          actorId: "root",
+          expectedRevision: objective.revision,
+        }),
+      /Stale objective revision/,
+    );
     const resumed = control.resume(objective.id, {
       idempotencyKey: "resume",
       actorId: "root",
