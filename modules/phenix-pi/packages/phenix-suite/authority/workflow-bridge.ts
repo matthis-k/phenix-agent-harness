@@ -1,3 +1,4 @@
+import { readWorkflowRecord } from "@matthis-k/phenix-flow/index.ts";
 import { getSessionRuntime } from "@matthis-k/phenix-routing/state.ts";
 import type { ParentExecutionContext } from "../runtime/workflow-api-types.ts";
 import type {
@@ -7,12 +8,9 @@ import type {
   WorkflowSpawnRequest,
   WorkflowSpawnResult,
 } from "../runtime/workflow-runtime-types.ts";
+import { assurancePolicyFor } from "./assurance.ts";
 import type { ExecutionAuthority } from "./service.ts";
 import type { HandleRuntimeState, LegalAction } from "./types.ts";
-
-function sessionId(input: WorkflowSpawnRequest | { readonly ctx: WorkflowSpawnRequest["ctx"] }): string {
-  return input.ctx.sessionManager.getSessionId() ?? "default";
-}
 
 function objectiveIdFor(
   ctx: WorkflowSpawnRequest["ctx"],
@@ -29,6 +27,81 @@ function actorIdFor(
 ): string {
   if (parent?.kind === "child") return parent.contract.runtime.workflow.actorId;
   return getSessionRuntime(ctx.sessionManager.getSessionId() ?? "default").activeWorkflow?.actorId ?? "root";
+}
+
+function ensureObjective(input: {
+  readonly authority: ExecutionAuthority;
+  readonly ctx: WorkflowSpawnRequest["ctx"];
+  readonly parent?: ParentExecutionContext;
+}): string | undefined {
+  const objectiveId = objectiveIdFor(input.ctx, input.parent);
+  if (!objectiveId) return undefined;
+  try {
+    input.authority.inspectObjective(objectiveId);
+    return objectiveId;
+  } catch {
+    // Reconstruct the durable authority from the workflow/contract source after
+    // process restart or when an older session first enters the new runtime.
+  }
+
+  if (input.parent?.kind === "child") {
+    const workflow = input.parent.contract.runtime.workflow;
+    const task = input.parent.contract.assignment.task;
+    const policy = assurancePolicyFor({
+      userTask: task,
+      difficulty: workflow.difficulty,
+      mutation: input.parent.contract.runtime.agent === "phenix.implementer" ? "local" : "none",
+      deterministicChecksAvailable: input.parent.contract.verification.commands.length > 0,
+      userRequestedRigor: input.parent.contract.verification.criticRequired ? "high" : "normal",
+    });
+    input.authority.beginObjective(
+      {
+        id: objectiveId,
+        rootSessionId: input.parent.sessionId,
+        rootActorId: workflow.parentActorId ?? workflow.actorId,
+        userTask: task,
+        workflowDefinitionId: workflow.definitionId,
+        difficulty: workflow.difficulty,
+        assurance: policy.level,
+      },
+      {
+        idempotencyKey: `recover-objective:${objectiveId}`,
+        actorId: workflow.actorId,
+      },
+    );
+    return objectiveId;
+  }
+
+  const sessionId = input.ctx.sessionManager.getSessionId() ?? "default";
+  const runtime = getSessionRuntime(sessionId);
+  const active = runtime.activeWorkflow;
+  if (!active) return undefined;
+  const workflow = readWorkflowRecord(input.ctx.cwd, active.instanceId, active.actorId);
+  if (!workflow) return undefined;
+  const task = runtime.currentUserTask ?? "Phenix managed objective";
+  const policy = assurancePolicyFor({
+    userTask: task,
+    difficulty: workflow.difficulty,
+    mutation: workflow.definitionId.includes("implement") ? "local" : "none",
+    deterministicChecksAvailable: true,
+    userRequestedRigor: workflow.definitionId.includes("qa") ? "verified" : "normal",
+  });
+  input.authority.beginObjective(
+    {
+      id: objectiveId,
+      rootSessionId: sessionId,
+      rootActorId: workflow.actorId,
+      userTask: task,
+      workflowDefinitionId: workflow.definitionId,
+      difficulty: workflow.difficulty,
+      assurance: policy.level,
+    },
+    {
+      idempotencyKey: `recover-objective:${objectiveId}`,
+      actorId: workflow.actorId,
+    },
+  );
+  return objectiveId;
 }
 
 function legalActions(snapshot: WorkflowAuthoritySnapshot): readonly LegalAction[] {
@@ -87,9 +160,17 @@ export function createAuthorityBoundWorkflowRuntime(input: {
     readonly parent?: ParentExecutionContext;
   }): WorkflowAuthoritySnapshot => {
     const snapshot = input.workflow.inspect(args);
-    const objectiveId = objectiveIdFor(args.ctx, args.parent);
+    const objectiveId = ensureObjective({
+      authority: input.authority,
+      ctx: args.ctx,
+      ...(args.parent ? { parent: args.parent } : {}),
+    });
     if (objectiveId) {
-      input.authority.syncLegalActions(objectiveId, legalActions(snapshot), actorIdFor(args.ctx, args.parent));
+      input.authority.syncLegalActions(
+        objectiveId,
+        legalActions(snapshot),
+        actorIdFor(args.ctx, args.parent),
+      );
     }
     return snapshot;
   };
@@ -104,10 +185,16 @@ export function createAuthorityBoundWorkflowRuntime(input: {
         ctx: request.ctx,
         ...(request.parent ? { parent: request.parent } : {}),
       });
-      const option = authoritySnapshot.workflow.options.find((candidate) => candidate.agent === request.agent);
+      const option = authoritySnapshot.workflow.options.find(
+        (candidate) => candidate.agent === request.agent,
+      );
       if (!option) return input.workflow.spawn(request);
 
-      const objectiveId = objectiveIdFor(request.ctx, request.parent);
+      const objectiveId = ensureObjective({
+        authority: input.authority,
+        ctx: request.ctx,
+        ...(request.parent ? { parent: request.parent } : {}),
+      });
       if (!objectiveId) return input.workflow.spawn(request);
       const objective = input.authority.inspectObjective(objectiveId);
       const parentNodeId =
@@ -168,15 +255,11 @@ export function createAuthorityBoundWorkflowRuntime(input: {
 
       if (execution.record.status === "completed") {
         current = input.authority.inspectObjective(objectiveId);
-        input.authority.submitResult(
-          execution.record.id,
-          execution.record.value,
-          {
-            idempotencyKey: `workflow-submit:${execution.record.id}`,
-            actorId: request.agent,
-            expectedRevision: current.objective.revision,
-          },
-        );
+        input.authority.submitResult(execution.record.id, execution.record.value, {
+          idempotencyKey: `workflow-submit:${execution.record.id}`,
+          actorId: request.agent,
+          expectedRevision: current.objective.revision,
+        });
         current = input.authority.inspectObjective(objectiveId);
         input.authority.decideAcceptance(
           execution.record.id,
