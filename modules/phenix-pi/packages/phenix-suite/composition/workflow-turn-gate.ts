@@ -95,9 +95,15 @@ function isHarnessPreflightTask(task: string, userTask: string): boolean {
   const internalResource =
     /(?:\bskill(?:\s+file)?\b|skill\.md|agents\.md|\/nix\/store\/|\bworkflow\s+(?:authority|contract)\b|\bcontract\s+id\b|\bharness\s+(?:bootstrap|preflight)\b)/i;
   const preflightAction = /\b(?:read|load|inspect|open|locate|parse|check)\b/i;
+  const userWorkAction =
+    /\b(?:run|execute|perform|complete|inspect|analy[sz]e|investigate|assess|audit|review|test|verify|validate|implement|fix|repair|refactor|maintain)\b/i;
+  const userWorkTarget =
+    /\b(?:qa|quality\s+assurance|repository|repo|codebase|source(?:\s+tree|\s+files?)?|tests?|checks?|findings?|implementation|changes?|migration|bugs?|features?|maintenance)\b/i;
+  const describesUserWork = userWorkAction.test(normalized) && userWorkTarget.test(normalized);
   return (
     internalResource.test(normalized) &&
     preflightAction.test(normalized) &&
+    !describesUserWork &&
     !internalResource.test(normalizedUserTask)
   );
 }
