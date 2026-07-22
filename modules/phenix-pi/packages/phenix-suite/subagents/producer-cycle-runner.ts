@@ -344,6 +344,10 @@ export async function executeProducerCycles(
       record.verification = verification.summary;
     }
 
+    record.candidateValue = submitted.value;
+    record.assuranceFailure = undefined;
+    writeRecord(cwd, record);
+
     if (record.producerSpec.criticRequired && !criticFactory) {
       cycleRecord.endedAt = now();
       cycleRecord.status = "failed";
@@ -352,7 +356,12 @@ export async function executeProducerCycles(
         message: "Required critic runner is not configured.",
       };
       record.status = "failed";
-      record.errors = ["Required critic runner is not configured."];
+      record.assuranceFailure = {
+        stage: "critic",
+        code: cycleRecord.error.code,
+        message: cycleRecord.error.message,
+      };
+      record.errors = ["Required critic runner is not configured; producer result preserved as candidateValue."];
       writeRecord(cwd, record);
       return {
         ok: false,
@@ -382,13 +391,28 @@ export async function executeProducerCycles(
         const aborted = finishAbortedCycle(cycleRecord);
         if (aborted) return aborted;
 
+        const serialized = serializeError(error);
         cycleRecord.endedAt = now();
         cycleRecord.status = "failed";
-        cycleRecord.error = serializeError(error);
+        cycleRecord.error = serialized;
         record.status = "failed";
-        record.errors = [error instanceof Error ? error.message : String(error)];
+        record.assuranceFailure = {
+          stage: "critic",
+          code: serialized.code,
+          message: serialized.message,
+        };
+        record.errors = [
+          `${serialized.code}: ${serialized.message}`,
+          "Producer result passed schema and deterministic verification and was preserved as candidateValue.",
+        ];
         writeRecord(cwd, record);
-        return { ok: false, status: "failed", error: serializeError(error), record };
+        return {
+          ok: false,
+          status: "failed",
+          value: submitted.value,
+          error: serialized,
+          record,
+        };
       }
 
       const aborted = finishAbortedCycle(cycleRecord);
@@ -439,6 +463,8 @@ export async function executeProducerCycles(
     cycleRecord.status = "accepted";
     cycleRecord.contractRevision = contractChannel.current().revision;
     record.value = submitted.value;
+    record.candidateValue = undefined;
+    record.assuranceFailure = undefined;
     record.status = "completed";
 
     if (cycleRecord.critic) {

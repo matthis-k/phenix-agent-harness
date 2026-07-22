@@ -128,6 +128,74 @@ describe("runtime cancellation ownership", () => {
   });
 });
 
+describe("assurance failure evidence preservation", () => {
+  it("preserves schema-valid producer output when critic startup fails", async () => {
+    const cwd = temporaryDirectory("phenix-assurance-unavailable");
+    const record = makeHandle();
+    record.producerSpec = { criticRequired: true } as HandleRecord["producerSpec"];
+    const submittedValue = { report: "completed QA evidence" };
+    const run: ChildRun = {
+      id: childRunId("child-assurance"),
+      backend: "sdk",
+      pi: { sessionId: "pi-assurance" },
+      snapshot: () => ({}) as ReturnType<ChildRun["snapshot"]>,
+      subscribe: () => () => undefined,
+      continue: async () => ({ cycle: 2, status: "settled" }),
+      waitForCurrentCycle: async () => ({ cycle: 1, status: "settled" }),
+      abort: async () => undefined,
+      dispose: async () => undefined,
+    };
+    const channel: ContractSubmissionChannel = {
+      current: () => ({
+        contractId: "contract-assurance",
+        state: "submitted",
+        revision: 1,
+        outputSchema: { type: "object" },
+      }),
+      submit: async () => ({ ok: true, state: "submitted", revision: 1 }),
+      reopen: async () => undefined,
+      accept: async () => undefined,
+      cancel: async () => undefined,
+      readSubmitted: async () => ({ value: submittedValue, revision: 1 }),
+    };
+
+    const result = await executeProducerCycles({
+      run,
+      contractChannel: channel,
+      contractArtifact: { assignment: { outputSchema: { type: "object" } } } as never,
+      record,
+      cwd,
+      signal: new AbortController().signal,
+      maximumProducerCycles: 1,
+      completionGraceRemaining: 0,
+      verify: async () => ({
+        ok: true,
+        issues: [],
+        summary: {
+          acceptanceStatus: "verified",
+          runtimeChecks: [],
+          verifyRuns: ["tests: passed"],
+          reviewFindings: [],
+          contract: "valid",
+        },
+      }),
+      criticFactory: async () => {
+        throw new ChildRuntimeError("SESSION_START_FAILED", "Pi RPC process closed with code 2");
+      },
+    });
+
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.value, submittedValue);
+    assert.deepEqual(record.candidateValue, submittedValue);
+    assert.deepEqual(record.assuranceFailure, {
+      stage: "critic",
+      code: "SESSION_START_FAILED",
+      message: "Pi RPC process closed with code 2",
+    });
+    assert.match(record.errors?.join("\n") ?? "", /preserved as candidateValue/);
+  });
+});
+
 describe("workflow handle finalization", () => {
   it("does not settle a starting handle and accepts a completed handle", () => {
     const cwd = temporaryDirectory("phenix-workflow-finalization");

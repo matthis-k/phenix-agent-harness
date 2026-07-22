@@ -112,6 +112,39 @@ function runtimePreference(): "sdk" | "rpc" | undefined {
   return value === "sdk" || value === "rpc" ? value : undefined;
 }
 
+interface RpcLaunchDescription {
+  readonly command: string;
+  readonly args: readonly string[];
+}
+
+function sanitizedArgs(args: readonly string[]): readonly string[] {
+  const result: string[] = [];
+  let redactNext = false;
+  for (const argument of args) {
+    if (redactNext) {
+      result.push("[redacted]");
+      redactNext = false;
+      continue;
+    }
+    result.push(argument);
+    if (/^--.*(?:token|secret|password|api[-_]?key)$/i.test(argument)) redactNext = true;
+  }
+  return result;
+}
+
+function launchDiagnostic(
+  launch: RpcLaunchDescription,
+  process: ChildProcessWithoutNullStreams,
+  initialized: boolean,
+): string {
+  return [
+    `command=${launch.command}`,
+    `args=${JSON.stringify(sanitizedArgs(launch.args))}`,
+    `pid=${process.pid ?? "unknown"}`,
+    `rpcState=${initialized ? "initialized" : "initializing"}`,
+  ].join(", ");
+}
+
 function executableTools(spec: TaskBoundChildSessionSpec): readonly string[] {
   const tools = new Set(
     spec.effectiveTools.filter(
@@ -180,11 +213,19 @@ class RpcChildRun implements ChildRun {
   private endedAt: string | undefined;
   private readonly unsubscribePeer: () => void;
   private readonly unsubscribePeerErrors: () => void;
+  private readonly launch: RpcLaunchDescription;
+  private initialized = false;
 
-  constructor(process: ChildProcessWithoutNullStreams, peer: RpcJsonlPeer, spec: ChildSessionSpec) {
+  constructor(
+    process: ChildProcessWithoutNullStreams,
+    peer: RpcJsonlPeer,
+    spec: ChildSessionSpec,
+    launch: RpcLaunchDescription,
+  ) {
     this.process = process;
     this.peer = peer;
     this.spec = spec;
+    this.launch = launch;
     this.id = spec.id;
     this.pi = { sessionId: `starting:${spec.id}` };
     this.budgetGuard = new BudgetGuard({
@@ -194,33 +235,41 @@ class RpcChildRun implements ChildRun {
     });
     this.unsubscribePeer = peer.subscribe(this.handleRpcEvent);
     this.unsubscribePeerErrors = peer.subscribeErrors((error) => {
-      void this.fail(new ChildRuntimeError("ORPHANED_SESSION", error.message, { cause: error }));
+      const failure =
+        error instanceof ChildRuntimeError
+          ? error
+          : new ChildRuntimeError("ORPHANED_SESSION", error.message, { cause: error });
+      void this.fail(failure);
     });
     process.stderr.setEncoding("utf8");
     process.stderr.on("data", (chunk) => {
       this.stderr = `${this.stderr}${String(chunk)}`.slice(-16_000);
     });
     process.once("error", (error) => {
-      void this.fail(
-        new ChildRuntimeError("SESSION_START_FAILED", `Pi RPC process failed: ${error.message}`, {
-          cause: error,
-        }),
+      const failure = new ChildRuntimeError(
+        "SESSION_START_FAILED",
+        `Pi RPC process failed: ${error.message}. ${launchDiagnostic(this.launch, process, this.initialized)}`,
+        { cause: error },
       );
+      this.peer.close(failure);
+      void this.fail(failure);
     });
-    process.once("exit", (code, signal) => {
+    process.once("close", (code, signal) => {
       if (this.disposed || this.status === "cancelled" || this.status === "disposed") return;
       const detail = [
-        `Pi RPC process exited${code === null ? "" : ` with code ${code}`}${signal ? ` (${signal})` : ""}.`,
+        `Pi RPC process closed${code === null ? "" : ` with code ${code}`}${signal ? ` (${signal})` : ""}.`,
+        launchDiagnostic(this.launch, process, this.initialized),
         this.stderr.trim(),
       ]
         .filter(Boolean)
-        .join("\n");
-      void this.fail(
-        new ChildRuntimeError(
-          this.status === "starting" ? "SESSION_START_FAILED" : "ORPHANED_SESSION",
-          detail,
-        ),
+        .join("
+");
+      const failure = new ChildRuntimeError(
+        this.status === "starting" ? "SESSION_START_FAILED" : "ORPHANED_SESSION",
+        detail,
       );
+      this.peer.close(failure);
+      void this.fail(failure);
     });
   }
 
@@ -241,6 +290,7 @@ class RpcChildRun implements ChildRun {
       sessionId: data.sessionId,
       ...(typeof data.sessionFile === "string" ? { sessionFile: data.sessionFile } : {}),
     };
+    this.initialized = true;
     this.status = "running";
     this.emit({ type: "session.started", runId: this.id, pi: this.pi });
     this.beginCycle();
@@ -516,7 +566,7 @@ export class RpcChildSessionBackend {
       windowsHide: true,
     });
     const peer = new RpcJsonlPeer(processHandle.stdout, processHandle.stdin);
-    const run = new RpcChildRun(processHandle, peer, spec);
+    const run = new RpcChildRun(processHandle, peer, spec, { command: this.command, args });
     try {
       await run.initialize(signal, this.startupTimeoutMs);
       return run;

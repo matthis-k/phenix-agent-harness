@@ -13,6 +13,7 @@ interface PiAgentEvent {
   readonly isError?: boolean;
   readonly message?: unknown;
   readonly messages?: readonly unknown[];
+  readonly stopReason?: unknown;
 }
 
 function messageFromUnknown(value: unknown): string | undefined {
@@ -105,7 +106,20 @@ export function isSettlementEvent(raw: PiAgentEvent): boolean {
   return raw.type === "agent_settled";
 }
 
+function nestedFailure(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    record.stopReason === "error" ||
+    record.error != null ||
+    (typeof record.errorMessage === "string" && record.errorMessage.trim().length > 0)
+  );
+}
+
 /** Determine whether a Pi event indicates a provider/model failure. */
 export function isFailureEvent(raw: PiAgentEvent): boolean {
-  return raw.type === "error" || (raw.type === "agent_end" && raw.error != null);
+  if (raw.type === "error" || raw.stopReason === "error") return true;
+  if (raw.error != null || raw.errorMessage != null) return true;
+  if (nestedFailure(raw.message)) return true;
+  return raw.messages?.some(nestedFailure) ?? false;
 }

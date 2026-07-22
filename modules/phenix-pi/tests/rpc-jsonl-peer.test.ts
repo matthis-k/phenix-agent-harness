@@ -78,4 +78,15 @@ describe("RpcJsonlPeer", () => {
     await assert.rejects(result, /unterminated JSON record/);
     peer.dispose();
   });
+
+  it("allows a richer process-close error to supersede stdout EOF", async () => {
+    const fromPi = new PassThrough();
+    const toPi = new PassThrough();
+    const peer = new RpcJsonlPeer(fromPi, toPi, { endErrorDelayMs: 50 });
+    const result = peer.command({ type: "get_state" });
+    fromPi.end();
+    peer.close(new Error("process closed with code 2; stderr=bad flag"));
+    await assert.rejects(result, /process closed with code 2; stderr=bad flag/);
+    peer.dispose();
+  });
 });

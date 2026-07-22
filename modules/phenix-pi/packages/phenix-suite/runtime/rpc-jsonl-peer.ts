@@ -20,6 +20,11 @@ interface PendingCommand {
   readonly detachAbort?: () => void;
 }
 
+export interface RpcJsonlPeerOptions {
+  /** Allow the child-process close/error event to supply a richer failure than stdout EOF. */
+  readonly endErrorDelayMs?: number;
+}
+
 export class RpcProtocolError extends Error {
   constructor(message: string, options?: { readonly cause?: unknown }) {
     super(message, options);
@@ -57,10 +62,13 @@ export class RpcJsonlPeer {
   private readonly errorListeners = new Set<(error: Error) => void>();
   private buffer = "";
   private terminalError: Error | undefined;
+  private readonly endErrorDelayMs: number;
+  private endErrorTimer: NodeJS.Timeout | undefined;
 
-  constructor(input: Readable, output: Writable) {
+  constructor(input: Readable, output: Writable, options: RpcJsonlPeerOptions = {}) {
     this.input = input;
     this.output = output;
+    this.endErrorDelayMs = options.endErrorDelayMs ?? 250;
     input.setEncoding("utf8");
     input.on("data", this.onData);
     input.once("end", this.onEnd);
@@ -149,10 +157,12 @@ export class RpcJsonlPeer {
   }
 
   close(reason: Error = new RpcProtocolError("Pi RPC peer closed.")): void {
+    this.clearEndErrorTimer();
     this.fail(reason);
   }
 
   dispose(): void {
+    this.clearEndErrorTimer();
     this.input.off("data", this.onData);
     this.input.off("end", this.onEnd);
     this.input.off("error", this.onInputError);
@@ -177,11 +187,17 @@ export class RpcJsonlPeer {
   };
 
   private readonly onEnd = (): void => {
-    if (this.buffer.length > 0) {
-      this.fail(new RpcProtocolError("Pi RPC stream ended with an unterminated JSON record."));
+    const error =
+      this.buffer.length > 0
+        ? new RpcProtocolError("Pi RPC stream ended with an unterminated JSON record.")
+        : new RpcProtocolError("Pi RPC stdout ended.");
+    if (this.endErrorDelayMs <= 0) {
+      this.fail(error);
       return;
     }
-    this.fail(new RpcProtocolError("Pi RPC stdout ended."));
+    this.clearEndErrorTimer();
+    this.endErrorTimer = setTimeout(() => this.fail(error), this.endErrorDelayMs);
+    this.endErrorTimer.unref?.();
   };
 
   private readonly onInputError = (error: Error): void => {
@@ -236,8 +252,15 @@ export class RpcJsonlPeer {
     for (const listener of this.eventListeners) listener(value);
   }
 
+  private clearEndErrorTimer(): void {
+    if (!this.endErrorTimer) return;
+    clearTimeout(this.endErrorTimer);
+    this.endErrorTimer = undefined;
+  }
+
   private fail(error: Error): void {
     if (this.terminalError) return;
+    this.clearEndErrorTimer();
     this.terminalError = error;
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);

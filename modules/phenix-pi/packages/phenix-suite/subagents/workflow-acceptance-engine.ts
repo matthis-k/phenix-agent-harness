@@ -120,7 +120,10 @@ export class WorkflowAcceptanceEngine implements AcceptanceEngine {
       const code =
         result.error?.code ??
         (result.status === "cancelled" ? "ABORTED" : "SUBAGENT_EXECUTION_FAILED");
-      const message = result.error?.message ?? `Producer execution ${result.status}.`;
+      const baseMessage = result.error?.message ?? `Producer execution ${result.status}.`;
+      const message = data.record.candidateValue
+        ? `${baseMessage} Producer output is preserved on handle ${data.record.id} as candidateValue; semantic assurance did not complete.`
+        : baseMessage;
       throw new SubagentExecutionError(code, message, {
         cause: new ChildRuntimeError(code === "ABORTED" ? "ABORTED" : "PROVIDER_FAILED", message),
       });

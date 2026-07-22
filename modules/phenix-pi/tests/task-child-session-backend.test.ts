@@ -149,7 +149,7 @@ describe("task-bound child backend", () => {
 
     const diagnosticLog = tasks.readLog(authority.token, authority.scopeTaskId).log;
     const messages = diagnosticLog.map((entry) => entry.message).join("\n");
-    assert.match(messages, /Child backend starting: backend=sdk/);
+    assert.match(messages, /Child backend starting: backend=auto, preferred=sdk/);
     assert.match(messages, /model=console\/deepseek-v4/);
     assert.match(messages, /Contract submission blocked/);
     assert.match(messages, /Provider event type=error, code=REPLICATION_FAILED/);
