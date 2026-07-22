@@ -1,0 +1,40 @@
+name: Patch producer formatting
+
+on:
+  push:
+    branches:
+      - fix/runtime-diagnostics-journal-full
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: fix/runtime-diagnostics-journal-full
+          fetch-depth: 0
+      - name: Apply exact formatter output
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('modules/phenix-pi/packages/phenix-suite/subagents/producer-cycle-runner.ts')
+          text = path.read_text()
+          old = '      record.errors = ["Required critic runner is not configured; producer result preserved as candidateValue."];'
+          new = '''      record.errors = [
+            "Required critic runner is not configured; producer result preserved as candidateValue.",
+          ];'''
+          if text.count(old) != 1:
+              raise SystemExit('expected producer formatting target exactly once')
+          path.write_text(text.replace(old, new))
+          Path('.github/workflows/patch-producer-format.yml').unlink()
+          Path('.producer-format-trigger').unlink(missing_ok=True)
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "style: format assurance preservation path"
+          git push origin HEAD:fix/runtime-diagnostics-journal-full
