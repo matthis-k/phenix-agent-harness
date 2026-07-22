@@ -6,12 +6,15 @@ import type { AgentRole } from "@matthis-k/phenix-kernel/agents.ts";
 import type { WorkflowExecutionBinding } from "@matthis-k/phenix-kernel/execution.ts";
 import type { AgentClientRef } from "@matthis-k/phenix-kernel/refs.ts";
 import type { ThinkingLevel } from "@matthis-k/phenix-kernel/task.ts";
+import type { AssuranceLevel } from "../authority/types.ts";
 import type { ToolBudget, TurnBudget } from "../subagents/agent-types.ts";
 import type { ContractArtifact } from "../subagents/contract.ts";
 
 declare const childRunIdBrand: unique symbol;
 export type ChildRunId = string & { readonly [childRunIdBrand]: true };
-export function childRunId(value: string): ChildRunId { return value as ChildRunId; }
+export function childRunId(value: string): ChildRunId {
+  return value as ChildRunId;
+}
 
 export interface PiSessionReference {
   readonly sessionId: string;
@@ -92,6 +95,10 @@ export interface ChildSessionSpec {
   readonly skillRefs: readonly string[];
   readonly extensionRefs: readonly string[];
   readonly inheritProjectContext: boolean;
+  /** Explicit derived assurance for adapter selection and diagnostics. */
+  readonly assurance?: AssuranceLevel;
+  /** True only when policy requires an operating-system process boundary. */
+  readonly isolationRequired?: boolean;
   readonly timeoutMs: number;
   readonly turnBudget: TurnBudget;
   readonly toolBudget: ToolBudget;
@@ -145,7 +152,11 @@ export interface ContractSubmissionChannel {
 }
 
 export type ChildSessionEvent =
-  | { readonly type: "session.started"; readonly runId: ChildRunId; readonly pi: PiSessionReference }
+  | {
+      readonly type: "session.started";
+      readonly runId: ChildRunId;
+      readonly pi: PiSessionReference;
+    }
   | { readonly type: "agent.event"; readonly runId: ChildRunId; readonly event: unknown }
   | { readonly type: "tool.started"; readonly runId: ChildRunId; readonly toolName: string }
   | {
@@ -155,7 +166,11 @@ export type ChildSessionEvent =
       readonly isError: boolean;
     }
   | { readonly type: "cycle.settled"; readonly runId: ChildRunId; readonly cycle: number }
-  | { readonly type: "session.failed"; readonly runId: ChildRunId; readonly error: SerializedError }
+  | {
+      readonly type: "session.failed";
+      readonly runId: ChildRunId;
+      readonly error: SerializedError;
+    }
   | { readonly type: "session.cancelled"; readonly runId: ChildRunId; readonly reason: string }
   | { readonly type: "session.disposed"; readonly runId: ChildRunId };
 
@@ -206,10 +221,21 @@ export type ChildRuntimeErrorCode =
   | "ORPHANED_SESSION";
 
 const CHILD_RUNTIME_ERROR_CODES: ReadonlySet<string> = new Set([
-  "MODEL_NOT_FOUND", "MODEL_AUTH_UNAVAILABLE", "SESSION_START_FAILED", "PROMPT_REJECTED",
-  "PROVIDER_FAILED", "CONTRACT_NOT_SUBMITTED", "CONTRACT_INVALID", "TURN_BUDGET_EXCEEDED",
-  "TOOL_BUDGET_EXCEEDED", "TIMEOUT", "ABORTED", "VERIFICATION_FAILED", "CRITIC_REJECTED",
-  "REPAIR_LIMIT_EXCEEDED", "ORPHANED_SESSION",
+  "MODEL_NOT_FOUND",
+  "MODEL_AUTH_UNAVAILABLE",
+  "SESSION_START_FAILED",
+  "PROMPT_REJECTED",
+  "PROVIDER_FAILED",
+  "CONTRACT_NOT_SUBMITTED",
+  "CONTRACT_INVALID",
+  "TURN_BUDGET_EXCEEDED",
+  "TOOL_BUDGET_EXCEEDED",
+  "TIMEOUT",
+  "ABORTED",
+  "VERIFICATION_FAILED",
+  "CRITIC_REJECTED",
+  "REPAIR_LIMIT_EXCEEDED",
+  "ORPHANED_SESSION",
 ]);
 
 export function isChildRuntimeErrorCode(value: unknown): value is ChildRuntimeErrorCode {
