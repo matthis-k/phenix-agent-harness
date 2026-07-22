@@ -3,9 +3,9 @@ import path from "node:path";
 
 import { findProjectRoot } from "../subagents/handle-store.ts";
 import {
-  SessionExecutionJournal,
   type SessionExecutionEvent,
   type SessionExecutionEventInput,
+  SessionExecutionJournal,
 } from "./session-execution-journal.ts";
 
 export interface SessionExecutionContext {
@@ -86,10 +86,7 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function isHighVolumeTrace(
-  boundary: string,
-  record: Readonly<Record<string, unknown>>,
-): boolean {
+function isHighVolumeTrace(boundary: string, record: Readonly<Record<string, unknown>>): boolean {
   if (boundary === "pi_message_update") return true;
   const eventType = optionalString(record.eventType);
   if (!eventType) return false;
