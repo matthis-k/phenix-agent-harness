@@ -15,7 +15,7 @@ function timeoutError(spec: ChildSessionSpec): ChildRuntimeError {
 
 /** Applies one wall-clock cancellation boundary to any Pi runtime adapter. */
 export class TimedChildSessionBackend implements ChildSessionBackend {
-  readonly kind;
+  readonly kind: ChildSessionBackend["kind"];
   private readonly delegate: ChildSessionBackend;
 
   constructor(delegate: ChildSessionBackend) {
