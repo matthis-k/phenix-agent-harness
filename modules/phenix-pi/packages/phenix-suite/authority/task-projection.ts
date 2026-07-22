@@ -1,5 +1,6 @@
 import type { TaskRuntimeFacade, TaskTreeNode } from "@matthis-k/phenix-tasks/index.ts";
 import type { ExecutionAuthority } from "./service.ts";
+import type { ObjectiveRecord } from "./types.ts";
 
 function locate(
   root: TaskTreeNode,
@@ -19,7 +20,7 @@ export function registerAuthorityTaskProjection(input: {
   readonly authority: ExecutionAuthority;
 }): () => void {
   return input.tasks.subscribe((event) => {
-    let objective;
+    let objective: ObjectiveRecord;
     try {
       objective = input.authority.inspectObjective(event.workflowId).objective;
     } catch {

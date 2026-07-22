@@ -175,7 +175,6 @@ class RpcChildRun implements ChildRun {
   private currentCycle: ActiveCycle | undefined;
   private lastCycleOutcome: ChildCycleOutcome = { cycle: 0, status: "settled" };
   private lastAssistantText: string | undefined;
-  private lastProviderFailure: SerializedError | undefined;
   private stderr = "";
   private disposed = false;
   private endedAt: string | undefined;
@@ -362,7 +361,6 @@ class RpcChildRun implements ChildRun {
     if (isFailureEvent(raw as { readonly type: string })) {
       const failure = providerFailureFromPiEvent(raw as { readonly type: string });
       if (failure) {
-        this.lastProviderFailure = failure;
         if (this.currentCycle) this.currentCycle.error = failure;
       }
     }
@@ -383,7 +381,6 @@ class RpcChildRun implements ChildRun {
       );
     }
     this.status = "running";
-    this.lastProviderFailure = undefined;
     this.cycle += 1;
     let resolve!: (outcome: ChildCycleOutcome) => void;
     const promise = new Promise<ChildCycleOutcome>((complete) => {

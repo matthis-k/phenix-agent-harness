@@ -24,10 +24,6 @@ function isLeafAssignment(spec: ChildSessionSpec): boolean {
  * require isolation, or when the operator explicitly requests RPC.
  */
 export class RpcChildSessionBackend extends ProcessRpcChildSessionBackend {
-  constructor(options: RpcChildSessionBackendOptions) {
-    super(options);
-  }
-
   override supports(spec: ChildSessionSpec): boolean {
     const preference = runtimePreference();
     if (preference === "sdk") return false;
