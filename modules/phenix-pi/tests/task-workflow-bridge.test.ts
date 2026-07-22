@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ChildParentExecutionContext } from "@matthis-k/phenix-suite/runtime/child-session-types.ts";
 import type {
   WorkflowAuthoritySnapshot,
   WorkflowRuntimePort,
@@ -69,6 +70,51 @@ function terminalAuthority(): WorkflowAuthoritySnapshot {
       options: [],
     },
   };
+}
+
+function unusedWorkflow(): WorkflowRuntimePort {
+  return {
+    inspect: authority,
+    async spawn() {
+      throw new Error("not used");
+    },
+  };
+}
+
+function childParent(input: {
+  readonly workflowId: string;
+  readonly actorId: string;
+  readonly parentActorId: string;
+  readonly task: string;
+  readonly requirements: readonly string[];
+  readonly taskAuthoritySource?: "runtime-internal";
+}): ChildParentExecutionContext {
+  return {
+    kind: "child",
+    sessionId: "root-session",
+    cwd: "/tmp/phenix-task-diagnostics",
+    contractId: `contract-${input.actorId}`,
+    contract: {
+      assignment: {
+        task: input.task,
+        requirements: input.requirements,
+        outputSchema: { type: "object" },
+      },
+      runtime: {
+        workflow: {
+          instanceId: input.workflowId,
+          actorId: input.actorId,
+          parentActorId: input.parentActorId,
+        },
+      },
+    },
+    handleId: `handle-${input.actorId}`,
+    childRunId: `run-${input.actorId}`,
+    rootChildRunId: "run-producer",
+    modelSet: "mixed",
+    maximumDelegationDepth: 0,
+    ...(input.taskAuthoritySource ? { taskAuthoritySource: input.taskAuthoritySource } : {}),
+  } as unknown as ChildParentExecutionContext;
 }
 
 describe("task workflow diagnostics", () => {
@@ -168,6 +214,83 @@ describe("task workflow diagnostics", () => {
       requirements: forwarded.requirements,
     });
     assert.equal(childAuthority.actorId, "child-base");
+  });
+
+  it("prepares task ownership for a runtime-owned semantic critic", () => {
+    const tasks = createTaskRuntimeFacade();
+    const root = tasks.ensureWorkflow({
+      workflowId: "wf_runtime_critic",
+      ownerSessionId: "root-session",
+      rootActorId: "root-actor",
+      title: "Review a QA producer",
+    });
+    const producerTask = "Produce the QA evidence";
+    const producerRequirements = ["Return structured evidence"];
+    tasks.prepareDelegation(root.token, {
+      task: producerTask,
+      requirements: producerRequirements,
+    });
+    const producer = tasks.claimDelegation({
+      workflowId: "wf_runtime_critic",
+      parentActorId: "root-actor",
+      childActorId: "producer-actor",
+      childSessionId: "run-producer",
+      task: producerTask,
+      requirements: producerRequirements,
+    });
+    const bridge = createTaskWorkflowBridge({ workflow: unusedWorkflow(), tasks });
+
+    const critic = bridge.claimChildAuthority(
+      childParent({
+        workflowId: "wf_runtime_critic",
+        actorId: "critic-actor",
+        parentActorId: "producer-actor",
+        task: "Review the producer result",
+        requirements: ["Return an independent verdict"],
+        taskAuthoritySource: "runtime-internal",
+      }),
+    );
+
+    assert.equal(critic.actorId, "critic-actor");
+    assert.equal(critic.sessionId, "run-critic-actor");
+    const producerTree = tasks.inspect(producer.token);
+    assert.equal(producerTree.children.length, 1);
+    assert.equal(producerTree.children[0]?.name, "Review the producer result");
+    assert.equal(producerTree.children[0]?.assignedSessionId, "run-critic-actor");
+  });
+
+  it("keeps unmatched ordinary workflow claims strict", () => {
+    const tasks = createTaskRuntimeFacade();
+    const root = tasks.ensureWorkflow({
+      workflowId: "wf_strict_claim",
+      ownerSessionId: "root-session",
+      rootActorId: "root-actor",
+      title: "Strict workflow child claims",
+    });
+    const producerTask = "Produce the primary result";
+    tasks.prepareDelegation(root.token, { task: producerTask });
+    tasks.claimDelegation({
+      workflowId: "wf_strict_claim",
+      parentActorId: "root-actor",
+      childActorId: "producer-actor",
+      childSessionId: "run-producer",
+      task: producerTask,
+    });
+    const bridge = createTaskWorkflowBridge({ workflow: unusedWorkflow(), tasks });
+
+    assert.throws(
+      () =>
+        bridge.claimChildAuthority(
+          childParent({
+            workflowId: "wf_strict_claim",
+            actorId: "ordinary-child",
+            parentActorId: "producer-actor",
+            task: "Unprepared child task",
+            requirements: [],
+          }),
+        ),
+      /No pending task delegation exists for actor producer-actor in wf_strict_claim/,
+    );
   });
 
   it("reconciles the root task when the workflow is terminal", () => {

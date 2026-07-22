@@ -22,6 +22,7 @@ export interface PiSessionReference {
 }
 
 export type ChildSessionBackendKind = "sdk" | "rpc";
+export type ChildTaskAuthoritySource = "workflow" | "runtime-internal";
 
 export interface ConcreteModelRef {
   readonly provider: string;
@@ -73,6 +74,8 @@ export interface ChildParentExecutionContext {
   readonly rootChildRunId: ChildRunId;
   readonly modelSet: string;
   readonly maximumDelegationDepth: number;
+  /** Ordinary workflow children claim a prepared task; runtime-owned children prepare at start. */
+  readonly taskAuthoritySource?: ChildTaskAuthoritySource;
 }
 
 export interface ChildSessionSpec {

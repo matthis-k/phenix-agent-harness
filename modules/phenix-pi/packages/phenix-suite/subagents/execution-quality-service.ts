@@ -184,6 +184,7 @@ export class ExecutionQualityService {
           rootChildRunId: rootRunId,
           modelSet: input.record.modelSet,
           maximumDelegationDepth: 0,
+          taskAuthoritySource: "runtime-internal",
         },
         effectiveTools: criticSpec.tools.effective,
         skillRefs: criticSpec.skills,
