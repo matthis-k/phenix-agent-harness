@@ -117,6 +117,7 @@ export const METRICS_ANALYZER: QaAnalyzer = {
         result.stdout,
         context.cwd,
         context.config.thresholds.cyclomaticComplexity,
+        context.scopedFiles,
       );
 
       if (parsed.filesAnalyzed === 0) {
@@ -125,7 +126,9 @@ export const METRICS_ANALYZER: QaAnalyzer = {
           status: "not-applicable",
           evidence: [],
           artifacts: [rawPath],
-          diagnostics: ["FTA found no supported JavaScript or TypeScript files."],
+          diagnostics: [
+            "FTA found no supported JavaScript or TypeScript files in the resolved scope.",
+          ],
           durationMs: Date.now() - start,
         };
       }
@@ -136,7 +139,7 @@ export const METRICS_ANALYZER: QaAnalyzer = {
         evidence: parsed.evidence,
         artifacts: [rawPath],
         diagnostics: [
-          `FTA ${FTA_VERSION} analyzed ${parsed.filesAnalyzed} JavaScript/TypeScript files in ${result.durationMs}ms.`,
+          `FTA ${FTA_VERSION} analyzed ${parsed.filesAnalyzed} scoped JavaScript/TypeScript files in ${result.durationMs}ms.`,
         ],
         durationMs: Date.now() - start,
       };
@@ -170,13 +173,19 @@ export function parseFtaJson(
   output: string,
   cwd: string,
   cyclomaticThreshold = 20,
+  scopedFiles?: readonly string[],
 ): ParsedFtaMetrics {
   const parsed: unknown = JSON.parse(output);
   if (!Array.isArray(parsed)) {
     throw new Error("Expected a JSON array.");
   }
 
-  const files = parsed.map((value, index) => parseFtaFileMetrics(value, index));
+  const allowed = scopedFiles
+    ? new Set(scopedFiles.map((file) => file.replaceAll("\\", "/").replace(/^\.\//, "")))
+    : undefined;
+  const files = parsed
+    .map((value, index) => parseFtaFileMetrics(value, index))
+    .filter((file) => !allowed || allowed.has(normalizeMetricPath(file.fileName, cwd)));
   if (files.length === 0) {
     return { filesAnalyzed: 0, evidence: [] };
   }

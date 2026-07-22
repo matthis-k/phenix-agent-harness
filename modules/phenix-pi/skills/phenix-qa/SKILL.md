@@ -34,8 +34,11 @@ The runtime enforces schemas, validates cross-references (evidence→findings, f
 node --experimental-strip-types skills/phenix-qa/runtime/index.ts review \
   --scope diff \
   --base main \
-  --output qa-results/
+  --output qa-results/ \
+  --trust-repository
 ```
+
+`--trust-repository` explicitly permits execution of commands discovered from the reviewed checkout. Omit it for an untrusted repository; `project-native` will then report unavailable rather than execute repository-controlled commands. Output paths are confined to the reviewed repository unless a caller explicitly combines `--output` with `--allow-external-output`.
 
 ### Validate a report
 
@@ -78,13 +81,13 @@ All QA types are now runtime-validatable TypeBox schemas. Validators:
 
 Validation rejects: invalid QA levels, empty titles/explanations/impacts/recommendations, risk values outside 0–100, invalid source locations, invalid timestamps, invalid architecture assessments, invalid quality gate values, missing evidence references for model-assisted findings, and blocking on non-high/critical findings.
 
-Semantic validation (`runtime/semantic-validation.ts`) additionally checks: evidence reference integrity, gate reference integrity, risk evidence existence, duplicate IDs, timestamp format, blocking severity constraints, composite score bounds, and remediation reference integrity.
+Semantic validation (`runtime/semantic-validation.ts`) additionally checks: evidence reference integrity, gate reference integrity, risk evidence existence, duplicate IDs, timestamp format, blocking severity constraints, composite score bounds, remediation reference integrity, and executive-summary consistency.
 
 ### Analyzer adapters
 
 | Analyzer | Status | Tool | Categories |
 |---|---|---|---|
-| `project-native` | Available | Discovers package.json verification scripts | build, test, lint, format |
+| `project-native` | Available after explicit repository trust | Discovers package scripts and canonical devenv maintenance gates | build, test, lint, format |
 | `metrics` | Available for JavaScript/TypeScript | Packaged FTA 3.0.0 | metrics, cyclomatic complexity, Halstead, maintainability |
 | `structural` | Available | ast-grep 0.44.0 | patterns, structural-rules |
 | `duplication` | Optional | jscpd (when installed) | duplication, clone-detection |
@@ -93,7 +96,7 @@ Semantic validation (`runtime/semantic-validation.ts`) additionally checks: evid
 
 **Required**: `project-native`
 
-**Packaged**: `metrics`, `structural`, `git-history`. The metrics analyzer reports `not-applicable` when FTA finds no supported JavaScript or TypeScript files.
+**Packaged**: `metrics`, `structural`, `git-history`. The metrics analyzer reports `not-applicable` when FTA finds no supported JavaScript or TypeScript files in the resolved scope.
 
 **Optional**: `duplication`, `security` (report as unavailable when not installed; never claim clean results).
 
@@ -112,6 +115,8 @@ The default cyclomatic review threshold is configured in `runtime/config.ts`. A 
 
 Supports: `diff`, `files`, `module`, `repository`, `architecture`.
 
+Repository and architecture scopes resolve tracked and non-ignored untracked files. Module scope filters that repository file set to a repository-relative subtree and rejects paths that escape the reviewed checkout. Analyzer evidence is constrained to the resolved scope.
+
 For `diff` scope:
 
 - Accepts explicit base revision
@@ -129,7 +134,7 @@ The runtime:
 3. Validates contribution structure
 4. Merges model findings with deterministic findings (deduplicates by ID)
 5. Recalculates risk scores and composite score in runtime code
-6. Recalculates quality gates
+6. Recalculates quality gates and all finding-derived executive-summary fields
 7. Runs semantic validation
 8. Writes JSON and text reports
 

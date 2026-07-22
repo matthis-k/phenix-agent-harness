@@ -324,8 +324,10 @@ class SessionSubagentHandle<TOutput> implements SubagentHandle<TOutput> {
     this.terminalStatus = statusForError(error);
     this.evaluationController.abort(error);
 
-    if (code === "ABORTED") {
+    try {
       await this.run.abort(reason);
+    } finally {
+      await this.run.dispose();
     }
   }
 

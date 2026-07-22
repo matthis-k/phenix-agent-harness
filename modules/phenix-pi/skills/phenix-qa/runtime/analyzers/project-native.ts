@@ -15,11 +15,18 @@ import type {
   QaAnalyzerResult,
 } from "../types.ts";
 
+const TRUST_REQUIRED =
+  "Repository-controlled verification commands require explicit trustedRepository opt-in.";
+
 export const PROJECT_NATIVE_ANALYZER: QaAnalyzer = {
   id: "project-native",
   categories: ["build", "test", "lint", "format"],
 
   async checkAvailability(context: QaAnalyzerContext): Promise<QaAnalyzerAvailability> {
+    if (!context.config.execution.trustedRepository) {
+      return { available: false, reason: TRUST_REQUIRED };
+    }
+
     const guidance = discoverGuidance(context.cwd);
 
     if (guidance.buildCommands.length === 0 && guidance.testCommands.length === 0) {
@@ -38,6 +45,17 @@ export const PROJECT_NATIVE_ANALYZER: QaAnalyzer = {
 
   async run(context: QaAnalyzerContext): Promise<QaAnalyzerResult> {
     const start = Date.now();
+    if (!context.config.execution.trustedRepository) {
+      return {
+        analyzer: "project-native",
+        status: "unavailable",
+        evidence: [],
+        artifacts: [],
+        diagnostics: [TRUST_REQUIRED],
+        durationMs: Date.now() - start,
+      };
+    }
+
     const guidance = discoverGuidance(context.cwd);
     const evidence: ReturnType<typeof makeEvidence>[] = [];
     const artifacts: string[] = [];
@@ -76,7 +94,9 @@ export const PROJECT_NATIVE_ANALYZER: QaAnalyzer = {
           continue;
         }
 
-        const timeoutMs = context.config.timeouts.defaultMs;
+        const timeoutMs =
+          context.config.timeouts.byAnalyzer?.["project-native"] ??
+          context.config.timeouts.defaultMs;
         const result = await runner.exec(cmd, args, {
           cwd: context.cwd,
           timeoutMs,

@@ -51,6 +51,14 @@ export function discoverGuidance(cwd: string): RepositoryGuidance {
     // No package.json or unparseable.
   }
 
+  const hasFlake = existsSync(join(guidanceRoot, "flake.nix"));
+  const hasDevenvTasks = ["maintenance.nix", "devenv.nix", "devenv.yaml"].some((name) =>
+    existsSync(join(guidanceRoot, name)),
+  );
+  if (hasFlake && hasDevenvTasks) {
+    testCommands.push("nix develop -c devenv test");
+  }
+
   const guidanceDocs: string[] = [];
   const architectureDocs: string[] = [];
   const guidanceNames = [

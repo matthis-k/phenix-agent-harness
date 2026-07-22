@@ -39,6 +39,11 @@ export interface QaConfig {
   readonly enabledAnalyzers: readonly string[];
   readonly requiredAnalyzers: readonly string[];
 
+  readonly execution: {
+    /** Repository-controlled commands may execute only after explicit caller trust. */
+    readonly trustedRepository: boolean;
+  };
+
   readonly timeouts: {
     readonly defaultMs: number;
     readonly byAnalyzer?: Readonly<Record<string, number>>;
@@ -74,6 +79,8 @@ export interface QaConfig {
 export interface QaAnalyzerContext {
   readonly cwd: string;
   readonly scope: ReviewScope;
+  /** Normalized repository-relative files selected by scope resolution. */
+  readonly scopedFiles: readonly string[];
   readonly artifactDirectory: string;
   readonly signal?: AbortSignal;
   readonly config: QaConfig;
