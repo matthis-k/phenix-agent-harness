@@ -24,7 +24,9 @@ function parentActorId(spec: ChildSessionSpec): string {
 
 function parentSessionId(spec: ChildSessionSpec): string {
   if (!spec.parentId) return spec.parentContext.sessionId;
-  return sessionExecutionContextForChildRun(spec.parentId)?.sessionId ?? spec.parentContext.sessionId;
+  return (
+    sessionExecutionContextForChildRun(spec.parentId)?.sessionId ?? spec.parentContext.sessionId
+  );
 }
 
 function eventPayload(event: ChildSessionEvent): Readonly<Record<string, unknown>> {
