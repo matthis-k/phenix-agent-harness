@@ -1,7 +1,8 @@
 import path from "node:path";
 
 import { findProjectRoot } from "../subagents/handle-store.ts";
-import { createExecutionAuthority, type ExecutionAuthority } from "./service.ts";
+import { createExecutionAuthority } from "./factory.ts";
+import type { ExecutionAuthority } from "./service.ts";
 import { FileExecutionAuthorityStore } from "./store.ts";
 
 const authorities = new Map<string, ExecutionAuthority>();
