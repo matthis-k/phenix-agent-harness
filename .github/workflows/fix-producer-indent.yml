@@ -1,0 +1,38 @@
+name: Fix producer indentation
+
+on:
+  push:
+    branches:
+      - fix/runtime-diagnostics-journal-full
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: fix/runtime-diagnostics-journal-full
+          fetch-depth: 0
+      - name: Correct exact formatter indentation
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('modules/phenix-pi/packages/phenix-suite/subagents/producer-cycle-runner.ts')
+          text = path.read_text()
+          old = '      record.errors = [\n  "Required critic runner is not configured; producer result preserved as candidateValue.",\n];'
+          new = '      record.errors = [\n        "Required critic runner is not configured; producer result preserved as candidateValue.",\n      ];'
+          if text.count(old) != 1:
+              raise SystemExit('expected misindented producer block exactly once')
+          path.write_text(text.replace(old, new))
+          Path('.github/workflows/fix-producer-indent.yml').unlink()
+          Path('.producer-indent-trigger').unlink(missing_ok=True)
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "style: fix assurance preservation indentation"
+          git push origin HEAD:fix/runtime-diagnostics-journal-full
