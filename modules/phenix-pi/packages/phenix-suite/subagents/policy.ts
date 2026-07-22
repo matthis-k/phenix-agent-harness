@@ -14,6 +14,7 @@ import type {
   TurnBudget,
   VerificationCommand,
 } from "./agent-types.ts";
+import { resolveChildAssurance } from "./child-assurance.ts";
 import { rolePreset } from "./role-presets.ts";
 
 export type {
@@ -27,8 +28,6 @@ export type {
   TurnBudget,
   VerificationCommand,
 };
-
-// ── Configuration types ─────────────────────────────────────────────────────
 
 interface VerificationConfig {
   readonly maxRepairAttempts?: number;
@@ -56,37 +55,26 @@ export interface RuntimePolicyConfig {
   readonly verification?: VerificationConfig;
 }
 
-// ── Resolved execution policy ────────────────────────────────────────────────
-
 export interface ResolvedExecutionPolicy {
   readonly role: AgentRole;
   readonly agent: `phenix.${AgentKind}` | "phenix.base";
-
   readonly profile: TaskProfile;
   readonly tier: ModelTier;
-
   readonly model?: string;
   readonly thinking: ThinkingLevel;
-
   readonly timeoutMs: number;
   readonly turnBudget: TurnBudget;
   readonly toolBudget: ToolBudget;
-
   readonly verificationCommands: readonly VerificationCommand[];
-
   readonly criticRequired: boolean;
   readonly maxRepairAttempts: number;
-  readonly allowedChildren: readonly AgentKind[];
-
-  // Routing fields (added by phenix-routing integration).
+  readonly allowedChildren: readonly AgentRole[];
   readonly modelSet?: string;
   readonly difficulty?: string;
   readonly capability?: string;
   readonly candidatePool?: string;
   readonly candidateIndex?: number;
 }
-
-// ── Constants ───────────────────────────────────────────────────────────────
 
 const DEFAULT_CONFIG: RuntimePolicyConfig = {
   verification: {
@@ -97,8 +85,6 @@ const DEFAULT_CONFIG: RuntimePolicyConfig = {
   },
 };
 
-// ── Config loading ──────────────────────────────────────────────────────────
-
 export function loadPolicyConfig(): RuntimePolicyConfig {
   const bundledPath = fileURLToPath(new URL("../../config/subagents.json", import.meta.url));
   const agentDir = process.env.PI_CODING_AGENT_DIR ?? path.join(os.homedir(), ".pi", "agent");
@@ -106,8 +92,6 @@ export function loadPolicyConfig(): RuntimePolicyConfig {
   const bundled = mergeObjects(DEFAULT_CONFIG as Record<string, unknown>, readJson(bundledPath));
   return mergeObjects(bundled, readJson(userPath)) as RuntimePolicyConfig;
 }
-
-// ── Profile derivation ──────────────────────────────────────────────────────
 
 export function deriveTaskProfile(
   role: AgentRole,
@@ -118,8 +102,6 @@ export function deriveTaskProfile(
   const preset = rolePreset(role);
   return deriveTaskProfileFromText(task, requirements, hint, preset.profileMinimums);
 }
-
-// ── Tier calculation ────────────────────────────────────────────────────────
 
 export function tierForProfile(profile: TaskProfile): ModelTier {
   const peak = Math.max(...Object.values(profile));
@@ -136,13 +118,9 @@ export function tierForProfile(profile: TaskProfile): ModelTier {
   return "low";
 }
 
-// ── Shell quoting ───────────────────────────────────────────────────────────
-
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
-
-// ── Verification commands ──────────────────────────────────────────────────
 
 function verificationCommands(
   role: AgentRole,
@@ -152,7 +130,6 @@ function verificationCommands(
   const scriptPath = fileURLToPath(new URL("../../../runtime/verify.mjs", import.meta.url));
   const commands: VerificationCommand[] = [];
 
-  // Only implementer and tester roles get the default runtime verification.
   if (role === "implementer" || role === "tester") {
     commands.push({
       id: "phenix-runtime-verification",
@@ -162,16 +139,12 @@ function verificationCommands(
     });
   }
 
-  // Null role gets no role-specific verification commands.
   if (role === null) return commands;
 
   for (const command of config.verification?.extraCommands ?? []) commands.push(command);
   for (const command of config.verification?.roleCommands?.[role] ?? []) commands.push(command);
-
   return commands;
 }
-
-// ── Budget tables ───────────────────────────────────────────────────────────
 
 const TIER_BUDGETS: Record<ModelTier, { advisoryTools: number; timeout: number }> = {
   low: { advisoryTools: 30, timeout: 10 * 60_000 },
@@ -244,8 +217,6 @@ function resolveToolBudget(tier: ModelTier, config: RuntimePolicyConfig): ToolBu
   };
 }
 
-// ── Policy resolution ──────────────────────────────────────────────────────
-
 export function resolveExecutionPolicy(input: {
   readonly role: AgentRole;
   readonly task: string;
@@ -256,24 +227,23 @@ export function resolveExecutionPolicy(input: {
 }): ResolvedExecutionPolicy {
   const config = input.config ?? loadPolicyConfig();
   const preset = rolePreset(input.role);
-
-  // 1. Derive task profile using preset minimums.
   const profile = deriveTaskProfile(input.role, input.task, input.requirements, input.profileHint);
-
-  // 2. Derive tier.
   const tier = tierForProfile(profile);
-
-  // 3. Select thinking from the preset.
   const thinking = preset.thinking[tier];
-
-  // 4. Derive budgets.
   const budget = TIER_BUDGETS[tier];
-
-  // 5. Derive verification commands.
   const commands = verificationCommands(input.role, input.cwd, config);
-
-  // 6. Max repair attempts.
-  const maxRepairAttempts = Math.max(0, Math.min(3, config.verification?.maxRepairAttempts ?? 1));
+  const assurance = resolveChildAssurance({
+    role: input.role,
+    task: input.task,
+    requirements: input.requirements,
+    profile,
+    verificationCommands: commands,
+    criticRequiredByRole: preset.criticRequired,
+  });
+  const configuredRepairAttempts = Math.max(
+    0,
+    Math.min(3, config.verification?.maxRepairAttempts ?? 1),
+  );
 
   return {
     role: input.role,
@@ -285,18 +255,15 @@ export function resolveExecutionPolicy(input: {
     turnBudget: resolveTurnBudget(config),
     toolBudget: resolveToolBudget(tier, config),
     verificationCommands: commands,
-    criticRequired: preset.criticRequired,
-    maxRepairAttempts,
+    criticRequired:
+      input.role === "critic"
+        ? false
+        : preset.criticRequired || assurance.semanticVerifierRequired || assurance.criticRequired,
+    maxRepairAttempts: Math.max(configuredRepairAttempts, assurance.maximumRepairAttempts),
     allowedChildren: preset.allowedChildren,
   };
 }
 
-// ── Environment helpers ────────────────────────────────────────────────────
-
-// In the Pi-native child-session architecture, the child agent role is
-// determined by the contract artifact, not by environment variables.
-// This function is retained for backward compatibility but always returns
-// "root" since PI_SUBAGENT_CHILD_AGENT is no longer set.
 export function roleFromEnvironment(): AgentKind | "root" {
   return "root";
 }

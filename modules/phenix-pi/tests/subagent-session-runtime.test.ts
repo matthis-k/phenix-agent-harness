@@ -25,7 +25,22 @@ const runtime = {
   rootId: childRunId("child-session-runtime-test"),
   handleId: "handle-test",
   cwd: "/tmp/phenix-session-runtime-test",
-  contract: { id: "contract-test" },
+  contract: {
+    id: "contract-test",
+    identity: { role: "implementer" },
+    assignment: {
+      task: "Inspect the repository boundary.",
+      requirements: [],
+    },
+    runtime: {
+      workflow: { difficulty: "D2" },
+    },
+    verification: {
+      commands: [],
+      criticRequired: true,
+      maxRepairAttempts: 1,
+    },
+  },
   workflowProjection: { options: [] },
   contractChannel: {},
   parentContext: {},
@@ -136,6 +151,8 @@ describe("SubagentSessionPlanner", () => {
     assert.equal(spec.initialPrompt, "Inspect the repository boundary.");
     assert.equal(spec.persistence, "file");
     assert.equal(spec.contract, runtime.contract);
+    assert.equal(spec.assurance, "A2");
+    assert.equal(spec.isolationRequired, false);
   });
 
   it("keeps the base agent explicit for a concrete model", async () => {
@@ -187,5 +204,7 @@ describe("SubagentSessionRuntime", () => {
       provider: "opencode-go",
       id: "mimo-v2.5",
     });
+    assert.equal(backend.spec?.assurance, "A2");
+    assert.equal(backend.spec?.isolationRequired, false);
   });
 });

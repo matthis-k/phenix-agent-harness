@@ -1,5 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
+import { executionAuthorityForProject } from "../authority/registry.ts";
 import type { WorkflowRuntimePort } from "../runtime/workflow-runtime-types.ts";
 import { effectiveSessionId, readRecord } from "./handle-store.ts";
 import type { HandleRecord, HandleStatus } from "./handle-types.ts";
@@ -62,6 +63,60 @@ function handle(record: HandleRecord | undefined): SubagentHandleView | undefine
   };
 }
 
+function reconcileAuthority(ctx: ExtensionContext, record: SubagentHandleView | undefined): void {
+  if (!record) return;
+  const authority = executionAuthorityForProject(ctx.cwd);
+  const objective = authority.activeObjectiveForSession(effectiveSessionId(ctx));
+  if (!objective) return;
+  const snapshot = authority.inspectObjective(objective.id);
+  if (!snapshot.handles.some((candidate) => candidate.id === record.id)) return;
+
+  const runtimeState =
+    record.status === "completed"
+      ? "settled"
+      : record.status === "starting"
+        ? "starting"
+        : record.status;
+  let current = snapshot;
+  authority.updateHandleRuntime(
+    record.id,
+    {
+      runtimeState,
+      ...(record.subagentId ? { childRunId: record.subagentId } : {}),
+      ...(record.errors ? { errors: record.errors } : {}),
+    },
+    {
+      idempotencyKey: `handle-reconcile:${record.id}:${record.status}`,
+      actorId: "runtime-supervisor",
+      expectedRevision: current.objective.revision,
+    },
+  );
+
+  if (record.status !== "completed") return;
+  current = authority.inspectObjective(objective.id);
+  const projected = current.handles.find((candidate) => candidate.id === record.id);
+  if (projected?.acceptanceState === "pending") {
+    authority.submitResult(record.id, record.value, {
+      idempotencyKey: `handle-submit:${record.id}`,
+      actorId: record.role ?? "producer",
+      expectedRevision: current.objective.revision,
+    });
+  }
+  current = authority.inspectObjective(objective.id);
+  const submitted = current.handles.find((candidate) => candidate.id === record.id);
+  if (submitted && submitted.acceptanceState !== "accepted") {
+    authority.decideAcceptance(
+      record.id,
+      { outcome: "accepted", value: record.value },
+      {
+        idempotencyKey: `handle-accept:${record.id}`,
+        actorId: "acceptance-engine",
+        expectedRevision: current.objective.revision,
+      },
+    );
+  }
+}
+
 export function createPhenixSubagentFacade(input: {
   readonly workflow: WorkflowRuntimePort;
   readonly delegator: WorkflowDelegator;
@@ -69,19 +124,29 @@ export function createPhenixSubagentFacade(input: {
   return {
     workflow: input.workflow,
     inspectHandle(ctx, id) {
-      return handle(readRecord(ctx.cwd, effectiveSessionId(ctx), id));
+      const view = handle(readRecord(ctx.cwd, effectiveSessionId(ctx), id));
+      reconcileAuthority(ctx, view);
+      return view;
     },
     async pollHandle(ctx, id) {
-      return handle(await input.delegator.poll(ctx, id));
+      const view = handle(await input.delegator.poll(ctx, id));
+      reconcileAuthority(ctx, view);
+      return view;
     },
     async awaitHandle(ctx, id, signal) {
-      return handle(await input.delegator.awaitHandle(ctx, id, signal));
+      const view = handle(await input.delegator.awaitHandle(ctx, id, signal));
+      reconcileAuthority(ctx, view);
+      return view;
     },
     async sendHandle(ctx, id, message, signal) {
-      return handle(await input.delegator.sendHandle(ctx, id, message, signal));
+      const view = handle(await input.delegator.sendHandle(ctx, id, message, signal));
+      reconcileAuthority(ctx, view);
+      return view;
     },
     async cancelHandle(ctx, id, reason) {
-      return handle(await input.delegator.cancelHandle(ctx, id, reason));
+      const view = handle(await input.delegator.cancelHandle(ctx, id, reason));
+      reconcileAuthority(ctx, view);
+      return view;
     },
   };
 }

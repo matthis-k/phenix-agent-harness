@@ -7,10 +7,30 @@ import { resolveDelegateRoleConfiguration } from "@matthis-k/phenix-suite/subage
 import { resolveExecutionPolicy } from "@matthis-k/phenix-suite/subagents/policy.ts";
 import { rolePreset } from "@matthis-k/phenix-suite/subagents/role-presets.ts";
 
-const BASE_CHILDREN = ["scout", "implementer", "tester", "architect", "critic"] as const;
+const BASE_CHILDREN = [
+  null,
+  "scout",
+  "planner",
+  "architect",
+  "implementer",
+  "tester",
+  "critic",
+  "finalizer",
+] as const;
+
+const BASE_CLIENTS = [
+  agentClientRef("base"),
+  agentClientRef("scout"),
+  agentClientRef("planner"),
+  agentClientRef("architect"),
+  agentClientRef("implementer"),
+  agentClientRef("tester"),
+  agentClientRef("critic"),
+  agentClientRef("finalizer"),
+] as const;
 
 describe("QA execution policy", () => {
-  it("authorizes the base integrator for preset-specific child workflows", () => {
+  it("authorizes the base integrator for preset-specific and dynamic child workflows", () => {
     assert.deepEqual(rolePreset(null).allowedChildren, BASE_CHILDREN);
     assert.deepEqual(
       resolveDelegateRoleConfiguration({
@@ -19,13 +39,7 @@ describe("QA execution policy", () => {
       }).effective,
       BASE_CHILDREN,
     );
-    assert.deepEqual(baseClient.delegation.allowedClients, [
-      agentClientRef("scout"),
-      agentClientRef("implementer"),
-      agentClientRef("tester"),
-      agentClientRef("architect"),
-      agentClientRef("critic"),
-    ]);
+    assert.deepEqual(baseClient.delegation.allowedClients, BASE_CLIENTS);
   });
 
   it("uses an advisory-only tool budget by default", () => {
