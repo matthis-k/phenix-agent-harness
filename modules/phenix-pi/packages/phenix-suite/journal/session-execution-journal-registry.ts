@@ -85,6 +85,11 @@ export function recordSessionExecutionTrace(record: Readonly<Record<string, unkn
   const boundary = optionalString(record.boundary) ?? "event";
   const actorId = optionalString(record.actorId) ?? context.actorId;
   const rootSessionId = optionalString(record.rootSessionId) ?? context.rootSessionId;
+  const parentSessionId = optionalString(record.parentSessionId) ?? context.parentSessionId;
+  const objectiveId = optionalString(record.objectiveId);
+  const nodeId = optionalString(record.nodeId);
+  const handleId = optionalString(record.handleId);
+  const childRunId = optionalString(record.childRunId) ?? context.childRunId;
   const payload: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(record)) {
     if (
@@ -109,17 +114,11 @@ export function recordSessionExecutionTrace(record: Readonly<Record<string, unkn
     rootSessionId,
     sessionId,
     actorId,
-    ...(optionalString(record.parentSessionId) ?? context.parentSessionId
-      ? { parentSessionId: optionalString(record.parentSessionId) ?? context.parentSessionId }
-      : {}),
-    ...(optionalString(record.objectiveId)
-      ? { objectiveId: optionalString(record.objectiveId) }
-      : {}),
-    ...(optionalString(record.nodeId) ? { nodeId: optionalString(record.nodeId) } : {}),
-    ...(optionalString(record.handleId) ? { handleId: optionalString(record.handleId) } : {}),
-    ...(optionalString(record.childRunId) ?? context.childRunId
-      ? { childRunId: optionalString(record.childRunId) ?? context.childRunId }
-      : {}),
+    ...(parentSessionId ? { parentSessionId } : {}),
+    ...(objectiveId ? { objectiveId } : {}),
+    ...(nodeId ? { nodeId } : {}),
+    ...(handleId ? { handleId } : {}),
+    ...(childRunId ? { childRunId } : {}),
     type: `trace.${boundary}`,
     payload,
   });
