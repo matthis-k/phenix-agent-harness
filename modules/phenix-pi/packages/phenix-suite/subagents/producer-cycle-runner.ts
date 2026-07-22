@@ -362,8 +362,8 @@ export async function executeProducerCycles(
         message: cycleRecord.error.message,
       };
       record.errors = [
-  "Required critic runner is not configured; producer result preserved as candidateValue.",
-];
+        "Required critic runner is not configured; producer result preserved as candidateValue.",
+      ];
       writeRecord(cwd, record);
       return {
         ok: false,
