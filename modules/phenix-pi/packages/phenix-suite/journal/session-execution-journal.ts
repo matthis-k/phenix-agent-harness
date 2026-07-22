@@ -7,7 +7,8 @@ const MAX_STRING_LENGTH = 8_192;
 const MAX_PREVIEW_LENGTH = 512;
 const MAX_COLLECTION_ITEMS = 128;
 const MAX_DEPTH = 8;
-const SENSITIVE_KEY = /(?:authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|password|secret|cookie)/i;
+const SENSITIVE_KEY =
+  /(?:authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|password|secret|cookie)/i;
 const REASONING_KEY = /(?:thinking|reasoning|chain[-_]?of[-_]?thought)/i;
 
 export interface SessionExecutionEventInput {
@@ -66,7 +67,7 @@ function sanitizeValue(value: unknown, key?: string, depth = 0): unknown {
   if (typeof value === "function" || typeof value === "symbol") return String(value);
 
   if (Array.isArray(value)) {
-    const values = value
+    const values: unknown[] = value
       .slice(0, MAX_COLLECTION_ITEMS)
       .map((item) => sanitizeValue(item, undefined, depth + 1));
     if (value.length > MAX_COLLECTION_ITEMS) {
@@ -86,16 +87,14 @@ function sanitizeValue(value: unknown, key?: string, depth = 0): unknown {
   }
 
   if (typeof value === "object") {
-    const entries = Object.entries(value as Readonly<Record<string, unknown>>).slice(
-      0,
-      MAX_COLLECTION_ITEMS,
-    );
+    const record = value as Readonly<Record<string, unknown>>;
+    const entries = Object.entries(record).slice(0, MAX_COLLECTION_ITEMS);
     const sanitized: Record<string, unknown> = {};
     for (const [entryKey, entryValue] of entries) {
       const next = sanitizeValue(entryValue, entryKey, depth + 1);
       if (next !== undefined) sanitized[entryKey] = next;
     }
-    const count = Object.keys(value as object).length;
+    const count = Object.keys(record).length;
     if (count > MAX_COLLECTION_ITEMS) sanitized.truncatedKeys = count - MAX_COLLECTION_ITEMS;
     return sanitized;
   }
