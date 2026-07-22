@@ -256,7 +256,9 @@ export function resolveExecutionPolicy(input: {
     toolBudget: resolveToolBudget(tier, config),
     verificationCommands: commands,
     criticRequired:
-      preset.criticRequired || assurance.semanticVerifierRequired || assurance.criticRequired,
+      input.role === "critic"
+        ? false
+        : preset.criticRequired || assurance.semanticVerifierRequired || assurance.criticRequired,
     maxRepairAttempts: Math.max(configuredRepairAttempts, assurance.maximumRepairAttempts),
     allowedChildren: preset.allowedChildren,
   };
