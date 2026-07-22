@@ -30,7 +30,7 @@ function temporaryDirectory(prefix: string): string {
   return directory;
 }
 
-function makeHandle(): HandleRecord {
+function makeHandle(criticRequired = false): HandleRecord {
   const timestamp = new Date().toISOString();
   return {
     id: "handle-timeout",
@@ -41,7 +41,7 @@ function makeHandle(): HandleRecord {
       requirements: [],
       outputSchema: { type: "object" },
     },
-    producerSpec: { criticRequired: false } as HandleRecord["producerSpec"],
+    producerSpec: { criticRequired } as HandleRecord["producerSpec"],
     producerCycles: [],
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -131,8 +131,7 @@ describe("runtime cancellation ownership", () => {
 describe("assurance failure evidence preservation", () => {
   it("preserves schema-valid producer output when critic startup fails", async () => {
     const cwd = temporaryDirectory("phenix-assurance-unavailable");
-    const record = makeHandle();
-    record.producerSpec = { criticRequired: true } as HandleRecord["producerSpec"];
+    const record = makeHandle(true);
     const submittedValue = { report: "completed QA evidence" };
     const run: ChildRun = {
       id: childRunId("child-assurance"),
