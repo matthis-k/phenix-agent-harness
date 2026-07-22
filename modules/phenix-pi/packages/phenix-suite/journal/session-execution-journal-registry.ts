@@ -19,6 +19,7 @@ export interface SessionExecutionContext {
 
 const journals = new Map<string, SessionExecutionJournal>();
 const contextsBySession = new Map<string, SessionExecutionContext>();
+const contextsByChildRun = new Map<string, SessionExecutionContext>();
 
 function sessionDirectoryName(rootSessionId: string): string {
   const prefix = rootSessionId.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 48) || "session";
@@ -50,18 +51,28 @@ export function sessionExecutionJournalForProject(
 }
 
 export function registerSessionExecutionContext(input: SessionExecutionContext): void {
-  contextsBySession.set(input.sessionId, {
+  const context = {
     ...input,
     cwd: findProjectRoot(input.cwd),
-  });
+  };
+  contextsBySession.set(input.sessionId, context);
+  if (input.childRunId) contextsByChildRun.set(input.childRunId, context);
 }
 
 export function unregisterSessionExecutionContext(sessionId: string): void {
+  const context = contextsBySession.get(sessionId);
   contextsBySession.delete(sessionId);
+  if (context?.childRunId) contextsByChildRun.delete(context.childRunId);
 }
 
 export function sessionExecutionContext(sessionId: string): SessionExecutionContext | undefined {
   return contextsBySession.get(sessionId);
+}
+
+export function sessionExecutionContextForChildRun(
+  childRunId: string,
+): SessionExecutionContext | undefined {
+  return contextsByChildRun.get(childRunId);
 }
 
 export function recordSessionExecutionEvent(
@@ -127,4 +138,5 @@ export function recordSessionExecutionTrace(record: Readonly<Record<string, unkn
 export function clearSessionExecutionJournalRegistry(): void {
   journals.clear();
   contextsBySession.clear();
+  contextsByChildRun.clear();
 }
