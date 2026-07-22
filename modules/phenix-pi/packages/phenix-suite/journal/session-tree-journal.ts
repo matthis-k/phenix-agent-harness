@@ -145,14 +145,10 @@ export function generateSessionTreeJournal(input: {
   const filePath = path.join(path.dirname(journalPath), "full.jsonl");
   const temporary = `${filePath}.tmp-${process.pid}`;
   fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(
-    temporary,
-    `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
-    {
-      encoding: "utf8",
-      mode: 0o600,
-    },
-  );
+  fs.writeFileSync(temporary, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
   fs.renameSync(temporary, filePath);
   return {
     filePath,
