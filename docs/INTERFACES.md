@@ -8,10 +8,27 @@ The authority owns objective, node, handle, acceptance, capability, revision, an
 
 Every mutation is idempotent and may include an expected objective revision. Stale revisions fail rather than overwriting newer state.
 
+## Root-session execution journal
+
+Every root Pi session owns one append-only JSONL journal for its complete execution tree:
+
+```text
+.phenix-agent-state/sessions/<root-session-id>-<digest>/events.jsonl
+```
+
+The root runtime is the sole writer. SDK children and RPC workers report observations to the root; they never append to the file directly. The writer assigns one monotonic sequence across the root, children, grandchildren, workflow authority, tools, routing, parent-child messages, lifecycle transitions, settlement, and recovery.
+
+The journal is the canonical chronological record of what happened in that root-session tree. The revisioned execution authority remains the canonical validator and mutator of workflow state: child observations are recorded as claims or runtime events, while only authority-committed events establish objective, node, handle, capability, or acceptance transitions.
+
+Each entry carries root-session, emitting session, actor, and optional parent-session, objective, node, handle, and child-run identities. Nested sessions therefore retain their real ancestry instead of being flattened under the root. `/phenix journal` reports the active journal path.
+
+Payloads are bounded before persistence. Authentication values and secrets are redacted, reasoning content is represented by length and digest, and oversized values are replaced with a digest and bounded preview. Large binary or repository artifacts remain external and should be referenced rather than copied into JSONL.
+
 ## Processes
 
 - **Interactive host:** user interaction and Pi presentation.
 - **Execution authority:** the single writer for objective and acceptance state.
+- **Session journal writer:** the single serialized writer for root and descendant execution history.
 - **Runtime supervisor:** starts, steers, awaits, aborts, and disposes Pi sessions.
 - **Child agent:** performs one capability-bounded assignment and submits a typed result.
 - **Evidence runner:** executes deterministic checks.
@@ -64,4 +81,6 @@ Adapter choice never changes workflow, task, contract, handle, or acceptance sem
 
 ## Events and recovery
 
-Authority events are ordered and cursor-readable. Handles remain meaningful after parent-turn completion, UI disconnection, Pi session replacement, and authority restart. Active-child status is derived from durable non-terminal handles scoped to the current root session, with the process-local manager used only before an objective is initialized.
+Authority events are ordered and cursor-readable. They are also projected into the root-session journal with the resulting objective, node, handle, and active-handle state so failures can be correlated with child and tool activity in one sequence.
+
+Handles remain meaningful after parent-turn completion, UI disconnection, Pi session replacement, and authority restart. Active-child status is derived from durable non-terminal handles scoped to the current root session, with the process-local manager used only before an objective is initialized.
