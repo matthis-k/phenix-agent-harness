@@ -12,13 +12,24 @@ import { assurancePolicyFor } from "./assurance.ts";
 import type { ExecutionAuthority } from "./service.ts";
 import type { HandleRuntimeState, LegalAction } from "./types.ts";
 
+type SessionRuntime = ReturnType<typeof getSessionRuntime>;
+
+function sessionRuntimeFor(ctx: WorkflowSpawnRequest["ctx"]): SessionRuntime | undefined {
+  try {
+    return getSessionRuntime(ctx.sessionManager.getSessionId() ?? "default");
+  } catch {
+    // Injected standalone workflow ports, including tests and non-router clients,
+    // remain valid; authority projection is skipped until routing owns a runtime.
+    return undefined;
+  }
+}
+
 function objectiveIdFor(
   ctx: WorkflowSpawnRequest["ctx"],
   parent?: ParentExecutionContext,
 ): string | undefined {
   if (parent?.kind === "child") return parent.contract.runtime.workflow.instanceId;
-  const runtime = getSessionRuntime(ctx.sessionManager.getSessionId() ?? "default");
-  return runtime.activeWorkflow?.instanceId;
+  return sessionRuntimeFor(ctx)?.activeWorkflow?.instanceId;
 }
 
 function actorIdFor(
@@ -26,7 +37,7 @@ function actorIdFor(
   parent?: ParentExecutionContext,
 ): string {
   if (parent?.kind === "child") return parent.contract.runtime.workflow.actorId;
-  return getSessionRuntime(ctx.sessionManager.getSessionId() ?? "default").activeWorkflow?.actorId ?? "root";
+  return sessionRuntimeFor(ctx)?.activeWorkflow?.actorId ?? "root";
 }
 
 function closeSupersededObjective(input: {
@@ -86,7 +97,9 @@ function ensureObjective(input: {
       difficulty: workflow.difficulty,
       mutation: input.parent.contract.runtime.agent === "phenix.implementer" ? "local" : "none",
       deterministicChecksAvailable: input.parent.contract.verification.commands.length > 0,
-      userRequestedRigor: input.parent.contract.verification.criticRequired ? "high" : "normal",
+      userRequestedRigor: input.parent.contract.verification.criticRequired
+        ? "verified"
+        : "normal",
     });
     input.authority.beginObjective(
       {
@@ -107,9 +120,9 @@ function ensureObjective(input: {
   }
 
   const sessionId = input.ctx.sessionManager.getSessionId() ?? "default";
-  const runtime = getSessionRuntime(sessionId);
-  const active = runtime.activeWorkflow;
-  if (!active) return undefined;
+  const runtime = sessionRuntimeFor(input.ctx);
+  const active = runtime?.activeWorkflow;
+  if (!runtime || !active) return undefined;
   const workflow = readWorkflowRecord(input.ctx.cwd, active.instanceId, active.actorId);
   if (!workflow) return undefined;
   closeSupersededObjective({
@@ -286,10 +299,11 @@ export function createAuthorityBoundWorkflowRuntime(input: {
       });
       if (!objectiveId) return input.workflow.spawn(request);
       const objective = input.authority.inspectObjective(objectiveId);
-      const parentNodeId =
-        request.parent?.kind === "child"
-          ? objective.handles.find((handle) => handle.id === request.parent?.handleId)?.nodeId
-          : objective.objective.rootNodeId;
+      const parentHandleId =
+        request.parent?.kind === "child" ? request.parent.handleId : undefined;
+      const parentNodeId = parentHandleId
+        ? objective.handles.find((handle) => handle.id === parentHandleId)?.nodeId
+        : objective.objective.rootNodeId;
 
       const execution = await input.workflow.spawn(request);
       if (!execution.ok) return execution;
