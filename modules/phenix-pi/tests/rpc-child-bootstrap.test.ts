@@ -70,9 +70,7 @@ describe("isolated RPC child bootstrap", () => {
     );
 
     assert.ok(
-      standalone.includes(
-        "export PHENIX_PI_BINARY=\"${self'.packages.pi-coding-agent}/bin/pi\"",
-      ),
+      standalone.includes("export PHENIX_PI_BINARY=\"${self'.packages.pi-coding-agent}/bin/pi\""),
     );
     assert.ok(
       standalone.includes("exec \"${self'.packages.pi-coding-agent}/bin/pi\""),
