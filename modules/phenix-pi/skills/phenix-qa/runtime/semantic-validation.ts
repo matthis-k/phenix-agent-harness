@@ -5,7 +5,7 @@
  * JSON Schema alone.
  */
 
-import type { QaReport } from "../contracts/contracts.ts";
+import type { QaLevel, QaReport } from "../contracts/contracts.ts";
 
 export interface SemanticValidationIssue {
   readonly path: string;
@@ -16,6 +16,17 @@ export interface SemanticValidationResult {
   readonly ok: boolean;
   readonly issues: readonly SemanticValidationIssue[];
 }
+
+const QA_LEVEL_ORDER: readonly QaLevel[] = [
+  "level-0-correctness",
+  "level-1-metrics",
+  "level-2-readability",
+  "level-3-patterns",
+  "level-4-architecture",
+  "level-5-system",
+  "level-6-operability",
+  "level-7-security",
+];
 
 /**
  * Perform all semantic validations on a QA report.
@@ -52,6 +63,9 @@ export function validateReportSemantics(report: QaReport): SemanticValidationRes
 
   // Validate remediation finding IDs exist
   validateRemediationReferences(report, issues);
+
+  // Validate finding-derived executive summary fields
+  validateExecutiveSummary(report, issues);
 
   return {
     ok: issues.length === 0,
@@ -215,5 +229,26 @@ function validateRemediationReferences(report: QaReport, issues: SemanticValidat
         });
       }
     }
+  }
+}
+
+function validateExecutiveSummary(report: QaReport, issues: SemanticValidationIssue[]): void {
+  const expectedBlocking = report.findings
+    .filter((finding) => finding.blocking)
+    .map((finding) => finding.id);
+  if (JSON.stringify(report.executiveSummary.blockingIssues) !== JSON.stringify(expectedBlocking)) {
+    issues.push({
+      path: "executiveSummary.blockingIssues",
+      message: "Executive-summary blockers do not match blocking findings.",
+    });
+  }
+
+  const levels = new Set(report.findings.map((finding) => finding.level));
+  const expectedHighest = QA_LEVEL_ORDER.findLast((level) => levels.has(level));
+  if (report.executiveSummary.highestRiskLevel !== expectedHighest) {
+    issues.push({
+      path: "executiveSummary.highestRiskLevel",
+      message: `Expected highest risk level ${expectedHighest ?? "none"}.`,
+    });
   }
 }
