@@ -37,8 +37,19 @@ jobs:
       - name: Format and statix
         shell: bash
         run: |
+          set +e
           nix shell nixpkgs#biome nixpkgs#nixfmt nixpkgs#statix --command bash -euo pipefail -c '
             find . -type f -name "*.nix" -not -path "./.git/*" -not -path "./.devenv/*" -not -path "*/node_modules/*" -exec nixfmt --check {} +
             biome ci --config-path biome.json --no-errors-on-unmatched --files-ignore-unknown=true --error-on-warnings biome.json modules
             statix check --ignore ".git/**"
-          '
+          ' > format-check.log 2>&1
+          status=$?
+          cat format-check.log
+          exit "$status"
+      - name: Upload format diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: format-check-log
+          path: format-check.log
+          if-no-files-found: ignore
