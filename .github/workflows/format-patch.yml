@@ -1,0 +1,36 @@
+name: Generate format patch
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    name: Generate formatted sources
+    if: github.head_ref == 'feat/unified-execution-authority'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
+      - name: Apply repository formatter
+        run: devenv tasks run maintenance:fix:format
+      - name: Record changed files
+        run: git diff --name-only > formatted-files.txt
+      - name: Upload formatted source tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: formatted-source-tree
+          path: |
+            formatted-files.txt
+            modules/phenix-pi
+          if-no-files-found: error
