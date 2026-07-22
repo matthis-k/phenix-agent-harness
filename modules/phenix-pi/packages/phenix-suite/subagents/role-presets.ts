@@ -1,21 +1,13 @@
 import type { AgentKind, AgentRole, ModelTier, TaskProfile, ThinkingLevel } from "./agent-types.ts";
 
-// ── Role preset interface ───────────────────────────────────────────────────
-
 export interface RolePreset {
   readonly agentName: `phenix.${AgentKind}` | "phenix.base";
-
   readonly tools: readonly string[];
-  readonly allowedChildren: readonly AgentKind[];
-
+  readonly allowedChildren: readonly AgentRole[];
   readonly profileMinimums: Readonly<Partial<TaskProfile>>;
-
   readonly thinking: Readonly<Record<ModelTier, ThinkingLevel>>;
-
   readonly criticRequired: boolean;
 }
-
-// ── Common read tools (shared by most roles) ────────────────────────────────
 
 const COMMON_READ_TOOLS: readonly string[] = [
   "read",
@@ -41,15 +33,23 @@ const COMMON_READ_TOOLS: readonly string[] = [
   "phenix_workflow",
 ] as const;
 
-// ── Role presets ────────────────────────────────────────────────────────────
-
 const BASE_PRESET: RolePreset = {
   agentName: "phenix.base",
   tools: COMMON_READ_TOOLS,
-  // Workflow definitions decide which of these capabilities are actually
-  // available. QA exposes review specialists; general may also expose an
-  // implementer as a managed escape hatch without granting base edit tools.
-  allowedChildren: ["scout", "implementer", "tester", "architect", "critic"],
+  // The workflow remains the final authority. This ceiling merely permits its
+  // bounded dynamic actions, including one general-purpose base child. Depth,
+  // transition execution counts, contracts, and task-subtree ownership still
+  // prevent unbounded recursion or arbitrary spawning.
+  allowedChildren: [
+    null,
+    "scout",
+    "planner",
+    "architect",
+    "implementer",
+    "tester",
+    "critic",
+    "finalizer",
+  ],
   profileMinimums: { breadth: 2 },
   thinking: {
     low: "low",
@@ -167,8 +167,6 @@ const ROLE_PRESETS: Record<AgentKind, RolePreset> = {
   critic: CRITIC_PRESET,
   finalizer: FINALIZER_PRESET,
 };
-
-// ── Preset lookup ───────────────────────────────────────────────────────────
 
 export function rolePreset(role: AgentRole): RolePreset {
   if (role === null) return BASE_PRESET;
