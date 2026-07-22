@@ -6,6 +6,7 @@ import {
   providerFailureFromPiEvent,
 } from "../packages/phenix-suite/runtime/session-event-normalizer.ts";
 
+// Reproduces the Console Go transcript shape that previously settled as missing completion.
 describe("session event provider failures", () => {
   it("recognizes an assistant message that settled with stopReason error", () => {
     const event = {
