@@ -76,7 +76,11 @@ describe("QA runtime CLI", () => {
         outputDirectory,
         allowExternalOutput: true,
       });
-      assert.ok(result.artifacts.some((artifact) => artifact === path.join(outputDirectory, "qa-report.json")));
+      assert.ok(
+        result.artifacts.some(
+          (artifact) => artifact === path.join(outputDirectory, "qa-report.json"),
+        ),
+      );
     } finally {
       rmSync(cwd, { recursive: true, force: true });
       rmSync(externalRoot, { recursive: true, force: true });
