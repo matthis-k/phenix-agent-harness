@@ -113,9 +113,7 @@ function childParent(input: {
     rootChildRunId: "run-producer",
     modelSet: "mixed",
     maximumDelegationDepth: 0,
-    ...(input.taskAuthoritySource
-      ? { taskAuthoritySource: input.taskAuthoritySource }
-      : {}),
+    ...(input.taskAuthoritySource ? { taskAuthoritySource: input.taskAuthoritySource } : {}),
   } as unknown as ChildParentExecutionContext;
 }
 
