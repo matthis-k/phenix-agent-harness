@@ -4,7 +4,16 @@ import { describe, it } from "node:test";
 import type { AgentKind } from "@matthis-k/phenix-suite/subagents/policy.ts";
 import { rolePreset } from "@matthis-k/phenix-suite/subagents/role-presets.ts";
 
-const BASE_CHILDREN = ["scout", "implementer", "tester", "architect", "critic"] as const;
+const BASE_CHILDREN = [
+  null,
+  "scout",
+  "planner",
+  "architect",
+  "implementer",
+  "tester",
+  "critic",
+  "finalizer",
+] as const;
 
 describe("Role presets", () => {
   it("scout and base have read-only tools", () => {
