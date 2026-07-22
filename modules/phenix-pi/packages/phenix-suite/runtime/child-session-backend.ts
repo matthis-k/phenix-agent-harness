@@ -10,6 +10,10 @@ import type {
   ChildSessionSpec,
   PiRuntimeServices,
 } from "./child-session-types.ts";
+import {
+  createJournaledChildSessionBackend,
+  JournaledChildSessionBackend,
+} from "./journaled-child-session-backend.ts";
 import type { PiRuntimeAdapter } from "./runtime-adapter.ts";
 import { SelectingChildSessionBackend } from "./runtime-adapter.ts";
 import type {
@@ -51,7 +55,10 @@ export function createChildSessionBackend(
     agentDir: options.services.agentDir,
     ...(options.rpc ?? {}),
   });
-  return new TimedChildSessionBackend(new SelectingChildSessionBackend([rpc, sdkAdapter(options)]));
+  const selected = new TimedChildSessionBackend(
+    new SelectingChildSessionBackend([rpc, sdkAdapter(options)]),
+  );
+  return createJournaledChildSessionBackend(selected);
 }
 
 export type {
@@ -128,6 +135,7 @@ export type {
 };
 export {
   buildEffectiveToolNames,
+  JournaledChildSessionBackend,
   ProductionPiSessionFactory,
   RpcChildSessionBackend,
   SdkChildSessionBackend,
