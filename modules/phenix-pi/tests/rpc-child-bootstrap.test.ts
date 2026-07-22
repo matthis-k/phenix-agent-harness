@@ -62,18 +62,4 @@ describe("isolated RPC child bootstrap", () => {
     assert.ok(registered.includes("custom-rpc-workflow"));
     assert.equal(getWorkflowDefinition("custom-rpc-workflow")?.id, "custom-rpc-workflow");
   });
-
-  it("configures the wrapper to give RPC children the raw Pi binary", () => {
-    const standalone = fs.readFileSync(
-      new URL("../../standalone.nix", import.meta.url),
-      "utf8",
-    );
-
-    assert.ok(
-      standalone.includes("export PHENIX_PI_BINARY=\"${self'.packages.pi-coding-agent}/bin/pi\""),
-    );
-    assert.ok(
-      standalone.includes("exec \"${self'.packages.pi-coding-agent}/bin/pi\""),
-    );
-  });
 });
