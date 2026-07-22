@@ -48,7 +48,11 @@ function handle(record: HandleRecord | undefined): SubagentHandleView | undefine
     id: record.id,
     ...(record.subagentId ? { subagentId: record.subagentId } : {}),
     status: record.status,
-    ...(record.value !== undefined ? { value: record.value } : {}),
+    ...(record.value !== undefined
+      ? { value: record.value }
+      : record.candidateValue !== undefined
+        ? { value: record.candidateValue }
+        : {}),
     ...(record.errors ? { errors: [...record.errors] } : {}),
     modelSet: record.modelSet,
     ...(record.producerSpec
