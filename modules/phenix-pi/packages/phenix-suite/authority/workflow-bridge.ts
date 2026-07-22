@@ -29,6 +29,34 @@ function actorIdFor(
   return getSessionRuntime(ctx.sessionManager.getSessionId() ?? "default").activeWorkflow?.actorId ?? "root";
 }
 
+function closeSupersededObjective(input: {
+  readonly authority: ExecutionAuthority;
+  readonly sessionId: string;
+  readonly nextObjectiveId: string;
+  readonly actorId: string;
+}): void {
+  const active = input.authority.activeObjectiveForSession(input.sessionId);
+  if (!active || active.id === input.nextObjectiveId) return;
+  try {
+    input.authority.completeObjective(active.id, {
+      idempotencyKey: `superseded-complete:${active.id}`,
+      actorId: input.actorId,
+      expectedRevision: active.revision,
+    });
+  } catch {
+    const current = input.authority.inspectObjective(active.id).objective;
+    input.authority.discardObjective(
+      active.id,
+      `Recovered stale objective before starting ${input.nextObjectiveId}.`,
+      {
+        idempotencyKey: `superseded-discard:${active.id}`,
+        actorId: input.actorId,
+        expectedRevision: current.revision,
+      },
+    );
+  }
+}
+
 function ensureObjective(input: {
   readonly authority: ExecutionAuthority;
   readonly ctx: WorkflowSpawnRequest["ctx"];
@@ -47,6 +75,12 @@ function ensureObjective(input: {
   if (input.parent?.kind === "child") {
     const workflow = input.parent.contract.runtime.workflow;
     const task = input.parent.contract.assignment.task;
+    closeSupersededObjective({
+      authority: input.authority,
+      sessionId: input.parent.sessionId,
+      nextObjectiveId: objectiveId,
+      actorId: workflow.actorId,
+    });
     const policy = assurancePolicyFor({
       userTask: task,
       difficulty: workflow.difficulty,
@@ -78,6 +112,12 @@ function ensureObjective(input: {
   if (!active) return undefined;
   const workflow = readWorkflowRecord(input.ctx.cwd, active.instanceId, active.actorId);
   if (!workflow) return undefined;
+  closeSupersededObjective({
+    authority: input.authority,
+    sessionId,
+    nextObjectiveId: objectiveId,
+    actorId: workflow.actorId,
+  });
   const task = runtime.currentUserTask ?? "Phenix managed objective";
   const policy = assurancePolicyFor({
     userTask: task,
@@ -151,6 +191,51 @@ function handleResult(record: {
   };
 }
 
+function reconcileTerminalObjective(input: {
+  readonly authority: ExecutionAuthority;
+  readonly objectiveId: string;
+  readonly actorId: string;
+  readonly workflowState: string;
+  readonly workflowRevision: number;
+}): void {
+  const snapshot = input.authority.inspectObjective(input.objectiveId);
+  if (["failed", "cancelled"].includes(input.workflowState)) {
+    input.authority.failObjective(
+      input.objectiveId,
+      `Workflow entered terminal state ${input.workflowState}.`,
+      {
+        idempotencyKey: `workflow-failed:${input.objectiveId}:${input.workflowRevision}`,
+        actorId: input.actorId,
+        expectedRevision: snapshot.objective.revision,
+      },
+    );
+    return;
+  }
+  if (input.workflowState === "abandoned") {
+    input.authority.discardObjective(
+      input.objectiveId,
+      "Workflow was abandoned.",
+      {
+        idempotencyKey: `workflow-abandoned:${input.objectiveId}:${input.workflowRevision}`,
+        actorId: input.actorId,
+        expectedRevision: snapshot.objective.revision,
+      },
+    );
+    return;
+  }
+  if (input.workflowState !== "completed") return;
+  try {
+    input.authority.completeObjective(input.objectiveId, {
+      idempotencyKey: `workflow-completed:${input.objectiveId}:${input.workflowRevision}`,
+      actorId: input.actorId,
+      expectedRevision: snapshot.objective.revision,
+    });
+  } catch {
+    // A workflow may reach its semantic terminal node while a background handle
+    // or task projection is still settling. The next inspection retries safely.
+  }
+}
+
 export function createAuthorityBoundWorkflowRuntime(input: {
   readonly workflow: WorkflowRuntimePort;
   readonly authority: ExecutionAuthority;
@@ -166,11 +251,15 @@ export function createAuthorityBoundWorkflowRuntime(input: {
       ...(args.parent ? { parent: args.parent } : {}),
     });
     if (objectiveId) {
-      input.authority.syncLegalActions(
+      const actorId = actorIdFor(args.ctx, args.parent);
+      input.authority.syncLegalActions(objectiveId, legalActions(snapshot), actorId);
+      reconcileTerminalObjective({
+        authority: input.authority,
         objectiveId,
-        legalActions(snapshot),
-        actorIdFor(args.ctx, args.parent),
-      );
+        actorId,
+        workflowState: snapshot.workflow.currentState,
+        workflowRevision: snapshot.workflow.revision,
+      });
     }
     return snapshot;
   };
