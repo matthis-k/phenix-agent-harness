@@ -51,6 +51,18 @@ describe("RpcJsonlPeer", () => {
     peer.dispose();
   });
 
+  it("rejects already-aborted commands without writing a frame", async () => {
+    const { peer, readWrites } = pair();
+    const controller = new AbortController();
+    controller.abort(new Error("cancelled before send"));
+    await assert.rejects(
+      peer.command({ type: "get_state" }, { signal: controller.signal }),
+      /cancelled before send/,
+    );
+    assert.equal(readWrites(), "");
+    peer.dispose();
+  });
+
   it("rejects pending commands on malformed protocol data", async () => {
     const { fromPi, peer } = pair();
     const result = peer.command({ type: "get_state" });
