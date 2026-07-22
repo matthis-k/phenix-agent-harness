@@ -116,12 +116,7 @@ function nestedFailure(value: unknown): boolean {
   );
 }
 
-const PROVIDER_LIFECYCLE_EVENTS = new Set([
-  "agent_end",
-  "message_end",
-  "turn_end",
-  "response_end",
-]);
+const PROVIDER_LIFECYCLE_EVENTS = new Set(["agent_end", "message_end", "turn_end", "response_end"]);
 
 /** Determine whether a Pi lifecycle event indicates a provider/model failure. */
 export function isFailureEvent(raw: PiAgentEvent): boolean {
