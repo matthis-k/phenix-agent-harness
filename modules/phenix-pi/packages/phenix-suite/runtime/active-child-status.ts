@@ -1,9 +1,12 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { executionAuthorityForProject } from "../authority/registry.ts";
+import type { ExecutionAuthority } from "../authority/service.ts";
 import type { ActiveSubagentCountListener } from "./subagent-manager.ts";
 
 const PHENIX_STATUS_ID = "phenix";
+const TERMINAL_RUNTIME = new Set(["failed", "cancelled", "orphaned"]);
+const TERMINAL_ACCEPTANCE = new Set(["accepted", "rejected", "cancelled"]);
 
 export interface ActiveSubagentCountSource {
   readonly activeCount: number;
@@ -18,6 +21,18 @@ export function activeSubsessionStatusText(activeCount: number): string {
   return `Phenix · ${activeCount} active subsession${activeCount === 1 ? "" : "s"}`;
 }
 
+function activeCountForSession(authority: ExecutionAuthority, rootSessionId: string): number {
+  const objective = authority.activeObjectiveForSession(rootSessionId);
+  if (!objective) return 0;
+  return authority
+    .inspectObjective(objective.id)
+    .handles.filter(
+      (handle) =>
+        !TERMINAL_RUNTIME.has(handle.runtimeState) &&
+        !TERMINAL_ACCEPTANCE.has(handle.acceptanceState),
+    ).length;
+}
+
 function updateStatus(ctx: ExtensionContext, activeCount: number): void {
   try {
     ctx.ui.setStatus(PHENIX_STATUS_ID, activeSubsessionStatusText(activeCount));
@@ -27,11 +42,9 @@ function updateStatus(ctx: ExtensionContext, activeCount: number): void {
 }
 
 /**
- * Keep the root TUI status synchronized with durable authority handles.
- *
- * The legacy manager source remains accepted as an adapter-compatibility input,
- * but it is no longer authoritative. This prevents process-local directory
- * cleanup or parent-turn timing from incorrectly displaying zero active work.
+ * Keep each root TUI status synchronized with durable handles owned by that
+ * root session. Project-global changes trigger recomputation, but sibling
+ * sessions never contribute to the displayed count.
  */
 export function registerActiveChildStatusProjection(input: {
   readonly pi: ExtensionAPI;
@@ -44,13 +57,13 @@ export function registerActiveChildStatusProjection(input: {
     const id = sessionId(ctx);
     contexts.set(id, ctx);
     const authority = executionAuthorityForProject(ctx.cwd);
-    updateStatus(ctx, authority.activeCount);
+    updateStatus(ctx, activeCountForSession(authority, id));
     if (!authorityUnsubscribers.has(id)) {
       authorityUnsubscribers.set(
         id,
-        authority.subscribeActiveCount((activeCount) => {
+        authority.subscribeActiveCount(() => {
           const current = contexts.get(id);
-          if (current) updateStatus(current, activeCount);
+          if (current) updateStatus(current, activeCountForSession(authority, id));
         }),
       );
     }
