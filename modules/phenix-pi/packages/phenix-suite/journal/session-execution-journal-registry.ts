@@ -86,6 +86,16 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function isHighVolumeTrace(
+  boundary: string,
+  record: Readonly<Record<string, unknown>>,
+): boolean {
+  if (boundary === "pi_message_update") return true;
+  const eventType = optionalString(record.eventType);
+  if (!eventType) return false;
+  return eventType.endsWith("_delta");
+}
+
 /** Route an existing stream/workflow trace record into the canonical root journal. */
 export function recordSessionExecutionTrace(record: Readonly<Record<string, unknown>>): void {
   const sessionId = optionalString(record.sessionId);
@@ -94,6 +104,7 @@ export function recordSessionExecutionTrace(record: Readonly<Record<string, unkn
   if (!context) return;
 
   const boundary = optionalString(record.boundary) ?? "event";
+  if (isHighVolumeTrace(boundary, record)) return;
   const actorId = optionalString(record.actorId) ?? context.actorId;
   const rootSessionId = optionalString(record.rootSessionId) ?? context.rootSessionId;
   const parentSessionId = optionalString(record.parentSessionId) ?? context.parentSessionId;
