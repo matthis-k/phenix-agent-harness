@@ -1,3 +1,9 @@
+import {
+  recordSessionExecutionEvent,
+  registerSessionExecutionContext,
+  sessionExecutionContextForChildRun,
+  unregisterSessionExecutionContext,
+} from "../journal/session-execution-journal-registry.ts";
 import type {
   ChildCycleOutcome,
   ChildRun,
@@ -7,11 +13,6 @@ import type {
   ChildSessionSpec,
   PiSessionReference,
 } from "./child-session-types.ts";
-import {
-  recordSessionExecutionEvent,
-  registerSessionExecutionContext,
-  unregisterSessionExecutionContext,
-} from "../journal/session-execution-journal-registry.ts";
 
 function childActorId(spec: ChildSessionSpec): string {
   return spec.contract.runtime.workflow.actorId;
@@ -19,6 +20,11 @@ function childActorId(spec: ChildSessionSpec): string {
 
 function parentActorId(spec: ChildSessionSpec): string {
   return spec.contract.runtime.workflow.parentActorId ?? "root";
+}
+
+function parentSessionId(spec: ChildSessionSpec): string {
+  if (!spec.parentId) return spec.parentContext.sessionId;
+  return sessionExecutionContextForChildRun(spec.parentId)?.sessionId ?? spec.parentContext.sessionId;
 }
 
 function eventPayload(event: ChildSessionEvent): Readonly<Record<string, unknown>> {
@@ -80,9 +86,7 @@ class JournaledChildRun implements ChildRun {
       rootSessionId: this.spec.parentContext.sessionId,
       sessionId: this.delegate.pi.sessionId,
       actorId: childActorId(this.spec),
-      ...(!this.spec.parentId
-        ? { parentSessionId: this.spec.parentContext.sessionId }
-        : {}),
+      parentSessionId: parentSessionId(this.spec),
       childRunId: this.spec.id,
     });
   }
@@ -93,9 +97,7 @@ class JournaledChildRun implements ChildRun {
       rootSessionId: this.spec.parentContext.sessionId,
       sessionId: this.delegate.pi.sessionId,
       actorId: childActorId(this.spec),
-      ...(!this.spec.parentId
-        ? { parentSessionId: this.spec.parentContext.sessionId }
-        : {}),
+      parentSessionId: parentSessionId(this.spec),
       objectiveId: this.spec.contract.runtime.workflow.instanceId,
       handleId: this.spec.handleId,
       childRunId: this.spec.id,
@@ -127,7 +129,7 @@ class JournaledChildRun implements ChildRun {
   async continue(message: string, signal?: AbortSignal): Promise<ChildCycleOutcome> {
     recordSessionExecutionEvent(this.spec.cwd, {
       rootSessionId: this.spec.parentContext.sessionId,
-      sessionId: this.spec.parentContext.sessionId,
+      sessionId: parentSessionId(this.spec),
       actorId: parentActorId(this.spec),
       objectiveId: this.spec.contract.runtime.workflow.instanceId,
       handleId: this.spec.handleId,
@@ -149,7 +151,7 @@ class JournaledChildRun implements ChildRun {
   async abort(reason: string): Promise<void> {
     recordSessionExecutionEvent(this.spec.cwd, {
       rootSessionId: this.spec.parentContext.sessionId,
-      sessionId: this.spec.parentContext.sessionId,
+      sessionId: parentSessionId(this.spec),
       actorId: parentActorId(this.spec),
       objectiveId: this.spec.contract.runtime.workflow.instanceId,
       handleId: this.spec.handleId,
@@ -183,9 +185,10 @@ export class JournaledChildSessionBackend implements ChildSessionBackend {
   }
 
   async start(spec: ChildSessionSpec, signal: AbortSignal): Promise<ChildRun> {
+    const parentSession = parentSessionId(spec);
     recordSessionExecutionEvent(spec.cwd, {
       rootSessionId: spec.parentContext.sessionId,
-      sessionId: spec.parentContext.sessionId,
+      sessionId: parentSession,
       actorId: parentActorId(spec),
       objectiveId: spec.contract.runtime.workflow.instanceId,
       handleId: spec.handleId,
@@ -208,7 +211,7 @@ export class JournaledChildSessionBackend implements ChildSessionBackend {
         rootSessionId: spec.parentContext.sessionId,
         sessionId: run.pi.sessionId,
         actorId: childActorId(spec),
-        ...(!spec.parentId ? { parentSessionId: spec.parentContext.sessionId } : {}),
+        parentSessionId: parentSession,
         objectiveId: spec.contract.runtime.workflow.instanceId,
         handleId: spec.handleId,
         childRunId: spec.id,
@@ -227,7 +230,7 @@ export class JournaledChildSessionBackend implements ChildSessionBackend {
     } catch (error) {
       recordSessionExecutionEvent(spec.cwd, {
         rootSessionId: spec.parentContext.sessionId,
-        sessionId: spec.parentContext.sessionId,
+        sessionId: parentSession,
         actorId: parentActorId(spec),
         objectiveId: spec.contract.runtime.workflow.instanceId,
         handleId: spec.handleId,
