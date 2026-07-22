@@ -1,0 +1,109 @@
+name: Apply QA preflight gate fix
+
+on:
+  push:
+    branches: [fix/qa-preflight-gate]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: fix/qa-preflight-gate
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: Apply deterministic source and regression-test fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          gate = Path("modules/phenix-pi/packages/phenix-suite/composition/workflow-turn-gate.ts")
+          text = gate.read_text()
+          old = '''  const preflightAction = /\\b(?:read|load|inspect|open|locate|parse|check)\\b/i;
+          return (
+            internalResource.test(normalized) &&
+            preflightAction.test(normalized) &&
+            !internalResource.test(normalizedUserTask)
+          );
+          '''
+          new = '''  const preflightAction = /\\b(?:read|load|inspect|open|locate|parse|check)\\b/i;
+          const userWorkAction =
+            /\\b(?:run|execute|perform|complete|inspect|analy[sz]e|investigate|assess|audit|review|test|verify|validate|implement|fix|repair|refactor|maintain)\\b/i;
+          const userWorkTarget =
+            /\\b(?:qa|quality\\s+assurance|repository|repo|codebase|source(?:\\s+tree|\\s+files?)?|tests?|checks?|findings?|implementation|changes?|migration|bugs?|features?|maintenance)\\b/i;
+          const describesUserWork =
+            userWorkAction.test(normalized) && userWorkTarget.test(normalized);
+          return (
+            internalResource.test(normalized) &&
+            preflightAction.test(normalized) &&
+            !describesUserWork &&
+            !internalResource.test(normalizedUserTask)
+          );
+          '''
+          if old not in text:
+              raise SystemExit("expected preflight classifier block not found")
+          gate.write_text(text.replace(old, new, 1))
+
+          tests = Path("modules/phenix-pi/tests/workflow-turn-gate.test.ts")
+          text = tests.read_text()
+          marker = '''  });
+
+            it("blocks non-workflow tools until a required spawn succeeds", () => {
+          '''
+          insertion = '''  });
+
+            it("allows AGENTS.md prerequisites when the delegation contains concrete QA work", () => {
+              const gate = createWorkflowTurnGate();
+              gate.beginTurn({
+                sessionId,
+                turnId,
+                userTask: "Do a full QA for this repo.",
+                requiredAgents: ["base"],
+              });
+
+              assert.equal(
+                gate.authorize(
+                  invocation("phenix_workflow", {
+                    action: "spawn",
+                    agent: "base",
+                    task:
+                      "Run the canonical deterministic QA gate and all available maintenance-defined checks after reading AGENTS.md.",
+                  }),
+                ),
+                undefined,
+              );
+            });
+
+            it("blocks non-workflow tools until a required spawn succeeds", () => {
+          '''
+          if marker not in text:
+              raise SystemExit("expected workflow gate test insertion point not found")
+          tests.write_text(text.replace(marker, insertion, 1))
+          PY
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
+      - name: Apply repository formatter
+        run: |
+          set +e
+          devenv tasks run maintenance:fix:format
+          exit 0
+      - name: Commit fix
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add modules/phenix-pi
+          git commit -m "fix: allow QA tasks with AGENTS preflight"
+          git push origin HEAD:fix/qa-preflight-gate
