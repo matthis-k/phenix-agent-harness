@@ -1,0 +1,76 @@
+name: Apply final lint fixes
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    name: Apply final lint fixes
+    if: github.head_ref == 'feat/unified-execution-authority'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.head_ref }}
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: Apply deterministic source fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          assurance = Path("modules/phenix-pi/packages/phenix-suite/runtime/assurance-rpc-child-session-backend.ts")
+          text = assurance.read_text()
+          constructor = '  constructor(options: RpcChildSessionBackendOptions) {\n    super(options);\n  }\n\n'
+          if constructor not in text:
+              raise SystemExit("expected assurance adapter constructor not found")
+          assurance.write_text(text.replace(constructor, "", 1))
+
+          rpc = Path("modules/phenix-pi/packages/phenix-suite/runtime/rpc-child-session-backend.ts")
+          text = rpc.read_text()
+          removals = [
+              '  private lastProviderFailure: SerializedError | undefined;\n',
+              '        this.lastProviderFailure = failure;\n',
+              '    this.lastProviderFailure = undefined;\n',
+          ]
+          for removal in removals:
+              if removal not in text:
+                  raise SystemExit(f"expected RPC lint target not found: {removal!r}")
+              text = text.replace(removal, "", 1)
+          rpc.write_text(text)
+
+          tasks = Path("modules/phenix-pi/packages/phenix-suite/authority/task-projection.ts")
+          text = tasks.read_text()
+          service_import = 'import type { ExecutionAuthority } from "./service.ts";\n'
+          typed_import = service_import + 'import type { ObjectiveRecord } from "./types.ts";\n'
+          if service_import not in text or '    let objective;\n' not in text:
+              raise SystemExit("expected task projection lint targets not found")
+          text = text.replace(service_import, typed_import, 1)
+          text = text.replace('    let objective;\n', '    let objective: ObjectiveRecord;\n', 1)
+          tasks.write_text(text)
+          PY
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
+      - name: Apply repository formatter
+        run: |
+          set +e
+          devenv tasks run maintenance:fix:format
+          exit 0
+      - name: Commit fixes
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add modules/phenix-pi
+          git commit -m "fix: resolve final authority lint findings"
+          git push origin HEAD:${{ github.head_ref }}
