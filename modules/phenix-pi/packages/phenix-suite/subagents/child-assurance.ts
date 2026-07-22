@@ -31,12 +31,11 @@ export function resolveChildAssurance(input: {
       : input.profile.uncertainty >= 2
         ? "medium"
         : "low";
+  // A role-level critic requirement means independently verified work (A2),
+  // not automatically high-risk work (A3). A3 remains driven by impact,
+  // secrecy, irreversibility, or an explicit high-assurance request.
   const requestedRigor =
-    input.criticRequiredByRole || input.role === "critic"
-      ? "high"
-      : input.role === "tester"
-        ? "verified"
-        : "normal";
+    input.criticRequiredByRole || input.role === "tester" ? "verified" : "normal";
   return assurancePolicyFor({
     userTask: input.task,
     difficulty: difficultyForProfile(input.profile),
