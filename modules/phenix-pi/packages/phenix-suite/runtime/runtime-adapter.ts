@@ -24,10 +24,11 @@ export class SelectingChildSessionBackend implements ChildSessionBackend {
     this.adapters = [...adapters];
   }
 
+  /** The final adapter is the deterministic fallback used for diagnostics. */
   get kind(): ChildSessionBackendKind {
-    const first = this.adapters[0];
-    if (!first) throw new Error("Pi runtime adapter selection is empty.");
-    return first.kind;
+    const fallback = this.adapters.at(-1);
+    if (!fallback) throw new Error("Pi runtime adapter selection is empty.");
+    return fallback.kind;
   }
 
   async start(spec: ChildSessionSpec, signal: AbortSignal): Promise<ChildRun> {
