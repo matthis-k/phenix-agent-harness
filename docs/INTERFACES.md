@@ -47,6 +47,21 @@ Assurance is independent from reasoning difficulty. Security, authentication, se
 
 Preset workflows remain available. The general workflow also exposes bounded ad-hoc base, planner, architect, implementer, tester, critic, and finalizer actions. These actions retain typed contracts, execution limits, depth limits, capability scoping, and acceptance policy; they do not bypass workflow authority.
 
+## Runtime adapters
+
+The supervisor selects from one transport-neutral backend interface:
+
+- **Pi SDK** is the deterministic fallback and handles nested orchestration.
+- **Pi RPC** is selected for high-assurance leaf assignments or by an explicit `PHENIX_CHILD_BACKEND=rpc` override.
+- RPC refuses assignments that retain child-delegation authority.
+- `PHENIX_CHILD_BACKEND=sdk` forces the in-process runtime.
+- RPC workers load only their explicit completion contract, task capability, declared integrations, skills, and tool allowlist.
+- RPC framing is strict LF-delimited JSON with correlated commands and resumable asynchronous events.
+- A cycle settles only on Pi's fully settled event, not merely on an agent-end event.
+- One adapter-independent wall-clock cancellation boundary covers startup, streaming, idle hangs, repair cycles, and disposal.
+
+Adapter choice never changes workflow, task, contract, handle, or acceptance semantics.
+
 ## Events and recovery
 
-Authority events are ordered and cursor-readable. Handles remain meaningful after parent-turn completion, UI disconnection, Pi session replacement, and authority restart. Active-child status is derived from durable non-terminal handles rather than a process-local session directory.
+Authority events are ordered and cursor-readable. Handles remain meaningful after parent-turn completion, UI disconnection, Pi session replacement, and authority restart. Active-child status is derived from durable non-terminal handles scoped to the current root session, with the process-local manager used only before an objective is initialized.
