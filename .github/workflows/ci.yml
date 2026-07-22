@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   checks:
-    name: Direct repository checks
+    name: Final maintenance checks
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -30,26 +30,20 @@ jobs:
             max-jobs = auto
       - uses: cachix/cachix-action@v17
         with: { name: devenv }
-      - name: Runtime tests including packaged RPC smoke
-        run: nix build --no-link --print-build-logs .#phenix-runtime-tests
-      - name: Typecheck
-        run: nix build --no-link --print-build-logs .#phenix-typecheck
-      - name: Format and statix
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
+      - name: Run repository maintenance
         shell: bash
         run: |
           set +e
-          nix shell nixpkgs#biome nixpkgs#nixfmt nixpkgs#statix --command bash -euo pipefail -c '
-            find . -type f -name "*.nix" -not -path "./.git/*" -not -path "./.devenv/*" -not -path "*/node_modules/*" -exec nixfmt --check {} +
-            biome ci --config-path biome.json --no-errors-on-unmatched --files-ignore-unknown=true --error-on-warnings biome.json modules
-            statix check --ignore ".git/**"
-          ' > format-check.log 2>&1
+          devenv test > devenv-test.log 2>&1
           status=$?
-          cat format-check.log
+          tail -n 320 devenv-test.log
           exit "$status"
-      - name: Upload format diagnostics
+      - name: Upload devenv diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: format-check-log
-          path: format-check.log
-          if-no-files-found: ignore
+          name: devenv-test-log
+          path: devenv-test.log
+          if-no-files-found: error
