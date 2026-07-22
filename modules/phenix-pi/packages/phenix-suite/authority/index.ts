@@ -1,6 +1,7 @@
 export { assurancePolicyFor } from "./assurance.ts";
 export type { AssurancePolicy, AssurancePolicyInput } from "./assurance.ts";
-export { createExecutionAuthority, ExecutionAuthority } from "./service.ts";
+export { createExecutionAuthority } from "./factory.ts";
+export { ExecutionAuthority } from "./service.ts";
 export type { ExecutionAuthorityOptions, TaskProjectionInput } from "./service.ts";
 export {
   emptyAuthorityPersistence,
