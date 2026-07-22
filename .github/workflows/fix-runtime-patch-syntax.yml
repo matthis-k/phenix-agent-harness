@@ -1,0 +1,36 @@
+name: Fix staged runtime patch syntax
+
+on:
+  push:
+    branches:
+      - fix/runtime-diagnostics-journal-full
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: fix/runtime-diagnostics-journal-full
+          fetch-depth: 0
+      - name: Repair generated string literal
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('modules/phenix-pi/packages/phenix-suite/runtime/rpc-child-session-backend.ts')
+          text = path.read_text()
+          broken = '.join("\n");'
+          if broken not in text:
+              raise SystemExit('broken join literal not found')
+          path.write_text(text.replace(broken, '.join("\\n");', 1))
+          Path('.github/workflows/fix-runtime-patch-syntax.yml').unlink()
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: preserve RPC process diagnostics"
+          git push origin HEAD:fix/runtime-diagnostics-journal-full
