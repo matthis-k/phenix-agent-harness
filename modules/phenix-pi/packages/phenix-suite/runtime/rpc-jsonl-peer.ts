@@ -81,6 +81,7 @@ export class RpcJsonlPeer {
     options: { readonly signal?: AbortSignal; readonly timeoutMs?: number } = {},
   ): Promise<RpcResponse & { readonly data?: TData }> {
     if (this.terminalError) throw this.terminalError;
+    if (options.signal?.aborted) throw abortError(options.signal);
     const id = typeof command.id === "string" ? command.id : `rpc_${randomUUID()}`;
     if (this.pending.has(id)) throw new RpcProtocolError(`Duplicate RPC command id: ${id}`);
     const timeoutMs = options.timeoutMs ?? 15_000;
@@ -104,11 +105,6 @@ export class RpcJsonlPeer {
           clearTimeout(pending.timeout);
           reject(abortError(signal));
         };
-        if (signal.aborted) {
-          clearTimeout(timeout);
-          reject(abortError(signal));
-          return;
-        }
         signal.addEventListener("abort", onAbort, { once: true });
         detachAbort = () => signal.removeEventListener("abort", onAbort);
       }
