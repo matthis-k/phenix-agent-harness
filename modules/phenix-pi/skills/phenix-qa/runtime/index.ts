@@ -360,9 +360,7 @@ function cliScope(args: readonly string[]): ReviewScope {
         kind,
         description,
         ...(cliOption(args, "--base") ? { baseRevision: cliOption(args, "--base") } : {}),
-        ...(cliOption(args, "--target")
-          ? { targetRevision: cliOption(args, "--target") }
-          : {}),
+        ...(cliOption(args, "--target") ? { targetRevision: cliOption(args, "--target") } : {}),
       };
     case "files": {
       const files = cliOption(args, "--files");
