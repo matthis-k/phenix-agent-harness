@@ -3,6 +3,11 @@
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getSessionRuntime } from "@matthis-k/phenix-routing/state.ts";
+import {
+  streamTraceHash,
+  streamTracePreview,
+  writeStreamTrace,
+} from "@matthis-k/phenix-routing/stream-trace.ts";
 import { authorizePhenixRootCapability, phenixRootModelScope } from "../composition/model-scope.ts";
 import { createWorkflowApiTools } from "../runtime/workflow-api-tools.ts";
 import { subscribeManagedBackgroundSettlements } from "./background-settlement-channel.ts";
@@ -47,6 +52,48 @@ function fail(message: string, details?: Record<string, unknown>): never {
   throw error;
 }
 
+function serialized(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function rootToolTraceFields(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  const inputValue = serialized(input);
+  const action = typeof input.action === "string" ? input.action : undefined;
+  const agent = typeof input.agent === "string" ? input.agent : undefined;
+  const handleId = typeof input.id === "string" ? input.id : undefined;
+  const task = typeof input.task === "string" ? input.task : undefined;
+  const message = typeof input.message === "string" ? input.message : undefined;
+  return {
+    toolName,
+    inputLength: inputValue.length,
+    inputSha256: streamTraceHash(inputValue),
+    ...(action ? { action } : {}),
+    ...(agent ? { agent } : {}),
+    ...(handleId ? { handleId } : {}),
+    ...(task
+      ? {
+          taskLength: task.length,
+          taskSha256: streamTraceHash(task),
+          taskPreview: streamTracePreview(task),
+        }
+      : {}),
+    ...(message
+      ? {
+          messageLength: message.length,
+          messageSha256: streamTraceHash(message),
+          messagePreview: streamTracePreview(message),
+        }
+      : {}),
+  };
+}
+
 export default async function phenixSubagents(
   pi: ExtensionAPI,
   options: PhenixSubagentsOptions,
@@ -60,6 +107,15 @@ export default async function phenixSubagents(
 
   const unsubscribeBackgroundSettlements = subscribeManagedBackgroundSettlements(
     ({ sessionId: settledSessionId, record }) => {
+      writeStreamTrace({
+        boundary: "root_background_settlement",
+        sessionId: settledSessionId,
+        actorId: "runtime-supervisor",
+        handleId: record.id,
+        childRunId: record.subagentId,
+        status: record.status,
+        errorCount: record.errors?.length ?? 0,
+      });
       if (activeSessionId !== settledSessionId) return;
 
       const details = {
@@ -91,8 +147,23 @@ export default async function phenixSubagents(
   pi.on("tool_call", async (event, ctx) => {
     if (!phenixRootModelScope.includes(ctx.model)) return;
     const id = effectiveSessionId(ctx);
+    writeStreamTrace({
+      boundary: "root_tool_call",
+      sessionId: id,
+      actorId: getSessionRuntime(id).activeWorkflow?.actorId ?? "root",
+      turnId: getSessionRuntime(id).currentTurnId,
+      ...rootToolTraceFields(event.toolName, event.input),
+    });
 
     if (event.toolName === "subagent") {
+      writeStreamTrace({
+        boundary: "root_tool_blocked",
+        sessionId: id,
+        actorId: getSessionRuntime(id).activeWorkflow?.actorId ?? "root",
+        turnId: getSessionRuntime(id).currentTurnId,
+        toolName: event.toolName,
+        reasonCode: "UNMANAGED_DELEGATION",
+      });
       return {
         block: true,
         reason:
@@ -106,16 +177,52 @@ export default async function phenixSubagents(
       toolName: event.toolName,
       input: event.input,
     });
+    if (denial !== undefined) {
+      writeStreamTrace({
+        boundary: "root_tool_blocked",
+        sessionId: id,
+        actorId: getSessionRuntime(id).activeWorkflow?.actorId ?? "root",
+        turnId: getSessionRuntime(id).currentTurnId,
+        toolName: event.toolName,
+        reasonLength: denial.length,
+        reasonSha256: streamTraceHash(denial),
+        reasonPreview: streamTracePreview(denial),
+      });
+    }
     return denial === undefined ? undefined : { block: true, reason: denial };
   });
 
   pi.on("tool_result", async (event, ctx) => {
     if (!phenixRootModelScope.includes(ctx.model)) return;
+    const id = effectiveSessionId(ctx);
+    const rawDetails = (event as { readonly details?: unknown }).details;
+    const details =
+      typeof rawDetails === "object" && rawDetails !== null && !Array.isArray(rawDetails)
+        ? (rawDetails as Readonly<Record<string, unknown>>)
+        : {};
+    const resultHandleId =
+      typeof details.handleId === "string"
+        ? details.handleId
+        : typeof details.id === "string"
+          ? details.id
+          : undefined;
+    const handleStatus = typeof details.status === "string" ? details.status : undefined;
+    writeStreamTrace({
+      boundary: "root_tool_result",
+      sessionId: id,
+      actorId: getSessionRuntime(id).activeWorkflow?.actorId ?? "root",
+      turnId: getSessionRuntime(id).currentTurnId,
+      toolName: event.toolName,
+      isError: event.isError,
+      ...(resultHandleId ? { handleId: resultHandleId } : {}),
+      ...(handleStatus ? { status: handleStatus } : {}),
+      detailKeys: Object.keys(details).sort(),
+    });
+
     const isWorkflowSpawn = event.toolName === "phenix_workflow" && event.input.action === "spawn";
     const isHandleLifecycle = event.toolName === "phenix_agent";
     if (!isWorkflowSpawn && !isHandleLifecycle) return;
 
-    const id = effectiveSessionId(ctx);
     let isError = event.isError;
     let authorityResolved = false;
     let currentState: string | undefined;
@@ -130,19 +237,6 @@ export default async function phenixSubagents(
     } catch {
       if (!isError) isError = true;
     }
-
-    const rawDetails = (event as { readonly details?: unknown }).details;
-    const details =
-      typeof rawDetails === "object" && rawDetails !== null && !Array.isArray(rawDetails)
-        ? (rawDetails as Readonly<Record<string, unknown>>)
-        : {};
-    const resultHandleId =
-      typeof details.handleId === "string"
-        ? details.handleId
-        : typeof details.id === "string"
-          ? details.id
-          : undefined;
-    const handleStatus = typeof details.status === "string" ? details.status : undefined;
 
     options.workflowGate.observe({
       sessionId: id,
