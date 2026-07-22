@@ -8,9 +8,7 @@ import {
   clearWorkflowDefinitions,
   getWorkflowDefinition,
 } from "@matthis-k/phenix-flow/workflow-definitions.ts";
-import {
-  registerRpcChildWorkflowDefinitions,
-} from "@matthis-k/phenix-suite/runtime/rpc-child-extension.ts";
+import { registerRpcChildWorkflowDefinitions } from "@matthis-k/phenix-suite/runtime/rpc-child-extension.ts";
 
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 const temporaryDirectories: string[] = [];
