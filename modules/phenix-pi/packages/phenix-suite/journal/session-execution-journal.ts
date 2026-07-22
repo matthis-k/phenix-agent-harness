@@ -1,5 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  statSync,
+} from "node:fs";
 import path from "node:path";
 
 const JOURNAL_SCHEMA_VERSION = 1;
@@ -124,11 +133,26 @@ function readEvents(filePath: string): readonly SessionExecutionEvent[] {
         events.push(event);
       }
     } catch {
-      // A torn trailing record is ignored. New events continue from the last
-      // valid durable sequence rather than making the entire journal unreadable.
+      // A torn record is ignored. New events continue from the last valid
+      // durable sequence rather than making the entire journal unreadable.
     }
   }
   return events.sort((left, right) => left.sequence - right.sequence);
+}
+
+function needsRecordSeparator(filePath: string): boolean {
+  if (!existsSync(filePath)) return false;
+  const size = statSync(filePath).size;
+  if (size === 0) return false;
+
+  const descriptor = openSync(filePath, "r");
+  try {
+    const last = Buffer.allocUnsafe(1);
+    readSync(descriptor, last, 0, 1, size - 1);
+    return last[0] !== 0x0a;
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function requireIdentifier(name: string, value: string): void {
@@ -148,12 +172,14 @@ export class SessionExecutionJournal {
   private readonly createEventId: () => string;
   private readonly listeners = new Set<SessionExecutionJournalListener>();
   private sequenceValue: number;
+  private prependRecordSeparator: boolean;
 
   constructor(options: SessionExecutionJournalOptions) {
     this.filePath = path.resolve(options.filePath);
     this.now = options.now ?? (() => new Date().toISOString());
     this.createEventId = options.createEventId ?? (() => `journal_event_${randomUUID()}`);
     this.sequenceValue = readEvents(this.filePath).at(-1)?.sequence ?? 0;
+    this.prependRecordSeparator = needsRecordSeparator(this.filePath);
   }
 
   get sequence(): number {
@@ -185,10 +211,12 @@ export class SessionExecutionJournal {
     };
 
     mkdirSync(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
-    appendFileSync(this.filePath, `${JSON.stringify(event)}\n`, {
+    const prefix = this.prependRecordSeparator ? "\n" : "";
+    appendFileSync(this.filePath, `${prefix}${JSON.stringify(event)}\n`, {
       encoding: "utf8",
       mode: 0o600,
     });
+    this.prependRecordSeparator = false;
     this.sequenceValue = event.sequence;
 
     for (const listener of [...this.listeners]) {
