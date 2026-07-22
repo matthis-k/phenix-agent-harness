@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -20,47 +20,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-        with:
-          fetch-depth: 0
-          ref: ${{ github.head_ref || github.ref_name }}
-      - name: Apply preserved producer evidence payload
-        if: github.event_name == 'pull_request' && github.head_ref == 'fix/runtime-diagnostics-journal-full'
-        shell: bash
-        run: |
-          if [[ -f .github/workflows/patch-candidate-details.yml ]]; then
-            python3 <<'PY'
-          from pathlib import Path
-          path = Path('modules/phenix-pi/packages/phenix-suite/subagents/workflow-delegator.ts')
-          text = path.read_text()
-          old = '''            handleId: execution.record.id,
-            status: execution.record.status,
-            errors: execution.record.errors,
-'''
-          new = '''            handleId: execution.record.id,
-            status: execution.record.status,
-            errors: execution.record.errors,
-            ...(execution.record.candidateValue !== undefined
-              ? { candidateValue: execution.record.candidateValue }
-              : {}),
-            ...(execution.record.verification
-              ? { verification: execution.record.verification }
-              : {}),
-            ...(execution.record.assuranceFailure
-              ? { assuranceFailure: execution.record.assuranceFailure }
-              : {}),
-'''
-          if text.count(old) != 1:
-              raise SystemExit('expected workflow failure details block exactly once')
-          path.write_text(text.replace(old, new))
-          Path('.github/workflows/patch-candidate-details.yml').unlink()
-          Path('.candidate-details-trigger').unlink(missing_ok=True)
-          PY
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -A
-            git commit -m "fix: return preserved producer evidence to parent"
-            git push origin HEAD:fix/runtime-diagnostics-journal-full
-          fi
+        with: { fetch-depth: 0 }
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
