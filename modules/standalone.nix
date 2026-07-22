@@ -99,6 +99,17 @@
             test -x ${pkgs.mcp-nixos}/bin/mcp-nixos
             touch "$out"
           '';
+
+      rpcChildBinarySmoke =
+        pkgs.runCommand "phenix-rpc-child-binary-smoke"
+          {
+            nativeBuildInputs = [ pkgs.gnugrep ];
+          }
+          ''
+            grep -F 'export PHENIX_PI_BINARY="${self'.packages.pi-coding-agent}/bin/pi"' \
+              ${wrappedPi}/bin/pi
+            touch "$out"
+          '';
     in
     {
       packages = {
@@ -109,6 +120,7 @@
       checks = {
         mcp-defaults = mcpDefaultsSmoke;
         pi-wrapper = wrappedPi;
+        rpc-child-binary = rpcChildBinarySmoke;
       };
     };
 }
