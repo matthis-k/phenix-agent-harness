@@ -11,11 +11,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
  * Resolve and create an artifact directory relative to the reviewed repository.
  * External paths require an explicit trusted caller override.
  */
-export function ensureArtifactDir(
-  cwd: string,
-  dir: string,
-  allowExternal = false,
-): string {
+export function ensureArtifactDir(cwd: string, dir: string, allowExternal = false): string {
   const root = resolve(cwd);
   const resolved = isAbsolute(dir) ? resolve(dir) : resolve(root, dir);
   const relation = relative(root, resolved);
