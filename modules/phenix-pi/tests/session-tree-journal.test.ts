@@ -19,17 +19,25 @@ describe("merged session-tree journal", () => {
     const childFile = path.join(cwd, "child.jsonl");
     fs.writeFileSync(
       rootFile,
-      [
-        JSON.stringify({ type: "session", id: "root-session", timestamp: "2026-01-01T00:00:00.000Z" }),
+      `${[
+        JSON.stringify({
+          type: "session",
+          id: "root-session",
+          timestamp: "2026-01-01T00:00:00.000Z",
+        }),
         JSON.stringify({ type: "message", timestamp: "2026-01-01T00:00:02.000Z" }),
-      ].join("\n") + "\n",
+      ].join("\n")}\n`,
     );
     fs.writeFileSync(
       childFile,
-      [
-        JSON.stringify({ type: "session", id: "child-session", timestamp: "2026-01-01T00:00:01.000Z" }),
+      `${[
+        JSON.stringify({
+          type: "session",
+          id: "child-session",
+          timestamp: "2026-01-01T00:00:01.000Z",
+        }),
         JSON.stringify({ type: "message", timestamp: "2026-01-01T00:00:03.000Z" }),
-      ].join("\n") + "\n",
+      ].join("\n")}\n`,
     );
     recordSessionExecutionEvent(cwd, {
       rootSessionId: "root-session",
