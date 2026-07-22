@@ -1,1 +1,0 @@
-Canonical managed-execution state lives in this package. Do not add independent workflow, task, handle, or TUI lifecycle stores.
