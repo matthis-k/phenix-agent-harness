@@ -22,6 +22,7 @@ import type { PiRuntimeAdapter } from "./runtime-adapter.ts";
 import { SelectingChildSessionBackend } from "./runtime-adapter.ts";
 import type { RpcChildSessionBackendOptions } from "./rpc-child-session-backend.ts";
 import { RpcChildSessionBackend } from "./rpc-child-session-backend.ts";
+import { TimedChildSessionBackend } from "./timed-child-session-backend.ts";
 import { WorkflowScopedPiSessionFactory } from "./workflow-session-factory.ts";
 
 export interface ChildSessionBackendOptions extends SdkChildSessionBackendOptions {
@@ -48,7 +49,9 @@ export function createChildSessionBackend(
     agentDir: options.services.agentDir,
     ...(options.rpc ?? {}),
   });
-  return new SelectingChildSessionBackend([rpc, sdkAdapter(options)]);
+  return new TimedChildSessionBackend(
+    new SelectingChildSessionBackend([rpc, sdkAdapter(options)]),
+  );
 }
 
 export type {
@@ -128,4 +131,5 @@ export {
   ProductionPiSessionFactory,
   RpcChildSessionBackend,
   SdkChildSessionBackend,
+  TimedChildSessionBackend,
 };
