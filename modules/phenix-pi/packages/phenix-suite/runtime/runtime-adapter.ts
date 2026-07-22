@@ -17,12 +17,17 @@ export interface PiRuntimeAdapter extends ChildSessionBackend {
 }
 
 export class SelectingChildSessionBackend implements ChildSessionBackend {
-  readonly kind = "selecting" as ChildSessionBackendKind;
   private readonly adapters: readonly PiRuntimeAdapter[];
 
   constructor(adapters: readonly PiRuntimeAdapter[]) {
     if (adapters.length === 0) throw new Error("At least one Pi runtime adapter is required.");
     this.adapters = [...adapters];
+  }
+
+  get kind(): ChildSessionBackendKind {
+    const first = this.adapters[0];
+    if (!first) throw new Error("Pi runtime adapter selection is empty.");
+    return first.kind;
   }
 
   async start(spec: ChildSessionSpec, signal: AbortSignal): Promise<ChildRun> {
