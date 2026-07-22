@@ -1,11 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-
+import type { SessionExecutionEvent } from "./session-execution-journal.ts";
 import {
   sessionExecutionJournalForProject,
   sessionExecutionJournalPath,
 } from "./session-execution-journal-registry.ts";
-import type { SessionExecutionEvent } from "./session-execution-journal.ts";
 
 interface JsonlRow {
   readonly line: number;
@@ -84,10 +83,13 @@ function sessionFilesFromEvents(
   if (rootSessionFile) files.add(path.resolve(rootSessionFile));
   for (const event of events) {
     const payload = event.payload;
-    const direct = payload && typeof payload.sessionFile === "string" ? payload.sessionFile : undefined;
+    const direct =
+      payload && typeof payload.sessionFile === "string" ? payload.sessionFile : undefined;
     const pi = payload?.pi;
     const nested =
-      typeof pi === "object" && pi !== null && typeof (pi as Record<string, unknown>).sessionFile === "string"
+      typeof pi === "object" &&
+      pi !== null &&
+      typeof (pi as Record<string, unknown>).sessionFile === "string"
         ? ((pi as Record<string, unknown>).sessionFile as string)
         : undefined;
     if (direct) files.add(path.resolve(direct));
@@ -132,20 +134,25 @@ export function generateSessionTreeJournal(input: {
     }
   }
 
-  records.sort((left, right) =>
-    left.timestamp.localeCompare(right.timestamp) ||
-    left.source.kind.localeCompare(right.source.kind) ||
-    left.source.path.localeCompare(right.source.path) ||
-    left.source.line - right.source.line,
+  records.sort(
+    (left, right) =>
+      left.timestamp.localeCompare(right.timestamp) ||
+      left.source.kind.localeCompare(right.source.kind) ||
+      left.source.path.localeCompare(right.source.path) ||
+      left.source.line - right.source.line,
   );
 
   const filePath = path.join(path.dirname(journalPath), "full.jsonl");
   const temporary = `${filePath}.tmp-${process.pid}`;
   fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(temporary, records.map((record) => JSON.stringify(record)).join("\n") + "\n", {
-    encoding: "utf8",
-    mode: 0o600,
-  });
+  fs.writeFileSync(
+    temporary,
+    `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+    {
+      encoding: "utf8",
+      mode: 0o600,
+    },
+  );
   fs.renameSync(temporary, filePath);
   return {
     filePath,
