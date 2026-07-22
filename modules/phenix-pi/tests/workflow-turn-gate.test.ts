@@ -79,6 +79,27 @@ describe("workflow turn gate", () => {
     );
   });
 
+  it("allows AGENTS.md prerequisites when the delegation contains concrete QA work", () => {
+    const gate = createWorkflowTurnGate();
+    gate.beginTurn({
+      sessionId,
+      turnId,
+      userTask: "Do a full QA for this repo.",
+      requiredAgents: ["base"],
+    });
+
+    assert.equal(
+      gate.authorize(
+        invocation("phenix_workflow", {
+          action: "spawn",
+          agent: "base",
+          task: "Run the canonical deterministic QA gate and all available maintenance-defined checks after reading AGENTS.md.",
+        }),
+      ),
+      undefined,
+    );
+  });
+
   it("blocks non-workflow tools until a required spawn succeeds", () => {
     const records: Record<string, unknown>[] = [];
     const gate = createWorkflowTurnGate({ trace: (record) => records.push({ ...record }) });
