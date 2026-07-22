@@ -244,7 +244,11 @@ export function isChildRuntimeErrorCode(value: unknown): value is ChildRuntimeEr
 
 export class ChildRuntimeError extends Error {
   readonly code: ChildRuntimeErrorCode;
-  constructor(code: ChildRuntimeErrorCode, message: string, options?: { readonly cause?: unknown }) {
+  constructor(
+    code: ChildRuntimeErrorCode,
+    message: string,
+    options?: { readonly cause?: unknown },
+  ) {
     super(message, options);
     this.name = "ChildRuntimeError";
     this.code = code;

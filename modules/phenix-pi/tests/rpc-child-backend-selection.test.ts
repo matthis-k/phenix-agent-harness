@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-
-import type { ChildSessionSpec } from "../packages/phenix-suite/runtime/child-session-types.ts";
 import { RpcChildSessionBackend } from "../packages/phenix-suite/runtime/assurance-rpc-child-session-backend.ts";
+import type { ChildSessionSpec } from "../packages/phenix-suite/runtime/child-session-types.ts";
 
 const originalPreference = process.env.PHENIX_CHILD_BACKEND;
 afterEach(() => {
@@ -59,19 +58,14 @@ describe("RpcChildSessionBackend selection", () => {
   it("automatically isolates a leaf with explicit isolation policy", () => {
     delete process.env.PHENIX_CHILD_BACKEND;
     const backend = new RpcChildSessionBackend({ agentDir: "/tmp/agent" });
-    assert.equal(
-      backend.supports(spec({ remainingDepth: 0, isolationRequired: true })),
-      true,
-    );
+    assert.equal(backend.supports(spec({ remainingDepth: 0, isolationRequired: true })), true);
   });
 
   it("does not infer isolation from critic presence", () => {
     delete process.env.PHENIX_CHILD_BACKEND;
     const backend = new RpcChildSessionBackend({ agentDir: "/tmp/agent" });
     assert.equal(
-      backend.supports(
-        spec({ remainingDepth: 0, criticRequired: true, isolationRequired: false }),
-      ),
+      backend.supports(spec({ remainingDepth: 0, criticRequired: true, isolationRequired: false })),
       false,
     );
   });
@@ -79,9 +73,6 @@ describe("RpcChildSessionBackend selection", () => {
   it("honors an explicit SDK override", () => {
     process.env.PHENIX_CHILD_BACKEND = "sdk";
     const backend = new RpcChildSessionBackend({ agentDir: "/tmp/agent" });
-    assert.equal(
-      backend.supports(spec({ remainingDepth: 0, isolationRequired: true })),
-      false,
-    );
+    assert.equal(backend.supports(spec({ remainingDepth: 0, isolationRequired: true })), false);
   });
 });

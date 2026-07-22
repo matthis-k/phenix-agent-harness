@@ -2,9 +2,7 @@ import { assurancePolicyFor } from "../authority/assurance.ts";
 import type { AssuranceLevel } from "../authority/types.ts";
 import type { ContractArtifact } from "../subagents/contract.ts";
 
-function mutationForRole(
-  role: ContractArtifact["identity"]["role"],
-): "none" | "local" | "broad" {
+function mutationForRole(role: ContractArtifact["identity"]["role"]): "none" | "local" | "broad" {
   if (role === "implementer") return "local";
   if (role === "finalizer") return "broad";
   return "none";
@@ -27,9 +25,7 @@ export interface ContractAssuranceProjection {
  * selection is stable across process boundaries and does not depend on critic
  * presence, provider choice, or a process-local registry.
  */
-export function assuranceForContract(
-  contract: ContractArtifact,
-): ContractAssuranceProjection {
+export function assuranceForContract(contract: ContractArtifact): ContractAssuranceProjection {
   const role = contract.identity.role;
   const policy = assurancePolicyFor({
     userTask: contract.assignment.task,

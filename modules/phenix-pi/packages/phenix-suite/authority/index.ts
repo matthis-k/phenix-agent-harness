@@ -1,14 +1,14 @@
-export { assurancePolicyFor } from "./assurance.ts";
 export type { AssurancePolicy, AssurancePolicyInput } from "./assurance.ts";
+export { assurancePolicyFor } from "./assurance.ts";
 export { createExecutionAuthority } from "./factory.ts";
-export { ExecutionAuthority } from "./service.ts";
 export type { ExecutionAuthorityOptions, TaskProjectionInput } from "./service.ts";
+export { ExecutionAuthority } from "./service.ts";
+export type { ExecutionAuthorityStore } from "./store.ts";
 export {
   emptyAuthorityPersistence,
   FileExecutionAuthorityStore,
   InMemoryExecutionAuthorityStore,
 } from "./store.ts";
-export type { ExecutionAuthorityStore } from "./store.ts";
 export type {
   AcceptanceDecision,
   AssuranceLevel,

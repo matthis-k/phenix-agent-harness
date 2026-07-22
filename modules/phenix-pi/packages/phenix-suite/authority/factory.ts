@@ -4,10 +4,7 @@ import type { AuthorityMutation, ObjectiveRecord } from "./types.ts";
 class RevisionStrictExecutionAuthority extends ExecutionAuthority {
   override resumeObjective(objectiveId: string, mutation: AuthorityMutation): ObjectiveRecord {
     const current = this.inspectObjective(objectiveId).objective;
-    if (
-      mutation.expectedRevision !== undefined &&
-      mutation.expectedRevision !== current.revision
-    ) {
+    if (mutation.expectedRevision !== undefined && mutation.expectedRevision !== current.revision) {
       throw new Error(
         `Stale objective revision for ${objectiveId}: expected ${mutation.expectedRevision}, current ${current.revision}.`,
       );
@@ -20,9 +17,7 @@ function mutationFromArguments(args: readonly unknown[]): AuthorityMutation | un
   const candidate = args.at(-1);
   if (typeof candidate !== "object" || candidate === null) return undefined;
   const record = candidate as Record<string, unknown>;
-  return typeof record.idempotencyKey === "string"
-    ? (candidate as AuthorityMutation)
-    : undefined;
+  return typeof record.idempotencyKey === "string" ? (candidate as AuthorityMutation) : undefined;
 }
 
 function assertGlobalIdempotencyOwnership(
@@ -43,9 +38,7 @@ function assertGlobalIdempotencyOwnership(
 }
 
 /** Public factory applies lifecycle invariants around the storage-oriented core. */
-export function createExecutionAuthority(
-  options: ExecutionAuthorityOptions,
-): ExecutionAuthority {
+export function createExecutionAuthority(options: ExecutionAuthorityOptions): ExecutionAuthority {
   const authority = new RevisionStrictExecutionAuthority(options);
   return new Proxy(authority, {
     get(target, property, receiver) {

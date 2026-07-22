@@ -1,9 +1,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createTaskClientTools } from "@matthis-k/phenix-tasks/pi-tools.ts";
 import { taskClientFromEnvironment } from "@matthis-k/phenix-tasks/transport.ts";
-
-import { FileContractStore } from "../subagents/contract-store.ts";
 import type { ContractId } from "../subagents/contract.ts";
+import { FileContractStore } from "../subagents/contract-store.ts";
 import { resolveChildExtensionFactories } from "./child-session-resources.ts";
 import { createCompletionTool } from "./completion-tool.ts";
 import { ContractSubmissionChannelImpl } from "./contract-channel.ts";

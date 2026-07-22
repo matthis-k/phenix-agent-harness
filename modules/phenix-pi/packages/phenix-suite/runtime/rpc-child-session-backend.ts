@@ -3,12 +3,9 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
+import { findProjectRoot } from "../subagents/handle-store.ts";
 import { BudgetGuard, budgetViolationToError } from "./budget-guard.ts";
-import {
-  inferChildIntegrationRefs,
-  resolveChildSkillPaths,
-} from "./child-session-resources.ts";
+import { inferChildIntegrationRefs, resolveChildSkillPaths } from "./child-session-resources.ts";
 import type {
   ChildCycleOutcome,
   ChildRun,
@@ -20,13 +17,12 @@ import type {
   SerializedError,
 } from "./child-session-types.ts";
 import { ChildRuntimeError, serializeError } from "./child-session-types.ts";
-import { RpcJsonlPeer, type RpcEvent } from "./rpc-jsonl-peer.ts";
+import { type RpcEvent, RpcJsonlPeer } from "./rpc-jsonl-peer.ts";
 import {
   isFailureEvent,
   normalizePiEvent,
   providerFailureFromPiEvent,
 } from "./session-event-normalizer.ts";
-import { findProjectRoot } from "../subagents/handle-store.ts";
 
 interface TaskBoundChildSessionSpec extends ChildSessionSpec {
   readonly runtimeEnvironment?: Readonly<Record<string, string>>;
@@ -199,9 +195,7 @@ class RpcChildRun implements ChildRun {
     });
     this.unsubscribePeer = peer.subscribe(this.handleRpcEvent);
     this.unsubscribePeerErrors = peer.subscribeErrors((error) => {
-      void this.fail(
-        new ChildRuntimeError("ORPHANED_SESSION", error.message, { cause: error }),
-      );
+      void this.fail(new ChildRuntimeError("ORPHANED_SESSION", error.message, { cause: error }));
     });
     process.stderr.setEncoding("utf8");
     process.stderr.on("data", (chunk) => {
@@ -239,7 +233,10 @@ class RpcChildRun implements ChildRun {
     );
     const data = state.data;
     if (!data || typeof data.sessionId !== "string") {
-      throw new ChildRuntimeError("SESSION_START_FAILED", "Pi RPC get_state omitted session identity.");
+      throw new ChildRuntimeError(
+        "SESSION_START_FAILED",
+        "Pi RPC get_state omitted session identity.",
+      );
     }
     this.pi = {
       sessionId: data.sessionId,
@@ -370,7 +367,8 @@ class RpcChildRun implements ChildRun {
       }
     }
     if (raw.type === "extension_error") {
-      const message = textFromContent(raw.error) ?? textFromContent(raw.message) ?? "Pi extension failed.";
+      const message =
+        textFromContent(raw.error) ?? textFromContent(raw.message) ?? "Pi extension failed.";
       const failure = { code: "PROVIDER_FAILED", message } satisfies SerializedError;
       if (this.currentCycle) this.currentCycle.error = failure;
     }

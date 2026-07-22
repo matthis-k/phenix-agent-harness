@@ -80,7 +80,10 @@ export function registerActiveChildStatusProjection(input: {
     authorities.set(id, authority);
     refresh(id);
     if (!authorityUnsubscribers.has(id)) {
-      authorityUnsubscribers.set(id, authority.subscribeActiveCount(() => refresh(id)));
+      authorityUnsubscribers.set(
+        id,
+        authority.subscribeActiveCount(() => refresh(id)),
+      );
     }
   };
 

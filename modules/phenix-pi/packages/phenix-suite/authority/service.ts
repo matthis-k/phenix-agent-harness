@@ -2,21 +2,21 @@ import { randomUUID } from "node:crypto";
 
 import type { TaskStatus } from "@matthis-k/phenix-tasks/facade.ts";
 import type { ExecutionAuthorityStore } from "./store.ts";
-import {
-  type AcceptanceDecision,
-  type AuthorityMutation,
-  type BeginObjectiveInput,
-  type CreateNodeInput,
-  type ExecutionAuthorityEvent,
-  type ExecutionAuthorityEventType,
-  type ExecutionAuthorityPersistence,
-  type ExecutionAuthoritySnapshot,
-  type ExecutionHandleRecord,
-  type ExecutionNodeRecord,
-  type LegalAction,
-  type ObjectiveRecord,
-  type RegisterHandleInput,
-  type RuntimeHandleUpdate,
+import type {
+  AcceptanceDecision,
+  AuthorityMutation,
+  BeginObjectiveInput,
+  CreateNodeInput,
+  ExecutionAuthorityEvent,
+  ExecutionAuthorityEventType,
+  ExecutionAuthorityPersistence,
+  ExecutionAuthoritySnapshot,
+  ExecutionHandleRecord,
+  ExecutionNodeRecord,
+  LegalAction,
+  ObjectiveRecord,
+  RegisterHandleInput,
+  RuntimeHandleUpdate,
 } from "./types.ts";
 
 const TERMINAL_OBJECTIVE_STATES = new Set(["completed", "failed", "discarded"]);
@@ -201,7 +201,11 @@ export class ExecutionAuthority {
     });
   }
 
-  amendObjective(objectiveId: string, amendment: string, mutation: AuthorityMutation): ObjectiveRecord {
+  amendObjective(
+    objectiveId: string,
+    amendment: string,
+    mutation: AuthorityMutation,
+  ): ObjectiveRecord {
     return this.mutate("amendObjective", mutation, { objectiveId, amendment }, () => {
       const current = this.requireObjective(objectiveId);
       this.requireExpectedRevision(current, mutation);
@@ -219,7 +223,11 @@ export class ExecutionAuthority {
     });
   }
 
-  discardObjective(objectiveId: string, reason: string, mutation: AuthorityMutation): ObjectiveRecord {
+  discardObjective(
+    objectiveId: string,
+    reason: string,
+    mutation: AuthorityMutation,
+  ): ObjectiveRecord {
     return this.mutate("discardObjective", mutation, { objectiveId, reason }, () => {
       const current = this.requireObjective(objectiveId);
       this.requireExpectedRevision(current, mutation);
@@ -270,7 +278,10 @@ export class ExecutionAuthority {
       const current = this.requireObjective(objectiveId);
       this.requireExpectedRevision(current, mutation);
       const unfinished = this.state.nodes.filter(
-        (node) => node.objectiveId === objectiveId && node.id !== current.rootNodeId && !this.isNodeTerminal(node),
+        (node) =>
+          node.objectiveId === objectiveId &&
+          node.id !== current.rootNodeId &&
+          !this.isNodeTerminal(node),
       );
       if (unfinished.length > 0) {
         throw new Error(
@@ -278,7 +289,9 @@ export class ExecutionAuthority {
         );
       }
       const rejected = this.state.nodes.filter(
-        (node) => node.objectiveId === objectiveId && ["rejected", "failed", "orphaned"].includes(node.state),
+        (node) =>
+          node.objectiveId === objectiveId &&
+          ["rejected", "failed", "orphaned"].includes(node.state),
       );
       if (rejected.length > 0) {
         throw new Error(`Objective ${objectiveId} contains rejected or failed execution nodes.`);
@@ -288,7 +301,9 @@ export class ExecutionAuthority {
       this.state = {
         ...this.state,
         nodes: this.state.nodes.map((node) =>
-          node.id === current.rootNodeId ? { ...node, state: "accepted", acceptedAt: timestamp, updatedAt: timestamp } : node,
+          node.id === current.rootNodeId
+            ? { ...node, state: "accepted", acceptedAt: timestamp, updatedAt: timestamp }
+            : node,
         ),
         legalActionsByObjective: {
           ...this.state.legalActionsByObjective,
@@ -326,8 +341,8 @@ export class ExecutionAuthority {
     const current = this.requireObjective(objectiveId);
     if (isObjectiveTerminal(current)) return;
     const normalized = [...actions].sort((left, right) => left.id.localeCompare(right.id));
-    const existing = [...(this.state.legalActionsByObjective[objectiveId] ?? [])].sort((left, right) =>
-      left.id.localeCompare(right.id),
+    const existing = [...(this.state.legalActionsByObjective[objectiveId] ?? [])].sort(
+      (left, right) => left.id.localeCompare(right.id),
     );
     if (JSON.stringify(existing) === JSON.stringify(normalized)) return;
     const beforeEvents = this.state.events.length;
@@ -355,7 +370,8 @@ export class ExecutionAuthority {
       const parent = input.parentNodeId
         ? this.requireNode(input.parentNodeId)
         : this.requireNode(objective.rootNodeId);
-      if (parent.objectiveId !== objective.id) throw new Error("Parent node belongs to another objective.");
+      if (parent.objectiveId !== objective.id)
+        throw new Error("Parent node belongs to another objective.");
       const depth = parent.depth + 1;
       if (depth > this.maximumDelegationDepth) {
         throw new Error(
@@ -467,7 +483,8 @@ export class ExecutionAuthority {
       const objective = this.requireObjective(input.objectiveId);
       this.requireExpectedRevision(objective, mutation);
       const node = this.requireNode(input.nodeId);
-      if (node.objectiveId !== objective.id) throw new Error("Handle node belongs to another objective.");
+      if (node.objectiveId !== objective.id)
+        throw new Error("Handle node belongs to another objective.");
       const existing = this.state.handles.find((handle) => handle.id === input.id);
       if (existing) return existing;
       const timestamp = now();
@@ -548,7 +565,11 @@ export class ExecutionAuthority {
     });
   }
 
-  submitResult(handleId: string, value: unknown, mutation: AuthorityMutation): ExecutionHandleRecord {
+  submitResult(
+    handleId: string,
+    value: unknown,
+    mutation: AuthorityMutation,
+  ): ExecutionHandleRecord {
     return this.mutate("submitResult", mutation, { handleId, value }, () => {
       const handle = this.requireHandle(handleId);
       const objective = this.requireObjective(handle.objectiveId);
@@ -691,7 +712,9 @@ export class ExecutionAuthority {
     const existing = this.state.idempotency[key];
     if (existing) {
       if (existing.fingerprint !== expectedFingerprint) {
-        throw new Error(`Idempotency key ${mutation.idempotencyKey} was reused with different input.`);
+        throw new Error(
+          `Idempotency key ${mutation.idempotencyKey} was reused with different input.`,
+        );
       }
       return structuredClone(existing.value) as T;
     }
@@ -759,9 +782,7 @@ export class ExecutionAuthority {
 
   private updateObjective(
     current: ObjectiveRecord,
-    patch: Partial<
-      Pick<ObjectiveRecord, "state" | "latestAmendment" | "terminalAt" | "failure">
-    >,
+    patch: Partial<Pick<ObjectiveRecord, "state" | "latestAmendment" | "terminalAt" | "failure">>,
   ): ObjectiveRecord {
     const updated: ObjectiveRecord = {
       ...current,

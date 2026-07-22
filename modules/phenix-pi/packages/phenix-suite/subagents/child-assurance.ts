@@ -1,5 +1,5 @@
 import { difficultyForProfile } from "@matthis-k/phenix-kernel/task.ts";
-import { assurancePolicyFor, type AssurancePolicy } from "../authority/assurance.ts";
+import { type AssurancePolicy, assurancePolicyFor } from "../authority/assurance.ts";
 import type { AgentRole, TaskProfile, VerificationCommand } from "./agent-types.ts";
 
 function mutationForRole(role: AgentRole): "none" | "local" | "broad" {
@@ -26,11 +26,7 @@ export function resolveChildAssurance(input: {
   readonly criticRequiredByRole: boolean;
 }): AssurancePolicy {
   const uncertainty =
-    input.profile.uncertainty >= 4
-      ? "high"
-      : input.profile.uncertainty >= 2
-        ? "medium"
-        : "low";
+    input.profile.uncertainty >= 4 ? "high" : input.profile.uncertainty >= 2 ? "medium" : "low";
   // A role-level critic requirement means independently verified work (A2),
   // not automatically high-risk work (A3). A3 remains driven by impact,
   // secrecy, irreversibility, or an explicit high-assurance request.

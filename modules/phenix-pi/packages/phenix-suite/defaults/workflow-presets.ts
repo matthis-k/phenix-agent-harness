@@ -90,7 +90,8 @@ const generalTransitions: WorkflowTransition[] = [
   }),
   delegate({
     id: "general.request-planner",
-    description: "Delegate a bounded plan when sequencing, dependencies, or risk need separate analysis",
+    description:
+      "Delegate a bounded plan when sequencing, dependencies, or risk need separate analysis",
     scope: "child",
     actorRoles: ["base"],
     from: ["executing"],

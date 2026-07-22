@@ -1,11 +1,17 @@
 /** Supported child-session composition boundary. */
 
+import {
+  RpcChildSessionBackend,
+  type RpcChildSessionBackendOptions,
+} from "./assurance-rpc-child-session-backend.ts";
 import type {
   ChildRun,
   ChildSessionBackend,
   ChildSessionSpec,
   PiRuntimeServices,
 } from "./child-session-types.ts";
+import type { PiRuntimeAdapter } from "./runtime-adapter.ts";
+import { SelectingChildSessionBackend } from "./runtime-adapter.ts";
 import type {
   PiSessionFactory,
   PiSessionLike,
@@ -18,12 +24,6 @@ import {
   ProductionPiSessionFactory,
   SdkChildSessionBackend,
 } from "./sdk-child-session-backend.ts";
-import type { PiRuntimeAdapter } from "./runtime-adapter.ts";
-import { SelectingChildSessionBackend } from "./runtime-adapter.ts";
-import {
-  RpcChildSessionBackend,
-  type RpcChildSessionBackendOptions,
-} from "./assurance-rpc-child-session-backend.ts";
 import { TimedChildSessionBackend } from "./timed-child-session-backend.ts";
 import { WorkflowScopedPiSessionFactory } from "./workflow-session-factory.ts";
 
@@ -51,9 +51,7 @@ export function createChildSessionBackend(
     agentDir: options.services.agentDir,
     ...(options.rpc ?? {}),
   });
-  return new TimedChildSessionBackend(
-    new SelectingChildSessionBackend([rpc, sdkAdapter(options)]),
-  );
+  return new TimedChildSessionBackend(new SelectingChildSessionBackend([rpc, sdkAdapter(options)]));
 }
 
 export type {

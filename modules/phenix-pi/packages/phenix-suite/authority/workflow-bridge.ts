@@ -32,10 +32,7 @@ function objectiveIdFor(
   return sessionRuntimeFor(ctx)?.activeWorkflow?.instanceId;
 }
 
-function actorIdFor(
-  ctx: WorkflowSpawnRequest["ctx"],
-  parent?: ParentExecutionContext,
-): string {
+function actorIdFor(ctx: WorkflowSpawnRequest["ctx"], parent?: ParentExecutionContext): string {
   if (parent?.kind === "child") return parent.contract.runtime.workflow.actorId;
   return sessionRuntimeFor(ctx)?.activeWorkflow?.actorId ?? "root";
 }
@@ -97,9 +94,7 @@ function ensureObjective(input: {
       difficulty: workflow.difficulty,
       mutation: input.parent.contract.runtime.agent === "phenix.implementer" ? "local" : "none",
       deterministicChecksAvailable: input.parent.contract.verification.commands.length > 0,
-      userRequestedRigor: input.parent.contract.verification.criticRequired
-        ? "verified"
-        : "normal",
+      userRequestedRigor: input.parent.contract.verification.criticRequired ? "verified" : "normal",
     });
     input.authority.beginObjective(
       {
@@ -225,15 +220,11 @@ function reconcileTerminalObjective(input: {
     return;
   }
   if (input.workflowState === "abandoned") {
-    input.authority.discardObjective(
-      input.objectiveId,
-      "Workflow was abandoned.",
-      {
-        idempotencyKey: `workflow-abandoned:${input.objectiveId}:${input.workflowRevision}`,
-        actorId: input.actorId,
-        expectedRevision: snapshot.objective.revision,
-      },
-    );
+    input.authority.discardObjective(input.objectiveId, "Workflow was abandoned.", {
+      idempotencyKey: `workflow-abandoned:${input.objectiveId}:${input.workflowRevision}`,
+      actorId: input.actorId,
+      expectedRevision: snapshot.objective.revision,
+    });
     return;
   }
   if (input.workflowState !== "completed") return;
@@ -299,8 +290,7 @@ export function createAuthorityBoundWorkflowRuntime(input: {
       });
       if (!objectiveId) return input.workflow.spawn(request);
       const objective = input.authority.inspectObjective(objectiveId);
-      const parentHandleId =
-        request.parent?.kind === "child" ? request.parent.handleId : undefined;
+      const parentHandleId = request.parent?.kind === "child" ? request.parent.handleId : undefined;
       const parentNodeId = parentHandleId
         ? objective.handles.find((handle) => handle.id === parentHandleId)?.nodeId
         : objective.objective.rootNodeId;

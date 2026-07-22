@@ -6,8 +6,8 @@
  * selection, translates explicit runtime bindings, and delegates to the backend.
  */
 import { agentClientRef } from "@matthis-k/phenix-kernel/refs.ts";
-import { assuranceForContract } from "./contract-assurance.ts";
 import type { ChildRun, ChildSessionBackend, ChildSessionSpec } from "./child-session-types.ts";
+import { assuranceForContract } from "./contract-assurance.ts";
 import type { SubagentExecutionPlan } from "./execution-plan.ts";
 import { resolveSubagentSessionOptions, type SessionRouteResolver } from "./session-options.ts";
 

@@ -43,7 +43,9 @@ function isResponse(value: unknown): value is RpcResponse {
 
 function abortError(signal: AbortSignal): Error {
   const reason = signal.reason;
-  return reason instanceof Error ? reason : new Error(reason ? String(reason) : "RPC command aborted.");
+  return reason instanceof Error
+    ? reason
+    : new Error(reason ? String(reason) : "RPC command aborted.");
 }
 
 /** Strict LF-delimited JSON peer for Pi RPC mode. */
@@ -91,7 +93,9 @@ export class RpcJsonlPeer {
         if (!pending) return;
         this.pending.delete(id);
         pending.detachAbort?.();
-        reject(new RpcProtocolError(`Pi RPC command ${command.type} timed out after ${timeoutMs}ms.`));
+        reject(
+          new RpcProtocolError(`Pi RPC command ${command.type} timed out after ${timeoutMs}ms.`),
+        );
       }, timeoutMs);
       timeout.unref?.();
 
@@ -219,7 +223,9 @@ export class RpcJsonlPeer {
     }
 
     if (isResponse(value)) {
-      this.fail(new RpcProtocolError(`Pi RPC response for ${value.command} omitted its correlation id.`));
+      this.fail(
+        new RpcProtocolError(`Pi RPC response for ${value.command} omitted its correlation id.`),
+      );
       return;
     }
 

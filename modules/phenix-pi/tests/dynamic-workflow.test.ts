@@ -5,7 +5,9 @@ import { PHENIX_GENERAL_WORKFLOW } from "../packages/phenix-suite/defaults/workf
 
 describe("general workflow dynamic escape actions", () => {
   it("keeps ad-hoc delegation typed and bounded", () => {
-    const byId = new Map(PHENIX_GENERAL_WORKFLOW.transitions.map((transition) => [transition.id, transition]));
+    const byId = new Map(
+      PHENIX_GENERAL_WORKFLOW.transitions.map((transition) => [transition.id, transition]),
+    );
     const base = byId.get("general.request-base");
     const planner = byId.get("general.request-planner");
     const finalizer = byId.get("general.request-finalizer");
@@ -13,7 +15,11 @@ describe("general workflow dynamic escape actions", () => {
     assert.equal(base?.kind, "delegate");
     assert.equal(planner?.kind, "delegate");
     assert.equal(finalizer?.kind, "delegate");
-    if (base?.kind !== "delegate" || planner?.kind !== "delegate" || finalizer?.kind !== "delegate") {
+    if (
+      base?.kind !== "delegate" ||
+      planner?.kind !== "delegate" ||
+      finalizer?.kind !== "delegate"
+    ) {
       return;
     }
     assert.equal(base.category, "optional");
