@@ -239,7 +239,7 @@ function validateExecutiveSummary(report: QaReport, issues: SemanticValidationIs
   if (JSON.stringify(report.executiveSummary.blockingIssues) !== JSON.stringify(expectedBlocking)) {
     issues.push({
       path: "executiveSummary.blockingIssues",
-      message: "Executive-summary blockers do not match blocking findings.",
+      message: "Executive-summary issue IDs do not match the required finding set.",
     });
   }
 
