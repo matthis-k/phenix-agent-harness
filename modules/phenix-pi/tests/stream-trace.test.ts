@@ -8,7 +8,9 @@ import {
   clearStreamTraceSession,
   createStreamTraceContext,
   newStreamTraceId,
+  registerStreamTraceSink,
   runWithStreamTraceContext,
+  streamTraceEnabled,
   streamTraceIdForSession,
   streamTraceMessageFields,
   writeStreamTrace,
@@ -61,6 +63,30 @@ test("stream tracing appends correlated valid JSONL", () => {
     if (previous === undefined) delete process.env.PHENIX_PI_STREAM_TRACE;
     else process.env.PHENIX_PI_STREAM_TRACE = previous;
     rmSync(directory, { recursive: true });
+  }
+});
+
+test("an in-process sink enables correlated tracing without a second trace file", () => {
+  const previous = process.env.PHENIX_PI_STREAM_TRACE;
+  delete process.env.PHENIX_PI_STREAM_TRACE;
+  const records: Readonly<Record<string, unknown>>[] = [];
+  const unsubscribe = registerStreamTraceSink((record) => records.push(record));
+  const context = createStreamTraceContext("root-session");
+  try {
+    assert.equal(streamTraceEnabled(), true);
+    runWithStreamTraceContext(context, () => {
+      writeStreamTrace({ boundary: "root_tool_call", toolName: "phenix_workflow" });
+    });
+    assert.equal(records.length, 1);
+    assert.equal(records[0]?.sessionId, "root-session");
+    assert.equal(records[0]?.traceId, context.traceId);
+    assert.equal(records[0]?.boundary, "root_tool_call");
+    assert.equal(typeof records[0]?.timestamp, "string");
+  } finally {
+    unsubscribe();
+    clearStreamTraceSession("root-session");
+    if (previous === undefined) delete process.env.PHENIX_PI_STREAM_TRACE;
+    else process.env.PHENIX_PI_STREAM_TRACE = previous;
   }
 });
 

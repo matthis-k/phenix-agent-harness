@@ -41,13 +41,23 @@ import {
 } from "@matthis-k/phenix-routing/config.ts";
 import { getSessionRuntime } from "@matthis-k/phenix-routing/state.ts";
 import { clearActiveRouteForSession } from "@matthis-k/phenix-routing/stream-proxy.ts";
-import { writeStreamTrace } from "@matthis-k/phenix-routing/stream-trace.ts";
+import {
+  registerStreamTraceSink,
+  writeStreamTrace,
+} from "@matthis-k/phenix-routing/stream-trace.ts";
 import { createTaskRuntimeFacade } from "@matthis-k/phenix-tasks/index.ts";
 import { createTaskTools } from "@matthis-k/phenix-tasks/pi-tools.ts";
 import { link } from "./composition/linker.ts";
 import { createWorkflowTurnGate, type WorkflowTurnGate } from "./composition/workflow-turn-gate.ts";
 import { loadPhenixSuiteConfiguration } from "./config-loader.ts";
 import { defaultOutputSchemas, outputSchemasFromContracts } from "./defaults/output-schemas.ts";
+import {
+  recordSessionExecutionEvent,
+  recordSessionExecutionTrace,
+  registerSessionExecutionContext,
+  sessionExecutionJournalPath,
+  unregisterSessionExecutionContext,
+} from "./journal/session-execution-journal-registry.ts";
 import { buildPhenixRootSystemPrompt } from "./phenix-skill-bootstrap.ts";
 import { registerActiveChildStatusProjection } from "./runtime/active-child-status.ts";
 import {
@@ -82,6 +92,7 @@ type IntegrationResult =
   | { readonly status: "failed"; readonly error: string };
 
 const integrationResults = new Map<string, IntegrationResult>();
+let disposeJournalTraceSink: (() => void) | undefined;
 
 function formatError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -332,6 +343,8 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
       `${linkResult.graph.routing.agentRoutes.size} agent routes.`,
   );
 
+  disposeJournalTraceSink?.();
+  disposeJournalTraceSink = registerStreamTraceSink(recordSessionExecutionTrace);
   const workflowGate = createWorkflowTurnGate({ trace: writeStreamTrace });
 
   await loadIntegration("hypa", pi, async (api) => {
@@ -372,6 +385,33 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
   const agentDir = getAgentDir();
   pi.on("session_start", async (_event, ctx) => {
     capturedModelRegistry = ctx.modelRegistry;
+    const rootSessionId = ctx.sessionManager.getSessionId() ?? "default";
+    registerSessionExecutionContext({
+      cwd: ctx.cwd,
+      rootSessionId,
+      sessionId: rootSessionId,
+      actorId: "root",
+    });
+    recordSessionExecutionEvent(ctx.cwd, {
+      rootSessionId,
+      sessionId: rootSessionId,
+      actorId: "root",
+      type: "root.session.started",
+      payload: {
+        journalPath: sessionExecutionJournalPath(ctx.cwd, rootSessionId),
+        ...(ctx.model ? { model: { provider: ctx.model.provider, id: ctx.model.id } } : {}),
+      },
+    });
+  });
+  pi.on("session_shutdown", async (_event, ctx) => {
+    const rootSessionId = ctx.sessionManager.getSessionId() ?? "default";
+    recordSessionExecutionEvent(ctx.cwd, {
+      rootSessionId,
+      sessionId: rootSessionId,
+      actorId: "root",
+      type: "root.session.shutdown",
+    });
+    unregisterSessionExecutionContext(rootSessionId);
   });
 
   const getRuntimeServices = (): {
@@ -465,11 +505,17 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
   registerShutdown(pi, delegationRuntime, disposeTuiProjection, () => taskHost.close());
 
   pi.registerCommand("phenix", {
-    description: "Inspect the Phenix coding substrate; usage: /phenix doctor",
+    description: "Inspect the Phenix coding substrate; usage: /phenix doctor|journal",
     handler: async (args, ctx) => {
       const action = args.trim().toLowerCase() || "doctor";
+      const rootSessionId = ctx.sessionManager.getSessionId() ?? "default";
+      const journalPath = sessionExecutionJournalPath(ctx.cwd, rootSessionId);
+      if (action === "journal") {
+        ctx.ui.notify(`Root-session execution journal: ${journalPath}`, "info");
+        return;
+      }
       if (action !== "doctor") {
-        ctx.ui.notify("Usage: /phenix doctor", "warning");
+        ctx.ui.notify("Usage: /phenix doctor|journal", "warning");
         return;
       }
 
@@ -504,6 +550,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
       const lines = [
         `Phenix: linked graph — ${linkResult.ok ? `${linkResult.graph.contracts.size} contracts, ${linkResult.graph.agentClients.size} clients, ${linkResult.graph.routing.modelSets.size} model sets` : "link errors"}`,
         "Backend: sdk",
+        `Session journal: ${journalPath}`,
         `Integrations: ${integrationSummary()}`,
         `LSP config: ${exists(lspConfigPath) ? lspConfigPath : `missing (${lspConfigPath})`}`,
         `Hypa mode: ${hypaMode}`,

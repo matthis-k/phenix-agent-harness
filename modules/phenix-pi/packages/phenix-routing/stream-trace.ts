@@ -12,15 +12,24 @@ export interface StreamTraceContext {
   readonly sessionId: string;
 }
 
+export type StreamTraceRecord = Readonly<Record<string, unknown>>;
+export type StreamTraceSink = (record: StreamTraceRecord) => void;
+
 const activeTraceContext = new AsyncLocalStorage<StreamTraceContext>();
 const latestTraceBySession = new Map<string, string>();
+const streamTraceSinks = new Set<StreamTraceSink>();
 
 export function streamTraceEnabled(): boolean {
-  return Boolean(process.env.PHENIX_PI_STREAM_TRACE);
+  return Boolean(process.env.PHENIX_PI_STREAM_TRACE) || streamTraceSinks.size > 0;
 }
 
 export function streamTraceReasoningEnabled(): boolean {
   return process.env.PHENIX_PI_STREAM_TRACE_REASONING === "1";
+}
+
+export function registerStreamTraceSink(sink: StreamTraceSink): () => void {
+  streamTraceSinks.add(sink);
+  return () => streamTraceSinks.delete(sink);
 }
 
 export function createStreamTraceContext(sessionId: string): StreamTraceContext {
@@ -170,16 +179,31 @@ export function streamTraceEventFields(event: AssistantMessageEvent): Record<str
 }
 
 export function writeStreamTrace(record: Record<string, unknown>): void {
+  const context = activeTraceContext.getStore();
+  const enriched: StreamTraceRecord = {
+    ...(context ? { traceId: context.traceId, sessionId: context.sessionId } : {}),
+    ...record,
+    timestamp: new Date().toISOString(),
+    pid: process.pid,
+  };
+
+  for (const sink of [...streamTraceSinks]) {
+    try {
+      sink(enriched);
+    } catch {
+      // Trace projections are observational and must not alter execution.
+    }
+  }
+
   const tracePath = process.env.PHENIX_PI_STREAM_TRACE;
   if (!tracePath) return;
 
   try {
     mkdirSync(dirname(tracePath), { recursive: true, mode: 0o700 });
-    appendFileSync(
-      tracePath,
-      `${JSON.stringify({ timestamp: new Date().toISOString(), pid: process.pid, ...record })}\n`,
-      { encoding: "utf8", mode: 0o600 },
-    );
+    appendFileSync(tracePath, `${JSON.stringify(enriched)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
   } catch {
     // Diagnostics are observational and must never alter provider execution.
   }
