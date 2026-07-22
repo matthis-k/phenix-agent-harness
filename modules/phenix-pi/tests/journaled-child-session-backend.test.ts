@@ -9,13 +9,13 @@ import {
   sessionExecutionJournalForProject,
 } from "@matthis-k/phenix-suite/journal/session-execution-journal-registry.ts";
 import {
-  childRunId,
   type ChildCycleOutcome,
   type ChildRun,
   type ChildSessionBackend,
   type ChildSessionEvent,
   type ChildSessionNode,
   type ChildSessionSpec,
+  childRunId,
 } from "@matthis-k/phenix-suite/runtime/child-session-types.ts";
 import { createJournaledChildSessionBackend } from "@matthis-k/phenix-suite/runtime/journaled-child-session-backend.ts";
 
