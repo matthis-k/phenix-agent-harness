@@ -5,8 +5,8 @@
  * plan and the lower-level ChildSessionBackend port. It resolves model/session
  * selection, translates explicit runtime bindings, and delegates to the backend.
  */
-
 import { agentClientRef } from "@matthis-k/phenix-kernel/refs.ts";
+import { assuranceForContract } from "./contract-assurance.ts";
 import type { ChildRun, ChildSessionBackend, ChildSessionSpec } from "./child-session-types.ts";
 import type { SubagentExecutionPlan } from "./execution-plan.ts";
 import { resolveSubagentSessionOptions, type SessionRouteResolver } from "./session-options.ts";
@@ -29,9 +29,11 @@ export class SubagentSessionPlanner {
       defaults: execution.session.defaults,
       resolveRoute: this.resolveRoute,
     });
+    const assurance = assuranceForContract(execution.runtime.contract);
 
     return {
       ...execution.runtime,
+      ...assurance,
       agentClient: agentClientRef(session.agent ?? "base"),
       role: session.agent,
       model: session.model,
