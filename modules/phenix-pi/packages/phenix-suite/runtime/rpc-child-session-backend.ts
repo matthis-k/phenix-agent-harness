@@ -262,8 +262,7 @@ class RpcChildRun implements ChildRun {
         this.stderr.trim(),
       ]
         .filter(Boolean)
-        .join("
-");
+        .join("\n");
       const failure = new ChildRuntimeError(
         this.status === "starting" ? "SESSION_START_FAILED" : "ORPHANED_SESSION",
         detail,
