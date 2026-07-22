@@ -68,7 +68,7 @@ export interface ResolvedExecutionPolicy {
   readonly verificationCommands: readonly VerificationCommand[];
   readonly criticRequired: boolean;
   readonly maxRepairAttempts: number;
-  readonly allowedChildren: readonly AgentKind[];
+  readonly allowedChildren: readonly AgentRole[];
   readonly modelSet?: string;
   readonly difficulty?: string;
   readonly capability?: string;
