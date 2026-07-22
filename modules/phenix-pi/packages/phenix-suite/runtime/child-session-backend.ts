@@ -20,8 +20,10 @@ import {
 } from "./sdk-child-session-backend.ts";
 import type { PiRuntimeAdapter } from "./runtime-adapter.ts";
 import { SelectingChildSessionBackend } from "./runtime-adapter.ts";
-import type { RpcChildSessionBackendOptions } from "./rpc-child-session-backend.ts";
-import { RpcChildSessionBackend } from "./rpc-child-session-backend.ts";
+import {
+  RpcChildSessionBackend,
+  type RpcChildSessionBackendOptions,
+} from "./assurance-rpc-child-session-backend.ts";
 import { TimedChildSessionBackend } from "./timed-child-session-backend.ts";
 import { WorkflowScopedPiSessionFactory } from "./workflow-session-factory.ts";
 
