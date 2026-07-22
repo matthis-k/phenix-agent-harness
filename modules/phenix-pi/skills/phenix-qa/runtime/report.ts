@@ -90,7 +90,9 @@ export function buildReportSkeleton(params: {
   };
 
   const overallResult = determineOverallResult(gates);
-  const blockingIssues = params.findings.filter((finding) => finding.blocking).map((finding) => finding.id);
+  const blockingIssues = params.findings
+    .filter((finding) => finding.blocking)
+    .map((finding) => finding.id);
 
   return {
     scope: params.scope,
@@ -441,7 +443,9 @@ export function mergeModelContribution(
   merged.executiveSummary = {
     ...merged.executiveSummary,
     overallResult: determineOverallResult(merged.qualityGates),
-    blockingIssues: merged.findings.filter((finding) => finding.blocking).map((finding) => finding.id),
+    blockingIssues: merged.findings
+      .filter((finding) => finding.blocking)
+      .map((finding) => finding.id),
     highestRiskLevel: highestRiskLevel(merged.findings),
     currentChangeIncreasesDebt,
     architectureAssessment: contribution.architectureRisk
