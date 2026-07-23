@@ -210,7 +210,8 @@ test("agent completion requires both typed output and a settled Pi cycle", async
   await recovered.load(root);
   assert.equal(recovered.projection.turnCounts.get(handle.id), 1);
   assert.equal(recovered.projection.toolCallCounts.get(handle.id), 1);
-  assert.equal(recovered.projection.activities.get(handle.id)?.source, "reported");
+  assert.equal(recovered.projection.activities.get(handle.id)?.source, "derived");
+  assert.equal(recovered.projection.activities.get(handle.id)?.phase, "finishing");
   assert.ok(
     recovered.projection.facts.some(
       (fact) => fact.runId === handle.id && fact.kind === "file-read",
