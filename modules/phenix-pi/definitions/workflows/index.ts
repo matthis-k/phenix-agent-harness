@@ -83,21 +83,21 @@ export const qaWorkflow: WorkflowDefinition<unknown, unknown> = {
   output: QAReportSchema,
   limits: { timeoutMs: 2_400_000, maxNodeRuns: 20, maxParallelism: 4 },
   graph: {
-    entry: "fanout",
+    entry: "checks",
     nodes: [
-      {
-        kind: "local",
-        id: "fanout",
-        title: "Start independent QA branches",
-        operation: "local.noop",
-        input: "input.identity",
-      },
       {
         kind: "local",
         id: "checks",
         title: "Run deterministic repository checks",
         operation: "local.qa-checks",
         input: "qa.checks.input",
+      },
+      {
+        kind: "local",
+        id: "fanout",
+        title: "Start independent QA branches",
+        operation: "local.noop",
+        input: "input.identity",
       },
       {
         kind: "invoke",
@@ -142,11 +142,11 @@ export const qaWorkflow: WorkflowDefinition<unknown, unknown> = {
       { kind: "return", id: "return", output: "qa.output" },
     ],
     edges: [
-      { from: "fanout", to: "checks" },
+      { from: "checks", to: "fanout" },
       { from: "fanout", to: "repo" },
+      { from: "fanout", to: "tests" },
       { from: "fanout", to: "architecture" },
       { from: "fanout", to: "security" },
-      { from: "checks", to: "tests" },
       { from: "repo", to: "join" },
       { from: "tests", to: "join" },
       { from: "architecture", to: "join" },
