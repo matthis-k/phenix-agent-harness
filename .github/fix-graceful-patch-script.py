@@ -48,4 +48,9 @@ prompt_prefix = "    '''    return `${definition.prompt.render(input)}\\n\\nExec
 raw_prompt_prefix = "    r'''    return `${definition.prompt.render(input)}\\n\\nExecution protocol:"
 if source.count(prompt_prefix) != 2:
     raise SystemExit(f'expected two prompt literals, found {source.count(prompt_prefix)}')
-path.write_text(source.replace(prompt_prefix, raw_prompt_prefix))
+source = source.replace(prompt_prefix, raw_prompt_prefix)
+root_prefix = "    '''- Never reproduce an invariant workflow manually; phenix_dispatch is the only root execution entry point.\\n- Available definitions:"
+raw_root_prefix = "    r'''- Never reproduce an invariant workflow manually; phenix_dispatch is the only root execution entry point.\\n- Available definitions:"
+if source.count(root_prefix) != 1:
+    raise SystemExit(f'expected one root prompt anchor, found {source.count(root_prefix)}')
+path.write_text(source.replace(root_prefix, raw_root_prefix))
