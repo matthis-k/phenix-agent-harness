@@ -23,10 +23,9 @@ const specifiers: Readonly<Record<IntegrationId, string>> = {
 // Keep optional package source outside the harness TypeScript program. These
 // extensions are loaded and validated by Pi at runtime; a broken optional
 // package must be reported as an integration failure, not break the core build.
-const runtimeImport = new Function(
-  "specifier",
-  "return import(specifier)",
-) as (specifier: string) => Promise<ExtensionModule>;
+const runtimeImport = new Function("specifier", "return import(specifier)") as (
+  specifier: string,
+) => Promise<ExtensionModule>;
 
 export async function loadPiIntegrations(pi: ExtensionAPI): Promise<readonly IntegrationStatus[]> {
   const statuses: IntegrationStatus[] = [];
