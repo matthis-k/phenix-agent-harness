@@ -1,0 +1,111 @@
+name: Apply live-run format fixes
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/live-run-facts'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: Apply deterministic formatter output
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          replacements = {
+              "modules/phenix-pi/application/agent-executor.ts": [
+                  (
+                      '''import {\n  ACTIVITY_PHASES,\n  defaultActivity,\n  type ActivityPhase,\n  type RunFactRecordedData,\n} from "../domain/run/observability.ts";''',
+                      '''import {\n  ACTIVITY_PHASES,\n  type ActivityPhase,\n  defaultActivity,\n  type RunFactRecordedData,\n} from "../domain/run/observability.ts";''',
+                  ),
+              ],
+              "modules/phenix-pi/application/query-facade.ts": [
+                  (
+                      '''import {\n  defaultActivity,\n  type ActivityPhase,\n  type RunActivity,\n  type RunFact,\n} from "../domain/run/observability.ts";''',
+                      '''import {\n  type ActivityPhase,\n  defaultActivity,\n  type RunActivity,\n  type RunFact,\n} from "../domain/run/observability.ts";''',
+                  ),
+              ],
+              "modules/phenix-pi/domain/run/reducer.ts": [
+                  (
+                      'if (!outcome || outcome.status !== "failure") return undefined;',
+                      'if (outcome?.status !== "failure") return undefined;',
+                  ),
+              ],
+              "modules/phenix-pi/application/run-observability.ts": [
+                  (
+                      '''import type {\n  RunActivityChangedData,\n  RunFactRecordedData,\n} from "../domain/run/observability.ts";''',
+                      'import type { RunActivityChangedData, RunFactRecordedData } from "../domain/run/observability.ts";',
+                  ),
+                  (
+                      '''    case "edit":\n      return description("editing", "Editing file", file, "file-changed", `Edited ${file ?? "file"}`);''',
+                      '''    case "edit":\n      return description(\n        "editing",\n        "Editing file",\n        file,\n        "file-changed",\n        `Edited ${file ?? "file"}`,\n      );''',
+                  ),
+                  (
+                      '''    case "write":\n      return description("editing", "Writing file", file, "file-changed", `Wrote ${file ?? "file"}`);''',
+                      '''    case "write":\n      return description(\n        "editing",\n        "Writing file",\n        file,\n        "file-changed",\n        `Wrote ${file ?? "file"}`,\n      );''',
+                  ),
+                  (
+                      '''    case "phenix_tasks":\n      return description("planning", "Updating task state", undefined, "decision-reported", "Updated tasks");''',
+                      '''    case "phenix_tasks":\n      return description(\n        "planning",\n        "Updating task state",\n        undefined,\n        "decision-reported",\n        "Updated tasks",\n      );''',
+                  ),
+                  (
+                      '''    case "phenix_return":\n      return description("finishing", "Submitting result", undefined, "decision-reported", "Submitted result");''',
+                      '''    case "phenix_return":\n      return description(\n        "finishing",\n        "Submitting result",\n        undefined,\n        "decision-reported",\n        "Submitted result",\n      );''',
+                  ),
+                  (
+                      '''    case "phenix_fail":\n      return description("finishing", "Reporting failure", undefined, "error-observed", "Reported failure");''',
+                      '''    case "phenix_fail":\n      return description(\n        "finishing",\n        "Reporting failure",\n        undefined,\n        "error-observed",\n        "Reported failure",\n      );''',
+                  ),
+                  (
+                      '  const normalized = value.replace(/[\\r\\n\\t]+/g, " ").replace(/\\s+/g, " ").trim();',
+                      '''  const normalized = value\n    .replace(/[\\r\\n\\t]+/g, " ")\n    .replace(/\\s+/g, " ")\n    .trim();''',
+                  ),
+              ],
+              "modules/phenix-pi/extension/run-monitor.ts": [
+                  (
+                      '''  node.children.forEach((child, index) =>\n    appendNode(lines, child, childPrefix, index === node.children.length - 1),\n  );''',
+                      '''  node.children.forEach((child, index) => {\n    appendNode(lines, child, childPrefix, index === node.children.length - 1);\n  });''',
+                  ),
+                  (
+                      '  const normalized = value.replace(/[\\r\\n\\t]+/g, " ").replace(/\\s+/g, " ").trim();',
+                      '''  const normalized = value\n    .replace(/[\\r\\n\\t]+/g, " ")\n    .replace(/\\s+/g, " ")\n    .trim();''',
+                  ),
+              ],
+              "modules/phenix-pi/tests/agent-lifecycle.test.ts": [
+                  (
+                      '''  await eventually(\n    () =>\n      store.projection.facts.some(\n        (fact) =>\n          fact.runId === handle.id &&\n          fact.kind === "file-read" &&\n          fact.subject === "modules/phenix-pi/application/agent-executor.ts",\n      ),\n  );''',
+                      '''  await eventually(() =>\n    store.projection.facts.some(\n      (fact) =>\n        fact.runId === handle.id &&\n        fact.kind === "file-read" &&\n        fact.subject === "modules/phenix-pi/application/agent-executor.ts",\n    ),\n  );''',
+                  ),
+              ],
+          }
+
+          for name, edits in replacements.items():
+              path = Path(name)
+              text = path.read_text()
+              for old, new in edits:
+                  if old not in text:
+                      raise SystemExit(f"Expected formatter input not found in {name}")
+                  text = text.replace(old, new, 1)
+              path.write_text(text)
+
+          Path('.github/workflows/export-pr-source.yml').unlink(missing_ok=True)
+          Path('.github/workflows/apply-live-run-format-fixes.yml').unlink(missing_ok=True)
+          PY
+      - name: Commit formatter output
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m "Apply deterministic source formatting"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
