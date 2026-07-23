@@ -1,11 +1,12 @@
 import { Type } from "typebox";
 
-import { definitionRef } from "../domain/definition/definition.ts";
+import { type AnyDefinition, definitionRef } from "../domain/definition/definition.ts";
 import { defineSchema } from "../domain/definition/schema.ts";
 import { definitionId, localTaskId, type RunId, runId, type TaskId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import type { CatalogFacade, ExecutionFacade, TaskFacade } from "./interfaces.ts";
+import { allowAllInvocations, type InvocationPolicy } from "./invocation-policy.ts";
 
 export interface AgentToolFactory {
   forRun(runId: RunId): Promise<readonly AgentTool[]>;
@@ -61,17 +62,20 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
   private readonly tasks: TaskFacade;
   private readonly catalog: CatalogFacade;
   private readonly store: ExecutionStore;
+  private readonly invocationPolicy: InvocationPolicy;
 
   constructor(input: {
     readonly execution: ExecutionFacade;
     readonly tasks: TaskFacade;
     readonly catalog: CatalogFacade;
     readonly store: ExecutionStore;
+    readonly invocationPolicy?: InvocationPolicy;
   }) {
     this.execution = input.execution;
     this.tasks = input.tasks;
     this.catalog = input.catalog;
     this.store = input.store;
+    this.invocationPolicy = input.invocationPolicy ?? allowAllInvocations;
   }
 
   async forRun(parentId: RunId): Promise<readonly AgentTool[]> {
@@ -85,9 +89,17 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       parameters: runParameters,
       execute: async (raw, signal) => {
         const params = requireValid(runParameters, raw);
+        const ref = definitionRef(definitionId(params.definition));
+        const parent = this.store.projection.requireRun(parentId);
+        this.invocationPolicy.assertAllowed({
+          rootRunId: this.store.projection.rootOf(parentId),
+          parent,
+          definition: this.catalog.get(ref) as AnyDefinition,
+          input: params.input,
+        });
         const handle = await this.execution.start({
           parentId,
-          definition: definitionRef(definitionId(params.definition)),
+          definition: ref,
           input: params.input,
           wait: params.wait ?? "await",
         });

@@ -4,7 +4,12 @@ import type {
   DefinitionRef,
   ToolPolicy,
 } from "../definition/definition.ts";
-import type { ModelSelector, ResolvedModel } from "../definition/model.ts";
+import type {
+  Difficulty,
+  ModelSelector,
+  PhenixModelSetId,
+  ResolvedModel,
+} from "../definition/model.ts";
 import type { DefinitionId, Outcome, RunId } from "../shared.ts";
 
 export type RunKind = "root" | "agent" | "workflow";
@@ -19,6 +24,31 @@ export type RunState =
   | "failed"
   | "cancelled"
   | "orphaned";
+
+export const SESSION_AGENT_PRESETS = [
+  "base",
+  "scout",
+  "planner",
+  "architect",
+  "implementer",
+  "tester",
+  "verifier",
+  "critic",
+  "finalizer",
+] as const;
+export type SessionAgentPreset = (typeof SESSION_AGENT_PRESETS)[number];
+
+export interface SessionProfile {
+  readonly agent: SessionAgentPreset;
+  readonly modelSet: PhenixModelSetId;
+  readonly difficulty: Difficulty;
+}
+
+export const DEFAULT_SESSION_PROFILE: SessionProfile = Object.freeze({
+  agent: "base",
+  modelSet: "mixed",
+  difficulty: "D1",
+});
 
 export interface RunLimits {
   readonly timeoutMs: number;
@@ -66,6 +96,8 @@ export interface RunRecord {
     readonly sessionId: string;
     readonly sessionFile?: string;
   };
+  readonly profile?: SessionProfile;
+  readonly observedModel?: ModelSelector;
   readonly resolvedModel?: ResolvedModel;
   readonly outcome?: Outcome<unknown>;
 }
@@ -99,3 +131,7 @@ export const ROOT_CAPABILITIES: CapabilitySet = Object.freeze({
 });
 
 export const ROOT_TOOL_POLICY: ToolPolicy = Object.freeze({ allow: [] });
+
+export function isSessionAgentPreset(value: string): value is SessionAgentPreset {
+  return (SESSION_AGENT_PRESETS as readonly string[]).includes(value);
+}

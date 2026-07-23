@@ -1,6 +1,6 @@
 import type { ResolvedModel } from "../definition/model.ts";
 import type { Failure, LocalTaskId, Outcome, RunId } from "../shared.ts";
-import type { RunRecord, RunState } from "./model.ts";
+import type { RunRecord, RunState, SessionProfile } from "./model.ts";
 
 export interface DomainEvent<TType extends string = string, TData = unknown> {
   readonly eventId: string;
@@ -37,6 +37,11 @@ export type RunCreatedData = { readonly record: Omit<RunRecord, "revision" | "st
 export type RunStateChangedData = { readonly from: RunState; readonly to: RunState };
 export type RunTerminalData = { readonly outcome: Outcome<unknown> };
 export type RunFailedData = { readonly failure: Failure };
+export type RunProfileSelectedData = {
+  readonly previous: SessionProfile;
+  readonly profile: SessionProfile;
+  readonly source: "user" | "model-select" | "policy";
+};
 export type RunReparentedData = {
   readonly previousParentId: RunId;
   readonly newParentId: RunId;
@@ -77,6 +82,7 @@ export type DomainEventType =
   | "run.created"
   | "run.started"
   | "run.state.changed"
+  | "run.profile.selected"
   | "run.model.resolved"
   | "run.model.observed"
   | "run.pi.bound"

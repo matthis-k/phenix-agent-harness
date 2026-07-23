@@ -94,7 +94,7 @@ test("agent completion requires both typed output and a settled Pi cycle", async
     definitions.register(definition);
   }
   definitions.seal(functions, {
-    has: (operation) => operation === "local.noop",
+    has: (operation) => operation === "local.noop" || operation === "local.qa-checks",
     async run(_operation, input) {
       return input;
     },

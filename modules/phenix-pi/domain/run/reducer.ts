@@ -2,7 +2,7 @@ import type { LocalTaskId, Outcome, RunId } from "../shared.ts";
 import type { LocalTask } from "../task/local-task.ts";
 import type { DomainEvent } from "./events.ts";
 import { activeAttachedChildren, assertRunTransition, isTerminalRunState } from "./invariants.ts";
-import type { RunRecord, RunState } from "./model.ts";
+import type { RunRecord, RunState, SessionProfile } from "./model.ts";
 
 interface CycleProjection {
   readonly number: number;
@@ -120,10 +120,22 @@ export class RunProjection {
         next = { ...next, state: data.to };
         break;
       }
+      case "run.profile.selected": {
+        if (current.kind !== "root") throw new Error(`Only root sessions own selectable profiles`);
+        const data = event.data as { readonly profile: SessionProfile };
+        next = { ...next, profile: data.profile };
+        break;
+      }
       case "run.model.resolved":
         next = {
           ...next,
           resolvedModel: (event.data as { readonly resolved: RunRecord["resolvedModel"] }).resolved,
+        };
+        break;
+      case "run.model.observed":
+        next = {
+          ...next,
+          observedModel: (event.data as { readonly model: RunRecord["observedModel"] }).model,
         };
         break;
       case "run.pi.bound":
@@ -257,16 +269,12 @@ export class RunProjection {
     const projection = new RunProjection();
     for (const [id, run] of this.runs) projection.runs.set(id, run);
     for (const [id, task] of this.localTasks) projection.localTasks.set(id, task);
-    for (const [id, output] of this.submittedOutputs) {
-      projection.submittedOutputs.set(id, output);
-    }
+    for (const [id, output] of this.submittedOutputs) projection.submittedOutputs.set(id, output);
     for (const [id, cycle] of this.cycles) projection.cycles.set(id, cycle);
     for (const [id, count] of this.turnCounts) projection.turnCounts.set(id, count);
     for (const [id, count] of this.toolCallCounts) projection.toolCallCounts.set(id, count);
     for (const [id, progress] of this.progress) projection.progress.set(id, progress);
-    for (const [id, sequence] of this.rootSequences) {
-      projection.rootSequences.set(id, sequence);
-    }
+    for (const [id, sequence] of this.rootSequences) projection.rootSequences.set(id, sequence);
     for (const eventId of this.eventIds) projection.eventIds.add(eventId);
     return projection;
   }

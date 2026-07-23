@@ -3,12 +3,26 @@ import path from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
+  ModelRegistry,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
+import {
+  type IntegrationStatus,
+  loadPiIntegrations,
+  summarizeIntegrations,
+} from "../adapters/pi-sdk/integrations.ts";
+import { registerPhenixProvider } from "../adapters/routing/phenix-provider.ts";
 import { createPhenixRuntime, type PhenixRuntime } from "../composition/create-phenix-runtime.ts";
-import type { ConcreteModelRef } from "../domain/definition/model.ts";
+import { isPhenixModelSet, PHENIX_MODEL_SETS } from "../domain/definition/model.ts";
+import {
+  DEFAULT_SESSION_PROFILE,
+  isSessionAgentPreset,
+  SESSION_AGENT_PRESETS,
+  type SessionAgentPreset,
+  type SessionProfile,
+} from "../domain/run/model.ts";
 import { type RunId, runId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 
@@ -21,17 +35,29 @@ interface RootBinding {
   readonly lastSequence: number;
 }
 
-export default function phenixRootExtension(pi: ExtensionAPI): void {
+export default async function phenixRootExtension(pi: ExtensionAPI): Promise<void> {
   let runtime: PhenixRuntime | undefined;
   let rootRunId: RunId | undefined;
+  let modelRegistry: ModelRegistry | undefined;
   let toolsRegistered = false;
   let disposeStatus: (() => void) | undefined;
+  let integrationStatuses: readonly IntegrationStatus[] = [];
+
+  registerPhenixProvider(pi, {
+    modelRegistry: () => modelRegistry,
+    profile: async () => {
+      if (!runtime || !rootRunId) return DEFAULT_SESSION_PROFILE;
+      return runtime.profiles.current(rootRunId);
+    },
+  });
+  integrationStatuses = await loadPiIntegrations(pi);
 
   pi.on("session_start", async (_event, ctx) => {
     const previousRuntime = runtime;
     const previousRoot = rootRunId;
     runtime = undefined;
     rootRunId = undefined;
+    modelRegistry = ctx.modelRegistry;
     disposeStatus?.();
     disposeStatus = undefined;
     if (previousRuntime && previousRoot) await previousRuntime.shutdown(previousRoot);
@@ -68,17 +94,23 @@ export default function phenixRootExtension(pi: ExtensionAPI): void {
           : {}),
         cwd: ctx.cwd,
       },
-      ...(ctx.model ? { model: concreteModel(ctx.model.provider, ctx.model.id) } : {}),
+      ...(ctx.model && ctx.model.provider !== "phenix"
+        ? { model: concreteModel(ctx.model.provider, ctx.model.id) }
+        : {}),
     });
+    if (ctx.model?.provider === "phenix" && isPhenixModelSet(ctx.model.id)) {
+      await currentRuntime.profiles.select(currentRoot, {
+        modelSet: ctx.model.id,
+        source: "model-select",
+      });
+    }
 
     if (!toolsRegistered) {
       for (const tool of await currentRuntime.rootTools(currentRoot)) {
         registerAgentTool(pi, tool, async () => {
           const activeRuntime = runtime;
           const activeRoot = rootRunId;
-          if (!activeRuntime || !activeRoot) {
-            throw new Error(`Phenix runtime is not initialized`);
-          }
+          if (!activeRuntime || !activeRoot) throw new Error(`Phenix runtime is not initialized`);
           const activeTool = (await activeRuntime.rootTools(activeRoot)).find(
             (candidate) => candidate.name === tool.name,
           );
@@ -91,15 +123,17 @@ export default function phenixRootExtension(pi: ExtensionAPI): void {
     disposeStatus = currentRuntime.events.subscribe(() =>
       updateStatus(ctx, currentRuntime, currentRoot),
     );
+    await applyAgentTools(pi, ctx, (await currentRuntime.profiles.current(currentRoot)).agent);
     await updateStatus(ctx, currentRuntime, currentRoot);
     appendBinding(pi, currentRuntime, currentRoot, sessionId);
   });
 
   pi.on("before_agent_start", async (event) => {
     if (!runtime || !rootRunId) return;
-    const [available, active] = await Promise.all([
+    const [available, active, profile] = await Promise.all([
       runtime.catalog.listAvailable(rootRunId),
       runtime.queries.activeRuns(rootRunId),
+      runtime.profiles.current(rootRunId),
     ]);
     const capabilities = available.map((definition) => definition.id).join(", ");
     const handles = active
@@ -107,7 +141,7 @@ export default function phenixRootExtension(pi: ExtensionAPI): void {
       .map((run) => `${run.id}:${run.state}`)
       .join(", ");
     return {
-      systemPrompt: `${event.systemPrompt}\n\nPhenix execution scope:\n- Invoke typed work through phenix_run; definitions own their internal actors, transitions, and models.\n- Available definitions: ${capabilities || "none"}.\n- Active descendant handles: ${handles || "none"}.\n- A background child remains attached. Use phenix_handle to inspect, await, send, or cancel it.\n- Use phenix_tasks only for local leaves; execution anchors are derived and read-only.`,
+      systemPrompt: `${event.systemPrompt}\n\n${agentInstructions(profile.agent)}\n\nPhenix execution scope:\n- Session profile: agent=${profile.agent}, modelSet=${profile.modelSet}, difficulty=${profile.difficulty}.\n- Compose typed agents and invariant workflows through phenix_run; workflows own mandatory actors, transitions, and verification.\n- Available definitions: ${capabilities || "none"}.\n- Active descendant handles: ${handles || "none"}.\n- A background child remains attached. Use phenix_handle to inspect, await, send, or cancel it.\n- Use phenix_tasks only for local leaves; execution anchors are derived and read-only.`,
     };
   });
 
@@ -118,6 +152,13 @@ export default function phenixRootExtension(pi: ExtensionAPI): void {
 
   pi.on("model_select", async (event) => {
     if (!runtime || !rootRunId) return;
+    if (event.model.provider === "phenix" && isPhenixModelSet(event.model.id)) {
+      await runtime.profiles.select(rootRunId, {
+        modelSet: event.model.id,
+        source: "model-select",
+      });
+      return;
+    }
     await runtime.observeRootModel(rootRunId, concreteModel(event.model.provider, event.model.id));
   });
 
@@ -126,6 +167,7 @@ export default function phenixRootExtension(pi: ExtensionAPI): void {
     const currentRoot = rootRunId;
     runtime = undefined;
     rootRunId = undefined;
+    modelRegistry = undefined;
     disposeStatus?.();
     disposeStatus = undefined;
     ctx.ui.setStatus(STATUS_KEY, undefined);
@@ -134,16 +176,107 @@ export default function phenixRootExtension(pi: ExtensionAPI): void {
     appendBinding(pi, currentRuntime, currentRoot, ctx.sessionManager.getSessionId());
   });
 
-  pi.registerCommand("phenix", {
-    description: "Inspect Phenix; usage: /phenix status|runs|tasks|catalog",
+  pi.registerCommand("agent", {
+    description: "Select the root-session Phenix agent preset; usage: /agent [preset]",
     handler: async (args, ctx) => {
-      if (!runtime || !rootRunId) {
+      const active = requireRuntime(runtime, rootRunId);
+      const selected = args.trim().toLowerCase();
+      if (!selected) {
+        const profile = await active.runtime.profiles.current(active.root);
+        ctx.ui.notify(
+          `Agent: ${profile.agent}\nAvailable: ${SESSION_AGENT_PRESETS.join(", ")}`,
+          "info",
+        );
+        return;
+      }
+      if (!isSessionAgentPreset(selected)) {
+        ctx.ui.notify(
+          `Unknown agent preset. Available: ${SESSION_AGENT_PRESETS.join(", ")}`,
+          "warning",
+        );
+        return;
+      }
+      const profile = await active.runtime.profiles.select(active.root, {
+        agent: selected,
+        source: "user",
+      });
+      await applyAgentTools(pi, ctx, profile.agent);
+      await updateStatus(ctx, active.runtime, active.root);
+    },
+  });
+
+  pi.registerCommand("modelset", {
+    description:
+      "Select the session Phenix model set; usage: /modelset [free|opencode-go|chatgpt-plus|mixed]",
+    handler: async (args, ctx) => {
+      const active = requireRuntime(runtime, rootRunId);
+      const selected = args.trim().toLowerCase();
+      if (!selected) {
+        const profile = await active.runtime.profiles.current(active.root);
+        ctx.ui.notify(
+          `Model set: ${profile.modelSet}\nAvailable: ${PHENIX_MODEL_SETS.join(", ")}`,
+          "info",
+        );
+        return;
+      }
+      if (!isPhenixModelSet(selected)) {
+        ctx.ui.notify(`Unknown model set. Available: ${PHENIX_MODEL_SETS.join(", ")}`, "warning");
+        return;
+      }
+      const model = ctx.modelRegistry.find("phenix", selected);
+      if (!model || !(await pi.setModel(model))) {
+        ctx.ui.notify(`Unable to activate phenix/${selected}.`, "warning");
+        return;
+      }
+      await active.runtime.profiles.select(active.root, {
+        modelSet: selected,
+        source: "user",
+      });
+      await updateStatus(ctx, active.runtime, active.root);
+    },
+  });
+
+  pi.registerCommand("difficulty", {
+    description: "Select routed reasoning difficulty; usage: /difficulty D0|D1|D2|D3",
+    handler: async (args, ctx) => {
+      const active = requireRuntime(runtime, rootRunId);
+      const selected = args.trim().toUpperCase();
+      if (!isDifficulty(selected)) {
+        const profile = await active.runtime.profiles.current(active.root);
+        ctx.ui.notify(
+          `Difficulty: ${profile.difficulty}\nAvailable: D0, D1, D2, D3`,
+          selected ? "warning" : "info",
+        );
+        return;
+      }
+      await active.runtime.profiles.select(active.root, {
+        difficulty: selected,
+        source: "user",
+      });
+      pi.setThinkingLevel(thinkingForDifficulty(selected));
+      await updateStatus(ctx, active.runtime, active.root);
+    },
+  });
+
+  pi.registerCommand("phenix", {
+    description: "Inspect Phenix; usage: /phenix status|runs|tasks|catalog|integrations",
+    handler: async (args, ctx) => {
+      const activeRuntime = runtime;
+      const activeRoot = rootRunId;
+      if (!activeRuntime || !activeRoot) {
         ctx.ui.notify("Phenix runtime is not initialized.", "warning");
         return;
       }
       const action = args.trim().toLowerCase() || "status";
+      if (action === "integrations") {
+        ctx.ui.notify(
+          summarizeIntegrations(integrationStatuses),
+          integrationLevel(integrationStatuses),
+        );
+        return;
+      }
       if (action === "catalog") {
-        const definitions = await runtime.catalog.listAvailable(rootRunId);
+        const definitions = await activeRuntime.catalog.listAvailable(activeRoot);
         ctx.ui.notify(
           definitions.map((definition) => `${definition.id} — ${definition.title}`).join("\n"),
           "info",
@@ -151,25 +284,28 @@ export default function phenixRootExtension(pi: ExtensionAPI): void {
         return;
       }
       if (action === "runs") {
-        const tree = await runtime.queries.runTree(rootRunId);
+        const tree = await activeRuntime.queries.runTree(activeRoot);
         ctx.ui.notify(limit(JSON.stringify(tree, null, 2)), "info");
         return;
       }
       if (action === "tasks") {
-        const tree = await runtime.tasks.tree(rootRunId);
+        const tree = await activeRuntime.tasks.tree(activeRoot);
         ctx.ui.notify(limit(JSON.stringify(tree, null, 2)), "info");
         return;
       }
       if (action !== "status") {
-        ctx.ui.notify("Usage: /phenix status|runs|tasks|catalog", "warning");
+        ctx.ui.notify("Usage: /phenix status|runs|tasks|catalog|integrations", "warning");
         return;
       }
-      const active = await runtime.queries.activeRuns(rootRunId);
-      const descendants = active.filter((run) => run.id !== rootRunId);
-      const ledger = runtime.ledgerPath(rootRunId) ?? "in-memory";
+      const [active, profile] = await Promise.all([
+        activeRuntime.queries.activeRuns(activeRoot),
+        activeRuntime.profiles.current(activeRoot),
+      ]);
+      const descendants = active.filter((run) => run.id !== activeRoot);
+      const ledger = activeRuntime.ledgerPath(activeRoot) ?? "in-memory";
       ctx.ui.notify(
-        `Root: ${rootRunId}\nSequence: ${runtime.sequence(rootRunId)}\nActive descendants: ${descendants.length}\nLedger: ${ledger}`,
-        "info",
+        `Root: ${activeRoot}\nProfile: ${profile.agent} / ${profile.modelSet} / ${profile.difficulty}\nSequence: ${activeRuntime.sequence(activeRoot)}\nActive descendants: ${descendants.length}\nIntegrations: ${summarizeIntegrations(integrationStatuses)}\nLedger: ${ledger}`,
+        integrationLevel(integrationStatuses),
       );
     },
   });
@@ -232,16 +368,101 @@ async function updateStatus(
   runtime: PhenixRuntime,
   rootRunId: RunId,
 ): Promise<void> {
-  const active = await runtime.queries.activeRuns(rootRunId);
+  const [active, profile] = await Promise.all([
+    runtime.queries.activeRuns(rootRunId),
+    runtime.profiles.current(rootRunId),
+  ]);
   const descendants = active.filter((run) => run.id !== rootRunId);
   ctx.ui.setStatus(
     STATUS_KEY,
-    descendants.length === 0 ? "phenix: idle" : `phenix: ${descendants.length} active`,
+    `phenix: ${profile.agent}/${profile.modelSet}${descendants.length === 0 ? "" : ` · ${descendants.length} active`}`,
   );
 }
 
-function concreteModel(provider: string, model: string): ConcreteModelRef {
-  return { kind: "concrete", provider, model };
+async function applyAgentTools(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  preset: SessionAgentPreset,
+): Promise<void> {
+  const policies: Readonly<Record<SessionAgentPreset, readonly string[]>> = {
+    base: [
+      "read",
+      "grep",
+      "find",
+      "ls",
+      "bash",
+      "edit",
+      "write",
+      "phenix_run",
+      "phenix_handle",
+      "phenix_tasks",
+    ],
+    scout: ["read", "grep", "find", "ls"],
+    planner: ["read", "grep", "find", "ls", "phenix_run", "phenix_handle", "phenix_tasks"],
+    architect: ["read", "grep", "find", "ls", "phenix_run", "phenix_handle", "phenix_tasks"],
+    implementer: ["read", "grep", "find", "ls", "bash", "edit", "write", "phenix_tasks"],
+    tester: ["read", "grep", "find", "ls", "bash", "phenix_tasks"],
+    verifier: ["read", "grep", "find", "ls", "bash", "phenix_tasks"],
+    critic: ["read", "grep", "find", "ls", "bash"],
+    finalizer: ["read", "phenix_handle", "phenix_tasks"],
+  };
+  const available = new Set(pi.getAllTools().map((tool) => tool.name));
+  const tools = policies[preset].filter((tool) => available.has(tool));
+  pi.setActiveTools(tools);
+  const missing = policies[preset].filter((tool) => !available.has(tool));
+  if (missing.length > 0) {
+    ctx.ui.notify(`Agent ${preset}: unavailable tools: ${missing.join(", ")}`, "warning");
+  }
+}
+
+function agentInstructions(preset: SessionAgentPreset): string {
+  const instructions: Readonly<Record<SessionAgentPreset, string>> = {
+    base: "Act as the root coordinator. Dynamically compose agents and invariant workflows only when they reduce risk or preserve context.",
+    scout:
+      "Act as a read-only repository scout. Answer focused questions with concrete paths and evidence.",
+    planner:
+      "Act as a read-only planner. Produce executable steps and delegate only narrow evidence gaps.",
+    architect:
+      "Act as a read-only architect. Focus on ownership, boundaries, dependency direction, and replaceability.",
+    implementer:
+      "Act as a focused implementer. Make bounded edits, run relevant checks, and avoid redesign outside the request.",
+    tester:
+      "Act as a test analyst. Run and interpret deterministic checks without editing implementation files.",
+    verifier:
+      "Act as an independent verifier. Do not edit; accept claims only with concrete evidence.",
+    critic:
+      "Act as a read-only critic. Find contradictions, omissions, and unsafe assumptions, ranked by impact.",
+    finalizer:
+      "Act as a finalizer. Synthesize completed evidence and outcomes without starting new work.",
+  };
+  return instructions[preset];
+}
+
+function isDifficulty(value: string): value is SessionProfile["difficulty"] {
+  return ["D0", "D1", "D2", "D3"].includes(value);
+}
+
+function thinkingForDifficulty(difficulty: SessionProfile["difficulty"]) {
+  return difficulty === "D0"
+    ? "minimal"
+    : difficulty === "D1"
+      ? "low"
+      : difficulty === "D2"
+        ? "high"
+        : "xhigh";
+}
+
+function integrationLevel(statuses: readonly IntegrationStatus[]): "info" | "warning" {
+  return statuses.some((status) => status.state === "failed") ? "warning" : "info";
+}
+
+function requireRuntime(runtime: PhenixRuntime | undefined, root: RunId | undefined) {
+  if (!runtime || !root) throw new Error(`Phenix runtime is not initialized`);
+  return { runtime, root };
+}
+
+function concreteModel(provider: string, model: string) {
+  return { kind: "concrete" as const, provider, model };
 }
 
 function limit(value: string): string {

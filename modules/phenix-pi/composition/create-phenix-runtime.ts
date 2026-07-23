@@ -21,9 +21,13 @@ import type {
   CatalogFacade,
   ExecutionFacade,
   QueryFacade,
+  SessionProfileFacade,
   TaskFacade,
 } from "../application/interfaces.ts";
+import { SessionInvocationPolicy } from "../application/invocation-policy.ts";
+import { ProfileAwareModelResolver } from "../application/profile-aware-model-resolver.ts";
 import { QueryFacadeImpl } from "../application/query-facade.ts";
+import { SessionProfileFacadeImpl } from "../application/session-profile-facade.ts";
 import { TaskFacadeImpl } from "../application/task-facade.ts";
 import { WorkflowProcessManager } from "../application/workflow-process-manager.ts";
 import { agentDefinitions } from "../definitions/agents.ts";
@@ -31,7 +35,7 @@ import { registerWorkflowFunctions } from "../definitions/workflows/functions.ts
 import { workflowDefinitions } from "../definitions/workflows/index.ts";
 import type { ConcreteModelRef } from "../domain/definition/model.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
-import type { RootRunInput } from "../domain/run/model.ts";
+import { DEFAULT_SESSION_PROFILE, type RootRunInput } from "../domain/run/model.ts";
 import type { RunId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import { type IdGenerator, systemClock } from "../ports/clock.ts";
@@ -50,6 +54,7 @@ export interface PhenixHostServices {
 
 export interface PhenixRuntime {
   readonly execution: ExecutionFacade;
+  readonly profiles: SessionProfileFacade;
   readonly tasks: TaskFacade;
   readonly catalog: CatalogFacade;
   readonly queries: QueryFacade;
@@ -74,6 +79,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
   const ledger =
     host.ledger ?? new JsonlRunLedger(host.stateDir ?? path.join(host.cwd, ".phenix-agent-state"));
   const store = new ExecutionStore({ ledger, events, clock: systemClock, ids });
+  const profiles = new SessionProfileFacadeImpl(store);
   const operations = new ProcessLocalOperationRunner();
   const functions = new WorkflowFunctionRegistry();
   registerWorkflowFunctions(functions);
@@ -83,10 +89,14 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
   }
   definitions.seal(functions, operations);
 
-  const resolver = new PhenixModelResolver(
+  let activeRootRunId: RunId | undefined;
+  const baseResolver = new PhenixModelResolver(
     new PiModelInventory(host.modelRegistry),
     host.routingPolicy,
   );
+  const resolver = new ProfileAwareModelResolver(baseResolver, async () => {
+    return activeRootRunId ? profiles.current(activeRootRunId) : DEFAULT_SESSION_PROFILE;
+  });
   const execution = new ExecutionFacadeImpl({
     catalog: definitions,
     store,
@@ -101,7 +111,14 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     ids,
   });
   const catalog = new CatalogFacadeImpl(definitions, store);
-  const tools = new FacadeAgentToolFactory({ execution, tasks, catalog, store });
+  const invocationPolicy = new SessionInvocationPolicy({ store, catalog: definitions });
+  const tools = new FacadeAgentToolFactory({
+    execution,
+    tasks,
+    catalog,
+    store,
+    invocationPolicy,
+  });
   const backend = new PiSdkAgentSessionBackend({
     modelRegistry: host.modelRegistry,
     agentDir: host.agentDir,
@@ -155,11 +172,13 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
 
   return {
     execution,
+    profiles,
     tasks,
     catalog,
     queries,
     events,
     async startRoot(input) {
+      activeRootRunId = input.id;
       await execution.initializeRoot(input);
       await execution.recoverNonterminal(input.id);
       await events.drain();
@@ -179,6 +198,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
       await workflows.shutdown();
       await agents.shutdown();
       await events.drain();
+      if (activeRootRunId === rootRunId) activeRootRunId = undefined;
       unsubscribeNotifications();
       unsubscribePiBridge();
     },

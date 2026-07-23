@@ -13,12 +13,15 @@ import { TaskFacadeImpl } from "../../application/task-facade.ts";
 import { WorkflowProcessManager } from "../../application/workflow-process-manager.ts";
 import { agentDefinitions } from "../../definitions/agents.ts";
 import {
+  AGENT_ARCHITECT,
   AGENT_BASE,
   AGENT_CRITIC,
+  AGENT_FINALIZER,
   AGENT_IMPLEMENTER,
   AGENT_PLANNER,
   AGENT_QA_SYNTHESIZER,
   AGENT_SCOUT,
+  AGENT_TESTER,
   AGENT_VERIFIER,
 } from "../../definitions/ids.ts";
 import { registerWorkflowFunctions } from "../../definitions/workflows/functions.ts";
@@ -50,8 +53,11 @@ const models: ModelResolver = {
   },
 };
 const operations: LocalOperationRunner = {
-  has: (operation) => operation === "local.noop",
-  async run(_operation, input) {
+  has: (operation) => operation === "local.noop" || operation === "local.qa-checks",
+  async run(operation, input) {
+    if (operation === "local.qa-checks") {
+      return [{ command: "test", ok: true, summary: "passed" }];
+    }
     return input;
   },
 };
@@ -162,13 +168,21 @@ function outputFor(definition: AnyDefinition): unknown {
   if (definition.id === AGENT_SCOUT) {
     return { summary: "scouted", evidence: [{ path: "src/file.ts", finding: "ok" }], risks: [] };
   }
-  if (definition.id === AGENT_CRITIC) {
+  if (definition.id === AGENT_TESTER) {
+    return {
+      summary: "checks passed",
+      checks: [{ command: "test", ok: true, summary: "passed" }],
+      findings: [],
+      evidence: ["test passed"],
+    };
+  }
+  if (definition.id === AGENT_ARCHITECT || definition.id === AGENT_CRITIC) {
     return { summary: "reviewed", findings: [] };
   }
   if (definition.id === AGENT_QA_SYNTHESIZER) {
     return { summary: "clean", findings: [], reports: [] };
   }
-  if (definition.id === AGENT_BASE) {
+  if (definition.id === AGENT_BASE || definition.id === AGENT_FINALIZER) {
     return { summary: "done", artifacts: [], unresolved: [] };
   }
   throw new Error(`No scripted output for ${definition.id}`);
