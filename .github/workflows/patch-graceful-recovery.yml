@@ -28,7 +28,16 @@ jobs:
             experimental-features = nix-command flakes
             accept-flake-config = true
       - name: Apply recovery corrections
-        run: python .github/correct-graceful-recovery.py
+        shell: bash
+        run: |
+          set -o pipefail
+          python .github/correct-graceful-recovery.py 2>&1 | tee recovery-correction.log
+      - name: Upload correction diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: graceful-recovery-correction-log
+          path: recovery-correction.log
       - name: Format corrected sources
         run: |
           nix shell github:NixOS/nixpkgs/0bb7ec54c8483066ec9d7720e780a5caa71f8612#biome -c \
