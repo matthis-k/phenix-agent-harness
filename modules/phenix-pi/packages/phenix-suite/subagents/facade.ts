@@ -10,7 +10,10 @@ export interface SubagentHandleView {
   readonly id: string;
   readonly subagentId?: string;
   readonly status: HandleStatus;
+  /** Accepted producer output. Present only after successful acceptance. */
   readonly value?: unknown;
+  /** Rejected or unverified output retained only for explicit diagnostics. */
+  readonly candidateValue?: unknown;
   readonly errors?: readonly string[];
   readonly modelSet: string;
   readonly role?: string;
@@ -42,17 +45,16 @@ export interface PhenixSubagentFacade {
   ): Promise<SubagentHandleView | undefined>;
 }
 
-function handle(record: HandleRecord | undefined): SubagentHandleView | undefined {
+export function projectHandleRecord(
+  record: HandleRecord | undefined,
+): SubagentHandleView | undefined {
   if (!record) return undefined;
   return {
     id: record.id,
     ...(record.subagentId ? { subagentId: record.subagentId } : {}),
     status: record.status,
-    ...(record.value !== undefined
-      ? { value: record.value }
-      : record.candidateValue !== undefined
-        ? { value: record.candidateValue }
-        : {}),
+    ...(record.value !== undefined ? { value: record.value } : {}),
+    ...(record.candidateValue !== undefined ? { candidateValue: record.candidateValue } : {}),
     ...(record.errors ? { errors: [...record.errors] } : {}),
     modelSet: record.modelSet,
     ...(record.producerSpec
@@ -128,27 +130,27 @@ export function createPhenixSubagentFacade(input: {
   return {
     workflow: input.workflow,
     inspectHandle(ctx, id) {
-      const view = handle(readRecord(ctx.cwd, effectiveSessionId(ctx), id));
+      const view = projectHandleRecord(readRecord(ctx.cwd, effectiveSessionId(ctx), id));
       reconcileAuthority(ctx, view);
       return view;
     },
     async pollHandle(ctx, id) {
-      const view = handle(await input.delegator.poll(ctx, id));
+      const view = projectHandleRecord(await input.delegator.poll(ctx, id));
       reconcileAuthority(ctx, view);
       return view;
     },
     async awaitHandle(ctx, id, signal) {
-      const view = handle(await input.delegator.awaitHandle(ctx, id, signal));
+      const view = projectHandleRecord(await input.delegator.awaitHandle(ctx, id, signal));
       reconcileAuthority(ctx, view);
       return view;
     },
     async sendHandle(ctx, id, message, signal) {
-      const view = handle(await input.delegator.sendHandle(ctx, id, message, signal));
+      const view = projectHandleRecord(await input.delegator.sendHandle(ctx, id, message, signal));
       reconcileAuthority(ctx, view);
       return view;
     },
     async cancelHandle(ctx, id, reason) {
-      const view = handle(await input.delegator.cancelHandle(ctx, id, reason));
+      const view = projectHandleRecord(await input.delegator.cancelHandle(ctx, id, reason));
       reconcileAuthority(ctx, view);
       return view;
     },

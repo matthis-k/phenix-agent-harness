@@ -66,4 +66,50 @@ describe("merged session-tree journal", () => {
     assert.ok(records.some((record) => record.source.kind === "execution-journal"));
     assert.ok(records.some((record) => record.source.kind === "pi-session"));
   });
+
+  it("applies canonical redaction to Pi rows and malformed input", () => {
+    clearSessionExecutionJournalRegistry();
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "phenix-journal-redaction-"));
+    fs.writeFileSync(path.join(cwd, "flake.nix"), "{ outputs = _: {}; }\n");
+    const rootFile = path.join(cwd, "root.jsonl");
+    try {
+      fs.writeFileSync(
+        rootFile,
+        [
+          JSON.stringify({
+            type: "session",
+            id: "root-session",
+            timestamp: "2026-07-23T00:00:00.000Z",
+          }),
+          JSON.stringify({
+            type: "message",
+            timestamp: "2026-07-23T00:00:01.000Z",
+            authorization: "Bearer secret-token",
+            message: {
+              role: "assistant",
+              thinking: "private chain",
+              cookie: "private-cookie",
+            },
+          }),
+          '{"authorization":"leaked-malformed"',
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = generateSessionTreeJournal({
+        cwd,
+        rootSessionId: "root-session",
+        rootSessionFile: rootFile,
+      });
+      const output = fs.readFileSync(result.filePath, "utf8");
+
+      assert.doesNotMatch(output, /secret-token|private chain|private-cookie|leaked-malformed/);
+      assert.match(output, /\[redacted\]/);
+      assert.match(output, /"redacted":true/);
+      assert.match(output, /"invalid-jsonl-record"/);
+    } finally {
+      clearSessionExecutionJournalRegistry();
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
 });

@@ -111,11 +111,16 @@ function sanitizeValue(value: unknown, key?: string, depth = 0): unknown {
   return String(value);
 }
 
+/** Apply the canonical journal redaction and bounding policy to any record value. */
+export function sanitizeSessionExecutionValue(value: unknown): unknown {
+  return sanitizeValue(value);
+}
+
 export function sanitizeSessionExecutionPayload(
   payload: Readonly<Record<string, unknown>> | undefined,
 ): Readonly<Record<string, unknown>> | undefined {
   if (!payload) return undefined;
-  return sanitizeValue(payload) as Readonly<Record<string, unknown>>;
+  return sanitizeSessionExecutionValue(payload) as Readonly<Record<string, unknown>>;
 }
 
 function readEvents(filePath: string): readonly SessionExecutionEvent[] {

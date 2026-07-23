@@ -28,29 +28,45 @@ The runtime enforces schemas, validates cross-references (evidence→findings, f
 6. Let the runtime validate, merge, score, and render the final report.
 ```
 
+Before reading repository guidance such as `AGENTS.md`, `maintenance.nix`, or `.stitch.json`, probe for its existence and walk applicable parent guidance. Optional missing files are not QA failures.
+
 ### One-shot review
 
 ```bash
-node --experimental-strip-types skills/phenix-qa/runtime/index.ts review \
+phenix-qa review \
   --scope diff \
   --base main \
   --output qa-results/ \
   --trust-repository
 ```
 
+Use the packaged `phenix-qa` command. Do not execute the runtime TypeScript directly from the reviewed checkout or a copied skill path; the packaged command pins the runtime dependencies and resource paths.
+
 `--trust-repository` explicitly permits execution of commands discovered from the reviewed checkout. Omit it for an untrusted repository; `project-native` will then report unavailable rather than execute repository-controlled commands. Output paths are confined to the reviewed repository unless a caller explicitly combines `--output` with `--allow-external-output`.
 
 ### Validate a report
 
 ```bash
-node --experimental-strip-types skills/phenix-qa/runtime/index.ts validate-report report.json
+phenix-qa validate-report report.json
 ```
 
 ### List available analyzers
 
 ```bash
-node --experimental-strip-types skills/phenix-qa/runtime/index.ts analyzers
+phenix-qa analyzers
 ```
+
+### Merge model-assisted review
+
+After writing a contribution that satisfies `ModelReviewContributionSchema`, merge it into the deterministic report through the runtime rather than presenting detached manual findings:
+
+```bash
+phenix-qa merge-review \
+  qa-results/qa-report.json \
+  qa-results/model-review.json
+```
+
+The command validates evidence references, recalculates gates and risk, validates the final report, and rewrites both JSON and text reports. Exit status `1` means the completed QA report has a failing quality gate; it does not mean the review workflow itself failed.
 
 ## Required subsession decomposition for full QA
 

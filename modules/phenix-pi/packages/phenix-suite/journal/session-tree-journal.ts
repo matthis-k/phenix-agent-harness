@@ -1,6 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { SessionExecutionEvent } from "./session-execution-journal.ts";
+import {
+  type SessionExecutionEvent,
+  sanitizeSessionExecutionValue,
+} from "./session-execution-journal.ts";
 import {
   sessionExecutionJournalForProject,
   sessionExecutionJournalPath,
@@ -41,7 +44,10 @@ function readJsonl(filePath: string): readonly JsonlRow[] {
     } catch {
       rows.push({
         line: index + 1,
-        value: { type: "invalid-jsonl-record", raw: line },
+        value: {
+          type: "invalid-jsonl-record",
+          raw: { redacted: true, length: line.length },
+        },
       });
     }
   }
@@ -98,7 +104,7 @@ function sessionFilesFromEvents(
   return [...files].filter((candidate) => fs.existsSync(candidate)).sort();
 }
 
-/** Materialize one chronological JSONL containing canonical events and every known Pi session file. */
+/** Materialize one chronological, sanitized JSONL containing canonical events and known Pi sessions. */
 export function generateSessionTreeJournal(input: {
   readonly cwd: string;
   readonly rootSessionId: string;
@@ -129,7 +135,7 @@ export function generateSessionTreeJournal(input: {
         timestamp: recordTimestamp(row.value, "9999-12-31T23:59:59.999Z"),
         ...(sessionId ? { sessionId } : {}),
         source: { kind: "pi-session", path: sourcePath, line: row.line },
-        record: row.value,
+        record: sanitizeSessionExecutionValue(row.value),
       });
     }
   }
