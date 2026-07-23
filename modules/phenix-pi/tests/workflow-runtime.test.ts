@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { WORKFLOW_IMPLEMENT, WORKFLOW_QA, WORKFLOW_QA_FIX } from "../definitions/ids.ts";
-import type { ImplementationResult } from "../definitions/schemas.ts";
+import { WORKFLOW_IMPLEMENT, WORKFLOW_QA } from "../definitions/ids.ts";
+import type { ImplementationResult, QAReport } from "../definitions/schemas.ts";
 import { definitionRef } from "../domain/definition/definition.ts";
 import type { LocalOperationRunner } from "../ports/local-operation-runner.ts";
 import { createTestRuntime } from "./support/core-runtime.ts";
@@ -78,6 +78,30 @@ test("implementation workflow performs a bounded typed repair loop", async () =>
   assert.equal(verifications, 2);
 });
 
+test("QA workflow combines deterministic checks and independent semantic reviews", async () => {
+  const runtime = await createTestRuntime();
+  const handle = await runtime.execution.start({
+    parentId: runtime.rootRunId,
+    definition: definitionRef<unknown, QAReport>(WORKFLOW_QA),
+    input: { objective: "Audit the repository" },
+    wait: "await",
+  });
+  const outcome = await handle.result();
+  assert.equal(outcome.status, "success");
+  const children = runtime.store.projection.childrenOf(handle.id);
+  assert.deepEqual(
+    children.map((child) => child.definitionId).sort(),
+    ["agent.architect", "agent.critic", "agent.qa-synthesizer", "agent.scout", "agent.tester"].sort(),
+  );
+  assert.ok(
+    runtime.store.projection.eventsFor(handle.id).some(
+      (event) =>
+        event.type === "workflow.node.completed" &&
+        (event.data as { nodeId?: string }).nodeId === "checks",
+    ),
+  );
+});
+
 test("workflow cancellation aborts and joins owned local operations", async () => {
   let markStarted: () => void = () => undefined;
   const started = new Promise<void>((resolve) => {
@@ -85,8 +109,9 @@ test("workflow cancellation aborts and joins owned local operations", async () =
   });
   let observedSignal: AbortSignal | undefined;
   const operations: LocalOperationRunner = {
-    has: (operation) => operation === "local.noop",
-    async run(_operation, _input, context) {
+    has: (operation) => operation === "local.noop" || operation === "local.qa-checks",
+    async run(operation, input, context) {
+      if (operation !== "local.noop") return input;
       observedSignal = context.signal;
       markStarted();
       await new Promise<void>((_resolve, reject) => {
@@ -117,22 +142,37 @@ test("workflow cancellation aborts and joins owned local operations", async () =
   assert.equal(runtime.store.projection.requireRun(handle.id).state, "cancelled");
 });
 
-test("nested QA-and-fix workflow is invoked through the same run boundary", async () => {
+test("a coordinator composes QA and implementation as sibling runs instead of a wrapper workflow", async () => {
   const runtime = await createTestRuntime();
-  const handle = await runtime.execution.start({
+  const qa = await runtime.execution.start({
     parentId: runtime.rootRunId,
-    definition: definitionRef(WORKFLOW_QA_FIX),
-    input: { objective: "Audit and repair" },
+    definition: definitionRef<unknown, QAReport>(WORKFLOW_QA),
+    input: { objective: "Audit before deciding whether to edit" },
     wait: "await",
   });
-  const outcome = await handle.result();
-  assert.equal(outcome.status, "success");
-  if (outcome.status !== "success") return;
-  assert.equal((outcome.value as { changed: boolean }).changed, false);
-  const nested = runtime.store.projection
-    .childrenOf(handle.id)
-    .find((run) => run.definitionId === "workflow.qa");
-  assert.ok(nested);
-  assert.equal(nested.parentId, handle.id);
-  assert.equal(nested.state, "completed");
+  assert.equal((await qa.result()).status, "success");
+
+  const implementation = await runtime.execution.start({
+    parentId: runtime.rootRunId,
+    definition: definitionRef<unknown, ImplementationResult>(WORKFLOW_IMPLEMENT),
+    input: {
+      objective: "Address the actionable QA findings",
+      findings: ["example actionable finding selected by the coordinator"],
+    },
+    wait: "await",
+  });
+  assert.equal((await implementation.result()).status, "success");
+
+  const rootChildren = runtime.store.projection.childrenOf(runtime.rootRunId);
+  assert.deepEqual(
+    rootChildren.map((run) => run.definitionId),
+    [WORKFLOW_QA, WORKFLOW_IMPLEMENT],
+  );
+  assert.ok(rootChildren.every((run) => run.parentId === runtime.rootRunId));
+  assert.equal(
+    [...runtime.store.projection.runs.values()].some(
+      (run) => run.definitionId === "workflow.qa-and-fix",
+    ),
+    false,
+  );
 });
