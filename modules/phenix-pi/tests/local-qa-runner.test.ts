@@ -13,7 +13,6 @@ test("QA runner reports repositories without a discoverable deterministic check"
     const result = (await runner.run("local.qa-checks", {}, {
       cwd,
       signal: new AbortController().signal,
-      runId: "run-test",
     })) as readonly { command: string; ok: boolean; summary: string }[];
     assert.equal(result.length, 1);
     assert.equal(result[0]?.ok, false);
@@ -28,7 +27,6 @@ test("QA runner rejects generic shell composition and unapproved commands", asyn
   const context = {
     cwd: process.cwd(),
     signal: new AbortController().signal,
-    runId: "run-test",
   };
   await assert.rejects(
     runner.run("local.qa-checks", { commands: ["npm test; rm -rf ."] }, context),
@@ -47,7 +45,6 @@ test("local noop remains the only identity operation", async () => {
     await runner.run("local.noop", input, {
       cwd: process.cwd(),
       signal: new AbortController().signal,
-      runId: "run-test",
     }),
     input,
   );
