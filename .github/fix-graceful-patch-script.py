@@ -43,4 +43,9 @@ if source.count(old_tools) != 1:
     raise SystemExit(f'expected one tools patch block, found {source.count(old_tools)}')
 if source.count(old_attach) != 1:
     raise SystemExit(f'expected one attach patch block, found {source.count(old_attach)}')
-path.write_text(source.replace(old_tools, new_tools).replace(old_attach, new_attach))
+source = source.replace(old_tools, new_tools).replace(old_attach, new_attach)
+prompt_prefix = "    '''    return `${definition.prompt.render(input)}\\n\\nExecution protocol:"
+raw_prompt_prefix = "    r'''    return `${definition.prompt.render(input)}\\n\\nExecution protocol:"
+if source.count(prompt_prefix) != 2:
+    raise SystemExit(f'expected two prompt literals, found {source.count(prompt_prefix)}')
+path.write_text(source.replace(prompt_prefix, raw_prompt_prefix))
