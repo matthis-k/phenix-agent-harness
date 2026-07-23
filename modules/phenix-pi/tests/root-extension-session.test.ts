@@ -28,15 +28,20 @@ test("registered root tools follow the active Pi session runtime", async () => {
       on(name: string, handler: Handler) {
         handlers.set(name, handler);
       },
+      registerProvider: () => undefined,
       registerTool(tool: unknown) {
         const registered = tool as RegisteredTool;
         tools.set(registered.name, registered);
       },
+      getAllTools: () => [...tools.values()],
+      setActiveTools: () => undefined,
+      setThinkingLevel: () => undefined,
+      setModel: async () => true,
       registerCommand: () => undefined,
       appendEntry: () => undefined,
       sendMessage: () => undefined,
     } as unknown as ExtensionAPI;
-    phenixRootExtension(fakePi);
+    await phenixRootExtension(fakePi);
 
     const start = handlers.get("session_start");
     const shutdown = handlers.get("session_shutdown");
@@ -78,6 +83,7 @@ function context(cwd: string, sessionId: string): ExtensionContext {
       getBranch: () => [],
     },
     modelRegistry: {
+      find: () => undefined,
       getAvailable: () => [],
       getRegisteredProviderIds: () => [],
       getRegisteredProviderConfig: () => undefined,
