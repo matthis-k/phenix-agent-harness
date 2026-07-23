@@ -4,10 +4,13 @@ import type {
   ContextPolicy,
 } from "../../domain/definition/definition.ts";
 import type { DefinitionId } from "../../domain/shared.ts";
+import { DispatchDecisionSchema } from "../dispatch.ts";
 import {
   AGENT_ARCHITECT,
   AGENT_BASE,
+  AGENT_COORDINATOR,
   AGENT_CRITIC,
+  AGENT_DISPATCHER,
   AGENT_FINALIZER,
   AGENT_IMPLEMENTER,
   AGENT_PLANNER,
@@ -16,6 +19,8 @@ import {
   AGENT_TESTER,
   AGENT_VERIFIER,
   ALL_DEFINITION_IDS,
+  WORKFLOW_IMPLEMENT,
+  WORKFLOW_QA,
 } from "../ids.ts";
 import {
   BaseResultSchema,
@@ -230,6 +235,62 @@ export const finalizerDefinition: AgentDefinition<unknown, unknown> = {
   persistence: "memory",
 };
 
+export const dispatcherDefinition: AgentDefinition<unknown, unknown> = {
+  id: AGENT_DISPATCHER,
+  kind: "agent",
+  title: "Execution dispatcher",
+  description: "Choose the typed execution route for an ambiguous substantial request.",
+  input: ObjectiveRequestSchema,
+  output: DispatchDecisionSchema,
+  model: sessionModel,
+  thinking: "minimal",
+  prompt: {
+    render: () =>
+      "Classify the request into exactly one route: qa for repository review or audit without requested mutation; implement for a concrete requested code change; coordinate for multi-stage, mixed review-and-fix, or otherwise open-ended substantial work. Return only the typed decision. Do not perform repository work.",
+  },
+  tools: { allow: [] },
+  context: { ...context, projectFiles: "none", maxBytes: 8_000 },
+  childCapabilities: none,
+  limits: { timeoutMs: 120_000, maxTurns: 2, maxToolCalls: 1, maxRepairAttempts: 1 },
+  persistence: "memory",
+};
+
+export const coordinatorDefinition: AgentDefinition<unknown, unknown> = {
+  id: AGENT_COORDINATOR,
+  kind: "agent",
+  title: "Dynamic execution coordinator",
+  description:
+    "Compose invariant workflows and focused read-only agents for nontrivial open-ended tasks.",
+  input: ObjectiveRequestSchema,
+  output: BaseResultSchema,
+  model: sessionModel,
+  thinking: "route",
+  prompt: {
+    render: () =>
+      "Act as a read-only execution coordinator. Compose workflow.qa and workflow.implement when their invariants match. Use focused read-only agents only for evidence gaps. For review-then-fix work, run workflow.qa, inspect its typed outcome, then invoke workflow.implement only when actionable findings require mutation. Never edit files or reproduce workflow internals manually. Own the final synthesis.",
+  },
+  tools: {
+    allow: ["read", "grep", "find", "ls", "phenix_run", "phenix_handle", "phenix_tasks"],
+  },
+  context,
+  childCapabilities: capabilities(
+    [
+      WORKFLOW_QA,
+      WORKFLOW_IMPLEMENT,
+      AGENT_SCOUT,
+      AGENT_PLANNER,
+      AGENT_ARCHITECT,
+      AGENT_TESTER,
+      AGENT_VERIFIER,
+      AGENT_CRITIC,
+      AGENT_FINALIZER,
+    ],
+    4,
+  ),
+  limits: { timeoutMs: 2_400_000, maxTurns: 24, maxToolCalls: 160, maxRepairAttempts: 2 },
+  persistence: "memory",
+};
+
 export const baseDefinition: AgentDefinition<unknown, unknown> = {
   id: AGENT_BASE,
   kind: "agent",
@@ -292,6 +353,8 @@ export const agentDefinitions = [
   verifierDefinition,
   criticDefinition,
   finalizerDefinition,
+  dispatcherDefinition,
+  coordinatorDefinition,
   baseDefinition,
   qaSynthesizerDefinition,
 ] as const;

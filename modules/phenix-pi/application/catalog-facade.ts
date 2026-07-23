@@ -23,7 +23,7 @@ export class CatalogFacadeImpl implements CatalogFacade {
     const allowed = new Set(parent.compiled.capabilities.invokableDefinitions);
     return this.catalog
       .list()
-      .filter((definition) => parent.kind === "root" || allowed.has(definition.id))
+      .filter((definition) => allowed.has(definition.id))
       .map((definition) => ({
         id: definition.id,
         kind: definition.kind,

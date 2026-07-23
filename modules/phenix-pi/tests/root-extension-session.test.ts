@@ -52,6 +52,8 @@ test("registered root tools follow the active Pi session runtime", async () => {
     await start({}, first);
     const taskTool = tools.get("phenix_tasks");
     assert.ok(taskTool);
+    assert.ok(tools.has("phenix_dispatch"));
+    assert.equal(tools.has("phenix_run"), false);
     const firstResult = await taskTool.execute(
       "call-1",
       { action: "tree" },

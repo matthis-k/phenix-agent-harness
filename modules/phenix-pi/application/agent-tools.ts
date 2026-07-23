@@ -4,6 +4,7 @@ import { type AnyDefinition, definitionRef } from "../domain/definition/definiti
 import { defineSchema } from "../domain/definition/schema.ts";
 import { definitionId, localTaskId, type RunId, runId, type TaskId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
+import type { DispatchService } from "./dispatch-service.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import type { CatalogFacade, ExecutionFacade, TaskFacade } from "./interfaces.ts";
 import { allowAllInvocations, type InvocationPolicy } from "./invocation-policy.ts";
@@ -21,6 +22,21 @@ const runParameters = defineSchema<{
   Type.Object({
     definition: Type.String({ description: "Definition ID from the available Phenix catalog" }),
     input: Type.Unknown({ description: "Input matching the selected definition schema" }),
+    wait: Type.Optional(Type.Enum(["await", "background"])),
+  }),
+);
+
+const dispatchParameters = defineSchema<{
+  objective: string;
+  context?: unknown;
+  mode?: "auto" | "qa" | "implement" | "coordinate";
+  wait?: "await" | "background";
+}>(
+  "tool.phenix-dispatch",
+  Type.Object({
+    objective: Type.String({ minLength: 1 }),
+    context: Type.Optional(Type.Unknown()),
+    mode: Type.Optional(Type.Enum(["auto", "qa", "implement", "coordinate"])),
     wait: Type.Optional(Type.Enum(["await", "background"])),
   }),
 );
@@ -59,6 +75,7 @@ const taskParameters = defineSchema<{
 
 export class FacadeAgentToolFactory implements AgentToolFactory {
   private readonly execution: ExecutionFacade;
+  private readonly dispatch?: DispatchService;
   private readonly tasks: TaskFacade;
   private readonly catalog: CatalogFacade;
   private readonly store: ExecutionStore;
@@ -66,12 +83,14 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
 
   constructor(input: {
     readonly execution: ExecutionFacade;
+    readonly dispatch?: DispatchService;
     readonly tasks: TaskFacade;
     readonly catalog: CatalogFacade;
     readonly store: ExecutionStore;
     readonly invocationPolicy?: InvocationPolicy;
   }) {
     this.execution = input.execution;
+    this.dispatch = input.dispatch;
     this.tasks = input.tasks;
     this.catalog = input.catalog;
     this.store = input.store;
@@ -79,6 +98,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
   }
 
   async forRun(parentId: RunId): Promise<readonly AgentTool[]> {
+    const parent = this.store.projection.requireRun(parentId);
     const available = await this.catalog.listAvailable(parentId);
     const runTool: AgentTool = {
       name: "phenix_run",
@@ -90,10 +110,10 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       execute: async (raw, signal) => {
         const params = requireValid(runParameters, raw);
         const ref = definitionRef(definitionId(params.definition));
-        const parent = this.store.projection.requireRun(parentId);
+        const currentParent = this.store.projection.requireRun(parentId);
         this.invocationPolicy.assertAllowed({
           rootRunId: this.store.projection.rootOf(parentId),
-          parent,
+          parent: currentParent,
           definition: this.catalog.get(ref) as AnyDefinition,
           input: params.input,
         });
@@ -111,6 +131,20 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
         }
         const outcome = await handle.result(signal);
         return { text: JSON.stringify(outcome), details: { runId: handle.id, outcome } };
+      },
+    };
+
+    const dispatchTool: AgentTool = {
+      name: "phenix_dispatch",
+      label: "Phenix Dispatch",
+      description:
+        "Route substantial work through an invariant QA or implementation workflow, or through the read-only dynamic coordinator when the execution shape is ambiguous.",
+      parameters: dispatchParameters,
+      execute: async (raw, signal) => {
+        const params = requireValid(dispatchParameters, raw);
+        if (!this.dispatch) throw new Error("Root dispatch service is not configured");
+        const result = await this.dispatch.dispatch(parentId, params, signal);
+        return { text: JSON.stringify(result), details: result };
       },
     };
 
@@ -200,7 +234,9 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       },
     };
 
-    return [runTool, handleTool, taskTool];
+    return parent.kind === "root"
+      ? [dispatchTool, handleTool, taskTool]
+      : [runTool, handleTool, taskTool];
   }
 
   private assertAccessible(callerId: RunId, targetId: RunId): void {
