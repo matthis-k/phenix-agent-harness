@@ -41,13 +41,10 @@ describe("packaged QA CLI", () => {
 
       const stdout: string[] = [];
       const stderr: string[] = [];
-      const exitCode = await runPackagedQaCli(
-        ["merge-review", reportPath, contributionPath],
-        {
-          stdout: (message) => stdout.push(message),
-          stderr: (message) => stderr.push(message),
-        },
-      );
+      const exitCode = await runPackagedQaCli(["merge-review", reportPath, contributionPath], {
+        stdout: (message) => stdout.push(message),
+        stderr: (message) => stderr.push(message),
+      });
 
       assert.equal(exitCode, 0, stderr.join("\n"));
       const merged = JSON.parse(fs.readFileSync(reportPath, "utf8")) as {
