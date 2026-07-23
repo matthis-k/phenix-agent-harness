@@ -87,35 +87,44 @@
         };
       };
 
-      phenixPiPackage = pkgs.runCommand "phenix-pi-package" { } ''
-        mkdir -p "$out"
-        cp -R ${./phenix-pi}/. "$out/"
-        chmod -R u+w "$out"
+      phenixPiPackage = pkgs.runCommand "phenix-pi-package"
+        {
+          nativeBuildInputs = [ pkgs.makeBinaryWrapper ];
+        }
+        ''
+          mkdir -p "$out"
+          cp -R ${./phenix-pi}/. "$out/"
+          chmod -R u+w "$out"
 
-        rm -rf "$out/node_modules"
-        cp -R ${piNpmPackages}/node_modules "$out/node_modules"
-        chmod -R u+w "$out/node_modules"
+          rm -rf "$out/node_modules"
+          cp -R ${piNpmPackages}/node_modules "$out/node_modules"
+          chmod -R u+w "$out/node_modules"
 
-        mkdir -p "$out/bin"
-        test -x "$out/node_modules/.bin/fta"
-        ln -s "$out/node_modules/.bin/fta" "$out/bin/fta"
+          mkdir -p "$out/bin"
+          test -x "$out/node_modules/.bin/fta"
+          ln -s "$out/node_modules/.bin/fta" "$out/bin/fta"
+          makeWrapper ${pkgs.nodejs}/bin/node "$out/bin/phenix-qa" \
+            --add-flags "--experimental-strip-types" \
+            --add-flags "$out/skills/phenix-qa/runtime/index.ts"
 
-        piRoot=${piCodingAgent}/lib/node_modules/pi-monorepo
-        mkdir -p "$out/node_modules/@earendil-works"
-        ln -s "$piRoot" "$out/node_modules/@earendil-works/pi-coding-agent"
-        for package in pi-agent-core pi-ai; do
-          source="$piRoot/node_modules/@earendil-works/$package"
-          test -e "$source"
-          rm -rf "$out/node_modules/@earendil-works/$package"
-          ln -s "$source" "$out/node_modules/@earendil-works/$package"
-        done
+          piRoot=${piCodingAgent}/lib/node_modules/pi-monorepo
+          mkdir -p "$out/node_modules/@earendil-works"
+          ln -s "$piRoot" "$out/node_modules/@earendil-works/pi-coding-agent"
+          for package in pi-agent-core pi-ai; do
+            source="$piRoot/node_modules/@earendil-works/$package"
+            test -e "$source"
+            rm -rf "$out/node_modules/@earendil-works/$package"
+            ln -s "$source" "$out/node_modules/@earendil-works/$package"
+          done
 
-        mkdir -p "$out/node_modules/@matthis-k"
-        for package in phenix-kernel phenix-flow phenix-routing phenix-contracts phenix-tasks phenix-suite; do
-          rm -rf "$out/node_modules/@matthis-k/$package"
-          ln -s "$out/packages/$package" "$out/node_modules/@matthis-k/$package"
-        done
-      '';
+          mkdir -p "$out/node_modules/@matthis-k"
+          for package in phenix-kernel phenix-flow phenix-routing phenix-contracts phenix-tasks phenix-suite; do
+            rm -rf "$out/node_modules/@matthis-k/$package"
+            ln -s "$out/packages/$package" "$out/node_modules/@matthis-k/$package"
+          done
+
+          "$out/bin/phenix-qa" analyzers >/dev/null
+        '';
 
       phenixRuntimeTests =
         pkgs.runCommand "phenix-runtime-tests"
