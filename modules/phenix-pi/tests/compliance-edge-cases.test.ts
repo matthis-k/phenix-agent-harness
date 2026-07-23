@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AGENT_BASE, AGENT_SCOUT, WORKFLOW_IMPLEMENT, WORKFLOW_QA } from "../definitions/ids.ts";
+import {
+  AGENT_ARCHITECT,
+  AGENT_BASE,
+  AGENT_CRITIC,
+  AGENT_QA_SYNTHESIZER,
+  AGENT_SCOUT,
+  AGENT_TESTER,
+  WORKFLOW_IMPLEMENT,
+  WORKFLOW_QA,
+} from "../definitions/ids.ts";
 import { definitionRef } from "../domain/definition/definition.ts";
-import { failed } from "../domain/shared.ts";
 import { createTestRuntime, type TestRuntime } from "./support/core-runtime.ts";
 
 test("orphaned state propagates to attached descendants", async () => {
@@ -77,9 +85,6 @@ test("completing with invalid output produces a typed failure", async () => {
     input: { objective: "produce bad output" },
     wait: "background",
   });
-  // Simulate what ExecutionFacadeImpl.complete does when output validation fails:
-  // it calls fail() which transitions to "failed" and records the outcome.
-  // We simulate this by directly failing the run.
   await runtime.controller.fail(handle.id, {
     code: "output_invalid",
     message:
@@ -123,21 +128,11 @@ test("detached child may be reparented back to an attachment after cancel", asyn
 
 test("workflow join all-success fails the workflow when one parallel branch fails", async () => {
   let runtime: TestRuntime;
-  let scoutRuns = 0;
   runtime = await createTestRuntime({
     async start(command) {
       await runtime.controller.transition(command.runId, "starting");
       await runtime.controller.transition(command.runId, "running");
-      if (command.definition.id === AGENT_SCOUT && scoutRuns === 0) {
-        scoutRuns += 1;
-        await runtime.controller.complete(command.runId, {
-          summary: "scouted ok",
-          evidence: [{ path: "src/x.ts", finding: "ok" }],
-          risks: [],
-        });
-        return;
-      }
-      if (command.definition.id === AGENT_SCOUT) {
+      if (command.definition.id === AGENT_CRITIC) {
         await runtime.controller.fail(command.runId, {
           code: "provider_failed",
           message: "parallel branch failed",
@@ -145,11 +140,34 @@ test("workflow join all-success fails the workflow when one parallel branch fail
         });
         return;
       }
-      await runtime.controller.complete(command.runId, {
-        summary: "ok",
-        evidence: [],
-        risks: [],
-      });
+      if (command.definition.id === AGENT_SCOUT) {
+        await runtime.controller.complete(command.runId, {
+          summary: "scouted ok",
+          evidence: [{ path: "src/x.ts", finding: "ok" }],
+          risks: [],
+        });
+        return;
+      }
+      if (command.definition.id === AGENT_TESTER) {
+        await runtime.controller.complete(command.runId, {
+          summary: "tests passed",
+          checks: [{ command: "test", ok: true, summary: "passed" }],
+          findings: [],
+          evidence: ["test passed"],
+        });
+        return;
+      }
+      if (command.definition.id === AGENT_ARCHITECT) {
+        await runtime.controller.complete(command.runId, { summary: "architecture ok", findings: [] });
+        return;
+      }
+      if (command.definition.id === AGENT_QA_SYNTHESIZER) {
+        await runtime.controller.complete(command.runId, {
+          summary: "not reached",
+          findings: [],
+          reports: [],
+        });
+      }
     },
   });
   const handle = await runtime.execution.start({
@@ -161,7 +179,6 @@ test("workflow join all-success fails the workflow when one parallel branch fail
   const outcome = await handle.result();
   assert.equal(outcome.status, "failure");
   if (outcome.status === "failure") {
-    // The child's own failure code propagates through (provider_failed)
     assert.equal(outcome.failure.code, "provider_failed");
     assert.ok(outcome.failure.causeRunId);
   }
@@ -212,8 +229,7 @@ test("orphaning an already cancelled run is idempotent", async () => {
 });
 
 test("a workflow with active attached children cannot be completed until they settle", async () => {
-  let runtime: TestRuntime;
-  runtime = await createTestRuntime();
+  const runtime = await createTestRuntime();
   const handle = await runtime.execution.start({
     parentId: runtime.rootRunId,
     definition: definitionRef(WORKFLOW_IMPLEMENT),
@@ -224,8 +240,6 @@ test("a workflow with active attached children cannot be completed until they se
   assert.equal(outcome.status, "success");
   const workflow = runtime.store.projection.requireRun(handle.id);
   assert.equal(workflow.state, "completed");
-  // The ScriptedAgentImplementation completes all children immediately,
-  // so the workflow should complete normally.
   const children = runtime.store.projection.childrenOf(handle.id);
   assert.equal(children.length, 3, "implementation workflow creates three children");
   assert.ok(children.every((child) => child.state === "completed"));
