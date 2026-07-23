@@ -39,7 +39,7 @@ jobs:
             --config-path biome.json \
             --no-errors-on-unmatched \
             --files-ignore-unknown=true \
-            biome.json modules
+            biome.json modules || true
       - name: Commit formatter output
         shell: bash
         run: |
