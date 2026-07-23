@@ -1,0 +1,470 @@
+name: Patch catalog-driven dispatch
+
+on:
+  push:
+    branches:
+      - feat/catalog-driven-workflow-selection
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: feat/catalog-driven-workflow-selection
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: Apply catalog-driven selector
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          dispatch_schema = '''import { Type } from "typebox";
+
+          import { defineSchema } from "../domain/definition/schema.ts";
+          import type { DefinitionId } from "../domain/shared.ts";
+
+          export const DISPATCH_ROUTES = ["qa", "implement", "coordinate"] as const;
+          export type DispatchRoute = (typeof DISPATCH_ROUTES)[number];
+
+          export interface DispatchCandidate {
+            readonly definitionId: DefinitionId;
+            readonly kind: "workflow" | "generic";
+            readonly title: string;
+            readonly description: string;
+          }
+
+          export interface DispatchSelectionRequest {
+            readonly objective: string;
+            readonly context?: unknown;
+            readonly candidates: readonly DispatchCandidate[];
+          }
+
+          export interface DispatchDecision {
+            readonly definitionId: DefinitionId;
+            readonly reason: string;
+            readonly confidence: number;
+          }
+
+          const DispatchCandidateType = Type.Object({
+            definitionId: Type.String({ minLength: 1 }),
+            kind: Type.Enum(["workflow", "generic"]),
+            title: Type.String({ minLength: 1 }),
+            description: Type.String({ minLength: 1 }),
+          });
+
+          export const DispatchSelectionRequestSchema = defineSchema<DispatchSelectionRequest>(
+            "request.dispatch-selection.v1",
+            Type.Object({
+              objective: Type.String({ minLength: 1 }),
+              context: Type.Optional(Type.Unknown()),
+              candidates: Type.Array(DispatchCandidateType, { minItems: 1 }),
+            }),
+          );
+
+          export const DispatchDecisionSchema = defineSchema<DispatchDecision>(
+            "outcome.dispatch-decision.v2",
+            Type.Object({
+              definitionId: Type.String({ minLength: 1 }),
+              reason: Type.String({ minLength: 1 }),
+              confidence: Type.Number({ minimum: 0, maximum: 1 }),
+            }),
+          );
+          '''
+          Path("modules/phenix-pi/definitions/dispatch.ts").write_text(dispatch_schema)
+
+          dispatch_service = '''import type {
+            DispatchCandidate,
+            DispatchDecision,
+            DispatchRoute,
+          } from "../definitions/dispatch.ts";
+          import {
+            AGENT_COORDINATOR,
+            AGENT_DISPATCHER,
+            WORKFLOW_IMPLEMENT,
+            WORKFLOW_QA,
+          } from "../definitions/ids.ts";
+          import type { ObjectiveRequest } from "../definitions/schemas.ts";
+          import {
+            type AnyDefinition,
+            type DefinitionRef,
+            definitionRef,
+          } from "../domain/definition/definition.ts";
+          import type { DefinitionId, Outcome, RunId } from "../domain/shared.ts";
+          import type { ExecutionStore } from "./execution-store.ts";
+          import type {
+            CatalogFacade,
+            DefinitionSummary,
+            ExecutionFacade,
+          } from "./interfaces.ts";
+          import type { InvocationPolicy } from "./invocation-policy.ts";
+
+          export type DispatchMode = "auto" | DispatchRoute;
+
+          export interface DispatchRequest extends ObjectiveRequest {
+            readonly mode?: DispatchMode;
+            readonly wait?: "await" | "background";
+          }
+
+          export interface DispatchResult {
+            readonly definition: DefinitionId;
+            readonly selectedBy: "explicit" | "dispatcher";
+            readonly runId: RunId;
+            readonly classifierRunId?: RunId;
+            readonly status: "running" | "completed";
+            readonly outcome?: Outcome<unknown>;
+          }
+
+          export class DispatchService {
+            private readonly execution: ExecutionFacade;
+            private readonly catalog: CatalogFacade;
+            private readonly store: ExecutionStore;
+            private readonly invocationPolicy: InvocationPolicy;
+
+            constructor(input: {
+              readonly execution: ExecutionFacade;
+              readonly catalog: CatalogFacade;
+              readonly store: ExecutionStore;
+              readonly invocationPolicy: InvocationPolicy;
+            }) {
+              this.execution = input.execution;
+              this.catalog = input.catalog;
+              this.store = input.store;
+              this.invocationPolicy = input.invocationPolicy;
+            }
+
+            async dispatch(
+              parentId: RunId,
+              request: DispatchRequest,
+              signal?: AbortSignal,
+            ): Promise<DispatchResult> {
+              const objective = request.objective.trim();
+              if (!objective) throw new Error("Dispatch objective must not be empty");
+
+              const explicit = request.mode && request.mode !== "auto" ? request.mode : undefined;
+              let targetRef: DefinitionRef<unknown, unknown>;
+              let classifierRunId: RunId | undefined;
+              let selectedBy: DispatchResult["selectedBy"];
+
+              if (explicit) {
+                targetRef = definitionForRoute(explicit);
+                selectedBy = "explicit";
+              } else {
+                const candidates = selectDispatchCandidates(await this.catalog.listAvailable(parentId));
+                if (candidates.length === 0) {
+                  throw new Error("No workflow or generic coordinator is available for dispatch");
+                }
+
+                const classifierRef = definitionRef(AGENT_DISPATCHER);
+                const classifierInput = {
+                  objective,
+                  ...(request.context === undefined ? {} : { context: request.context }),
+                  candidates,
+                };
+                this.assertAllowed(
+                  parentId,
+                  this.catalog.get(classifierRef) as AnyDefinition,
+                  classifierInput,
+                );
+                const classifier = await this.execution.start({
+                  parentId,
+                  definition: classifierRef,
+                  input: classifierInput,
+                  wait: "await",
+                });
+                classifierRunId = classifier.id;
+                const decision = await classifier.result(signal);
+                if (decision.status !== "success") {
+                  throw new Error(`Dispatch selector failed: ${describeOutcome(decision)}`);
+                }
+                const selected = requireSelectedCandidate(
+                  candidates,
+                  decision.value as DispatchDecision,
+                );
+                targetRef = definitionRef(selected.definitionId);
+                selectedBy = "dispatcher";
+              }
+
+              const input = {
+                objective,
+                ...(request.context === undefined ? {} : { context: request.context }),
+              };
+              this.assertAllowed(parentId, this.catalog.get(targetRef) as AnyDefinition, input);
+
+              const wait = request.wait ?? "await";
+              const handle = await this.execution.start({
+                parentId,
+                definition: targetRef,
+                input,
+                wait,
+              });
+              if (wait === "background") {
+                return {
+                  definition: targetRef.id,
+                  selectedBy,
+                  runId: handle.id,
+                  ...(classifierRunId ? { classifierRunId } : {}),
+                  status: "running",
+                };
+              }
+
+              return {
+                definition: targetRef.id,
+                selectedBy,
+                runId: handle.id,
+                ...(classifierRunId ? { classifierRunId } : {}),
+                status: "completed",
+                outcome: await handle.result(signal),
+              };
+            }
+
+            private assertAllowed(parentId: RunId, definition: AnyDefinition, input: unknown): void {
+              this.invocationPolicy.assertAllowed({
+                rootRunId: this.store.projection.rootOf(parentId),
+                parent: this.store.projection.requireRun(parentId),
+                definition,
+                input,
+              });
+            }
+          }
+
+          export function selectDispatchCandidates(
+            available: readonly DefinitionSummary[],
+          ): readonly DispatchCandidate[] {
+            return available
+              .filter(
+                (definition) =>
+                  definition.kind === "workflow" || definition.id === AGENT_COORDINATOR,
+              )
+              .map((definition) => ({
+                definitionId: definition.id,
+                kind: definition.kind === "workflow" ? "workflow" : "generic",
+                title: definition.title,
+                description: definition.description,
+              }));
+          }
+
+          export function requireSelectedCandidate(
+            candidates: readonly DispatchCandidate[],
+            decision: DispatchDecision,
+          ): DispatchCandidate {
+            const selected = candidates.find(
+              (candidate) => candidate.definitionId === decision.definitionId,
+            );
+            if (!selected) {
+              throw new Error(
+                `Dispatch selector chose unavailable definition ${decision.definitionId}`,
+              );
+            }
+            return selected;
+          }
+
+          function definitionForRoute(route: DispatchRoute): DefinitionRef<unknown, unknown> {
+            if (route === "qa") return definitionRef(WORKFLOW_QA);
+            if (route === "implement") return definitionRef(WORKFLOW_IMPLEMENT);
+            return definitionRef(AGENT_COORDINATOR);
+          }
+
+          function describeOutcome(outcome: Outcome<unknown>): string {
+            if (outcome.status === "failure") return outcome.failure.message;
+            if (outcome.status === "cancelled") return outcome.reason;
+            return "unexpected successful outcome";
+          }
+          '''
+          Path("modules/phenix-pi/application/dispatch-service.ts").write_text(dispatch_service)
+
+          tests = '''import assert from "node:assert/strict";
+          import test from "node:test";
+
+          import {
+            requireSelectedCandidate,
+            selectDispatchCandidates,
+          } from "../application/dispatch-service.ts";
+          import { dispatcherDefinition } from "../definitions/agents.ts";
+          import {
+            AGENT_BASE,
+            AGENT_COORDINATOR,
+            AGENT_DISPATCHER,
+            WORKFLOW_IMPLEMENT,
+            WORKFLOW_QA,
+          } from "../definitions/ids.ts";
+          import type { DispatchCandidate } from "../definitions/dispatch.ts";
+          import type { DefinitionSummary } from "../application/interfaces.ts";
+
+          const available: readonly DefinitionSummary[] = [
+            {
+              id: WORKFLOW_QA,
+              kind: "workflow",
+              title: "Repository QA",
+              description: "Run deterministic checks and independent repository reviews.",
+            },
+            {
+              id: WORKFLOW_IMPLEMENT,
+              kind: "workflow",
+              title: "Verified implementation",
+              description: "Plan, implement, verify, and repair one bounded change.",
+            },
+            {
+              id: AGENT_COORDINATOR,
+              kind: "agent",
+              title: "Dynamic coordinator",
+              description: "Compose multiple workflows when no single invariant graph fits.",
+            },
+            {
+              id: AGENT_DISPATCHER,
+              kind: "agent",
+              title: "Dispatcher",
+              description: "Internal selector.",
+            },
+            {
+              id: AGENT_BASE,
+              kind: "agent",
+              title: "Base",
+              description: "Internal escape hatch.",
+            },
+          ];
+
+          test("derives selector candidates from allowed workflows plus the generic coordinator", () => {
+            assert.deepEqual(
+              selectDispatchCandidates(available).map((candidate) => candidate.definitionId),
+              [WORKFLOW_QA, WORKFLOW_IMPLEMENT, AGENT_COORDINATOR],
+            );
+          });
+
+          test("rejects a selector decision outside the offered catalog candidates", () => {
+            const candidates = selectDispatchCandidates(available);
+            assert.throws(
+              () =>
+                requireSelectedCandidate(candidates, {
+                  definitionId: AGENT_BASE,
+                  reason: "too flexible",
+                  confidence: 1,
+                }),
+              /unavailable definition agent\.base/,
+            );
+          });
+
+          test("dispatcher prompt prefers a specific workflow over the generic coordinator", () => {
+            const candidates = selectDispatchCandidates(available) as readonly DispatchCandidate[];
+            const prompt = dispatcherDefinition.prompt.render({
+              objective: "Do a full QA pass",
+              candidates,
+            });
+            assert.match(prompt, /Prefer the most specific workflow/);
+            assert.match(prompt, /Do not choose the generic coordinator merely because it is flexible/);
+            assert.match(prompt, /workflow\.qa/);
+            assert.match(prompt, /Run deterministic checks and independent repository reviews/);
+          });
+          '''
+          Path("modules/phenix-pi/tests/dispatch-routing.test.ts").write_text(tests)
+
+          agents = Path("modules/phenix-pi/definitions/agents/index.ts")
+          source = agents.read_text()
+          old_import = 'import { DispatchDecisionSchema } from "../dispatch.ts";'
+          new_import = '''import {
+            type DispatchDecision,
+            DispatchDecisionSchema,
+            type DispatchSelectionRequest,
+            DispatchSelectionRequestSchema,
+          } from "../dispatch.ts";'''
+          if old_import in source:
+            source = source.replace(old_import, new_import, 1)
+
+          old_block = '''export const dispatcherDefinition: AgentDefinition<unknown, unknown> = {
+            id: AGENT_DISPATCHER,
+            kind: "agent",
+            title: "Execution dispatcher",
+            description: "Choose the typed execution route for an ambiguous substantial request.",
+            input: ObjectiveRequestSchema,
+            output: DispatchDecisionSchema,
+            model: sessionModel,
+            thinking: "minimal",
+            prompt: {
+              render: () =>
+                "Classify the request into exactly one route: qa for repository review or audit without requested mutation; implement for a concrete requested code change; coordinate for multi-stage, mixed review-and-fix, or otherwise open-ended substantial work. Return only the typed decision. Do not perform repository work.",
+            },
+            tools: { allow: [] },
+            context: { ...context, projectFiles: "none", maxBytes: 8_000 },
+            childCapabilities: none,
+            limits: { timeoutMs: 120_000, maxTurns: 2, maxRepairAttempts: 1 },
+            persistence: "memory",
+          };'''
+          new_block = '''export const dispatcherDefinition: AgentDefinition<
+            DispatchSelectionRequest,
+            DispatchDecision
+          > = {
+            id: AGENT_DISPATCHER,
+            kind: "agent",
+            title: "Execution dispatcher",
+            description: "Select one authorized execution definition from catalog descriptions.",
+            input: DispatchSelectionRequestSchema,
+            output: DispatchDecisionSchema,
+            model: sessionModel,
+            thinking: "minimal",
+            prompt: {
+              render: (input) => {
+                const candidates = input.candidates
+                  .map(
+                    (candidate) =>
+                      `- ${candidate.definitionId} [${candidate.kind}]: ${candidate.title} — ${candidate.description}`,
+                  )
+                  .join("\\n");
+                return [
+                  "Choose exactly one execution definition from the supplied candidates.",
+                  "Prefer the most specific workflow whose complete contract matches the request.",
+                  "Choose the generic coordinator only when no single workflow covers the whole request, multiple workflows are required, execution order depends on intermediate results, or the task is substantially open-ended.",
+                  "Do not choose the generic coordinator merely because it is flexible.",
+                  "Return definitionId exactly as offered, with a concise reason and confidence. Do not perform repository work.",
+                  `Candidates:\\n${candidates}`,
+                ].join("\\n");
+              },
+            },
+            tools: { allow: [] },
+            context: { ...context, projectFiles: "none", maxBytes: 8_000 },
+            childCapabilities: none,
+            limits: { timeoutMs: 120_000, maxTurns: 2, maxRepairAttempts: 1 },
+            persistence: "memory",
+          };'''
+          if old_block not in source:
+            raise SystemExit("dispatcher definition block not found")
+          source = source.replace(old_block, new_block, 1)
+          agents.write_text(source)
+
+          support = Path("modules/phenix-pi/tests/support/core-runtime.ts")
+          source = support.read_text()
+          old = 'return { route: "coordinate", reason: "requires composition", confidence: 0.8 };'
+          new = 'return { definitionId: AGENT_COORDINATOR, reason: "requires composition", confidence: 0.8 };'
+          if old not in source:
+            raise SystemExit("scripted dispatcher output not found")
+          support.write_text(source.replace(old, new, 1))
+          PY
+      - name: Format changed source
+        run: |
+          nix shell github:NixOS/nixpkgs/0bb7ec54c8483066ec9d7720e780a5caa71f8612#biome -c \
+            biome check --write --unsafe --config-path biome.json --no-errors-on-unmatched \
+            --files-ignore-unknown=true \
+            modules/phenix-pi/definitions/dispatch.ts \
+            modules/phenix-pi/application/dispatch-service.ts \
+            modules/phenix-pi/definitions/agents/index.ts \
+            modules/phenix-pi/tests/dispatch-routing.test.ts \
+            modules/phenix-pi/tests/support/core-runtime.ts
+      - name: Commit selector changes
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add modules/phenix-pi
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "feat: select workflows from catalog descriptions"
+          git push origin HEAD:feat/catalog-driven-workflow-selection
