@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   patch:
-    if: ${{ github.event_name == 'pull_request' || !contains(github.event.head_commit.message, '[skip recovery patch]') }}
+    if: ${{ github.event_name == 'pull_request' || !contains(github.event.head_commit.message, '[skip recovery correction]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -27,54 +27,26 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
             accept-flake-config = true
-      - name: Apply recovery lifecycle patch
-        shell: bash
-        run: |
-          set -o pipefail
-          python .github/fix-graceful-patch-script.py
-          python .github/patch-graceful-recovery.py 2>&1 | tee patch-graceful-recovery.log
-      - name: Upload patch diagnostics
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: graceful-recovery-patch-log
-          path: patch-graceful-recovery.log
-      - name: Format changed sources
+      - name: Apply recovery corrections
+        run: python .github/correct-graceful-recovery.py
+      - name: Format corrected sources
         run: |
           nix shell github:NixOS/nixpkgs/0bb7ec54c8483066ec9d7720e780a5caa71f8612#biome -c \
             biome check --write --unsafe --config-path biome.json --no-errors-on-unmatched \
             --files-ignore-unknown=true \
-            modules/phenix-pi/domain/shared.ts \
-            modules/phenix-pi/domain/definition/definition.ts \
-            modules/phenix-pi/domain/run/model.ts \
-            modules/phenix-pi/application/catalog.ts \
-            modules/phenix-pi/application/interfaces.ts \
-            modules/phenix-pi/application/execution-facade.ts \
-            modules/phenix-pi/application/agent-tools.ts \
             modules/phenix-pi/application/agent-executor.ts \
+            modules/phenix-pi/application/execution-facade.ts \
             modules/phenix-pi/composition/create-phenix-runtime.ts \
-            modules/phenix-pi/extension/root-extension.ts \
-            modules/phenix-pi/definitions/agents/index.ts \
-            modules/phenix-pi/tests/catalog-validation.test.ts \
-            modules/phenix-pi/tests/graceful-recovery.test.ts
-      - name: Commit patched sources
+            modules/phenix-pi/extension/root-extension.ts
+      - name: Commit corrected sources
         shell: bash
         run: |
-          set -o pipefail
           if git diff --quiet; then
-            echo "No changes required." | tee commit-graceful-recovery.log
+            echo "No corrections required."
             exit 0
           fi
-          git status --short | tee commit-graceful-recovery.log
-          git diff --check 2>&1 | tee -a commit-graceful-recovery.log
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs modules
-          git commit -m "[skip recovery patch] feat: add graceful child recovery" 2>&1 | tee -a commit-graceful-recovery.log
-          git push origin HEAD:feat/graceful-child-recovery 2>&1 | tee -a commit-graceful-recovery.log
-      - name: Upload commit diagnostics
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: graceful-recovery-commit-log
-          path: commit-graceful-recovery.log
+          git add modules
+          git commit --no-verify -m "[skip recovery correction] fix: harden graceful recovery"
+          git push origin HEAD:feat/graceful-child-recovery
