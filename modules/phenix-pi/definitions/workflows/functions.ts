@@ -3,18 +3,15 @@ import type { WorkflowFunctionRegistrar } from "../../domain/workflow/functions.
 import type { WorkflowEvaluationContext } from "../../domain/workflow/graph-state.ts";
 import type {
   ChangeSet,
+  CheckResult,
   ImplementationRequest,
   ImplementationResult,
   ObjectiveRequest,
-  QAReport,
   VerificationResult,
 } from "../schemas.ts";
 
 export function registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): void {
   registry.registerMapping("input.identity", (context) => context.input);
-
-  registry.registerMapping("direct.base.input", (context) => context.input);
-  registry.registerMapping("direct.output", (context) => successAt(context, "base"));
 
   registry.registerMapping("implement.plan.input", (context) => {
     const input = context.input as ImplementationRequest;
@@ -28,6 +25,7 @@ export function registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): 
       objective: input.objective,
       context: input.context,
       plan: successAt(context, "plan"),
+      ...(input.findings ? { findings: input.findings } : {}),
       ...(previous.length > 0 ? { previousChangeSet: previous.at(-1) } : {}),
       ...(verification && !verification.accepted ? { findings: verification.findings } : {}),
     };
@@ -67,68 +65,35 @@ export function registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): 
     return `Implementation was rejected after ${valuesAt(context, "implement").length} attempts: ${verification.findings.join("; ")}`;
   });
 
+  registry.registerMapping("qa.checks.input", (context) => {
+    const input = context.input as ObjectiveRequest;
+    const configured = extractConfiguredChecks(input.context);
+    return configured.length > 0 ? { commands: configured } : {};
+  });
   registry.registerMapping("qa.repo.input", (context) =>
-    scopedObjective(context, "repository structure and correctness"),
+    scopedObjective(context, "repository structure, correctness, and maintainability"),
   );
-  registry.registerMapping("qa.tests.input", (context) =>
-    scopedObjective(context, "test coverage and failing checks"),
-  );
+  registry.registerMapping("qa.tests.input", (context) => {
+    const input = context.input as ObjectiveRequest;
+    return {
+      objective: input.objective,
+      context: input.context,
+      checks: successAt<readonly CheckResult[]>(context, "checks"),
+    };
+  });
   registry.registerMapping("qa.arch.input", (context) =>
-    criticObjective(context, "architecture and boundaries"),
+    criticObjective(context, "architecture, ownership, dependency direction, and replaceability"),
   );
   registry.registerMapping("qa.security.input", (context) =>
-    criticObjective(context, "security, trust boundaries, and unsafe behavior"),
+    criticObjective(context, "security, trust boundaries, secrets, authentication, and unsafe behavior"),
   );
   registry.registerMapping("qa.synthesize.input", (context) => ({
     objective: (context.input as ObjectiveRequest).objective,
-    reports: ["repo", "tests", "architecture", "security"].map((node) => successAt(context, node)),
+    reports: ["checks", "repo", "tests", "architecture", "security"].map((node) =>
+      successAt(context, node),
+    ),
   }));
   registry.registerMapping("qa.output", (context) => successAt(context, "synthesize"));
-
-  registry.registerMapping("qa-fix.qa.input", (context) => context.input);
-  registry.registerDecision("qa-fix.actionable", (context) => {
-    const qa = successAt<QAReport>(context, "qa");
-    return qa.findings.length > 0 ? "fix" : "noop";
-  });
-  registry.registerCondition("decision.fix", (_context, decision) => decision === "fix");
-  registry.registerCondition("decision.noop", (_context, decision) => decision === "noop");
-  registry.registerMapping("qa-fix.implement.input", (context) => {
-    const input = context.input as ObjectiveRequest;
-    const qa = successAt<QAReport>(context, "qa");
-    return {
-      objective: input.objective,
-      context: input.context,
-      findings: qa.findings.map((finding) => `${finding.title}: ${finding.recommendation}`),
-    };
-  });
-  registry.registerMapping("qa-fix.verify.input", (context) => {
-    const input = context.input as ObjectiveRequest;
-    const implementation = successAt<ImplementationResult>(context, "fix");
-    return {
-      objective: input.objective,
-      context: input.context,
-      changeSet: implementation.changeSet,
-    };
-  });
-  registry.registerMapping("qa-fix.output", (context) => {
-    const qa = successAt<QAReport>(context, "qa");
-    const implementation = successAt<ImplementationResult>(context, "fix");
-    const verification = successAt<VerificationResult>(context, "final");
-    return {
-      summary: verification.summary,
-      changed: true,
-      qa,
-      implementation,
-      verification,
-    };
-  });
-  registry.registerMapping("qa-fix.noop.output", (context) => {
-    const qa = successAt<QAReport>(context, "qa");
-    return { summary: "QA found no actionable changes.", changed: false, qa };
-  });
-
-  registry.registerMapping("dynamic.coordinator.input", (context) => context.input);
-  registry.registerMapping("dynamic.output", (context) => successAt(context, "coordinator"));
 }
 
 function outcomeValue<T>(value: unknown): T {
@@ -156,4 +121,11 @@ function scopedObjective(context: WorkflowEvaluationContext, focus: string) {
 function criticObjective(context: WorkflowEvaluationContext, focus: string) {
   const input = context.input as ObjectiveRequest;
   return { objective: input.objective, context: input.context, focus };
+}
+
+function extractConfiguredChecks(context: unknown): readonly string[] {
+  if (typeof context !== "object" || context === null) return [];
+  const checks = (context as { readonly checks?: unknown }).checks;
+  if (!Array.isArray(checks)) return [];
+  return checks.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
 }
