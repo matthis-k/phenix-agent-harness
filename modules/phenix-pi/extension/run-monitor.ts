@@ -1,9 +1,9 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
+import type { RunTree, RunTreeNode } from "../application/interfaces.ts";
 import type { PhenixRuntime } from "../composition/create-phenix-runtime.ts";
 import type { RunFact } from "../domain/run/observability.ts";
 import type { RunId } from "../domain/shared.ts";
-import type { RunTree, RunTreeNode } from "../application/interfaces.ts";
 
 const WIDGET_KEY = "phenix-live-runs";
 const MAX_TREE_LINES = 36;
@@ -100,7 +100,7 @@ export class RunMonitor {
 
 export function renderRuns(tree: RunTree, facts: readonly RunFact[], sequence: number): string[] {
   const lines = [`Phenix live runs · seq ${sequence}`];
-  appendNode(lines, tree.root, "", true);
+  appendNode(lines, tree.root, "", true, true);
   if (lines.length > MAX_TREE_LINES) {
     lines.splice(MAX_TREE_LINES, lines.length - MAX_TREE_LINES, "… run tree truncated");
   }
@@ -120,21 +120,27 @@ export function renderFacts(facts: readonly RunFact[], sequence: number): string
   return lines;
 }
 
-function appendNode(lines: string[], node: RunTreeNode, prefix: string, last: boolean): void {
+function appendNode(
+  lines: string[],
+  node: RunTreeNode,
+  prefix: string,
+  last: boolean,
+  root = false,
+): void {
   if (lines.length >= MAX_TREE_LINES) return;
-  const branch = prefix ? (last ? "└─ " : "├─ ") : "";
+  const branch = root ? "" : last ? "└─ " : "├─ ";
   const symbol = stateSymbol(node.run.state);
   const label = definitionLabel(String(node.run.definitionId));
   lines.push(`${prefix}${branch}${symbol} ${label} [${node.run.state}]`);
+  const contentPrefix = root ? "   " : `${prefix}${last ? "   " : "│  "}`;
   if (node.activity && lines.length < MAX_TREE_LINES) {
-    const childPrefix = prefix ? `${prefix}${last ? "   " : "│  "}` : "   ";
     const target = node.activity.target ? ` · ${truncate(node.activity.target, 72)}` : "";
     const reliability = node.activity.source === "reported" ? "!" : "";
     lines.push(
-      `${childPrefix}${reliability}${node.activity.phase} · ${truncate(node.activity.summary, 72)}${target}`,
+      `${contentPrefix}${reliability}${node.activity.phase} · ${truncate(node.activity.summary, 72)}${target}`,
     );
   }
-  const childPrefix = prefix ? `${prefix}${last ? "   " : "│  "}` : "";
+  const childPrefix = root ? "" : contentPrefix;
   node.children.forEach((child, index) =>
     appendNode(lines, child, childPrefix, index === node.children.length - 1),
   );
