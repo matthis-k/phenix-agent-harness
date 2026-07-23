@@ -29,96 +29,59 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          def replace_once(source: str, old: str, new: str, label: str) -> str:
-              count = source.count(old)
-              if count != 1:
-                  raise SystemExit(f"{label}: expected one match, found {count}")
-              return source.replace(old, new)
-
           path = Path("modules/phenix-pi/application/agent-tools.ts")
           source = path.read_text()
-          source = replace_once(
-              source,
+          source = source.replace(
               "  private readonly dispatch: DispatchService;",
               "  private readonly dispatch?: DispatchService;",
-              "optional dispatch field",
           )
-          source = replace_once(
-              source,
+          source = source.replace(
               "    readonly dispatch: DispatchService;",
               "    readonly dispatch?: DispatchService;",
-              "optional dispatch input",
           )
-          source = replace_once(
-              source,
-              '''      execute: async (raw, signal) => {
-                const params = requireValid(dispatchParameters, raw);
-                const result = await this.dispatch.dispatch(parentId, params, signal);''',
-              '''      execute: async (raw, signal) => {
-                const params = requireValid(dispatchParameters, raw);
-                if (!this.dispatch) throw new Error("Root dispatch service is not configured");
-                const result = await this.dispatch.dispatch(parentId, params, signal);''',
-              "dispatch execution guard",
+          source = source.replace(
+              "        const result = await this.dispatch.dispatch(parentId, params, signal);",
+              '        if (!this.dispatch) throw new Error("Root dispatch service is not configured");\n        const result = await this.dispatch.dispatch(parentId, params, signal);',
           )
+          if "private readonly dispatch?: DispatchService" not in source:
+              raise SystemExit("optional dispatch patch did not apply")
           path.write_text(source)
 
           path = Path("modules/phenix-pi/application/execution-facade.ts")
           source = path.read_text()
-          source = replace_once(
-              source,
-              '''    if (!capabilities.invokableDefinitions.includes(definition.id)) {
-                throw new Error(`Parent ${parent.id} cannot invoke ${definition.id}`);
-              }''',
-              '''    const invokableDefinitions =
-                parent.kind === "root"
-                  ? this.rootInvokableDefinitions
-                  : capabilities.invokableDefinitions;
-              if (!invokableDefinitions.includes(definition.id)) {
-                throw new Error(`Parent ${parent.id} cannot invoke ${definition.id}`);
-              }''',
-              "effective root authorization",
-          )
+          old = '''    if (!capabilities.invokableDefinitions.includes(definition.id)) {
+              throw new Error(`Parent ${parent.id} cannot invoke ${definition.id}`);
+            }'''
+          new = '''    const invokableDefinitions =
+              parent.kind === "root" ? this.rootInvokableDefinitions : capabilities.invokableDefinitions;
+            if (!invokableDefinitions.includes(definition.id)) {
+              throw new Error(`Parent ${parent.id} cannot invoke ${definition.id}`);
+            }'''
+          if old in source:
+              source = source.replace(old, new, 1)
+          if "parent.kind === \"root\" ? this.rootInvokableDefinitions" not in source:
+              raise SystemExit("effective root authorization patch did not apply")
           path.write_text(source)
 
           path = Path("modules/phenix-pi/extension/root-extension.ts")
           source = path.read_text()
-          source = replace_once(
-              source,
-              '''  const readOnlyTools = ["read", "grep", "find", "ls"] as const;
-            const policies:''',
-              '''  const policies:''',
-              "remove redundant root tools",
-          )
-          source = replace_once(
-              source,
-              "    scout: readOnlyTools,",
-              "    scout: orchestrationTools,",
-              "scout dispatch access",
-          )
+          source = source.replace('  const readOnlyTools = ["read", "grep", "find", "ls"] as const;\n', "")
+          source = source.replace("    scout: readOnlyTools,", "    scout: orchestrationTools,")
+          if "scout: orchestrationTools" not in source:
+              raise SystemExit("root scout dispatch patch did not apply")
           path.write_text(source)
 
           path = Path("modules/phenix-pi/tests/support/core-runtime.ts")
           source = path.read_text()
-          source = replace_once(
-              source,
-              '''  AGENT_ARCHITECT,
-            AGENT_BASE,
-            AGENT_CRITIC,''',
-              '''  AGENT_ARCHITECT,
-            AGENT_BASE,
-            AGENT_COORDINATOR,
-            AGENT_CRITIC,
-            AGENT_DISPATCHER,''',
-              "support dispatch imports",
+          source = source.replace(
+              "  AGENT_BASE,\n  AGENT_CRITIC,",
+              "  AGENT_BASE,\n  AGENT_COORDINATOR,\n  AGENT_CRITIC,\n  AGENT_DISPATCHER,",
           )
-          source = replace_once(
-              source,
-              '''import type { RunId } from "../../domain/shared.ts";''',
-              '''import type { DefinitionId, RunId } from "../../domain/shared.ts";''',
-              "support definition id import",
+          source = source.replace(
+              'import type { RunId } from "../../domain/shared.ts";',
+              'import type { DefinitionId, RunId } from "../../domain/shared.ts";',
           )
-          source = replace_once(
-              source,
+          source = source.replace(
               '''export interface TestRuntimeOptions {
               readonly modelResolver?: ModelResolver;
               readonly operations?: LocalOperationRunner;
@@ -128,38 +91,48 @@ jobs:
               readonly operations?: LocalOperationRunner;
               readonly rootInvokableDefinitions?: readonly DefinitionId[];
             }''',
-              "test runtime options",
           )
-          source = replace_once(
-              source,
-              '''    ids,
+          constructor_anchor = '''    ids,
               clock,
-            });''',
-              '''    ids,
+            });'''
+          if "rootInvokableDefinitions: options.rootInvokableDefinitions" not in source:
+              source = source.replace(
+                  constructor_anchor,
+                  '''    ids,
               clock,
               rootInvokableDefinitions: options.rootInvokableDefinitions,
             });''',
-              "test root capabilities",
-          )
-          source = replace_once(
-              source,
-              '''  if (definition.id === AGENT_QA_SYNTHESIZER) {
-                return { summary: "clean", findings: [], reports: [] };
-              }
-              if (definition.id === AGENT_BASE || definition.id === AGENT_FINALIZER) {''',
-              '''  if (definition.id === AGENT_QA_SYNTHESIZER) {
-                return { summary: "clean", findings: [], reports: [] };
-              }
-              if (definition.id === AGENT_DISPATCHER) {
-                return { route: "coordinate", reason: "requires composition", confidence: 0.8 };
-              }
-              if (
-                definition.id === AGENT_BASE ||
-                definition.id === AGENT_COORDINATOR ||
-                definition.id === AGENT_FINALIZER
-              ) {''',
-              "scripted dispatch output",
-          )
+                  1,
+              )
+          output_anchor = '''  if (definition.id === AGENT_QA_SYNTHESIZER) {
+              return { summary: "clean", findings: [], reports: [] };
+            }
+            if (definition.id === AGENT_BASE || definition.id === AGENT_FINALIZER) {'''
+          if "definition.id === AGENT_DISPATCHER" not in source:
+              source = source.replace(
+                  output_anchor,
+                  '''  if (definition.id === AGENT_QA_SYNTHESIZER) {
+              return { summary: "clean", findings: [], reports: [] };
+            }
+            if (definition.id === AGENT_DISPATCHER) {
+              return { route: "coordinate", reason: "requires composition", confidence: 0.8 };
+            }
+            if (
+              definition.id === AGENT_BASE ||
+              definition.id === AGENT_COORDINATOR ||
+              definition.id === AGENT_FINALIZER
+            ) {''',
+                  1,
+              )
+          required = [
+              "AGENT_COORDINATOR",
+              "AGENT_DISPATCHER",
+              "rootInvokableDefinitions?: readonly DefinitionId[]",
+              "rootInvokableDefinitions: options.rootInvokableDefinitions",
+          ]
+          for token in required:
+              if token not in source:
+                  raise SystemExit(f"support patch missing {token}")
           path.write_text(source)
           PY
           cat > modules/phenix-pi/tests/root-dispatch-policy.test.ts <<'TS'
