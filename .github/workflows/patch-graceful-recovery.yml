@@ -1,0 +1,58 @@
+name: Patch graceful child recovery
+
+on:
+  push:
+    branches:
+      - feat/graceful-child-recovery
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[skip recovery patch]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: feat/graceful-child-recovery
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: Apply recovery lifecycle patch
+        run: python .github/patch-graceful-recovery.py
+      - name: Format changed sources
+        run: |
+          nix shell github:NixOS/nixpkgs/0bb7ec54c8483066ec9d7720e780a5caa71f8612#biome -c \
+            biome check --write --unsafe --config-path biome.json --no-errors-on-unmatched \
+            --files-ignore-unknown=true \
+            modules/phenix-pi/domain/shared.ts \
+            modules/phenix-pi/domain/definition/definition.ts \
+            modules/phenix-pi/domain/run/model.ts \
+            modules/phenix-pi/application/catalog.ts \
+            modules/phenix-pi/application/interfaces.ts \
+            modules/phenix-pi/application/execution-facade.ts \
+            modules/phenix-pi/application/agent-tools.ts \
+            modules/phenix-pi/application/agent-executor.ts \
+            modules/phenix-pi/composition/create-phenix-runtime.ts \
+            modules/phenix-pi/extension/root-extension.ts \
+            modules/phenix-pi/definitions/agents/index.ts \
+            modules/phenix-pi/tests/catalog-validation.test.ts \
+            modules/phenix-pi/tests/graceful-recovery.test.ts
+      - name: Commit patched sources
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs modules
+          git commit -m "[skip recovery patch] feat: add graceful child recovery"
+          git push origin HEAD:feat/graceful-child-recovery
