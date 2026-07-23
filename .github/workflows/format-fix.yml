@@ -27,19 +27,17 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
             accept-flake-config = true
-      - uses: cachix/cachix-action@v17
-        with: { name: devenv }
-      - name: Install devenv
-        run: nix profile add nixpkgs#devenv
-      - name: Apply repository formatter
+      - name: Apply pinned repository formatter
         run: |
-          devenv shell -- biome check \
+          nix shell github:NixOS/nixpkgs/0bb7ec54c8483066ec9d7720e780a5caa71f8612#biome -c \
+            biome check \
             --write \
             --unsafe \
             --config-path biome.json \
             --no-errors-on-unmatched \
             --files-ignore-unknown=true \
             biome.json modules || true
+          git status --short
       - name: Commit formatter output
         shell: bash
         run: |
