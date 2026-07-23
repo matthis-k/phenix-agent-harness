@@ -27,6 +27,7 @@ import {
 import { type RunId, runId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import { completePhenixSubcommands, PHENIX_USAGE } from "./phenix-command.ts";
+import { RunMonitor, type RunMonitorMode } from "./run-monitor.ts";
 
 const ROOT_BINDING_ENTRY = "phenix:root-binding";
 const STATUS_KEY = "phenix";
@@ -43,6 +44,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
   let modelRegistry: ModelRegistry | undefined;
   let toolsRegistered = false;
   let disposeStatus: (() => void) | undefined;
+  let monitor: RunMonitor | undefined;
   let integrationStatuses: readonly IntegrationStatus[] = [];
 
   registerPhenixProvider(pi, {
@@ -62,6 +64,8 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
     modelRegistry = ctx.modelRegistry;
     disposeStatus?.();
     disposeStatus = undefined;
+    monitor?.dispose();
+    monitor = undefined;
     if (previousRuntime && previousRoot) await previousRuntime.shutdown(previousRoot);
 
     const sessionId = ctx.sessionManager.getSessionId();
@@ -122,9 +126,11 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
       }
       toolsRegistered = true;
     }
-    disposeStatus = currentRuntime.events.subscribe(() =>
-      updateStatus(ctx, currentRuntime, currentRoot),
-    );
+    monitor = new RunMonitor(ctx, currentRuntime, currentRoot);
+    disposeStatus = currentRuntime.events.subscribe(() => {
+      void updateStatus(ctx, currentRuntime, currentRoot);
+      void monitor?.refresh();
+    });
     await applyAgentTools(pi, ctx, (await currentRuntime.profiles.current(currentRoot)).agent);
     await updateStatus(ctx, currentRuntime, currentRoot);
     appendBinding(pi, currentRuntime, currentRoot, sessionId);
@@ -179,6 +185,8 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
     modelRegistry = undefined;
     disposeStatus?.();
     disposeStatus = undefined;
+    monitor?.dispose();
+    monitor = undefined;
     ctx.ui.setStatus(STATUS_KEY, undefined);
     if (!currentRuntime || !currentRoot) return;
     await currentRuntime.shutdown(currentRoot);
@@ -277,7 +285,9 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
         ctx.ui.notify("Phenix runtime is not initialized.", "warning");
         return;
       }
-      const action = args.trim().toLowerCase() || "status";
+      const tokens = args.trim().split(/\s+/).filter(Boolean);
+      const action = (tokens.shift() ?? "status").toLowerCase();
+      const options = tokens.map((value) => value.toLowerCase());
       if (action === "integrations") {
         ctx.ui.notify(
           formatIntegrationReport(integrationStatuses),
@@ -293,9 +303,28 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
         );
         return;
       }
-      if (action === "runs") {
-        const tree = await activeRuntime.queries.runTree(activeRoot);
-        ctx.ui.notify(limit(JSON.stringify(tree, null, 2)), "info");
+      if (action === "runs" || action === "facts") {
+        const activeMonitor = monitor ?? new RunMonitor(ctx, activeRuntime, activeRoot);
+        monitor = activeMonitor;
+        const mode = action as Exclude<RunMonitorMode, "hidden">;
+        const option = options[0];
+        if (options.length > 1 || (option && !["off", "--once", "--json"].includes(option))) {
+          ctx.ui.notify(`Usage: /phenix ${action} [off|--once|--json]`, "warning");
+          return;
+        }
+        if (option === "off") {
+          activeMonitor.hide();
+          return;
+        }
+        if (option === "--once") {
+          ctx.ui.notify(limit(await activeMonitor.once(mode)), "info");
+          return;
+        }
+        if (option === "--json") {
+          ctx.ui.notify(limit(await activeMonitor.json(mode)), "info");
+          return;
+        }
+        await activeMonitor.show(mode);
         return;
       }
       if (action === "tasks") {
@@ -307,14 +336,15 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
         ctx.ui.notify(`Usage: ${PHENIX_USAGE}`, "warning");
         return;
       }
-      const [active, profile] = await Promise.all([
+      const [active, profile, facts] = await Promise.all([
         activeRuntime.queries.activeRuns(activeRoot),
         activeRuntime.profiles.current(activeRoot),
+        activeRuntime.queries.facts(activeRoot, 1_000),
       ]);
       const descendants = active.filter((run) => run.id !== activeRoot);
       const ledger = activeRuntime.ledgerPath(activeRoot) ?? "in-memory";
       ctx.ui.notify(
-        `Root: ${activeRoot}\nProfile: ${profile.agent} / ${profile.modelSet} / ${profile.difficulty}\nSequence: ${activeRuntime.sequence(activeRoot)}\nActive descendants: ${descendants.length}\nIntegrations: ${summarizeIntegrations(integrationStatuses)}\nLedger: ${ledger}`,
+        `Root: ${activeRoot}\nProfile: ${profile.agent} / ${profile.modelSet} / ${profile.difficulty}\nSequence: ${activeRuntime.sequence(activeRoot)}\nActive descendants: ${descendants.length}\nFacts: ${facts.length}\nLive view: ${monitor?.currentMode ?? "hidden"}\nIntegrations: ${summarizeIntegrations(integrationStatuses)}\nLedger: ${ledger}`,
         integrationLevel(integrationStatuses),
       );
     },
