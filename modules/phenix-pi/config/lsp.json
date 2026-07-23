@@ -1,0 +1,196 @@
+{
+  "version": 1,
+  "servers": [
+    {
+      "id": "rust-analyzer",
+      "enabled": true,
+      "include": ["**/*.rs"],
+      "exclude": ["**/.git/**", "**/.direnv/**", "**/target/**", "**/result/**"],
+      "rootMarkers": ["rust-project.json", "Cargo.toml", ".git"],
+      "bin": "rust-analyzer",
+      "args": [],
+      "cwd": "{root}",
+      "languageIdByExtension": {
+        ".rs": "rust"
+      },
+      "startupTimeoutMs": 60000,
+      "diagnosticsWaitMs": 2500,
+      "initializationOptions": {
+        "cargo": {
+          "allTargets": true,
+          "buildScripts": {
+            "enable": true
+          }
+        },
+        "procMacro": {
+          "enable": true
+        },
+        "checkOnSave": true,
+        "check": {
+          "command": "clippy",
+          "allTargets": true
+        }
+      },
+      "settings": {}
+    },
+    {
+      "id": "lua-language-server",
+      "enabled": true,
+      "include": ["**/*.lua"],
+      "exclude": ["**/.git/**", "**/.direnv/**", "**/result/**"],
+      "rootMarkers": [".luarc.json", ".luarc.jsonc", ".git"],
+      "bin": "lua-language-server",
+      "args": [],
+      "cwd": "{root}",
+      "languageIdByExtension": {
+        ".lua": "lua"
+      },
+      "startupTimeoutMs": 30000,
+      "diagnosticsWaitMs": 1200,
+      "initializationOptions": {},
+      "settings": {}
+    },
+    {
+      "id": "typescript-language-server",
+      "enabled": true,
+      "include": [
+        "**/*.ts",
+        "**/*.tsx",
+        "**/*.mts",
+        "**/*.cts",
+        "**/*.js",
+        "**/*.jsx",
+        "**/*.mjs",
+        "**/*.cjs"
+      ],
+      "exclude": [
+        "**/.git/**",
+        "**/.direnv/**",
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/build/**",
+        "**/result/**"
+      ],
+      "rootMarkers": ["tsconfig.json", "jsconfig.json", "package.json", ".git"],
+      "bin": "typescript-language-server",
+      "args": ["--stdio"],
+      "cwd": "{root}",
+      "languageIdByExtension": {
+        ".ts": "typescript",
+        ".tsx": "typescriptreact",
+        ".mts": "typescript",
+        ".cts": "typescript",
+        ".js": "javascript",
+        ".jsx": "javascriptreact",
+        ".mjs": "javascript",
+        ".cjs": "javascript"
+      },
+      "startupTimeoutMs": 45000,
+      "diagnosticsWaitMs": 1500,
+      "initializationOptions": {},
+      "settings": {}
+    },
+    {
+      "id": "vscode-json-language-server",
+      "enabled": true,
+      "include": ["**/*.json", "**/*.jsonc"],
+      "exclude": ["**/.git/**", "**/.direnv/**", "**/node_modules/**", "**/result/**"],
+      "rootMarkers": ["package.json", ".git"],
+      "bin": "vscode-json-language-server",
+      "args": ["--stdio"],
+      "cwd": "{root}",
+      "languageIdByExtension": {
+        ".json": "json",
+        ".jsonc": "jsonc"
+      },
+      "startupTimeoutMs": 30000,
+      "diagnosticsWaitMs": 1000,
+      "initializationOptions": {},
+      "settings": {}
+    },
+    {
+      "id": "nixd",
+      "enabled": true,
+      "include": ["**/*.nix"],
+      "exclude": ["**/.git/**", "**/.direnv/**", "**/result/**"],
+      "rootMarkers": ["flake.nix", "shell.nix", "default.nix", ".git"],
+      "bin": "nixd",
+      "args": [],
+      "cwd": "{root}",
+      "languageIdByExtension": {
+        ".nix": "nix"
+      },
+      "startupTimeoutMs": 45000,
+      "diagnosticsWaitMs": 1500,
+      "initializationOptions": {},
+      "settings": {}
+    },
+    {
+      "id": "taplo",
+      "enabled": true,
+      "include": ["**/*.toml"],
+      "exclude": ["**/.git/**", "**/.direnv/**", "**/target/**", "**/result/**"],
+      "rootMarkers": ["taplo.toml", ".taplo.toml", "Cargo.toml", "pyproject.toml", ".git"],
+      "bin": "taplo",
+      "args": ["lsp", "stdio"],
+      "cwd": "{root}",
+      "languageIdByExtension": {
+        ".toml": "toml"
+      },
+      "startupTimeoutMs": 30000,
+      "diagnosticsWaitMs": 1000,
+      "initializationOptions": {},
+      "settings": {}
+    },
+    {
+      "id": "yaml-language-server",
+      "enabled": true,
+      "include": ["**/*.yaml", "**/*.yml"],
+      "exclude": ["**/.git/**", "**/.direnv/**", "**/node_modules/**", "**/result/**"],
+      "rootMarkers": [".yamllint", ".git"],
+      "bin": "yaml-language-server",
+      "args": ["--stdio"],
+      "cwd": "{root}",
+      "languageIdByExtension": {
+        ".yaml": "yaml",
+        ".yml": "yaml"
+      },
+      "startupTimeoutMs": 30000,
+      "diagnosticsWaitMs": 1000,
+      "initializationOptions": {},
+      "settings": {}
+    },
+    {
+      "id": "basedpyright",
+      "enabled": true,
+      "include": ["**/*.py", "**/*.pyi"],
+      "exclude": [
+        "**/.git/**",
+        "**/.direnv/**",
+        "**/.venv/**",
+        "**/venv/**",
+        "**/__pycache__/**",
+        "**/result/**"
+      ],
+      "rootMarkers": [
+        "pyproject.toml",
+        "basedpyrightconfig.json",
+        "pyrightconfig.json",
+        "setup.py",
+        "requirements.txt",
+        ".git"
+      ],
+      "bin": "basedpyright-langserver",
+      "args": ["--stdio"],
+      "cwd": "{root}",
+      "languageIdByExtension": {
+        ".py": "python",
+        ".pyi": "python"
+      },
+      "startupTimeoutMs": 45000,
+      "diagnosticsWaitMs": 1500,
+      "initializationOptions": {},
+      "settings": {}
+    }
+  ]
+}
