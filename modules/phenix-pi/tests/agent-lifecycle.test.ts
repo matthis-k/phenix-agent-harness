@@ -148,12 +148,42 @@ test("agent completion requires both typed output and a settled Pi cycle", async
   });
 
   backend.session.emit({ type: "turn.ended" });
-  backend.session.emit({ type: "tool.started", toolName: "read" });
+  backend.session.emit({
+    type: "tool.started",
+    toolName: "read",
+    toolCallId: "read-1",
+    input: { path: "modules/phenix-pi/application/agent-executor.ts" },
+  });
   await eventually(
     () =>
       store.projection.turnCounts.get(handle.id) === 1 &&
-      store.projection.toolCallCounts.get(handle.id) === 1,
+      store.projection.toolCallCounts.get(handle.id) === 1 &&
+      store.projection.activities.get(handle.id)?.target ===
+        "modules/phenix-pi/application/agent-executor.ts",
   );
+  backend.session.emit({
+    type: "tool.finished",
+    toolName: "read",
+    toolCallId: "read-1",
+    isError: false,
+  });
+  await eventually(
+    () =>
+      store.projection.facts.some(
+        (fact) =>
+          fact.runId === handle.id &&
+          fact.kind === "file-read" &&
+          fact.subject === "modules/phenix-pi/application/agent-executor.ts",
+      ),
+  );
+
+  await backend.tool("phenix_progress").execute({
+    phase: "analyzing",
+    message: "Tracing completion ordering",
+    target: "AgentExecutor.observe",
+  });
+  assert.equal(store.projection.activities.get(handle.id)?.source, "reported");
+  assert.equal(store.projection.activities.get(handle.id)?.target, "AgentExecutor.observe");
 
   backend.session.emit({ type: "cycle.settled" });
   await eventually(() => backend.session.followUps === 1);
@@ -180,6 +210,17 @@ test("agent completion requires both typed output and a settled Pi cycle", async
   await recovered.load(root);
   assert.equal(recovered.projection.turnCounts.get(handle.id), 1);
   assert.equal(recovered.projection.toolCallCounts.get(handle.id), 1);
+  assert.equal(recovered.projection.activities.get(handle.id)?.source, "reported");
+  assert.ok(
+    recovered.projection.facts.some(
+      (fact) => fact.runId === handle.id && fact.kind === "file-read",
+    ),
+  );
+  assert.ok(
+    recovered.projection.facts.some(
+      (fact) => fact.runId === handle.id && fact.reliability === "reported",
+    ),
+  );
 });
 
 async function eventually(condition: () => boolean): Promise<void> {
