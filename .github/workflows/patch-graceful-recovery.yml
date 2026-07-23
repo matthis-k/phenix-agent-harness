@@ -31,6 +31,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          python .github/fix-recovery-correction.py
           python .github/correct-graceful-recovery.py 2>&1 | tee recovery-correction.log
       - name: Upload correction diagnostics
         if: always()
