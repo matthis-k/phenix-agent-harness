@@ -1,13 +1,12 @@
 name: Format snapshot
 
 on:
-  pull_request:
   push:
     branches: [complete-clean-architecture]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: format-snapshot-${{ github.ref }}
@@ -30,15 +29,17 @@ jobs:
         with: { name: devenv }
       - name: Install devenv
         run: nix profile add nixpkgs#devenv
-      - name: Format source snapshot
+      - name: Apply exact formatter output
+        run: devenv shell -- biome check --write modules/phenix-pi || true
+      - name: Commit formatter output
+        shell: bash
         run: |
-          set +e
-          devenv shell -- biome check --write modules/phenix-pi
-          true
-      - name: Pack formatted source
-        run: tar -czf formatted-source.tar.gz modules/phenix-pi
-      - uses: actions/upload-artifact@v4
-        with:
-          name: formatted-source
-          path: formatted-source.tar.gz
-          if-no-files-found: error
+          if git diff --quiet -- modules/phenix-pi; then
+            echo "Source is already formatted."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add modules/phenix-pi
+          git commit -m "style: apply Biome formatting"
+          git push origin HEAD:complete-clean-architecture
