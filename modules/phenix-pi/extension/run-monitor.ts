@@ -51,7 +51,7 @@ export class RunMonitor {
     try {
       do {
         this.pending = false;
-        const requestedMode = this.mode;
+        const requestedMode: RunMonitorMode = this.mode;
         if (requestedMode === "hidden") return;
         const lines = await this.render(requestedMode);
         if (!this.disposed && this.mode === requestedMode) {
