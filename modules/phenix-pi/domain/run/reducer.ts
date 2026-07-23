@@ -402,6 +402,6 @@ function terminalFact(run: RunRecord, summary: string, error: boolean): RunFactR
 }
 
 function outcomeMessage(outcome: Outcome<unknown> | undefined): string | undefined {
-  if (!outcome || outcome.status !== "failure") return undefined;
+  if (outcome?.status !== "failure") return undefined;
   return outcome.failure.message;
 }

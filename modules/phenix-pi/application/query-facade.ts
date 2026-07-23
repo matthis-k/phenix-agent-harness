@@ -2,8 +2,8 @@ import type { DomainEvent } from "../domain/run/events.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
 import type { RunRecord, RunSnapshot } from "../domain/run/model.ts";
 import {
-  defaultActivity,
   type ActivityPhase,
+  defaultActivity,
   type RunActivity,
   type RunFact,
 } from "../domain/run/observability.ts";

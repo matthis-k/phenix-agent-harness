@@ -1,9 +1,6 @@
 import path from "node:path";
 
-import type {
-  RunActivityChangedData,
-  RunFactRecordedData,
-} from "../domain/run/observability.ts";
+import type { RunActivityChangedData, RunFactRecordedData } from "../domain/run/observability.ts";
 
 export interface ToolObservationDescription {
   readonly activity: RunActivityChangedData;
@@ -49,9 +46,21 @@ export function describeToolCall(
         `Listed ${file ?? targetPath ?? "directory"}`,
       );
     case "edit":
-      return description("editing", "Editing file", file, "file-changed", `Edited ${file ?? "file"}`);
+      return description(
+        "editing",
+        "Editing file",
+        file,
+        "file-changed",
+        `Edited ${file ?? "file"}`,
+      );
     case "write":
-      return description("editing", "Writing file", file, "file-changed", `Wrote ${file ?? "file"}`);
+      return description(
+        "editing",
+        "Writing file",
+        file,
+        "file-changed",
+        `Wrote ${file ?? "file"}`,
+      );
     case "bash": {
       const testing = isCheckCommand(command);
       return description(
@@ -87,11 +96,29 @@ export function describeToolCall(
         "Inspected child run",
       );
     case "phenix_tasks":
-      return description("planning", "Updating task state", undefined, "decision-reported", "Updated tasks");
+      return description(
+        "planning",
+        "Updating task state",
+        undefined,
+        "decision-reported",
+        "Updated tasks",
+      );
     case "phenix_return":
-      return description("finishing", "Submitting result", undefined, "decision-reported", "Submitted result");
+      return description(
+        "finishing",
+        "Submitting result",
+        undefined,
+        "decision-reported",
+        "Submitted result",
+      );
     case "phenix_fail":
-      return description("finishing", "Reporting failure", undefined, "error-observed", "Reported failure");
+      return description(
+        "finishing",
+        "Reporting failure",
+        undefined,
+        "error-observed",
+        "Reported failure",
+      );
     case "phenix_progress":
       return description(
         "thinking",
@@ -197,7 +224,10 @@ function isCheckCommand(command: string | undefined): boolean {
 
 function compact(value: string | undefined, maxLength: number): string | undefined {
   if (!value) return undefined;
-  const normalized = value.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
+  const normalized = value
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!normalized) return undefined;
   return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}…`;
 }

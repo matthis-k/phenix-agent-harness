@@ -7,8 +7,8 @@ import { isTerminalRunState } from "../domain/run/invariants.ts";
 import type { RunLimits, RunRecord } from "../domain/run/model.ts";
 import {
   ACTIVITY_PHASES,
-  defaultActivity,
   type ActivityPhase,
+  defaultActivity,
   type RunFactRecordedData,
 } from "../domain/run/observability.ts";
 import type {

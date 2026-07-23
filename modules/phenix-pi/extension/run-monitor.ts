@@ -142,9 +142,9 @@ function appendNode(
     );
   }
   const childPrefix = root ? "" : contentPrefix;
-  node.children.forEach((child, index) =>
-    appendNode(lines, child, childPrefix, index === node.children.length - 1),
-  );
+  node.children.forEach((child, index) => {
+    appendNode(lines, child, childPrefix, index === node.children.length - 1);
+  });
 }
 
 function formatFact(fact: RunFact): string {
@@ -179,6 +179,9 @@ function stateSymbol(state: string): string {
 }
 
 function truncate(value: string, maxLength: number): string {
-  const normalized = value.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
+  const normalized = value
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}…`;
 }

@@ -167,14 +167,13 @@ test("agent completion requires both typed output and a settled Pi cycle", async
     toolCallId: "read-1",
     isError: false,
   });
-  await eventually(
-    () =>
-      store.projection.facts.some(
-        (fact) =>
-          fact.runId === handle.id &&
-          fact.kind === "file-read" &&
-          fact.subject === "modules/phenix-pi/application/agent-executor.ts",
-      ),
+  await eventually(() =>
+    store.projection.facts.some(
+      (fact) =>
+        fact.runId === handle.id &&
+        fact.kind === "file-read" &&
+        fact.subject === "modules/phenix-pi/application/agent-executor.ts",
+    ),
   );
 
   await backend.tool("phenix_progress").execute({
