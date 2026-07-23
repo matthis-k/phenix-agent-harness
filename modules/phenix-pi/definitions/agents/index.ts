@@ -82,7 +82,7 @@ export const scoutDefinition: AgentDefinition<unknown, unknown> = {
   tools: { allow: ["read", "grep", "find", "ls"] },
   context,
   childCapabilities: none,
-  limits: { timeoutMs: 300_000, maxTurns: 8, maxToolCalls: 50, maxRepairAttempts: 1 },
+  limits: { timeoutMs: 300_000, maxToolCalls: 50, maxRepairAttempts: 1 },
   persistence: "memory",
 };
 
@@ -128,7 +128,7 @@ export const architectDefinition: AgentDefinition<unknown, unknown> = {
   },
   context,
   childCapabilities: capabilities([AGENT_SCOUT], 4),
-  limits: { timeoutMs: 600_000, maxTurns: 12, maxToolCalls: 80, maxRepairAttempts: 2 },
+  limits: { timeoutMs: 600_000, maxToolCalls: 80, maxRepairAttempts: 2 },
   persistence: "memory",
 };
 
@@ -169,7 +169,7 @@ export const testerDefinition: AgentDefinition<unknown, unknown> = {
   tools: { allow: ["read", "grep", "find", "ls"] },
   context,
   childCapabilities: none,
-  limits: { timeoutMs: 420_000, maxTurns: 10, maxToolCalls: 50, maxRepairAttempts: 2 },
+  limits: { timeoutMs: 420_000, maxToolCalls: 50, maxRepairAttempts: 2 },
   persistence: "memory",
 };
 
@@ -210,7 +210,7 @@ export const criticDefinition: AgentDefinition<unknown, unknown> = {
   tools: { allow: ["read", "grep", "find", "ls", "bash"] },
   context,
   childCapabilities: none,
-  limits: { timeoutMs: 480_000, maxTurns: 10, maxToolCalls: 60, maxRepairAttempts: 2 },
+  limits: { timeoutMs: 480_000, maxToolCalls: 60, maxRepairAttempts: 2 },
   persistence: "memory",
 };
 

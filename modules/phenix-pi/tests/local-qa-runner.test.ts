@@ -5,8 +5,8 @@ import path from "node:path";
 import test from "node:test";
 
 import {
-  parseApprovedCheckCommand,
   ProcessLocalOperationRunner,
+  parseApprovedCheckCommand,
 } from "../adapters/process/local-operation-runner.ts";
 
 test("QA runner reports repositories without a discoverable deterministic check", async () => {
