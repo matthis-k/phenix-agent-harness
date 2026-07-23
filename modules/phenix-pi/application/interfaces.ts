@@ -1,6 +1,12 @@
 import type { Definition, DefinitionRef } from "../domain/definition/definition.ts";
+import type { Difficulty, PhenixModelSetId } from "../domain/definition/model.ts";
 import type { DomainEvent } from "../domain/run/events.ts";
-import type { RunSnapshot, StartRun } from "../domain/run/model.ts";
+import type {
+  RunSnapshot,
+  SessionAgentPreset,
+  SessionProfile,
+  StartRun,
+} from "../domain/run/model.ts";
 import type { DefinitionId, LocalTaskId, Outcome, RunId, TaskId } from "../domain/shared.ts";
 import type { LocalTask } from "../domain/task/local-task.ts";
 import type { TaskNode, TaskTree } from "../domain/task/projection.ts";
@@ -22,6 +28,18 @@ export interface ExecutionFacade {
   send(runId: RunId, message: string, signal?: AbortSignal): Promise<void>;
   cancel(runId: RunId, reason: string): Promise<void>;
   reparent(runId: RunId, newParentId: RunId): Promise<void>;
+}
+
+export interface SessionProfileUpdate {
+  readonly agent?: SessionAgentPreset;
+  readonly modelSet?: PhenixModelSetId;
+  readonly difficulty?: Difficulty;
+  readonly source: "user" | "model-select" | "policy";
+}
+
+export interface SessionProfileFacade {
+  current(rootRunId: RunId): Promise<SessionProfile>;
+  select(rootRunId: RunId, update: SessionProfileUpdate): Promise<SessionProfile>;
 }
 
 export interface TaskFacade {
