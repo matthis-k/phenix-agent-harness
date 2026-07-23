@@ -53,7 +53,9 @@ let
     basedpyright
   ];
 
-  harnessRuntime = agentRuntime ++ quality;
+  # Runtime composition and repository maintenance are separate boundaries.
+  # Maintenance scripts inject quality tools only for their own checks.
+  harnessRuntime = agentRuntime;
 in
 {
   inherit agentRuntime harnessRuntime quality;
