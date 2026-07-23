@@ -1,6 +1,7 @@
 name: Format snapshot
 
 on:
+  pull_request:
   push:
     branches: [complete-clean-architecture]
   workflow_dispatch:
