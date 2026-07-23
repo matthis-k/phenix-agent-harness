@@ -51,8 +51,7 @@ export class RunMonitor {
     try {
       do {
         this.pending = false;
-        const requestedMode: RunMonitorMode = this.mode;
-        if (requestedMode === "hidden") return;
+        const requestedMode: Exclude<RunMonitorMode, "hidden"> = this.mode;
         const lines = await this.render(requestedMode);
         if (!this.disposed && this.mode === requestedMode) {
           this.ctx.ui.setWidget?.(WIDGET_KEY, lines, { placement: "aboveEditor" });
