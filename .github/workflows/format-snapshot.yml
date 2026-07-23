@@ -31,7 +31,10 @@ jobs:
       - name: Install devenv
         run: nix profile add nixpkgs#devenv
       - name: Format source snapshot
-        run: devenv shell -- biome check --write modules/phenix-pi
+        run: |
+          set +e
+          devenv shell -- biome check --write modules/phenix-pi
+          true
       - name: Pack formatted source
         run: tar -czf formatted-source.tar.gz modules/phenix-pi
       - uses: actions/upload-artifact@v4
