@@ -18,7 +18,7 @@ test("phenix command completion lists and filters subcommands", () => {
   ]);
   assert.equal(completePhenixSubcommands("unknown"), null);
   assert.equal(completePhenixSubcommands("status extra"), null);
-  assert.equal(PHENIX_USAGE, "/phenix status|runs|tasks|catalog|integrations");
+  assert.equal(PHENIX_USAGE, "/phenix status|runs|facts|tasks|catalog|integrations");
 });
 
 test("integration reports are compact in status and detailed on demand", () => {
