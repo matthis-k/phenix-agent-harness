@@ -28,116 +28,106 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
-          def replace_once(source: str, old: str, new: str, label: str) -> str:
-              count = source.count(old)
-              if count != 1:
-                  raise SystemExit(f"{label}: expected one match, found {count}")
-              return source.replace(old, new)
-
+          # Replace the classifier function structurally so explanatory text is never
+          # mistaken for an execution request.
           path = Path("modules/phenix-pi/application/dispatch-service.ts")
           source = path.read_text()
-          old = '''export function classifyDeterministicDispatch(objective: string): DispatchRoute | undefined {
-            const normalized = objective.toLowerCase();
-            const qa = /\\b(qa|quality assurance|audit|review|validate|verification|check(?:s|ing)?)\\b/.test(
-              normalized,
-            );
-            const mutate =
-              /\\b(fix|implement|change|modify|add|remove|refactor|update|rewrite|migrate|build|create|apply|address)\\b/.test(
-                normalized,
-              );
-
-            if (qa && mutate) return "coordinate";
-            if (qa) return "qa";
-            if (mutate) return "implement";
-            return undefined;
-          }'''
-          new = '''export function classifyDeterministicDispatch(objective: string): DispatchRoute | undefined {
+          replacement = r'''export function classifyDeterministicDispatch(objective: string): DispatchRoute | undefined {
             const normalized = objective.trim().toLowerCase();
-            const broadScope = /\\b(full|complete|comprehensive|overall|repository|repo|codebase|project)\\b/.test(
+            const broadScope = /\b(full|complete|comprehensive|overall|repository|repo|codebase|project)\b/.test(
               normalized,
             );
-            const qaIntent = /\\b(qa|quality assurance|audit|review|validate|verification|check(?:s|ing)?)\\b/.test(
+            const qaIntent = /\b(qa|quality assurance|audit|review|validate|verification|check(?:s|ing)?)\b/.test(
               normalized,
             );
             const explicitQa =
               broadScope &&
               qaIntent &&
-              (/^(?:please\\s+)?(?:do|run|perform|conduct|give me)\\b/.test(normalized) ||
-                /\\b(?:full|complete|comprehensive)\\s+(?:repository\\s+|repo\\s+|codebase\\s+|project\\s+)?(?:qa|audit|review|check)\\b/.test(
+              (/^(?:please\s+)?(?:do|run|perform|conduct|give me)\b/.test(normalized) ||
+                /\b(?:full|complete|comprehensive)\s+(?:repository\s+|repo\s+|codebase\s+|project\s+)?(?:qa|audit|review|check)\b/.test(
                   normalized,
                 ));
             const mutationVerb =
               "fix|implement|modify|add|remove|refactor|update|rewrite|migrate|build|create|apply|address";
             const explicitMutation = new RegExp(
-              `^(?:please\\\\s+)?(?:go\\\\s+ahead\\\\s+(?:and\\\\s+)?)?(?:${mutationVerb})\\\\b|\\\\b(?:can|could|would)\\\\s+you\\\\s+(?:${mutationVerb})\\\\b`,
+              `^(?:please\\s+)?(?:go\\s+ahead\\s+(?:and\\s+)?)?(?:${mutationVerb})\\b|\\b(?:can|could|would)\\s+you\\s+(?:${mutationVerb})\\b`,
             ).test(normalized);
 
             if (explicitQa && explicitMutation) return "coordinate";
             if (explicitQa) return "qa";
             if (explicitMutation) return "implement";
             return undefined;
-          }'''
-          source = replace_once(source, old, new, "conservative classifier")
+          }
+
+          function definitionForRoute'''
+          source, count = re.subn(
+              r'export function classifyDeterministicDispatch\(objective: string\): DispatchRoute \| undefined \{.*?\n\}\n\nfunction definitionForRoute',
+              replacement,
+              source,
+              count=1,
+              flags=re.S,
+          )
+          if count != 1:
+              raise SystemExit(f"classifier replacement count: {count}")
           path.write_text(source)
 
+          # Expose dispatch as a root runtime operation and make background completion
+          # messages retain the original objective.
           path = Path("modules/phenix-pi/composition/create-phenix-runtime.ts")
           source = path.read_text()
-          source = replace_once(
-              source,
-              '''import { DispatchService } from "../application/dispatch-service.ts";''',
+          source = source.replace(
+              'import { DispatchService } from "../application/dispatch-service.ts";',
               '''import {
             type DispatchRequest,
             type DispatchResult,
             DispatchService,
           } from "../application/dispatch-service.ts";''',
-              "dispatch type imports",
           )
-          source = replace_once(
-              source,
-              '''  rootTools(rootRunId: RunId): Promise<readonly AgentTool[]>;
-            setRootNotifier''',
-              '''  rootTools(rootRunId: RunId): Promise<readonly AgentTool[]>;
+          if "dispatchRoot(" not in source:
+              source = source.replace(
+                  "  rootTools(rootRunId: RunId): Promise<readonly AgentTool[]>;\n",
+                  '''  rootTools(rootRunId: RunId): Promise<readonly AgentTool[]>;
             dispatchRoot(
               rootRunId: RunId,
               request: DispatchRequest,
               signal?: AbortSignal,
             ): Promise<DispatchResult>;
-            setRootNotifier''',
-              "runtime dispatch contract",
+            ''',
+                  1,
+              )
+          if "dispatchRoot: (rootRunId" not in source:
+              source = source.replace(
+                  "    rootTools: (rootRunId) => tools.forRun(rootRunId),\n",
+                  '''    rootTools: (rootRunId) => tools.forRun(rootRunId),
+              dispatchRoot: (rootRunId, request, signal) =>
+                dispatch.dispatch(rootRunId, request, signal),
+              ''',
+                  1,
+              )
+          source = source.replace(
+              "const summary = summarizeTerminal(run.outcome, run.id);",
+              "const summary = summarizeTerminal(run.outcome, run.id, run.definitionId, run.input);",
           )
-          source = replace_once(
-              source,
-              '''    rootTools: (rootRunId) => tools.forRun(rootRunId),
-              setRootNotifier''',
-              '''    rootTools: (rootRunId) => tools.forRun(rootRunId),
-              dispatchRoot: (rootRunId, request, signal) => dispatch.dispatch(rootRunId, request, signal),
-              setRootNotifier''',
-              "runtime dispatch implementation",
-          )
-          source = replace_once(
-              source,
-              '''    const summary = summarizeTerminal(run.outcome, run.id);''',
-              '''    const summary = summarizeTerminal(run.outcome, run.id, run.definitionId, run.input);''',
-              "completion summary call",
-          )
-          source = replace_once(
-              source,
-              '''function summarizeTerminal(outcome: unknown, runId: RunId): string {''',
+          source = re.sub(
+              r'function summarizeTerminal\(outcome: unknown, runId: RunId\): string \{',
               '''function summarizeTerminal(
             outcome: unknown,
             runId: RunId,
             definitionId: string,
             input: unknown,
           ): string {''',
-              "completion signature",
-          )
-          source = replace_once(
               source,
-              '''  if (!value) return `Background run ${runId} reached a terminal state.`;
+              count=1,
+          )
+          old_terminal = '''  if (!value) return `Background run ${runId} reached a terminal state.`;
             if (value.status === "failure") return `Background run ${runId} failed: ${value.failure.message}`;
-            if (value.status === "cancelled") return `Background run ${runId} was cancelled: ${value.reason}`;''',
-              '''  const objective =
+            if (value.status === "cancelled") return `Background run ${runId} was cancelled: ${value.reason}`;'''
+          if old_terminal in source:
+              source = source.replace(
+                  old_terminal,
+                  '''  const objective =
               typeof input === "object" &&
               input !== null &&
               typeof (input as { objective?: unknown }).objective === "string"
@@ -149,66 +139,72 @@ jobs:
             if (!value) return `Background ${subject} reached a terminal state.`;
             if (value.status === "failure") return `Background ${subject} failed: ${value.failure.message}`;
             if (value.status === "cancelled") return `Background ${subject} was cancelled: ${value.reason}`;''',
-              "completion subject",
+                  1,
+              )
+          source = source.replace(
+              "return `Background run ${runId} completed: ${summary}. Use phenix_handle to inspect the full outcome.`;",
+              "return `Background ${subject} completed: ${summary}. Use phenix_handle to inspect the full outcome.`;",
           )
-          source = replace_once(
-              source,
-              '''  return `Background run ${runId} completed: ${summary}. Use phenix_handle to inspect the full outcome.`;''',
-              '''  return `Background ${subject} completed: ${summary}. Use phenix_handle to inspect the full outcome.`;''',
-              "completion return",
-          )
+          required = ["DispatchRequest", "dispatchRoot:", "const subject = objective"]
+          for token in required:
+              if token not in source:
+                  raise SystemExit(f"runtime patch missing {token}")
           path.write_text(source)
 
+          # Intercept only high-confidence idle input. Steering and ambiguous prompts
+          # continue to the active frontend model.
           path = Path("modules/phenix-pi/extension/root-extension.ts")
           source = path.read_text()
-          source = replace_once(
-              source,
-              '''import { registerPhenixProvider } from "../adapters/routing/phenix-provider.ts";''',
-              '''import { registerPhenixProvider } from "../adapters/routing/phenix-provider.ts";
-          import { classifyDeterministicDispatch } from "../application/dispatch-service.ts";''',
-              "classifier import",
-          )
-          source = replace_once(
-              source,
-              '''  pi.on("input", async (event) => {
-                if (!runtime || !rootRunId || event.source === "extension") return;
-                await runtime.amendRootInput(rootRunId, event.text);
-              });''',
-              '''  pi.on("input", async (event, ctx) => {
-                if (!runtime || !rootRunId || event.source === "extension") {
-                  return { action: "continue" as const };
-                }
-                await runtime.amendRootInput(rootRunId, event.text);
-                if (event.streamingBehavior) return { action: "continue" as const };
+          if "classifyDeterministicDispatch" not in source:
+              source = source.replace(
+                  'import { registerPhenixProvider } from "../adapters/routing/phenix-provider.ts";\n',
+                  '''import { registerPhenixProvider } from "../adapters/routing/phenix-provider.ts";
+            import { classifyDeterministicDispatch } from "../application/dispatch-service.ts";
+            ''',
+                  1,
+              )
+          input_handler = '''  pi.on("input", async (event, ctx) => {
+            if (!runtime || !rootRunId || event.source === "extension") {
+              return { action: "continue" as const };
+            }
+            await runtime.amendRootInput(rootRunId, event.text);
+            if (event.streamingBehavior) return { action: "continue" as const };
 
-                const route = classifyDeterministicDispatch(event.text);
-                if (!route) return { action: "continue" as const };
-                try {
-                  const result = await runtime.dispatchRoot(
-                    rootRunId,
-                    { objective: event.text, mode: route, wait: "background" },
-                    ctx.signal,
-                  );
-                  ctx.ui.notify(
-                    `Phenix routed this request to ${result.definition} (${result.runId}).`,
-                    "info",
-                  );
-                  return { action: "handled" as const };
-                } catch (error) {
-                  ctx.ui.notify(
-                    `Automatic Phenix dispatch failed: ${error instanceof Error ? error.message : String(error)}`,
-                    "warning",
-                  );
-                  return { action: "continue" as const };
-                }
-              });''',
-              "input auto dispatch",
+            const route = classifyDeterministicDispatch(event.text);
+            if (!route) return { action: "continue" as const };
+            try {
+              const result = await runtime.dispatchRoot(
+                rootRunId,
+                { objective: event.text, mode: route, wait: "background" },
+                ctx.signal,
+              );
+              ctx.ui.notify(
+                `Phenix routed this request to ${result.definition} (${result.runId}).`,
+                "info",
+              );
+              return { action: "handled" as const };
+            } catch (error) {
+              ctx.ui.notify(
+                `Automatic Phenix dispatch failed: ${error instanceof Error ? error.message : String(error)}`,
+                "warning",
+              );
+              return { action: "continue" as const };
+            }
+          });'''
+          source, count = re.subn(
+              r'  pi\.on\("input", async \(event(?:, ctx)?\) => \{.*?\n  \}\);',
+              input_handler,
+              source,
+              count=1,
+              flags=re.S,
           )
+          if count != 1:
+              raise SystemExit(f"input handler replacement count: {count}")
           path.write_text(source)
 
           path = Path("modules/phenix-pi/tests/dispatch-routing.test.ts")
           source = path.read_text()
-          source += '''
+          additions = '''
 
           test("does not mistake explanatory language for mutation intent", () => {
             assert.equal(classifyDeterministicDispatch("How does change detection work?"), undefined);
@@ -218,6 +214,8 @@ jobs:
             assert.equal(classifyDeterministicDispatch("Review this function and explain it"), undefined);
           });
           '''
+          if "does not mistake explanatory language" not in source:
+              source += additions
           path.write_text(source)
           PY
       - name: Format changed source
