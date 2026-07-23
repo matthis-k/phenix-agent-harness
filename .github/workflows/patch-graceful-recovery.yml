@@ -60,12 +60,21 @@ jobs:
       - name: Commit patched sources
         shell: bash
         run: |
+          set -o pipefail
           if git diff --quiet; then
-            echo "No changes required."
+            echo "No changes required." | tee commit-graceful-recovery.log
             exit 0
           fi
+          git status --short | tee commit-graceful-recovery.log
+          git diff --check 2>&1 | tee -a commit-graceful-recovery.log
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docs modules
-          git commit -m "[skip recovery patch] feat: add graceful child recovery"
-          git push origin HEAD:feat/graceful-child-recovery
+          git commit -m "[skip recovery patch] feat: add graceful child recovery" 2>&1 | tee -a commit-graceful-recovery.log
+          git push origin HEAD:feat/graceful-child-recovery 2>&1 | tee -a commit-graceful-recovery.log
+      - name: Upload commit diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: graceful-recovery-commit-log
+          path: commit-graceful-recovery.log
