@@ -20,6 +20,7 @@ export type FailureCode =
   | "input_invalid"
   | "model_unavailable"
   | "backend_start_failed"
+  | "agent_reported_failure"
   | "provider_failed"
   | "timeout"
   | "turn_budget_exceeded"
@@ -32,6 +33,31 @@ export type FailureCode =
   | "local_step_failed"
   | "cancelled"
   | "orphaned";
+
+export type FailureCategory =
+  | "blocked"
+  | "deadlock"
+  | "insufficient_permissions"
+  | "resource_limit"
+  | "invalid_task"
+  | "external_failure"
+  | "other";
+
+export interface FailureLimitSuggestion {
+  readonly timeoutMs?: number;
+  readonly maxTurns?: number | null;
+  readonly maxToolCalls?: number | null;
+  readonly maxRepairAttempts?: number;
+}
+
+export interface FailureReport {
+  readonly source: "agent" | "automatic";
+  readonly category: FailureCategory;
+  readonly summary: string;
+  readonly retryable: boolean;
+  readonly requestedTools?: readonly string[];
+  readonly suggestedLimits?: FailureLimitSuggestion;
+}
 
 export interface Failure {
   readonly code: FailureCode;

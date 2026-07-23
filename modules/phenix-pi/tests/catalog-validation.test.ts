@@ -54,13 +54,16 @@ test("workflow function names are unique authorities", () => {
   );
 });
 
-test("QA analysis agents rely on timeout and tool-call bounds instead of fixed turns", () => {
+test("bundled agents omit tool-call caps by default", () => {
+  for (const definition of agentDefinitions) {
+    assert.equal(definition.limits.maxToolCalls, undefined);
+    assert.ok(definition.limits.timeoutMs > 0);
+  }
+});
+
+test("open-ended QA analysis agents omit fixed turn caps", () => {
   const qaAgentIds = new Set(["agent.scout", "agent.tester", "agent.architect", "agent.critic"]);
   const qaAgents = agentDefinitions.filter((definition) => qaAgentIds.has(definition.id));
   assert.equal(qaAgents.length, qaAgentIds.size);
-  for (const definition of qaAgents) {
-    assert.equal(definition.limits.maxTurns, undefined);
-    assert.ok(definition.limits.timeoutMs > 0);
-    assert.ok(definition.limits.maxToolCalls > 0);
-  }
+  for (const definition of qaAgents) assert.equal(definition.limits.maxTurns, undefined);
 });
