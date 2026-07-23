@@ -12,19 +12,27 @@ type ExtensionModule = {
   readonly default: (pi: ExtensionAPI) => void | Promise<void>;
 };
 
-const loaders: Readonly<Record<IntegrationId, () => Promise<ExtensionModule>>> = {
-  hypa: () => import("@hypabolic/pi-hypa/extensions/index.ts") as Promise<ExtensionModule>,
-  lsp: () => import("pi-lsp/extensions/pi-lsp/index.ts") as Promise<ExtensionModule>,
-  mcp: () => import("pi-mcp-adapter/index.ts") as Promise<ExtensionModule>,
-  context: () => import("pi-context-tools/extensions/index.ts") as Promise<ExtensionModule>,
-  web: () => import("@juicesharp/rpiv-web-tools/index.ts") as Promise<ExtensionModule>,
+const specifiers: Readonly<Record<IntegrationId, string>> = {
+  hypa: "@hypabolic/pi-hypa/extensions/index.ts",
+  lsp: "pi-lsp/extensions/pi-lsp/index.ts",
+  mcp: "pi-mcp-adapter/index.ts",
+  context: "pi-context-tools/extensions/index.ts",
+  web: "@juicesharp/rpiv-web-tools/index.ts",
 };
+
+// Keep optional package source outside the harness TypeScript program. These
+// extensions are loaded and validated by Pi at runtime; a broken optional
+// package must be reported as an integration failure, not break the core build.
+const runtimeImport = new Function(
+  "specifier",
+  "return import(specifier)",
+) as (specifier: string) => Promise<ExtensionModule>;
 
 export async function loadPiIntegrations(pi: ExtensionAPI): Promise<readonly IntegrationStatus[]> {
   const statuses: IntegrationStatus[] = [];
-  for (const id of Object.keys(loaders) as IntegrationId[]) {
+  for (const id of Object.keys(specifiers) as IntegrationId[]) {
     try {
-      const extension = await loaders[id]();
+      const extension = await runtimeImport(specifiers[id]);
       await extension.default(pi);
       statuses.push({ id, state: "loaded" });
     } catch (error) {
