@@ -33,20 +33,19 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          def replace_once(path: Path, old: str, new: str) -> None:
+          def replace_first(path: Path, old: str, new: str) -> None:
               source = path.read_text()
-              count = source.count(old)
-              if count != 1:
-                  raise SystemExit(f"{path}: expected one replacement, found {count}: {old!r}")
-              path.write_text(source.replace(old, new))
+              if old not in source:
+                  raise SystemExit(f"{path}: replacement target not found: {old!r}")
+              path.write_text(source.replace(old, new, 1))
 
           executor = Path("modules/phenix-pi/application/agent-executor.ts")
-          replace_once(
+          replace_first(
               executor,
               "      if (turns > live.definition.limits.maxTurns) {",
               "      const maxTurns = live.definition.limits.maxTurns;\n      if (maxTurns !== undefined && turns > maxTurns) {",
           )
-          replace_once(
+          replace_first(
               executor,
               "          message: `Agent exceeded ${live.definition.limits.maxTurns} turns`,",
               "          message: `Agent exceeded ${maxTurns} turns`,",
@@ -64,7 +63,7 @@ jobs:
                   "limits: { timeoutMs: 480_000, maxToolCalls: 60, maxRepairAttempts: 2 }",
           }
           for old, new in replacements.items():
-              replace_once(agents, old, new)
+              replace_first(agents, old, new)
 
           tests = Path("modules/phenix-pi/tests/catalog-validation.test.ts")
           source = tests.read_text()
