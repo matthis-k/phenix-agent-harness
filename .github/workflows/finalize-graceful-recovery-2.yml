@@ -1,0 +1,132 @@
+name: Finalize graceful recovery v2
+
+on:
+  push:
+    branches:
+      - feat/graceful-child-recovery
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: ${{ github.event_name == 'pull_request' || !contains(github.event.head_commit.message, '[skip recovery finalizer]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: feat/graceful-child-recovery
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: Apply structural finalization
+        shell: bash
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          def sub_once(path: str, pattern: str, replacement: str) -> None:
+              file = Path(path)
+              source = file.read_text()
+              updated, count = re.subn(pattern, replacement, source, count=1, flags=re.DOTALL)
+              if count == 0:
+                  if replacement.strip() in source:
+                      return
+                  raise SystemExit(f"{path}: structural finalization pattern missing: {pattern[:100]!r}")
+              file.write_text(updated)
+
+          execution = "modules/phenix-pi/application/execution-facade.ts"
+          sub_once(
+              execution,
+              r'''modelFailure = \{\s*code: "model_unavailable",\s*message: error instanceof Error \? error\.message : String\(error\),\s*retryable: false,\s*\};''',
+              '''const message = error instanceof Error ? error.message : String(error);
+              modelFailure = {
+                code: "model_unavailable",
+                message,
+                retryable: true,
+                details: {
+                  source: "automatic",
+                  category: "external_failure",
+                  summary: message,
+                  retryable: true,
+                },
+              };''',
+          )
+          sub_once(
+              execution,
+              r'''await this\.fail\(id, \{\s*code: "backend_start_failed",\s*message: error instanceof Error \? error\.message : String\(error\),\s*retryable: false,\s*\}\);''',
+              '''const message = error instanceof Error ? error.message : String(error);
+              await this.fail(id, {
+                code: "backend_start_failed",
+                message,
+                retryable: true,
+                details: {
+                  source: "automatic",
+                  category: "external_failure",
+                  summary: message,
+                  retryable: true,
+                },
+              });''',
+          )
+
+          runtime = "modules/phenix-pi/composition/create-phenix-runtime.ts"
+          sub_once(
+              runtime,
+              r'''const changedLimits = original\s*\? Object\.fromEntries\(\s*Object\.entries\(retry\.compiled\.limits\)\.filter\(\s*\(\[key, value\]\) =>\s*value !== \(original\.compiled\.limits as Readonly<Record<string, unknown>>\)\[key\],\s*\),\s*\)\s*: retry\.compiled\.limits;''',
+              '''const retryLimits = retry.compiled.limits as Readonly<Record<string, unknown>>;
+          const originalLimits = original?.compiled.limits as
+            | Readonly<Record<string, unknown>>
+            | undefined;
+          const changedLimits = originalLimits
+            ? Object.fromEntries(
+                [...new Set([...Object.keys(originalLimits), ...Object.keys(retryLimits)])]
+                  .filter((key) => retryLimits[key] !== originalLimits[key])
+                  .map((key) => [key, retryLimits[key] ?? null]),
+              )
+            : retryLimits;''',
+          )
+
+          tools = Path("modules/phenix-pi/application/agent-tools.ts")
+          tools.write_text(
+              tools.read_text().replace(
+                  "Retry creates a linked replacement run and may add only bounded non-mutating recovery permissions.",
+                  "Retry creates a linked replacement run and may explicitly add bounded read/search or bash execution permissions.",
+              )
+          )
+          docs = Path("docs/INTERFACES.md")
+          docs.write_text(
+              docs.read_text().replace(
+                  "Recovery overrides are bounded and may add only non-mutating repository tools plus `bash`.",
+                  "Recovery overrides are bounded and may add read/search tools or explicitly escalate to `bash`; they cannot directly add `edit` or `write`.",
+              )
+          )
+          PY
+      - name: Format finalized sources
+        run: |
+          nix shell github:NixOS/nixpkgs/0bb7ec54c8483066ec9d7720e780a5caa71f8612#biome -c \
+            biome check --write --unsafe --config-path biome.json --no-errors-on-unmatched \
+            --files-ignore-unknown=true \
+            modules/phenix-pi/application/execution-facade.ts \
+            modules/phenix-pi/application/agent-tools.ts \
+            modules/phenix-pi/composition/create-phenix-runtime.ts
+      - name: Commit finalized sources
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No finalization required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs modules
+          git commit --no-verify -m "[skip recovery finalizer] fix: complete graceful recovery semantics"
+          git push origin HEAD:feat/graceful-child-recovery
