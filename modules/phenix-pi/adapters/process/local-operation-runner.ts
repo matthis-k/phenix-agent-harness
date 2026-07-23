@@ -56,7 +56,9 @@ async function runCheck(command: string, context: LocalOperationContext) {
     return {
       command,
       ok: true,
-      summary: bounded(`${result.stdout}${result.stderr ? `\n${result.stderr}` : ""}`.trim() || "Passed."),
+      summary: bounded(
+        `${result.stdout}${result.stderr ? `\n${result.stderr}` : ""}`.trim() || "Passed.",
+      ),
     };
   } catch (error) {
     const failure = error as Error & {
@@ -68,7 +70,10 @@ async function runCheck(command: string, context: LocalOperationContext) {
     return {
       command,
       ok: false,
-      summary: bounded(output || `${failure.message}${failure.code === undefined ? "" : ` (exit ${failure.code})`}`),
+      summary: bounded(
+        output ||
+          `${failure.message}${failure.code === undefined ? "" : ` (exit ${failure.code})`}`,
+      ),
     };
   }
 }
