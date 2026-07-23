@@ -4,7 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { ProcessLocalOperationRunner } from "../adapters/process/local-operation-runner.ts";
+import {
+  ProcessLocalOperationRunner,
+  parseApprovedCheckCommand,
+} from "../adapters/process/local-operation-runner.ts";
 
 test("QA runner reports repositories without a discoverable deterministic check", async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "phenix-qa-"));
@@ -24,6 +27,41 @@ test("QA runner reports repositories without a discoverable deterministic check"
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
+});
+
+test("QA runner executes approved checks directly without a shell", async () => {
+  const calls: Array<{ executable: string; args: readonly string[] }> = [];
+  const runner = new ProcessLocalOperationRunner(async (executable, args) => {
+    calls.push({ executable, args });
+    return { stdout: "check passed", stderr: "" };
+  });
+
+  const result = (await runner.run(
+    "local.qa-checks",
+    {
+      commands: ["nix flake check --accept-flake-config --print-build-logs --keep-going"],
+    },
+    {
+      cwd: process.cwd(),
+      signal: new AbortController().signal,
+    },
+  )) as readonly { command: string; ok: boolean; summary: string }[];
+
+  assert.deepEqual(calls, [
+    {
+      executable: "nix",
+      args: ["flake", "check", "--accept-flake-config", "--print-build-logs", "--keep-going"],
+    },
+  ]);
+  assert.equal(result[0]?.ok, true);
+  assert.equal(result[0]?.summary, "check passed");
+});
+
+test("approved QA command parsing preserves quoted arguments without shell evaluation", () => {
+  assert.deepEqual(parseApprovedCheckCommand('nix flake check ".#package check"'), {
+    executable: "nix",
+    args: ["flake", "check", ".#package check"],
+  });
 });
 
 test("QA runner rejects generic shell composition and unapproved commands", async () => {

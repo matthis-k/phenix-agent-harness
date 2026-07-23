@@ -279,10 +279,11 @@ export class AgentExecutor implements RunImplementation {
 
     if (event.type === "turn.ended") {
       const turns = await this.controller.turnEnded(runId);
-      if (turns > live.definition.limits.maxTurns) {
+      const maxTurns = live.definition.limits.maxTurns;
+      if (maxTurns !== undefined && turns > maxTurns) {
         await this.controller.fail(runId, {
           code: "turn_budget_exceeded",
-          message: `Agent exceeded ${live.definition.limits.maxTurns} turns`,
+          message: `Agent exceeded ${maxTurns} turns`,
           retryable: false,
         });
       }

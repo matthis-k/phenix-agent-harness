@@ -154,8 +154,11 @@ function validateAgent(
   if (!Number.isFinite(definition.limits.timeoutMs) || definition.limits.timeoutMs < 0) {
     error("agent_timeout_invalid", `timeoutMs must be finite and non-negative`);
   }
-  if (!Number.isInteger(definition.limits.maxTurns) || definition.limits.maxTurns < 1) {
-    error("agent_turn_limit_invalid", `maxTurns must be a positive integer`);
+  if (
+    definition.limits.maxTurns !== undefined &&
+    (!Number.isInteger(definition.limits.maxTurns) || definition.limits.maxTurns < 1)
+  ) {
+    error("agent_turn_limit_invalid", `maxTurns must be omitted or a positive integer`);
   }
   if (!Number.isInteger(definition.limits.maxToolCalls) || definition.limits.maxToolCalls < 1) {
     error("agent_tool_limit_invalid", `maxToolCalls must be a positive integer`);
