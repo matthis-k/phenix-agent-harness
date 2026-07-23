@@ -4,7 +4,12 @@ import type {
   ContextPolicy,
 } from "../../domain/definition/definition.ts";
 import type { DefinitionId } from "../../domain/shared.ts";
-import { DispatchDecisionSchema } from "../dispatch.ts";
+import {
+  type DispatchDecision,
+  DispatchDecisionSchema,
+  type DispatchSelectionRequest,
+  DispatchSelectionRequestSchema,
+} from "../dispatch.ts";
 import {
   AGENT_ARCHITECT,
   AGENT_BASE,
@@ -235,18 +240,32 @@ export const finalizerDefinition: AgentDefinition<unknown, unknown> = {
   persistence: "memory",
 };
 
-export const dispatcherDefinition: AgentDefinition<unknown, unknown> = {
+export const dispatcherDefinition: AgentDefinition<DispatchSelectionRequest, DispatchDecision> = {
   id: AGENT_DISPATCHER,
   kind: "agent",
   title: "Execution dispatcher",
-  description: "Choose the typed execution route for an ambiguous substantial request.",
-  input: ObjectiveRequestSchema,
+  description: "Select one authorized execution definition from catalog descriptions.",
+  input: DispatchSelectionRequestSchema,
   output: DispatchDecisionSchema,
   model: sessionModel,
   thinking: "minimal",
   prompt: {
-    render: () =>
-      "Classify the request into exactly one route: qa for repository review or audit without requested mutation; implement for a concrete requested code change; coordinate for multi-stage, mixed review-and-fix, or otherwise open-ended substantial work. Return only the typed decision. Do not perform repository work.",
+    render: (input) => {
+      const candidates = input.candidates
+        .map(
+          (candidate) =>
+            `- ${candidate.definitionId} [${candidate.kind}]: ${candidate.title} — ${candidate.description}`,
+        )
+        .join("\n");
+      return [
+        "Choose exactly one execution definition from the supplied candidates.",
+        "Prefer the most specific workflow whose complete contract matches the request.",
+        "Choose the generic coordinator only when no single workflow covers the whole request, multiple workflows are required, execution order depends on intermediate results, or the task is substantially open-ended.",
+        "Do not choose the generic coordinator merely because it is flexible.",
+        "Return definitionId exactly as offered, with a concise reason and confidence. Do not perform repository work.",
+        `Candidates:\n${candidates}`,
+      ].join("\n");
+    },
   },
   tools: { allow: [] },
   context: { ...context, projectFiles: "none", maxBytes: 8_000 },

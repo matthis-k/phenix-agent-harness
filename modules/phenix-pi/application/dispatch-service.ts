@@ -1,4 +1,8 @@
-import type { DispatchDecision, DispatchRoute } from "../definitions/dispatch.ts";
+import type {
+  DispatchCandidate,
+  DispatchDecision,
+  DispatchRoute,
+} from "../definitions/dispatch.ts";
 import {
   AGENT_COORDINATOR,
   AGENT_DISPATCHER,
@@ -11,9 +15,9 @@ import {
   type DefinitionRef,
   definitionRef,
 } from "../domain/definition/definition.ts";
-import type { Outcome, RunId } from "../domain/shared.ts";
+import type { DefinitionId, Outcome, RunId } from "../domain/shared.ts";
 import type { ExecutionStore } from "./execution-store.ts";
-import type { CatalogFacade, ExecutionFacade } from "./interfaces.ts";
+import type { CatalogFacade, DefinitionSummary, ExecutionFacade } from "./interfaces.ts";
 import type { InvocationPolicy } from "./invocation-policy.ts";
 
 export type DispatchMode = "auto" | DispatchRoute;
@@ -24,8 +28,8 @@ export interface DispatchRequest extends ObjectiveRequest {
 }
 
 export interface DispatchResult {
-  readonly route: DispatchRoute;
-  readonly definition: string;
+  readonly definition: DefinitionId;
+  readonly selectedBy: "explicit" | "dispatcher";
   readonly runId: RunId;
   readonly classifierRunId?: RunId;
   readonly status: "running" | "completed";
@@ -59,33 +63,46 @@ export class DispatchService {
     if (!objective) throw new Error("Dispatch objective must not be empty");
 
     const explicit = request.mode && request.mode !== "auto" ? request.mode : undefined;
-    let route = explicit ?? classifyDeterministicDispatch(objective);
+    let targetRef: DefinitionRef<unknown, unknown>;
     let classifierRunId: RunId | undefined;
+    let selectedBy: DispatchResult["selectedBy"];
 
-    if (!route) {
+    if (explicit) {
+      targetRef = definitionForRoute(explicit);
+      selectedBy = "explicit";
+    } else {
+      const candidates = selectDispatchCandidates(await this.catalog.listAvailable(parentId));
+      if (candidates.length === 0) {
+        throw new Error("No workflow or generic coordinator is available for dispatch");
+      }
+
       const classifierRef = definitionRef(AGENT_DISPATCHER);
-      this.assertAllowed(parentId, this.catalog.get(classifierRef) as AnyDefinition, {
+      const classifierInput = {
         objective,
         ...(request.context === undefined ? {} : { context: request.context }),
-      });
+        candidates,
+      };
+      this.assertAllowed(
+        parentId,
+        this.catalog.get(classifierRef) as AnyDefinition,
+        classifierInput,
+      );
       const classifier = await this.execution.start({
         parentId,
         definition: classifierRef,
-        input: {
-          objective,
-          ...(request.context === undefined ? {} : { context: request.context }),
-        },
+        input: classifierInput,
         wait: "await",
       });
       classifierRunId = classifier.id;
       const decision = await classifier.result(signal);
       if (decision.status !== "success") {
-        throw new Error(`Dispatch classifier failed: ${describeOutcome(decision)}`);
+        throw new Error(`Dispatch selector failed: ${describeOutcome(decision)}`);
       }
-      route = (decision.value as DispatchDecision).route;
+      const selected = requireSelectedCandidate(candidates, decision.value as DispatchDecision);
+      targetRef = definitionRef(selected.definitionId);
+      selectedBy = "dispatcher";
     }
 
-    const targetRef = definitionForRoute(route);
     const input = {
       objective,
       ...(request.context === undefined ? {} : { context: request.context }),
@@ -101,8 +118,8 @@ export class DispatchService {
     });
     if (wait === "background") {
       return {
-        route,
         definition: targetRef.id,
+        selectedBy,
         runId: handle.id,
         ...(classifierRunId ? { classifierRunId } : {}),
         status: "running",
@@ -110,8 +127,8 @@ export class DispatchService {
     }
 
     return {
-      route,
       definition: targetRef.id,
+      selectedBy,
       runId: handle.id,
       ...(classifierRunId ? { classifierRunId } : {}),
       status: "completed",
@@ -129,20 +146,28 @@ export class DispatchService {
   }
 }
 
-export function classifyDeterministicDispatch(objective: string): DispatchRoute | undefined {
-  const normalized = objective.toLowerCase();
-  const qa = /\b(qa|quality assurance|audit|review|validate|verification|check(?:s|ing)?)\b/.test(
-    normalized,
-  );
-  const mutate =
-    /\b(fix|implement|change|modify|add|remove|refactor|update|rewrite|migrate|build|create|apply|address)\b/.test(
-      normalized,
-    );
+export function selectDispatchCandidates(
+  available: readonly DefinitionSummary[],
+): readonly DispatchCandidate[] {
+  return available
+    .filter((definition) => definition.kind === "workflow" || definition.id === AGENT_COORDINATOR)
+    .map((definition) => ({
+      definitionId: definition.id,
+      kind: definition.kind === "workflow" ? "workflow" : "generic",
+      title: definition.title,
+      description: definition.description,
+    }));
+}
 
-  if (qa && mutate) return "coordinate";
-  if (qa) return "qa";
-  if (mutate) return "implement";
-  return undefined;
+export function requireSelectedCandidate(
+  candidates: readonly DispatchCandidate[],
+  decision: DispatchDecision,
+): DispatchCandidate {
+  const selected = candidates.find((candidate) => candidate.definitionId === decision.definitionId);
+  if (!selected) {
+    throw new Error(`Dispatch selector chose unavailable definition ${decision.definitionId}`);
+  }
+  return selected;
 }
 
 function definitionForRoute(route: DispatchRoute): DefinitionRef<unknown, unknown> {

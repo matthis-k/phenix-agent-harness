@@ -187,7 +187,7 @@ function outputFor(definition: AnyDefinition): unknown {
     return { summary: "clean", findings: [], reports: [] };
   }
   if (definition.id === AGENT_DISPATCHER) {
-    return { route: "coordinate", reason: "requires composition", confidence: 0.8 };
+    return { definitionId: AGENT_COORDINATOR, reason: "requires composition", confidence: 0.8 };
   }
   if (
     definition.id === AGENT_BASE ||
