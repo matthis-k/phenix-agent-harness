@@ -25,6 +25,18 @@ _:
           mkdir -p "$agent_dir"
           chmod 0700 "$agent_dir" 2>/dev/null || true
 
+          seed_config() {
+            local name="$1"
+            local source="${phenixPiPackage}/config/$name"
+            local target="$agent_dir/$name"
+            if [[ ! -e "$target" && -f "$source" ]]; then
+              install -m 0600 "$source" "$target"
+            fi
+          }
+
+          seed_config lsp.json
+          seed_config mcp.json
+
           export PI_CODING_AGENT_DIR="$agent_dir"
           export PI_SKIP_VERSION_CHECK=1
           export PI_TELEMETRY=0
