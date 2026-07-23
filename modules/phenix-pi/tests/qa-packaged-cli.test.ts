@@ -55,7 +55,7 @@ describe("packaged QA CLI", () => {
       };
       assert.deepEqual(merged.positiveObservations, ["Model review completed."]);
       assert.ok(fs.existsSync(path.join(cwd, "qa-report.txt")));
-      assert.ok(stdout.some((line) => line === "QA PASS"));
+      assert.ok(stdout.some((line) => line === "QA REVIEW"));
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }
