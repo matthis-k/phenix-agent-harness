@@ -4,5 +4,7 @@ export * from "./domain-event-bus.ts";
 export * from "./execution-facade.ts";
 export * from "./execution-store.ts";
 export * from "./interfaces.ts";
+export * from "./profile-aware-model-resolver.ts";
 export * from "./query-facade.ts";
+export * from "./session-profile-facade.ts";
 export * from "./task-facade.ts";
