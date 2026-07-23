@@ -964,8 +964,8 @@ function normalizeRetryOverrides(
   options: RunRetryOptions,
 ): Omit<RunRetryOptions, "wait"> | undefined {
   const addTools = [...new Set(options.addTools ?? [])];
-  if (kind !== "agent" && addTools.length > 0) {
-    throw new Error(`Only agent retries may add tools`);
+  if (kind !== "agent" && (addTools.length > 0 || options.limits !== undefined)) {
+    throw new Error(`Only agent retries may override tools or limits`);
   }
   for (const tool of addTools) {
     if (!RECOVERY_ADDITIONAL_TOOLS.has(tool)) {

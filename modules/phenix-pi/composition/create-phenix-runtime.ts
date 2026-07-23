@@ -165,9 +165,8 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     if (!run) return;
     const retryOf = run.compiled.invocation.retryOf;
     if (event.type === "run.created" && retryOf) {
-      await rootNotifier?.(
-        `Recovery run ${run.id} started for failed run ${retryOf}. The original outcome remains immutable.`,
-      );
+      const original = store.projection.runs.get(retryOf);
+      await rootNotifier?.(summarizeRetryStart(run, original));
       return;
     }
     if (!isTerminalEvent(event.type) || !run.parentId) return;
@@ -245,6 +244,36 @@ function isTerminalEvent(type: string): boolean {
   return ["run.completed", "run.failed", "run.cancelled", "run.orphaned"].includes(type);
 }
 
+function summarizeRetryStart(
+  retry: {
+    readonly id: RunId;
+    readonly compiled: { readonly tools: readonly string[]; readonly limits: object };
+  },
+  original:
+    | {
+        readonly id: RunId;
+        readonly compiled: { readonly tools: readonly string[]; readonly limits: object };
+      }
+    | undefined,
+): string {
+  const originalTools = new Set(original?.compiled.tools ?? []);
+  const addedTools = retry.compiled.tools.filter((tool) => !originalTools.has(tool));
+  const changedLimits = original
+    ? Object.fromEntries(
+        Object.entries(retry.compiled.limits).filter(
+          ([key, value]) =>
+            value !== (original.compiled.limits as Readonly<Record<string, unknown>>)[key],
+        ),
+      )
+    : retry.compiled.limits;
+  const tools = addedTools.length > 0 ? ` Added tools: ${addedTools.join(", ")}.` : "";
+  const limits =
+    Object.keys(changedLimits).length > 0
+      ? ` Changed limits: ${JSON.stringify(changedLimits)}.`
+      : "";
+  return `Recovery run ${retry.id} started for failed run ${original?.id ?? "unknown"}.${tools}${limits} The original outcome remains immutable.`;
+}
+
 function summarizeTerminal(outcome: unknown, runId: RunId, retryOf?: RunId): string {
   const value = outcome as
     | { readonly status: "success"; readonly value: unknown }
@@ -255,6 +284,11 @@ function summarizeTerminal(outcome: unknown, runId: RunId, retryOf?: RunId): str
           readonly message: string;
           readonly retryable: boolean;
           readonly causeRunId?: RunId;
+          readonly details?: {
+            readonly category?: string;
+            readonly requestedTools?: readonly string[];
+            readonly suggestedLimits?: unknown;
+          };
         };
       }
     | { readonly status: "cancelled"; readonly reason: string }
@@ -263,10 +297,20 @@ function summarizeTerminal(outcome: unknown, runId: RunId, retryOf?: RunId): str
   if (!value) return `${prefix} reached a terminal state.`;
   if (value.status === "failure") {
     const cause = value.failure.causeRunId ? ` Cause: ${value.failure.causeRunId}.` : "";
+    const category = value.failure.details?.category
+      ? ` Category: ${value.failure.details.category}.`
+      : "";
+    const requestedTools = value.failure.details?.requestedTools?.length
+      ? ` Requested tools: ${value.failure.details.requestedTools.join(", ")}.`
+      : "";
+    const suggestedLimits = value.failure.details?.suggestedLimits
+      ? ` Suggested limits: ${JSON.stringify(value.failure.details.suggestedLimits)}.`
+      : "";
     const recovery = value.failure.retryable
       ? " A bounded retry may be appropriate after inspecting the report."
       : " The failure is marked non-retryable; choose another route or ask the user before forcing recovery.";
-    return `${prefix} failed [${value.failure.code}]: ${value.failure.message}.${cause}${recovery}`;
+    const punctuation = /[.!?]$/.test(value.failure.message) ? "" : ".";
+    return `${prefix} failed [${value.failure.code}]: ${value.failure.message}${punctuation}${cause}${category}${requestedTools}${suggestedLimits}${recovery}`;
   }
   if (value.status === "cancelled") return `${prefix} was cancelled: ${value.reason}`;
   const summary =

@@ -149,7 +149,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
 - Mixed review-and-fix or ambiguous nontrivial work MUST use phenix_dispatch with mode=coordinate.
 - Never reproduce an invariant workflow manually; phenix_dispatch is the only root execution entry point.
 - When any descendant fails, inform the user immediately, inspect the structured failure and cause run, then decide whether to retry with phenix_handle, dispatch a better-suited workflow, request user input, or stop.
-- Retry only with bounded settings and the minimum additional permissions needed; recovery may add read/search tools or bash, never mutation permissions to a read-only task.
+- Retry only with bounded settings and the minimum additional permissions needed; recovery may add read/search tools or explicitly escalate to bash, but never add edit/write directly to a read-only task; report every escalation to the user.
 - Available definitions: ${capabilities || "none"}.\n- Active descendant handles: ${handles || "none"}.\n- A background child remains attached. Use phenix_handle to inspect, await, send, or cancel it.\n- Use phenix_tasks only for local leaves; execution anchors are derived and read-only.`,
     };
   });

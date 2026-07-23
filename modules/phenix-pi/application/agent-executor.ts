@@ -188,11 +188,15 @@ export class AgentExecutor implements RunImplementation {
           "A typed output is already accepted. Conclude this recovery cycle without resubmitting it.",
         );
       } catch (error) {
-        await this.controller.fail(command.runId, {
-          code: "provider_failed",
-          message: error instanceof Error ? error.message : String(error),
-          retryable: true,
-        });
+        await this.controller.fail(
+          command.runId,
+          automaticFailure(
+            "provider_failed",
+            error instanceof Error ? error.message : String(error),
+            "external_failure",
+            true,
+          ),
+        );
       }
       return true;
     }
@@ -201,25 +205,35 @@ export class AgentExecutor implements RunImplementation {
       previousCycle?.state === "idle" &&
       previousCycle.number > (compiled.limits.maxRepairAttempts ?? 0)
     ) {
-      await this.controller.fail(command.runId, {
-        code: "output_missing",
-        message: `Agent settled without phenix_return after ${previousCycle.number} cycle(s)`,
-        retryable: false,
-      });
+      const maxRepairAttempts = compiled.limits.maxRepairAttempts ?? 0;
+      await this.controller.fail(
+        command.runId,
+        automaticFailure(
+          "output_missing",
+          `Agent settled without phenix_return or phenix_fail after ${previousCycle.number} cycle(s)`,
+          "deadlock",
+          true,
+          { maxRepairAttempts: Math.min(10, maxRepairAttempts + 1) },
+        ),
+      );
       return true;
     }
     const cycle = (previousCycle?.number ?? 0) + 1;
     await this.controller.cycleStarted(command.runId, cycle);
     try {
       await session.followUp(
-        "Resume this run and submit the required typed output with phenix_return.",
+        "Resume this run and call phenix_return with the typed output, or phenix_fail with a short report if the run remains blocked.",
       );
     } catch (error) {
-      await this.controller.fail(command.runId, {
-        code: "provider_failed",
-        message: error instanceof Error ? error.message : String(error),
-        retryable: true,
-      });
+      await this.controller.fail(
+        command.runId,
+        automaticFailure(
+          "provider_failed",
+          error instanceof Error ? error.message : String(error),
+          "external_failure",
+          true,
+        ),
+      );
     }
     return true;
   }
@@ -375,7 +389,7 @@ export class AgentExecutor implements RunImplementation {
 
     if (event.type === "turn.ended") {
       const turns = await this.controller.turnEnded(runId);
-      const maxTurns = live.definition.limits.maxTurns;
+      const maxTurns = live.limits.maxTurns;
       if (maxTurns !== undefined && turns > maxTurns) {
         await this.controller.fail(
           runId,
@@ -441,11 +455,15 @@ export class AgentExecutor implements RunImplementation {
         "The run is not complete: call phenix_return with the typed result, or phenix_fail with a short structured report if blocked or deadlocked.",
       );
     } catch (error) {
-      await this.controller.fail(runId, {
-        code: "provider_failed",
-        message: error instanceof Error ? error.message : String(error),
-        retryable: true,
-      });
+      await this.controller.fail(
+        runId,
+        automaticFailure(
+          "provider_failed",
+          error instanceof Error ? error.message : String(error),
+          "external_failure",
+          true,
+        ),
+      );
     }
   }
 
