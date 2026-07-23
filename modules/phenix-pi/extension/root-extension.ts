@@ -9,6 +9,7 @@ import type {
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 import {
+  formatIntegrationReport,
   type IntegrationStatus,
   loadPiIntegrations,
   summarizeIntegrations,
@@ -25,6 +26,7 @@ import {
 } from "../domain/run/model.ts";
 import { type RunId, runId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
+import { completePhenixSubcommands, PHENIX_USAGE } from "./phenix-command.ts";
 
 const ROOT_BINDING_ENTRY = "phenix:root-binding";
 const STATUS_KEY = "phenix";
@@ -259,7 +261,8 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
   });
 
   pi.registerCommand("phenix", {
-    description: "Inspect Phenix; usage: /phenix status|runs|tasks|catalog|integrations",
+    description: `Inspect Phenix; usage: ${PHENIX_USAGE}`,
+    getArgumentCompletions: completePhenixSubcommands,
     handler: async (args, ctx) => {
       const activeRuntime = runtime;
       const activeRoot = rootRunId;
@@ -270,7 +273,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
       const action = args.trim().toLowerCase() || "status";
       if (action === "integrations") {
         ctx.ui.notify(
-          summarizeIntegrations(integrationStatuses),
+          formatIntegrationReport(integrationStatuses),
           integrationLevel(integrationStatuses),
         );
         return;
@@ -294,7 +297,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
         return;
       }
       if (action !== "status") {
-        ctx.ui.notify("Usage: /phenix status|runs|tasks|catalog|integrations", "warning");
+        ctx.ui.notify(`Usage: ${PHENIX_USAGE}`, "warning");
         return;
       }
       const [active, profile] = await Promise.all([
