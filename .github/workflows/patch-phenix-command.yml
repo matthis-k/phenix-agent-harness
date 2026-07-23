@@ -1,0 +1,111 @@
+name: Patch Phenix command
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: fix/phenix-command-completion
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: Wire command helpers
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("modules/phenix-pi/extension/root-extension.ts")
+          source = path.read_text()
+
+          replacements = [
+              (
+                  '''import {
+            type IntegrationStatus,
+            loadPiIntegrations,
+            summarizeIntegrations,
+          } from "../adapters/pi-sdk/integrations.ts";''',
+                  '''import {
+            type IntegrationStatus,
+            formatIntegrationReport,
+            loadPiIntegrations,
+            summarizeIntegrations,
+          } from "../adapters/pi-sdk/integrations.ts";''',
+              ),
+              (
+                  '''import type { AgentTool } from "../ports/agent-session-backend.ts";''',
+                  '''import type { AgentTool } from "../ports/agent-session-backend.ts";
+          import { completePhenixSubcommands, PHENIX_USAGE } from "./phenix-command.ts";''',
+              ),
+              (
+                  '''  pi.registerCommand("phenix", {
+            description: "Inspect Phenix; usage: /phenix status|runs|tasks|catalog|integrations",''',
+                  '''  pi.registerCommand("phenix", {
+            description: `Inspect Phenix; usage: ${PHENIX_USAGE}`,
+            getArgumentCompletions: completePhenixSubcommands,''',
+              ),
+              (
+                  '''      if (action === "integrations") {
+                ctx.ui.notify(
+                  summarizeIntegrations(integrationStatuses),
+                  integrationLevel(integrationStatuses),
+                );''',
+                  '''      if (action === "integrations") {
+                ctx.ui.notify(
+                  formatIntegrationReport(integrationStatuses),
+                  integrationLevel(integrationStatuses),
+                );''',
+              ),
+              (
+                  '''        ctx.ui.notify("Usage: /phenix status|runs|tasks|catalog|integrations", "warning");''',
+                  '''        ctx.ui.notify(`Usage: ${PHENIX_USAGE}`, "warning");''',
+              ),
+          ]
+
+          for old, new in replacements:
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected one replacement, found {count}: {old[:80]!r}")
+              source = source.replace(old, new)
+
+          path.write_text(source)
+          PY
+      - name: Format changed source
+        run: |
+          nix shell github:NixOS/nixpkgs/0bb7ec54c8483066ec9d7720e780a5caa71f8612#biome -c \
+            biome check \
+            --write \
+            --unsafe \
+            --config-path biome.json \
+            --no-errors-on-unmatched \
+            --files-ignore-unknown=true \
+            modules/phenix-pi/extension/root-extension.ts \
+            modules/phenix-pi/extension/phenix-command.ts \
+            modules/phenix-pi/adapters/pi-sdk/integrations.ts \
+            modules/phenix-pi/tests/phenix-command.test.ts || true
+      - name: Commit wired command
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add modules/phenix-pi
+          git commit -m "feat: complete phenix command UX"
+          git push origin HEAD:fix/phenix-command-completion
