@@ -56,6 +56,18 @@ phenix-qa validate-report report.json
 phenix-qa analyzers
 ```
 
+### Merge model-assisted review
+
+After writing a contribution that satisfies `ModelReviewContributionSchema`, merge it into the deterministic report through the runtime rather than presenting detached manual findings:
+
+```bash
+phenix-qa merge-review \
+  qa-results/qa-report.json \
+  qa-results/model-review.json
+```
+
+The command validates evidence references, recalculates gates and risk, validates the final report, and rewrites both JSON and text reports. Exit status `1` means the completed QA report has a failing quality gate; it does not mean the review workflow itself failed.
+
 ## Required subsession decomposition for full QA
 
 For a full repository or module QA, the base child is the **review integrator**, not the sole reviewer. Keep unrelated evidence and judgment in separate child contexts. When the corresponding child targets are advertised, delegate these bounded concerns individually:
