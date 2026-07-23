@@ -32,55 +32,34 @@ jobs:
           path = Path("modules/phenix-pi/extension/root-extension.ts")
           source = path.read_text()
 
-          replacements = [
-              (
-                  '''import {
-            type IntegrationStatus,
-            loadPiIntegrations,
-            summarizeIntegrations,
-          } from "../adapters/pi-sdk/integrations.ts";''',
-                  '''import {
-            type IntegrationStatus,
-            formatIntegrationReport,
-            loadPiIntegrations,
-            summarizeIntegrations,
-          } from "../adapters/pi-sdk/integrations.ts";''',
-              ),
-              (
-                  '''import type { AgentTool } from "../ports/agent-session-backend.ts";''',
-                  '''import type { AgentTool } from "../ports/agent-session-backend.ts";
-          import { completePhenixSubcommands, PHENIX_USAGE } from "./phenix-command.ts";''',
-              ),
-              (
-                  '''  pi.registerCommand("phenix", {
-            description: "Inspect Phenix; usage: /phenix status|runs|tasks|catalog|integrations",''',
-                  '''  pi.registerCommand("phenix", {
-            description: `Inspect Phenix; usage: ${PHENIX_USAGE}`,
-            getArgumentCompletions: completePhenixSubcommands,''',
-              ),
-              (
-                  '''      if (action === "integrations") {
-                ctx.ui.notify(
-                  summarizeIntegrations(integrationStatuses),
-                  integrationLevel(integrationStatuses),
-                );''',
-                  '''      if (action === "integrations") {
-                ctx.ui.notify(
-                  formatIntegrationReport(integrationStatuses),
-                  integrationLevel(integrationStatuses),
-                );''',
-              ),
-              (
-                  '''        ctx.ui.notify("Usage: /phenix status|runs|tasks|catalog|integrations", "warning");''',
-                  '''        ctx.ui.notify(`Usage: ${PHENIX_USAGE}`, "warning");''',
-              ),
-          ]
-
-          for old, new in replacements:
+          def replace_once(old: str, new: str) -> None:
+              global source
               count = source.count(old)
               if count != 1:
-                  raise SystemExit(f"expected one replacement, found {count}: {old[:80]!r}")
-              source = source.replace(old, new)
+                  raise SystemExit(f"expected one replacement, found {count}: {old!r}")
+              source = source.replace(old, new, 1)
+
+          replace_once(
+              '  type IntegrationStatus,\n  loadPiIntegrations,',
+              '  type IntegrationStatus,\n  formatIntegrationReport,\n  loadPiIntegrations,',
+          )
+          replace_once(
+              'import type { AgentTool } from "../ports/agent-session-backend.ts";',
+              'import type { AgentTool } from "../ports/agent-session-backend.ts";\nimport { completePhenixSubcommands, PHENIX_USAGE } from "./phenix-command.ts";',
+          )
+          replace_once(
+              '    description: "Inspect Phenix; usage: /phenix status|runs|tasks|catalog|integrations",',
+              '    description: `Inspect Phenix; usage: ${PHENIX_USAGE}`,\n    getArgumentCompletions: completePhenixSubcommands,',
+          )
+          marker = '      if (action === "integrations") {'
+          start = source.index(marker)
+          status_call = 'summarizeIntegrations(integrationStatuses)'
+          position = source.index(status_call, start)
+          source = source[:position] + 'formatIntegrationReport(integrationStatuses)' + source[position + len(status_call):]
+          replace_once(
+              '        ctx.ui.notify("Usage: /phenix status|runs|tasks|catalog|integrations", "warning");',
+              '        ctx.ui.notify(`Usage: ${PHENIX_USAGE}`, "warning");',
+          )
 
           path.write_text(source)
           PY
