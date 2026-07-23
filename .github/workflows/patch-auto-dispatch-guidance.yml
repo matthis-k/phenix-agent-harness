@@ -1,0 +1,109 @@
+name: Patch auto dispatch guidance
+
+on:
+  push:
+    branches:
+      - feat/catalog-driven-workflow-selection
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: feat/catalog-driven-workflow-selection
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: Apply auto dispatch guidance
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          root = Path("modules/phenix-pi/extension/root-extension.ts")
+          source = root.read_text()
+          old = '''- A full repository QA, audit, or broad review MUST use phenix_dispatch with mode=qa.
+          - Any requested repository mutation MUST use phenix_dispatch with mode=implement.
+          - Mixed review-and-fix or ambiguous nontrivial work MUST use phenix_dispatch with mode=coordinate.
+          - Never reproduce an invariant workflow manually; phenix_dispatch is the only root execution entry point.'''
+          new = '''- All substantial work MUST use phenix_dispatch with mode=auto so the mandatory selector chooses from the current capability-filtered catalog descriptions.
+          - Do not choose qa, implement, or coordinate yourself unless the user explicitly requests that operator override.
+          - The selector should prefer the most specific invariant workflow and use the generic coordinator only when no single workflow covers the whole request or execution depends on intermediate results.
+          - Never reproduce an invariant workflow manually; phenix_dispatch is the only root execution entry point.'''
+          if old in source:
+            source = source.replace(old, new, 1)
+          elif new not in source:
+            raise SystemExit("root dispatch guidance block not found")
+          root.write_text(source)
+
+          tools = Path("modules/phenix-pi/application/agent-tools.ts")
+          source = tools.read_text()
+          old = '''      description:
+                "Route substantial work through an invariant QA or implementation workflow, or through the read-only dynamic coordinator when the execution shape is ambiguous.",'''
+          new = '''      description:
+                "Route substantial work through a mandatory catalog-driven selector. Use auto for normal requests; explicit qa, implement, or coordinate modes are operator overrides only.",'''
+          if old in source:
+            source = source.replace(old, new, 1)
+          elif new not in source:
+            raise SystemExit("dispatch tool description not found")
+          tools.write_text(source)
+
+          test = Path("modules/phenix-pi/tests/root-extension-session.test.ts")
+          source = test.read_text()
+          old = '''    const start = handlers.get("session_start");
+              const shutdown = handlers.get("session_shutdown");
+              assert.ok(start);
+              assert.ok(shutdown);'''
+          new = '''    const start = handlers.get("session_start");
+              const beforeStart = handlers.get("before_agent_start");
+              const shutdown = handlers.get("session_shutdown");
+              assert.ok(start);
+              assert.ok(beforeStart);
+              assert.ok(shutdown);'''
+          if old in source:
+            source = source.replace(old, new, 1)
+          elif new not in source:
+            raise SystemExit("root handler setup not found")
+
+          old = '''    await start({}, first);
+              const taskTool = tools.get("phenix_tasks");'''
+          new = '''    await start({}, first);
+              const prompt = (await beforeStart({ systemPrompt: "base" }, first)) as {
+                systemPrompt: string;
+              };
+              assert.match(prompt.systemPrompt, /phenix_dispatch with mode=auto/);
+              assert.doesNotMatch(prompt.systemPrompt, /phenix_dispatch with mode=qa/);
+              const taskTool = tools.get("phenix_tasks");'''
+          if old in source:
+            source = source.replace(old, new, 1)
+          elif new not in source:
+            raise SystemExit("root prompt assertion insertion point not found")
+          test.write_text(source)
+          PY
+      - name: Format changed source
+        run: |
+          nix shell github:NixOS/nixpkgs/0bb7ec54c8483066ec9d7720e780a5caa71f8612#biome -c \
+            biome check --write --unsafe --config-path biome.json --no-errors-on-unmatched \
+            --files-ignore-unknown=true \
+            modules/phenix-pi/extension/root-extension.ts \
+            modules/phenix-pi/application/agent-tools.ts \
+            modules/phenix-pi/tests/root-extension-session.test.ts
+      - name: Commit guidance changes
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add modules/phenix-pi
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "fix: require catalog selection in auto mode"
+          git push origin HEAD:feat/catalog-driven-workflow-selection
