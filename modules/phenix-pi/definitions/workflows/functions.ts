@@ -78,20 +78,27 @@ export function registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): 
     return {
       objective: input.objective,
       context: input.context,
-      checks: successAt<readonly CheckResult[]>(context, "checks"),
+      checks: localAt<readonly CheckResult[]>(context, "checks"),
     };
   });
   registry.registerMapping("qa.arch.input", (context) =>
     criticObjective(context, "architecture, ownership, dependency direction, and replaceability"),
   );
   registry.registerMapping("qa.security.input", (context) =>
-    criticObjective(context, "security, trust boundaries, secrets, authentication, and unsafe behavior"),
+    criticObjective(
+      context,
+      "security, trust boundaries, secrets, authentication, and unsafe behavior",
+    ),
   );
   registry.registerMapping("qa.synthesize.input", (context) => ({
     objective: (context.input as ObjectiveRequest).objective,
-    reports: ["checks", "repo", "tests", "architecture", "security"].map((node) =>
-      successAt(context, node),
-    ),
+    reports: [
+      localAt(context, "checks"),
+      successAt(context, "repo"),
+      successAt(context, "tests"),
+      successAt(context, "architecture"),
+      successAt(context, "security"),
+    ],
   }));
   registry.registerMapping("qa.output", (context) => successAt(context, "synthesize"));
 }
@@ -107,6 +114,11 @@ function outcomeValue<T>(value: unknown): T {
 function successAt<T = unknown>(context: WorkflowEvaluationContext, node: string): T {
   const value = context.latest.get(node);
   return outcomeValue<T>(value);
+}
+
+function localAt<T = unknown>(context: WorkflowEvaluationContext, node: string): T {
+  if (!context.latest.has(node)) throw new Error(`Workflow mapping expected local result ${node}`);
+  return context.latest.get(node) as T;
 }
 
 function valuesAt<T = unknown>(context: WorkflowEvaluationContext, node: string): readonly T[] {
@@ -127,5 +139,7 @@ function extractConfiguredChecks(context: unknown): readonly string[] {
   if (typeof context !== "object" || context === null) return [];
   const checks = (context as { readonly checks?: unknown }).checks;
   if (!Array.isArray(checks)) return [];
-  return checks.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  return checks.filter(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  );
 }
