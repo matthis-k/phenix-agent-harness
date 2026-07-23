@@ -19,7 +19,7 @@ interface CheckInvocation {
 
 interface CheckExecutionOptions {
   readonly cwd: string;
-  readonly signal: AbortSignal;
+  readonly signal: AbortSignal | undefined;
   readonly timeout: number;
   readonly maxBuffer: number;
 }
