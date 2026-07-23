@@ -1,0 +1,115 @@
+name: Patch NixOS QA runtime
+
+on:
+  push:
+    branches:
+      - fix/nixos-qa-runner
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[skip patch]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: fix/nixos-qa-runner
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: Patch optional turn limits
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str) -> None:
+              source = path.read_text()
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one replacement, found {count}: {old[:100]!r}")
+              path.write_text(source.replace(old, new))
+
+          executor = Path("modules/phenix-pi/application/agent-executor.ts")
+          replace_once(
+              executor,
+              '''      const turns = await this.controller.turnEnded(runId);
+                if (turns > live.definition.limits.maxTurns) {
+                  await this.controller.fail(runId, {
+                    code: "turn_budget_exceeded",
+                    message: `Agent exceeded ${live.definition.limits.maxTurns} turns`,
+                    retryable: false,
+                  });
+                }''',
+              '''      const turns = await this.controller.turnEnded(runId);
+                const maxTurns = live.definition.limits.maxTurns;
+                if (maxTurns !== undefined && turns > maxTurns) {
+                  await this.controller.fail(runId, {
+                    code: "turn_budget_exceeded",
+                    message: `Agent exceeded ${maxTurns} turns`,
+                    retryable: false,
+                  });
+                }''',
+          )
+
+          agents = Path("modules/phenix-pi/definitions/agents/index.ts")
+          replacements = {
+              '''limits: { timeoutMs: 300_000, maxTurns: 8, maxToolCalls: 50, maxRepairAttempts: 1 }''':
+                  '''limits: { timeoutMs: 300_000, maxToolCalls: 50, maxRepairAttempts: 1 }''',
+              '''limits: { timeoutMs: 600_000, maxTurns: 12, maxToolCalls: 80, maxRepairAttempts: 2 }''':
+                  '''limits: { timeoutMs: 600_000, maxToolCalls: 80, maxRepairAttempts: 2 }''',
+              '''limits: { timeoutMs: 420_000, maxTurns: 10, maxToolCalls: 50, maxRepairAttempts: 2 }''':
+                  '''limits: { timeoutMs: 420_000, maxToolCalls: 50, maxRepairAttempts: 2 }''',
+              '''limits: { timeoutMs: 480_000, maxTurns: 10, maxToolCalls: 60, maxRepairAttempts: 2 }''':
+                  '''limits: { timeoutMs: 480_000, maxToolCalls: 60, maxRepairAttempts: 2 }''',
+          }
+          for old, new in replacements.items():
+              replace_once(agents, old, new)
+
+          tests = Path("modules/phenix-pi/tests/catalog-validation.test.ts")
+          source = tests.read_text()
+          addition = '''
+
+          test("QA analysis agents rely on timeout and tool-call bounds instead of fixed turns", () => {
+            const qaAgentIds = new Set(["agent.scout", "agent.tester", "agent.architect", "agent.critic"]);
+            const qaAgents = agentDefinitions.filter((definition) => qaAgentIds.has(definition.id));
+            assert.equal(qaAgents.length, qaAgentIds.size);
+            for (const definition of qaAgents) {
+              assert.equal(definition.limits.maxTurns, undefined);
+              assert.ok(definition.limits.timeoutMs > 0);
+              assert.ok(definition.limits.maxToolCalls > 0);
+            }
+          });
+          '''
+          if 'QA analysis agents rely on timeout and tool-call bounds' not in source:
+              tests.write_text(source + addition)
+          PY
+      - name: Format changed files
+        run: |
+          nix shell github:NixOS/nixpkgs/0bb7ec54c8483066ec9d7720e780a5caa71f8612#biome -c \
+            biome check \
+            --write \
+            --unsafe \
+            --config-path biome.json \
+            --no-errors-on-unmatched \
+            --files-ignore-unknown=true \
+            modules/phenix-pi/application/agent-executor.ts \
+            modules/phenix-pi/definitions/agents/index.ts \
+            modules/phenix-pi/tests/catalog-validation.test.ts \
+            modules/phenix-pi/adapters/process/local-operation-runner.ts \
+            modules/phenix-pi/tests/local-qa-runner.test.ts
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add modules/phenix-pi
+          git commit -m "[skip patch] fix: make QA execution NixOS-safe"
+          git push origin HEAD:fix/nixos-qa-runner
