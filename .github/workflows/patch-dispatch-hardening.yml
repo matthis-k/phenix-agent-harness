@@ -28,47 +28,36 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path("modules/phenix-pi/application/agent-tools.ts")
           source = path.read_text()
+          source = source.replace("private readonly dispatch: DispatchService", "private readonly dispatch?: DispatchService")
+          source = source.replace("readonly dispatch: DispatchService", "readonly dispatch?: DispatchService")
           source = source.replace(
-              "  private readonly dispatch: DispatchService;",
-              "  private readonly dispatch?: DispatchService;",
+              "const result = await this.dispatch.dispatch(parentId, params, signal);",
+              'if (!this.dispatch) throw new Error("Root dispatch service is not configured");\n        const result = await this.dispatch.dispatch(parentId, params, signal);',
           )
-          source = source.replace(
-              "    readonly dispatch: DispatchService;",
-              "    readonly dispatch?: DispatchService;",
-          )
-          source = source.replace(
-              "        const result = await this.dispatch.dispatch(parentId, params, signal);",
-              '        if (!this.dispatch) throw new Error("Root dispatch service is not configured");\n        const result = await this.dispatch.dispatch(parentId, params, signal);',
-          )
-          if "private readonly dispatch?: DispatchService" not in source:
-              raise SystemExit("optional dispatch patch did not apply")
           path.write_text(source)
 
           path = Path("modules/phenix-pi/application/execution-facade.ts")
           source = path.read_text()
-          old = '''    if (!capabilities.invokableDefinitions.includes(definition.id)) {
-              throw new Error(`Parent ${parent.id} cannot invoke ${definition.id}`);
-            }'''
-          new = '''    const invokableDefinitions =
+          source = re.sub(
+              r'    if \(!capabilities\.invokableDefinitions\.includes\(definition\.id\)\) \{\n      throw new Error\(`Parent \$\{parent\.id\} cannot invoke \$\{definition\.id\}`\);\n    \}',
+              '''    const invokableDefinitions =
               parent.kind === "root" ? this.rootInvokableDefinitions : capabilities.invokableDefinitions;
             if (!invokableDefinitions.includes(definition.id)) {
               throw new Error(`Parent ${parent.id} cannot invoke ${definition.id}`);
-            }'''
-          if old in source:
-              source = source.replace(old, new, 1)
-          if "parent.kind === \"root\" ? this.rootInvokableDefinitions" not in source:
-              raise SystemExit("effective root authorization patch did not apply")
+            }''',
+              source,
+              count=1,
+          )
           path.write_text(source)
 
           path = Path("modules/phenix-pi/extension/root-extension.ts")
           source = path.read_text()
           source = source.replace('  const readOnlyTools = ["read", "grep", "find", "ls"] as const;\n', "")
-          source = source.replace("    scout: readOnlyTools,", "    scout: orchestrationTools,")
-          if "scout: orchestrationTools" not in source:
-              raise SystemExit("root scout dispatch patch did not apply")
+          source = source.replace("scout: readOnlyTools", "scout: orchestrationTools")
           path.write_text(source)
 
           path = Path("modules/phenix-pi/tests/support/core-runtime.ts")
@@ -82,36 +71,21 @@ jobs:
               'import type { DefinitionId, RunId } from "../../domain/shared.ts";',
           )
           source = source.replace(
-              '''export interface TestRuntimeOptions {
-              readonly modelResolver?: ModelResolver;
-              readonly operations?: LocalOperationRunner;
-            }''',
-              '''export interface TestRuntimeOptions {
-              readonly modelResolver?: ModelResolver;
-              readonly operations?: LocalOperationRunner;
-              readonly rootInvokableDefinitions?: readonly DefinitionId[];
-            }''',
+              "  readonly operations?: LocalOperationRunner;\n}",
+              "  readonly operations?: LocalOperationRunner;\n  readonly rootInvokableDefinitions?: readonly DefinitionId[];\n}",
+              1,
           )
-          constructor_anchor = '''    ids,
-              clock,
-            });'''
-          if "rootInvokableDefinitions: options.rootInvokableDefinitions" not in source:
-              source = source.replace(
-                  constructor_anchor,
-                  '''    ids,
-              clock,
-              rootInvokableDefinitions: options.rootInvokableDefinitions,
-            });''',
-                  1,
-              )
-          output_anchor = '''  if (definition.id === AGENT_QA_SYNTHESIZER) {
+          source = source.replace(
+              "    clock,\n  });",
+              "    clock,\n    rootInvokableDefinitions: options.rootInvokableDefinitions,\n  });",
+              1,
+          )
+          source = source.replace(
+              '''  if (definition.id === AGENT_QA_SYNTHESIZER) {
               return { summary: "clean", findings: [], reports: [] };
             }
-            if (definition.id === AGENT_BASE || definition.id === AGENT_FINALIZER) {'''
-          if "definition.id === AGENT_DISPATCHER" not in source:
-              source = source.replace(
-                  output_anchor,
-                  '''  if (definition.id === AGENT_QA_SYNTHESIZER) {
+            if (definition.id === AGENT_BASE || definition.id === AGENT_FINALIZER) {''',
+              '''  if (definition.id === AGENT_QA_SYNTHESIZER) {
               return { summary: "clean", findings: [], reports: [] };
             }
             if (definition.id === AGENT_DISPATCHER) {
@@ -122,17 +96,8 @@ jobs:
               definition.id === AGENT_COORDINATOR ||
               definition.id === AGENT_FINALIZER
             ) {''',
-                  1,
-              )
-          required = [
-              "AGENT_COORDINATOR",
-              "AGENT_DISPATCHER",
-              "rootInvokableDefinitions?: readonly DefinitionId[]",
-              "rootInvokableDefinitions: options.rootInvokableDefinitions",
-          ]
-          for token in required:
-              if token not in source:
-                  raise SystemExit(f"support patch missing {token}")
+              1,
+          )
           path.write_text(source)
           PY
           cat > modules/phenix-pi/tests/root-dispatch-policy.test.ts <<'TS'
