@@ -96,7 +96,9 @@ function visit(value: unknown, reasons: Set<string>, depth: number, path: string
     return;
   }
   if (Array.isArray(value)) {
-    value.slice(0, 64).forEach((item, index) => visit(item, reasons, depth + 1, `${path}[${index}]`));
+    for (const [index, item] of value.slice(0, 64).entries()) {
+      visit(item, reasons, depth + 1, `${path}[${index}]`);
+    }
     return;
   }
   if (typeof value !== "object") return;
@@ -126,13 +128,13 @@ function collectStrings(value: unknown, output: string[], depth: number): void {
     return;
   }
   if (Array.isArray(value)) {
-    value.slice(0, 64).forEach((item) => collectStrings(item, output, depth + 1));
+    for (const item of value.slice(0, 64)) collectStrings(item, output, depth + 1);
     return;
   }
   if (typeof value === "object") {
-    Object.values(value)
-      .slice(0, 64)
-      .forEach((item) => collectStrings(item, output, depth + 1));
+    for (const item of Object.values(value).slice(0, 64)) {
+      collectStrings(item, output, depth + 1);
+    }
   }
 }
 
