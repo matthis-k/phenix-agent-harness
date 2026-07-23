@@ -223,7 +223,21 @@ class PiAgentSessionPort implements AgentSessionPort {
       return;
     }
     if (event.type === "tool_execution_start") {
-      this.emit({ type: "tool.started", toolName: event.toolName });
+      this.emit({
+        type: "tool.started",
+        toolName: event.toolName,
+        toolCallId: event.toolCallId,
+        input: event.args,
+      });
+      return;
+    }
+    if (event.type === "tool_execution_end") {
+      this.emit({
+        type: "tool.finished",
+        toolName: event.toolName,
+        toolCallId: event.toolCallId,
+        isError: event.isError,
+      });
       return;
     }
     if (
