@@ -37,41 +37,31 @@ jobs:
               source = path.read_text()
               count = source.count(old)
               if count != 1:
-                  raise SystemExit(f"{path}: expected one replacement, found {count}: {old[:100]!r}")
+                  raise SystemExit(f"{path}: expected one replacement, found {count}: {old!r}")
               path.write_text(source.replace(old, new))
 
           executor = Path("modules/phenix-pi/application/agent-executor.ts")
           replace_once(
               executor,
-              '''      const turns = await this.controller.turnEnded(runId);
-                if (turns > live.definition.limits.maxTurns) {
-                  await this.controller.fail(runId, {
-                    code: "turn_budget_exceeded",
-                    message: `Agent exceeded ${live.definition.limits.maxTurns} turns`,
-                    retryable: false,
-                  });
-                }''',
-              '''      const turns = await this.controller.turnEnded(runId);
-                const maxTurns = live.definition.limits.maxTurns;
-                if (maxTurns !== undefined && turns > maxTurns) {
-                  await this.controller.fail(runId, {
-                    code: "turn_budget_exceeded",
-                    message: `Agent exceeded ${maxTurns} turns`,
-                    retryable: false,
-                  });
-                }''',
+              "      if (turns > live.definition.limits.maxTurns) {",
+              "      const maxTurns = live.definition.limits.maxTurns;\n      if (maxTurns !== undefined && turns > maxTurns) {",
+          )
+          replace_once(
+              executor,
+              "          message: `Agent exceeded ${live.definition.limits.maxTurns} turns`,",
+              "          message: `Agent exceeded ${maxTurns} turns`,",
           )
 
           agents = Path("modules/phenix-pi/definitions/agents/index.ts")
           replacements = {
-              '''limits: { timeoutMs: 300_000, maxTurns: 8, maxToolCalls: 50, maxRepairAttempts: 1 }''':
-                  '''limits: { timeoutMs: 300_000, maxToolCalls: 50, maxRepairAttempts: 1 }''',
-              '''limits: { timeoutMs: 600_000, maxTurns: 12, maxToolCalls: 80, maxRepairAttempts: 2 }''':
-                  '''limits: { timeoutMs: 600_000, maxToolCalls: 80, maxRepairAttempts: 2 }''',
-              '''limits: { timeoutMs: 420_000, maxTurns: 10, maxToolCalls: 50, maxRepairAttempts: 2 }''':
-                  '''limits: { timeoutMs: 420_000, maxToolCalls: 50, maxRepairAttempts: 2 }''',
-              '''limits: { timeoutMs: 480_000, maxTurns: 10, maxToolCalls: 60, maxRepairAttempts: 2 }''':
-                  '''limits: { timeoutMs: 480_000, maxToolCalls: 60, maxRepairAttempts: 2 }''',
+              "limits: { timeoutMs: 300_000, maxTurns: 8, maxToolCalls: 50, maxRepairAttempts: 1 }":
+                  "limits: { timeoutMs: 300_000, maxToolCalls: 50, maxRepairAttempts: 1 }",
+              "limits: { timeoutMs: 600_000, maxTurns: 12, maxToolCalls: 80, maxRepairAttempts: 2 }":
+                  "limits: { timeoutMs: 600_000, maxToolCalls: 80, maxRepairAttempts: 2 }",
+              "limits: { timeoutMs: 420_000, maxTurns: 10, maxToolCalls: 50, maxRepairAttempts: 2 }":
+                  "limits: { timeoutMs: 420_000, maxToolCalls: 50, maxRepairAttempts: 2 }",
+              "limits: { timeoutMs: 480_000, maxTurns: 10, maxToolCalls: 60, maxRepairAttempts: 2 }":
+                  "limits: { timeoutMs: 480_000, maxToolCalls: 60, maxRepairAttempts: 2 }",
           }
           for old, new in replacements.items():
               replace_once(agents, old, new)
