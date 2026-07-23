@@ -38,7 +38,7 @@ export class RunMonitor {
 
   hide(): void {
     this.mode = "hidden";
-    this.ctx.ui.setWidget(WIDGET_KEY, undefined);
+    this.ctx.ui.setWidget?.(WIDGET_KEY, undefined);
   }
 
   async refresh(): Promise<void> {
@@ -51,11 +51,13 @@ export class RunMonitor {
     try {
       do {
         this.pending = false;
-        const lines = await this.render(this.mode);
-        if (!this.disposed && this.mode !== "hidden") {
-          this.ctx.ui.setWidget(WIDGET_KEY, lines, { placement: "aboveEditor" });
+        const requestedMode = this.mode;
+        if (requestedMode === "hidden") return;
+        const lines = await this.render(requestedMode);
+        if (!this.disposed && this.mode === requestedMode) {
+          this.ctx.ui.setWidget?.(WIDGET_KEY, lines, { placement: "aboveEditor" });
         }
-      } while (this.pending && !this.disposed && this.mode !== "hidden");
+      } while (this.pending && !this.disposed);
     } finally {
       this.refreshing = false;
     }
