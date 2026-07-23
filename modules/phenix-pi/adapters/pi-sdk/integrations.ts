@@ -28,18 +28,11 @@ const specifiers: Readonly<Record<IntegrationId, string>> = {
   web: "@juicesharp/rpiv-web-tools/index.ts",
 };
 
-// Keep optional package source outside the harness TypeScript program. These
-// extensions are loaded and validated by Pi at runtime; a broken optional
-// package must be reported as an integration failure, not break the core build.
-const runtimeImport = new Function("specifier", "return import(specifier)") as (
-  specifier: string,
-) => Promise<ExtensionModule>;
-
 export async function loadPiIntegrations(pi: ExtensionAPI): Promise<readonly IntegrationStatus[]> {
   const statuses: IntegrationStatus[] = [];
   for (const id of Object.keys(specifiers) as IntegrationId[]) {
     try {
-      const extension = await runtimeImport(specifiers[id]);
+      const extension = (await import(specifiers[id])) as ExtensionModule;
       await extension.default(pi);
       statuses.push({ id, state: "loaded" });
     } catch (error) {
