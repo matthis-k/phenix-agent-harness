@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  formatIntegrationReport,
-  summarizeIntegrations,
-} from "../adapters/pi-sdk/integrations.ts";
+import { formatIntegrationReport, summarizeIntegrations } from "../adapters/pi-sdk/integrations.ts";
 import {
   completePhenixSubcommands,
   PHENIX_SUBCOMMANDS,
