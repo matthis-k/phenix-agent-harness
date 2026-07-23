@@ -8,6 +8,7 @@ import type {
   SessionProfile,
   StartRun,
 } from "../domain/run/model.ts";
+import type { RunActivity, RunFact } from "../domain/run/observability.ts";
 import type { DefinitionId, LocalTaskId, Outcome, RunId, TaskId } from "../domain/shared.ts";
 import type { LocalTask } from "../domain/task/local-task.ts";
 import type { TaskNode, TaskTree } from "../domain/task/projection.ts";
@@ -74,6 +75,7 @@ export interface CatalogFacade {
 
 export interface RunTreeNode {
   readonly run: RunSnapshot;
+  readonly activity?: RunActivity;
   readonly children: readonly RunTreeNode[];
 }
 
@@ -83,6 +85,7 @@ export interface RunTree {
 
 export interface QueryFacade {
   runTree(rootRunId: RunId): Promise<RunTree>;
+  facts(rootRunId: RunId, limit?: number): Promise<readonly RunFact[]>;
   taskTree(rootRunId: RunId): Promise<TaskTree>;
   activeRuns(rootRunId: RunId): Promise<readonly RunSnapshot[]>;
   events(rootRunId: RunId, afterSequence?: number): AsyncIterable<DomainEvent>;
