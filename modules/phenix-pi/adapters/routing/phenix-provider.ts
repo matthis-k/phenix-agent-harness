@@ -12,6 +12,7 @@ import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ModelRegistry } from "@earendil-works/pi-coding-agent";
 
+import { registerFreeModelGuard } from "../pi-sdk/free-model-guard.ts";
 import {
   isPhenixModelSet,
   PHENIX_MODEL_SETS,
@@ -41,6 +42,7 @@ export function registerPhenixProvider(
   pi: ExtensionAPI,
   dependencies: PhenixProviderDependencies,
 ): void {
+  registerFreeModelGuard(pi, dependencies.profile);
   pi.registerProvider(PHENIX_PROVIDER, {
     name: "Phenix",
     baseUrl: "https://phenix.invalid/router",
