@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
-  sanitizeSessionExecutionValue,
   type SessionExecutionEvent,
+  sanitizeSessionExecutionValue,
 } from "./session-execution-journal.ts";
 import {
   sessionExecutionJournalForProject,
