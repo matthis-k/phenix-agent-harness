@@ -1,0 +1,239 @@
+name: Patch automatic dispatch
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: feat/enforced-workflow-dispatch
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: Add automatic dispatch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(source: str, old: str, new: str, label: str) -> str:
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one match, found {count}")
+              return source.replace(old, new)
+
+          path = Path("modules/phenix-pi/application/dispatch-service.ts")
+          source = path.read_text()
+          old = '''export function classifyDeterministicDispatch(objective: string): DispatchRoute | undefined {
+            const normalized = objective.toLowerCase();
+            const qa = /\\b(qa|quality assurance|audit|review|validate|verification|check(?:s|ing)?)\\b/.test(
+              normalized,
+            );
+            const mutate =
+              /\\b(fix|implement|change|modify|add|remove|refactor|update|rewrite|migrate|build|create|apply|address)\\b/.test(
+                normalized,
+              );
+
+            if (qa && mutate) return "coordinate";
+            if (qa) return "qa";
+            if (mutate) return "implement";
+            return undefined;
+          }'''
+          new = '''export function classifyDeterministicDispatch(objective: string): DispatchRoute | undefined {
+            const normalized = objective.trim().toLowerCase();
+            const broadScope = /\\b(full|complete|comprehensive|overall|repository|repo|codebase|project)\\b/.test(
+              normalized,
+            );
+            const qaIntent = /\\b(qa|quality assurance|audit|review|validate|verification|check(?:s|ing)?)\\b/.test(
+              normalized,
+            );
+            const explicitQa =
+              broadScope &&
+              qaIntent &&
+              (/^(?:please\\s+)?(?:do|run|perform|conduct|give me)\\b/.test(normalized) ||
+                /\\b(?:full|complete|comprehensive)\\s+(?:repository\\s+|repo\\s+|codebase\\s+|project\\s+)?(?:qa|audit|review|check)\\b/.test(
+                  normalized,
+                ));
+            const mutationVerb =
+              "fix|implement|modify|add|remove|refactor|update|rewrite|migrate|build|create|apply|address";
+            const explicitMutation = new RegExp(
+              `^(?:please\\\\s+)?(?:go\\\\s+ahead\\\\s+(?:and\\\\s+)?)?(?:${mutationVerb})\\\\b|\\\\b(?:can|could|would)\\\\s+you\\\\s+(?:${mutationVerb})\\\\b`,
+            ).test(normalized);
+
+            if (explicitQa && explicitMutation) return "coordinate";
+            if (explicitQa) return "qa";
+            if (explicitMutation) return "implement";
+            return undefined;
+          }'''
+          source = replace_once(source, old, new, "conservative classifier")
+          path.write_text(source)
+
+          path = Path("modules/phenix-pi/composition/create-phenix-runtime.ts")
+          source = path.read_text()
+          source = replace_once(
+              source,
+              '''import { DispatchService } from "../application/dispatch-service.ts";''',
+              '''import {
+            type DispatchRequest,
+            type DispatchResult,
+            DispatchService,
+          } from "../application/dispatch-service.ts";''',
+              "dispatch type imports",
+          )
+          source = replace_once(
+              source,
+              '''  rootTools(rootRunId: RunId): Promise<readonly AgentTool[]>;
+            setRootNotifier''',
+              '''  rootTools(rootRunId: RunId): Promise<readonly AgentTool[]>;
+            dispatchRoot(
+              rootRunId: RunId,
+              request: DispatchRequest,
+              signal?: AbortSignal,
+            ): Promise<DispatchResult>;
+            setRootNotifier''',
+              "runtime dispatch contract",
+          )
+          source = replace_once(
+              source,
+              '''    rootTools: (rootRunId) => tools.forRun(rootRunId),
+              setRootNotifier''',
+              '''    rootTools: (rootRunId) => tools.forRun(rootRunId),
+              dispatchRoot: (rootRunId, request, signal) => dispatch.dispatch(rootRunId, request, signal),
+              setRootNotifier''',
+              "runtime dispatch implementation",
+          )
+          source = replace_once(
+              source,
+              '''    const summary = summarizeTerminal(run.outcome, run.id);''',
+              '''    const summary = summarizeTerminal(run.outcome, run.id, run.definitionId, run.input);''',
+              "completion summary call",
+          )
+          source = replace_once(
+              source,
+              '''function summarizeTerminal(outcome: unknown, runId: RunId): string {''',
+              '''function summarizeTerminal(
+            outcome: unknown,
+            runId: RunId,
+            definitionId: string,
+            input: unknown,
+          ): string {''',
+              "completion signature",
+          )
+          source = replace_once(
+              source,
+              '''  if (!value) return `Background run ${runId} reached a terminal state.`;
+            if (value.status === "failure") return `Background run ${runId} failed: ${value.failure.message}`;
+            if (value.status === "cancelled") return `Background run ${runId} was cancelled: ${value.reason}`;''',
+              '''  const objective =
+              typeof input === "object" &&
+              input !== null &&
+              typeof (input as { objective?: unknown }).objective === "string"
+                ? (input as { objective: string }).objective
+                : undefined;
+            const subject = objective
+              ? `${definitionId} run ${runId} for "${objective}"`
+              : `${definitionId} run ${runId}`;
+            if (!value) return `Background ${subject} reached a terminal state.`;
+            if (value.status === "failure") return `Background ${subject} failed: ${value.failure.message}`;
+            if (value.status === "cancelled") return `Background ${subject} was cancelled: ${value.reason}`;''',
+              "completion subject",
+          )
+          source = replace_once(
+              source,
+              '''  return `Background run ${runId} completed: ${summary}. Use phenix_handle to inspect the full outcome.`;''',
+              '''  return `Background ${subject} completed: ${summary}. Use phenix_handle to inspect the full outcome.`;''',
+              "completion return",
+          )
+          path.write_text(source)
+
+          path = Path("modules/phenix-pi/extension/root-extension.ts")
+          source = path.read_text()
+          source = replace_once(
+              source,
+              '''import { registerPhenixProvider } from "../adapters/routing/phenix-provider.ts";''',
+              '''import { registerPhenixProvider } from "../adapters/routing/phenix-provider.ts";
+          import { classifyDeterministicDispatch } from "../application/dispatch-service.ts";''',
+              "classifier import",
+          )
+          source = replace_once(
+              source,
+              '''  pi.on("input", async (event) => {
+                if (!runtime || !rootRunId || event.source === "extension") return;
+                await runtime.amendRootInput(rootRunId, event.text);
+              });''',
+              '''  pi.on("input", async (event, ctx) => {
+                if (!runtime || !rootRunId || event.source === "extension") {
+                  return { action: "continue" as const };
+                }
+                await runtime.amendRootInput(rootRunId, event.text);
+                if (event.streamingBehavior) return { action: "continue" as const };
+
+                const route = classifyDeterministicDispatch(event.text);
+                if (!route) return { action: "continue" as const };
+                try {
+                  const result = await runtime.dispatchRoot(
+                    rootRunId,
+                    { objective: event.text, mode: route, wait: "background" },
+                    ctx.signal,
+                  );
+                  ctx.ui.notify(
+                    `Phenix routed this request to ${result.definition} (${result.runId}).`,
+                    "info",
+                  );
+                  return { action: "handled" as const };
+                } catch (error) {
+                  ctx.ui.notify(
+                    `Automatic Phenix dispatch failed: ${error instanceof Error ? error.message : String(error)}`,
+                    "warning",
+                  );
+                  return { action: "continue" as const };
+                }
+              });''',
+              "input auto dispatch",
+          )
+          path.write_text(source)
+
+          path = Path("modules/phenix-pi/tests/dispatch-routing.test.ts")
+          source = path.read_text()
+          source += '''
+
+          test("does not mistake explanatory language for mutation intent", () => {
+            assert.equal(classifyDeterministicDispatch("How does change detection work?"), undefined);
+          });
+
+          test("does not force a focused read-only review through repository QA", () => {
+            assert.equal(classifyDeterministicDispatch("Review this function and explain it"), undefined);
+          });
+          '''
+          path.write_text(source)
+          PY
+      - name: Format changed source
+        run: |
+          nix shell github:NixOS/nixpkgs/0bb7ec54c8483066ec9d7720e780a5caa71f8612#biome -c \
+            biome check --write --unsafe --config-path biome.json --no-errors-on-unmatched \
+            --files-ignore-unknown=true modules/phenix-pi || true
+      - name: Commit automatic dispatch
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add modules/phenix-pi
+          git commit -m "feat: auto-dispatch explicit workflow intents"
+          git push origin HEAD:feat/enforced-workflow-dispatch
