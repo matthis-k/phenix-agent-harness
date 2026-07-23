@@ -1,8 +1,9 @@
-import type {
-  AgentDefinition,
-  AnyDefinition,
-  CapabilitySet,
-  WorkflowDefinition,
+import {
+  type AgentDefinition,
+  type AnyDefinition,
+  type CapabilitySet,
+  definitionRef,
+  type WorkflowDefinition,
 } from "../domain/definition/definition.ts";
 import type { ConcreteModelRef, ResolvedModel } from "../domain/definition/model.ts";
 import type { PendingDomainEvent } from "../domain/run/events.ts";
@@ -12,7 +13,9 @@ import {
   ROOT_CAPABILITIES,
   ROOT_DEFINITION_ID,
   type RootRunInput,
+  type RunLimits,
   type RunRecord,
+  type RunRetryOptions,
   type RunSnapshot,
   type StartRun,
   type WorkflowCausation,
@@ -52,6 +55,8 @@ export interface RunImplementation {
 export interface InternalStartRun<I, O> extends StartRun<I, O> {
   readonly causation?: WorkflowCausation;
   readonly trustedWorkflowInvocation?: boolean;
+  readonly retryOf?: RunId;
+  readonly retryOverrides?: Omit<RunRetryOptions, "wait">;
 }
 
 export interface ChildInvoker {
@@ -212,6 +217,25 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
     return this.startInternal(request);
   }
 
+  async retry<O>(
+    callerId: RunId,
+    targetId: RunId,
+    options: RunRetryOptions = {},
+  ): Promise<RunHandle<O>> {
+    const caller = this.store.projection.requireRun(callerId);
+    const target = this.store.projection.requireRun(targetId);
+    this.assertRetryAccessible(caller, target);
+    const retryOverrides = normalizeRetryOverrides(target.kind, options);
+    return this.startInternal<unknown, O>({
+      parentId: caller.id,
+      definition: definitionRef(target.definitionId),
+      input: target.input,
+      wait: options.wait ?? "await",
+      retryOf: target.id,
+      ...(retryOverrides ? { retryOverrides } : {}),
+    });
+  }
+
   async startInternal<I, O>(request: InternalStartRun<I, O>): Promise<RunHandle<O>> {
     if (!this.sealed) throw new Error(`Execution runtime is not sealed`);
     const parent = this.store.projection.requireRun(request.parentId);
@@ -272,6 +296,8 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
       capabilities,
       request.wait,
       request.causation,
+      request.retryOf,
+      request.retryOverrides,
     );
     const record: Omit<RunRecord, "revision" | "state"> = {
       id,
@@ -760,6 +786,16 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
     definition: AnyDefinition,
     request: InternalStartRun<I, O>,
   ): Partial<CapabilitySet> | undefined {
+    if (request.retryOf) {
+      const original = this.store.projection.requireRun(request.retryOf);
+      this.assertRetryAccessible(parent, original);
+      if (original.definitionId !== definition.id) {
+        throw new Error(
+          `Retry definition ${definition.id} does not match ${original.definitionId}`,
+        );
+      }
+      return undefined;
+    }
     let capabilities = parent.compiled.capabilities;
     if (parent.kind === "workflow") {
       if (!request.trustedWorkflowInvocation || !request.causation) {
@@ -809,6 +845,27 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
     return invocation?.kind === "invoke" ? invocation.capabilityOverride : undefined;
   }
 
+  private assertRetryAccessible(caller: RunRecord, target: RunRecord): void {
+    if (target.kind === "root") throw new Error(`The root run cannot be retried`);
+    if (this.store.projection.rootOf(caller.id) !== this.store.projection.rootOf(target.id)) {
+      throw new Error(`Run ${target.id} is outside caller ${caller.id}'s root scope`);
+    }
+    if (
+      !isTerminalRunState(target.state) ||
+      !target.outcome ||
+      target.outcome.status === "success"
+    ) {
+      throw new Error(`Run ${target.id} is not a failed or cancelled terminal run`);
+    }
+    if (caller.kind === "root") return;
+    let current = target;
+    while (current.parentId) {
+      if (current.parentId === caller.id) return;
+      current = this.store.projection.requireRun(current.parentId);
+    }
+    throw new Error(`Run ${target.id} is outside caller ${caller.id}'s descendant scope`);
+  }
+
   private depth(runId: RunId): number {
     let depth = 0;
     let current = this.store.projection.requireRun(runId);
@@ -856,18 +913,25 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
     capabilities: CapabilitySet,
     wait: "await" | "background",
     causation?: WorkflowCausation,
+    retryOf?: RunId,
+    retryOverrides?: Omit<RunRetryOptions, "wait">,
   ): CompiledRunSpec {
+    const invocation = {
+      wait,
+      ...(causation ? { causation } : {}),
+      ...(retryOf ? { retryOf } : {}),
+    };
     if (definition.kind === "agent") {
       return {
         definitionId: definition.id,
         input,
         outputSchemaId: definition.output.id,
-        tools: definition.tools.allow,
+        tools: applyRetryTools(definition.tools.allow, retryOverrides?.addTools),
         contextPolicy: definition.context,
         modelSelector: definition.model,
-        limits: definition.limits,
+        limits: applyRetryLimits(definition.limits, retryOverrides?.limits),
         capabilities,
-        invocation: { wait, ...(causation ? { causation } : {}) },
+        invocation,
       };
     }
     return {
@@ -877,7 +941,7 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
       tools: [],
       limits: definition.limits,
       capabilities,
-      invocation: { wait, ...(causation ? { causation } : {}) },
+      invocation,
     };
   }
 
@@ -891,6 +955,77 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
       thinking: definition.thinking,
     });
   }
+}
+
+const RECOVERY_ADDITIONAL_TOOLS = new Set(["read", "grep", "find", "ls", "bash"]);
+
+function normalizeRetryOverrides(
+  kind: RunRecord["kind"],
+  options: RunRetryOptions,
+): Omit<RunRetryOptions, "wait"> | undefined {
+  const addTools = [...new Set(options.addTools ?? [])];
+  if (kind !== "agent" && addTools.length > 0) {
+    throw new Error(`Only agent retries may add tools`);
+  }
+  for (const tool of addTools) {
+    if (!RECOVERY_ADDITIONAL_TOOLS.has(tool)) {
+      throw new Error(`Recovery retry may not grant tool ${tool}`);
+    }
+  }
+  const limits = options.limits ? validateRetryLimits(options.limits) : undefined;
+  if (addTools.length === 0 && !limits) return undefined;
+  return {
+    ...(addTools.length > 0 ? { addTools } : {}),
+    ...(limits ? { limits } : {}),
+  };
+}
+
+function validateRetryLimits(
+  limits: NonNullable<RunRetryOptions["limits"]>,
+): NonNullable<RunRetryOptions["limits"]> {
+  if (limits.timeoutMs !== undefined) boundedInteger("timeoutMs", limits.timeoutMs, 1, 3_600_000);
+  if (limits.maxTurns !== undefined && limits.maxTurns !== null) {
+    boundedInteger("maxTurns", limits.maxTurns, 1, 200);
+  }
+  if (limits.maxToolCalls !== undefined && limits.maxToolCalls !== null) {
+    boundedInteger("maxToolCalls", limits.maxToolCalls, 1, 1_000);
+  }
+  if (limits.maxRepairAttempts !== undefined) {
+    boundedInteger("maxRepairAttempts", limits.maxRepairAttempts, 0, 10);
+  }
+  return limits;
+}
+
+function boundedInteger(name: string, value: number, minimum: number, maximum: number): void {
+  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`);
+  }
+}
+
+function applyRetryTools(
+  base: readonly string[],
+  additions: readonly string[] = [],
+): readonly string[] {
+  return [...new Set([...base, ...additions])];
+}
+
+function applyRetryLimits(
+  base: RunLimits,
+  override?: NonNullable<RunRetryOptions["limits"]>,
+): RunLimits {
+  if (!override) return base;
+  const maxTurns = override.maxTurns === null ? undefined : (override.maxTurns ?? base.maxTurns);
+  const maxToolCalls =
+    override.maxToolCalls === null ? undefined : (override.maxToolCalls ?? base.maxToolCalls);
+  const maxRepairAttempts = override.maxRepairAttempts ?? base.maxRepairAttempts;
+  return {
+    timeoutMs: override.timeoutMs ?? base.timeoutMs,
+    ...(maxTurns !== undefined ? { maxTurns } : {}),
+    ...(maxToolCalls !== undefined ? { maxToolCalls } : {}),
+    ...(maxRepairAttempts !== undefined ? { maxRepairAttempts } : {}),
+    ...(base.maxNodeRuns !== undefined ? { maxNodeRuns: base.maxNodeRuns } : {}),
+    ...(base.maxParallelism !== undefined ? { maxParallelism: base.maxParallelism } : {}),
+  };
 }
 
 function isTerminalEvent(type: string): boolean {

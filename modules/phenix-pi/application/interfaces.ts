@@ -2,6 +2,7 @@ import type { Definition, DefinitionRef } from "../domain/definition/definition.
 import type { Difficulty, PhenixModelSetId } from "../domain/definition/model.ts";
 import type { DomainEvent } from "../domain/run/events.ts";
 import type {
+  RunRetryOptions,
   RunSnapshot,
   SessionAgentPreset,
   SessionProfile,
@@ -27,6 +28,7 @@ export interface ExecutionFacade {
   await<O>(runId: RunId, signal?: AbortSignal): Promise<Outcome<O>>;
   send(runId: RunId, message: string, signal?: AbortSignal): Promise<void>;
   cancel(runId: RunId, reason: string): Promise<void>;
+  retry<O>(callerId: RunId, targetId: RunId, options?: RunRetryOptions): Promise<RunHandle<O>>;
   reparent(runId: RunId, newParentId: RunId): Promise<void>;
 }
 

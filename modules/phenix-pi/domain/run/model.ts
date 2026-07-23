@@ -59,6 +59,19 @@ export interface RunLimits {
   readonly maxParallelism?: number;
 }
 
+export interface RunRetryLimitOverrides {
+  readonly timeoutMs?: number;
+  readonly maxTurns?: number | null;
+  readonly maxToolCalls?: number | null;
+  readonly maxRepairAttempts?: number;
+}
+
+export interface RunRetryOptions {
+  readonly wait?: "await" | "background";
+  readonly addTools?: readonly string[];
+  readonly limits?: RunRetryLimitOverrides;
+}
+
 export interface WorkflowCausation {
   readonly workflowRunId: RunId;
   readonly nodeId: string;
@@ -77,6 +90,7 @@ export interface CompiledRunSpec {
   readonly invocation: {
     readonly wait: "await" | "background";
     readonly causation?: WorkflowCausation;
+    readonly retryOf?: RunId;
   };
 }
 

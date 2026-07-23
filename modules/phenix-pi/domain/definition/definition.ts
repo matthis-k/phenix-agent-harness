@@ -43,7 +43,7 @@ export interface CapabilitySet {
 export interface AgentLimits {
   readonly timeoutMs: number;
   readonly maxTurns?: number;
-  readonly maxToolCalls: number;
+  readonly maxToolCalls?: number;
   readonly maxRepairAttempts: number;
 }
 

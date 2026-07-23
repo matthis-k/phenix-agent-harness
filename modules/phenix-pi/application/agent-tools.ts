@@ -42,15 +42,37 @@ const dispatchParameters = defineSchema<{
 );
 
 const handleParameters = defineSchema<{
-  action: "inspect" | "await" | "send" | "cancel";
+  action: "inspect" | "await" | "send" | "cancel" | "retry";
   runId: string;
   message?: string;
+  wait?: "await" | "background";
+  addTools?: string[];
+  limits?: {
+    timeoutMs?: number;
+    maxTurns?: number | null;
+    maxToolCalls?: number | null;
+    maxRepairAttempts?: number;
+  };
 }>(
   "tool.phenix-handle",
   Type.Object({
-    action: Type.Enum(["inspect", "await", "send", "cancel"]),
+    action: Type.Enum(["inspect", "await", "send", "cancel", "retry"]),
     runId: Type.String(),
     message: Type.Optional(Type.String()),
+    wait: Type.Optional(Type.Enum(["await", "background"])),
+    addTools: Type.Optional(Type.Array(Type.String(), { maxItems: 8 })),
+    limits: Type.Optional(
+      Type.Object({
+        timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: 3_600_000 })),
+        maxTurns: Type.Optional(
+          Type.Union([Type.Integer({ minimum: 1, maximum: 200 }), Type.Null()]),
+        ),
+        maxToolCalls: Type.Optional(
+          Type.Union([Type.Integer({ minimum: 1, maximum: 1_000 }), Type.Null()]),
+        ),
+        maxRepairAttempts: Type.Optional(Type.Integer({ minimum: 0, maximum: 10 })),
+      }),
+    ),
   }),
 );
 
@@ -152,7 +174,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       name: "phenix_handle",
       label: "Phenix Handle",
       description:
-        "Inspect, await, send a message to, or cancel an accessible run. Cancelling an await only cancels the wait, never the child.",
+        "Inspect, await, message, cancel, or retry an accessible run. Retry creates a linked replacement run and may add only bounded non-mutating recovery permissions.",
       parameters: handleParameters,
       execute: async (raw, signal) => {
         const params = requireValid(handleParameters, raw);
@@ -168,6 +190,21 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
         if (params.action === "await") {
           const outcome = await this.execution.await(targetId, signal);
           return { text: JSON.stringify(outcome), details: outcome };
+        }
+        if (params.action === "retry") {
+          const wait = params.wait ?? "await";
+          const handle = await this.execution.retry(parentId, targetId, {
+            wait,
+            ...(params.addTools ? { addTools: params.addTools } : {}),
+            ...(params.limits ? { limits: params.limits } : {}),
+          });
+          if (wait === "background") {
+            const details = { runId: handle.id, retryOf: targetId, status: "running" };
+            return { text: JSON.stringify(details), details };
+          }
+          const outcome = await handle.result(signal);
+          const details = { runId: handle.id, retryOf: targetId, outcome };
+          return { text: JSON.stringify(details), details };
         }
         const caller = this.store.projection.requireRun(parentId);
         if (params.action === "send") {

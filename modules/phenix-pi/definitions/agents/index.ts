@@ -82,7 +82,7 @@ export const scoutDefinition: AgentDefinition<unknown, unknown> = {
   tools: { allow: ["read", "grep", "find", "ls"] },
   context,
   childCapabilities: none,
-  limits: { timeoutMs: 300_000, maxToolCalls: 50, maxRepairAttempts: 1 },
+  limits: { timeoutMs: 300_000, maxRepairAttempts: 1 },
   persistence: "memory",
 };
 
@@ -105,7 +105,7 @@ export const plannerDefinition: AgentDefinition<unknown, unknown> = {
   },
   context,
   childCapabilities: capabilities([AGENT_SCOUT], 4),
-  limits: { timeoutMs: 600_000, maxTurns: 12, maxToolCalls: 70, maxRepairAttempts: 2 },
+  limits: { timeoutMs: 600_000, maxTurns: 12, maxRepairAttempts: 2 },
   persistence: "memory",
 };
 
@@ -128,7 +128,7 @@ export const architectDefinition: AgentDefinition<unknown, unknown> = {
   },
   context,
   childCapabilities: capabilities([AGENT_SCOUT], 4),
-  limits: { timeoutMs: 600_000, maxToolCalls: 80, maxRepairAttempts: 2 },
+  limits: { timeoutMs: 600_000, maxRepairAttempts: 2 },
   persistence: "memory",
 };
 
@@ -148,7 +148,7 @@ export const implementerDefinition: AgentDefinition<unknown, unknown> = {
   tools: { allow: ["read", "grep", "find", "ls", "edit", "write", "bash", "phenix_tasks"] },
   context,
   childCapabilities: none,
-  limits: { timeoutMs: 900_000, maxTurns: 18, maxToolCalls: 120, maxRepairAttempts: 2 },
+  limits: { timeoutMs: 900_000, maxTurns: 18, maxRepairAttempts: 2 },
   persistence: "memory",
 };
 
@@ -169,7 +169,7 @@ export const testerDefinition: AgentDefinition<unknown, unknown> = {
   tools: { allow: ["read", "grep", "find", "ls"] },
   context,
   childCapabilities: none,
-  limits: { timeoutMs: 420_000, maxToolCalls: 50, maxRepairAttempts: 2 },
+  limits: { timeoutMs: 420_000, maxRepairAttempts: 2 },
   persistence: "memory",
 };
 
@@ -190,7 +190,7 @@ export const verifierDefinition: AgentDefinition<unknown, unknown> = {
   tools: { allow: ["read", "grep", "find", "ls", "bash", "phenix_tasks"] },
   context,
   childCapabilities: none,
-  limits: { timeoutMs: 600_000, maxTurns: 12, maxToolCalls: 80, maxRepairAttempts: 2 },
+  limits: { timeoutMs: 600_000, maxTurns: 12, maxRepairAttempts: 2 },
   persistence: "memory",
 };
 
@@ -210,7 +210,7 @@ export const criticDefinition: AgentDefinition<unknown, unknown> = {
   tools: { allow: ["read", "grep", "find", "ls", "bash"] },
   context,
   childCapabilities: none,
-  limits: { timeoutMs: 480_000, maxToolCalls: 60, maxRepairAttempts: 2 },
+  limits: { timeoutMs: 480_000, maxRepairAttempts: 2 },
   persistence: "memory",
 };
 
@@ -231,7 +231,7 @@ export const finalizerDefinition: AgentDefinition<unknown, unknown> = {
   tools: { allow: ["read", "phenix_handle", "phenix_tasks"] },
   context,
   childCapabilities: none,
-  limits: { timeoutMs: 300_000, maxTurns: 6, maxToolCalls: 24, maxRepairAttempts: 1 },
+  limits: { timeoutMs: 300_000, maxTurns: 6, maxRepairAttempts: 1 },
   persistence: "memory",
 };
 
@@ -251,7 +251,7 @@ export const dispatcherDefinition: AgentDefinition<unknown, unknown> = {
   tools: { allow: [] },
   context: { ...context, projectFiles: "none", maxBytes: 8_000 },
   childCapabilities: none,
-  limits: { timeoutMs: 120_000, maxTurns: 2, maxToolCalls: 1, maxRepairAttempts: 1 },
+  limits: { timeoutMs: 120_000, maxTurns: 2, maxRepairAttempts: 1 },
   persistence: "memory",
 };
 
@@ -287,7 +287,7 @@ export const coordinatorDefinition: AgentDefinition<unknown, unknown> = {
     ],
     4,
   ),
-  limits: { timeoutMs: 2_400_000, maxTurns: 24, maxToolCalls: 160, maxRepairAttempts: 2 },
+  limits: { timeoutMs: 2_400_000, maxTurns: 24, maxRepairAttempts: 2 },
   persistence: "memory",
 };
 
@@ -320,7 +320,7 @@ export const baseDefinition: AgentDefinition<unknown, unknown> = {
   },
   context,
   childCapabilities: capabilities(ALL_DEFINITION_IDS, 4),
-  limits: { timeoutMs: 1_200_000, maxTurns: 24, maxToolCalls: 160, maxRepairAttempts: 2 },
+  limits: { timeoutMs: 1_200_000, maxTurns: 24, maxRepairAttempts: 2 },
   persistence: "memory",
 };
 
@@ -340,7 +340,7 @@ export const qaSynthesizerDefinition: AgentDefinition<unknown, unknown> = {
   tools: { allow: [] },
   context: { ...context, projectFiles: "none" },
   childCapabilities: none,
-  limits: { timeoutMs: 300_000, maxTurns: 6, maxToolCalls: 4, maxRepairAttempts: 2 },
+  limits: { timeoutMs: 300_000, maxTurns: 6, maxRepairAttempts: 2 },
   persistence: "memory",
 };
 

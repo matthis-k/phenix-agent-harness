@@ -160,8 +160,11 @@ function validateAgent(
   ) {
     error("agent_turn_limit_invalid", `maxTurns must be omitted or a positive integer`);
   }
-  if (!Number.isInteger(definition.limits.maxToolCalls) || definition.limits.maxToolCalls < 1) {
-    error("agent_tool_limit_invalid", `maxToolCalls must be a positive integer`);
+  if (
+    definition.limits.maxToolCalls !== undefined &&
+    (!Number.isInteger(definition.limits.maxToolCalls) || definition.limits.maxToolCalls < 1)
+  ) {
+    error("agent_tool_limit_invalid", `maxToolCalls must be omitted or a positive integer`);
   }
   if (
     !Number.isInteger(definition.limits.maxRepairAttempts) ||
