@@ -1,18 +1,12 @@
 import { Type } from "typebox";
 
-import {
-  definitionRef,
-  type AnyDefinition,
-} from "../domain/definition/definition.ts";
+import { type AnyDefinition, definitionRef } from "../domain/definition/definition.ts";
 import { defineSchema } from "../domain/definition/schema.ts";
 import { definitionId, localTaskId, type RunId, runId, type TaskId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import type { ExecutionStore } from "./execution-store.ts";
-import {
-  allowAllInvocations,
-  type InvocationPolicy,
-} from "./invocation-policy.ts";
 import type { CatalogFacade, ExecutionFacade, TaskFacade } from "./interfaces.ts";
+import { allowAllInvocations, type InvocationPolicy } from "./invocation-policy.ts";
 
 export interface AgentToolFactory {
   forRun(runId: RunId): Promise<readonly AgentTool[]>;

@@ -1,4 +1,8 @@
-import type { ModelResolutionContext, ModelSelector, ResolvedModel } from "../domain/definition/model.ts";
+import type {
+  ModelResolutionContext,
+  ModelSelector,
+  ResolvedModel,
+} from "../domain/definition/model.ts";
 import type { SessionProfile } from "../domain/run/model.ts";
 import type { ModelResolver } from "../ports/model-resolver.ts";
 

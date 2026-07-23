@@ -108,7 +108,8 @@ export const architectDefinition: AgentDefinition<unknown, unknown> = {
   id: AGENT_ARCHITECT,
   kind: "agent",
   title: "Architect",
-  description: "Analyze module boundaries, ownership, data flow, and replacement seams without editing.",
+  description:
+    "Analyze module boundaries, ownership, data flow, and replacement seams without editing.",
   input: CriticRequestSchema,
   output: CriticReportSchema,
   model: sessionModel,
@@ -150,7 +151,8 @@ export const testerDefinition: AgentDefinition<unknown, unknown> = {
   id: AGENT_TESTER,
   kind: "agent",
   title: "Test analyst",
-  description: "Interpret deterministic check output and identify concrete failures and coverage gaps.",
+  description:
+    "Interpret deterministic check output and identify concrete failures and coverage gaps.",
   input: TestRequestSchema,
   output: TestReportSchema,
   model: sessionModel,
@@ -211,7 +213,8 @@ export const finalizerDefinition: AgentDefinition<unknown, unknown> = {
   id: AGENT_FINALIZER,
   kind: "agent",
   title: "Finalizer",
-  description: "Synthesize completed child outcomes into a concise final handoff without new mutation.",
+  description:
+    "Synthesize completed child outcomes into a concise final handoff without new mutation.",
   input: ObjectiveRequestSchema,
   output: BaseResultSchema,
   model: sessionModel,

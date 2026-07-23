@@ -17,7 +17,8 @@ test("all bundled workflow graphs validate at startup", () => {
   const functions = new WorkflowFunctionRegistry();
   registerWorkflowFunctions(functions);
   const catalog = new DefinitionCatalog();
-  for (const definition of [...agentDefinitions, ...workflowDefinitions]) catalog.register(definition);
+  for (const definition of [...agentDefinitions, ...workflowDefinitions])
+    catalog.register(definition);
   catalog.seal(functions, localOperations);
   assert.deepEqual(catalog.validateAll(), []);
   const workflow = catalog.require(workflowDefinitions[0].id);
@@ -36,8 +37,12 @@ test("only invariant procedures are declared as workflows", () => {
   );
   const qa = workflowDefinitions.find((workflow) => workflow.id === "workflow.qa");
   assert.ok(qa);
-  assert.ok(qa.graph.nodes.some((node) => node.kind === "local" && node.operation === "local.qa-checks"));
-  assert.ok(qa.graph.nodes.some((node) => node.kind === "invoke" && node.definition.id === "agent.tester"));
+  assert.ok(
+    qa.graph.nodes.some((node) => node.kind === "local" && node.operation === "local.qa-checks"),
+  );
+  assert.ok(
+    qa.graph.nodes.some((node) => node.kind === "invoke" && node.definition.id === "agent.tester"),
+  );
 });
 
 test("workflow function names are unique authorities", () => {

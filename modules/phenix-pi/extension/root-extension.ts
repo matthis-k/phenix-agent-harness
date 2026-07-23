@@ -9,9 +9,9 @@ import type {
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 import {
+  type IntegrationStatus,
   loadPiIntegrations,
   summarizeIntegrations,
-  type IntegrationStatus,
 } from "../adapters/pi-sdk/integrations.ts";
 import { registerPhenixProvider } from "../adapters/routing/phenix-provider.ts";
 import { createPhenixRuntime, type PhenixRuntime } from "../composition/create-phenix-runtime.ts";
@@ -269,7 +269,10 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
       }
       const action = args.trim().toLowerCase() || "status";
       if (action === "integrations") {
-        ctx.ui.notify(summarizeIntegrations(integrationStatuses), integrationLevel(integrationStatuses));
+        ctx.ui.notify(
+          summarizeIntegrations(integrationStatuses),
+          integrationLevel(integrationStatuses),
+        );
         return;
       }
       if (action === "catalog") {
@@ -396,15 +399,7 @@ async function applyAgentTools(
     ],
     scout: ["read", "grep", "find", "ls"],
     planner: ["read", "grep", "find", "ls", "phenix_run", "phenix_handle", "phenix_tasks"],
-    architect: [
-      "read",
-      "grep",
-      "find",
-      "ls",
-      "phenix_run",
-      "phenix_handle",
-      "phenix_tasks",
-    ],
+    architect: ["read", "grep", "find", "ls", "phenix_run", "phenix_handle", "phenix_tasks"],
     implementer: ["read", "grep", "find", "ls", "bash", "edit", "write", "phenix_tasks"],
     tester: ["read", "grep", "find", "ls", "bash", "phenix_tasks"],
     verifier: ["read", "grep", "find", "ls", "bash", "phenix_tasks"],
@@ -423,14 +418,22 @@ async function applyAgentTools(
 function agentInstructions(preset: SessionAgentPreset): string {
   const instructions: Readonly<Record<SessionAgentPreset, string>> = {
     base: "Act as the root coordinator. Dynamically compose agents and invariant workflows only when they reduce risk or preserve context.",
-    scout: "Act as a read-only repository scout. Answer focused questions with concrete paths and evidence.",
-    planner: "Act as a read-only planner. Produce executable steps and delegate only narrow evidence gaps.",
-    architect: "Act as a read-only architect. Focus on ownership, boundaries, dependency direction, and replaceability.",
-    implementer: "Act as a focused implementer. Make bounded edits, run relevant checks, and avoid redesign outside the request.",
-    tester: "Act as a test analyst. Run and interpret deterministic checks without editing implementation files.",
-    verifier: "Act as an independent verifier. Do not edit; accept claims only with concrete evidence.",
-    critic: "Act as a read-only critic. Find contradictions, omissions, and unsafe assumptions, ranked by impact.",
-    finalizer: "Act as a finalizer. Synthesize completed evidence and outcomes without starting new work.",
+    scout:
+      "Act as a read-only repository scout. Answer focused questions with concrete paths and evidence.",
+    planner:
+      "Act as a read-only planner. Produce executable steps and delegate only narrow evidence gaps.",
+    architect:
+      "Act as a read-only architect. Focus on ownership, boundaries, dependency direction, and replaceability.",
+    implementer:
+      "Act as a focused implementer. Make bounded edits, run relevant checks, and avoid redesign outside the request.",
+    tester:
+      "Act as a test analyst. Run and interpret deterministic checks without editing implementation files.",
+    verifier:
+      "Act as an independent verifier. Do not edit; accept claims only with concrete evidence.",
+    critic:
+      "Act as a read-only critic. Find contradictions, omissions, and unsafe assumptions, ranked by impact.",
+    finalizer:
+      "Act as a finalizer. Synthesize completed evidence and outcomes without starting new work.",
   };
   return instructions[preset];
 }

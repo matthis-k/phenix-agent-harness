@@ -25,7 +25,8 @@ function catalog() {
   const functions = new WorkflowFunctionRegistry();
   registerWorkflowFunctions(functions);
   const definitions = new DefinitionCatalog();
-  for (const definition of [...agentDefinitions, ...workflowDefinitions]) definitions.register(definition);
+  for (const definition of [...agentDefinitions, ...workflowDefinitions])
+    definitions.register(definition);
   definitions.seal(functions, {
     has: (operation) => operation === "local.noop" || operation === "local.qa-checks",
     async run() {
@@ -65,7 +66,10 @@ test("session profile changes are event-sourced and survive recovery", async () 
   execution.registerImplementation("agent", { async start() {} });
   execution.registerImplementation("workflow", { async start() {} });
   execution.seal();
-  await execution.initializeRoot({ id: root, session: { sessionId: "pi-root", cwd: process.cwd() } });
+  await execution.initializeRoot({
+    id: root,
+    session: { sessionId: "pi-root", cwd: process.cwd() },
+  });
 
   const profiles = new SessionProfileFacadeImpl(store);
   assert.deepEqual(await profiles.current(root), {

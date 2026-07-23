@@ -11,8 +11,6 @@ import type {
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ModelRegistry } from "@earendil-works/pi-coding-agent";
-
-import { registerFreeModelGuard } from "../pi-sdk/free-model-guard.ts";
 import {
   isPhenixModelSet,
   PHENIX_MODEL_SETS,
@@ -20,8 +18,9 @@ import {
   virtualModel,
 } from "../../domain/definition/model.ts";
 import type { SessionProfile } from "../../domain/run/model.ts";
-import { PiModelInventory } from "./pi-model-inventory.ts";
+import { registerFreeModelGuard } from "../pi-sdk/free-model-guard.ts";
 import { PhenixModelResolver, type RoutingPolicy } from "./phenix-model-resolver.ts";
+import { PiModelInventory } from "./pi-model-inventory.ts";
 
 const PHENIX_PROVIDER = "phenix";
 const PHENIX_API = "phenix-router" as Api;
@@ -151,7 +150,11 @@ async function forwardAttempt(
     readonly env?: Record<string, string>;
   },
   thinking: PiThinkingLevel,
-): Promise<{ readonly completed: boolean; readonly substantiveOutput: boolean; readonly error: string }> {
+): Promise<{
+  readonly completed: boolean;
+  readonly substantiveOutput: boolean;
+  readonly error: string;
+}> {
   const { apiKey: _virtualApiKey, headers, env, ...rest } = options ?? {};
   const reasoning = thinking === "off" ? undefined : (thinking satisfies ThinkingLevel);
   const upstream = streamSimple(concrete, context, {
@@ -206,7 +209,8 @@ function maskMessage(message: AssistantMessage, virtualModelId: string): Assista
 }
 
 function maskEvent(event: AssistantMessageEvent, virtualModelId: string): AssistantMessageEvent {
-  if (event.type === "done") return { ...event, message: maskMessage(event.message, virtualModelId) };
+  if (event.type === "done")
+    return { ...event, message: maskMessage(event.message, virtualModelId) };
   if (event.type === "error") return { ...event, error: maskMessage(event.error, virtualModelId) };
   return { ...event, partial: maskMessage(event.partial, virtualModelId) };
 }

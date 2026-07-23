@@ -158,7 +158,10 @@ test("workflow join all-success fails the workflow when one parallel branch fail
         return;
       }
       if (command.definition.id === AGENT_ARCHITECT) {
-        await runtime.controller.complete(command.runId, { summary: "architecture ok", findings: [] });
+        await runtime.controller.complete(command.runId, {
+          summary: "architecture ok",
+          findings: [],
+        });
         return;
       }
       if (command.definition.id === AGENT_QA_SYNTHESIZER) {
@@ -205,7 +208,11 @@ test("completing an agent run that is already failing is idempotent", async () =
   });
   const run = runtime.store.projection.requireRun(handle.id);
   assert.equal(run.state, "failed");
-  await runtime.execution.complete(handle.id, { summary: "too late", artifacts: [], unresolved: [] });
+  await runtime.execution.complete(handle.id, {
+    summary: "too late",
+    artifacts: [],
+    unresolved: [],
+  });
   assert.equal(runtime.store.projection.requireRun(handle.id).state, "failed");
 });
 

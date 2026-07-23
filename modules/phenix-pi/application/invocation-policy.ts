@@ -30,7 +30,8 @@ export class SessionInvocationPolicy implements InvocationPolicy {
   }
 
   assertAllowed(context: InvocationPolicyContext): void {
-    const profile = this.store.projection.requireRun(context.rootRunId).profile ?? DEFAULT_SESSION_PROFILE;
+    const profile =
+      this.store.projection.requireRun(context.rootRunId).profile ?? DEFAULT_SESSION_PROFILE;
     if (profile.modelSet !== "free" || !this.mayMutate(context.definition, new Set())) return;
 
     const assessment = assessExecutionRisk(context.input);

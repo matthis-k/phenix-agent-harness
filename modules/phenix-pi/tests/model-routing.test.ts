@@ -65,10 +65,7 @@ test("OpenCode Go, ChatGPT Plus, and mixed select the capability-specific provid
   assert.equal(`${go.concrete.provider}/${go.concrete.model}`, "opencode-go/glm-5.2");
 
   const plus = await resolve("chatgpt-plus", "agent.verifier", "D2");
-  assert.equal(
-    `${plus.concrete.provider}/${plus.concrete.model}`,
-    "openai-codex/gpt-5.6-terra",
-  );
+  assert.equal(`${plus.concrete.provider}/${plus.concrete.model}`, "openai-codex/gpt-5.6-terra");
 
   const mixedCode = await resolve("mixed", "agent.implementer", "D2");
   assert.equal(

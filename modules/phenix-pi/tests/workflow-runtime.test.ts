@@ -91,14 +91,22 @@ test("QA workflow combines deterministic checks and independent semantic reviews
   const children = runtime.store.projection.childrenOf(handle.id);
   assert.deepEqual(
     children.map((child) => child.definitionId).sort(),
-    ["agent.architect", "agent.critic", "agent.qa-synthesizer", "agent.scout", "agent.tester"].sort(),
+    [
+      "agent.architect",
+      "agent.critic",
+      "agent.qa-synthesizer",
+      "agent.scout",
+      "agent.tester",
+    ].sort(),
   );
   assert.ok(
-    runtime.store.projection.eventsFor(handle.id).some(
-      (event) =>
-        event.type === "workflow.node.completed" &&
-        (event.data as { nodeId?: string }).nodeId === "checks",
-    ),
+    runtime.store.projection
+      .eventsFor(handle.id)
+      .some(
+        (event) =>
+          event.type === "workflow.node.completed" &&
+          (event.data as { nodeId?: string }).nodeId === "checks",
+      ),
   );
 });
 

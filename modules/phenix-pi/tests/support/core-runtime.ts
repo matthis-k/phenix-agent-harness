@@ -91,7 +91,8 @@ export async function createTestRuntime(
   const functions = new WorkflowFunctionRegistry();
   registerWorkflowFunctions(functions);
   const catalog = new DefinitionCatalog();
-  for (const definition of [...agentDefinitions, ...workflowDefinitions]) catalog.register(definition);
+  for (const definition of [...agentDefinitions, ...workflowDefinitions])
+    catalog.register(definition);
   const operationRunner = options.operations ?? operations;
   catalog.seal(functions, operationRunner);
   const execution = new ExecutionFacadeImpl({

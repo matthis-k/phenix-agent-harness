@@ -15,7 +15,8 @@ function definitionCatalog(): DefinitionCatalog {
   const functions = new WorkflowFunctionRegistry();
   registerWorkflowFunctions(functions);
   const catalog = new DefinitionCatalog();
-  for (const definition of [...agentDefinitions, ...workflowDefinitions]) catalog.register(definition);
+  for (const definition of [...agentDefinitions, ...workflowDefinitions])
+    catalog.register(definition);
   catalog.seal(functions, {
     has: (operation) => operation === "local.noop" || operation === "local.qa-checks",
     async run() {

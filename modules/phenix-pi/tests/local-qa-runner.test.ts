@@ -10,10 +10,14 @@ test("QA runner reports repositories without a discoverable deterministic check"
   const cwd = await mkdtemp(path.join(os.tmpdir(), "phenix-qa-"));
   try {
     const runner = new ProcessLocalOperationRunner();
-    const result = (await runner.run("local.qa-checks", {}, {
-      cwd,
-      signal: new AbortController().signal,
-    })) as readonly { command: string; ok: boolean; summary: string }[];
+    const result = (await runner.run(
+      "local.qa-checks",
+      {},
+      {
+        cwd,
+        signal: new AbortController().signal,
+      },
+    )) as readonly { command: string; ok: boolean; summary: string }[];
     assert.equal(result.length, 1);
     assert.equal(result[0]?.ok, false);
     assert.match(result[0]?.summary ?? "", /No deterministic project check/);

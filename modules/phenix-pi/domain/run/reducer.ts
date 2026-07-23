@@ -196,12 +196,14 @@ export class RunProjection {
           readonly newParentId: RunId;
           readonly ownership: "attached" | "detached";
         };
-        if (current.parentId !== data.previousParentId) throw new Error(`Stale parent for ${current.id}`);
+        if (current.parentId !== data.previousParentId)
+          throw new Error(`Stale parent for ${current.id}`);
         const newParent = this.requireRun(data.newParentId);
         if (isTerminalRunState(newParent.state)) throw new Error(`Cannot reparent to terminal run`);
         let ancestor: RunRecord | undefined = newParent;
         while (ancestor) {
-          if (ancestor.id === current.id) throw new Error(`Reparenting would create an ancestry cycle`);
+          if (ancestor.id === current.id)
+            throw new Error(`Reparenting would create an ancestry cycle`);
           ancestor = ancestor.parentId ? this.requireRun(ancestor.parentId) : undefined;
         }
         next = { ...next, parentId: data.newParentId, ownership: data.ownership };
@@ -221,7 +223,8 @@ export class RunProjection {
           readonly updatedAt: string;
         };
         const task = this.localTasks.get(data.taskId);
-        if (!task || task.ownerRunId !== current.id) throw new Error(`Unknown local task ${data.taskId}`);
+        if (!task || task.ownerRunId !== current.id)
+          throw new Error(`Unknown local task ${data.taskId}`);
         this.localTasks.set(task.id, { ...task, state: data.state, updatedAt: data.updatedAt });
         break;
       }
