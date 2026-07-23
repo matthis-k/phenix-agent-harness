@@ -31,6 +31,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          python .github/fix-graceful-patch-script.py
           python .github/patch-graceful-recovery.py 2>&1 | tee patch-graceful-recovery.log
       - name: Upload patch diagnostics
         if: always()
