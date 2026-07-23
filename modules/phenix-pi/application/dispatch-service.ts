@@ -1,19 +1,19 @@
-import {
-  type AnyDefinition,
-  type DefinitionRef,
-  definitionRef,
-} from "../domain/definition/definition.ts";
+import type { DispatchDecision, DispatchRoute } from "../definitions/dispatch.ts";
 import {
   AGENT_COORDINATOR,
   AGENT_DISPATCHER,
   WORKFLOW_IMPLEMENT,
   WORKFLOW_QA,
 } from "../definitions/ids.ts";
-import type { DispatchDecision, DispatchRoute } from "../definitions/dispatch.ts";
 import type { ObjectiveRequest } from "../definitions/schemas.ts";
+import {
+  type AnyDefinition,
+  type DefinitionRef,
+  definitionRef,
+} from "../domain/definition/definition.ts";
 import type { Outcome, RunId } from "../domain/shared.ts";
-import type { CatalogFacade, ExecutionFacade } from "./interfaces.ts";
 import type { ExecutionStore } from "./execution-store.ts";
+import type { CatalogFacade, ExecutionFacade } from "./interfaces.ts";
 import type { InvocationPolicy } from "./invocation-policy.ts";
 
 export type DispatchMode = "auto" | DispatchRoute;

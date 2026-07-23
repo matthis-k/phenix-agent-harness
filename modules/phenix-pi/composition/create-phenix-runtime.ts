@@ -14,6 +14,7 @@ import { AgentExecutor } from "../application/agent-executor.ts";
 import { FacadeAgentToolFactory } from "../application/agent-tools.ts";
 import { DefinitionCatalog, WorkflowFunctionRegistry } from "../application/catalog.ts";
 import { CatalogFacadeImpl } from "../application/catalog-facade.ts";
+import { DispatchService } from "../application/dispatch-service.ts";
 import { OrderedDomainEventBus } from "../application/domain-event-bus.ts";
 import { ExecutionFacadeImpl } from "../application/execution-facade.ts";
 import { ExecutionStore } from "../application/execution-store.ts";
@@ -31,6 +32,7 @@ import { SessionProfileFacadeImpl } from "../application/session-profile-facade.
 import { TaskFacadeImpl } from "../application/task-facade.ts";
 import { WorkflowProcessManager } from "../application/workflow-process-manager.ts";
 import { agentDefinitions } from "../definitions/agents.ts";
+import { ROOT_DISPATCH_DEFINITION_IDS } from "../definitions/ids.ts";
 import { registerWorkflowFunctions } from "../definitions/workflows/functions.ts";
 import { workflowDefinitions } from "../definitions/workflows/index.ts";
 import type { ConcreteModelRef } from "../domain/definition/model.ts";
@@ -103,6 +105,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     models: resolver,
     ids,
     clock: systemClock,
+    rootInvokableDefinitions: ROOT_DISPATCH_DEFINITION_IDS,
   });
   const tasks = new TaskFacadeImpl({
     store,
@@ -112,8 +115,15 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
   });
   const catalog = new CatalogFacadeImpl(definitions, store);
   const invocationPolicy = new SessionInvocationPolicy({ store, catalog: definitions });
+  const dispatch = new DispatchService({
+    execution,
+    catalog,
+    store,
+    invocationPolicy,
+  });
   const tools = new FacadeAgentToolFactory({
     execution,
+    dispatch,
     tasks,
     catalog,
     store,

@@ -143,7 +143,11 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
       .map((run) => `${run.id}:${run.state}`)
       .join(", ");
     return {
-      systemPrompt: `${event.systemPrompt}\n\n${agentInstructions(profile.agent)}\n\nPhenix execution scope:\n- Session profile: agent=${profile.agent}, modelSet=${profile.modelSet}, difficulty=${profile.difficulty}.\n- Compose typed agents and invariant workflows through phenix_run; workflows own mandatory actors, transitions, and verification.\n- Available definitions: ${capabilities || "none"}.\n- Active descendant handles: ${handles || "none"}.\n- A background child remains attached. Use phenix_handle to inspect, await, send, or cancel it.\n- Use phenix_tasks only for local leaves; execution anchors are derived and read-only.`,
+      systemPrompt: `${event.systemPrompt}\n\n${agentInstructions(profile.agent)}\n\nPhenix execution scope:\n- Session profile: agent=${profile.agent}, modelSet=${profile.modelSet}, difficulty=${profile.difficulty}.\n- Directly answer only simple read-only questions.
+- A full repository QA, audit, or broad review MUST use phenix_dispatch with mode=qa.
+- Any requested repository mutation MUST use phenix_dispatch with mode=implement.
+- Mixed review-and-fix or ambiguous nontrivial work MUST use phenix_dispatch with mode=coordinate.
+- Never reproduce an invariant workflow manually; phenix_dispatch is the only root execution entry point.\n- Available definitions: ${capabilities || "none"}.\n- Active descendant handles: ${handles || "none"}.\n- A background child remains attached. Use phenix_handle to inspect, await, send, or cancel it.\n- Use phenix_tasks only for local leaves; execution anchors are derived and read-only.`,
     };
   });
 
@@ -387,27 +391,26 @@ async function applyAgentTools(
   ctx: ExtensionContext,
   preset: SessionAgentPreset,
 ): Promise<void> {
+  const orchestrationTools = [
+    "read",
+    "grep",
+    "find",
+    "ls",
+    "phenix_dispatch",
+    "phenix_handle",
+    "phenix_tasks",
+  ] as const;
+  const readOnlyTools = ["read", "grep", "find", "ls"] as const;
   const policies: Readonly<Record<SessionAgentPreset, readonly string[]>> = {
-    base: [
-      "read",
-      "grep",
-      "find",
-      "ls",
-      "bash",
-      "edit",
-      "write",
-      "phenix_run",
-      "phenix_handle",
-      "phenix_tasks",
-    ],
-    scout: ["read", "grep", "find", "ls"],
-    planner: ["read", "grep", "find", "ls", "phenix_run", "phenix_handle", "phenix_tasks"],
-    architect: ["read", "grep", "find", "ls", "phenix_run", "phenix_handle", "phenix_tasks"],
-    implementer: ["read", "grep", "find", "ls", "bash", "edit", "write", "phenix_tasks"],
-    tester: ["read", "grep", "find", "ls", "bash", "phenix_tasks"],
-    verifier: ["read", "grep", "find", "ls", "bash", "phenix_tasks"],
-    critic: ["read", "grep", "find", "ls", "bash"],
-    finalizer: ["read", "phenix_handle", "phenix_tasks"],
+    base: orchestrationTools,
+    scout: readOnlyTools,
+    planner: orchestrationTools,
+    architect: orchestrationTools,
+    implementer: orchestrationTools,
+    tester: orchestrationTools,
+    verifier: orchestrationTools,
+    critic: orchestrationTools,
+    finalizer: orchestrationTools,
   };
   const available = new Set(pi.getAllTools().map((tool) => tool.name));
   const tools = policies[preset].filter((tool) => available.has(tool));
@@ -420,7 +423,7 @@ async function applyAgentTools(
 
 function agentInstructions(preset: SessionAgentPreset): string {
   const instructions: Readonly<Record<SessionAgentPreset, string>> = {
-    base: "Act as the root coordinator. Dynamically compose agents and invariant workflows only when they reduce risk or preserve context.",
+    base: "Act as the read-only frontend coordinator. Answer simple read-only requests directly and route all substantial execution through phenix_dispatch.",
     scout:
       "Act as a read-only repository scout. Answer focused questions with concrete paths and evidence.",
     planner:
@@ -428,11 +431,11 @@ function agentInstructions(preset: SessionAgentPreset): string {
     architect:
       "Act as a read-only architect. Focus on ownership, boundaries, dependency direction, and replaceability.",
     implementer:
-      "Act as a focused implementer. Make bounded edits, run relevant checks, and avoid redesign outside the request.",
+      "Act as an implementation-routing frontend. Use phenix_dispatch with mode=implement; do not mutate the repository directly.",
     tester:
-      "Act as a test analyst. Run and interpret deterministic checks without editing implementation files.",
+      "Act as a QA-routing frontend. Use phenix_dispatch with mode=qa for repository-level checks and reviews.",
     verifier:
-      "Act as an independent verifier. Do not edit; accept claims only with concrete evidence.",
+      "Act as a verification-routing frontend. Use phenix_dispatch with mode=qa for substantial repository verification.",
     critic:
       "Act as a read-only critic. Find contradictions, omissions, and unsafe assumptions, ranked by impact.",
     finalizer:

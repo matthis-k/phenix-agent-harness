@@ -19,6 +19,7 @@ import {
 } from "../domain/run/model.ts";
 import {
   cancelled,
+  type DefinitionId,
   type Failure,
   failed,
   type Outcome,
@@ -81,6 +82,7 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
   private readonly models: ModelResolver;
   private readonly ids: IdGenerator;
   private readonly clock: Clock;
+  private readonly rootInvokableDefinitions: readonly DefinitionId[];
   private readonly implementations = new Map<"agent" | "workflow", RunImplementation>();
   private readonly terminating = new Set<RunId>();
   private sealed = false;
@@ -91,12 +93,15 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
     readonly models: ModelResolver;
     readonly ids: IdGenerator;
     readonly clock: Clock;
+    readonly rootInvokableDefinitions?: readonly DefinitionId[];
   }) {
     this.catalog = input.catalog;
     this.store = input.store;
     this.models = input.models;
     this.ids = input.ids;
     this.clock = input.clock;
+    this.rootInvokableDefinitions =
+      input.rootInvokableDefinitions ?? this.catalog.list().map((definition) => definition.id);
   }
 
   registerImplementation(kind: "agent" | "workflow", implementation: RunImplementation): void {
@@ -144,13 +149,13 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
 
     const capabilities: CapabilitySet = {
       ...ROOT_CAPABILITIES,
-      invokableDefinitions: this.catalog.list().map((definition) => definition.id),
+      invokableDefinitions: this.rootInvokableDefinitions,
     };
     const compiled: CompiledRunSpec = {
       definitionId: ROOT_DEFINITION_ID,
       input: input.session,
       outputSchemaId: "root.outcome",
-      tools: ["phenix_run", "phenix_handle", "phenix_tasks"],
+      tools: ["phenix_dispatch", "phenix_handle", "phenix_tasks"],
       limits: { timeoutMs: 0 },
       capabilities,
       invocation: { wait: "background" },
@@ -782,7 +787,7 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
       };
     }
 
-    if (parent.kind !== "root" && !capabilities.invokableDefinitions.includes(definition.id)) {
+    if (!capabilities.invokableDefinitions.includes(definition.id)) {
       throw new Error(`Parent ${parent.id} cannot invoke ${definition.id}`);
     }
     if (this.depth(parent.id) + 1 > capabilities.maxDepth) {

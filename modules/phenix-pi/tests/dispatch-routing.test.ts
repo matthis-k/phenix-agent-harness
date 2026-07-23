@@ -12,7 +12,10 @@ test("routes concrete mutations through workflow.implement", () => {
 });
 
 test("routes mixed QA and repair through the dynamic coordinator", () => {
-  assert.equal(classifyDeterministicDispatch("Audit the repository and fix every valid issue"), "coordinate");
+  assert.equal(
+    classifyDeterministicDispatch("Audit the repository and fix every valid issue"),
+    "coordinate",
+  );
 });
 
 test("leaves ambiguous substantial work for the typed dispatcher", () => {
