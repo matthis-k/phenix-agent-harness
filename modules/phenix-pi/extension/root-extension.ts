@@ -400,10 +400,9 @@ async function applyAgentTools(
     "phenix_handle",
     "phenix_tasks",
   ] as const;
-  const readOnlyTools = ["read", "grep", "find", "ls"] as const;
   const policies: Readonly<Record<SessionAgentPreset, readonly string[]>> = {
     base: orchestrationTools,
-    scout: readOnlyTools,
+    scout: orchestrationTools,
     planner: orchestrationTools,
     architect: orchestrationTools,
     implementer: orchestrationTools,

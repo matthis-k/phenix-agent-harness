@@ -75,7 +75,7 @@ const taskParameters = defineSchema<{
 
 export class FacadeAgentToolFactory implements AgentToolFactory {
   private readonly execution: ExecutionFacade;
-  private readonly dispatch: DispatchService;
+  private readonly dispatch?: DispatchService;
   private readonly tasks: TaskFacade;
   private readonly catalog: CatalogFacade;
   private readonly store: ExecutionStore;
@@ -83,7 +83,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
 
   constructor(input: {
     readonly execution: ExecutionFacade;
-    readonly dispatch: DispatchService;
+    readonly dispatch?: DispatchService;
     readonly tasks: TaskFacade;
     readonly catalog: CatalogFacade;
     readonly store: ExecutionStore;
@@ -142,6 +142,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       parameters: dispatchParameters,
       execute: async (raw, signal) => {
         const params = requireValid(dispatchParameters, raw);
+        if (!this.dispatch) throw new Error("Root dispatch service is not configured");
         const result = await this.dispatch.dispatch(parentId, params, signal);
         return { text: JSON.stringify(result), details: result };
       },

@@ -15,7 +15,9 @@ import { agentDefinitions } from "../../definitions/agents.ts";
 import {
   AGENT_ARCHITECT,
   AGENT_BASE,
+  AGENT_COORDINATOR,
   AGENT_CRITIC,
+  AGENT_DISPATCHER,
   AGENT_FINALIZER,
   AGENT_IMPLEMENTER,
   AGENT_PLANNER,
@@ -28,7 +30,7 @@ import { registerWorkflowFunctions } from "../../definitions/workflows/functions
 import { workflowDefinitions } from "../../definitions/workflows/index.ts";
 import type { AnyDefinition } from "../../domain/definition/definition.ts";
 import type { ResolvedModel } from "../../domain/definition/model.ts";
-import type { RunId } from "../../domain/shared.ts";
+import type { DefinitionId, RunId } from "../../domain/shared.ts";
 import type { Clock, IdGenerator } from "../../ports/clock.ts";
 import type { LocalOperationRunner } from "../../ports/local-operation-runner.ts";
 import type { ModelResolver } from "../../ports/model-resolver.ts";
@@ -74,6 +76,7 @@ export interface TestRuntime {
 export interface TestRuntimeOptions {
   readonly modelResolver?: ModelResolver;
   readonly operations?: LocalOperationRunner;
+  readonly rootInvokableDefinitions?: readonly DefinitionId[];
 }
 
 export async function createTestRuntime(
@@ -101,6 +104,7 @@ export async function createTestRuntime(
     models: options.modelResolver ?? models,
     ids,
     clock,
+    rootInvokableDefinitions: options.rootInvokableDefinitions,
   });
   const tasks = new TaskFacadeImpl({ store, catalog, clock, ids });
   const workflows = new WorkflowProcessManager({
@@ -182,7 +186,14 @@ function outputFor(definition: AnyDefinition): unknown {
   if (definition.id === AGENT_QA_SYNTHESIZER) {
     return { summary: "clean", findings: [], reports: [] };
   }
-  if (definition.id === AGENT_BASE || definition.id === AGENT_FINALIZER) {
+  if (definition.id === AGENT_DISPATCHER) {
+    return { route: "coordinate", reason: "requires composition", confidence: 0.8 };
+  }
+  if (
+    definition.id === AGENT_BASE ||
+    definition.id === AGENT_COORDINATOR ||
+    definition.id === AGENT_FINALIZER
+  ) {
     return { summary: "done", artifacts: [], unresolved: [] };
   }
   throw new Error(`No scripted output for ${definition.id}`);

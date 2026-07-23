@@ -787,7 +787,9 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
       };
     }
 
-    if (!capabilities.invokableDefinitions.includes(definition.id)) {
+    const invokableDefinitions =
+      parent.kind === "root" ? this.rootInvokableDefinitions : capabilities.invokableDefinitions;
+    if (!invokableDefinitions.includes(definition.id)) {
       throw new Error(`Parent ${parent.id} cannot invoke ${definition.id}`);
     }
     if (this.depth(parent.id) + 1 > capabilities.maxDepth) {
