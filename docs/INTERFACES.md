@@ -34,7 +34,7 @@ Pi session entries persist only the root binding and ledger cursor. The cross-se
 ## Pi tools
 
 - `phenix_run` invokes a catalog definition and either awaits its typed outcome or returns its run ID for background work.
-- `phenix_handle` inspects, awaits, messages, cancels, or retries an accessible failed descendant. A retry is a linked new run; the failed run remains immutable evidence. Recovery overrides are bounded and may add only non-mutating repository tools plus `bash`.
+- `phenix_handle` inspects, awaits, messages, cancels, or retries an accessible failed descendant. A retry is a linked new run; the failed run remains immutable evidence. Recovery overrides are bounded and may add read/search tools or explicitly escalate to `bash`; they cannot directly add `edit` or `write`.
 - `phenix_tasks` reads the derived execution tree and manages only local task leaves and owned progress.
 - `phenix_return` exists only inside child agent sessions and submits the definition's output schema.
 - `phenix_fail` exists only inside child agent sessions and records a short structured failure report for blockage, deadlock, missing permissions, resource exhaustion, or other inability to return valid output.

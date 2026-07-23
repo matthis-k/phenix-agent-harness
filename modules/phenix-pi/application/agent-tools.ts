@@ -174,7 +174,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       name: "phenix_handle",
       label: "Phenix Handle",
       description:
-        "Inspect, await, message, cancel, or retry an accessible run. Retry creates a linked replacement run and may add only bounded non-mutating recovery permissions.",
+        "Inspect, await, message, cancel, or retry an accessible run. Retry creates a linked replacement run and may explicitly add bounded read/search or bash execution permissions.",
       parameters: handleParameters,
       execute: async (raw, signal) => {
         const params = requireValid(handleParameters, raw);

@@ -267,10 +267,17 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
       try {
         resolvedModel = await this.resolveModel(definition, parent.definitionId);
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
         modelFailure = {
           code: "model_unavailable",
-          message: error instanceof Error ? error.message : String(error),
-          retryable: false,
+          message,
+          retryable: true,
+          details: {
+            source: "automatic",
+            category: "external_failure",
+            summary: message,
+            retryable: true,
+          },
         };
       }
     }
@@ -350,10 +357,17 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
         ...(resolvedModel ? { resolvedModel } : {}),
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       await this.fail(id, {
         code: "backend_start_failed",
-        message: error instanceof Error ? error.message : String(error),
-        retryable: false,
+        message,
+        retryable: true,
+        details: {
+          source: "automatic",
+          category: "external_failure",
+          summary: message,
+          retryable: true,
+        },
       });
     }
 

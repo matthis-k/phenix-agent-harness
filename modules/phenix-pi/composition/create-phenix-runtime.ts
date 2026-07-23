@@ -258,14 +258,15 @@ function summarizeRetryStart(
 ): string {
   const originalTools = new Set(original?.compiled.tools ?? []);
   const addedTools = retry.compiled.tools.filter((tool) => !originalTools.has(tool));
-  const changedLimits = original
+  const retryLimits = retry.compiled.limits as Readonly<Record<string, unknown>>;
+  const originalLimits = original?.compiled.limits as Readonly<Record<string, unknown>> | undefined;
+  const changedLimits = originalLimits
     ? Object.fromEntries(
-        Object.entries(retry.compiled.limits).filter(
-          ([key, value]) =>
-            value !== (original.compiled.limits as Readonly<Record<string, unknown>>)[key],
-        ),
+        [...new Set([...Object.keys(originalLimits), ...Object.keys(retryLimits)])]
+          .filter((key) => retryLimits[key] !== originalLimits[key])
+          .map((key) => [key, retryLimits[key] ?? null]),
       )
-    : retry.compiled.limits;
+    : retryLimits;
   const tools = addedTools.length > 0 ? ` Added tools: ${addedTools.join(", ")}.` : "";
   const limits =
     Object.keys(changedLimits).length > 0
