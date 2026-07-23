@@ -1,0 +1,213 @@
+name: Patch dispatch hardening
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: feat/enforced-workflow-dispatch
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: Apply dispatch hardening
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(source: str, old: str, new: str, label: str) -> str:
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one match, found {count}")
+              return source.replace(old, new)
+
+          path = Path("modules/phenix-pi/application/agent-tools.ts")
+          source = path.read_text()
+          source = replace_once(
+              source,
+              "  private readonly dispatch: DispatchService;",
+              "  private readonly dispatch?: DispatchService;",
+              "optional dispatch field",
+          )
+          source = replace_once(
+              source,
+              "    readonly dispatch: DispatchService;",
+              "    readonly dispatch?: DispatchService;",
+              "optional dispatch input",
+          )
+          source = replace_once(
+              source,
+              '''      execute: async (raw, signal) => {
+                const params = requireValid(dispatchParameters, raw);
+                const result = await this.dispatch.dispatch(parentId, params, signal);''',
+              '''      execute: async (raw, signal) => {
+                const params = requireValid(dispatchParameters, raw);
+                if (!this.dispatch) throw new Error("Root dispatch service is not configured");
+                const result = await this.dispatch.dispatch(parentId, params, signal);''',
+              "dispatch execution guard",
+          )
+          path.write_text(source)
+
+          path = Path("modules/phenix-pi/application/execution-facade.ts")
+          source = path.read_text()
+          source = replace_once(
+              source,
+              '''    if (!capabilities.invokableDefinitions.includes(definition.id)) {
+                throw new Error(`Parent ${parent.id} cannot invoke ${definition.id}`);
+              }''',
+              '''    const invokableDefinitions =
+                parent.kind === "root"
+                  ? this.rootInvokableDefinitions
+                  : capabilities.invokableDefinitions;
+              if (!invokableDefinitions.includes(definition.id)) {
+                throw new Error(`Parent ${parent.id} cannot invoke ${definition.id}`);
+              }''',
+              "effective root authorization",
+          )
+          path.write_text(source)
+
+          path = Path("modules/phenix-pi/extension/root-extension.ts")
+          source = path.read_text()
+          source = replace_once(
+              source,
+              '''  const readOnlyTools = ["read", "grep", "find", "ls"] as const;
+            const policies:''',
+              '''  const policies:''',
+              "remove redundant root tools",
+          )
+          source = replace_once(
+              source,
+              "    scout: readOnlyTools,",
+              "    scout: orchestrationTools,",
+              "scout dispatch access",
+          )
+          path.write_text(source)
+
+          path = Path("modules/phenix-pi/tests/support/core-runtime.ts")
+          source = path.read_text()
+          source = replace_once(
+              source,
+              '''  AGENT_ARCHITECT,
+            AGENT_BASE,
+            AGENT_CRITIC,''',
+              '''  AGENT_ARCHITECT,
+            AGENT_BASE,
+            AGENT_COORDINATOR,
+            AGENT_CRITIC,
+            AGENT_DISPATCHER,''',
+              "support dispatch imports",
+          )
+          source = replace_once(
+              source,
+              '''import type { RunId } from "../../domain/shared.ts";''',
+              '''import type { DefinitionId, RunId } from "../../domain/shared.ts";''',
+              "support definition id import",
+          )
+          source = replace_once(
+              source,
+              '''export interface TestRuntimeOptions {
+              readonly modelResolver?: ModelResolver;
+              readonly operations?: LocalOperationRunner;
+            }''',
+              '''export interface TestRuntimeOptions {
+              readonly modelResolver?: ModelResolver;
+              readonly operations?: LocalOperationRunner;
+              readonly rootInvokableDefinitions?: readonly DefinitionId[];
+            }''',
+              "test runtime options",
+          )
+          source = replace_once(
+              source,
+              '''    ids,
+              clock,
+            });''',
+              '''    ids,
+              clock,
+              rootInvokableDefinitions: options.rootInvokableDefinitions,
+            });''',
+              "test root capabilities",
+          )
+          source = replace_once(
+              source,
+              '''  if (definition.id === AGENT_QA_SYNTHESIZER) {
+                return { summary: "clean", findings: [], reports: [] };
+              }
+              if (definition.id === AGENT_BASE || definition.id === AGENT_FINALIZER) {''',
+              '''  if (definition.id === AGENT_QA_SYNTHESIZER) {
+                return { summary: "clean", findings: [], reports: [] };
+              }
+              if (definition.id === AGENT_DISPATCHER) {
+                return { route: "coordinate", reason: "requires composition", confidence: 0.8 };
+              }
+              if (
+                definition.id === AGENT_BASE ||
+                definition.id === AGENT_COORDINATOR ||
+                definition.id === AGENT_FINALIZER
+              ) {''',
+              "scripted dispatch output",
+          )
+          path.write_text(source)
+          PY
+          cat > modules/phenix-pi/tests/root-dispatch-policy.test.ts <<'TS'
+          import assert from "node:assert/strict";
+          import test from "node:test";
+
+          import { AGENT_BASE, ROOT_DISPATCH_DEFINITION_IDS, WORKFLOW_QA } from "../definitions/ids.ts";
+          import { definitionRef } from "../domain/definition/definition.ts";
+          import { createTestRuntime } from "./support/core-runtime.ts";
+
+          test("root may invoke dispatch targets but not the general-purpose escape hatch", async () => {
+            const runtime = await createTestRuntime(undefined, {
+              rootInvokableDefinitions: ROOT_DISPATCH_DEFINITION_IDS,
+            });
+
+            await assert.rejects(
+              runtime.execution.start({
+                parentId: runtime.rootRunId,
+                definition: definitionRef(AGENT_BASE),
+                input: { objective: "bypass dispatch" },
+                wait: "await",
+              }),
+              /cannot invoke agent\.base/,
+            );
+
+            const qa = await runtime.execution.start({
+              parentId: runtime.rootRunId,
+              definition: definitionRef(WORKFLOW_QA),
+              input: { objective: "full repository QA" },
+              wait: "await",
+            });
+            assert.equal((await qa.result()).status, "success");
+          });
+          TS
+      - name: Format changed source
+        run: |
+          nix shell github:NixOS/nixpkgs/0bb7ec54c8483066ec9d7720e780a5caa71f8612#biome -c \
+            biome check --write --unsafe --config-path biome.json --no-errors-on-unmatched \
+            --files-ignore-unknown=true modules/phenix-pi || true
+      - name: Commit hardening
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add modules/phenix-pi
+          git commit -m "test: harden root dispatch enforcement"
+          git push origin HEAD:feat/enforced-workflow-dispatch
