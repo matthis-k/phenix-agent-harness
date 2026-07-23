@@ -12,7 +12,39 @@ const execFileAsync = promisify(execFile);
 const MAX_CHECKS = 6;
 const MAX_SUMMARY = 4_000;
 
+interface CheckInvocation {
+  readonly executable: string;
+  readonly args: readonly string[];
+}
+
+interface CheckExecutionOptions {
+  readonly cwd: string;
+  readonly signal: AbortSignal;
+  readonly timeout: number;
+  readonly maxBuffer: number;
+}
+
+interface CheckExecutionResult {
+  readonly stdout: string | Buffer;
+  readonly stderr: string | Buffer;
+}
+
+export type CheckExecutor = (
+  executable: string,
+  args: readonly string[],
+  options: CheckExecutionOptions,
+) => Promise<CheckExecutionResult>;
+
+const defaultExecutor: CheckExecutor = async (executable, args, options) =>
+  execFileAsync(executable, [...args], options);
+
 export class ProcessLocalOperationRunner implements LocalOperationRunner {
+  private readonly execute: CheckExecutor;
+
+  constructor(execute: CheckExecutor = defaultExecutor) {
+    this.execute = execute;
+  }
+
   has(operation: string): boolean {
     return operation === "local.noop" || operation === "local.qa-checks";
   }
@@ -38,35 +70,42 @@ export class ProcessLocalOperationRunner implements LocalOperationRunner {
 
     const results = [];
     for (const command of commands) {
-      assertSafeCheckCommand(command);
-      results.push(await runCheck(command, context));
+      const invocation = parseApprovedCheckCommand(command);
+      results.push(await runCheck(command, invocation, context, this.execute));
     }
     return results;
   }
 }
 
-async function runCheck(command: string, context: LocalOperationContext) {
+async function runCheck(
+  command: string,
+  invocation: CheckInvocation,
+  context: LocalOperationContext,
+  execute: CheckExecutor,
+) {
   try {
-    const result = await execFileAsync("/bin/bash", ["-lc", command], {
+    const result = await execute(invocation.executable, invocation.args, {
       cwd: context.cwd,
       signal: context.signal,
       timeout: 900_000,
       maxBuffer: 4 * 1024 * 1024,
     });
+    const stdout = String(result.stdout);
+    const stderr = String(result.stderr);
     return {
       command,
       ok: true,
-      summary: bounded(
-        `${result.stdout}${result.stderr ? `\n${result.stderr}` : ""}`.trim() || "Passed.",
-      ),
+      summary: bounded(`${stdout}${stderr ? `\n${stderr}` : ""}`.trim() || "Passed."),
     };
   } catch (error) {
     const failure = error as Error & {
-      readonly stdout?: string;
-      readonly stderr?: string;
+      readonly stdout?: string | Buffer;
+      readonly stderr?: string | Buffer;
       readonly code?: string | number;
     };
-    const output = `${failure.stdout ?? ""}${failure.stderr ? `\n${failure.stderr}` : ""}`.trim();
+    const stdout = failure.stdout === undefined ? "" : String(failure.stdout);
+    const stderr = failure.stderr === undefined ? "" : String(failure.stderr);
+    const output = `${stdout}${stderr ? `\n${stderr}` : ""}`.trim();
     return {
       command,
       ok: false,
@@ -114,6 +153,14 @@ function configuredCommands(input: unknown): readonly string[] {
   );
 }
 
+export function parseApprovedCheckCommand(command: string): CheckInvocation {
+  assertSafeCheckCommand(command);
+  const tokens = tokenizeCommand(command);
+  const [executable, ...args] = tokens;
+  if (!executable) throw new Error(`Deterministic QA command is empty`);
+  return { executable, args };
+}
+
 function assertSafeCheckCommand(command: string): void {
   if (/[\n\r;&|`]|\$\(/.test(command)) {
     throw new Error(`Deterministic QA commands may not contain shell composition: ${command}`);
@@ -131,6 +178,50 @@ function assertSafeCheckCommand(command: string): void {
   if (!allowed.some((pattern) => pattern.test(command.trim()))) {
     throw new Error(`Command is not an approved deterministic QA check: ${command}`);
   }
+}
+
+function tokenizeCommand(command: string): string[] {
+  const tokens: string[] = [];
+  let token = "";
+  let quote: "'" | '"' | undefined;
+  let escaped = false;
+
+  const flush = () => {
+    if (token.length === 0) return;
+    tokens.push(token);
+    token = "";
+  };
+
+  for (const character of command.trim()) {
+    if (escaped) {
+      token += character;
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) quote = undefined;
+      else token += character;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (/\s/.test(character)) {
+      flush();
+      continue;
+    }
+    token += character;
+  }
+
+  if (escaped) throw new Error(`Deterministic QA command has a trailing escape: ${command}`);
+  if (quote) throw new Error(`Deterministic QA command has an unterminated quote: ${command}`);
+  flush();
+  return tokens;
 }
 
 function bounded(value: string): string {
