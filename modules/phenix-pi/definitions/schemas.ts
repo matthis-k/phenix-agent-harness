@@ -46,6 +46,17 @@ export interface CheckResult {
   readonly summary: string;
 }
 
+export interface TestRequest extends ObjectiveRequest {
+  readonly checks: readonly CheckResult[];
+}
+
+export interface TestReport {
+  readonly summary: string;
+  readonly checks: readonly CheckResult[];
+  readonly findings: readonly string[];
+  readonly evidence: readonly string[];
+}
+
 export interface ChangeSet {
   readonly summary: string;
   readonly changedFiles: readonly string[];
@@ -197,6 +208,19 @@ export const ImplementationRequestSchema = defineSchema<ImplementationRequest>(
     ),
     previousChangeSet: Type.Optional(ChangeSetType),
     findings: Type.Optional(Type.Array(Type.String())),
+  }),
+);
+export const TestRequestSchema = defineSchema<TestRequest>(
+  "request.test.v1",
+  Type.Object({ ...objective, checks: Type.Array(checkResult) }),
+);
+export const TestReportSchema = defineSchema<TestReport>(
+  "outcome.test-report.v1",
+  Type.Object({
+    summary: Type.String(),
+    checks: Type.Array(checkResult),
+    findings: Type.Array(Type.String()),
+    evidence: Type.Array(Type.String()),
   }),
 );
 export const ChangeSetSchema = defineSchema<ChangeSet>("outcome.change-set.v1", ChangeSetType);
