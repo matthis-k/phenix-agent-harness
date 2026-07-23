@@ -35,7 +35,12 @@ export async function runPackagedQaCli(
   try {
     const reportFile = args[1];
     const contributionFile = args[2];
-    if (!reportFile || reportFile.startsWith("--") || !contributionFile || contributionFile.startsWith("--")) {
+    if (
+      !reportFile ||
+      reportFile.startsWith("--") ||
+      !contributionFile ||
+      contributionFile.startsWith("--")
+    ) {
       throw new Error(
         "merge-review requires <qa-report.json> <model-review.json> [--output merged-report.json].",
       );
@@ -45,8 +50,8 @@ export async function runPackagedQaCli(
     const contributionPath = path.resolve(contributionFile);
     const outputPath = path.resolve(option(args, "--output") ?? reportPath);
     const [report, contribution] = await Promise.all([
-      readFile(reportPath, "utf8").then(JSON.parse),
-      readFile(contributionPath, "utf8").then(JSON.parse),
+      readFile(reportPath, "utf8").then((value) => JSON.parse(value) as unknown),
+      readFile(contributionPath, "utf8").then((value) => JSON.parse(value) as unknown),
     ]);
     const merged = submitModelReview(report, contribution);
     if (!merged.ok) {
