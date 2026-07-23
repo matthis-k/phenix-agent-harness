@@ -10,24 +10,17 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "strict": true,
-    "noImplicitAny": false,
-    "types": ["node"],
-    "baseUrl": ".",
-    "paths": {
-      "@matthis-k/phenix-kernel/*": ["packages/phenix-kernel/*"],
-      "@matthis-k/phenix-flow/*": ["packages/phenix-flow/*"],
-      "@matthis-k/phenix-routing/*": ["packages/phenix-routing/*"],
-      "@matthis-k/phenix-contracts/*": ["packages/phenix-contracts/*"],
-      "@matthis-k/phenix-tasks/*": ["packages/phenix-tasks/*"],
-      "@hypabolic/pi-hypa/extensions/index.ts": ["extensions/optional-integrations.d.ts"],
-      "@hypabolic/pi-hypa/extensions/rewrite-client.ts": ["extensions/optional-integrations.d.ts"],
-      "@hypabolic/pi-hypa/extensions/tools.ts": ["extensions/optional-integrations.d.ts"],
-      "pi-lsp/extensions/pi-lsp/index.ts": ["extensions/optional-integrations.d.ts"],
-      "pi-mcp-adapter/index.ts": ["extensions/optional-integrations.d.ts"],
-      "pi-context-tools/extensions/index.ts": ["extensions/optional-integrations.d.ts"],
-      "@juicesharp/rpiv-web-tools/index.ts": ["extensions/optional-integrations.d.ts"]
-    }
+    "types": ["node"]
   },
-  "include": ["extensions/**/*.ts", "packages/**/*.ts"],
+  "include": [
+    "adapters/**/*.ts",
+    "application/**/*.ts",
+    "composition/**/*.ts",
+    "definitions/**/*.ts",
+    "domain/**/*.ts",
+    "extension/**/*.ts",
+    "ports/**/*.ts",
+    "tests/**/*.ts"
+  ],
   "exclude": ["node_modules"]
 }

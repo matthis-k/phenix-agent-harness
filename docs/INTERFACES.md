@@ -1,86 +1,52 @@
 # Phenix execution interfaces
 
-Phenix uses one revisioned execution authority as the source of truth for managed work.
+The canonical Phenix state is one append-only event stream per root Pi session.
 
-## Authority
+## Runtime identity
 
-The authority owns objective, node, handle, acceptance, capability, revision, and event state. Workflow, task, handle, and TUI views are projections. Pi sessions are replaceable execution transcripts and never own workflow truth.
+A run ID is the only identity for a root session, agent session, or workflow session. Each non-root run stores exactly one parent edge. Root, depth, active-child counts, task anchors, workflow position, and effective task state are projections.
 
-Every mutation is idempotent and may include an expected objective revision. Stale revisions fail rather than overwriting newer state.
+## Commands and facts
 
-## Root-session execution journal
+Application commands call one of four façades:
 
-Every root Pi session owns one append-only JSONL journal for its complete execution tree:
+- `ExecutionFacade` starts definitions and controls run lifecycles.
+- `TaskFacade` mutates only local task leaves.
+- `CatalogFacade` reads immutable definitions.
+- `QueryFacade` reads projections and the ordered event stream.
+
+Committed domain events are facts. Event subscribers never serve as command queues; only the workflow process manager may react to facts by issuing direct child commands. Reducer invariants are evaluated against a staged projection before a batch is appended, so a rejected transition never corrupts the durable stream.
+
+## Lifecycle and outcomes
+
+Runs move through `created`, startup, active, completion, and terminal states. Terminal outcomes are typed as success, failure, or cancellation; an orphan is a failed outcome with an `orphaned` code. Agent success requires both an accepted schema-valid `phenix_return` value and a later `agent_settled` boundary. Workflow success requires a typed return node and settled attached children.
+
+## Structured concurrency
+
+Children begin attached. Background mode changes waiting, not ownership. Parent cancellation cascades through attached descendants, and a parent cannot become terminal while an attached child remains active. Detachment is an explicit reparent to the root supervisor. A lost backend produces `orphaned`, never success.
+
+## Pi boundary
+
+The root extension is a host adapter. Child agents use one public Pi `AgentSession` and one `SessionManager` each. `agent_settled` records a cycle-idle boundary; semantic completion additionally requires a schema-valid `phenix_return` value and no active attached child.
+
+Pi session entries persist only the root binding and ledger cursor. The cross-session run and task trees remain in `.phenix-agent-state/runs/*/events.jsonl`. On recovery, file-backed child sessions are reopened; unrecoverable in-memory children become orphaned. Every child records both its requested model selector and the concrete model chosen by the versioned routing policy.
+
+## Pi tools
+
+- `phenix_run` invokes a catalog definition and either awaits its typed outcome or returns its run ID for background work.
+- `phenix_handle` inspects, awaits, messages, or cancels an accessible descendant without introducing another handle identity.
+- `phenix_tasks` reads the derived execution tree and manages only local task leaves and owned progress.
+- `phenix_return` exists only inside child agent sessions and submits the definition's output schema.
+
+The `/phenix` command provides read-only status, run, task, and catalog views.
+
+## Package boundaries
 
 ```text
-.phenix-agent-state/sessions/<root-session-id>-<digest>/events.jsonl
+extension -> application -> domain -> ports
+adapters ---------------------------> ports
+composition -> all layers
+definitions -> domain definition types
 ```
 
-The root runtime is the sole writer. SDK children and RPC workers report observations to the root; they never append to the file directly. The writer assigns one monotonic sequence across the root, children, grandchildren, workflow authority, tools, routing, parent-child messages, lifecycle transitions, settlement, and recovery.
-
-The journal is the canonical chronological record of what happened in that root-session tree. The revisioned execution authority remains the canonical validator and mutator of workflow state: child observations are recorded as claims or runtime events, while only authority-committed events establish objective, node, handle, capability, or acceptance transitions.
-
-Each entry carries root-session, emitting session, actor, and optional parent-session, objective, node, handle, and child-run identities. Nested sessions therefore retain their real ancestry instead of being flattened under the root. `/phenix journal` reports the active journal path.
-
-Payloads are bounded before persistence. Authentication values and secrets are redacted, reasoning content is represented by length and digest, and oversized values are replaced with a digest and bounded preview. Large binary or repository artifacts remain external and should be referenced rather than copied into JSONL.
-
-## Processes
-
-- **Interactive host:** user interaction and Pi presentation.
-- **Execution authority:** the single writer for objective and acceptance state.
-- **Session journal writer:** the single serialized writer for root and descendant execution history.
-- **Runtime supervisor:** starts, steers, awaits, aborts, and disposes Pi sessions.
-- **Child agent:** performs one capability-bounded assignment and submits a typed result.
-- **Evidence runner:** executes deterministic checks.
-- **Semantic verifier:** independently approves, rejects, or reports an inconclusive result.
-- **Presentation observer:** renders authority projections only.
-- **Model router:** resolves abstract role and assurance needs to concrete models.
-
-These are logical boundaries and may share an operating-system process.
-
-## Lifecycle
-
-Runtime settlement and acceptance are separate:
-
-1. A node becomes ready and receives a durable handle.
-2. The runtime starts and eventually settles, fails, cancels, or becomes orphaned.
-3. A structured result is submitted.
-4. Contract and workflow completion are checked.
-5. Deterministic evidence and semantic verification run according to assurance.
-6. The authority accepts, rejects, permits repair, or escalates.
-
-A child process exiting without a valid result is not success.
-
-## Assurance
-
-- **A0 Direct:** low-impact direct work.
-- **A1 Contracted:** structured assignment and schema-validated result.
-- **A2 Verified:** deterministic evidence and independent review where needed.
-- **A3 High assurance:** isolation, semantic verification, critic review, and stronger repair policy.
-
-Assurance is independent from reasoning difficulty. Security, authentication, secrets, CI, deployment, production, release, broad mutation, and requested QA raise assurance even for short tasks.
-
-## Delegation
-
-Preset workflows remain available. The general workflow also exposes bounded ad-hoc base, planner, architect, implementer, tester, critic, and finalizer actions. These actions retain typed contracts, execution limits, depth limits, capability scoping, and acceptance policy; they do not bypass workflow authority.
-
-## Runtime adapters
-
-The supervisor selects from one transport-neutral backend interface:
-
-- **Pi SDK** is the deterministic fallback and handles nested orchestration.
-- **Pi RPC** is selected for high-assurance leaf assignments or by an explicit `PHENIX_CHILD_BACKEND=rpc` override.
-- RPC refuses assignments that retain child-delegation authority.
-- `PHENIX_CHILD_BACKEND=sdk` forces the in-process runtime.
-- RPC workers load only their explicit completion contract, task capability, declared integrations, skills, and tool allowlist.
-- RPC framing is strict LF-delimited JSON with correlated commands and resumable asynchronous events.
-- A cycle settles only on Pi's fully settled event, not merely on an agent-end event.
-- One adapter-independent wall-clock cancellation boundary covers startup, streaming, idle hangs, repair cycles, and disposal.
-
-Adapter choice never changes workflow, task, contract, handle, or acceptance semantics.
-
-## Events and recovery
-
-Authority events are ordered and cursor-readable. They are also projected into the root-session journal with the resulting objective, node, handle, and active-handle state so failures can be correlated with child and tool activity in one sequence.
-
-Handles remain meaningful after parent-turn completion, UI disconnection, Pi session replacement, and authority restart. Active-child status is derived from durable non-terminal handles scoped to the current root session, with the process-local manager used only before an objective is initialized.
+The domain and application layers contain no Pi imports. Concrete adapters meet only in `composition/create-phenix-runtime.ts`.

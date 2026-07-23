@@ -1,5 +1,5 @@
 {
-  description = "Minimal Phenix coding-agent harness for Pi";
+  description = "Phenix recursive agent and workflow harness for Pi";
 
   inputs = {
     phenix-pins.url = "github:matthis-k/phenix-pins";

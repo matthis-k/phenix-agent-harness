@@ -1,0 +1,212 @@
+import { Type } from "typebox";
+
+import { definitionRef } from "../domain/definition/definition.ts";
+import { defineSchema } from "../domain/definition/schema.ts";
+import { definitionId, localTaskId, type RunId, runId, type TaskId } from "../domain/shared.ts";
+import type { AgentTool } from "../ports/agent-session-backend.ts";
+import type { ExecutionStore } from "./execution-store.ts";
+import type { CatalogFacade, ExecutionFacade, TaskFacade } from "./interfaces.ts";
+
+export interface AgentToolFactory {
+  forRun(runId: RunId): Promise<readonly AgentTool[]>;
+}
+
+const runParameters = defineSchema<{
+  definition: string;
+  input: unknown;
+  wait?: "await" | "background";
+}>(
+  "tool.phenix-run",
+  Type.Object({
+    definition: Type.String({ description: "Definition ID from the available Phenix catalog" }),
+    input: Type.Unknown({ description: "Input matching the selected definition schema" }),
+    wait: Type.Optional(Type.Enum(["await", "background"])),
+  }),
+);
+
+const handleParameters = defineSchema<{
+  action: "inspect" | "await" | "send" | "cancel";
+  runId: string;
+  message?: string;
+}>(
+  "tool.phenix-handle",
+  Type.Object({
+    action: Type.Enum(["inspect", "await", "send", "cancel"]),
+    runId: Type.String(),
+    message: Type.Optional(Type.String()),
+  }),
+);
+
+const taskParameters = defineSchema<{
+  action: "tree" | "list" | "add" | "set" | "progress";
+  taskId?: string;
+  title?: string;
+  description?: string;
+  state?: "not_started" | "wip" | "done" | "failed";
+  message?: string;
+}>(
+  "tool.phenix-tasks",
+  Type.Object({
+    action: Type.Enum(["tree", "list", "add", "set", "progress"]),
+    taskId: Type.Optional(Type.String()),
+    title: Type.Optional(Type.String()),
+    description: Type.Optional(Type.String()),
+    state: Type.Optional(Type.Enum(["not_started", "wip", "done", "failed"])),
+    message: Type.Optional(Type.String()),
+  }),
+);
+
+export class FacadeAgentToolFactory implements AgentToolFactory {
+  private readonly execution: ExecutionFacade;
+  private readonly tasks: TaskFacade;
+  private readonly catalog: CatalogFacade;
+  private readonly store: ExecutionStore;
+
+  constructor(input: {
+    readonly execution: ExecutionFacade;
+    readonly tasks: TaskFacade;
+    readonly catalog: CatalogFacade;
+    readonly store: ExecutionStore;
+  }) {
+    this.execution = input.execution;
+    this.tasks = input.tasks;
+    this.catalog = input.catalog;
+    this.store = input.store;
+  }
+
+  async forRun(parentId: RunId): Promise<readonly AgentTool[]> {
+    const available = await this.catalog.listAvailable(parentId);
+    const runTool: AgentTool = {
+      name: "phenix_run",
+      label: "Phenix Run",
+      description: `Invoke one typed agent or workflow definition. Available: ${
+        available.map((definition) => definition.id).join(", ") || "none"
+      }. The definition owns all internal transitions and model choices.`,
+      parameters: runParameters,
+      execute: async (raw, signal) => {
+        const params = requireValid(runParameters, raw);
+        const handle = await this.execution.start({
+          parentId,
+          definition: definitionRef(definitionId(params.definition)),
+          input: params.input,
+          wait: params.wait ?? "await",
+        });
+        if ((params.wait ?? "await") === "background") {
+          return {
+            text: JSON.stringify({ runId: handle.id, status: "running" }),
+            details: { runId: handle.id, status: "running" },
+          };
+        }
+        const outcome = await handle.result(signal);
+        return { text: JSON.stringify(outcome), details: { runId: handle.id, outcome } };
+      },
+    };
+
+    const handleTool: AgentTool = {
+      name: "phenix_handle",
+      label: "Phenix Handle",
+      description:
+        "Inspect, await, send a message to, or cancel an accessible run. Cancelling an await only cancels the wait, never the child.",
+      parameters: handleParameters,
+      execute: async (raw, signal) => {
+        const params = requireValid(handleParameters, raw);
+        const targetId = runId(params.runId);
+        this.assertAccessible(parentId, targetId);
+        if (targetId === parentId && params.action !== "inspect") {
+          throw new Error(`A run cannot control its own lifecycle through phenix_handle`);
+        }
+        if (params.action === "inspect") {
+          const snapshot = await this.execution.inspect(targetId);
+          return { text: JSON.stringify(snapshot), details: snapshot };
+        }
+        if (params.action === "await") {
+          const outcome = await this.execution.await(targetId, signal);
+          return { text: JSON.stringify(outcome), details: outcome };
+        }
+        const caller = this.store.projection.requireRun(parentId);
+        if (params.action === "send") {
+          if (!caller.compiled.capabilities.maySend) {
+            throw new Error(`Run ${parentId} may not send child messages`);
+          }
+          if (!params.message?.trim()) throw new Error(`send requires message`);
+          await this.execution.send(targetId, params.message, signal);
+          return { text: `Message sent to ${targetId}.` };
+        }
+        if (!caller.compiled.capabilities.mayCancelChildren) {
+          throw new Error(`Run ${parentId} may not cancel children`);
+        }
+        await this.execution.cancel(
+          targetId,
+          params.message?.trim() || "Cancelled by parent agent",
+        );
+        return { text: `Cancellation requested for ${targetId}.` };
+      },
+    };
+
+    const taskTool: AgentTool = {
+      name: "phenix_tasks",
+      label: "Phenix Tasks",
+      description:
+        "Read the derived task tree or manage local task leaves owned by this run. Execution task anchors are read-only.",
+      parameters: taskParameters,
+      execute: async (raw) => {
+        const params = requireValid(taskParameters, raw);
+        const root = this.store.projection.rootOf(parentId);
+        if (params.action === "tree") {
+          const tree = await this.tasks.tree(root);
+          return { text: JSON.stringify(tree), details: tree };
+        }
+        if (params.action === "list") {
+          const tasks = await this.tasks.tasksFor(parentId);
+          return { text: JSON.stringify(tasks), details: tasks };
+        }
+        if (params.action === "add") {
+          if (!params.title?.trim()) throw new Error(`add requires title`);
+          const task = await this.tasks.addLocal({
+            ownerRunId: parentId,
+            title: params.title,
+            ...(params.description ? { description: params.description } : {}),
+          });
+          return { text: JSON.stringify(task), details: task };
+        }
+        if (!params.taskId) throw new Error(`${params.action} requires taskId`);
+        const task = this.store.projection.localTasks.get(localTaskId(params.taskId));
+        if (task && task.ownerRunId !== parentId) {
+          throw new Error(`Agents may mutate only their own local task leaves`);
+        }
+        if (params.action === "progress" && !task && params.taskId !== `run:${parentId}`) {
+          throw new Error(`Agents may append progress only to their own execution anchor`);
+        }
+        if (params.action === "set") {
+          if (!params.state) throw new Error(`set requires state`);
+          const updated = await this.tasks.setLocalState(localTaskId(params.taskId), params.state);
+          return { text: JSON.stringify(updated), details: updated };
+        }
+        if (!params.message?.trim()) throw new Error(`progress requires message`);
+        await this.tasks.appendProgress(params.taskId as TaskId, params.message);
+        return { text: `Progress appended to ${params.taskId}.` };
+      },
+    };
+
+    return [runTool, handleTool, taskTool];
+  }
+
+  private assertAccessible(callerId: RunId, targetId: RunId): void {
+    const caller = this.store.projection.requireRun(callerId);
+    let target = this.store.projection.requireRun(targetId);
+    if (caller.kind === "root" && this.store.projection.rootOf(target.id) === caller.id) return;
+    while (target.parentId) {
+      if (target.parentId === caller.id) return;
+      target = this.store.projection.requireRun(target.parentId);
+    }
+    throw new Error(`Run ${targetId} is outside caller ${callerId}'s task scope`);
+  }
+}
+
+function requireValid<T>(schema: ReturnType<typeof defineSchema<T>>, value: unknown): T {
+  const validation = schema.validate(value);
+  if (!validation.ok) {
+    throw new Error(validation.issues.map((issue) => `${issue.path} ${issue.message}`).join("; "));
+  }
+  return validation.value;
+}

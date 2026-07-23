@@ -30,8 +30,6 @@
           runHook postBuild
         '';
 
-        # Materialize workspace dependencies so external Phenix extensions can
-        # import the exact SDK modules used by the packaged Pi executable.
         postInstall = ''
           local nm="$out/lib/node_modules/pi-monorepo/node_modules"
 
@@ -74,82 +72,47 @@
       };
 
       piNpmRoot = ./pi-npm;
-
-      # The extension lock remains independent; Pi is supplied by piCodingAgent.
       piNpmPackages = pkgs.importNpmLock.buildNodeModules {
         npmRoot = piNpmRoot;
         inherit (pkgs) nodejs;
         derivationArgs = {
           pname = "phenix-pi-npm-packages";
-          version = "1.0.0";
+          version = "2.0.0";
           npmFlags = [ "--legacy-peer-deps" ];
           npm_config_ignore_scripts = true;
         };
       };
 
-      phenixPiPackage =
-        pkgs.runCommand "phenix-pi-package"
-          {
-            nativeBuildInputs = [ pkgs.makeBinaryWrapper ];
-          }
-          ''
-            mkdir -p "$out"
-            cp -R ${./phenix-pi}/. "$out/"
-            chmod -R u+w "$out"
+      phenixPiPackage = pkgs.runCommand "phenix-pi-package" { } ''
+        mkdir -p "$out"
+        cp -R ${./phenix-pi}/. "$out/"
+        chmod -R u+w "$out"
 
-            rm -rf "$out/node_modules"
-            cp -R ${piNpmPackages}/node_modules "$out/node_modules"
-            chmod -R u+w "$out/node_modules"
+        rm -rf "$out/node_modules"
+        cp -R ${piNpmPackages}/node_modules "$out/node_modules"
+        chmod -R u+w "$out/node_modules"
 
-            mkdir -p "$out/bin"
-            test -x "$out/node_modules/.bin/fta"
-            ln -s "$out/node_modules/.bin/fta" "$out/bin/fta"
-            makeWrapper ${pkgs.nodejs}/bin/node "$out/bin/phenix-qa" \
-              --add-flags "--experimental-strip-types" \
-              --add-flags "$out/skills/phenix-qa/runtime/cli.ts"
-
-            piRoot=${piCodingAgent}/lib/node_modules/pi-monorepo
-            mkdir -p "$out/node_modules/@earendil-works"
-            ln -s "$piRoot" "$out/node_modules/@earendil-works/pi-coding-agent"
-            for package in pi-agent-core pi-ai; do
-              source="$piRoot/node_modules/@earendil-works/$package"
-              test -e "$source"
-              rm -rf "$out/node_modules/@earendil-works/$package"
-              ln -s "$source" "$out/node_modules/@earendil-works/$package"
-            done
-
-            mkdir -p "$out/node_modules/@matthis-k"
-            for package in phenix-kernel phenix-flow phenix-routing phenix-contracts phenix-tasks phenix-suite; do
-              rm -rf "$out/node_modules/@matthis-k/$package"
-              ln -s "$out/packages/$package" "$out/node_modules/@matthis-k/$package"
-            done
-
-            "$out/bin/phenix-qa" analyzers >/dev/null
-          '';
+        piRoot=${piCodingAgent}/lib/node_modules/pi-monorepo
+        mkdir -p "$out/node_modules/@earendil-works" "$out/node_modules/@types"
+        ln -s "$piRoot" "$out/node_modules/@earendil-works/pi-coding-agent"
+        ln -s "$piRoot/node_modules/@types/node" "$out/node_modules/@types/node"
+        ln -s "$piRoot/node_modules/undici-types" "$out/node_modules/undici-types"
+        for package in pi-agent-core pi-ai; do
+          source="$piRoot/node_modules/@earendil-works/$package"
+          test -e "$source"
+          rm -rf "$out/node_modules/@earendil-works/$package"
+          ln -s "$source" "$out/node_modules/@earendil-works/$package"
+        done
+      '';
 
       phenixRuntimeTests =
         pkgs.runCommand "phenix-runtime-tests"
           {
-            nativeBuildInputs = [
-              pkgs.nodejs
-              pkgs.ast-grep
-              pkgs.git
-              pkgs.which
-            ];
+            nativeBuildInputs = [ pkgs.nodejs ];
           }
           ''
-            export PATH=${
-              pkgs.lib.makeBinPath [
-                phenixPiPackage
-                piCodingAgent
-              ]
-            }:$PATH
             cd ${phenixPiPackage}
             node --experimental-strip-types --test tests/*.test.ts
-            node --check runtime/managed-json.mjs
-            node --check runtime/merge-mcp-defaults.mjs
-            node --check runtime/merge-model-defaults.mjs
-            node --check runtime/verify.mjs
             touch "$out"
           '';
 
