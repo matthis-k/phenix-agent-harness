@@ -144,9 +144,9 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
       .join(", ");
     return {
       systemPrompt: `${event.systemPrompt}\n\n${agentInstructions(profile.agent)}\n\nPhenix execution scope:\n- Session profile: agent=${profile.agent}, modelSet=${profile.modelSet}, difficulty=${profile.difficulty}.\n- Directly answer only simple read-only questions.
-- A full repository QA, audit, or broad review MUST use phenix_dispatch with mode=qa.
-- Any requested repository mutation MUST use phenix_dispatch with mode=implement.
-- Mixed review-and-fix or ambiguous nontrivial work MUST use phenix_dispatch with mode=coordinate.
+- All substantial work MUST use phenix_dispatch with mode=auto so the mandatory selector chooses from the current capability-filtered catalog descriptions.
+- Do not choose qa, implement, or coordinate yourself unless the user explicitly requests that operator override.
+- The selector should prefer the most specific invariant workflow and use the generic coordinator only when no single workflow covers the whole request or execution depends on intermediate results.
 - Never reproduce an invariant workflow manually; phenix_dispatch is the only root execution entry point.
 - When any descendant fails, inform the user immediately, inspect the structured failure and cause run, then decide whether to retry with phenix_handle, dispatch a better-suited workflow, request user input, or stop.
 - Retry only with bounded settings and the minimum additional permissions needed; recovery may add read/search tools or explicitly escalate to bash, but never add edit/write directly to a read-only task; report every escalation to the user.

@@ -160,7 +160,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       name: "phenix_dispatch",
       label: "Phenix Dispatch",
       description:
-        "Route substantial work through an invariant QA or implementation workflow, or through the read-only dynamic coordinator when the execution shape is ambiguous.",
+        "Route substantial work through a mandatory catalog-driven selector. Use auto for normal requests; explicit qa, implement, or coordinate modes are operator overrides only.",
       parameters: dispatchParameters,
       execute: async (raw, signal) => {
         const params = requireValid(dispatchParameters, raw);
