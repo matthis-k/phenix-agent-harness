@@ -44,12 +44,19 @@ test("registered root tools follow the active Pi session runtime", async () => {
     await phenixRootExtension(fakePi);
 
     const start = handlers.get("session_start");
+    const beforeStart = handlers.get("before_agent_start");
     const shutdown = handlers.get("session_shutdown");
     assert.ok(start);
+    assert.ok(beforeStart);
     assert.ok(shutdown);
 
     const first = context(directory, "session-one");
     await start({}, first);
+    const prompt = (await beforeStart({ systemPrompt: "base" }, first)) as {
+      systemPrompt: string;
+    };
+    assert.match(prompt.systemPrompt, /phenix_dispatch with mode=auto/);
+    assert.doesNotMatch(prompt.systemPrompt, /phenix_dispatch with mode=qa/);
     const taskTool = tools.get("phenix_tasks");
     assert.ok(taskTool);
     assert.ok(tools.has("phenix_dispatch"));
