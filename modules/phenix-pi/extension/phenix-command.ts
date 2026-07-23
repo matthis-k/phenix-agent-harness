@@ -1,6 +1,7 @@
 export const PHENIX_SUBCOMMANDS = [
   { value: "status", label: "status — Show runtime status" },
-  { value: "runs", label: "runs — Show the run tree" },
+  { value: "runs", label: "runs — Toggle the live run tree" },
+  { value: "facts", label: "facts — Toggle the live fact history" },
   { value: "tasks", label: "tasks — Show the task projection" },
   { value: "catalog", label: "catalog — List invokable definitions" },
   { value: "integrations", label: "integrations — Show integration health" },
