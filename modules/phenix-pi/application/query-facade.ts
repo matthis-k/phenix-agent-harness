@@ -17,13 +17,24 @@ export class QueryFacadeImpl implements QueryFacade {
   async runTree(rootRunId: RunId): Promise<RunTree> {
     const root = this.store.projection.requireRun(rootRunId);
     if (root.parentId) throw new Error(`${rootRunId} is not a root run`);
-    const build = (run: RunRecord): RunTreeNode => ({
-      run: this.snapshot(run),
-      children: [...this.store.projection.childrenOf(run.id)]
-        .sort((left, right) => left.requestedAt.localeCompare(right.requestedAt))
-        .map(build),
-    });
+    const build = (run: RunRecord): RunTreeNode => {
+      const activity = this.store.projection.activities.get(run.id);
+      return {
+        run: this.snapshot(run),
+        ...(activity ? { activity } : {}),
+        children: [...this.store.projection.childrenOf(run.id)]
+          .sort((left, right) => left.requestedAt.localeCompare(right.requestedAt))
+          .map(build),
+      };
+    };
     return { root: build(root) };
+  }
+
+  async facts(rootRunId: RunId, limit = 100) {
+    this.store.projection.requireRun(rootRunId);
+    const facts = this.store.projection.factsFor(rootRunId);
+    const bounded = Math.max(0, Math.min(1_000, limit));
+    return bounded === 0 ? [] : facts.slice(-bounded);
   }
 
   taskTree(rootRunId: RunId) {
