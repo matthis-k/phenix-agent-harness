@@ -6,6 +6,7 @@ import type {
   Context,
   Model,
   SimpleStreamOptions,
+  ThinkingLevel,
 } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
@@ -14,6 +15,7 @@ import type { ExtensionAPI, ModelRegistry } from "@earendil-works/pi-coding-agen
 import {
   isPhenixModelSet,
   PHENIX_MODEL_SETS,
+  type PiThinkingLevel,
   virtualModel,
 } from "../../domain/definition/model.ts";
 import type { SessionProfile } from "../../domain/run/model.ts";
@@ -146,15 +148,16 @@ async function forwardAttempt(
     readonly headers?: Record<string, string>;
     readonly env?: Record<string, string>;
   },
-  thinking: string,
+  thinking: PiThinkingLevel,
 ): Promise<{ readonly completed: boolean; readonly substantiveOutput: boolean; readonly error: string }> {
   const { apiKey: _virtualApiKey, headers, env, ...rest } = options ?? {};
+  const reasoning = thinking === "off" ? undefined : (thinking satisfies ThinkingLevel);
   const upstream = streamSimple(concrete, context, {
     ...rest,
     ...(auth.apiKey ? { apiKey: auth.apiKey } : {}),
     headers: { ...headers, ...auth.headers },
     env: { ...env, ...auth.env },
-    ...(thinking === "off" || thinking === "minimal" ? {} : { reasoning: thinking }),
+    ...(reasoning ? { reasoning } : {}),
   });
 
   const pending: AssistantMessageEvent[] = [];
