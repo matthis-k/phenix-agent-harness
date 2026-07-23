@@ -24,6 +24,7 @@ import type {
   SessionProfileFacade,
   TaskFacade,
 } from "../application/interfaces.ts";
+import { SessionInvocationPolicy } from "../application/invocation-policy.ts";
 import { ProfileAwareModelResolver } from "../application/profile-aware-model-resolver.ts";
 import { QueryFacadeImpl } from "../application/query-facade.ts";
 import { SessionProfileFacadeImpl } from "../application/session-profile-facade.ts";
@@ -110,7 +111,14 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     ids,
   });
   const catalog = new CatalogFacadeImpl(definitions, store);
-  const tools = new FacadeAgentToolFactory({ execution, tasks, catalog, store });
+  const invocationPolicy = new SessionInvocationPolicy({ store, catalog: definitions });
+  const tools = new FacadeAgentToolFactory({
+    execution,
+    tasks,
+    catalog,
+    store,
+    invocationPolicy,
+  });
   const backend = new PiSdkAgentSessionBackend({
     modelRegistry: host.modelRegistry,
     agentDir: host.agentDir,
