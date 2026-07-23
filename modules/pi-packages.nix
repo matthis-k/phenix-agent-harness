@@ -105,7 +105,7 @@
           ln -s "$out/node_modules/.bin/fta" "$out/bin/fta"
           makeWrapper ${pkgs.nodejs}/bin/node "$out/bin/phenix-qa" \
             --add-flags "--experimental-strip-types" \
-            --add-flags "$out/skills/phenix-qa/runtime/index.ts"
+            --add-flags "$out/skills/phenix-qa/runtime/cli.ts"
 
           piRoot=${piCodingAgent}/lib/node_modules/pi-monorepo
           mkdir -p "$out/node_modules/@earendil-works"
