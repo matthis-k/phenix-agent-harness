@@ -1,21 +1,20 @@
 # Phenix definition Markdown
 
-Bundled Phenix agents and workflows are authored as constrained Markdown and compiled into the existing typed `AgentDefinition` and `WorkflowDefinition` runtime objects.
+Bundled Phenix agents and workflows are authored as constrained Markdown and compiled into typed `AgentDefinition` and `WorkflowDefinition` runtime objects.
 
-Markdown is the authoring surface. Compiled definitions, schemas, graph validation, and capability enforcement remain execution authority. Mermaid is explanatory and never authoritative.
+Markdown is the authoring surface. Compiled definitions, schemas, graph validation, capability enforcement, and run-scoped routing remain execution authority. Mermaid is explanatory and never authoritative.
 
 ## Design rules
 
 1. Every definition declares a stable ID and explicit input/output schema IDs.
-2. Agent prompts remain static definition instructions; task data is supplied separately through the input schema.
-3. Tools, context, child capabilities, and limits are structured metadata, never inferred from prose.
+2. Agent prompts remain static instructions; task data is supplied through the input schema.
+3. Tools, context, child capabilities, limits, and model routes are structured metadata.
 4. Workflow states invoke public agent or workflow definitions through typed boundaries.
 5. Transition tables are authoritative; Mermaid diagrams are for readers.
-6. Arbitrary expressions, JavaScript, shell expansion, and prompt-granted permissions are not supported.
+6. Difficulty is run-scoped data. It is never inferred inside provider adapters or stored as mutable workflow-global state.
+7. Arbitrary expressions, JavaScript, shell expansion, and prompt-granted permissions are not supported.
 
 ## Agent format
-
-A small agent such as the repository scout is complete in one readable file:
 
 ````md
 # Repository scout
@@ -29,6 +28,15 @@ model: session
 thinking: route
 persistence: memory
 ```
+
+## Models
+
+| Difficulty | Model | Capability | Thinking |
+|---|---|---|---|
+| `D0` | `session` | `fast` | `minimal` |
+| `D1` | `session` | `general` | `low` |
+| `D2` | `session` | `reasoning` | `medium` |
+| `D3` | `session` | `reasoning` | `high` |
 
 ## Tools
 
@@ -67,7 +75,7 @@ max-repair-attempts: 1
 Act as a read-only repository scout. Search narrowly, cite concrete paths and lines, distinguish evidence from inference, and do not edit files.
 ````
 
-The compiler resolves both schema IDs, validates every field and enum, and produces the effective runtime definition directly. There is no secondary TypeScript policy overlay.
+The compiler resolves both schema IDs, validates every field and enum, and produces the effective runtime definition directly. There is no secondary TypeScript policy overlay for agents that declare a model table.
 
 ### Model syntax
 
@@ -75,56 +83,112 @@ The compiler resolves both schema IDs, validates every field and enum, and produ
 - `phenix:<set>` — select a named virtual Phenix model set.
 - `<provider>/<model>` — select a concrete provider model.
 
+### Difficulty model table
+
+`## Models` is optional. When present it must contain exactly one row for each of `D0`, `D1`, `D2`, and `D3`.
+
+| Column | Meaning |
+|---|---|
+| `Difficulty` | The effective run difficulty. |
+| `Model` | A model selector using the syntax above. |
+| `Capability` | The provider-independent pool capability, such as `code`, `reasoning-max`, or `review`. |
+| `Thinking` | A concrete Pi thinking level. `route` is not allowed in this table. |
+
+The execution application layer selects one row. The provider resolver receives only the selected model, capability, thinking level, and difficulty. It does not inspect workflow graphs or Markdown.
+
 ### Lists
 
 Tool names, artifacts, and invokable child definitions use comma-separated values. An empty value declares an empty list.
 
+## Difficulty estimator
+
+Difficulty estimation is implemented as an ordinary typed agent. Its Markdown prompt contains a small decision flowchart and rubric; its output schema is:
+
+```ts
+{
+  difficulty: "D0" | "D1" | "D2" | "D3";
+  summary: string;
+  signals: string[];
+}
+```
+
+The estimator has no repository tools and does not solve the task. Workflows decide whether to invoke it and how to consume its result. A workflow such as QA may instead pin strong routes directly.
+
 ## Workflow format
 
 ````md
-# Human-readable workflow title
+# Difficulty-aware implementation
 
 ```phenix-workflow
 id: workflow.example
-description: One-line dispatch description.
-input: request.objective.v1
-output: outcome.base.v1
-entry: inspect
+input: request.implementation.v1
+output: outcome.implementation-result.v1
+entry: estimate
 timeout-ms: 600000
 max-node-runs: 12
-max-parallelism: 2
+max-parallelism: 1
 ```
 
 ## Flow
 
 ```mermaid
 flowchart LR
-    inspect --> verify
+    estimate -->|D0| implement
+    estimate -->|D1-D3| plan
+    plan --> implement
+    implement -->|D0| return
+    implement -->|D1-D3| verify
     verify --> return
 ```
 
 ## States
 
-### inspect
+### estimate
 
 ```phenix-state
 kind: invoke
-run: agent.scout
-input: example.inspect.input
-input-schema: request.scout.v1
-output-schema: outcome.scout-report.v1
+run: agent.difficulty-estimator
+input: difficulty.input
+input-schema: request.difficulty-assessment.v1
+output-schema: outcome.difficulty-assessment.v1
 wait: await
+difficulty: D0
+```
+
+### plan
+
+```phenix-state
+kind: invoke
+run: agent.planner
+input: example.plan.input
+input-schema: request.plan.v1
+output-schema: outcome.plan.v1
+wait: await
+difficulty: result:estimate
+```
+
+### implement
+
+```phenix-state
+kind: invoke
+run: agent.implementer
+input: example.implement.input
+input-schema: request.implementation.v1
+output-schema: outcome.change-set.v1
+wait: await
+difficulty: result:estimate
 ```
 
 ### verify
 
 ```phenix-state
 kind: invoke
-run: workflow.verify
+run: agent.verifier
 input: example.verify.input
 input-schema: request.verification.v1
 output-schema: outcome.verification.v1
 wait: await
+difficulty: result:estimate
 ```
 
 ### return
@@ -132,37 +196,40 @@ wait: await
 ```phenix-state
 kind: return
 output: example.output
-output-schema: outcome.base.v1
+output-schema: outcome.implementation-result.v1
 ```
 
 ## Transitions
 
 | From | To | When | Max traversals |
 |---|---|---|---|
-| `inspect` | `verify` | | |
+| `estimate` | `implement` | `difficulty.D0` | |
+| `estimate` | `plan` | `difficulty.at-least-D1` | |
+| `plan` | `implement` | | |
+| `implement` | `return` | `difficulty.D0` | |
+| `implement` | `verify` | `difficulty.at-least-D1` | |
 | `verify` | `return` | | |
 ````
+
+## Invoke difficulty binding
+
+An `invoke` state may declare one of three policies:
+
+- Omitted — inherit the parent run's effective difficulty.
+- `difficulty: D3` — pin this invocation to a fixed route. QA uses this for architecture, security, and synthesis.
+- `difficulty: result:estimate` — read the validated `difficulty` field from a successful earlier state result.
+
+The compiler verifies that a result-bound state exists and is not self-referential. The workflow process manager extracts the validated difficulty and passes it through the child invocation boundary. The execution facade persists it in the child's compiled run specification.
 
 ## State contracts
 
 ### `invoke`
 
-An invoked state declares both the mapping used to construct the child input and the expected child schemas:
-
-```phenix-state
-kind: invoke
-run: workflow.verify
-input: verification.input
-input-schema: request.verification.v1
-output-schema: outcome.verification.v1
-wait: await
-```
-
-The compiler resolves `workflow.verify` and rejects the workflow when either declared schema differs from the callee's public contract.
+An invoked state declares the mapping used to construct the child input and the expected child schemas. The compiler rejects schema mismatches.
 
 ### `local`
 
-A deterministic local operation also declares input and output schemas:
+A deterministic local operation declares input and output schemas:
 
 ```phenix-state
 kind: local
@@ -172,11 +239,11 @@ input-schema: request.qa-checks.v1
 output-schema: outcome.check-results.v1
 ```
 
-The schemas must exist in the shared definition schema registry. Local operation implementations remain separately registered runtime authorities.
+Local operation implementations remain separately registered runtime authorities.
 
 ### `decision`
 
-A decision evaluates a registered pure function. Outgoing edge conditions select the transition:
+A decision evaluates a registered pure function. Outgoing edge conditions select transitions:
 
 ```phenix-state
 kind: decision
@@ -185,66 +252,31 @@ decide: implement.acceptance
 
 ### `join`
 
-A join combines fan-out branches using `all`, `all-success`, `first-success`, or `quorum`:
-
-```phenix-state
-kind: join
-policy: all-success
-```
+A join combines fan-out branches using `all`, `all-success`, `first-success`, or `quorum`.
 
 ### `return` and `fail`
 
-A return state must declare the workflow's public output schema:
-
-```phenix-state
-kind: return
-output: workflow.output
-output-schema: outcome.base.v1
-```
-
-A fail state resolves its reason through a registered mapping:
-
-```phenix-state
-kind: fail
-reason: workflow.failure
-```
+A return declares the workflow's public output schema. A fail resolves its reason through a registered mapping.
 
 ## Workflow composition
 
-A workflow may invoke another workflow through the same `invoke` node used for agents:
+A workflow may invoke another workflow through the same `invoke` node used for agents. Callers cannot jump into another workflow's private state. This preserves independent entry points, schemas, limits, failure handling, cancellation ownership, and implementation freedom.
 
-```phenix-state
-kind: invoke
-run: workflow.implement
-input: qa-fix.implement.input
-input-schema: request.implementation.v1
-output-schema: outcome.implementation-result.v1
-wait: await
-```
-
-The transition targets the local state that performs the invocation. Callers cannot jump into another workflow's private internal state. This preserves independent entry points, schemas, limits, failure handling, cancellation ownership, and implementation freedom.
+A nested workflow inherits the invoking run's difficulty unless the invocation pins another value. The nested workflow may also run its own estimator and bind subsequent states to that result.
 
 ## Conditions and bounded cycles
 
-Conditions are registered pure function references, not inline expressions:
+Conditions are registered pure function references, not inline expressions. Difficulty branches use the same condition registry as any other branch:
 
 ```md
-| `accepted` | `implement` | `decision.repair` | `2` |
+| `estimate` | `implement` | `difficulty.D0` | |
 ```
 
 Every cycle edge must declare `Max traversals`. The graph validator enforces bounded cycles, reachability, terminal paths, definition existence, mapping references, decision references, condition references, and parallelism limits.
 
 ## Workflow prompt templates
 
-A state may reserve an optional prompt body:
-
-```md
-#### Prompt
-
-Verify the change for {{ input.objective }} using {{ result.implement }}.
-```
-
-The parser records this section, but compilation currently rejects it. Template execution will only be enabled once replacements can be attached to schema-validated invocation input without bypassing capability enforcement. The intended namespaces are limited to `input.*`, `result.*`, explicitly exposed `runtime.*`, and generated `system.*` values.
+A state may reserve an optional prompt body, but compilation currently rejects it. Template execution will only be enabled once replacements can be attached to schema-validated invocation input without bypassing capability enforcement.
 
 ## Source layout
 
@@ -254,4 +286,4 @@ The parser records this section, but compilation currently rejects it. Template 
 - `modules/phenix-pi/adapters/agent/markdown.ts`
 - `modules/phenix-pi/adapters/workflow/markdown.ts`
 
-The bundled agent and workflow registries load these Markdown files directly. Tests verify that every source compiles, all catalog definitions validate, step contracts match referenced definitions, and nested workflow execution preserves typed outcomes.
+The bundled registries load these Markdown files directly. Tests verify source compilation, route-table completeness, graph validation, step contracts, difficulty-dependent execution, pinned QA routes, and nested workflow behavior.
