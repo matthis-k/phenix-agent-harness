@@ -383,25 +383,37 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
   }
 
   async await<O>(runId: RunId, signal?: AbortSignal): Promise<Outcome<O>> {
-    const current = this.store.projection.requireRun(runId);
-    if (current.outcome) return current.outcome as Outcome<O>;
     if (signal?.aborted) throw abortError(signal);
 
     return new Promise<Outcome<O>>((resolve, reject) => {
+      let settled = false;
       let unsubscribe: () => void = () => undefined;
+      const finish = (outcome: Outcome<O>): void => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener("abort", onAbort);
+        unsubscribe();
+        resolve(outcome);
+      };
       const onAbort = (): void => {
+        if (settled) return;
+        settled = true;
         unsubscribe();
         reject(abortError(signal));
       };
       unsubscribe = this.store.events.subscribe((event) => {
         if (event.runId !== runId || !isTerminalEvent(event.type)) return;
         const outcome = this.store.projection.requireRun(runId).outcome;
-        if (!outcome) return;
-        signal?.removeEventListener("abort", onAbort);
-        unsubscribe();
-        resolve(outcome as Outcome<O>);
+        if (outcome) finish(outcome as Outcome<O>);
       });
       signal?.addEventListener("abort", onAbort, { once: true });
+
+      const current = this.store.projection.requireRun(runId);
+      if (current.outcome) {
+        finish(current.outcome as Outcome<O>);
+      } else if (signal?.aborted) {
+        onAbort();
+      }
     });
   }
 
