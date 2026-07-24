@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import type { EventBus, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { JsonlDiagnosticLog } from "../adapters/persistence/jsonl-diagnostic-log.ts";
 import { JsonlRunLedger } from "../adapters/persistence/jsonl-run-ledger.ts";
 import { PiSdkAgentSessionBackend } from "../adapters/pi-sdk/agent-session-backend.ts";
 import { ProcessLocalOperationRunner } from "../adapters/process/local-operation-runner.ts";
@@ -14,6 +15,7 @@ import { AgentExecutor } from "../application/agent-executor.ts";
 import { FacadeAgentToolFactory } from "../application/agent-tools.ts";
 import { DefinitionCatalog, WorkflowFunctionRegistry } from "../application/catalog.ts";
 import { CatalogFacadeImpl } from "../application/catalog-facade.ts";
+import { logDomainEvent } from "../application/diagnostic-event-bridge.ts";
 import { DispatchService } from "../application/dispatch-service.ts";
 import { OrderedDomainEventBus } from "../application/domain-event-bus.ts";
 import { ExecutionFacadeImpl } from "../application/execution-facade.ts";
@@ -42,6 +44,7 @@ import { DEFAULT_SESSION_PROFILE, type RootRunInput } from "../domain/run/model.
 import type { RunId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import { type IdGenerator, systemClock } from "../ports/clock.ts";
+import type { DiagnosticLog } from "../ports/diagnostic-log.ts";
 import type { RunLedger } from "../ports/run-ledger.ts";
 
 export interface PhenixHostServices {
@@ -52,6 +55,7 @@ export interface PhenixHostServices {
   readonly routingPolicy?: RoutingPolicy;
   readonly piEventBus?: EventBus;
   readonly ledger?: RunLedger;
+  readonly diagnostics?: DiagnosticLog;
   readonly ids?: IdGenerator;
 }
 
@@ -62,6 +66,7 @@ export interface PhenixRuntime {
   readonly catalog: CatalogFacade;
   readonly queries: QueryFacade;
   readonly events: OrderedDomainEventBus;
+  readonly diagnostics: DiagnosticLog;
   startRoot(input: {
     readonly id: RunId;
     readonly session: RootRunInput;
@@ -78,17 +83,31 @@ export interface PhenixRuntime {
 
 export async function createPhenixRuntime(host: PhenixHostServices): Promise<PhenixRuntime> {
   const ids = host.ids ?? new CryptoIdGenerator();
+  const stateDir = host.stateDir ?? path.join(host.cwd, ".phenix-agent-state");
+  const diagnostics = host.diagnostics ?? new JsonlDiagnosticLog(stateDir);
   const events = new OrderedDomainEventBus({
-    onSubscriberError: ({ event, error }) => {
-      console.error(
-        `[phenix] domain event subscriber failed for ${event.type}:`,
-        error instanceof Error ? error.message : String(error),
-      );
+    onSubscriberError: async ({ event, error }) => {
+      try {
+        await diagnostics.record({
+          rootRunId: event.rootRunId,
+          runId: event.runId,
+          ...(event.parentRunId ? { parentRunId: event.parentRunId } : {}),
+          severity: "error",
+          scope: "runtime.event.subscriber_failed",
+          message: `Domain event subscriber failed for ${event.type}`,
+          fields: { eventType: event.type, sequence: event.sequence, error },
+        });
+      } catch {
+        console.error(
+          `[phenix] domain event subscriber failed for ${event.type}:`,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
     },
   });
-  const ledger =
-    host.ledger ?? new JsonlRunLedger(host.stateDir ?? path.join(host.cwd, ".phenix-agent-state"));
+  const ledger = host.ledger ?? new JsonlRunLedger(stateDir);
   const store = new ExecutionStore({ ledger, events, clock: systemClock, ids });
+  const unsubscribeDiagnostics = events.subscribe((event) => logDomainEvent(diagnostics, event));
   const profiles = new SessionProfileFacadeImpl(store);
   const operations = new ProcessLocalOperationRunner();
   const functions = new WorkflowFunctionRegistry();
@@ -218,11 +237,33 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     catalog,
     queries,
     events,
+    diagnostics,
     async startRoot(input) {
       activeRootRunId = input.id;
+      await diagnostics.record({
+        rootRunId: input.id,
+        runId: input.id,
+        severity: "info",
+        scope: "runtime.session.starting",
+        message: "Phenix root session is starting",
+        fields: {
+          sessionId: input.session.sessionId,
+          sessionFile: input.session.sessionFile,
+          cwd: input.session.cwd,
+          model: input.model,
+        },
+      });
       await execution.initializeRoot(input);
       await execution.recoverNonterminal(input.id);
       await events.drain();
+      await diagnostics.record({
+        rootRunId: input.id,
+        runId: input.id,
+        severity: "info",
+        scope: "runtime.session.started",
+        message: "Phenix root session started",
+        fields: { sequence: store.sequence(input.id) },
+      });
     },
     rootTools: (rootRunId) => tools.forRun(rootRunId),
     setRootNotifier(listener) {
@@ -235,13 +276,30 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
       ledger instanceof JsonlRunLedger ? ledger.pathFor(rootRunId) : undefined,
     async shutdown(rootRunId) {
       rootNotifier = undefined;
+      await diagnostics.record({
+        rootRunId,
+        runId: rootRunId,
+        severity: "info",
+        scope: "runtime.session.shutdown_started",
+        message: "Phenix root session shutdown started",
+      });
       await execution.shutdown(rootRunId);
       await workflows.shutdown();
       await agents.shutdown();
       await events.drain();
+      await diagnostics.record({
+        rootRunId,
+        runId: rootRunId,
+        severity: "info",
+        scope: "runtime.session.shutdown_completed",
+        message: "Phenix root session shutdown completed",
+        fields: { sequence: store.sequence(rootRunId) },
+      });
+      await diagnostics.drain();
       if (activeRootRunId === rootRunId) activeRootRunId = undefined;
       unsubscribeNotifications();
       unsubscribePiBridge();
+      unsubscribeDiagnostics();
     },
   };
 }

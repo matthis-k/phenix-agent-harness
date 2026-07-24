@@ -2,9 +2,19 @@
 
 Phenix exposes deterministic execution telemetry without routing it through another model.
 
-## Live views
+## Live dashboard
 
-- `/phenix runs` shows the complete live run tree with current activity and recent facts.
+- `/phenix status` opens the live session dashboard.
+- `/phenix status off` hides the active widget.
+- `/phenix status --once` renders one static dashboard snapshot.
+- `/phenix status --json` renders the complete structured dashboard projection.
+- `/phenix status --expanded` keeps completed workflows expanded.
+- `/phenix runs` is a compatibility alias for `/phenix status`.
+
+The dashboard shows the session profile, integration health, active descendant count, diagnostic severity totals, the complete active run tree, five recent deduplicated facts, and durable storage paths. Each agent subsession displays its own resolved concrete provider/model and effective thinking level. Active, waiting, and failed workflow branches remain expanded. Completed workflows collapse to a terminal summary by default.
+
+## Fact history
+
 - `/phenix facts` shows the merged chronological fact history for the full session tree.
 - Append `off` to hide the active widget.
 - Append `--once` for a static text snapshot.
@@ -16,6 +26,21 @@ Phenix exposes deterministic execution telemetry without routing it through anot
 
 Clipboard and file exports use the same complete ANSI-free plain-text history. Export operations report their fact count and destination, and failures do not modify the live view.
 
+## Structured diagnostic logs
+
+`/phenix logs` reads the root-scoped structured diagnostic stream. Severity options are thresholds:
+
+- `--trace`: trace, info, warning, and error
+- `--info`: info, warning, and error; this is the default
+- `--warning` or `--warn`: warning and error
+- `--error`: error only
+
+The interactive view renders the latest matching entries in a grepable single-line form. `/phenix logs --json` exposes the matching structured records. `/phenix logs <severity> --copy [program]` pipes the complete filtered JSONL stream to `wl-copy` or another directly spawned program. `/phenix logs <severity> --file <file>` writes the complete filtered JSONL stream with private permissions.
+
+Scopes are stable lowercase dot-separated identifiers such as `run.lifecycle.failed`, `model.routing.resolved`, `workflow.node.entered`, and `tool.execution.started`. Runtime IDs, model names, durations, exit states, counts, and other short scalar fields stay inline. Large strings, context, inputs, outcomes, nested reports, and provider bodies are stored once as private content-addressed artifacts and represented by `artifact:sha256:<digest>` references. Resolve one with `/phenix logs --resolve <reference>`.
+
+The diagnostic stream is not canonical execution state. The append-only run ledger remains authoritative; diagnostics are a durable reconstruction aid derived from runtime boundaries and domain events.
+
 ## Semantic colors
 
 The live views and status surfaces use theme-aware semantic colors:
@@ -25,11 +50,17 @@ The live views and status surfaces use theme-aware semantic colors:
 - successful or completed: success
 - failed: error
 - cancelled: muted/error distinction
+- concrete model: accent
+- minimal/off thinking: muted
+- low thinking: success
+- medium thinking: accent
+- high thinking: warning
+- xhigh/max thinking: error accent
 - agent-reported facts: warning
 - deterministically derived facts: secondary
-- IDs, timestamps, and tree guides: muted
+- IDs, timestamps, paths, and tree guides: muted
 
-Exports remain uncolored.
+Exports remain uncolored and retain explicit state labels and symbols so meaning does not depend on color.
 
 ## Activity and facts
 

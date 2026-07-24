@@ -5,6 +5,7 @@ import { formatIntegrationReport, summarizeIntegrations } from "../adapters/pi-s
 import {
   completePhenixSubcommands,
   PHENIX_FACTS_USAGE,
+  PHENIX_STATUS_USAGE,
   PHENIX_SUBCOMMANDS,
   PHENIX_USAGE,
 } from "../extension/phenix-command.ts";
@@ -17,9 +18,13 @@ test("phenix command completion lists and filters subcommands", () => {
   assert.deepEqual(completePhenixSubcommands("I"), [
     { value: "integrations", label: "integrations — Show integration health" },
   ]);
+  assert.deepEqual(completePhenixSubcommands("l"), [
+    { value: "logs", label: "logs — Inspect or export structured diagnostics" },
+  ]);
   assert.equal(completePhenixSubcommands("unknown"), null);
   assert.equal(completePhenixSubcommands("status extra"), null);
-  assert.equal(PHENIX_USAGE, "/phenix status|runs|facts|tasks|catalog|integrations");
+  assert.equal(PHENIX_USAGE, "/phenix status|logs|runs|facts|tasks|catalog|integrations");
+  assert.equal(PHENIX_STATUS_USAGE, "/phenix status [off|--once|--json|--expanded]");
   assert.equal(
     PHENIX_FACTS_USAGE,
     "/phenix facts [off|--once|--json|--clipboard [command]|--file <file>]",

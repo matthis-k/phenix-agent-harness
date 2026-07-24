@@ -3,6 +3,9 @@ import { Text } from "@earendil-works/pi-tui";
 
 import type { RunTree, RunTreeNode } from "../application/interfaces.ts";
 import type { PhenixRuntime } from "../composition/create-phenix-runtime.ts";
+import type { PiThinkingLevel } from "../domain/definition/model.ts";
+import type { DiagnosticSummary } from "../domain/diagnostics.ts";
+import type { SessionProfile } from "../domain/run/model.ts";
 import type { RunFact } from "../domain/run/observability.ts";
 import type { RunId } from "../domain/shared.ts";
 import {
@@ -18,36 +21,68 @@ import {
 
 const WIDGET_KEY = "phenix-live-runs";
 const MAX_FACT_LINES = 24;
+const DASHBOARD_FACT_LINES = 5;
 
-export type RunMonitorMode = "hidden" | "runs" | "facts";
+export type RunMonitorMode = "hidden" | "status" | "facts";
 
 export interface FactHistoryExport {
   readonly text: string;
   readonly count: number;
 }
 
+export interface RunMonitorOptions {
+  readonly integrations?: string;
+  readonly integrationsFailed?: boolean;
+}
+
+interface DashboardData {
+  readonly tree: RunTree;
+  readonly facts: readonly RunFact[];
+  readonly sequence: number;
+  readonly profile: SessionProfile;
+  readonly diagnostics: DiagnosticSummary;
+  readonly ledger: string;
+  readonly logs: string;
+  readonly artifacts: string;
+  readonly integrations: string;
+  readonly integrationsFailed: boolean;
+  readonly expanded: boolean;
+}
+
 export class RunMonitor {
   private readonly ctx: ExtensionContext;
   private readonly runtime: PhenixRuntime;
   private readonly rootRunId: RunId;
+  private readonly options: RunMonitorOptions;
   private mode: RunMonitorMode = "hidden";
+  private expanded = false;
   private refreshing = false;
   private pending = false;
   private disposed = false;
 
-  constructor(ctx: ExtensionContext, runtime: PhenixRuntime, rootRunId: RunId) {
+  constructor(
+    ctx: ExtensionContext,
+    runtime: PhenixRuntime,
+    rootRunId: RunId,
+    options: RunMonitorOptions = {},
+  ) {
     this.ctx = ctx;
     this.runtime = runtime;
     this.rootRunId = rootRunId;
+    this.options = options;
   }
 
   get currentMode(): RunMonitorMode {
     return this.mode;
   }
 
-  async show(mode: Exclude<RunMonitorMode, "hidden">): Promise<void> {
+  async show(
+    mode: Exclude<RunMonitorMode, "hidden">,
+    options: { readonly expanded?: boolean } = {},
+  ): Promise<void> {
     if (this.disposed) return;
     this.mode = mode;
+    if (options.expanded !== undefined) this.expanded = options.expanded;
     await this.refresh();
   }
 
@@ -79,20 +114,43 @@ export class RunMonitor {
     }
   }
 
-  async once(mode: Exclude<RunMonitorMode, "hidden">): Promise<string> {
-    return (await this.render(mode, this.ctx.ui.theme)).join("\n");
+  async once(
+    mode: Exclude<RunMonitorMode, "hidden">,
+    options: { readonly expanded?: boolean } = {},
+  ): Promise<string> {
+    const previous = this.expanded;
+    if (options.expanded !== undefined) this.expanded = options.expanded;
+    try {
+      return (await this.render(mode, this.ctx.ui.theme)).join("\n");
+    } finally {
+      this.expanded = previous;
+    }
   }
 
   async json(mode: Exclude<RunMonitorMode, "hidden">): Promise<string> {
     if (mode === "facts") {
       return JSON.stringify(await this.runtime.queries.facts(this.rootRunId), null, 2);
     }
-    const [tree, facts] = await Promise.all([
+    const [tree, facts, profile, diagnostics] = await Promise.all([
       this.runtime.queries.runTree(this.rootRunId),
-      this.runtime.queries.facts(this.rootRunId, 100),
+      this.runtime.queries.facts(this.rootRunId),
+      this.runtime.profiles.current(this.rootRunId),
+      this.runtime.diagnostics.summary(this.rootRunId),
     ]);
     return JSON.stringify(
-      { sequence: this.runtime.sequence(this.rootRunId), tree, facts },
+      {
+        sequence: this.runtime.sequence(this.rootRunId),
+        profile,
+        tree,
+        facts: selectRecentFacts(facts),
+        diagnostics,
+        storage: {
+          ledger: this.runtime.ledgerPath(this.rootRunId) ?? "in-memory",
+          logs: this.runtime.diagnostics.pathFor(this.rootRunId) ?? "in-memory",
+          artifacts: this.runtime.diagnostics.artifactDirectoryFor(this.rootRunId) ?? "in-memory",
+        },
+        integrations: this.options.integrations ?? "unknown",
+      },
       null,
       2,
     );
@@ -119,11 +177,28 @@ export class RunMonitor {
       const facts = await this.runtime.queries.facts(this.rootRunId, MAX_FACT_LINES);
       return renderFacts(facts, this.runtime.sequence(this.rootRunId), theme);
     }
-    const [tree, facts] = await Promise.all([
+    const [tree, facts, profile, diagnostics] = await Promise.all([
       this.runtime.queries.runTree(this.rootRunId),
-      this.runtime.queries.facts(this.rootRunId, 8),
+      this.runtime.queries.facts(this.rootRunId),
+      this.runtime.profiles.current(this.rootRunId),
+      this.runtime.diagnostics.summary(this.rootRunId),
     ]);
-    return renderRuns(tree, facts, this.runtime.sequence(this.rootRunId), theme);
+    return renderDashboard(
+      {
+        tree,
+        facts,
+        sequence: this.runtime.sequence(this.rootRunId),
+        profile,
+        diagnostics,
+        ledger: this.runtime.ledgerPath(this.rootRunId) ?? "in-memory",
+        logs: this.runtime.diagnostics.pathFor(this.rootRunId) ?? "in-memory",
+        artifacts: this.runtime.diagnostics.artifactDirectoryFor(this.rootRunId) ?? "in-memory",
+        integrations: this.options.integrations ?? "unknown",
+        integrationsFailed: this.options.integrationsFailed ?? false,
+        expanded: this.expanded,
+      },
+      theme,
+    );
   }
 }
 
@@ -132,20 +207,86 @@ export function createUnboundedWidget(lines: readonly string[]): () => Text {
   return () => new Text(content, 1, 0);
 }
 
+export function renderDashboard(data: DashboardData, theme?: ObservabilityTheme): string[] {
+  const activeDescendants = countNodes(
+    data.tree.root,
+    (node) => node.run.id !== data.tree.root.run.id && !isTerminal(node.run.state),
+  );
+  const roleByRun = new Map<RunId, string>();
+  collectRoles(data.tree.root, roleByRun);
+  const terminalFacts = terminalFactMap(data.facts);
+  const lines = [heading(theme, `Phenix · live status · seq ${data.sequence}`), ""];
+
+  lines.push(heading(theme, "Session"));
+  lines.push(
+    `  ${color(theme, "dim", "Profile")}       ${strong(theme, data.profile.agent)}${color(theme, "dim", " · ")}${color(theme, "accent", data.profile.modelSet)}${color(theme, "dim", " · ")}${thinking(theme, difficultyThinking(data.profile.difficulty), data.profile.difficulty)}`,
+  );
+  lines.push(
+    `  ${color(theme, "dim", "Integrations")}  ${color(theme, data.integrationsFailed ? "error" : "success", data.integrations)}`,
+  );
+  lines.push(
+    `  ${color(theme, "dim", "Active")}        ${color(theme, activeDescendants === 0 ? "success" : "warning", `${activeDescendants} descendants`)}`,
+  );
+  lines.push(
+    `  ${color(theme, "dim", "Diagnostics")}   ${color(theme, data.diagnostics.counts.error > 0 ? "error" : "success", `${data.diagnostics.counts.error} errors`)}${color(theme, "dim", " · ")}${color(theme, data.diagnostics.counts.warning > 0 ? "warning" : "muted", `${data.diagnostics.counts.warning} warnings`)}${color(theme, "dim", " · ")}${color(theme, "muted", `${data.diagnostics.total} total`)}`,
+  );
+
+  lines.push("", heading(theme, "Execution"));
+  appendNode(lines, data.tree.root, "", true, theme, terminalFacts, data.expanded, true);
+
+  const recent = selectRecentFacts(data.facts);
+  lines.push("", heading(theme, "Recent facts"));
+  if (recent.length === 0) lines.push(color(theme, "muted", "  No facts recorded yet."));
+  for (const factItem of recent) {
+    lines.push(`  ${formatFact(factItem, true, theme, roleByRun.get(factItem.runId))}`);
+  }
+
+  lines.push("", heading(theme, "Storage"));
+  lines.push(`  ${color(theme, "dim", "Ledger")}     ${color(theme, "muted", data.ledger)}`);
+  lines.push(`  ${color(theme, "dim", "Logs")}       ${color(theme, "muted", data.logs)}`);
+  lines.push(
+    `  ${color(theme, "dim", "Artifacts")}  ${color(theme, "muted", `${data.diagnostics.artifacts} · ${data.artifacts}`)}`,
+  );
+  lines.push(
+    "",
+    color(
+      theme,
+      "dim",
+      data.expanded
+        ? "/phenix status off · /phenix status · /phenix facts · /phenix logs"
+        : "/phenix status off · /phenix status --expanded · /phenix facts · /phenix logs",
+    ),
+  );
+  return lines;
+}
+
+/** Compatibility renderer retained for existing tests and callers. */
 export function renderRuns(
   tree: RunTree,
   facts: readonly RunFact[],
   sequence: number,
   theme?: ObservabilityTheme,
 ): string[] {
-  const lines = [heading(theme, `Phenix live runs · seq ${sequence}`)];
-  appendNode(lines, tree.root, "", true, theme, true);
-  if (facts.length > 0) {
-    lines.push("", heading(theme, "Recent facts"));
-    for (const factItem of facts.slice(-8)) lines.push(formatFact(factItem, true, theme));
-  }
-  lines.push("", color(theme, "dim", "/phenix runs off · /phenix facts"));
-  return lines;
+  return renderDashboard(
+    {
+      tree,
+      facts,
+      sequence,
+      profile: { agent: "base", modelSet: "mixed", difficulty: "D1" },
+      diagnostics: {
+        total: 0,
+        artifacts: 0,
+        counts: { trace: 0, info: 0, warning: 0, error: 0 },
+      },
+      ledger: "in-memory",
+      logs: "in-memory",
+      artifacts: "in-memory",
+      integrations: "unknown",
+      integrationsFailed: false,
+      expanded: true,
+    },
+    theme,
+  );
 }
 
 export function renderFacts(
@@ -158,7 +299,7 @@ export function renderFacts(
   for (const factItem of facts.slice(-MAX_FACT_LINES)) {
     lines.push(formatFact(factItem, true, theme));
   }
-  lines.push("", color(theme, "dim", "/phenix facts off · /phenix runs"));
+  lines.push("", color(theme, "dim", "/phenix facts off · /phenix status"));
   return lines;
 }
 
@@ -175,14 +316,38 @@ function appendNode(
   prefix: string,
   last: boolean,
   theme: ObservabilityTheme | undefined,
+  terminalFacts: ReadonlyMap<RunId, RunFact>,
+  expanded: boolean,
   root = false,
 ): void {
   const branch = root ? "" : last ? "└─ " : "├─ ";
   const symbol = state(theme, node.run.state, stateSymbol(node.run.state));
   const label = strong(theme, definitionLabel(String(node.run.definitionId)));
   const stateLabel = state(theme, node.run.state, `[${node.run.state}]`);
-  lines.push(`${color(theme, "dim", `${prefix}${branch}`)}${symbol} ${label} ${stateLabel}`);
+  const collapsed = node.run.kind === "workflow" && node.run.state === "completed" && !expanded;
+  const childStats = descendantStats(node);
+  const terminal = terminalFacts.get(node.run.id);
+  const duration = terminal ? formatDuration(node.run.requestedAt, terminal.timestamp) : undefined;
+  const suffix = collapsed
+    ? `${color(theme, "dim", " · ")}${color(theme, "muted", `${childStats.total} children`)}${duration ? `${color(theme, "dim", " · ")}${color(theme, "success", duration)}` : ""}`
+    : "";
+  lines.push(
+    `${color(theme, "dim", `${prefix}${branch}`)}${symbol} ${label} ${stateLabel}${suffix}`,
+  );
   const contentPrefix = root ? "   " : `${prefix}${last ? "   " : "│  "}`;
+  if (collapsed) return;
+
+  if (node.run.resolvedModel) {
+    const model = node.run.resolvedModel;
+    lines.push(
+      `${color(theme, "dim", contentPrefix)}${color(theme, "accent", `${model.concrete.provider}/${model.concrete.model}`)}${color(theme, "dim", " · ")}${thinking(theme, model.thinking, model.thinking)}`,
+    );
+  } else if (root && node.run.observedModel) {
+    const observed = node.run.observedModel;
+    const model =
+      observed.kind === "session" ? "session" : `${observed.provider}/${observed.model}`;
+    lines.push(`${color(theme, "dim", contentPrefix)}${color(theme, "accent", model)}`);
+  }
   if (node.activity) {
     const target = node.activity.target
       ? `${color(theme, "dim", " · ")}${color(theme, "muted", truncate(node.activity.target, 72))}`
@@ -202,16 +367,29 @@ function appendNode(
   }
   const childPrefix = root ? "" : contentPrefix;
   node.children.forEach((child, index) => {
-    appendNode(lines, child, childPrefix, index === node.children.length - 1, theme);
+    appendNode(
+      lines,
+      child,
+      childPrefix,
+      index === node.children.length - 1,
+      theme,
+      terminalFacts,
+      expanded,
+    );
   });
 }
 
-function formatFact(factItem: RunFact, compact = true, theme?: ObservabilityTheme): string {
+function formatFact(
+  factItem: RunFact,
+  compact = true,
+  theme?: ObservabilityTheme,
+  role?: string,
+): string {
   const reliabilitySymbol =
     factItem.reliability === "observed" ? "✓" : factItem.reliability === "derived" ? "≈" : "!";
   const time =
     factItem.timestamp.length >= 19 ? factItem.timestamp.slice(11, 19) : factItem.timestamp;
-  const run = shortRunId(factItem.runId);
+  const run = role ?? shortRunId(factItem.runId);
   const summary = compact ? truncate(factItem.summary, 100) : normalize(factItem.summary);
   const subject = factItem.subject
     ? `${color(theme, "dim", " · ")}${color(
@@ -230,6 +408,55 @@ function formatFact(factItem: RunFact, compact = true, theme?: ObservabilityThem
     summary,
     summary,
   )}${subject}`;
+}
+
+function selectRecentFacts(facts: readonly RunFact[]): readonly RunFact[] {
+  const selected: RunFact[] = [];
+  const seen = new Set<string>();
+  for (const item of [...facts].reverse()) {
+    const key = `${item.kind}\u0000${normalize(item.summary)}\u0000${normalize(item.subject ?? "")}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    selected.push(item);
+    if (selected.length >= DASHBOARD_FACT_LINES) break;
+  }
+  return selected.reverse();
+}
+
+function terminalFactMap(facts: readonly RunFact[]): ReadonlyMap<RunId, RunFact> {
+  const output = new Map<RunId, RunFact>();
+  for (const item of facts) {
+    if (["child-finished", "error-observed", "run-state-changed"].includes(item.kind)) {
+      output.set(item.runId, item);
+    }
+  }
+  return output;
+}
+
+function collectRoles(node: RunTreeNode, output: Map<RunId, string>): void {
+  output.set(node.run.id, definitionLabel(String(node.run.definitionId)));
+  for (const child of node.children) collectRoles(child, output);
+}
+
+function countNodes(node: RunTreeNode, predicate: (node: RunTreeNode) => boolean): number {
+  return (
+    (predicate(node) ? 1 : 0) +
+    node.children.reduce((total, child) => total + countNodes(child, predicate), 0)
+  );
+}
+
+function descendantStats(node: RunTreeNode): { readonly total: number; readonly failed: number } {
+  let total = 0;
+  let failed = 0;
+  const visit = (current: RunTreeNode): void => {
+    for (const child of current.children) {
+      total += 1;
+      if (child.run.state === "failed" || child.run.state === "orphaned") failed += 1;
+      visit(child);
+    }
+  };
+  visit(node);
+  return { total, failed };
 }
 
 function definitionLabel(value: string): string {
@@ -252,6 +479,48 @@ function stateSymbol(value: string): string {
         : value === "waiting"
           ? "○"
           : "●";
+}
+
+function isTerminal(value: string): boolean {
+  return ["completed", "failed", "cancelled", "orphaned"].includes(value);
+}
+
+function thinking(
+  theme: ObservabilityTheme | undefined,
+  value: PiThinkingLevel,
+  text: string,
+): string {
+  const tone =
+    value === "off" || value === "minimal"
+      ? "muted"
+      : value === "low"
+        ? "success"
+        : value === "medium"
+          ? "accent"
+          : value === "high"
+            ? "warning"
+            : "error";
+  return color(theme, tone, text);
+}
+
+function difficultyThinking(difficulty: SessionProfile["difficulty"]): PiThinkingLevel {
+  return difficulty === "D0"
+    ? "minimal"
+    : difficulty === "D1"
+      ? "low"
+      : difficulty === "D2"
+        ? "high"
+        : "xhigh";
+}
+
+function formatDuration(start: string, end: string): string | undefined {
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return undefined;
+  const totalSeconds = Math.floor((endMs - startMs) / 1_000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 }
 
 function normalize(value: string): string {

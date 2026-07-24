@@ -66,7 +66,7 @@ definitions -> domain definition types
 
 - `domain`: execution concepts, typed definitions, state and invariants.
 - `application`: façades, process managers, projections, policy orchestration.
-- `ports`: replaceable runtime boundaries.
+- `ports`: replaceable runtime boundaries, including durable diagnostic logging.
 - `adapters`: Pi SDK, process execution, persistence, routing.
 - `composition`: the only place concrete adapters are assembled.
 - `extension`: Pi-facing commands, tools, widgets, session lifecycle.
@@ -84,8 +84,13 @@ The domain and application layers must not import Pi packages or concrete adapte
 
 ## Observability and presentation
 
-- `/phenix runs` is the complete live session tree.
+- `/phenix status` is the live color-coded session dashboard; `/phenix runs` remains a compatibility alias.
+- Completed workflows collapse by default. Active, waiting, and failed branches remain expanded. Each agent row owns its concrete provider/model and effective thinking level.
 - `/phenix facts` is the ordered full-tree fact history.
+- `/phenix logs` is the root-scoped structured diagnostic history with trace, info, warning, and error thresholds.
+- Diagnostic scopes are stable lowercase dot-separated semantic identifiers. Dynamic IDs and values belong in fields, not scopes.
+- Short scalar telemetry may remain inline. Context, prompts, nested outcomes, provider bodies, tool payloads, and other large values must be content-addressed once and referenced by artifact digest.
+- Secret-bearing fields are redacted before diagnostic persistence. Diagnostics are reconstruction aids; they never replace the canonical run ledger.
 - Current activity and facts derive from domain events and tool lifecycle data; they do not invoke another model.
 - Raw tool output is not persisted in facts.
 - Durable command summaries must minimize data and redact secret-bearing values.
@@ -93,7 +98,7 @@ The domain and application layers must not import Pi packages or concrete adapte
 - `phenix_present` is reserved for bounded warning, high-severity, or critical findings that must be visible before child completion.
 - A presentation is recorded once as a durable reported fact, rendered through the root notifier, and delivered as a bounded next-turn attention message to the root model.
 - Presentation fingerprints deduplicate repeated notices; do not use presentation as a progress stream.
-- Theme colors are semantic: active, waiting, successful, failed, cancelled, reported, derived, and muted structural data.
+- Theme colors are semantic: active, waiting, successful, failed, cancelled, model/thinking level, reported, derived, and muted structural data.
 - Plain-text and file exports must remain ANSI-free.
 
 ## Change discipline
@@ -101,7 +106,7 @@ The domain and application layers must not import Pi packages or concrete adapte
 - Remove obsolete aliases and compatibility paths rather than maintaining unused APIs.
 - Prefer the library or platform primitive when it already provides the required behavior.
 - Keep interfaces distinct from implementations and keep dependency direction inward.
-- Add regression tests for lifecycle races, authorization boundaries, capability changes, persistence, failure propagation, context projection, and presentation deduplication.
+- Add regression tests for lifecycle races, authorization boundaries, capability changes, persistence, failure propagation, context projection, diagnostic redaction/reference behavior, and presentation deduplication.
 - CI is read-only. Formatting fixes run locally through `devenv tasks run maintenance:fix`; CI runs `devenv test`.
 - Pin third-party GitHub Actions to full commit SHAs with a version comment.
 - Do not add `.stitch.json` unless Stitch actually requires repository-specific metadata that cannot be derived.
