@@ -66,13 +66,13 @@ export const workflowDefinitions = BUNDLED_WORKFLOW_SOURCE_NAMES.map(registerWor
 
 function requireAgent(id: string): AgentDefinition<unknown, unknown> {
   const definition = definitionsById.get(id);
-  if (!definition || definition.kind !== "agent") throw new Error(`Missing bundled agent ${id}`);
+  if (definition?.kind !== "agent") throw new Error(`Missing bundled agent ${id}`);
   return definition;
 }
 
 function requireWorkflow(id: string): WorkflowDefinition<unknown, unknown> {
   const definition = definitionsById.get(id);
-  if (!definition || definition.kind !== "workflow") {
+  if (definition?.kind !== "workflow") {
     throw new Error(`Missing bundled workflow ${id}`);
   }
   return definition;
