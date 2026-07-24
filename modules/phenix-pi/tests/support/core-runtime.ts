@@ -17,6 +17,7 @@ import {
   AGENT_BASE,
   AGENT_COORDINATOR,
   AGENT_CRITIC,
+  AGENT_DIFFICULTY_ESTIMATOR,
   AGENT_DISPATCHER,
   AGENT_FINALIZER,
   AGENT_IMPLEMENTER,
@@ -29,7 +30,7 @@ import {
 import { registerWorkflowFunctions } from "../../definitions/workflows/functions.ts";
 import { workflowDefinitions } from "../../definitions/workflows/index.ts";
 import type { AnyDefinition } from "../../domain/definition/definition.ts";
-import type { ResolvedModel } from "../../domain/definition/model.ts";
+import type { Difficulty, ResolvedModel } from "../../domain/definition/model.ts";
 import type { DefinitionId, RunId } from "../../domain/shared.ts";
 import type { Clock, IdGenerator } from "../../ports/clock.ts";
 import type { LocalOperationRunner } from "../../ports/local-operation-runner.ts";
@@ -50,6 +51,7 @@ const models: ModelResolver = {
       requested: selector,
       concrete: { kind: "concrete", provider: "test", model: "model" },
       thinking: context.thinking === "route" ? "medium" : context.thinking,
+      capability: context.capability,
       policyRevision: "test",
     };
   },
@@ -78,6 +80,7 @@ export interface TestRuntimeOptions {
   readonly operations?: LocalOperationRunner;
   readonly rootInvokableDefinitions?: readonly DefinitionId[];
   readonly definitions?: readonly AnyDefinition[];
+  readonly estimatedDifficulty?: Difficulty;
   readonly registerFunctions?: (functions: WorkflowFunctionRegistry) => void;
 }
 
@@ -129,7 +132,8 @@ export async function createTestRuntime(
   });
   execution.registerImplementation(
     "agent",
-    agentImplementation ?? new ScriptedAgentImplementation(execution),
+    agentImplementation ??
+      new ScriptedAgentImplementation(execution, options.estimatedDifficulty ?? "D1"),
   );
   execution.registerImplementation("workflow", workflows);
   execution.seal();
@@ -150,19 +154,31 @@ export async function createTestRuntime(
 
 class ScriptedAgentImplementation implements RunImplementation {
   private readonly controller: RunController;
+  private readonly estimatedDifficulty: Difficulty;
 
-  constructor(controller: RunController) {
+  constructor(controller: RunController, estimatedDifficulty: Difficulty) {
     this.controller = controller;
+    this.estimatedDifficulty = estimatedDifficulty;
   }
 
   async start(command: StartImplementationCommand): Promise<void> {
     await this.controller.transition(command.runId, "starting");
     await this.controller.transition(command.runId, "running");
-    await this.controller.complete(command.runId, outputFor(command.definition));
+    await this.controller.complete(
+      command.runId,
+      outputFor(command.definition, this.estimatedDifficulty),
+    );
   }
 }
 
-function outputFor(definition: AnyDefinition): unknown {
+function outputFor(definition: AnyDefinition, estimatedDifficulty: Difficulty): unknown {
+  if (definition.id === AGENT_DIFFICULTY_ESTIMATOR) {
+    return {
+      difficulty: estimatedDifficulty,
+      summary: `Scripted ${estimatedDifficulty} assessment`,
+      signals: ["test fixture"],
+    };
+  }
   if (definition.id === AGENT_PLANNER) {
     return { summary: "plan", steps: ["edit"], constraints: [], checks: ["test"] };
   }
