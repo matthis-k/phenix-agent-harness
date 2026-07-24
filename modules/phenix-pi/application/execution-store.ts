@@ -1,9 +1,9 @@
+import { AttentionProjection } from "../domain/attention/projection.ts";
 import type {
   DomainEvent,
   PendingDomainEvent,
   UnsequencedDomainEvent,
 } from "../domain/run/events.ts";
-import { AttentionProjection } from "../domain/attention/projection.ts";
 import { RunProjection } from "../domain/run/reducer.ts";
 import type { RunId } from "../domain/shared.ts";
 import type { Clock, IdGenerator } from "../ports/clock.ts";
