@@ -63,20 +63,14 @@ test("workflow states may invoke other workflows through the normal definition b
 });
 
 test("state Prompt sections are parsed but rejected until typed binding is implemented", () => {
-  const authored = parseWorkflowMarkdown(`${source("qa-fix").replace(
-    "### qa\n",
-    "### qa\n\n#### Prompt\n\nRun QA for {{ input.objective }}.\n",
-  )}`);
+  const withPrompt = source("qa-fix").replace(
+    "wait: await\n```\n\n### route",
+    "wait: await\n```\n\n#### Prompt\n\nRun QA for {{ input.objective }}.\n\n### route",
+  );
+  const authored = parseWorkflowMarkdown(withPrompt);
   assert.equal(authored.states[0]?.prompt, "Run QA for {{ input.objective }}.");
   assert.throws(
-    () =>
-      compileWorkflowMarkdown(
-        source("qa-fix").replace(
-          "### qa\n",
-          "### qa\n\n#### Prompt\n\nRun QA for {{ input.objective }}.\n",
-        ),
-        bindings,
-      ),
+    () => compileWorkflowMarkdown(withPrompt, bindings),
     /executable state prompts are not bound yet/,
   );
 });
