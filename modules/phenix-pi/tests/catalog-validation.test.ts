@@ -72,7 +72,13 @@ test("command execution stays scoped to operational agents", () => {
   const byId = new Map(
     agentDefinitions.map((definition) => [String(definition.id), definition] as const),
   );
-  for (const id of ["agent.tester", "agent.implementer", "agent.verifier", "agent.critic", "agent.base"]) {
+  for (const id of [
+    "agent.tester",
+    "agent.implementer",
+    "agent.verifier",
+    "agent.critic",
+    "agent.base",
+  ]) {
     assert.ok(byId.get(id)?.tools.allow.includes("bash"), `${id} lacks bash`);
     assert.ok(byId.get(id)?.tools.allow.includes("nix_shell"), `${id} lacks nix_shell`);
   }
