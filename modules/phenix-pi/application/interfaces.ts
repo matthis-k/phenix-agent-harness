@@ -1,3 +1,7 @@
+import type {
+  AttentionResult,
+  AttentionSubmitRequest,
+} from "../domain/attention/model.ts";
 import type { Definition, DefinitionRef } from "../domain/definition/definition.ts";
 import type { Difficulty, PhenixModelSetId } from "../domain/definition/model.ts";
 import type { DomainEvent } from "../domain/run/events.ts";
@@ -28,9 +32,15 @@ export interface ExecutionFacade {
   inspect(runId: RunId): Promise<RunSnapshot>;
   await<O>(runId: RunId, signal?: AbortSignal): Promise<Outcome<O>>;
   send(runId: RunId, message: string, signal?: AbortSignal): Promise<void>;
+  notify(runId: RunId, message: string): Promise<void>;
   cancel(runId: RunId, reason: string): Promise<void>;
   retry<O>(callerId: RunId, targetId: RunId, options?: RunRetryOptions): Promise<RunHandle<O>>;
   reparent(runId: RunId, newParentId: RunId): Promise<void>;
+}
+
+export interface AttentionFacade {
+  hasActiveTargets(rootRunId: RunId): boolean;
+  submit(request: AttentionSubmitRequest): Promise<AttentionResult>;
 }
 
 export interface SessionProfileUpdate {
