@@ -13,10 +13,9 @@ import { implementationWorkflow, qaWorkflow } from "../definitions/workflows/ind
 import type { AnyDefinition } from "../domain/definition/definition.ts";
 
 const definitionById = new Map<string, AnyDefinition>(
-  [...agentDefinitions, implementationWorkflow, qaWorkflow].map((definition) => [
-    definition.id,
-    definition,
-  ]),
+  [...agentDefinitions, implementationWorkflow, qaWorkflow].map(
+    (definition) => [definition.id, definition] as const,
+  ),
 );
 
 const bindings: WorkflowMarkdownBindings = {
