@@ -1,5 +1,10 @@
 export type MarkdownFields = Readonly<Record<string, string>>;
 
+export interface MarkdownTable {
+  readonly columns: readonly string[];
+  readonly rows: readonly MarkdownFields[];
+}
+
 const FENCE = "\x60\x60\x60";
 
 export function markdownTitle(source: string): string {
@@ -21,6 +26,40 @@ export function parseMarkdownFields(block: string): Record<string, string> {
     fields[key] = value;
   }
   return fields;
+}
+
+export function parseMarkdownTable(source: string, owner: string): MarkdownTable {
+  const lines = source
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("|") && line.endsWith("|"));
+  if (lines.length < 2) throw new Error(`${owner} must be a Markdown table`);
+
+  const columns = tableCells(lines[0]).map(normalizeHeader);
+  if (columns.some((column) => !column)) throw new Error(`${owner} has an empty column name`);
+  if (new Set(columns).size !== columns.length) throw new Error(`${owner} has duplicate columns`);
+
+  return {
+    columns,
+    rows: lines.slice(2).map((line, rowIndex) => {
+      const cells = tableCells(line);
+      if (cells.length !== columns.length) {
+        throw new Error(`${owner} row ${rowIndex + 1} has ${cells.length} cells; expected ${columns.length}`);
+      }
+      return Object.fromEntries(columns.map((column, index) => [column, cells[index] ?? ""]));
+    }),
+  };
+}
+
+export function requireMarkdownColumns(
+  table: MarkdownTable,
+  required: readonly string[],
+  owner: string,
+): void {
+  const columns = new Set(table.columns);
+  for (const column of required) {
+    if (!columns.has(column)) throw new Error(`${owner} is missing ${column}`);
+  }
 }
 
 export function requiredMarkdownSection(source: string, heading: string): string {
@@ -118,6 +157,17 @@ export function markdownEnum<const T extends readonly string[]>(
   const value = requiredMarkdownField(fields, key, owner);
   if ((allowed as readonly string[]).includes(value)) return value as T[number];
   throw new Error(`${owner}.${key} must be one of ${allowed.join(", ")}`);
+}
+
+function tableCells(row: string): string[] {
+  return row
+    .slice(1, -1)
+    .split("|")
+    .map((cell) => unquote(cell.trim().replace(/^`|`$/g, "")));
+}
+
+function normalizeHeader(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, "-");
 }
 
 function unquote(value: string): string {
