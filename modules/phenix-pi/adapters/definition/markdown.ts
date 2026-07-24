@@ -52,11 +52,7 @@ export function requiredMarkdownFence(source: string, language: string): string 
   return match[1];
 }
 
-export function requiredMarkdownField(
-  fields: MarkdownFields,
-  key: string,
-  owner: string,
-): string {
+export function requiredMarkdownField(fields: MarkdownFields, key: string, owner: string): string {
   const value = fields[key];
   if (!value) throw new Error(`${owner} requires ${key}`);
   return value;
