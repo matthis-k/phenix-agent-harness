@@ -6,13 +6,10 @@ import {
   type WorkflowMarkdownBindings,
 } from "../adapters/workflow/markdown.ts";
 import { WORKFLOW_IMPLEMENT } from "../definitions/ids.ts";
-import {
-  ImplementationRequestSchema,
-  type ImplementationResult,
-  ImplementationResultSchema,
-} from "../definitions/schemas.ts";
+import { resolveDefinitionSchema } from "../definitions/schema-registry.ts";
+import type { ImplementationResult } from "../definitions/schemas.ts";
+import { implementationWorkflow } from "../definitions/workflows/index.ts";
 import { definitionRef } from "../domain/definition/definition.ts";
-import type { Schema } from "../domain/definition/schema.ts";
 import { definitionId, type Outcome } from "../domain/shared.ts";
 import { createTestRuntime } from "./support/core-runtime.ts";
 
@@ -39,6 +36,8 @@ max-parallelism: 1
 kind: invoke
 run: workflow.implement
 input: input.identity
+input-schema: request.implementation.v1
+output-schema: outcome.implementation-result.v1
 wait: await
 \`\`\`
 
@@ -47,6 +46,7 @@ wait: await
 \`\`\`phenix-state
 kind: return
 output: test.composed.output
+output-schema: outcome.implementation-result.v1
 \`\`\`
 
 ## Transitions
@@ -56,16 +56,11 @@ output: test.composed.output
 | \`implement\` | \`return\` | | |
 `;
 
-const schemas = new Map<string, Schema<unknown>>([
-  [ImplementationRequestSchema.id, ImplementationRequestSchema as Schema<unknown>],
-  [ImplementationResultSchema.id, ImplementationResultSchema as Schema<unknown>],
-]);
-
 const bindings: WorkflowMarkdownBindings = {
-  resolveSchema(id) {
-    const schema = schemas.get(id);
-    if (!schema) throw new Error(`Unknown schema ${id}`);
-    return schema;
+  resolveSchema: resolveDefinitionSchema,
+  resolveDefinition(id) {
+    if (id !== implementationWorkflow.id) throw new Error(`Unknown definition ${id}`);
+    return implementationWorkflow;
   },
 };
 
