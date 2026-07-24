@@ -16,7 +16,8 @@ export const MODEL_CAPABILITIES = [
 ] as const;
 export type ModelCapability = (typeof MODEL_CAPABILITIES)[number];
 
-export type Difficulty = "D0" | "D1" | "D2" | "D3";
+export const DIFFICULTIES = ["D0", "D1", "D2", "D3"] as const;
+export type Difficulty = (typeof DIFFICULTIES)[number];
 
 export type ConcreteModelRef = {
   readonly kind: "concrete";
@@ -38,12 +39,21 @@ export type SessionModelRef = {
 export type ModelSelector = ConcreteModelRef | VirtualModelRef | SessionModelRef;
 export type ThinkingPolicy = PiThinkingLevel | "route";
 
+export interface DifficultyModelRoute {
+  readonly model: ModelSelector;
+  readonly capability: ModelCapability;
+  readonly thinking: PiThinkingLevel;
+}
+
+export type DifficultyModelRoutes = Readonly<Record<Difficulty, DifficultyModelRoute>>;
+
 export interface ModelResolutionContext {
   readonly definitionId: string;
   readonly parentDefinitionId: string;
   readonly thinking: ThinkingPolicy;
   readonly modelSet?: PhenixModelSetId;
   readonly difficulty?: Difficulty;
+  readonly routes?: DifficultyModelRoutes;
 }
 
 export interface ResolvedModel {
@@ -54,6 +64,14 @@ export interface ResolvedModel {
   readonly capability?: ModelCapability;
   readonly pool?: string;
   readonly policyRevision: string;
+}
+
+export function isDifficulty(value: string): value is Difficulty {
+  return (DIFFICULTIES as readonly string[]).includes(value);
+}
+
+export function isModelCapability(value: string): value is ModelCapability {
+  return (MODEL_CAPABILITIES as readonly string[]).includes(value);
 }
 
 export function isPhenixModelSet(value: string): value is PhenixModelSetId {
