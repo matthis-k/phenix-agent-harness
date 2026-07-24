@@ -1,5 +1,10 @@
 import type { DefinitionId } from "../shared.ts";
-import type { ModelSelector, ThinkingPolicy } from "./model.ts";
+import type {
+  Difficulty,
+  DifficultyModelRoutes,
+  ModelSelector,
+  ThinkingPolicy,
+} from "./model.ts";
 import type { Schema } from "./schema.ts";
 
 export interface DefinitionRef<I = unknown, O = unknown> {
@@ -54,6 +59,7 @@ export interface PromptTemplate {
 export interface AgentDefinition<I, O> extends Definition<I, O> {
   readonly kind: "agent";
   readonly model: ModelSelector;
+  readonly modelRoutes?: DifficultyModelRoutes;
   readonly thinking: ThinkingPolicy;
   readonly prompt: PromptTemplate;
   readonly tools: ToolPolicy;
@@ -75,6 +81,7 @@ export interface InvokeNode {
   readonly definition: DefinitionRef<unknown, unknown>;
   readonly input: ValueMappingRef;
   readonly wait: "await" | "background";
+  readonly difficulty?: Difficulty;
   readonly capabilityOverride?: Partial<CapabilitySet>;
 }
 
@@ -121,6 +128,7 @@ export interface WorkflowEdge {
   readonly from: string;
   readonly to: string;
   readonly when?: PureConditionRef;
+  readonly difficulties?: readonly Difficulty[];
   readonly maxTraversals?: number;
 }
 
@@ -134,6 +142,7 @@ export interface WorkflowGraph<I = unknown, O = unknown> {
 
 export interface WorkflowDefinition<I, O> extends Definition<I, O> {
   readonly kind: "workflow";
+  readonly difficultySource?: string;
   readonly graph: WorkflowGraph<I, O>;
   readonly limits: {
     readonly timeoutMs: number;
