@@ -28,7 +28,11 @@ test("run widget renders the complete run tree without a height cap", () => {
   assert.equal(lines.some((line) => line.includes("run tree truncated")), false);
 });
 
-function snapshot(id: ReturnType<typeof runId>, parentId: ReturnType<typeof runId> | undefined, definition: string): RunSnapshot {
+function snapshot(
+  id: ReturnType<typeof runId>,
+  parentId: ReturnType<typeof runId> | undefined,
+  definition: string,
+): RunSnapshot {
   const resolvedDefinition = definitionId(definition);
   return {
     id,
