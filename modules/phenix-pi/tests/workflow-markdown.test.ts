@@ -15,10 +15,7 @@ import {
   ObjectiveRequestSchema,
   QAReportSchema,
 } from "../definitions/schemas.ts";
-import {
-  implementationWorkflow,
-  qaWorkflow,
-} from "../definitions/workflows/index.ts";
+import { implementationWorkflow, qaWorkflow } from "../definitions/workflows/index.ts";
 
 const schemaById = new Map<string, Schema<unknown>>(
   [
@@ -27,7 +24,7 @@ const schemaById = new Map<string, Schema<unknown>>(
     ImplementationRequestSchema,
     ImplementationResultSchema,
     FinalReportSchema,
-  ].map((schema) => [schema.id, schema as Schema<unknown>]),
+  ].map((schema) => [schema.id, schema as Schema<unknown>] as const),
 );
 
 const bindings: WorkflowMarkdownBindings = {
