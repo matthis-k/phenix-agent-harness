@@ -1,5 +1,5 @@
-import type { DefinitionId, Outcome, RunId } from "../domain/shared.ts";
 import type { RunRetryOptions, RunSnapshot, StartRun } from "../domain/run/model.ts";
+import type { DefinitionId, Outcome, RunId } from "../domain/shared.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import type { ExecutionFacade, RunHandle } from "./interfaces.ts";
 
@@ -55,11 +55,7 @@ export class ModelExecutionFacade implements ExecutionFacade {
     return this.execution.cancel(runId, reason);
   }
 
-  retry<O>(
-    callerId: RunId,
-    targetId: RunId,
-    options?: RunRetryOptions,
-  ): Promise<RunHandle<O>> {
+  retry<O>(callerId: RunId, targetId: RunId, options?: RunRetryOptions): Promise<RunHandle<O>> {
     this.assertRunVisible(callerId);
     this.assertRunVisible(targetId);
     return this.execution.retry<O>(callerId, targetId, options);
