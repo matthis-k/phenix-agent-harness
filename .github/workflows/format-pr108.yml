@@ -3,13 +3,14 @@ name: Format PR 108
 on:
   push:
     branches: [fix/parent-return-facts-export-final2]
+  pull_request:
 
 permissions:
   contents: write
 
 jobs:
   format:
-    if: github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]' && github.event_name == 'push' || github.event.pull_request.head.ref == 'fix/parent-return-facts-export-final2'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
