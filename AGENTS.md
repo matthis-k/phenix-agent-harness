@@ -25,11 +25,13 @@ When documentation and code disagree, investigate the code path and update the d
 - `agent.base` is an internal escape hatch and is not root-invokable in production.
 - Child agents may use `phenix_run` only within their compiled capability scope.
 - Workflow children may be started only by their workflow process manager with valid workflow causation.
+- Follow-up input received during active execution is supervisory attention, not a new workflow node or an implicit workflow mutation.
+- `AttentionProcessManager` is the only process allowed to route follow-up input into live agent sessions. The internal attention router is not model-facing or ordinarily invokable.
 
 ## Runtime invariants
 
 - One append-only JSONL event stream is canonical for each root session.
-- A run ID is the only execution identity. Trees, task anchors, active counts, workflow position, and effective task state are projections.
+- A run ID is the only execution identity. Trees, task anchors, active counts, workflow position, effective task state, and attention delivery are projections.
 - Children start attached. Background waiting does not detach ownership.
 - A parent cannot terminate while an attached child is active.
 - Cancellation cascades through attached descendants.
@@ -38,6 +40,9 @@ When documentation and code disagree, investigate the code path and update the d
 - A missing or lost backend becomes a typed failure or orphan; never synthesize success.
 - Failed runs remain immutable evidence. Recovery creates a linked replacement run.
 - Recovery escalation must be bounded and minimal. Read/search tools or explicit `bash` may be added; `edit` and `write` are never granted directly to a read-only retry.
+- Attention targets are active agents in the same root tree. Workflow runs are never directly steered.
+- Steering does not settle an await, change ownership, mutate workflow input, or create a replacement run.
+- Delivery to a starting child is durable and must be reconstructable from canonical events after restart.
 
 ## Agent prompt boundary
 
@@ -54,6 +59,7 @@ When documentation and code disagree, investigate the code path and update the d
 - Awaited `phenix_run` and `phenix_dispatch` calls return compact status, summary, and handle data by default.
 - `phenix_handle` defaults to a summary projection. Request `view=outcome`, `view=failure`, or `view=full` only when the additional payload is required for the current decision.
 - Tool-result transport records source, inline, and omitted byte counts. Do not defeat that boundary by embedding complete outcomes into summaries.
+- Attention routing receives bounded active-run metadata, not child transcripts, repository context, or complete outcomes.
 
 ## Layer ownership
 
@@ -102,6 +108,7 @@ The domain and application layers must not import Pi packages or concrete adapte
 - `phenix_present` is reserved for bounded warning, high-severity, or critical findings that must be visible before child completion.
 - A presentation is recorded once as a durable reported fact, rendered through the root notifier, and delivered as a bounded next-turn attention message to the root model.
 - Presentation fingerprints deduplicate repeated notices; do not use presentation as a progress stream.
+- Attention routing and delivery must emit canonical events and stable diagnostic scopes; transport success without a durable delivery event is not authoritative.
 - Theme colors are semantic: active, waiting, successful, failed, cancelled, model/thinking level, reported, derived, and muted structural data.
 - Plain-text and file exports must remain ANSI-free.
 
@@ -110,7 +117,7 @@ The domain and application layers must not import Pi packages or concrete adapte
 - Remove obsolete aliases and compatibility paths rather than maintaining unused APIs.
 - Prefer the library or platform primitive when it already provides the required behavior.
 - Keep interfaces distinct from implementations and keep dependency direction inward.
-- Add regression tests for lifecycle races, authorization boundaries, capability changes, persistence, failure propagation, context projection, diagnostic redaction/reference behavior, and presentation deduplication.
+- Add regression tests for lifecycle races, authorization boundaries, capability changes, persistence, failure propagation, context projection, attention routing/deferred delivery, diagnostic redaction/reference behavior, and presentation deduplication.
 - CI is read-only. Formatting fixes run locally through `devenv tasks run maintenance:fix`; CI runs `devenv test`.
 - Pin third-party GitHub Actions to full commit SHAs with a version comment.
 - Do not add `.stitch.json` unless Stitch actually requires repository-specific metadata that cannot be derived.
