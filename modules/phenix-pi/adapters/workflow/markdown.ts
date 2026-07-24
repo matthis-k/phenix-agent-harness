@@ -121,9 +121,7 @@ function compileState(state: AuthoredWorkflowState): WorkflowNode {
         ...common,
         kind,
         policy: parseJoinPolicy(read("policy"), state.id),
-        ...(fields.quorum
-          ? { quorum: integerValue(fields.quorum, `${owner}.quorum`, 1) }
-          : {}),
+        ...(fields.quorum ? { quorum: integerValue(fields.quorum, `${owner}.quorum`, 1) } : {}),
       };
     case "return":
       return { ...common, kind, output: read("output") };
@@ -176,9 +174,7 @@ function parseTransitions(section: string): WorkflowEdge[] {
       from,
       to,
       ...(when ? { when } : {}),
-      ...(max
-        ? { maxTraversals: integerValue(max, `transition ${from}->${to}`, 1) }
-        : {}),
+      ...(max ? { maxTraversals: integerValue(max, `transition ${from}->${to}`, 1) } : {}),
     };
   });
 }
@@ -269,10 +265,7 @@ function assertKnownFields(
   }
 }
 
-function requireColumns(
-  indexes: ReadonlyMap<string, number>,
-  required: readonly string[],
-): void {
+function requireColumns(indexes: ReadonlyMap<string, number>, required: readonly string[]): void {
   for (const column of required) {
     if (!indexes.has(column)) throw new Error(`Transitions table is missing ${column}`);
   }
