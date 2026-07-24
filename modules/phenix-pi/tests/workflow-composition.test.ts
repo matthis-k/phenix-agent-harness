@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { Schema } from "../domain/definition/schema.ts";
-import { definitionRef } from "../domain/definition/definition.ts";
 import {
   compileWorkflowMarkdown,
   type WorkflowMarkdownBindings,
-} from "../domain/workflow/markdown.ts";
+} from "../adapters/workflow/markdown.ts";
+import { definitionRef } from "../domain/definition/definition.ts";
+import type { Schema } from "../domain/definition/schema.ts";
 import { definitionId, type Outcome } from "../domain/shared.ts";
 import { WORKFLOW_IMPLEMENT } from "../definitions/ids.ts";
 import {
@@ -60,6 +60,7 @@ const schemas = new Map<string, Schema<unknown>>([
   [ImplementationRequestSchema.id, ImplementationRequestSchema as Schema<unknown>],
   [ImplementationResultSchema.id, ImplementationResultSchema as Schema<unknown>],
 ]);
+
 const bindings: WorkflowMarkdownBindings = {
   resolveSchema(id) {
     const schema = schemas.get(id);
