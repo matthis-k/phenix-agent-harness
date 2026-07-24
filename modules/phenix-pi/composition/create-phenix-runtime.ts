@@ -38,10 +38,7 @@ import { SupervisionProcessManager } from "../application/supervision-process-ma
 import { TaskFacadeImpl } from "../application/task-facade.ts";
 import { WorkflowProcessManager } from "../application/workflow-process-manager.ts";
 import { agentDefinitions } from "../definitions/agents.ts";
-import {
-  ROOT_DISPATCH_DEFINITION_IDS,
-  ROOT_INTERNAL_DEFINITION_IDS,
-} from "../definitions/ids.ts";
+import { ROOT_DISPATCH_DEFINITION_IDS, ROOT_INTERNAL_DEFINITION_IDS } from "../definitions/ids.ts";
 import { registerWorkflowFunctions } from "../definitions/workflows/functions.ts";
 import { workflowDefinitions } from "../definitions/workflows/index.ts";
 import type { ConcreteModelRef } from "../domain/definition/model.ts";
