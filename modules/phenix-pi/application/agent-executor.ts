@@ -279,7 +279,7 @@ export class AgentExecutor implements RunImplementation {
     }
     const cycle = (this.store.projection.cycles.get(runId)?.number ?? 0) + 1;
     await this.controller.cycleStarted(runId, cycle);
-    await live.session.prompt(message);
+    await live.session.followUp(message);
   }
 
   async cancel(runId: RunId): Promise<void> {
@@ -380,27 +380,17 @@ export class AgentExecutor implements RunImplementation {
               validation.issues.map((issue) => `${issue.path} ${issue.message}`).join("; "),
             );
           }
-          const report: FailureReport = {
-            source: "agent",
-            category: validation.value.category ?? "other",
-            summary: validation.value.summary,
-            retryable: validation.value.retryable ?? true,
-            ...(validation.value.requestedTools
-              ? { requestedTools: validation.value.requestedTools }
-              : {}),
-            ...(validation.value.suggestedLimits
-              ? { suggestedLimits: validation.value.suggestedLimits }
-              : {}),
-          };
-          const failure: Failure = {
-            code: "agent_reported_failure",
-            message: report.summary,
-            retryable: report.retryable,
-            details: report,
-          };
+          const failure = automaticFailure(
+            "agent_reported_failure",
+            validation.value.summary,
+            validation.value.category ?? "other",
+            validation.value.retryable ?? true,
+            validation.value.suggestedLimits,
+            validation.value.requestedTools,
+          );
           await this.controller.fail(runId, failure);
           return {
-            text: "Failure report accepted.",
+            text: "Failure recorded.",
             details: { runId, failure },
             terminate: true,
           };
@@ -410,7 +400,7 @@ export class AgentExecutor implements RunImplementation {
       name: "phenix_progress",
       label: "Phenix Progress",
       description:
-        "Publish one short run-scoped progress update for the TUI. Use only when the phase, current target, hypothesis, or next action materially changes. This does not message the parent model.",
+        "Publish a short update only when the run's phase, current target, hypothesis, or next action materially changes. This updates run telemetry and the TUI; it is not sent to the parent model.",
       parameters: agentProgressSchema,
       execute: async (value) =>
         this.serial.run(runId, async () => {
@@ -695,12 +685,14 @@ function automaticFailure(
   category: FailureCategory,
   retryable: boolean,
   suggestedLimits?: FailureLimitSuggestion,
+  requestedTools?: readonly string[],
 ): Failure {
   const report: FailureReport = {
-    source: "automatic",
+    source: code === "agent_reported_failure" ? "agent" : "automatic",
     category,
     summary: message,
     retryable,
+    ...(requestedTools?.length ? { requestedTools } : {}),
     ...(suggestedLimits ? { suggestedLimits } : {}),
   };
   return { code, message, retryable, details: report };
