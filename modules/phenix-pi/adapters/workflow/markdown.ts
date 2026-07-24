@@ -1,4 +1,5 @@
 import {
+  type AnyDefinition,
   definitionRef,
   type WorkflowDefinition,
   type WorkflowEdge,
@@ -6,9 +7,20 @@ import {
 } from "../../domain/definition/definition.ts";
 import type { Schema } from "../../domain/definition/schema.ts";
 import { definitionId } from "../../domain/shared.ts";
+import {
+  assertMarkdownFields,
+  markdownInteger,
+  markdownTitle,
+  optionalMarkdownSubsection,
+  parseMarkdownFields,
+  requiredMarkdownFence,
+  requiredMarkdownField,
+  requiredMarkdownSection,
+} from "../definition/markdown.ts";
 
 export interface WorkflowMarkdownBindings {
   resolveSchema(id: string): Schema<unknown>;
+  resolveDefinition(id: string): AnyDefinition;
 }
 
 export interface AuthoredWorkflowState {
@@ -38,22 +50,30 @@ const WORKFLOW_FIELDS = [
 ] as const;
 
 const STATE_FIELDS: Readonly<Record<StateKind, readonly string[]>> = {
-  invoke: ["kind", "title", "run", "input", "wait"],
-  local: ["kind", "title", "operation", "input"],
+  invoke: [
+    "kind",
+    "title",
+    "run",
+    "input",
+    "wait",
+    "input-schema",
+    "output-schema",
+  ],
+  local: ["kind", "title", "operation", "input", "input-schema", "output-schema"],
   decision: ["kind", "title", "decide"],
   join: ["kind", "title", "policy", "quorum"],
-  return: ["kind", "title", "output"],
+  return: ["kind", "title", "output", "output-schema"],
   fail: ["kind", "title", "reason"],
 };
 
-const FENCE = "\\x60\\x60\\x60";
-
 export function parseWorkflowMarkdown(source: string): AuthoredWorkflow {
-  const title = requiredMatch(source, /^#\s+(.+)$/m, "workflow title").trim();
-  const fields = parseFields(requiredFence(source, "phenix-workflow"));
-  const states = parseStates(requiredSection(source, "States"));
-  const transitions = parseTransitions(requiredSection(source, "Transitions"));
-  return { title, fields, states, transitions };
+  const fields = parseMarkdownFields(requiredMarkdownFence(source, "phenix-workflow"));
+  return {
+    title: markdownTitle(source),
+    fields,
+    states: parseStates(requiredMarkdownSection(source, "States")),
+    transitions: parseTransitions(requiredMarkdownSection(source, "Transitions")),
+  };
 }
 
 export function compileWorkflowMarkdown(
@@ -62,29 +82,35 @@ export function compileWorkflowMarkdown(
 ): WorkflowDefinition<unknown, unknown> {
   const authored = parseWorkflowMarkdown(source);
   const fields = authored.fields;
-  assertKnownFields(fields, WORKFLOW_FIELDS, "workflow");
+  assertMarkdownFields(fields, WORKFLOW_FIELDS, "workflow");
+  const input = bindings.resolveSchema(requiredMarkdownField(fields, "input", "workflow"));
+  const output = bindings.resolveSchema(requiredMarkdownField(fields, "output", "workflow"));
 
   return {
-    id: definitionId(requiredField(fields, "id", "workflow")),
+    id: definitionId(requiredMarkdownField(fields, "id", "workflow")),
     kind: "workflow",
     title: authored.title,
-    description: requiredField(fields, "description", "workflow"),
-    input: bindings.resolveSchema(requiredField(fields, "input", "workflow")),
-    output: bindings.resolveSchema(requiredField(fields, "output", "workflow")),
+    description: requiredMarkdownField(fields, "description", "workflow"),
+    input,
+    output,
     limits: {
-      timeoutMs: integerField(fields, "timeout-ms", "workflow", 0),
-      maxNodeRuns: integerField(fields, "max-node-runs", "workflow", 1),
-      maxParallelism: integerField(fields, "max-parallelism", "workflow", 1),
+      timeoutMs: markdownInteger(fields, "timeout-ms", "workflow", 0),
+      maxNodeRuns: markdownInteger(fields, "max-node-runs", "workflow", 1),
+      maxParallelism: markdownInteger(fields, "max-parallelism", "workflow", 1),
     },
     graph: {
-      entry: requiredField(fields, "entry", "workflow"),
-      nodes: authored.states.map(compileState),
+      entry: requiredMarkdownField(fields, "entry", "workflow"),
+      nodes: authored.states.map((state) => compileState(state, bindings, output)),
       edges: authored.transitions,
     },
   };
 }
 
-function compileState(state: AuthoredWorkflowState): WorkflowNode {
+function compileState(
+  state: AuthoredWorkflowState,
+  bindings: WorkflowMarkdownBindings,
+  workflowOutput: Schema<unknown>,
+): WorkflowNode {
   if (state.prompt) {
     throw new Error(
       `Workflow state ${state.id} declares a Prompt section, but executable state prompts are not bound yet`,
@@ -93,21 +119,27 @@ function compileState(state: AuthoredWorkflowState): WorkflowNode {
 
   const owner = `state ${state.id}`;
   const fields = state.fields;
-  const read = (key: string): string => requiredField(fields, key, owner);
+  const read = (key: string): string => requiredMarkdownField(fields, key, owner);
   const kind = parseStateKind(read("kind"), state.id);
   const common = { id: state.id, ...(fields.title ? { title: fields.title } : {}) };
-  assertKnownFields(fields, STATE_FIELDS[kind], owner);
+  assertMarkdownFields(fields, STATE_FIELDS[kind], owner);
 
   switch (kind) {
-    case "invoke":
+    case "invoke": {
+      const invoked = bindings.resolveDefinition(read("run"));
+      assertSchema(bindings, read("input-schema"), invoked.input, `${owner} input`);
+      assertSchema(bindings, read("output-schema"), invoked.output, `${owner} output`);
       return {
         ...common,
         kind,
-        definition: definitionRef(definitionId(read("run"))),
+        definition: definitionRef(definitionId(invoked.id)),
         input: read("input"),
         wait: parseWait(fields.wait ?? "await", state.id),
       };
+    }
     case "local":
+      bindings.resolveSchema(read("input-schema"));
+      bindings.resolveSchema(read("output-schema"));
       return {
         ...common,
         kind,
@@ -124,9 +156,22 @@ function compileState(state: AuthoredWorkflowState): WorkflowNode {
         ...(fields.quorum ? { quorum: integerValue(fields.quorum, `${owner}.quorum`, 1) } : {}),
       };
     case "return":
+      assertSchema(bindings, read("output-schema"), workflowOutput, `${owner} output`);
       return { ...common, kind, output: read("output") };
     case "fail":
       return { ...common, kind, reason: read("reason") };
+  }
+}
+
+function assertSchema(
+  bindings: WorkflowMarkdownBindings,
+  declaredId: string,
+  expected: Schema<unknown>,
+  owner: string,
+): void {
+  const declared = bindings.resolveSchema(declaredId);
+  if (declared.id !== expected.id) {
+    throw new Error(`${owner} schema ${declared.id} does not match ${expected.id}`);
   }
 }
 
@@ -139,10 +184,10 @@ function parseStates(section: string): AuthoredWorkflowState[] {
     const start = (heading.index ?? 0) + heading[0].length;
     const end = headings[index + 1]?.index ?? section.length;
     const body = section.slice(start, end);
-    const prompt = optionalSubsection(body, "Prompt")?.trim();
+    const prompt = optionalMarkdownSubsection(body, "Prompt")?.trim();
     return {
       id,
-      fields: parseFields(requiredFence(body, "phenix-state")),
+      fields: parseMarkdownFields(requiredMarkdownFence(body, "phenix-state")),
       ...(prompt ? { prompt } : {}),
     };
   });
@@ -167,9 +212,7 @@ function parseTransitions(section: string): WorkflowEdge[] {
     const max =
       tableValue(cells, indexes, "max-traversals", false) ||
       tableValue(cells, indexes, "max", false);
-    if (!from || !to) {
-      throw new Error(`Transitions row ${rowIndex + 1} requires From and To`);
-    }
+    if (!from || !to) throw new Error(`Transitions row ${rowIndex + 1} requires From and To`);
     return {
       from,
       to,
@@ -179,90 +222,12 @@ function parseTransitions(section: string): WorkflowEdge[] {
   });
 }
 
-function parseFields(block: string): Record<string, string> {
-  const fields: Record<string, string> = {};
-  for (const [index, rawLine] of block.split("\n").entries()) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const separator = line.indexOf(":");
-    if (separator < 1) {
-      throw new Error(`Invalid field on line ${index + 1}: ${rawLine}`);
-    }
-    const key = line.slice(0, separator).trim();
-    const value = unquote(line.slice(separator + 1).trim());
-    if (key in fields) throw new Error(`Duplicate field ${key}`);
-    fields[key] = value;
-  }
-  return fields;
-}
-
-function requiredSection(source: string, heading: string): string {
-  const marker = new RegExp(`^##\\s+${escapeRegExp(heading)}\\s*$`, "m").exec(source);
-  if (!marker || marker.index === undefined) {
-    throw new Error(`Missing ## ${heading} section`);
-  }
-  const remainder = source.slice(marker.index + marker[0].length);
-  const next = /^##\s+/m.exec(remainder);
-  return remainder.slice(0, next?.index ?? remainder.length);
-}
-
-function optionalSubsection(source: string, heading: string): string | undefined {
-  const marker = new RegExp(`^####\\s+${escapeRegExp(heading)}\\s*$`, "m").exec(source);
-  if (!marker || marker.index === undefined) return undefined;
-  const remainder = source.slice(marker.index + marker[0].length);
-  const next = /^####\s+/m.exec(remainder);
-  return remainder.slice(0, next?.index ?? remainder.length);
-}
-
-function requiredFence(source: string, language: string): string {
-  const pattern = `${FENCE}${escapeRegExp(language)}\\s*\\n([\\s\\S]*?)\\n${FENCE}`;
-  const match = new RegExp(pattern, "m").exec(source);
-  if (!match) throw new Error(`Missing fenced ${language} block`);
-  return match[1];
-}
-
-function requiredMatch(source: string, pattern: RegExp, name: string): string {
-  const match = pattern.exec(source);
-  if (!match) throw new Error(`Missing ${name}`);
-  return match[1];
-}
-
-function requiredField(
-  fields: Readonly<Record<string, string>>,
-  key: string,
-  owner: string,
-): string {
-  const value = fields[key];
-  if (!value) throw new Error(`${owner} requires ${key}`);
-  return value;
-}
-
-function integerField(
-  fields: Readonly<Record<string, string>>,
-  key: string,
-  owner: string,
-  minimum: number,
-): number {
-  return integerValue(requiredField(fields, key, owner), `${owner}.${key}`, minimum);
-}
-
 function integerValue(value: string, name: string, minimum: number): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < minimum) {
     throw new Error(`${name} must be an integer greater than or equal to ${minimum}`);
   }
   return parsed;
-}
-
-function assertKnownFields(
-  fields: Readonly<Record<string, string>>,
-  allowed: readonly string[],
-  owner: string,
-): void {
-  const known = new Set(allowed);
-  for (const key of Object.keys(fields)) {
-    if (!known.has(key)) throw new Error(`${owner} has unknown field ${key}`);
-  }
 }
 
 function requireColumns(indexes: ReadonlyMap<string, number>, required: readonly string[]): void {
@@ -335,8 +300,4 @@ function unquote(value: string): string {
     (value.startsWith('"') && value.endsWith('"')) ||
     (value.startsWith("'") && value.endsWith("'"));
   return quoted ? value.slice(1, -1) : value;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
