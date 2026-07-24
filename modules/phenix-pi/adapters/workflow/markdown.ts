@@ -1,11 +1,12 @@
 import {
   type AnyDefinition,
   definitionRef,
+  type DifficultyBinding,
   type WorkflowDefinition,
   type WorkflowEdge,
   type WorkflowNode,
 } from "../../domain/definition/definition.ts";
-import { type Difficulty, isDifficulty } from "../../domain/definition/model.ts";
+import { isDifficulty } from "../../domain/definition/model.ts";
 import type { Schema } from "../../domain/definition/schema.ts";
 import { definitionId } from "../../domain/shared.ts";
 import {
@@ -89,6 +90,20 @@ export function compileWorkflowMarkdown(
   assertMarkdownFields(fields, WORKFLOW_FIELDS, "workflow");
   const input = bindings.resolveSchema(requiredMarkdownField(fields, "input", "workflow"));
   const output = bindings.resolveSchema(requiredMarkdownField(fields, "output", "workflow"));
+  const nodes = authored.states.map((state) => compileState(state, bindings, output));
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  for (const node of nodes) {
+    if (node.kind === "invoke" && node.difficulty?.kind === "result") {
+      if (node.difficulty.nodeId === node.id) {
+        throw new Error(`State ${node.id} cannot obtain difficulty from itself`);
+      }
+      if (!nodeIds.has(node.difficulty.nodeId)) {
+        throw new Error(
+          `State ${node.id} obtains difficulty from unknown state ${node.difficulty.nodeId}`,
+        );
+      }
+    }
+  }
 
   return {
     id: definitionId(requiredMarkdownField(fields, "id", "workflow")),
@@ -104,7 +119,7 @@ export function compileWorkflowMarkdown(
     },
     graph: {
       entry: requiredMarkdownField(fields, "entry", "workflow"),
-      nodes: authored.states.map((state) => compileState(state, bindings, output)),
+      nodes,
       edges: authored.transitions,
     },
   };
@@ -139,7 +154,9 @@ function compileState(
         definition: definitionRef(definitionId(invoked.id)),
         input: read("input"),
         wait: parseWait(fields.wait ?? "await", state.id),
-        ...(fields.difficulty ? { difficulty: parseDifficulty(fields.difficulty, owner) } : {}),
+        ...(fields.difficulty
+          ? { difficulty: parseDifficultyBinding(fields.difficulty, owner) }
+          : {}),
       };
     }
     case "local":
@@ -217,9 +234,13 @@ function parseTransitions(section: string): WorkflowEdge[] {
   });
 }
 
-function parseDifficulty(value: string, owner: string): Difficulty {
-  if (isDifficulty(value)) return value;
-  throw new Error(`${owner}.difficulty must be D0, D1, D2, or D3`);
+function parseDifficultyBinding(value: string, owner: string): DifficultyBinding {
+  if (isDifficulty(value)) return { kind: "fixed", value };
+  if (value.startsWith("result:")) {
+    const nodeId = value.slice("result:".length).trim();
+    if (/^[A-Za-z0-9._:-]+$/.test(nodeId)) return { kind: "result", nodeId };
+  }
+  throw new Error(`${owner}.difficulty must be D0, D1, D2, D3, or result:<state>`);
 }
 
 function integerValue(value: string, name: string, minimum: number): number {
