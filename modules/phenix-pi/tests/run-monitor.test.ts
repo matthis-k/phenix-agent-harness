@@ -127,8 +127,14 @@ test("status uses one compact row per run, collapses completed subtrees, and kee
     true,
   );
   assert.equal(collapsed.filter((line) => line.includes("Completed qa")).length, 1);
-  assert.equal(collapsed.some((line) => line.includes("Latest fact")), true);
-  assert.equal(collapsed.some((line) => line.includes("Older fact")), false);
+  assert.equal(
+    collapsed.some((line) => line.includes("Latest fact")),
+    true,
+  );
+  assert.equal(
+    collapsed.some((line) => line.includes("Older fact")),
+    false,
+  );
   assert.equal(
     collapsed.some((line) => line.includes("Storage")),
     false,
