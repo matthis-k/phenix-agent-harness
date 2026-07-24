@@ -3,12 +3,12 @@ import test from "node:test";
 
 import {
   projectCompletedRun,
+  projectedToolResult,
   projectOutcome,
   projectRunSnapshot,
-  projectedToolResult,
 } from "../application/tool-result-projection.ts";
 import type { RunSnapshot } from "../domain/run/model.ts";
-import { success, type RunId } from "../domain/shared.ts";
+import { type RunId, success } from "../domain/shared.ts";
 
 test("completed runs inline only a compact summary by default", () => {
   const outcome = success({
@@ -23,7 +23,11 @@ test("completed runs inline only a compact summary by default", () => {
   const result = projectedToolResult(projected, outcome);
   const parsed = JSON.parse(result.text) as Record<string, unknown>;
   const details = result.details as {
-    readonly transport: { readonly sourceBytes: number; readonly inlineBytes: number; readonly omittedBytes: number };
+    readonly transport: {
+      readonly sourceBytes: number;
+      readonly inlineBytes: number;
+      readonly omittedBytes: number;
+    };
   };
 
   assert.deepEqual(parsed, {
