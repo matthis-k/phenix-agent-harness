@@ -5,6 +5,7 @@ export {
   baseDefinition,
   coordinatorDefinition,
   criticDefinition,
+  difficultyEstimatorDefinition,
   dispatcherDefinition,
   finalizerDefinition,
   implementerDefinition,
