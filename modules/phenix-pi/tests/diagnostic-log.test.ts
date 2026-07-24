@@ -35,7 +35,7 @@ test("diagnostics persist private JSONL, filter by threshold, and reference larg
         apiKey: "must-not-be-written",
         context: "x".repeat(2_000),
         status: 400,
-        response: { token: "raw-nested-token", requestId: "request-1" },
+        response: { accessToken: "raw-nested-token", requestId: "request-1" },
       },
     });
 
@@ -55,9 +55,9 @@ test("diagnostics persist private JSONL, filter by threshold, and reference larg
 
     const fields = warning.fields as {
       readonly context: { readonly ref: string; readonly bytes: number };
-      readonly response: { readonly token: string; readonly requestId: string };
+      readonly response: { readonly accessToken: string; readonly requestId: string };
     };
-    assert.equal(fields.response.token, "[redacted]");
+    assert.equal(fields.response.accessToken, "[redacted]");
     assert.equal(fields.response.requestId, "request-1");
     assert.match(fields.context.ref, /^artifact:sha256:[a-f0-9]{64}$/);
     assert.equal(fields.context.bytes, 2_000);
