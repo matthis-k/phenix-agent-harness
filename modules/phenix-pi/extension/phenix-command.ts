@@ -1,6 +1,7 @@
 export const PHENIX_SUBCOMMANDS = [
-  { value: "status", label: "status — Show runtime status" },
-  { value: "runs", label: "runs — Toggle the live run tree" },
+  { value: "status", label: "status — Toggle the live dashboard" },
+  { value: "logs", label: "logs — Inspect or export structured diagnostics" },
+  { value: "runs", label: "runs — Alias for the live status dashboard" },
   { value: "facts", label: "facts — Toggle or export the full fact history" },
   { value: "tasks", label: "tasks — Show the task projection" },
   { value: "catalog", label: "catalog — List invokable definitions" },
@@ -8,6 +9,8 @@ export const PHENIX_SUBCOMMANDS = [
 ] as const;
 
 export const PHENIX_USAGE = `/phenix ${PHENIX_SUBCOMMANDS.map((item) => item.value).join("|")}`;
+export const PHENIX_STATUS_USAGE =
+  "/phenix status [off|--once|--json|--expanded]";
 export const PHENIX_FACTS_USAGE =
   "/phenix facts [off|--once|--json|--clipboard [command]|--file <file>]";
 
