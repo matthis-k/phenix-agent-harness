@@ -99,27 +99,38 @@ test("open-ended QA analysis agents omit fixed turn caps", () => {
   for (const definition of qaAgents) assert.equal(definition.limits.maxTurns, undefined);
 });
 
-test("command execution stays scoped to operational agents", () => {
-  const byId = new Map(
-    agentDefinitions.map((definition) => [String(definition.id), definition] as const),
-  );
-  for (const id of [
+test("every bundled agent has an explicit shell-authority class", () => {
+  const commandAgents = new Set([
     "agent.tester",
     "agent.implementer",
     "agent.verifier",
     "agent.critic",
     "agent.base",
-  ]) {
-    assert.ok(byId.get(id)?.tools.allow.includes("bash"), `${id} lacks bash`);
-    assert.ok(byId.get(id)?.tools.allow.includes("nix_shell"), `${id} lacks nix_shell`);
-  }
-  for (const id of ["agent.scout", "agent.planner", "agent.architect", "agent.finalizer"]) {
-    assert.equal(byId.get(id)?.tools.allow.includes("bash"), false, `${id} unexpectedly has bash`);
-    assert.equal(
-      byId.get(id)?.tools.allow.includes("nix_shell"),
-      false,
-      `${id} unexpectedly has nix_shell`,
+  ]);
+  const nonExecutingAgents = new Set([
+    "agent.difficulty-estimator",
+    "agent.scout",
+    "agent.planner",
+    "agent.architect",
+    "agent.finalizer",
+    "agent.dispatcher",
+    "agent.coordinator",
+    "agent.qa-synthesizer",
+    "agent.attention-router",
+  ]);
+
+  assert.equal(commandAgents.size + nonExecutingAgents.size, agentDefinitions.length);
+  for (const definition of agentDefinitions) {
+    const id = String(definition.id);
+    assert.notEqual(
+      commandAgents.has(id),
+      nonExecutingAgents.has(id),
+      `${id} must belong to exactly one shell-authority class`,
     );
+    const hasBash = definition.tools.allow.includes("bash");
+    const hasNixShell = definition.tools.allow.includes("nix_shell");
+    assert.equal(hasBash, hasNixShell, `${id} must grant bash and nix_shell together`);
+    assert.equal(hasBash, commandAgents.has(id), `${id} has the wrong shell authority`);
   }
 });
 
