@@ -27,11 +27,7 @@ import {
 import { type RunId, runId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import { copyFactHistory, parseFactsCommand, writeFactHistory } from "./fact-export.ts";
-import {
-  completePhenixSubcommands,
-  PHENIX_FACTS_USAGE,
-  PHENIX_USAGE,
-} from "./phenix-command.ts";
+import { completePhenixSubcommands, PHENIX_FACTS_USAGE, PHENIX_USAGE } from "./phenix-command.ts";
 import { RunMonitor } from "./run-monitor.ts";
 
 const ROOT_BINDING_ENTRY = "phenix:root-binding";
@@ -342,10 +338,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
           const exported = await activeMonitor.exportFacts();
           if (factsAction.kind === "clipboard") {
             await copyFactHistory(exported.text, factsAction.command, ctx.cwd);
-            ctx.ui.notify(
-              `Copied ${exported.count} facts using: ${factsAction.command}`,
-              "info",
-            );
+            ctx.ui.notify(`Copied ${exported.count} facts using: ${factsAction.command}`, "info");
             return;
           }
           const file = await writeFactHistory(exported.text, factsAction.file, ctx.cwd);
