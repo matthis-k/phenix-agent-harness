@@ -184,7 +184,9 @@ export class AttentionProjection {
     const record = this.require(attentionId, rootRunId);
     const routed = record.route?.targets.find((candidate) => candidate.runId === target.runId);
     if (!routed || routed.delivery !== target.delivery) {
-      throw new Error(`Attention ${attentionId} did not route to ${target.runId} as ${target.delivery}`);
+      throw new Error(
+        `Attention ${attentionId} did not route to ${target.runId} as ${target.delivery}`,
+      );
     }
     return record;
   }
