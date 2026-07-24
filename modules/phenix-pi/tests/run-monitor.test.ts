@@ -3,13 +3,18 @@ import test from "node:test";
 
 import type { RunTreeNode } from "../application/interfaces.ts";
 import type { RunSnapshot } from "../domain/run/model.ts";
-import type { RunFact } from "../domain/run/observability.ts";
 import { definitionId, runId } from "../domain/shared.ts";
-import { createUnboundedWidget, renderDashboard, renderRuns } from "../extension/run-monitor.ts";
+import { createUnboundedWidget, renderDashboard } from "../extension/run-monitor.ts";
 
 const ROOT = runId("root-monitor");
 
-test("run widget renders the complete run tree without a height cap", () => {
+const DIAGNOSTICS = {
+  total: 0,
+  artifacts: 0,
+  counts: { trace: 0, info: 0, warning: 0, error: 0 },
+} as const;
+
+test("status widget renders the complete active tree without a height cap", () => {
   const children = Array.from(
     { length: 50 },
     (_, index): RunTreeNode => ({
@@ -17,16 +22,20 @@ test("run widget renders the complete run tree without a height cap", () => {
       children: [],
     }),
   );
-  const lines = renderRuns(
-    {
+  const lines = renderDashboard({
+    tree: {
       root: {
         run: snapshot(ROOT, undefined, "root.session"),
         children,
       },
     },
-    [],
-    123,
-  );
+    sequence: 123,
+    profile: { agent: "base", modelSet: "mixed", difficulty: "D1" },
+    diagnostics: DIAGNOSTICS,
+    integrations: "5/5 loaded",
+    integrationsFailed: false,
+    expanded: false,
+  });
 
   assert.equal(lines.filter((line) => line.includes("scout [running]")).length, 50);
   assert.equal(
@@ -48,7 +57,7 @@ test("widget component factory bypasses Pi's string-array line cap", () => {
   );
 });
 
-test("dashboard collapses completed workflows and shows concrete model and thinking per child", () => {
+test("status uses one compact row per run and collapses completed subtrees", () => {
   const workflowId = runId("run-workflow");
   const scoutId = runId("run-scout");
   const workflow: RunTreeNode = {
@@ -69,10 +78,6 @@ test("dashboard collapses completed workflows and shows concrete model and think
       },
     ],
   };
-  const facts: RunFact[] = [
-    factFor(workflowId, "2026-07-24T00:01:00.000Z", "child-finished", "Completed qa"),
-    factFor(scoutId, "2026-07-24T00:00:30.000Z", "child-finished", "Completed scout"),
-  ];
   const base = {
     tree: {
       root: {
@@ -80,7 +85,6 @@ test("dashboard collapses completed workflows and shows concrete model and think
         children: [workflow],
       },
     },
-    facts,
     sequence: 20,
     profile: { agent: "base" as const, modelSet: "mixed" as const, difficulty: "D2" as const },
     diagnostics: {
@@ -88,40 +92,41 @@ test("dashboard collapses completed workflows and shows concrete model and think
       artifacts: 2,
       counts: { trace: 5, info: 4, warning: 2, error: 1 },
     },
-    ledger: "/state/events.jsonl",
-    logs: "/state/logs.jsonl",
-    artifacts: "/state/artifacts",
     integrations: "5/6 loaded; failed: mcp",
     integrationsFailed: true,
   };
 
   const collapsed = renderDashboard({ ...base, expanded: false });
   assert.equal(
-    collapsed.some((line) => line.includes("qa [completed] · 1 children · 1m 0s")),
+    collapsed.some((line) => line.includes("qa [completed]")),
+    true,
+  );
+  assert.equal(
+    collapsed.some((line) => line.includes("1 children completed")),
     true,
   );
   assert.equal(
     collapsed.some((line) => line.includes("opencode-go/model-a")),
     false,
   );
+  assert.equal(
+    collapsed.some((line) => line.includes("root.session")),
+    false,
+  );
+  assert.equal(
+    collapsed.some((line) => line.includes("Recent facts")),
+    false,
+  );
+  assert.equal(
+    collapsed.some((line) => line.includes("Storage")),
+    false,
+  );
 
   const expanded = renderDashboard({ ...base, expanded: true });
-  assert.equal(
-    expanded.some((line) => line.includes("scout [completed]")),
-    true,
-  );
-  assert.equal(
-    expanded.some((line) => line.includes("opencode-go/model-a · low")),
-    true,
-  );
-  assert.equal(
-    expanded.some((line) => line.includes("Recent facts")),
-    true,
-  );
-  assert.equal(
-    expanded.some((line) => line.includes("1 errors")),
-    true,
-  );
+  const scoutLine = expanded.find((line) => line.includes("scout [completed]"));
+  assert.ok(scoutLine);
+  assert.match(scoutLine, /opencode-go\/model-a · low/);
+  assert.equal(expanded.filter((line) => line.includes("scout [completed]")).length, 1);
 });
 
 function snapshot(
@@ -157,25 +162,5 @@ function snapshot(
       invocation: { wait: "background" },
     },
     activeChildren: [],
-  };
-}
-
-function factFor(
-  id: ReturnType<typeof runId>,
-  timestamp: string,
-  kind: RunFact["kind"],
-  summary: string,
-): RunFact {
-  return {
-    id: `fact-${id}`,
-    rootRunId: ROOT,
-    runId: id,
-    sequence: 1,
-    timestamp,
-    kind,
-    source: "runtime",
-    summary,
-    provenance: {},
-    reliability: "observed",
   };
 }
