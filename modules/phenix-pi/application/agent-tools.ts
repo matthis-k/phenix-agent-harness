@@ -2,12 +2,28 @@ import { Type } from "typebox";
 
 import { type AnyDefinition, definitionRef } from "../domain/definition/definition.ts";
 import { defineSchema, type Schema } from "../domain/definition/schema.ts";
-import { definitionId, localTaskId, type RunId, runId, type TaskId } from "../domain/shared.ts";
+import {
+  definitionId,
+  localTaskId,
+  type Outcome,
+  type RunId,
+  runId,
+  type TaskId,
+} from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import type { DispatchService } from "./dispatch-service.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import type { CatalogFacade, ExecutionFacade, TaskFacade } from "./interfaces.ts";
 import { allowAllInvocations, type InvocationPolicy } from "./invocation-policy.ts";
+import {
+  projectCompletedRun,
+  projectDispatchResult,
+  projectedToolResult,
+  projectOutcome,
+  projectRetryResult,
+  projectRunSnapshot,
+  type RunResultView,
+} from "./tool-result-projection.ts";
 
 export interface AgentToolFactory {
   forRun(runId: RunId): Promise<readonly AgentTool[]>;
@@ -46,6 +62,7 @@ const handleParameters = defineSchema<{
   runId: string;
   message?: string;
   wait?: "await" | "background";
+  view?: RunResultView;
   addTools?: string[];
   limits?: {
     timeoutMs?: number;
@@ -60,6 +77,7 @@ const handleParameters = defineSchema<{
     runId: Type.String(),
     message: Type.Optional(Type.String()),
     wait: Type.Optional(Type.Enum(["await", "background"])),
+    view: Type.Optional(Type.Enum(["summary", "outcome", "failure", "full"])),
     addTools: Type.Optional(Type.Array(Type.String(), { maxItems: 8 })),
     limits: Type.Optional(
       Type.Object({
@@ -127,7 +145,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       label: "Phenix Run",
       description: `Invoke one typed agent or workflow definition. Available: ${
         available.map((definition) => definition.id).join(", ") || "none"
-      }. The definition owns all internal transitions and model choices.`,
+      }. Awaited calls return a compact summary and run ID; inspect the handle with view=outcome only when the complete typed result is needed.`,
       parameters: runParameters,
       execute: async (raw, signal) => {
         const params = requireValid(runParameters, raw);
@@ -146,13 +164,10 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
           wait: params.wait ?? "await",
         });
         if ((params.wait ?? "await") === "background") {
-          return {
-            text: JSON.stringify({ runId: handle.id, status: "running" }),
-            details: { runId: handle.id, status: "running" },
-          };
+          return projectedToolResult({ runId: handle.id, status: "running" });
         }
         const outcome = await handle.result(signal);
-        return { text: JSON.stringify(outcome), details: { runId: handle.id, outcome } };
+        return projectedToolResult(projectCompletedRun(handle.id, outcome), outcome);
       },
     };
 
@@ -160,13 +175,13 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       name: "phenix_dispatch",
       label: "Phenix Dispatch",
       description:
-        "Route substantial work through a mandatory catalog-driven selector. Use auto for normal requests; explicit qa, implement, or coordinate modes are operator overrides only.",
+        "Route substantial work through a mandatory catalog-driven selector. Use auto for normal requests; explicit qa, implement, or coordinate modes are operator overrides only. Completed dispatches return a compact run summary; retrieve the full typed outcome explicitly through phenix_handle when needed.",
       parameters: dispatchParameters,
       execute: async (raw, signal) => {
         const params = requireValid(dispatchParameters, raw);
         if (!this.dispatch) throw new Error("Root dispatch service is not configured");
         const result = await this.dispatch.dispatch(parentId, params, signal);
-        return { text: JSON.stringify(result), details: result };
+        return projectedToolResult(projectDispatchResult(result), result);
       },
     };
 
@@ -174,7 +189,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       name: "phenix_handle",
       label: "Phenix Handle",
       description:
-        "Inspect, await, message, cancel, or retry an accessible run. Retry creates a linked replacement run and may explicitly add bounded read/search or bash execution permissions.",
+        "Inspect, await, message, cancel, or retry an accessible run. Summary is the default low-context view; request view=outcome, failure, or full only when that data is required. Retry creates a linked replacement run and may explicitly add bounded read/search or bash execution permissions.",
       parameters: handleParameters,
       execute: async (raw, signal) => {
         const params = requireValid(handleParameters, raw);
@@ -185,11 +200,11 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
         }
         if (params.action === "inspect") {
           const snapshot = await this.execution.inspect(targetId);
-          return { text: JSON.stringify(snapshot), details: snapshot };
+          return projectedToolResult(projectRunSnapshot(snapshot, params.view), snapshot);
         }
         if (params.action === "await") {
           const outcome = await this.execution.await(targetId, signal);
-          return { text: JSON.stringify(outcome), details: outcome };
+          return projectedToolResult(projectOutcomeForView(outcome, params.view), outcome);
         }
         if (params.action === "retry") {
           const wait = params.wait ?? "await";
@@ -199,12 +214,16 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
             ...(params.limits ? { limits: params.limits } : {}),
           });
           if (wait === "background") {
-            const details = { runId: handle.id, retryOf: targetId, status: "running" };
-            return { text: JSON.stringify(details), details };
+            return projectedToolResult({ runId: handle.id, retryOf: targetId, status: "running" });
           }
           const outcome = await handle.result(signal);
-          const details = { runId: handle.id, retryOf: targetId, outcome };
-          return { text: JSON.stringify(details), details };
+          const projected =
+            params.view === "outcome" || params.view === "full"
+              ? { runId: handle.id, retryOf: targetId, outcome }
+              : params.view === "failure" && outcome.status === "failure"
+                ? { runId: handle.id, retryOf: targetId, failure: outcome.failure }
+                : projectRetryResult(handle.id, targetId, outcome);
+          return projectedToolResult(projected, { runId: handle.id, retryOf: targetId, outcome });
         }
         const caller = this.store.projection.requireRun(parentId);
         if (params.action === "send") {
@@ -286,6 +305,14 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
     }
     throw new Error(`Run ${targetId} is outside caller ${callerId}'s task scope`);
   }
+}
+
+function projectOutcomeForView(
+  outcome: Outcome<unknown>,
+  view: RunResultView | undefined,
+): unknown {
+  if (view === "outcome" || view === "full") return outcome;
+  return projectOutcome(outcome, view ?? "summary");
 }
 
 function requireValid<T>(schema: Schema<T>, value: unknown): T {
