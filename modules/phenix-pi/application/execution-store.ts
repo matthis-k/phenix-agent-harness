@@ -1,3 +1,4 @@
+import { AttentionProjection } from "../domain/attention/projection.ts";
 import type {
   DomainEvent,
   PendingDomainEvent,
@@ -12,6 +13,7 @@ import { KeyedSerialExecutor } from "./keyed-serial-executor.ts";
 
 export class ExecutionStore {
   readonly projection = new RunProjection();
+  readonly attention = new AttentionProjection();
   readonly events: OrderedDomainEventBus;
   private readonly ledger: RunLedger;
   private readonly clock: Clock;
@@ -39,7 +41,7 @@ export class ExecutionStore {
       const events = [...(await this.ledger.load(rootRunId))].sort(
         (left, right) => left.sequence - right.sequence,
       );
-      for (const event of events) this.projection.apply(event);
+      for (const event of events) this.apply(event);
       this.loadedRoots.add(rootRunId);
       return events;
     });
@@ -82,14 +84,14 @@ export class ExecutionStore {
 
       if (unsequenced.length === 0) return [];
       const expected = this.projection.rootSequences.get(rootRunId) ?? 0;
-      this.projection.assertApplicable(
-        unsequenced.map((event, index) => ({
-          ...event,
-          sequence: expected + index + 1,
-        })),
-      );
+      const staged = unsequenced.map((event, index) => ({
+        ...event,
+        sequence: expected + index + 1,
+      }));
+      this.projection.assertApplicable(staged);
+      this.attention.assertApplicable(staged);
       const events = await this.ledger.append(rootRunId, expected, unsequenced);
-      for (const event of events) this.projection.apply(event);
+      for (const event of events) this.apply(event);
       this.events.publish(events);
       return events;
     });
@@ -103,7 +105,12 @@ export class ExecutionStore {
     const events = [...(await this.ledger.load(rootRunId))].sort(
       (left, right) => left.sequence - right.sequence,
     );
-    for (const event of events) this.projection.apply(event);
+    for (const event of events) this.apply(event);
     this.loadedRoots.add(rootRunId);
+  }
+
+  private apply(event: DomainEvent): void {
+    this.projection.apply(event);
+    this.attention.apply(event);
   }
 }
