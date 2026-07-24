@@ -36,10 +36,11 @@ export class QueryFacadeImpl implements QueryFacade {
     return { root: build(root) };
   }
 
-  async facts(rootRunId: RunId, limit = 100) {
+  async facts(rootRunId: RunId, limit?: number) {
     this.store.projection.requireRun(rootRunId);
     const facts = this.store.projection.factsFor(rootRunId);
-    const bounded = Math.max(0, Math.min(1_000, limit));
+    if (limit === undefined || !Number.isFinite(limit)) return facts;
+    const bounded = Math.max(0, Math.floor(limit));
     return bounded === 0 ? [] : facts.slice(-bounded);
   }
 
