@@ -17,7 +17,7 @@ This makes workflows reviewable without weakening runtime validation or moving c
 
 ## Canonical layout
 
-```md
+````md
 # Human-readable workflow title
 
 ```phenix-workflow
@@ -72,7 +72,7 @@ output: example.output
 |---|---|---|---|
 | `inspect` | `verify` | | |
 | `verify` | `return` | | |
-```
+````
 
 ## State kinds
 
