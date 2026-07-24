@@ -13,6 +13,37 @@ const localOperations = {
   },
 };
 
+const definitionsById = new Map(
+  [...agentDefinitions, ...workflowDefinitions].map((definition) => [
+    String(definition.id),
+    definition,
+  ] as const),
+);
+
+function reachesCommandAuthority(id: string, visited = new Set<string>()): boolean {
+  if (visited.has(id)) return false;
+  const definition = definitionsById.get(id);
+  if (!definition) return false;
+  const nextVisited = new Set(visited).add(id);
+
+  if (definition.kind === "agent") {
+    const tools = new Set(definition.tools.allow);
+    if (tools.has("bash") && tools.has("nix_shell")) return true;
+    if (!tools.has("phenix_run")) return false;
+    return definition.childCapabilities.invokableDefinitions.some((childId) =>
+      reachesCommandAuthority(String(childId), nextVisited),
+    );
+  }
+
+  return definition.graph.nodes.some((node) => {
+    if (node.kind === "local") return node.operation === "local.qa-checks";
+    return (
+      node.kind === "invoke" &&
+      reachesCommandAuthority(String(node.definition.id), nextVisited)
+    );
+  });
+}
+
 test("all bundled workflow graphs validate at startup", () => {
   const functions = new WorkflowFunctionRegistry();
   registerWorkflowFunctions(functions);
@@ -89,6 +120,27 @@ test("command execution stays scoped to operational agents", () => {
       false,
       `${id} unexpectedly has nix_shell`,
     );
+  }
+});
+
+test("every substantial dispatch route reaches command authority", () => {
+  for (const id of ["workflow.qa", "workflow.implement", "agent.coordinator"]) {
+    assert.equal(reachesCommandAuthority(id), true, `${id} cannot reach command authority`);
+  }
+});
+
+test("dispatch prompts prohibit read-only command fallbacks", () => {
+  const coordinator = definitionsById.get("agent.coordinator");
+  const dispatcher = definitionsById.get("agent.dispatcher");
+  assert.equal(coordinator?.kind, "agent");
+  assert.equal(dispatcher?.kind, "agent");
+  if (coordinator?.kind === "agent") {
+    assert.match(coordinator.prompt.render(), /Never route command execution to agent\.scout/);
+    assert.match(coordinator.prompt.render(), /explicitly shell-capable operational child/);
+  }
+  if (dispatcher?.kind === "agent") {
+    assert.match(dispatcher.prompt.render(), /full repository QA/);
+    assert.match(dispatcher.prompt.render(), /never use a read-only analysis role/);
   }
 });
 
