@@ -30,6 +30,7 @@ import type {
   TaskFacade,
 } from "../application/interfaces.ts";
 import { SessionInvocationPolicy } from "../application/invocation-policy.ts";
+import { ModelExecutionFacade } from "../application/model-execution-facade.ts";
 import { formatPresentationNotice, isPresentationFact } from "../application/presentation.ts";
 import { ProfileAwareModelResolver } from "../application/profile-aware-model-resolver.ts";
 import { QueryFacadeImpl } from "../application/query-facade.ts";
@@ -138,22 +139,29 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     clock: systemClock,
     rootInvokableDefinitions: [...ROOT_DISPATCH_DEFINITION_IDS, ...ROOT_INTERNAL_DEFINITION_IDS],
   });
+  const modelExecution = new ModelExecutionFacade({
+    execution,
+    store,
+    hiddenDefinitions: ROOT_INTERNAL_DEFINITION_IDS,
+  });
   const tasks = new TaskFacadeImpl({
     store,
     catalog: definitions,
     clock: systemClock,
     ids,
   });
-  const catalog = new CatalogFacadeImpl(definitions, store);
+  const catalog = new CatalogFacadeImpl(definitions, store, {
+    hiddenDefinitions: ROOT_INTERNAL_DEFINITION_IDS,
+  });
   const invocationPolicy = new SessionInvocationPolicy({ store, catalog: definitions });
   const dispatch = new DispatchService({
-    execution,
+    execution: modelExecution,
     catalog,
     store,
     invocationPolicy,
   });
   const tools = new FacadeAgentToolFactory({
-    execution,
+    execution: modelExecution,
     dispatch,
     tasks,
     catalog,
