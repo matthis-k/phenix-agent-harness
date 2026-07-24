@@ -1,7 +1,6 @@
 export const PHENIX_SUBCOMMANDS = [
-  { value: "status", label: "status — Toggle the live dashboard" },
+  { value: "status", label: "status — Open the live dashboard" },
   { value: "logs", label: "logs — Inspect or export structured diagnostics" },
-  { value: "runs", label: "runs — Alias for the live status dashboard" },
   { value: "facts", label: "facts — Toggle or export the full fact history" },
   { value: "tasks", label: "tasks — Show the task projection" },
   { value: "catalog", label: "catalog — List invokable definitions" },
