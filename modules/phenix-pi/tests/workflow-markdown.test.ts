@@ -7,31 +7,24 @@ import {
   parseWorkflowMarkdown,
   type WorkflowMarkdownBindings,
 } from "../adapters/workflow/markdown.ts";
-import {
-  FinalReportSchema,
-  ImplementationRequestSchema,
-  ImplementationResultSchema,
-  ObjectiveRequestSchema,
-  QAReportSchema,
-} from "../definitions/schemas.ts";
+import { agentDefinitions } from "../definitions/agents.ts";
+import { resolveDefinitionSchema } from "../definitions/schema-registry.ts";
 import { implementationWorkflow, qaWorkflow } from "../definitions/workflows/index.ts";
-import type { Schema } from "../domain/definition/schema.ts";
+import type { AnyDefinition } from "../domain/definition/definition.ts";
 
-const schemaById = new Map<string, Schema<unknown>>(
-  [
-    ObjectiveRequestSchema,
-    QAReportSchema,
-    ImplementationRequestSchema,
-    ImplementationResultSchema,
-    FinalReportSchema,
-  ].map((schema) => [schema.id, schema as Schema<unknown>] as const),
+const definitionById = new Map<string, AnyDefinition>(
+  [...agentDefinitions, implementationWorkflow, qaWorkflow].map((definition) => [
+    definition.id,
+    definition,
+  ]),
 );
 
 const bindings: WorkflowMarkdownBindings = {
-  resolveSchema(id) {
-    const schema = schemaById.get(id);
-    if (!schema) throw new Error(`Unknown schema ${id}`);
-    return schema;
+  resolveSchema: resolveDefinitionSchema,
+  resolveDefinition(id) {
+    const definition = definitionById.get(id);
+    if (!definition) throw new Error(`Unknown definition ${id}`);
+    return definition;
   },
 };
 
@@ -42,11 +35,8 @@ function source(name: string): string {
   );
 }
 
-test("Markdown QA workflow compiles to the current typed definition", () => {
+test("bundled Markdown workflows are the production definitions", () => {
   assert.deepEqual(compileWorkflowMarkdown(source("qa"), bindings), qaWorkflow);
-});
-
-test("Markdown implementation workflow compiles to the current typed definition", () => {
   assert.deepEqual(compileWorkflowMarkdown(source("implement"), bindings), implementationWorkflow);
 });
 
@@ -56,6 +46,17 @@ test("workflow states may invoke other workflows through the normal definition b
   assert.deepEqual(
     invocations.map((node) => node.definition.id),
     ["workflow.qa", "workflow.implement"],
+  );
+});
+
+test("invoked step contracts must match the referenced definition", () => {
+  const invalid = source("implement").replace(
+    "output-schema: outcome.plan.v1",
+    "output-schema: outcome.change-set.v1",
+  );
+  assert.throws(
+    () => compileWorkflowMarkdown(invalid, bindings),
+    /schema outcome.change-set.v1 does not match outcome.plan.v1/,
   );
 });
 
