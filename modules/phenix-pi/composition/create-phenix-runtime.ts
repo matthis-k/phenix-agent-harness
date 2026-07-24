@@ -144,7 +144,9 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     clock: systemClock,
     ids,
   });
-  const catalog = new CatalogFacadeImpl(definitions, store);
+  const catalog = new CatalogFacadeImpl(definitions, store, {
+    hiddenDefinitions: ROOT_INTERNAL_DEFINITION_IDS,
+  });
   const invocationPolicy = new SessionInvocationPolicy({ store, catalog: definitions });
   const dispatch = new DispatchService({
     execution,
