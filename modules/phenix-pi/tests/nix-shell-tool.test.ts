@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  createNixShellTool,
-  normalizeNixInstallable,
-} from "../adapters/pi-sdk/nix-shell-tool.ts";
+import { createNixShellTool, normalizeNixInstallable } from "../adapters/pi-sdk/nix-shell-tool.ts";
 
 test("nix shell normalizes bare packages and preserves explicit installables", () => {
   assert.equal(normalizeNixInstallable("jq"), "nixpkgs#jq");
-  assert.equal(normalizeNixInstallable("python312Packages.black"), "nixpkgs#python312Packages.black");
+  assert.equal(
+    normalizeNixInstallable("python312Packages.black"),
+    "nixpkgs#python312Packages.black",
+  );
   assert.equal(normalizeNixInstallable("nixpkgs#ripgrep"), "nixpkgs#ripgrep");
   assert.equal(
     normalizeNixInstallable("github:NixOS/nixpkgs/nixos-unstable#fd"),
