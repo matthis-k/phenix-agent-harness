@@ -26,6 +26,7 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
   private readonly cache = new Map<RunId, DiagnosticLogEntry[]>();
   private readonly loading = new Map<RunId, Promise<DiagnosticLogEntry[]>>();
   private tail: Promise<void> = Promise.resolve();
+  private reportedWriteFailure = false;
 
   constructor(stateDirectory: string) {
     this.stateDirectory = stateDirectory;
@@ -63,8 +64,17 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
       entries.push(committed);
     });
     this.tail = pending.catch(() => undefined);
-    await pending;
-    if (!committed) throw new Error("Diagnostic entry was not committed");
+    try {
+      await pending;
+    } catch (error) {
+      this.reportWriteFailure(error);
+      return transientEntry(input);
+    }
+    if (!committed) {
+      const error = new Error("Diagnostic entry was not committed");
+      this.reportWriteFailure(error);
+      return transientEntry(input);
+    }
     this.notify(committed);
     return committed;
   }
@@ -196,6 +206,14 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
     }
   }
 
+  private reportWriteFailure(error: unknown): void {
+    if (this.reportedWriteFailure) return;
+    this.reportedWriteFailure = true;
+    console.error(
+      `[phenix] diagnostic persistence failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
   private async materializeFields(
     rootRunId: RunId,
     fields: Readonly<Record<string, unknown>>,
@@ -306,6 +324,19 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
     const digest = createHash("sha256").update(rootRunId).digest("hex").slice(0, 16);
     return path.join(this.stateDirectory, "runs", `${digest}-${safePrefix(rootRunId)}`);
   }
+}
+
+function transientEntry(input: DiagnosticWrite): DiagnosticLogEntry {
+  return {
+    version: 1,
+    timestamp: input.timestamp ?? new Date().toISOString(),
+    severity: input.severity,
+    scope: input.scope,
+    message: normalizeMessage(input.message),
+    rootRunId: input.rootRunId,
+    ...(input.runId ? { runId: input.runId } : {}),
+    ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}),
+  };
 }
 
 function normalizeMessage(message: string): string {
