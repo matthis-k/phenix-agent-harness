@@ -24,6 +24,7 @@ import type {
   CreateAgentSessionSpec,
 } from "../../ports/agent-session-backend.ts";
 import { BoundedAgentSessionPort } from "./bounded-agent-session-port.ts";
+import { createNixShellTool } from "./nix-shell-tool.ts";
 
 export class PiSdkAgentSessionBackend implements AgentSessionBackend {
   private readonly modelRegistry: ModelRegistry;
@@ -96,7 +97,10 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
     });
     await resourceLoader.reload();
     const modelRuntime = await this.createModelRuntime();
-    const customTools = spec.customTools.map(toPiTool) as ToolDefinition[];
+    const customTools = [
+      ...spec.customTools.map(toPiTool),
+      ...(spec.tools.includes("nix_shell") ? [createNixShellTool(spec.cwd)] : []),
+    ] as ToolDefinition[];
     const { session } = await createAgentSession({
       cwd: spec.cwd,
       agentDir: this.agentDir,
