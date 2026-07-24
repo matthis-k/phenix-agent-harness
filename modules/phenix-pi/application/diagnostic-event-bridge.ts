@@ -165,9 +165,19 @@ function describe(event: DomainEvent): Description {
         fields: event.data as Readonly<Record<string, unknown>>,
       };
     case "attention.received":
-      return attentionDescription("trace", "attention.received", "Follow-up attention received", event.data);
+      return attentionDescription(
+        "trace",
+        "attention.received",
+        "Follow-up attention received",
+        event.data,
+      );
     case "attention.routed":
-      return attentionDescription("info", "attention.routed", "Follow-up attention routed", event.data);
+      return attentionDescription(
+        "info",
+        "attention.routed",
+        "Follow-up attention routed",
+        event.data,
+      );
     case "attention.routing.failed":
       return attentionDescription(
         "warning",
