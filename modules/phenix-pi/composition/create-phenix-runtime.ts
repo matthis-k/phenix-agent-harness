@@ -13,6 +13,7 @@ import {
 import { PiModelInventory } from "../adapters/routing/pi-model-inventory.ts";
 import { AgentExecutor } from "../application/agent-executor.ts";
 import { FacadeAgentToolFactory } from "../application/agent-tools.ts";
+import { AttentionProcessManager } from "../application/attention-process-manager.ts";
 import { DefinitionCatalog, WorkflowFunctionRegistry } from "../application/catalog.ts";
 import { CatalogFacadeImpl } from "../application/catalog-facade.ts";
 import { logDomainEvent } from "../application/diagnostic-event-bridge.ts";
@@ -21,6 +22,7 @@ import { OrderedDomainEventBus } from "../application/domain-event-bus.ts";
 import { ExecutionFacadeImpl } from "../application/execution-facade.ts";
 import { ExecutionStore } from "../application/execution-store.ts";
 import type {
+  AttentionFacade,
   CatalogFacade,
   ExecutionFacade,
   QueryFacade,
@@ -28,6 +30,7 @@ import type {
   TaskFacade,
 } from "../application/interfaces.ts";
 import { SessionInvocationPolicy } from "../application/invocation-policy.ts";
+import { ModelExecutionFacade } from "../application/model-execution-facade.ts";
 import { ProfileAwareModelResolver } from "../application/profile-aware-model-resolver.ts";
 import { QueryFacadeImpl } from "../application/query-facade.ts";
 import { SessionProfileFacadeImpl } from "../application/session-profile-facade.ts";
@@ -35,7 +38,10 @@ import { SupervisionProcessManager } from "../application/supervision-process-ma
 import { TaskFacadeImpl } from "../application/task-facade.ts";
 import { WorkflowProcessManager } from "../application/workflow-process-manager.ts";
 import { agentDefinitions } from "../definitions/agents.ts";
-import { ROOT_DISPATCH_DEFINITION_IDS } from "../definitions/ids.ts";
+import {
+  ROOT_DISPATCH_DEFINITION_IDS,
+  ROOT_INTERNAL_DEFINITION_IDS,
+} from "../definitions/ids.ts";
 import { registerWorkflowFunctions } from "../definitions/workflows/functions.ts";
 import { workflowDefinitions } from "../definitions/workflows/index.ts";
 import type { ConcreteModelRef } from "../domain/definition/model.ts";
@@ -60,6 +66,7 @@ export interface PhenixHostServices {
 
 export interface PhenixRuntime {
   readonly execution: ExecutionFacade;
+  readonly attention: AttentionFacade;
   readonly profiles: SessionProfileFacade;
   readonly tasks: TaskFacade;
   readonly catalog: CatalogFacade;
@@ -132,7 +139,12 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     models: resolver,
     ids,
     clock: systemClock,
-    rootInvokableDefinitions: ROOT_DISPATCH_DEFINITION_IDS,
+    rootInvokableDefinitions: [...ROOT_DISPATCH_DEFINITION_IDS, ...ROOT_INTERNAL_DEFINITION_IDS],
+  });
+  const modelExecution = new ModelExecutionFacade({
+    execution,
+    store,
+    hiddenDefinitions: ROOT_INTERNAL_DEFINITION_IDS,
   });
   const tasks = new TaskFacadeImpl({
     store,
@@ -140,16 +152,18 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     clock: systemClock,
     ids,
   });
-  const catalog = new CatalogFacadeImpl(definitions, store);
+  const catalog = new CatalogFacadeImpl(definitions, store, {
+    hiddenDefinitions: ROOT_INTERNAL_DEFINITION_IDS,
+  });
   const invocationPolicy = new SessionInvocationPolicy({ store, catalog: definitions });
   const dispatch = new DispatchService({
-    execution,
+    execution: modelExecution,
     catalog,
     store,
     invocationPolicy,
   });
   const tools = new FacadeAgentToolFactory({
-    execution,
+    execution: modelExecution,
     dispatch,
     tasks,
     catalog,
@@ -184,7 +198,15 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
   execution.registerImplementation("agent", agents);
   execution.registerImplementation("workflow", workflows);
   execution.seal();
+
   const queries = new QueryFacadeImpl(store, tasks);
+  const attention = new AttentionProcessManager({
+    execution,
+    store,
+    ids,
+    clock: systemClock,
+    notifyRoot: (message) => rootNotifier?.(message),
+  });
   const supervision = new SupervisionProcessManager({
     execution,
     store,
@@ -199,6 +221,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
 
   return {
     execution,
+    attention,
     profiles,
     tasks,
     catalog,
@@ -222,6 +245,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
       });
       await execution.initializeRoot(input);
       await execution.recoverNonterminal(input.id);
+      await attention.recover(input.id);
       await events.drain();
       await diagnostics.record({
         rootRunId: input.id,
@@ -251,6 +275,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
         message: "Phenix root session shutdown started",
       });
       await execution.shutdown(rootRunId);
+      await attention.shutdown();
       await workflows.shutdown();
       await agents.shutdown();
       await events.drain();
