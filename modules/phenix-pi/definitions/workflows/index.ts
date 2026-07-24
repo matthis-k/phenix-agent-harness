@@ -1,3 +1,9 @@
-export const BUNDLED_WORKFLOW_SOURCE_NAMES = ["implement", "qa"] as const;
-
-export type BundledWorkflowSourceName = (typeof BUNDLED_WORKFLOW_SOURCE_NAMES)[number];
+export {
+  implementationWorkflow,
+  qaWorkflow,
+  workflowDefinitions,
+} from "../../composition/bundled-definitions.ts";
+export {
+  BUNDLED_WORKFLOW_SOURCE_NAMES,
+  type BundledWorkflowSourceName,
+} from "./manifest.ts";
