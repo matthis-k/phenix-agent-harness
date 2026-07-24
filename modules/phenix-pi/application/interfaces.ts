@@ -1,7 +1,4 @@
-import type {
-  AttentionResult,
-  AttentionSubmitRequest,
-} from "../domain/attention/model.ts";
+import type { AttentionResult, AttentionSubmitRequest } from "../domain/attention/model.ts";
 import type { Definition, DefinitionRef } from "../domain/definition/definition.ts";
 import type { Difficulty, PhenixModelSetId } from "../domain/definition/model.ts";
 import type { DomainEvent } from "../domain/run/events.ts";
