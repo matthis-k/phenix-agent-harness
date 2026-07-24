@@ -1,19 +1,20 @@
 name: Format PR 108
 
 on:
-  pull_request:
+  push:
+    branches: [fix/parent-return-facts-export-final2]
 
 permissions:
   contents: write
 
 jobs:
   format:
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/parent-return-facts-export-final2'
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: fix/parent-return-facts-export-final2
           fetch-depth: 0
       - name: Apply exact Biome output
         shell: bash
@@ -51,4 +52,4 @@ jobs:
           git add -A
           git diff --cached --check
           git commit -m "Apply source formatting"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          git push origin HEAD:fix/parent-return-facts-export-final2
