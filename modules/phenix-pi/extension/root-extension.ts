@@ -27,6 +27,7 @@ import {
 import { type RunId, runId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import { copyFactHistory, parseFactsCommand, writeFactHistory } from "./fact-export.ts";
+import { statusField, statusLine } from "./observability-theme.ts";
 import { completePhenixSubcommands, PHENIX_FACTS_USAGE, PHENIX_USAGE } from "./phenix-command.ts";
 import { RunMonitor } from "./run-monitor.ts";
 
@@ -387,8 +388,44 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
       ]);
       const descendants = active.filter((run) => run.id !== activeRoot);
       const ledger = activeRuntime.ledgerPath(activeRoot) ?? "in-memory";
+      const failedIntegrations = integrationStatuses.some((status) => status.state === "failed");
+      const liveMode = monitor?.currentMode ?? "hidden";
       ctx.ui.notify(
-        `Root: ${activeRoot}\nProfile: ${profile.agent} / ${profile.modelSet} / ${profile.difficulty}\nSequence: ${activeRuntime.sequence(activeRoot)}\nActive descendants: ${descendants.length}\nFacts: ${facts.length}\nLive view: ${monitor?.currentMode ?? "hidden"}\nIntegrations: ${summarizeIntegrations(integrationStatuses)}\nLedger: ${ledger}`,
+        [
+          statusField(ctx.ui.theme, "Root", String(activeRoot), "muted"),
+          statusField(
+            ctx.ui.theme,
+            "Profile",
+            `${profile.agent} / ${profile.modelSet} / ${profile.difficulty}`,
+            "accent",
+          ),
+          statusField(
+            ctx.ui.theme,
+            "Sequence",
+            String(activeRuntime.sequence(activeRoot)),
+            "muted",
+          ),
+          statusField(
+            ctx.ui.theme,
+            "Active descendants",
+            String(descendants.length),
+            descendants.length === 0 ? "success" : "warning",
+          ),
+          statusField(ctx.ui.theme, "Facts", String(facts.length)),
+          statusField(
+            ctx.ui.theme,
+            "Live view",
+            liveMode,
+            liveMode === "hidden" ? "muted" : "accent",
+          ),
+          statusField(
+            ctx.ui.theme,
+            "Integrations",
+            summarizeIntegrations(integrationStatuses),
+            failedIntegrations ? "error" : "success",
+          ),
+          statusField(ctx.ui.theme, "Ledger", ledger, "muted"),
+        ].join("\n"),
         integrationLevel(integrationStatuses),
       );
     },
@@ -457,10 +494,7 @@ async function updateStatus(
     runtime.profiles.current(rootRunId),
   ]);
   const descendants = active.filter((run) => run.id !== rootRunId);
-  ctx.ui.setStatus(
-    STATUS_KEY,
-    `phenix: ${profile.agent}/${profile.modelSet}${descendants.length === 0 ? "" : ` · ${descendants.length} active`}`,
-  );
+  ctx.ui.setStatus(STATUS_KEY, statusLine(ctx.ui.theme, profile, descendants.length));
 }
 
 async function applyAgentTools(
