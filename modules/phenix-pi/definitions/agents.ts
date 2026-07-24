@@ -1,5 +1,4 @@
 import type { AgentDefinition, ContextPolicy } from "../domain/definition/definition.ts";
-import { attentionRouterDefinition as rawAttentionRouterDefinition } from "./attention.ts";
 import {
   architectDefinition as rawArchitectDefinition,
   baseDefinition as rawBaseDefinition,
@@ -14,6 +13,7 @@ import {
   testerDefinition as rawTesterDefinition,
   verifierDefinition as rawVerifierDefinition,
 } from "./agents/index.ts";
+import { attentionRouterDefinition as rawAttentionRouterDefinition } from "./attention.ts";
 
 const fullRepositoryContext: ContextPolicy = {
   projectFiles: "inherit",
