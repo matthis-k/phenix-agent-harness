@@ -32,6 +32,8 @@ kind: invoke
 title: Produce an executable plan
 run: agent.planner
 input: implement.plan.input
+input-schema: request.plan.v1
+output-schema: outcome.plan.v1
 wait: await
 ```
 
@@ -42,6 +44,8 @@ kind: invoke
 title: Apply the current implementation attempt
 run: agent.implementer
 input: implement.work.input
+input-schema: request.implementation.v1
+output-schema: outcome.change-set.v1
 wait: await
 ```
 
@@ -52,6 +56,8 @@ kind: invoke
 title: Independently verify the attempt
 run: agent.verifier
 input: implement.verify.input
+input-schema: request.verification.v1
+output-schema: outcome.verification.v1
 wait: await
 ```
 
@@ -67,6 +73,7 @@ decide: implement.acceptance
 ```phenix-state
 kind: return
 output: implement.output
+output-schema: outcome.implementation-result.v1
 ```
 
 ### fail
