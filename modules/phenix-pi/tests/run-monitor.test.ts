@@ -59,6 +59,64 @@ test("widget component factory bypasses Pi's string-array line cap", () => {
   );
 });
 
+
+test("running nodes render current activity on a separate indented line", () => {
+  const childId = runId("run-active-scout");
+  const lines = renderDashboard({
+    tree: {
+      root: {
+        run: snapshot(ROOT, undefined, "root.session"),
+        children: [
+          {
+            run: {
+              ...snapshot(childId, ROOT, "agent.scout"),
+              resolvedModel: {
+                requested: { kind: "session" },
+                concrete: {
+                  kind: "concrete",
+                  provider: "opencode-go",
+                  model: "model-a",
+                },
+                thinking: "low",
+                policyRevision: "test",
+              },
+            },
+            activity: {
+              rootRunId: ROOT,
+              runId: childId,
+              phase: "exploring",
+              summary: "Inspecting workflow scheduler",
+              target: "application/workflow-process-manager.ts",
+              source: "reported",
+              since: "2026-07-24T00:00:10.000Z",
+              sequence: 2,
+            },
+            children: [],
+          },
+        ],
+      },
+    },
+    facts: [],
+    sequence: 3,
+    profile: { agent: "base", modelSet: "mixed", difficulty: "D1" },
+    diagnostics: DIAGNOSTICS,
+    integrations: "5/5 loaded",
+    integrationsFailed: false,
+    expanded: false,
+  });
+
+  const rowIndex = lines.findIndex((line) => line.includes("scout [running]"));
+  assert.notEqual(rowIndex, -1);
+  const row = lines[rowIndex];
+  const activity = lines[rowIndex + 1];
+  assert.ok(row);
+  assert.ok(activity);
+  assert.match(row, /opencode-go\/model-a · low/);
+  assert.doesNotMatch(row, /Inspecting workflow scheduler/);
+  assert.match(activity, /! exploring Inspecting workflow scheduler/);
+  assert.match(activity, /workflow-process-manager\.ts/);
+});
+
 test("status uses one compact row per run, collapses completed subtrees, and keeps recent facts", () => {
   const workflowId = runId("run-workflow");
   const scoutId = runId("run-scout");

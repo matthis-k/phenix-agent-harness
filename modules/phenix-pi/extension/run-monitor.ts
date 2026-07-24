@@ -322,7 +322,6 @@ function appendNode(
   const collapsed = node.run.state === "completed" && node.children.length > 0 && !expanded;
   const details = [modelDetails(node, theme)];
   if (collapsed) details.push(collapsedDetails(node, theme));
-  if (!isTerminal(node.run.state) && node.activity) details.push(activityDetails(node, theme));
   const suffix = details.filter(Boolean).join(color(theme, "dim", "  ·  "));
   lines.push(
     `${color(theme, "dim", `${prefix}${branch}`)}${symbol} ${label} ${stateLabel}${
@@ -331,6 +330,9 @@ function appendNode(
   );
   if (collapsed) return;
   const childPrefix = `${prefix}${last ? "   " : "│  "}`;
+  if (node.run.state === "running" && node.activity) {
+    lines.push(`${color(theme, "dim", childPrefix)}${activityDetails(node, theme)}`);
+  }
   node.children.forEach((child, index) => {
     appendNode(lines, child, childPrefix, index === node.children.length - 1, theme, expanded);
   });
