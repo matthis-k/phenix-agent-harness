@@ -101,6 +101,11 @@ test("a Markdown workflow can invoke and await another workflow", async () => {
   );
   assert.deepEqual(
     runtime.store.projection.childrenOf(nested[0].id).map((run) => run.definitionId),
-    ["agent.planner", "agent.implementer", "agent.verifier"],
+    [
+      "agent.difficulty-estimator",
+      "agent.planner",
+      "agent.implementer",
+      "agent.verifier",
+    ],
   );
 });
