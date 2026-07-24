@@ -1,3 +1,4 @@
+import { AGENT_ATTENTION_ROUTER } from "../definitions/ids.ts";
 import type {
   AttentionCandidate,
   AttentionDeliveredData,
@@ -19,7 +20,6 @@ import type { DomainEvent, PendingDomainEvent } from "../domain/run/events.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
 import type { RunRecord } from "../domain/run/model.ts";
 import type { RunId } from "../domain/shared.ts";
-import { AGENT_ATTENTION_ROUTER } from "../definitions/ids.ts";
 import type { Clock, IdGenerator } from "../ports/clock.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import type { AttentionFacade, ExecutionFacade } from "./interfaces.ts";
@@ -46,10 +46,7 @@ export class AgentAttentionRouter implements AttentionRouter {
     this.execution = execution;
   }
 
-  async route(
-    rootRunId: RunId,
-    request: AttentionRoutingRequest,
-  ): Promise<AttentionRouterResult> {
+  async route(rootRunId: RunId, request: AttentionRoutingRequest): Promise<AttentionRouterResult> {
     const handle = await this.execution.start({
       parentId: rootRunId,
       definition: definitionRef(AGENT_ATTENTION_ROUTER),
@@ -201,7 +198,9 @@ export class AttentionProcessManager implements AttentionFacade {
           reason,
           ...(routerRunId ? { routerRunId } : {}),
         } satisfies AttentionRoutingFailedData);
-        await this.notifyRoot?.(`Phenix could not route the follow-up to active children: ${reason}`);
+        await this.notifyRoot?.(
+          `Phenix could not route the follow-up to active children: ${reason}`,
+        );
         return {
           attentionId,
           routedBy: "none",
@@ -420,7 +419,7 @@ export class AttentionProcessManager implements AttentionFacade {
   private async notifyParent(run: RunRecord, pending: PendingDelivery): Promise<void> {
     if (!run.parentId) return;
     const parent = this.store.projection.runs.get(run.parentId);
-    if (!parent || parent.kind !== "agent" || isTerminalRunState(parent.state)) return;
+    if (parent?.kind !== "agent" || isTerminalRunState(parent.state)) return;
     try {
       await this.execution.notify(
         parent.id,
@@ -528,7 +527,9 @@ function formatRoutingNotice(
   }
   const status = new Map(deliveries.map((delivery) => [delivery.runId, delivery.status]));
   return `Follow-up routed to ${targets
-    .map((target) => `${target.runId} (${target.delivery}, ${status.get(target.runId) ?? "unknown"})`)
+    .map(
+      (target) => `${target.runId} (${target.delivery}, ${status.get(target.runId) ?? "unknown"})`,
+    )
     .join(", ")}.`;
 }
 
