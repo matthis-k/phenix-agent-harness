@@ -23,6 +23,7 @@ import type {
   AgentTool,
   CreateAgentSessionSpec,
 } from "../../ports/agent-session-backend.ts";
+import { BoundedAgentSessionPort } from "./bounded-agent-session-port.ts";
 
 export class PiSdkAgentSessionBackend implements AgentSessionBackend {
   private readonly modelRegistry: ModelRegistry;
@@ -108,7 +109,7 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
       sessionManager,
       settingsManager,
     });
-    return new PiAgentSessionPort(session);
+    return new BoundedAgentSessionPort(new PiAgentSessionPort(session));
   }
 
   private async createModelRuntime(): Promise<ModelRuntime> {

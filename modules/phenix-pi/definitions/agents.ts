@@ -56,9 +56,31 @@ function configured<I, O>(
   };
 }
 
-export const scoutDefinition = configured(rawScoutDefinition, analysisRepositoryContext);
+function withPromptSuffix<I, O>(
+  definition: AgentDefinition<I, O>,
+  suffix: string,
+): AgentDefinition<I, O> {
+  return {
+    ...definition,
+    prompt: { render: () => `${definition.prompt.render()}\n${suffix}` },
+  };
+}
+
+export const scoutDefinition = configured(
+  withPromptSuffix(
+    rawScoutDefinition,
+    "You have no command-execution capability. Never claim to run checks or delegate command work. If the task requires executing a command rather than inspecting existing evidence, call phenix_fail immediately with an insufficient_permissions report.",
+  ),
+  analysisRepositoryContext,
+);
 export const plannerDefinition = configured(rawPlannerDefinition, analysisRepositoryContext);
-export const architectDefinition = configured(rawArchitectDefinition, analysisRepositoryContext);
+export const architectDefinition = configured(
+  withPromptSuffix(
+    rawArchitectDefinition,
+    "In workflow QA, deterministic checks are handled by a separate tester branch. Do not rerun or delegate those checks. Delegate to agent.scout only for a focused repository evidence question that can be answered with read, grep, find, or ls.",
+  ),
+  analysisRepositoryContext,
+);
 export const implementerDefinition = configured(rawImplementerDefinition, fullRepositoryContext);
 export const testerDefinition = configured(rawTesterDefinition, testRepositoryContext);
 export const verifierDefinition = configured(rawVerifierDefinition, fullRepositoryContext);
