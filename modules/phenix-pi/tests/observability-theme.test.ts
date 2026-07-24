@@ -14,7 +14,7 @@ const THEME = {
   bold: (text: string) => `<bold>${text}</bold>`,
 } as unknown as ObservabilityTheme;
 
-test("run tree uses semantic state and activity colors", () => {
+test("status dashboard uses semantic state and activity colors", () => {
   const children: RunTreeNode[] = [
     node("completed", "agent.scout"),
     node("failed", "agent.tester"),
@@ -34,12 +34,14 @@ test("run tree uses semantic state and activity colors", () => {
   );
   const output = lines.join("\n");
 
-  assert.match(output, /<accent><bold>Phenix live runs · seq 42<\/bold><\/accent>/);
+  assert.match(output, /<accent><bold>Phenix · live status · seq 42<\/bold><\/accent>/);
+  assert.match(output, /<accent><bold>Session<\/bold><\/accent>/);
+  assert.match(output, /<accent><bold>Execution<\/bold><\/accent>/);
   assert.match(output, /<success>✓<\/success>.*<success>\[completed\]<\/success>/);
   assert.match(output, /<error>✗<\/error>.*<error>\[failed\]<\/error>/);
   assert.match(output, /<warning>○<\/warning>.*<warning>\[waiting\]<\/warning>/);
   assert.match(output, /<muted>−<\/muted>.*<muted>\[cancelled\]<\/muted>/);
-  assert.match(output, /<dim>\/phenix runs off · \/phenix facts<\/dim>/);
+  assert.match(output, /<dim>\/phenix status off · \/phenix status/);
 });
 
 test("fact history highlights severity, reliability, timestamps, and run ids", () => {
