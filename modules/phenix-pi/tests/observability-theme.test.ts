@@ -2,18 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { RunTreeNode } from "../application/interfaces.ts";
-import type { RunFact } from "../domain/run/observability.ts";
 import type { RunSnapshot, RunState } from "../domain/run/model.ts";
+import type { RunFact } from "../domain/run/observability.ts";
 import { definitionId, runId } from "../domain/shared.ts";
-import {
-  type ObservabilityTheme,
-  statusLine,
-} from "../extension/observability-theme.ts";
-import {
-  renderCompleteFactHistory,
-  renderFacts,
-  renderRuns,
-} from "../extension/run-monitor.ts";
+import { type ObservabilityTheme, statusLine } from "../extension/observability-theme.ts";
+import { renderCompleteFactHistory, renderFacts, renderRuns } from "../extension/run-monitor.ts";
 
 const ROOT = runId("root-colors");
 const THEME = {
@@ -72,16 +65,8 @@ test("fact history highlights severity, reliability, timestamps, and run ids", (
 });
 
 test("footer status distinguishes active work from idle", () => {
-  const active = statusLine(
-    THEME,
-    { agent: "base", modelSet: "mixed", difficulty: "D2" },
-    3,
-  );
-  const idle = statusLine(
-    THEME,
-    { agent: "base", modelSet: "mixed", difficulty: "D2" },
-    0,
-  );
+  const active = statusLine(THEME, { agent: "base", modelSet: "mixed", difficulty: "D2" }, 3);
+  const idle = statusLine(THEME, { agent: "base", modelSet: "mixed", difficulty: "D2" }, 0);
 
   assert.match(active, /<accent><bold>phenix<\/bold><\/accent>/);
   assert.match(active, /<text><bold>base<\/bold><\/text>/);
