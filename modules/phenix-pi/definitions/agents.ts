@@ -1,4 +1,5 @@
 import type { AgentDefinition, ContextPolicy } from "../domain/definition/definition.ts";
+import { attentionRouterDefinition as rawAttentionRouterDefinition } from "./attention.ts";
 import {
   architectDefinition as rawArchitectDefinition,
   baseDefinition as rawBaseDefinition,
@@ -94,6 +95,11 @@ export const qaSynthesizerDefinition = configured(
   noProjectContext,
   false,
 );
+export const attentionRouterDefinition = configured(
+  rawAttentionRouterDefinition,
+  noProjectContext,
+  false,
+);
 
 export const agentDefinitions = [
   scoutDefinition,
@@ -108,4 +114,5 @@ export const agentDefinitions = [
   coordinatorDefinition,
   baseDefinition,
   qaSynthesizerDefinition,
+  attentionRouterDefinition,
 ] as const;
