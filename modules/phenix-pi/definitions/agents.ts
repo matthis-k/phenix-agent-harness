@@ -1,15 +1,1 @@
-export {
-  agentDefinitions,
-  architectDefinition,
-  baseDefinition,
-  coordinatorDefinition,
-  criticDefinition,
-  dispatcherDefinition,
-  finalizerDefinition,
-  implementerDefinition,
-  plannerDefinition,
-  qaSynthesizerDefinition,
-  scoutDefinition,
-  testerDefinition,
-  verifierDefinition,
-} from "./agents/index.ts";
+export { BUNDLED_AGENT_SOURCE_NAMES, type BundledAgentSourceName } from "./agents/index.ts";
