@@ -12,6 +12,7 @@ export const AGENT_DISPATCHER = definitionId("agent.dispatcher");
 export const AGENT_COORDINATOR = definitionId("agent.coordinator");
 export const AGENT_BASE = definitionId("agent.base");
 export const AGENT_QA_SYNTHESIZER = definitionId("agent.qa-synthesizer");
+export const AGENT_ATTENTION_ROUTER = definitionId("agent.attention-router");
 
 export const WORKFLOW_IMPLEMENT = definitionId("workflow.implement");
 export const WORKFLOW_QA = definitionId("workflow.qa");
@@ -22,6 +23,8 @@ export const ROOT_DISPATCH_DEFINITION_IDS = [
   WORKFLOW_IMPLEMENT,
   WORKFLOW_QA,
 ] as const;
+
+export const ROOT_INTERNAL_DEFINITION_IDS = [AGENT_ATTENTION_ROUTER] as const;
 
 export const ALL_DEFINITION_IDS = [
   AGENT_SCOUT,
