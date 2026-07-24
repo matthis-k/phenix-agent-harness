@@ -9,10 +9,13 @@ import { renderRuns } from "../extension/run-monitor.ts";
 const ROOT = runId("root-monitor");
 
 test("run widget renders the complete run tree without a height cap", () => {
-  const children = Array.from({ length: 50 }, (_, index): RunTreeNode => ({
-    run: snapshot(runId(`run-${index}`), ROOT, "agent.scout"),
-    children: [],
-  }));
+  const children = Array.from(
+    { length: 50 },
+    (_, index): RunTreeNode => ({
+      run: snapshot(runId(`run-${index}`), ROOT, "agent.scout"),
+      children: [],
+    }),
+  );
   const lines = renderRuns(
     {
       root: {
@@ -25,7 +28,10 @@ test("run widget renders the complete run tree without a height cap", () => {
   );
 
   assert.equal(lines.filter((line) => line.includes("scout [running]")).length, 50);
-  assert.equal(lines.some((line) => line.includes("run tree truncated")), false);
+  assert.equal(
+    lines.some((line) => line.includes("run tree truncated")),
+    false,
+  );
 });
 
 function snapshot(
