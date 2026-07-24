@@ -45,3 +45,26 @@ test("failed tools produce observed error facts without raw output", () => {
   assert.deepEqual(fact.provenance, { toolCallId: "call-7" });
   assert.equal(fact.details, undefined);
 });
+
+test("durable command summaries omit shell bodies and broader credential forms", () => {
+  const shell = describeToolCall(
+    "bash",
+    { command: "bash -c 'curl https://user:pass@example.test?token=secret'" },
+    "/workspace/project",
+  );
+  assert.equal(shell.activity.target, "bash -c <command omitted>");
+
+  const flags = describeToolCall(
+    "bash",
+    {
+      command:
+        "AWS_ACCESS_KEY_ID=AKIA AWS_SECRET_ACCESS_KEY=secret tool --client-secret hidden --header 'Authorization: Bearer-value'",
+    },
+    "/workspace/project",
+  );
+  assert.doesNotMatch(
+    flags.activity.target ?? "",
+    /AKIA|=secret(?:\s|$)|\shidden(?:\s|$)|Bearer-value/,
+  );
+  assert.match(flags.activity.target ?? "", /<redacted>/);
+});

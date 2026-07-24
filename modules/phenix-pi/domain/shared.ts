@@ -3,16 +3,31 @@ export type DefinitionId = string & { readonly __brand: "DefinitionId" };
 export type LocalTaskId = string & { readonly __brand: "LocalTaskId" };
 export type TaskId = `run:${RunId}` | LocalTaskId;
 
+const MAX_ID_LENGTH = 160;
+const GENERAL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+const DEFINITION_ID = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
+
 export function runId(value: string): RunId {
-  return value as RunId;
+  return validateId("run ID", value, GENERAL_ID) as RunId;
 }
 
 export function definitionId(value: string): DefinitionId {
-  return value as DefinitionId;
+  return validateId("definition ID", value, DEFINITION_ID) as DefinitionId;
 }
 
 export function localTaskId(value: string): LocalTaskId {
-  return value as LocalTaskId;
+  return validateId("local task ID", value, GENERAL_ID) as LocalTaskId;
+}
+
+function validateId(name: string, value: string, pattern: RegExp): string {
+  if (value.length === 0) throw new Error(`${name} must not be empty`);
+  if (value.length > MAX_ID_LENGTH) {
+    throw new Error(`${name} must not exceed ${MAX_ID_LENGTH} characters`);
+  }
+  if (!pattern.test(value)) {
+    throw new Error(`${name} contains unsupported characters: ${value}`);
+  }
+  return value;
 }
 
 export type FailureCode =

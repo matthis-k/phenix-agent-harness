@@ -1,0 +1,106 @@
+# Phenix agent harness instructions
+
+This file describes the current architecture. Do not infer behavior from historical PRs, deleted APIs, old workflow names, or compatibility aliases.
+
+## Source of truth
+
+Use this order:
+
+1. Executable code and deterministic tests.
+2. `docs/INTERFACES.md` for the current runtime design.
+3. `modules/phenix-pi/OBSERVABILITY.md` for telemetry behavior.
+4. This file for repository working rules.
+
+When documentation and code disagree, investigate the code path and update the documentation in the same change. Do not preserve stale behavior solely because it is documented.
+
+## Execution architecture
+
+- The root Pi session is a read-only frontend and supervisor.
+- `phenix_dispatch` is the only substantial root execution entry point.
+- Normal substantial requests use `mode=auto`.
+- `auto` selects from the capability-filtered catalog using typed candidate descriptions.
+- Explicit `qa`, `implement`, and `coordinate` modes are operator overrides, not choices the frontend should make by itself.
+- Invariant procedures are typed workflow definitions executed only by `WorkflowProcessManager`.
+- Open-ended composition belongs to the read-only `agent.coordinator`; do not create a fake generic workflow.
+- `agent.base` is an internal escape hatch and is not root-invokable in production.
+- Child agents may use `phenix_run` only within their compiled capability scope.
+- Workflow children may be started only by their workflow process manager with valid workflow causation.
+
+## Runtime invariants
+
+- One append-only JSONL event stream is canonical for each root session.
+- A run ID is the only execution identity. Trees, task anchors, active counts, workflow position, and effective task state are projections.
+- Children start attached. Background waiting does not detach ownership.
+- A parent cannot terminate while an attached child is active.
+- Cancellation cascades through attached descendants.
+- Detachment is an explicit reparent to the root supervisor.
+- Success requires a schema-valid typed outcome and the relevant settled boundary.
+- A missing or lost backend becomes a typed failure or orphan; never synthesize success.
+- Failed runs remain immutable evidence. Recovery creates a linked replacement run.
+- Recovery escalation must be bounded and minimal. Read/search tools or explicit `bash` may be added; `edit` and `write` are never granted directly to a read-only retry.
+
+## Agent prompt boundary
+
+- Definition prompts are static system instructions.
+- Schema-validated task input is sent separately as task data.
+- Never interpolate objectives, repository content, candidate descriptions, or user-provided context into a system prompt.
+- Tool availability and child capabilities are enforcement. Prompt text is guidance, not authorization.
+
+## Layer ownership
+
+```text
+extension -> application -> domain -> ports
+adapters ---------------------------> ports
+composition -> all layers
+definitions -> domain definition types
+```
+
+- `domain`: execution concepts, typed definitions, state and invariants.
+- `application`: façades, process managers, projections, policy orchestration.
+- `ports`: replaceable runtime boundaries.
+- `adapters`: Pi SDK, process execution, persistence, routing.
+- `composition`: the only place concrete adapters are assembled.
+- `extension`: Pi-facing commands, tools, widgets, session lifecycle.
+- `definitions`: bundled agent and workflow declarations.
+
+The domain and application layers must not import Pi packages or concrete adapters. Avoid generic wrappers with no independent policy or replacement seam.
+
+## Local operations and shell authority
+
+- `local.qa-checks` accepts only structured deterministic check specifications.
+- The process adapter compiles each specification to a fixed executable and argument vector.
+- Do not reintroduce arbitrary command strings, regex shell allowlists, or implicit shell execution.
+- Arbitrary shell work belongs only to an agent explicitly compiled with the `bash` tool.
+- Local slash commands are operator actions, but should still avoid accidental implicit shell interpretation.
+
+## Observability
+
+- `/phenix runs` is the complete live session tree.
+- `/phenix facts` is the ordered full-tree fact history.
+- Current activity and facts derive from domain events and tool lifecycle data; they do not invoke another model.
+- Raw tool output is not persisted in facts.
+- Durable command summaries must minimize data and redact secret-bearing values.
+- `phenix_progress` is bounded telemetry only. It is not sent to the parent model.
+- Theme colors are semantic: active, waiting, successful, failed, cancelled, reported, derived, and muted structural data.
+- Plain-text and file exports must remain ANSI-free.
+
+## Change discipline
+
+- Remove obsolete aliases and compatibility paths rather than maintaining unused APIs.
+- Prefer the library or platform primitive when it already provides the required behavior.
+- Keep interfaces distinct from implementations and keep dependency direction inward.
+- Add regression tests for lifecycle races, authorization boundaries, capability changes, persistence, and failure propagation.
+- CI is read-only. Formatting fixes run locally through `devenv tasks run maintenance:fix`; CI runs `devenv test`.
+- Pin third-party GitHub Actions to full commit SHAs with a version comment.
+- Do not add `.stitch.json` unless Stitch actually requires repository-specific metadata that cannot be derived.
+
+## Required verification
+
+Run:
+
+```sh
+devenv tasks run maintenance:fix
+devenv test
+```
+
+A change is incomplete when formatting, typecheck, runtime tests, workflow validation, Nix packaging, or flake evaluation fails.

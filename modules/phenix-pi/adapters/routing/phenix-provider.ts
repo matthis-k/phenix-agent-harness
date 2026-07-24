@@ -45,7 +45,8 @@ export function registerPhenixProvider(
   pi.registerProvider(PHENIX_PROVIDER, {
     name: "Phenix",
     baseUrl: "https://phenix.invalid/router",
-    apiKey: "phenix-internal",
+    // Pi requires a provider key even though this virtual provider never authenticates itself.
+    apiKey: "unused-internal-provider-sentinel",
     authHeader: false,
     api: PHENIX_API,
     models: PHENIX_MODEL_SETS.map((modelSet) => ({

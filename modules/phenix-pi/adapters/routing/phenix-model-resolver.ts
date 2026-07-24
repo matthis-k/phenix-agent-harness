@@ -221,9 +221,6 @@ export const defaultRoutingPolicy: RoutingPolicy = {
   },
 };
 
-/** Kept as a compatibility name for callers from the temporary rewrite. */
-export const deterministicMixedPolicy = defaultRoutingPolicy;
-
 export class PhenixModelResolver implements ModelResolver {
   private readonly inventory: ModelInventory;
   private readonly policy: RoutingPolicy;
