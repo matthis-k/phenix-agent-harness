@@ -25,8 +25,9 @@ When documentation and code disagree, investigate the code path and update the d
 - `agent.base` is an internal escape hatch and is not root-invokable in production.
 - Child agents may use `phenix_run` only within their compiled capability scope.
 - Workflow children may be started only by their workflow process manager with valid workflow causation.
+- `SupervisionProcessManager` exclusively owns event-driven presentation, retry, descendant-terminal, root-notification, and parent-attention reactions.
 - Follow-up input received during active execution is supervisory attention, not a new workflow node or an implicit workflow mutation.
-- `AttentionProcessManager` is the only process allowed to route follow-up input into live agent sessions. The internal attention router is not model-facing or ordinarily invokable.
+- `AttentionProcessManager` is the only process allowed to route follow-up input into live agent sessions. The internal attention router is runtime-owned, excluded from model-facing catalogs, and blocked from model-facing execution handles.
 
 ## Runtime invariants
 
@@ -42,7 +43,7 @@ When documentation and code disagree, investigate the code path and update the d
 - Recovery escalation must be bounded and minimal. Read/search tools or explicit `bash` may be added; `edit` and `write` are never granted directly to a read-only retry.
 - Attention targets are active agents in the same root tree. Workflow runs are never directly steered.
 - Steering does not settle an await, change ownership, mutate workflow input, or create a replacement run.
-- Delivery to a starting child is durable and must be reconstructable from canonical events after restart.
+- Delivery to a starting child is durable, validated by the attention projection, and reconstructable from canonical events after restart.
 
 ## Agent prompt boundary
 
@@ -78,7 +79,7 @@ definitions -> domain definition types
 - `extension`: Pi-facing commands, tools, widgets, session lifecycle.
 - `definitions`: bundled agent and workflow declarations.
 
-The domain and application layers must not import Pi packages or concrete adapters. Avoid generic wrappers with no independent policy or replacement seam.
+The domain and application layers must not import Pi packages or concrete adapters. Composition assembles event observers and process managers but must not contain command-generating lifecycle policy. Runtime-internal definitions and model-facing catalog visibility are injected at composition rather than imported into application façades. Avoid generic wrappers with no independent policy or replacement seam.
 
 ## Local operations and shell authority
 
@@ -87,7 +88,7 @@ The domain and application layers must not import Pi packages or concrete adapte
 - The process adapter compiles each specification to a fixed executable and argument vector.
 - Do not reintroduce arbitrary command strings, regex shell allowlists, or implicit shell execution into local workflow operations.
 - Arbitrary shell work belongs only to an agent explicitly compiled with `bash`.
-- `nix_shell` is a second arbitrary-command tool for those same operational roles. It provides requested packages through an ephemeral `nix shell`; it must never install into a profile or the host system.
+- `nix_shell` is a second arbitrary-command tool for those same operational roles. It provides explicit installables or resolves executable basenames through `nix-index-database`, enters an ephemeral `nix shell`, and must never install into a profile or the host system.
 - The QA test analyst may run targeted read-only commands to close explicit coverage gaps. Repository, architecture, and synthesis branches remain non-executing unless their own definition explicitly grants command authority.
 - Local slash commands are operator actions, but should still avoid accidental implicit shell interpretation.
 
@@ -117,7 +118,7 @@ The domain and application layers must not import Pi packages or concrete adapte
 - Remove obsolete aliases and compatibility paths rather than maintaining unused APIs.
 - Prefer the library or platform primitive when it already provides the required behavior.
 - Keep interfaces distinct from implementations and keep dependency direction inward.
-- Add regression tests for lifecycle races, authorization boundaries, capability changes, persistence, failure propagation, context projection, attention routing/deferred delivery, diagnostic redaction/reference behavior, and presentation deduplication.
+- Add regression tests for lifecycle races, authorization boundaries, capability changes, persistence, failure propagation, context projection, attention routing/deferred delivery, diagnostic redaction/reference behavior, supervision notifications, and presentation deduplication.
 - CI is read-only. Formatting fixes run locally through `devenv tasks run maintenance:fix`; CI runs `devenv test`.
 - Pin third-party GitHub Actions to full commit SHAs with a version comment.
 - Do not add `.stitch.json` unless Stitch actually requires repository-specific metadata that cannot be derived.
