@@ -39,7 +39,9 @@ function snapshot(definition: AgentDefinition<unknown, unknown>) {
 }
 
 test("every bundled agent is loaded from its Markdown source", () => {
-  const production = new Map(agentDefinitions.map((definition) => [definition.id, definition]));
+  const production = new Map(
+    agentDefinitions.map((definition) => [definition.id, definition] as const),
+  );
   assert.equal(production.size, sources.length);
 
   for (const [name, id] of sources) {
@@ -53,7 +55,9 @@ test("every bundled agent is loaded from its Markdown source", () => {
 });
 
 test("agent contracts and effective permissions are explicit", () => {
-  const byId = new Map(agentDefinitions.map((definition) => [definition.id, definition]));
+  const byId = new Map(
+    agentDefinitions.map((definition) => [definition.id, definition] as const),
+  );
   const scout = byId.get("agent.scout");
   assert.ok(scout);
   assert.equal(scout.input.id, "request.scout.v1");
