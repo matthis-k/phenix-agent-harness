@@ -67,6 +67,16 @@ function withPromptSuffix<I, O>(
   };
 }
 
+function withTools<I, O>(
+  definition: AgentDefinition<I, O>,
+  ...tools: readonly string[]
+): AgentDefinition<I, O> {
+  return {
+    ...definition,
+    tools: { allow: [...new Set([...definition.tools.allow, ...tools])] },
+  };
+}
+
 export const scoutDefinition = configured(
   withPromptSuffix(
     rawScoutDefinition,
@@ -82,14 +92,32 @@ export const architectDefinition = configured(
   ),
   analysisRepositoryContext,
 );
-export const implementerDefinition = configured(rawImplementerDefinition, fullRepositoryContext);
-export const testerDefinition = configured(rawTesterDefinition, testRepositoryContext);
-export const verifierDefinition = configured(rawVerifierDefinition, fullRepositoryContext);
-export const criticDefinition = configured(rawCriticDefinition, analysisRepositoryContext);
+export const implementerDefinition = configured(
+  withTools(rawImplementerDefinition, "nix_shell"),
+  fullRepositoryContext,
+);
+export const testerDefinition = configured(
+  withPromptSuffix(
+    withTools(rawTesterDefinition, "bash", "nix_shell"),
+    "Treat the supplied deterministic check results as the baseline. You may run additional targeted read-only checks when the requested QA scope has an explicit coverage gap. Use nix_shell only when a required CLI is unavailable, never edit files, and report command evidence precisely.",
+  ),
+  testRepositoryContext,
+);
+export const verifierDefinition = configured(
+  withTools(rawVerifierDefinition, "nix_shell"),
+  fullRepositoryContext,
+);
+export const criticDefinition = configured(
+  withTools(rawCriticDefinition, "nix_shell"),
+  analysisRepositoryContext,
+);
 export const finalizerDefinition = configured(rawFinalizerDefinition, noProjectContext);
 export const dispatcherDefinition = configured(rawDispatcherDefinition, noProjectContext, false);
 export const coordinatorDefinition = configured(rawCoordinatorDefinition, noProjectContext);
-export const baseDefinition = configured(rawBaseDefinition, fullRepositoryContext);
+export const baseDefinition = configured(
+  withTools(rawBaseDefinition, "nix_shell"),
+  fullRepositoryContext,
+);
 export const qaSynthesizerDefinition = configured(
   rawQaSynthesizerDefinition,
   noProjectContext,
