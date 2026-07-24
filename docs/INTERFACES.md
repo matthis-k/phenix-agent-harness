@@ -33,6 +33,14 @@ Application commands use four façades:
 
 Event subscribers observe facts; they are not command queues. Only an explicit process manager may react to events by issuing commands. Reducer invariants are checked against a staged projection before a batch is appended.
 
+## Diagnostic reconstruction boundary
+
+`DiagnosticLog` is a replaceable port assembled by composition. The filesystem adapter writes a second root-scoped append-only JSONL stream. This diagnostic stream is not execution authority and cannot drive reducers or recover run state.
+
+The composition layer subscribes to canonical domain events and maps them to stable lowercase dot-separated diagnostic scopes. Runtime, integration, persistence, agent-session, model-resolution, workflow, tool, output, failure, and recovery boundaries may also record explicit diagnostics when the domain event alone lacks enough context.
+
+Diagnostic records keep timestamps, IDs, model names, durations, counts, statuses, and other short scalar fields inline. Large strings and nested values are redacted, serialized once into a private content-addressed artifact store, and replaced by `artifact:sha256:<digest>` metadata. Artifact resolution is root scoped. Diagnostic observers are asynchronous side effects and may never block, mutate, or fail execution.
+
 ## Lifecycle and typed outcomes
 
 Runs move through creation, startup, active work, completion, and a terminal state.
@@ -114,13 +122,13 @@ Repeated presentations with the same fingerprint are acknowledged but not emitte
 
 `local.qa-checks` is deliberately narrower than `bash`. It accepts structured deterministic check specifications and compiles them to fixed executable/argument pairs. Arbitrary command strings and implicit shell composition are not part of the local-operation contract.
 
-The operator-facing fact clipboard command also spawns an executable directly. Shell behavior remains available only when the operator explicitly chooses a shell executable such as `sh -c`.
+The operator-facing clipboard commands also spawn an executable directly. Shell behavior remains available only when the operator explicitly chooses a shell executable such as `sh -c`.
 
 ## Pi boundary
 
 The root extension is a host adapter. Each child agent owns one public Pi `AgentSession` and one `SessionManager`.
 
-Pi session entries store only root binding and ledger cursor information. Cross-session execution state remains in `.phenix-agent-state/runs/*/events.jsonl`.
+Pi session entries store only root binding and ledger cursor information. Cross-session execution state remains in `.phenix-agent-state/runs/*/events.jsonl`. Root-scoped diagnostics live beside the ledger as `logs.jsonl`, with referenced payloads under `artifacts/sha256`.
 
 Every child records its requested model selector and the concrete model selected by the versioned routing policy. The `phenix` provider is virtual: it performs no authentication itself and forwards the concrete provider credentials obtained from Pi's model registry.
 
