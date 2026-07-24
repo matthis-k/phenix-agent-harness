@@ -95,9 +95,7 @@ export function summarizeRetryStart(
   const originalLimits = original?.compiled.limits;
   const changedLimits = originalLimits
     ? Object.fromEntries(
-        [
-          ...new Set([...Object.keys(originalLimits), ...Object.keys(retryLimits)]),
-        ]
+        [...new Set([...Object.keys(originalLimits), ...Object.keys(retryLimits)])]
           .map((key) => key as keyof typeof retryLimits)
           .filter((key) => retryLimits[key] !== originalLimits[key])
           .map((key) => [key, retryLimits[key] ?? null]),
