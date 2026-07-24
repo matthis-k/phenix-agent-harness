@@ -8,12 +8,12 @@ import {
 import {
   BUNDLED_AGENT_SOURCE_NAMES,
   type BundledAgentSourceName,
-} from "../definitions/agents.ts";
+} from "../definitions/agents/index.ts";
 import { resolveDefinitionSchema } from "../definitions/schema-registry.ts";
 import {
   BUNDLED_WORKFLOW_SOURCE_NAMES,
   type BundledWorkflowSourceName,
-} from "../definitions/workflows/index.ts";
+} from "../definitions/workflows/manifest.ts";
 import type {
   AgentDefinition,
   AnyDefinition,
