@@ -7,7 +7,6 @@ import {
   parseWorkflowMarkdown,
   type WorkflowMarkdownBindings,
 } from "../adapters/workflow/markdown.ts";
-import type { Schema } from "../domain/definition/schema.ts";
 import {
   FinalReportSchema,
   ImplementationRequestSchema,
@@ -16,6 +15,7 @@ import {
   QAReportSchema,
 } from "../definitions/schemas.ts";
 import { implementationWorkflow, qaWorkflow } from "../definitions/workflows/index.ts";
+import type { Schema } from "../domain/definition/schema.ts";
 
 const schemaById = new Map<string, Schema<unknown>>(
   [
