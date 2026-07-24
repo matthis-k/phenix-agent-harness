@@ -24,7 +24,7 @@ const DIAGNOSTICS = {
   counts: { trace: 0, info: 0, warning: 0, error: 0 },
 } as const;
 
-test("status dashboard uses semantic state colors and muted model details", () => {
+test("status dashboard uses semantic colors with a compact recent-facts tail", () => {
   const children: RunTreeNode[] = [
     node("completed", "agent.scout"),
     node("failed", "agent.tester"),
@@ -51,6 +51,7 @@ test("status dashboard uses semantic state colors and muted model details", () =
           children,
         },
       },
+      facts: [factItem("test-result", "derived", "Latest dashboard fact")],
       sequence: 42,
       profile: { agent: "base", modelSet: "mixed", difficulty: "D1" },
       diagnostics: DIAGNOSTICS,
@@ -68,8 +69,10 @@ test("status dashboard uses semantic state colors and muted model details", () =
   assert.match(output, /<warning>○<\/warning>.*<warning>\[waiting\]<\/warning>/);
   assert.match(output, /<muted>−<\/muted>.*<muted>\[cancelled\]<\/muted>/);
   assert.match(output, /<muted>opencode-go\/model-a · low<\/muted>/);
+  assert.match(output, /<accent><bold>Recent facts<\/bold><\/accent>/);
+  assert.match(output, /<success>Latest dashboard fact<\/success>/);
   assert.match(output, /<dim>\/phenix status off · \/phenix status/);
-  assert.doesNotMatch(output, /Recent facts|Storage|root\.session/);
+  assert.doesNotMatch(output, /Storage|root\.session/);
 });
 
 test("fact history highlights severity, reliability, timestamps, and run ids", () => {
