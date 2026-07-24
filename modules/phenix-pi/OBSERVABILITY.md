@@ -46,3 +46,20 @@ Tool arguments are reduced to bounded summaries. Paths are repository-relative w
 ## Agent progress
 
 Child agents may call `phenix_progress` when their phase, current target, hypothesis, or next action materially changes. The report updates only run activity and fact projections used by the TUI. It is not sent to the root or parent model and is not inserted into the root conversation transcript.
+
+## Structured presentation
+
+Operational child agents may call `phenix_present` when they discover a warning, high-severity, or critical issue that should be visible before the run finishes.
+
+Presentation input is bounded to a title, summary, optional subject, and at most eight short evidence items. The runtime derives a deterministic presentation fingerprint from the source run and normalized content. The first occurrence is recorded as a reported `finding-reported` fact; duplicate occurrences are acknowledged without another fact or notification.
+
+The root notifier handles the first occurrence in two ways:
+
+1. it renders the bounded notice directly in the root UI;
+2. it delivers the same notice to the root model on its next turn so the root can inspect, reroute, stop, or request input.
+
+A presentation is an attention signal, not a replacement for the child's final typed outcome. It must not be used for ordinary progress, repeated commentary, or raw command output.
+
+## Model-facing result volume
+
+Awaited run and dispatch tools return compact projections by default. Complete outcomes remain in the canonical run ledger and are admitted to a model only through an explicit `phenix_handle` result view. Tool-result details report source, inline, and omitted byte counts so transport savings remain observable without reintroducing the omitted payload.

@@ -46,6 +46,15 @@ When documentation and code disagree, investigate the code path and update the d
 - Never interpolate objectives, repository content, candidate descriptions, or user-provided context into a system prompt.
 - Tool availability and child capabilities are enforcement. Prompt text is guidance, not authorization.
 
+## Context and result transport boundary
+
+- Child sessions never inherit the parent conversation.
+- Repository context-file inheritance is role-scoped: orchestration and synthesis roles receive none, focused analysis roles receive bounded context, and mutation or independent verification roles retain the full configured allowance.
+- The run ledger owns complete typed inputs and outcomes. Do not copy them into secondary registries or prose handoffs.
+- Awaited `phenix_run` and `phenix_dispatch` calls return compact status, summary, and handle data by default.
+- `phenix_handle` defaults to a summary projection. Request `view=outcome`, `view=failure`, or `view=full` only when the additional payload is required for the current decision.
+- Tool-result transport records source, inline, and omitted byte counts. Do not defeat that boundary by embedding complete outcomes into summaries.
+
 ## Layer ownership
 
 ```text
@@ -73,14 +82,17 @@ The domain and application layers must not import Pi packages or concrete adapte
 - Arbitrary shell work belongs only to an agent explicitly compiled with the `bash` tool.
 - Local slash commands are operator actions, but should still avoid accidental implicit shell interpretation.
 
-## Observability
+## Observability and presentation
 
 - `/phenix runs` is the complete live session tree.
 - `/phenix facts` is the ordered full-tree fact history.
 - Current activity and facts derive from domain events and tool lifecycle data; they do not invoke another model.
 - Raw tool output is not persisted in facts.
 - Durable command summaries must minimize data and redact secret-bearing values.
-- `phenix_progress` is bounded telemetry only. It is not sent to the parent model.
+- `phenix_progress` is bounded telemetry only. It is not sent to the parent or root model.
+- `phenix_present` is reserved for bounded warning, high-severity, or critical findings that must be visible before child completion.
+- A presentation is recorded once as a durable reported fact, rendered through the root notifier, and delivered as a bounded next-turn attention message to the root model.
+- Presentation fingerprints deduplicate repeated notices; do not use presentation as a progress stream.
 - Theme colors are semantic: active, waiting, successful, failed, cancelled, reported, derived, and muted structural data.
 - Plain-text and file exports must remain ANSI-free.
 
@@ -89,7 +101,7 @@ The domain and application layers must not import Pi packages or concrete adapte
 - Remove obsolete aliases and compatibility paths rather than maintaining unused APIs.
 - Prefer the library or platform primitive when it already provides the required behavior.
 - Keep interfaces distinct from implementations and keep dependency direction inward.
-- Add regression tests for lifecycle races, authorization boundaries, capability changes, persistence, and failure propagation.
+- Add regression tests for lifecycle races, authorization boundaries, capability changes, persistence, failure propagation, context projection, and presentation deduplication.
 - CI is read-only. Formatting fixes run locally through `devenv tasks run maintenance:fix`; CI runs `devenv test`.
 - Pin third-party GitHub Actions to full commit SHAs with a version comment.
 - Do not add `.stitch.json` unless Stitch actually requires repository-specific metadata that cannot be derived.

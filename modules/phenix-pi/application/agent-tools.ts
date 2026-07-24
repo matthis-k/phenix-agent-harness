@@ -15,6 +15,7 @@ import type { DispatchService } from "./dispatch-service.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import type { CatalogFacade, ExecutionFacade, TaskFacade } from "./interfaces.ts";
 import { allowAllInvocations, type InvocationPolicy } from "./invocation-policy.ts";
+import { PresentationRequestSchema, presentationFact } from "./presentation.ts";
 import {
   projectCompletedRun,
   projectDispatchResult,
@@ -245,6 +246,34 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       },
     };
 
+    const presentTool: AgentTool = {
+      name: "phenix_present",
+      label: "Phenix Present",
+      description:
+        "Publish one bounded warning, high-severity, or critical finding directly to the user and root model. Use only for material issues that should be visible before this run completes; use phenix_progress for ordinary status.",
+      parameters: PresentationRequestSchema,
+      execute: async (raw) => {
+        const request = requireValid(PresentationRequestSchema, raw);
+        const fact = presentationFact(parentId, request);
+        const presentationId = String(fact.details?.presentationId);
+        const duplicate = this.store.projection.facts.some(
+          (existing) => existing.details?.presentationId === presentationId,
+        );
+        if (!duplicate) {
+          await this.store.commit(this.store.projection.rootOf(parentId), [
+            { runId: parentId, type: "run.fact.recorded", data: fact },
+          ]);
+        }
+        return projectedToolResult({
+          presented: !duplicate,
+          duplicate,
+          presentationId,
+          severity: request.severity,
+          sourceRunId: parentId,
+        });
+      },
+    };
+
     const taskTool: AgentTool = {
       name: "phenix_tasks",
       label: "Phenix Tasks",
@@ -292,7 +321,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
 
     return parent.kind === "root"
       ? [dispatchTool, handleTool, taskTool]
-      : [runTool, handleTool, taskTool];
+      : [runTool, handleTool, presentTool, taskTool];
   }
 
   private assertAccessible(callerId: RunId, targetId: RunId): void {

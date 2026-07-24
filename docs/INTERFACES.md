@@ -20,7 +20,7 @@ Dynamic composition is an agent responsibility. `agent.coordinator` is read-only
 
 ## Canonical state
 
-Each root Pi session owns one append-only JSONL domain-event stream. The event stream is canonical. Run trees, task trees, active-child counts, workflow positions, current activity, fact history, outcomes, and retry relationships are projections.
+Each root Pi session owns one append-only JSONL domain-event stream. The event stream is canonical. Run trees, task trees, active-child counts, workflow positions, current activity, fact history, outcomes, retry relationships, and structured presentations are projections.
 
 A run ID is the only execution identity for roots, agents, and workflows. Each non-root run has exactly one parent edge.
 
@@ -60,9 +60,16 @@ Children begin attached. `wait=background` changes waiting behavior, not ownersh
 - A lost in-memory backend becomes `orphaned`, never successful.
 - File-backed child sessions may be recovered from their Pi session reference.
 
-## Prompt and capability boundary
+## Prompt, context, and capability boundary
 
 System prompts contain only static definition instructions plus the static execution protocol. Schema-validated objectives, context, candidate descriptions, plans, findings, and other task values are sent separately as task data.
+
+Child sessions never inherit the parent conversation. Repository context files are admitted according to the owning agent definition:
+
+- dispatcher, coordinator, finalizer, and QA synthesizer: no automatic repository context;
+- tester: 32 KB maximum;
+- scout, planner, architect, and critic: 64 KB maximum;
+- implementer, verifier, and internal base: 128 KB maximum.
 
 Prompt text does not authorize behavior. Authorization is enforced by:
 
@@ -75,6 +82,33 @@ Prompt text does not authorize behavior. Authorization is enforced by:
 - task and descendant scope checks.
 
 Authorization occurs before durable creation and is repeated after asynchronous model resolution to close stale-parent races.
+
+## Result transport
+
+The run ledger retains complete schema-valid inputs and outcomes. Model-facing tools do not automatically inline those complete values.
+
+- Awaited `phenix_run` and `phenix_dispatch` calls return a compact run ID, state, summary, and failure metadata when applicable.
+- `phenix_handle inspect` and `await` default to `view=summary`.
+- `view=outcome` admits the complete typed outcome.
+- `view=failure` admits the complete failure projection when one exists.
+- `view=full` admits the full run snapshot and is intended only for explicit diagnostics.
+- Tool-result details include deterministic source, inline, and omitted byte counts without duplicating the omitted source payload.
+
+Workflow process managers are not model-facing transports and continue to consume child outcomes directly through the execution authority.
+
+## Structured presentation
+
+`phenix_present` publishes a bounded warning, high-severity, or critical finding before child completion. It is available only to operational agents.
+
+A presentation:
+
+1. is schema validated and size bounded;
+2. receives a deterministic fingerprint scoped to its source run;
+3. is stored once as a reported `finding-reported` fact;
+4. is rendered immediately through the root notifier;
+5. is delivered to the root model as a bounded next-turn attention message.
+
+Repeated presentations with the same fingerprint are acknowledged but not emitted again. Ordinary status remains the responsibility of `phenix_progress`, which does not message the root model.
 
 ## Process authority
 
@@ -92,13 +126,14 @@ Every child records its requested model selector and the concrete model selected
 
 ## Public Pi tools
 
-- `phenix_dispatch`: the root's sole substantial execution entry point.
-- `phenix_run`: invokes an authorized catalog definition from a child agent.
-- `phenix_handle`: inspects, awaits, messages, cancels, or retries an accessible descendant.
+- `phenix_dispatch`: the root's sole substantial execution entry point; returns a compact result envelope.
+- `phenix_run`: invokes an authorized catalog definition from a child agent; returns a compact result envelope.
+- `phenix_handle`: inspects, awaits, messages, cancels, or retries an accessible descendant, with explicit result views.
 - `phenix_tasks`: reads the derived tree and mutates only local task leaves or owned progress.
 - `phenix_return`: submits a child agent's typed success value.
 - `phenix_fail`: submits a structured child failure.
-- `phenix_progress`: updates bounded run telemetry without messaging the parent model.
+- `phenix_progress`: updates bounded run telemetry without messaging the parent or root model.
+- `phenix_present`: records and propagates a bounded material finding to the user and root model.
 
 ## Package boundaries
 
