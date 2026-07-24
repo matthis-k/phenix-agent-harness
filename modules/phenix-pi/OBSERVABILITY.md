@@ -13,6 +13,8 @@ Phenix exposes live execution telemetry without routing it through another model
 - `/phenix facts --clipboard <command>` pipes it to another shell command, such as `xclip -selection clipboard`.
 - `/phenix facts --file <file>` writes the complete text history to a file relative to the current working directory, unless an absolute path is supplied.
 
+Export operations report their fact count and destination, and failures are surfaced without modifying the live view.
+
 The views update from the runtime domain-event stream. They do not poll child sessions or invoke a model.
 
 ## Activity and facts
