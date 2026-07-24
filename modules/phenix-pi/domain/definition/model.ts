@@ -53,7 +53,7 @@ export interface ModelResolutionContext {
   readonly thinking: ThinkingPolicy;
   readonly modelSet?: PhenixModelSetId;
   readonly difficulty?: Difficulty;
-  readonly routes?: DifficultyModelRoutes;
+  readonly capability?: ModelCapability;
 }
 
 export interface ResolvedModel {
