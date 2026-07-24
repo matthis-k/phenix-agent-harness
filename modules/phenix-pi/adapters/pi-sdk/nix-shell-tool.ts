@@ -40,10 +40,9 @@ export function createNixShellTool(cwd: string): ToolDefinition {
     }),
     async execute(_toolCallId, rawInput, signal) {
       const input = requireInput(rawInput);
-      const installables = [
-        "nixpkgs#bash",
-        ...input.packages.map(normalizeNixInstallable),
-      ].filter((value, index, values) => values.indexOf(value) === index);
+      const installables = ["nixpkgs#bash", ...input.packages.map(normalizeNixInstallable)].filter(
+        (value, index, values) => values.indexOf(value) === index,
+      );
       const args = [
         "shell",
         "--accept-flake-config",
@@ -79,9 +78,7 @@ export function createNixShellTool(cwd: string): ToolDefinition {
         const stderr = failure.stderr === undefined ? "" : String(failure.stderr);
         const output = `${stdout}${stderr ? `\n${stderr}` : ""}`.trim();
         const suffix = failure.code === undefined ? "" : ` (exit ${failure.code})`;
-        throw new Error(
-          bounded(`nix shell command failed${suffix}: ${output || failure.message}`),
-        );
+        throw new Error(bounded(`nix shell command failed${suffix}: ${output || failure.message}`));
       }
     },
   } as ToolDefinition;
