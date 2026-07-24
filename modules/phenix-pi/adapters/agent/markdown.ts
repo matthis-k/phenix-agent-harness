@@ -1,7 +1,13 @@
 import type { AgentDefinition } from "../../domain/definition/definition.ts";
 import {
+  DIFFICULTIES,
+  type Difficulty,
+  type DifficultyModelRoutes,
+  isDifficulty,
+  isModelCapability,
   isPhenixModelSet,
   type ModelSelector,
+  type PiThinkingLevel,
   type ThinkingPolicy,
   virtualModel,
 } from "../../domain/definition/model.ts";
@@ -15,10 +21,13 @@ import {
   markdownList,
   markdownTitle,
   optionalMarkdownInteger,
+  optionalMarkdownSection,
   parseMarkdownFields,
+  parseMarkdownTable,
   requiredMarkdownFence,
   requiredMarkdownField,
   requiredMarkdownSection,
+  requireMarkdownColumns,
 } from "../definition/markdown.ts";
 
 export interface AgentMarkdownBindings {
@@ -54,6 +63,10 @@ const THINKING_POLICIES = [
   "max",
   "route",
 ] as const;
+const THINKING_LEVELS = THINKING_POLICIES.filter(
+  (value): value is PiThinkingLevel => value !== "route",
+);
+const MODEL_COLUMNS = ["difficulty", "model", "capability", "thinking"] as const;
 
 export function compileAgentMarkdown(
   source: string,
@@ -76,6 +89,7 @@ export function compileAgentMarkdown(
   const maxToolCalls = optionalMarkdownInteger(limitFields, "max-tool-calls", "agent limits", 1);
   const prompt = requiredMarkdownSection(source, "Prompt").trim();
   if (!prompt) throw new Error("Agent Prompt section must not be empty");
+  const modelRoutes = parseModelRoutes(source);
 
   return {
     id: definitionId(requiredMarkdownField(fields, "id", owner)),
@@ -85,6 +99,7 @@ export function compileAgentMarkdown(
     input: bindings.resolveSchema(requiredMarkdownField(fields, "input", owner)),
     output: bindings.resolveSchema(requiredMarkdownField(fields, "output", owner)),
     model: parseModel(requiredMarkdownField(fields, "model", owner)),
+    ...(modelRoutes ? { modelRoutes } : {}),
     thinking: markdownEnum(fields, "thinking", owner, THINKING_POLICIES) as ThinkingPolicy,
     prompt: { render: () => prompt },
     tools: { allow: markdownList(toolFields, "allow") },
@@ -123,6 +138,46 @@ function sectionFields(source: string, heading: string, fence: string) {
   return parseMarkdownFields(
     requiredMarkdownFence(requiredMarkdownSection(source, heading), fence),
   );
+}
+
+function parseModelRoutes(source: string): DifficultyModelRoutes | undefined {
+  const section = optionalMarkdownSection(source, "Models");
+  if (section === undefined) return undefined;
+  const table = parseMarkdownTable(section, "agent Models");
+  requireMarkdownColumns(table, MODEL_COLUMNS, "agent Models");
+  const knownColumns = new Set<string>(MODEL_COLUMNS);
+  for (const column of table.columns) {
+    if (!knownColumns.has(column)) throw new Error(`agent Models has unknown column ${column}`);
+  }
+
+  const routes = new Map<Difficulty, DifficultyModelRoutes[Difficulty]>();
+  for (const [index, row] of table.rows.entries()) {
+    const difficultyValue = requiredMarkdownField(row, "difficulty", `agent Models row ${index + 1}`);
+    if (!isDifficulty(difficultyValue)) {
+      throw new Error(`agent Models row ${index + 1} has unknown difficulty ${difficultyValue}`);
+    }
+    if (routes.has(difficultyValue)) throw new Error(`agent Models repeats ${difficultyValue}`);
+
+    const capability = requiredMarkdownField(row, "capability", `agent Models row ${index + 1}`);
+    if (!isModelCapability(capability)) {
+      throw new Error(`agent Models row ${index + 1} has unknown capability ${capability}`);
+    }
+    const thinking = requiredMarkdownField(row, "thinking", `agent Models row ${index + 1}`);
+    if (!(THINKING_LEVELS as readonly string[]).includes(thinking)) {
+      throw new Error(`agent Models row ${index + 1} has unknown thinking level ${thinking}`);
+    }
+    routes.set(difficultyValue, {
+      model: parseModel(requiredMarkdownField(row, "model", `agent Models row ${index + 1}`)),
+      capability,
+      thinking: thinking as PiThinkingLevel,
+    });
+  }
+
+  for (const difficulty of DIFFICULTIES) {
+    if (!routes.has(difficulty)) throw new Error(`agent Models is missing ${difficulty}`);
+  }
+  return Object.fromEntries(DIFFICULTIES.map((difficulty) => [difficulty, routes.get(difficulty)])) as
+    DifficultyModelRoutes;
 }
 
 function parseModel(value: string): ModelSelector {
