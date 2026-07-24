@@ -1,12 +1,13 @@
-import type {
-  AgentDefinition,
-  AnyDefinition,
-  ToolPolicy,
-} from "../domain/definition/definition.ts";
+import { Type } from "typebox";
+
+import type { AgentDefinition, AnyDefinition } from "../domain/definition/definition.ts";
+import { defineSchema } from "../domain/definition/schema.ts";
 import type { DomainEvent, PendingDomainEvent } from "../domain/run/events.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
-import type { RunLimits } from "../domain/run/model.ts";
+import type { RunLimits, RunRecord } from "../domain/run/model.ts";
 import {
+  ACTIVITY_PHASES,
+  type ActivityPhase,
   defaultActivity,
   type RunFactRecordedData,
 } from "../domain/run/observability.ts";
@@ -22,9 +23,9 @@ import type {
   AgentSessionObservation,
   AgentSessionPort,
   AgentTool,
+  CreateAgentSessionSpec,
 } from "../ports/agent-session-backend.ts";
 import type { Clock } from "../ports/clock.ts";
-import { describeToolCall, failedToolFact } from "./agent-observability.ts";
 import type { AgentToolFactory } from "./agent-tools.ts";
 import type {
   RunController,
@@ -33,7 +34,7 @@ import type {
 } from "./execution-facade.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import { KeyedSerialExecutor } from "./keyed-serial-executor.ts";
-import { agentFailureSchema, agentProgressSchema } from "./schemas.ts";
+import { describeToolCall, failedToolFact } from "./run-observability.ts";
 
 interface LiveToolCall {
   readonly toolName: string;
@@ -42,15 +43,70 @@ interface LiveToolCall {
 
 interface LiveAgent {
   readonly session: AgentSessionPort;
-  readonly unsubscribe: () => void;
+  readonly definition: AgentDefinition<unknown, unknown>;
   readonly limits: RunLimits;
   readonly toolCalls: Map<string, LiveToolCall>;
-  timeout?: NodeJS.Timeout;
+  unsubscribe: () => void;
+  timeout?: ReturnType<typeof setTimeout>;
   lastProgress?: string;
 }
 
-const DEFAULT_ABORT_GRACE_MS = 5_000;
-const DEFAULT_DISPOSE_GRACE_MS = 5_000;
+interface AgentFailureInput {
+  readonly summary: string;
+  readonly category?: FailureCategory;
+  readonly retryable?: boolean;
+  readonly requestedTools?: readonly string[];
+  readonly suggestedLimits?: FailureLimitSuggestion;
+}
+
+interface AgentProgressInput {
+  readonly phase: ActivityPhase;
+  readonly message: string;
+  readonly target?: string;
+}
+
+const agentFailureSchema = defineSchema<AgentFailureInput>(
+  "agent.failure-report",
+  Type.Object({
+    summary: Type.String({ minLength: 1, maxLength: 2_000 }),
+    category: Type.Optional(
+      Type.Enum([
+        "blocked",
+        "deadlock",
+        "insufficient_permissions",
+        "resource_limit",
+        "invalid_task",
+        "external_failure",
+        "other",
+      ]),
+    ),
+    retryable: Type.Optional(Type.Boolean()),
+    requestedTools: Type.Optional(
+      Type.Array(Type.String({ minLength: 1, maxLength: 64 }), { maxItems: 8 }),
+    ),
+    suggestedLimits: Type.Optional(
+      Type.Object({
+        timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: 3_600_000 })),
+        maxTurns: Type.Optional(
+          Type.Union([Type.Integer({ minimum: 1, maximum: 200 }), Type.Null()]),
+        ),
+        maxToolCalls: Type.Optional(
+          Type.Union([Type.Integer({ minimum: 1, maximum: 1_000 }), Type.Null()]),
+        ),
+        maxRepairAttempts: Type.Optional(Type.Integer({ minimum: 0, maximum: 10 })),
+      }),
+    ),
+  }),
+);
+
+const agentProgressSchema = defineSchema<AgentProgressInput>(
+  "agent.progress-report",
+  Type.Object({
+    phase: Type.Union(ACTIVITY_PHASES.map((phase) => Type.Literal(phase))),
+    message: Type.String({ minLength: 1, maxLength: 96 }),
+    target: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
+  }),
+);
 
 export class AgentExecutor implements RunImplementation {
   private readonly backend: AgentSessionBackend;
@@ -82,67 +138,113 @@ export class AgentExecutor implements RunImplementation {
 
   async start(command: StartImplementationCommand): Promise<void> {
     const definition = requireAgent(command.definition);
-    if (!command.resolvedModel) throw new Error(`Missing resolved model for ${command.runId}`);
+    if (!command.resolvedModel) throw new Error(`Agent run has no resolved model`);
     await this.controller.transition(command.runId, "starting");
-    const allowedTools = definition.tools.allow;
-    const session = await this.backend.create({
+    if (!this.isActive(command.runId)) return;
+    const compiled = this.store.projection.requireRun(command.runId).compiled;
+    const customTools = await this.buildTools(command.runId, definition, compiled.tools);
+    if (!this.isActive(command.runId)) return;
+    const spec: CreateAgentSessionSpec = {
       runId: command.runId,
       cwd: this.cwd,
-      model: command.resolvedModel,
+      model: command.resolvedModel.concrete,
+      thinking: command.resolvedModel.thinking,
       systemPrompt: this.systemPrompt(definition),
-      customTools: await this.agentTools(command.runId, definition.output, allowedTools),
-      toolPolicy: definition.tools,
-      contextPolicy: definition.context,
+      tools: [...new Set([...compiled.tools, "phenix_return", "phenix_fail", "phenix_progress"])],
+      customTools,
+      context: definition.context,
       persistence: definition.persistence,
-    });
-    await this.attach(command.runId, session, command.definition);
-    await this.controller.bindPi(command.runId, session.reference);
-    await this.controller.transition(command.runId, "running");
-    await this.controller.cycleStarted(command.runId, 1);
+    };
+    const session = await this.backend.create(spec);
+    if (!this.isActive(command.runId)) {
+      await session.dispose();
+      return;
+    }
+    const live = this.attach(command.runId, definition, compiled.limits, session);
     try {
+      await this.controller.bindPi(command.runId, session.reference);
+      if (!this.isActive(command.runId)) {
+        await this.dispose(command.runId);
+        return;
+      }
+      await this.controller.transition(command.runId, "running");
+      if (!this.isActive(command.runId)) {
+        await this.dispose(command.runId);
+        return;
+      }
+      await this.controller.cycleStarted(command.runId, 1);
+      this.armTimeout(command.runId, live);
       await session.prompt(renderInitialInput(command.input));
     } catch (error) {
-      await this.controller.fail(
-        command.runId,
-        automaticFailure(
-          "provider_failed",
-          error instanceof Error ? error.message : String(error),
-          "external_failure",
-          true,
-        ),
-      );
+      await this.dispose(command.runId).catch(() => undefined);
+      throw error;
     }
   }
 
-  async recover(
-    command: StartImplementationCommand,
-    record: Parameters<NonNullable<RunImplementation["recover"]>>[1],
-  ): Promise<boolean> {
-    if (!record.pi) return false;
+  async recover(command: StartImplementationCommand, record: RunRecord): Promise<boolean> {
     const definition = requireAgent(command.definition);
-    if (!command.resolvedModel) return false;
-    const session = await this.backend.recover({
+    if (definition.persistence !== "file" || !record.pi || !command.resolvedModel) return false;
+    const compiled = this.store.projection.requireRun(command.runId).compiled;
+    const customTools = await this.buildTools(command.runId, definition, compiled.tools);
+    const spec: CreateAgentSessionSpec = {
       runId: command.runId,
       cwd: this.cwd,
-      model: command.resolvedModel,
+      model: command.resolvedModel.concrete,
+      thinking: command.resolvedModel.thinking,
       systemPrompt: this.systemPrompt(definition),
-      customTools: await this.agentTools(command.runId, definition.output, definition.tools.allow),
-      toolPolicy: definition.tools,
-      contextPolicy: definition.context,
+      tools: [...new Set([...compiled.tools, "phenix_return", "phenix_fail", "phenix_progress"])],
+      customTools,
+      context: definition.context,
       persistence: definition.persistence,
-      reference: record.pi,
-    });
+    };
+    const session = await this.backend.recover(spec, record.pi);
     if (!session) return false;
-    await this.attach(command.runId, session, command.definition);
-    const previousCycle = this.store.projection.cycles.get(command.runId);
-    if (previousCycle?.state === "active" && !this.store.projection.submittedOutputs.has(command.runId)) {
-      await this.controller.cycleSettled(command.runId, previousCycle.number);
+    if (!this.isActive(command.runId)) {
+      await session.dispose();
+      return true;
     }
+    const live = this.attach(command.runId, definition, compiled.limits, session);
+    this.armTimeout(command.runId, live);
+    const previousCycle = this.store.projection.cycles.get(command.runId);
     if (this.store.projection.submittedOutputs.has(command.runId)) {
-      if (previousCycle?.state === "active") {
-        await this.controller.cycleSettled(command.runId, previousCycle.number);
-      }
       await this.tryFinalize(command.runId);
+      if (!this.isActive(command.runId) || previousCycle?.state === "idle") return true;
+      await this.controller.transition(command.runId, "running");
+      const cycle = (previousCycle?.number ?? 0) + 1;
+      await this.controller.cycleStarted(command.runId, cycle);
+      try {
+        await session.followUp(
+          "A typed output is already accepted. Conclude this recovery cycle without resubmitting it.",
+        );
+      } catch (error) {
+        await this.controller.fail(
+          command.runId,
+          automaticFailure(
+            "provider_failed",
+            error instanceof Error ? error.message : String(error),
+            "external_failure",
+            true,
+          ),
+        );
+      }
+      return true;
+    }
+    await this.controller.transition(command.runId, "running");
+    if (
+      previousCycle?.state === "idle" &&
+      previousCycle.number > (compiled.limits.maxRepairAttempts ?? 0)
+    ) {
+      const maxRepairAttempts = compiled.limits.maxRepairAttempts ?? 0;
+      await this.controller.fail(
+        command.runId,
+        automaticFailure(
+          "output_missing",
+          `Agent settled without phenix_return or phenix_fail after ${previousCycle.number} cycle(s)`,
+          "deadlock",
+          true,
+          { maxRepairAttempts: Math.min(10, maxRepairAttempts + 1) },
+        ),
+      );
       return true;
     }
     const cycle = (previousCycle?.number ?? 0) + 1;
@@ -177,7 +279,7 @@ export class AgentExecutor implements RunImplementation {
     }
     const cycle = (this.store.projection.cycles.get(runId)?.number ?? 0) + 1;
     await this.controller.cycleStarted(runId, cycle);
-    await live.session.followUp(message);
+    await live.session.prompt(message);
   }
 
   async cancel(runId: RunId): Promise<void> {
@@ -185,7 +287,7 @@ export class AgentExecutor implements RunImplementation {
     if (!live) return;
     clearTimeout(live.timeout);
     try {
-      await settleWithin(live.session.abort(), DEFAULT_ABORT_GRACE_MS, "abort");
+      await live.session.abort();
     } finally {
       await this.dispose(runId);
     }
@@ -197,7 +299,7 @@ export class AgentExecutor implements RunImplementation {
     this.live.delete(runId);
     clearTimeout(live.timeout);
     live.unsubscribe();
-    await settleWithin(live.session.dispose(), DEFAULT_DISPOSE_GRACE_MS, "dispose");
+    await live.session.dispose();
   }
 
   async shutdown(): Promise<void> {
@@ -205,46 +307,61 @@ export class AgentExecutor implements RunImplementation {
     await Promise.allSettled([...this.live.keys()].map((runId) => this.dispose(runId)));
   }
 
-  private async attach(
+  private attach(
     runId: RunId,
+    definition: AgentDefinition<unknown, unknown>,
+    limits: RunLimits,
     session: AgentSessionPort,
-    definition: AnyDefinition,
-  ): Promise<void> {
-    if (this.live.has(runId)) throw new Error(`Agent session already attached for ${runId}`);
-    const unsubscribe = session.subscribe((event) => {
-      void this.serial
-        .run(runId, () => this.observe(runId, event))
-        .catch((error: unknown) => this.failObservation(runId, error));
-    });
-    const limits = definition.limits;
+  ): LiveAgent {
     const live: LiveAgent = {
       session,
-      unsubscribe,
+      definition,
       limits,
       toolCalls: new Map(),
+      unsubscribe: () => undefined,
     };
+    live.unsubscribe = session.subscribe((event) => {
+      void this.serial
+        .run(runId, () => this.observe(runId, event))
+        .catch((error: unknown) => {
+          void this.failObservation(runId, error).catch(() => undefined);
+        });
+    });
     this.live.set(runId, live);
-    this.armTimeout(runId, live);
+    return live;
   }
 
-  private async agentTools(
+  private async buildTools(
     runId: RunId,
-    outputSchema: AgentDefinition<unknown, unknown>["output"],
+    definition: AgentDefinition<unknown, unknown>,
     allowedTools: readonly string[],
   ): Promise<readonly AgentTool[]> {
     const childTools = await this.tools.forRun(runId);
+    const completionSchema = defineSchema<unknown>(
+      `${definition.output.id}.completion`,
+      definition.output.jsonSchema,
+    );
     const completion: AgentTool = {
       name: "phenix_return",
       label: "Phenix Return",
       description:
-        "Submit the typed result for this run. This is the only successful completion path. The run completes only after the current Pi cycle settles and all attached children settle.",
-      parameters: outputSchema,
+        "Submit this run's final typed outcome. Use exactly once as the final action; ordinary text does not complete the run.",
+      parameters: completionSchema,
       execute: async (value) =>
         this.serial.run(runId, async () => {
-          await this.controller.submitOutput(runId, value);
+          const validation = definition.output.validate(value);
+          if (!validation.ok) {
+            await this.controller.rejectOutput(runId, validation.issues);
+            throw new Error(
+              `Output rejected: ${validation.issues
+                .map((issue) => `${issue.path} ${issue.message}`)
+                .join("; ")}`,
+            );
+          }
+          await this.controller.submitOutput(runId, validation.value);
           return {
-            text: "Typed result accepted. Finish this turn without additional work.",
-            details: { runId, accepted: true },
+            text: "Result accepted.",
+            details: { runId },
             terminate: true,
           };
         }),
@@ -253,7 +370,7 @@ export class AgentExecutor implements RunImplementation {
       name: "phenix_fail",
       label: "Phenix Fail",
       description:
-        "End this run with a short structured failure report when blocked, deadlocked, missing permissions, or unable to produce a valid result. Do not loop or invent success.",
+        "Stop this run gracefully with a short structured report when blocked, deadlocked, under-permissioned, or otherwise unable to produce a valid result.",
       parameters: agentFailureSchema,
       execute: async (value) =>
         this.serial.run(runId, async () => {
@@ -600,26 +717,4 @@ function renderInitialInput(input: unknown): string {
 
 function isTerminalEvent(type: string): boolean {
   return ["run.completed", "run.failed", "run.cancelled", "run.orphaned"].includes(type);
-}
-
-async function settleWithin(
-  operation: Promise<void>,
-  timeoutMs: number,
-  label: string,
-): Promise<void> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    await Promise.race([
-      operation,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`Agent session ${label} exceeded ${timeoutMs}ms`)),
-          timeoutMs,
-        );
-        timer.unref?.();
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
 }
