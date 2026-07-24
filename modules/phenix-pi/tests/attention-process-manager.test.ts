@@ -40,10 +40,11 @@ class Ids implements IdGenerator {
 
 class FakeRouter implements AttentionRouter {
   readonly requests: AttentionRoutingRequest[] = [];
+  private readonly decide: (request: AttentionRoutingRequest) => AttentionRoutingDecision;
 
-  constructor(
-    private readonly decide: (request: AttentionRoutingRequest) => AttentionRoutingDecision,
-  ) {}
+  constructor(decide: (request: AttentionRoutingRequest) => AttentionRoutingDecision) {
+    this.decide = decide;
+  }
 
   async route(
     _rootRunId: RunId,
@@ -60,11 +61,13 @@ class FakeAgentImplementation implements RunImplementation {
     readonly message: string;
     readonly delivery: "normal" | "nextTurn";
   }> = [];
+  private readonly execution: ExecutionFacadeImpl;
+  private readonly autoRun: boolean;
 
-  constructor(
-    private readonly execution: ExecutionFacadeImpl,
-    private readonly autoRun: boolean,
-  ) {}
+  constructor(execution: ExecutionFacadeImpl, autoRun: boolean) {
+    this.execution = execution;
+    this.autoRun = autoRun;
+  }
 
   async start(command: StartImplementationCommand): Promise<void> {
     await this.execution.transition(command.runId, "starting");
