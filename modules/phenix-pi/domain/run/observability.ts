@@ -86,89 +86,73 @@ export interface RunFactRecordedData {
   readonly reliability: FactReliability;
 }
 
+type ActivityTemplate = Omit<RunActivityChangedData, "source" | "target">;
+
+const STATE_ACTIVITIES: Partial<Record<RunState, ActivityTemplate>> = {
+  created: { phase: "starting", summary: "Starting run" },
+  starting: { phase: "starting", summary: "Starting run" },
+  waiting: { phase: "waiting", summary: "Waiting for dependencies" },
+  completing: { phase: "finishing", summary: "Finalizing result" },
+  completed: { phase: "finishing", summary: "Completed" },
+  failed: { phase: "finishing", summary: "Failed" },
+  cancelled: { phase: "finishing", summary: "Cancelled" },
+  orphaned: { phase: "finishing", summary: "Orphaned" },
+};
+
+const DEFINITION_ACTIVITIES = [
+  [["scout"], "exploring", "Exploring repository"],
+  [["planner"], "planning", "Preparing plan"],
+  [["architect"], "analyzing", "Analyzing architecture"],
+  [["implementer"], "editing", "Implementing changes"],
+  [["tester"], "testing", "Running test analysis"],
+  [["verifier"], "verifying", "Verifying changes"],
+  [["critic"], "reviewing", "Reviewing evidence"],
+  [["finalizer", "synthesizer"], "summarizing", "Preparing final handoff"],
+  [["dispatcher", "coordinator"], "delegating", "Coordinating execution"],
+] as const satisfies readonly (readonly [readonly string[], ActivityPhase, string])[];
+
+const WORKFLOW_NODE_PHASES = [
+  [["plan"], "planning"],
+  [["implement", "fix"], "editing"],
+  [["test"], "testing"],
+  [["verify"], "verifying"],
+  [["review", "critic"], "reviewing"],
+  [["final", "synth"], "summarizing"],
+  [["wait", "join"], "waiting"],
+] as const satisfies readonly (readonly [readonly string[], ActivityPhase])[];
+
 export function defaultActivity(input: {
   readonly definitionId: DefinitionId;
   readonly kind: RunKind;
   readonly state: RunState;
 }): RunActivityChangedData {
-  if (input.state === "created" || input.state === "starting") {
-    return { phase: "starting", summary: "Starting run", source: "derived" };
-  }
-  if (input.state === "waiting") {
-    return { phase: "waiting", summary: "Waiting for dependencies", source: "derived" };
-  }
-  if (input.state === "completing") {
-    return { phase: "finishing", summary: "Finalizing result", source: "derived" };
-  }
-  if (["completed", "failed", "cancelled", "orphaned"].includes(input.state)) {
-    return { phase: "finishing", summary: terminalSummary(input.state), source: "derived" };
+  const stateActivity = STATE_ACTIVITIES[input.state];
+  if (stateActivity) return derivedActivity(stateActivity);
+  if (input.kind === "workflow") {
+    return derivedActivity({ phase: "planning", summary: "Running workflow" });
   }
 
-  const id = String(input.definitionId);
-  if (input.kind === "workflow") {
-    return { phase: "planning", summary: "Running workflow", source: "derived" };
-  }
-  if (id.includes("scout")) {
-    return { phase: "exploring", summary: "Exploring repository", source: "derived" };
-  }
-  if (id.includes("planner")) {
-    return { phase: "planning", summary: "Preparing plan", source: "derived" };
-  }
-  if (id.includes("architect")) {
-    return { phase: "analyzing", summary: "Analyzing architecture", source: "derived" };
-  }
-  if (id.includes("implementer")) {
-    return { phase: "editing", summary: "Implementing changes", source: "derived" };
-  }
-  if (id.includes("tester")) {
-    return { phase: "testing", summary: "Running test analysis", source: "derived" };
-  }
-  if (id.includes("verifier")) {
-    return { phase: "verifying", summary: "Verifying changes", source: "derived" };
-  }
-  if (id.includes("critic")) {
-    return { phase: "reviewing", summary: "Reviewing evidence", source: "derived" };
-  }
-  if (id.includes("finalizer") || id.includes("synthesizer")) {
-    return { phase: "summarizing", summary: "Preparing final handoff", source: "derived" };
-  }
-  if (id.includes("dispatcher") || id.includes("coordinator")) {
-    return { phase: "delegating", summary: "Coordinating execution", source: "derived" };
-  }
-  return { phase: "thinking", summary: "Working", source: "derived" };
+  const definitionId = String(input.definitionId);
+  const matched = DEFINITION_ACTIVITIES.find(([terms]) =>
+    terms.some((term) => definitionId.includes(term)),
+  );
+  const [, phase = "thinking", summary = "Working"] = matched ?? [];
+  return derivedActivity({ phase, summary });
 }
 
 export function workflowNodeActivity(nodeId: string): RunActivityChangedData {
   const normalized = nodeId.toLowerCase();
-  const phase: ActivityPhase = normalized.includes("plan")
-    ? "planning"
-    : normalized.includes("implement") || normalized.includes("fix")
-      ? "editing"
-      : normalized.includes("test")
-        ? "testing"
-        : normalized.includes("verify")
-          ? "verifying"
-          : normalized.includes("review") || normalized.includes("critic")
-            ? "reviewing"
-            : normalized.includes("final") || normalized.includes("synth")
-              ? "summarizing"
-              : normalized.includes("wait") || normalized.includes("join")
-                ? "waiting"
-                : "analyzing";
+  const matched = WORKFLOW_NODE_PHASES.find(([terms]) =>
+    terms.some((term) => normalized.includes(term)),
+  );
   return {
-    phase,
+    phase: matched?.[1] ?? "analyzing",
     summary: "Running workflow node",
     target: nodeId,
     source: "derived",
   };
 }
 
-function terminalSummary(state: RunState): string {
-  return state === "completed"
-    ? "Completed"
-    : state === "failed"
-      ? "Failed"
-      : state === "cancelled"
-        ? "Cancelled"
-        : "Orphaned";
+function derivedActivity(activity: ActivityTemplate): RunActivityChangedData {
+  return { ...activity, source: "derived" };
 }
