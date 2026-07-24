@@ -9,7 +9,7 @@ import { agentDefinitions } from "../agents.ts";
 import { resolveDefinitionSchema } from "../schema-registry.ts";
 
 const referencedDefinitions = new Map<string, AnyDefinition>(
-  agentDefinitions.map((definition) => [definition.id, definition]),
+  agentDefinitions.map((definition) => [definition.id, definition] as const),
 );
 
 const bindings: WorkflowMarkdownBindings = {
