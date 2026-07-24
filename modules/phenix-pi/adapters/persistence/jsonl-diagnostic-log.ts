@@ -272,17 +272,10 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
     }
     if (typeof value === "object") {
       const materialized: Record<string, unknown> = {};
-      for (const [nestedKey, nestedValue] of Object.entries(
-        value as Record<string, unknown>,
-      )) {
+      for (const [nestedKey, nestedValue] of Object.entries(value as Record<string, unknown>)) {
         materialized[nestedKey] = SECRET_KEY.test(nestedKey)
           ? "[redacted]"
-          : await this.materializeValue(
-              rootRunId,
-              nestedValue,
-              `${key}.${nestedKey}`,
-              depth + 1,
-            );
+          : await this.materializeValue(rootRunId, nestedValue, `${key}.${nestedKey}`, depth + 1);
       }
       return encodedBytes(materialized) <= INLINE_VALUE_BYTES
         ? materialized
@@ -354,10 +347,7 @@ function redactString(value: string): string {
       /\b(api[-_]?key|access[-_]?token|refresh[-_]?token|client[-_]?secret|password|secret|token)\s*[:=]\s*([^\s,;]+)/gi,
       "$1=<redacted>",
     )
-    .replace(
-      /((?:authorization|cookie|x-api-key)\s*:\s*)[^\r\n]+/gi,
-      "$1<redacted>",
-    )
+    .replace(/((?:authorization|cookie|x-api-key)\s*:\s*)[^\r\n]+/gi, "$1<redacted>")
     .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/gi, "$1<redacted>@")
     .replace(
       /([?&](?:access_key|api_key|client_secret|credential|key|password|secret|signature|token)=)[^&\s]+/gi,

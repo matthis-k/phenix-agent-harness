@@ -3,8 +3,8 @@ import { Text } from "@earendil-works/pi-tui";
 
 import type { RunTree, RunTreeNode } from "../application/interfaces.ts";
 import type { PhenixRuntime } from "../composition/create-phenix-runtime.ts";
-import type { DiagnosticSummary } from "../domain/diagnostics.ts";
 import type { PiThinkingLevel } from "../domain/definition/model.ts";
+import type { DiagnosticSummary } from "../domain/diagnostics.ts";
 import type { SessionProfile } from "../domain/run/model.ts";
 import type { RunFact } from "../domain/run/observability.ts";
 import type { RunId } from "../domain/shared.ts";
@@ -208,8 +208,9 @@ export function createUnboundedWidget(lines: readonly string[]): () => Text {
 }
 
 export function renderDashboard(data: DashboardData, theme?: ObservabilityTheme): string[] {
-  const activeDescendants = countNodes(data.tree.root, (node) =>
-    node.run.id !== data.tree.root.run.id && !isTerminal(node.run.state),
+  const activeDescendants = countNodes(
+    data.tree.root,
+    (node) => node.run.id !== data.tree.root.run.id && !isTerminal(node.run.state),
   );
   const roleByRun = new Map<RunId, string>();
   collectRoles(data.tree.root, roleByRun);
@@ -343,7 +344,8 @@ function appendNode(
     );
   } else if (root && node.run.observedModel) {
     const observed = node.run.observedModel;
-    const model = observed.kind === "session" ? "session" : `${observed.provider}/${observed.model}`;
+    const model =
+      observed.kind === "session" ? "session" : `${observed.provider}/${observed.model}`;
     lines.push(`${color(theme, "dim", contentPrefix)}${color(theme, "accent", model)}`);
   }
   if (node.activity) {
@@ -437,7 +439,10 @@ function collectRoles(node: RunTreeNode, output: Map<RunId, string>): void {
 }
 
 function countNodes(node: RunTreeNode, predicate: (node: RunTreeNode) => boolean): number {
-  return (predicate(node) ? 1 : 0) + node.children.reduce((total, child) => total + countNodes(child, predicate), 0);
+  return (
+    (predicate(node) ? 1 : 0) +
+    node.children.reduce((total, child) => total + countNodes(child, predicate), 0)
+  );
 }
 
 function descendantStats(node: RunTreeNode): { readonly total: number; readonly failed: number } {
@@ -499,7 +504,13 @@ function thinking(
 }
 
 function difficultyThinking(difficulty: SessionProfile["difficulty"]): PiThinkingLevel {
-  return difficulty === "D0" ? "minimal" : difficulty === "D1" ? "low" : difficulty === "D2" ? "high" : "xhigh";
+  return difficulty === "D0"
+    ? "minimal"
+    : difficulty === "D1"
+      ? "low"
+      : difficulty === "D2"
+        ? "high"
+        : "xhigh";
 }
 
 function formatDuration(start: string, end: string): string | undefined {

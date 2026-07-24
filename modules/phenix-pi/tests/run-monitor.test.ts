@@ -96,14 +96,32 @@ test("dashboard collapses completed workflows and shows concrete model and think
   };
 
   const collapsed = renderDashboard({ ...base, expanded: false });
-  assert.equal(collapsed.some((line) => line.includes("qa [completed] · 1 children · 1m 0s")), true);
-  assert.equal(collapsed.some((line) => line.includes("opencode-go/model-a")), false);
+  assert.equal(
+    collapsed.some((line) => line.includes("qa [completed] · 1 children · 1m 0s")),
+    true,
+  );
+  assert.equal(
+    collapsed.some((line) => line.includes("opencode-go/model-a")),
+    false,
+  );
 
   const expanded = renderDashboard({ ...base, expanded: true });
-  assert.equal(expanded.some((line) => line.includes("scout [completed]")), true);
-  assert.equal(expanded.some((line) => line.includes("opencode-go/model-a · low")), true);
-  assert.equal(expanded.some((line) => line.includes("Recent facts")), true);
-  assert.equal(expanded.some((line) => line.includes("1 errors")), true);
+  assert.equal(
+    expanded.some((line) => line.includes("scout [completed]")),
+    true,
+  );
+  assert.equal(
+    expanded.some((line) => line.includes("opencode-go/model-a · low")),
+    true,
+  );
+  assert.equal(
+    expanded.some((line) => line.includes("Recent facts")),
+    true,
+  );
+  assert.equal(
+    expanded.some((line) => line.includes("1 errors")),
+    true,
+  );
 });
 
 function snapshot(

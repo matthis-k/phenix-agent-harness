@@ -27,11 +27,7 @@ import {
 import { type RunId, runId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import { copyFactHistory, parseFactsCommand, writeFactHistory } from "./fact-export.ts";
-import {
-  formatDiagnosticEntries,
-  parseLogsCommand,
-  PHENIX_LOGS_USAGE,
-} from "./log-command.ts";
+import { formatDiagnosticEntries, PHENIX_LOGS_USAGE, parseLogsCommand } from "./log-command.ts";
 import { statusLine } from "./observability-theme.ts";
 import {
   completePhenixSubcommands,
@@ -399,10 +395,12 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
         return;
       }
       if (action === "facts") {
-        const activeMonitor = monitor ?? new RunMonitor(ctx, activeRuntime, activeRoot, {
-          integrations: summarizeIntegrations(integrationStatuses),
-          integrationsFailed: integrationStatuses.some((status) => status.state === "failed"),
-        });
+        const activeMonitor =
+          monitor ??
+          new RunMonitor(ctx, activeRuntime, activeRoot, {
+            integrations: summarizeIntegrations(integrationStatuses),
+            integrationsFailed: integrationStatuses.some((status) => status.state === "failed"),
+          });
         monitor = activeMonitor;
         const factsAction = parseFactsCommand(rawOptions);
         if (!factsAction) {
@@ -448,13 +446,18 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
         ctx.ui.notify(`Usage: ${PHENIX_USAGE}`, "warning");
         return;
       }
-      const activeMonitor = monitor ?? new RunMonitor(ctx, activeRuntime, activeRoot, {
-        integrations: summarizeIntegrations(integrationStatuses),
-        integrationsFailed: integrationStatuses.some((status) => status.state === "failed"),
-      });
+      const activeMonitor =
+        monitor ??
+        new RunMonitor(ctx, activeRuntime, activeRoot, {
+          integrations: summarizeIntegrations(integrationStatuses),
+          integrationsFailed: integrationStatuses.some((status) => status.state === "failed"),
+        });
       monitor = activeMonitor;
       const allowed = new Set(["off", "--once", "--json", "--expanded"]);
-      if (options.some((option) => !allowed.has(option)) || options.filter((option) => option !== "--expanded").length > 1) {
+      if (
+        options.some((option) => !allowed.has(option)) ||
+        options.filter((option) => option !== "--expanded").length > 1
+      ) {
         ctx.ui.notify(`Usage: ${PHENIX_STATUS_USAGE}`, "warning");
         return;
       }

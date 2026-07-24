@@ -4,8 +4,8 @@ import test from "node:test";
 import { runId } from "../domain/shared.ts";
 import {
   formatDiagnosticEntry,
-  parseLogsCommand,
   PHENIX_LOGS_USAGE,
+  parseLogsCommand,
 } from "../extension/log-command.ts";
 
 const ROOT = runId("root-logs");

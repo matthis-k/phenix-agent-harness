@@ -42,7 +42,10 @@ export function parseLogsCommand(raw: string): LogsCommand | undefined {
   const copyIndex = value.search(/(?:^|\s)--copy(?:\s|$)/);
   if (copyIndex >= 0) {
     const before = value.slice(0, copyIndex).trim();
-    const after = value.slice(copyIndex).replace(/^\s*--copy\s*/, "").trim();
+    const after = value
+      .slice(copyIndex)
+      .replace(/^\s*--copy\s*/, "")
+      .trim();
     const minimum = parseMinimum(before);
     if (!minimum || hasUnknownOptions(before)) return undefined;
     return {
