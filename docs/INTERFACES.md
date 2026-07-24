@@ -120,7 +120,11 @@ Repeated presentations with the same fingerprint are acknowledged but not emitte
 
 ## Process authority
 
-`local.qa-checks` is deliberately narrower than `bash`. It accepts structured deterministic check specifications and compiles them to fixed executable/argument pairs. Arbitrary command strings and implicit shell composition are not part of the local-operation contract.
+`local.qa-checks` is deliberately narrower than `bash`. It accepts structured deterministic check specifications and compiles them to fixed executable/argument pairs. Automatic discovery for a devenv repository runs `devenv tasks run maintenance:fix`, `devenv test`, and then the remaining detected checks in a deterministic order. Arbitrary command strings and implicit shell composition are not part of the local-operation contract.
+
+The QA test analyst receives `bash` and `nix_shell` so it can close explicit test-coverage gaps after interpreting the local check results. Repository scouting, architecture review, and synthesis remain non-executing unless their own definitions explicitly grant command authority.
+
+`nix_shell` is an operational child-session tool with the same command-execution authority as `bash`. It normalizes bare package names through `nixpkgs`, evaluates explicit flake installables without shell interpolation, runs the requested command inside an ephemeral environment, and never installs packages into a profile or the host system.
 
 The operator-facing clipboard commands also spawn an executable directly. Shell behavior remains available only when the operator explicitly chooses a shell executable such as `sh -c`.
 
@@ -142,6 +146,7 @@ Every child records its requested model selector and the concrete model selected
 - `phenix_fail`: submits a structured child failure.
 - `phenix_progress`: updates bounded run telemetry without messaging the parent or root model.
 - `phenix_present`: records and propagates a bounded material finding to the user and root model.
+- `nix_shell`: runs a command with ephemeral Nix-provided packages for command-authorized child agents.
 
 ## Package boundaries
 
