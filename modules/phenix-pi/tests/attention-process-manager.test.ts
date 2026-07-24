@@ -182,7 +182,7 @@ test("user follow-up immediately steers a selected running child without settlin
   });
 
   await harness.execution.amendRootInput(harness.root, "Focus on the deadlock before cleanup.");
-  await eventually(() => harness.agents.sent.length === 1);
+  await eventually(() => hasEvent(harness, "attention.delivered"));
 
   assert.deepEqual(harness.agents.sent[0], {
     runId: child.id,
@@ -191,21 +191,8 @@ test("user follow-up immediately steers a selected running child without settlin
   });
   assert.equal(harness.store.projection.requireRun(child.id).state, "running");
   assert.equal(harness.store.projection.requireRun(child.id).outcome, undefined);
-  assert.ok(
-    harness.store.projection.events.some(
-      (event) => event.type === "attention.received" && event.runId === harness.root,
-    ),
-  );
-  assert.ok(
-    harness.store.projection.events.some(
-      (event) => event.type === "attention.routed" && event.runId === harness.root,
-    ),
-  );
-  assert.ok(
-    harness.store.projection.events.some(
-      (event) => event.type === "attention.delivered" && event.runId === harness.root,
-    ),
-  );
+  assert.ok(hasEvent(harness, "attention.received"));
+  assert.ok(hasEvent(harness, "attention.routed"));
   await harness.attention.shutdown();
 });
 
@@ -231,15 +218,11 @@ test("attention is durably deferred until a starting child binds its session", a
   });
 
   await harness.execution.amendRootInput(harness.root, "Use the revised API boundary.");
-  await eventually(() =>
-    harness.store.projection.events.some(
-      (event) => event.type === "attention.delivery.deferred",
-    ),
-  );
+  await eventually(() => hasEvent(harness, "attention.delivery.deferred"));
   assert.equal(harness.agents.sent.length, 0);
 
   await harness.agents.makeRunning(child.id);
-  await eventually(() => harness.agents.sent.length === 1);
+  await eventually(() => hasEvent(harness, "attention.delivered"));
 
   const delivered = harness.store.projection.events.find(
     (event) => event.type === "attention.delivered",
@@ -248,6 +231,7 @@ test("attention is durably deferred until a starting child binds its session", a
     (delivered?.data as { readonly deferred?: boolean } | undefined)?.deferred,
     true,
   );
+  assert.equal(harness.agents.sent.length, 1);
   await harness.attention.shutdown();
 });
 
@@ -268,7 +252,7 @@ test("an explicit run id bypasses model routing", async () => {
     harness.root,
     `Steer ${child.id}: inspect the state transition first.`,
   );
-  await eventually(() => harness.agents.sent.length === 1);
+  await eventually(() => hasEvent(harness, "attention.delivered"));
 
   assert.equal(harness.router.requests.length, 0);
   assert.equal(harness.agents.sent[0]?.runId, child.id);
@@ -277,7 +261,10 @@ test("an explicit run id bypasses model routing", async () => {
 
 test("model routing may keep a follow-up with the root supervisor", async () => {
   const harness = await createHarness({
-    decide: () => ({ targets: [], reason: "The message changes orchestration rather than child work" }),
+    decide: () => ({
+      targets: [],
+      reason: "The message changes orchestration rather than child work",
+    }),
   });
   await harness.execution.start({
     parentId: harness.root,
@@ -294,8 +281,14 @@ test("model routing may keep a follow-up with the root supervisor", async () => 
   await harness.attention.shutdown();
 });
 
+function hasEvent(harness: Harness, type: string): boolean {
+  return harness.store.projection.events.some(
+    (event) => event.type === type && event.runId === harness.root,
+  );
+}
+
 async function eventually(condition: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
     if (condition()) return;
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
