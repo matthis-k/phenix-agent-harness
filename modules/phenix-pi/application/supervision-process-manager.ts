@@ -3,10 +3,13 @@ import { isTerminalRunState } from "../domain/run/invariants.ts";
 import type { RunRecord } from "../domain/run/model.ts";
 import type { RunId } from "../domain/shared.ts";
 import type { ExecutionStore } from "./execution-store.ts";
-import type { ExecutionFacade } from "./interfaces.ts";
 import { formatPresentationNotice, isPresentationFact } from "./presentation.ts";
 
 export type RootNotifier = (message: string) => void | Promise<void>;
+
+interface SupervisionExecution {
+  notify(runId: RunId, message: string): Promise<void>;
+}
 
 /**
  * Reacts to canonical execution events with bounded supervisory notifications.
@@ -16,13 +19,13 @@ export type RootNotifier = (message: string) => void | Promise<void>;
  * and parent-attention notification policy.
  */
 export class SupervisionProcessManager {
-  private readonly execution: ExecutionFacade;
+  private readonly execution: SupervisionExecution;
   private readonly store: ExecutionStore;
   private readonly notifyRoot: RootNotifier;
   private readonly unsubscribe: () => void;
 
   constructor(input: {
-    readonly execution: ExecutionFacade;
+    readonly execution: SupervisionExecution;
     readonly store: ExecutionStore;
     readonly notifyRoot: RootNotifier;
   }) {
