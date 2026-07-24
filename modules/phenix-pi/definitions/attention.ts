@@ -1,11 +1,10 @@
 import { Type } from "typebox";
-
-import type { AgentDefinition, CapabilitySet } from "../domain/definition/definition.ts";
-import { defineSchema } from "../domain/definition/schema.ts";
 import type {
   AttentionRoutingDecision,
   AttentionRoutingRequest,
 } from "../domain/attention/model.ts";
+import type { AgentDefinition, CapabilitySet } from "../domain/definition/definition.ts";
+import { defineSchema } from "../domain/definition/schema.ts";
 import { AGENT_ATTENTION_ROUTER } from "./ids.ts";
 
 const runStateSchema = Type.Union([
