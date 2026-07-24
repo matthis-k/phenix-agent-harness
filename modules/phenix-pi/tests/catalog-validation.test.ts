@@ -67,3 +67,37 @@ test("open-ended QA analysis agents omit fixed turn caps", () => {
   assert.equal(qaAgents.length, qaAgentIds.size);
   for (const definition of qaAgents) assert.equal(definition.limits.maxTurns, undefined);
 });
+
+test("agent context inheritance is scoped to role needs", () => {
+  const byId = new Map(
+    agentDefinitions.map((definition) => [String(definition.id), definition] as const),
+  );
+
+  for (const id of [
+    "agent.dispatcher",
+    "agent.coordinator",
+    "agent.finalizer",
+    "agent.qa-synthesizer",
+  ]) {
+    const definition = byId.get(id);
+    assert.ok(definition);
+    assert.equal(definition.context.projectFiles, "none");
+    assert.equal(definition.context.maxBytes, 0);
+    assert.equal(definition.context.parentConversation, "none");
+  }
+
+  assert.equal(byId.get("agent.tester")?.context.maxBytes, 32_000);
+  for (const id of ["agent.scout", "agent.planner", "agent.architect", "agent.critic"]) {
+    const definition = byId.get(id);
+    assert.ok(definition);
+    assert.equal(definition.context.projectFiles, "inherit");
+    assert.equal(definition.context.maxBytes, 64_000);
+  }
+
+  for (const id of ["agent.implementer", "agent.verifier", "agent.base"]) {
+    const definition = byId.get(id);
+    assert.ok(definition);
+    assert.equal(definition.context.projectFiles, "inherit");
+    assert.equal(definition.context.maxBytes, 128_000);
+  }
+});
