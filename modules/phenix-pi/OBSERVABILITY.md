@@ -12,7 +12,7 @@ Phenix exposes deterministic execution telemetry without routing it through anot
 
 The default dashboard is a compact execution overview. Its header combines the root profile, model set, difficulty, active descendant count, diagnostic health, and integration health. The synthetic root run is omitted. Every visible agent or workflow occupies one row containing its semantic role, state, dimmed concrete provider/model and thinking level, and current activity when the run is active. Completed subtrees collapse automatically and summarize how many descendants completed or ended exceptionally. Waiting, active, and failed branches remain expanded.
 
-Fact history and storage listings are intentionally not embedded in the text dashboard. Facts have their own command, while complete storage metadata remains available through `/phenix status --json` and diagnostic export commands.
+The dashboard retains a three-line deduplicated recent-facts tail for quick context. `/phenix facts` remains the complete chronological history and export surface. Storage paths are omitted from the default text dashboard and remain available through `/phenix status --json` and diagnostic export commands.
 
 ## Fact history
 
