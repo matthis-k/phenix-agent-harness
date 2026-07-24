@@ -1,6 +1,7 @@
 import type { ResolvedModel } from "../definition/model.ts";
 import type { Failure, LocalTaskId, Outcome, RunId } from "../shared.ts";
 import type { RunRecord, RunState, SessionProfile } from "./model.ts";
+import type { RunActivityChangedData, RunFactRecordedData } from "./observability.ts";
 
 export interface DomainEvent<TType extends string = string, TData = unknown> {
   readonly eventId: string;
@@ -90,6 +91,8 @@ export type DomainEventType =
   | "run.cycle.settled"
   | "run.turn.ended"
   | "run.tool.started"
+  | "run.activity.changed"
+  | "run.fact.recorded"
   | "run.input.amended"
   | "run.output.submitted"
   | "run.output.rejected"
@@ -105,6 +108,8 @@ export type DomainEventType =
   | "task.local.state.changed"
   | "task.progress.appended";
 
+export type RunActivityChangedEvent = DomainEvent<"run.activity.changed", RunActivityChangedData>;
+export type RunFactRecordedEvent = DomainEvent<"run.fact.recorded", RunFactRecordedData>;
 export type RunDomainEvent = DomainEvent<DomainEventType, unknown>;
 
 export function modelResolvedData(resolved: ResolvedModel): { readonly resolved: ResolvedModel } {

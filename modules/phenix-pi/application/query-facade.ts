@@ -1,6 +1,12 @@
 import type { DomainEvent } from "../domain/run/events.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
 import type { RunRecord, RunSnapshot } from "../domain/run/model.ts";
+import {
+  type ActivityPhase,
+  defaultActivity,
+  type RunActivity,
+  type RunFact,
+} from "../domain/run/observability.ts";
 import type { RunId } from "../domain/shared.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import type { QueryFacade, RunTree, RunTreeNode, TaskFacade } from "./interfaces.ts";
@@ -17,13 +23,24 @@ export class QueryFacadeImpl implements QueryFacade {
   async runTree(rootRunId: RunId): Promise<RunTree> {
     const root = this.store.projection.requireRun(rootRunId);
     if (root.parentId) throw new Error(`${rootRunId} is not a root run`);
-    const build = (run: RunRecord): RunTreeNode => ({
-      run: this.snapshot(run),
-      children: [...this.store.projection.childrenOf(run.id)]
-        .sort((left, right) => left.requestedAt.localeCompare(right.requestedAt))
-        .map(build),
-    });
+    const build = (run: RunRecord): RunTreeNode => {
+      const activity = this.activityFor(run);
+      return {
+        run: this.snapshot(run),
+        ...(activity ? { activity } : {}),
+        children: [...this.store.projection.childrenOf(run.id)]
+          .sort((left, right) => left.requestedAt.localeCompare(right.requestedAt))
+          .map(build),
+      };
+    };
     return { root: build(root) };
+  }
+
+  async facts(rootRunId: RunId, limit = 100) {
+    this.store.projection.requireRun(rootRunId);
+    const facts = this.store.projection.factsFor(rootRunId);
+    const bounded = Math.max(0, Math.min(1_000, limit));
+    return bounded === 0 ? [] : facts.slice(-bounded);
   }
 
   taskTree(rootRunId: RunId) {
@@ -70,6 +87,35 @@ export class QueryFacadeImpl implements QueryFacade {
     }
   }
 
+  private activityFor(run: RunRecord): RunActivity | undefined {
+    const activity = this.store.projection.activities.get(run.id);
+    if (isTerminalRunState(run.state) || run.state === "completing" || run.state === "waiting") {
+      const fallback = defaultActivity(run);
+      return {
+        rootRunId: this.store.projection.rootOf(run.id),
+        runId: run.id,
+        ...fallback,
+        since: activity?.since ?? run.requestedAt,
+        sequence: activity?.sequence ?? 0,
+      };
+    }
+    if (!activity || activity.target || activity.source === "reported") return activity;
+
+    const lastFact = [...this.store.projection.facts]
+      .reverse()
+      .find((fact) => fact.runId === run.id && fact.subject && isMeaningfulActivityFact(fact));
+    if (!lastFact?.subject) return activity;
+    return {
+      ...activity,
+      phase: phaseForFact(lastFact),
+      summary: lastFact.summary,
+      target: lastFact.subject,
+      source: "derived",
+      since: lastFact.timestamp,
+      sequence: lastFact.sequence,
+    };
+  }
+
   private snapshot(run: RunRecord): RunSnapshot {
     return {
       ...run,
@@ -83,4 +129,28 @@ export class QueryFacadeImpl implements QueryFacade {
         .map((child) => child.id),
     };
   }
+}
+
+function isMeaningfulActivityFact(fact: RunFact): boolean {
+  return [
+    "file-read",
+    "search-performed",
+    "file-changed",
+    "command-finished",
+    "test-result",
+    "child-started",
+    "error-observed",
+  ].includes(fact.kind);
+}
+
+function phaseForFact(fact: RunFact): ActivityPhase {
+  return fact.kind === "file-read" || fact.kind === "search-performed"
+    ? "exploring"
+    : fact.kind === "file-changed"
+      ? "editing"
+      : fact.kind === "test-result"
+        ? "testing"
+        : fact.kind === "child-started"
+          ? "delegating"
+          : "analyzing";
 }

@@ -3,6 +3,14 @@ import type { LocalTask } from "../task/local-task.ts";
 import type { DomainEvent } from "./events.ts";
 import { activeAttachedChildren, assertRunTransition, isTerminalRunState } from "./invariants.ts";
 import type { RunRecord, RunState, SessionProfile } from "./model.ts";
+import {
+  defaultActivity,
+  type RunActivity,
+  type RunActivityChangedData,
+  type RunFact,
+  type RunFactRecordedData,
+  workflowNodeActivity,
+} from "./observability.ts";
 
 interface CycleProjection {
   readonly number: number;
@@ -18,6 +26,8 @@ export class RunProjection {
   readonly turnCounts = new Map<RunId, number>();
   readonly toolCallCounts = new Map<RunId, number>();
   readonly progress = new Map<string, readonly string[]>();
+  readonly activities = new Map<RunId, RunActivity>();
+  readonly facts: RunFact[] = [];
   readonly rootSequences = new Map<RunId, number>();
   readonly eventIds = new Set<string>();
 
@@ -43,6 +53,7 @@ export class RunProjection {
       this.applyExisting(event, current);
     }
 
+    this.projectObservability(event);
     this.events.push(event);
     this.eventIds.add(event.eventId);
     this.rootSequences.set(event.rootRunId, event.sequence);
@@ -65,6 +76,10 @@ export class RunProjection {
 
   eventsFor(runId: RunId): readonly DomainEvent[] {
     return this.events.filter((event) => event.runId === runId);
+  }
+
+  factsFor(rootRunId: RunId): readonly RunFact[] {
+    return this.facts.filter((fact) => fact.rootRunId === rootRunId);
   }
 
   assertApplicable(events: readonly DomainEvent[]): void {
@@ -240,6 +255,57 @@ export class RunProjection {
     this.runs.set(current.id, next);
   }
 
+  private projectObservability(event: DomainEvent): void {
+    const run = this.requireRun(event.runId);
+
+    if (event.type === "run.activity.changed") {
+      this.setActivity(event, event.data as RunActivityChangedData);
+    } else if (event.type === "run.created" || event.type === "run.state.changed") {
+      this.setActivity(event, defaultActivity(run));
+    } else if (event.type === "workflow.node.entered") {
+      const data = event.data as { readonly nodeId: string };
+      this.setActivity(event, workflowNodeActivity(data.nodeId));
+    }
+
+    if (event.type === "run.fact.recorded") {
+      this.appendFact(event, event.data as RunFactRecordedData);
+      return;
+    }
+
+    const derived = derivedFact(event, run);
+    if (derived) this.appendFact(event, derived);
+  }
+
+  private setActivity(event: DomainEvent, data: RunActivityChangedData): void {
+    this.activities.set(event.runId, {
+      rootRunId: event.rootRunId,
+      runId: event.runId,
+      phase: data.phase,
+      summary: data.summary,
+      ...(data.target ? { target: data.target } : {}),
+      source: data.source,
+      since: event.timestamp,
+      sequence: event.sequence,
+    });
+  }
+
+  private appendFact(event: DomainEvent, data: RunFactRecordedData): void {
+    this.facts.push({
+      id: event.eventId,
+      rootRunId: event.rootRunId,
+      runId: event.runId,
+      sequence: event.sequence,
+      timestamp: event.timestamp,
+      kind: data.kind,
+      source: data.source,
+      summary: data.summary,
+      ...(data.subject ? { subject: data.subject } : {}),
+      ...(data.details ? { details: data.details } : {}),
+      provenance: { eventId: event.eventId, ...(data.provenance ?? {}) },
+      reliability: data.reliability,
+    });
+  }
+
   private terminal(
     current: RunRecord,
     next: RunRecord,
@@ -274,8 +340,68 @@ export class RunProjection {
     for (const [id, count] of this.turnCounts) projection.turnCounts.set(id, count);
     for (const [id, count] of this.toolCallCounts) projection.toolCallCounts.set(id, count);
     for (const [id, progress] of this.progress) projection.progress.set(id, progress);
+    for (const [id, activity] of this.activities) projection.activities.set(id, activity);
+    projection.facts.push(...this.facts);
     for (const [id, sequence] of this.rootSequences) projection.rootSequences.set(id, sequence);
     for (const eventId of this.eventIds) projection.eventIds.add(eventId);
     return projection;
   }
+}
+
+function derivedFact(event: DomainEvent, run: RunRecord): RunFactRecordedData | undefined {
+  switch (event.type) {
+    case "run.created":
+      return {
+        kind: run.parentId ? "child-started" : "run-started",
+        source: "runtime",
+        summary: `${run.parentId ? "Started" : "Opened"} ${run.definitionId}`,
+        ...(run.parentId ? { provenance: { childRunId: run.id } } : {}),
+        reliability: "observed",
+      };
+    case "workflow.node.entered": {
+      const data = event.data as { readonly nodeId: string };
+      return {
+        kind: "workflow-transition",
+        source: "workflow",
+        summary: `Entered workflow node ${data.nodeId}`,
+        subject: data.nodeId,
+        reliability: "observed",
+      };
+    }
+    case "workflow.transition.taken": {
+      const data = event.data as { readonly from: string; readonly to: string };
+      return {
+        kind: "workflow-transition",
+        source: "workflow",
+        summary: `Transitioned ${data.from} → ${data.to}`,
+        subject: data.to,
+        reliability: "observed",
+      };
+    }
+    case "run.completed":
+      return terminalFact(run, "Completed", false);
+    case "run.failed":
+      return terminalFact(run, outcomeMessage(run.outcome) ?? "Failed", true);
+    case "run.cancelled":
+      return terminalFact(run, "Cancelled", true);
+    case "run.orphaned":
+      return terminalFact(run, "Orphaned", true);
+    default:
+      return undefined;
+  }
+}
+
+function terminalFact(run: RunRecord, summary: string, error: boolean): RunFactRecordedData {
+  return {
+    kind: error ? "error-observed" : run.parentId ? "child-finished" : "run-state-changed",
+    source: "runtime",
+    summary: `${summary} · ${run.definitionId}`,
+    ...(run.parentId ? { provenance: { childRunId: run.id } } : {}),
+    reliability: "observed",
+  };
+}
+
+function outcomeMessage(outcome: Outcome<unknown> | undefined): string | undefined {
+  if (outcome?.status !== "failure") return undefined;
+  return outcome.failure.message;
 }

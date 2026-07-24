@@ -2,9 +2,15 @@ import { Type } from "typebox";
 
 import type { AgentDefinition, AnyDefinition } from "../domain/definition/definition.ts";
 import { defineSchema } from "../domain/definition/schema.ts";
-import type { DomainEvent } from "../domain/run/events.ts";
+import type { DomainEvent, PendingDomainEvent } from "../domain/run/events.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
 import type { RunLimits, RunRecord } from "../domain/run/model.ts";
+import {
+  ACTIVITY_PHASES,
+  type ActivityPhase,
+  defaultActivity,
+  type RunFactRecordedData,
+} from "../domain/run/observability.ts";
 import type {
   Failure,
   FailureCategory,
@@ -28,13 +34,21 @@ import type {
 } from "./execution-facade.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import { KeyedSerialExecutor } from "./keyed-serial-executor.ts";
+import { describeToolCall, failedToolFact } from "./run-observability.ts";
+
+interface LiveToolCall {
+  readonly toolName: string;
+  readonly input: unknown;
+}
 
 interface LiveAgent {
   readonly session: AgentSessionPort;
   readonly definition: AgentDefinition<unknown, unknown>;
   readonly limits: RunLimits;
+  readonly toolCalls: Map<string, LiveToolCall>;
   unsubscribe: () => void;
   timeout?: ReturnType<typeof setTimeout>;
+  lastProgress?: string;
 }
 
 interface AgentFailureInput {
@@ -43,6 +57,12 @@ interface AgentFailureInput {
   readonly retryable?: boolean;
   readonly requestedTools?: readonly string[];
   readonly suggestedLimits?: FailureLimitSuggestion;
+}
+
+interface AgentProgressInput {
+  readonly phase: ActivityPhase;
+  readonly message: string;
+  readonly target?: string;
 }
 
 const agentFailureSchema = defineSchema<AgentFailureInput>(
@@ -76,6 +96,15 @@ const agentFailureSchema = defineSchema<AgentFailureInput>(
         maxRepairAttempts: Type.Optional(Type.Integer({ minimum: 0, maximum: 10 })),
       }),
     ),
+  }),
+);
+
+const agentProgressSchema = defineSchema<AgentProgressInput>(
+  "agent.progress-report",
+  Type.Object({
+    phase: Type.Union(ACTIVITY_PHASES.map((phase) => Type.Literal(phase))),
+    message: Type.String({ minLength: 1, maxLength: 96 }),
+    target: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
   }),
 );
 
@@ -121,7 +150,7 @@ export class AgentExecutor implements RunImplementation {
       model: command.resolvedModel.concrete,
       thinking: command.resolvedModel.thinking,
       systemPrompt: this.systemPrompt(definition, command.input),
-      tools: [...new Set([...compiled.tools, "phenix_return", "phenix_fail"])],
+      tools: [...new Set([...compiled.tools, "phenix_return", "phenix_fail", "phenix_progress"])],
       customTools,
       context: definition.context,
       persistence: definition.persistence,
@@ -163,7 +192,7 @@ export class AgentExecutor implements RunImplementation {
       model: command.resolvedModel.concrete,
       thinking: command.resolvedModel.thinking,
       systemPrompt: this.systemPrompt(definition, command.input),
-      tools: [...new Set([...compiled.tools, "phenix_return", "phenix_fail"])],
+      tools: [...new Set([...compiled.tools, "phenix_return", "phenix_fail", "phenix_progress"])],
       customTools,
       context: definition.context,
       persistence: definition.persistence,
@@ -288,6 +317,7 @@ export class AgentExecutor implements RunImplementation {
       session,
       definition,
       limits,
+      toolCalls: new Map(),
       unsubscribe: () => undefined,
     };
     live.unsubscribe = session.subscribe((event) => {
@@ -376,8 +406,60 @@ export class AgentExecutor implements RunImplementation {
           };
         }),
     };
+    const progressTool: AgentTool = {
+      name: "phenix_progress",
+      label: "Phenix Progress",
+      description:
+        "Publish one short run-scoped progress update for the TUI. Use only when the phase, current target, hypothesis, or next action materially changes. This does not message the parent model.",
+      parameters: agentProgressSchema,
+      execute: async (value) =>
+        this.serial.run(runId, async () => {
+          const validation = agentProgressSchema.validate(value);
+          if (!validation.ok) {
+            throw new Error(
+              validation.issues.map((issue) => `${issue.path} ${issue.message}`).join("; "),
+            );
+          }
+          const live = this.live.get(runId);
+          const normalized = `${validation.value.phase}\u0000${validation.value.message}\u0000${validation.value.target ?? ""}`;
+          if (live?.lastProgress === normalized) {
+            return { text: "Duplicate progress ignored.", details: { runId, duplicate: true } };
+          }
+          if (live) live.lastProgress = normalized;
+          const rootRunId = this.store.projection.rootOf(runId);
+          await this.store.commit(rootRunId, [
+            {
+              runId,
+              type: "run.activity.changed",
+              data: {
+                phase: validation.value.phase,
+                summary: validation.value.message,
+                ...(validation.value.target ? { target: validation.value.target } : {}),
+                source: "reported",
+              },
+            },
+            {
+              runId,
+              type: "run.fact.recorded",
+              data: {
+                kind: "finding-reported",
+                source: "agent-report",
+                summary: validation.value.message,
+                ...(validation.value.target ? { subject: validation.value.target } : {}),
+                reliability: "reported",
+              } satisfies RunFactRecordedData,
+            },
+          ]);
+          return { text: "Progress recorded.", details: { runId } };
+        }),
+    };
     const allowed = new Set(allowedTools);
-    return [completion, failureTool, ...childTools.filter((tool) => allowed.has(tool.name))];
+    return [
+      completion,
+      failureTool,
+      progressTool,
+      ...childTools.filter((tool) => allowed.has(tool.name)),
+    ];
   }
 
   private async observe(runId: RunId, event: AgentSessionObservation): Promise<void> {
@@ -406,6 +488,9 @@ export class AgentExecutor implements RunImplementation {
     }
     if (event.type === "tool.started") {
       const toolCalls = await this.controller.toolStarted(runId, event.toolName);
+      const callId = event.toolCallId ?? `${event.toolName}-${toolCalls}`;
+      live.toolCalls.set(callId, { toolName: event.toolName, input: event.input });
+      await this.recordToolStarted(runId, event.toolName, event.input);
       const maxToolCalls = live.limits.maxToolCalls;
       if (maxToolCalls !== undefined && toolCalls > maxToolCalls) {
         await this.controller.fail(
@@ -419,6 +504,17 @@ export class AgentExecutor implements RunImplementation {
           ),
         );
       }
+      return;
+    }
+    if (event.type === "tool.finished") {
+      const call = this.takeToolCall(live, event.toolName, event.toolCallId);
+      await this.recordToolFinished(
+        runId,
+        event.toolName,
+        call?.input,
+        event.toolCallId,
+        event.isError,
+      );
       return;
     }
     if (event.type === "backend.failed") {
@@ -465,6 +561,57 @@ export class AgentExecutor implements RunImplementation {
         ),
       );
     }
+  }
+
+  private async recordToolStarted(runId: RunId, toolName: string, input: unknown): Promise<void> {
+    const rootRunId = this.store.projection.rootOf(runId);
+    const observed = describeToolCall(toolName, input, this.cwd);
+    await this.store.commit(rootRunId, [
+      { runId, type: "run.activity.changed", data: observed.activity },
+    ]);
+  }
+
+  private async recordToolFinished(
+    runId: RunId,
+    toolName: string,
+    input: unknown,
+    toolCallId: string | undefined,
+    isError: boolean,
+  ): Promise<void> {
+    if (toolName === "phenix_progress") return;
+    const run = this.store.projection.requireRun(runId);
+    const rootRunId = this.store.projection.rootOf(runId);
+    const pending: PendingDomainEvent[] = [];
+    if (!new Set(["phenix_return", "phenix_fail"]).has(toolName)) {
+      const observed = describeToolCall(toolName, input, this.cwd);
+      const fact: RunFactRecordedData = isError
+        ? failedToolFact(toolName, input, this.cwd, toolCallId)
+        : {
+            ...observed.fact,
+            provenance: toolCallId ? { toolCallId } : {},
+            reliability: "observed",
+          };
+      pending.push({ runId, type: "run.fact.recorded", data: fact });
+    }
+    pending.push({ runId, type: "run.activity.changed", data: defaultActivity(run) });
+    await this.store.commit(rootRunId, pending);
+  }
+
+  private takeToolCall(
+    live: LiveAgent,
+    toolName: string,
+    toolCallId: string | undefined,
+  ): LiveToolCall | undefined {
+    if (toolCallId) {
+      const call = live.toolCalls.get(toolCallId);
+      live.toolCalls.delete(toolCallId);
+      return call;
+    }
+    const matches = [...live.toolCalls.entries()].reverse();
+    const match = matches.find(([, call]) => call.toolName === toolName);
+    if (!match) return undefined;
+    live.toolCalls.delete(match[0]);
+    return match[1];
   }
 
   private async tryFinalize(runId: RunId): Promise<void> {
@@ -532,7 +679,7 @@ export class AgentExecutor implements RunImplementation {
   }
 
   private systemPrompt(definition: AgentDefinition<unknown, unknown>, input: unknown): string {
-    return `${definition.prompt.render(input)}\n\nExecution protocol:\n- You are run-scoped and own only the supplied task.\n- Use only the exact tools provided by this definition.\n- A settled Pi cycle is not completion.\n- Finish successfully only by calling phenix_return with an output matching schema ${definition.output.id}.\n- If blocked, deadlocked, missing permissions, or unable to produce a valid result, call phenix_fail with a short report instead of looping or inventing success.\n- When a child fails, inspect its report, surface it explicitly, and decide whether a bounded phenix_handle retry is appropriate.\n- Background children remain attached; resolve, retry, or cancel them before returning.`;
+    return `${definition.prompt.render(input)}\n\nExecution protocol:\n- You are run-scoped and own only the supplied task.\n- Use only the exact tools provided by this definition.\n- A settled Pi cycle is not completion.\n- Use phenix_progress sparingly when your phase, current target, hypothesis, or next action materially changes; it updates only deterministic run telemetry and the TUI, not the parent model.\n- Finish successfully only by calling phenix_return with an output matching schema ${definition.output.id}.\n- If blocked, deadlocked, missing permissions, or unable to produce a valid result, call phenix_fail with a short report instead of looping or inventing success.\n- When a child fails, inspect its report, surface it explicitly, and decide whether a bounded phenix_handle retry is appropriate.\n- Background children remain attached; resolve, retry, or cancel them before returning.`;
   }
 
   private requireLive(runId: RunId): LiveAgent {

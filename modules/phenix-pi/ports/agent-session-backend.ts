@@ -20,7 +20,18 @@ export interface AgentTool {
 export type AgentSessionObservation =
   | { readonly type: "cycle.settled" }
   | { readonly type: "turn.ended" }
-  | { readonly type: "tool.started"; readonly toolName: string }
+  | {
+      readonly type: "tool.started";
+      readonly toolName: string;
+      readonly toolCallId?: string;
+      readonly input?: unknown;
+    }
+  | {
+      readonly type: "tool.finished";
+      readonly toolName: string;
+      readonly toolCallId?: string;
+      readonly isError: boolean;
+    }
   | { readonly type: "backend.failed"; readonly message: string; readonly retryable: boolean };
 
 export interface AgentSessionReference {
