@@ -1,0 +1,43 @@
+name: Format command authority fix
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: format-command-authority-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  format:
+    if: github.head_ref == 'fix/command-authority-reachability'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
+      - name: Apply repository maintenance fixes
+        run: devenv tasks run maintenance:fix
+      - name: Commit formatting
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "chore: format command authority fix"
+          git push origin HEAD:${{ github.head_ref }}
