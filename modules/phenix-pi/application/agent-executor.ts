@@ -279,7 +279,7 @@ export class AgentExecutor implements RunImplementation {
     }
     const cycle = (this.store.projection.cycles.get(runId)?.number ?? 0) + 1;
     await this.controller.cycleStarted(runId, cycle);
-    await live.session.prompt(message);
+    await live.session.followUp(message);
   }
 
   async cancel(runId: RunId): Promise<void> {

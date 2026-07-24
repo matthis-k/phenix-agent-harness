@@ -164,6 +164,48 @@ function describe(event: DomainEvent): Description {
         message: "Run ownership changed",
         fields: event.data as Readonly<Record<string, unknown>>,
       };
+    case "attention.received":
+      return attentionDescription(
+        "trace",
+        "attention.received",
+        "Follow-up attention received",
+        event.data,
+      );
+    case "attention.routed":
+      return attentionDescription(
+        "info",
+        "attention.routed",
+        "Follow-up attention routed",
+        event.data,
+      );
+    case "attention.routing.failed":
+      return attentionDescription(
+        "warning",
+        "attention.routing.failed",
+        "Follow-up attention routing failed",
+        event.data,
+      );
+    case "attention.delivery.deferred":
+      return attentionDescription(
+        "info",
+        "attention.delivery.deferred",
+        "Attention delivery deferred until the target session is ready",
+        event.data,
+      );
+    case "attention.delivered":
+      return attentionDescription(
+        "info",
+        "attention.delivery.delivered",
+        "Attention delivered to active agent",
+        event.data,
+      );
+    case "attention.delivery.failed":
+      return attentionDescription(
+        "warning",
+        "attention.delivery.failed",
+        "Attention delivery failed",
+        event.data,
+      );
     case "workflow.node.entered":
       return {
         severity: "info",
@@ -236,6 +278,15 @@ function factDescription(data: RunFactRecordedData): Description {
       provenance: data.provenance,
     },
   };
+}
+
+function attentionDescription(
+  severity: DiagnosticSeverity,
+  scope: string,
+  message: string,
+  data: unknown,
+): Description {
+  return { severity, scope, message, fields: data as Readonly<Record<string, unknown>> };
 }
 
 function terminalDescription(
