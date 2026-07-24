@@ -26,6 +26,7 @@ import type {
   TaskFacade,
 } from "../application/interfaces.ts";
 import { SessionInvocationPolicy } from "../application/invocation-policy.ts";
+import { formatPresentationNotice, isPresentationFact } from "../application/presentation.ts";
 import { ProfileAwareModelResolver } from "../application/profile-aware-model-resolver.ts";
 import { QueryFacadeImpl } from "../application/query-facade.ts";
 import { SessionProfileFacadeImpl } from "../application/session-profile-facade.ts";
@@ -170,6 +171,10 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
   const unsubscribeNotifications = events.subscribe(async (event) => {
     const run = store.projection.runs.get(event.runId);
     if (!run) return;
+    if (event.type === "run.fact.recorded" && isPresentationFact(event.data)) {
+      await rootNotifier?.(formatPresentationNotice(run.id, event.data));
+      return;
+    }
     const retryOf = run.compiled.invocation.retryOf;
     if (event.type === "run.created" && retryOf) {
       const original = store.projection.runs.get(retryOf);

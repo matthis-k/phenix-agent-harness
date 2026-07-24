@@ -101,3 +101,25 @@ test("agent context inheritance is scoped to role needs", () => {
     assert.equal(definition.context.maxBytes, 128_000);
   }
 });
+
+test("structured presentation is available only to operational agents", () => {
+  const byId = new Map(
+    agentDefinitions.map((definition) => [String(definition.id), definition] as const),
+  );
+  for (const id of [
+    "agent.scout",
+    "agent.planner",
+    "agent.architect",
+    "agent.implementer",
+    "agent.tester",
+    "agent.verifier",
+    "agent.critic",
+    "agent.finalizer",
+    "agent.coordinator",
+    "agent.base",
+  ]) {
+    assert.ok(byId.get(id)?.tools.allow.includes("phenix_present"), id);
+  }
+  assert.equal(byId.get("agent.dispatcher")?.tools.allow.includes("phenix_present"), false);
+  assert.equal(byId.get("agent.qa-synthesizer")?.tools.allow.includes("phenix_present"), false);
+});
