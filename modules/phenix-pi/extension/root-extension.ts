@@ -27,8 +27,18 @@ import {
 import { type RunId, runId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import { copyFactHistory, parseFactsCommand, writeFactHistory } from "./fact-export.ts";
-import { statusField, statusLine } from "./observability-theme.ts";
-import { completePhenixSubcommands, PHENIX_FACTS_USAGE, PHENIX_USAGE } from "./phenix-command.ts";
+import {
+  formatDiagnosticEntries,
+  parseLogsCommand,
+  PHENIX_LOGS_USAGE,
+} from "./log-command.ts";
+import { statusLine } from "./observability-theme.ts";
+import {
+  completePhenixSubcommands,
+  PHENIX_FACTS_USAGE,
+  PHENIX_STATUS_USAGE,
+  PHENIX_USAGE,
+} from "./phenix-command.ts";
 import { RunMonitor } from "./run-monitor.ts";
 
 const ROOT_BINDING_ENTRY = "phenix:root-binding";
@@ -113,6 +123,25 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
       });
     }
 
+    await Promise.all(
+      integrationStatuses.map((status) =>
+        currentRuntime.diagnostics.record({
+          rootRunId: currentRoot,
+          runId: currentRoot,
+          severity: status.state === "failed" ? "warning" : "info",
+          scope:
+            status.state === "failed"
+              ? "integration.runtime.load_failed"
+              : "integration.runtime.loaded",
+          message:
+            status.state === "failed"
+              ? `Integration ${status.id} failed to load`
+              : `Integration ${status.id} loaded`,
+          fields: { id: status.id, state: status.state, error: status.error },
+        }),
+      ),
+    );
+
     if (!toolsRegistered) {
       for (const tool of await currentRuntime.rootTools(currentRoot)) {
         registerAgentTool(pi, tool, async () => {
@@ -128,11 +157,20 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
       }
       toolsRegistered = true;
     }
-    monitor = new RunMonitor(ctx, currentRuntime, currentRoot);
-    disposeStatus = currentRuntime.events.subscribe(() => {
+    monitor = new RunMonitor(ctx, currentRuntime, currentRoot, {
+      integrations: summarizeIntegrations(integrationStatuses),
+      integrationsFailed: integrationStatuses.some((status) => status.state === "failed"),
+    });
+    const refresh = (): void => {
       void updateStatus(ctx, currentRuntime, currentRoot);
       void monitor?.refresh();
-    });
+    };
+    const unsubscribeEvents = currentRuntime.events.subscribe(refresh);
+    const unsubscribeLogs = currentRuntime.diagnostics.subscribe(refresh);
+    disposeStatus = () => {
+      unsubscribeEvents();
+      unsubscribeLogs();
+    };
     await applyAgentTools(pi, ctx, (await currentRuntime.profiles.current(currentRoot)).agent);
     await updateStatus(ctx, currentRuntime, currentRoot);
     appendBinding(pi, currentRuntime, currentRoot, sessionId);
@@ -311,8 +349,60 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
         );
         return;
       }
+      if (action === "logs") {
+        const logsAction = parseLogsCommand(rawOptions);
+        if (!logsAction) {
+          ctx.ui.notify(`Usage: ${PHENIX_LOGS_USAGE}`, "warning");
+          return;
+        }
+        try {
+          if (logsAction.kind === "resolve") {
+            ctx.ui.notify(
+              limit(await activeRuntime.diagnostics.resolve(activeRoot, logsAction.reference)),
+              "info",
+            );
+            return;
+          }
+          const entries = await activeRuntime.diagnostics.entries(
+            activeRoot,
+            logsAction.minimum,
+            logsAction.kind === "show" ? 200 : undefined,
+          );
+          if (logsAction.kind === "show") {
+            ctx.ui.notify(
+              limit(
+                logsAction.json
+                  ? JSON.stringify(entries, null, 2)
+                  : formatDiagnosticEntries(entries),
+              ),
+              logsAction.minimum === "error" ? "warning" : "info",
+            );
+            return;
+          }
+          const exported = await activeRuntime.diagnostics.export(activeRoot, logsAction.minimum);
+          if (logsAction.kind === "copy") {
+            await copyFactHistory(exported, logsAction.command, ctx.cwd);
+            ctx.ui.notify(
+              `Copied ${entries.length} ${logsAction.minimum}+ diagnostic entries using: ${logsAction.command}`,
+              "info",
+            );
+            return;
+          }
+          const file = await writeFactHistory(exported, logsAction.file, ctx.cwd);
+          ctx.ui.notify(
+            `Wrote ${entries.length} ${logsAction.minimum}+ diagnostic entries to ${file}`,
+            "info",
+          );
+        } catch (error) {
+          ctx.ui.notify(`Diagnostic log command failed: ${errorMessage(error)}`, "warning");
+        }
+        return;
+      }
       if (action === "facts") {
-        const activeMonitor = monitor ?? new RunMonitor(ctx, activeRuntime, activeRoot);
+        const activeMonitor = monitor ?? new RunMonitor(ctx, activeRuntime, activeRoot, {
+          integrations: summarizeIntegrations(integrationStatuses),
+          integrationsFailed: integrationStatuses.some((status) => status.state === "failed"),
+        });
         monitor = activeMonitor;
         const factsAction = parseFactsCommand(rawOptions);
         if (!factsAction) {
@@ -349,85 +439,39 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
         }
         return;
       }
-      if (action === "runs") {
-        const activeMonitor = monitor ?? new RunMonitor(ctx, activeRuntime, activeRoot);
-        monitor = activeMonitor;
-        const option = options[0];
-        if (options.length > 1 || (option && !["off", "--once", "--json"].includes(option))) {
-          ctx.ui.notify("Usage: /phenix runs [off|--once|--json]", "warning");
-          return;
-        }
-        if (option === "off") {
-          activeMonitor.hide();
-          return;
-        }
-        if (option === "--once") {
-          ctx.ui.notify(limit(await activeMonitor.once("runs")), "info");
-          return;
-        }
-        if (option === "--json") {
-          ctx.ui.notify(limit(await activeMonitor.json("runs")), "info");
-          return;
-        }
-        await activeMonitor.show("runs");
-        return;
-      }
       if (action === "tasks") {
         const tree = await activeRuntime.tasks.tree(activeRoot);
         ctx.ui.notify(limit(JSON.stringify(tree, null, 2)), "info");
         return;
       }
-      if (action !== "status") {
+      if (action !== "status" && action !== "runs") {
         ctx.ui.notify(`Usage: ${PHENIX_USAGE}`, "warning");
         return;
       }
-      const [active, profile, facts] = await Promise.all([
-        activeRuntime.queries.activeRuns(activeRoot),
-        activeRuntime.profiles.current(activeRoot),
-        activeRuntime.queries.facts(activeRoot),
-      ]);
-      const descendants = active.filter((run) => run.id !== activeRoot);
-      const ledger = activeRuntime.ledgerPath(activeRoot) ?? "in-memory";
-      const failedIntegrations = integrationStatuses.some((status) => status.state === "failed");
-      const liveMode = monitor?.currentMode ?? "hidden";
-      ctx.ui.notify(
-        [
-          statusField(ctx.ui.theme, "Root", String(activeRoot), "muted"),
-          statusField(
-            ctx.ui.theme,
-            "Profile",
-            `${profile.agent} / ${profile.modelSet} / ${profile.difficulty}`,
-            "accent",
-          ),
-          statusField(
-            ctx.ui.theme,
-            "Sequence",
-            String(activeRuntime.sequence(activeRoot)),
-            "muted",
-          ),
-          statusField(
-            ctx.ui.theme,
-            "Active descendants",
-            String(descendants.length),
-            descendants.length === 0 ? "success" : "warning",
-          ),
-          statusField(ctx.ui.theme, "Facts", String(facts.length)),
-          statusField(
-            ctx.ui.theme,
-            "Live view",
-            liveMode,
-            liveMode === "hidden" ? "muted" : "accent",
-          ),
-          statusField(
-            ctx.ui.theme,
-            "Integrations",
-            summarizeIntegrations(integrationStatuses),
-            failedIntegrations ? "error" : "success",
-          ),
-          statusField(ctx.ui.theme, "Ledger", ledger, "muted"),
-        ].join("\n"),
-        integrationLevel(integrationStatuses),
-      );
+      const activeMonitor = monitor ?? new RunMonitor(ctx, activeRuntime, activeRoot, {
+        integrations: summarizeIntegrations(integrationStatuses),
+        integrationsFailed: integrationStatuses.some((status) => status.state === "failed"),
+      });
+      monitor = activeMonitor;
+      const allowed = new Set(["off", "--once", "--json", "--expanded"]);
+      if (options.some((option) => !allowed.has(option)) || options.filter((option) => option !== "--expanded").length > 1) {
+        ctx.ui.notify(`Usage: ${PHENIX_STATUS_USAGE}`, "warning");
+        return;
+      }
+      const expanded = options.includes("--expanded");
+      if (options.includes("off")) {
+        activeMonitor.hide();
+        return;
+      }
+      if (options.includes("--once")) {
+        ctx.ui.notify(limit(await activeMonitor.once("status", { expanded })), "info");
+        return;
+      }
+      if (options.includes("--json")) {
+        ctx.ui.notify(limit(await activeMonitor.json("status")), "info");
+        return;
+      }
+      await activeMonitor.show("status", { expanded });
     },
   });
 }
