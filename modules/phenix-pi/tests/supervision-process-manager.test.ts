@@ -30,11 +30,7 @@ class RecordingPendingAgent implements RunImplementation {
     await this.controller.transition(command.runId, "running");
   }
 
-  async send(
-    runId: RunId,
-    message: string,
-    delivery: "normal" | "nextTurn",
-  ): Promise<void> {
+  async send(runId: RunId, message: string, delivery: "normal" | "nextTurn"): Promise<void> {
     this.messages.push({ runId, message, delivery });
   }
 }
