@@ -109,11 +109,7 @@ const DEFINITION_ACTIVITIES = [
   [["critic"], "reviewing", "Reviewing evidence"],
   [["finalizer", "synthesizer"], "summarizing", "Preparing final handoff"],
   [["dispatcher", "coordinator"], "delegating", "Coordinating execution"],
-] as const satisfies readonly (readonly [
-  readonly string[],
-  ActivityPhase,
-  string,
-])[];
+] as const satisfies readonly (readonly [readonly string[], ActivityPhase, string])[];
 
 const WORKFLOW_NODE_PHASES = [
   [["plan"], "planning"],
