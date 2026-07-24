@@ -28,7 +28,7 @@ jobs:
             experimental-features = nix-command flakes
             accept-flake-config = true
             max-jobs = auto
-      - uses: cachix/cachix-action@v17
+      - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
         with: { name: devenv }
       - name: Install devenv
         run: nix profile add nixpkgs#devenv
@@ -42,7 +42,7 @@ jobs:
           exit "$status"
       - name: Upload devenv diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: devenv-test-log
           path: devenv-test.log
