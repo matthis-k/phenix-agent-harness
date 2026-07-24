@@ -5,6 +5,7 @@ import {
   type WorkflowEdge,
   type WorkflowNode,
 } from "../../domain/definition/definition.ts";
+import { type Difficulty, isDifficulty } from "../../domain/definition/model.ts";
 import type { Schema } from "../../domain/definition/schema.ts";
 import { definitionId } from "../../domain/shared.ts";
 import {
@@ -13,9 +14,11 @@ import {
   markdownTitle,
   optionalMarkdownSubsection,
   parseMarkdownFields,
+  parseMarkdownTable,
   requiredMarkdownFence,
   requiredMarkdownField,
   requiredMarkdownSection,
+  requireMarkdownColumns,
 } from "../definition/markdown.ts";
 
 export interface WorkflowMarkdownBindings {
@@ -44,13 +47,23 @@ const WORKFLOW_FIELDS = [
   "input",
   "output",
   "entry",
+  "difficulty-source",
   "timeout-ms",
   "max-node-runs",
   "max-parallelism",
 ] as const;
 
 const STATE_FIELDS: Readonly<Record<StateKind, readonly string[]>> = {
-  invoke: ["kind", "title", "run", "input", "wait", "input-schema", "output-schema"],
+  invoke: [
+    "kind",
+    "title",
+    "run",
+    "input",
+    "wait",
+    "difficulty",
+    "input-schema",
+    "output-schema",
+  ],
   local: ["kind", "title", "operation", "input", "input-schema", "output-schema"],
   decision: ["kind", "title", "decide"],
   join: ["kind", "title", "policy", "quorum"],
@@ -77,6 +90,11 @@ export function compileWorkflowMarkdown(
   assertMarkdownFields(fields, WORKFLOW_FIELDS, "workflow");
   const input = bindings.resolveSchema(requiredMarkdownField(fields, "input", "workflow"));
   const output = bindings.resolveSchema(requiredMarkdownField(fields, "output", "workflow"));
+  const nodes = authored.states.map((state) => compileState(state, bindings, output));
+  const difficultySource = fields["difficulty-source"];
+  if (difficultySource && !nodes.some((node) => node.id === difficultySource)) {
+    throw new Error(`Workflow difficulty source ${difficultySource} is not a state`);
+  }
 
   return {
     id: definitionId(requiredMarkdownField(fields, "id", "workflow")),
@@ -85,6 +103,7 @@ export function compileWorkflowMarkdown(
     description: requiredMarkdownField(fields, "description", "workflow"),
     input,
     output,
+    ...(difficultySource ? { difficultySource } : {}),
     limits: {
       timeoutMs: markdownInteger(fields, "timeout-ms", "workflow", 0),
       maxNodeRuns: markdownInteger(fields, "max-node-runs", "workflow", 1),
@@ -92,7 +111,7 @@ export function compileWorkflowMarkdown(
     },
     graph: {
       entry: requiredMarkdownField(fields, "entry", "workflow"),
-      nodes: authored.states.map((state) => compileState(state, bindings, output)),
+      nodes,
       edges: authored.transitions,
     },
   };
@@ -127,6 +146,7 @@ function compileState(
         definition: definitionRef(definitionId(invoked.id)),
         input: read("input"),
         wait: parseWait(fields.wait ?? "await", state.id),
+        ...(fields.difficulty ? { difficulty: parseDifficulty(fields.difficulty, owner) } : {}),
       };
     }
     case "local":
@@ -186,32 +206,43 @@ function parseStates(section: string): AuthoredWorkflowState[] {
 }
 
 function parseTransitions(section: string): WorkflowEdge[] {
-  const rows = section
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("|") && line.endsWith("|"));
-  if (rows.length < 2) throw new Error("Transitions must be a Markdown table");
+  const table = parseMarkdownTable(section, "Transitions");
+  requireMarkdownColumns(table, ["from", "to"], "Transitions");
 
-  const headers = tableCells(rows[0]).map(normalizeHeader);
-  const indexes = new Map(headers.map((header, index) => [header, index] as const));
-  requireColumns(indexes, ["from", "to"]);
-
-  return rows.slice(2).map((row, rowIndex) => {
-    const cells = tableCells(row);
-    const from = tableValue(cells, indexes, "from");
-    const to = tableValue(cells, indexes, "to");
-    const when = tableValue(cells, indexes, "when", false);
-    const max =
-      tableValue(cells, indexes, "max-traversals", false) ||
-      tableValue(cells, indexes, "max", false);
+  return table.rows.map((row, rowIndex) => {
+    const from = row.from ?? "";
+    const to = row.to ?? "";
+    const when = row.when ?? "";
+    const max = row["max-traversals"] || row.max || "";
+    const difficulties = parseDifficulties(row.difficulties ?? "", rowIndex + 1);
     if (!from || !to) throw new Error(`Transitions row ${rowIndex + 1} requires From and To`);
     return {
       from,
       to,
       ...(when ? { when } : {}),
+      ...(difficulties.length > 0 ? { difficulties } : {}),
       ...(max ? { maxTraversals: integerValue(max, `transition ${from}->${to}`, 1) } : {}),
     };
   });
+}
+
+function parseDifficulties(value: string, row: number): Difficulty[] {
+  if (!value) return [];
+  const values = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const result: Difficulty[] = [];
+  for (const value of values) {
+    if (!isDifficulty(value)) throw new Error(`Transitions row ${row} has unknown difficulty ${value}`);
+    if (!result.includes(value)) result.push(value);
+  }
+  return result;
+}
+
+function parseDifficulty(value: string, owner: string): Difficulty {
+  if (isDifficulty(value)) return value;
+  throw new Error(`${owner}.difficulty must be D0, D1, D2, or D3`);
 }
 
 function integerValue(value: string, name: string, minimum: number): number {
@@ -220,12 +251,6 @@ function integerValue(value: string, name: string, minimum: number): number {
     throw new Error(`${name} must be an integer greater than or equal to ${minimum}`);
   }
   return parsed;
-}
-
-function requireColumns(indexes: ReadonlyMap<string, number>, required: readonly string[]): void {
-  for (const column of required) {
-    if (!indexes.has(column)) throw new Error(`Transitions table is missing ${column}`);
-  }
 }
 
 function parseStateKind(value: string, stateId: string): StateKind {
@@ -260,36 +285,4 @@ function parseJoinPolicy(
     return value;
   }
   throw new Error(`State ${stateId} has unsupported join policy ${value}`);
-}
-
-function tableCells(row: string): string[] {
-  return row
-    .slice(1, -1)
-    .split("|")
-    .map((cell) => unquote(cell.trim().replace(/^`|`$/g, "")));
-}
-
-function tableValue(
-  cells: readonly string[],
-  indexes: ReadonlyMap<string, number>,
-  key: string,
-  required = true,
-): string {
-  const index = indexes.get(key);
-  if (index === undefined) {
-    if (required) throw new Error(`Transitions table is missing ${key}`);
-    return "";
-  }
-  return cells[index] ?? "";
-}
-
-function normalizeHeader(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, "-");
-}
-
-function unquote(value: string): string {
-  const quoted =
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"));
-  return quoted ? value.slice(1, -1) : value;
 }
