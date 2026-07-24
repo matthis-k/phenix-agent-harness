@@ -1,4 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 
 import type { RunTree, RunTreeNode } from "../application/interfaces.ts";
 import type { PhenixRuntime } from "../composition/create-phenix-runtime.ts";
@@ -58,7 +59,9 @@ export class RunMonitor {
         const requestedMode: Exclude<RunMonitorMode, "hidden"> = this.mode;
         const lines = await this.render(requestedMode);
         if (!this.disposed && this.mode === requestedMode) {
-          this.ctx.ui.setWidget?.(WIDGET_KEY, lines, { placement: "aboveEditor" });
+          this.ctx.ui.setWidget?.(WIDGET_KEY, createUnboundedWidget(lines), {
+            placement: "aboveEditor",
+          });
         }
       } while (this.pending && !this.disposed);
     } finally {
@@ -109,6 +112,11 @@ export class RunMonitor {
     ]);
     return renderRuns(tree, facts, this.runtime.sequence(this.rootRunId));
   }
+}
+
+export function createUnboundedWidget(lines: readonly string[]): () => Text {
+  const content = lines.join("\n");
+  return () => new Text(content, 1, 0);
 }
 
 export function renderRuns(tree: RunTree, facts: readonly RunFact[], sequence: number): string[] {
