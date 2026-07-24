@@ -24,7 +24,7 @@ export interface WorkflowFunctionInventory {
 }
 
 type EdgeIndex = ReadonlyMap<string, readonly WorkflowEdge[]>;
-type MappingRefs = Map<string, { readonly nodeId: string; readonly ref: string }>;
+type MappingRefs = Map<string, string>;
 
 interface WorkflowTopology {
   readonly nodeById: ReadonlyMap<string, WorkflowNode>;
@@ -117,14 +117,14 @@ export function validateWorkflow(
 
     if (hasInputMapping) {
       if (inventory.hasMapping(node.input)) {
-        inputMappings.set(node.id, { nodeId: node.id, ref: node.input as string });
+        inputMappings.set(node.id, node.input as string);
       } else {
         diagnostics.push(diagnostic("mapping_missing", `Unknown mapping ${node.input}`, node.id));
       }
     }
     if (outputMapping) {
       if (inventory.hasMapping(outputMapping)) {
-        outputMappings.set(node.id, { nodeId: node.id, ref: outputMapping as string });
+        outputMappings.set(node.id, outputMapping as string);
       } else {
         diagnostics.push(
           diagnostic("mapping_missing", `Unknown mapping ${outputMapping}`, node.id),
@@ -135,7 +135,9 @@ export function validateWorkflow(
       diagnostics.push(diagnostic("decision_missing", `Unknown decision ${node.decide}`, node.id));
     }
     if (node.kind === "local" && !inventory.hasOperation(node.operation)) {
-      diagnostics.push(diagnostic("operation_missing", `Unknown operation ${node.operation}`, node.id));
+      diagnostics.push(
+        diagnostic("operation_missing", `Unknown operation ${node.operation}`, node.id),
+      );
     }
     if (node.kind === "join" && node.policy === "quorum" && (!node.quorum || node.quorum < 1)) {
       diagnostics.push(diagnostic("join_invalid", "Quorum joins require quorum >= 1", node.id));
@@ -154,7 +156,9 @@ export function validateWorkflow(
       diagnostics.push(diagnostic("edge_target_missing", `Unknown edge target ${edge.to}`));
     }
     if (edge.when && !inventory.hasCondition(edge.when)) {
-      diagnostics.push(diagnostic("condition_missing", `Unknown condition ${edge.when}`, edge.from));
+      diagnostics.push(
+        diagnostic("condition_missing", `Unknown condition ${edge.when}`, edge.from),
+      );
     }
     const invalidTraversalLimit =
       edge.maxTraversals !== undefined &&
@@ -209,7 +213,8 @@ export function validateWorkflow(
 
   for (const edge of graph.edges) {
     const unboundedCycle =
-      edge.maxTraversals === undefined && canReach(edge.to, edge.from, topology.outgoing, new Set());
+      edge.maxTraversals === undefined &&
+      canReach(edge.to, edge.from, topology.outgoing, new Set());
     if (unboundedCycle) {
       diagnostics.push(
         diagnostic(
@@ -221,9 +226,7 @@ export function validateWorkflow(
     }
   }
 
-  diagnostics.push(
-    ...checkMappingsTypeConsistency(topology, inputMappings, outputMappings),
-  );
+  diagnostics.push(...checkMappingsTypeConsistency(topology, inputMappings, outputMappings));
 
   const fanOut = new Map<string, number>();
   for (const edge of graph.edges) {
@@ -244,9 +247,7 @@ export function validateWorkflow(
   return diagnostics;
 }
 
-function validateLimits(
-  definition: WorkflowDefinition<unknown, unknown>,
-): WorkflowDiagnostic[] {
+function validateLimits(definition: WorkflowDefinition<unknown, unknown>): WorkflowDiagnostic[] {
   return LIMIT_RULES.flatMap(([code, message, read, valid]) =>
     valid(read(definition)) ? [] : [diagnostic(code, message)],
   );
@@ -294,9 +295,7 @@ function canReach(
   if (current === target) return true;
   if (visited.has(current)) return false;
   visited.add(current);
-  return (outgoing.get(current) ?? []).some((edge) =>
-    canReach(edge.to, target, outgoing, visited),
-  );
+  return (outgoing.get(current) ?? []).some((edge) => canReach(edge.to, target, outgoing, visited));
 }
 
 function checkMappingsTypeConsistency(
@@ -308,13 +307,14 @@ function checkMappingsTypeConsistency(
   for (const [sourceId, outputRef] of outputMappings) {
     for (const targetId of downstreamNodes(sourceId, topology.outgoing)) {
       const mappingRef = inputMappings.get(targetId);
-      const sameKind = topology.nodeById.get(sourceId)?.kind === topology.nodeById.get(targetId)?.kind;
-      const suspiciousMapping = mappingRef && outputRef.ref === mappingRef.ref && sameKind;
+      const sameKind =
+        topology.nodeById.get(sourceId)?.kind === topology.nodeById.get(targetId)?.kind;
+      const suspiciousMapping = mappingRef && outputRef === mappingRef && sameKind;
       if (!suspiciousMapping) continue;
       diagnostics.push(
         diagnostic(
           "mapping_type_suspicious",
-          `Node ${targetId} uses mapping "${mappingRef.ref}" which is the same ref used as output of node ${sourceId};` +
+          `Node ${targetId} uses mapping "${mappingRef}" which is the same ref used as output of node ${sourceId};` +
             " data may be passed through unchanged but the mapping identity suggests the workflow output feeds directly" +
             " into the next node without a typed transformation",
           targetId,
@@ -326,7 +326,11 @@ function checkMappingsTypeConsistency(
   return diagnostics;
 }
 
-function downstreamNodes(nodeId: string, outgoing: EdgeIndex, visited = new Set<string>()): string[] {
+function downstreamNodes(
+  nodeId: string,
+  outgoing: EdgeIndex,
+  visited = new Set<string>(),
+): string[] {
   if (visited.has(nodeId)) return [];
   visited.add(nodeId);
   return (outgoing.get(nodeId) ?? []).flatMap((edge) => [
