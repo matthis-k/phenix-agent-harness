@@ -12,6 +12,42 @@ export type ObservabilityTone =
   | "dim"
   | "text";
 
+const RELIABILITY_TONES: Readonly<Record<FactReliability, ObservabilityTone>> = {
+  observed: "success",
+  reported: "warning",
+  derived: "accent",
+};
+const STATE_TONES: Partial<Record<RunState, ObservabilityTone>> = {
+  completed: "success",
+  failed: "error",
+  orphaned: "error",
+  waiting: "warning",
+  cancelled: "muted",
+};
+const PHASE_TONES: Partial<Record<ActivityPhase, ObservabilityTone>> = {
+  waiting: "warning",
+  editing: "warning",
+  finishing: "success",
+  summarizing: "success",
+};
+const FACT_TONES: Partial<Record<FactKind, ObservabilityTone>> = {
+  "error-observed": "error",
+  "file-changed": "warning",
+  "test-result": "success",
+  "child-finished": "success",
+  "finding-reported": "warning",
+  "decision-reported": "warning",
+  "run-started": "accent",
+  "child-started": "accent",
+  "workflow-transition": "accent",
+};
+const RUN_STATE_SUMMARY_TONES = [
+  [/failed|orphaned|error|timed out/, "error"],
+  [/cancelled/, "muted"],
+  [/waiting/, "warning"],
+  [/completed|finished/, "success"],
+] as const satisfies readonly (readonly [RegExp, ObservabilityTone])[];
+
 export function color(
   theme: ObservabilityTheme | undefined,
   tone: ObservabilityTone,
@@ -33,7 +69,7 @@ export function state(
   value: RunState,
   text: string,
 ): string {
-  return color(theme, stateTone(value), text);
+  return color(theme, STATE_TONES[value] ?? "accent", text);
 }
 
 export function phase(
@@ -41,7 +77,7 @@ export function phase(
   value: ActivityPhase,
   text: string,
 ): string {
-  return color(theme, phaseTone(value), text);
+  return color(theme, PHASE_TONES[value] ?? "accent", text);
 }
 
 export function reliability(
@@ -49,11 +85,7 @@ export function reliability(
   value: FactReliability,
   text: string,
 ): string {
-  return color(
-    theme,
-    value === "observed" ? "success" : value === "reported" ? "warning" : "accent",
-    text,
-  );
+  return color(theme, RELIABILITY_TONES[value], text);
 }
 
 export function fact(
@@ -95,35 +127,8 @@ export function statusField(
   return `${color(theme, "dim", `${label}:`)} ${color(theme, tone, value)}`;
 }
 
-function stateTone(value: RunState): ObservabilityTone {
-  if (value === "completed") return "success";
-  if (value === "failed" || value === "orphaned") return "error";
-  if (value === "waiting") return "warning";
-  if (value === "cancelled") return "muted";
-  return "accent";
-}
-
-function phaseTone(value: ActivityPhase): ObservabilityTone {
-  if (value === "waiting" || value === "editing") return "warning";
-  if (value === "finishing" || value === "summarizing") return "success";
-  return "accent";
-}
-
 function factTone(kind: FactKind, summary: string): ObservabilityTone {
-  if (kind === "error-observed") return "error";
-  if (kind === "file-changed") return "warning";
-  if (kind === "test-result" || kind === "child-finished") return "success";
-  if (kind === "finding-reported" || kind === "decision-reported") return "warning";
-  if (kind === "run-started" || kind === "child-started" || kind === "workflow-transition") {
-    return "accent";
-  }
-  if (kind === "run-state-changed") {
-    const normalized = summary.toLowerCase();
-    if (/failed|orphaned|error|timed out/.test(normalized)) return "error";
-    if (/cancelled/.test(normalized)) return "muted";
-    if (/waiting/.test(normalized)) return "warning";
-    if (/completed|finished/.test(normalized)) return "success";
-    return "accent";
-  }
-  return "text";
+  if (kind !== "run-state-changed") return FACT_TONES[kind] ?? "text";
+  const normalized = summary.toLowerCase();
+  return RUN_STATE_SUMMARY_TONES.find(([pattern]) => pattern.test(normalized))?.[1] ?? "accent";
 }
