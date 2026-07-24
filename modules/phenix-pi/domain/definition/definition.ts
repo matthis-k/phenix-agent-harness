@@ -74,6 +74,10 @@ export type PureDecisionRef = string;
 export type PureConditionRef = string;
 export type LocalOperationRef = string;
 
+export type DifficultyBinding =
+  | { readonly kind: "fixed"; readonly value: Difficulty }
+  | { readonly kind: "result"; readonly nodeId: string };
+
 export interface InvokeNode {
   readonly kind: "invoke";
   readonly id: string;
@@ -81,8 +85,8 @@ export interface InvokeNode {
   readonly definition: DefinitionRef<unknown, unknown>;
   readonly input: ValueMappingRef;
   readonly wait: "await" | "background";
-  /** Fixed route for this invocation. Omit to inherit the parent run difficulty. */
-  readonly difficulty?: Difficulty;
+  /** Omit to inherit the parent run difficulty. */
+  readonly difficulty?: DifficultyBinding;
   readonly capabilityOverride?: Partial<CapabilitySet>;
 }
 
