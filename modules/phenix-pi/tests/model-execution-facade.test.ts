@@ -56,7 +56,7 @@ test("model execution facade rejects every handle path for internal definitions"
   });
 
   await assert.rejects(() => modelExecution.inspect(internal.id), /internal to the Phenix runtime/);
-  await assert.rejects(
+  assert.throws(
     () => modelExecution.cancel(internal.id, "operator request"),
     /internal to the Phenix runtime/,
   );
