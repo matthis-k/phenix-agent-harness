@@ -50,15 +50,7 @@ const WORKFLOW_FIELDS = [
 ] as const;
 
 const STATE_FIELDS: Readonly<Record<StateKind, readonly string[]>> = {
-  invoke: [
-    "kind",
-    "title",
-    "run",
-    "input",
-    "wait",
-    "input-schema",
-    "output-schema",
-  ],
+  invoke: ["kind", "title", "run", "input", "wait", "input-schema", "output-schema"],
   local: ["kind", "title", "operation", "input", "input-schema", "output-schema"],
   decision: ["kind", "title", "decide"],
   join: ["kind", "title", "policy", "quorum"],
