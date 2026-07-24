@@ -1,6 +1,7 @@
 export {
   agentDefinitions,
   architectDefinition,
+  attentionRouterDefinition,
   baseDefinition,
   coordinatorDefinition,
   criticDefinition,
