@@ -1,12 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+
 import { WORKFLOW_IMPLEMENT, WORKFLOW_QA } from "../definitions/ids.ts";
 import type { ImplementationResult, QAReport } from "../definitions/schemas.ts";
 import { definitionRef } from "../domain/definition/definition.ts";
+import type { ModelResolutionContext, ResolvedModel } from "../domain/definition/model.ts";
 import type { LocalOperationRunner } from "../ports/local-operation-runner.ts";
+import type { ModelResolver } from "../ports/model-resolver.ts";
 import { createTestRuntime } from "./support/core-runtime.ts";
 
-test("implementation workflow invokes typed children and returns verified output", async () => {
+function recordingModelResolver(
+  contexts: Map<string, ModelResolutionContext>,
+): ModelResolver {
+  return {
+    async resolve(selector, context): Promise<ResolvedModel> {
+      contexts.set(context.definitionId, context);
+      return {
+        requested: selector,
+        concrete: { kind: "concrete", provider: "test", model: "model" },
+        thinking: context.thinking === "route" ? "medium" : context.thinking,
+        capability: context.capability,
+        policyRevision: "test",
+      };
+    },
+  };
+}
+
+test("implementation workflow estimates difficulty and returns verified output", async () => {
   const runtime = await createTestRuntime();
   const handle = await runtime.execution.start({
     parentId: runtime.rootRunId,
@@ -26,9 +46,74 @@ test("implementation workflow invokes typed children and returns verified output
   assert.equal(workflow.state, "completed");
   assert.deepEqual(
     children.map((child) => child.definitionId),
-    ["agent.planner", "agent.implementer", "agent.verifier"],
+    [
+      "agent.difficulty-estimator",
+      "agent.planner",
+      "agent.implementer",
+      "agent.verifier",
+    ],
   );
   assert.ok(children.every((child) => child.parentId === handle.id));
+});
+
+test("D0 implementation skips planning and independent verification", async () => {
+  const runtime = await createTestRuntime(undefined, { estimatedDifficulty: "D0" });
+  const handle = await runtime.execution.start({
+    parentId: runtime.rootRunId,
+    definition: definitionRef<unknown, ImplementationResult>(WORKFLOW_IMPLEMENT),
+    input: { objective: "Change one obvious local constant" },
+    wait: "await",
+  });
+  const outcome = await handle.result();
+
+  assert.equal(outcome.status, "success");
+  if (outcome.status !== "success") return;
+  assert.equal(outcome.value.verification.accepted, true);
+  assert.match(outcome.value.verification.summary, /targeted checks/);
+  assert.deepEqual(
+    runtime.store.projection.childrenOf(handle.id).map((child) => child.definitionId),
+    ["agent.difficulty-estimator", "agent.implementer"],
+  );
+});
+
+test("estimated difficulty selects Markdown-declared model routes", async () => {
+  const contexts = new Map<string, ModelResolutionContext>();
+  const runtime = await createTestRuntime(undefined, {
+    estimatedDifficulty: "D2",
+    modelResolver: recordingModelResolver(contexts),
+  });
+  const handle = await runtime.execution.start({
+    parentId: runtime.rootRunId,
+    definition: definitionRef<unknown, ImplementationResult>(WORKFLOW_IMPLEMENT),
+    input: { objective: "Coordinate a cross-module change" },
+    wait: "await",
+  });
+  assert.equal((await handle.result()).status, "success");
+
+  assert.deepEqual(
+    {
+      difficulty: contexts.get("agent.planner")?.difficulty,
+      capability: contexts.get("agent.planner")?.capability,
+      thinking: contexts.get("agent.planner")?.thinking,
+    },
+    { difficulty: "D2", capability: "reasoning", thinking: "high" },
+  );
+  assert.deepEqual(
+    {
+      difficulty: contexts.get("agent.implementer")?.difficulty,
+      capability: contexts.get("agent.implementer")?.capability,
+      thinking: contexts.get("agent.implementer")?.thinking,
+    },
+    { difficulty: "D2", capability: "code", thinking: "medium" },
+  );
+  assert.deepEqual(
+    {
+      difficulty: contexts.get("agent.verifier")?.difficulty,
+      capability: contexts.get("agent.verifier")?.capability,
+      thinking: contexts.get("agent.verifier")?.thinking,
+    },
+    { difficulty: "D2", capability: "review", thinking: "high" },
+  );
 });
 
 test("implementation workflow performs a bounded typed repair loop", async () => {
@@ -38,6 +123,14 @@ test("implementation workflow performs a bounded typed repair loop", async () =>
     async start(command) {
       await runtime.controller.transition(command.runId, "starting");
       await runtime.controller.transition(command.runId, "running");
+      if (command.definition.id === "agent.difficulty-estimator") {
+        await runtime.controller.complete(command.runId, {
+          difficulty: "D1",
+          summary: "bounded test task",
+          signals: ["repair loop fixture"],
+        });
+        return;
+      }
       if (command.definition.id === "agent.planner") {
         await runtime.controller.complete(command.runId, {
           summary: "plan",
@@ -56,6 +149,7 @@ test("implementation workflow performs a bounded typed repair loop", async () =>
         });
         return;
       }
+      assert.equal(command.definition.id, "agent.verifier");
       verifications += 1;
       await runtime.controller.complete(command.runId, {
         accepted: verifications > 1,
@@ -78,8 +172,11 @@ test("implementation workflow performs a bounded typed repair loop", async () =>
   assert.equal(verifications, 2);
 });
 
-test("QA workflow combines deterministic checks and independent semantic reviews", async () => {
-  const runtime = await createTestRuntime();
+test("QA workflow pins capable review routes independent of session difficulty", async () => {
+  const contexts = new Map<string, ModelResolutionContext>();
+  const runtime = await createTestRuntime(undefined, {
+    modelResolver: recordingModelResolver(contexts),
+  });
   const handle = await runtime.execution.start({
     parentId: runtime.rootRunId,
     definition: definitionRef<unknown, QAReport>(WORKFLOW_QA),
@@ -99,6 +196,14 @@ test("QA workflow combines deterministic checks and independent semantic reviews
       "agent.tester",
     ].sort(),
   );
+  assert.equal(contexts.get("agent.scout")?.difficulty, "D2");
+  assert.equal(contexts.get("agent.tester")?.difficulty, "D2");
+  assert.equal(contexts.get("agent.architect")?.difficulty, "D3");
+  assert.equal(contexts.get("agent.architect")?.capability, "reasoning-max");
+  assert.equal(contexts.get("agent.critic")?.difficulty, "D3");
+  assert.equal(contexts.get("agent.critic")?.capability, "review-max");
+  assert.equal(contexts.get("agent.qa-synthesizer")?.difficulty, "D3");
+  assert.equal(contexts.get("agent.qa-synthesizer")?.capability, "review-max");
   assert.ok(
     runtime.store.projection
       .eventsFor(handle.id)
