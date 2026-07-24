@@ -6,7 +6,6 @@ import type { RunFact } from "../domain/run/observability.ts";
 import type { RunId } from "../domain/shared.ts";
 
 const WIDGET_KEY = "phenix-live-runs";
-const MAX_TREE_LINES = 36;
 const MAX_FACT_LINES = 24;
 
 export type RunMonitorMode = "hidden" | "runs" | "facts";
@@ -115,9 +114,6 @@ export class RunMonitor {
 export function renderRuns(tree: RunTree, facts: readonly RunFact[], sequence: number): string[] {
   const lines = [`Phenix live runs · seq ${sequence}`];
   appendNode(lines, tree.root, "", true, true);
-  if (lines.length > MAX_TREE_LINES) {
-    lines.splice(MAX_TREE_LINES, lines.length - MAX_TREE_LINES, "… run tree truncated");
-  }
   if (facts.length > 0) {
     lines.push("", "Recent facts");
     for (const fact of facts.slice(-8)) lines.push(formatFact(fact));
@@ -148,13 +144,12 @@ function appendNode(
   last: boolean,
   root = false,
 ): void {
-  if (lines.length >= MAX_TREE_LINES) return;
   const branch = root ? "" : last ? "└─ " : "├─ ";
   const symbol = stateSymbol(node.run.state);
   const label = definitionLabel(String(node.run.definitionId));
   lines.push(`${prefix}${branch}${symbol} ${label} [${node.run.state}]`);
   const contentPrefix = root ? "   " : `${prefix}${last ? "   " : "│  "}`;
-  if (node.activity && lines.length < MAX_TREE_LINES) {
+  if (node.activity) {
     const target = node.activity.target ? ` · ${truncate(node.activity.target, 72)}` : "";
     const reliability = node.activity.source === "reported" ? "!" : "";
     lines.push(
