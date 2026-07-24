@@ -37,10 +37,7 @@ import { SessionProfileFacadeImpl } from "../application/session-profile-facade.
 import { TaskFacadeImpl } from "../application/task-facade.ts";
 import { WorkflowProcessManager } from "../application/workflow-process-manager.ts";
 import { agentDefinitions } from "../definitions/agents.ts";
-import {
-  ROOT_DISPATCH_DEFINITION_IDS,
-  ROOT_INTERNAL_DEFINITION_IDS,
-} from "../definitions/ids.ts";
+import { ROOT_DISPATCH_DEFINITION_IDS, ROOT_INTERNAL_DEFINITION_IDS } from "../definitions/ids.ts";
 import { registerWorkflowFunctions } from "../definitions/workflows/functions.ts";
 import { workflowDefinitions } from "../definitions/workflows/index.ts";
 import type { ConcreteModelRef } from "../domain/definition/model.ts";
@@ -139,10 +136,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     models: resolver,
     ids,
     clock: systemClock,
-    rootInvokableDefinitions: [
-      ...ROOT_DISPATCH_DEFINITION_IDS,
-      ...ROOT_INTERNAL_DEFINITION_IDS,
-    ],
+    rootInvokableDefinitions: [...ROOT_DISPATCH_DEFINITION_IDS, ...ROOT_INTERNAL_DEFINITION_IDS],
   });
   const tasks = new TaskFacadeImpl({
     store,
@@ -301,8 +295,8 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
         scope: "runtime.session.shutdown_started",
         message: "Phenix root session shutdown started",
       });
-      await attention.shutdown();
       await execution.shutdown(rootRunId);
+      await attention.shutdown();
       await workflows.shutdown();
       await agents.shutdown();
       await events.drain();
