@@ -68,10 +68,10 @@ export function registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): 
   registry.registerMapping("qa.checks.input", (context) => {
     const input = context.input as ObjectiveRequest;
     const configured = extractConfiguredChecks(input.context);
-    return configured.length > 0 ? { commands: configured } : {};
+    return configured.length > 0 ? { checks: configured } : {};
   });
   registry.registerMapping("qa.repo.input", (context) =>
-    scopedObjective(context, "repository structure, correctness, and maintainability"),
+    objectiveWithFocus(context, "repository structure, correctness, and maintainability"),
   );
   registry.registerMapping("qa.tests.input", (context) => {
     const input = context.input as ObjectiveRequest;
@@ -82,10 +82,13 @@ export function registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): 
     };
   });
   registry.registerMapping("qa.arch.input", (context) =>
-    criticObjective(context, "architecture, ownership, dependency direction, and replaceability"),
+    objectiveWithFocus(
+      context,
+      "architecture, ownership, dependency direction, and replaceability",
+    ),
   );
   registry.registerMapping("qa.security.input", (context) =>
-    criticObjective(
+    objectiveWithFocus(
       context,
       "security, trust boundaries, secrets, authentication, and unsafe behavior",
     ),
@@ -125,21 +128,14 @@ function valuesAt<T = unknown>(context: WorkflowEvaluationContext, node: string)
   return (context.results.get(node) ?? []).map((value) => outcomeValue<T>(value));
 }
 
-function scopedObjective(context: WorkflowEvaluationContext, focus: string) {
+function objectiveWithFocus(context: WorkflowEvaluationContext, focus: string) {
   const input = context.input as ObjectiveRequest;
   return { objective: input.objective, context: input.context, focus };
 }
 
-function criticObjective(context: WorkflowEvaluationContext, focus: string) {
-  const input = context.input as ObjectiveRequest;
-  return { objective: input.objective, context: input.context, focus };
-}
-
-function extractConfiguredChecks(context: unknown): readonly string[] {
+function extractConfiguredChecks(context: unknown): readonly unknown[] {
   if (typeof context !== "object" || context === null) return [];
   const checks = (context as { readonly checks?: unknown }).checks;
   if (!Array.isArray(checks)) return [];
-  return checks.filter(
-    (value): value is string => typeof value === "string" && value.trim().length > 0,
-  );
+  return checks;
 }

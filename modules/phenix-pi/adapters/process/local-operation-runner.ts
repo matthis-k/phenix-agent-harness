@@ -12,7 +12,21 @@ const execFileAsync = promisify(execFile);
 const MAX_CHECKS = 6;
 const MAX_SUMMARY = 4_000;
 
+export type DeterministicCheck =
+  | { readonly kind: "nix-flake-check" }
+  | { readonly kind: "devenv-test" }
+  | {
+      readonly kind: "package-script";
+      readonly manager: "npm" | "pnpm" | "yarn";
+      readonly script: "test" | "typecheck" | "lint" | "check";
+    }
+  | { readonly kind: "cargo-test" }
+  | { readonly kind: "cargo-clippy" }
+  | { readonly kind: "pytest" }
+  | { readonly kind: "go-test" };
+
 interface CheckInvocation {
+  readonly display: string;
   readonly executable: string;
   readonly args: readonly string[];
 }
@@ -53,12 +67,12 @@ export class ProcessLocalOperationRunner implements LocalOperationRunner {
     if (operation === "local.noop") return input;
     if (operation !== "local.qa-checks") throw new Error(`Unknown local operation: ${operation}`);
 
-    const requested = configuredCommands(input);
-    const commands = (requested.length > 0 ? requested : discoverCommands(context.cwd)).slice(
+    const requested = configuredChecks(input);
+    const checks = (requested.length > 0 ? requested : discoverChecks(context.cwd)).slice(
       0,
       MAX_CHECKS,
     );
-    if (commands.length === 0) {
+    if (checks.length === 0) {
       return [
         {
           command: "<automatic discovery>",
@@ -69,16 +83,14 @@ export class ProcessLocalOperationRunner implements LocalOperationRunner {
     }
 
     const results = [];
-    for (const command of commands) {
-      const invocation = parseApprovedCheckCommand(command);
-      results.push(await runCheck(command, invocation, context, this.execute));
+    for (const check of checks) {
+      results.push(await runCheck(compileDeterministicCheck(check), context, this.execute));
     }
     return results;
   }
 }
 
 async function runCheck(
-  command: string,
   invocation: CheckInvocation,
   context: LocalOperationContext,
   execute: CheckExecutor,
@@ -93,7 +105,7 @@ async function runCheck(
     const stdout = String(result.stdout);
     const stderr = String(result.stderr);
     return {
-      command,
+      command: invocation.display,
       ok: true,
       summary: bounded(`${stdout}${stderr ? `\n${stderr}` : ""}`.trim() || "Passed."),
     };
@@ -107,7 +119,7 @@ async function runCheck(
     const stderr = failure.stderr === undefined ? "" : String(failure.stderr);
     const output = `${stdout}${stderr ? `\n${stderr}` : ""}`.trim();
     return {
-      command,
+      command: invocation.display,
       ok: false,
       summary: bounded(
         output ||
@@ -117,16 +129,14 @@ async function runCheck(
   }
 }
 
-function discoverCommands(cwd: string): readonly string[] {
-  const commands: string[] = [];
-  if (existsSync(path.join(cwd, "flake.nix"))) {
-    commands.push("nix flake check --accept-flake-config --print-build-logs --keep-going");
-  }
+function discoverChecks(cwd: string): readonly DeterministicCheck[] {
+  const checks: DeterministicCheck[] = [];
+  if (existsSync(path.join(cwd, "flake.nix"))) checks.push({ kind: "nix-flake-check" });
   if (existsSync(path.join(cwd, "Cargo.toml"))) {
-    commands.push("cargo test --all-targets", "cargo clippy --all-targets -- -D warnings");
+    checks.push({ kind: "cargo-test" }, { kind: "cargo-clippy" });
   }
-  if (existsSync(path.join(cwd, "go.mod"))) commands.push("go test ./...");
-  if (existsSync(path.join(cwd, "pyproject.toml"))) commands.push("python -m pytest");
+  if (existsSync(path.join(cwd, "go.mod"))) checks.push({ kind: "go-test" });
+  if (existsSync(path.join(cwd, "pyproject.toml"))) checks.push({ kind: "pytest" });
 
   const packageJson = path.join(cwd, "package.json");
   if (existsSync(packageJson)) {
@@ -134,94 +144,96 @@ function discoverCommands(cwd: string): readonly string[] {
       const parsed = JSON.parse(readFileSync(packageJson, "utf8")) as {
         readonly scripts?: Readonly<Record<string, string>>;
       };
-      if (parsed.scripts?.test) commands.push("npm test --if-present");
-      if (parsed.scripts?.typecheck) commands.push("npm run typecheck --if-present");
-      if (parsed.scripts?.lint) commands.push("npm run lint --if-present");
+      for (const script of ["test", "typecheck", "lint", "check"] as const) {
+        if (parsed.scripts?.[script]) {
+          checks.push({ kind: "package-script", manager: "npm", script });
+        }
+      }
     } catch {
-      commands.push("npm test --if-present");
+      checks.push({ kind: "package-script", manager: "npm", script: "test" });
     }
   }
-  return commands;
+  return checks;
 }
 
-function configuredCommands(input: unknown): readonly string[] {
+function configuredChecks(input: unknown): readonly DeterministicCheck[] {
   if (typeof input !== "object" || input === null) return [];
-  const commands = (input as { readonly commands?: unknown }).commands;
-  if (!Array.isArray(commands)) return [];
-  return commands.filter(
-    (value): value is string => typeof value === "string" && value.trim().length > 0,
-  );
+  const record = input as { readonly checks?: unknown; readonly commands?: unknown };
+  if (record.commands !== undefined) {
+    throw new Error("Configured QA checks must use structured check objects, not command strings");
+  }
+  if (record.checks === undefined) return [];
+  if (!Array.isArray(record.checks)) throw new Error("Configured QA checks must be an array");
+  return record.checks.map(parseDeterministicCheck);
 }
 
-export function parseApprovedCheckCommand(command: string): CheckInvocation {
-  assertSafeCheckCommand(command);
-  const tokens = tokenizeCommand(command);
-  const [executable, ...args] = tokens;
-  if (!executable) throw new Error(`Deterministic QA command is empty`);
-  return { executable, args };
+export function parseDeterministicCheck(value: unknown): DeterministicCheck {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Deterministic QA check must be an object");
+  }
+  const record = value as Readonly<Record<string, unknown>>;
+  switch (record.kind) {
+    case "nix-flake-check":
+    case "devenv-test":
+    case "cargo-test":
+    case "cargo-clippy":
+    case "pytest":
+    case "go-test":
+      return { kind: record.kind };
+    case "package-script": {
+      if (!["npm", "pnpm", "yarn"].includes(String(record.manager))) {
+        throw new Error("Package-script check has an unsupported package manager");
+      }
+      if (!["test", "typecheck", "lint", "check"].includes(String(record.script))) {
+        throw new Error("Package-script check has an unsupported script");
+      }
+      return {
+        kind: "package-script",
+        manager: record.manager as "npm" | "pnpm" | "yarn",
+        script: record.script as "test" | "typecheck" | "lint" | "check",
+      };
+    }
+    default:
+      throw new Error(`Unknown deterministic QA check kind: ${String(record.kind)}`);
+  }
 }
 
-function assertSafeCheckCommand(command: string): void {
-  if (/[\n\r;&|`]|\$\(/.test(command)) {
-    throw new Error(`Deterministic QA commands may not contain shell composition: ${command}`);
+export function compileDeterministicCheck(check: DeterministicCheck): CheckInvocation {
+  switch (check.kind) {
+    case "nix-flake-check":
+      return {
+        display: "nix flake check --accept-flake-config --print-build-logs --keep-going",
+        executable: "nix",
+        args: ["flake", "check", "--accept-flake-config", "--print-build-logs", "--keep-going"],
+      };
+    case "devenv-test":
+      return { display: "devenv test", executable: "devenv", args: ["test"] };
+    case "package-script": {
+      const args =
+        check.script === "test" ? ["test", "--if-present"] : ["run", check.script, "--if-present"];
+      return {
+        display: `${check.manager} ${args.join(" ")}`,
+        executable: check.manager,
+        args,
+      };
+    }
+    case "cargo-test":
+      return {
+        display: "cargo test --all-targets",
+        executable: "cargo",
+        args: ["test", "--all-targets"],
+      };
+    case "cargo-clippy":
+      return {
+        display: "cargo clippy --all-targets -- -D warnings",
+        executable: "cargo",
+        args: ["clippy", "--all-targets", "--", "-D", "warnings"],
+      };
+    case "pytest":
+      return { display: "python -m pytest", executable: "python", args: ["-m", "pytest"] };
+    case "go-test":
+      return { display: "go test ./...", executable: "go", args: ["test", "./..."] };
   }
-  const allowed = [
-    /^nix flake check(?:\s|$)/,
-    /^devenv test(?:\s|$)/,
-    /^npm (?:test|run (?:test|typecheck|lint|check))(?:\s|$)/,
-    /^pnpm (?:test|run (?:test|typecheck|lint|check))(?:\s|$)/,
-    /^yarn (?:test|run (?:test|typecheck|lint|check))(?:\s|$)/,
-    /^cargo (?:test|clippy)(?:\s|$)/,
-    /^(?:python -m )?pytest(?:\s|$)/,
-    /^go test(?:\s|$)/,
-  ];
-  if (!allowed.some((pattern) => pattern.test(command.trim()))) {
-    throw new Error(`Command is not an approved deterministic QA check: ${command}`);
-  }
-}
-
-function tokenizeCommand(command: string): string[] {
-  const tokens: string[] = [];
-  let token = "";
-  let quote: "'" | '"' | undefined;
-  let escaped = false;
-
-  const flush = () => {
-    if (token.length === 0) return;
-    tokens.push(token);
-    token = "";
-  };
-
-  for (const character of command.trim()) {
-    if (escaped) {
-      token += character;
-      escaped = false;
-      continue;
-    }
-    if (character === "\\") {
-      escaped = true;
-      continue;
-    }
-    if (quote) {
-      if (character === quote) quote = undefined;
-      else token += character;
-      continue;
-    }
-    if (character === "'" || character === '"') {
-      quote = character;
-      continue;
-    }
-    if (/\s/.test(character)) {
-      flush();
-      continue;
-    }
-    token += character;
-  }
-
-  if (escaped) throw new Error(`Deterministic QA command has a trailing escape: ${command}`);
-  if (quote) throw new Error(`Deterministic QA command has an unterminated quote: ${command}`);
-  flush();
-  return tokens;
 }
 
 function bounded(value: string): string {

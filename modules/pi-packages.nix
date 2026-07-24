@@ -134,7 +134,6 @@
       packages = {
         pi-coding-agent = piCodingAgent;
         phenix-pi-package = phenixPiPackage;
-        phenix-shell = phenixPiPackage;
         phenix-pi-npm-packages = piNpmPackages;
         phenix-runtime-tests = phenixRuntimeTests;
         phenix-typecheck = phenixTypecheck;

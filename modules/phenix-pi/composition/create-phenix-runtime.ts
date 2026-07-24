@@ -77,7 +77,14 @@ export interface PhenixRuntime {
 
 export async function createPhenixRuntime(host: PhenixHostServices): Promise<PhenixRuntime> {
   const ids = host.ids ?? new CryptoIdGenerator();
-  const events = new OrderedDomainEventBus();
+  const events = new OrderedDomainEventBus({
+    onSubscriberError: ({ event, error }) => {
+      console.error(
+        `[phenix] domain event subscriber failed for ${event.type}:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    },
+  });
   const ledger =
     host.ledger ?? new JsonlRunLedger(host.stateDir ?? path.join(host.cwd, ".phenix-agent-state"));
   const store = new ExecutionStore({ ledger, events, clock: systemClock, ids });

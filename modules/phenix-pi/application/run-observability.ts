@@ -204,12 +204,25 @@ function relativePath(cwd: string, value: string | undefined): string | undefine
 
 function safeCommand(value: string | undefined): string | undefined {
   if (!value) return undefined;
-  const redacted = value
+  const shellBodyRedacted = value.replace(
+    /\b(?:ba|z|fi)?sh\s+-c\s+([\s\S]*)$/i,
+    (match) => `${match.slice(0, match.indexOf("-c") + 2)} <command omitted>`,
+  );
+  const redacted = shellBodyRedacted
+    .replace(/\b([A-Za-z_][A-Za-z0-9_]*)=([^\s]+)/g, "$1=<redacted>")
     .replace(
-      /\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY)[A-Z0-9_]*)=([^\s]+)/gi,
-      "$1=<redacted>",
+      /(\s|^)(--?(?:api[-_]?key|access[-_]?key|client[-_]?secret|credential|password|passwd|private[-_]?key|secret|token))(?:=|\s+)([^\s]+)/gi,
+      "$1$2=<redacted>",
     )
-    .replace(/([?&](?:token|key|secret|password)=)[^&\s]+/gi, "$1<redacted>");
+    .replace(
+      /((?:-H|--header)\s+["']?(?:authorization|cookie|x-api-key)\s*:\s*)[^"'\s]+/gi,
+      "$1<redacted>",
+    )
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/gi, "$1<redacted>@")
+    .replace(
+      /([?&](?:access_key|api_key|client_secret|credential|key|password|secret|signature|token)=)[^&\s]+/gi,
+      "$1<redacted>",
+    );
   return compact(redacted.replace(/\s+/g, " "), 120);
 }
 

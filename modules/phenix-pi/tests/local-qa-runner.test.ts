@@ -5,8 +5,8 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  compileDeterministicCheck,
   ProcessLocalOperationRunner,
-  parseApprovedCheckCommand,
 } from "../adapters/process/local-operation-runner.ts";
 
 test("QA runner reports repositories without a discoverable deterministic check", async () => {
@@ -29,7 +29,7 @@ test("QA runner reports repositories without a discoverable deterministic check"
   }
 });
 
-test("QA runner executes approved checks directly without a shell", async () => {
+test("QA runner executes structured checks directly without a shell", async () => {
   const calls: Array<{ executable: string; args: readonly string[] }> = [];
   const runner = new ProcessLocalOperationRunner(async (executable, args) => {
     calls.push({ executable, args });
@@ -38,9 +38,7 @@ test("QA runner executes approved checks directly without a shell", async () => 
 
   const result = (await runner.run(
     "local.qa-checks",
-    {
-      commands: ["nix flake check --accept-flake-config --print-build-logs --keep-going"],
-    },
+    { checks: [{ kind: "nix-flake-check" }] },
     {
       cwd: process.cwd(),
       signal: new AbortController().signal,
@@ -57,14 +55,22 @@ test("QA runner executes approved checks directly without a shell", async () => 
   assert.equal(result[0]?.summary, "check passed");
 });
 
-test("approved QA command parsing preserves quoted arguments without shell evaluation", () => {
-  assert.deepEqual(parseApprovedCheckCommand('nix flake check ".#package check"'), {
-    executable: "nix",
-    args: ["flake", "check", ".#package check"],
-  });
+test("deterministic checks compile to fixed executable and argv pairs", () => {
+  assert.deepEqual(
+    compileDeterministicCheck({
+      kind: "package-script",
+      manager: "pnpm",
+      script: "typecheck",
+    }),
+    {
+      display: "pnpm run typecheck --if-present",
+      executable: "pnpm",
+      args: ["run", "typecheck", "--if-present"],
+    },
+  );
 });
 
-test("QA runner rejects generic shell composition and unapproved commands", async () => {
+test("QA runner rejects command strings and unknown check kinds", async () => {
   const runner = new ProcessLocalOperationRunner();
   const context = {
     cwd: process.cwd(),
@@ -72,11 +78,11 @@ test("QA runner rejects generic shell composition and unapproved commands", asyn
   };
   await assert.rejects(
     runner.run("local.qa-checks", { commands: ["npm test; rm -rf ."] }, context),
-    /may not contain shell composition/,
+    /structured check objects/,
   );
   await assert.rejects(
-    runner.run("local.qa-checks", { commands: ["echo looks-safe"] }, context),
-    /not an approved deterministic QA check/,
+    runner.run("local.qa-checks", { checks: [{ kind: "shell-command" }] }, context),
+    /Unknown deterministic QA check kind/,
   );
 });
 

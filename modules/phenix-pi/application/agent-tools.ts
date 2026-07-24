@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 
 import { type AnyDefinition, definitionRef } from "../domain/definition/definition.ts";
-import { defineSchema } from "../domain/definition/schema.ts";
+import { defineSchema, type Schema } from "../domain/definition/schema.ts";
 import { definitionId, localTaskId, type RunId, runId, type TaskId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import type { DispatchService } from "./dispatch-service.ts";
@@ -288,7 +288,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
   }
 }
 
-function requireValid<T>(schema: ReturnType<typeof defineSchema<T>>, value: unknown): T {
+function requireValid<T>(schema: Schema<T>, value: unknown): T {
   const validation = schema.validate(value);
   if (!validation.ok) {
     throw new Error(validation.issues.map((issue) => `${issue.path} ${issue.message}`).join("; "));

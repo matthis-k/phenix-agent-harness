@@ -69,14 +69,12 @@ test("rejects a selector decision outside the offered catalog candidates", () =>
   );
 });
 
-test("dispatcher prompt prefers a specific workflow over the generic coordinator", () => {
+test("dispatcher keeps candidate data out of the system prompt", () => {
   const candidates = selectDispatchCandidates(available) as readonly DispatchCandidate[];
-  const prompt = dispatcherDefinition.prompt.render({
-    objective: "Do a full QA pass",
-    candidates,
-  });
+  const prompt = dispatcherDefinition.prompt.render();
   assert.match(prompt, /Prefer the most specific workflow/);
   assert.match(prompt, /Do not choose the generic coordinator merely because it is flexible/);
-  assert.match(prompt, /workflow\.qa/);
-  assert.match(prompt, /Run deterministic checks and independent repository reviews/);
+  assert.doesNotMatch(prompt, /workflow\.qa/);
+  assert.doesNotMatch(prompt, /Run deterministic checks and independent repository reviews/);
+  assert.ok(candidates.some((candidate) => candidate.definitionId === WORKFLOW_QA));
 });

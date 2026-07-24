@@ -28,3 +28,23 @@ test("root may invoke dispatch targets but not the general-purpose escape hatch"
   });
   assert.equal((await qa.result()).status, "success");
 });
+
+test("rejected root invocations have no durable side effects", async () => {
+  const runtime = await createTestRuntime(undefined, {
+    rootInvokableDefinitions: ROOT_DISPATCH_DEFINITION_IDS,
+  });
+  const before = runtime.store.sequence(runtime.rootRunId);
+
+  await assert.rejects(
+    runtime.execution.start({
+      parentId: runtime.rootRunId,
+      definition: definitionRef(AGENT_BASE),
+      input: { objective: "attempt unauthorized execution" },
+      wait: "background",
+    }),
+    /cannot invoke agent\.base/,
+  );
+
+  assert.equal(runtime.store.sequence(runtime.rootRunId), before);
+  assert.equal(runtime.store.projection.childrenOf(runtime.rootRunId).length, 0);
+});

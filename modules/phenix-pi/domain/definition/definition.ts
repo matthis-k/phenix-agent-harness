@@ -47,15 +47,15 @@ export interface AgentLimits {
   readonly maxRepairAttempts: number;
 }
 
-export interface PromptTemplate<I> {
-  render(input: I): string;
+export interface PromptTemplate {
+  render(): string;
 }
 
 export interface AgentDefinition<I, O> extends Definition<I, O> {
   readonly kind: "agent";
   readonly model: ModelSelector;
   readonly thinking: ThinkingPolicy;
-  readonly prompt: PromptTemplate<I>;
+  readonly prompt: PromptTemplate;
   readonly tools: ToolPolicy;
   readonly context: ContextPolicy;
   readonly childCapabilities: CapabilitySet;
