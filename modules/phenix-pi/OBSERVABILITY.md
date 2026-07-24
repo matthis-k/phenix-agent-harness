@@ -8,7 +8,12 @@ Phenix exposes live execution telemetry without routing it through another model
 - `/phenix facts` shows the merged chronological fact history for the full session tree.
 - Append `off` to hide the active widget.
 - Append `--once` for a static text snapshot.
-- Append `--json` for the structured projection.
+- Append `--json` for the complete structured fact projection.
+- `/phenix facts --clipboard` pipes the complete text history to `wl-copy`.
+- `/phenix facts --clipboard <command>` pipes it to another shell command, such as `xclip -selection clipboard`.
+- `/phenix facts --file <file>` writes the complete text history to a file relative to the current working directory, unless an absolute path is supplied.
+
+Clipboard and file exports use the same complete plain-text history. Export operations report their fact count and destination, and failures are surfaced without modifying the live view.
 
 The views update from the runtime domain-event stream. They do not poll child sessions or invoke a model.
 

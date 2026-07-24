@@ -4,6 +4,7 @@ import test from "node:test";
 import { formatIntegrationReport, summarizeIntegrations } from "../adapters/pi-sdk/integrations.ts";
 import {
   completePhenixSubcommands,
+  PHENIX_FACTS_USAGE,
   PHENIX_SUBCOMMANDS,
   PHENIX_USAGE,
 } from "../extension/phenix-command.ts";
@@ -19,6 +20,10 @@ test("phenix command completion lists and filters subcommands", () => {
   assert.equal(completePhenixSubcommands("unknown"), null);
   assert.equal(completePhenixSubcommands("status extra"), null);
   assert.equal(PHENIX_USAGE, "/phenix status|runs|facts|tasks|catalog|integrations");
+  assert.equal(
+    PHENIX_FACTS_USAGE,
+    "/phenix facts [off|--once|--json|--clipboard [command]|--file <file>]",
+  );
 });
 
 test("integration reports are compact in status and detailed on demand", () => {
