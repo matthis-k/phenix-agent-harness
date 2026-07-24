@@ -90,6 +90,7 @@ export const dispatcherDefinition = requireAgent("agent.dispatcher");
 export const coordinatorDefinition = requireAgent("agent.coordinator");
 export const baseDefinition = requireAgent("agent.base");
 export const qaSynthesizerDefinition = requireAgent("agent.qa-synthesizer");
+export const attentionRouterDefinition = requireAgent("agent.attention-router");
 
 export const implementationWorkflow = requireWorkflow("workflow.implement");
 export const qaWorkflow = requireWorkflow("workflow.qa");
