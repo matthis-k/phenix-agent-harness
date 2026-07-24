@@ -30,8 +30,7 @@ export class CatalogFacadeImpl implements CatalogFacade {
     return this.catalog
       .list()
       .filter(
-        (definition) =>
-          allowed.has(definition.id) && !this.hiddenDefinitions.has(definition.id),
+        (definition) => allowed.has(definition.id) && !this.hiddenDefinitions.has(definition.id),
       )
       .map((definition) => ({
         id: definition.id,
