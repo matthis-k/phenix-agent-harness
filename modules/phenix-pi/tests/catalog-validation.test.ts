@@ -14,10 +14,9 @@ const localOperations = {
 };
 
 const definitionsById = new Map(
-  [...agentDefinitions, ...workflowDefinitions].map((definition) => [
-    String(definition.id),
-    definition,
-  ] as const),
+  [...agentDefinitions, ...workflowDefinitions].map(
+    (definition) => [String(definition.id), definition] as const,
+  ),
 );
 
 function reachesCommandAuthority(id: string, visited = new Set<string>()): boolean {
@@ -38,8 +37,7 @@ function reachesCommandAuthority(id: string, visited = new Set<string>()): boole
   return definition.graph.nodes.some((node) => {
     if (node.kind === "local") return node.operation === "local.qa-checks";
     return (
-      node.kind === "invoke" &&
-      reachesCommandAuthority(String(node.definition.id), nextVisited)
+      node.kind === "invoke" && reachesCommandAuthority(String(node.definition.id), nextVisited)
     );
   });
 }
