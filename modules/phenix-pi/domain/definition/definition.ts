@@ -81,6 +81,7 @@ export interface InvokeNode {
   readonly definition: DefinitionRef<unknown, unknown>;
   readonly input: ValueMappingRef;
   readonly wait: "await" | "background";
+  /** Fixed route for this invocation. Omit to inherit the parent run difficulty. */
   readonly difficulty?: Difficulty;
   readonly capabilityOverride?: Partial<CapabilitySet>;
 }
@@ -128,7 +129,6 @@ export interface WorkflowEdge {
   readonly from: string;
   readonly to: string;
   readonly when?: PureConditionRef;
-  readonly difficulties?: readonly Difficulty[];
   readonly maxTraversals?: number;
 }
 
@@ -142,7 +142,6 @@ export interface WorkflowGraph<I = unknown, O = unknown> {
 
 export interface WorkflowDefinition<I, O> extends Definition<I, O> {
   readonly kind: "workflow";
-  readonly difficultySource?: string;
   readonly graph: WorkflowGraph<I, O>;
   readonly limits: {
     readonly timeoutMs: number;
