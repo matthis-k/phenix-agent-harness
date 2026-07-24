@@ -14,6 +14,7 @@ const MAX_SUMMARY = 4_000;
 
 export type DeterministicCheck =
   | { readonly kind: "nix-flake-check" }
+  | { readonly kind: "devenv-maintenance-fix" }
   | { readonly kind: "devenv-test" }
   | {
       readonly kind: "package-script";
@@ -131,6 +132,11 @@ async function runCheck(
 
 function discoverChecks(cwd: string): readonly DeterministicCheck[] {
   const checks: DeterministicCheck[] = [];
+  const hasDevenv =
+    existsSync(path.join(cwd, "devenv.nix")) || existsSync(path.join(cwd, "devenv.yaml"));
+  if (hasDevenv) {
+    checks.push({ kind: "devenv-maintenance-fix" }, { kind: "devenv-test" });
+  }
   if (existsSync(path.join(cwd, "flake.nix"))) checks.push({ kind: "nix-flake-check" });
   if (existsSync(path.join(cwd, "Cargo.toml"))) {
     checks.push({ kind: "cargo-test" }, { kind: "cargo-clippy" });
@@ -174,6 +180,7 @@ export function parseDeterministicCheck(value: unknown): DeterministicCheck {
   const record = value as Readonly<Record<string, unknown>>;
   switch (record.kind) {
     case "nix-flake-check":
+    case "devenv-maintenance-fix":
     case "devenv-test":
     case "cargo-test":
     case "cargo-clippy":
@@ -205,6 +212,12 @@ export function compileDeterministicCheck(check: DeterministicCheck): CheckInvoc
         display: "nix flake check --accept-flake-config --print-build-logs --keep-going",
         executable: "nix",
         args: ["flake", "check", "--accept-flake-config", "--print-build-logs", "--keep-going"],
+      };
+    case "devenv-maintenance-fix":
+      return {
+        display: "devenv tasks run maintenance:fix",
+        executable: "devenv",
+        args: ["tasks", "run", "maintenance:fix"],
       };
     case "devenv-test":
       return { display: "devenv test", executable: "devenv", args: ["test"] };

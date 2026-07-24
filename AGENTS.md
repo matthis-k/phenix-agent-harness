@@ -77,9 +77,12 @@ The domain and application layers must not import Pi packages or concrete adapte
 ## Local operations and shell authority
 
 - `local.qa-checks` accepts only structured deterministic check specifications.
+- For devenv repositories, automatic QA discovery runs `devenv tasks run maintenance:fix`, `devenv test`, and then the remaining discovered checks in fixed argv form.
 - The process adapter compiles each specification to a fixed executable and argument vector.
-- Do not reintroduce arbitrary command strings, regex shell allowlists, or implicit shell execution.
-- Arbitrary shell work belongs only to an agent explicitly compiled with the `bash` tool.
+- Do not reintroduce arbitrary command strings, regex shell allowlists, or implicit shell execution into local workflow operations.
+- Arbitrary shell work belongs only to an agent explicitly compiled with `bash`.
+- `nix_shell` is a second arbitrary-command tool for those same operational roles. It provides requested packages through an ephemeral `nix shell`; it must never install into a profile or the host system.
+- The QA test analyst may run targeted read-only commands to close explicit coverage gaps. Repository, architecture, and synthesis branches remain non-executing unless their own definition explicitly grants command authority.
 - Local slash commands are operator actions, but should still avoid accidental implicit shell interpretation.
 
 ## Observability and presentation

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -55,6 +55,32 @@ test("QA runner executes structured checks directly without a shell", async () =
   assert.equal(result[0]?.summary, "check passed");
 });
 
+test("QA runner discovers the repository devenv verification gate in order", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "phenix-qa-devenv-"));
+  const calls: Array<{ executable: string; args: readonly string[] }> = [];
+  try {
+    await writeFile(path.join(cwd, "devenv.nix"), "{}\n", "utf8");
+    await writeFile(path.join(cwd, "flake.nix"), "{}\n", "utf8");
+    const runner = new ProcessLocalOperationRunner(async (executable, args) => {
+      calls.push({ executable, args });
+      return { stdout: "passed", stderr: "" };
+    });
+
+    await runner.run("local.qa-checks", {}, { cwd, signal: new AbortController().signal });
+
+    assert.deepEqual(calls.slice(0, 3), [
+      { executable: "devenv", args: ["tasks", "run", "maintenance:fix"] },
+      { executable: "devenv", args: ["test"] },
+      {
+        executable: "nix",
+        args: ["flake", "check", "--accept-flake-config", "--print-build-logs", "--keep-going"],
+      },
+    ]);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
 test("deterministic checks compile to fixed executable and argv pairs", () => {
   assert.deepEqual(
     compileDeterministicCheck({
@@ -68,6 +94,11 @@ test("deterministic checks compile to fixed executable and argv pairs", () => {
       args: ["run", "typecheck", "--if-present"],
     },
   );
+  assert.deepEqual(compileDeterministicCheck({ kind: "devenv-maintenance-fix" }), {
+    display: "devenv tasks run maintenance:fix",
+    executable: "devenv",
+    args: ["tasks", "run", "maintenance:fix"],
+  });
 });
 
 test("QA runner rejects command strings and unknown check kinds", async () => {
