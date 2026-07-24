@@ -97,7 +97,7 @@
         ln -s "$piRoot" "$out/node_modules/@earendil-works/pi-coding-agent"
         ln -s "$piRoot/node_modules/@types/node" "$out/node_modules/@types/node"
         ln -s "$piRoot/node_modules/undici-types" "$out/node_modules/undici-types"
-        for package in pi-agent-core pi-ai; do
+        for package in pi-agent-core pi-ai pi-tui; do
           source="$piRoot/node_modules/@earendil-works/$package"
           test -e "$source"
           rm -rf "$out/node_modules/@earendil-works/$package"
