@@ -28,7 +28,7 @@ import { KeyedSerialExecutor } from "./keyed-serial-executor.ts";
 const MAX_MESSAGE_LENGTH = 4_000;
 const MAX_ROUTING_CANDIDATES = 32;
 const MAX_TARGETS = 8;
-const MUTATION_TOOLS = new Set(["edit", "write", "bash"]);
+const MUTATION_TOOLS = new Set(["edit", "write", "bash", "nix_shell"]);
 
 export interface AttentionRouterResult {
   readonly decision: AttentionRoutingDecision;
@@ -114,35 +114,7 @@ export class AttentionProcessManager implements AttentionFacade {
   }
 
   async recover(rootRunId: RunId): Promise<void> {
-    const envelopes = new Map<AttentionId, AttentionEnvelope>();
-    const deferred = new Map<string, PendingDelivery>();
-    const events = this.store.projection.events.filter((event) => event.rootRunId === rootRunId);
-
-    for (const event of events) {
-      if (event.type === "attention.received") {
-        const envelope = (event.data as { readonly envelope: AttentionEnvelope }).envelope;
-        envelopes.set(envelope.id, envelope);
-        continue;
-      }
-      if (event.type === "attention.delivery.deferred") {
-        const data = event.data as AttentionDeliveryDeferredData;
-        const envelope = envelopes.get(data.attentionId);
-        if (!envelope) continue;
-        deferred.set(deliveryKey(data.attentionId, data.target.runId), {
-          attentionId: data.attentionId,
-          rootRunId,
-          message: envelope.message,
-          target: data.target,
-        });
-        continue;
-      }
-      if (event.type === "attention.delivered" || event.type === "attention.delivery.failed") {
-        const data = event.data as AttentionDeliveredData | AttentionDeliveryFailedData;
-        deferred.delete(deliveryKey(data.attentionId, data.target.runId));
-      }
-    }
-
-    for (const pending of deferred.values()) {
+    for (const pending of this.store.attention.pendingDeliveries(rootRunId)) {
       const run = this.store.projection.runs.get(pending.target.runId);
       if (!run || isTerminalRunState(run.state) || run.state === "completing") continue;
       this.enqueue(pending);
@@ -531,10 +503,6 @@ function formatRoutingNotice(
       (target) => `${target.runId} (${target.delivery}, ${status.get(target.runId) ?? "unknown"})`,
     )
     .join(", ")}.`;
-}
-
-function deliveryKey(attentionId: AttentionId, runId: RunId): string {
-  return `${attentionId}\u0000${runId}`;
 }
 
 function isTerminalEvent(type: string): boolean {
