@@ -91,11 +91,14 @@ export function summarizeRetryStart(
 ): string {
   const originalTools = new Set(original?.compiled.tools ?? []);
   const addedTools = retry.compiled.tools.filter((tool) => !originalTools.has(tool));
-  const retryLimits = retry.compiled.limits as Readonly<Record<string, unknown>>;
-  const originalLimits = original?.compiled.limits as Readonly<Record<string, unknown>> | undefined;
+  const retryLimits = retry.compiled.limits;
+  const originalLimits = original?.compiled.limits;
   const changedLimits = originalLimits
     ? Object.fromEntries(
-        [...new Set([...Object.keys(originalLimits), ...Object.keys(retryLimits)])]
+        [
+          ...new Set([...Object.keys(originalLimits), ...Object.keys(retryLimits)]),
+        ]
+          .map((key) => key as keyof typeof retryLimits)
           .filter((key) => retryLimits[key] !== originalLimits[key])
           .map((key) => [key, retryLimits[key] ?? null]),
       )
