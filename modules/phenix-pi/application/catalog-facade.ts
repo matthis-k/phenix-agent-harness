@@ -1,6 +1,6 @@
+import { ROOT_INTERNAL_DEFINITION_IDS } from "../definitions/ids.ts";
 import type { Definition, DefinitionRef } from "../domain/definition/definition.ts";
 import type { DefinitionId, RunId } from "../domain/shared.ts";
-import { ROOT_INTERNAL_DEFINITION_IDS } from "../definitions/ids.ts";
 import type { DefinitionCatalog } from "./catalog.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import type { CatalogFacade, DefinitionSummary } from "./interfaces.ts";
