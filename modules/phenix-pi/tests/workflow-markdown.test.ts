@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import type { Schema } from "../domain/definition/schema.ts";
 import {
   compileWorkflowMarkdown,
   parseWorkflowMarkdown,
   type WorkflowMarkdownBindings,
-} from "../domain/workflow/markdown.ts";
+} from "../adapters/workflow/markdown.ts";
+import type { Schema } from "../domain/definition/schema.ts";
 import {
   FinalReportSchema,
   ImplementationRequestSchema,
