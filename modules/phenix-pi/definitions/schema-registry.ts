@@ -1,4 +1,5 @@
 import type { Schema } from "../domain/definition/schema.ts";
+import { AttentionRoutingDecisionSchema, AttentionRoutingRequestSchema } from "./attention.ts";
 import { DispatchDecisionSchema, DispatchSelectionRequestSchema } from "./dispatch.ts";
 import {
   BaseResultSchema,
@@ -43,6 +44,8 @@ export const definitionSchemas = [
   FinalReportSchema,
   DispatchSelectionRequestSchema,
   DispatchDecisionSchema,
+  AttentionRoutingRequestSchema,
+  AttentionRoutingDecisionSchema,
   QAChecksRequestSchema,
   CheckResultsSchema,
 ] as const;
