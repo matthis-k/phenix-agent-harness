@@ -20,6 +20,7 @@ import {
 
 const WIDGET_KEY = "phenix-live-status";
 const MAX_FACT_LINES = 24;
+const DASHBOARD_FACT_LINES = 3;
 const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]);
 const STATE_SYMBOLS: Readonly<Record<string, string>> = {
   completed: "✓",
@@ -48,6 +49,7 @@ export interface RunMonitorOptions {
 
 interface DashboardData {
   readonly tree: RunTree;
+  readonly facts: readonly RunFact[];
   readonly sequence: number;
   readonly profile: SessionProfile;
   readonly diagnostics: DiagnosticSummary;
@@ -152,6 +154,7 @@ export class RunMonitor {
         sequence: data.sequence,
         profile: data.profile,
         tree: data.tree,
+        facts: selectRecentFacts(data.facts),
         diagnostics: data.diagnostics,
         storage: {
           ledger: this.runtime.ledgerPath(this.rootRunId) ?? "in-memory",
@@ -190,13 +193,15 @@ export class RunMonitor {
   }
 
   private async dashboardData(): Promise<DashboardData> {
-    const [tree, profile, diagnostics] = await Promise.all([
+    const [tree, facts, profile, diagnostics] = await Promise.all([
       this.runtime.queries.runTree(this.rootRunId),
+      this.runtime.queries.facts(this.rootRunId, MAX_FACT_LINES),
       this.runtime.profiles.current(this.rootRunId),
       this.runtime.diagnostics.summary(this.rootRunId),
     ]);
     return {
       tree,
+      facts,
       sequence: this.runtime.sequence(this.rootRunId),
       profile,
       diagnostics,
@@ -232,6 +237,15 @@ export function renderDashboard(data: DashboardData, theme?: ObservabilityTheme)
       );
     });
   }
+
+  const recentFacts = selectRecentFacts(data.facts);
+  if (recentFacts.length > 0) {
+    lines.push("", heading(theme, "Recent facts"));
+    for (const factItem of recentFacts) {
+      lines.push(`  ${formatFact(factItem, true, theme)}`);
+    }
+  }
+
   lines.push(
     "",
     color(
@@ -378,6 +392,19 @@ function formatFact(factItem: RunFact, compact = true, theme?: ObservabilityThem
     summary,
     summary,
   )}${subject}`;
+}
+
+function selectRecentFacts(facts: readonly RunFact[]): readonly RunFact[] {
+  const selected: RunFact[] = [];
+  const seen = new Set<string>();
+  for (const item of [...facts].reverse()) {
+    const key = `${item.kind}\u0000${normalize(item.summary)}\u0000${normalize(item.subject ?? "")}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    selected.push(item);
+    if (selected.length >= DASHBOARD_FACT_LINES) break;
+  }
+  return selected.reverse();
 }
 
 function countNodes(node: RunTreeNode, predicate: (node: RunTreeNode) => boolean): number {
