@@ -35,7 +35,10 @@ export function projectOutcome(
   return { status: "cancelled", reason: outcome.reason, hasOutcome: true };
 }
 
-export function projectRunSnapshot(snapshot: RunSnapshot, view: RunResultView = "summary"): unknown {
+export function projectRunSnapshot(
+  snapshot: RunSnapshot,
+  view: RunResultView = "summary",
+): unknown {
   if (view === "full") return snapshot;
   if (view === "outcome") {
     return snapshot.outcome ?? { runId: snapshot.id, status: snapshot.state, hasOutcome: false };
@@ -93,7 +96,10 @@ export function projectDispatchResult(result: {
   };
 }
 
-export function projectedToolResult(projected: unknown, source: unknown = projected): {
+export function projectedToolResult(
+  projected: unknown,
+  source: unknown = projected,
+): {
   readonly text: string;
   readonly details: unknown;
 } {
