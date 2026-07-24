@@ -7,11 +7,12 @@ Phenix exposes deterministic execution telemetry without routing it through anot
 - `/phenix status` opens the live session dashboard.
 - `/phenix status off` hides the active widget.
 - `/phenix status --once` renders one static dashboard snapshot.
-- `/phenix status --json` renders the complete structured dashboard projection.
-- `/phenix status --expanded` keeps completed workflows expanded.
-- `/phenix runs` is a compatibility alias for `/phenix status`.
+- `/phenix status --json` renders the complete structured status projection, including durable storage locations.
+- `/phenix status --expanded` expands completed execution subtrees for inspection.
 
-The dashboard shows the session profile, integration health, active descendant count, diagnostic severity totals, the complete active run tree, five recent deduplicated facts, and durable storage paths. Each agent subsession displays its own resolved concrete provider/model and effective thinking level. Active, waiting, and failed workflow branches remain expanded. Completed workflows collapse to a terminal summary by default.
+The default dashboard is a compact execution overview. Its header combines the root profile, model set, difficulty, active descendant count, diagnostic health, and integration health. The synthetic root run is omitted. Every visible agent or workflow occupies one row containing its semantic role, state, dimmed concrete provider/model and thinking level, and current activity when the run is active. Completed subtrees collapse automatically and summarize how many descendants completed or ended exceptionally. Waiting, active, and failed branches remain expanded.
+
+Fact history and storage listings are intentionally not embedded in the text dashboard. Facts have their own command, while complete storage metadata remains available through `/phenix status --json` and diagnostic export commands.
 
 ## Fact history
 
@@ -50,12 +51,7 @@ The live views and status surfaces use theme-aware semantic colors:
 - successful or completed: success
 - failed: error
 - cancelled: muted/error distinction
-- concrete model: accent
-- minimal/off thinking: muted
-- low thinking: success
-- medium thinking: accent
-- high thinking: warning
-- xhigh/max thinking: error accent
+- concrete model and thinking metadata: muted in the compact status tree
 - agent-reported facts: warning
 - deterministically derived facts: secondary
 - IDs, timestamps, paths, and tree guides: muted
