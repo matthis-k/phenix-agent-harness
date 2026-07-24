@@ -1,160 +1,35 @@
-import { definitionRef, type WorkflowDefinition } from "../../domain/definition/definition.ts";
-import {
-  AGENT_ARCHITECT,
-  AGENT_CRITIC,
-  AGENT_IMPLEMENTER,
-  AGENT_PLANNER,
-  AGENT_QA_SYNTHESIZER,
-  AGENT_SCOUT,
-  AGENT_TESTER,
-  AGENT_VERIFIER,
-  WORKFLOW_IMPLEMENT,
-  WORKFLOW_QA,
-} from "../ids.ts";
-import {
-  ImplementationRequestSchema,
-  ImplementationResultSchema,
-  ObjectiveRequestSchema,
-  QAReportSchema,
-} from "../schemas.ts";
+import { readFileSync } from "node:fs";
 
-export const implementationWorkflow: WorkflowDefinition<unknown, unknown> = {
-  id: WORKFLOW_IMPLEMENT,
-  kind: "workflow",
-  title: "Implementation workflow",
-  description: "Plan, implement, independently verify, and perform at most two repair attempts.",
-  input: ImplementationRequestSchema,
-  output: ImplementationResultSchema,
-  limits: { timeoutMs: 2_400_000, maxNodeRuns: 20, maxParallelism: 1 },
-  graph: {
-    entry: "plan",
-    nodes: [
-      {
-        kind: "invoke",
-        id: "plan",
-        title: "Produce an executable plan",
-        definition: definitionRef(AGENT_PLANNER),
-        input: "implement.plan.input",
-        wait: "await",
-      },
-      {
-        kind: "invoke",
-        id: "implement",
-        title: "Apply the current implementation attempt",
-        definition: definitionRef(AGENT_IMPLEMENTER),
-        input: "implement.work.input",
-        wait: "await",
-      },
-      {
-        kind: "invoke",
-        id: "verify",
-        title: "Independently verify the attempt",
-        definition: definitionRef(AGENT_VERIFIER),
-        input: "implement.verify.input",
-        wait: "await",
-      },
-      { kind: "decision", id: "accepted", decide: "implement.acceptance" },
-      { kind: "return", id: "return", output: "implement.output" },
-      { kind: "fail", id: "fail", reason: "implement.failure" },
-    ],
-    edges: [
-      { from: "plan", to: "implement" },
-      { from: "implement", to: "verify", maxTraversals: 3 },
-      { from: "verify", to: "accepted", maxTraversals: 3 },
-      { from: "accepted", to: "return", when: "decision.accepted" },
-      {
-        from: "accepted",
-        to: "implement",
-        when: "decision.repair",
-        maxTraversals: 2,
-      },
-      { from: "accepted", to: "fail", when: "decision.exhausted" },
-    ],
+import {
+  compileWorkflowMarkdown,
+  type WorkflowMarkdownBindings,
+} from "../../adapters/workflow/markdown.ts";
+import type { AnyDefinition, WorkflowDefinition } from "../../domain/definition/definition.ts";
+import { agentDefinitions } from "../agents.ts";
+import { resolveDefinitionSchema } from "../schema-registry.ts";
+
+const referencedDefinitions = new Map<string, AnyDefinition>(
+  agentDefinitions.map((definition) => [definition.id, definition]),
+);
+
+const bindings: WorkflowMarkdownBindings = {
+  resolveSchema: resolveDefinitionSchema,
+  resolveDefinition(id) {
+    const definition = referencedDefinitions.get(id);
+    if (!definition) throw new Error(`Unknown workflow state definition ${id}`);
+    return definition;
   },
 };
 
-export const qaWorkflow: WorkflowDefinition<unknown, unknown> = {
-  id: WORKFLOW_QA,
-  kind: "workflow",
-  title: "QA workflow",
-  description:
-    "Run deterministic project checks and independent repository, architecture, test, and security reviews, then synthesize.",
-  input: ObjectiveRequestSchema,
-  output: QAReportSchema,
-  limits: { timeoutMs: 2_400_000, maxNodeRuns: 20, maxParallelism: 4 },
-  graph: {
-    entry: "checks",
-    nodes: [
-      {
-        kind: "local",
-        id: "checks",
-        title: "Run deterministic repository checks",
-        operation: "local.qa-checks",
-        input: "qa.checks.input",
-      },
-      {
-        kind: "local",
-        id: "fanout",
-        title: "Start independent QA branches",
-        operation: "local.noop",
-        input: "input.identity",
-      },
-      {
-        kind: "invoke",
-        id: "repo",
-        title: "Review repository structure and correctness",
-        definition: definitionRef(AGENT_SCOUT),
-        input: "qa.repo.input",
-        wait: "await",
-      },
-      {
-        kind: "invoke",
-        id: "tests",
-        title: "Interpret deterministic checks and coverage gaps",
-        definition: definitionRef(AGENT_TESTER),
-        input: "qa.tests.input",
-        wait: "await",
-      },
-      {
-        kind: "invoke",
-        id: "architecture",
-        title: "Review architecture and module boundaries",
-        definition: definitionRef(AGENT_ARCHITECT),
-        input: "qa.arch.input",
-        wait: "await",
-      },
-      {
-        kind: "invoke",
-        id: "security",
-        title: "Review security and trust boundaries",
-        definition: definitionRef(AGENT_CRITIC),
-        input: "qa.security.input",
-        wait: "await",
-      },
-      { kind: "join", id: "join", policy: "all-success" },
-      {
-        kind: "invoke",
-        id: "synthesize",
-        definition: definitionRef(AGENT_QA_SYNTHESIZER),
-        input: "qa.synthesize.input",
-        wait: "await",
-      },
-      { kind: "return", id: "return", output: "qa.output" },
-    ],
-    edges: [
-      { from: "checks", to: "fanout" },
-      { from: "fanout", to: "repo" },
-      { from: "fanout", to: "tests" },
-      { from: "fanout", to: "architecture" },
-      { from: "fanout", to: "security" },
-      { from: "repo", to: "join" },
-      { from: "tests", to: "join" },
-      { from: "architecture", to: "join" },
-      { from: "security", to: "join" },
-      { from: "join", to: "synthesize" },
-      { from: "synthesize", to: "return" },
-    ],
-  },
-};
+function source(name: string): string {
+  return readFileSync(new URL(`./sources/${name}.workflow.md`, import.meta.url), "utf8");
+}
+
+function definition(name: string): WorkflowDefinition<unknown, unknown> {
+  return compileWorkflowMarkdown(source(name), bindings);
+}
+
+export const implementationWorkflow = definition("implement");
+export const qaWorkflow = definition("qa");
 
 export const workflowDefinitions = [implementationWorkflow, qaWorkflow] as const;
