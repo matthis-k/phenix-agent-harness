@@ -23,6 +23,8 @@ const SECRET_KEY =
 export class JsonlDiagnosticLog implements DiagnosticLog {
   private readonly stateDirectory: string;
   private readonly listeners = new Set<DiagnosticLogListener>();
+  private readonly cache = new Map<RunId, DiagnosticLogEntry[]>();
+  private readonly loading = new Map<RunId, Promise<DiagnosticLogEntry[]>>();
   private tail: Promise<void> = Promise.resolve();
 
   constructor(stateDirectory: string) {
@@ -33,6 +35,7 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
     assertDiagnosticScope(input.scope);
     let committed: DiagnosticLogEntry | undefined;
     const pending = this.tail.then(async () => {
+      const entries = await this.load(input.rootRunId);
       const fields = input.fields
         ? await this.materializeFields(input.rootRunId, input.fields)
         : undefined;
@@ -57,6 +60,7 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
       } finally {
         await handle.close();
       }
+      entries.push(committed);
     });
     this.tail = pending.catch(() => undefined);
     await pending;
@@ -71,26 +75,9 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
     limit?: number,
   ): Promise<readonly DiagnosticLogEntry[]> {
     await this.drain();
-    let content: string;
-    try {
-      content = await readFile(this.pathFor(rootRunId), "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-      throw error;
-    }
-    const entries = content
-      .split("\n")
-      .filter((line) => line.trim().length > 0)
-      .map((line, index) => {
-        try {
-          return JSON.parse(line) as DiagnosticLogEntry;
-        } catch (error) {
-          throw new Error(
-            `Invalid Phenix diagnostic JSON at ${this.pathFor(rootRunId)}:${index + 1}: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-      })
-      .filter((entry) => includesSeverity(entry.severity, minimum));
+    const entries = (await this.load(rootRunId)).filter((entry) =>
+      includesSeverity(entry.severity, minimum),
+    );
     if (limit === undefined || !Number.isFinite(limit)) return entries;
     const bounded = Math.max(0, Math.floor(limit));
     return bounded === 0 ? [] : entries.slice(-bounded);
@@ -158,6 +145,47 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
     await this.tail;
   }
 
+  private async load(rootRunId: RunId): Promise<DiagnosticLogEntry[]> {
+    const cached = this.cache.get(rootRunId);
+    if (cached) return cached;
+    const active = this.loading.get(rootRunId);
+    if (active) return active;
+    const loading = this.readEntries(rootRunId).then((entries) => {
+      this.cache.set(rootRunId, entries);
+      this.loading.delete(rootRunId);
+      return entries;
+    });
+    this.loading.set(rootRunId, loading);
+    try {
+      return await loading;
+    } catch (error) {
+      this.loading.delete(rootRunId);
+      throw error;
+    }
+  }
+
+  private async readEntries(rootRunId: RunId): Promise<DiagnosticLogEntry[]> {
+    let content: string;
+    try {
+      content = await readFile(this.pathFor(rootRunId), "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+    return content
+      .split("\n")
+      .filter((line) => line.trim().length > 0)
+      .map((line, index) => {
+        try {
+          return JSON.parse(line) as DiagnosticLogEntry;
+        } catch (error) {
+          throw new Error(
+            `Invalid Phenix diagnostic JSON at ${this.pathFor(rootRunId)}:${index + 1}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      });
+  }
+
   private notify(entry: DiagnosticLogEntry): void {
     for (const listener of this.listeners) {
       try {
@@ -197,10 +225,11 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
     }
     if (typeof value === "bigint") return String(value);
     if (typeof value === "string") {
-      const bytes = Buffer.byteLength(value, "utf8");
-      return bytes <= INLINE_STRING_BYTES && !value.includes("\n")
-        ? value
-        : this.storeArtifact(rootRunId, value, "text/plain");
+      const redacted = redactString(value);
+      const bytes = Buffer.byteLength(redacted, "utf8");
+      return bytes <= INLINE_STRING_BYTES && !redacted.includes("\n")
+        ? redacted
+        : this.storeArtifact(rootRunId, redacted, "text/plain");
     }
     if (value instanceof Error) {
       return this.materializeValue(
@@ -251,7 +280,7 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
   ): Promise<DiagnosticArtifactReference> {
     const text =
       contentType === "text/plain"
-        ? String(value)
+        ? redactString(String(value))
         : JSON.stringify(safelySerializable(value), null, 2);
     const digest = createHash("sha256").update(text).digest("hex");
     const bytes = Buffer.byteLength(text, "utf8");
@@ -280,7 +309,29 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
 }
 
 function normalizeMessage(message: string): string {
-  return message.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 512);
+  return redactString(message)
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 512);
+}
+
+function redactString(value: string): string {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer <redacted>")
+    .replace(
+      /\b(api[-_]?key|access[-_]?token|refresh[-_]?token|client[-_]?secret|password|secret|token)\s*[:=]\s*([^\s,;]+)/gi,
+      "$1=<redacted>",
+    )
+    .replace(
+      /((?:authorization|cookie|x-api-key)\s*:\s*)[^\r\n]+/gi,
+      "$1<redacted>",
+    )
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/gi, "$1<redacted>@")
+    .replace(
+      /([?&](?:access_key|api_key|client_secret|credential|key|password|secret|signature|token)=)[^&\s]+/gi,
+      "$1<redacted>",
+    );
 }
 
 function encodedBytes(value: unknown): number {
@@ -290,7 +341,9 @@ function encodedBytes(value: unknown): number {
 function safelySerializable(value: unknown): unknown {
   const seen = new WeakSet<object>();
   return JSON.parse(
-    JSON.stringify(value, (_key, nested) => {
+    JSON.stringify(value, (key, nested) => {
+      if (SECRET_KEY.test(key)) return "[redacted]";
+      if (typeof nested === "string") return redactString(nested);
       if (typeof nested === "bigint") return String(nested);
       if (nested instanceof Error) {
         return { name: nested.name, message: nested.message, stack: nested.stack };
