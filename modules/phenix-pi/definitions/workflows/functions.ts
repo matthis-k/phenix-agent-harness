@@ -1,6 +1,7 @@
 import type { Outcome } from "../../domain/shared.ts";
 import type { WorkflowFunctionRegistrar } from "../../domain/workflow/functions.ts";
 import type { WorkflowEvaluationContext } from "../../domain/workflow/graph-state.ts";
+import type { DifficultyAssessment } from "../difficulty.ts";
 import type {
   ChangeSet,
   CheckResult,
@@ -12,6 +13,18 @@ import type {
 
 export function registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): void {
   registry.registerMapping("input.identity", (context) => context.input);
+  registry.registerMapping("difficulty.input", (context) => {
+    const input = context.input as ObjectiveRequest;
+    return { objective: input.objective, context: input.context };
+  });
+  registry.registerCondition("difficulty.D0", (context) => difficultyAt(context) === "D0");
+  registry.registerCondition("difficulty.D1", (context) => difficultyAt(context) === "D1");
+  registry.registerCondition("difficulty.D2", (context) => difficultyAt(context) === "D2");
+  registry.registerCondition("difficulty.D3", (context) => difficultyAt(context) === "D3");
+  registry.registerCondition(
+    "difficulty.at-least-D1",
+    (context) => difficultyAt(context) !== "D0",
+  );
 
   registry.registerMapping("implement.plan.input", (context) => {
     const input = context.input as ImplementationRequest;
@@ -20,11 +33,12 @@ export function registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): 
   registry.registerMapping("implement.work.input", (context) => {
     const input = context.input as ImplementationRequest;
     const previous = valuesAt<ChangeSet>(context, "implement");
-    const verification = valuesAt<VerificationResult>(context, "verify").at(-1);
+    const verification = optionalSuccessAt<VerificationResult>(context, "verify");
+    const plan = optionalSuccessAt(context, "plan");
     return {
       objective: input.objective,
       context: input.context,
-      plan: successAt(context, "plan"),
+      ...(plan === undefined ? {} : { plan }),
       ...(input.findings ? { findings: input.findings } : {}),
       ...(previous.length > 0 ? { previousChangeSet: previous.at(-1) } : {}),
       ...(verification && !verification.accepted ? { findings: verification.findings } : {}),
@@ -38,12 +52,33 @@ export function registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): 
       changeSet: successAt(context, "implement"),
     };
   });
+  registry.registerMapping("implement.trivial-verification", (context): VerificationResult => {
+    const changeSet = successAt<ChangeSet>(context, "implement");
+    const checksPassed = changeSet.checks.length > 0 && changeSet.checks.every((check) => check.ok);
+    const accepted = checksPassed && changeSet.unresolved.length === 0;
+    return {
+      accepted,
+      summary: accepted
+        ? "Trivial change passed its declared targeted checks."
+        : "Trivial change did not satisfy its deterministic acceptance gate.",
+      findings: [
+        ...(checksPassed ? [] : ["No successful targeted check was reported."]),
+        ...changeSet.unresolved,
+      ],
+      evidence: changeSet.checks.map(
+        (check) => `${check.command}: ${check.ok ? "passed" : "failed"} — ${check.summary}`,
+      ),
+    };
+  });
   registry.registerDecision("implement.acceptance", (context) => {
     const verification = successAt<VerificationResult>(context, "verify");
     if (verification.accepted) return "accepted";
     const attempts = valuesAt(context, "implement").length;
     return attempts < 3 ? "repair" : "exhausted";
   });
+  registry.registerDecision("implement.trivial-acceptance", (context) =>
+    localAt<VerificationResult>(context, "trivial-accept").accepted ? "accepted" : "exhausted",
+  );
   registry.registerCondition("decision.accepted", (_context, decision) => decision === "accepted");
   registry.registerCondition("decision.repair", (_context, decision) => decision === "repair");
   registry.registerCondition(
@@ -51,7 +86,9 @@ export function registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): 
     (_context, decision) => decision === "exhausted",
   );
   registry.registerMapping("implement.output", (context): ImplementationResult => {
-    const verification = successAt<VerificationResult>(context, "verify");
+    const verification =
+      optionalSuccessAt<VerificationResult>(context, "verify") ??
+      localAt<VerificationResult>(context, "trivial-accept");
     const changeSet = successAt<ChangeSet>(context, "implement");
     return {
       summary: verification.summary,
@@ -61,7 +98,9 @@ export function registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): 
     };
   });
   registry.registerMapping("implement.failure", (context) => {
-    const verification = successAt<VerificationResult>(context, "verify");
+    const verification =
+      optionalSuccessAt<VerificationResult>(context, "verify") ??
+      localAt<VerificationResult>(context, "trivial-accept");
     return `Implementation was rejected after ${valuesAt(context, "implement").length} attempts: ${verification.findings.join("; ")}`;
   });
 
@@ -106,6 +145,10 @@ export function registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): 
   registry.registerMapping("qa.output", (context) => successAt(context, "synthesize"));
 }
 
+function difficultyAt(context: WorkflowEvaluationContext) {
+  return successAt<DifficultyAssessment>(context, "estimate").difficulty;
+}
+
 function outcomeValue<T>(value: unknown): T {
   const outcome = value as Outcome<T>;
   if (outcome?.status !== "success") {
@@ -117,6 +160,14 @@ function outcomeValue<T>(value: unknown): T {
 function successAt<T = unknown>(context: WorkflowEvaluationContext, node: string): T {
   const value = context.latest.get(node);
   return outcomeValue<T>(value);
+}
+
+function optionalSuccessAt<T = unknown>(
+  context: WorkflowEvaluationContext,
+  node: string,
+): T | undefined {
+  const value = context.latest.get(node);
+  return value === undefined ? undefined : outcomeValue<T>(value);
 }
 
 function localAt<T = unknown>(context: WorkflowEvaluationContext, node: string): T {
