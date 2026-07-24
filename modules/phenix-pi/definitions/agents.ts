@@ -13,6 +13,7 @@ import {
   testerDefinition as rawTesterDefinition,
   verifierDefinition as rawVerifierDefinition,
 } from "./agents/index.ts";
+import { attentionRouterDefinition as rawAttentionRouterDefinition } from "./attention.ts";
 
 const fullRepositoryContext: ContextPolicy = {
   projectFiles: "inherit",
@@ -122,6 +123,11 @@ export const qaSynthesizerDefinition = configured(
   noProjectContext,
   false,
 );
+export const attentionRouterDefinition = configured(
+  rawAttentionRouterDefinition,
+  noProjectContext,
+  false,
+);
 
 export const agentDefinitions = [
   scoutDefinition,
@@ -136,4 +142,5 @@ export const agentDefinitions = [
   coordinatorDefinition,
   baseDefinition,
   qaSynthesizerDefinition,
+  attentionRouterDefinition,
 ] as const;

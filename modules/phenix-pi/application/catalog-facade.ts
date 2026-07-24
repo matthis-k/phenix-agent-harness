@@ -1,5 +1,5 @@
 import type { Definition, DefinitionRef } from "../domain/definition/definition.ts";
-import type { RunId } from "../domain/shared.ts";
+import type { DefinitionId, RunId } from "../domain/shared.ts";
 import type { DefinitionCatalog } from "./catalog.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import type { CatalogFacade, DefinitionSummary } from "./interfaces.ts";
@@ -7,10 +7,16 @@ import type { CatalogFacade, DefinitionSummary } from "./interfaces.ts";
 export class CatalogFacadeImpl implements CatalogFacade {
   private readonly catalog: DefinitionCatalog;
   private readonly store: ExecutionStore;
+  private readonly hiddenDefinitions: ReadonlySet<DefinitionId>;
 
-  constructor(catalog: DefinitionCatalog, store: ExecutionStore) {
+  constructor(
+    catalog: DefinitionCatalog,
+    store: ExecutionStore,
+    options: { readonly hiddenDefinitions?: readonly DefinitionId[] } = {},
+  ) {
     this.catalog = catalog;
     this.store = store;
+    this.hiddenDefinitions = new Set(options.hiddenDefinitions ?? []);
   }
 
   get<I, O>(ref: DefinitionRef<I, O>): Definition<I, O> {
@@ -23,7 +29,9 @@ export class CatalogFacadeImpl implements CatalogFacade {
     const allowed = new Set(parent.compiled.capabilities.invokableDefinitions);
     return this.catalog
       .list()
-      .filter((definition) => allowed.has(definition.id))
+      .filter(
+        (definition) => allowed.has(definition.id) && !this.hiddenDefinitions.has(definition.id),
+      )
       .map((definition) => ({
         id: definition.id,
         kind: definition.kind,
