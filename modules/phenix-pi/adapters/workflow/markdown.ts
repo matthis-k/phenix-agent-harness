@@ -1,0 +1,295 @@
+import {
+  type AnyDefinition,
+  definitionRef,
+  type WorkflowDefinition,
+  type WorkflowEdge,
+  type WorkflowNode,
+} from "../../domain/definition/definition.ts";
+import type { Schema } from "../../domain/definition/schema.ts";
+import { definitionId } from "../../domain/shared.ts";
+import {
+  assertMarkdownFields,
+  markdownInteger,
+  markdownTitle,
+  optionalMarkdownSubsection,
+  parseMarkdownFields,
+  requiredMarkdownFence,
+  requiredMarkdownField,
+  requiredMarkdownSection,
+} from "../definition/markdown.ts";
+
+export interface WorkflowMarkdownBindings {
+  resolveSchema(id: string): Schema<unknown>;
+  resolveDefinition(id: string): AnyDefinition;
+}
+
+export interface AuthoredWorkflowState {
+  readonly id: string;
+  readonly fields: Readonly<Record<string, string>>;
+  readonly prompt?: string;
+}
+
+export interface AuthoredWorkflow {
+  readonly title: string;
+  readonly fields: Readonly<Record<string, string>>;
+  readonly states: readonly AuthoredWorkflowState[];
+  readonly transitions: readonly WorkflowEdge[];
+}
+
+type StateKind = "invoke" | "local" | "decision" | "join" | "return" | "fail";
+
+const WORKFLOW_FIELDS = [
+  "id",
+  "description",
+  "input",
+  "output",
+  "entry",
+  "timeout-ms",
+  "max-node-runs",
+  "max-parallelism",
+] as const;
+
+const STATE_FIELDS: Readonly<Record<StateKind, readonly string[]>> = {
+  invoke: ["kind", "title", "run", "input", "wait", "input-schema", "output-schema"],
+  local: ["kind", "title", "operation", "input", "input-schema", "output-schema"],
+  decision: ["kind", "title", "decide"],
+  join: ["kind", "title", "policy", "quorum"],
+  return: ["kind", "title", "output", "output-schema"],
+  fail: ["kind", "title", "reason"],
+};
+
+export function parseWorkflowMarkdown(source: string): AuthoredWorkflow {
+  const fields = parseMarkdownFields(requiredMarkdownFence(source, "phenix-workflow"));
+  return {
+    title: markdownTitle(source),
+    fields,
+    states: parseStates(requiredMarkdownSection(source, "States")),
+    transitions: parseTransitions(requiredMarkdownSection(source, "Transitions")),
+  };
+}
+
+export function compileWorkflowMarkdown(
+  source: string,
+  bindings: WorkflowMarkdownBindings,
+): WorkflowDefinition<unknown, unknown> {
+  const authored = parseWorkflowMarkdown(source);
+  const fields = authored.fields;
+  assertMarkdownFields(fields, WORKFLOW_FIELDS, "workflow");
+  const input = bindings.resolveSchema(requiredMarkdownField(fields, "input", "workflow"));
+  const output = bindings.resolveSchema(requiredMarkdownField(fields, "output", "workflow"));
+
+  return {
+    id: definitionId(requiredMarkdownField(fields, "id", "workflow")),
+    kind: "workflow",
+    title: authored.title,
+    description: requiredMarkdownField(fields, "description", "workflow"),
+    input,
+    output,
+    limits: {
+      timeoutMs: markdownInteger(fields, "timeout-ms", "workflow", 0),
+      maxNodeRuns: markdownInteger(fields, "max-node-runs", "workflow", 1),
+      maxParallelism: markdownInteger(fields, "max-parallelism", "workflow", 1),
+    },
+    graph: {
+      entry: requiredMarkdownField(fields, "entry", "workflow"),
+      nodes: authored.states.map((state) => compileState(state, bindings, output)),
+      edges: authored.transitions,
+    },
+  };
+}
+
+function compileState(
+  state: AuthoredWorkflowState,
+  bindings: WorkflowMarkdownBindings,
+  workflowOutput: Schema<unknown>,
+): WorkflowNode {
+  if (state.prompt) {
+    throw new Error(
+      `Workflow state ${state.id} declares a Prompt section, but executable state prompts are not bound yet`,
+    );
+  }
+
+  const owner = `state ${state.id}`;
+  const fields = state.fields;
+  const read = (key: string): string => requiredMarkdownField(fields, key, owner);
+  const kind = parseStateKind(read("kind"), state.id);
+  const common = { id: state.id, ...(fields.title ? { title: fields.title } : {}) };
+  assertMarkdownFields(fields, STATE_FIELDS[kind], owner);
+
+  switch (kind) {
+    case "invoke": {
+      const invoked = bindings.resolveDefinition(read("run"));
+      assertSchema(bindings, read("input-schema"), invoked.input, `${owner} input`);
+      assertSchema(bindings, read("output-schema"), invoked.output, `${owner} output`);
+      return {
+        ...common,
+        kind,
+        definition: definitionRef(definitionId(invoked.id)),
+        input: read("input"),
+        wait: parseWait(fields.wait ?? "await", state.id),
+      };
+    }
+    case "local":
+      bindings.resolveSchema(read("input-schema"));
+      bindings.resolveSchema(read("output-schema"));
+      return {
+        ...common,
+        kind,
+        operation: read("operation"),
+        input: read("input"),
+      };
+    case "decision":
+      return { ...common, kind, decide: read("decide") };
+    case "join":
+      return {
+        ...common,
+        kind,
+        policy: parseJoinPolicy(read("policy"), state.id),
+        ...(fields.quorum ? { quorum: integerValue(fields.quorum, `${owner}.quorum`, 1) } : {}),
+      };
+    case "return":
+      assertSchema(bindings, read("output-schema"), workflowOutput, `${owner} output`);
+      return { ...common, kind, output: read("output") };
+    case "fail":
+      return { ...common, kind, reason: read("reason") };
+  }
+}
+
+function assertSchema(
+  bindings: WorkflowMarkdownBindings,
+  declaredId: string,
+  expected: Schema<unknown>,
+  owner: string,
+): void {
+  const declared = bindings.resolveSchema(declaredId);
+  if (declared.id !== expected.id) {
+    throw new Error(`${owner} schema ${declared.id} does not match ${expected.id}`);
+  }
+}
+
+function parseStates(section: string): AuthoredWorkflowState[] {
+  const headings = [...section.matchAll(/^###\s+([A-Za-z0-9._:-]+)\s*$/gm)];
+  if (headings.length === 0) throw new Error("Workflow States section has no states");
+
+  return headings.map((heading, index) => {
+    const id = heading[1];
+    const start = (heading.index ?? 0) + heading[0].length;
+    const end = headings[index + 1]?.index ?? section.length;
+    const body = section.slice(start, end);
+    const prompt = optionalMarkdownSubsection(body, "Prompt")?.trim();
+    return {
+      id,
+      fields: parseMarkdownFields(requiredMarkdownFence(body, "phenix-state")),
+      ...(prompt ? { prompt } : {}),
+    };
+  });
+}
+
+function parseTransitions(section: string): WorkflowEdge[] {
+  const rows = section
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("|") && line.endsWith("|"));
+  if (rows.length < 2) throw new Error("Transitions must be a Markdown table");
+
+  const headers = tableCells(rows[0]).map(normalizeHeader);
+  const indexes = new Map(headers.map((header, index) => [header, index] as const));
+  requireColumns(indexes, ["from", "to"]);
+
+  return rows.slice(2).map((row, rowIndex) => {
+    const cells = tableCells(row);
+    const from = tableValue(cells, indexes, "from");
+    const to = tableValue(cells, indexes, "to");
+    const when = tableValue(cells, indexes, "when", false);
+    const max =
+      tableValue(cells, indexes, "max-traversals", false) ||
+      tableValue(cells, indexes, "max", false);
+    if (!from || !to) throw new Error(`Transitions row ${rowIndex + 1} requires From and To`);
+    return {
+      from,
+      to,
+      ...(when ? { when } : {}),
+      ...(max ? { maxTraversals: integerValue(max, `transition ${from}->${to}`, 1) } : {}),
+    };
+  });
+}
+
+function integerValue(value: string, name: string, minimum: number): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < minimum) {
+    throw new Error(`${name} must be an integer greater than or equal to ${minimum}`);
+  }
+  return parsed;
+}
+
+function requireColumns(indexes: ReadonlyMap<string, number>, required: readonly string[]): void {
+  for (const column of required) {
+    if (!indexes.has(column)) throw new Error(`Transitions table is missing ${column}`);
+  }
+}
+
+function parseStateKind(value: string, stateId: string): StateKind {
+  if (
+    value === "invoke" ||
+    value === "local" ||
+    value === "decision" ||
+    value === "join" ||
+    value === "return" ||
+    value === "fail"
+  ) {
+    return value;
+  }
+  throw new Error(`State ${stateId} has unsupported kind ${value}`);
+}
+
+function parseWait(value: string, stateId: string): "await" | "background" {
+  if (value === "await" || value === "background") return value;
+  throw new Error(`State ${stateId} has unsupported wait policy ${value}`);
+}
+
+function parseJoinPolicy(
+  value: string,
+  stateId: string,
+): "all" | "all-success" | "first-success" | "quorum" {
+  if (
+    value === "all" ||
+    value === "all-success" ||
+    value === "first-success" ||
+    value === "quorum"
+  ) {
+    return value;
+  }
+  throw new Error(`State ${stateId} has unsupported join policy ${value}`);
+}
+
+function tableCells(row: string): string[] {
+  return row
+    .slice(1, -1)
+    .split("|")
+    .map((cell) => unquote(cell.trim().replace(/^`|`$/g, "")));
+}
+
+function tableValue(
+  cells: readonly string[],
+  indexes: ReadonlyMap<string, number>,
+  key: string,
+  required = true,
+): string {
+  const index = indexes.get(key);
+  if (index === undefined) {
+    if (required) throw new Error(`Transitions table is missing ${key}`);
+    return "";
+  }
+  return cells[index] ?? "";
+}
+
+function normalizeHeader(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, "-");
+}
+
+function unquote(value: string): string {
+  const quoted =
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"));
+  return quoted ? value.slice(1, -1) : value;
+}
