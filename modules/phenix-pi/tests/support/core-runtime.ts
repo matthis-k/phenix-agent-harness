@@ -77,6 +77,8 @@ export interface TestRuntimeOptions {
   readonly modelResolver?: ModelResolver;
   readonly operations?: LocalOperationRunner;
   readonly rootInvokableDefinitions?: readonly DefinitionId[];
+  readonly definitions?: readonly AnyDefinition[];
+  readonly registerFunctions?: (functions: WorkflowFunctionRegistry) => void;
 }
 
 export async function createTestRuntime(
@@ -93,9 +95,15 @@ export async function createTestRuntime(
   });
   const functions = new WorkflowFunctionRegistry();
   registerWorkflowFunctions(functions);
+  options.registerFunctions?.(functions);
   const catalog = new DefinitionCatalog();
-  for (const definition of [...agentDefinitions, ...workflowDefinitions])
+  for (const definition of [
+    ...agentDefinitions,
+    ...workflowDefinitions,
+    ...(options.definitions ?? []),
+  ]) {
     catalog.register(definition);
+  }
   const operationRunner = options.operations ?? operations;
   catalog.seal(functions, operationRunner);
   const execution = new ExecutionFacadeImpl({
