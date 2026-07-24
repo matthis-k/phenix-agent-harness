@@ -25,6 +25,7 @@ When documentation and code disagree, investigate the code path and update the d
 - `agent.base` is an internal escape hatch and is not root-invokable in production.
 - Child agents may use `phenix_run` only within their compiled capability scope.
 - Workflow children may be started only by their workflow process manager with valid workflow causation.
+- `SupervisionProcessManager` exclusively owns event-driven presentation, retry, descendant-terminal, root-notification, and parent-attention reactions.
 
 ## Runtime invariants
 
@@ -72,7 +73,7 @@ definitions -> domain definition types
 - `extension`: Pi-facing commands, tools, widgets, session lifecycle.
 - `definitions`: bundled agent and workflow declarations.
 
-The domain and application layers must not import Pi packages or concrete adapters. Avoid generic wrappers with no independent policy or replacement seam.
+The domain and application layers must not import Pi packages or concrete adapters. Composition assembles event observers and process managers but must not contain command-generating lifecycle policy. Avoid generic wrappers with no independent policy or replacement seam.
 
 ## Local operations and shell authority
 
@@ -81,7 +82,7 @@ The domain and application layers must not import Pi packages or concrete adapte
 - The process adapter compiles each specification to a fixed executable and argument vector.
 - Do not reintroduce arbitrary command strings, regex shell allowlists, or implicit shell execution into local workflow operations.
 - Arbitrary shell work belongs only to an agent explicitly compiled with `bash`.
-- `nix_shell` is a second arbitrary-command tool for those same operational roles. It provides requested packages through an ephemeral `nix shell`; it must never install into a profile or the host system.
+- `nix_shell` is a second arbitrary-command tool for those same operational roles. It provides explicit installables or resolves executable basenames through `nix-index-database`, enters an ephemeral `nix shell`, and must never install into a profile or the host system.
 - The QA test analyst may run targeted read-only commands to close explicit coverage gaps. Repository, architecture, and synthesis branches remain non-executing unless their own definition explicitly grants command authority.
 - Local slash commands are operator actions, but should still avoid accidental implicit shell interpretation.
 
@@ -110,7 +111,7 @@ The domain and application layers must not import Pi packages or concrete adapte
 - Remove obsolete aliases and compatibility paths rather than maintaining unused APIs.
 - Prefer the library or platform primitive when it already provides the required behavior.
 - Keep interfaces distinct from implementations and keep dependency direction inward.
-- Add regression tests for lifecycle races, authorization boundaries, capability changes, persistence, failure propagation, context projection, diagnostic redaction/reference behavior, and presentation deduplication.
+- Add regression tests for lifecycle races, authorization boundaries, capability changes, persistence, failure propagation, context projection, diagnostic redaction/reference behavior, supervision notifications, and presentation deduplication.
 - CI is read-only. Formatting fixes run locally through `devenv tasks run maintenance:fix`; CI runs `devenv test`.
 - Pin third-party GitHub Actions to full commit SHAs with a version comment.
 - Do not add `.stitch.json` unless Stitch actually requires repository-specific metadata that cannot be derived.

@@ -24,14 +24,16 @@ Each root Pi session owns one append-only JSONL domain-event stream. The event s
 
 A run ID is the only execution identity for roots, agents, and workflows. Each non-root run has exactly one parent edge.
 
-Application commands use four façades:
+Application execution commands use four façades:
 
 - `ExecutionFacade`: run lifecycle and control.
 - `TaskFacade`: local task leaves and owned progress.
 - `CatalogFacade`: immutable definitions and capability-filtered availability.
 - `QueryFacade`: projections and ordered facts.
 
-Event subscribers observe facts; they are not command queues. Only an explicit process manager may react to events by issuing commands. Reducer invariants are checked against a staged projection before a batch is appended.
+Root-session model, agent-preset, and difficulty selection is separate host policy exposed through `SessionProfileFacade`; it is not execution-tree command authority.
+
+Event subscribers observe facts; they are not anonymous command queues. Only an explicit named process manager may react to events by issuing commands. `WorkflowProcessManager` advances workflow graphs, while `SupervisionProcessManager` owns presentation, retry, descendant-terminal, root-notification, and parent-attention reactions. Reducer invariants are checked against a staged projection before a batch is appended.
 
 ## Diagnostic reconstruction boundary
 
@@ -120,11 +122,13 @@ Repeated presentations with the same fingerprint are acknowledged but not emitte
 
 ## Process authority
 
+`SupervisionProcessManager` is the only process that translates canonical retry, terminal, and presentation events into root or parent-agent notifications. Composition assembles this process and provides its notification port; it does not contain descendant lifecycle policy itself.
+
 `local.qa-checks` is deliberately narrower than `bash`. It accepts structured deterministic check specifications and compiles them to fixed executable/argument pairs. Automatic discovery for a devenv repository runs `devenv tasks run maintenance:fix`, `devenv test`, and then the remaining detected checks in a deterministic order. Arbitrary command strings and implicit shell composition are not part of the local-operation contract.
 
 The QA test analyst receives `bash` and `nix_shell` so it can close explicit test-coverage gaps after interpreting the local check results. Repository scouting, architecture review, and synthesis remain non-executing unless their own definitions explicitly grant command authority.
 
-`nix_shell` is an operational child-session tool with the same command-execution authority as `bash`. It normalizes bare package names through `nixpkgs`, evaluates explicit flake installables without shell interpolation, runs the requested command inside an ephemeral environment, and never installs packages into a profile or the host system.
+`nix_shell` is an operational child-session tool with the same command-execution authority as `bash`. It normalizes bare package names through `nixpkgs`, resolves executable basenames through `nix-index-database`, evaluates explicit flake installables without shell interpolation, runs the requested command inside an ephemeral environment, and never installs packages into a profile or the host system.
 
 The operator-facing clipboard commands also spawn an executable directly. Shell behavior remains available only when the operator explicitly chooses a shell executable such as `sh -c`.
 
@@ -157,4 +161,4 @@ composition -> all layers
 definitions -> domain definition types
 ```
 
-The domain and application layers contain no Pi imports and no concrete adapter imports. Concrete adapters meet only in `composition/create-phenix-runtime.ts`. TypeBox is currently the explicit schema-contract implementation; do not pretend it is abstracted by moving isolated imports without replacing the complete schema construction and validation boundary.
+The domain and application layers contain no Pi imports and no concrete adapter imports. Concrete adapters meet only in `composition/create-phenix-runtime.ts`. Composition may assemble event observers and named process managers, but command-generating event policy belongs inside the relevant application process manager. TypeBox is currently the explicit schema-contract implementation; do not pretend it is abstracted by moving isolated imports without replacing the complete schema construction and validation boundary.
