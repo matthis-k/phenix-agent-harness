@@ -25,11 +25,18 @@ function source(name: string): string {
   return readFileSync(new URL(`./sources/${name}.workflow.md`, import.meta.url), "utf8");
 }
 
-function definition(name: string): WorkflowDefinition<unknown, unknown> {
-  return compileWorkflowMarkdown(source(name), bindings);
+function register(name: string): WorkflowDefinition<unknown, unknown> {
+  const definition = compileWorkflowMarkdown(source(name), bindings);
+  if (referencedDefinitions.has(definition.id)) {
+    throw new Error(`Duplicate bundled definition ${definition.id}`);
+  }
+  referencedDefinitions.set(definition.id, definition);
+  return definition;
 }
 
-export const implementationWorkflow = definition("implement");
-export const qaWorkflow = definition("qa");
+// Registration order is dependency order. A later workflow may invoke any agent
+// or workflow already registered through its public input/output contract.
+export const implementationWorkflow = register("implement");
+export const qaWorkflow = register("qa");
 
 export const workflowDefinitions = [implementationWorkflow, qaWorkflow] as const;
