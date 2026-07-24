@@ -44,7 +44,9 @@ export function parseMarkdownTable(source: string, owner: string): MarkdownTable
     rows: lines.slice(2).map((line, rowIndex) => {
       const cells = tableCells(line);
       if (cells.length !== columns.length) {
-        throw new Error(`${owner} row ${rowIndex + 1} has ${cells.length} cells; expected ${columns.length}`);
+        throw new Error(
+          `${owner} row ${rowIndex + 1} has ${cells.length} cells; expected ${columns.length}`,
+        );
       }
       return Object.fromEntries(columns.map((column, index) => [column, cells[index] ?? ""]));
     }),

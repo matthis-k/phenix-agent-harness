@@ -1,9 +1,6 @@
 import type { Schema } from "../domain/definition/schema.ts";
 import { AttentionRoutingDecisionSchema, AttentionRoutingRequestSchema } from "./attention.ts";
-import {
-  DifficultyAssessmentRequestSchema,
-  DifficultyAssessmentSchema,
-} from "./difficulty.ts";
+import { DifficultyAssessmentRequestSchema, DifficultyAssessmentSchema } from "./difficulty.ts";
 import { DispatchDecisionSchema, DispatchSelectionRequestSchema } from "./dispatch.ts";
 import {
   BaseResultSchema,

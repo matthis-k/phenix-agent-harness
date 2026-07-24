@@ -5,11 +5,7 @@ import {
   definitionRef,
   type WorkflowDefinition,
 } from "../domain/definition/definition.ts";
-import type {
-  ConcreteModelRef,
-  Difficulty,
-  ResolvedModel,
-} from "../domain/definition/model.ts";
+import type { ConcreteModelRef, Difficulty, ResolvedModel } from "../domain/definition/model.ts";
 import type { PendingDomainEvent } from "../domain/run/events.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
 import {

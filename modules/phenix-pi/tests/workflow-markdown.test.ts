@@ -57,9 +57,7 @@ test("implementation workflow binds routes to its estimator result", () => {
   assert.ok(
     compiled.graph.edges.some(
       (edge) =>
-        edge.from === "estimate" &&
-        edge.to === "plan" &&
-        edge.when === "difficulty.at-least-D1",
+        edge.from === "estimate" && edge.to === "plan" && edge.when === "difficulty.at-least-D1",
     ),
   );
 });

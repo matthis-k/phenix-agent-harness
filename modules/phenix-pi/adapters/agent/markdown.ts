@@ -152,7 +152,11 @@ function parseModelRoutes(source: string): DifficultyModelRoutes | undefined {
 
   const routes = new Map<Difficulty, DifficultyModelRoutes[Difficulty]>();
   for (const [index, row] of table.rows.entries()) {
-    const difficultyValue = requiredMarkdownField(row, "difficulty", `agent Models row ${index + 1}`);
+    const difficultyValue = requiredMarkdownField(
+      row,
+      "difficulty",
+      `agent Models row ${index + 1}`,
+    );
     if (!isDifficulty(difficultyValue)) {
       throw new Error(`agent Models row ${index + 1} has unknown difficulty ${difficultyValue}`);
     }
@@ -176,8 +180,9 @@ function parseModelRoutes(source: string): DifficultyModelRoutes | undefined {
   for (const difficulty of DIFFICULTIES) {
     if (!routes.has(difficulty)) throw new Error(`agent Models is missing ${difficulty}`);
   }
-  return Object.fromEntries(DIFFICULTIES.map((difficulty) => [difficulty, routes.get(difficulty)])) as
-    DifficultyModelRoutes;
+  return Object.fromEntries(
+    DIFFICULTIES.map((difficulty) => [difficulty, routes.get(difficulty)]),
+  ) as DifficultyModelRoutes;
 }
 
 function parseModel(value: string): ModelSelector {

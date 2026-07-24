@@ -346,7 +346,10 @@ export class WorkflowProcessManager implements RunImplementation {
   ): Difficulty | undefined {
     if (!node.difficulty) return run.compiled.difficulty;
     if (node.difficulty.kind === "fixed") return node.difficulty.value;
-    return difficultyFromResult(state.context.latest.get(node.difficulty.nodeId), node.difficulty.nodeId);
+    return difficultyFromResult(
+      state.context.latest.get(node.difficulty.nodeId),
+      node.difficulty.nodeId,
+    );
   }
 
   private async processJoin(

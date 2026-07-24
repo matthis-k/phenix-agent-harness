@@ -21,10 +21,7 @@ export function registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): 
   registry.registerCondition("difficulty.D1", (context) => difficultyAt(context) === "D1");
   registry.registerCondition("difficulty.D2", (context) => difficultyAt(context) === "D2");
   registry.registerCondition("difficulty.D3", (context) => difficultyAt(context) === "D3");
-  registry.registerCondition(
-    "difficulty.at-least-D1",
-    (context) => difficultyAt(context) !== "D0",
-  );
+  registry.registerCondition("difficulty.at-least-D1", (context) => difficultyAt(context) !== "D0");
 
   registry.registerMapping("implement.plan.input", (context) => {
     const input = context.input as ImplementationRequest;

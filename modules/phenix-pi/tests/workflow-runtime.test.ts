@@ -9,9 +9,7 @@ import type { LocalOperationRunner } from "../ports/local-operation-runner.ts";
 import type { ModelResolver } from "../ports/model-resolver.ts";
 import { createTestRuntime } from "./support/core-runtime.ts";
 
-function recordingModelResolver(
-  contexts: Map<string, ModelResolutionContext>,
-): ModelResolver {
+function recordingModelResolver(contexts: Map<string, ModelResolutionContext>): ModelResolver {
   return {
     async resolve(selector, context): Promise<ResolvedModel> {
       contexts.set(context.definitionId, context);
@@ -46,12 +44,7 @@ test("implementation workflow estimates difficulty and returns verified output",
   assert.equal(workflow.state, "completed");
   assert.deepEqual(
     children.map((child) => child.definitionId),
-    [
-      "agent.difficulty-estimator",
-      "agent.planner",
-      "agent.implementer",
-      "agent.verifier",
-    ],
+    ["agent.difficulty-estimator", "agent.planner", "agent.implementer", "agent.verifier"],
   );
   assert.ok(children.every((child) => child.parentId === handle.id));
 });

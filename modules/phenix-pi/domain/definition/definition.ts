@@ -1,10 +1,5 @@
 import type { DefinitionId } from "../shared.ts";
-import type {
-  Difficulty,
-  DifficultyModelRoutes,
-  ModelSelector,
-  ThinkingPolicy,
-} from "./model.ts";
+import type { Difficulty, DifficultyModelRoutes, ModelSelector, ThinkingPolicy } from "./model.ts";
 import type { Schema } from "./schema.ts";
 
 export interface DefinitionRef<I = unknown, O = unknown> {

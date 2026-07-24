@@ -1,7 +1,7 @@
 import {
   type AnyDefinition,
-  definitionRef,
   type DifficultyBinding,
+  definitionRef,
   type WorkflowDefinition,
   type WorkflowEdge,
   type WorkflowNode,
@@ -54,16 +54,7 @@ const WORKFLOW_FIELDS = [
 ] as const;
 
 const STATE_FIELDS: Readonly<Record<StateKind, readonly string[]>> = {
-  invoke: [
-    "kind",
-    "title",
-    "run",
-    "input",
-    "wait",
-    "difficulty",
-    "input-schema",
-    "output-schema",
-  ],
+  invoke: ["kind", "title", "run", "input", "wait", "difficulty", "input-schema", "output-schema"],
   local: ["kind", "title", "operation", "input", "input-schema", "output-schema"],
   decision: ["kind", "title", "decide"],
   join: ["kind", "title", "policy", "quorum"],
