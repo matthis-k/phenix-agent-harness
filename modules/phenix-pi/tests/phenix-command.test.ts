@@ -21,9 +21,10 @@ test("phenix command completion lists and filters subcommands", () => {
   assert.deepEqual(completePhenixSubcommands("l"), [
     { value: "logs", label: "logs — Inspect or export structured diagnostics" },
   ]);
+  assert.equal(completePhenixSubcommands("r"), null);
   assert.equal(completePhenixSubcommands("unknown"), null);
   assert.equal(completePhenixSubcommands("status extra"), null);
-  assert.equal(PHENIX_USAGE, "/phenix status|logs|runs|facts|tasks|catalog|integrations");
+  assert.equal(PHENIX_USAGE, "/phenix status|logs|facts|tasks|catalog|integrations");
   assert.equal(PHENIX_STATUS_USAGE, "/phenix status [off|--once|--json|--expanded]");
   assert.equal(
     PHENIX_FACTS_USAGE,
