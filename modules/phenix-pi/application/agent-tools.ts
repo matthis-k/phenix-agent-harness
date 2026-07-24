@@ -2,7 +2,14 @@ import { Type } from "typebox";
 
 import { type AnyDefinition, definitionRef } from "../domain/definition/definition.ts";
 import { defineSchema, type Schema } from "../domain/definition/schema.ts";
-import { definitionId, localTaskId, type Outcome, type RunId, runId, type TaskId } from "../domain/shared.ts";
+import {
+  definitionId,
+  localTaskId,
+  type Outcome,
+  type RunId,
+  runId,
+  type TaskId,
+} from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import type { DispatchService } from "./dispatch-service.ts";
 import type { ExecutionStore } from "./execution-store.ts";
@@ -11,10 +18,10 @@ import { allowAllInvocations, type InvocationPolicy } from "./invocation-policy.
 import {
   projectCompletedRun,
   projectDispatchResult,
+  projectedToolResult,
   projectOutcome,
   projectRetryResult,
   projectRunSnapshot,
-  projectedToolResult,
   type RunResultView,
 } from "./tool-result-projection.ts";
 
@@ -300,7 +307,10 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
   }
 }
 
-function projectOutcomeForView(outcome: Outcome<unknown>, view: RunResultView | undefined): unknown {
+function projectOutcomeForView(
+  outcome: Outcome<unknown>,
+  view: RunResultView | undefined,
+): unknown {
   if (view === "outcome" || view === "full") return outcome;
   return projectOutcome(outcome, view ?? "summary");
 }
