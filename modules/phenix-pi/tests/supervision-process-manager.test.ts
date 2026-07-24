@@ -50,7 +50,9 @@ test("supervision process reports descendant failure and notifies its active par
   const supervision = new SupervisionProcessManager({
     execution: runtime.execution,
     store: runtime.store,
-    notifyRoot: (message) => rootNotices.push(message),
+    notifyRoot: (message) => {
+      rootNotices.push(message);
+    },
   });
 
   const parent = await runtime.execution.start({
@@ -67,7 +69,7 @@ test("supervision process reports descendant failure and notifies its active par
   });
 
   await runtime.controller.fail(child.id, {
-    code: "blocked",
+    code: "provider_failed",
     message: "Required evidence is unavailable",
     retryable: true,
   });
