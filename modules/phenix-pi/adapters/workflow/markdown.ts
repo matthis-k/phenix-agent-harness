@@ -47,7 +47,6 @@ const WORKFLOW_FIELDS = [
   "input",
   "output",
   "entry",
-  "difficulty-source",
   "timeout-ms",
   "max-node-runs",
   "max-parallelism",
@@ -90,11 +89,6 @@ export function compileWorkflowMarkdown(
   assertMarkdownFields(fields, WORKFLOW_FIELDS, "workflow");
   const input = bindings.resolveSchema(requiredMarkdownField(fields, "input", "workflow"));
   const output = bindings.resolveSchema(requiredMarkdownField(fields, "output", "workflow"));
-  const nodes = authored.states.map((state) => compileState(state, bindings, output));
-  const difficultySource = fields["difficulty-source"];
-  if (difficultySource && !nodes.some((node) => node.id === difficultySource)) {
-    throw new Error(`Workflow difficulty source ${difficultySource} is not a state`);
-  }
 
   return {
     id: definitionId(requiredMarkdownField(fields, "id", "workflow")),
@@ -103,7 +97,6 @@ export function compileWorkflowMarkdown(
     description: requiredMarkdownField(fields, "description", "workflow"),
     input,
     output,
-    ...(difficultySource ? { difficultySource } : {}),
     limits: {
       timeoutMs: markdownInteger(fields, "timeout-ms", "workflow", 0),
       maxNodeRuns: markdownInteger(fields, "max-node-runs", "workflow", 1),
@@ -111,7 +104,7 @@ export function compileWorkflowMarkdown(
     },
     graph: {
       entry: requiredMarkdownField(fields, "entry", "workflow"),
-      nodes,
+      nodes: authored.states.map((state) => compileState(state, bindings, output)),
       edges: authored.transitions,
     },
   };
@@ -214,30 +207,14 @@ function parseTransitions(section: string): WorkflowEdge[] {
     const to = row.to ?? "";
     const when = row.when ?? "";
     const max = row["max-traversals"] || row.max || "";
-    const difficulties = parseDifficulties(row.difficulties ?? "", rowIndex + 1);
     if (!from || !to) throw new Error(`Transitions row ${rowIndex + 1} requires From and To`);
     return {
       from,
       to,
       ...(when ? { when } : {}),
-      ...(difficulties.length > 0 ? { difficulties } : {}),
       ...(max ? { maxTraversals: integerValue(max, `transition ${from}->${to}`, 1) } : {}),
     };
   });
-}
-
-function parseDifficulties(value: string, row: number): Difficulty[] {
-  if (!value) return [];
-  const values = value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const result: Difficulty[] = [];
-  for (const value of values) {
-    if (!isDifficulty(value)) throw new Error(`Transitions row ${row} has unknown difficulty ${value}`);
-    if (!result.includes(value)) result.push(value);
-  }
-  return result;
 }
 
 function parseDifficulty(value: string, owner: string): Difficulty {
