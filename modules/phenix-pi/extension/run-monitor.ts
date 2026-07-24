@@ -11,6 +11,11 @@ const MAX_FACT_LINES = 24;
 
 export type RunMonitorMode = "hidden" | "runs" | "facts";
 
+export interface FactHistoryExport {
+  readonly text: string;
+  readonly count: number;
+}
+
 export class RunMonitor {
   private readonly ctx: ExtensionContext;
   private readonly runtime: PhenixRuntime;
@@ -68,7 +73,7 @@ export class RunMonitor {
 
   async json(mode: Exclude<RunMonitorMode, "hidden">): Promise<string> {
     if (mode === "facts") {
-      return JSON.stringify(await this.runtime.queries.facts(this.rootRunId, 1_000), null, 2);
+      return JSON.stringify(await this.runtime.queries.facts(this.rootRunId), null, 2);
     }
     const [tree, facts] = await Promise.all([
       this.runtime.queries.runTree(this.rootRunId),
@@ -79,6 +84,14 @@ export class RunMonitor {
       null,
       2,
     );
+  }
+
+  async exportFacts(): Promise<FactHistoryExport> {
+    const facts = await this.runtime.queries.facts(this.rootRunId);
+    return {
+      text: renderCompleteFactHistory(facts, this.runtime.sequence(this.rootRunId)),
+      count: facts.length,
+    };
   }
 
   dispose(): void {
@@ -121,6 +134,13 @@ export function renderFacts(facts: readonly RunFact[], sequence: number): string
   return lines;
 }
 
+export function renderCompleteFactHistory(facts: readonly RunFact[], sequence: number): string {
+  const lines = [`Phenix fact history · seq ${sequence}`];
+  if (facts.length === 0) lines.push("No facts recorded yet.");
+  for (const fact of facts) lines.push(formatFact(fact, false));
+  return `${lines.join("\n")}\n`;
+}
+
 function appendNode(
   lines: string[],
   node: RunTreeNode,
@@ -147,13 +167,16 @@ function appendNode(
   });
 }
 
-function formatFact(fact: RunFact): string {
+function formatFact(fact: RunFact, compact = true): string {
   const reliability =
     fact.reliability === "observed" ? "✓" : fact.reliability === "derived" ? "≈" : "!";
   const time = fact.timestamp.length >= 19 ? fact.timestamp.slice(11, 19) : fact.timestamp;
   const run = shortRunId(fact.runId);
-  const subject = fact.subject ? ` · ${truncate(fact.subject, 64)}` : "";
-  return `${time} ${reliability} ${run} · ${truncate(fact.summary, 100)}${subject}`;
+  const summary = compact ? truncate(fact.summary, 100) : normalize(fact.summary);
+  const subject = fact.subject
+    ? ` · ${compact ? truncate(fact.subject, 64) : normalize(fact.subject)}`
+    : "";
+  return `${time} ${reliability} ${run} · ${summary}${subject}`;
 }
 
 function definitionLabel(value: string): string {
@@ -178,10 +201,14 @@ function stateSymbol(state: string): string {
           : "●";
 }
 
-function truncate(value: string, maxLength: number): string {
-  const normalized = value
+function normalize(value: string): string {
+  return value
     .replace(/[\r\n\t]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function truncate(value: string, maxLength: number): string {
+  const normalized = normalize(value);
   return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}…`;
 }
