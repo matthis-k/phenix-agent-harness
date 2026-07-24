@@ -87,7 +87,7 @@ The domain and application layers must not import Pi packages or concrete adapte
 - `/phenix status` is the only live execution dashboard command.
 - The compact status tree omits the synthetic root row and renders one row per visible agent or workflow: role, state, dimmed concrete model/thinking metadata, and bounded current activity.
 - Completed subtrees collapse by default and summarize completed or exceptional descendants. Active, waiting, and failed branches remain expanded; `--expanded` is the explicit inspection override.
-- Fact history and storage paths do not consume status-dashboard space. `/phenix facts` owns ordered full-tree facts, `/phenix logs` owns structured diagnostics, and `/phenix status --json` exposes complete storage metadata.
+- Status keeps a three-line deduplicated recent-facts tail for quick context. `/phenix facts` owns the complete ordered full-tree history, `/phenix logs` owns structured diagnostics, and `/phenix status --json` exposes complete storage metadata without printing paths in the default dashboard.
 - `/phenix logs` is the root-scoped structured diagnostic history with trace, info, warning, and error thresholds.
 - Diagnostic scopes are stable lowercase dot-separated semantic identifiers. Dynamic IDs and values belong in fields, not scopes.
 - Short scalar telemetry may remain inline. Context, prompts, nested outcomes, provider bodies, tool payloads, and other large values must be content-addressed once and referenced by artifact digest.
