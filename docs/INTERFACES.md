@@ -20,40 +20,26 @@ Dynamic composition is an agent responsibility. `agent.coordinator` is read-only
 
 ## Canonical state
 
-Each root Pi session owns one append-only JSONL domain-event stream. The event stream is canonical. Run trees, task trees, active-child counts, workflow positions, current activity, fact history, outcomes, retry relationships, structured presentations, and attention delivery are projections.
+Each root Pi session owns one append-only JSONL domain-event stream. The event stream is canonical. Run trees, task trees, active-child counts, workflow positions, current activity, fact history, outcomes, retry relationships, and structured presentations are projections.
 
 A run ID is the only execution identity for roots, agents, and workflows. Each non-root run has exactly one parent edge.
 
-Application commands use five façades:
+Application execution commands use four façades:
 
-- `ExecutionFacade`: run lifecycle and direct control of a known run.
-- `AttentionFacade`: supervisory routing of follow-up input into existing live agent sessions.
+- `ExecutionFacade`: run lifecycle and control.
 - `TaskFacade`: local task leaves and owned progress.
 - `CatalogFacade`: immutable definitions and capability-filtered availability.
 - `QueryFacade`: projections and ordered facts.
 
-Event subscribers observe facts; they are not command queues. Only an explicit process manager may react to events by issuing commands. Reducer invariants are checked against a staged projection before a batch is appended.
+Root-session model, agent-preset, and difficulty selection is separate host policy exposed through `SessionProfileFacade`; it is not execution-tree command authority.
 
-## Supervisory attention
-
-A user follow-up received while descendants are active is first recorded as `run.input.amended`. `AttentionProcessManager` consumes that canonical event and treats the message as supervisory control for existing execution, not as a new workflow node or a mutation of immutable run input.
-
-The process manager derives a bounded candidate set from active agent projections and invokes the internal no-tools `agent.attention-router`. The router receives only bounded run metadata and may select only offered run IDs. It may return no targets when the root supervisor should handle the message. The router is authorized for runtime use but excluded from model-facing catalogs and ordinary delegation capabilities.
-
-Workflow runs are never direct attention targets. Follow-ups that change workflow selection, cancellation, or graph semantics remain explicit root-supervisor decisions. Follow-ups that directly affect a live agent are delivered through the existing execution/session boundary:
-
-- a streaming child receives `steer` immediately;
-- next-turn context is delivered through the session notification path;
-- a child whose Pi session is not bound yet receives durable deferred delivery;
-- existing awaits, ownership edges, cancellation propagation, and typed completion remain unchanged.
-
-Attention state is persisted through `attention.received`, `attention.routed`, `attention.routing.failed`, `attention.delivery.deferred`, `attention.delivered`, and `attention.delivery.failed`. Deferred delivery is reconstructed from the ledger during runtime recovery and retried when the target session binds. Explicit run IDs bypass model routing but remain subject to root scope, active-agent, size, and fan-out validation.
+Event subscribers observe facts; they are not anonymous command queues. Only an explicit named process manager may react to events by issuing commands. `WorkflowProcessManager` advances workflow graphs, while `SupervisionProcessManager` owns presentation, retry, descendant-terminal, root-notification, and parent-attention reactions. Reducer invariants are checked against a staged projection before a batch is appended.
 
 ## Diagnostic reconstruction boundary
 
 `DiagnosticLog` is a replaceable port assembled by composition. The filesystem adapter writes a second root-scoped append-only JSONL stream. This diagnostic stream is not execution authority and cannot drive reducers or recover run state.
 
-The composition layer subscribes to canonical domain events and maps them to stable lowercase dot-separated diagnostic scopes. Runtime, integration, persistence, agent-session, model-resolution, workflow, attention, tool, output, failure, and recovery boundaries may also record explicit diagnostics when the domain event alone lacks enough context.
+The composition layer subscribes to canonical domain events and maps them to stable lowercase dot-separated diagnostic scopes. Runtime, integration, persistence, agent-session, model-resolution, workflow, tool, output, failure, and recovery boundaries may also record explicit diagnostics when the domain event alone lacks enough context.
 
 Diagnostic records keep timestamps, IDs, model names, durations, counts, statuses, and other short scalar fields inline. Large strings and nested values are redacted, serialized once into a private content-addressed artifact store, and replaced by `artifact:sha256:<digest>` metadata. Artifact resolution is root scoped. Diagnostic observers are asynchronous side effects and may never block, mutate, or fail execution.
 
@@ -90,7 +76,7 @@ System prompts contain only static definition instructions plus the static execu
 
 Child sessions never inherit the parent conversation. Repository context files are admitted according to the owning agent definition:
 
-- dispatcher, attention router, coordinator, finalizer, and QA synthesizer: no automatic repository context;
+- dispatcher, coordinator, finalizer, and QA synthesizer: no automatic repository context;
 - tester: 32 KB maximum;
 - scout, planner, architect, and critic: 64 KB maximum;
 - implementer, verifier, and internal base: 128 KB maximum.
@@ -136,11 +122,13 @@ Repeated presentations with the same fingerprint are acknowledged but not emitte
 
 ## Process authority
 
+`SupervisionProcessManager` is the only process that translates canonical retry, terminal, and presentation events into root or parent-agent notifications. Composition assembles this process and provides its notification port; it does not contain descendant lifecycle policy itself.
+
 `local.qa-checks` is deliberately narrower than `bash`. It accepts structured deterministic check specifications and compiles them to fixed executable/argument pairs. Automatic discovery for a devenv repository runs `devenv tasks run maintenance:fix`, `devenv test`, and then the remaining detected checks in a deterministic order. Arbitrary command strings and implicit shell composition are not part of the local-operation contract.
 
 The QA test analyst receives `bash` and `nix_shell` so it can close explicit test-coverage gaps after interpreting the local check results. Repository scouting, architecture review, and synthesis remain non-executing unless their own definitions explicitly grant command authority.
 
-`nix_shell` is an operational child-session tool with the same command-execution authority as `bash`. It normalizes bare package names through `nixpkgs`, evaluates explicit flake installables without shell interpolation, runs the requested command inside an ephemeral environment, and never installs packages into a profile or the host system.
+`nix_shell` is an operational child-session tool with the same command-execution authority as `bash`. It normalizes bare package names through `nixpkgs`, resolves executable basenames through `nix-index-database`, evaluates explicit flake installables without shell interpolation, runs the requested command inside an ephemeral environment, and never installs packages into a profile or the host system.
 
 The operator-facing clipboard commands also spawn an executable directly. Shell behavior remains available only when the operator explicitly chooses a shell executable such as `sh -c`.
 
@@ -173,4 +161,4 @@ composition -> all layers
 definitions -> domain definition types
 ```
 
-The domain and application layers contain no Pi imports and no concrete adapter imports. Concrete adapters meet only in `composition/create-phenix-runtime.ts`. TypeBox is currently the explicit schema-contract implementation; do not pretend it is abstracted by moving isolated imports without replacing the complete schema construction and validation boundary.
+The domain and application layers contain no Pi imports and no concrete adapter imports. Concrete adapters meet only in `composition/create-phenix-runtime.ts`. Composition may assemble event observers and named process managers, but command-generating event policy belongs inside the relevant application process manager. TypeBox is currently the explicit schema-contract implementation; do not pretend it is abstracted by moving isolated imports without replacing the complete schema construction and validation boundary.
