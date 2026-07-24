@@ -380,17 +380,27 @@ export class AgentExecutor implements RunImplementation {
               validation.issues.map((issue) => `${issue.path} ${issue.message}`).join("; "),
             );
           }
-          const failure = automaticFailure(
-            "agent_reported_failure",
-            validation.value.summary,
-            validation.value.category ?? "other",
-            validation.value.retryable ?? true,
-            validation.value.suggestedLimits,
-            validation.value.requestedTools,
-          );
+          const report: FailureReport = {
+            source: "agent",
+            category: validation.value.category ?? "other",
+            summary: validation.value.summary,
+            retryable: validation.value.retryable ?? true,
+            ...(validation.value.requestedTools
+              ? { requestedTools: validation.value.requestedTools }
+              : {}),
+            ...(validation.value.suggestedLimits
+              ? { suggestedLimits: validation.value.suggestedLimits }
+              : {}),
+          };
+          const failure: Failure = {
+            code: "agent_reported_failure",
+            message: report.summary,
+            retryable: report.retryable,
+            details: report,
+          };
           await this.controller.fail(runId, failure);
           return {
-            text: "Failure recorded.",
+            text: "Failure report accepted.",
             details: { runId, failure },
             terminate: true,
           };
@@ -400,7 +410,7 @@ export class AgentExecutor implements RunImplementation {
       name: "phenix_progress",
       label: "Phenix Progress",
       description:
-        "Publish a short update only when the run's phase, current target, hypothesis, or next action materially changes. This updates run telemetry and the TUI; it is not sent to the parent model.",
+        "Publish one short run-scoped progress update for the TUI. Use only when the phase, current target, hypothesis, or next action materially changes. This does not message the parent model.",
       parameters: agentProgressSchema,
       execute: async (value) =>
         this.serial.run(runId, async () => {
@@ -685,14 +695,12 @@ function automaticFailure(
   category: FailureCategory,
   retryable: boolean,
   suggestedLimits?: FailureLimitSuggestion,
-  requestedTools?: readonly string[],
 ): Failure {
   const report: FailureReport = {
-    source: code === "agent_reported_failure" ? "agent" : "automatic",
+    source: "automatic",
     category,
     summary: message,
     retryable,
-    ...(requestedTools?.length ? { requestedTools } : {}),
     ...(suggestedLimits ? { suggestedLimits } : {}),
   };
   return { code, message, retryable, details: report };
