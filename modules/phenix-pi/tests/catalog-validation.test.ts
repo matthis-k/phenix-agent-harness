@@ -69,7 +69,7 @@ test("open-ended QA analysis agents omit fixed turn caps", () => {
 });
 
 test("agent context inheritance is scoped to role needs", () => {
-  const byId = new Map(agentDefinitions.map((definition) => [definition.id, definition]));
+  const byId = new Map(agentDefinitions.map((definition) => [String(definition.id), definition] as const));
 
   for (const id of [
     "agent.dispatcher",
