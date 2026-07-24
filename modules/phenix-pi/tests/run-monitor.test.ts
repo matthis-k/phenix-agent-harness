@@ -4,7 +4,7 @@ import test from "node:test";
 import type { RunTreeNode } from "../application/interfaces.ts";
 import type { RunSnapshot } from "../domain/run/model.ts";
 import { definitionId, runId } from "../domain/shared.ts";
-import { renderRuns } from "../extension/run-monitor.ts";
+import { createUnboundedWidget, renderRuns } from "../extension/run-monitor.ts";
 
 const ROOT = runId("root-monitor");
 
@@ -30,6 +30,19 @@ test("run widget renders the complete run tree without a height cap", () => {
   assert.equal(lines.filter((line) => line.includes("scout [running]")).length, 50);
   assert.equal(
     lines.some((line) => line.includes("run tree truncated")),
+    false,
+  );
+});
+
+test("widget component factory bypasses Pi's string-array line cap", () => {
+  const lines = Array.from({ length: 50 }, (_, index) => `widget-line-${index}`);
+  const rendered = createUnboundedWidget(lines)().render(120);
+
+  assert.equal(rendered.length, 50);
+  assert.equal(rendered[0]?.trim(), "widget-line-0");
+  assert.equal(rendered.at(-1)?.trim(), "widget-line-49");
+  assert.equal(
+    rendered.some((line) => line.includes("widget truncated")),
     false,
   );
 });
