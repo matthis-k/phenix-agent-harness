@@ -59,7 +59,6 @@ test("widget component factory bypasses Pi's string-array line cap", () => {
   );
 });
 
-
 test("running nodes render current activity on a separate indented line", () => {
   const childId = runId("run-active-scout");
   const lines = renderDashboard({
