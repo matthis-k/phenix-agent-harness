@@ -5,15 +5,15 @@ import {
   compileWorkflowMarkdown,
   type WorkflowMarkdownBindings,
 } from "../adapters/workflow/markdown.ts";
-import { definitionRef } from "../domain/definition/definition.ts";
-import type { Schema } from "../domain/definition/schema.ts";
-import { definitionId, type Outcome } from "../domain/shared.ts";
 import { WORKFLOW_IMPLEMENT } from "../definitions/ids.ts";
 import {
   ImplementationRequestSchema,
-  ImplementationResultSchema,
   type ImplementationResult,
+  ImplementationResultSchema,
 } from "../definitions/schemas.ts";
+import { definitionRef } from "../domain/definition/definition.ts";
+import type { Schema } from "../domain/definition/schema.ts";
+import { definitionId, type Outcome } from "../domain/shared.ts";
 import { createTestRuntime } from "./support/core-runtime.ts";
 
 const COMPOSED_WORKFLOW = definitionId("workflow.test-compose");
