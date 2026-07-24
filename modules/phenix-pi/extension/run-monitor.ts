@@ -377,7 +377,7 @@ function appendNode(
   }
 
   const childPrefix = root ? "" : contentPrefix;
-  node.children.forEach((child, index) =>
+  node.children.forEach((child, index) => {
     appendNode(
       lines,
       child,
@@ -386,8 +386,8 @@ function appendNode(
       theme,
       terminalFacts,
       expanded,
-    ),
-  );
+    );
+  });
 }
 
 function modelLabel(
