@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, open, readFile, readdir } from "node:fs/promises";
+import { mkdir, open, readFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -17,7 +17,8 @@ import type { DiagnosticLog, DiagnosticLogListener } from "../../ports/diagnosti
 const INLINE_STRING_BYTES = 256;
 const INLINE_VALUE_BYTES = 1_024;
 const MAX_INLINE_DEPTH = 5;
-const SECRET_KEY = /authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|secret|password|cookie/i;
+const SECRET_KEY =
+  /authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|secret|password|cookie/i;
 
 export class JsonlDiagnosticLog implements DiagnosticLog {
   private readonly stateDirectory: string;
@@ -56,17 +57,11 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
       } finally {
         await handle.close();
       }
-      for (const listener of this.listeners) {
-        try {
-          await listener(committed);
-        } catch {
-          // Diagnostic observers must not affect runtime execution.
-        }
-      }
     });
     this.tail = pending.catch(() => undefined);
     await pending;
     if (!committed) throw new Error("Diagnostic entry was not committed");
+    this.notify(committed);
     return committed;
   }
 
@@ -103,7 +98,9 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
 
   async export(rootRunId: RunId, minimum: DiagnosticSeverity = "trace"): Promise<string> {
     const entries = await this.entries(rootRunId, minimum);
-    return entries.length === 0 ? "" : `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`;
+    return entries.length === 0
+      ? ""
+      : `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`;
   }
 
   async resolve(rootRunId: RunId, reference: string): Promise<string> {
@@ -135,11 +132,12 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
       counts[entry.severity] += 1;
       collectReferences(entry.fields, artifacts);
     }
+    const latest = entries.at(-1);
     return {
       total: entries.length,
       artifacts: artifacts.size,
       counts,
-      ...(entries.at(-1) ? { latest: entries.at(-1) } : {}),
+      ...(latest ? { latest } : {}),
     };
   }
 
@@ -158,6 +156,16 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
 
   async drain(): Promise<void> {
     await this.tail;
+  }
+
+  private notify(entry: DiagnosticLogEntry): void {
+    for (const listener of this.listeners) {
+      try {
+        void Promise.resolve(listener(entry)).catch(() => undefined);
+      } catch {
+        // Diagnostic observers must not affect runtime execution.
+      }
+    }
   }
 
   private async materializeFields(
@@ -179,7 +187,12 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
     key: string,
     depth: number,
   ): Promise<unknown> {
-    if (value === null || value === undefined || typeof value === "boolean" || typeof value === "number") {
+    if (
+      value === null ||
+      value === undefined ||
+      typeof value === "boolean" ||
+      typeof value === "number"
+    ) {
       return value ?? null;
     }
     if (typeof value === "bigint") return String(value);
@@ -202,7 +215,9 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
     }
     if (Array.isArray(value)) {
       const materialized = await Promise.all(
-        value.map((item, index) => this.materializeValue(rootRunId, item, `${key}.${index}`, depth + 1)),
+        value.map((item, index) =>
+          this.materializeValue(rootRunId, item, `${key}.${index}`, depth + 1),
+        ),
       );
       return encodedBytes(materialized) <= INLINE_VALUE_BYTES
         ? materialized
@@ -210,10 +225,17 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
     }
     if (typeof value === "object") {
       const materialized: Record<string, unknown> = {};
-      for (const [nestedKey, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+      for (const [nestedKey, nestedValue] of Object.entries(
+        value as Record<string, unknown>,
+      )) {
         materialized[nestedKey] = SECRET_KEY.test(nestedKey)
           ? "[redacted]"
-          : await this.materializeValue(rootRunId, nestedValue, `${key}.${nestedKey}`, depth + 1);
+          : await this.materializeValue(
+              rootRunId,
+              nestedValue,
+              `${key}.${nestedKey}`,
+              depth + 1,
+            );
       }
       return encodedBytes(materialized) <= INLINE_VALUE_BYTES
         ? materialized
@@ -227,7 +249,10 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
     value: unknown,
     contentType: DiagnosticArtifactReference["contentType"],
   ): Promise<DiagnosticArtifactReference> {
-    const text = contentType === "text/plain" ? String(value) : JSON.stringify(safelySerializable(value), null, 2);
+    const text =
+      contentType === "text/plain"
+        ? String(value)
+        : JSON.stringify(safelySerializable(value), null, 2);
     const digest = createHash("sha256").update(text).digest("hex");
     const bytes = Buffer.byteLength(text, "utf8");
     const extension = contentType === "text/plain" ? "txt" : "json";
@@ -250,11 +275,7 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
 
   private rootDirectory(rootRunId: RunId): string {
     const digest = createHash("sha256").update(rootRunId).digest("hex").slice(0, 16);
-    return path.join(
-      this.stateDirectory,
-      "runs",
-      `${digest}-${safePrefix(rootRunId)}`,
-    );
+    return path.join(this.stateDirectory, "runs", `${digest}-${safePrefix(rootRunId)}`);
   }
 }
 
@@ -293,7 +314,9 @@ function collectReferences(value: unknown, output: Set<string>): void {
     for (const item of value) collectReferences(item, output);
     return;
   }
-  for (const item of Object.values(value as Record<string, unknown>)) collectReferences(item, output);
+  for (const item of Object.values(value as Record<string, unknown>)) {
+    collectReferences(item, output);
+  }
 }
 
 function safePrefix(value: string): string {
