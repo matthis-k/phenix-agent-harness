@@ -78,6 +78,7 @@ function requireWorkflow(id: string): WorkflowDefinition<unknown, unknown> {
   return definition;
 }
 
+export const difficultyEstimatorDefinition = requireAgent("agent.difficulty-estimator");
 export const scoutDefinition = requireAgent("agent.scout");
 export const plannerDefinition = requireAgent("agent.planner");
 export const architectDefinition = requireAgent("agent.architect");

@@ -8,6 +8,7 @@ import { resolveDefinitionSchema } from "../definitions/schema-registry.ts";
 import type { AgentDefinition } from "../domain/definition/definition.ts";
 
 const sources = [
+  ["difficulty-estimator", "agent.difficulty-estimator"],
   ["scout", "agent.scout"],
   ["planner", "agent.planner"],
   ["architect", "agent.architect"],
@@ -55,16 +56,26 @@ test("every bundled agent is loaded from its Markdown source", () => {
   }
 });
 
-test("agent contracts and effective permissions are explicit", () => {
+test("agent contracts, routes, and effective permissions are explicit", () => {
   const byId = new Map(
     agentDefinitions.map((definition) => [String(definition.id), definition] as const),
   );
+  const estimator = byId.get("agent.difficulty-estimator");
+  assert.ok(estimator);
+  assert.equal(estimator.input.id, "request.difficulty-assessment.v1");
+  assert.equal(estimator.output.id, "outcome.difficulty-assessment.v1");
+  assert.deepEqual(estimator.tools.allow, []);
+  assert.equal(estimator.modelRoutes?.D3.capability, "general");
+  assert.match(estimator.prompt.render(), /flowchart TD/);
+
   const scout = byId.get("agent.scout");
   assert.ok(scout);
   assert.equal(scout.input.id, "request.scout.v1");
   assert.equal(scout.output.id, "outcome.scout-report.v1");
   assert.deepEqual(scout.tools.allow, ["read", "grep", "find", "ls", "phenix_present"]);
   assert.equal(scout.context.maxBytes, 64_000);
+  assert.equal(scout.modelRoutes?.D0.capability, "fast");
+  assert.equal(scout.modelRoutes?.D3.capability, "reasoning");
   assert.match(scout.prompt.render(), /insufficient_permissions/);
 
   const implementer = byId.get("agent.implementer");
@@ -73,12 +84,25 @@ test("agent contracts and effective permissions are explicit", () => {
   assert.ok(implementer.tools.allow.includes("nix_shell"));
   assert.equal(implementer.input.id, "request.implementation.v1");
   assert.equal(implementer.output.id, "outcome.change-set.v1");
+  assert.equal(implementer.modelRoutes?.D0.capability, "code-fast");
+  assert.equal(implementer.modelRoutes?.D3.capability, "code-max");
 
   const attentionRouter = byId.get("agent.attention-router");
   assert.ok(attentionRouter);
   assert.equal(attentionRouter.input.id, "attention.routing-request");
   assert.equal(attentionRouter.output.id, "attention.routing-decision");
   assert.deepEqual(attentionRouter.tools.allow, []);
+});
+
+test("agent Markdown requires a complete difficulty model table", () => {
+  const incomplete = source("implementer").replace(
+    "| `D3` | `session` | `code-max` | `high` |\n",
+    "",
+  );
+  assert.throws(
+    () => compileAgentMarkdown(incomplete, { resolveSchema: resolveDefinitionSchema }),
+    /agent Models is missing D3/,
+  );
 });
 
 test("agent Markdown fails closed on unknown schemas", () => {

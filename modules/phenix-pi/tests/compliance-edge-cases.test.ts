@@ -248,7 +248,7 @@ test("a workflow with active attached children cannot be completed until they se
   const workflow = runtime.store.projection.requireRun(handle.id);
   assert.equal(workflow.state, "completed");
   const children = runtime.store.projection.childrenOf(handle.id);
-  assert.equal(children.length, 3, "implementation workflow creates three children");
+  assert.equal(children.length, 4, "implementation workflow creates four children");
   assert.ok(children.every((child) => child.state === "completed"));
   assert.ok(
     children.every((child) => child.parentId === handle.id),

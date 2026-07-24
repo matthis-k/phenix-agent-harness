@@ -1,5 +1,6 @@
 import type { Schema } from "../domain/definition/schema.ts";
 import { AttentionRoutingDecisionSchema, AttentionRoutingRequestSchema } from "./attention.ts";
+import { DifficultyAssessmentRequestSchema, DifficultyAssessmentSchema } from "./difficulty.ts";
 import { DispatchDecisionSchema, DispatchSelectionRequestSchema } from "./dispatch.ts";
 import {
   BaseResultSchema,
@@ -25,6 +26,8 @@ import { CheckResultsSchema, QAChecksRequestSchema } from "./workflow-schemas.ts
 
 export const definitionSchemas = [
   ObjectiveRequestSchema,
+  DifficultyAssessmentRequestSchema,
+  DifficultyAssessmentSchema,
   ScoutRequestSchema,
   ScoutReportSchema,
   PlanRequestSchema,

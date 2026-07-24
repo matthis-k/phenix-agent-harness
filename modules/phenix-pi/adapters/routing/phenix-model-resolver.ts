@@ -206,11 +206,15 @@ const ROUTES: Readonly<Record<string, Readonly<Record<Difficulty, CapabilityRout
 };
 
 export const defaultRoutingPolicy: RoutingPolicy = {
-  revision: "phenix-routing-v2",
+  revision: "phenix-routing-v3",
   route(context) {
     const role = roleFromDefinition(context.definitionId);
     const difficulty = context.difficulty ?? defaultDifficulty(role);
-    return (ROUTES[role] ?? ROUTES.base)[difficulty];
+    const routed = (ROUTES[role] ?? ROUTES.base)[difficulty];
+    return {
+      capability: context.capability ?? routed.capability,
+      thinking: routed.thinking,
+    };
   },
   candidates(modelSet, capability) {
     const pool = MODEL_SETS[modelSet].capabilityPools[capability];

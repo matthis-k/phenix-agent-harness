@@ -1,4 +1,5 @@
 export const BUNDLED_AGENT_SOURCE_NAMES = [
+  "difficulty-estimator",
   "scout",
   "planner",
   "architect",

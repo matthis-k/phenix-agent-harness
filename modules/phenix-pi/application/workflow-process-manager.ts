@@ -6,6 +6,7 @@ import type {
   WorkflowEdge,
   WorkflowNode,
 } from "../domain/definition/definition.ts";
+import { type Difficulty, isDifficulty } from "../domain/definition/model.ts";
 import type { DomainEvent, PendingDomainEvent } from "../domain/run/events.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
 import type { RunRecord } from "../domain/run/model.ts";
@@ -300,11 +301,13 @@ export class WorkflowProcessManager implements RunImplementation {
         return false;
       }
       const mappedInput = this.functions.mapping(node.input)(state.context);
+      const difficulty = this.resolveDifficulty(run, state, node);
       const handle = await this.invoker.start({
         parentId: run.id,
         definition: node.definition,
         input: mappedInput,
         wait: node.wait,
+        ...(difficulty ? { difficulty } : {}),
         causation: {
           workflowRunId: run.id,
           nodeId: node.id,
@@ -334,6 +337,19 @@ export class WorkflowProcessManager implements RunImplementation {
     await this.controller.transition(run.id, "running");
     await this.completeAndAdvance(run.id, state, node, activationId, child.outcome);
     return true;
+  }
+
+  private resolveDifficulty(
+    run: RunRecord,
+    state: WorkflowGraphState,
+    node: InvokeNode,
+  ): Difficulty | undefined {
+    if (!node.difficulty) return run.compiled.difficulty;
+    if (node.difficulty.kind === "fixed") return node.difficulty.value;
+    return difficultyFromResult(
+      state.context.latest.get(node.difficulty.nodeId),
+      node.difficulty.nodeId,
+    );
   }
 
   private async processJoin(
@@ -524,6 +540,22 @@ export class WorkflowProcessManager implements RunImplementation {
     timer.unref?.();
     this.timers.set(runId, timer);
   }
+}
+
+function difficultyFromResult(value: unknown, nodeId: string): Difficulty {
+  const outcome = value as Outcome<unknown> | undefined;
+  if (outcome?.status !== "success") {
+    throw new Error(`Difficulty source ${nodeId} has no successful result`);
+  }
+  const assessment = outcome.value;
+  if (typeof assessment !== "object" || assessment === null) {
+    throw new Error(`Difficulty source ${nodeId} did not return an assessment object`);
+  }
+  const difficulty = (assessment as { readonly difficulty?: unknown }).difficulty;
+  if (typeof difficulty !== "string" || !isDifficulty(difficulty)) {
+    throw new Error(`Difficulty source ${nodeId} returned an invalid difficulty`);
+  }
+  return difficulty;
 }
 
 function requireWorkflow(definition: AnyDefinition): WorkflowDefinition<unknown, unknown> {

@@ -2,7 +2,7 @@
 
 ```phenix-workflow
 id: workflow.qa
-description: Run deterministic project checks and independent repository, architecture, test, and security reviews, then synthesize.
+description: Run deterministic project checks and independent repository, architecture, test, and security reviews, then synthesize with deliberately capable review routes.
 input: request.objective.v1
 output: outcome.qa-report.v1
 entry: checks
@@ -62,6 +62,7 @@ input: qa.repo.input
 input-schema: request.scout.v1
 output-schema: outcome.scout-report.v1
 wait: await
+difficulty: D2
 ```
 
 ### tests
@@ -74,6 +75,7 @@ input: qa.tests.input
 input-schema: request.test.v1
 output-schema: outcome.test-report.v1
 wait: await
+difficulty: D2
 ```
 
 ### architecture
@@ -86,6 +88,7 @@ input: qa.arch.input
 input-schema: request.critic.v1
 output-schema: outcome.critic-report.v1
 wait: await
+difficulty: D3
 ```
 
 ### security
@@ -98,6 +101,7 @@ input: qa.security.input
 input-schema: request.critic.v1
 output-schema: outcome.critic-report.v1
 wait: await
+difficulty: D3
 ```
 
 ### join
@@ -116,6 +120,7 @@ input: qa.synthesize.input
 input-schema: request.qa-synthesis.v1
 output-schema: outcome.qa-report.v1
 wait: await
+difficulty: D3
 ```
 
 ### return

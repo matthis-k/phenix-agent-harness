@@ -85,6 +85,7 @@ export interface CompiledRunSpec {
   readonly tools: readonly string[];
   readonly contextPolicy?: ContextPolicy;
   readonly modelSelector?: ModelSelector;
+  readonly difficulty?: Difficulty;
   readonly limits: RunLimits;
   readonly capabilities: CapabilitySet;
   readonly invocation: {

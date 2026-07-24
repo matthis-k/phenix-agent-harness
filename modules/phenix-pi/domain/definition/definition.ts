@@ -1,5 +1,5 @@
 import type { DefinitionId } from "../shared.ts";
-import type { ModelSelector, ThinkingPolicy } from "./model.ts";
+import type { Difficulty, DifficultyModelRoutes, ModelSelector, ThinkingPolicy } from "./model.ts";
 import type { Schema } from "./schema.ts";
 
 export interface DefinitionRef<I = unknown, O = unknown> {
@@ -54,6 +54,7 @@ export interface PromptTemplate {
 export interface AgentDefinition<I, O> extends Definition<I, O> {
   readonly kind: "agent";
   readonly model: ModelSelector;
+  readonly modelRoutes?: DifficultyModelRoutes;
   readonly thinking: ThinkingPolicy;
   readonly prompt: PromptTemplate;
   readonly tools: ToolPolicy;
@@ -68,6 +69,10 @@ export type PureDecisionRef = string;
 export type PureConditionRef = string;
 export type LocalOperationRef = string;
 
+export type DifficultyBinding =
+  | { readonly kind: "fixed"; readonly value: Difficulty }
+  | { readonly kind: "result"; readonly nodeId: string };
+
 export interface InvokeNode {
   readonly kind: "invoke";
   readonly id: string;
@@ -75,6 +80,8 @@ export interface InvokeNode {
   readonly definition: DefinitionRef<unknown, unknown>;
   readonly input: ValueMappingRef;
   readonly wait: "await" | "background";
+  /** Omit to inherit the parent run difficulty. */
+  readonly difficulty?: DifficultyBinding;
   readonly capabilityOverride?: Partial<CapabilitySet>;
 }
 

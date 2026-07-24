@@ -1,5 +1,6 @@
 import { definitionId } from "../domain/shared.ts";
 
+export const AGENT_DIFFICULTY_ESTIMATOR = definitionId("agent.difficulty-estimator");
 export const AGENT_SCOUT = definitionId("agent.scout");
 export const AGENT_IMPLEMENTER = definitionId("agent.implementer");
 export const AGENT_PLANNER = definitionId("agent.planner");
@@ -24,9 +25,13 @@ export const ROOT_DISPATCH_DEFINITION_IDS = [
   WORKFLOW_QA,
 ] as const;
 
-export const ROOT_INTERNAL_DEFINITION_IDS = [AGENT_ATTENTION_ROUTER] as const;
+export const ROOT_INTERNAL_DEFINITION_IDS = [
+  AGENT_ATTENTION_ROUTER,
+  AGENT_DIFFICULTY_ESTIMATOR,
+] as const;
 
 export const ALL_DEFINITION_IDS = [
+  AGENT_DIFFICULTY_ESTIMATOR,
   AGENT_SCOUT,
   AGENT_IMPLEMENTER,
   AGENT_PLANNER,
@@ -39,6 +44,7 @@ export const ALL_DEFINITION_IDS = [
   AGENT_COORDINATOR,
   AGENT_BASE,
   AGENT_QA_SYNTHESIZER,
+  AGENT_ATTENTION_ROUTER,
   WORKFLOW_IMPLEMENT,
   WORKFLOW_QA,
 ] as const;

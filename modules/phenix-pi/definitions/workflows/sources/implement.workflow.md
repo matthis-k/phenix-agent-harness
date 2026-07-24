@@ -2,12 +2,12 @@
 
 ```phenix-workflow
 id: workflow.implement
-description: Plan, implement, independently verify, and perform at most two repair attempts.
+description: Estimate difficulty, use a trivial fast path when safe, otherwise plan, implement, independently verify, and perform bounded repairs.
 input: request.implementation.v1
 output: outcome.implementation-result.v1
-entry: plan
+entry: estimate
 timeout-ms: 2400000
-max-node-runs: 20
+max-node-runs: 24
 max-parallelism: 1
 ```
 
@@ -15,15 +15,34 @@ max-parallelism: 1
 
 ```mermaid
 flowchart LR
-    plan[Plan] --> implement[Implement]
-    implement --> verify[Verify]
+    estimate[Estimate difficulty] -->|D0| implement[Implement]
+    estimate -->|D1-D3| plan[Plan]
+    plan --> implement
+    implement -->|D0| trivial[Deterministic acceptance]
+    trivial --> trivialDecision{Accepted?}
+    trivialDecision -->|yes| return([Return result])
+    trivialDecision -->|no| fail([Fail])
+    implement -->|D1-D3| verify[Independent verification]
     verify --> accepted{Accepted?}
-    accepted -->|accepted| return([Return result])
+    accepted -->|accepted| return
     accepted -->|repair; at most 2| implement
-    accepted -->|exhausted| fail([Fail])
+    accepted -->|exhausted| fail
 ```
 
 ## States
+
+### estimate
+
+```phenix-state
+kind: invoke
+title: Estimate task difficulty
+run: agent.difficulty-estimator
+input: difficulty.input
+input-schema: request.difficulty-assessment.v1
+output-schema: outcome.difficulty-assessment.v1
+wait: await
+difficulty: D0
+```
 
 ### plan
 
@@ -35,6 +54,7 @@ input: implement.plan.input
 input-schema: request.plan.v1
 output-schema: outcome.plan.v1
 wait: await
+difficulty: result:estimate
 ```
 
 ### implement
@@ -47,6 +67,25 @@ input: implement.work.input
 input-schema: request.implementation.v1
 output-schema: outcome.change-set.v1
 wait: await
+difficulty: result:estimate
+```
+
+### trivial-accept
+
+```phenix-state
+kind: local
+title: Accept a trivial change only from deterministic evidence
+operation: local.noop
+input: implement.trivial-verification
+input-schema: outcome.verification.v1
+output-schema: outcome.verification.v1
+```
+
+### trivial-decision
+
+```phenix-state
+kind: decision
+decide: implement.trivial-acceptance
 ```
 
 ### verify
@@ -59,6 +98,7 @@ input: implement.verify.input
 input-schema: request.verification.v1
 output-schema: outcome.verification.v1
 wait: await
+difficulty: result:estimate
 ```
 
 ### accepted
@@ -87,8 +127,14 @@ reason: implement.failure
 
 | From | To | When | Max traversals |
 |---|---|---|---|
+| `estimate` | `implement` | `difficulty.D0` | |
+| `estimate` | `plan` | `difficulty.at-least-D1` | |
 | `plan` | `implement` | | |
-| `implement` | `verify` | | `3` |
+| `implement` | `trivial-accept` | `difficulty.D0` | |
+| `trivial-accept` | `trivial-decision` | | |
+| `trivial-decision` | `return` | `decision.accepted` | |
+| `trivial-decision` | `fail` | `decision.exhausted` | |
+| `implement` | `verify` | `difficulty.at-least-D1` | `3` |
 | `verify` | `accepted` | | `3` |
 | `accepted` | `return` | `decision.accepted` | |
 | `accepted` | `implement` | `decision.repair` | `2` |

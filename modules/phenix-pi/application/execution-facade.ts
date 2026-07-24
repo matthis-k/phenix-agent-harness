@@ -5,11 +5,12 @@ import {
   definitionRef,
   type WorkflowDefinition,
 } from "../domain/definition/definition.ts";
-import type { ConcreteModelRef, ResolvedModel } from "../domain/definition/model.ts";
+import type { ConcreteModelRef, Difficulty, ResolvedModel } from "../domain/definition/model.ts";
 import type { PendingDomainEvent } from "../domain/run/events.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
 import {
   type CompiledRunSpec,
+  DEFAULT_SESSION_PROFILE,
   ROOT_CAPABILITIES,
   ROOT_DEFINITION_ID,
   type RootRunInput,
@@ -53,6 +54,7 @@ export interface RunImplementation {
 }
 
 export interface InternalStartRun<I, O> extends StartRun<I, O> {
+  readonly difficulty?: Difficulty;
   readonly causation?: WorkflowCausation;
   readonly trustedWorkflowInvocation?: boolean;
   readonly retryOf?: RunId;
@@ -232,6 +234,7 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
       input: target.input,
       wait: options.wait ?? "await",
       retryOf: target.id,
+      ...(target.compiled.difficulty ? { difficulty: target.compiled.difficulty } : {}),
       ...(retryOverrides ? { retryOverrides } : {}),
     });
   }
@@ -249,6 +252,12 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
       );
     }
     const rootRunId = this.store.projection.rootOf(parent.id);
+    const root = this.store.projection.requireRun(rootRunId);
+    const difficulty =
+      request.difficulty ??
+      parent.compiled.difficulty ??
+      root.profile?.difficulty ??
+      DEFAULT_SESSION_PROFILE.difficulty;
     const definition = this.catalog.get(request.definition) as AnyDefinition;
     const validation = definition.input.validate(request.input);
     if (!validation.ok) {
@@ -265,7 +274,7 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
     let modelFailure: Failure | undefined;
     if (definition.kind === "agent") {
       try {
-        resolvedModel = await this.resolveModel(definition, parent.definitionId);
+        resolvedModel = await this.resolveModel(definition, parent.definitionId, difficulty);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         modelFailure = {
@@ -300,6 +309,7 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
     const compiled = this.compile(
       definition,
       validation.value,
+      difficulty,
       capabilities,
       request.wait,
       request.causation,
@@ -936,6 +946,7 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
   private compile(
     definition: AnyDefinition,
     input: unknown,
+    difficulty: Difficulty,
     capabilities: CapabilitySet,
     wait: "await" | "background",
     causation?: WorkflowCausation,
@@ -948,13 +959,15 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
       ...(retryOf ? { retryOf } : {}),
     };
     if (definition.kind === "agent") {
+      const route = definition.modelRoutes?.[difficulty];
       return {
         definitionId: definition.id,
         input,
         outputSchemaId: definition.output.id,
         tools: applyRetryTools(definition.tools.allow, retryOverrides?.addTools),
         contextPolicy: definition.context,
-        modelSelector: definition.model,
+        modelSelector: route?.model ?? definition.model,
+        difficulty,
         limits: applyRetryLimits(definition.limits, retryOverrides?.limits),
         capabilities,
         invocation,
@@ -965,6 +978,7 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
       input,
       outputSchemaId: definition.output.id,
       tools: [],
+      difficulty,
       limits: definition.limits,
       capabilities,
       invocation,
@@ -974,11 +988,15 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
   private resolveModel(
     definition: AgentDefinition<unknown, unknown>,
     parentDefinitionId: string,
+    difficulty: Difficulty,
   ): Promise<ResolvedModel> {
-    return this.models.resolve(definition.model, {
+    const route = definition.modelRoutes?.[difficulty];
+    return this.models.resolve(route?.model ?? definition.model, {
       definitionId: definition.id,
       parentDefinitionId,
-      thinking: definition.thinking,
+      thinking: route?.thinking ?? definition.thinking,
+      difficulty,
+      ...(route ? { capability: route.capability } : {}),
     });
   }
 }
