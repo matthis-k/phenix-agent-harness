@@ -1,5 +1,5 @@
-import type { DefinitionId, RunId } from "../shared.ts";
 import type { RunState } from "../run/model.ts";
+import type { DefinitionId, RunId } from "../shared.ts";
 
 export type AttentionId = string & { readonly __brand: "AttentionId" };
 export type AttentionDelivery = "urgent" | "next_turn";
