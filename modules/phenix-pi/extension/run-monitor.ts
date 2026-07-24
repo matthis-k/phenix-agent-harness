@@ -187,8 +187,7 @@ function appendNode(
     const target = node.activity.target
       ? `${color(theme, "dim", " · ")}${color(theme, "muted", truncate(node.activity.target, 72))}`
       : "";
-    const reported =
-      node.activity.source === "reported" ? color(theme, "warning", "! ") : "";
+    const reported = node.activity.source === "reported" ? color(theme, "warning", "! ") : "";
     lines.push(
       `${color(theme, "dim", contentPrefix)}${reported}${phase(
         theme,
@@ -207,11 +206,7 @@ function appendNode(
   });
 }
 
-function formatFact(
-  factItem: RunFact,
-  compact = true,
-  theme?: ObservabilityTheme,
-): string {
+function formatFact(factItem: RunFact, compact = true, theme?: ObservabilityTheme): string {
   const reliabilitySymbol =
     factItem.reliability === "observed" ? "✓" : factItem.reliability === "derived" ? "≈" : "!";
   const time =
