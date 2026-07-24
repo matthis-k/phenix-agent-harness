@@ -46,10 +46,7 @@ class FakeRouter implements AttentionRouter {
     this.decide = decide;
   }
 
-  async route(
-    _rootRunId: RunId,
-    request: AttentionRoutingRequest,
-  ): Promise<AttentionRouterResult> {
+  async route(_rootRunId: RunId, request: AttentionRoutingRequest): Promise<AttentionRouterResult> {
     this.requests.push(request);
     return { decision: this.decide(request) };
   }
@@ -74,11 +71,7 @@ class FakeAgentImplementation implements RunImplementation {
     if (this.autoRun) await this.makeRunning(command.runId);
   }
 
-  async send(
-    runId: RunId,
-    message: string,
-    delivery: "normal" | "nextTurn",
-  ): Promise<void> {
+  async send(runId: RunId, message: string, delivery: "normal" | "nextTurn"): Promise<void> {
     this.sent.push({ runId, message, delivery });
   }
 
@@ -230,10 +223,7 @@ test("attention is durably deferred until a starting child binds its session", a
   const delivered = harness.store.projection.events.find(
     (event) => event.type === "attention.delivered",
   );
-  assert.equal(
-    (delivered?.data as { readonly deferred?: boolean } | undefined)?.deferred,
-    true,
-  );
+  assert.equal((delivered?.data as { readonly deferred?: boolean } | undefined)?.deferred, true);
   assert.equal(harness.agents.sent.length, 1);
   await harness.attention.shutdown();
 });
