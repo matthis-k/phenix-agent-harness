@@ -30,6 +30,8 @@ kind: invoke
 title: Run the complete QA workflow
 run: workflow.qa
 input: input.identity
+input-schema: request.objective.v1
+output-schema: outcome.qa-report.v1
 wait: await
 ```
 
@@ -47,6 +49,8 @@ kind: invoke
 title: Repair actionable QA findings
 run: workflow.implement
 input: qa-fix.implement.input
+input-schema: request.implementation.v1
+output-schema: outcome.implementation-result.v1
 wait: await
 ```
 
@@ -55,6 +59,7 @@ wait: await
 ```phenix-state
 kind: return
 output: qa-fix.output
+output-schema: outcome.final-report.v1
 ```
 
 ## Transitions
