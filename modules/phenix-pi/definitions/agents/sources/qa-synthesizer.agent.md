@@ -10,6 +10,15 @@ thinking: route
 persistence: memory
 ```
 
+## Models
+
+| Difficulty | Model | Capability | Thinking |
+|---|---|---|---|
+| `D0` | `session` | `review` | `medium` |
+| `D1` | `session` | `review` | `high` |
+| `D2` | `session` | `review-max` | `high` |
+| `D3` | `session` | `review-max` | `xhigh` |
+
 ## Tools
 
 ```phenix-tools
