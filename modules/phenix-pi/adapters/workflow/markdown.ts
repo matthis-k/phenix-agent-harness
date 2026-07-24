@@ -269,7 +269,10 @@ function assertKnownFields(
   }
 }
 
-function requireColumns(indexes: ReadonlyMap<string, number>, required: readonly string[]): void {
+function requireColumns(
+  indexes: ReadonlyMap<string, number>,
+  required: readonly string[],
+): void {
   for (const column of required) {
     if (!indexes.has(column)) throw new Error(`Transitions table is missing ${column}`);
   }
