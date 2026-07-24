@@ -44,7 +44,16 @@ const CHILD_FIELDS = [
   "may-cancel-children",
 ] as const;
 const LIMIT_FIELDS = ["timeout-ms", "max-turns", "max-tool-calls", "max-repair-attempts"] as const;
-const THINKING_POLICIES = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "route"] as const;
+const THINKING_POLICIES = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "route",
+] as const;
 
 export function compileAgentMarkdown(
   source: string,
@@ -80,18 +89,16 @@ export function compileAgentMarkdown(
     prompt: { render: () => prompt },
     tools: { allow: markdownList(toolFields, "allow") },
     context: {
-      projectFiles: markdownEnum(
-        contextFields,
-        "project-files",
-        "agent context",
-        ["inherit", "none", "selected"] as const,
-      ),
-      parentConversation: markdownEnum(
-        contextFields,
-        "parent-conversation",
-        "agent context",
-        ["none", "summary", "selected-messages"] as const,
-      ),
+      projectFiles: markdownEnum(contextFields, "project-files", "agent context", [
+        "inherit",
+        "none",
+        "selected",
+      ] as const),
+      parentConversation: markdownEnum(contextFields, "parent-conversation", "agent context", [
+        "none",
+        "summary",
+        "selected-messages",
+      ] as const),
       artifacts: markdownList(contextFields, "artifacts"),
       maxBytes: markdownInteger(contextFields, "max-bytes", "agent context", 0),
     },
@@ -100,34 +107,22 @@ export function compileAgentMarkdown(
       maxDepth: markdownInteger(childFields, "max-depth", "agent children", 0),
       mayDetach: markdownBoolean(childFields, "may-detach", "agent children"),
       maySend: markdownBoolean(childFields, "may-send", "agent children"),
-      mayCancelChildren: markdownBoolean(
-        childFields,
-        "may-cancel-children",
-        "agent children",
-      ),
+      mayCancelChildren: markdownBoolean(childFields, "may-cancel-children", "agent children"),
     },
     limits: {
       timeoutMs: markdownInteger(limitFields, "timeout-ms", "agent limits", 1),
       ...(maxTurns === undefined ? {} : { maxTurns }),
       ...(maxToolCalls === undefined ? {} : { maxToolCalls }),
-      maxRepairAttempts: markdownInteger(
-        limitFields,
-        "max-repair-attempts",
-        "agent limits",
-        0,
-      ),
+      maxRepairAttempts: markdownInteger(limitFields, "max-repair-attempts", "agent limits", 0),
     },
-    persistence: markdownEnum(
-      fields,
-      "persistence",
-      owner,
-      ["memory", "file"] as const,
-    ),
+    persistence: markdownEnum(fields, "persistence", owner, ["memory", "file"] as const),
   };
 }
 
 function sectionFields(source: string, heading: string, fence: string) {
-  return parseMarkdownFields(requiredMarkdownFence(requiredMarkdownSection(source, heading), fence));
+  return parseMarkdownFields(
+    requiredMarkdownFence(requiredMarkdownSection(source, heading), fence),
+  );
 }
 
 function parseModel(value: string): ModelSelector {
