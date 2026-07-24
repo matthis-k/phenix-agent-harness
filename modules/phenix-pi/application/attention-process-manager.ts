@@ -1,9 +1,9 @@
 import type {
   AttentionCandidate,
   AttentionDeliveredData,
+  AttentionDeliveryDeferredData,
   AttentionDeliveryFailedData,
   AttentionDeliveryOutcome,
-  AttentionDeliveryDeferredData,
   AttentionEnvelope,
   AttentionId,
   AttentionResult,
@@ -28,6 +28,7 @@ import { KeyedSerialExecutor } from "./keyed-serial-executor.ts";
 const MAX_MESSAGE_LENGTH = 4_000;
 const MAX_ROUTING_CANDIDATES = 32;
 const MAX_TARGETS = 8;
+const MUTATION_TOOLS = new Set(["edit", "write", "bash"]);
 
 export interface AttentionRouterResult {
   readonly decision: AttentionRoutingDecision;
@@ -39,7 +40,11 @@ export interface AttentionRouter {
 }
 
 export class AgentAttentionRouter implements AttentionRouter {
-  constructor(private readonly execution: ExecutionFacade) {}
+  private readonly execution: ExecutionFacade;
+
+  constructor(execution: ExecutionFacade) {
+    this.execution = execution;
+  }
 
   async route(
     rootRunId: RunId,
@@ -81,7 +86,7 @@ export class AttentionProcessManager implements AttentionFacade {
   private readonly notifyRoot?: (message: string) => void | Promise<void>;
   private readonly serial = new KeyedSerialExecutor<RunId>();
   private readonly pendingByRun = new Map<RunId, Map<AttentionId, PendingDelivery>>();
-  private readonly inFlight = new Set<Promise<unknown>>();
+  private readonly inFlight = new Set<Promise<void>>();
   private readonly unsubscribe: () => void;
   private closed = false;
 
@@ -107,6 +112,7 @@ export class AttentionProcessManager implements AttentionFacade {
   }
 
   submit(request: AttentionSubmitRequest): Promise<AttentionResult> {
+    if (this.closed) return Promise.reject(new Error("Attention runtime is shut down"));
     return this.serial.run(request.rootRunId, () => this.submitSerial(request));
   }
 
@@ -144,11 +150,9 @@ export class AttentionProcessManager implements AttentionFacade {
       if (!run || isTerminalRunState(run.state) || run.state === "completing") continue;
       this.enqueue(pending);
     }
-    await Promise.all(
-      [...this.pendingByRun.keys()].map((runId) =>
-        this.serial.run(rootRunId, () => this.flushRun(runId)),
-      ),
-    );
+    for (const runId of this.pendingByRun.keys()) {
+      await this.serial.run(rootRunId, () => this.flushRun(runId));
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -216,7 +220,14 @@ export class AttentionProcessManager implements AttentionFacade {
 
     const deliveries: AttentionDeliveryOutcome[] = [];
     for (const target of targets) {
-      deliveries.push(await this.deliver({ attentionId, rootRunId: request.rootRunId, message, target }));
+      deliveries.push(
+        await this.deliver({
+          attentionId,
+          rootRunId: request.rootRunId,
+          message,
+          target,
+        }),
+      );
     }
     await this.notifyRoot?.(formatRoutingNotice(targets, deliveries));
 
@@ -230,7 +241,7 @@ export class AttentionProcessManager implements AttentionFacade {
   }
 
   private candidates(rootRunId: RunId): readonly AttentionCandidate[] {
-    const candidates = [...this.store.projection.runs.values()]
+    const runs = [...this.store.projection.runs.values()]
       .filter(
         (run) =>
           run.kind === "agent" &&
@@ -246,21 +257,23 @@ export class AttentionProcessManager implements AttentionFacade {
       )
       .slice(0, MAX_ROUTING_CANDIDATES);
 
-    return candidates.map((run) => ({
-      runId: run.id,
-      ...(run.parentId ? { parentRunId: run.parentId } : {}),
-      definitionId: run.definitionId,
-      state: run.state,
-      ...(objectiveFor(run) ? { objective: objectiveFor(run) } : {}),
-      ...(activityFor(run, this.store) ? { activity: activityFor(run, this.store) } : {}),
-      activeChildRunIds: this.store.projection
-        .childrenOf(run.id)
-        .filter((child) => !isTerminalRunState(child.state))
-        .map((child) => child.id),
-      mutationCapable: run.compiled.tools.some((tool) =>
-        new Set(["edit", "write", "bash"]).has(tool),
-      ),
-    }));
+    return runs.map((run) => {
+      const objective = objectiveFor(run);
+      const activity = activityFor(run, this.store);
+      return {
+        runId: run.id,
+        ...(run.parentId ? { parentRunId: run.parentId } : {}),
+        definitionId: run.definitionId,
+        state: run.state,
+        ...(objective ? { objective } : {}),
+        ...(activity ? { activity } : {}),
+        activeChildRunIds: this.store.projection
+          .childrenOf(run.id)
+          .filter((child) => !isTerminalRunState(child.state))
+          .map((child) => child.id),
+        mutationCapable: run.compiled.tools.some((tool) => MUTATION_TOOLS.has(tool)),
+      };
+    });
   }
 
   private explicitTargets(
@@ -268,13 +281,17 @@ export class AttentionProcessManager implements AttentionFacade {
     message: string,
     candidates: readonly AttentionCandidate[],
   ): readonly AttentionTarget[] {
-    const allowed = new Map(candidates.map((candidate) => [candidate.runId, candidate]));
-    const selected = requested ?? candidates.filter((candidate) => message.includes(candidate.runId)).map((candidate) => candidate.runId);
+    const allowed = new Set(candidates.map((candidate) => candidate.runId));
+    const selected =
+      requested ??
+      candidates
+        .filter((candidate) => message.includes(candidate.runId))
+        .map((candidate) => candidate.runId);
     const unique = [...new Set(selected)].slice(0, MAX_TARGETS);
     if (requested) {
       for (const runId of unique) {
         if (!allowed.has(runId)) {
-          throw new Error(`Attention target ${runId} is not an active agent in ${candidates[0]?.runId ?? "this root"}`);
+          throw new Error(`Attention target ${runId} is not an active agent`);
         }
       }
     }
@@ -316,17 +333,25 @@ export class AttentionProcessManager implements AttentionFacade {
     if (run.state === "created" || run.state === "starting") {
       return this.deferDelivery(pending, `Target is ${run.state}`);
     }
+    return this.sendToRun(pending, run, false);
+  }
 
+  private async sendToRun(
+    pending: PendingDelivery,
+    run: RunRecord,
+    deferred: boolean,
+  ): Promise<AttentionDeliveryOutcome> {
     try {
       if (pending.target.delivery === "next_turn") {
         await this.execution.notify(run.id, pending.message);
       } else {
         await this.execution.send(run.id, pending.message);
       }
+      this.removePending(run.id, pending.attentionId);
       await this.commit(pending.rootRunId, "attention.delivered", {
         attentionId: pending.attentionId,
         target: pending.target,
-        deferred: false,
+        deferred,
       } satisfies AttentionDeliveredData);
       await this.notifyParent(run, pending);
       return {
@@ -388,25 +413,7 @@ export class AttentionProcessManager implements AttentionFacade {
         continue;
       }
       if (run.state === "created" || run.state === "starting" || !run.pi) continue;
-      try {
-        if (pending.target.delivery === "next_turn") {
-          await this.execution.notify(run.id, pending.message);
-        } else {
-          await this.execution.send(run.id, pending.message);
-        }
-        this.removePending(runId, pending.attentionId);
-        await this.commit(pending.rootRunId, "attention.delivered", {
-          attentionId: pending.attentionId,
-          target: pending.target,
-          deferred: true,
-        } satisfies AttentionDeliveredData);
-        await this.notifyParent(run, pending);
-      } catch (error) {
-        const latest = this.store.projection.runs.get(runId);
-        if (!latest || !this.isEligibleTarget(latest, pending.rootRunId)) {
-          await this.failDelivery(pending, errorMessage(error));
-        }
-      }
+      await this.sendToRun(pending, run, true);
     }
   }
 
@@ -434,8 +441,6 @@ export class AttentionProcessManager implements AttentionFacade {
           rootRunId: event.rootRunId,
           message: text,
           source: { kind: "user" },
-        }).catch(async (error: unknown) => {
-          await this.notifyRoot?.(`Phenix attention routing failed: ${errorMessage(error)}`);
         }),
       );
       return;
@@ -452,9 +457,19 @@ export class AttentionProcessManager implements AttentionFacade {
     }
   }
 
-  private launch(promise: Promise<unknown>): void {
-    this.inFlight.add(promise);
-    void promise.finally(() => this.inFlight.delete(promise));
+  private launch(operation: Promise<unknown>): void {
+    const tracked = operation.then(
+      () => undefined,
+      async (error: unknown) => {
+        try {
+          await this.notifyRoot?.(`Phenix attention routing failed: ${errorMessage(error)}`);
+        } catch {
+          // Attention failure reporting must not create an unhandled rejection.
+        }
+      },
+    );
+    this.inFlight.add(tracked);
+    void tracked.then(() => this.inFlight.delete(tracked));
   }
 
   private enqueue(pending: PendingDelivery): void {
