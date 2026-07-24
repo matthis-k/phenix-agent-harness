@@ -22,6 +22,35 @@ import {
 const WIDGET_KEY = "phenix-live-runs";
 const MAX_FACT_LINES = 24;
 const DASHBOARD_FACT_LINES = 5;
+const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]);
+const TERMINAL_FACT_KINDS = new Set(["child-finished", "error-observed", "run-state-changed"]);
+const STATE_SYMBOLS: Readonly<Record<string, string>> = {
+  completed: "✓",
+  failed: "✗",
+  orphaned: "✗",
+  cancelled: "−",
+  waiting: "○",
+};
+const RELIABILITY_SYMBOLS: Readonly<Record<RunFact["reliability"], string>> = {
+  observed: "✓",
+  derived: "≈",
+  reported: "!",
+};
+const THINKING_TONES: Readonly<Record<PiThinkingLevel, Parameters<typeof color>[1]>> = {
+  off: "muted",
+  minimal: "muted",
+  low: "success",
+  medium: "accent",
+  high: "warning",
+  xhigh: "error",
+  max: "error",
+};
+const DIFFICULTY_THINKING: Readonly<Record<SessionProfile["difficulty"], PiThinkingLevel>> = {
+  D0: "minimal",
+  D1: "low",
+  D2: "high",
+  D3: "xhigh",
+};
 
 export type RunMonitorMode = "hidden" | "status" | "facts";
 
@@ -131,25 +160,16 @@ export class RunMonitor {
     if (mode === "facts") {
       return JSON.stringify(await this.runtime.queries.facts(this.rootRunId), null, 2);
     }
-    const [tree, facts, profile, diagnostics] = await Promise.all([
-      this.runtime.queries.runTree(this.rootRunId),
-      this.runtime.queries.facts(this.rootRunId),
-      this.runtime.profiles.current(this.rootRunId),
-      this.runtime.diagnostics.summary(this.rootRunId),
-    ]);
+    const data = await this.dashboardData();
     return JSON.stringify(
       {
-        sequence: this.runtime.sequence(this.rootRunId),
-        profile,
-        tree,
-        facts: selectRecentFacts(facts),
-        diagnostics,
-        storage: {
-          ledger: this.runtime.ledgerPath(this.rootRunId) ?? "in-memory",
-          logs: this.runtime.diagnostics.pathFor(this.rootRunId) ?? "in-memory",
-          artifacts: this.runtime.diagnostics.artifactDirectoryFor(this.rootRunId) ?? "in-memory",
-        },
-        integrations: this.options.integrations ?? "unknown",
+        sequence: data.sequence,
+        profile: data.profile,
+        tree: data.tree,
+        facts: selectRecentFacts(data.facts),
+        diagnostics: data.diagnostics,
+        storage: { ledger: data.ledger, logs: data.logs, artifacts: data.artifacts },
+        integrations: data.integrations,
       },
       null,
       2,
@@ -177,28 +197,29 @@ export class RunMonitor {
       const facts = await this.runtime.queries.facts(this.rootRunId, MAX_FACT_LINES);
       return renderFacts(facts, this.runtime.sequence(this.rootRunId), theme);
     }
+    return renderDashboard(await this.dashboardData(), theme);
+  }
+
+  private async dashboardData(): Promise<DashboardData> {
     const [tree, facts, profile, diagnostics] = await Promise.all([
       this.runtime.queries.runTree(this.rootRunId),
       this.runtime.queries.facts(this.rootRunId),
       this.runtime.profiles.current(this.rootRunId),
       this.runtime.diagnostics.summary(this.rootRunId),
     ]);
-    return renderDashboard(
-      {
-        tree,
-        facts,
-        sequence: this.runtime.sequence(this.rootRunId),
-        profile,
-        diagnostics,
-        ledger: this.runtime.ledgerPath(this.rootRunId) ?? "in-memory",
-        logs: this.runtime.diagnostics.pathFor(this.rootRunId) ?? "in-memory",
-        artifacts: this.runtime.diagnostics.artifactDirectoryFor(this.rootRunId) ?? "in-memory",
-        integrations: this.options.integrations ?? "unknown",
-        integrationsFailed: this.options.integrationsFailed ?? false,
-        expanded: this.expanded,
-      },
-      theme,
-    );
+    return {
+      tree,
+      facts,
+      sequence: this.runtime.sequence(this.rootRunId),
+      profile,
+      diagnostics,
+      ledger: this.runtime.ledgerPath(this.rootRunId) ?? "in-memory",
+      logs: this.runtime.diagnostics.pathFor(this.rootRunId) ?? "in-memory",
+      artifacts: this.runtime.diagnostics.artifactDirectoryFor(this.rootRunId) ?? "in-memory",
+      integrations: this.options.integrations ?? "unknown",
+      integrationsFailed: this.options.integrationsFailed ?? false,
+      expanded: this.expanded,
+    };
   }
 }
 
@@ -219,7 +240,7 @@ export function renderDashboard(data: DashboardData, theme?: ObservabilityTheme)
 
   lines.push(heading(theme, "Session"));
   lines.push(
-    `  ${color(theme, "dim", "Profile")}       ${strong(theme, data.profile.agent)}${color(theme, "dim", " · ")}${color(theme, "accent", data.profile.modelSet)}${color(theme, "dim", " · ")}${thinking(theme, difficultyThinking(data.profile.difficulty), data.profile.difficulty)}`,
+    `  ${color(theme, "dim", "Profile")}       ${strong(theme, data.profile.agent)}${color(theme, "dim", " · ")}${color(theme, "accent", data.profile.modelSet)}${color(theme, "dim", " · ")}${thinking(theme, DIFFICULTY_THINKING[data.profile.difficulty], data.profile.difficulty)}`,
   );
   lines.push(
     `  ${color(theme, "dim", "Integrations")}  ${color(theme, data.integrationsFailed ? "error" : "success", data.integrations)}`,
@@ -325,11 +346,10 @@ function appendNode(
   const label = strong(theme, definitionLabel(String(node.run.definitionId)));
   const stateLabel = state(theme, node.run.state, `[${node.run.state}]`);
   const collapsed = node.run.kind === "workflow" && node.run.state === "completed" && !expanded;
-  const childStats = descendantStats(node);
   const terminal = terminalFacts.get(node.run.id);
   const duration = terminal ? formatDuration(node.run.requestedAt, terminal.timestamp) : undefined;
   const suffix = collapsed
-    ? `${color(theme, "dim", " · ")}${color(theme, "muted", `${childStats.total} children`)}${duration ? `${color(theme, "dim", " · ")}${color(theme, "success", duration)}` : ""}`
+    ? `${color(theme, "dim", " · ")}${color(theme, "muted", `${descendantCount(node)} children`)}${duration ? `${color(theme, "dim", " · ")}${color(theme, "success", duration)}` : ""}`
     : "";
   lines.push(
     `${color(theme, "dim", `${prefix}${branch}`)}${symbol} ${label} ${stateLabel}${suffix}`,
@@ -337,16 +357,14 @@ function appendNode(
   const contentPrefix = root ? "   " : `${prefix}${last ? "   " : "│  "}`;
   if (collapsed) return;
 
-  if (node.run.resolvedModel) {
-    const model = node.run.resolvedModel;
+  const model = modelLabel(node, root);
+  if (model) {
+    const thinkingLabel = model.thinking
+      ? `${color(theme, "dim", " · ")}${thinking(theme, model.thinking, model.thinking)}`
+      : "";
     lines.push(
-      `${color(theme, "dim", contentPrefix)}${color(theme, "accent", `${model.concrete.provider}/${model.concrete.model}`)}${color(theme, "dim", " · ")}${thinking(theme, model.thinking, model.thinking)}`,
+      `${color(theme, "dim", contentPrefix)}${color(theme, "accent", model.text)}${thinkingLabel}`,
     );
-  } else if (root && node.run.observedModel) {
-    const observed = node.run.observedModel;
-    const model =
-      observed.kind === "session" ? "session" : `${observed.provider}/${observed.model}`;
-    lines.push(`${color(theme, "dim", contentPrefix)}${color(theme, "accent", model)}`);
   }
   if (node.activity) {
     const target = node.activity.target
@@ -354,19 +372,12 @@ function appendNode(
       : "";
     const reported = node.activity.source === "reported" ? color(theme, "warning", "! ") : "";
     lines.push(
-      `${color(theme, "dim", contentPrefix)}${reported}${phase(
-        theme,
-        node.activity.phase,
-        node.activity.phase,
-      )}${color(theme, "dim", " · ")}${color(
-        theme,
-        "text",
-        truncate(node.activity.summary, 72),
-      )}${target}`,
+      `${color(theme, "dim", contentPrefix)}${reported}${phase(theme, node.activity.phase, node.activity.phase)}${color(theme, "dim", " · ")}${color(theme, "text", truncate(node.activity.summary, 72))}${target}`,
     );
   }
+
   const childPrefix = root ? "" : contentPrefix;
-  node.children.forEach((child, index) => {
+  node.children.forEach((child, index) =>
     appendNode(
       lines,
       child,
@@ -375,8 +386,26 @@ function appendNode(
       theme,
       terminalFacts,
       expanded,
-    );
-  });
+    ),
+  );
+}
+
+function modelLabel(
+  node: RunTreeNode,
+  root: boolean,
+): { readonly text: string; readonly thinking?: PiThinkingLevel } | undefined {
+  if (node.run.resolvedModel) {
+    const model = node.run.resolvedModel;
+    return {
+      text: `${model.concrete.provider}/${model.concrete.model}`,
+      thinking: model.thinking,
+    };
+  }
+  if (!root || !node.run.observedModel) return undefined;
+  const observed = node.run.observedModel;
+  return {
+    text: observed.kind === "session" ? "session" : `${observed.provider}/${observed.model}`,
+  };
 }
 
 function formatFact(
@@ -385,8 +414,6 @@ function formatFact(
   theme?: ObservabilityTheme,
   role?: string,
 ): string {
-  const reliabilitySymbol =
-    factItem.reliability === "observed" ? "✓" : factItem.reliability === "derived" ? "≈" : "!";
   const time =
     factItem.timestamp.length >= 19 ? factItem.timestamp.slice(11, 19) : factItem.timestamp;
   const run = role ?? shortRunId(factItem.runId);
@@ -401,7 +428,7 @@ function formatFact(
   return `${color(theme, "dim", time)} ${reliability(
     theme,
     factItem.reliability,
-    reliabilitySymbol,
+    RELIABILITY_SYMBOLS[factItem.reliability],
   )} ${color(theme, "muted", run)}${color(theme, "dim", " · ")}${fact(
     theme,
     factItem.kind,
@@ -424,13 +451,9 @@ function selectRecentFacts(facts: readonly RunFact[]): readonly RunFact[] {
 }
 
 function terminalFactMap(facts: readonly RunFact[]): ReadonlyMap<RunId, RunFact> {
-  const output = new Map<RunId, RunFact>();
-  for (const item of facts) {
-    if (["child-finished", "error-observed", "run-state-changed"].includes(item.kind)) {
-      output.set(item.runId, item);
-    }
-  }
-  return output;
+  return new Map(
+    facts.filter((item) => TERMINAL_FACT_KINDS.has(item.kind)).map((item) => [item.runId, item]),
+  );
 }
 
 function collectRoles(node: RunTreeNode, output: Map<RunId, string>): void {
@@ -445,18 +468,8 @@ function countNodes(node: RunTreeNode, predicate: (node: RunTreeNode) => boolean
   );
 }
 
-function descendantStats(node: RunTreeNode): { readonly total: number; readonly failed: number } {
-  let total = 0;
-  let failed = 0;
-  const visit = (current: RunTreeNode): void => {
-    for (const child of current.children) {
-      total += 1;
-      if (child.run.state === "failed" || child.run.state === "orphaned") failed += 1;
-      visit(child);
-    }
-  };
-  visit(node);
-  return { total, failed };
+function descendantCount(node: RunTreeNode): number {
+  return node.children.reduce((total, child) => total + 1 + descendantCount(child), 0);
 }
 
 function definitionLabel(value: string): string {
@@ -470,19 +483,11 @@ function shortRunId(value: RunId): string {
 }
 
 function stateSymbol(value: string): string {
-  return value === "completed"
-    ? "✓"
-    : value === "failed" || value === "orphaned"
-      ? "✗"
-      : value === "cancelled"
-        ? "−"
-        : value === "waiting"
-          ? "○"
-          : "●";
+  return STATE_SYMBOLS[value] ?? "●";
 }
 
 function isTerminal(value: string): boolean {
-  return ["completed", "failed", "cancelled", "orphaned"].includes(value);
+  return TERMINAL_STATES.has(value);
 }
 
 function thinking(
@@ -490,27 +495,7 @@ function thinking(
   value: PiThinkingLevel,
   text: string,
 ): string {
-  const tone =
-    value === "off" || value === "minimal"
-      ? "muted"
-      : value === "low"
-        ? "success"
-        : value === "medium"
-          ? "accent"
-          : value === "high"
-            ? "warning"
-            : "error";
-  return color(theme, tone, text);
-}
-
-function difficultyThinking(difficulty: SessionProfile["difficulty"]): PiThinkingLevel {
-  return difficulty === "D0"
-    ? "minimal"
-    : difficulty === "D1"
-      ? "low"
-      : difficulty === "D2"
-        ? "high"
-        : "xhigh";
+  return color(theme, THINKING_TONES[value], text);
 }
 
 function formatDuration(start: string, end: string): string | undefined {
