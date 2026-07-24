@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { RunTreeNode } from "../application/interfaces.ts";
 import type { RunSnapshot } from "../domain/run/model.ts";
+import type { RunFact } from "../domain/run/observability.ts";
 import { definitionId, runId } from "../domain/shared.ts";
 import { createUnboundedWidget, renderDashboard } from "../extension/run-monitor.ts";
 
@@ -29,6 +30,7 @@ test("status widget renders the complete active tree without a height cap", () =
         children,
       },
     },
+    facts: [],
     sequence: 123,
     profile: { agent: "base", modelSet: "mixed", difficulty: "D1" },
     diagnostics: DIAGNOSTICS,
@@ -57,7 +59,7 @@ test("widget component factory bypasses Pi's string-array line cap", () => {
   );
 });
 
-test("status uses one compact row per run and collapses completed subtrees", () => {
+test("status uses one compact row per run, collapses completed subtrees, and keeps recent facts", () => {
   const workflowId = runId("run-workflow");
   const scoutId = runId("run-scout");
   const workflow: RunTreeNode = {
@@ -85,6 +87,13 @@ test("status uses one compact row per run and collapses completed subtrees", () 
         children: [workflow],
       },
     },
+    facts: [
+      factFor(scoutId, 1, "2026-07-24T00:00:10.000Z", "run-state-changed", "Older fact"),
+      factFor(scoutId, 2, "2026-07-24T00:00:20.000Z", "child-finished", "Completed scout"),
+      factFor(workflowId, 3, "2026-07-24T00:00:30.000Z", "child-finished", "Completed qa"),
+      factFor(workflowId, 4, "2026-07-24T00:00:40.000Z", "child-finished", "Completed qa"),
+      factFor(workflowId, 5, "2026-07-24T00:00:50.000Z", "test-result", "Latest fact"),
+    ],
     sequence: 20,
     profile: { agent: "base" as const, modelSet: "mixed" as const, difficulty: "D2" as const },
     diagnostics: {
@@ -115,8 +124,11 @@ test("status uses one compact row per run and collapses completed subtrees", () 
   );
   assert.equal(
     collapsed.some((line) => line.includes("Recent facts")),
-    false,
+    true,
   );
+  assert.equal(collapsed.filter((line) => line.includes("Completed qa")).length, 1);
+  assert.equal(collapsed.some((line) => line.includes("Latest fact")), true);
+  assert.equal(collapsed.some((line) => line.includes("Older fact")), false);
   assert.equal(
     collapsed.some((line) => line.includes("Storage")),
     false,
@@ -162,5 +174,26 @@ function snapshot(
       invocation: { wait: "background" },
     },
     activeChildren: [],
+  };
+}
+
+function factFor(
+  id: ReturnType<typeof runId>,
+  sequence: number,
+  timestamp: string,
+  kind: RunFact["kind"],
+  summary: string,
+): RunFact {
+  return {
+    id: `fact-${sequence}`,
+    rootRunId: ROOT,
+    runId: id,
+    sequence,
+    timestamp,
+    kind,
+    source: "runtime",
+    summary,
+    provenance: {},
+    reliability: "observed",
   };
 }
