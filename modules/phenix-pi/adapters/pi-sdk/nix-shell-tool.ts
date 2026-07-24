@@ -136,10 +136,18 @@ export function normalizeBinaryName(raw: string): string {
 }
 
 export function selectBinaryInstallable(binary: string, stdout: string): string {
-  const candidates = [...new Set(stdout.split(/\r?\n/u).map((value) => value.trim()).filter(Boolean))]
-    .map(normalizeNixInstallable);
+  const candidates = [
+    ...new Set(
+      stdout
+        .split(/\r?\n/u)
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  ].map(normalizeNixInstallable);
   if (candidates.length === 0) {
-    throw new Error(`nix-index found no nixpkgs package providing binary ${JSON.stringify(binary)}`);
+    throw new Error(
+      `nix-index found no nixpkgs package providing binary ${JSON.stringify(binary)}`,
+    );
   }
   if (candidates.length > 1) {
     const shown = candidates.slice(0, 12).join(", ");
@@ -154,7 +162,7 @@ export function selectBinaryInstallable(binary: string, stdout: string): string 
 async function resolveNixBinaries(
   binaries: readonly string[],
   cwd: string,
-  signal: AbortSignal,
+  signal: AbortSignal | undefined,
   timeout: number,
 ): Promise<readonly string[]> {
   const installables: string[] = [];
@@ -188,7 +196,9 @@ async function resolveNixBinaries(
       installables.push(selectBinaryInstallable(binary, String(result.stdout)));
     } catch (error) {
       if (error instanceof Error && error.message.startsWith("nix-index found")) throw error;
-      throw new Error(formatExecutionFailure(`nix-index lookup for ${JSON.stringify(binary)}`, error));
+      throw new Error(
+        formatExecutionFailure(`nix-index lookup for ${JSON.stringify(binary)}`, error),
+      );
     }
   }
   return installables;
