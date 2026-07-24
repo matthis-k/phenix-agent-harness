@@ -49,7 +49,6 @@ may-cancel-children: false
 ```phenix-limits
 timeout-ms: 60000
 max-turns: 1
-max-tool-calls: 1
 max-repair-attempts: 1
 ```
 
