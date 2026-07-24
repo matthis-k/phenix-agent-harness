@@ -20,6 +20,7 @@ const sources = [
   ["coordinator", "agent.coordinator"],
   ["base", "agent.base"],
   ["qa-synthesizer", "agent.qa-synthesizer"],
+  ["attention-router", "agent.attention-router"],
 ] as const;
 
 function source(name: string): string {
@@ -72,6 +73,12 @@ test("agent contracts and effective permissions are explicit", () => {
   assert.ok(implementer.tools.allow.includes("nix_shell"));
   assert.equal(implementer.input.id, "request.implementation.v1");
   assert.equal(implementer.output.id, "outcome.change-set.v1");
+
+  const attentionRouter = byId.get("agent.attention-router");
+  assert.ok(attentionRouter);
+  assert.equal(attentionRouter.input.id, "attention.routing-request");
+  assert.equal(attentionRouter.output.id, "attention.routing-decision");
+  assert.deepEqual(attentionRouter.tools.allow, []);
 });
 
 test("agent Markdown fails closed on unknown schemas", () => {
