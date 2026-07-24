@@ -30,7 +30,7 @@ export function heading(theme: ObservabilityTheme | undefined, text: string): st
 }
 
 export function strong(theme: ObservabilityTheme | undefined, text: string): string {
-  return theme ? theme.bold(theme.fg("text", text)) : text;
+  return theme ? theme.fg("text", theme.bold(text)) : text;
 }
 
 export function state(
