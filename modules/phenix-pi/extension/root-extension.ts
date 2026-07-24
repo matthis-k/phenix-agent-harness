@@ -442,7 +442,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
         ctx.ui.notify(limit(JSON.stringify(tree, null, 2)), "info");
         return;
       }
-      if (action !== "status" && action !== "runs") {
+      if (action !== "status") {
         ctx.ui.notify(`Usage: ${PHENIX_USAGE}`, "warning");
         return;
       }

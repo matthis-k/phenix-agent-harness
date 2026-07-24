@@ -6,7 +6,11 @@ import type { RunSnapshot, RunState } from "../domain/run/model.ts";
 import type { RunFact } from "../domain/run/observability.ts";
 import { definitionId, runId } from "../domain/shared.ts";
 import { type ObservabilityTheme, statusLine } from "../extension/observability-theme.ts";
-import { renderCompleteFactHistory, renderFacts, renderRuns } from "../extension/run-monitor.ts";
+import {
+  renderCompleteFactHistory,
+  renderDashboard,
+  renderFacts,
+} from "../extension/run-monitor.ts";
 
 const ROOT = runId("root-colors");
 const THEME = {
@@ -14,34 +18,61 @@ const THEME = {
   bold: (text: string) => `<bold>${text}</bold>`,
 } as unknown as ObservabilityTheme;
 
-test("status dashboard uses semantic state and activity colors", () => {
+const DIAGNOSTICS = {
+  total: 0,
+  artifacts: 0,
+  counts: { trace: 0, info: 0, warning: 0, error: 0 },
+} as const;
+
+test("status dashboard uses semantic colors with a compact recent-facts tail", () => {
   const children: RunTreeNode[] = [
     node("completed", "agent.scout"),
     node("failed", "agent.tester"),
     node("waiting", "workflow.qa"),
     node("cancelled", "agent.critic"),
   ];
-  const lines = renderRuns(
-    {
-      root: {
-        run: snapshot(ROOT, undefined, "root.session", "running"),
-        children,
+  children[0] = {
+    ...children[0],
+    run: {
+      ...children[0].run,
+      resolvedModel: {
+        requested: { kind: "session" },
+        concrete: { kind: "concrete", provider: "opencode-go", model: "model-a" },
+        thinking: "low",
+        policyRevision: "test",
       },
     },
-    [],
-    42,
+  };
+  const lines = renderDashboard(
+    {
+      tree: {
+        root: {
+          run: snapshot(ROOT, undefined, "root.session", "running"),
+          children,
+        },
+      },
+      facts: [factItem("test-result", "derived", "Latest dashboard fact")],
+      sequence: 42,
+      profile: { agent: "base", modelSet: "mixed", difficulty: "D1" },
+      diagnostics: DIAGNOSTICS,
+      integrations: "5/5 loaded",
+      integrationsFailed: false,
+      expanded: false,
+    },
     THEME,
   );
   const output = lines.join("\n");
 
-  assert.match(output, /<accent><bold>Phenix · live status · seq 42<\/bold><\/accent>/);
-  assert.match(output, /<accent><bold>Session<\/bold><\/accent>/);
-  assert.match(output, /<accent><bold>Execution<\/bold><\/accent>/);
+  assert.match(output, /<accent><bold>Phenix status · seq 42<\/bold><\/accent>/);
   assert.match(output, /<success>✓<\/success>.*<success>\[completed\]<\/success>/);
   assert.match(output, /<error>✗<\/error>.*<error>\[failed\]<\/error>/);
   assert.match(output, /<warning>○<\/warning>.*<warning>\[waiting\]<\/warning>/);
   assert.match(output, /<muted>−<\/muted>.*<muted>\[cancelled\]<\/muted>/);
+  assert.match(output, /<muted>opencode-go\/model-a · low<\/muted>/);
+  assert.match(output, /<accent><bold>Recent facts<\/bold><\/accent>/);
+  assert.match(output, /<success>Latest dashboard fact<\/success>/);
   assert.match(output, /<dim>\/phenix status off · \/phenix status/);
+  assert.doesNotMatch(output, /Storage|root\.session/);
 });
 
 test("fact history highlights severity, reliability, timestamps, and run ids", () => {
