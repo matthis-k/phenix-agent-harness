@@ -1,11 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-
-import type {
-  ActivityPhase,
-  FactKind,
-  FactReliability,
-} from "../domain/run/observability.ts";
 import type { RunState } from "../domain/run/model.ts";
+import type { ActivityPhase, FactKind, FactReliability } from "../domain/run/observability.ts";
 
 export type ObservabilityTheme = ExtensionContext["ui"]["theme"];
 export type ObservabilityTone =
