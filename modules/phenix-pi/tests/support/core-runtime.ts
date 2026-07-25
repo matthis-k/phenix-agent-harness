@@ -34,6 +34,7 @@ import {
   AGENT_SCOUT,
   AGENT_TESTER,
   AGENT_VERIFIER,
+  SESSION_STOCK,
 } from "../../definitions/ids.ts";
 import { resolveDefinitionSchema } from "../../definitions/schema-registry.ts";
 import { registerWorkflowFunctions } from "../../definitions/workflows/functions.ts";
@@ -143,6 +144,7 @@ export async function createTestRuntime(
     ids,
     cwd: process.cwd(),
     clock,
+    resolveSchema: resolveDefinitionSchema,
   });
   const checkpoints = new WorkflowCheckpointProcessManager({ store, catalog });
   execution.registerImplementation(
@@ -268,6 +270,19 @@ function outputFor(
   }
   if (definition.id === AGENT_COORDINATOR) {
     return compositionFixture(input);
+  }
+  if (definition.id === SESSION_STOCK) {
+    if (typeof input !== "object" || input === null || !("outputSchema" in input)) {
+      throw new Error("Stock session fixture requires an output schema");
+    }
+    return {
+      outputSchema: input.outputSchema,
+      value: {
+        summary: "stock result",
+        evidence: [{ path: "src/file.ts", finding: "stock evidence" }],
+        risks: [],
+      },
+    };
   }
   if (definition.id === AGENT_BASE || definition.id === AGENT_FINALIZER) {
     return { summary: "done", artifacts: [], unresolved: [] };
