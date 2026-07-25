@@ -45,11 +45,11 @@ export class WorkflowCheckpointProcessManager {
     await Promise.allSettled([...this.pending]);
   }
 
-  private onDomainEvent(event: DomainEvent): void {
-    if (!CHECKPOINT_TRIGGER_EVENTS.has(event.type)) return;
+  private onDomainEvent(event: DomainEvent): Promise<void> | undefined {
+    if (!CHECKPOINT_TRIGGER_EVENTS.has(event.type)) return undefined;
     const operation = this.checkpoint(event.runId);
     this.pending.add(operation);
-    void operation.finally(() => this.pending.delete(operation));
+    return operation.finally(() => this.pending.delete(operation));
   }
 
   private async save(runId: RunId): Promise<void> {
