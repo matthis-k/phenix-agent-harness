@@ -152,13 +152,17 @@ function compileState(
       const invoked = bindings.resolveDefinition(read("run"));
       assertSchema(bindings, read("input-schema"), invoked.input, `${owner} input`);
       assertSchema(bindings, read("output-schema"), invoked.output, `${owner} output`);
+      const wait = parseWait(fields.wait ?? "await", state.id);
       const retry = parseInvokeRetry(fields, owner);
+      if (retry && wait === "background") {
+        throw new Error(`${owner} cannot retry a background invocation`);
+      }
       return {
         ...common,
         kind,
         definition: definitionRef(definitionId(invoked.id)),
         input: read("input"),
-        wait: parseWait(fields.wait ?? "await", state.id),
+        wait,
         ...(fields.difficulty
           ? { difficulty: parseDifficultyBinding(fields.difficulty, owner) }
           : {}),
