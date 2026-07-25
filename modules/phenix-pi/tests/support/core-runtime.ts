@@ -22,12 +22,13 @@ import { agentDefinitions } from "../../definitions/agents.ts";
 import type { DynamicWorkflowProposal } from "../../definitions/dynamic-workflow.ts";
 import {
   AGENT_ARCHITECT,
-  AGENT_BASE,
   AGENT_COORDINATOR,
   AGENT_CRITIC,
   AGENT_DIFFICULTY_ESTIMATOR,
   AGENT_DISPATCHER,
   AGENT_FINALIZER,
+  AGENT_GENERIC_READ,
+  AGENT_GENERIC_WRITE,
   AGENT_IMPLEMENTER,
   AGENT_PLANNER,
   AGENT_QA_SYNTHESIZER,
@@ -269,7 +270,11 @@ function outputFor(
   if (definition.id === AGENT_COORDINATOR) {
     return compositionFixture(input);
   }
-  if (definition.id === AGENT_BASE || definition.id === AGENT_FINALIZER) {
+  if (
+    definition.id === AGENT_GENERIC_READ ||
+    definition.id === AGENT_GENERIC_WRITE ||
+    definition.id === AGENT_FINALIZER
+  ) {
     return { summary: "done", artifacts: [], unresolved: [] };
   }
   throw new Error(`No scripted output for ${definition.id}`);
