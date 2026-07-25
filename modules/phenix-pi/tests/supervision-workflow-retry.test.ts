@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { summarizeWorkflowRetryStart } from "../application/supervision-process-manager.ts";
+import {
+  summarizeWorkflowRetryStart,
+  summarizeWorkflowTerminal,
+} from "../application/supervision-process-manager.ts";
 import type { RunRecord } from "../domain/run/model.ts";
 import { failed, type RunId } from "../domain/shared.ts";
 
@@ -72,4 +75,22 @@ test("workflow retry notice is compact and states retained work", () => {
   assert.match(notice, /"timeoutMs":960000/);
   assert.match(notice, /Completed workflow states are retained/);
   assert.doesNotMatch(notice, /Recovery run/);
+});
+
+test("exhausted workflow recovery is final and does not recommend a full restart", () => {
+  const notice = summarizeWorkflowTerminal({
+    id: "run-workflow" as RunId,
+    definitionId: "workflow.qa" as RunRecord["definitionId"],
+    outcome: failed({
+      code: "timeout",
+      message: "Agent timed out after 960000ms",
+      retryable: true,
+      causeRunId: "run-critic-2" as RunId,
+    }),
+  });
+
+  assert.match(notice, /declared recovery policy was exhausted/);
+  assert.match(notice, /Completed states were not rerun/);
+  assert.match(notice, /Do not restart the full workflow automatically/);
+  assert.doesNotMatch(notice, /bounded retry may be appropriate/);
 });
