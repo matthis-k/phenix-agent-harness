@@ -1,12 +1,12 @@
+import type { DynamicWorkflowProposal } from "../definitions/dynamic-workflow.ts";
+import { type DefinitionId, definitionId } from "../domain/shared.ts";
+import type { DefinitionCatalog, WorkflowFunctionRegistry } from "./catalog.ts";
 import {
   type CompiledDynamicWorkflow,
   DynamicWorkflowCompileError,
-  DynamicWorkflowCompiler,
+  type DynamicWorkflowCompiler,
   type DynamicWorkflowIdentity,
 } from "./dynamic-workflow-compiler.ts";
-import type { DynamicWorkflowProposal } from "../definitions/dynamic-workflow.ts";
-import { definitionId, type DefinitionId } from "../domain/shared.ts";
-import { DefinitionCatalog, WorkflowFunctionRegistry } from "./catalog.ts";
 
 export interface DynamicWorkflowSnapshot {
   readonly proposal: DynamicWorkflowProposal;
@@ -107,10 +107,7 @@ function referencedDefinitionIds(proposal: DynamicWorkflowProposal): readonly De
   ];
 }
 
-function sameIdentity(
-  left: DynamicWorkflowIdentity,
-  right: DynamicWorkflowIdentity,
-): boolean {
+function sameIdentity(left: DynamicWorkflowIdentity, right: DynamicWorkflowIdentity): boolean {
   return (
     left.version === right.version &&
     left.graphDigest === right.graphDigest &&
