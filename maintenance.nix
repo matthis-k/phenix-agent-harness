@@ -48,6 +48,17 @@ in
       '';
     };
 
+    "maintenance-check-tools" = {
+      packages = [
+        pkgs.git
+        pkgs.nodejs
+      ];
+      exec = ''
+        ${repositoryRoot}
+        node modules/phenix-pi/scripts/check-agent-tools.ts
+      '';
+    };
+
     "maintenance-check-runtime" = {
       packages = [ pkgs.git ];
       exec = ''
@@ -106,6 +117,7 @@ in
     "maintenance:format".exec = "maintenance-check-format";
     "maintenance:statix".exec = "maintenance-check-statix";
     "maintenance:workflows".exec = "maintenance-check-workflows";
+    "maintenance:tools".exec = "maintenance-check-tools";
     "maintenance:runtime".exec = "maintenance-check-runtime";
     "maintenance:typecheck".exec = "maintenance-check-typecheck";
     "maintenance:flake".exec = "maintenance-check-flake";
@@ -116,6 +128,7 @@ in
         "maintenance:format"
         "maintenance:statix"
         "maintenance:workflows"
+        "maintenance:tools"
         "maintenance:runtime"
         "maintenance:typecheck"
         "maintenance:flake"

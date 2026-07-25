@@ -179,7 +179,10 @@ function localAt<T = unknown>(context: WorkflowEvaluationContext, node: string):
 }
 
 function valuesAt<T = unknown>(context: WorkflowEvaluationContext, node: string): readonly T[] {
-  return (context.results.get(node) ?? []).map((value) => outcomeValue<T>(value));
+  return (context.results.get(node) ?? []).flatMap((value) => {
+    const outcome = value as Outcome<T>;
+    return outcome?.status === "success" ? [outcome.value] : [];
+  });
 }
 
 function qaReviewInput(context: WorkflowEvaluationContext, focus: string, authority: string) {

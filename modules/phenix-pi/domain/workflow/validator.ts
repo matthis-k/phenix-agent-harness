@@ -6,6 +6,7 @@ import type {
   WorkflowEdge,
   WorkflowGraph,
   WorkflowNode,
+  WorkflowTransitionOutcome,
 } from "../definition/definition.ts";
 
 export interface WorkflowDiagnostic {
@@ -52,6 +53,8 @@ const LIMIT_RULES = [
     isPositiveInteger,
   ],
 ] as const;
+
+const SETTLED_OUTCOMES = ["success", "failure", "cancelled"] as const;
 
 function diagnostic(
   code: string,
@@ -149,6 +152,7 @@ export function validateWorkflow(
   }
 
   for (const edge of graph.edges) {
+    const source = topology.nodeById.get(edge.from);
     if (!nodeIds.has(edge.from)) {
       diagnostics.push(diagnostic("edge_source_missing", `Unknown edge source ${edge.from}`));
     }
@@ -158,6 +162,20 @@ export function validateWorkflow(
     if (edge.when && !inventory.hasCondition(edge.when)) {
       diagnostics.push(
         diagnostic("condition_missing", `Unknown condition ${edge.when}`, edge.from),
+      );
+    }
+    if (
+      (edge.on === "failure" || edge.on === "cancelled") &&
+      source &&
+      source.kind !== "invoke" &&
+      source.kind !== "local"
+    ) {
+      diagnostics.push(
+        diagnostic(
+          "transition_outcome_invalid",
+          `${edge.on} transitions require an invoke or local source`,
+          edge.from,
+        ),
       );
     }
     const invalidTraversalLimit =
@@ -227,22 +245,7 @@ export function validateWorkflow(
   }
 
   diagnostics.push(...checkMappingsTypeConsistency(topology, inputMappings, outputMappings));
-
-  const fanOut = new Map<string, number>();
-  for (const edge of graph.edges) {
-    if (!edge.when) fanOut.set(edge.from, (fanOut.get(edge.from) ?? 0) + 1);
-  }
-  for (const [nodeId, count] of fanOut) {
-    if (count > definition.limits.maxParallelism) {
-      diagnostics.push(
-        diagnostic(
-          "parallelism_exceeded",
-          `Node ${nodeId} fans out to ${count}, above maxParallelism ${definition.limits.maxParallelism}`,
-          nodeId,
-        ),
-      );
-    }
-  }
+  diagnostics.push(...validateParallelism(definition));
 
   return diagnostics;
 }
@@ -251,6 +254,38 @@ function validateLimits(definition: WorkflowDefinition<unknown, unknown>): Workf
   return LIMIT_RULES.flatMap(([code, message, read, valid]) =>
     valid(read(definition)) ? [] : [diagnostic(code, message)],
   );
+}
+
+function validateParallelism(
+  definition: WorkflowDefinition<unknown, unknown>,
+): WorkflowDiagnostic[] {
+  const diagnostics: WorkflowDiagnostic[] = [];
+  const nodeIds = new Set(definition.graph.edges.map((edge) => edge.from));
+  for (const nodeId of nodeIds) {
+    const outgoing = definition.graph.edges.filter(
+      (edge) => edge.from === nodeId && !edge.when,
+    );
+    for (const outcome of SETTLED_OUTCOMES) {
+      const count = outgoing.filter((edge) => acceptsOutcome(edge.on, outcome)).length;
+      if (count <= definition.limits.maxParallelism) continue;
+      diagnostics.push(
+        diagnostic(
+          "parallelism_exceeded",
+          `Node ${nodeId} fans out to ${count} unconditional ${outcome} transitions, above maxParallelism ${definition.limits.maxParallelism}`,
+          nodeId,
+        ),
+      );
+    }
+  }
+  return diagnostics;
+}
+
+function acceptsOutcome(
+  declared: WorkflowTransitionOutcome | undefined,
+  actual: Exclude<WorkflowTransitionOutcome, "any">,
+): boolean {
+  const outcome = declared ?? "success";
+  return outcome === "any" || outcome === actual;
 }
 
 function buildTopology(graph: WorkflowGraph<unknown, unknown>): WorkflowTopology {

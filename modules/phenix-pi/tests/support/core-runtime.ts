@@ -107,7 +107,9 @@ export async function createTestRuntime(
   ]) {
     catalog.register(definition);
   }
-  const operationRunner = options.operations ?? operations;
+  const operationRunner = options.operations
+    ? layeredOperations(options.operations, operations)
+    : operations;
   catalog.seal(functions, operationRunner);
   const execution = new ExecutionFacadeImpl({
     catalog,
@@ -239,4 +241,16 @@ export class PendingAgentImplementation implements RunImplementation {
   async cancel(runId: RunId): Promise<void> {
     this.cancelled.push(runId);
   }
+}
+
+function layeredOperations(
+  primary: LocalOperationRunner,
+  fallback: LocalOperationRunner,
+): LocalOperationRunner {
+  return {
+    has: (operation) => primary.has(operation) || fallback.has(operation),
+    run(operation, input, context) {
+      return (primary.has(operation) ? primary : fallback).run(operation, input, context);
+    },
+  };
 }

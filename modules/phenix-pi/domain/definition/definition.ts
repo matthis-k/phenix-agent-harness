@@ -124,9 +124,13 @@ export interface FailNode {
 
 export type WorkflowNode = InvokeNode | LocalNode | DecisionNode | JoinNode | ReturnNode | FailNode;
 
+export type WorkflowTransitionOutcome = "success" | "failure" | "cancelled" | "any";
+
 export interface WorkflowEdge {
   readonly from: string;
   readonly to: string;
+  /** Omitted edges accept successful node completion only. */
+  readonly on?: WorkflowTransitionOutcome;
   readonly when?: PureConditionRef;
   readonly maxTraversals?: number;
 }
