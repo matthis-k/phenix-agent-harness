@@ -130,10 +130,11 @@ async function runCheck(
 }
 
 function discoverChecks(cwd: string): readonly DeterministicCheck[] {
-  const checks: DeterministicCheck[] = [];
   const hasDevenv =
     existsSync(path.join(cwd, "devenv.nix")) || existsSync(path.join(cwd, "devenv.yaml"));
-  if (hasDevenv) checks.push({ kind: "devenv-test" });
+  if (hasDevenv) return [{ kind: "devenv-test" }];
+
+  const checks: DeterministicCheck[] = [];
   if (existsSync(path.join(cwd, "flake.nix"))) checks.push({ kind: "nix-flake-check" });
   if (existsSync(path.join(cwd, "Cargo.toml"))) {
     checks.push({ kind: "cargo-test" }, { kind: "cargo-clippy" });
