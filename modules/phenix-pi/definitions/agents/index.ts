@@ -10,7 +10,8 @@ export const BUNDLED_AGENT_SOURCE_NAMES = [
   "finalizer",
   "dispatcher",
   "coordinator",
-  "base",
+  "generic-read",
+  "generic-write",
   "qa-synthesizer",
   "attention-router",
 ] as const;
