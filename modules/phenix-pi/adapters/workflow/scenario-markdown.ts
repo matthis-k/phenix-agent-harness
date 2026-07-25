@@ -1,12 +1,6 @@
-import type {
-  WorkflowDefinition,
-  WorkflowNode,
-} from "../../domain/definition/definition.ts";
+import type { WorkflowDefinition, WorkflowNode } from "../../domain/definition/definition.ts";
 import type { Failure, FailureCode } from "../../domain/shared.ts";
-import {
-  optionalMarkdownSection,
-  requiredMarkdownFence,
-} from "../definition/markdown.ts";
+import { optionalMarkdownSection, requiredMarkdownFence } from "../definition/markdown.ts";
 import {
   compileWorkflowMarkdown,
   parseWorkflowMarkdown,
@@ -106,10 +100,7 @@ function compileScenario(
   raw: unknown,
   workflow: WorkflowDefinition<unknown, unknown>,
   nodes: ReadonlyMap<string, WorkflowNode>,
-  authoredStates: ReadonlyMap<
-    string,
-    { readonly fields: Readonly<Record<string, string>> }
-  >,
+  authoredStates: ReadonlyMap<string, { readonly fields: Readonly<Record<string, string>> }>,
   bindings: WorkflowMarkdownBindings,
 ): WorkflowScenario {
   const owner = `${workflow.id} test ${id}`;
@@ -141,10 +132,7 @@ function compileScenario(
     );
   }
 
-  const environmentValue = requireRecord(
-    value.environment ?? {},
-    `${owner}.environment`,
-  );
+  const environmentValue = requireRecord(value.environment ?? {}, `${owner}.environment`);
   assertFields(environmentValue, ["availableTools"], `${owner}.environment`);
   const availableTools = optionalStringArray(
     environmentValue.availableTools,
@@ -182,9 +170,7 @@ function compileMockAction(
     const schema =
       node.kind === "invoke"
         ? bindings.resolveDefinition(node.definition.id).output
-        : bindings.resolveSchema(
-            requiredField(authored?.fields, "output-schema", owner),
-          );
+        : bindings.resolveSchema(requiredField(authored?.fields, "output-schema", owner));
     const validation = schema.validate(action.return);
     if (!validation.ok) {
       throw validationError(`${owner}.return (${schema.id})`, validation.issues);
@@ -203,10 +189,7 @@ function compileMockAction(
 function compileFailure(raw: unknown, owner: string): Failure {
   const value = requireRecord(raw, owner);
   assertFields(value, ["code", "message", "retryable", "details"], owner);
-  if (
-    typeof value.code !== "string" ||
-    !FAILURE_CODES.has(value.code as FailureCode)
-  ) {
+  if (typeof value.code !== "string" || !FAILURE_CODES.has(value.code as FailureCode)) {
     throw new Error(`${owner}.code is not a supported failure code`);
   }
   if (typeof value.message !== "string" || !value.message.trim()) {
@@ -232,21 +215,10 @@ function compileExpectation(
   const value = requireRecord(raw, `${owner}.expect`);
   assertFields(
     value,
-    [
-      "status",
-      "visits",
-      "counts",
-      "transitions",
-      "failure",
-      "requireAllMocksConsumed",
-    ],
+    ["status", "visits", "counts", "transitions", "failure", "requireAllMocksConsumed"],
     `${owner}.expect`,
   );
-  if (
-    value.status !== "success" &&
-    value.status !== "failure" &&
-    value.status !== "cancelled"
-  ) {
+  if (value.status !== "success" && value.status !== "failure" && value.status !== "cancelled") {
     throw new Error(`${owner}.expect.status must be success, failure, or cancelled`);
   }
 
@@ -258,35 +230,24 @@ function compileExpectation(
   }
 
   const countsValue =
-    value.counts === undefined
-      ? undefined
-      : requireRecord(value.counts, `${owner}.expect.counts`);
+    value.counts === undefined ? undefined : requireRecord(value.counts, `${owner}.expect.counts`);
   const counts: Record<string, number> = {};
   for (const [nodeId, count] of Object.entries(countsValue ?? {})) {
     if (!nodes.has(nodeId)) {
       throw new Error(`${owner}.expect.counts references unknown state ${nodeId}`);
     }
     if (typeof count !== "number" || !Number.isInteger(count) || count < 0) {
-      throw new Error(
-        `${owner}.expect.counts.${nodeId} must be a non-negative integer`,
-      );
+      throw new Error(`${owner}.expect.counts.${nodeId} must be a non-negative integer`);
     }
     counts[nodeId] = count;
   }
 
-  const transitions = optionalStringArray(
-    value.transitions,
-    `${owner}.expect.transitions`,
-  );
+  const transitions = optionalStringArray(value.transitions, `${owner}.expect.transitions`);
   for (const transition of transitions ?? []) {
     const [from, to, extra] = transition.split("->").map((part) => part.trim());
-    const exists = workflow.graph.edges.some(
-      (edge) => edge.from === from && edge.to === to,
-    );
+    const exists = workflow.graph.edges.some((edge) => edge.from === from && edge.to === to);
     if (!from || !to || extra || !exists) {
-      throw new Error(
-        `${owner}.expect.transitions references unknown transition ${transition}`,
-      );
+      throw new Error(`${owner}.expect.transitions references unknown transition ${transition}`);
     }
   }
 
@@ -296,22 +257,16 @@ function compileExpectation(
     assertFields(expected, ["code", "messageIncludes"], `${owner}.expect.failure`);
     if (
       expected.code !== undefined &&
-      (typeof expected.code !== "string" ||
-        !FAILURE_CODES.has(expected.code as FailureCode))
+      (typeof expected.code !== "string" || !FAILURE_CODES.has(expected.code as FailureCode))
     ) {
       throw new Error(`${owner}.expect.failure.code is not supported`);
     }
-    if (
-      expected.messageIncludes !== undefined &&
-      typeof expected.messageIncludes !== "string"
-    ) {
+    if (expected.messageIncludes !== undefined && typeof expected.messageIncludes !== "string") {
       throw new Error(`${owner}.expect.failure.messageIncludes must be a string`);
     }
     failure = {
       ...(expected.code ? { code: expected.code as FailureCode } : {}),
-      ...(expected.messageIncludes
-        ? { messageIncludes: expected.messageIncludes }
-        : {}),
+      ...(expected.messageIncludes ? { messageIncludes: expected.messageIncludes } : {}),
     };
   }
 
@@ -349,15 +304,9 @@ function assertFields(
   }
 }
 
-function optionalStringArray(
-  value: unknown,
-  owner: string,
-): readonly string[] | undefined {
+function optionalStringArray(value: unknown, owner: string): readonly string[] | undefined {
   if (value === undefined) return undefined;
-  if (
-    !Array.isArray(value) ||
-    value.some((item) => typeof item !== "string" || !item.trim())
-  ) {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item.trim())) {
     throw new Error(`${owner} must be an array of non-empty strings`);
   }
   return value as string[];
@@ -378,8 +327,6 @@ function validationError(
   issues: readonly { readonly path: string; readonly message: string }[],
 ): Error {
   return new Error(
-    `${owner} is invalid: ${issues
-      .map((issue) => `${issue.path} ${issue.message}`)
-      .join("; ")}`,
+    `${owner} is invalid: ${issues.map((issue) => `${issue.path} ${issue.message}`).join("; ")}`,
   );
 }

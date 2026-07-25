@@ -49,13 +49,17 @@ in
     };
 
     "maintenance-check-tools" = {
-      packages = [
-        pkgs.git
-        pkgs.nodejs
-      ];
+      packages = [ pkgs.git ];
       exec = ''
         ${repositoryRoot}
-        node modules/phenix-pi/scripts/check-agent-tools.ts
+        missing=0
+        for executable in bash nix; do
+          if ! command -v "$executable" >/dev/null 2>&1; then
+            echo "agent tool executable unavailable: $executable was not found in PATH" >&2
+            missing=1
+          fi
+        done
+        exit "$missing"
       '';
     };
 

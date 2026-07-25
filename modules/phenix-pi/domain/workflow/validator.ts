@@ -262,9 +262,7 @@ function validateParallelism(
   const diagnostics: WorkflowDiagnostic[] = [];
   const nodeIds = new Set(definition.graph.edges.map((edge) => edge.from));
   for (const nodeId of nodeIds) {
-    const outgoing = definition.graph.edges.filter(
-      (edge) => edge.from === nodeId && !edge.when,
-    );
+    const outgoing = definition.graph.edges.filter((edge) => edge.from === nodeId && !edge.when);
     for (const outcome of SETTLED_OUTCOMES) {
       const count = outgoing.filter((edge) => acceptsOutcome(edge.on, outcome)).length;
       if (count <= definition.limits.maxParallelism) continue;

@@ -11,7 +11,7 @@ import { type Difficulty, isDifficulty } from "../domain/definition/model.ts";
 import type { DomainEvent, PendingDomainEvent } from "../domain/run/events.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
 import type { RunRecord } from "../domain/run/model.ts";
-import { failed, type Failure, type Outcome, type RunId } from "../domain/shared.ts";
+import { type Failure, failed, type Outcome, type RunId } from "../domain/shared.ts";
 import {
   buildWorkflowGraphState,
   type WorkflowGraphState,
@@ -343,8 +343,10 @@ export class WorkflowProcessManager implements RunImplementation {
       return false;
     }
     const outcomeStatus = child.outcome.status;
-    const edges = this.selectEdges(state, node, child.outcome, outcomeStatus);
-    if (outcomeStatus !== "success" && edges.length === 0) {
+    if (
+      outcomeStatus !== "success" &&
+      this.selectEdges(state, node, child.outcome, outcomeStatus).length === 0
+    ) {
       await this.controller.fail(run.id, childFailure(child, child.outcome));
       return true;
     }
