@@ -88,6 +88,13 @@ export function latestBudgetState(
   runId: RunId,
 ): { readonly limits: RunLimits; readonly timeoutRemainingMs?: number } {
   const run = store.projection.requireRun(runId);
+  const pending = pendingBudgetSuspension(store, runId);
+  if (pending) {
+    return {
+      limits: pending.currentLimits,
+      timeoutRemainingMs: pending.timeoutRemainingMs,
+    };
+  }
   const events = store.projection.eventsFor(runId);
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
@@ -95,10 +102,7 @@ export function latestBudgetState(
     const data = event.data as BudgetResumedData;
     return { limits: data.limits, timeoutRemainingMs: data.timeoutRemainingMs };
   }
-  const pending = pendingBudgetSuspension(store, runId);
-  return pending
-    ? { limits: pending.currentLimits, timeoutRemainingMs: pending.timeoutRemainingMs }
-    : { limits: run.compiled.limits };
+  return { limits: run.compiled.limits };
 }
 
 export function pendingBudgetSuspensionInScope(
@@ -138,29 +142,23 @@ export function resolveResumeLimits(
 ): RunLimits {
   const selected = requested ?? suspension.suggestedLimits;
   const current = suspension.currentLimits;
+  const timeoutMs = resolveTimeoutLimit(current.timeoutMs, selected.timeoutMs);
   const next: RunLimits = {
-    timeoutMs: selected.timeoutMs ?? current.timeoutMs,
+    timeoutMs,
     ...resolveOptionalLimit("maxTurns", current.maxTurns, selected.maxTurns),
     ...resolveOptionalLimit("maxToolCalls", current.maxToolCalls, selected.maxToolCalls),
-    ...resolveRequiredOptionalLimit(
-      "maxRepairAttempts",
-      current.maxRepairAttempts,
-      selected.maxRepairAttempts,
-    ),
+    ...resolveRepairLimit(current.maxRepairAttempts, selected.maxRepairAttempts),
     ...(current.maxNodeRuns === undefined ? {} : { maxNodeRuns: current.maxNodeRuns }),
     ...(current.maxParallelism === undefined
       ? {}
       : { maxParallelism: current.maxParallelism }),
   };
 
-  if (next.timeoutMs < current.timeoutMs) {
-    throw new Error(`timeoutMs may not decrease from ${current.timeoutMs}`);
-  }
   const increased =
-    next.timeoutMs > current.timeoutMs ||
+    timeoutIncreased(current.timeoutMs, next.timeoutMs) ||
     increasedOptional(current.maxTurns, next.maxTurns) ||
     increasedOptional(current.maxToolCalls, next.maxToolCalls) ||
-    increasedOptional(current.maxRepairAttempts, next.maxRepairAttempts);
+    (next.maxRepairAttempts ?? 0) > (current.maxRepairAttempts ?? 0);
   if (!increased) {
     throw new Error("Resume requires at least one increased or removed budget limit");
   }
@@ -171,6 +169,7 @@ export function resumedTimeoutRemaining(
   suspension: BudgetSuspension,
   nextLimits: RunLimits,
 ): number {
+  if (suspension.currentLimits.timeoutMs <= 0) return suspension.timeoutRemainingMs;
   const added = Math.max(0, nextLimits.timeoutMs - suspension.currentLimits.timeoutMs);
   return Math.max(0, suspension.timeoutRemainingMs + added);
 }
@@ -178,7 +177,6 @@ export function resumedTimeoutRemaining(
 export async function awaitOutcomeOrBudget<O>(input: {
   readonly store: ExecutionStore;
   readonly runId: RunId;
-  readonly awaitOutcome: (signal?: AbortSignal) => Promise<Outcome<O>>;
   readonly signal?: AbortSignal;
 }): Promise<AwaitedRun<O>> {
   const immediate = settledState<O>(input.store, input.runId);
@@ -256,6 +254,15 @@ function parseLimitOverrides(value: unknown): RunRetryLimitOverrides | undefined
   };
 }
 
+function resolveTimeoutLimit(current: number, requested: number | undefined): number {
+  if (requested === undefined) return current;
+  if (current <= 0) {
+    throw new Error("timeoutMs is already unbounded and may not be replaced by a finite limit");
+  }
+  if (requested < current) throw new Error(`timeoutMs may not decrease from ${current}`);
+  return requested;
+}
+
 function resolveOptionalLimit(
   name: string,
   current: number | undefined,
@@ -263,22 +270,26 @@ function resolveOptionalLimit(
 ): Readonly<Record<string, number>> {
   if (requested === undefined) return current === undefined ? {} : { [name]: current };
   if (requested === null) return {};
-  if (current !== undefined && requested < current) {
-    throw new Error(`${name} may not decrease from ${current}`);
+  if (current === undefined) {
+    throw new Error(`${name} is already unbounded and may not be replaced by a finite limit`);
   }
+  if (requested < current) throw new Error(`${name} may not decrease from ${current}`);
   return { [name]: requested };
 }
 
-function resolveRequiredOptionalLimit(
-  name: string,
+function resolveRepairLimit(
   current: number | undefined,
   requested: number | undefined,
 ): Readonly<Record<string, number>> {
-  if (requested === undefined) return current === undefined ? {} : { [name]: current };
-  if (current !== undefined && requested < current) {
-    throw new Error(`${name} may not decrease from ${current}`);
+  if (requested === undefined) return current === undefined ? {} : { maxRepairAttempts: current };
+  if (requested < (current ?? 0)) {
+    throw new Error(`maxRepairAttempts may not decrease from ${current ?? 0}`);
   }
-  return { [name]: requested };
+  return { maxRepairAttempts: requested };
+}
+
+function timeoutIncreased(current: number, next: number): boolean {
+  return current > 0 && next > current;
 }
 
 function increasedOptional(current: number | undefined, next: number | undefined): boolean {
