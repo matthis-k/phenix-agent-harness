@@ -61,6 +61,12 @@ test("failure retry fixture compiles an activation-scoped retry policy", () => {
 
 for (const scenario of scenarios) {
   test(`failure retry / ${scenario.id}`, async () => {
-    await runWorkflowScenario(workflow, scenario, [workflow]);
+    const result = await runWorkflowScenario(workflow, scenario, [workflow]);
+    if (scenario.id === "retry-exhausted") {
+      assert.equal(result.outcome.status, "failure");
+      if (result.outcome.status === "failure") {
+        assert.equal(result.outcome.failure.retryable, false);
+      }
+    }
   });
 }
