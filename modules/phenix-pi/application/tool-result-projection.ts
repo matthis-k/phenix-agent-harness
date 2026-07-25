@@ -17,13 +17,15 @@ export interface ProjectedCheck {
 
 export interface ProjectedFinding {
   readonly severity?: string;
-  readonly title: string;
-  readonly evidence?: string;
-  readonly recommendation?: string;
+  readonly kind?: string;
+  readonly description: string;
+  readonly files: readonly string[];
+  readonly notes?: string;
 }
 
 const MAX_PROJECTED_CHECKS = 100;
 const MAX_PROJECTED_FINDINGS = 50;
+const MAX_PROJECTED_FILES_PER_FINDING = 20;
 const MAX_PROJECTED_TITLE_CHARS = 240;
 const MAX_PROJECTED_DETAIL_CHARS = 500;
 
@@ -192,27 +194,49 @@ function projectFindings(value: unknown): Readonly<Record<string, unknown>> {
 
 function projectFinding(value: unknown): ProjectedFinding | undefined {
   if (typeof value === "string") {
-    const title = boundedText(value, MAX_PROJECTED_TITLE_CHARS);
-    return title ? { title } : undefined;
+    const description = boundedText(value, MAX_PROJECTED_TITLE_CHARS);
+    return description ? { description, files: [] } : undefined;
   }
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
 
   const finding = value as Readonly<Record<string, unknown>>;
-  const title =
+  const description =
+    boundedText(finding.description, MAX_PROJECTED_TITLE_CHARS) ??
     boundedText(finding.title, MAX_PROJECTED_TITLE_CHARS) ??
     boundedText(finding.summary, MAX_PROJECTED_TITLE_CHARS) ??
     boundedText(finding.message, MAX_PROJECTED_TITLE_CHARS);
-  if (!title) return undefined;
+  if (!description) return undefined;
 
   const severity = boundedText(finding.severity, 32);
-  const evidence = boundedText(finding.evidence, MAX_PROJECTED_DETAIL_CHARS);
-  const recommendation = boundedText(finding.recommendation, MAX_PROJECTED_DETAIL_CHARS);
+  const kind = boundedText(finding.kind, 80);
+  const files = boundedStringArray(
+    finding.files,
+    MAX_PROJECTED_FILES_PER_FINDING,
+    MAX_PROJECTED_TITLE_CHARS,
+  );
+  const notes = findingNotes(finding);
   return {
     ...(severity ? { severity } : {}),
-    title,
-    ...(evidence ? { evidence } : {}),
-    ...(recommendation ? { recommendation } : {}),
+    ...(kind ? { kind } : {}),
+    description,
+    files,
+    ...(notes ? { notes } : {}),
   };
+}
+
+function findingNotes(finding: Readonly<Record<string, unknown>>): string | undefined {
+  const notes = boundedText(finding.notes, MAX_PROJECTED_DETAIL_CHARS);
+  if (notes) return notes;
+
+  const evidence = boundedText(finding.evidence, MAX_PROJECTED_DETAIL_CHARS);
+  const recommendation = boundedText(finding.recommendation, MAX_PROJECTED_DETAIL_CHARS);
+  if (evidence && recommendation) {
+    return boundedText(
+      `Evidence: ${evidence}\nRecommendation: ${recommendation}`,
+      MAX_PROJECTED_DETAIL_CHARS,
+    );
+  }
+  return evidence ?? recommendation;
 }
 
 function renderStructuredReport(projected: unknown): string | undefined {
@@ -232,15 +256,7 @@ function renderStructuredReport(projected: unknown): string | undefined {
   const failedCheckCount = checks.filter((check) => !check.ok).length;
   const severityCounts = countSeverities(findings);
   const gateStatus = failedCheckCount === 0 ? "Passed" : `Failed (${failedCheckCount})`;
-  const reviewStatus =
-    severityCounts.high > 0
-      ? `Attention required (${severityCounts.high} high)`
-      : findingCount > 0
-        ? `Findings present (${findingCount})`
-        : "Clear";
-  const sortedFindings = [...findings].sort(
-    (left, right) => severityRank(right.severity) - severityRank(left.severity),
-  );
+  const reviewStatus = reviewStatusOf(severityCounts, findingCount);
 
   const metadata = [
     boundedText(envelope.definition, 160)
@@ -274,28 +290,19 @@ function renderStructuredReport(projected: unknown): string | undefined {
 
   lines.push(
     "",
-    "### Finding counts",
-    "",
-    "| Severity | Count |",
-    "|---|---:|",
-    `| High | ${severityCounts.high} |`,
-    `| Medium | ${severityCounts.medium} |`,
-    `| Low | ${severityCounts.low} |`,
-    `| Unspecified | ${severityCounts.unspecified} |`,
-    "",
     "### Findings",
     "",
+    "| # | Severity | Kind | Description | Files | Notes |",
+    "|---:|---|---|---|---|---|",
   );
 
-  if (sortedFindings.length === 0) {
-    lines.push("No review findings were reported.");
+  if (findings.length === 0) {
+    lines.push("| — | — | — | No review findings were reported. | — | — |");
   } else {
     lines.push(
-      "| Severity | Finding | Evidence | Recommendation |",
-      "|---|---|---|---|",
-      ...sortedFindings.map(
-        (finding) =>
-          `| ${markdownCell(finding.severity?.toUpperCase() ?? "UNSPECIFIED")} | ${markdownCell(finding.title)} | ${markdownCell(finding.evidence ?? "—")} | ${markdownCell(finding.recommendation ?? "—")} |`,
+      ...findings.map(
+        (finding, index) =>
+          `| ${index + 1} | ${markdownCell(finding.severity?.toUpperCase() ?? "UNSPECIFIED")} | ${markdownCell(finding.kind ?? "—")} | ${markdownCell(finding.description)} | ${markdownCell(finding.files.length > 0 ? finding.files.join("\n") : "—")} | ${markdownCell(finding.notes ?? "—")} |`,
       ),
     );
   }
@@ -311,7 +318,7 @@ function renderStructuredReport(projected: unknown): string | undefined {
 
 function projectedChecks(value: unknown): readonly ProjectedCheck[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  return value.filter((item): item is ProjectedCheck => projectCheck(item) !== undefined);
+  return value.map(projectCheck).filter((item): item is ProjectedCheck => item !== undefined);
 }
 
 function projectedFindings(value: unknown): readonly ProjectedFinding[] | undefined {
@@ -319,30 +326,36 @@ function projectedFindings(value: unknown): readonly ProjectedFinding[] | undefi
   return value.map(projectFinding).filter((item): item is ProjectedFinding => item !== undefined);
 }
 
-function countSeverities(findings: readonly ProjectedFinding[]): {
-  readonly high: number;
-  readonly medium: number;
-  readonly low: number;
-  readonly unspecified: number;
-} {
+interface SeverityCounts {
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  info: number;
+  unspecified: number;
+}
+
+function countSeverities(findings: readonly ProjectedFinding[]): SeverityCounts {
   return findings.reduce(
     (counts, finding) => {
       const severity = finding.severity?.toLowerCase();
-      if (severity === "high") counts.high += 1;
+      if (severity === "critical") counts.critical += 1;
+      else if (severity === "high") counts.high += 1;
       else if (severity === "medium") counts.medium += 1;
       else if (severity === "low") counts.low += 1;
+      else if (severity === "info") counts.info += 1;
       else counts.unspecified += 1;
       return counts;
     },
-    { high: 0, medium: 0, low: 0, unspecified: 0 },
+    { critical: 0, high: 0, medium: 0, low: 0, info: 0, unspecified: 0 },
   );
 }
 
-function severityRank(severity: string | undefined): number {
-  if (severity?.toLowerCase() === "high") return 3;
-  if (severity?.toLowerCase() === "medium") return 2;
-  if (severity?.toLowerCase() === "low") return 1;
-  return 0;
+function reviewStatusOf(counts: SeverityCounts, findingCount: number): string {
+  if (counts.critical > 0) return `Attention required (${counts.critical} critical)`;
+  if (counts.high > 0) return `Attention required (${counts.high} high)`;
+  if (findingCount > 0) return `Findings present (${findingCount})`;
+  return "Clear";
 }
 
 function markdownCell(value: string): string {
@@ -375,6 +388,18 @@ function boundedText(value: unknown, maxChars: number): string | undefined {
   if (!normalized) return undefined;
   if (normalized.length <= maxChars) return normalized;
   return `${normalized.slice(0, maxChars - 1).trimEnd()}…`;
+}
+
+function boundedStringArray(
+  value: unknown,
+  maxItems: number,
+  maxChars: number,
+): readonly string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .slice(0, maxItems)
+    .map((item) => boundedText(item, maxChars))
+    .filter((item): item is string => item !== undefined);
 }
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> {
