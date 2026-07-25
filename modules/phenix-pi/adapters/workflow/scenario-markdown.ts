@@ -1,4 +1,7 @@
-import type { WorkflowDefinition, WorkflowNode } from "../../domain/definition/definition.ts";
+import type {
+  WorkflowDefinition,
+  WorkflowNode,
+} from "../../domain/definition/definition.ts";
 import type { Failure, FailureCode } from "../../domain/shared.ts";
 import {
   optionalMarkdownSection,
@@ -72,7 +75,9 @@ export function compileWorkflowMarkdownScenarios(
   const authoredStates = new Map(authored.states.map((state) => [state.id, state]));
   const nodes = new Map(workflow.graph.nodes.map((node) => [node.id, node]));
   const headings = [...section.matchAll(/^###\s+([A-Za-z0-9._:-]+)\s*$/gm)];
-  if (headings.length === 0) throw new Error(`${workflow.id} Tests section has no scenarios`);
+  if (headings.length === 0) {
+    throw new Error(`${workflow.id} Tests section has no scenarios`);
+  }
 
   const seen = new Set<string>();
   return headings.map((heading, index) => {
@@ -87,7 +92,9 @@ export function compileWorkflowMarkdownScenarios(
       raw = JSON.parse(requiredMarkdownFence(body, "phenix-test"));
     } catch (error) {
       throw new Error(
-        `${workflow.id} test ${id} has invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
+        `${workflow.id} test ${id} has invalid JSON: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
     return compileScenario(id, raw, workflow, nodes, authoredStates, bindings);
@@ -99,7 +106,10 @@ function compileScenario(
   raw: unknown,
   workflow: WorkflowDefinition<unknown, unknown>,
   nodes: ReadonlyMap<string, WorkflowNode>,
-  authoredStates: ReadonlyMap<string, { readonly fields: Readonly<Record<string, string>> }>,
+  authoredStates: ReadonlyMap<
+    string,
+    { readonly fields: Readonly<Record<string, string>> }
+  >,
   bindings: WorkflowMarkdownBindings,
 ): WorkflowScenario {
   const owner = `${workflow.id} test ${id}`;
@@ -131,7 +141,10 @@ function compileScenario(
     );
   }
 
-  const environmentValue = requireRecord(value.environment ?? {}, `${owner}.environment`);
+  const environmentValue = requireRecord(
+    value.environment ?? {},
+    `${owner}.environment`,
+  );
   assertFields(environmentValue, ["availableTools"], `${owner}.environment`);
   const availableTools = optionalStringArray(
     environmentValue.availableTools,
@@ -161,15 +174,21 @@ function compileMockAction(
   const action = requireRecord(raw, owner);
   assertFields(action, ["return", "fail", "cancel"], owner);
   const kinds = ["return", "fail", "cancel"].filter((key) => key in action);
-  if (kinds.length !== 1) throw new Error(`${owner} requires exactly one of return, fail, or cancel`);
+  if (kinds.length !== 1) {
+    throw new Error(`${owner} requires exactly one of return, fail, or cancel`);
+  }
 
   if ("return" in action) {
     const schema =
       node.kind === "invoke"
         ? bindings.resolveDefinition(node.definition.id).output
-        : bindings.resolveSchema(requiredField(authored?.fields, "output-schema", owner));
+        : bindings.resolveSchema(
+            requiredField(authored?.fields, "output-schema", owner),
+          );
     const validation = schema.validate(action.return);
-    if (!validation.ok) throw validationError(`${owner}.return (${schema.id})`, validation.issues);
+    if (!validation.ok) {
+      throw validationError(`${owner}.return (${schema.id})`, validation.issues);
+    }
     return { return: validation.value };
   }
   if ("cancel" in action) {
@@ -184,13 +203,18 @@ function compileMockAction(
 function compileFailure(raw: unknown, owner: string): Failure {
   const value = requireRecord(raw, owner);
   assertFields(value, ["code", "message", "retryable", "details"], owner);
-  if (typeof value.code !== "string" || !FAILURE_CODES.has(value.code as FailureCode)) {
+  if (
+    typeof value.code !== "string" ||
+    !FAILURE_CODES.has(value.code as FailureCode)
+  ) {
     throw new Error(`${owner}.code is not a supported failure code`);
   }
   if (typeof value.message !== "string" || !value.message.trim()) {
     throw new Error(`${owner}.message must be a non-empty string`);
   }
-  if (typeof value.retryable !== "boolean") throw new Error(`${owner}.retryable must be boolean`);
+  if (typeof value.retryable !== "boolean") {
+    throw new Error(`${owner}.retryable must be boolean`);
+  }
   return {
     code: value.code as FailureCode,
     message: value.message,
@@ -208,30 +232,61 @@ function compileExpectation(
   const value = requireRecord(raw, `${owner}.expect`);
   assertFields(
     value,
-    ["status", "visits", "counts", "transitions", "failure", "requireAllMocksConsumed"],
+    [
+      "status",
+      "visits",
+      "counts",
+      "transitions",
+      "failure",
+      "requireAllMocksConsumed",
+    ],
     `${owner}.expect`,
   );
-  if (value.status !== "success" && value.status !== "failure" && value.status !== "cancelled") {
+  if (
+    value.status !== "success" &&
+    value.status !== "failure" &&
+    value.status !== "cancelled"
+  ) {
     throw new Error(`${owner}.expect.status must be success, failure, or cancelled`);
   }
+
   const visits = optionalStringArray(value.visits, `${owner}.expect.visits`);
   for (const nodeId of visits ?? []) {
-    if (!nodes.has(nodeId)) throw new Error(`${owner}.expect.visits references unknown state ${nodeId}`);
+    if (!nodes.has(nodeId)) {
+      throw new Error(`${owner}.expect.visits references unknown state ${nodeId}`);
+    }
   }
-  const countsValue = value.counts === undefined ? undefined : requireRecord(value.counts, `${owner}.expect.counts`);
+
+  const countsValue =
+    value.counts === undefined
+      ? undefined
+      : requireRecord(value.counts, `${owner}.expect.counts`);
   const counts: Record<string, number> = {};
   for (const [nodeId, count] of Object.entries(countsValue ?? {})) {
-    if (!nodes.has(nodeId)) throw new Error(`${owner}.expect.counts references unknown state ${nodeId}`);
-    if (!Number.isInteger(count) || Number(count) < 0) {
-      throw new Error(`${owner}.expect.counts.${nodeId} must be a non-negative integer`);
+    if (!nodes.has(nodeId)) {
+      throw new Error(`${owner}.expect.counts references unknown state ${nodeId}`);
     }
-    counts[nodeId] = Number(count);
+    if (typeof count !== "number" || !Number.isInteger(count) || count < 0) {
+      throw new Error(
+        `${owner}.expect.counts.${nodeId} must be a non-negative integer`,
+      );
+    }
+    counts[nodeId] = count;
   }
-  const transitions = optionalStringArray(value.transitions, `${owner}.expect.transitions`);
+
+  const transitions = optionalStringArray(
+    value.transitions,
+    `${owner}.expect.transitions`,
+  );
   for (const transition of transitions ?? []) {
     const [from, to, extra] = transition.split("->").map((part) => part.trim());
-    if (!from || !to || extra || !workflow.graph.edges.some((edge) => edge.from === from && edge.to === to)) {
-      throw new Error(`${owner}.expect.transitions references unknown transition ${transition}`);
+    const exists = workflow.graph.edges.some(
+      (edge) => edge.from === from && edge.to === to,
+    );
+    if (!from || !to || extra || !exists) {
+      throw new Error(
+        `${owner}.expect.transitions references unknown transition ${transition}`,
+      );
     }
   }
 
@@ -239,17 +294,24 @@ function compileExpectation(
   if (value.failure !== undefined) {
     const expected = requireRecord(value.failure, `${owner}.expect.failure`);
     assertFields(expected, ["code", "messageIncludes"], `${owner}.expect.failure`);
-    if (expected.code !== undefined) {
-      if (typeof expected.code !== "string" || !FAILURE_CODES.has(expected.code as FailureCode)) {
-        throw new Error(`${owner}.expect.failure.code is not supported`);
-      }
+    if (
+      expected.code !== undefined &&
+      (typeof expected.code !== "string" ||
+        !FAILURE_CODES.has(expected.code as FailureCode))
+    ) {
+      throw new Error(`${owner}.expect.failure.code is not supported`);
     }
-    if (expected.messageIncludes !== undefined && typeof expected.messageIncludes !== "string") {
+    if (
+      expected.messageIncludes !== undefined &&
+      typeof expected.messageIncludes !== "string"
+    ) {
       throw new Error(`${owner}.expect.failure.messageIncludes must be a string`);
     }
     failure = {
       ...(expected.code ? { code: expected.code as FailureCode } : {}),
-      ...(expected.messageIncludes ? { messageIncludes: expected.messageIncludes } : {}),
+      ...(expected.messageIncludes
+        ? { messageIncludes: expected.messageIncludes }
+        : {}),
     };
   }
 
@@ -276,16 +338,26 @@ function requireRecord(value: unknown, owner: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function assertFields(value: Record<string, unknown>, allowed: readonly string[], owner: string): void {
+function assertFields(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  owner: string,
+): void {
   const fields = new Set(allowed);
   for (const key of Object.keys(value)) {
     if (!fields.has(key)) throw new Error(`${owner} has unknown field ${key}`);
   }
 }
 
-function optionalStringArray(value: unknown, owner: string): readonly string[] | undefined {
+function optionalStringArray(
+  value: unknown,
+  owner: string,
+): readonly string[] | undefined {
   if (value === undefined) return undefined;
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item.trim())) {
+  if (
+    !Array.isArray(value) ||
+    value.some((item) => typeof item !== "string" || !item.trim())
+  ) {
     throw new Error(`${owner} must be an array of non-empty strings`);
   }
   return value as string[];
@@ -305,5 +377,9 @@ function validationError(
   owner: string,
   issues: readonly { readonly path: string; readonly message: string }[],
 ): Error {
-  return new Error(`${owner} is invalid: ${issues.map((issue) => `${issue.path} ${issue.message}`).join("; ")}`);
+  return new Error(
+    `${owner} is invalid: ${issues
+      .map((issue) => `${issue.path} ${issue.message}`)
+      .join("; ")}`,
+  );
 }
