@@ -12,8 +12,8 @@ import {
 } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import {
-  type BudgetSuspension,
   awaitOutcomeOrBudget,
+  type BudgetSuspension,
   encodeBudgetResumeControl,
   pendingBudgetSuspension,
   pendingBudgetSuspensionInScope,
