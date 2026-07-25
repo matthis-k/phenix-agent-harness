@@ -22,34 +22,44 @@ const available: readonly DefinitionSummary[] = [
     kind: "workflow",
     title: "Repository QA",
     description: "Run deterministic checks and independent repository reviews.",
+    inputSchema: "request.objective.v1",
+    outputSchema: "outcome.qa-report.v1",
   },
   {
     id: WORKFLOW_IMPLEMENT,
     kind: "workflow",
     title: "Verified implementation",
     description: "Plan, implement, verify, and repair one bounded change.",
+    inputSchema: "request.implementation.v1",
+    outputSchema: "outcome.implementation-result.v1",
   },
   {
     id: AGENT_COORDINATOR,
     kind: "agent",
-    title: "Dynamic coordinator",
-    description: "Compose multiple workflows when no single invariant graph fits.",
+    title: "Dynamic composer",
+    description: "Propose a typed graph when no single invariant workflow fits.",
+    inputSchema: "request.dynamic-workflow-composition.v1",
+    outputSchema: "request.dynamic-workflow-proposal.v1",
   },
   {
     id: AGENT_DISPATCHER,
     kind: "agent",
     title: "Dispatcher",
     description: "Internal selector.",
+    inputSchema: "request.dispatch-selection.v1",
+    outputSchema: "outcome.dispatch-decision.v1",
   },
   {
     id: AGENT_BASE,
     kind: "agent",
     title: "Base",
     description: "Internal escape hatch.",
+    inputSchema: "request.objective.v1",
+    outputSchema: "outcome.base.v1",
   },
 ];
 
-test("derives selector candidates from allowed workflows plus the generic coordinator", () => {
+test("derives selector candidates from allowed workflows plus the dynamic composer", () => {
   assert.deepEqual(
     selectDispatchCandidates(available).map((candidate) => candidate.definitionId),
     [WORKFLOW_QA, WORKFLOW_IMPLEMENT, AGENT_COORDINATOR],
