@@ -16,10 +16,7 @@ import {
   definitionRef,
 } from "../domain/definition/definition.ts";
 import type { DefinitionId, Outcome, RunId } from "../domain/shared.ts";
-import {
-  type BudgetSuspension,
-  awaitOutcomeOrBudget,
-} from "./budget-suspension.ts";
+import { awaitOutcomeOrBudget, type BudgetSuspension } from "./budget-suspension.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import type { CatalogFacade, DefinitionSummary, ExecutionFacade } from "./interfaces.ts";
 import type { InvocationPolicy } from "./invocation-policy.ts";
