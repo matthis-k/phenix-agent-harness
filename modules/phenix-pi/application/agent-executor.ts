@@ -620,11 +620,7 @@ export class AgentExecutor implements RunImplementation {
     }
   }
 
-  private async suspendForBudget(
-    runId: RunId,
-    live: LiveAgent,
-    failure: Failure,
-  ): Promise<void> {
+  private async suspendForBudget(runId: RunId, live: LiveAgent, failure: Failure): Promise<void> {
     if (pendingBudgetSuspension(this.store, runId)) return;
     this.pauseTimeout(live);
     const details = failure.details as FailureReport | undefined;
