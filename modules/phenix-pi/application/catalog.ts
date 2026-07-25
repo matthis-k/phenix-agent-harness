@@ -49,12 +49,14 @@ export class WorkflowFunctionRegistry implements WorkflowFunctionRegistrar {
   }
 
   registerRuntimeMappings(mappings: ReadonlyMap<ValueMappingRef, ValueMapping>): void {
-    if (!this.sealed) throw new Error(`Runtime mappings may only be installed after static sealing`);
+    if (!this.sealed)
+      throw new Error(`Runtime mappings may only be installed after static sealing`);
     for (const [ref, mapping] of mappings) {
       if (!ref.startsWith(DYNAMIC_WORKFLOW_PREFIX)) {
         throw new Error(`Runtime workflow mapping must be content-addressed: ${ref}`);
       }
-      if (this.mappings.has(ref)) throw new Error(`Runtime mapping collides with static mapping: ${ref}`);
+      if (this.mappings.has(ref))
+        throw new Error(`Runtime mapping collides with static mapping: ${ref}`);
       if (!this.runtimeMappings.has(ref)) this.runtimeMappings.set(ref, mapping);
     }
   }
@@ -106,12 +108,14 @@ export class DefinitionCatalog {
 
   register(definition: AnyDefinition): void {
     if (this.sealed) throw new Error(`Definition catalog is sealed`);
-    if (this.definitions.has(definition.id)) throw new Error(`Duplicate definition ${definition.id}`);
+    if (this.definitions.has(definition.id))
+      throw new Error(`Duplicate definition ${definition.id}`);
     this.definitions.set(definition.id, deepFreeze(definition));
   }
 
   registerRuntimeWorkflow(definition: WorkflowDefinition<unknown, unknown>): void {
-    if (!this.sealed) throw new Error(`Runtime workflows may only be installed after static sealing`);
+    if (!this.sealed)
+      throw new Error(`Runtime workflows may only be installed after static sealing`);
     if (!definition.id.startsWith(DYNAMIC_WORKFLOW_PREFIX)) {
       throw new Error(`Runtime workflow must be content-addressed: ${definition.id}`);
     }
