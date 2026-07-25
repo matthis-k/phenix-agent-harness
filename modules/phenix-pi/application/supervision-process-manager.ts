@@ -2,6 +2,11 @@ import type { DomainEvent } from "../domain/run/events.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
 import type { RunRecord } from "../domain/run/model.ts";
 import type { RunId } from "../domain/shared.ts";
+import {
+  BUDGET_SUSPENDED_EVENT,
+  type BudgetSuspension,
+  pendingBudgetSuspension,
+} from "./budget-suspension.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import { formatPresentationNotice, isPresentationFact } from "./presentation.ts";
 
@@ -15,8 +20,8 @@ interface SupervisionExecution {
  * Reacts to canonical execution events with bounded supervisory notifications.
  *
  * This is deliberately a process manager rather than an anonymous composition
- * subscriber: it is the sole owner of descendant terminal, retry, presentation,
- * and parent-attention notification policy.
+ * subscriber: it is the sole owner of descendant terminal, retry, budget,
+ * presentation, and parent-attention notification policy.
  */
 export class SupervisionProcessManager {
   private readonly execution: SupervisionExecution;
@@ -45,6 +50,21 @@ export class SupervisionProcessManager {
 
     if (event.type === "run.fact.recorded" && isPresentationFact(event.data)) {
       await this.notifyRoot(formatPresentationNotice(run.id, event.data));
+      return;
+    }
+
+    if (event.type === BUDGET_SUSPENDED_EVENT) {
+      const suspension = pendingBudgetSuspension(this.store, run.id);
+      if (!suspension) return;
+      const summary = summarizeBudgetSuspension(suspension);
+      await this.notifyRoot(summary);
+      const parent = run.parentId ? this.store.projection.runs.get(run.parentId) : undefined;
+      if (parent?.kind === "agent" && !isTerminalRunState(parent.state)) {
+        await this.execution.notify(
+          parent.id,
+          `${summary} Decide whether to resume the same session with phenix_handle action=resume, supply different larger limits, cancel it, or leave it suspended. Do not use retry for this budget request.`,
+        );
+      }
       return;
     }
 
@@ -101,6 +121,12 @@ export class SupervisionProcessManager {
 
 function isTerminalEvent(type: string): boolean {
   return ["run.completed", "run.failed", "run.cancelled", "run.orphaned"].includes(type);
+}
+
+export function summarizeBudgetSuspension(suspension: BudgetSuspension): string {
+  const current = JSON.stringify(suspension.currentLimits);
+  const suggested = JSON.stringify(suspension.suggestedLimits);
+  return `Run ${suspension.runId} is budget-suspended [${suspension.failure.code}]: ${suspension.failure.message}. The existing Pi session and accumulated context are retained. Current limits: ${current}. Suggested limits: ${suggested}. Counters: ${suspension.turnCount} turns, ${suspension.toolCallCount} tool calls. Resume this exact run with phenix_handle action=resume; retry would create a replacement session.`;
 }
 
 export function summarizeRetryStart(
