@@ -235,6 +235,13 @@ output-schema: outcome.qa-report.v1
       {
         "return": {
           "summary": "QA passed",
+          "checks": [
+            {
+              "command": "devenv test",
+              "ok": true,
+              "summary": "passed"
+            }
+          ],
           "findings": [],
           "reports": []
         }
@@ -337,6 +344,13 @@ output-schema: outcome.qa-report.v1
       {
         "return": {
           "summary": "QA passed after bounded recovery",
+          "checks": [
+            {
+              "command": "devenv test",
+              "ok": true,
+              "summary": "passed"
+            }
+          ],
           "findings": [],
           "reports": []
         }

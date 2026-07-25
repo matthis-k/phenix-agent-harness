@@ -8,6 +8,8 @@ import type {
   ImplementationRequest,
   ImplementationResult,
   ObjectiveRequest,
+  QAReport,
+  QASynthesisRequest,
   VerificationResult,
 } from "../schemas.ts";
 
@@ -135,17 +137,26 @@ export function registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): 
       "Treat baseline command execution as already owned by the deterministic-check state. Run only additional targeted read-only checks needed to support a concrete security finding.",
     ),
   );
-  registry.registerMapping("qa.synthesize.input", (context) => ({
-    objective: (context.input as ObjectiveRequest).objective,
-    reports: [
-      localAt(context, "checks"),
-      successAt(context, "repo"),
-      successAt(context, "tests"),
-      successAt(context, "architecture"),
-      successAt(context, "security"),
-    ],
-  }));
-  registry.registerMapping("qa.output", (context) => successAt(context, "synthesize"));
+  registry.registerMapping(
+    "qa.synthesize.input",
+    (context): QASynthesisRequest => ({
+      objective: (context.input as ObjectiveRequest).objective,
+      checks: localAt<readonly CheckResult[]>(context, "checks"),
+      reports: [
+        successAt(context, "repo"),
+        successAt(context, "tests"),
+        successAt(context, "architecture"),
+        successAt(context, "security"),
+      ],
+    }),
+  );
+  registry.registerMapping(
+    "qa.output",
+    (context): QAReport => ({
+      ...successAt<QAReport>(context, "synthesize"),
+      checks: localAt<readonly CheckResult[]>(context, "checks"),
+    }),
+  );
 }
 
 function difficultyAt(context: WorkflowEvaluationContext) {

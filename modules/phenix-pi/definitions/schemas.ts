@@ -95,8 +95,15 @@ export interface BaseResult {
   readonly unresolved: readonly string[];
 }
 
+export interface QASynthesisRequest {
+  readonly objective: string;
+  readonly checks: readonly CheckResult[];
+  readonly reports: readonly unknown[];
+}
+
 export interface QAReport {
   readonly summary: string;
+  readonly checks: readonly CheckResult[];
   readonly findings: readonly {
     readonly severity: "low" | "medium" | "high";
     readonly title: string;
@@ -155,6 +162,7 @@ const qaFinding = Type.Object({
 });
 export const QAReportType = Type.Object({
   summary: Type.String(),
+  checks: Type.Array(checkResult),
   findings: Type.Array(qaFinding),
   reports: Type.Array(Type.Unknown()),
 });
@@ -261,12 +269,13 @@ export const BaseResultSchema = defineSchema<BaseResult>(
     unresolved: Type.Array(Type.String()),
   }),
 );
-export const QASynthesisRequestSchema = defineSchema<{
-  readonly objective: string;
-  readonly reports: readonly unknown[];
-}>(
+export const QASynthesisRequestSchema = defineSchema<QASynthesisRequest>(
   "request.qa-synthesis.v1",
-  Type.Object({ objective: Type.String(), reports: Type.Array(Type.Unknown()) }),
+  Type.Object({
+    objective: Type.String(),
+    checks: Type.Array(checkResult),
+    reports: Type.Array(Type.Unknown()),
+  }),
 );
 export const QAReportSchema = defineSchema<QAReport>("outcome.qa-report.v1", QAReportType);
 export const ImplementationResultSchema = defineSchema<ImplementationResult>(

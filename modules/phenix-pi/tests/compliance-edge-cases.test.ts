@@ -167,6 +167,7 @@ test("workflow join all-success fails the workflow when one parallel branch fail
       if (command.definition.id === AGENT_QA_SYNTHESIZER) {
         await runtime.controller.complete(command.runId, {
           summary: "not reached",
+          checks: [{ command: "test", ok: true, summary: "passed" }],
           findings: [],
           reports: [],
         });

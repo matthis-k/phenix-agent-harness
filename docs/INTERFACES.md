@@ -115,6 +115,8 @@ Authorization occurs before durable creation and is repeated after asynchronous 
 The run ledger retains complete schema-valid inputs and outcomes. Model-facing tools do not automatically inline those complete values.
 
 - Awaited `phenix_run` and `phenix_dispatch` calls return a compact run ID, state, summary, and failure metadata when applicable.
+- Compact success projections retain bounded structured `checks` and `findings` arrays with authoritative total and omitted counts when the typed outcome provides them; bulky raw branch reports remain omitted.
+- A compact outcome containing both checks and findings is rendered deterministically as Markdown tool text: separate gate and review status, the complete projected check table, severity counts, and the complete projected findings table. The structured projection remains available in tool-result details.
 - `phenix_handle inspect` and `await` default to `view=summary`.
 - `view=outcome` admits the complete typed outcome.
 - `view=failure` admits the complete failure projection when one exists.
@@ -143,7 +145,7 @@ Repeated presentations with the same fingerprint are acknowledged but not emitte
 
 `local.qa-checks` is deliberately narrower than `bash`. It accepts structured deterministic check specifications and compiles them to fixed executable/argument pairs. Automatic discovery for a devenv repository selects only the read-only `devenv test` gate; generic check discovery applies only when no devenv gate is present. Mutating tasks such as `maintenance:fix`, arbitrary command strings, and implicit shell composition are not part of the local-operation contract.
 
-The QA workflow partitions authority by state. Repository and architecture branches receive branch-specific read-only objectives rather than the caller's command obligation. The deterministic local state owns baseline project checks, the test analyst receives those results and may use `bash` or `nix_shell` only to close explicit read-only coverage gaps, and synthesis receives the complete reports. A non-executing scout is therefore not evidence that the workflow lacks command authority.
+The QA workflow partitions authority by state. Repository and architecture branches receive branch-specific read-only objectives rather than the caller's command obligation. The deterministic local state owns baseline project checks, the test analyst receives those results and may use `bash` or `nix_shell` only to close explicit read-only coverage gaps, and synthesis receives typed checks separately from semantic branch reports. The final workflow mapping overwrites any model-echoed checks with the authoritative local results. A non-executing scout is therefore not evidence that the workflow lacks command authority.
 
 `nix_shell` is an operational child-session tool with the same command-execution authority as `bash`. It normalizes bare package names through `nixpkgs`, resolves executable basenames through `nix-index-database`, evaluates explicit flake installables without shell interpolation, runs the requested command inside an ephemeral environment, and never installs packages into a profile or the host system.
 
@@ -159,7 +161,7 @@ Every child records its requested model selector and the concrete model selected
 
 ## Public Pi tools
 
-- `phenix_dispatch`: the root's sole substantial execution entry point; returns a compact result envelope.
+- `phenix_dispatch`: the root's sole substantial execution entry point; returns a compact result envelope and renders structured QA reports as tables.
 - `phenix_run`: invokes an authorized catalog definition from a child agent; returns a compact result envelope.
 - `phenix_handle`: inspects, awaits, messages, cancels, or retries an accessible descendant, with explicit result views.
 - `phenix_tasks`: reads the derived tree and mutates only local task leaves or owned progress.
