@@ -30,9 +30,7 @@ export function renderTerminalMermaid(
   }
   const header = normalized.split(/\r?\n/, 1)[0]?.trim().toLowerCase() ?? "";
   if (
-    !/^(?:flowchart|graph|statediagram|sequencediagram|classdiagram|erdiagram|xychart)/.test(
-      header,
-    )
+    !/^(?:flowchart|graph|statediagram|sequencediagram|classdiagram|erdiagram|xychart)/.test(header)
   ) {
     throw new Error(
       "Unsupported Mermaid diagram. Use flowchart, graph, stateDiagram, sequenceDiagram, classDiagram, erDiagram, or xychart.",
@@ -90,10 +88,7 @@ export function renderCatalogDefinition(definition: AnyDefinition): string {
   return lines.join("\n");
 }
 
-export function runTreeSequenceMermaid(
-  tree: RunTree,
-  options: RunSequenceOptions = {},
-): string {
+export function runTreeSequenceMermaid(tree: RunTree, options: RunSequenceOptions = {}): string {
   const participantIds = new Map<string, string>();
   const participants: Array<{ readonly id: string; readonly label: string }> = [];
   const rootId = registerParticipant(tree.root, participantIds, participants);
@@ -166,10 +161,7 @@ export function runTreeSequenceMermaid(
   return lines.join("\n");
 }
 
-export function renderRunTreeSequence(
-  tree: RunTree,
-  options: RunSequenceOptions = {},
-): string {
+export function renderRunTreeSequence(tree: RunTree, options: RunSequenceOptions = {}): string {
   return renderTerminalMermaid(runTreeSequenceMermaid(tree, options), { compact: true });
 }
 
@@ -257,7 +249,10 @@ function escapeSequenceText(value: string): string {
 }
 
 function normalizeText(value: string): string {
-  return value.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
+  return value
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function definitionLabel(value: string): string {

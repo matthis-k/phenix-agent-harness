@@ -35,12 +35,12 @@ test("workflow definitions compile to flowcharts from the executable graph", () 
       entry: "scout",
       nodes: [
         {
-kind: "invoke",
-id: "scout",
-title: "Scout",
-definition: { id: "agent.scout" },
-input: "sample.input",
-wait: "await",
+          kind: "invoke",
+          id: "scout",
+          title: "Scout",
+          definition: { id: "agent.scout" },
+          input: "sample.input",
+          wait: "await",
         },
         { kind: "return", id: "done", title: "Done", output: "sample.output" },
       ],
@@ -62,27 +62,27 @@ test("run trees become sequence diagrams with workflow boundaries", () => {
       run: { id: "root-test", kind: "root", definitionId: "root.session", state: "running" },
       children: [
         {
-run: {
-  id: "run-workflow",
-  kind: "workflow",
-  definitionId: "workflow.qa",
-  state: "running",
-},
-children: [
-  {
-    run: {
-      id: "run-agent",
-      kind: "agent",
-      definitionId: "agent.architect",
-      state: "running",
-      resolvedModel: {
-        concrete: { provider: "test", model: "model-a" },
-        thinking: "high",
-      },
-    },
-    children: [],
-  },
-],
+          run: {
+            id: "run-workflow",
+            kind: "workflow",
+            definitionId: "workflow.qa",
+            state: "running",
+          },
+          children: [
+            {
+              run: {
+                id: "run-agent",
+                kind: "agent",
+                definitionId: "agent.architect",
+                state: "running",
+                resolvedModel: {
+                  concrete: { provider: "test", model: "model-a" },
+                  thinking: "high",
+                },
+              },
+              children: [],
+            },
+          ],
         },
       ],
     },
