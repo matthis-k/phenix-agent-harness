@@ -27,11 +27,18 @@ import {
 import { type RunId, runId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import { copyFactHistory, parseFactsCommand, writeFactHistory } from "./fact-export.ts";
+import {
+  formatPhenixHealth,
+  healthNotificationLevel,
+  inspectPhenixHealth,
+  parsePhenixHealthCommand,
+} from "./health-command.ts";
 import { formatDiagnosticEntries, PHENIX_LOGS_USAGE, parseLogsCommand } from "./log-command.ts";
 import { statusLine } from "./observability-theme.ts";
 import {
   completePhenixSubcommands,
   PHENIX_FACTS_USAGE,
+  PHENIX_HEALTH_USAGE,
   PHENIX_STATUS_USAGE,
   PHENIX_USAGE,
 } from "./phenix-command.ts";
@@ -330,6 +337,21 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
         .split(/\s+/)
         .filter(Boolean)
         .map((value) => value.toLowerCase());
+      if (action === "health") {
+        const command = parsePhenixHealthCommand(rawOptions);
+        if (!command) {
+          ctx.ui.notify(`Usage: ${PHENIX_HEALTH_USAGE}`, "warning");
+          return;
+        }
+        const report = await inspectPhenixHealth({
+          runtime: activeRuntime,
+          rootRunId: activeRoot,
+          integrations: integrationStatuses,
+          hasModelSet: (modelSet) => ctx.modelRegistry.find("phenix", modelSet) !== undefined,
+        });
+        ctx.ui.notify(limit(formatPhenixHealth(report, command)), healthNotificationLevel(report));
+        return;
+      }
       if (action === "integrations") {
         ctx.ui.notify(
           formatIntegrationReport(integrationStatuses),
