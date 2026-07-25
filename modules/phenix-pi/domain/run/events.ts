@@ -96,6 +96,8 @@ export type DomainEventType =
   | "run.input.amended"
   | "run.output.submitted"
   | "run.output.rejected"
+  | "run.budget.suspended"
+  | "run.budget.resumed"
   | "run.completed"
   | "run.failed"
   | "run.cancelled"
