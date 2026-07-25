@@ -3,22 +3,29 @@ import type {
   DispatchDecision,
   DispatchRoute,
 } from "../definitions/dispatch.ts";
+import type {
+  DynamicWorkflowCandidate,
+  DynamicWorkflowCompositionRequest,
+  DynamicWorkflowProposal,
+} from "../definitions/dynamic-workflow.ts";
 import {
   AGENT_COORDINATOR,
   AGENT_DISPATCHER,
   WORKFLOW_IMPLEMENT,
   WORKFLOW_QA,
 } from "../definitions/ids.ts";
-import type { ObjectiveRequest } from "../definitions/schemas.ts";
+import { ObjectiveRequestSchema, type ObjectiveRequest } from "../definitions/schemas.ts";
 import {
+  type AgentDefinition,
   type AnyDefinition,
   type DefinitionRef,
   definitionRef,
 } from "../domain/definition/definition.ts";
 import type { DefinitionId, Outcome, RunId } from "../domain/shared.ts";
 import { awaitOutcomeOrBudget, type BudgetSuspension } from "./budget-suspension.ts";
+import type { DynamicWorkflowExecutionService } from "./dynamic-workflow-execution.ts";
 import type { ExecutionStore } from "./execution-store.ts";
-import type { CatalogFacade, DefinitionSummary, ExecutionFacade } from "./interfaces.ts";
+import type { CatalogFacade, DefinitionSummary, ExecutionFacade, RunHandle } from "./interfaces.ts";
 import type { InvocationPolicy } from "./invocation-policy.ts";
 
 export type DispatchMode = "auto" | DispatchRoute;
@@ -33,6 +40,7 @@ export interface DispatchResult {
   readonly selectedBy: "explicit" | "dispatcher";
   readonly runId: RunId;
   readonly classifierRunId?: RunId;
+  readonly composerRunId?: RunId;
   readonly status: "running" | "completed" | "suspended";
   readonly outcome?: Outcome<unknown>;
   readonly suspension?: BudgetSuspension;
@@ -40,17 +48,20 @@ export interface DispatchResult {
 
 export class DispatchService {
   private readonly execution: ExecutionFacade;
+  private readonly dynamicWorkflows: DynamicWorkflowExecutionService;
   private readonly catalog: CatalogFacade;
   private readonly store: ExecutionStore;
   private readonly invocationPolicy: InvocationPolicy;
 
   constructor(input: {
     readonly execution: ExecutionFacade;
+    readonly dynamicWorkflows: DynamicWorkflowExecutionService;
     readonly catalog: CatalogFacade;
     readonly store: ExecutionStore;
     readonly invocationPolicy: InvocationPolicy;
   }) {
     this.execution = input.execution;
+    this.dynamicWorkflows = input.dynamicWorkflows;
     this.catalog = input.catalog;
     this.store = input.store;
     this.invocationPolicy = input.invocationPolicy;
@@ -75,7 +86,7 @@ export class DispatchService {
     } else {
       const candidates = selectDispatchCandidates(await this.catalog.listAvailable(parentId));
       if (candidates.length === 0) {
-        throw new Error("No workflow or generic coordinator is available for dispatch");
+        throw new Error("No workflow or dynamic composer is available for dispatch");
       }
 
       const classifierRef = definitionRef(AGENT_DISPATCHER);
@@ -109,45 +120,120 @@ export class DispatchService {
       objective,
       ...(request.context === undefined ? {} : { context: request.context }),
     };
-    this.assertAllowed(parentId, this.catalog.get(targetRef) as AnyDefinition, input);
+    if (targetRef.id === AGENT_COORDINATOR) {
+      return this.compose(parentId, input, request.wait ?? "await", selectedBy, classifierRunId, signal);
+    }
 
-    const wait = request.wait ?? "await";
+    this.assertAllowed(parentId, this.catalog.get(targetRef) as AnyDefinition, input);
     const handle = await this.execution.start({
       parentId,
       definition: targetRef,
       input,
+      wait: request.wait ?? "await",
+    });
+    return this.resultForHandle({
+      handle,
+      definition: targetRef.id,
+      selectedBy,
+      classifierRunId,
+      wait: request.wait ?? "await",
+      signal,
+    });
+  }
+
+  private async compose(
+    parentId: RunId,
+    input: ObjectiveRequest,
+    wait: "await" | "background",
+    selectedBy: DispatchResult["selectedBy"],
+    classifierRunId: RunId | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<DispatchResult> {
+    const composerRef = definitionRef<DynamicWorkflowCompositionRequest, DynamicWorkflowProposal>(
+      AGENT_COORDINATOR,
+    );
+    const composerDefinition = this.catalog.get(composerRef) as AgentDefinition<
+      DynamicWorkflowCompositionRequest,
+      DynamicWorkflowProposal
+    >;
+    const composerInput: DynamicWorkflowCompositionRequest = {
+      ...input,
+      workflowInputSchema: ObjectiveRequestSchema.id,
+      candidates: compositionCandidates(composerDefinition, this.catalog),
+    };
+    this.assertAllowed(parentId, composerDefinition, composerInput);
+    const composer = await this.execution.start({
+      parentId,
+      definition: composerRef,
+      input: composerInput,
+      wait: "await",
+    });
+    const composed = await composer.result(signal);
+    if (composed.status !== "success") {
+      throw new Error(`Dynamic workflow composer failed: ${describeOutcome(composed)}`);
+    }
+
+    const handle = await this.dynamicWorkflows.start({
+      parentId,
+      scopeRunId: composer.id,
+      proposal: composed.value,
+      input,
       wait,
     });
-    if (wait === "background") {
+    const definition = this.store.projection.requireRun(handle.id).definitionId;
+    return this.resultForHandle({
+      handle,
+      definition,
+      selectedBy,
+      classifierRunId,
+      composerRunId: composer.id,
+      wait,
+      signal,
+    });
+  }
+
+  private async resultForHandle(input: {
+    readonly handle: RunHandle<unknown>;
+    readonly definition: DefinitionId;
+    readonly selectedBy: DispatchResult["selectedBy"];
+    readonly classifierRunId?: RunId;
+    readonly composerRunId?: RunId;
+    readonly wait: "await" | "background";
+    readonly signal?: AbortSignal;
+  }): Promise<DispatchResult> {
+    if (input.wait === "background") {
       return {
-        definition: targetRef.id,
-        selectedBy,
-        runId: handle.id,
-        ...(classifierRunId ? { classifierRunId } : {}),
+        definition: input.definition,
+        selectedBy: input.selectedBy,
+        runId: input.handle.id,
+        ...(input.classifierRunId ? { classifierRunId: input.classifierRunId } : {}),
+        ...(input.composerRunId ? { composerRunId: input.composerRunId } : {}),
         status: "running",
       };
     }
 
     const settled = await awaitOutcomeOrBudget({
       store: this.store,
-      runId: handle.id,
-      signal,
+      runId: input.handle.id,
+      signal: input.signal,
     });
     if (settled.status === "suspended") {
       return {
-        definition: targetRef.id,
-        selectedBy,
-        runId: handle.id,
-        ...(classifierRunId ? { classifierRunId } : {}),
+        definition: input.definition,
+        selectedBy: input.selectedBy,
+        runId: input.handle.id,
+        ...(input.classifierRunId ? { classifierRunId: input.classifierRunId } : {}),
+        ...(input.composerRunId ? { composerRunId: input.composerRunId } : {}),
         status: "suspended",
         suspension: settled.suspension,
       };
     }
     return {
-      definition: targetRef.id,
-      selectedBy,
-      runId: handle.id,
-      ...(classifierRunId ? { classifierRunId } : {}),
+      definition: input.definition,
+      selectedBy: input.selectedBy,
+      runId: input.handle.id,
+      ...(input.classifierRunId ? { classifierRunId: input.classifierRunId } : {}),
+      ...(input.composerRunId ? { composerRunId: input.composerRunId } : {}),
       status: "completed",
       outcome: settled.outcome,
     };
@@ -185,6 +271,23 @@ export function requireSelectedCandidate(
     throw new Error(`Dispatch selector chose unavailable definition ${decision.definitionId}`);
   }
   return selected;
+}
+
+function compositionCandidates(
+  composer: AgentDefinition<DynamicWorkflowCompositionRequest, DynamicWorkflowProposal>,
+  catalog: CatalogFacade,
+): readonly DynamicWorkflowCandidate[] {
+  return composer.childCapabilities.invokableDefinitions.map((id) => {
+    const definition = catalog.get(definitionRef(id));
+    return {
+      definitionId: definition.id,
+      kind: definition.kind,
+      title: definition.title,
+      description: definition.description,
+      inputSchema: definition.input.id,
+      outputSchema: definition.output.id,
+    };
+  });
 }
 
 function definitionForRoute(route: DispatchRoute): DefinitionRef<unknown, unknown> {
