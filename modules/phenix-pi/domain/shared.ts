@@ -46,6 +46,7 @@ export type FailureCode =
   | "workflow_runtime_failed"
   | "workflow_exhausted"
   | "local_step_failed"
+  | "tool_unavailable"
   | "cancelled"
   | "orphaned";
 
