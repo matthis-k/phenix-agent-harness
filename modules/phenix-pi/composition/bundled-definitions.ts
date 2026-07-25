@@ -151,7 +151,8 @@ export const criticDefinition = requireAgent("agent.critic");
 export const finalizerDefinition = requireAgent("agent.finalizer");
 export const dispatcherDefinition = requireAgent("agent.dispatcher");
 export const coordinatorDefinition = requireAgent("agent.coordinator");
-export const baseDefinition = requireAgent("agent.base");
+export const genericReadDefinition = requireAgent("agent.generic-read");
+export const genericWriteDefinition = requireAgent("agent.generic-write");
 export const qaSynthesizerDefinition = requireAgent("agent.qa-synthesizer");
 export const attentionRouterDefinition = requireAgent("agent.attention-router");
 
