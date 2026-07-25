@@ -47,6 +47,19 @@ function compiled(
   };
 }
 
+function failedWorkflow() {
+  return {
+    id: "run-workflow" as RunId,
+    definitionId: "workflow.qa" as RunRecord["definitionId"],
+    outcome: failed({
+      code: "timeout",
+      message: "Agent timed out after 960000ms",
+      retryable: true,
+      causeRunId: "run-critic-2" as RunId,
+    }),
+  };
+}
+
 test("workflow retry notice is compact and states retained work", () => {
   const originalId = "run-critic-1" as RunId;
   const original = {
@@ -78,19 +91,18 @@ test("workflow retry notice is compact and states retained work", () => {
 });
 
 test("exhausted workflow recovery is final and does not recommend a full restart", () => {
-  const notice = summarizeWorkflowTerminal({
-    id: "run-workflow" as RunId,
-    definitionId: "workflow.qa" as RunRecord["definitionId"],
-    outcome: failed({
-      code: "timeout",
-      message: "Agent timed out after 960000ms",
-      retryable: true,
-      causeRunId: "run-critic-2" as RunId,
-    }),
-  });
+  const notice = summarizeWorkflowTerminal(failedWorkflow(), true);
 
   assert.match(notice, /declared recovery policy was exhausted/);
   assert.match(notice, /Completed states were not rerun/);
   assert.match(notice, /Do not restart the full workflow automatically/);
   assert.doesNotMatch(notice, /bounded retry may be appropriate/);
+});
+
+test("ordinary workflow failure is not mislabeled as retry exhaustion", () => {
+  const notice = summarizeWorkflowTerminal(failedWorkflow(), false);
+
+  assert.match(notice, /^workflow\.qa failed \[timeout\]/);
+  assert.doesNotMatch(notice, /recovery policy was exhausted/);
+  assert.match(notice, /Do not restart the full workflow automatically/);
 });
