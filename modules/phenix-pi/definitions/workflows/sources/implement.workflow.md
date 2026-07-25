@@ -42,6 +42,8 @@ input-schema: request.difficulty-assessment.v1
 output-schema: outcome.difficulty-assessment.v1
 wait: await
 difficulty: D0
+retry: retryable
+max-retries: 1
 ```
 
 ### plan
@@ -55,6 +57,8 @@ input-schema: request.plan.v1
 output-schema: outcome.plan.v1
 wait: await
 difficulty: result:estimate
+retry: retryable
+max-retries: 1
 ```
 
 ### implement
@@ -99,6 +103,8 @@ input-schema: request.verification.v1
 output-schema: outcome.verification.v1
 wait: await
 difficulty: result:estimate
+retry: retryable
+max-retries: 1
 ```
 
 ### accepted
