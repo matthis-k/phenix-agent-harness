@@ -7,7 +7,6 @@ import {
   DynamicWorkflowProposalSchema,
 } from "../definitions/dynamic-workflow.ts";
 import {
-  type AgentDefinition,
   type AnyDefinition,
   definitionRef,
   type ValueMappingRef,
@@ -80,39 +79,18 @@ export class DynamicWorkflowCompiler {
     const proposalNodes = new Map(proposal.nodes.map((node) => [node.id, node] as const));
     const outgoing = indexEdges(proposal.edges);
 
-    if (containsCycle(proposal.entry, outgoing)) {
+    if (containsCycle(proposal.nodes.map((node) => node.id), outgoing)) {
       throw new DynamicWorkflowCompileError(
         "Dynamic workflows are initially restricted to acyclic graphs",
       );
     }
 
-    const invokedDefinitions = new Map<string, AnyDefinition>();
-    for (const node of proposal.nodes) {
-      if (node.kind !== "invoke") continue;
-      const id = definitionId(node.definitionId);
-      if (!allowed.has(id)) {
-        throw new DynamicWorkflowCompileError(
-          `Dynamic workflow node ${node.id} references unavailable definition ${id}`,
-        );
-      }
-      invokedDefinitions.set(node.id, this.bindings.resolveDefinition(id));
-    }
-
-    for (const node of proposal.nodes) {
-      const binding = node.kind === "invoke" ? node.input : node.kind === "return" ? node.output : undefined;
-      if (!binding) continue;
-      validateBindingReferences(binding, node.id, proposalNodes, outgoing);
-      const expectedSchema =
-        node.kind === "invoke"
-          ? invokedDefinitions.get(node.id)?.input.id
-          : proposal.outputSchema;
-      const actualSchema = directBindingSchema(binding, proposal, invokedDefinitions);
-      if (expectedSchema && actualSchema && expectedSchema !== actualSchema) {
-        throw new DynamicWorkflowCompileError(
-          `Dynamic workflow node ${node.id} passes complete schema ${actualSchema} to ${expectedSchema}`,
-        );
-      }
-    }
+    const invokedDefinitions = resolveInvokedDefinitions(
+      proposal,
+      allowed,
+      this.bindings.resolveDefinition.bind(this.bindings),
+    );
+    validateBindings(proposal, proposalNodes, outgoing, invokedDefinitions);
 
     const inputSchema = this.bindings.resolveSchema(proposal.inputSchema);
     const outputSchema = this.bindings.resolveSchema(proposal.outputSchema);
@@ -134,23 +112,11 @@ export class DynamicWorkflowCompiler {
       description: proposal.description,
       input: inputSchema,
       output: outputSchema,
-      graph: {
-        entry: proposal.entry,
-        nodes,
-        edges,
-      },
+      graph: { entry: proposal.entry, nodes, edges },
       limits: proposal.limits,
     };
 
-    const inventory: WorkflowFunctionInventory = {
-      hasMapping: (ref) => mappings.has(ref),
-      hasDecision: () => false,
-      hasCondition: () => false,
-      hasOperation: () => false,
-      hasDefinition: (candidate) =>
-        [...invokedDefinitions.values()].some((definition) => definition.id === candidate),
-    };
-    const diagnostics = validateWorkflow(definition, inventory);
+    const diagnostics = validateWorkflow(definition, dynamicInventory(invokedDefinitions, mappings));
     const errors = diagnostics.filter((diagnostic) => diagnostic.severity === "error");
     if (errors.length > 0) {
       throw new DynamicWorkflowCompileError(
@@ -170,10 +136,58 @@ export class DynamicWorkflowCompiler {
   }
 }
 
+function resolveInvokedDefinitions(
+  proposal: DynamicWorkflowProposal,
+  allowed: ReadonlySet<string>,
+  resolve: (id: DefinitionId) => AnyDefinition,
+): ReadonlyMap<string, AnyDefinition> {
+  const definitions = new Map<string, AnyDefinition>();
+  for (const node of proposal.nodes) {
+    if (node.kind !== "invoke") continue;
+    let id: DefinitionId;
+    try {
+      id = definitionId(node.definitionId);
+    } catch (error) {
+      throw new DynamicWorkflowCompileError(
+        `Dynamic workflow node ${node.id} has invalid definition ID: ${describeError(error)}`,
+      );
+    }
+    if (!allowed.has(id)) {
+      throw new DynamicWorkflowCompileError(
+        `Dynamic workflow node ${node.id} references unavailable definition ${id}`,
+      );
+    }
+    definitions.set(node.id, resolve(id));
+  }
+  return definitions;
+}
+
+function validateBindings(
+  proposal: DynamicWorkflowProposal,
+  nodes: ReadonlyMap<string, DynamicWorkflowNodeProposal>,
+  outgoing: ReadonlyMap<string, readonly string[]>,
+  definitions: ReadonlyMap<string, AnyDefinition>,
+): void {
+  for (const node of proposal.nodes) {
+    const binding =
+      node.kind === "invoke" ? node.input : node.kind === "return" ? node.output : undefined;
+    if (!binding) continue;
+    validateBindingReferences(binding, node.id, nodes, outgoing);
+    const expectedSchema =
+      node.kind === "invoke" ? definitions.get(node.id)?.input.id : proposal.outputSchema;
+    const actualSchema = directBindingSchema(binding, proposal, definitions);
+    if (expectedSchema && actualSchema && expectedSchema !== actualSchema) {
+      throw new DynamicWorkflowCompileError(
+        `Dynamic workflow node ${node.id} passes complete schema ${actualSchema} to ${expectedSchema}`,
+      );
+    }
+  }
+}
+
 function compileNode(
   workflowId: DefinitionId,
   proposal: DynamicWorkflowNodeProposal,
-  invokedDefinitions: ReadonlyMap<string, AnyDefinition>,
+  definitions: ReadonlyMap<string, AnyDefinition>,
   mappings: Map<ValueMappingRef, ValueMapping>,
 ): WorkflowNode {
   if (proposal.kind === "join") {
@@ -186,7 +200,8 @@ function compileNode(
     };
   }
 
-  const ref = `${workflowId}.mapping.${proposal.id}.${proposal.kind === "return" ? "output" : "input"}`;
+  const direction = proposal.kind === "return" ? "output" : "input";
+  const ref = `${workflowId}.mapping.${proposal.id}.${direction}`;
   const binding = proposal.kind === "return" ? proposal.output : proposal.input;
   mappings.set(ref, (context) => evaluateDynamicBinding(binding, context));
 
@@ -199,7 +214,7 @@ function compileNode(
     };
   }
 
-  const definition = invokedDefinitions.get(proposal.id);
+  const definition = definitions.get(proposal.id);
   if (!definition) throw new DynamicWorkflowCompileError(`Missing resolved node ${proposal.id}`);
   return {
     kind: "invoke",
@@ -211,6 +226,20 @@ function compileNode(
     ...(proposal.retry
       ? { retry: { when: "retryable" as const, maxRetries: proposal.retry.maxRetries } }
       : {}),
+  };
+}
+
+function dynamicInventory(
+  definitions: ReadonlyMap<string, AnyDefinition>,
+  mappings: ReadonlyMap<ValueMappingRef, ValueMapping>,
+): WorkflowFunctionInventory {
+  const definitionIds = new Set([...definitions.values()].map((definition) => definition.id));
+  return {
+    hasMapping: (ref) => mappings.has(ref),
+    hasDecision: () => false,
+    hasCondition: () => false,
+    hasOperation: () => false,
+    hasDefinition: (candidate) => definitionIds.has(candidate as DefinitionId),
   };
 }
 
@@ -278,11 +307,14 @@ function validateBindingReferences(
 function directBindingSchema(
   binding: DynamicValueBinding,
   proposal: DynamicWorkflowProposal,
-  invokedDefinitions: ReadonlyMap<string, AnyDefinition>,
+  definitions: ReadonlyMap<string, AnyDefinition>,
 ): string | undefined {
-  if ((binding.path?.length ?? 0) > 0) return undefined;
-  if (binding.source === "input") return proposal.inputSchema;
-  if (binding.source === "node") return invokedDefinitions.get(binding.nodeId)?.output.id;
+  if (binding.source === "input") {
+    return binding.path?.length ? undefined : proposal.inputSchema;
+  }
+  if (binding.source === "node") {
+    return binding.path?.length ? undefined : definitions.get(binding.nodeId)?.output.id;
+  }
   return undefined;
 }
 
@@ -344,7 +376,7 @@ function definitionContract(definition: AnyDefinition): unknown {
     childCapabilities: definition.childCapabilities,
     limits: definition.limits,
     persistence: definition.persistence,
-  } satisfies Record<keyof AgentDefinition<unknown, unknown> | "inputSchema" | "outputSchema", unknown>;
+  };
 }
 
 function normalizeProposal(proposal: DynamicWorkflowProposal): DynamicWorkflowProposal {
@@ -371,7 +403,10 @@ function indexEdges(
   return result;
 }
 
-function containsCycle(entry: string, outgoing: ReadonlyMap<string, readonly string[]>): boolean {
+function containsCycle(
+  nodeIds: readonly string[],
+  outgoing: ReadonlyMap<string, readonly string[]>,
+): boolean {
   const active = new Set<string>();
   const visited = new Set<string>();
   const visit = (nodeId: string): boolean => {
@@ -385,7 +420,7 @@ function containsCycle(entry: string, outgoing: ReadonlyMap<string, readonly str
     visited.add(nodeId);
     return false;
   };
-  return visit(entry);
+  return nodeIds.some(visit);
 }
 
 function canReach(
@@ -427,4 +462,8 @@ function deepFreeze<T>(value: T, seen = new Set<object>()): T {
     deepFreeze(nested, seen);
   }
   return Object.freeze(value);
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
