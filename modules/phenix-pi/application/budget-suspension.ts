@@ -43,17 +43,11 @@ interface BudgetResumedData {
   readonly timeoutRemainingMs: number;
 }
 
-export function budgetSuspendedEvent(
-  runId: RunId,
-  data: BudgetSuspendedData,
-): PendingDomainEvent {
+export function budgetSuspendedEvent(runId: RunId, data: BudgetSuspendedData): PendingDomainEvent {
   return { runId, type: BUDGET_SUSPENDED_EVENT, data };
 }
 
-export function budgetResumedEvent(
-  runId: RunId,
-  data: BudgetResumedData,
-): PendingDomainEvent {
+export function budgetResumedEvent(runId: RunId, data: BudgetResumedData): PendingDomainEvent {
   return { runId, type: BUDGET_RESUMED_EVENT, data };
 }
 
@@ -149,9 +143,7 @@ export function resolveResumeLimits(
     ...resolveOptionalLimit("maxToolCalls", current.maxToolCalls, selected.maxToolCalls),
     ...resolveRepairLimit(current.maxRepairAttempts, selected.maxRepairAttempts),
     ...(current.maxNodeRuns === undefined ? {} : { maxNodeRuns: current.maxNodeRuns }),
-    ...(current.maxParallelism === undefined
-      ? {}
-      : { maxParallelism: current.maxParallelism }),
+    ...(current.maxParallelism === undefined ? {} : { maxParallelism: current.maxParallelism }),
   };
 
   const increased =
@@ -240,12 +232,7 @@ function parseLimitOverrides(value: unknown): RunRetryLimitOverrides | undefined
   const timeoutMs = boundedInteger(value.timeoutMs, 1, 3_600_000, "timeoutMs");
   const maxTurns = nullableBoundedInteger(value.maxTurns, 1, 200, "maxTurns");
   const maxToolCalls = nullableBoundedInteger(value.maxToolCalls, 1, 1_000, "maxToolCalls");
-  const maxRepairAttempts = boundedInteger(
-    value.maxRepairAttempts,
-    0,
-    10,
-    "maxRepairAttempts",
-  );
+  const maxRepairAttempts = boundedInteger(value.maxRepairAttempts, 0, 10, "maxRepairAttempts");
   return {
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
     ...(maxTurns === undefined ? {} : { maxTurns }),
