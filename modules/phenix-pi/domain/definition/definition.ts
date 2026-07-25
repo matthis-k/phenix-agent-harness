@@ -73,6 +73,8 @@ export type DifficultyBinding =
   | { readonly kind: "fixed"; readonly value: Difficulty }
   | { readonly kind: "result"; readonly nodeId: string };
 
+export const MAX_INVOKE_RETRIES = 3;
+
 export interface InvokeRetryPolicy {
   /** Retry only failures explicitly marked retryable by the child runtime. */
   readonly when: "retryable";
