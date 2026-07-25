@@ -46,7 +46,8 @@ test("all bundled workflow graphs validate at startup", () => {
   const functions = new WorkflowFunctionRegistry();
   registerWorkflowFunctions(functions);
   const catalog = new DefinitionCatalog();
-  for (const definition of [...agentDefinitions, ...workflowDefinitions]) catalog.register(definition);
+  for (const definition of [...agentDefinitions, ...workflowDefinitions])
+    catalog.register(definition);
   catalog.seal(functions, localOperations);
   assert.deepEqual(catalog.validateAll(), []);
   const workflow = catalog.require(workflowDefinitions[0].id);
