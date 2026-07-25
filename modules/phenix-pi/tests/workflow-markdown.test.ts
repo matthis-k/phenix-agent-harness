@@ -78,6 +78,9 @@ test("implementation workflow binds routes to its estimator result", () => {
   assert.deepEqual(estimate?.difficulty, { kind: "fixed", value: "D0" });
   assert.deepEqual(implement?.difficulty, { kind: "result", nodeId: "estimate" });
   assert.deepEqual(verify?.difficulty, { kind: "result", nodeId: "estimate" });
+  assert.deepEqual(estimate?.retry, { when: "retryable", maxRetries: 1 });
+  assert.equal(implement?.retry, undefined, "side-effecting implementation is not auto-retried");
+  assert.deepEqual(verify?.retry, { when: "retryable", maxRetries: 1 });
   assert.ok(
     compiled.graph.edges.some(
       (edge) =>
@@ -107,6 +110,9 @@ test("QA fixes review difficulty independently of caller routing", () => {
     kind: "fixed",
     value: "D3",
   });
+  for (const invocation of invocations) {
+    assert.deepEqual(invocation.retry, { when: "retryable", maxRetries: 1 });
+  }
 });
 
 test("workflow states may invoke other workflows through the normal definition boundary", () => {
@@ -137,6 +143,20 @@ test("result-bound difficulty must reference another state", () => {
   assert.throws(
     () => compileWorkflowMarkdown(invalid, bindings),
     /obtains difficulty from unknown state missing/,
+  );
+});
+
+test("retry declarations require a bounded awaited invocation", () => {
+  const missingLimit = productionSource("implement").replace("max-retries: 1", "max-retries:");
+  assert.throws(() => compileWorkflowMarkdown(missingLimit, bindings), /max-retries/);
+
+  const background = productionSource("implement").replace(
+    "wait: await\ndifficulty: D0\nretry: retryable",
+    "wait: background\ndifficulty: D0\nretry: retryable",
+  );
+  assert.throws(
+    () => compileWorkflowMarkdown(background, bindings),
+    /cannot retry a background invocation/,
   );
 });
 
