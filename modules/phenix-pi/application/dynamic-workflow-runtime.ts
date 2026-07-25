@@ -1,5 +1,15 @@
-import type { DynamicWorkflowProposal } from "../definitions/dynamic-workflow.ts";
+import {
+  type DynamicWorkflowProposal,
+  DynamicWorkflowProposalSchema,
+} from "../definitions/dynamic-workflow.ts";
+import type { ValueMappingRef } from "../domain/definition/definition.ts";
+import type {
+  PersistedDynamicWorkflowIdentity,
+  PersistedDynamicWorkflowSnapshot,
+} from "../domain/run/model.ts";
 import { type DefinitionId, definitionId } from "../domain/shared.ts";
+import type { ValueMapping } from "../domain/workflow/functions.ts";
+import type { WorkflowEvaluationContext } from "../domain/workflow/graph-state.ts";
 import type { DefinitionCatalog, WorkflowFunctionRegistry } from "./catalog.ts";
 import {
   type CompiledDynamicWorkflow,
@@ -8,16 +18,16 @@ import {
   type DynamicWorkflowIdentity,
 } from "./dynamic-workflow-compiler.ts";
 
-export interface DynamicWorkflowSnapshot {
+export interface DynamicWorkflowSnapshot extends PersistedDynamicWorkflowSnapshot {
   readonly proposal: DynamicWorkflowProposal;
   readonly identity: DynamicWorkflowIdentity;
 }
 
 export class DynamicWorkflowDriftError extends Error {
-  readonly expected: DynamicWorkflowIdentity;
+  readonly expected: PersistedDynamicWorkflowIdentity;
   readonly actual: DynamicWorkflowIdentity;
 
-  constructor(expected: DynamicWorkflowIdentity, actual: DynamicWorkflowIdentity) {
+  constructor(expected: PersistedDynamicWorkflowIdentity, actual: DynamicWorkflowIdentity) {
     super(
       `Dynamic workflow ${expected.graphDigest} cannot be restored because its execution contract changed to ${actual.graphDigest}`,
     );
@@ -69,15 +79,16 @@ export class DynamicWorkflowRuntimeRegistry {
       );
     }
 
-    this.functions.registerRuntimeMappings(compiled.mappings);
+    this.functions.registerRuntimeMappings(runtimeMappings(compiled.mappings));
     this.catalog.registerRuntimeWorkflow(compiled.definition);
     this.identities.set(compiled.definition.id, compiled.identity);
     return snapshotOf(compiled);
   }
 
-  restore(snapshot: DynamicWorkflowSnapshot): CompiledDynamicWorkflow {
-    const allowedDefinitionIds = referencedDefinitionIds(snapshot.proposal);
-    const compiled = this.compiler.compile(snapshot.proposal, { allowedDefinitionIds });
+  restore(snapshot: PersistedDynamicWorkflowSnapshot): CompiledDynamicWorkflow {
+    const proposal = requireProposal(snapshot.proposal);
+    const allowedDefinitionIds = referencedDefinitionIds(proposal);
+    const compiled = this.compiler.compile(proposal, { allowedDefinitionIds });
     if (!sameIdentity(snapshot.identity, compiled.identity)) {
       throw new DynamicWorkflowDriftError(snapshot.identity, compiled.identity);
     }
@@ -97,6 +108,50 @@ export function snapshotOf(compiled: CompiledDynamicWorkflow): DynamicWorkflowSn
   });
 }
 
+function runtimeMappings(
+  mappings: ReadonlyMap<ValueMappingRef, ValueMapping>,
+): ReadonlyMap<ValueMappingRef, ValueMapping> {
+  return new Map(
+    [...mappings].map(([ref, mapping]) => [
+      ref,
+      (context: WorkflowEvaluationContext) => mapping(normalizeEvaluationContext(context)),
+    ]),
+  );
+}
+
+function normalizeEvaluationContext(context: WorkflowEvaluationContext): WorkflowEvaluationContext {
+  return {
+    ...context,
+    latest: new Map(
+      [...context.latest].map(([nodeId, value]) => [nodeId, publicNodeValue(nodeId, value)]),
+    ),
+  };
+}
+
+function publicNodeValue(nodeId: string, value: unknown): unknown {
+  if (!isRecord(value) || typeof value.status !== "string") return value;
+  if (value.status === "success" && Object.hasOwn(value, "value")) return value.value;
+  if (value.status === "failure") {
+    throw new Error(`Dynamic workflow result ${nodeId} failed and cannot be used as input`);
+  }
+  if (value.status === "cancelled") {
+    throw new Error(`Dynamic workflow result ${nodeId} was cancelled and cannot be used as input`);
+  }
+  return value;
+}
+
+function requireProposal(value: unknown): DynamicWorkflowProposal {
+  const validation = DynamicWorkflowProposalSchema.validate(value);
+  if (!validation.ok) {
+    throw new DynamicWorkflowCompileError(
+      `Persisted dynamic workflow proposal is invalid: ${validation.issues
+        .map((issue) => `${issue.path} ${issue.message}`)
+        .join("; ")}`,
+    );
+  }
+  return validation.value;
+}
+
 function referencedDefinitionIds(proposal: DynamicWorkflowProposal): readonly DefinitionId[] {
   return [
     ...new Set(
@@ -107,7 +162,10 @@ function referencedDefinitionIds(proposal: DynamicWorkflowProposal): readonly De
   ];
 }
 
-function sameIdentity(left: DynamicWorkflowIdentity, right: DynamicWorkflowIdentity): boolean {
+function sameIdentity(
+  left: PersistedDynamicWorkflowIdentity,
+  right: PersistedDynamicWorkflowIdentity,
+): boolean {
   return (
     left.version === right.version &&
     left.graphDigest === right.graphDigest &&
@@ -126,4 +184,8 @@ function sameRecord(
     leftEntries.length === rightEntries.length &&
     leftEntries.every(([key, value]) => right[key] === value)
   );
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

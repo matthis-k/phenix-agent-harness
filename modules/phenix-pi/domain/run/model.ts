@@ -78,6 +78,18 @@ export interface WorkflowCausation {
   readonly activationId: string;
 }
 
+export interface PersistedDynamicWorkflowIdentity {
+  readonly version: 1;
+  readonly graphDigest: string;
+  readonly definitionDigests: Readonly<Record<string, string>>;
+  readonly schemaDigests: Readonly<Record<string, string>>;
+}
+
+export interface PersistedDynamicWorkflowSnapshot {
+  readonly proposal: unknown;
+  readonly identity: PersistedDynamicWorkflowIdentity;
+}
+
 export interface CompiledRunSpec {
   readonly definitionId: DefinitionId;
   readonly input: unknown;
@@ -93,6 +105,7 @@ export interface CompiledRunSpec {
     readonly causation?: WorkflowCausation;
     readonly retryOf?: RunId;
   };
+  readonly dynamicWorkflow?: PersistedDynamicWorkflowSnapshot;
 }
 
 export interface RunRecord {

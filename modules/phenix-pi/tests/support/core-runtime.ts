@@ -1,6 +1,10 @@
 import { InMemoryRunLedger } from "../../adapters/persistence/in-memory-run-ledger.ts";
 import { DefinitionCatalog, WorkflowFunctionRegistry } from "../../application/catalog.ts";
+import { CatalogFacadeImpl } from "../../application/catalog-facade.ts";
 import { OrderedDomainEventBus } from "../../application/domain-event-bus.ts";
+import { DynamicWorkflowCompiler } from "../../application/dynamic-workflow-compiler.ts";
+import { DynamicWorkflowExecutionService } from "../../application/dynamic-workflow-execution.ts";
+import { DynamicWorkflowRuntimeRegistry } from "../../application/dynamic-workflow-runtime.ts";
 import {
   ExecutionFacadeImpl,
   type RunController,
@@ -27,6 +31,7 @@ import {
   AGENT_TESTER,
   AGENT_VERIFIER,
 } from "../../definitions/ids.ts";
+import { resolveDefinitionSchema } from "../../definitions/schema-registry.ts";
 import { registerWorkflowFunctions } from "../../definitions/workflows/functions.ts";
 import { workflowDefinitions } from "../../definitions/workflows/index.ts";
 import type { AnyDefinition } from "../../domain/definition/definition.ts";
@@ -68,6 +73,7 @@ const operations: LocalOperationRunner = {
 
 export interface TestRuntime {
   readonly execution: ExecutionFacadeImpl;
+  readonly dynamicWorkflows: DynamicWorkflowExecutionService;
   readonly controller: RunController;
   readonly store: ExecutionStore;
   readonly tasks: TaskFacadeImpl;
@@ -139,6 +145,25 @@ export async function createTestRuntime(
   );
   execution.registerImplementation("workflow", workflows);
   execution.seal();
+  const catalogFacade = new CatalogFacadeImpl(catalog, store);
+  const dynamicRegistry = new DynamicWorkflowRuntimeRegistry({
+    compiler: new DynamicWorkflowCompiler({
+      resolveDefinition: (id) => catalog.require(id),
+      resolveSchema: resolveDefinitionSchema,
+    }),
+    catalog,
+    functions,
+  });
+  const dynamicWorkflows = new DynamicWorkflowExecutionService({
+    registry: dynamicRegistry,
+    catalog: catalogFacade,
+    store,
+    controller: execution,
+    workflow: workflows,
+    execution,
+    ids,
+    clock,
+  });
   const rootRunId = "root-test" as RunId;
   await execution.initializeRoot({
     id: rootRunId,
@@ -146,6 +171,7 @@ export async function createTestRuntime(
   });
   return {
     execution,
+    dynamicWorkflows,
     controller: execution,
     store,
     tasks,

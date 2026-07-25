@@ -43,6 +43,8 @@ export type FailureCode =
   | "output_missing"
   | "output_invalid"
   | "workflow_invalid"
+  | "workflow_definition_drift"
+  | "workflow_definition_invalid"
   | "workflow_runtime_failed"
   | "workflow_exhausted"
   | "local_step_failed"
