@@ -9,23 +9,32 @@ export interface ToolTransportMetrics {
   readonly omittedBytes: number;
 }
 
+export type ProjectedCheckStatus = "passed" | "failed" | "unavailable";
+
 export interface ProjectedCheck {
   readonly command: string;
   readonly ok: boolean;
+  readonly status: ProjectedCheckStatus;
   readonly summary: string;
+}
+
+export interface ProjectedLocation {
+  readonly path: string;
+  readonly line: number;
+  readonly endLine?: number;
 }
 
 export interface ProjectedFinding {
   readonly severity?: string;
   readonly kind?: string;
   readonly description: string;
-  readonly files: readonly string[];
+  readonly locations: readonly ProjectedLocation[];
   readonly notes?: string;
 }
 
 const MAX_PROJECTED_CHECKS = 100;
 const MAX_PROJECTED_FINDINGS = 50;
-const MAX_PROJECTED_FILES_PER_FINDING = 20;
+const MAX_PROJECTED_LOCATIONS_PER_FINDING = 20;
 const MAX_PROJECTED_TITLE_CHARS = 240;
 const MAX_PROJECTED_DETAIL_CHARS = 500;
 
@@ -171,7 +180,21 @@ function projectCheck(value: unknown): ProjectedCheck | undefined {
   const command = boundedText(check.command, MAX_PROJECTED_TITLE_CHARS);
   const summary = boundedText(check.summary, MAX_PROJECTED_DETAIL_CHARS);
   if (!command || typeof check.ok !== "boolean" || !summary) return undefined;
-  return { command, ok: check.ok, summary };
+  return {
+    command,
+    ok: check.ok,
+    status: checkStatus(check.ok, summary),
+    summary,
+  };
+}
+
+function checkStatus(ok: boolean, summary: string): ProjectedCheckStatus {
+  if (ok) return "passed";
+  return /\b(enoent|command not found|executable not found|binary (?:was )?unavailable|could not run|couldn't run)\b/i.test(
+    summary,
+  )
+    ? "unavailable"
+    : "failed";
 }
 
 function projectFindings(value: unknown): Readonly<Record<string, unknown>> {
@@ -195,7 +218,7 @@ function projectFindings(value: unknown): Readonly<Record<string, unknown>> {
 function projectFinding(value: unknown): ProjectedFinding | undefined {
   if (typeof value === "string") {
     const description = boundedText(value, MAX_PROJECTED_TITLE_CHARS);
-    return description ? { description, files: [] } : undefined;
+    return description ? { description, locations: [] } : undefined;
   }
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
 
@@ -209,18 +232,36 @@ function projectFinding(value: unknown): ProjectedFinding | undefined {
 
   const severity = boundedText(finding.severity, 32);
   const kind = boundedText(finding.kind, 80);
-  const files = boundedStringArray(
-    finding.files,
-    MAX_PROJECTED_FILES_PER_FINDING,
-    MAX_PROJECTED_TITLE_CHARS,
-  );
+  const locations = projectedLocations(finding.locations);
   const notes = findingNotes(finding);
   return {
     ...(severity ? { severity } : {}),
     ...(kind ? { kind } : {}),
     description,
-    files,
+    locations,
     ...(notes ? { notes } : {}),
+  };
+}
+
+function projectedLocations(value: unknown): readonly ProjectedLocation[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .slice(0, MAX_PROJECTED_LOCATIONS_PER_FINDING)
+    .map(projectLocation)
+    .filter((location): location is ProjectedLocation => location !== undefined);
+}
+
+function projectLocation(value: unknown): ProjectedLocation | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const location = value as Readonly<Record<string, unknown>>;
+  const path = boundedText(location.path, MAX_PROJECTED_TITLE_CHARS);
+  const line = positiveInteger(location.line);
+  if (!path || line === undefined) return undefined;
+  const endLine = positiveInteger(location.endLine);
+  return {
+    path,
+    line,
+    ...(endLine !== undefined && endLine >= line ? { endLine } : {}),
   };
 }
 
@@ -253,9 +294,15 @@ function renderStructuredReport(projected: unknown): string | undefined {
   const findingCount = numericCount(outcome.findingCount, findings.length);
   const omittedCheckCount = numericCount(outcome.omittedCheckCount, 0);
   const omittedFindingCount = numericCount(outcome.omittedFindingCount, 0);
-  const failedCheckCount = checks.filter((check) => !check.ok).length;
+  const unavailableCheckCount = checks.filter((check) => check.status === "unavailable").length;
+  const failedCheckCount = checks.filter((check) => check.status === "failed").length;
   const severityCounts = countSeverities(findings);
-  const gateStatus = failedCheckCount === 0 ? "Passed" : `Failed (${failedCheckCount})`;
+  const gateStatus =
+    unavailableCheckCount > 0
+      ? `Incomplete (${unavailableCheckCount} unavailable)`
+      : failedCheckCount > 0
+        ? `Failed (${failedCheckCount})`
+        : "Passed";
   const reviewStatus = reviewStatusOf(severityCounts, findingCount);
 
   const metadata = [
@@ -281,7 +328,7 @@ function renderStructuredReport(projected: unknown): string | undefined {
     "|---|---|---|",
     ...checks.map(
       (check) =>
-        `| ${markdownCell(check.command)} | ${check.ok ? "PASS" : "FAIL"} | ${markdownCell(check.summary)} |`,
+        `| ${markdownCell(check.command)} | ${check.status.toUpperCase()} | ${markdownCell(check.summary)} |`,
     ),
   );
   if (omittedCheckCount > 0) {
@@ -292,7 +339,7 @@ function renderStructuredReport(projected: unknown): string | undefined {
     "",
     "### Findings",
     "",
-    "| # | Severity | Kind | Description | Files | Notes |",
+    "| # | Severity | Kind | Description | Locations | Notes |",
     "|---:|---|---|---|---|---|",
   );
 
@@ -302,7 +349,7 @@ function renderStructuredReport(projected: unknown): string | undefined {
     lines.push(
       ...findings.map(
         (finding, index) =>
-          `| ${index + 1} | ${markdownCell(finding.severity?.toUpperCase() ?? "UNSPECIFIED")} | ${markdownCell(finding.kind ?? "—")} | ${markdownCell(finding.description)} | ${markdownCell(finding.files.length > 0 ? finding.files.join("\n") : "—")} | ${markdownCell(finding.notes ?? "—")} |`,
+          `| ${index + 1} | ${markdownCell(finding.severity?.toUpperCase() ?? "UNSPECIFIED")} | ${markdownCell(finding.kind ?? "—")} | ${markdownCell(finding.description)} | ${markdownCell(renderLocations(finding.locations))} | ${markdownCell(finding.notes ?? "—")} |`,
       ),
     );
   }
@@ -358,6 +405,17 @@ function reviewStatusOf(counts: SeverityCounts, findingCount: number): string {
   return "Clear";
 }
 
+function renderLocations(locations: readonly ProjectedLocation[]): string {
+  if (locations.length === 0) return "—";
+  return locations
+    .map((location) =>
+      location.endLine === undefined || location.endLine === location.line
+        ? `${location.path}:${location.line}`
+        : `${location.path}:${location.line}-${location.endLine}`,
+    )
+    .join("\n");
+}
+
 function markdownCell(value: string): string {
   return value.trim().replaceAll("|", "\\|").replace(/\r?\n/g, "<br>");
 }
@@ -368,6 +426,10 @@ function markdownInline(value: string): string {
 
 function numericCount(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : fallback;
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 ? value : undefined;
 }
 
 function recordOf(value: unknown): Readonly<Record<string, unknown>> | undefined {
@@ -388,18 +450,6 @@ function boundedText(value: unknown, maxChars: number): string | undefined {
   if (!normalized) return undefined;
   if (normalized.length <= maxChars) return normalized;
   return `${normalized.slice(0, maxChars - 1).trimEnd()}…`;
-}
-
-function boundedStringArray(
-  value: unknown,
-  maxItems: number,
-  maxChars: number,
-): readonly string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .slice(0, maxItems)
-    .map((item) => boundedText(item, maxChars))
-    .filter((item): item is string => item !== undefined);
 }
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> {
