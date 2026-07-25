@@ -210,7 +210,12 @@ function outputFor(definition: AnyDefinition, estimatedDifficulty: Difficulty): 
     return { summary: "reviewed", findings: [] };
   }
   if (definition.id === AGENT_QA_SYNTHESIZER) {
-    return { summary: "clean", findings: [], reports: [] };
+    return {
+      summary: "clean",
+      checks: [{ command: "test", ok: true, summary: "passed" }],
+      findings: [],
+      reports: [],
+    };
   }
   if (definition.id === AGENT_DISPATCHER) {
     return { definitionId: AGENT_COORDINATOR, reason: "requires composition", confidence: 0.8 };
