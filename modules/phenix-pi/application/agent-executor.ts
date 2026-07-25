@@ -27,6 +27,15 @@ import type {
 } from "../ports/agent-session-backend.ts";
 import type { Clock } from "../ports/clock.ts";
 import type { AgentToolFactory } from "./agent-tools.ts";
+import {
+  budgetResumedEvent,
+  budgetSuspendedEvent,
+  latestBudgetState,
+  parseBudgetResumeControl,
+  pendingBudgetSuspension,
+  resolveResumeLimits,
+  resumedTimeoutRemaining,
+} from "./budget-suspension.ts";
 import type {
   RunController,
   RunImplementation,
@@ -44,7 +53,9 @@ interface LiveToolCall {
 interface LiveAgent {
   readonly session: AgentSessionPort;
   readonly definition: AgentDefinition<unknown, unknown>;
-  readonly limits: RunLimits;
+  limits: RunLimits;
+  timeoutRemainingMs: number;
+  timeoutStartedAtMs?: number;
   readonly toolCalls: Map<string, LiveToolCall>;
   unsubscribe: () => void;
   timeout?: ReturnType<typeof setTimeout>;
@@ -160,7 +171,14 @@ export class AgentExecutor implements RunImplementation {
       await session.dispose();
       return;
     }
-    const live = this.attach(command.runId, definition, compiled.limits, session);
+    const budget = latestBudgetState(this.store, command.runId);
+    const live = this.attach(
+      command.runId,
+      definition,
+      budget.limits,
+      session,
+      budget.timeoutRemainingMs,
+    );
     try {
       await this.controller.bindPi(command.runId, session.reference);
       if (!this.isActive(command.runId)) {
@@ -203,7 +221,18 @@ export class AgentExecutor implements RunImplementation {
       await session.dispose();
       return true;
     }
-    const live = this.attach(command.runId, definition, compiled.limits, session);
+    const budget = latestBudgetState(this.store, command.runId);
+    const live = this.attach(
+      command.runId,
+      definition,
+      budget.limits,
+      session,
+      budget.timeoutRemainingMs,
+    );
+    if (pendingBudgetSuspension(this.store, command.runId)) {
+      await this.controller.transition(command.runId, "waiting");
+      return true;
+    }
     this.armTimeout(command.runId, live);
     const previousCycle = this.store.projection.cycles.get(command.runId);
     if (this.store.projection.submittedOutputs.has(command.runId)) {
@@ -232,15 +261,16 @@ export class AgentExecutor implements RunImplementation {
     await this.controller.transition(command.runId, "running");
     if (
       previousCycle?.state === "idle" &&
-      previousCycle.number > (compiled.limits.maxRepairAttempts ?? 0)
+      previousCycle.number > (live.limits.maxRepairAttempts ?? 0)
     ) {
-      const maxRepairAttempts = compiled.limits.maxRepairAttempts ?? 0;
-      await this.controller.fail(
+      const maxRepairAttempts = live.limits.maxRepairAttempts ?? 0;
+      await this.suspendForBudget(
         command.runId,
+        live,
         automaticFailure(
           "output_missing",
           `Agent settled without phenix_return or phenix_fail after ${previousCycle.number} cycle(s)`,
-          "deadlock",
+          "resource_limit",
           true,
           { maxRepairAttempts: Math.min(10, maxRepairAttempts + 1) },
         ),
@@ -273,6 +303,14 @@ export class AgentExecutor implements RunImplementation {
       await live.session.notify(message);
       return;
     }
+    const resume = parseBudgetResumeControl(message);
+    if (resume) {
+      await this.resumeBudget(runId, live, resume);
+      return;
+    }
+    if (pendingBudgetSuspension(this.store, runId)) {
+      throw new Error(`Run ${runId} is budget-suspended; use phenix_handle action=resume`);
+    }
     if (live.session.isStreaming) {
       await live.session.steer(message);
       return;
@@ -285,7 +323,7 @@ export class AgentExecutor implements RunImplementation {
   async cancel(runId: RunId): Promise<void> {
     const live = this.live.get(runId);
     if (!live) return;
-    clearTimeout(live.timeout);
+    this.pauseTimeout(live);
     try {
       await live.session.abort();
     } finally {
@@ -297,7 +335,7 @@ export class AgentExecutor implements RunImplementation {
     const live = this.live.get(runId);
     if (!live) return;
     this.live.delete(runId);
-    clearTimeout(live.timeout);
+    this.pauseTimeout(live);
     live.unsubscribe();
     await live.session.dispose();
   }
@@ -312,11 +350,13 @@ export class AgentExecutor implements RunImplementation {
     definition: AgentDefinition<unknown, unknown>,
     limits: RunLimits,
     session: AgentSessionPort,
+    timeoutRemainingMs = limits.timeoutMs,
   ): LiveAgent {
     const live: LiveAgent = {
       session,
       definition,
       limits,
+      timeoutRemainingMs,
       toolCalls: new Map(),
       unsubscribe: () => undefined,
     };
@@ -398,6 +438,15 @@ export class AgentExecutor implements RunImplementation {
             retryable: report.retryable,
             details: report,
           };
+          if (report.category === "resource_limit" && report.suggestedLimits) {
+            const live = this.requireLive(runId);
+            await this.suspendForBudget(runId, live, failure);
+            return {
+              text: "Budget increase requested from the parent.",
+              details: { runId, failure },
+              terminate: true,
+            };
+          }
           await this.controller.fail(runId, failure);
           return {
             text: "Failure report accepted.",
@@ -468,13 +517,16 @@ export class AgentExecutor implements RunImplementation {
     if (!live || !run || isTerminalRunState(run.state) || this.controller.isTerminating(runId)) {
       return;
     }
+    const suspended = pendingBudgetSuspension(this.store, runId);
 
     if (event.type === "turn.ended") {
       const turns = await this.controller.turnEnded(runId);
+      if (suspended) return;
       const maxTurns = live.limits.maxTurns;
       if (maxTurns !== undefined && turns > maxTurns) {
-        await this.controller.fail(
+        await this.suspendForBudget(
           runId,
+          live,
           automaticFailure(
             "turn_budget_exceeded",
             `Agent exceeded ${maxTurns} turns`,
@@ -491,10 +543,12 @@ export class AgentExecutor implements RunImplementation {
       const callId = event.toolCallId ?? `${event.toolName}-${toolCalls}`;
       live.toolCalls.set(callId, { toolName: event.toolName, input: event.input });
       await this.recordToolStarted(runId, event.toolName, event.input);
+      if (suspended) return;
       const maxToolCalls = live.limits.maxToolCalls;
       if (maxToolCalls !== undefined && toolCalls > maxToolCalls) {
-        await this.controller.fail(
+        await this.suspendForBudget(
           runId,
+          live,
           automaticFailure(
             "tool_budget_exceeded",
             `Agent exceeded ${maxToolCalls} tool calls`,
@@ -518,6 +572,7 @@ export class AgentExecutor implements RunImplementation {
       return;
     }
     if (event.type === "backend.failed") {
+      if (suspended) return;
       await this.controller.fail(
         runId,
         automaticFailure("provider_failed", event.message, "external_failure", event.retryable),
@@ -527,18 +582,20 @@ export class AgentExecutor implements RunImplementation {
 
     const settledCycle = this.store.projection.cycles.get(runId)?.number ?? 1;
     await this.controller.cycleSettled(runId, settledCycle);
+    if (suspended) return;
     if (this.store.projection.submittedOutputs.has(runId)) {
       await this.tryFinalize(runId);
       return;
     }
     const maxRepairAttempts = live.limits.maxRepairAttempts ?? 0;
     if (settledCycle > maxRepairAttempts) {
-      await this.controller.fail(
+      await this.suspendForBudget(
         runId,
+        live,
         automaticFailure(
           "output_missing",
           `Agent settled without phenix_return or phenix_fail after ${settledCycle} cycle(s)`,
-          "deadlock",
+          "resource_limit",
           true,
           { maxRepairAttempts: Math.min(10, maxRepairAttempts + 1) },
         ),
@@ -561,6 +618,55 @@ export class AgentExecutor implements RunImplementation {
         ),
       );
     }
+  }
+
+  private async suspendForBudget(
+    runId: RunId,
+    live: LiveAgent,
+    failure: Failure,
+  ): Promise<void> {
+    if (pendingBudgetSuspension(this.store, runId)) return;
+    this.pauseTimeout(live);
+    const details = failure.details as FailureReport | undefined;
+    const suggestedLimits = details?.suggestedLimits ?? {};
+    await this.controller.transition(runId, "waiting");
+    await this.store.commit(this.store.projection.rootOf(runId), [
+      budgetSuspendedEvent(runId, {
+        failure,
+        currentLimits: live.limits,
+        suggestedLimits,
+        timeoutRemainingMs: live.timeoutRemainingMs,
+        turnCount: this.store.projection.turnCounts.get(runId) ?? 0,
+        toolCallCount: this.store.projection.toolCallCounts.get(runId) ?? 0,
+      }),
+    ]);
+    if (live.session.isStreaming) {
+      await live.session.abort().catch(() => undefined);
+    }
+  }
+
+  private async resumeBudget(
+    runId: RunId,
+    live: LiveAgent,
+    control: { readonly limits?: FailureLimitSuggestion; readonly message?: string },
+  ): Promise<void> {
+    const suspension = pendingBudgetSuspension(this.store, runId);
+    if (!suspension) throw new Error(`Run ${runId} has no pending budget suspension`);
+    const limits = resolveResumeLimits(suspension, control.limits);
+    const timeoutRemainingMs = resumedTimeoutRemaining(suspension, limits);
+    live.limits = limits;
+    live.timeoutRemainingMs = timeoutRemainingMs;
+    await this.store.commit(this.store.projection.rootOf(runId), [
+      budgetResumedEvent(runId, { limits, timeoutRemainingMs }),
+    ]);
+    await this.controller.transition(runId, "running");
+    this.armTimeout(runId, live);
+    const cycle = (this.store.projection.cycles.get(runId)?.number ?? 0) + 1;
+    await this.controller.cycleStarted(runId, cycle);
+    await live.session.followUp(
+      control.message ??
+        "The parent increased this run's budget. Continue from the existing session state and finish with phenix_return, or report a non-budget blocker with phenix_fail.",
+    );
   }
 
   private async recordToolStarted(runId: RunId, toolName: string, input: unknown): Promise<void> {
@@ -634,7 +740,7 @@ export class AgentExecutor implements RunImplementation {
   }
 
   private async failObservation(runId: RunId, error: unknown): Promise<void> {
-    if (!this.isActive(runId)) return;
+    if (!this.isActive(runId) || pendingBudgetSuspension(this.store, runId)) return;
     await this.controller.fail(
       runId,
       automaticFailure(
@@ -654,32 +760,50 @@ export class AgentExecutor implements RunImplementation {
   }
 
   private armTimeout(runId: RunId, live: LiveAgent): void {
-    if (live.limits.timeoutMs <= 0) return;
-    const run = this.store.projection.requireRun(runId);
-    const requestedAt = Date.parse(run.requestedAt);
-    const now = Date.parse(this.clock.now());
-    const elapsed =
-      Number.isFinite(requestedAt) && Number.isFinite(now) ? Math.max(0, now - requestedAt) : 0;
-    const remaining = Math.max(0, live.limits.timeoutMs - elapsed);
+    this.pauseTimeout(live);
+    if (live.limits.timeoutMs <= 0 || live.timeoutRemainingMs <= 0) {
+      if (live.limits.timeoutMs <= 0) return;
+    }
+    const remaining = Math.max(0, live.timeoutRemainingMs);
+    live.timeoutStartedAtMs = this.nowMs();
     live.timeout = setTimeout(() => {
-      void this.controller
-        .fail(
-          runId,
-          automaticFailure(
-            "timeout",
-            `Agent timed out after ${live.limits.timeoutMs}ms`,
-            "resource_limit",
-            true,
-            { timeoutMs: Math.min(3_600_000, Math.max(live.limits.timeoutMs * 2, 60_000)) },
-          ),
-        )
-        .catch(() => undefined);
+      live.timeout = undefined;
+      live.timeoutStartedAtMs = undefined;
+      live.timeoutRemainingMs = 0;
+      void this.suspendForBudget(
+        runId,
+        live,
+        automaticFailure(
+          "timeout",
+          `Agent timed out after ${live.limits.timeoutMs}ms of active execution`,
+          "resource_limit",
+          true,
+          { timeoutMs: Math.min(3_600_000, Math.max(live.limits.timeoutMs * 2, 60_000)) },
+        ),
+      ).catch(() => undefined);
     }, remaining);
     live.timeout.unref?.();
   }
 
+  private pauseTimeout(live: LiveAgent): void {
+    if (live.timeout) {
+      clearTimeout(live.timeout);
+      live.timeout = undefined;
+    }
+    if (live.timeoutStartedAtMs !== undefined) {
+      const elapsed = Math.max(0, this.nowMs() - live.timeoutStartedAtMs);
+      live.timeoutRemainingMs = Math.max(0, live.timeoutRemainingMs - elapsed);
+      live.timeoutStartedAtMs = undefined;
+    }
+  }
+
+  private nowMs(): number {
+    const parsed = Date.parse(this.clock.now());
+    return Number.isFinite(parsed) ? parsed : Date.now();
+  }
+
   private systemPrompt(definition: AgentDefinition<unknown, unknown>): string {
-    return `${definition.prompt.render()}\n\nExecution protocol:\n- You are run-scoped and own only the supplied task.\n- Use only the exact tools provided by this definition.\n- A settled Pi cycle is not completion.\n- Use phenix_progress sparingly when your phase, current target, hypothesis, or next action materially changes; it updates only deterministic run telemetry and the TUI, not the parent model.\n- Finish successfully only by calling phenix_return with an output matching schema ${definition.output.id}.\n- If blocked, deadlocked, missing permissions, or unable to produce a valid result, call phenix_fail with a short report instead of looping or inventing success.\n- When a child fails, inspect its report, surface it explicitly, and decide whether a bounded phenix_handle retry is appropriate.\n- Background children remain attached; resolve, retry, or cancel them before returning.`;
+    return `${definition.prompt.render()}\n\nExecution protocol:\n- You are run-scoped and own only the supplied task.\n- Use only the exact tools provided by this definition.\n- A settled Pi cycle is not completion.\n- Use phenix_progress sparingly when your phase, current target, hypothesis, or next action materially changes; it updates only deterministic run telemetry and the TUI, not the parent model.\n- Finish successfully only by calling phenix_return with an output matching schema ${definition.output.id}.\n- If blocked, deadlocked, missing permissions, or unable to produce a valid result, call phenix_fail with a short report instead of looping or inventing success.\n- Budget exhaustion suspends the same Pi session. The parent may resume it with higher limits through phenix_handle; do not assume a replacement agent will be created.\n- When a child fails for a non-budget reason, inspect its report, surface it explicitly, and decide whether a bounded phenix_handle retry is appropriate.\n- Background children remain attached; resolve, resume, retry, or cancel them before returning.`;
   }
 
   private requireLive(runId: RunId): LiveAgent {
