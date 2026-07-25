@@ -1,8 +1,9 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 
 import { compileAgentMarkdown } from "../adapters/agent/markdown.ts";
 import {
   compileWorkflowMarkdown,
+  parseWorkflowMarkdown,
   type WorkflowMarkdownBindings,
 } from "../adapters/workflow/markdown.ts";
 import {
@@ -10,15 +11,20 @@ import {
   type BundledAgentSourceName,
 } from "../definitions/agents/index.ts";
 import { resolveDefinitionSchema } from "../definitions/schema-registry.ts";
-import {
-  BUNDLED_WORKFLOW_SOURCE_NAMES,
-  type BundledWorkflowSourceName,
-} from "../definitions/workflows/manifest.ts";
 import type {
   AgentDefinition,
   AnyDefinition,
   WorkflowDefinition,
 } from "../domain/definition/definition.ts";
+
+interface WorkflowSource {
+  readonly fileName: string;
+  readonly source: string;
+  readonly id: string;
+  readonly invokedDefinitions: readonly string[];
+}
+
+const workflowSourceDirectory = new URL("../definitions/workflows/sources/", import.meta.url);
 
 function readAgentSource(name: BundledAgentSourceName): string {
   return readFileSync(
@@ -27,11 +33,24 @@ function readAgentSource(name: BundledAgentSourceName): string {
   );
 }
 
-function readWorkflowSource(name: BundledWorkflowSourceName): string {
-  return readFileSync(
-    new URL(`../definitions/workflows/sources/${name}.workflow.md`, import.meta.url),
-    "utf8",
-  );
+function readWorkflowSources(): readonly WorkflowSource[] {
+  return readdirSync(workflowSourceDirectory)
+    .filter((fileName) => fileName.endsWith(".workflow.md"))
+    .sort()
+    .map((fileName) => {
+      const source = readFileSync(new URL(fileName, workflowSourceDirectory), "utf8");
+      const authored = parseWorkflowMarkdown(source);
+      const id = authored.fields.id?.trim();
+      if (!id) throw new Error(`Workflow source ${fileName} does not declare an id`);
+      const invokedDefinitions = [
+        ...new Set(
+          authored.states.flatMap((state) =>
+            state.fields.kind === "invoke" && state.fields.run ? [state.fields.run] : [],
+          ),
+        ),
+      ];
+      return { fileName, source, id, invokedDefinitions };
+    });
 }
 
 export const agentDefinitions = BUNDLED_AGENT_SOURCE_NAMES.map((name) =>
@@ -51,18 +70,61 @@ const workflowBindings: WorkflowMarkdownBindings = {
   },
 };
 
-function registerWorkflow(name: BundledWorkflowSourceName): WorkflowDefinition<unknown, unknown> {
-  const definition = compileWorkflowMarkdown(readWorkflowSource(name), workflowBindings);
-  if (definitionsById.has(definition.id)) {
-    throw new Error(`Duplicate bundled definition ${definition.id}`);
+function orderWorkflowSources(sources: readonly WorkflowSource[]): readonly WorkflowSource[] {
+  const byId = new Map<string, WorkflowSource>();
+  for (const source of sources) {
+    if (byId.has(source.id) || definitionsById.has(source.id)) {
+      throw new Error(`Duplicate bundled definition ${source.id}`);
+    }
+    byId.set(source.id, source);
+  }
+
+  const dependencies = new Map<string, readonly string[]>();
+  for (const source of sources) {
+    const workflowDependencies: string[] = [];
+    for (const invokedId of source.invokedDefinitions) {
+      if (byId.has(invokedId)) {
+        workflowDependencies.push(invokedId);
+      } else if (!definitionsById.has(invokedId)) {
+        throw new Error(
+          `Workflow source ${source.fileName} references unknown definition ${invokedId}`,
+        );
+      }
+    }
+    dependencies.set(source.id, workflowDependencies);
+  }
+
+  const remaining = new Map(byId);
+  const ordered: WorkflowSource[] = [];
+  while (remaining.size > 0) {
+    const ready = [...remaining.values()]
+      .filter((source) =>
+        (dependencies.get(source.id) ?? []).every((dependency) => !remaining.has(dependency)),
+      )
+      .sort((left, right) => left.fileName.localeCompare(right.fileName));
+    if (ready.length === 0) {
+      throw new Error(`Workflow dependency cycle: ${[...remaining.keys()].sort().join(", ")}`);
+    }
+    for (const source of ready) {
+      remaining.delete(source.id);
+      ordered.push(source);
+    }
+  }
+  return ordered;
+}
+
+function registerWorkflow(source: WorkflowSource): WorkflowDefinition<unknown, unknown> {
+  const definition = compileWorkflowMarkdown(source.source, workflowBindings);
+  if (definition.id !== source.id) {
+    throw new Error(`Workflow source ${source.fileName} changed id while compiling`);
   }
   definitionsById.set(definition.id, definition);
   return definition;
 }
 
-// The manifest order is dependency order. A workflow may invoke any agent or
-// earlier workflow through its public input/output contract.
-export const workflowDefinitions = BUNDLED_WORKFLOW_SOURCE_NAMES.map(registerWorkflow);
+export const workflowDefinitions = orderWorkflowSources(readWorkflowSources()).map(
+  registerWorkflow,
+);
 
 function requireAgent(id: string): AgentDefinition<unknown, unknown> {
   const definition = definitionsById.get(id);

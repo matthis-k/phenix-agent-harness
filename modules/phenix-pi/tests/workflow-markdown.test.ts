@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -9,11 +9,18 @@ import {
 } from "../adapters/workflow/markdown.ts";
 import { agentDefinitions } from "../definitions/agents.ts";
 import { resolveDefinitionSchema } from "../definitions/schema-registry.ts";
-import { implementationWorkflow, qaWorkflow } from "../definitions/workflows/index.ts";
+import {
+  implementationWorkflow,
+  qaWorkflow,
+  workflowDefinitions,
+} from "../definitions/workflows/index.ts";
 import type { AnyDefinition } from "../domain/definition/definition.ts";
 
+const productionSourceDirectory = new URL("../definitions/workflows/sources/", import.meta.url);
+const fixtureDirectory = new URL("./fixtures/workflows/", import.meta.url);
+
 const definitionById = new Map<string, AnyDefinition>(
-  [...agentDefinitions, implementationWorkflow, qaWorkflow].map(
+  [...agentDefinitions, ...workflowDefinitions].map(
     (definition) => [definition.id, definition] as const,
   ),
 );
@@ -27,20 +34,43 @@ const bindings: WorkflowMarkdownBindings = {
   },
 };
 
-function source(name: string): string {
-  return readFileSync(
-    new URL(`../definitions/workflows/sources/${name}.workflow.md`, import.meta.url),
-    "utf8",
-  );
+function productionSourceFileNames(): readonly string[] {
+  return readdirSync(productionSourceDirectory)
+    .filter((name) => name.endsWith(".workflow.md"))
+    .sort();
 }
 
+function productionSource(name: string): string {
+  return readFileSync(new URL(`${name}.workflow.md`, productionSourceDirectory), "utf8");
+}
+
+function fixtureSource(name: string): string {
+  return readFileSync(new URL(`${name}.workflow.md`, fixtureDirectory), "utf8");
+}
+
+test("all production workflow definitions come from Markdown sources", () => {
+  const sourceIds = productionSourceFileNames()
+    .map((fileName) => {
+      const authored = parseWorkflowMarkdown(
+        readFileSync(new URL(fileName, productionSourceDirectory), "utf8"),
+      );
+      assert.ok(authored.fields.id, `${fileName} must declare a workflow id`);
+      return authored.fields.id;
+    })
+    .sort();
+  assert.deepEqual(workflowDefinitions.map((definition) => definition.id).sort(), sourceIds);
+});
+
 test("bundled Markdown workflows are the production definitions", () => {
-  assert.deepEqual(compileWorkflowMarkdown(source("qa"), bindings), qaWorkflow);
-  assert.deepEqual(compileWorkflowMarkdown(source("implement"), bindings), implementationWorkflow);
+  assert.deepEqual(compileWorkflowMarkdown(productionSource("qa"), bindings), qaWorkflow);
+  assert.deepEqual(
+    compileWorkflowMarkdown(productionSource("implement"), bindings),
+    implementationWorkflow,
+  );
 });
 
 test("implementation workflow binds routes to its estimator result", () => {
-  const compiled = compileWorkflowMarkdown(source("implement"), bindings);
+  const compiled = compileWorkflowMarkdown(productionSource("implement"), bindings);
   const invocations = compiled.graph.nodes.filter((node) => node.kind === "invoke");
   const estimate = invocations.find((node) => node.id === "estimate");
   const implement = invocations.find((node) => node.id === "implement");
@@ -63,7 +93,7 @@ test("implementation workflow binds routes to its estimator result", () => {
 });
 
 test("QA fixes review difficulty independently of caller routing", () => {
-  const compiled = compileWorkflowMarkdown(source("qa"), bindings);
+  const compiled = compileWorkflowMarkdown(productionSource("qa"), bindings);
   const invocations = compiled.graph.nodes.filter((node) => node.kind === "invoke");
   assert.deepEqual(invocations.find((node) => node.id === "repo")?.difficulty, {
     kind: "fixed",
@@ -80,7 +110,7 @@ test("QA fixes review difficulty independently of caller routing", () => {
 });
 
 test("workflow states may invoke other workflows through the normal definition boundary", () => {
-  const compiled = compileWorkflowMarkdown(source("qa-fix"), bindings);
+  const compiled = compileWorkflowMarkdown(fixtureSource("qa-fix"), bindings);
   const invocations = compiled.graph.nodes.filter((node) => node.kind === "invoke");
   assert.deepEqual(
     invocations.map((node) => node.definition.id),
@@ -89,7 +119,7 @@ test("workflow states may invoke other workflows through the normal definition b
 });
 
 test("invoked step contracts must match the referenced definition", () => {
-  const invalid = source("implement").replace(
+  const invalid = productionSource("implement").replace(
     "output-schema: outcome.plan.v1",
     "output-schema: outcome.change-set.v1",
   );
@@ -100,7 +130,7 @@ test("invoked step contracts must match the referenced definition", () => {
 });
 
 test("result-bound difficulty must reference another state", () => {
-  const invalid = source("implement").replace(
+  const invalid = productionSource("implement").replace(
     "difficulty: result:estimate",
     "difficulty: result:missing",
   );
@@ -111,7 +141,7 @@ test("result-bound difficulty must reference another state", () => {
 });
 
 test("state Prompt sections are parsed but rejected until typed binding is implemented", () => {
-  const withPrompt = source("qa-fix").replace(
+  const withPrompt = fixtureSource("qa-fix").replace(
     "wait: await\n```\n\n### route",
     "wait: await\n```\n\n#### Prompt\n\nRun QA for {{ input.objective }}.\n\n### route",
   );

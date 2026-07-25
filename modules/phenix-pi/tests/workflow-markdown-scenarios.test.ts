@@ -1,18 +1,16 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 import { compileWorkflowMarkdown } from "../adapters/workflow/markdown.ts";
 import { compileWorkflowMarkdownScenarios } from "../adapters/workflow/scenario-markdown.ts";
 import { agentDefinitions } from "../definitions/agents.ts";
 import { resolveDefinitionSchema } from "../definitions/schema-registry.ts";
-import {
-  BUNDLED_WORKFLOW_SOURCE_NAMES,
-  workflowDefinitions,
-} from "../definitions/workflows/index.ts";
+import { workflowDefinitions } from "../definitions/workflows/index.ts";
 import type { AnyDefinition } from "../domain/definition/definition.ts";
 import { runWorkflowScenario } from "./support/workflow-scenario.ts";
 
+const sourceDirectory = new URL("../definitions/workflows/sources/", import.meta.url);
 const definitionById = new Map<string, AnyDefinition>(
   [...agentDefinitions, ...workflowDefinitions].map((definition) => [definition.id, definition]),
 );
@@ -25,11 +23,10 @@ const bindings = {
   },
 };
 
-for (const name of BUNDLED_WORKFLOW_SOURCE_NAMES) {
-  const source = readFileSync(
-    new URL(`../definitions/workflows/sources/${name}.workflow.md`, import.meta.url),
-    "utf8",
-  );
+for (const fileName of readdirSync(sourceDirectory)
+  .filter((name) => name.endsWith(".workflow.md"))
+  .sort()) {
+  const source = readFileSync(new URL(fileName, sourceDirectory), "utf8");
   const workflow = compileWorkflowMarkdown(source, bindings);
   const scenarios = compileWorkflowMarkdownScenarios(source, bindings);
 
