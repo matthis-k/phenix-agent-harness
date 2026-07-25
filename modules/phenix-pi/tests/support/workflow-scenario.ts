@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 
-import { definitionRef, type AnyDefinition, type WorkflowDefinition } from "../../domain/definition/definition.ts";
-import { definitionId, type Outcome, type RunId } from "../../domain/shared.ts";
+import {
+  definitionRef,
+  type AnyDefinition,
+  type WorkflowDefinition,
+} from "../../domain/definition/definition.ts";
+import { definitionId, type Outcome } from "../../domain/shared.ts";
 import type { LocalOperationRunner } from "../../ports/local-operation-runner.ts";
 import type {
   RunImplementation,
@@ -23,7 +27,7 @@ export interface WorkflowScenarioResult {
 export async function runWorkflowScenario(
   workflow: WorkflowDefinition<unknown, unknown>,
   scenario: WorkflowScenario,
-  definitions: readonly AnyDefinition[],
+  additionalDefinitions: readonly AnyDefinition[] = [],
 ): Promise<WorkflowScenarioResult> {
   const scripts = new ScenarioScripts(scenario);
   let runtime: TestRuntime;
@@ -34,7 +38,7 @@ export async function runWorkflowScenario(
   };
   const operations = scenarioOperations(workflow, scripts);
   runtime = await createTestRuntime(implementation, {
-    definitions,
+    definitions: additionalDefinitions,
     operations,
   });
 
@@ -71,6 +75,11 @@ class ScenarioScripts {
     this.scenario = scenario;
   }
 
+  availableTools(): ReadonlySet<string> | undefined {
+    const available = this.scenario.environment.availableTools;
+    return available ? new Set(available) : undefined;
+  }
+
   next(nodeId: string): WorkflowMockAction {
     const index = this.consumed.get(nodeId) ?? 0;
     const action = this.scenario.mocks[nodeId]?.[index];
@@ -101,7 +110,7 @@ async function executeAgent(
   await runtime.controller.transition(command.runId, "starting");
   await runtime.controller.transition(command.runId, "running");
 
-  const available = runtimeToolEnvironment(command, runtime);
+  const available = scripts.availableTools();
   if (available) {
     const required = command.definition.kind === "agent" ? command.definition.tools.allow : [];
     const missing = required.filter((tool) => !available.has(tool));
@@ -133,18 +142,6 @@ async function executeAgent(
     return;
   }
   await runtime.execution.cancel(command.runId, action.cancel);
-}
-
-function runtimeToolEnvironment(
-  command: StartImplementationCommand,
-  runtime: TestRuntime,
-): ReadonlySet<string> | undefined {
-  const parent = runtime.store.projection.requireRun(command.parentId);
-  if (parent.kind !== "workflow") return undefined;
-  const workflow = runtime.store.projection.requireRun(parent.id);
-  const available = (workflow.input as { readonly __scenarioAvailableTools?: unknown }).__scenarioAvailableTools;
-  if (!Array.isArray(available)) return undefined;
-  return new Set(available.filter((tool): tool is string => typeof tool === "string"));
 }
 
 function scenarioOperations(
