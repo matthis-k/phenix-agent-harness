@@ -16,6 +16,7 @@ import { ExecutionStore } from "../../application/execution-store.ts";
 import { SessionInvocationPolicy } from "../../application/invocation-policy.ts";
 import { QueryFacadeImpl } from "../../application/query-facade.ts";
 import { TaskFacadeImpl } from "../../application/task-facade.ts";
+import { WorkflowCheckpointProcessManager } from "../../application/workflow-checkpoint-process-manager.ts";
 import { WorkflowProcessManager } from "../../application/workflow-process-manager.ts";
 import { agentDefinitions } from "../../definitions/agents.ts";
 import type { DynamicWorkflowProposal } from "../../definitions/dynamic-workflow.ts";
@@ -78,6 +79,7 @@ export interface TestRuntime {
   readonly execution: ExecutionFacadeImpl;
   readonly dynamicWorkflows: DynamicWorkflowExecutionService;
   readonly dispatch: DispatchService;
+  readonly checkpoints: WorkflowCheckpointProcessManager;
   readonly controller: RunController;
   readonly store: ExecutionStore;
   readonly tasks: TaskFacadeImpl;
@@ -142,6 +144,7 @@ export async function createTestRuntime(
     cwd: process.cwd(),
     clock,
   });
+  const checkpoints = new WorkflowCheckpointProcessManager({ store, catalog });
   execution.registerImplementation(
     "agent",
     agentImplementation ??
@@ -184,6 +187,7 @@ export async function createTestRuntime(
     execution,
     dynamicWorkflows,
     dispatch,
+    checkpoints,
     controller: execution,
     store,
     tasks,
