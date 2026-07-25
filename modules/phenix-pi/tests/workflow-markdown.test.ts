@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -20,7 +20,9 @@ const productionSourceDirectory = new URL("../definitions/workflows/sources/", i
 const fixtureDirectory = new URL("./fixtures/workflows/", import.meta.url);
 
 const definitionById = new Map<string, AnyDefinition>(
-  [...agentDefinitions, ...workflowDefinitions].map((definition) => [definition.id, definition] as const),
+  [...agentDefinitions, ...workflowDefinitions].map(
+    (definition) => [definition.id, definition] as const,
+  ),
 );
 
 const bindings: WorkflowMarkdownBindings = {
@@ -56,10 +58,7 @@ test("all production workflow definitions come from Markdown sources", () => {
       return authored.fields.id;
     })
     .sort();
-  assert.deepEqual(
-    workflowDefinitions.map((definition) => definition.id).sort(),
-    sourceIds,
-  );
+  assert.deepEqual(workflowDefinitions.map((definition) => definition.id).sort(), sourceIds);
 });
 
 test("bundled Markdown workflows are the production definitions", () => {
