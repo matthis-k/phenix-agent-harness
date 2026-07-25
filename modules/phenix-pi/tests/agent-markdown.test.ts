@@ -19,7 +19,8 @@ const sources = [
   ["finalizer", "agent.finalizer"],
   ["dispatcher", "agent.dispatcher"],
   ["coordinator", "agent.coordinator"],
-  ["base", "agent.base"],
+  ["generic-read", "agent.generic-read"],
+  ["generic-write", "agent.generic-write"],
   ["qa-synthesizer", "agent.qa-synthesizer"],
   ["attention-router", "agent.attention-router"],
 ] as const;
@@ -97,6 +98,32 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
   assert.equal(coordinator.limits.maxTurns, undefined);
   assert.equal(coordinator.limits.maxToolCalls, undefined);
   assert.match(coordinator.prompt.render(), /declarative workflow composer/);
+
+  const genericRead = byId.get("agent.generic-read");
+  const genericWrite = byId.get("agent.generic-write");
+  assert.ok(genericRead);
+  assert.ok(genericWrite);
+  assert.equal(genericRead.input.id, "request.generic-task.v1");
+  assert.equal(genericWrite.input.id, "request.generic-task.v1");
+  assert.equal(genericRead.output.id, "outcome.base.v1");
+  assert.equal(genericWrite.output.id, "outcome.base.v1");
+  assert.deepEqual(genericRead.childCapabilities.invokableDefinitions, []);
+  assert.deepEqual(genericWrite.childCapabilities.invokableDefinitions, []);
+  assert.deepEqual(genericRead.tools.allow, [
+    "read",
+    "grep",
+    "find",
+    "ls",
+    "phenix_tasks",
+    "phenix_present",
+  ]);
+  assert.ok(genericWrite.tools.allow.includes("edit"));
+  assert.ok(genericWrite.tools.allow.includes("bash"));
+  assert.ok(genericWrite.tools.allow.includes("nix_shell"));
+  assert.equal(genericRead.tools.allow.includes("edit"), false);
+  assert.equal(genericRead.tools.allow.includes("bash"), false);
+  assert.equal(genericRead.modelRoutes?.D3.capability, "reasoning");
+  assert.equal(genericWrite.modelRoutes?.D3.capability, "code-max");
 
   const attentionRouter = byId.get("agent.attention-router");
   assert.ok(attentionRouter);
