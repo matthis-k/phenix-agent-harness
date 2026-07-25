@@ -9,7 +9,7 @@ permissions:
 
 concurrency:
   group: finalize-tui-diagrams
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   finalize:
@@ -20,6 +20,9 @@ jobs:
         with:
           fetch-depth: 0
           ref: feat/tui-workflow-diagrams
+
+      - name: Apply final compatibility fixes
+        run: python .github/scripts/fix_sequence_status.py
 
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
@@ -50,7 +53,8 @@ jobs:
             .github/workflows/implement-tui-diagrams.yml \
             .github/workflows/implement-tui-diagrams-pr.yml \
             .github/workflows/implement-tui-diagrams-fast.yml \
-            .github/scripts/integrate_tui_diagrams.py
+            .github/scripts/integrate_tui_diagrams.py \
+            .github/scripts/fix_sequence_status.py
           rmdir .github/scripts 2>/dev/null || true
 
       - name: Commit finalized implementation
