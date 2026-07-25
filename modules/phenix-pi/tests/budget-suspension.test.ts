@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  type BudgetSuspension,
   encodeBudgetResumeControl,
   parseBudgetResumeControl,
   resolveResumeLimits,
   resumedTimeoutRemaining,
-  type BudgetSuspension,
 } from "../application/budget-suspension.ts";
 import type { RunId } from "../domain/shared.ts";
 
@@ -75,10 +75,7 @@ test("parent overrides may increase or remove limits but may not reduce them", (
     },
   );
   assert.equal(
-    resumedTimeoutRemaining(
-      suspension,
-      resolveResumeLimits(suspension, { timeoutMs: 180_000 }),
-    ),
+    resumedTimeoutRemaining(suspension, resolveResumeLimits(suspension, { timeoutMs: 180_000 })),
     95_000,
   );
   assert.throws(
