@@ -85,7 +85,9 @@ function validCheckpointData(value: unknown): WorkflowCheckpointSavedData | unde
   if (!isRecord(value) || value.version !== 1) return undefined;
   if (typeof value.definitionId !== "string") return undefined;
   if (typeof value.definitionFingerprint !== "string") return undefined;
-  if (!Number.isInteger(value.throughSequence)) return undefined;
+  if (typeof value.throughSequence !== "number" || !Number.isInteger(value.throughSequence)) {
+    return undefined;
+  }
   if (typeof value.snapshotFingerprint !== "string") return undefined;
   if (!isRecord(value.snapshot)) return undefined;
   return value as unknown as WorkflowCheckpointSavedData;
