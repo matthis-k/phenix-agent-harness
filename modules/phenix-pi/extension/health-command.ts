@@ -2,10 +2,7 @@ import { existsSync } from "node:fs";
 
 import type { IntegrationStatus } from "../adapters/pi-sdk/integrations.ts";
 import type { PhenixRuntime } from "../composition/create-phenix-runtime.ts";
-import {
-  PHENIX_MODEL_SETS,
-  type PhenixModelSetId,
-} from "../domain/definition/model.ts";
+import { PHENIX_MODEL_SETS, type PhenixModelSetId } from "../domain/definition/model.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
 import type { RunRecord } from "../domain/run/model.ts";
 import type { RunId } from "../domain/shared.ts";
@@ -212,12 +209,12 @@ async function definitionsHealth(input: PhenixHealthInput): Promise<PhenixHealth
   ]);
   const errors = diagnostics.filter((diagnostic) => diagnostic.severity === "error");
   const warnings = diagnostics.filter((diagnostic) => diagnostic.severity === "warning");
-  const dynamicRuns = flattenRuns(tree.root)
-    .filter((run) => run.compiled.dynamicWorkflow !== undefined);
+  const dynamicRuns = flattenRuns(tree.root).filter(
+    (run) => run.compiled.dynamicWorkflow !== undefined,
+  );
   const drifted = dynamicRuns.filter(
     (run) =>
-      run.outcome?.status === "failure" &&
-      run.outcome.failure.code === "workflow_definition_drift",
+      run.outcome?.status === "failure" && run.outcome.failure.code === "workflow_definition_drift",
   );
   const invalid = dynamicRuns.filter(
     (run) =>
@@ -295,7 +292,10 @@ async function storageHealth(input: PhenixHealthInput): Promise<PhenixHealthSect
   };
 }
 
-function flattenRuns(node: { readonly run: RunRecord; readonly children: readonly unknown[] }): RunRecord[] {
+function flattenRuns(node: {
+  readonly run: RunRecord;
+  readonly children: readonly unknown[];
+}): RunRecord[] {
   const children = node.children as readonly {
     readonly run: RunRecord;
     readonly children: readonly unknown[];
