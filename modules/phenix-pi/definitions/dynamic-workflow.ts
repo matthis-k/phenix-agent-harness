@@ -87,46 +87,44 @@ const PathType = Type.Optional(
   Type.Array(Type.String({ minLength: 1, maxLength: 96 }), { maxItems: 16 }),
 );
 
-const DynamicValueBindingType = Type.Recursive((Self) =>
-  Type.Union([
-    Type.Object(
-      {
-        source: Type.Literal("input"),
-        path: PathType,
-      },
-      { additionalProperties: false },
-    ),
-    Type.Object(
-      {
-        source: Type.Literal("node"),
-        nodeId: IdentifierType,
-        path: PathType,
-      },
-      { additionalProperties: false },
-    ),
-    Type.Object(
-      {
-        source: Type.Literal("literal"),
-        value: Type.Unknown(),
-      },
-      { additionalProperties: false },
-    ),
-    Type.Object(
-      {
-        source: Type.Literal("object"),
-        fields: Type.Record(Type.String({ minLength: 1, maxLength: 96 }), Self),
-      },
-      { additionalProperties: false },
-    ),
-    Type.Object(
-      {
-        source: Type.Literal("array"),
-        items: Type.Array(Self, { maxItems: 64 }),
-      },
-      { additionalProperties: false },
-    ),
-  ]),
-);
+const DynamicValueBindingType = Type.Union([
+  Type.Object(
+    {
+      source: Type.Literal("input"),
+      path: PathType,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      source: Type.Literal("node"),
+      nodeId: IdentifierType,
+      path: PathType,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      source: Type.Literal("literal"),
+      value: Type.Unknown(),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      source: Type.Literal("object"),
+      fields: Type.Record(Type.String({ minLength: 1, maxLength: 96 }), Type.Unknown()),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      source: Type.Literal("array"),
+      items: Type.Array(Type.Unknown(), { maxItems: 64 }),
+    },
+    { additionalProperties: false },
+  ),
+]);
 
 const DynamicInvokeNodeType = Type.Object(
   {
