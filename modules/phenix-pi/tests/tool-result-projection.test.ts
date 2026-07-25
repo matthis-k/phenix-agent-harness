@@ -204,10 +204,7 @@ test("empty QA findings still render the canonical findings table", () => {
   );
 
   assert.match(result.text, /\| # \| Severity \| Kind \| Description \| Locations \| Notes \|/);
-  assert.match(
-    result.text,
-    /\| — \| — \| — \| No review findings were reported\. \| — \| — \|/,
-  );
+  assert.match(result.text, /\| — \| — \| — \| No review findings were reported\. \| — \| — \|/);
 });
 
 test("string findings are normalized into finding objects", () => {
@@ -288,9 +285,7 @@ test("invalid location line ranges are normalized conservatively", () => {
     }[];
   };
 
-  assert.deepEqual(projected.findings[0]?.locations, [
-    { path: "tests/example.test.ts", line: 20 },
-  ]);
+  assert.deepEqual(projected.findings[0]?.locations, [{ path: "tests/example.test.ts", line: 20 }]);
 });
 
 test("explicit outcome view preserves the complete typed value", () => {
