@@ -42,6 +42,7 @@ const AGENT_FIELDS = [
   "model",
   "thinking",
   "persistence",
+  "session-mode",
 ] as const;
 const TOOL_FIELDS = ["allow"] as const;
 const CONTEXT_FIELDS = ["project-files", "parent-conversation", "artifacts", "max-bytes"] as const;
@@ -90,6 +91,9 @@ export function compileAgentMarkdown(
   const prompt = requiredMarkdownSection(source, "Prompt").trim();
   if (!prompt) throw new Error("Agent Prompt section must not be empty");
   const modelRoutes = parseModelRoutes(source);
+  const sessionMode = fields["session-mode"]
+    ? markdownEnum(fields, "session-mode", owner, ["phenix", "stock"] as const)
+    : undefined;
 
   return {
     id: definitionId(requiredMarkdownField(fields, "id", owner)),
@@ -98,6 +102,7 @@ export function compileAgentMarkdown(
     description: requiredMarkdownField(fields, "description", owner),
     input: bindings.resolveSchema(requiredMarkdownField(fields, "input", owner)),
     output: bindings.resolveSchema(requiredMarkdownField(fields, "output", owner)),
+    ...(sessionMode ? { sessionMode } : {}),
     model: parseModel(requiredMarkdownField(fields, "model", owner)),
     ...(modelRoutes ? { modelRoutes } : {}),
     thinking: markdownEnum(fields, "thinking", owner, THINKING_POLICIES) as ThinkingPolicy,
