@@ -1,20 +1,19 @@
 import assert from "node:assert/strict";
-
-import {
-  definitionRef,
-  type AnyDefinition,
-  type WorkflowDefinition,
-} from "../../domain/definition/definition.ts";
-import { definitionId, type Outcome } from "../../domain/shared.ts";
-import type { LocalOperationRunner } from "../../ports/local-operation-runner.ts";
-import type {
-  RunImplementation,
-  StartImplementationCommand,
-} from "../../application/execution-facade.ts";
 import type {
   WorkflowMockAction,
   WorkflowScenario,
 } from "../../adapters/workflow/scenario-markdown.ts";
+import type {
+  RunImplementation,
+  StartImplementationCommand,
+} from "../../application/execution-facade.ts";
+import {
+  type AnyDefinition,
+  definitionRef,
+  type WorkflowDefinition,
+} from "../../domain/definition/definition.ts";
+import { definitionId, type Outcome } from "../../domain/shared.ts";
+import type { LocalOperationRunner } from "../../ports/local-operation-runner.ts";
 import { createTestRuntime, type TestRuntime } from "./core-runtime.ts";
 
 export interface WorkflowScenarioResult {
@@ -60,7 +59,10 @@ export async function runWorkflowScenario(
       return `${data.from}->${data.to}`;
     });
   const counts = Object.fromEntries(
-    [...new Set(visits)].map((nodeId) => [nodeId, visits.filter((visit) => visit === nodeId).length]),
+    [...new Set(visits)].map((nodeId) => [
+      nodeId,
+      visits.filter((visit) => visit === nodeId).length,
+    ]),
   );
   const result = { outcome, visits, transitions, counts };
   assertScenario(workflow, scenario, scripts, result);
@@ -83,7 +85,8 @@ class ScenarioScripts {
   next(nodeId: string): WorkflowMockAction {
     const index = this.consumed.get(nodeId) ?? 0;
     const action = this.scenario.mocks[nodeId]?.[index];
-    if (!action) throw new Error(`No mock action ${index + 1} configured for workflow state ${nodeId}`);
+    if (!action)
+      throw new Error(`No mock action ${index + 1} configured for workflow state ${nodeId}`);
     this.consumed.set(nodeId, index + 1);
     return action;
   }
@@ -180,13 +183,17 @@ function assertScenario(
   assert.equal(
     result.outcome.status,
     scenario.expect.status,
-    `${workflow.id}/${scenario.id} terminal status`,
+    `${workflow.id}/${scenario.id} terminal status; outcome=${JSON.stringify(result.outcome)}`,
   );
   if (scenario.expect.visits) {
     assert.deepEqual(result.visits, scenario.expect.visits, `${workflow.id}/${scenario.id} visits`);
   }
   for (const [nodeId, expected] of Object.entries(scenario.expect.counts ?? {})) {
-    assert.equal(result.counts[nodeId] ?? 0, expected, `${workflow.id}/${scenario.id} count ${nodeId}`);
+    assert.equal(
+      result.counts[nodeId] ?? 0,
+      expected,
+      `${workflow.id}/${scenario.id} count ${nodeId}`,
+    );
   }
   if (scenario.expect.transitions) {
     assert.deepEqual(
@@ -196,7 +203,11 @@ function assertScenario(
     );
   }
   if (scenario.expect.failure) {
-    assert.equal(result.outcome.status, "failure", `${workflow.id}/${scenario.id} expected failure`);
+    assert.equal(
+      result.outcome.status,
+      "failure",
+      `${workflow.id}/${scenario.id} expected failure`,
+    );
     if (result.outcome.status === "failure") {
       if (scenario.expect.failure.code) {
         assert.equal(result.outcome.failure.code, scenario.expect.failure.code);
