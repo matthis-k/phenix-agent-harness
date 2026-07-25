@@ -55,7 +55,7 @@ test("QA runner executes structured checks directly without a shell", async () =
   assert.equal(result[0]?.summary, "check passed");
 });
 
-test("QA runner discovers read-only repository verification gates in order", async () => {
+test("QA runner uses devenv test as the single canonical repository gate", async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "phenix-qa-devenv-"));
   const calls: Array<{ executable: string; args: readonly string[] }> = [];
   try {
@@ -68,19 +68,7 @@ test("QA runner discovers read-only repository verification gates in order", asy
 
     await runner.run("local.qa-checks", {}, { cwd, signal: new AbortController().signal });
 
-    assert.deepEqual(calls.slice(0, 2), [
-      { executable: "devenv", args: ["test"] },
-      {
-        executable: "nix",
-        args: ["flake", "check", "--accept-flake-config", "--print-build-logs", "--keep-going"],
-      },
-    ]);
-    assert.equal(
-      calls.some(
-        (call) => call.executable === "devenv" && call.args.join(" ") === "tasks run maintenance:fix",
-      ),
-      false,
-    );
+    assert.deepEqual(calls, [{ executable: "devenv", args: ["test"] }]);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
