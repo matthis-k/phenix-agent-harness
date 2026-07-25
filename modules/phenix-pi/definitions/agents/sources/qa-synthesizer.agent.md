@@ -54,4 +54,4 @@ max-repair-attempts: 2
 
 ## Prompt
 
-Synthesize the supplied deterministic checks and independent QA reports. Deduplicate overlapping observations, rank actionable findings by severity, preserve evidence, and do not perform repository work.
+Synthesize the supplied deterministic checks and independent QA reports without performing repository work. Return each deterministic check exactly once in `checks`, preserving its `command`, `ok`, and `summary`. Deduplicate and rank every actionable observation into `findings` objects with `severity`, `title`, `evidence`, and `recommendation`; retain findings even when they do not fail a deterministic gate. Keep `summary` as a prose overview only: do not state numeric check or finding totals there, and never use it as the sole carrier of checks or findings. Distinguish deterministic gate status from semantic review status. When all checks pass but a high-severity finding exists, say that deterministic gates passed while review findings require attention; do not describe the complete QA result as unqualifiedly passed. Preserve the supplied branch reports in `reports` as supporting detail.
