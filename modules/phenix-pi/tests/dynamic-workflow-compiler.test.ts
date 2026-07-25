@@ -8,6 +8,10 @@ import {
   DynamicWorkflowCompiler,
 } from "../application/dynamic-workflow-compiler.ts";
 import type { DynamicWorkflowProposal } from "../definitions/dynamic-workflow.ts";
+import {
+  StockSessionHandoffSchema,
+  StockSessionRequestSchema,
+} from "../definitions/stock-session.ts";
 import type {
   AgentDefinition,
   AnyDefinition,
@@ -41,12 +45,14 @@ const FinalResultSchema = defineSchema<{ readonly answer: string }>(
 
 const SCOUT = definitionId("agent.test-dynamic-scout");
 const FINALIZER = definitionId("agent.test-dynamic-finalizer");
+const STOCK = definitionId("session.stock");
 
 function agent(
   id: DefinitionId,
   input: Schema<unknown>,
   output: Schema<unknown>,
   prompt: string,
+  sessionMode?: "phenix" | "stock",
 ): AgentDefinition<unknown, unknown> {
   return {
     id,
@@ -55,6 +61,7 @@ function agent(
     description: `Test definition ${id}`,
     input,
     output,
+    ...(sessionMode ? { sessionMode } : {}),
     model: { kind: "session" },
     thinking: "route",
     prompt: { render: () => prompt },
@@ -81,6 +88,16 @@ function compiler(prompt = "Finalize the evidence"): DynamicWorkflowCompiler {
   const definitions = new Map<string, AnyDefinition>([
     [SCOUT, agent(SCOUT, ScoutRequestSchema, ScoutResultSchema, "Gather evidence")],
     [FINALIZER, agent(FINALIZER, FinalRequestSchema, FinalResultSchema, prompt)],
+    [
+      STOCK,
+      agent(
+        STOCK,
+        StockSessionRequestSchema,
+        StockSessionHandoffSchema,
+        "PHENIX_STOCK_SESSION",
+        "stock",
+      ),
+    ],
   ]);
   const schemas = new Map<string, Schema<unknown>>(
     [
@@ -89,6 +106,8 @@ function compiler(prompt = "Finalize the evidence"): DynamicWorkflowCompiler {
       ScoutResultSchema,
       FinalRequestSchema,
       FinalResultSchema,
+      StockSessionRequestSchema,
+      StockSessionHandoffSchema,
     ].map((schema) => [schema.id, schema as Schema<unknown>]),
   );
   return new DynamicWorkflowCompiler({
@@ -153,6 +172,37 @@ function proposal(): DynamicWorkflowProposal {
   };
 }
 
+function stockProposal(): DynamicWorkflowProposal {
+  return {
+    title: "Stock investigation",
+    description: "Bind a concrete typed result to a stock Pi session.",
+    inputSchema: ObjectiveSchema.id,
+    outputSchema: ScoutResultSchema.id,
+    entry: "stock",
+    nodes: [
+      {
+        kind: "invoke",
+        id: "stock",
+        definitionId: STOCK,
+        outputSchema: ScoutResultSchema.id,
+        input: {
+          source: "object",
+          fields: {
+            task: { source: "input", path: ["objective"] },
+          },
+        },
+      },
+      {
+        kind: "return",
+        id: "return",
+        output: { source: "node", nodeId: "stock" },
+      },
+    ],
+    edges: [{ from: "stock", to: "return" }],
+    limits: { timeoutMs: 120_000, maxNodeRuns: 2, maxParallelism: 1 },
+  };
+}
+
 function context(latest: ReadonlyMap<string, unknown> = new Map()): WorkflowEvaluationContext {
   return {
     runId: runId("run-dynamic-test"),
@@ -194,6 +244,39 @@ test("dynamic workflow compiler seals deterministic typed graphs", () => {
   assert.deepEqual(
     first.mappings.get(returned.output)?.(context(new Map([["finalize", { answer: "Done" }]]))),
     { answer: "Done" },
+  );
+});
+
+test("dynamic workflow compiler binds stock session result schemas", () => {
+  const compiled = compiler().compile(stockProposal(), { allowedDefinitionIds: [STOCK] });
+  const stock = compiled.definition.graph.nodes.find((node) => node.id === "stock");
+
+  assert.equal(stock?.kind, "invoke");
+  if (stock?.kind === "invoke") assert.equal(stock.outputSchema, ScoutResultSchema.id);
+  assert.ok(compiled.identity.schemaDigests[ScoutResultSchema.id]);
+
+  const missing = stockProposal();
+  const missingNodes = missing.nodes.map((node) =>
+    node.id === "stock" && node.kind === "invoke" ? { ...node, outputSchema: undefined } : node,
+  );
+  assert.throws(
+    () => compiler().compile({ ...missing, nodes: missingNodes }, { allowedDefinitionIds: [STOCK] }),
+    /must declare outputSchema/,
+  );
+
+  const override = proposal();
+  const overrideNodes = override.nodes.map((node) =>
+    node.id === "scout" && node.kind === "invoke"
+      ? { ...node, outputSchema: FinalResultSchema.id }
+      : node,
+  );
+  assert.throws(
+    () =>
+      compiler().compile(
+        { ...override, nodes: overrideNodes },
+        { allowedDefinitionIds: [SCOUT, FINALIZER] },
+      ),
+    /may not override fixed output schema/,
   );
 });
 
