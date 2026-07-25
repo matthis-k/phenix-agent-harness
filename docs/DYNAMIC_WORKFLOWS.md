@@ -4,9 +4,9 @@ Phenix may dynamically author orchestration without treating model-generated sou
 
 ## Boundary
 
-The root supervisor first prefers one complete predefined workflow. When no single definition covers the request, a Markdown-defined composer may propose a graph assembled from the caller's capability-filtered catalog.
+The root supervisor first prefers one complete predefined workflow. When no single definition covers the request, the Markdown-defined `agent.coordinator` may propose a graph assembled from its capability-filtered building-block catalog.
 
-The model produces `request.dynamic-workflow-proposal.v1`, a declarative object. It does not execute JavaScript, register functions, grant tools, or construct runtime objects directly.
+The composer receives `request.dynamic-workflow-composition.v1` and returns `request.dynamic-workflow-proposal.v1`. It has no tools, repository context, or direct child execution authority. It does not execute JavaScript, register functions, grant tools, or construct runtime objects directly.
 
 A trusted compiler:
 
@@ -21,9 +21,23 @@ A trusted compiler:
 
 Only the sealed result may enter workflow execution.
 
+## Dispatch policy
+
+Normal `phenix_dispatch` selection still prefers the most specific complete predefined workflow. `workflow.qa` and `workflow.implement` therefore execute directly when selected.
+
+When the selector chooses `agent.coordinator`, dispatch performs three distinct runs:
+
+1. the optional dispatcher selects the composition fallback;
+2. the no-tools composer returns a declarative graph proposal;
+3. `DynamicWorkflowExecutionService` recompiles, rechecks the composer's concrete definition scope, persists the sealed graph, and starts the dynamic workflow under the original dispatch parent.
+
+The completed composer remains immutable evidence but is not the dynamic workflow's structural parent. Its run ID is retained as `composerRunId`, and its compiled child capability set is the authority used to validate the proposal.
+
+Explicit `mode=coordinate` skips only the selector. It still uses the same composer and trusted execution path.
+
 ## Initial graph subset
 
-The first compiler slice deliberately supports:
+The compiler supports:
 
 - awaited `invoke` nodes;
 - `join` nodes;
@@ -45,7 +59,7 @@ It deliberately excludes:
 - runtime collection fan-out;
 - checkpoint nodes.
 
-These restrictions keep the first execution surface statically inspectable and prevent a composition request from becoming a capability bypass.
+These restrictions keep the execution surface statically inspectable and prevent composition from becoming a capability bypass.
 
 ## Identity and drift
 
@@ -63,7 +77,7 @@ The generated definition ID is derived from the graph digest:
 workflow.dynamic.<24 hex characters>
 ```
 
-The complete sealed proposal and identity must be persisted with the run before runtime execution is enabled.
+The complete sealed proposal and identity are persisted in the dynamic workflow run's compiled specification. Root startup restores the hidden definition and mappings before normal nonterminal recovery. A live run fails deterministically if restoration detects definition or schema drift.
 
 ## Runtime registration
 
@@ -80,8 +94,6 @@ The overlays have deliberately narrow behavior:
 
 The overlay is an execution cache, not persistence authority. The persisted snapshot remains the proposal plus its full graph, definition, and schema identity.
 
-## Next execution slice
+## Deferred extensions
 
-Execution integration must persist the dynamic snapshot in the owning workflow run, restore runtime overlays before nonterminal recovery, and provide a trusted start path that rechecks the caller's current composition scope. `WorkflowProcessManager` can then execute the installed graph through the same lifecycle and structured-concurrency rules as bundled workflows.
-
-The composer agent and dispatch integration follow that trusted start path. Persistent checkpoints and capability-scoped generic fallback agents should be added only after it exists.
+Persistent checkpoints, capability-scoped generic mutation fallbacks, runtime collection fan-out, and cross-run activation replay remain separate extensions. They must preserve the same compiler, identity, and capability boundaries.

@@ -37,6 +37,8 @@ export class CatalogFacadeImpl implements CatalogFacade {
         kind: definition.kind,
         title: definition.title,
         description: definition.description,
+        inputSchema: definition.input.id,
+        outputSchema: definition.output.id,
       }));
   }
 

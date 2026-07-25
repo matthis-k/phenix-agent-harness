@@ -166,8 +166,31 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     hiddenDefinitions: ROOT_INTERNAL_DEFINITION_IDS,
   });
   const invocationPolicy = new SessionInvocationPolicy({ store, catalog: definitions });
+  const workflows = new WorkflowProcessManager({
+    invoker: execution.childInvoker(),
+    controller: execution,
+    operations,
+    store,
+    catalog: definitions,
+    functions,
+    tasks,
+    ids,
+    cwd: host.cwd,
+    clock: systemClock,
+  });
+  const dynamicWorkflows = new DynamicWorkflowExecutionService({
+    registry: dynamicRegistry,
+    catalog,
+    store,
+    controller: execution,
+    workflow: workflows,
+    execution,
+    ids,
+    clock: systemClock,
+  });
   const dispatch = new DispatchService({
     execution: modelExecution,
+    dynamicWorkflows,
     catalog,
     store,
     invocationPolicy,
@@ -193,31 +216,9 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     cwd: host.cwd,
     clock: systemClock,
   });
-  const workflows = new WorkflowProcessManager({
-    invoker: execution.childInvoker(),
-    controller: execution,
-    operations,
-    store,
-    catalog: definitions,
-    functions,
-    tasks,
-    ids,
-    cwd: host.cwd,
-    clock: systemClock,
-  });
   execution.registerImplementation("agent", agents);
   execution.registerImplementation("workflow", workflows);
   execution.seal();
-  const dynamicWorkflows = new DynamicWorkflowExecutionService({
-    registry: dynamicRegistry,
-    catalog,
-    store,
-    controller: execution,
-    workflow: workflows,
-    execution,
-    ids,
-    clock: systemClock,
-  });
 
   const queries = new QueryFacadeImpl(store, tasks);
   const attention = new AttentionProcessManager({

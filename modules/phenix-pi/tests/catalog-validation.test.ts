@@ -132,9 +132,21 @@ test("every bundled agent has an explicit shell-authority class", () => {
   }
 });
 
-test("every substantial dispatch route reaches command authority", () => {
-  for (const id of ["workflow.qa", "workflow.implement", "agent.coordinator"]) {
+test("predefined dispatch routes reach command authority while the composer only references it", () => {
+  for (const id of ["workflow.qa", "workflow.implement"]) {
     assert.equal(reachesCommandAuthority(id), true, `${id} cannot reach command authority`);
+  }
+
+  const composer = definitionsById.get("agent.coordinator");
+  assert.equal(composer?.kind, "agent");
+  if (composer?.kind === "agent") {
+    assert.deepEqual(composer.tools.allow, []);
+    assert.equal(reachesCommandAuthority("agent.coordinator"), false);
+    assert.ok(
+      composer.childCapabilities.invokableDefinitions.some((id) =>
+        reachesCommandAuthority(String(id)),
+      ),
+    );
   }
 });
 
@@ -144,8 +156,11 @@ test("dispatch prompts prohibit read-only command fallbacks", () => {
   assert.equal(coordinator?.kind, "agent");
   assert.equal(dispatcher?.kind, "agent");
   if (coordinator?.kind === "agent") {
-    assert.match(coordinator.prompt.render(), /Never route command execution to agent\.scout/);
-    assert.match(coordinator.prompt.render(), /explicitly shell-capable operational child/);
+    assert.match(
+      coordinator.prompt.render(),
+      /Never use agent\.scout, agent\.planner, agent\.architect, or agent\.finalizer/,
+    );
+    assert.match(coordinator.prompt.render(), /command-capable workflow or operational agent/);
   }
   if (dispatcher?.kind === "agent") {
     assert.match(dispatcher.prompt.render(), /full repository QA/);
@@ -200,11 +215,11 @@ test("structured presentation is available only to operational agents", () => {
     "agent.verifier",
     "agent.critic",
     "agent.finalizer",
-    "agent.coordinator",
     "agent.base",
   ]) {
     assert.ok(byId.get(id)?.tools.allow.includes("phenix_present"), id);
   }
-  assert.equal(byId.get("agent.dispatcher")?.tools.allow.includes("phenix_present"), false);
-  assert.equal(byId.get("agent.qa-synthesizer")?.tools.allow.includes("phenix_present"), false);
+  for (const id of ["agent.coordinator", "agent.dispatcher", "agent.qa-synthesizer"]) {
+    assert.equal(byId.get(id)?.tools.allow.includes("phenix_present"), false, id);
+  }
 });
