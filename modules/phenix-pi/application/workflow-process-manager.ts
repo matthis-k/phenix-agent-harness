@@ -5,12 +5,13 @@ import type {
   WorkflowDefinition,
   WorkflowEdge,
   WorkflowNode,
+  WorkflowTransitionOutcome,
 } from "../domain/definition/definition.ts";
 import { type Difficulty, isDifficulty } from "../domain/definition/model.ts";
 import type { DomainEvent, PendingDomainEvent } from "../domain/run/events.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
 import type { RunRecord } from "../domain/run/model.ts";
-import type { Failure, Outcome, RunId } from "../domain/shared.ts";
+import { failed, type Failure, type Outcome, type RunId } from "../domain/shared.ts";
 import {
   buildWorkflowGraphState,
   type WorkflowGraphState,
@@ -211,15 +212,21 @@ export class WorkflowProcessManager implements RunImplementation {
           if (!this.isActive(run.id)) return false;
           await this.tasks.setLocalState(task.id, "done");
           if (!this.isActive(run.id)) return false;
-          await this.completeAndAdvance(run.id, state, node, activationId, result);
+          await this.completeAndAdvance(run.id, node, activationId, result, "success");
         } catch (error) {
           if (!this.isActive(run.id) || operationController.signal.aborted) return false;
           await this.tasks.setLocalState(task.id, "failed");
-          await this.controller.fail(run.id, {
+          const failure: Failure = {
             code: "local_step_failed",
             message: error instanceof Error ? error.message : String(error),
             retryable: false,
-          });
+          };
+          const outcome = failed(failure);
+          if (this.selectEdges(state, node, outcome, "failure").length === 0) {
+            await this.controller.fail(run.id, failure);
+          } else {
+            await this.completeAndAdvance(run.id, node, activationId, outcome, "failure");
+          }
         } finally {
           controllers.delete(operationController);
           active.delete(operation);
@@ -231,7 +238,7 @@ export class WorkflowProcessManager implements RunImplementation {
       case "decision": {
         await this.controller.transition(run.id, "running");
         const decision = this.functions.decision(node.decide)(state.context);
-        await this.completeAndAdvance(run.id, state, node, activationId, decision);
+        await this.completeAndAdvance(run.id, node, activationId, decision, "success");
         return true;
       }
       case "join":
@@ -241,13 +248,15 @@ export class WorkflowProcessManager implements RunImplementation {
           await this.controller.transition(run.id, "waiting");
           return false;
         }
+        const currentState = this.loadState(run);
         const failedChild = this.store.projection
           .childrenOf(run.id)
           .find(
             (child) =>
               child.ownership === "attached" &&
               child.outcome !== undefined &&
-              child.outcome.status !== "success",
+              child.outcome.status !== "success" &&
+              !this.isHandledChildOutcome(currentState, child),
           );
         if (failedChild?.outcome) {
           await this.controller.fail(run.id, childFailure(failedChild, failedChild.outcome));
@@ -316,10 +325,13 @@ export class WorkflowProcessManager implements RunImplementation {
         trustedWorkflowInvocation: true,
       });
       if (node.wait === "background") {
-        await this.completeAndAdvance(run.id, this.loadState(run), node, activationId, {
-          runId: handle.id,
-          status: "running",
-        });
+        await this.completeAndAdvance(
+          run.id,
+          node,
+          activationId,
+          { runId: handle.id, status: "running" },
+          "success",
+        );
         return true;
       }
       await this.controller.transition(run.id, "waiting");
@@ -330,12 +342,14 @@ export class WorkflowProcessManager implements RunImplementation {
       await this.controller.transition(run.id, "waiting");
       return false;
     }
-    if (child.outcome.status !== "success") {
+    const outcomeStatus = child.outcome.status;
+    const edges = this.selectEdges(state, node, child.outcome, outcomeStatus);
+    if (outcomeStatus !== "success" && edges.length === 0) {
       await this.controller.fail(run.id, childFailure(child, child.outcome));
       return true;
     }
     await this.controller.transition(run.id, "running");
-    await this.completeAndAdvance(run.id, state, node, activationId, child.outcome);
+    await this.completeAndAdvance(run.id, node, activationId, child.outcome, outcomeStatus);
     return true;
   }
 
@@ -395,7 +409,7 @@ export class WorkflowProcessManager implements RunImplementation {
         state.context.childOutcomes.get(edge.from) ?? state.context.results.get(edge.from) ?? [],
       ]),
     );
-    await this.completeAndAdvance(run.id, state, node, activationId, result);
+    await this.completeAndAdvance(run.id, node, activationId, result, "success");
     return true;
   }
 
@@ -417,18 +431,18 @@ export class WorkflowProcessManager implements RunImplementation {
 
   private async completeAndAdvance(
     runId: RunId,
-    _state: WorkflowGraphState,
     node: WorkflowNode,
     activationId: string,
     result: unknown,
+    outcome: WorkflowTransitionOutcome,
   ): Promise<void> {
     await this.completeNode(runId, node, activationId, result);
     const nextState = this.loadState(this.store.projection.requireRun(runId));
-    const edges = this.selectEdges(nextState, node, result);
+    const edges = this.selectEdges(nextState, node, result, outcome);
     if (edges.length === 0) {
       await this.controller.fail(runId, {
         code: "workflow_exhausted",
-        message: `No legal transition from workflow node ${node.id}`,
+        message: `No legal ${outcome} transition from workflow node ${node.id}`,
         retryable: false,
       });
       return;
@@ -441,7 +455,7 @@ export class WorkflowProcessManager implements RunImplementation {
       pending.push({
         runId,
         type: "workflow.transition.taken",
-        data: { activationId, from: edge.from, to: edge.to, traversal },
+        data: { activationId, from: edge.from, to: edge.to, traversal, outcome },
       });
       const target = workflowNode(nextState.definition, edge.to);
       const joinAlreadyActive =
@@ -455,13 +469,28 @@ export class WorkflowProcessManager implements RunImplementation {
     state: WorkflowGraphState,
     node: WorkflowNode,
     result: unknown,
+    outcome: WorkflowTransitionOutcome,
   ): readonly WorkflowEdge[] {
     return state.definition.graph.edges.filter((edge) => {
-      if (edge.from !== node.id) return false;
+      if (edge.from !== node.id || !matchesOutcome(edge, outcome)) return false;
       const count = state.context.transitionCounts.get(`${edge.from}->${edge.to}`) ?? 0;
       if (edge.maxTraversals !== undefined && count >= edge.maxTraversals) return false;
       return edge.when ? this.functions.condition(edge.when)(state.context, result) : true;
     });
+  }
+
+  private isHandledChildOutcome(state: WorkflowGraphState, child: RunRecord): boolean {
+    const causation = child.compiled.invocation.causation;
+    const status = child.outcome?.status;
+    if (!causation || !status || status === "success") return false;
+    const source = workflowNode(state.definition, causation.nodeId);
+    if (source.kind !== "invoke" || source.wait === "background") return false;
+    return state.definition.graph.edges.some(
+      (edge) =>
+        edge.from === causation.nodeId &&
+        matchesOutcome(edge, status) &&
+        (state.context.transitionCounts.get(`${edge.from}->${edge.to}`) ?? 0) > 0,
+    );
   }
 
   private async completeNode(
@@ -540,6 +569,11 @@ export class WorkflowProcessManager implements RunImplementation {
     timer.unref?.();
     this.timers.set(runId, timer);
   }
+}
+
+function matchesOutcome(edge: WorkflowEdge, outcome: WorkflowTransitionOutcome): boolean {
+  const accepted = edge.on ?? "success";
+  return accepted === "any" || accepted === outcome;
 }
 
 function difficultyFromResult(value: unknown, nodeId: string): Difficulty {
