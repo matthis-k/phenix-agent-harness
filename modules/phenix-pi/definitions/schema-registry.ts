@@ -26,13 +26,13 @@ import {
   VerificationRequestSchema,
   VerificationResultSchema,
 } from "./schemas.ts";
-import { StockSessionDynamicOutputSchema, StockSessionRequestSchema } from "./stock-session.ts";
+import { StockSessionHandoffSchema, StockSessionRequestSchema } from "./stock-session.ts";
 import { CheckResultsSchema, QAChecksRequestSchema } from "./workflow-schemas.ts";
 
 export const definitionSchemas = [
   ObjectiveRequestSchema,
   StockSessionRequestSchema,
-  StockSessionDynamicOutputSchema,
+  StockSessionHandoffSchema,
   DifficultyAssessmentRequestSchema,
   DifficultyAssessmentSchema,
   ScoutRequestSchema,
