@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { agentDefinitions } from "../definitions/agents.ts";
 import { WORKFLOW_QA } from "../definitions/ids.ts";
-import type { QAReport, TestRequest } from "../definitions/schemas.ts";
+import type { QAReport, QASynthesisRequest, TestRequest } from "../definitions/schemas.ts";
 import { definitionRef } from "../domain/definition/definition.ts";
 import { createTestRuntime } from "./support/core-runtime.ts";
 
@@ -43,10 +43,12 @@ test("QA keeps command obligations out of read-only review branches", async () =
         return;
       }
       assert.equal(definitionId, "agent.qa-synthesizer");
+      const input = command.input as QASynthesisRequest;
       await runtime.controller.complete(command.runId, {
         summary: "QA complete",
+        checks: [{ command: "model-invented-check", ok: false, summary: "not authoritative" }],
         findings: [],
-        reports: [],
+        reports: input.reports,
       });
     },
   });
@@ -60,7 +62,10 @@ test("QA keeps command obligations out of read-only review branches", async () =
     wait: "await",
   });
 
-  assert.equal((await handle.result()).status, "success");
+  const outcome = await handle.result();
+  assert.equal(outcome.status, "success");
+  if (outcome.status !== "success") return;
+  assert.deepEqual(outcome.value.checks, [{ command: "test", ok: true, summary: "passed" }]);
 
   const scout = inputs.get("agent.scout") as { objective: string; focus: string };
   assert.match(scout.objective, /Perform only the repository structure/);
@@ -77,6 +82,10 @@ test("QA keeps command obligations out of read-only review branches", async () =
 
   const tester = inputs.get("agent.tester") as TestRequest;
   assert.equal(tester.objective, objective);
+
+  const synthesis = inputs.get("agent.qa-synthesizer") as QASynthesisRequest;
+  assert.deepEqual(synthesis.checks, [{ command: "test", ok: true, summary: "passed" }]);
+  assert.equal(synthesis.reports.length, 4);
 });
 
 test("difficulty estimation permits one correction turn", () => {
