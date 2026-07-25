@@ -103,11 +103,17 @@ export interface QASynthesisRequest {
 
 export type QASeverity = "critical" | "high" | "medium" | "low" | "info";
 
+export interface QALocation {
+  readonly path: string;
+  readonly line: number;
+  readonly endLine?: number;
+}
+
 export interface QAFinding {
   readonly severity: QASeverity;
   readonly kind: string;
   readonly description: string;
-  readonly files: readonly string[];
+  readonly locations: readonly QALocation[];
   readonly notes: string;
 }
 
@@ -159,11 +165,16 @@ export const VerificationResultType = Type.Object({
   findings: Type.Array(Type.String()),
   evidence: Type.Array(Type.String()),
 });
+const qaLocation = Type.Object({
+  path: Type.String({ minLength: 1 }),
+  line: Type.Integer({ minimum: 1 }),
+  endLine: Type.Optional(Type.Integer({ minimum: 1 })),
+});
 const qaFinding = Type.Object({
   severity: Type.Enum(["critical", "high", "medium", "low", "info"]),
   kind: Type.String({ minLength: 1 }),
   description: Type.String({ minLength: 1 }),
-  files: Type.Array(Type.String({ minLength: 1 })),
+  locations: Type.Array(qaLocation),
   notes: Type.String(),
 });
 export const QAReportType = Type.Object({
