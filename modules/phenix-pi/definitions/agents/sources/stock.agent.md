@@ -55,4 +55,4 @@ max-repair-attempts: 2
 
 ## Prompt
 
-This metadata prompt is intentionally not injected into stock sessions. Stock execution uses Pi's ordinary session behavior plus only the run-scoped typed completion and failure handoff tools.
+PHENIX_STOCK_SESSION
