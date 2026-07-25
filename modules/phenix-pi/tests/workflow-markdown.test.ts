@@ -10,9 +10,9 @@ import {
 import { agentDefinitions } from "../definitions/agents.ts";
 import { resolveDefinitionSchema } from "../definitions/schema-registry.ts";
 import {
-  BUNDLED_WORKFLOW_SOURCE_NAMES,
   implementationWorkflow,
   qaWorkflow,
+  workflowDefinitions,
 } from "../definitions/workflows/index.ts";
 import type { AnyDefinition } from "../domain/definition/definition.ts";
 
@@ -20,9 +20,7 @@ const productionSourceDirectory = new URL("../definitions/workflows/sources/", i
 const fixtureDirectory = new URL("./fixtures/workflows/", import.meta.url);
 
 const definitionById = new Map<string, AnyDefinition>(
-  [...agentDefinitions, implementationWorkflow, qaWorkflow].map(
-    (definition) => [definition.id, definition] as const,
-  ),
+  [...agentDefinitions, ...workflowDefinitions].map((definition) => [definition.id, definition] as const),
 );
 
 const bindings: WorkflowMarkdownBindings = {
@@ -34,6 +32,12 @@ const bindings: WorkflowMarkdownBindings = {
   },
 };
 
+function productionSourceFileNames(): readonly string[] {
+  return readdirSync(productionSourceDirectory)
+    .filter((name) => name.endsWith(".workflow.md"))
+    .sort();
+}
+
 function productionSource(name: string): string {
   return readFileSync(new URL(`${name}.workflow.md`, productionSourceDirectory), "utf8");
 }
@@ -42,12 +46,20 @@ function fixtureSource(name: string): string {
   return readFileSync(new URL(`${name}.workflow.md`, fixtureDirectory), "utf8");
 }
 
-test("production workflow sources match the production manifest exactly", () => {
-  const actual = readdirSync(productionSourceDirectory)
-    .filter((name) => name.endsWith(".workflow.md"))
+test("all production workflow definitions come from Markdown sources", () => {
+  const sourceIds = productionSourceFileNames()
+    .map((fileName) => {
+      const authored = parseWorkflowMarkdown(
+        readFileSync(new URL(fileName, productionSourceDirectory), "utf8"),
+      );
+      assert.ok(authored.fields.id, `${fileName} must declare a workflow id`);
+      return authored.fields.id;
+    })
     .sort();
-  const expected = BUNDLED_WORKFLOW_SOURCE_NAMES.map((name) => `${name}.workflow.md`).sort();
-  assert.deepEqual(actual, expected);
+  assert.deepEqual(
+    workflowDefinitions.map((definition) => definition.id).sort(),
+    sourceIds,
+  );
 });
 
 test("bundled Markdown workflows are the production definitions", () => {
