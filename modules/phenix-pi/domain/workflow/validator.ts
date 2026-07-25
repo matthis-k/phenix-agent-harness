@@ -119,8 +119,7 @@ export function validateWorkflow(
       }
       if (
         node.retry &&
-        (!isPositiveInteger(node.retry.maxRetries) ||
-          node.retry.maxRetries > MAX_INVOKE_RETRIES)
+        (!isPositiveInteger(node.retry.maxRetries) || node.retry.maxRetries > MAX_INVOKE_RETRIES)
       ) {
         diagnostics.push(
           diagnostic(
