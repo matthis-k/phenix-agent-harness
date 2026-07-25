@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { RunImplementation, StartImplementationCommand } from "../application/execution-facade.ts";
+import { DefinitionCatalog, WorkflowFunctionRegistry } from "../application/catalog.ts";
+import { CatalogFacadeImpl } from "../application/catalog-facade.ts";
+import type {
+  RunImplementation,
+  StartImplementationCommand,
+} from "../application/execution-facade.ts";
+import { agentDefinitions } from "../definitions/agents.ts";
 import type { DynamicWorkflowProposal } from "../definitions/dynamic-workflow.ts";
 import { AGENT_CRITIC, SESSION_STOCK } from "../definitions/ids.ts";
+import { registerWorkflowFunctions } from "../definitions/workflows/functions.ts";
+import { workflowDefinitions } from "../definitions/workflows/index.ts";
 import { createTestRuntime } from "./support/core-runtime.ts";
 
 function directStockWorkflow(): DynamicWorkflowProposal {
@@ -78,7 +86,20 @@ test("the catalog exposes stock Pi as a session with a dynamic output", async ()
   const runtime = await createTestRuntime(undefined, {
     rootInvokableDefinitions: [SESSION_STOCK],
   });
-  const entries = await runtime.dynamicWorkflows["catalog"].listAvailable(runtime.rootRunId);
+  const functions = new WorkflowFunctionRegistry();
+  registerWorkflowFunctions(functions);
+  const definitions = new DefinitionCatalog();
+  for (const definition of [...agentDefinitions, ...workflowDefinitions]) {
+    definitions.register(definition);
+  }
+  definitions.seal(functions, {
+    has: (operation) => operation === "local.noop" || operation === "local.qa-checks",
+    async run() {
+      return undefined;
+    },
+  });
+  const catalog = new CatalogFacadeImpl(definitions, runtime.store);
+  const entries = await catalog.listAvailable(runtime.rootRunId);
   const stock = entries.find((entry) => entry.id === SESSION_STOCK);
 
   assert.ok(stock);
@@ -100,6 +121,7 @@ test("a dynamic workflow may return stock output directly without a verifier", a
   });
   const outcome = await handle.result();
   const children = runtime.store.projection.childrenOf(handle.id);
+  const stockInput = children[0]?.input as Readonly<Record<string, unknown>> | undefined;
 
   assert.equal(outcome.status, "success");
   assert.deepEqual(outcome.value, {
@@ -108,8 +130,8 @@ test("a dynamic workflow may return stock output directly without a verifier", a
     risks: [],
   });
   assert.deepEqual(children.map((child) => child.definitionId), [SESSION_STOCK]);
-  assert.equal(children[0]?.input.outputSchema, "outcome.scout-report.v1");
-  assert.equal(typeof children[0]?.input.outputContract, "object");
+  assert.equal(stockInput?.outputSchema, "outcome.scout-report.v1");
+  assert.equal(typeof stockInput?.outputContract, "object");
 });
 
 test("verification is added only when the workflow explicitly invokes it", async () => {
