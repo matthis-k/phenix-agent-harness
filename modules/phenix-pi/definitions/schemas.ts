@@ -101,15 +101,20 @@ export interface QASynthesisRequest {
   readonly reports: readonly unknown[];
 }
 
+export type QASeverity = "critical" | "high" | "medium" | "low" | "info";
+
+export interface QAFinding {
+  readonly severity: QASeverity;
+  readonly kind: string;
+  readonly description: string;
+  readonly files: readonly string[];
+  readonly notes: string;
+}
+
 export interface QAReport {
   readonly summary: string;
   readonly checks: readonly CheckResult[];
-  readonly findings: readonly {
-    readonly severity: "low" | "medium" | "high";
-    readonly title: string;
-    readonly evidence: string;
-    readonly recommendation: string;
-  }[];
+  readonly findings: readonly QAFinding[];
   readonly reports: readonly unknown[];
 }
 
@@ -155,10 +160,11 @@ export const VerificationResultType = Type.Object({
   evidence: Type.Array(Type.String()),
 });
 const qaFinding = Type.Object({
-  severity: Type.Enum(["low", "medium", "high"]),
-  title: Type.String(),
-  evidence: Type.String(),
-  recommendation: Type.String(),
+  severity: Type.Enum(["critical", "high", "medium", "low", "info"]),
+  kind: Type.String({ minLength: 1 }),
+  description: Type.String({ minLength: 1 }),
+  files: Type.Array(Type.String({ minLength: 1 })),
+  notes: Type.String(),
 });
 export const QAReportType = Type.Object({
   summary: Type.String(),
