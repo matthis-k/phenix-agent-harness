@@ -12,7 +12,7 @@ import {
 import type { DynamicWorkflowProposal } from "../definitions/dynamic-workflow.ts";
 import type { AgentDefinition } from "../domain/definition/definition.ts";
 import { defineSchema, type Schema } from "../domain/definition/schema.ts";
-import { definitionId, type DefinitionId } from "../domain/shared.ts";
+import { type DefinitionId, definitionId } from "../domain/shared.ts";
 import type { LocalOperationRunner } from "../ports/local-operation-runner.ts";
 
 const RequestSchema = defineSchema<{ readonly objective: string }>(
