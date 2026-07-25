@@ -2,7 +2,10 @@ import type { Schema } from "../domain/definition/schema.ts";
 import { AttentionRoutingDecisionSchema, AttentionRoutingRequestSchema } from "./attention.ts";
 import { DifficultyAssessmentRequestSchema, DifficultyAssessmentSchema } from "./difficulty.ts";
 import { DispatchDecisionSchema, DispatchSelectionRequestSchema } from "./dispatch.ts";
-import { DynamicWorkflowProposalSchema } from "./dynamic-workflow.ts";
+import {
+  DynamicWorkflowCompositionRequestSchema,
+  DynamicWorkflowProposalSchema,
+} from "./dynamic-workflow.ts";
 import {
   BaseResultSchema,
   ChangeSetSchema,
@@ -48,6 +51,7 @@ export const definitionSchemas = [
   FinalReportSchema,
   DispatchSelectionRequestSchema,
   DispatchDecisionSchema,
+  DynamicWorkflowCompositionRequestSchema,
   DynamicWorkflowProposalSchema,
   AttentionRoutingRequestSchema,
   AttentionRoutingDecisionSchema,
