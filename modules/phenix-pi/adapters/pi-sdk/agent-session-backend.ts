@@ -71,7 +71,7 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
     const model = this.modelRegistry.find(spec.model.provider, spec.model.model);
     if (!model)
       throw new Error(`Pi model ${spec.model.provider}/${spec.model.model} is unavailable`);
-    const stock = spec.systemPrompt.trim() === STOCK_SESSION_PROMPT_SENTINEL;
+    const stock = spec.systemPrompt.trimStart().startsWith(STOCK_SESSION_PROMPT_SENTINEL);
     const settingsManager = SettingsManager.create(spec.cwd, this.agentDir);
     const resourceLoader = new DefaultResourceLoader({
       cwd: spec.cwd,
