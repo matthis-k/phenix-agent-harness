@@ -7,7 +7,7 @@ import type {
   StartImplementationCommand,
 } from "../application/execution-facade.ts";
 import { SupervisionProcessManager } from "../application/supervision-process-manager.ts";
-import { AGENT_COORDINATOR, AGENT_SCOUT } from "../definitions/ids.ts";
+import { AGENT_BASE, AGENT_SCOUT } from "../definitions/ids.ts";
 import { definitionRef } from "../domain/definition/definition.ts";
 import type { RunId } from "../domain/shared.ts";
 import { createTestRuntime } from "./support/core-runtime.ts";
@@ -38,7 +38,7 @@ class RecordingPendingAgent implements RunImplementation {
 test("supervision process reports descendant failure and notifies its active parent", async () => {
   const implementation = new RecordingPendingAgent();
   const runtime = await createTestRuntime(implementation, {
-    rootInvokableDefinitions: [AGENT_COORDINATOR],
+    rootInvokableDefinitions: [AGENT_BASE],
   });
   implementation.bind(runtime.controller);
 
@@ -53,7 +53,7 @@ test("supervision process reports descendant failure and notifies its active par
 
   const parent = await runtime.execution.start({
     parentId: runtime.rootRunId,
-    definition: definitionRef(AGENT_COORDINATOR),
+    definition: definitionRef(AGENT_BASE),
     input: { objective: "Coordinate a focused repository review" },
     wait: "await",
   });
