@@ -1,8 +1,8 @@
 import type { WorkflowDefinition } from "../domain/definition/definition.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
 import {
-  DEFAULT_SESSION_PROFILE,
   type CompiledRunSpec,
+  DEFAULT_SESSION_PROFILE,
   type RunRecord,
 } from "../domain/run/model.ts";
 import { type DefinitionId, type RunId } from "../domain/shared.ts";
@@ -17,7 +17,6 @@ import type { CatalogFacade, ExecutionFacade, RunHandle } from "./interfaces.ts"
 import {
   DynamicWorkflowDriftError,
   type DynamicWorkflowRuntimeRegistry,
-  type DynamicWorkflowSnapshot,
 } from "./dynamic-workflow-runtime.ts";
 
 export interface DynamicWorkflowStartRequest<I> {
@@ -171,12 +170,14 @@ export class DynamicWorkflowExecutionService {
           code: drift ? "workflow_definition_drift" : "workflow_definition_invalid",
           message: error instanceof Error ? error.message : String(error),
           retryable: false,
-          details: drift
+          ...(drift
             ? {
-                expected: error.expected,
-                actual: error.actual,
+                details: {
+                  expected: error.expected,
+                  actual: error.actual,
+                },
               }
-            : undefined,
+            : {}),
         });
       }
     }
@@ -184,10 +185,7 @@ export class DynamicWorkflowExecutionService {
 
   private requireActiveParent(runId: RunId): RunRecord {
     const parent = this.store.projection.requireRun(runId);
-    if (
-      isTerminalRunState(parent.state) ||
-      parent.state === "completing"
-    ) {
+    if (isTerminalRunState(parent.state) || parent.state === "completing") {
       throw new Error(`Cannot start a dynamic workflow from ${parent.state} parent ${runId}`);
     }
     return parent;
