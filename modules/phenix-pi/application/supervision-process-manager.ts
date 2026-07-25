@@ -69,8 +69,11 @@ export class SupervisionProcessManager {
     // workflow failure rather than every intermediate child failure.
     if (parent.kind === "workflow") return;
 
-    const summary = summarizeTerminal(run.outcome, run.id, retryOf);
     const failed = run.outcome?.status === "failure";
+    const summary =
+      run.kind === "workflow" && failed
+        ? summarizeWorkflowTerminal(run)
+        : summarizeTerminal(run.outcome, run.id, retryOf);
     if (
       failed ||
       retryOf ||
@@ -130,6 +133,17 @@ export function summarizeWorkflowRetryStart(
   const changedLimits = changedLimitSummary(retry.compiled.limits, original?.compiled.limits);
   const limits = changedLimits ? ` ${changedLimits}` : "";
   return `${workflow.definitionId} state ${nodeId} is retrying${reason}.${limits} Completed workflow states are retained.`;
+}
+
+export function summarizeWorkflowTerminal(
+  run: Pick<RunRecord, "id" | "definitionId" | "outcome">,
+): string {
+  if (run.outcome?.status !== "failure") {
+    return `${run.definitionId} run ${run.id} reached a terminal state.`;
+  }
+  const failure = run.outcome.failure;
+  const cause = failure.causeRunId ? ` Cause: ${failure.causeRunId}.` : "";
+  return `${run.definitionId} failed after its declared recovery policy was exhausted [${failure.code}]: ${failure.message}.${cause} Completed states were not rerun. Do not restart the full workflow automatically.`;
 }
 
 function changedLimitSummary(
