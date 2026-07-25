@@ -22,6 +22,7 @@ export function inspectToolAvailability(input: {
   readonly tools: readonly string[];
   readonly customTools: readonly Pick<AgentTool, "name">[];
   readonly path?: string;
+  readonly checkExecutables?: boolean;
 }): readonly ToolAvailabilityIssue[] {
   const custom = new Set(input.customTools.map((tool) => tool.name));
   // nix_shell is constructed by the Pi adapter when requested rather than by AgentToolFactory.
@@ -35,7 +36,7 @@ export function inspectToolAvailability(input: {
       continue;
     }
     const executable = TOOL_EXECUTABLES[tool];
-    if (executable && !resolveExecutable(executable, path)) {
+    if (input.checkExecutables !== false && executable && !resolveExecutable(executable, path)) {
       issues.push({
         tool,
         reason: "executable_not_found",
