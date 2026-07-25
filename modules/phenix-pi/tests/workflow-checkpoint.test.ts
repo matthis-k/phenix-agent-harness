@@ -89,7 +89,10 @@ test("checkpoint restoration equals full replay and ignores corrupt or incompati
     events: events.filter((event) => event.type !== "workflow.checkpoint.saved"),
     children,
   });
-  assert.deepEqual(workflowCheckpointSnapshot(checkpointState), workflowCheckpointSnapshot(fullState));
+  assert.deepEqual(
+    workflowCheckpointSnapshot(checkpointState),
+    workflowCheckpointSnapshot(fullState),
+  );
 
   const validCheckpoint = checkpointEvents(events).at(-1);
   assert.ok(validCheckpoint);
@@ -126,7 +129,10 @@ test("checkpoint restoration equals full replay and ignores corrupt or incompati
     events,
     children,
   });
-  assert.deepEqual(workflowCheckpointSnapshot(fallbackState), workflowCheckpointSnapshot(fullState));
+  assert.deepEqual(
+    workflowCheckpointSnapshot(fallbackState),
+    workflowCheckpointSnapshot(fullState),
+  );
 
   await runtime.execution.cancel(handle.id, "checkpoint test complete");
   await runtime.checkpoints.shutdown();
