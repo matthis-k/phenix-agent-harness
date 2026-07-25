@@ -144,7 +144,10 @@ test("a timed-out topic becomes unavailable without blocking other probes", asyn
       timeoutMs: 5,
     });
 
-    assert.equal(report.sections.find((section) => section.topic === "models")?.state, "unavailable");
+    assert.equal(
+      report.sections.find((section) => section.topic === "models")?.state,
+      "unavailable",
+    );
     assert.equal(
       report.sections.find((section) => section.topic === "integrations")?.state,
       "healthy",
