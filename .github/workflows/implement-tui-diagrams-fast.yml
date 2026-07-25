@@ -24,35 +24,30 @@ jobs:
       - name: Apply implementation script
         shell: bash
         run: |
-          python <<'PY'
+          set +e
+          python <<'PY' > /tmp/implementation.log 2>&1
           from pathlib import Path
+          import traceback
 
-          workflow = Path('.github/workflows/implement-tui-diagrams.yml').read_text()
-          start_marker = "          python <<'PY'\n"
-          end_marker = "\n          PY\n"
-          start = workflow.index(start_marker) + len(start_marker)
-          end = workflow.index(end_marker, start)
-          raw = workflow[start:end]
-          script = "\n".join(line[10:] if line.startswith("          ") else line for line in raw.splitlines())
-          exec(compile(script, 'implement-tui-diagrams.py', 'exec'))
+          try:
+              workflow = Path('.github/workflows/implement-tui-diagrams.yml').read_text()
+              start_marker = "          python <<'PY'\n"
+              end_marker = "\n          PY\n"
+              start = workflow.index(start_marker) + len(start_marker)
+              end = workflow.index(end_marker, start)
+              raw = workflow[start:end]
+              script = "\n".join(line[10:] if line.startswith("          ") else line for line in raw.splitlines())
+              compile(script, 'implement-tui-diagrams.py', 'exec')
+              exec(compile(script, 'implement-tui-diagrams.py', 'exec'))
+          except BaseException:
+              traceback.print_exc()
+              raise
           PY
-
-      - name: Update locked runtime dependencies
-        run: |
-          npm install \
-            --prefix modules/pi-npm \
-            --package-lock-only \
-            --ignore-scripts \
-            --legacy-peer-deps \
-            --no-audit \
-            --no-fund
-
-      - name: Commit implementation
-        shell: bash
-        run: |
+          status=$?
+          cp /tmp/implementation.log .github/implementation-error.txt
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add modules/phenix-pi modules/pi-npm
-          git diff --cached --stat
-          git commit -m "Render workflows and agent sequences in the TUI [skip ci]"
+          git add .github/implementation-error.txt modules/phenix-pi modules/pi-npm
+          git commit -m "Capture TUI diagram implementation result [skip ci]" || true
           git push origin HEAD:feat/tui-workflow-diagrams
+          exit "$status"
