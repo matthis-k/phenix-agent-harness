@@ -77,6 +77,22 @@ export interface DynamicWorkflowProposal {
   };
 }
 
+export interface DynamicWorkflowCandidate {
+  readonly definitionId: string;
+  readonly kind: "agent" | "workflow";
+  readonly title: string;
+  readonly description: string;
+  readonly inputSchema: string;
+  readonly outputSchema: string;
+}
+
+export interface DynamicWorkflowCompositionRequest {
+  readonly objective: string;
+  readonly context?: unknown;
+  readonly workflowInputSchema: string;
+  readonly candidates: readonly DynamicWorkflowCandidate[];
+}
+
 const IdentifierType = Type.String({
   minLength: 1,
   maxLength: 96,
@@ -165,6 +181,33 @@ const DynamicReturnNodeType = Type.Object(
   },
   { additionalProperties: false },
 );
+
+export const DynamicWorkflowCompositionRequestSchema =
+  defineSchema<DynamicWorkflowCompositionRequest>(
+    "request.dynamic-workflow-composition.v1",
+    Type.Object(
+      {
+        objective: Type.String({ minLength: 1, maxLength: 20_000 }),
+        context: Type.Optional(Type.Unknown()),
+        workflowInputSchema: Type.String({ minLength: 1, maxLength: 160 }),
+        candidates: Type.Array(
+          Type.Object(
+            {
+              definitionId: Type.String({ minLength: 1, maxLength: 160 }),
+              kind: Type.Enum(["agent", "workflow"]),
+              title: Type.String({ minLength: 1, maxLength: 160 }),
+              description: Type.String({ minLength: 1, maxLength: 1000 }),
+              inputSchema: Type.String({ minLength: 1, maxLength: 160 }),
+              outputSchema: Type.String({ minLength: 1, maxLength: 160 }),
+            },
+            { additionalProperties: false },
+          ),
+          { minItems: 1, maxItems: 32 },
+        ),
+      },
+      { additionalProperties: false },
+    ),
+  );
 
 export const DynamicWorkflowProposalSchema = defineSchema<DynamicWorkflowProposal>(
   "request.dynamic-workflow-proposal.v1",
