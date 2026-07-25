@@ -2,7 +2,7 @@
 
 ```phenix-workflow
 id: workflow.test-failure-retry
-description: Exercise explicit child failure retry and retry exhaustion.
+description: Exercise bounded in-place child recovery and retry exhaustion.
 input: request.implementation.v1
 output: outcome.implementation-result.v1
 entry: implement
@@ -22,6 +22,8 @@ input: implement.work.input
 input-schema: request.implementation.v1
 output-schema: outcome.change-set.v1
 wait: await
+retry: retryable
+max-retries: 1
 ```
 
 ### verify
@@ -47,7 +49,6 @@ output-schema: outcome.implementation-result.v1
 
 | From | To | On | When | Max traversals |
 |---|---|---|---|---|
-| `implement` | `implement` | `failure` | | `1` |
 | `implement` | `verify` | `success` | | |
 | `verify` | `return` | `success` | | |
 
@@ -101,16 +102,16 @@ output-schema: outcome.implementation-result.v1
   },
   "expect": {
     "status": "success",
-    "visits": ["implement", "implement", "verify", "return"],
+    "visits": ["implement", "verify", "return"],
     "counts": {
-      "implement": 2,
+      "implement": 1,
       "verify": 1
     },
     "transitions": [
-      "implement->implement",
       "implement->verify",
       "verify->return"
-    ]
+    ],
+    "requireAllMocksConsumed": true
   }
 }
 ```
@@ -142,15 +143,16 @@ output-schema: outcome.implementation-result.v1
   },
   "expect": {
     "status": "failure",
-    "visits": ["implement", "implement"],
+    "visits": ["implement"],
     "counts": {
-      "implement": 2
+      "implement": 1
     },
-    "transitions": ["implement->implement"],
+    "transitions": [],
     "failure": {
       "code": "tool_unavailable",
       "messageIncludes": "remains unavailable"
-    }
+    },
+    "requireAllMocksConsumed": true
   }
 }
 ```

@@ -30,7 +30,11 @@ const source = readFileSync(
 const workflow = compileWorkflowMarkdown(source, bindings);
 const scenarios = compileWorkflowMarkdownScenarios(source, bindings);
 
-test("failure retry fixture compiles explicit outcome transitions", () => {
+test("failure retry fixture compiles an activation-scoped retry policy", () => {
+  const implement = workflow.graph.nodes.find((node) => node.id === "implement");
+  assert.equal(implement?.kind, "invoke");
+  if (implement?.kind !== "invoke") return;
+  assert.deepEqual(implement.retry, { when: "retryable", maxRetries: 1 });
   assert.deepEqual(
     workflow.graph.edges.map((edge) => ({
       from: edge.from,
@@ -39,12 +43,6 @@ test("failure retry fixture compiles explicit outcome transitions", () => {
       maxTraversals: edge.maxTraversals,
     })),
     [
-      {
-        from: "implement",
-        to: "implement",
-        on: "failure",
-        maxTraversals: 1,
-      },
       {
         from: "implement",
         to: "verify",
@@ -63,6 +61,12 @@ test("failure retry fixture compiles explicit outcome transitions", () => {
 
 for (const scenario of scenarios) {
   test(`failure retry / ${scenario.id}`, async () => {
-    await runWorkflowScenario(workflow, scenario, [workflow]);
+    const result = await runWorkflowScenario(workflow, scenario, [workflow]);
+    if (scenario.id === "retry-exhausted") {
+      assert.equal(result.outcome.status, "failure");
+      if (result.outcome.status === "failure") {
+        assert.equal(result.outcome.failure.retryable, false);
+      }
+    }
   });
 }

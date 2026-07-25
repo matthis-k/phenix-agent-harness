@@ -2,6 +2,8 @@ import {
   type AnyDefinition,
   type DifficultyBinding,
   definitionRef,
+  type InvokeRetryPolicy,
+  MAX_INVOKE_RETRIES,
   type WorkflowDefinition,
   type WorkflowEdge,
   type WorkflowNode,
@@ -55,7 +57,18 @@ const WORKFLOW_FIELDS = [
 ] as const;
 
 const STATE_FIELDS: Readonly<Record<StateKind, readonly string[]>> = {
-  invoke: ["kind", "title", "run", "input", "wait", "difficulty", "input-schema", "output-schema"],
+  invoke: [
+    "kind",
+    "title",
+    "run",
+    "input",
+    "wait",
+    "difficulty",
+    "retry",
+    "max-retries",
+    "input-schema",
+    "output-schema",
+  ],
   local: ["kind", "title", "operation", "input", "input-schema", "output-schema"],
   decision: ["kind", "title", "decide"],
   join: ["kind", "title", "policy", "quorum"],
@@ -140,15 +153,21 @@ function compileState(
       const invoked = bindings.resolveDefinition(read("run"));
       assertSchema(bindings, read("input-schema"), invoked.input, `${owner} input`);
       assertSchema(bindings, read("output-schema"), invoked.output, `${owner} output`);
+      const wait = parseWait(fields.wait ?? "await", state.id);
+      const retry = parseInvokeRetry(fields, owner);
+      if (retry && wait === "background") {
+        throw new Error(`${owner} cannot retry a background invocation`);
+      }
       return {
         ...common,
         kind,
         definition: definitionRef(definitionId(invoked.id)),
         input: read("input"),
-        wait: parseWait(fields.wait ?? "await", state.id),
+        wait,
         ...(fields.difficulty
           ? { difficulty: parseDifficultyBinding(fields.difficulty, owner) }
           : {}),
+        ...(retry ? { retry } : {}),
       };
     }
     case "local":
@@ -175,6 +194,30 @@ function compileState(
     case "fail":
       return { ...common, kind, reason: read("reason") };
   }
+}
+
+function parseInvokeRetry(
+  fields: Readonly<Record<string, string>>,
+  owner: string,
+): InvokeRetryPolicy | undefined {
+  if (!fields.retry) {
+    if (fields["max-retries"]) {
+      throw new Error(`${owner}.max-retries requires retry: retryable`);
+    }
+    return undefined;
+  }
+  if (fields.retry !== "retryable") {
+    throw new Error(`${owner}.retry must be retryable`);
+  }
+  const maxRetries = integerValue(
+    requiredMarkdownField(fields, "max-retries", owner),
+    `${owner}.max-retries`,
+    1,
+  );
+  if (maxRetries > MAX_INVOKE_RETRIES) {
+    throw new Error(`${owner}.max-retries must not exceed ${MAX_INVOKE_RETRIES}`);
+  }
+  return { when: "retryable", maxRetries };
 }
 
 function assertSchema(

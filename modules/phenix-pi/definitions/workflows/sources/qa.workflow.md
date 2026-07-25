@@ -63,6 +63,8 @@ input-schema: request.scout.v1
 output-schema: outcome.scout-report.v1
 wait: await
 difficulty: D2
+retry: retryable
+max-retries: 1
 ```
 
 ### tests
@@ -76,6 +78,8 @@ input-schema: request.test.v1
 output-schema: outcome.test-report.v1
 wait: await
 difficulty: D2
+retry: retryable
+max-retries: 1
 ```
 
 ### architecture
@@ -89,6 +93,8 @@ input-schema: request.critic.v1
 output-schema: outcome.critic-report.v1
 wait: await
 difficulty: D3
+retry: retryable
+max-retries: 1
 ```
 
 ### security
@@ -102,6 +108,8 @@ input-schema: request.critic.v1
 output-schema: outcome.critic-report.v1
 wait: await
 difficulty: D3
+retry: retryable
+max-retries: 1
 ```
 
 ### join
@@ -121,6 +129,8 @@ input-schema: request.qa-synthesis.v1
 output-schema: outcome.qa-report.v1
 wait: await
 difficulty: D3
+retry: retryable
+max-retries: 1
 ```
 
 ### return
@@ -244,6 +254,120 @@ output-schema: outcome.qa-report.v1
       "synthesize": 1,
       "return": 1
     }
+  }
+}
+```
+
+### security-retries-in-place
+
+```phenix-test
+{
+  "input": {
+    "objective": "Run QA while recovering one transient security timeout"
+  },
+  "mocks": {
+    "checks": [
+      {
+        "return": [
+          {
+            "command": "devenv test",
+            "ok": true,
+            "summary": "passed"
+          }
+        ]
+      }
+    ],
+    "fanout": [
+      {
+        "return": {
+          "objective": "Run QA while recovering one transient security timeout"
+        }
+      }
+    ],
+    "repo": [
+      {
+        "return": {
+          "summary": "Repository review passed",
+          "evidence": [],
+          "risks": []
+        }
+      }
+    ],
+    "tests": [
+      {
+        "return": {
+          "summary": "Checks passed",
+          "checks": [],
+          "findings": [],
+          "evidence": []
+        }
+      }
+    ],
+    "architecture": [
+      {
+        "return": {
+          "summary": "Architecture review passed",
+          "findings": []
+        }
+      }
+    ],
+    "security": [
+      {
+        "fail": {
+          "code": "timeout",
+          "message": "Agent timed out after 480000ms",
+          "retryable": true,
+          "details": {
+            "source": "automatic",
+            "category": "resource_limit",
+            "suggestedLimits": {
+              "timeoutMs": 960000
+            }
+          }
+        }
+      },
+      {
+        "return": {
+          "summary": "Security review passed after retry",
+          "findings": []
+        }
+      }
+    ],
+    "synthesize": [
+      {
+        "return": {
+          "summary": "QA passed after bounded recovery",
+          "findings": [],
+          "reports": []
+        }
+      }
+    ]
+  },
+  "expect": {
+    "status": "success",
+    "visits": [
+      "checks",
+      "fanout",
+      "repo",
+      "tests",
+      "architecture",
+      "security",
+      "join",
+      "synthesize",
+      "return"
+    ],
+    "counts": {
+      "checks": 1,
+      "fanout": 1,
+      "repo": 1,
+      "tests": 1,
+      "architecture": 1,
+      "security": 1,
+      "join": 1,
+      "synthesize": 1,
+      "return": 1
+    },
+    "requireAllMocksConsumed": true
   }
 }
 ```

@@ -8,6 +8,7 @@ import type {
   WorkflowNode,
   WorkflowTransitionOutcome,
 } from "../definition/definition.ts";
+import { MAX_INVOKE_RETRIES } from "../definition/definition.ts";
 
 export interface WorkflowDiagnostic {
   readonly severity: "error" | "warning";
@@ -115,6 +116,27 @@ export function validateWorkflow(
             ),
           );
         }
+      }
+      if (
+        node.retry &&
+        (!isPositiveInteger(node.retry.maxRetries) || node.retry.maxRetries > MAX_INVOKE_RETRIES)
+      ) {
+        diagnostics.push(
+          diagnostic(
+            "retry_limit_invalid",
+            `Invoke retry maxRetries must be between 1 and ${MAX_INVOKE_RETRIES}`,
+            node.id,
+          ),
+        );
+      }
+      if (node.retry && node.wait === "background") {
+        diagnostics.push(
+          diagnostic(
+            "retry_background_invalid",
+            "Background invoke states cannot own retry recovery",
+            node.id,
+          ),
+        );
       }
     }
 

@@ -10,7 +10,7 @@ import type {
 import { type Difficulty, isDifficulty } from "../domain/definition/model.ts";
 import type { DomainEvent, PendingDomainEvent } from "../domain/run/events.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
-import type { RunRecord } from "../domain/run/model.ts";
+import type { RunRecord, RunRetryLimitOverrides, RunRetryOptions } from "../domain/run/model.ts";
 import { type Failure, failed, type Outcome, type RunId } from "../domain/shared.ts";
 import {
   buildWorkflowGraphState,
@@ -294,21 +294,10 @@ export class WorkflowProcessManager implements RunImplementation {
     node: InvokeNode,
     activationId: string,
   ): Promise<boolean> {
-    const child = this.store.projection
-      .childrenOf(run.id)
-      .find(
-        (candidate) =>
-          candidate.compiled.invocation.causation?.activationId === activationId &&
-          candidate.compiled.invocation.causation?.nodeId === node.id,
-      );
+    const attempts = this.invocationAttempts(run.id, node.id, activationId);
+    const child = attempts.at(-1);
     if (!child) {
-      if (
-        this.controller.activeAttachedChildren(run.id).length >=
-        state.definition.limits.maxParallelism
-      ) {
-        await this.controller.transition(run.id, "waiting");
-        return false;
-      }
+      if (!(await this.hasInvocationCapacity(run.id, state))) return false;
       const mappedInput = this.functions.mapping(node.input)(state.context);
       const difficulty = this.resolveDifficulty(run, state, node);
       const handle = await this.invoker.start({
@@ -342,6 +331,29 @@ export class WorkflowProcessManager implements RunImplementation {
       await this.controller.transition(run.id, "waiting");
       return false;
     }
+
+    if (this.shouldRetry(node, attempts, child)) {
+      if (!(await this.hasInvocationCapacity(run.id, state))) return false;
+      const retryOverrides = suggestedRetryOverrides(child);
+      await this.invoker.start({
+        parentId: run.id,
+        definition: node.definition,
+        input: child.input,
+        wait: node.wait,
+        ...(child.compiled.difficulty ? { difficulty: child.compiled.difficulty } : {}),
+        causation: {
+          workflowRunId: run.id,
+          nodeId: node.id,
+          activationId,
+        },
+        trustedWorkflowInvocation: true,
+        retryOf: child.id,
+        ...(retryOverrides ? { retryOverrides } : {}),
+      });
+      await this.controller.transition(run.id, "waiting");
+      return true;
+    }
+
     const outcomeStatus = child.outcome.status;
     if (
       outcomeStatus !== "success" &&
@@ -353,6 +365,33 @@ export class WorkflowProcessManager implements RunImplementation {
     await this.controller.transition(run.id, "running");
     await this.completeAndAdvance(run.id, node, activationId, child.outcome, outcomeStatus);
     return true;
+  }
+
+  private invocationAttempts(
+    workflowRunId: RunId,
+    nodeId: string,
+    activationId: string,
+  ): readonly RunRecord[] {
+    return this.store.projection.childrenOf(workflowRunId).filter((candidate) => {
+      const causation = candidate.compiled.invocation.causation;
+      return causation?.activationId === activationId && causation.nodeId === nodeId;
+    });
+  }
+
+  private shouldRetry(node: InvokeNode, attempts: readonly RunRecord[], child: RunRecord): boolean {
+    if (!node.retry || node.wait === "background") return false;
+    if (attempts.length - 1 >= node.retry.maxRetries) return false;
+    return child.outcome?.status === "failure" && child.outcome.failure.retryable;
+  }
+
+  private async hasInvocationCapacity(runId: RunId, state: WorkflowGraphState): Promise<boolean> {
+    if (
+      this.controller.activeAttachedChildren(runId).length < state.definition.limits.maxParallelism
+    ) {
+      return true;
+    }
+    await this.controller.transition(runId, "waiting");
+    return false;
   }
 
   private resolveDifficulty(
@@ -378,7 +417,7 @@ export class WorkflowProcessManager implements RunImplementation {
     const arrived = incoming.filter(
       (edge) => (state.context.transitionCounts.get(`${edge.from}->${edge.to}`) ?? 0) > 0,
     );
-    const statuses = arrived.map((edge) => this.sourceStatus(run, state, edge.from));
+    const statuses = arrived.map((edge) => this.sourceStatus(state, edge.from));
     const successes = statuses.filter((status) => status === "success").length;
     const failures = statuses.filter((status) => status === "failure").length;
     const settled = statuses.filter((status) => status !== "pending").length;
@@ -406,29 +445,22 @@ export class WorkflowProcessManager implements RunImplementation {
 
     await this.controller.transition(run.id, "running");
     const result = Object.fromEntries(
-      incoming.map((edge) => [
-        edge.from,
-        state.context.childOutcomes.get(edge.from) ?? state.context.results.get(edge.from) ?? [],
-      ]),
+      incoming.map((edge) => [edge.from, state.context.results.get(edge.from) ?? []]),
     );
     await this.completeAndAdvance(run.id, node, activationId, result, "success");
     return true;
   }
 
   private sourceStatus(
-    run: RunRecord,
     state: WorkflowGraphState,
     sourceNodeId: string,
   ): "pending" | "success" | "failure" {
     const source = workflowNode(state.definition, sourceNodeId);
-    if (source.kind !== "invoke")
-      return state.context.results.has(sourceNodeId) ? "success" : "pending";
-    const children = this.store.projection
-      .childrenOf(run.id)
-      .filter((child) => child.compiled.invocation.causation?.nodeId === sourceNodeId);
-    if (children.some((child) => !isTerminalRunState(child.state))) return "pending";
-    if (children.length === 0) return "pending";
-    return children.every((child) => child.outcome?.status === "success") ? "success" : "failure";
+    const result = state.context.latest.get(sourceNodeId);
+    if (result === undefined) return "pending";
+    if (source.kind !== "invoke") return "success";
+    const outcome = result as Outcome<unknown>;
+    return outcome.status === "success" ? "success" : "failure";
   }
 
   private async completeAndAdvance(
@@ -485,6 +517,10 @@ export class WorkflowProcessManager implements RunImplementation {
     const causation = child.compiled.invocation.causation;
     const status = child.outcome?.status;
     if (!causation || !status || status === "success") return false;
+    const superseded = this.store.projection
+      .childrenOf(child.parentId ?? state.context.runId)
+      .some((candidate) => candidate.compiled.invocation.retryOf === child.id);
+    if (superseded) return true;
     const source = workflowNode(state.definition, causation.nodeId);
     if (source.kind !== "invoke" || source.wait === "background") return false;
     return state.definition.graph.edges.some(
@@ -573,6 +609,50 @@ export class WorkflowProcessManager implements RunImplementation {
   }
 }
 
+function suggestedRetryOverrides(child: RunRecord): Omit<RunRetryOptions, "wait"> | undefined {
+  if (child.outcome?.status !== "failure") return undefined;
+  const details = child.outcome.failure.details;
+  if (!isRecord(details) || !isRecord(details.suggestedLimits)) return undefined;
+  const limits = sanitizeRetryLimits(details.suggestedLimits);
+  return limits ? { limits } : undefined;
+}
+
+function sanitizeRetryLimits(
+  value: Readonly<Record<string, unknown>>,
+): RunRetryLimitOverrides | undefined {
+  const timeoutMs = boundedInteger(value.timeoutMs, 1, 3_600_000);
+  const maxTurns = boundedInteger(value.maxTurns, 1, 200);
+  const maxToolCalls = boundedInteger(value.maxToolCalls, 1, 1_000);
+  const maxRepairAttempts = boundedInteger(value.maxRepairAttempts, 0, 10);
+  if (
+    timeoutMs === undefined &&
+    maxTurns === undefined &&
+    maxToolCalls === undefined &&
+    maxRepairAttempts === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(maxTurns !== undefined ? { maxTurns } : {}),
+    ...(maxToolCalls !== undefined ? { maxToolCalls } : {}),
+    ...(maxRepairAttempts !== undefined ? { maxRepairAttempts } : {}),
+  };
+}
+
+function boundedInteger(value: unknown, minimum: number, maximum: number): number | undefined {
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= minimum &&
+    value <= maximum
+    ? value
+    : undefined;
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function matchesOutcome(edge: WorkflowEdge, outcome: WorkflowTransitionOutcome): boolean {
   const accepted = edge.on ?? "success";
   return accepted === "any" || accepted === outcome;
@@ -602,7 +682,11 @@ function requireWorkflow(definition: AnyDefinition): WorkflowDefinition<unknown,
 
 function childFailure(child: RunRecord, outcome: Outcome<unknown>): Failure {
   if (outcome.status === "failure") {
-    return { ...outcome.failure, causeRunId: child.id };
+    return {
+      ...outcome.failure,
+      retryable: false,
+      causeRunId: child.id,
+    };
   }
   if (outcome.status === "cancelled") {
     return {

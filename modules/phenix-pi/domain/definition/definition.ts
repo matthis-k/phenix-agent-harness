@@ -73,6 +73,15 @@ export type DifficultyBinding =
   | { readonly kind: "fixed"; readonly value: Difficulty }
   | { readonly kind: "result"; readonly nodeId: string };
 
+export const MAX_INVOKE_RETRIES = 3;
+
+export interface InvokeRetryPolicy {
+  /** Retry only failures explicitly marked retryable by the child runtime. */
+  readonly when: "retryable";
+  /** Number of replacement attempts after the initial invocation. */
+  readonly maxRetries: number;
+}
+
 export interface InvokeNode {
   readonly kind: "invoke";
   readonly id: string;
@@ -82,6 +91,8 @@ export interface InvokeNode {
   readonly wait: "await" | "background";
   /** Omit to inherit the parent run difficulty. */
   readonly difficulty?: DifficultyBinding;
+  /** Omit to propagate the first unhandled child failure. */
+  readonly retry?: InvokeRetryPolicy;
   readonly capabilityOverride?: Partial<CapabilitySet>;
 }
 
