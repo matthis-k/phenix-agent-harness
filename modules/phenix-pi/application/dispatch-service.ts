@@ -286,13 +286,14 @@ function compositionCandidates(
 ): readonly DynamicWorkflowCandidate[] {
   return composer.childCapabilities.invokableDefinitions.map((id) => {
     const definition = catalog.get(definitionRef(id));
+    const stock = definition.kind === "agent" && definition.sessionMode === "stock";
     return {
       definitionId: definition.id,
-      kind: definition.kind,
+      kind: stock ? "session" : definition.kind,
       title: definition.title,
       description: definition.description,
       inputSchema: definition.input.id,
-      outputSchema: definition.output.id,
+      outputSchema: stock ? "dynamic" : definition.output.id,
     };
   });
 }
