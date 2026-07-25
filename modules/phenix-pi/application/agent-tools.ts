@@ -11,6 +11,13 @@ import {
   type TaskId,
 } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
+import {
+  type BudgetSuspension,
+  awaitOutcomeOrBudget,
+  encodeBudgetResumeControl,
+  pendingBudgetSuspension,
+  pendingBudgetSuspensionInScope,
+} from "./budget-suspension.ts";
 import type { DispatchService } from "./dispatch-service.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import type { CatalogFacade, ExecutionFacade, TaskFacade } from "./interfaces.ts";
@@ -59,7 +66,7 @@ const dispatchParameters = defineSchema<{
 );
 
 const handleParameters = defineSchema<{
-  action: "inspect" | "await" | "send" | "cancel" | "retry";
+  action: "inspect" | "await" | "send" | "cancel" | "retry" | "resume";
   runId: string;
   message?: string;
   wait?: "await" | "background";
@@ -74,7 +81,7 @@ const handleParameters = defineSchema<{
 }>(
   "tool.phenix-handle",
   Type.Object({
-    action: Type.Enum(["inspect", "await", "send", "cancel", "retry"]),
+    action: Type.Enum(["inspect", "await", "send", "cancel", "retry", "resume"]),
     runId: Type.String(),
     message: Type.Optional(Type.String()),
     wait: Type.Optional(Type.Enum(["await", "background"])),
@@ -146,7 +153,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       label: "Phenix Run",
       description: `Invoke one typed agent or workflow definition. Available: ${
         available.map((definition) => definition.id).join(", ") || "none"
-      }. Awaited calls return a compact summary and run ID; inspect the handle with view=outcome only when the complete typed result is needed.`,
+      }. Awaited calls return either a compact result or a budget suspension identifying the same child session that may be resumed through phenix_handle.`,
       parameters: runParameters,
       execute: async (raw, signal) => {
         const params = requireValid(runParameters, raw);
@@ -167,8 +174,21 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
         if ((params.wait ?? "await") === "background") {
           return projectedToolResult({ runId: handle.id, status: "running" });
         }
-        const outcome = await handle.result(signal);
-        return projectedToolResult(projectCompletedRun(handle.id, outcome), outcome);
+        const settled = await awaitOutcomeOrBudget({
+          store: this.store,
+          runId: handle.id,
+          signal,
+        });
+        if (settled.status === "suspended") {
+          return projectedToolResult(
+            projectBudgetSuspension(handle.id, settled.suspension),
+            settled.suspension,
+          );
+        }
+        return projectedToolResult(
+          projectCompletedRun(handle.id, settled.outcome),
+          settled.outcome,
+        );
       },
     };
 
@@ -176,12 +196,24 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       name: "phenix_dispatch",
       label: "Phenix Dispatch",
       description:
-        "Route substantial work through a mandatory catalog-driven selector. Use auto for normal requests; explicit qa, implement, or coordinate modes are operator overrides only. Completed dispatches return a compact run summary; retrieve the full typed outcome explicitly through phenix_handle when needed.",
+        "Route substantial work through a mandatory catalog-driven selector. Use auto for normal requests; explicit qa, implement, or coordinate modes are operator overrides only. Awaited dispatches return either the result or a structured budget suspension for the exact existing child session that needs a parent decision.",
       parameters: dispatchParameters,
       execute: async (raw, signal) => {
         const params = requireValid(dispatchParameters, raw);
         if (!this.dispatch) throw new Error("Root dispatch service is not configured");
         const result = await this.dispatch.dispatch(parentId, params, signal);
+        if (result.status === "suspended" && result.suspension) {
+          return projectedToolResult(
+            {
+              definition: result.definition,
+              selectedBy: result.selectedBy,
+              runId: result.runId,
+              ...(result.classifierRunId ? { classifierRunId: result.classifierRunId } : {}),
+              ...projectBudgetSuspension(result.runId, result.suspension),
+            },
+            result,
+          );
+        }
         return projectedToolResult(projectDispatchResult(result), result);
       },
     };
@@ -190,7 +222,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       name: "phenix_handle",
       label: "Phenix Handle",
       description:
-        "Inspect, await, message, cancel, or retry an accessible run. Summary is the default low-context view; request view=outcome, failure, or full only when that data is required. Retry creates a linked replacement run and may explicitly add bounded read/search or bash execution permissions.",
+        "Inspect, await, message, resume, cancel, or retry an accessible run. Resume increases limits on the same budget-suspended Pi session and preserves its context. Retry is reserved for creating a linked replacement run after a terminal non-budget failure.",
       parameters: handleParameters,
       execute: async (raw, signal) => {
         const params = requireValid(handleParameters, raw);
@@ -201,11 +233,80 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
         }
         if (params.action === "inspect") {
           const snapshot = await this.execution.inspect(targetId);
-          return projectedToolResult(projectRunSnapshot(snapshot, params.view), snapshot);
+          const projected = projectRunSnapshot(snapshot, params.view);
+          const suspension = pendingBudgetSuspensionInScope(this.store, targetId);
+          return projectedToolResult(
+            suspension
+              ? {
+                  ...asRecord(projected),
+                  suspension: projectBudgetSuspension(targetId, suspension).suspension,
+                }
+              : projected,
+            snapshot,
+          );
         }
         if (params.action === "await") {
-          const outcome = await this.execution.await(targetId, signal);
-          return projectedToolResult(projectOutcomeForView(outcome, params.view), outcome);
+          const settled = await awaitOutcomeOrBudget({
+            store: this.store,
+            runId: targetId,
+            signal,
+          });
+          if (settled.status === "suspended") {
+            return projectedToolResult(
+              projectBudgetSuspension(targetId, settled.suspension),
+              settled.suspension,
+            );
+          }
+          return projectedToolResult(
+            projectOutcomeForView(settled.outcome, params.view),
+            settled.outcome,
+          );
+        }
+        if (params.action === "resume") {
+          const caller = this.store.projection.requireRun(parentId);
+          if (caller.kind !== "root" && !caller.compiled.capabilities.maySend) {
+            throw new Error(`Run ${parentId} may not resume child sessions`);
+          }
+          const suspension = pendingBudgetSuspension(this.store, targetId);
+          if (!suspension) throw new Error(`Run ${targetId} has no pending budget suspension`);
+          const wait = params.wait ?? "await";
+          await this.execution.send(
+            targetId,
+            encodeBudgetResumeControl({
+              ...(params.limits ? { limits: params.limits } : {}),
+              ...(params.message?.trim() ? { message: params.message.trim() } : {}),
+            }),
+            signal,
+          );
+          if (wait === "background") {
+            return projectedToolResult({
+              runId: targetId,
+              status: "running",
+              resumed: true,
+              sameSession: true,
+              previousSuspension: projectBudgetSuspension(targetId, suspension).suspension,
+            });
+          }
+          const settled = await awaitOutcomeOrBudget({
+            store: this.store,
+            runId: targetId,
+            signal,
+          });
+          if (settled.status === "suspended") {
+            return projectedToolResult(
+              {
+                resumed: true,
+                sameSession: true,
+                ...projectBudgetSuspension(targetId, settled.suspension),
+              },
+              settled.suspension,
+            );
+          }
+          const projected = projectOutcomeForView(settled.outcome, params.view);
+          return projectedToolResult(
+            { runId: targetId, resumed: true, sameSession: true, outcome: projected },
+            settled.outcome,
+          );
         }
         if (params.action === "retry") {
           const wait = params.wait ?? "await";
@@ -217,7 +318,21 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
           if (wait === "background") {
             return projectedToolResult({ runId: handle.id, retryOf: targetId, status: "running" });
           }
-          const outcome = await handle.result(signal);
+          const settled = await awaitOutcomeOrBudget({
+            store: this.store,
+            runId: handle.id,
+            signal,
+          });
+          if (settled.status === "suspended") {
+            return projectedToolResult(
+              {
+                retryOf: targetId,
+                ...projectBudgetSuspension(handle.id, settled.suspension),
+              },
+              settled.suspension,
+            );
+          }
+          const outcome = settled.outcome;
           const projected =
             params.view === "outcome" || params.view === "full"
               ? { runId: handle.id, retryOf: targetId, outcome }
@@ -336,12 +451,47 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
   }
 }
 
+function projectBudgetSuspension(
+  scopeRunId: RunId,
+  suspension: BudgetSuspension,
+): Readonly<Record<string, unknown>> {
+  return {
+    runId: scopeRunId,
+    status: "suspended",
+    suspension: {
+      runId: suspension.runId,
+      reason: suspension.failure.message,
+      failure: suspension.failure,
+      sameSession: true,
+      currentLimits: suspension.currentLimits,
+      suggestedLimits: suspension.suggestedLimits,
+      counters: {
+        turns: suspension.turnCount,
+        toolCalls: suspension.toolCallCount,
+      },
+      timeoutRemainingMs: suspension.timeoutRemainingMs,
+    },
+    nextAction: {
+      tool: "phenix_handle",
+      action: "resume",
+      runId: suspension.runId,
+      note: "Omit limits to accept suggestedLimits, or supply larger limits. Resume preserves the existing Pi session and context.",
+    },
+  };
+}
+
 function projectOutcomeForView(
   outcome: Outcome<unknown>,
   view: RunResultView | undefined,
 ): unknown {
   if (view === "outcome" || view === "full") return outcome;
   return projectOutcome(outcome, view ?? "summary");
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : { value };
 }
 
 function requireValid<T>(schema: Schema<T>, value: unknown): T {
