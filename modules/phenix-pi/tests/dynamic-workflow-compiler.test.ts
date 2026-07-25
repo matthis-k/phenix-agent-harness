@@ -15,7 +15,7 @@ import type {
   ReturnNode,
 } from "../domain/definition/definition.ts";
 import { defineSchema, type Schema } from "../domain/definition/schema.ts";
-import { definitionId, runId, type DefinitionId } from "../domain/shared.ts";
+import { type DefinitionId, definitionId, runId } from "../domain/shared.ts";
 import type { WorkflowEvaluationContext } from "../domain/workflow/graph-state.ts";
 
 const ObjectiveSchema = defineSchema<{ readonly objective: string }>(
@@ -182,23 +182,17 @@ test("dynamic workflow compiler seals deterministic typed graphs", () => {
   const finalize = first.definition.graph.nodes.find(
     (node) => node.id === "finalize",
   ) as InvokeNode;
-  const returned = first.definition.graph.nodes.find(
-    (node) => node.id === "return",
-  ) as ReturnNode;
+  const returned = first.definition.graph.nodes.find((node) => node.id === "return") as ReturnNode;
 
   assert.deepEqual(first.mappings.get(scout.input)?.(context()), {
     objective: "Inspect the repository",
   });
   assert.deepEqual(
-    first.mappings.get(finalize.input)?.(
-      context(new Map([["scout", { summary: "Evidence" }]])),
-    ),
+    first.mappings.get(finalize.input)?.(context(new Map([["scout", { summary: "Evidence" }]]))),
     { evidence: { summary: "Evidence" } },
   );
   assert.deepEqual(
-    first.mappings.get(returned.output)?.(
-      context(new Map([["finalize", { answer: "Done" }]])),
-    ),
+    first.mappings.get(returned.output)?.(context(new Map([["finalize", { answer: "Done" }]]))),
     { answer: "Done" },
   );
 });
@@ -219,11 +213,7 @@ test("dynamic workflow compiler rejects non-upstream result bindings", () => {
       : node,
   );
   assert.throws(
-    () =>
-      compiler().compile(
-        { ...invalid, nodes },
-        { allowedDefinitionIds: [SCOUT, FINALIZER] },
-      ),
+    () => compiler().compile({ ...invalid, nodes }, { allowedDefinitionIds: [SCOUT, FINALIZER] }),
     (error: unknown) =>
       error instanceof DynamicWorkflowCompileError && /not upstream/.test(error.message),
   );
