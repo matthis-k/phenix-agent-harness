@@ -8,7 +8,7 @@ The root Pi session is a read-only frontend and root supervisor. It directly ans
 
 Normal routing uses `mode=auto`. The dispatch service derives the exact candidate set from the caller's capability-filtered catalog and asks the typed dispatcher to select one definition. The selector must prefer the most specific invariant workflow whose complete contract matches the request. It may choose `agent.coordinator` only when no single workflow covers the task, multiple workflows are required, order depends on intermediate results, or the task is genuinely open-ended.
 
-`qa`, `implement`, and `coordinate` are explicit operator overrides. The frontend must not substitute them for normal catalog-driven selection.
+`qa`, `implement`, and `coordinate` are explicit operator overrides. The frontend must not substitute them for normal catalog-driven selection. The root has no direct shell authority, and neither implementation mode nor the read-only coordinator is a shell bypass.
 
 ## Definitions and execution mechanisms
 
@@ -73,7 +73,7 @@ Workflows succeed only through a typed return node after their attached children
 
 A child that cannot complete calls `phenix_fail` with a structured report. Automatic model, provider, backend, timeout, budget, output, workflow, cancellation, and orphan failures use the same typed failure model.
 
-A failed run is immutable evidence. `phenix_handle retry` creates a linked replacement run. Retry overrides are bounded. Recovery may add read/search tools or explicitly escalate to `bash`; it may not add `edit` or `write` directly to a read-only task.
+A failed run is immutable evidence. `phenix_handle retry` creates a linked replacement run. Only a failed terminal agent retry may override tools or limits. Workflow retries preserve the declared graph and cannot be converted into shell-capable runs. The root inspects the structured cause run before retrying and never reroutes QA to implementation or coordination merely to obtain `bash`. Agent recovery may add read/search tools or explicitly escalate to `bash`; it may not add `edit` or `write` directly to a read-only task.
 
 ## Structured concurrency
 
@@ -141,9 +141,9 @@ Repeated presentations with the same fingerprint are acknowledged but not emitte
 
 `SupervisionProcessManager` is the only process that translates canonical retry, terminal, and presentation events into root or parent-agent notifications. `AttentionProcessManager` is the only process that translates amended root input into routing and delivery commands for live agents. Composition assembles both processes and supplies notification ports; it contains neither descendant lifecycle policy nor attention-routing policy.
 
-`local.qa-checks` is deliberately narrower than `bash`. It accepts structured deterministic check specifications and compiles them to fixed executable/argument pairs. Automatic discovery for a devenv repository runs `devenv tasks run maintenance:fix`, `devenv test`, and then the remaining detected checks in a deterministic order. Arbitrary command strings and implicit shell composition are not part of the local-operation contract.
+`local.qa-checks` is deliberately narrower than `bash`. It accepts structured deterministic check specifications and compiles them to fixed executable/argument pairs. Automatic discovery for a devenv repository runs the read-only `devenv test` gate and then the remaining detected checks in a deterministic order. Mutating tasks such as `maintenance:fix`, arbitrary command strings, and implicit shell composition are not part of the local-operation contract.
 
-The QA test analyst receives `bash` and `nix_shell` so it can close explicit test-coverage gaps after interpreting the local check results. Repository scouting, architecture review, and synthesis remain non-executing unless their own definitions explicitly grant command authority.
+The QA workflow partitions authority by state. Repository and architecture branches receive branch-specific read-only objectives rather than the caller's command obligation. The deterministic local state owns baseline project checks, the test analyst receives those results and may use `bash` or `nix_shell` only to close explicit read-only coverage gaps, and synthesis receives the complete reports. A non-executing scout is therefore not evidence that the workflow lacks command authority.
 
 `nix_shell` is an operational child-session tool with the same command-execution authority as `bash`. It normalizes bare package names through `nixpkgs`, resolves executable basenames through `nix-index-database`, evaluates explicit flake installables without shell interpolation, runs the requested command inside an ephemeral environment, and never installs packages into a profile or the host system.
 
