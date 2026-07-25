@@ -160,8 +160,7 @@ function validSnapshot(
 function stableFingerprint(value: unknown): string {
   const text = JSON.stringify(canonicalValue(value));
   const seeds = [
-    0x811c9dc5, 0x9e3779b9, 0x85ebca6b, 0xc2b2ae35, 0x27d4eb2f, 0x165667b1, 0xd3a2646c,
-    0xfd7046c5,
+    0x811c9dc5, 0x9e3779b9, 0x85ebca6b, 0xc2b2ae35, 0x27d4eb2f, 0x165667b1, 0xd3a2646c, 0xfd7046c5,
   ];
   return seeds.map((seed) => fnv1a(text, seed).toString(16).padStart(8, "0")).join("");
 }
