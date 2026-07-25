@@ -8,10 +8,11 @@ import type {
   WorkflowTransitionOutcome,
 } from "../domain/definition/definition.ts";
 import { type Difficulty, isDifficulty } from "../domain/definition/model.ts";
+import type { Schema } from "../domain/definition/schema.ts";
 import type { DomainEvent, PendingDomainEvent } from "../domain/run/events.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
 import type { RunRecord, RunRetryLimitOverrides, RunRetryOptions } from "../domain/run/model.ts";
-import { type Failure, failed, type Outcome, type RunId } from "../domain/shared.ts";
+import { type Failure, failed, type Outcome, type RunId, success } from "../domain/shared.ts";
 import {
   buildWorkflowGraphState,
   type WorkflowGraphState,
@@ -30,6 +31,8 @@ import type { ExecutionStore } from "./execution-store.ts";
 import type { TaskFacade } from "./interfaces.ts";
 import { KeyedSerialExecutor } from "./keyed-serial-executor.ts";
 
+const STOCK_SESSION_ID = "session.stock";
+
 export class WorkflowProcessManager implements RunImplementation {
   private readonly invoker: ChildInvoker;
   private readonly controller: RunController;
@@ -41,6 +44,7 @@ export class WorkflowProcessManager implements RunImplementation {
   private readonly ids: IdGenerator;
   private readonly cwd: string;
   private readonly clock: Clock;
+  private readonly resolveSchema: (id: string) => Schema<unknown>;
   private readonly serial = new KeyedSerialExecutor<RunId>();
   private readonly timers = new Map<RunId, ReturnType<typeof setTimeout>>();
   private readonly operationControllers = new Map<RunId, Set<AbortController>>();
@@ -58,6 +62,7 @@ export class WorkflowProcessManager implements RunImplementation {
     readonly ids: IdGenerator;
     readonly cwd: string;
     readonly clock: Clock;
+    readonly resolveSchema: (id: string) => Schema<unknown>;
   }) {
     this.invoker = input.invoker;
     this.controller = input.controller;
@@ -69,6 +74,7 @@ export class WorkflowProcessManager implements RunImplementation {
     this.ids = input.ids;
     this.cwd = input.cwd;
     this.clock = input.clock;
+    this.resolveSchema = input.resolveSchema;
     this.unsubscribe = this.store.events.subscribe((event) => this.onDomainEvent(event));
   }
 
@@ -298,7 +304,7 @@ export class WorkflowProcessManager implements RunImplementation {
     const child = attempts.at(-1);
     if (!child) {
       if (!(await this.hasInvocationCapacity(run.id, state))) return false;
-      const mappedInput = this.functions.mapping(node.input)(state.context);
+      const mappedInput = this.prepareInvokeInput(node, state);
       const difficulty = this.resolveDifficulty(run, state, node);
       const handle = await this.invoker.start({
         parentId: run.id,
@@ -362,9 +368,66 @@ export class WorkflowProcessManager implements RunImplementation {
       await this.controller.fail(run.id, childFailure(child, child.outcome));
       return true;
     }
+
+    let outcome = child.outcome;
+    if (outcome.status === "success" && this.isStockNode(node)) {
+      try {
+        outcome = this.validateStockOutcome(node, outcome.value);
+      } catch (error) {
+        await this.controller.fail(run.id, {
+          code: "output_invalid",
+          message: error instanceof Error ? error.message : String(error),
+          retryable: false,
+          causeRunId: child.id,
+        });
+        return true;
+      }
+    }
+
     await this.controller.transition(run.id, "running");
-    await this.completeAndAdvance(run.id, node, activationId, child.outcome, outcomeStatus);
+    await this.completeAndAdvance(run.id, node, activationId, outcome, outcomeStatus);
     return true;
+  }
+
+  private prepareInvokeInput(node: InvokeNode, state: WorkflowGraphState): unknown {
+    const mapped = this.functions.mapping(node.input)(state.context);
+    if (!this.isStockNode(node)) return mapped;
+    if (!node.outputSchema) throw new Error(`Stock session node ${node.id} has no output schema`);
+    if (!isRecord(mapped)) {
+      throw new Error(`Stock session node ${node.id} input mapping must return an object`);
+    }
+    const schema = this.resolveSchema(node.outputSchema);
+    return {
+      ...mapped,
+      outputSchema: schema.id,
+      outputContract: schema.jsonSchema,
+    };
+  }
+
+  private validateStockOutcome(node: InvokeNode, value: unknown): Outcome<unknown> {
+    if (!node.outputSchema) throw new Error(`Stock session node ${node.id} has no output schema`);
+    if (!isRecord(value)) throw new Error(`Stock session ${node.id} returned no typed handoff`);
+    const outputSchema = value.outputSchema;
+    if (outputSchema !== node.outputSchema) {
+      throw new Error(
+        `Stock session ${node.id} returned schema ${String(outputSchema)} instead of ${node.outputSchema}`,
+      );
+    }
+    const schema = this.resolveSchema(node.outputSchema);
+    const validation = schema.validate(value.value);
+    if (!validation.ok) {
+      throw new Error(
+        `Stock session ${node.id} output is invalid: ${validation.issues
+          .map((issue) => `${issue.path} ${issue.message}`)
+          .join("; ")}`,
+      );
+    }
+    return success(validation.value);
+  }
+
+  private isStockNode(node: InvokeNode): boolean {
+    const definition = this.catalog.require(node.definition.id);
+    return definition.id === STOCK_SESSION_ID && definition.kind === "agent";
   }
 
   private invocationAttempts(
