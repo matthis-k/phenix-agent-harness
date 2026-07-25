@@ -51,13 +51,23 @@ export class SupervisionProcessManager {
     const retryOf = run.compiled.invocation.retryOf;
     if (event.type === "run.created" && retryOf) {
       const original = this.store.projection.runs.get(retryOf);
-      await this.notifyRoot(summarizeRetryStart(run, original));
+      const parent = run.parentId ? this.store.projection.runs.get(run.parentId) : undefined;
+      await this.notifyRoot(
+        parent?.kind === "workflow"
+          ? summarizeWorkflowRetryStart(run, original, parent)
+          : summarizeRetryStart(run, original),
+      );
       return;
     }
 
     if (!isTerminalEvent(event.type) || !run.parentId) return;
     const parent = this.store.projection.runs.get(run.parentId);
     if (!parent) return;
+
+    // A workflow owns the terminal policy for its private child attempts. The
+    // root sees one retry notice and, if recovery is exhausted, the terminal
+    // workflow failure rather than every intermediate child failure.
+    if (parent.kind === "workflow") return;
 
     const summary = summarizeTerminal(run.outcome, run.id, retryOf);
     const failed = run.outcome?.status === "failure";
@@ -107,6 +117,33 @@ export function summarizeRetryStart(
       ? ` Changed limits: ${JSON.stringify(changedLimits)}.`
       : "";
   return `Recovery run ${retry.id} started for failed run ${original?.id ?? "unknown"}.${tools}${limits} The original outcome remains immutable.`;
+}
+
+export function summarizeWorkflowRetryStart(
+  retry: Pick<RunRecord, "compiled">,
+  original: Pick<RunRecord, "outcome" | "compiled"> | undefined,
+  workflow: Pick<RunRecord, "definitionId">,
+): string {
+  const nodeId = retry.compiled.invocation.causation?.nodeId ?? "unknown";
+  const failure = original?.outcome?.status === "failure" ? original.outcome.failure : undefined;
+  const reason = failure ? ` after ${failure.code}: ${failure.message}` : "";
+  const changedLimits = changedLimitSummary(retry.compiled.limits, original?.compiled.limits);
+  const limits = changedLimits ? ` ${changedLimits}` : "";
+  return `${workflow.definitionId} state ${nodeId} is retrying${reason}.${limits} Completed workflow states are retained.`;
+}
+
+function changedLimitSummary(
+  retry: RunRecord["compiled"]["limits"],
+  original: RunRecord["compiled"]["limits"] | undefined,
+): string | undefined {
+  if (!original) return undefined;
+  const changed = Object.fromEntries(
+    [...new Set([...Object.keys(original), ...Object.keys(retry)])]
+      .map((key) => key as keyof typeof retry)
+      .filter((key) => retry[key] !== original[key])
+      .map((key) => [key, retry[key] ?? null]),
+  );
+  return Object.keys(changed).length > 0 ? `Adjusted limits: ${JSON.stringify(changed)}.` : undefined;
 }
 
 export function summarizeTerminal(outcome: unknown, runId: RunId, retryOf?: RunId): string {
