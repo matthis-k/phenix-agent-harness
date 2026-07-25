@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AGENT_BASE } from "../definitions/ids.ts";
+import { AGENT_GENERIC_WRITE } from "../definitions/ids.ts";
 import { definitionRef } from "../domain/definition/definition.ts";
 import { success } from "../domain/shared.ts";
 import { createTestRuntime } from "./support/core-runtime.ts";
@@ -16,8 +16,8 @@ test("reducer invariants are validated before events reach the ledger", async ()
   });
   await runtime.execution.start({
     parentId: runtime.rootRunId,
-    definition: definitionRef(AGENT_BASE),
-    input: { objective: "remain active" },
+    definition: definitionRef(AGENT_GENERIC_WRITE),
+    input: { objective: "remain active", instructions: "Remain active for the invariant test." },
     wait: "background",
   });
   const before = runtime.store.sequence(runtime.rootRunId);
