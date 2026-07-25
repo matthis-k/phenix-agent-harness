@@ -1,5 +1,6 @@
 import type { WorkflowDefinition } from "../domain/definition/definition.ts";
 import type { DomainEvent } from "../domain/run/events.ts";
+import { isTerminalRunState } from "../domain/run/invariants.ts";
 import type { RunId } from "../domain/shared.ts";
 import {
   createWorkflowCheckpoint,
@@ -53,7 +54,7 @@ export class WorkflowCheckpointProcessManager {
 
   private async save(runId: RunId): Promise<void> {
     const run = this.store.projection.runs.get(runId);
-    if (!run || run.kind !== "workflow") return;
+    if (!run || run.kind !== "workflow" || isTerminalRunState(run.state)) return;
     const definition = this.catalog.require(run.definitionId);
     if (definition.kind !== "workflow") return;
 
