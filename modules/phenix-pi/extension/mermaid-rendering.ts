@@ -1,11 +1,11 @@
 import { renderMermaidASCII } from "beautiful-mermaid";
 
+import type { RunTree, RunTreeNode } from "../application/interfaces.ts";
 import type {
   AnyDefinition,
   WorkflowDefinition,
   WorkflowNode,
 } from "../domain/definition/definition.ts";
-import type { RunTree, RunTreeNode } from "../application/interfaces.ts";
 
 export interface TerminalMermaidOptions {
   readonly useAscii?: boolean;
@@ -29,7 +29,11 @@ export function renderTerminalMermaid(
     throw new Error(`Mermaid source exceeds ${MAX_MERMAID_SOURCE_LENGTH} characters`);
   }
   const header = normalized.split(/\r?\n/, 1)[0]?.trim().toLowerCase() ?? "";
-  if (!/^(?:flowchart|graph|statediagram|sequencediagram|classdiagram|erdiagram|xychart)/.test(header)) {
+  if (
+    !/^(?:flowchart|graph|statediagram|sequencediagram|classdiagram|erdiagram|xychart)/.test(
+      header,
+    )
+  ) {
     throw new Error(
       "Unsupported Mermaid diagram. Use flowchart, graph, stateDiagram, sequenceDiagram, classDiagram, erDiagram, or xychart.",
     );
@@ -47,7 +51,7 @@ export function workflowDefinitionMermaid(
   definition: WorkflowDefinition<unknown, unknown>,
 ): string {
   const aliases = new Map(definition.graph.nodes.map((node, index) => [node.id, `n${index}`]));
-  const lines = ["flowchart TD", `  entry((entry))`];
+  const lines = ["flowchart TD", "  entry((entry))"];
   for (const node of definition.graph.nodes) {
     const alias = aliases.get(node.id);
     if (!alias) continue;
@@ -62,7 +66,9 @@ export function workflowDefinitionMermaid(
     const details = [edge.on && edge.on !== "success" ? edge.on : undefined, edge.when]
       .filter(Boolean)
       .join(" · ");
-    lines.push(details ? `  ${from} -->|${escapeEdgeLabel(details)}| ${to}` : `  ${from} --> ${to}`);
+    lines.push(
+      details ? `  ${from} -->|${escapeEdgeLabel(details)}| ${to}` : `  ${from} --> ${to}`,
+    );
   }
   return lines.join("\n");
 }
@@ -77,7 +83,7 @@ export function renderCatalogDefinition(definition: AnyDefinition): string {
     lines.push("", renderTerminalMermaid(workflowDefinitionMermaid(definition), { compact: true }));
   } else {
     lines.push(
-      `model: ${formatModelSelector(definition.model)} · thinking: ${definition.thinking}`,
+      `model: ${formatModelSelector(definition.model)} · thinking: ${formatThinking(definition.thinking)}`,
       `tools: ${definition.tools.allow.join(", ") || "none"}`,
     );
   }
@@ -107,15 +113,20 @@ export function runTreeSequenceMermaid(
   const visit = (node: RunTreeNode, caller: string): void => {
     if (node.run.kind === "workflow") {
       const label = `${definitionLabel(String(node.run.definitionId))} · ${node.run.state}`;
-      lines.push(`  rect workflow ${escapeSequenceText(label)}`);
       const collapsed = isCollapsedWorkflow(node, options.expanded);
-      const summary = collapsed
-        ? `${descendantCount(node)} descendants · ${node.run.state}`
-        : `workflow ${label}`;
-      lines.push(`    ${caller}->>${caller}: ${escapeSequenceText(summary)}`);
-      if (!collapsed) {
-        for (const child of node.children) visit(child, caller);
+      if (collapsed) {
+        lines.push(
+          `  Note over ${caller}: ${escapeSequenceText(
+            `workflow ${label}<br/>${descendantCount(node)} descendants`,
+          )}`,
+        );
+        return;
       }
+
+      lines.push(`  rect workflow ${escapeSequenceText(label)}`);
+      lines.push(`    ${caller}->>${caller}: ${escapeSequenceText(`enter ${label}`)}`);
+      for (const child of node.children) visit(child, caller);
+      lines.push(`    ${caller}-->>${caller}: ${escapeSequenceText(`leave · ${node.run.state}`)}`);
       lines.push("  end");
       return;
     }
@@ -127,14 +138,21 @@ export function runTreeSequenceMermaid(
 
     const target = participantIds.get(String(node.run.id));
     if (!target) return;
-    lines.push(
-      `  ${caller}->>${target}: ${escapeSequenceText(`start · ${node.run.state}`)}`,
-    );
+    lines.push(`  ${caller}->>${target}: ${escapeSequenceText(`start · ${node.run.state}`)}`);
     const model = node.run.resolvedModel;
     if (model) {
       lines.push(
         `  Note right of ${target}: ${escapeSequenceText(
-`${model.concrete.provider}/${model.concrete.model} · ${model.thinking}`,
+          `${model.concrete.provider}/${model.concrete.model} · ${model.thinking}`,
+        )}`,
+      );
+    }
+    if (node.activity) {
+      const reported = node.activity.source === "reported" ? "! " : "";
+      const targetSuffix = node.activity.target ? ` → ${node.activity.target}` : "";
+      lines.push(
+        `  Note right of ${target}: ${escapeSequenceText(
+          `${reported}${node.activity.phase} ${node.activity.summary}${targetSuffix}`,
         )}`,
       );
     }
@@ -211,6 +229,13 @@ function formatModelSelector(selector: unknown): string {
   if (record.kind === "concrete") return `${record.provider}/${record.model}`;
   if (typeof record.kind === "string") return record.kind;
   return "configured";
+}
+
+function formatThinking(thinking: unknown): string {
+  if (typeof thinking === "string") return thinking;
+  if (typeof thinking !== "object" || thinking === null) return String(thinking);
+  const record = thinking as Record<string, unknown>;
+  return typeof record.kind === "string" ? record.kind : "configured";
 }
 
 function normalizeMermaidSource(source: string): string {
