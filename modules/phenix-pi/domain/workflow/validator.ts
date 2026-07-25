@@ -8,6 +8,7 @@ import type {
   WorkflowNode,
   WorkflowTransitionOutcome,
 } from "../definition/definition.ts";
+import { MAX_INVOKE_RETRIES } from "../definition/definition.ts";
 
 export interface WorkflowDiagnostic {
   readonly severity: "error" | "warning";
@@ -116,11 +117,15 @@ export function validateWorkflow(
           );
         }
       }
-      if (node.retry && !isPositiveInteger(node.retry.maxRetries)) {
+      if (
+        node.retry &&
+        (!isPositiveInteger(node.retry.maxRetries) ||
+          node.retry.maxRetries > MAX_INVOKE_RETRIES)
+      ) {
         diagnostics.push(
           diagnostic(
             "retry_limit_invalid",
-            "Invoke retry maxRetries must be a positive integer",
+            `Invoke retry maxRetries must be between 1 and ${MAX_INVOKE_RETRIES}`,
             node.id,
           ),
         );
@@ -377,18 +382,19 @@ function checkMappingsTypeConsistency(
   return diagnostics;
 }
 
-function downstreamNodes(sourceId: string, outgoing: EdgeIndex): Set<string> {
-  const visited = new Set<string>();
-  const pending = [...(outgoing.get(sourceId) ?? []).map((edge) => edge.to)];
-  while (pending.length > 0) {
-    const current = pending.pop();
-    if (!current || visited.has(current)) continue;
-    visited.add(current);
-    for (const edge of outgoing.get(current) ?? []) pending.push(edge.to);
-  }
-  return visited;
+function downstreamNodes(
+  nodeId: string,
+  outgoing: EdgeIndex,
+  visited = new Set<string>(),
+): string[] {
+  if (visited.has(nodeId)) return [];
+  visited.add(nodeId);
+  return (outgoing.get(nodeId) ?? []).flatMap((edge) => [
+    edge.to,
+    ...downstreamNodes(edge.to, outgoing, visited),
+  ]);
 }
 
 function isPositiveInteger(value: number): boolean {
-  return Number.isInteger(value) && value > 0;
+  return Number.isInteger(value) && value >= 1;
 }
