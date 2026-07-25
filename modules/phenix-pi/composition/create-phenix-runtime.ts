@@ -178,6 +178,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     ids,
     cwd: host.cwd,
     clock: systemClock,
+    resolveSchema: resolveDefinitionSchema,
   });
   const checkpoints = new WorkflowCheckpointProcessManager({ store, catalog: definitions });
   const dynamicWorkflows = new DynamicWorkflowExecutionService({
