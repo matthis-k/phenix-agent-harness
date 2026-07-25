@@ -3,6 +3,7 @@ import {
   type DifficultyBinding,
   definitionRef,
   type InvokeRetryPolicy,
+  MAX_INVOKE_RETRIES,
   type WorkflowDefinition,
   type WorkflowEdge,
   type WorkflowNode,
@@ -213,6 +214,9 @@ function parseInvokeRetry(
     `${owner}.max-retries`,
     1,
   );
+  if (maxRetries > MAX_INVOKE_RETRIES) {
+    throw new Error(`${owner}.max-retries must not exceed ${MAX_INVOKE_RETRIES}`);
+  }
   return { when: "retryable", maxRetries };
 }
 
