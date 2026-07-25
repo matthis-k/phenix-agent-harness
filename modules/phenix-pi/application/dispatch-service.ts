@@ -14,7 +14,7 @@ import {
   WORKFLOW_IMPLEMENT,
   WORKFLOW_QA,
 } from "../definitions/ids.ts";
-import { ObjectiveRequestSchema, type ObjectiveRequest } from "../definitions/schemas.ts";
+import { type ObjectiveRequest, ObjectiveRequestSchema } from "../definitions/schemas.ts";
 import {
   type AgentDefinition,
   type AnyDefinition,
@@ -121,7 +121,14 @@ export class DispatchService {
       ...(request.context === undefined ? {} : { context: request.context }),
     };
     if (targetRef.id === AGENT_COORDINATOR) {
-      return this.compose(parentId, input, request.wait ?? "await", selectedBy, classifierRunId, signal);
+      return this.compose(
+        parentId,
+        input,
+        request.wait ?? "await",
+        selectedBy,
+        classifierRunId,
+        signal,
+      );
     }
 
     this.assertAllowed(parentId, this.catalog.get(targetRef) as AnyDefinition, input);
