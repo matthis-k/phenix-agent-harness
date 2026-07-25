@@ -285,7 +285,7 @@ function compositionCandidates(
   catalog: CatalogFacade,
 ): readonly DynamicWorkflowCandidate[] {
   return composer.childCapabilities.invokableDefinitions.map((id) => {
-    const definition = catalog.get(definitionRef(id));
+    const definition = catalog.get(definitionRef(id)) as AnyDefinition;
     const stock = definition.kind === "agent" && definition.sessionMode === "stock";
     return {
       definitionId: definition.id,
