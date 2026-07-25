@@ -1,4 +1,11 @@
-import type { DynamicWorkflowProposal } from "../definitions/dynamic-workflow.ts";
+import {
+  type DynamicWorkflowProposal,
+  DynamicWorkflowProposalSchema,
+} from "../definitions/dynamic-workflow.ts";
+import type {
+  PersistedDynamicWorkflowIdentity,
+  PersistedDynamicWorkflowSnapshot,
+} from "../domain/run/model.ts";
 import { type DefinitionId, definitionId } from "../domain/shared.ts";
 import type { DefinitionCatalog, WorkflowFunctionRegistry } from "./catalog.ts";
 import {
@@ -8,16 +15,16 @@ import {
   type DynamicWorkflowIdentity,
 } from "./dynamic-workflow-compiler.ts";
 
-export interface DynamicWorkflowSnapshot {
+export interface DynamicWorkflowSnapshot extends PersistedDynamicWorkflowSnapshot {
   readonly proposal: DynamicWorkflowProposal;
   readonly identity: DynamicWorkflowIdentity;
 }
 
 export class DynamicWorkflowDriftError extends Error {
-  readonly expected: DynamicWorkflowIdentity;
+  readonly expected: PersistedDynamicWorkflowIdentity;
   readonly actual: DynamicWorkflowIdentity;
 
-  constructor(expected: DynamicWorkflowIdentity, actual: DynamicWorkflowIdentity) {
+  constructor(expected: PersistedDynamicWorkflowIdentity, actual: DynamicWorkflowIdentity) {
     super(
       `Dynamic workflow ${expected.graphDigest} cannot be restored because its execution contract changed to ${actual.graphDigest}`,
     );
@@ -75,9 +82,10 @@ export class DynamicWorkflowRuntimeRegistry {
     return snapshotOf(compiled);
   }
 
-  restore(snapshot: DynamicWorkflowSnapshot): CompiledDynamicWorkflow {
-    const allowedDefinitionIds = referencedDefinitionIds(snapshot.proposal);
-    const compiled = this.compiler.compile(snapshot.proposal, { allowedDefinitionIds });
+  restore(snapshot: PersistedDynamicWorkflowSnapshot): CompiledDynamicWorkflow {
+    const proposal = requireProposal(snapshot.proposal);
+    const allowedDefinitionIds = referencedDefinitionIds(proposal);
+    const compiled = this.compiler.compile(proposal, { allowedDefinitionIds });
     if (!sameIdentity(snapshot.identity, compiled.identity)) {
       throw new DynamicWorkflowDriftError(snapshot.identity, compiled.identity);
     }
@@ -97,6 +105,18 @@ export function snapshotOf(compiled: CompiledDynamicWorkflow): DynamicWorkflowSn
   });
 }
 
+function requireProposal(value: unknown): DynamicWorkflowProposal {
+  const validation = DynamicWorkflowProposalSchema.validate(value);
+  if (!validation.ok) {
+    throw new DynamicWorkflowCompileError(
+      `Persisted dynamic workflow proposal is invalid: ${validation.issues
+        .map((issue) => `${issue.path} ${issue.message}`)
+        .join("; ")}`,
+    );
+  }
+  return validation.value;
+}
+
 function referencedDefinitionIds(proposal: DynamicWorkflowProposal): readonly DefinitionId[] {
   return [
     ...new Set(
@@ -107,7 +127,10 @@ function referencedDefinitionIds(proposal: DynamicWorkflowProposal): readonly De
   ];
 }
 
-function sameIdentity(left: DynamicWorkflowIdentity, right: DynamicWorkflowIdentity): boolean {
+function sameIdentity(
+  left: PersistedDynamicWorkflowIdentity,
+  right: PersistedDynamicWorkflowIdentity,
+): boolean {
   return (
     left.version === right.version &&
     left.graphDigest === right.graphDigest &&
