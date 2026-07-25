@@ -95,18 +95,25 @@ export class DynamicWorkflowCompiler {
       allowed,
       this.bindings.resolveDefinition.bind(this.bindings),
     );
-    validateBindings(proposal, proposalNodes, outgoing, invokedDefinitions);
+    const invocationSchemas = resolveInvocationSchemas(
+      proposal,
+      invokedDefinitions,
+      this.bindings.resolveSchema.bind(this.bindings),
+    );
+    validateBindings(proposal, proposalNodes, outgoing, invokedDefinitions, invocationSchemas);
 
     const inputSchema = this.bindings.resolveSchema(proposal.inputSchema);
     const outputSchema = this.bindings.resolveSchema(proposal.outputSchema);
     const identity = dynamicWorkflowIdentity(
       proposal,
       [...invokedDefinitions.values()],
-      [inputSchema, outputSchema],
+      [inputSchema, outputSchema, ...invocationSchemas.values()],
     );
     const id = definitionId(`workflow.dynamic.${identity.graphDigest.slice(0, 24)}`);
     const mappings = new Map<ValueMappingRef, ValueMapping>();
-    const nodes = proposal.nodes.map((node) => compileNode(id, node, invokedDefinitions, mappings));
+    const nodes = proposal.nodes.map((node) =>
+      compileNode(id, node, invokedDefinitions, invocationSchemas, mappings),
+    );
     const edges: readonly WorkflowEdge[] = proposal.edges.map((edge) => ({ ...edge }));
     const definition: WorkflowDefinition<unknown, unknown> = {
       id,
@@ -168,11 +175,48 @@ function resolveInvokedDefinitions(
   return definitions;
 }
 
+function resolveInvocationSchemas(
+  proposal: DynamicWorkflowProposal,
+  definitions: ReadonlyMap<string, AnyDefinition>,
+  resolveSchema: (id: string) => Schema<unknown>,
+): ReadonlyMap<string, Schema<unknown>> {
+  const schemas = new Map<string, Schema<unknown>>();
+  for (const node of proposal.nodes) {
+    if (node.kind !== "invoke") continue;
+    const definition = definitions.get(node.id);
+    if (!definition) throw new DynamicWorkflowCompileError(`Missing resolved node ${node.id}`);
+    const isStock = definition.kind === "agent" && definition.sessionMode === "stock";
+    if (isStock) {
+      if (!node.outputSchema) {
+        throw new DynamicWorkflowCompileError(
+          `Dynamic workflow node ${node.id} must declare outputSchema for ${definition.id}`,
+        );
+      }
+      const schema = resolveSchema(node.outputSchema);
+      if (schema.id === definition.output.id) {
+        throw new DynamicWorkflowCompileError(
+          `Dynamic workflow node ${node.id} must bind a concrete output schema for ${definition.id}`,
+        );
+      }
+      schemas.set(node.id, schema);
+      continue;
+    }
+    if (node.outputSchema && node.outputSchema !== definition.output.id) {
+      throw new DynamicWorkflowCompileError(
+        `Dynamic workflow node ${node.id} may not override fixed output schema ${definition.output.id}`,
+      );
+    }
+    schemas.set(node.id, definition.output);
+  }
+  return schemas;
+}
+
 function validateBindings(
   proposal: DynamicWorkflowProposal,
   nodes: ReadonlyMap<string, DynamicWorkflowNodeProposal>,
   outgoing: ReadonlyMap<string, readonly string[]>,
   definitions: ReadonlyMap<string, AnyDefinition>,
+  invocationSchemas: ReadonlyMap<string, Schema<unknown>>,
 ): void {
   for (const node of proposal.nodes) {
     const binding =
@@ -182,7 +226,7 @@ function validateBindings(
     validateBindingReferences(binding, node.id, nodes, outgoing);
     const expectedSchema =
       node.kind === "invoke" ? definitions.get(node.id)?.input.id : proposal.outputSchema;
-    const actualSchema = directBindingSchema(binding, proposal, definitions);
+    const actualSchema = directBindingSchema(binding, proposal, invocationSchemas);
     if (expectedSchema && actualSchema && expectedSchema !== actualSchema) {
       throw new DynamicWorkflowCompileError(
         `Dynamic workflow node ${node.id} passes complete schema ${actualSchema} to ${expectedSchema}`,
@@ -195,6 +239,7 @@ function compileNode(
   workflowId: DefinitionId,
   proposal: DynamicWorkflowNodeProposal,
   definitions: ReadonlyMap<string, AnyDefinition>,
+  invocationSchemas: ReadonlyMap<string, Schema<unknown>>,
   mappings: Map<ValueMappingRef, ValueMapping>,
 ): WorkflowNode {
   if (proposal.kind === "join") {
@@ -222,7 +267,11 @@ function compileNode(
   }
 
   const definition = definitions.get(proposal.id);
-  if (!definition) throw new DynamicWorkflowCompileError(`Missing resolved node ${proposal.id}`);
+  const outputSchema = invocationSchemas.get(proposal.id);
+  if (!definition || !outputSchema) {
+    throw new DynamicWorkflowCompileError(`Missing resolved node ${proposal.id}`);
+  }
+  const isStock = definition.kind === "agent" && definition.sessionMode === "stock";
   return {
     kind: "invoke",
     id: proposal.id,
@@ -230,6 +279,7 @@ function compileNode(
     definition: definitionRef(definition.id),
     input: ref,
     wait: "await",
+    ...(isStock ? { outputSchema: outputSchema.id } : {}),
     ...(proposal.retry
       ? { retry: { when: "retryable" as const, maxRetries: proposal.retry.maxRetries } }
       : {}),
@@ -400,13 +450,13 @@ function validateBindingReferences(
 function directBindingSchema(
   binding: DynamicValueBinding,
   proposal: DynamicWorkflowProposal,
-  definitions: ReadonlyMap<string, AnyDefinition>,
+  invocationSchemas: ReadonlyMap<string, Schema<unknown>>,
 ): string | undefined {
   if (binding.source === "input") {
     return binding.path?.length ? undefined : proposal.inputSchema;
   }
   if (binding.source === "node") {
-    return binding.path?.length ? undefined : definitions.get(binding.nodeId)?.output.id;
+    return binding.path?.length ? undefined : invocationSchemas.get(binding.nodeId)?.id;
   }
   return undefined;
 }
@@ -438,7 +488,7 @@ function dynamicWorkflowIdentity(
       .map((definition) => [definition.id, digest(definitionContract(definition))]),
   );
   const schemaDigests = Object.fromEntries(
-    [...schemas]
+    [...new Map(schemas.map((schema) => [schema.id, schema] as const)).values()]
       .sort((left, right) => left.id.localeCompare(right.id))
       .map((schema) => [schema.id, digest(schema.jsonSchema)]),
   );
@@ -460,10 +510,11 @@ function definitionContract(definition: AnyDefinition): unknown {
   }
   return {
     ...common,
+    sessionMode: definition.sessionMode ?? "phenix",
     model: definition.model,
     modelRoutes: definition.modelRoutes,
     thinking: definition.thinking,
-    prompt: definition.prompt.render(),
+    prompt: definition.sessionMode === "stock" ? undefined : definition.prompt.render(),
     tools: definition.tools,
     context: definition.context,
     childCapabilities: definition.childCapabilities,
