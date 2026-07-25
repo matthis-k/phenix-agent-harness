@@ -16,6 +16,10 @@ import {
   definitionRef,
 } from "../domain/definition/definition.ts";
 import type { DefinitionId, Outcome, RunId } from "../domain/shared.ts";
+import {
+  type BudgetSuspension,
+  awaitOutcomeOrBudget,
+} from "./budget-suspension.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import type { CatalogFacade, DefinitionSummary, ExecutionFacade } from "./interfaces.ts";
 import type { InvocationPolicy } from "./invocation-policy.ts";
@@ -32,8 +36,9 @@ export interface DispatchResult {
   readonly selectedBy: "explicit" | "dispatcher";
   readonly runId: RunId;
   readonly classifierRunId?: RunId;
-  readonly status: "running" | "completed";
+  readonly status: "running" | "completed" | "suspended";
   readonly outcome?: Outcome<unknown>;
+  readonly suspension?: BudgetSuspension;
 }
 
 export class DispatchService {
@@ -126,13 +131,28 @@ export class DispatchService {
       };
     }
 
+    const settled = await awaitOutcomeOrBudget({
+      store: this.store,
+      runId: handle.id,
+      signal,
+    });
+    if (settled.status === "suspended") {
+      return {
+        definition: targetRef.id,
+        selectedBy,
+        runId: handle.id,
+        ...(classifierRunId ? { classifierRunId } : {}),
+        status: "suspended",
+        suspension: settled.suspension,
+      };
+    }
     return {
       definition: targetRef.id,
       selectedBy,
       runId: handle.id,
       ...(classifierRunId ? { classifierRunId } : {}),
       status: "completed",
-      outcome: await handle.result(signal),
+      outcome: settled.outcome,
     };
   }
 
