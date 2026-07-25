@@ -8,7 +8,12 @@ import {
   DynamicWorkflowCompiler,
 } from "../application/dynamic-workflow-compiler.ts";
 import type { DynamicWorkflowProposal } from "../definitions/dynamic-workflow.ts";
-import type { AgentDefinition, AnyDefinition, InvokeNode, ReturnNode } from "../domain/definition/definition.ts";
+import type {
+  AgentDefinition,
+  AnyDefinition,
+  InvokeNode,
+  ReturnNode,
+} from "../domain/definition/definition.ts";
 import { defineSchema, type Schema } from "../domain/definition/schema.ts";
 import { definitionId, runId, type DefinitionId } from "../domain/shared.ts";
 import type { WorkflowEvaluationContext } from "../domain/workflow/graph-state.ts";
@@ -171,11 +176,15 @@ test("dynamic workflow compiler seals deterministic typed graphs", () => {
   assert.equal(first.definition.id, second.definition.id);
   assert.match(first.definition.id, /^workflow\.dynamic\.[a-f0-9]{24}$/);
   assert.ok(Object.isFrozen(first.definition));
-  assert.deepEqual(Object.keys(first.identity.definitionDigests), [SCOUT, FINALIZER]);
+  assert.deepEqual(Object.keys(first.identity.definitionDigests), [FINALIZER, SCOUT]);
 
   const scout = first.definition.graph.nodes.find((node) => node.id === "scout") as InvokeNode;
-  const finalize = first.definition.graph.nodes.find((node) => node.id === "finalize") as InvokeNode;
-  const returned = first.definition.graph.nodes.find((node) => node.id === "return") as ReturnNode;
+  const finalize = first.definition.graph.nodes.find(
+    (node) => node.id === "finalize",
+  ) as InvokeNode;
+  const returned = first.definition.graph.nodes.find(
+    (node) => node.id === "return",
+  ) as ReturnNode;
 
   assert.deepEqual(first.mappings.get(scout.input)?.(context()), {
     objective: "Inspect the repository",
@@ -210,7 +219,11 @@ test("dynamic workflow compiler rejects non-upstream result bindings", () => {
       : node,
   );
   assert.throws(
-    () => compiler().compile({ ...invalid, nodes }, { allowedDefinitionIds: [SCOUT, FINALIZER] }),
+    () =>
+      compiler().compile(
+        { ...invalid, nodes },
+        { allowedDefinitionIds: [SCOUT, FINALIZER] },
+      ),
     (error: unknown) =>
       error instanceof DynamicWorkflowCompileError && /not upstream/.test(error.message),
   );
