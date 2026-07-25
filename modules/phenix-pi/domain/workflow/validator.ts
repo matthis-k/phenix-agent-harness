@@ -116,6 +116,24 @@ export function validateWorkflow(
           );
         }
       }
+      if (node.retry && !isPositiveInteger(node.retry.maxRetries)) {
+        diagnostics.push(
+          diagnostic(
+            "retry_limit_invalid",
+            "Invoke retry maxRetries must be a positive integer",
+            node.id,
+          ),
+        );
+      }
+      if (node.retry && node.wait === "background") {
+        diagnostics.push(
+          diagnostic(
+            "retry_background_invalid",
+            "Background invoke states cannot own retry recovery",
+            node.id,
+          ),
+        );
+      }
     }
 
     if (hasInputMapping) {
@@ -359,19 +377,18 @@ function checkMappingsTypeConsistency(
   return diagnostics;
 }
 
-function downstreamNodes(
-  nodeId: string,
-  outgoing: EdgeIndex,
-  visited = new Set<string>(),
-): string[] {
-  if (visited.has(nodeId)) return [];
-  visited.add(nodeId);
-  return (outgoing.get(nodeId) ?? []).flatMap((edge) => [
-    edge.to,
-    ...downstreamNodes(edge.to, outgoing, visited),
-  ]);
+function downstreamNodes(sourceId: string, outgoing: EdgeIndex): Set<string> {
+  const visited = new Set<string>();
+  const pending = [...(outgoing.get(sourceId) ?? []).map((edge) => edge.to)];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!current || visited.has(current)) continue;
+    visited.add(current);
+    for (const edge of outgoing.get(current) ?? []) pending.push(edge.to);
+  }
+  return visited;
 }
 
 function isPositiveInteger(value: number): boolean {
-  return Number.isInteger(value) && value >= 1;
+  return Number.isInteger(value) && value > 0;
 }
