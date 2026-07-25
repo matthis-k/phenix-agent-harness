@@ -316,9 +316,7 @@ function projectedChecks(value: unknown): readonly ProjectedCheck[] | undefined 
 
 function projectedFindings(value: unknown): readonly ProjectedFinding[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  return value
-    .map(projectFinding)
-    .filter((item): item is ProjectedFinding => item !== undefined);
+  return value.map(projectFinding).filter((item): item is ProjectedFinding => item !== undefined);
 }
 
 function countSeverities(findings: readonly ProjectedFinding[]): {
