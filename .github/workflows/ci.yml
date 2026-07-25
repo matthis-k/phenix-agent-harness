@@ -21,6 +21,15 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with: { fetch-depth: 0 }
+      - name: Upload workflow source snapshot
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: workflow-source-snapshot
+          path: |
+            modules/phenix-pi/application/workflow-process-manager.ts
+            modules/phenix-pi/adapters/workflow/scenario-markdown.ts
+            modules/phenix-pi/domain/workflow/validator.ts
+          if-no-files-found: error
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
@@ -46,14 +55,4 @@ jobs:
         with:
           name: devenv-test-log
           path: devenv-test.log
-          if-no-files-found: error
-      - name: Upload workflow source snapshot
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: workflow-source-snapshot
-          path: |
-            modules/phenix-pi/application/workflow-process-manager.ts
-            modules/phenix-pi/adapters/workflow/scenario-markdown.ts
-            modules/phenix-pi/domain/workflow/validator.ts
           if-no-files-found: error
