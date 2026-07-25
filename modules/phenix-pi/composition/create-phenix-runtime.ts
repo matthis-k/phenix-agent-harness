@@ -19,6 +19,9 @@ import { CatalogFacadeImpl } from "../application/catalog-facade.ts";
 import { logDomainEvent } from "../application/diagnostic-event-bridge.ts";
 import { DispatchService } from "../application/dispatch-service.ts";
 import { OrderedDomainEventBus } from "../application/domain-event-bus.ts";
+import { DynamicWorkflowCompiler } from "../application/dynamic-workflow-compiler.ts";
+import { DynamicWorkflowExecutionService } from "../application/dynamic-workflow-execution.ts";
+import { DynamicWorkflowRuntimeRegistry } from "../application/dynamic-workflow-runtime.ts";
 import { ExecutionFacadeImpl } from "../application/execution-facade.ts";
 import { ExecutionStore } from "../application/execution-store.ts";
 import type {
@@ -39,6 +42,7 @@ import { TaskFacadeImpl } from "../application/task-facade.ts";
 import { WorkflowProcessManager } from "../application/workflow-process-manager.ts";
 import { agentDefinitions } from "../definitions/agents.ts";
 import { ROOT_DISPATCH_DEFINITION_IDS, ROOT_INTERNAL_DEFINITION_IDS } from "../definitions/ids.ts";
+import { resolveDefinitionSchema } from "../definitions/schema-registry.ts";
 import { registerWorkflowFunctions } from "../definitions/workflows/functions.ts";
 import { workflowDefinitions } from "../definitions/workflows/index.ts";
 import type { ConcreteModelRef } from "../domain/definition/model.ts";
@@ -63,6 +67,7 @@ export interface PhenixHostServices {
 
 export interface PhenixRuntime {
   readonly execution: ExecutionFacade;
+  readonly dynamicWorkflows: DynamicWorkflowExecutionService;
   readonly attention: AttentionFacade;
   readonly profiles: SessionProfileFacade;
   readonly tasks: TaskFacade;
@@ -120,6 +125,14 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     definitions.register(definition);
   }
   definitions.seal(functions, operations);
+  const dynamicRegistry = new DynamicWorkflowRuntimeRegistry({
+    compiler: new DynamicWorkflowCompiler({
+      resolveDefinition: (id) => definitions.require(id),
+      resolveSchema: resolveDefinitionSchema,
+    }),
+    catalog: definitions,
+    functions,
+  });
 
   let activeRootRunId: RunId | undefined;
   let rootNotifier: ((message: string) => void | Promise<void>) | undefined;
@@ -195,6 +208,16 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
   execution.registerImplementation("agent", agents);
   execution.registerImplementation("workflow", workflows);
   execution.seal();
+  const dynamicWorkflows = new DynamicWorkflowExecutionService({
+    registry: dynamicRegistry,
+    catalog,
+    store,
+    controller: execution,
+    workflow: workflows,
+    execution,
+    ids,
+    clock: systemClock,
+  });
 
   const queries = new QueryFacadeImpl(store, tasks);
   const attention = new AttentionProcessManager({
@@ -218,6 +241,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
 
   return {
     execution,
+    dynamicWorkflows,
     attention,
     profiles,
     tasks,
@@ -241,6 +265,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
         },
       });
       await execution.initializeRoot(input);
+      await dynamicWorkflows.restoreRoot(input.id);
       await execution.recoverNonterminal(input.id);
       await attention.recover(input.id);
       await events.drain();
