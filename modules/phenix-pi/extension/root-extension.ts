@@ -1,7 +1,4 @@
 import path from "node:path";
-
-import { Type } from "typebox";
-
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -9,6 +6,7 @@ import type {
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 
 import {
   formatIntegrationReport,
@@ -18,7 +16,7 @@ import {
 } from "../adapters/pi-sdk/integrations.ts";
 import { registerPhenixProvider } from "../adapters/routing/phenix-provider.ts";
 import { createPhenixRuntime, type PhenixRuntime } from "../composition/create-phenix-runtime.ts";
-import { definitionRef, type AnyDefinition } from "../domain/definition/definition.ts";
+import { type AnyDefinition, definitionRef } from "../domain/definition/definition.ts";
 import { isPhenixModelSet, PHENIX_MODEL_SETS } from "../domain/definition/model.ts";
 import {
   DEFAULT_SESSION_PROFILE,
@@ -366,9 +364,9 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
           );
           return;
         }
-        const definition = activeRuntime.catalog.get(
-          definitionRef(matches[0]!.id),
-        ) as AnyDefinition;
+        const match = matches.at(0);
+        if (!match) throw new Error(`Catalog match disappeared for ${rawOptions}`);
+        const definition = activeRuntime.catalog.get(definitionRef(match.id)) as AnyDefinition;
         ctx.ui.notify(limit(renderCatalogDefinition(definition)), "info");
         return;
       }
