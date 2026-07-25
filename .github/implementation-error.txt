@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "<stdin>", line 13, in <module>
+  File "implement-tui-diagrams.py", line 441, in <module>
+SystemExit: catalog block not found
+catalog block not found
