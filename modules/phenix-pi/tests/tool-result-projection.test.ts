@@ -11,7 +11,7 @@ import {
 import type { RunSnapshot } from "../domain/run/model.ts";
 import { type RunId, success } from "../domain/shared.ts";
 
-test("completed QA runs render all compact checks and findings as Markdown tables", () => {
+test("completed QA runs render all compact checks and findings as canonical Markdown tables", () => {
   const outcome = success({
     summary: "Deterministic gates passed while review findings require attention.",
     checks: Array.from({ length: 8 }, (_, index) => ({
@@ -22,15 +22,25 @@ test("completed QA runs render all compact checks and findings as Markdown table
     findings: [
       {
         severity: "high",
-        title: "free mutation guard is bypassed",
-        evidence: "child command sessions do not load the root extension guard",
-        recommendation: "enforce the policy at the child tool boundary",
+        kind: "security",
+        description: "free mutation guard is bypassed",
+        locations: [
+          {
+            path: "modules/phenix-pi/application/agent-executor.ts",
+            line: 84,
+          },
+        ],
+        notes: "Enforce the policy at the child tool boundary.",
       },
       {
         severity: "low",
-        title: "second",
-        evidence: "y".repeat(8_000),
-        recommendation: "fix second",
+        kind: "architecture",
+        description: "second",
+        locations: [
+          { path: "src/one.ts", line: 10, endLine: 14 },
+          { path: "src/two.ts", line: 22 },
+        ],
+        notes: "y".repeat(8_000),
       },
     ],
     reports: [{ raw: "z".repeat(16_000) }],
@@ -45,14 +55,20 @@ test("completed QA runs render all compact checks and findings as Markdown table
     readonly checks: readonly {
       readonly command: string;
       readonly ok: boolean;
+      readonly status: "passed" | "failed" | "unavailable";
       readonly summary: string;
     }[];
     readonly findingCount: number;
     readonly findings: readonly {
       readonly severity?: string;
-      readonly title: string;
-      readonly evidence?: string;
-      readonly recommendation?: string;
+      readonly kind?: string;
+      readonly description: string;
+      readonly locations: readonly {
+        readonly path: string;
+        readonly line: number;
+        readonly endLine?: number;
+      }[];
+      readonly notes?: string;
     }[];
     readonly hasOutcome: boolean;
     readonly transport: {
@@ -67,10 +83,17 @@ test("completed QA runs render all compact checks and findings as Markdown table
   assert.match(result.text, /\*\*Gate status:\*\* Passed/);
   assert.match(result.text, /\*\*Review status:\*\* Attention required \(1 high\)/);
   assert.match(result.text, /\| Check \| Status \| Details \|/);
-  assert.match(result.text, /\| check-1 \| PASS \| passed \|/);
-  assert.match(result.text, /\| High \| 1 \|/);
-  assert.match(result.text, /\| HIGH \| free mutation guard is bypassed \|/);
-  assert.match(result.text, /\| LOW \| second \|/);
+  assert.match(result.text, /\| check-1 \| PASSED \| passed \|/);
+  assert.match(result.text, /\| # \| Severity \| Kind \| Description \| Locations \| Notes \|/);
+  assert.match(
+    result.text,
+    /\| 1 \| HIGH \| security \| free mutation guard is bypassed \| modules\/phenix-pi\/application\/agent-executor\.ts:84 \|/,
+  );
+  assert.match(
+    result.text,
+    /\| 2 \| LOW \| architecture \| second \| src\/one\.ts:10-14<br>src\/two\.ts:22 \|/,
+  );
+  assert.doesNotMatch(result.text, /### Finding counts/);
   assert.equal(details.runId, "run-1");
   assert.equal(details.status, "success");
   assert.equal(
@@ -79,12 +102,22 @@ test("completed QA runs render all compact checks and findings as Markdown table
   );
   assert.equal(details.checkCount, 8);
   assert.equal(details.checks.length, 8);
-  assert.deepEqual(details.checks[0], { command: "check-1", ok: true, summary: "passed" });
+  assert.deepEqual(details.checks[0], {
+    command: "check-1",
+    ok: true,
+    status: "passed",
+    summary: "passed",
+  });
   assert.equal(details.findingCount, 2);
   assert.equal(details.findings[0]?.severity, "high");
-  assert.equal(details.findings[0]?.title, "free mutation guard is bypassed");
-  assert.equal(details.findings[1]?.evidence?.length, 500);
-  assert.equal(details.findings[1]?.evidence?.endsWith("…"), true);
+  assert.equal(details.findings[0]?.kind, "security");
+  assert.equal(details.findings[0]?.description, "free mutation guard is bypassed");
+  assert.deepEqual(details.findings[1]?.locations, [
+    { path: "src/one.ts", line: 10, endLine: 14 },
+    { path: "src/two.ts", line: 22 },
+  ]);
+  assert.equal(details.findings[1]?.notes?.length, 500);
+  assert.equal(details.findings[1]?.notes?.endsWith("…"), true);
   assert.equal(details.hasOutcome, true);
   assert.equal("reports" in details, false);
   assert.ok(details.transport.sourceBytes > details.transport.inlineBytes);
@@ -104,9 +137,16 @@ test("completed QA dispatches render the report instead of a prose-only JSON sum
       findings: [
         {
           severity: "medium",
-          title: "dependency direction is unclear",
-          evidence: "definitions imports composition",
-          recommendation: "restore one-way ownership",
+          kind: "architecture",
+          description: "dependency direction is unclear",
+          locations: [
+            {
+              path: "modules/phenix-pi/definitions/schemas.ts",
+              line: 108,
+              endLine: 121,
+            },
+          ],
+          notes: "Restore one-way ownership.",
         },
       ],
       reports: [],
@@ -117,9 +157,54 @@ test("completed QA dispatches render the report instead of a prose-only JSON sum
   assert.match(result.text, /^## QA report/m);
   assert.match(result.text, /\*\*Definition:\*\* `workflow\.qa`/);
   assert.match(result.text, /\*\*Run:\*\* `run-qa`/);
-  assert.match(result.text, /\| devenv test \| PASS \| passed \|/);
-  assert.match(result.text, /\| MEDIUM \| dependency direction is unclear \|/);
+  assert.match(result.text, /\| devenv test \| PASSED \| passed \|/);
+  assert.match(
+    result.text,
+    /\| 1 \| MEDIUM \| architecture \| dependency direction is unclear \| modules\/phenix-pi\/definitions\/schemas\.ts:108-121 \|/,
+  );
   assert.doesNotMatch(result.text, /"hasOutcome":true/);
+});
+
+test("an unavailable canonical gate is rendered as incomplete, not passed", () => {
+  const result = projectedToolResult(
+    projectCompletedRun(
+      "run-unavailable" as RunId,
+      success({
+        summary:
+          "Not a clean pass. The devenv binary was unavailable, although underlying steps passed individually.",
+        checks: [
+          {
+            command: "devenv test",
+            ok: false,
+            summary: "spawn devenv ENOENT",
+          },
+        ],
+        findings: [],
+        reports: [],
+      }),
+    ),
+  );
+
+  assert.match(result.text, /\*\*Gate status:\*\* Incomplete \(1 unavailable\)/);
+  assert.match(result.text, /\| devenv test \| UNAVAILABLE \| spawn devenv ENOENT \|/);
+  assert.doesNotMatch(result.text, /\*\*Gate status:\*\* Passed/);
+});
+
+test("empty QA findings still render the canonical findings table", () => {
+  const result = projectedToolResult(
+    projectCompletedRun(
+      "run-clear" as RunId,
+      success({
+        summary: "Clear",
+        checks: [],
+        findings: [],
+        reports: [],
+      }),
+    ),
+  );
+
+  assert.match(result.text, /\| # \| Severity \| Kind \| Description \| Locations \| Notes \|/);
+  assert.match(result.text, /\| — \| — \| — \| No review findings were reported\. \| — \| — \|/);
 });
 
 test("string findings are normalized into finding objects", () => {
@@ -134,7 +219,10 @@ test("string findings are normalized into finding objects", () => {
       status: "success",
       summary: "Verification found two issues",
       findingCount: 2,
-      findings: [{ title: "first issue" }, { title: "second issue" }],
+      findings: [
+        { description: "first issue", locations: [] },
+        { description: "second issue", locations: [] },
+      ],
       hasOutcome: true,
     },
   );
@@ -151,9 +239,10 @@ test("structured collections are count-preserving and bounded", () => {
       })),
       findings: Array.from({ length: 52 }, (_, index) => ({
         severity: "low",
-        title: `finding ${index + 1}`,
-        evidence: "evidence",
-        recommendation: "recommendation",
+        kind: "tests",
+        description: `finding ${index + 1}`,
+        locations: [{ path: "tests/example.test.ts", line: index + 1 }],
+        notes: "note",
       })),
     }),
   ) as {
@@ -171,6 +260,32 @@ test("structured collections are count-preserving and bounded", () => {
   assert.equal(projected.findingCount, 52);
   assert.equal(projected.findings.length, 50);
   assert.equal(projected.omittedFindingCount, 2);
+});
+
+test("invalid location line ranges are normalized conservatively", () => {
+  const projected = projectOutcome(
+    success({
+      summary: "one finding",
+      findings: [
+        {
+          severity: "low",
+          kind: "tests",
+          description: "invalid end line",
+          locations: [
+            { path: "tests/example.test.ts", line: 20, endLine: 10 },
+            { path: "tests/missing-line.test.ts" },
+          ],
+          notes: "note",
+        },
+      ],
+    }),
+  ) as {
+    readonly findings: readonly {
+      readonly locations: readonly unknown[];
+    }[];
+  };
+
+  assert.deepEqual(projected.findings[0]?.locations, [{ path: "tests/example.test.ts", line: 20 }]);
 });
 
 test("explicit outcome view preserves the complete typed value", () => {
