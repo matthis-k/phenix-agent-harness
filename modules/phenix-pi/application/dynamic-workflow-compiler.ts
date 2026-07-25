@@ -15,7 +15,7 @@ import {
   type WorkflowNode,
 } from "../domain/definition/definition.ts";
 import type { Schema } from "../domain/definition/schema.ts";
-import { definitionId, type DefinitionId } from "../domain/shared.ts";
+import { type DefinitionId, definitionId } from "../domain/shared.ts";
 import type { ValueMapping } from "../domain/workflow/functions.ts";
 import type { WorkflowEvaluationContext } from "../domain/workflow/graph-state.ts";
 import {
