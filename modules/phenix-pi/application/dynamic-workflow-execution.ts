@@ -5,8 +5,12 @@ import {
   DEFAULT_SESSION_PROFILE,
   type RunRecord,
 } from "../domain/run/model.ts";
-import { type DefinitionId, type RunId } from "../domain/shared.ts";
+import type { DefinitionId, RunId } from "../domain/shared.ts";
 import type { Clock, IdGenerator } from "../ports/clock.ts";
+import {
+  DynamicWorkflowDriftError,
+  type DynamicWorkflowRuntimeRegistry,
+} from "./dynamic-workflow-runtime.ts";
 import type {
   RunController,
   RunImplementation,
@@ -14,10 +18,6 @@ import type {
 } from "./execution-facade.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import type { CatalogFacade, ExecutionFacade, RunHandle } from "./interfaces.ts";
-import {
-  DynamicWorkflowDriftError,
-  type DynamicWorkflowRuntimeRegistry,
-} from "./dynamic-workflow-runtime.ts";
 
 export interface DynamicWorkflowStartRequest<I> {
   readonly parentId: RunId;
