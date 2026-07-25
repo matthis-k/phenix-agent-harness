@@ -12,6 +12,7 @@ import {
   CriticReportSchema,
   CriticRequestSchema,
   FinalReportSchema,
+  GenericTaskRequestSchema,
   ImplementationRequestSchema,
   ImplementationResultSchema,
   ObjectiveRequestSchema,
@@ -30,6 +31,7 @@ import { CheckResultsSchema, QAChecksRequestSchema } from "./workflow-schemas.ts
 
 export const definitionSchemas = [
   ObjectiveRequestSchema,
+  GenericTaskRequestSchema,
   DifficultyAssessmentRequestSchema,
   DifficultyAssessmentSchema,
   ScoutRequestSchema,
