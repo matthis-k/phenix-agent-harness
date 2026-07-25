@@ -73,7 +73,10 @@ test("completed QA runs render all compact checks and findings as Markdown table
   assert.match(result.text, /\| LOW \| second \|/);
   assert.equal(details.runId, "run-1");
   assert.equal(details.status, "success");
-  assert.equal(details.summary, "Deterministic gates passed while review findings require attention.");
+  assert.equal(
+    details.summary,
+    "Deterministic gates passed while review findings require attention.",
+  );
   assert.equal(details.checkCount, 8);
   assert.equal(details.checks.length, 8);
   assert.deepEqual(details.checks[0], { command: "check-1", ok: true, summary: "passed" });
