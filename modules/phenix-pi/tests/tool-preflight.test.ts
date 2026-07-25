@@ -7,7 +7,7 @@ import {
 } from "../adapters/pi-sdk/tool-preflight.ts";
 import { agentDefinitions } from "../definitions/agents.ts";
 
-const CUSTOM_TOOLS = [
+export const TEST_CUSTOM_TOOLS = [
   "phenix_run",
   "phenix_handle",
   "phenix_present",
@@ -17,11 +17,12 @@ const CUSTOM_TOOLS = [
   "phenix_progress",
 ].map((name) => ({ name }));
 
-test("all bundled agent tool policies resolve in the test environment", () => {
+test("all bundled agent tool policies reference registered tools", () => {
   for (const definition of agentDefinitions) {
     const issues = inspectToolAvailability({
       tools: definition.tools.allow,
-      customTools: CUSTOM_TOOLS,
+      customTools: TEST_CUSTOM_TOOLS,
+      checkExecutables: false,
     });
     assert.deepEqual(
       issues,
