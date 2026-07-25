@@ -20,7 +20,7 @@ Dynamic composition is split between model planning and trusted execution. The n
 
 ## Canonical state
 
-Each root Pi session owns one append-only JSONL domain-event stream. The event stream is canonical. Run trees, task trees, active-child counts, workflow positions, current activity, fact history, outcomes, retry relationships, structured presentations, and attention delivery are projections.
+Each root Pi session owns one append-only JSONL domain-event stream. The event stream is canonical. Run trees, task trees, active-child counts, workflow positions, current activity, fact history, outcomes, retry relationships, structured presentations, attention delivery, and workflow replay checkpoints are projections. A checkpoint accelerates reconstruction but never replaces canonical node, transition, child, or terminal events.
 
 A run ID is the only execution identity for roots, agents, and workflows. Each non-root run has exactly one parent edge.
 
@@ -36,7 +36,7 @@ Application execution commands use five façades:
 
 Root-session model, agent-preset, and difficulty selection is separate host policy exposed through `SessionProfileFacade`; it is not execution-tree command authority.
 
-Event subscribers observe facts; they are not anonymous command queues. Only an explicit named process manager may react to events by issuing commands. `WorkflowProcessManager` advances workflow graphs, `SupervisionProcessManager` owns presentation, retry, descendant-terminal, root-notification, and parent-attention reactions, and `AttentionProcessManager` routes user follow-up input to live agents. Run and attention invariants are checked against staged projections before a batch is appended.
+Event subscribers observe facts; they are not anonymous command queues. Only an explicit named process manager may react to events. `WorkflowProcessManager` advances workflow graphs, `WorkflowCheckpointProcessManager` persists derived replay snapshots, `SupervisionProcessManager` owns presentation, retry, descendant-terminal, root-notification, and parent-attention reactions, and `AttentionProcessManager` routes user follow-up input to live agents. Run and attention invariants are checked against staged projections before a batch is appended.
 
 ## Supervisory attention
 
@@ -59,7 +59,7 @@ Attention state is persisted through `attention.received`, `attention.routed`, `
 
 The composition layer subscribes to canonical domain events and maps them to stable lowercase dot-separated diagnostic scopes. Runtime, integration, persistence, agent-session, model-resolution, workflow, attention, tool, output, failure, and recovery boundaries may also record explicit diagnostics when the domain event alone lacks enough context.
 
-Diagnostic records keep timestamps, IDs, model names, durations, counts, statuses, and other short scalar fields inline. Large strings and nested values are redacted, serialized once into a private content-addressed artifact store, and replaced by `artifact:sha256:<digest>` metadata. Artifact resolution is root scoped. Diagnostic observers are asynchronous side effects and may never block, mutate, or fail execution.
+Diagnostic records keep timestamps, IDs, model names, durations, counts, statuses, and other short scalar fields inline. Large strings and nested values are redacted, serialized once into a private content-addressed artifact store, and replaced by `artifact:sha256:<digest>` metadata. Artifact resolution is root scoped. Diagnostic observers are asynchronous side effects and may never block, mutate, or fail execution. Checkpoint diagnostics retain only fingerprints, included sequence, and bounded counts rather than duplicating checkpoint payloads.
 
 ## Lifecycle and typed outcomes
 
@@ -126,7 +126,7 @@ The run ledger retains complete schema-valid inputs and outcomes. Model-facing t
 - `view=full` admits the full run snapshot and is intended only for explicit diagnostics.
 - Tool-result details include deterministic source, inline, and omitted byte counts without duplicating the omitted source payload.
 
-Workflow and attention process managers are not model-facing transports and consume execution state through runtime authority.
+Workflow, checkpoint, and attention process managers are not model-facing transports and consume execution state through runtime authority.
 
 ## Structured presentation
 
@@ -144,7 +144,7 @@ Repeated presentations with the same fingerprint are acknowledged but not emitte
 
 ## Process authority
 
-`SupervisionProcessManager` is the only process that translates canonical retry, terminal, and presentation events into root or parent-agent notifications. `AttentionProcessManager` is the only process that translates amended root input into routing and delivery commands for live agents. Composition assembles both processes and supplies notification ports; it contains neither descendant lifecycle policy nor attention-routing policy.
+`SupervisionProcessManager` is the only process that translates canonical retry, terminal, and presentation events into root or parent-agent notifications. `AttentionProcessManager` is the only process that translates amended root input into routing and delivery commands for live agents. `WorkflowCheckpointProcessManager` may append only derived `workflow.checkpoint.saved` events and cannot invoke children, transition runs, or alter workflow control flow. Composition assembles these processes and supplies notification ports; it contains neither descendant lifecycle policy nor attention-routing policy.
 
 `local.qa-checks` is deliberately narrower than `bash`. It accepts structured deterministic check specifications and compiles them to fixed executable/argument pairs. Automatic discovery for a devenv repository selects only the read-only `devenv test` gate; generic check discovery applies only when no devenv gate is present. Mutating tasks such as `maintenance:fix`, arbitrary command strings, and implicit shell composition are not part of the local-operation contract.
 

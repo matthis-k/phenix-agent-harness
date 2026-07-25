@@ -2,6 +2,10 @@ import type { WorkflowDefinition, WorkflowNode } from "../definition/definition.
 import type { DomainEvent } from "../run/events.ts";
 import type { RunRecord } from "../run/model.ts";
 import type { Outcome, RunId } from "../shared.ts";
+import {
+  latestCompatibleWorkflowCheckpoint,
+  type WorkflowCheckpointSnapshot,
+} from "./checkpoint.ts";
 
 export interface WorkflowActivation {
   readonly activationId: string;
@@ -38,11 +42,22 @@ export function buildWorkflowGraphState(input: {
   readonly events: readonly DomainEvent[];
   readonly children: readonly RunRecord[];
 }): WorkflowGraphState {
-  const activations = new Map<string, WorkflowActivation>();
-  const results = new Map<string, unknown[]>();
-  const transitions = new Map<string, number>();
+  const checkpoint = latestCompatibleWorkflowCheckpoint({
+    definition: input.definition,
+    events: input.events,
+  });
+  const activations = new Map<string, WorkflowActivation>(
+    checkpoint?.snapshot.activations.map((activation) => [activation.activationId, activation]),
+  );
+  const results = new Map<string, unknown[]>(
+    checkpoint?.snapshot.results.map(([nodeId, values]) => [nodeId, [...values]]),
+  );
+  const transitions = new Map<string, number>(checkpoint?.snapshot.transitionCounts);
+  const replayEvents = checkpoint
+    ? input.events.filter((event) => event.sequence > checkpoint.throughSequence)
+    : input.events;
 
-  for (const event of input.events) {
+  for (const event of replayEvents) {
     if (event.type === "workflow.node.entered") {
       const data = event.data as { readonly activationId: string; readonly nodeId: string };
       activations.set(data.activationId, {
@@ -98,6 +113,24 @@ export function buildWorkflowGraphState(input: {
       transitionCounts: transitions,
     },
     nodeRuns: activations.size,
+  };
+}
+
+export function workflowCheckpointSnapshot(state: WorkflowGraphState): WorkflowCheckpointSnapshot {
+  return {
+    activations: [...state.activations.values()]
+      .sort(
+        (left, right) =>
+          left.enteredSequence - right.enteredSequence ||
+          left.activationId.localeCompare(right.activationId),
+      )
+      .map((activation) => ({ ...activation })),
+    results: [...state.context.results.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([nodeId, values]) => [nodeId, [...values]] as const),
+    transitionCounts: [...state.context.transitionCounts.entries()].sort(([left], [right]) =>
+      left.localeCompare(right),
+    ),
   };
 }
 

@@ -1,5 +1,6 @@
 import type { ResolvedModel } from "../definition/model.ts";
 import type { Failure, LocalTaskId, Outcome, RunId } from "../shared.ts";
+import type { WorkflowCheckpointSavedData } from "../workflow/checkpoint.ts";
 import type { RunRecord, RunState, SessionProfile } from "./model.ts";
 import type { RunActivityChangedData, RunFactRecordedData } from "./observability.ts";
 
@@ -67,6 +68,8 @@ export interface WorkflowTransitionTakenData {
   readonly traversal: number;
 }
 
+export type WorkflowCheckpointData = WorkflowCheckpointSavedData;
+
 export interface LocalTaskCreatedData {
   readonly task: {
     readonly id: LocalTaskId;
@@ -112,6 +115,7 @@ export type DomainEventType =
   | "workflow.node.entered"
   | "workflow.node.completed"
   | "workflow.transition.taken"
+  | "workflow.checkpoint.saved"
   | "task.local.created"
   | "task.local.state.changed"
   | "task.progress.appended";

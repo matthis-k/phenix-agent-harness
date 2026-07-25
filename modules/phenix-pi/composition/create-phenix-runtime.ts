@@ -39,6 +39,7 @@ import { QueryFacadeImpl } from "../application/query-facade.ts";
 import { SessionProfileFacadeImpl } from "../application/session-profile-facade.ts";
 import { SupervisionProcessManager } from "../application/supervision-process-manager.ts";
 import { TaskFacadeImpl } from "../application/task-facade.ts";
+import { WorkflowCheckpointProcessManager } from "../application/workflow-checkpoint-process-manager.ts";
 import { WorkflowProcessManager } from "../application/workflow-process-manager.ts";
 import { agentDefinitions } from "../definitions/agents.ts";
 import { ROOT_DISPATCH_DEFINITION_IDS, ROOT_INTERNAL_DEFINITION_IDS } from "../definitions/ids.ts";
@@ -178,6 +179,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     cwd: host.cwd,
     clock: systemClock,
   });
+  const checkpoints = new WorkflowCheckpointProcessManager({ store, catalog: definitions });
   const dynamicWorkflows = new DynamicWorkflowExecutionService({
     registry: dynamicRegistry,
     catalog,
@@ -302,6 +304,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
       await workflows.shutdown();
       await agents.shutdown();
       await events.drain();
+      await checkpoints.shutdown();
       supervision.shutdown();
       await diagnostics.record({
         rootRunId,
