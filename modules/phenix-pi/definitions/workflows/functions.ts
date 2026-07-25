@@ -107,7 +107,11 @@ export function registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): 
     return configured.length > 0 ? { checks: configured } : {};
   });
   registry.registerMapping("qa.repo.input", (context) =>
-    objectiveWithFocus(context, "repository structure, correctness, and maintainability"),
+    qaReviewInput(
+      context,
+      "repository structure, correctness, and maintainability",
+      "Use repository reads and searches only. Do not execute or delegate commands; deterministic checks and command execution are owned by separate workflow states.",
+    ),
   );
   registry.registerMapping("qa.tests.input", (context) => {
     const input = context.input as ObjectiveRequest;
@@ -118,15 +122,17 @@ export function registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): 
     };
   });
   registry.registerMapping("qa.arch.input", (context) =>
-    objectiveWithFocus(
+    qaReviewInput(
       context,
       "architecture, ownership, dependency direction, and replaceability",
+      "Remain read-only. Do not run or delegate the caller's requested verification commands; the deterministic-check and test-analysis states own that work.",
     ),
   );
   registry.registerMapping("qa.security.input", (context) =>
-    objectiveWithFocus(
+    qaReviewInput(
       context,
       "security, trust boundaries, secrets, authentication, and unsafe behavior",
+      "Treat baseline command execution as already owned by the deterministic-check state. Run only additional targeted read-only checks needed to support a concrete security finding.",
     ),
   );
   registry.registerMapping("qa.synthesize.input", (context) => ({
@@ -176,9 +182,17 @@ function valuesAt<T = unknown>(context: WorkflowEvaluationContext, node: string)
   return (context.results.get(node) ?? []).map((value) => outcomeValue<T>(value));
 }
 
-function objectiveWithFocus(context: WorkflowEvaluationContext, focus: string) {
+function qaReviewInput(context: WorkflowEvaluationContext, focus: string, authority: string) {
   const input = context.input as ObjectiveRequest;
-  return { objective: input.objective, context: input.context, focus };
+  return {
+    objective: [
+      `Perform only the ${focus} branch of workflow.qa.`,
+      authority,
+      `Caller QA scope (background context, not an execution instruction): ${input.objective}`,
+    ].join(" "),
+    context: input.context,
+    focus,
+  };
 }
 
 function extractConfiguredChecks(context: unknown): readonly unknown[] {

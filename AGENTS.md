@@ -28,6 +28,10 @@ When documentation and code disagree, investigate the code path and update the d
 - `SupervisionProcessManager` exclusively owns event-driven presentation, retry, descendant-terminal, root-notification, and parent-attention reactions.
 - Follow-up input received during active execution is supervisory attention, not a new workflow node or an implicit workflow mutation.
 - `AttentionProcessManager` is the only process allowed to route follow-up input into live agent sessions. The internal attention router is runtime-owned, excluded from model-facing catalogs, and blocked from model-facing execution handles.
+- The root frontend has no direct shell authority. Never offer to run commands "in this session" or claim that `mode=implement` or `agent.coordinator` is a shell bypass.
+- Do not infer a workflow's authority from one visible descendant. In `workflow.qa`, the repository scout is intentionally non-executing, deterministic checks run in a local workflow state, and the tester owns targeted command analysis.
+- After workflow failure, inspect the structured cause run. Tool and limit overrides apply only to a failed terminal agent retry; never retry or reroute an entire QA workflow merely to add `bash`.
+- Ask the user for input only when the task itself is ambiguous or requires an operator decision, not to choose among invented runtime escape routes.
 
 ## Runtime invariants
 
@@ -40,7 +44,7 @@ When documentation and code disagree, investigate the code path and update the d
 - Success requires a schema-valid typed outcome and the relevant settled boundary.
 - A missing or lost backend becomes a typed failure or orphan; never synthesize success.
 - Failed runs remain immutable evidence. Recovery creates a linked replacement run.
-- Recovery escalation must be bounded and minimal. Read/search tools or explicit `bash` may be added; `edit` and `write` are never granted directly to a read-only retry.
+- Recovery escalation must be bounded and minimal. Read/search tools or explicit `bash` may be added to a failed agent retry; `edit` and `write` are never granted directly to a read-only retry.
 - Attention targets are active agents in the same root tree. Workflow runs are never directly steered.
 - Steering does not settle an await, change ownership, mutate workflow input, or create a replacement run.
 - Delivery to a starting child is durable, validated by the attention projection, and reconstructable from canonical events after restart.
@@ -84,7 +88,8 @@ The domain and application layers must not import Pi packages or concrete adapte
 ## Local operations and shell authority
 
 - `local.qa-checks` accepts only structured deterministic check specifications.
-- For devenv repositories, automatic QA discovery runs `devenv tasks run maintenance:fix`, `devenv test`, and then the remaining discovered checks in fixed argv form.
+- For devenv repositories, automatic QA discovery runs only the read-only `devenv test` gate; generic check discovery applies only when no devenv gate is present.
+- Mutating maintenance tasks such as `devenv tasks run maintenance:fix` never belong to QA discovery or configured QA checks.
 - The process adapter compiles each specification to a fixed executable and argument vector.
 - Do not reintroduce arbitrary command strings, regex shell allowlists, or implicit shell execution into local workflow operations.
 - Arbitrary shell work belongs only to an agent explicitly compiled with `bash`.
