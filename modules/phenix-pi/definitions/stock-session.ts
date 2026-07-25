@@ -11,6 +11,11 @@ export interface StockSessionRequest {
   readonly outputContract: unknown;
 }
 
+export interface StockSessionHandoff {
+  readonly outputSchema: string;
+  readonly value: unknown;
+}
+
 export const StockSessionRequestSchema = defineSchema<StockSessionRequest>(
   "request.stock-session.v1",
   Type.Object(
@@ -24,8 +29,13 @@ export const StockSessionRequestSchema = defineSchema<StockSessionRequest>(
   ),
 );
 
-/** Catalog placeholder. Runtime validation uses the concrete schema carried by the task. */
-export const StockSessionDynamicOutputSchema = defineSchema<unknown>(
-  "outcome.stock-session.dynamic",
-  Type.Unknown(),
+export const StockSessionHandoffSchema = defineSchema<StockSessionHandoff>(
+  "outcome.stock-session-handoff.v1",
+  Type.Object(
+    {
+      outputSchema: Type.String({ minLength: 1, maxLength: 160 }),
+      value: Type.Unknown(),
+    },
+    { additionalProperties: false },
+  ),
 );
