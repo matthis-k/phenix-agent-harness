@@ -87,6 +87,15 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
   assert.equal(implementer.modelRoutes?.D0.capability, "code-fast");
   assert.equal(implementer.modelRoutes?.D3.capability, "code-max");
 
+  const coordinator = byId.get("agent.coordinator");
+  assert.ok(coordinator);
+  assert.equal(coordinator.input.id, "request.dynamic-workflow-composition.v1");
+  assert.equal(coordinator.output.id, "request.dynamic-workflow-proposal.v1");
+  assert.deepEqual(coordinator.tools.allow, []);
+  assert.equal(coordinator.context.projectFiles, "none");
+  assert.equal(coordinator.limits.timeoutMs, 0);
+  assert.match(coordinator.prompt.render(), /declarative workflow composer/);
+
   const attentionRouter = byId.get("agent.attention-router");
   assert.ok(attentionRouter);
   assert.equal(attentionRouter.input.id, "attention.routing-request");
