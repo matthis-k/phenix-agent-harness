@@ -7,6 +7,11 @@ export interface ObjectiveRequest {
   readonly context?: unknown;
 }
 
+export interface GenericTaskRequest extends ObjectiveRequest {
+  readonly instructions: string;
+  readonly deliverables?: readonly string[];
+}
+
 export interface ScoutRequest extends ObjectiveRequest {
   readonly focus?: string;
 }
@@ -193,6 +198,16 @@ export const ImplementationResultType = Type.Object({
 export const ObjectiveRequestSchema = defineSchema<ObjectiveRequest>(
   "request.objective.v1",
   Type.Object(objective),
+);
+export const GenericTaskRequestSchema = defineSchema<GenericTaskRequest>(
+  "request.generic-task.v1",
+  Type.Object({
+    ...objective,
+    instructions: Type.String({ minLength: 1, maxLength: 4_000 }),
+    deliverables: Type.Optional(
+      Type.Array(Type.String({ minLength: 1, maxLength: 300 }), { maxItems: 20 }),
+    ),
+  }),
 );
 export const ScoutRequestSchema = defineSchema<ScoutRequest>(
   "request.scout.v1",
