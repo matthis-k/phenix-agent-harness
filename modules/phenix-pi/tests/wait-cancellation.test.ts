@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AGENT_BASE } from "../definitions/ids.ts";
+import { AGENT_GENERIC_WRITE } from "../definitions/ids.ts";
 import { definitionRef } from "../domain/definition/definition.ts";
 import { createTestRuntime } from "./support/core-runtime.ts";
 
@@ -14,8 +14,8 @@ test("aborting an await never cancels the attached child", async () => {
   });
   const handle = await runtime.execution.start({
     parentId: runtime.rootRunId,
-    definition: definitionRef(AGENT_BASE),
-    input: { objective: "keep running" },
+    definition: definitionRef(AGENT_GENERIC_WRITE),
+    input: { objective: "keep running", instructions: "Remain active for the test." },
     wait: "await",
   });
   const abort = new AbortController();
