@@ -21,8 +21,11 @@ import {
 } from "../domain/workflow/validator.ts";
 import type { LocalOperationRunner } from "../ports/local-operation-runner.ts";
 
+const DYNAMIC_WORKFLOW_PREFIX = "workflow.dynamic.";
+
 export class WorkflowFunctionRegistry implements WorkflowFunctionRegistrar {
   private readonly mappings = new Map<ValueMappingRef, ValueMapping>();
+  private readonly runtimeMappings = new Map<ValueMappingRef, ValueMapping>();
   private readonly decisions = new Map<PureDecisionRef, PureDecision>();
   private readonly conditions = new Map<PureConditionRef, PureCondition>();
   private sealed = false;
@@ -45,8 +48,21 @@ export class WorkflowFunctionRegistry implements WorkflowFunctionRegistrar {
     this.conditions.set(ref, condition);
   }
 
+  registerRuntimeMappings(mappings: ReadonlyMap<ValueMappingRef, ValueMapping>): void {
+    if (!this.sealed)
+      throw new Error(`Runtime mappings may only be installed after static sealing`);
+    for (const [ref, mapping] of mappings) {
+      if (!ref.startsWith(DYNAMIC_WORKFLOW_PREFIX)) {
+        throw new Error(`Runtime workflow mapping must be content-addressed: ${ref}`);
+      }
+      if (this.mappings.has(ref))
+        throw new Error(`Runtime mapping collides with static mapping: ${ref}`);
+      if (!this.runtimeMappings.has(ref)) this.runtimeMappings.set(ref, mapping);
+    }
+  }
+
   mapping(ref: ValueMappingRef): ValueMapping {
-    const mapping = this.mappings.get(ref);
+    const mapping = this.mappings.get(ref) ?? this.runtimeMappings.get(ref);
     if (!mapping) throw new Error(`Unknown workflow mapping: ${ref}`);
     return mapping;
   }
@@ -64,7 +80,7 @@ export class WorkflowFunctionRegistry implements WorkflowFunctionRegistrar {
   }
 
   hasMapping(ref: ValueMappingRef): boolean {
-    return this.mappings.has(ref);
+    return this.mappings.has(ref) || this.runtimeMappings.has(ref);
   }
 
   hasDecision(ref: PureDecisionRef): boolean {
@@ -86,6 +102,7 @@ export class WorkflowFunctionRegistry implements WorkflowFunctionRegistrar {
 
 export class DefinitionCatalog {
   private readonly definitions = new Map<DefinitionId, AnyDefinition>();
+  private readonly runtimeDefinitions = new Map<DefinitionId, AnyDefinition>();
   private readonly diagnostics: WorkflowDiagnostic[] = [];
   private sealed = false;
 
@@ -94,6 +111,20 @@ export class DefinitionCatalog {
     if (this.definitions.has(definition.id))
       throw new Error(`Duplicate definition ${definition.id}`);
     this.definitions.set(definition.id, deepFreeze(definition));
+  }
+
+  registerRuntimeWorkflow(definition: WorkflowDefinition<unknown, unknown>): void {
+    if (!this.sealed)
+      throw new Error(`Runtime workflows may only be installed after static sealing`);
+    if (!definition.id.startsWith(DYNAMIC_WORKFLOW_PREFIX)) {
+      throw new Error(`Runtime workflow must be content-addressed: ${definition.id}`);
+    }
+    if (this.definitions.has(definition.id)) {
+      throw new Error(`Runtime workflow collides with static definition ${definition.id}`);
+    }
+    if (!this.runtimeDefinitions.has(definition.id)) {
+      this.runtimeDefinitions.set(definition.id, deepFreeze(definition));
+    }
   }
 
   seal(functions: WorkflowFunctionRegistry, operations: LocalOperationRunner): void {
@@ -129,7 +160,7 @@ export class DefinitionCatalog {
   }
 
   require(id: DefinitionId): AnyDefinition {
-    const definition = this.definitions.get(id);
+    const definition = this.definitions.get(id) ?? this.runtimeDefinitions.get(id);
     if (!definition) throw new Error(`Definition not found: ${id}`);
     return definition;
   }

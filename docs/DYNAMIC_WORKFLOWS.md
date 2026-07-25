@@ -15,7 +15,7 @@ A trusted compiler:
 3. resolves referenced definition and schema contracts;
 4. validates all data bindings;
 5. rejects result references that are not upstream of their consumer;
-6. compiles bindings into pure run-scoped mappings;
+6. compiles bindings into pure runtime mappings;
 7. validates the resulting ordinary `WorkflowDefinition`;
 8. seals a deterministic graph identity and contract digests.
 
@@ -55,7 +55,7 @@ Every compiled proposal receives an identity containing:
 - a digest for each referenced definition contract;
 - a digest for the workflow input and output schemas.
 
-Definition contract digests include prompts, model policy, tools, context policy, child capabilities, limits, persistence, and nested workflow graphs. A later recovery or replay path can therefore distinguish unchanged, changed, and incompatible execution contracts instead of silently recompiling against current definitions.
+Definition contract digests include prompts, model policy, tools, context policy, child capabilities, limits, persistence, and nested workflow graphs. Recovery or replay can therefore distinguish unchanged, changed, and incompatible execution contracts instead of silently recompiling against current definitions.
 
 The generated definition ID is derived from the graph digest:
 
@@ -65,8 +65,23 @@ workflow.dynamic.<24 hex characters>
 
 The complete sealed proposal and identity must be persisted with the run before runtime execution is enabled.
 
-## Next integration slice
+## Runtime registration
 
-Runtime integration should add a root-scoped compiled-definition store rather than mutate the sealed global catalog. `ExecutionFacade` will resolve a dynamic definition and its run-scoped mappings from that store using the persisted graph identity. The composer agent can then return a proposal, the dispatch path can compile it, and `WorkflowProcessManager` can execute it through the same lifecycle and structured-concurrency rules as bundled workflows.
+`DynamicWorkflowRuntimeRegistry` installs compiled graphs into runtime-only overlays after the static definition catalog and function registry have been sealed.
 
-Persistent checkpoints and capability-scoped generic fallback agents should be added only after that execution boundary exists.
+The overlays have deliberately narrow behavior:
+
+- only content-addressed `workflow.dynamic.*` definitions and mappings are accepted;
+- dynamic definitions remain absent from `DefinitionCatalog.list()`, so they cannot become dispatcher candidates or model-facing catalog entries;
+- static definitions and functions remain immutable;
+- repeated installation of the same graph is idempotent;
+- an ID associated with a different full graph identity is rejected;
+- restoration recompiles the persisted proposal and rejects definition or schema drift before registration.
+
+The overlay is an execution cache, not persistence authority. The persisted snapshot remains the proposal plus its full graph, definition, and schema identity.
+
+## Next execution slice
+
+Execution integration must persist the dynamic snapshot in the owning workflow run, restore runtime overlays before nonterminal recovery, and provide a trusted start path that rechecks the caller's current composition scope. `WorkflowProcessManager` can then execute the installed graph through the same lifecycle and structured-concurrency rules as bundled workflows.
+
+The composer agent and dispatch integration follow that trusted start path. Persistent checkpoints and capability-scoped generic fallback agents should be added only after it exists.
