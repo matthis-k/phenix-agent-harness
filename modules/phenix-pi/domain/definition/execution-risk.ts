@@ -74,7 +74,7 @@ export function assessRootMutation(input: {
   for (const pattern of SENSITIVE_PATHS) {
     if (pattern.test(serialized)) reasons.add(`sensitive path matched ${pattern.source}`);
   }
-  if (input.toolName === "bash") {
+  if (input.toolName === "bash" || input.toolName === "nix_shell") {
     for (const pattern of SENSITIVE_COMMANDS) {
       if (pattern.test(serialized)) reasons.add(`sensitive command matched ${pattern.source}`);
     }

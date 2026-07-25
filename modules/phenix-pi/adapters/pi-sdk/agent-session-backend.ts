@@ -15,6 +15,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 
+import type { ConcreteModelRef } from "../../domain/definition/model.ts";
 import type {
   AgentSessionBackend,
   AgentSessionObservation,
@@ -24,6 +25,7 @@ import type {
   CreateAgentSessionSpec,
 } from "../../ports/agent-session-backend.ts";
 import { BoundedAgentSessionPort } from "./bounded-agent-session-port.ts";
+import { freeModelSessionExtensions } from "./free-model-guard.ts";
 import { createNixShellTool } from "./nix-shell-tool.ts";
 
 export class PiSdkAgentSessionBackend implements AgentSessionBackend {
@@ -75,6 +77,7 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
       settingsManager,
       ...(this.eventBus ? { eventBus: this.eventBus } : {}),
       noExtensions: true,
+      extensionFactories: [...freeModelSessionExtensions(isFreeTierModel(spec.model))],
       noSkills: true,
       noPromptTemplates: true,
       noThemes: true,
@@ -267,6 +270,10 @@ class PiAgentSessionPort implements AgentSessionPort {
       }
     }
   }
+}
+
+function isFreeTierModel(model: ConcreteModelRef): boolean {
+  return model.provider === "opencode" && model.model.endsWith("-free");
 }
 
 function limitContextFiles(

@@ -1,9 +1,63 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
 import { assessRootMutation } from "../../domain/definition/execution-risk.ts";
+import type { ConcreteModelRef } from "../../domain/definition/model.ts";
 import type { SessionProfile } from "../../domain/run/model.ts";
 
-const MUTATION_TOOLS = new Set(["edit", "write", "bash"]);
+const MUTATION_TOOLS = new Set(["edit", "write", "bash", "nix_shell"]);
+
+export interface FreeModelToolCall {
+  readonly toolName: string;
+  readonly toolInput: unknown;
+  readonly userText?: string;
+}
+
+export interface ToolCallBlock {
+  readonly block: true;
+  readonly reason: string;
+}
+
+export function blockSensitiveFreeModelMutation(
+  call: FreeModelToolCall,
+): ToolCallBlock | undefined {
+  if (!MUTATION_TOOLS.has(call.toolName)) return undefined;
+  const assessment = assessRootMutation({
+    userText: call.userText,
+    toolName: call.toolName,
+    toolInput: call.toolInput,
+  });
+  if (!assessment.sensitive) return undefined;
+  return {
+    block: true,
+    reason:
+      `phenix/free may not perform this sensitive mutation: ${assessment.reasons.join("; ")}. ` +
+      `Select phenix/opencode-go, phenix/chatgpt-plus, or phenix/mixed.`,
+  };
+}
+
+export function freeModelSessionExtensions(
+  model: ConcreteModelRef | boolean,
+): readonly ExtensionFactory[] {
+  const guarded = typeof model === "boolean" ? model : isFreeTierModel(model);
+  return guarded ? [createFreeModelGuardExtension()] : [];
+}
+
+export function isFreeTierModel(model: ConcreteModelRef): boolean {
+  return model.provider === "opencode" && model.model.endsWith("-free");
+}
+
+// Filesystem extension discovery stays disabled.
+// The child backend injects this policy factory explicitly.
+export function createFreeModelGuardExtension(): ExtensionFactory {
+  return (pi) => {
+    pi.on("tool_call", async (event) =>
+      blockSensitiveFreeModelMutation({
+        toolName: event.toolName,
+        toolInput: event.input,
+      }),
+    );
+  };
+}
 
 export function registerFreeModelGuard(
   pi: ExtensionAPI,
@@ -18,21 +72,12 @@ export function registerFreeModelGuard(
     if (event.source !== "extension") lastUserInput = event.text;
   });
   pi.on("tool_call", async (event, ctx) => {
-    if (!MUTATION_TOOLS.has(event.toolName)) return;
     const current = await profile(ctx.sessionManager.getSessionId());
     if (current.modelSet !== "free") return;
-
-    const assessment = assessRootMutation({
+    return blockSensitiveFreeModelMutation({
       userText: lastUserInput,
       toolName: event.toolName,
       toolInput: event.input,
     });
-    if (!assessment.sensitive) return;
-    return {
-      block: true,
-      reason:
-        `phenix/free may not perform this sensitive mutation: ${assessment.reasons.join("; ")}. ` +
-        `Select phenix/opencode-go, phenix/chatgpt-plus, or phenix/mixed.`,
-    };
   });
 }
