@@ -72,6 +72,8 @@ export interface DefinitionSummary {
   readonly kind: "agent" | "workflow";
   readonly title: string;
   readonly description: string;
+  readonly inputSchema: string;
+  readonly outputSchema: string;
 }
 
 export interface CatalogFacade {
