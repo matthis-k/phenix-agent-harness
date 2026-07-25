@@ -47,3 +47,13 @@ jobs:
           name: devenv-test-log
           path: devenv-test.log
           if-no-files-found: error
+      - name: Upload workflow source snapshot
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: workflow-source-snapshot
+          path: |
+            modules/phenix-pi/application/workflow-process-manager.ts
+            modules/phenix-pi/adapters/workflow/scenario-markdown.ts
+            modules/phenix-pi/domain/workflow/validator.ts
+          if-no-files-found: error
