@@ -71,7 +71,10 @@ test("explicit QA bypasses the dynamic composer", async () => {
   assert.equal(result.status, "completed");
   assert.equal(result.classifierRunId, undefined);
   assert.equal(result.composerRunId, undefined);
-  assert.equal(runtime.store.projection.requireRun(result.runId).compiled.dynamicWorkflow, undefined);
+  assert.equal(
+    runtime.store.projection.requireRun(result.runId).compiled.dynamicWorkflow,
+    undefined,
+  );
   assert.equal(
     runtime.store.projection
       .childrenOf(runtime.rootRunId)
