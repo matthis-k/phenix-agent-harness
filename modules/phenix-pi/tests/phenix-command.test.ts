@@ -5,6 +5,7 @@ import { formatIntegrationReport, summarizeIntegrations } from "../adapters/pi-s
 import {
   completePhenixSubcommands,
   PHENIX_FACTS_USAGE,
+  PHENIX_HEALTH_USAGE,
   PHENIX_STATUS_USAGE,
   PHENIX_SUBCOMMANDS,
   PHENIX_USAGE,
@@ -15,6 +16,9 @@ test("phenix command completion lists and filters subcommands", () => {
     completePhenixSubcommands("")?.map((item) => item.value),
     PHENIX_SUBCOMMANDS.map((item) => item.value),
   );
+  assert.deepEqual(completePhenixSubcommands("h"), [
+    { value: "health", label: "health — Inspect runtime and configuration health" },
+  ]);
   assert.deepEqual(completePhenixSubcommands("I"), [
     { value: "integrations", label: "integrations — Show integration health" },
   ]);
@@ -24,8 +28,12 @@ test("phenix command completion lists and filters subcommands", () => {
   assert.equal(completePhenixSubcommands("r"), null);
   assert.equal(completePhenixSubcommands("unknown"), null);
   assert.equal(completePhenixSubcommands("status extra"), null);
-  assert.equal(PHENIX_USAGE, "/phenix status|logs|facts|tasks|catalog|integrations");
+  assert.equal(PHENIX_USAGE, "/phenix status|health|logs|facts|tasks|catalog|integrations");
   assert.equal(PHENIX_STATUS_USAGE, "/phenix status [off|--once|--json|--expanded]");
+  assert.equal(
+    PHENIX_HEALTH_USAGE,
+    "/phenix health [integrations|models|definitions|runtime|storage] [--json]",
+  );
   assert.equal(
     PHENIX_FACTS_USAGE,
     "/phenix facts [off|--once|--json|--clipboard [command]|--file <file>]",
