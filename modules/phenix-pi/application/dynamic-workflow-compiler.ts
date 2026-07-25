@@ -16,8 +16,8 @@ import {
 } from "../domain/definition/definition.ts";
 import type { Schema } from "../domain/definition/schema.ts";
 import { definitionId, type DefinitionId } from "../domain/shared.ts";
-import type { WorkflowEvaluationContext } from "../domain/workflow/graph-state.ts";
 import type { ValueMapping } from "../domain/workflow/functions.ts";
+import type { WorkflowEvaluationContext } from "../domain/workflow/graph-state.ts";
 import {
   validateWorkflow,
   type WorkflowDiagnostic,
@@ -79,7 +79,12 @@ export class DynamicWorkflowCompiler {
     const proposalNodes = new Map(proposal.nodes.map((node) => [node.id, node] as const));
     const outgoing = indexEdges(proposal.edges);
 
-    if (containsCycle(proposal.nodes.map((node) => node.id), outgoing)) {
+    if (
+      containsCycle(
+        proposal.nodes.map((node) => node.id),
+        outgoing,
+      )
+    ) {
       throw new DynamicWorkflowCompileError(
         "Dynamic workflows are initially restricted to acyclic graphs",
       );
@@ -101,9 +106,7 @@ export class DynamicWorkflowCompiler {
     );
     const id = definitionId(`workflow.dynamic.${identity.graphDigest.slice(0, 24)}`);
     const mappings = new Map<ValueMappingRef, ValueMapping>();
-    const nodes = proposal.nodes.map((node) =>
-      compileNode(id, node, invokedDefinitions, mappings),
-    );
+    const nodes = proposal.nodes.map((node) => compileNode(id, node, invokedDefinitions, mappings));
     const edges: readonly WorkflowEdge[] = proposal.edges.map((edge) => ({ ...edge }));
     const definition: WorkflowDefinition<unknown, unknown> = {
       id,
@@ -116,7 +119,10 @@ export class DynamicWorkflowCompiler {
       limits: proposal.limits,
     };
 
-    const diagnostics = validateWorkflow(definition, dynamicInventory(invokedDefinitions, mappings));
+    const diagnostics = validateWorkflow(
+      definition,
+      dynamicInventory(invokedDefinitions, mappings),
+    );
     const errors = diagnostics.filter((diagnostic) => diagnostic.severity === "error");
     if (errors.length > 0) {
       throw new DynamicWorkflowCompileError(
@@ -262,9 +268,7 @@ export function evaluateDynamicBinding(
   }
 
   const root =
-    binding.source === "input"
-      ? context.input
-      : requireNodeResult(context.latest, binding.nodeId);
+    binding.source === "input" ? context.input : requireNodeResult(context.latest, binding.nodeId);
   return readPath(root, binding.path ?? []);
 }
 
@@ -323,9 +327,9 @@ function assertDynamicBinding(
     if (!Array.isArray(value.items) || value.items.length > 64) {
       throw new DynamicWorkflowCompileError(`${location}.items must contain at most 64 bindings`);
     }
-    value.items.forEach((nested, index) =>
-      assertDynamicBinding(nested, `${location}.items.${index}`, depth + 1),
-    );
+    value.items.forEach((nested, index) => {
+      assertDynamicBinding(nested, `${location}.items.${index}`, depth + 1);
+    });
     return;
   }
   throw new DynamicWorkflowCompileError(`${location}.source is unsupported`);
@@ -348,7 +352,9 @@ function assertBindingPath(value: unknown, location: string): void {
   const valid =
     Array.isArray(value) &&
     value.length <= 16 &&
-    value.every((segment) => typeof segment === "string" && segment.length >= 1 && segment.length <= 96);
+    value.every(
+      (segment) => typeof segment === "string" && segment.length >= 1 && segment.length <= 96,
+    );
   if (!valid) {
     throw new DynamicWorkflowCompileError(`${location}.path must contain at most 16 path segments`);
   }
