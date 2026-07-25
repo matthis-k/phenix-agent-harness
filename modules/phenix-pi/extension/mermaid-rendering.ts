@@ -116,8 +116,8 @@ export function runTreeSequenceMermaid(
       const collapsed = isCollapsedWorkflow(node, options.expanded);
       if (collapsed) {
         lines.push(
-          `  Note over ${caller}: ${escapeSequenceText(
-            `workflow ${label}<br/>${descendantCount(node)} descendants`,
+          `  ${caller}->>${caller}: ${escapeSequenceText(
+            `workflow ${label} · ${descendantCount(node)} descendants`,
           )}`,
         );
         return;
