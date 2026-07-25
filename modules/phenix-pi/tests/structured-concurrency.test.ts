@@ -1,11 +1,33 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { RunImplementation } from "../application/execution-facade.ts";
-import { AGENT_BASE, WORKFLOW_IMPLEMENT } from "../definitions/ids.ts";
-import { definitionRef } from "../domain/definition/definition.ts";
-import type { RunId } from "../domain/shared.ts";
+import { genericWriteDefinition } from "../definitions/agents.ts";
+import { AGENT_GENERIC_WRITE, WORKFLOW_IMPLEMENT } from "../definitions/ids.ts";
+import { definitionRef, type AgentDefinition } from "../domain/definition/definition.ts";
+import { definitionId, type RunId } from "../domain/shared.ts";
 import type { ModelResolver } from "../ports/model-resolver.ts";
 import { createTestRuntime } from "./support/core-runtime.ts";
+
+const TEST_PARENT = definitionId("agent.test-structured-parent");
+const testParentDefinition: AgentDefinition<unknown, unknown> = {
+  ...genericWriteDefinition,
+  id: TEST_PARENT,
+  title: "Structured concurrency test parent",
+  description: "Test-only parent with one explicit child capability.",
+  tools: { allow: [] },
+  childCapabilities: {
+    invokableDefinitions: [AGENT_GENERIC_WRITE],
+    maxDepth: 4,
+    mayDetach: true,
+    maySend: false,
+    mayCancelChildren: true,
+  },
+};
+
+const genericInput = (objective: string) => ({
+  objective,
+  instructions: "Remain active for structured-concurrency assertions.",
+});
 
 test("background changes waiting but does not detach ownership", async () => {
   let implementation: PendingImplementation | undefined;
@@ -22,8 +44,8 @@ test("background changes waiting but does not detach ownership", async () => {
 
   const handle = await runtime.execution.start({
     parentId: runtime.rootRunId,
-    definition: definitionRef(AGENT_BASE),
-    input: { objective: "background work" },
+    definition: definitionRef(AGENT_GENERIC_WRITE),
+    input: genericInput("background work"),
     wait: "background",
   });
   const child = runtime.store.projection.requireRun(handle.id);
@@ -37,22 +59,25 @@ test("background changes waiting but does not detach ownership", async () => {
 
 test("explicit reparenting transfers a child to the root supervisor", async () => {
   let runtime: Awaited<ReturnType<typeof createTestRuntime>>;
-  runtime = await createTestRuntime({
-    async start(command) {
-      await runtime.controller.transition(command.runId, "starting");
-      await runtime.controller.transition(command.runId, "running");
+  runtime = await createTestRuntime(
+    {
+      async start(command) {
+        await runtime.controller.transition(command.runId, "starting");
+        await runtime.controller.transition(command.runId, "running");
+      },
     },
-  });
+    { definitions: [testParentDefinition], rootInvokableDefinitions: [TEST_PARENT] },
+  );
   const parent = await runtime.execution.start({
     parentId: runtime.rootRunId,
-    definition: definitionRef(AGENT_BASE),
-    input: { objective: "parent" },
+    definition: definitionRef(TEST_PARENT),
+    input: genericInput("parent"),
     wait: "background",
   });
   const child = await runtime.execution.start({
     parentId: parent.id,
-    definition: definitionRef(AGENT_BASE),
-    input: { objective: "child" },
+    definition: definitionRef(AGENT_GENERIC_WRITE),
+    input: genericInput("child"),
     wait: "background",
   });
 
@@ -82,8 +107,8 @@ test("model resolution failure is a typed terminal run outcome", async () => {
   );
   const handle = await runtime.execution.start({
     parentId: runtime.rootRunId,
-    definition: definitionRef(AGENT_BASE),
-    input: { objective: "requires a model" },
+    definition: definitionRef(AGENT_GENERIC_WRITE),
+    input: genericInput("requires a model"),
     wait: "await",
   });
   const outcome = await handle.result();
@@ -127,18 +152,22 @@ test("an invocation resolving its model cannot attach after parent cancellation 
         await runtime.controller.transition(command.runId, "running");
       },
     },
-    { modelResolver },
+    {
+      modelResolver,
+      definitions: [testParentDefinition],
+      rootInvokableDefinitions: [TEST_PARENT],
+    },
   );
   const parent = await runtime.execution.start({
     parentId: runtime.rootRunId,
-    definition: definitionRef(AGENT_BASE),
-    input: { objective: "parent" },
+    definition: definitionRef(TEST_PARENT),
+    input: genericInput("parent"),
     wait: "background",
   });
   const childStart = runtime.execution.start({
     parentId: parent.id,
-    definition: definitionRef(AGENT_BASE),
-    input: { objective: "late child" },
+    definition: definitionRef(AGENT_GENERIC_WRITE),
+    input: genericInput("late child"),
     wait: "background",
   });
   await resolving;
