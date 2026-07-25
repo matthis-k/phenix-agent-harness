@@ -48,6 +48,21 @@ in
       '';
     };
 
+    "maintenance-check-tools" = {
+      packages = [ pkgs.git ];
+      exec = ''
+        ${repositoryRoot}
+        missing=0
+        for executable in bash nix; do
+          if ! command -v "$executable" >/dev/null 2>&1; then
+            echo "agent tool executable unavailable: $executable was not found in PATH" >&2
+            missing=1
+          fi
+        done
+        exit "$missing"
+      '';
+    };
+
     "maintenance-check-runtime" = {
       packages = [ pkgs.git ];
       exec = ''
@@ -106,6 +121,7 @@ in
     "maintenance:format".exec = "maintenance-check-format";
     "maintenance:statix".exec = "maintenance-check-statix";
     "maintenance:workflows".exec = "maintenance-check-workflows";
+    "maintenance:tools".exec = "maintenance-check-tools";
     "maintenance:runtime".exec = "maintenance-check-runtime";
     "maintenance:typecheck".exec = "maintenance-check-typecheck";
     "maintenance:flake".exec = "maintenance-check-flake";
@@ -116,6 +132,7 @@ in
         "maintenance:format"
         "maintenance:statix"
         "maintenance:workflows"
+        "maintenance:tools"
         "maintenance:runtime"
         "maintenance:typecheck"
         "maintenance:flake"

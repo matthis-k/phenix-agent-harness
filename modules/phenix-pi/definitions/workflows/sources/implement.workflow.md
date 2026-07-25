@@ -139,3 +139,201 @@ reason: implement.failure
 | `accepted` | `return` | `decision.accepted` | |
 | `accepted` | `implement` | `decision.repair` | `2` |
 | `accepted` | `fail` | `decision.exhausted` | |
+
+## Tests
+
+### d0-deterministic-success
+
+```phenix-test
+{
+  "input": {
+    "objective": "Apply a trivial targeted change"
+  },
+  "mocks": {
+    "estimate": [
+      {
+        "return": {
+          "difficulty": "D0",
+          "summary": "Trivial targeted change",
+          "signals": ["single bounded edit"]
+        }
+      }
+    ],
+    "implement": [
+      {
+        "return": {
+          "summary": "Applied targeted change",
+          "changedFiles": ["src/file.ts"],
+          "checks": [
+            {
+              "command": "devenv test",
+              "ok": true,
+              "summary": "passed"
+            }
+          ],
+          "unresolved": []
+        }
+      }
+    ],
+    "trivial-accept": [
+      {
+        "return": {
+          "accepted": true,
+          "summary": "Deterministic evidence accepted",
+          "findings": [],
+          "evidence": ["devenv test passed"]
+        }
+      }
+    ]
+  },
+  "expect": {
+    "status": "success",
+    "visits": [
+      "estimate",
+      "implement",
+      "trivial-accept",
+      "trivial-decision",
+      "return"
+    ],
+    "transitions": [
+      "estimate->implement",
+      "implement->trivial-accept",
+      "trivial-accept->trivial-decision",
+      "trivial-decision->return"
+    ]
+  }
+}
+```
+
+### repair-once
+
+```phenix-test
+{
+  "input": {
+    "objective": "Implement a non-trivial change"
+  },
+  "mocks": {
+    "estimate": [
+      {
+        "return": {
+          "difficulty": "D1",
+          "summary": "Requires planning and verification",
+          "signals": ["behavioral change"]
+        }
+      }
+    ],
+    "plan": [
+      {
+        "return": {
+          "summary": "Plan the implementation",
+          "steps": ["edit implementation", "run tests"],
+          "constraints": [],
+          "checks": ["devenv test"]
+        }
+      }
+    ],
+    "implement": [
+      {
+        "return": {
+          "summary": "Initial implementation",
+          "changedFiles": ["src/file.ts"],
+          "checks": [],
+          "unresolved": []
+        }
+      },
+      {
+        "return": {
+          "summary": "Repaired implementation",
+          "changedFiles": ["src/file.ts"],
+          "checks": [
+            {
+              "command": "devenv test",
+              "ok": true,
+              "summary": "passed"
+            }
+          ],
+          "unresolved": []
+        }
+      }
+    ],
+    "verify": [
+      {
+        "return": {
+          "accepted": false,
+          "summary": "Repair required",
+          "findings": ["Missing regression handling"],
+          "evidence": []
+        }
+      },
+      {
+        "return": {
+          "accepted": true,
+          "summary": "Accepted after repair",
+          "findings": [],
+          "evidence": ["devenv test passed"]
+        }
+      }
+    ]
+  },
+  "expect": {
+    "status": "success",
+    "visits": [
+      "estimate",
+      "plan",
+      "implement",
+      "verify",
+      "accepted",
+      "implement",
+      "verify",
+      "accepted",
+      "return"
+    ],
+    "counts": {
+      "implement": 2,
+      "verify": 2
+    },
+    "transitions": [
+      "estimate->plan",
+      "plan->implement",
+      "implement->verify",
+      "verify->accepted",
+      "accepted->implement",
+      "implement->verify",
+      "verify->accepted",
+      "accepted->return"
+    ]
+  }
+}
+```
+
+### unavailable-implementer-tools
+
+```phenix-test
+{
+  "input": {
+    "objective": "Apply a trivial targeted change"
+  },
+  "environment": {
+    "availableTools": []
+  },
+  "mocks": {
+    "estimate": [
+      {
+        "return": {
+          "difficulty": "D0",
+          "summary": "Trivial targeted change",
+          "signals": ["single bounded edit"]
+        }
+      }
+    ]
+  },
+  "expect": {
+    "status": "failure",
+    "visits": ["estimate", "implement"],
+    "failure": {
+      "code": "tool_unavailable",
+      "messageIncludes": "nix_shell"
+    }
+  }
+}
+```

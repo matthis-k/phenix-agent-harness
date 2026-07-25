@@ -146,3 +146,104 @@ output-schema: outcome.qa-report.v1
 | `security` | `join` | | |
 | `join` | `synthesize` | | |
 | `synthesize` | `return` | | |
+
+## Tests
+
+### all-branches-succeed
+
+```phenix-test
+{
+  "input": {
+    "objective": "Run a full repository QA review"
+  },
+  "mocks": {
+    "checks": [
+      {
+        "return": [
+          {
+            "command": "devenv test",
+            "ok": true,
+            "summary": "passed"
+          }
+        ]
+      }
+    ],
+    "fanout": [
+      {
+        "return": {
+          "objective": "Run a full repository QA review"
+        }
+      }
+    ],
+    "repo": [
+      {
+        "return": {
+          "summary": "Repository review passed",
+          "evidence": [
+            {
+              "path": "src/file.ts",
+              "finding": "Structure is consistent"
+            }
+          ],
+          "risks": []
+        }
+      }
+    ],
+    "tests": [
+      {
+        "return": {
+          "summary": "Checks passed",
+          "checks": [
+            {
+              "command": "devenv test",
+              "ok": true,
+              "summary": "passed"
+            }
+          ],
+          "findings": [],
+          "evidence": ["devenv test passed"]
+        }
+      }
+    ],
+    "architecture": [
+      {
+        "return": {
+          "summary": "Architecture review passed",
+          "findings": []
+        }
+      }
+    ],
+    "security": [
+      {
+        "return": {
+          "summary": "Security review passed",
+          "findings": []
+        }
+      }
+    ],
+    "synthesize": [
+      {
+        "return": {
+          "summary": "QA passed",
+          "findings": [],
+          "reports": []
+        }
+      }
+    ]
+  },
+  "expect": {
+    "status": "success",
+    "counts": {
+      "checks": 1,
+      "fanout": 1,
+      "repo": 1,
+      "tests": 1,
+      "architecture": 1,
+      "security": 1,
+      "join": 1,
+      "synthesize": 1,
+      "return": 1
+    }
+  }
+}
+```

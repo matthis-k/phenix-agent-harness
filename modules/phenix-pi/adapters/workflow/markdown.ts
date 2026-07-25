@@ -5,6 +5,7 @@ import {
   type WorkflowDefinition,
   type WorkflowEdge,
   type WorkflowNode,
+  type WorkflowTransitionOutcome,
 } from "../../domain/definition/definition.ts";
 import { isDifficulty } from "../../domain/definition/model.ts";
 import type { Schema } from "../../domain/definition/schema.ts";
@@ -213,16 +214,25 @@ function parseTransitions(section: string): WorkflowEdge[] {
   return table.rows.map((row, rowIndex) => {
     const from = row.from ?? "";
     const to = row.to ?? "";
+    const on = row.on ?? "";
     const when = row.when ?? "";
     const max = row["max-traversals"] || row.max || "";
     if (!from || !to) throw new Error(`Transitions row ${rowIndex + 1} requires From and To`);
     return {
       from,
       to,
+      ...(on ? { on: parseTransitionOutcome(on, `${from}->${to}`) } : {}),
       ...(when ? { when } : {}),
       ...(max ? { maxTraversals: integerValue(max, `transition ${from}->${to}`, 1) } : {}),
     };
   });
+}
+
+function parseTransitionOutcome(value: string, owner: string): WorkflowTransitionOutcome {
+  if (value === "success" || value === "failure" || value === "cancelled" || value === "any") {
+    return value;
+  }
+  throw new Error(`Transition ${owner}.on must be success, failure, cancelled, or any`);
 }
 
 function parseDifficultyBinding(value: string, owner: string): DifficultyBinding {
