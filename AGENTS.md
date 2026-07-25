@@ -88,7 +88,7 @@ The domain and application layers must not import Pi packages or concrete adapte
 ## Local operations and shell authority
 
 - `local.qa-checks` accepts only structured deterministic check specifications.
-- For devenv repositories, automatic QA discovery runs the read-only `devenv test` gate and then the remaining discovered checks in fixed argv form.
+- For devenv repositories, automatic QA discovery runs only the read-only `devenv test` gate; generic check discovery applies only when no devenv gate is present.
 - Mutating maintenance tasks such as `devenv tasks run maintenance:fix` never belong to QA discovery or configured QA checks.
 - The process adapter compiles each specification to a fixed executable and argument vector.
 - Do not reintroduce arbitrary command strings, regex shell allowlists, or implicit shell execution into local workflow operations.
