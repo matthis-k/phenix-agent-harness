@@ -1,6 +1,7 @@
 import type { DiagnosticSeverity } from "../domain/diagnostics.ts";
 import type { DomainEvent } from "../domain/run/events.ts";
 import type { RunFactRecordedData } from "../domain/run/observability.ts";
+import type { WorkflowCheckpointSavedData } from "../domain/workflow/checkpoint.ts";
 import type { DiagnosticLog } from "../ports/diagnostic-log.ts";
 
 export async function logDomainEvent(log: DiagnosticLog, event: DomainEvent): Promise<void> {
@@ -227,6 +228,24 @@ function describe(event: DomainEvent): Description {
         message: "Workflow transition taken",
         fields: event.data as Readonly<Record<string, unknown>>,
       };
+    case "workflow.checkpoint.saved": {
+      const data = event.data as WorkflowCheckpointSavedData;
+      return {
+        severity: "trace",
+        scope: "workflow.checkpoint.saved",
+        message: "Workflow replay checkpoint saved",
+        fields: {
+          version: data.version,
+          definitionId: data.definitionId,
+          definitionFingerprint: data.definitionFingerprint,
+          throughSequence: data.throughSequence,
+          snapshotFingerprint: data.snapshotFingerprint,
+          activations: data.snapshot.activations.length,
+          resultNodes: data.snapshot.results.length,
+          transitions: data.snapshot.transitionCounts.length,
+        },
+      };
+    }
     case "task.local.created":
       return {
         severity: "trace",
