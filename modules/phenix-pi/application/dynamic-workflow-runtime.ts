@@ -119,9 +119,7 @@ function runtimeMappings(
   );
 }
 
-function normalizeEvaluationContext(
-  context: WorkflowEvaluationContext,
-): WorkflowEvaluationContext {
+function normalizeEvaluationContext(context: WorkflowEvaluationContext): WorkflowEvaluationContext {
   return {
     ...context,
     latest: new Map(
