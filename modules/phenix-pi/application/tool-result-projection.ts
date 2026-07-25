@@ -115,6 +115,7 @@ export function projectDispatchResult(result: {
   readonly selectedBy: string;
   readonly runId: RunId;
   readonly classifierRunId?: RunId;
+  readonly composerRunId?: RunId;
   readonly status: string;
   readonly outcome?: Outcome<unknown>;
 }): unknown {
@@ -123,6 +124,7 @@ export function projectDispatchResult(result: {
     selectedBy: result.selectedBy,
     runId: result.runId,
     ...(result.classifierRunId ? { classifierRunId: result.classifierRunId } : {}),
+    ...(result.composerRunId ? { composerRunId: result.composerRunId } : {}),
     status: result.status,
     ...(result.outcome ? { outcome: projectOutcome(result.outcome) } : {}),
   };
@@ -156,62 +158,59 @@ export function transportMetrics(source: unknown, inline: string): ToolTransport
   };
 }
 
-function projectChecks(value: unknown): Readonly<Record<string, unknown>> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
-  const rawChecks = (value as { readonly checks?: unknown }).checks;
-  if (!Array.isArray(rawChecks)) return {};
+function summaryOf(value: unknown): string | undefined {
+  if (typeof value === "string") return truncate(value, 500);
+  if (typeof value !== "object" || value === null) return undefined;
+  const summary = (value as { readonly summary?: unknown }).summary;
+  return typeof summary === "string" ? truncate(summary, 500) : undefined;
+}
 
-  const checks = rawChecks
-    .slice(0, MAX_PROJECTED_CHECKS)
+function truncate(value: string, max: number): string {
+  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
+}
+
+function projectChecks(value: unknown): Readonly<Record<string, unknown>> {
+  const source = recordOf(value);
+  if (!source || !Array.isArray(source.checks)) return {};
+  const checks = source.checks
     .map(projectCheck)
     .filter((check): check is ProjectedCheck => check !== undefined);
-  const omittedCheckCount = Math.max(0, rawChecks.length - checks.length);
-
+  const count = checks.length;
+  const projected = checks.slice(0, MAX_PROJECTED_CHECKS);
   return {
-    checkCount: rawChecks.length,
-    checks,
-    ...(omittedCheckCount > 0 ? { omittedCheckCount } : {}),
+    checks: projected,
+    checkCount: count,
+    omittedCheckCount: Math.max(0, count - projected.length),
   };
 }
 
 function projectCheck(value: unknown): ProjectedCheck | undefined {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-  const check = value as Readonly<Record<string, unknown>>;
+  const check = recordOf(value);
+  if (!check) return undefined;
   const command = boundedText(check.command, MAX_PROJECTED_TITLE_CHARS);
   const summary = boundedText(check.summary, MAX_PROJECTED_DETAIL_CHARS);
-  if (!command || typeof check.ok !== "boolean" || !summary) return undefined;
-  return {
-    command,
-    ok: check.ok,
-    status: checkStatus(check.ok, summary),
-    summary,
-  };
+  if (!command || !summary) return undefined;
+  const status = projectedCheckStatus(check);
+  return { command, ok: status === "passed", status, summary };
 }
 
-function checkStatus(ok: boolean, summary: string): ProjectedCheckStatus {
-  if (ok) return "passed";
-  return /\b(enoent|command not found|executable not found|binary (?:was )?unavailable|could not run|couldn't run)\b/i.test(
-    summary,
-  )
-    ? "unavailable"
-    : "failed";
+function projectedCheckStatus(check: Readonly<Record<string, unknown>>): ProjectedCheckStatus {
+  if (check.status === "unavailable" || check.available === false) return "unavailable";
+  return check.ok === true ? "passed" : "failed";
 }
 
 function projectFindings(value: unknown): Readonly<Record<string, unknown>> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
-  const rawFindings = (value as { readonly findings?: unknown }).findings;
-  if (!Array.isArray(rawFindings)) return {};
-
-  const findings = rawFindings
-    .slice(0, MAX_PROJECTED_FINDINGS)
+  const source = recordOf(value);
+  if (!source || !Array.isArray(source.findings)) return {};
+  const findings = source.findings
     .map(projectFinding)
     .filter((finding): finding is ProjectedFinding => finding !== undefined);
-  const omittedFindingCount = Math.max(0, rawFindings.length - findings.length);
-
+  const count = findings.length;
+  const projected = findings.slice(0, MAX_PROJECTED_FINDINGS);
   return {
-    findingCount: rawFindings.length,
-    findings,
-    ...(omittedFindingCount > 0 ? { omittedFindingCount } : {}),
+    findings: projected,
+    findingCount: count,
+    omittedFindingCount: Math.max(0, count - projected.length),
   };
 }
 
@@ -220,19 +219,16 @@ function projectFinding(value: unknown): ProjectedFinding | undefined {
     const description = boundedText(value, MAX_PROJECTED_TITLE_CHARS);
     return description ? { description, locations: [] } : undefined;
   }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-
-  const finding = value as Readonly<Record<string, unknown>>;
-  const description =
-    boundedText(finding.description, MAX_PROJECTED_TITLE_CHARS) ??
-    boundedText(finding.title, MAX_PROJECTED_TITLE_CHARS) ??
-    boundedText(finding.summary, MAX_PROJECTED_TITLE_CHARS) ??
-    boundedText(finding.message, MAX_PROJECTED_TITLE_CHARS);
+  const finding = recordOf(value);
+  if (!finding) return undefined;
+  const description = boundedText(
+    finding.description ?? finding.title ?? finding.summary,
+    MAX_PROJECTED_TITLE_CHARS,
+  );
   if (!description) return undefined;
-
-  const severity = boundedText(finding.severity, 32);
+  const severity = boundedText(finding.severity, 32)?.toLowerCase();
   const kind = boundedText(finding.kind, 80);
-  const locations = projectedLocations(finding.locations);
+  const locations = projectLocations(finding.locations);
   const notes = findingNotes(finding);
   return {
     ...(severity ? { severity } : {}),
@@ -243,7 +239,7 @@ function projectFinding(value: unknown): ProjectedFinding | undefined {
   };
 }
 
-function projectedLocations(value: unknown): readonly ProjectedLocation[] {
+function projectLocations(value: unknown): readonly ProjectedLocation[] {
   if (!Array.isArray(value)) return [];
   return value
     .slice(0, MAX_PROJECTED_LOCATIONS_PER_FINDING)
@@ -328,108 +324,104 @@ function renderStructuredReport(projected: unknown): string | undefined {
     "|---|---|---|",
     ...checks.map(
       (check) =>
-        `| ${markdownCell(check.command)} | ${check.status.toUpperCase()} | ${markdownCell(check.summary)} |`,
+        `| \`${markdownInline(check.command)}\` | ${checkLabel(check.status)} | ${markdownCell(check.summary)} |`,
     ),
   );
+  if (checks.length === 0) lines.push("| — | — | No checks reported | ");
   if (omittedCheckCount > 0) {
-    lines.push("", `_${omittedCheckCount} additional checks omitted from the compact report._`);
+    lines.push("", `_${omittedCheckCount} of ${checkCount} checks omitted by projection bounds._`);
   }
 
   lines.push(
+    "",
+    "### Finding counts",
+    "",
+    "| Severity | Count |",
+    "|---|---:|",
+    ...severityRows(severityCounts),
     "",
     "### Findings",
     "",
     "| # | Severity | Kind | Description | Locations | Notes |",
     "|---:|---|---|---|---|---|",
+    ...findings.map(
+      (finding, index) =>
+        `| ${index + 1} | ${markdownCell(finding.severity ?? "unspecified")} | ${markdownCell(
+          finding.kind ?? "—",
+        )} | ${markdownCell(finding.description)} | ${markdownCell(
+          renderLocations(finding.locations),
+        )} | ${markdownCell(finding.notes ?? "—")} |`,
+    ),
   );
-
-  if (findings.length === 0) {
-    lines.push("| — | — | — | No review findings were reported. | — | — |");
-  } else {
+  if (findings.length === 0) lines.push("| — | — | — | No findings | — | — |");
+  if (omittedFindingCount > 0) {
     lines.push(
-      ...findings.map(
-        (finding, index) =>
-          `| ${index + 1} | ${markdownCell(finding.severity?.toUpperCase() ?? "UNSPECIFIED")} | ${markdownCell(finding.kind ?? "—")} | ${markdownCell(finding.description)} | ${markdownCell(renderLocations(finding.locations))} | ${markdownCell(finding.notes ?? "—")} |`,
-      ),
+      "",
+      `_${omittedFindingCount} of ${findingCount} findings omitted by projection bounds._`,
     );
   }
-  if (omittedFindingCount > 0) {
-    lines.push("", `_${omittedFindingCount} additional findings omitted from the compact report._`);
-  }
-  if (checkCount !== checks.length || findingCount !== findings.length) {
-    lines.push("", `_Authoritative totals: ${checkCount} checks and ${findingCount} findings._`);
-  }
-
   return lines.join("\n");
 }
 
 function projectedChecks(value: unknown): readonly ProjectedCheck[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  return value.map(projectCheck).filter((item): item is ProjectedCheck => item !== undefined);
+  return value.map(projectCheck).filter((check): check is ProjectedCheck => check !== undefined);
 }
 
 function projectedFindings(value: unknown): readonly ProjectedFinding[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  return value.map(projectFinding).filter((item): item is ProjectedFinding => item !== undefined);
+  return value
+    .map(projectFinding)
+    .filter((finding): finding is ProjectedFinding => finding !== undefined);
 }
 
-interface SeverityCounts {
-  critical: number;
-  high: number;
-  medium: number;
-  low: number;
-  info: number;
-  unspecified: number;
+function countSeverities(findings: readonly ProjectedFinding[]): Readonly<Record<string, number>> {
+  const counts: Record<string, number> = {};
+  for (const finding of findings) {
+    const severity = finding.severity ?? "unspecified";
+    counts[severity] = (counts[severity] ?? 0) + 1;
+  }
+  return counts;
 }
 
-function countSeverities(findings: readonly ProjectedFinding[]): SeverityCounts {
-  return findings.reduce(
-    (counts, finding) => {
-      const severity = finding.severity?.toLowerCase();
-      if (severity === "critical") counts.critical += 1;
-      else if (severity === "high") counts.high += 1;
-      else if (severity === "medium") counts.medium += 1;
-      else if (severity === "low") counts.low += 1;
-      else if (severity === "info") counts.info += 1;
-      else counts.unspecified += 1;
-      return counts;
-    },
-    { critical: 0, high: 0, medium: 0, low: 0, info: 0, unspecified: 0 },
-  );
+function severityRows(counts: Readonly<Record<string, number>>): readonly string[] {
+  const order = ["critical", "high", "medium", "low", "info", "unspecified"];
+  const rows = order
+    .filter((severity) => (counts[severity] ?? 0) > 0)
+    .map((severity) => `| ${markdownCell(severity)} | ${counts[severity]} |`);
+  return rows.length > 0 ? rows : ["| — | 0 |"]; 
 }
 
-function reviewStatusOf(counts: SeverityCounts, findingCount: number): string {
-  if (counts.critical > 0) return `Attention required (${counts.critical} critical)`;
-  if (counts.high > 0) return `Attention required (${counts.high} high)`;
-  if (findingCount > 0) return `Findings present (${findingCount})`;
-  return "Clear";
+function reviewStatusOf(counts: Readonly<Record<string, number>>, total: number): string {
+  if ((counts.critical ?? 0) > 0) return `Blocked (${counts.critical} critical)`;
+  if ((counts.high ?? 0) > 0) return `Attention required (${counts.high} high)`;
+  return total > 0 ? `Findings present (${total})` : "Clear";
+}
+
+function checkLabel(status: ProjectedCheckStatus): string {
+  if (status === "passed") return "PASS";
+  if (status === "failed") return "FAIL";
+  return "UNAVAILABLE";
 }
 
 function renderLocations(locations: readonly ProjectedLocation[]): string {
   if (locations.length === 0) return "—";
   return locations
-    .map((location) =>
-      location.endLine === undefined || location.endLine === location.line
-        ? `${location.path}:${location.line}`
-        : `${location.path}:${location.line}-${location.endLine}`,
-    )
-    .join("\n");
+    .map((location) => {
+      const line = location.endLine
+        ? `${location.line}-${location.endLine}`
+        : String(location.line);
+      return `${location.path}:${line}`;
+    })
+    .join(", ");
 }
 
 function markdownCell(value: string): string {
-  return value.trim().replaceAll("|", "\\|").replace(/\r?\n/g, "<br>");
+  return value.replaceAll("|", "\\|").replaceAll("\n", "<br>");
 }
 
 function markdownInline(value: string): string {
   return value.replaceAll("`", "\\`");
-}
-
-function numericCount(value: unknown, fallback: number): number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : fallback;
-}
-
-function positiveInteger(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isInteger(value) && value >= 1 ? value : undefined;
 }
 
 function recordOf(value: unknown): Readonly<Record<string, unknown>> | undefined {
@@ -438,24 +430,23 @@ function recordOf(value: unknown): Readonly<Record<string, unknown>> | undefined
     : undefined;
 }
 
-function summaryOf(value: unknown): string | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
-  const summary = (value as { readonly summary?: unknown }).summary;
-  return typeof summary === "string" && summary.trim() ? summary : undefined;
-}
-
-function boundedText(value: unknown, maxChars: number): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.trim();
-  if (!normalized) return undefined;
-  if (normalized.length <= maxChars) return normalized;
-  return `${normalized.slice(0, maxChars - 1).trimEnd()}…`;
-}
-
 function asRecord(value: unknown): Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : { value };
+  return recordOf(value) ?? { value };
+}
+
+function boundedText(value: unknown, max: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return truncate(trimmed, max);
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 ? value : undefined;
+}
+
+function numericCount(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : fallback;
 }
 
 function jsonBytes(value: unknown): number {
