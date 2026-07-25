@@ -10,11 +10,7 @@ import type {
 import { type Difficulty, isDifficulty } from "../domain/definition/model.ts";
 import type { DomainEvent, PendingDomainEvent } from "../domain/run/events.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
-import type {
-  RunRecord,
-  RunRetryLimitOverrides,
-  RunRetryOptions,
-} from "../domain/run/model.ts";
+import type { RunRecord, RunRetryLimitOverrides, RunRetryOptions } from "../domain/run/model.ts";
 import { type Failure, failed, type Outcome, type RunId } from "../domain/shared.ts";
 import {
   buildWorkflowGraphState,
@@ -382,20 +378,13 @@ export class WorkflowProcessManager implements RunImplementation {
     });
   }
 
-  private shouldRetry(
-    node: InvokeNode,
-    attempts: readonly RunRecord[],
-    child: RunRecord,
-  ): boolean {
+  private shouldRetry(node: InvokeNode, attempts: readonly RunRecord[], child: RunRecord): boolean {
     if (!node.retry || node.wait === "background") return false;
     if (attempts.length - 1 >= node.retry.maxRetries) return false;
     return child.outcome?.status === "failure" && child.outcome.failure.retryable;
   }
 
-  private async hasInvocationCapacity(
-    runId: RunId,
-    state: WorkflowGraphState,
-  ): Promise<boolean> {
+  private async hasInvocationCapacity(runId: RunId, state: WorkflowGraphState): Promise<boolean> {
     if (
       this.controller.activeAttachedChildren(runId).length < state.definition.limits.maxParallelism
     ) {
@@ -620,9 +609,7 @@ export class WorkflowProcessManager implements RunImplementation {
   }
 }
 
-function suggestedRetryOverrides(
-  child: RunRecord,
-): Omit<RunRetryOptions, "wait"> | undefined {
+function suggestedRetryOverrides(child: RunRecord): Omit<RunRetryOptions, "wait"> | undefined {
   if (child.outcome?.status !== "failure") return undefined;
   const details = child.outcome.failure.details;
   if (!isRecord(details) || !isRecord(details.suggestedLimits)) return undefined;
@@ -630,7 +617,9 @@ function suggestedRetryOverrides(
   return limits ? { limits } : undefined;
 }
 
-function sanitizeRetryLimits(value: Readonly<Record<string, unknown>>): RunRetryLimitOverrides | undefined {
+function sanitizeRetryLimits(
+  value: Readonly<Record<string, unknown>>,
+): RunRetryLimitOverrides | undefined {
   const timeoutMs = boundedInteger(value.timeoutMs, 1, 3_600_000);
   const maxTurns = boundedInteger(value.maxTurns, 1, 200);
   const maxToolCalls = boundedInteger(value.maxToolCalls, 1, 1_000);
