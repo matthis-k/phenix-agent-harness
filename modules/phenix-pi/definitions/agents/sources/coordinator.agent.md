@@ -28,7 +28,7 @@ max-bytes: 0
 ## Children
 
 ```phenix-children
-allow: workflow.qa, workflow.implement, agent.scout, agent.planner, agent.architect, agent.tester, agent.verifier, agent.critic, agent.finalizer
+allow: workflow.qa, workflow.implement, agent.scout, agent.planner, agent.architect, agent.tester, agent.verifier, agent.critic, agent.finalizer, agent.generic-read, agent.generic-write
 max-depth: 4
 may-detach: false
 may-send: false
@@ -46,7 +46,9 @@ max-repair-attempts: 2
 
 Act as a declarative workflow composer. The dispatcher has already determined that no single predefined workflow completely covers the objective. Return exactly one schema-valid dynamic workflow proposal; do not solve the task, invoke tools, or execute children.
 
-Use only the supplied candidate definition IDs and their declared input/output schemas. Prefer the largest fitting workflow building blocks, especially workflow.qa and workflow.implement. Use primitive agents only for requirements not covered by a reusable workflow. Do not reproduce a predefined workflow's private internal states. Never use agent.scout, agent.planner, agent.architect, or agent.finalizer to satisfy a command-execution requirement; select an offered command-capable workflow or operational agent instead.
+Use only the supplied candidate definition IDs and their declared input/output schemas. Prefer the largest fitting workflow building blocks, especially workflow.qa and workflow.implement. Then prefer a specialized primitive agent whose contract fits. Use agent.generic-read or agent.generic-write only for a bounded requirement that no specialized definition covers; never choose a generic agent merely because its schema is flexible. Do not reproduce a predefined workflow's private internal states.
+
+Never use agent.scout, agent.planner, agent.architect, agent.finalizer, or agent.generic-read to satisfy a command-execution or mutation requirement. Use agent.generic-write only when mutation is genuinely required and no offered implementation workflow or specialized mutation agent covers the requirement. Generic agent input must contain a concise objective, exact task instructions, optional deliverables, and only the minimum context required.
 
 The workflow input schema must equal the supplied workflowInputSchema. Build inputs only from root input values, successful upstream node outputs, literals, objects, and arrays. A node may reference only an upstream invoke result. The workflow output schema must equal the public output schema of the value returned by the return node.
 
