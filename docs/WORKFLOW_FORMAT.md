@@ -153,6 +153,8 @@ input-schema: request.difficulty-assessment.v1
 output-schema: outcome.difficulty-assessment.v1
 wait: await
 difficulty: D0
+retry: retryable
+max-retries: 1
 ```
 
 ### plan
@@ -189,6 +191,8 @@ input-schema: request.verification.v1
 output-schema: outcome.verification.v1
 wait: await
 difficulty: result:estimate
+retry: retryable
+max-retries: 1
 ```
 
 ### return
@@ -220,6 +224,36 @@ An `invoke` state may declare one of three policies:
 - `difficulty: result:estimate` — read the validated `difficulty` field from a successful earlier state result.
 
 The compiler verifies that a result-bound state exists and is not self-referential. The workflow process manager extracts the validated difficulty and passes it through the child invocation boundary. The execution facade persists it in the child's compiled run specification.
+
+## Invoke recovery
+
+An awaited `invoke` state may declare bounded recovery:
+
+```phenix-state
+kind: invoke
+run: agent.critic
+input: qa.security.input
+input-schema: request.critic.v1
+output-schema: outcome.critic-report.v1
+wait: await
+retry: retryable
+max-retries: 1
+```
+
+`retry: retryable` means that only a child failure explicitly marked `retryable: true` may create a replacement attempt. `max-retries` counts replacement attempts after the initial run and must be a positive integer.
+
+Recovery belongs to the original workflow activation:
+
+- completed sibling states and their typed results remain authoritative;
+- the failed attempt remains immutable and the replacement records `retryOf`;
+- the replacement retains the original workflow node and activation causation;
+- validated `suggestedLimits` from a failure may adjust the replacement's bounded agent limits;
+- the state completes only after the final successful or exhausted attempt;
+- joins evaluate the activation's final outcome rather than every historical attempt.
+
+Background invocations cannot declare recovery because the workflow has already advanced. Side-effecting states should omit automatic retry unless their operation is explicitly idempotent. Production implementation workflows therefore retry estimator, planner, and verifier states but not the implementer state.
+
+Intermediate workflow-child failures remain diagnostic events, but presentation is owned by the workflow supervisor. The root receives a compact retry notice and only sees an error if the workflow exhausts its recovery policy.
 
 ## State contracts
 
@@ -272,7 +306,7 @@ Conditions are registered pure function references, not inline expressions. Diff
 | `estimate` | `implement` | `difficulty.D0` | |
 ```
 
-Every cycle edge must declare `Max traversals`. The graph validator enforces bounded cycles, reachability, terminal paths, definition existence, mapping references, decision references, condition references, and parallelism limits.
+Every cycle edge must declare `Max traversals`. The graph validator enforces bounded cycles, reachability, terminal paths, definition existence, mapping references, decision references, condition references, retry policies, and parallelism limits.
 
 ## Workflow prompt templates
 
@@ -286,4 +320,4 @@ A state may reserve an optional prompt body, but compilation currently rejects i
 - `modules/phenix-pi/adapters/agent/markdown.ts`
 - `modules/phenix-pi/adapters/workflow/markdown.ts`
 
-The bundled registries load these Markdown files directly. Tests verify source compilation, route-table completeness, graph validation, step contracts, difficulty-dependent execution, pinned QA routes, and nested workflow behavior.
+The bundled registries load these Markdown files directly. Tests verify source compilation, route-table completeness, graph validation, step contracts, difficulty-dependent execution, pinned QA routes, activation-scoped recovery, and nested workflow behavior.
