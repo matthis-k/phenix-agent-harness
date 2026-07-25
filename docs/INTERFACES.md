@@ -8,7 +8,7 @@ The root Pi session is a read-only frontend and root supervisor. It directly ans
 
 Normal routing uses `mode=auto`. The dispatch service derives the exact candidate set from the caller's capability-filtered catalog and asks the typed dispatcher to select one definition. The selector must prefer the most specific invariant workflow whose complete contract matches the request. It may choose `agent.coordinator` only when no single workflow covers the task, multiple workflows are required, order depends on intermediate results, or the task is genuinely open-ended.
 
-`qa`, `implement`, and `coordinate` are explicit operator overrides. The frontend must not substitute them for normal catalog-driven selection. The root has no direct shell authority, and neither implementation mode nor the read-only coordinator is a shell bypass.
+`qa`, `implement`, and `coordinate` are explicit operator overrides. The frontend must not substitute them for normal catalog-driven selection. The root has no direct shell authority, and neither implementation mode nor dynamic composition is a shell bypass.
 
 ## Definitions and execution mechanisms
 
@@ -16,7 +16,7 @@ An agent definition owns static system instructions, input and output schemas, m
 
 A workflow definition owns an invariant typed graph. Only `WorkflowProcessManager` interprets workflow nodes and starts workflow children. Workflow children cannot be started through the ordinary child-agent path without trusted workflow causation.
 
-Dynamic composition is an agent responsibility. `agent.coordinator` is read-only and composes workflows and focused evidence agents. `agent.base` remains an internal bounded escape hatch and is excluded from the production root allowlist.
+Dynamic composition is split between model planning and trusted execution. The no-tools `agent.coordinator` receives a schema-addressable catalog and returns only a declarative graph proposal. `DynamicWorkflowExecutionService` recompiles the proposal, checks it against the completed composer's concrete capability scope, persists a content-addressed graph snapshot, and starts an ordinary workflow run under the original dispatch parent. Dynamic definitions remain hidden from normal catalog listing. `agent.base` remains an internal bounded escape hatch and is excluded from the production root allowlist.
 
 ## Canonical state
 
@@ -31,6 +31,8 @@ Application execution commands use five façades:
 - `TaskFacade`: local task leaves and owned progress.
 - `CatalogFacade`: immutable definitions and capability-filtered availability.
 - `QueryFacade`: projections and ordered facts.
+
+`DynamicWorkflowExecutionService` is a trusted application service, not a model-facing façade. It creates content-addressed dynamic workflow runs only from a separately validated composition scope.
 
 Root-session model, agent-preset, and difficulty selection is separate host policy exposed through `SessionProfileFacade`; it is not execution-tree command authority.
 
@@ -99,22 +101,23 @@ Child sessions never inherit the parent conversation. Repository context files a
 
 Prompt text does not authorize behavior. Authorization is enforced by:
 
-- the root definition allowlist,
-- compiled tools,
-- invokable definition capabilities,
-- maximum delegation depth,
-- detachment and messaging permissions,
-- workflow node causation,
-- task and descendant scope checks,
+- the root definition allowlist;
+- compiled tools;
+- invokable definition capabilities;
+- maximum delegation depth;
+- detachment and messaging permissions;
+- workflow node causation;
+- task and descendant scope checks;
 - the model-facing execution view that excludes runtime-internal definitions.
 
-Authorization occurs before durable creation and is repeated after asynchronous model resolution to close stale-parent races.
+Authorization occurs before durable creation and is repeated after asynchronous model resolution to close stale-parent races. Dynamic dispatch adds another check immediately before graph creation using the completed composer's actual catalog scope.
 
 ## Result transport
 
 The run ledger retains complete schema-valid inputs and outcomes. Model-facing tools do not automatically inline those complete values.
 
 - Awaited `phenix_run` and `phenix_dispatch` calls return a compact run ID, state, summary, and failure metadata when applicable.
+- Dynamic dispatch results retain both the final workflow run ID and `composerRunId`; auto mode also retains `classifierRunId`.
 - Compact success projections retain bounded structured `checks` and `findings` arrays with authoritative total and omitted counts when the typed outcome provides them; bulky raw branch reports remain omitted.
 - A compact outcome containing both checks and findings is rendered deterministically as Markdown tool text: separate gate and review status, the complete projected check table, severity counts, and the complete projected findings table. The structured projection remains available in tool-result details.
 - `phenix_handle inspect` and `await` default to `view=summary`.
