@@ -15,6 +15,7 @@ import { WorkflowCheckpointProcessManager } from "../application/workflow-checkp
 import { WorkflowProcessManager } from "../application/workflow-process-manager.ts";
 import { agentDefinitions } from "../definitions/agents.ts";
 import { WORKFLOW_IMPLEMENT } from "../definitions/ids.ts";
+import { resolveDefinitionSchema } from "../definitions/schema-registry.ts";
 import { registerWorkflowFunctions } from "../definitions/workflows/functions.ts";
 import { workflowDefinitions } from "../definitions/workflows/index.ts";
 import { definitionRef } from "../domain/definition/definition.ts";
@@ -122,6 +123,7 @@ async function createRuntime(
     ids,
     cwd: process.cwd(),
     clock,
+    resolveSchema: resolveDefinitionSchema,
   });
   const checkpoints = new WorkflowCheckpointProcessManager({ store, catalog });
   const agents = new RecoverablePendingAgent(execution);
