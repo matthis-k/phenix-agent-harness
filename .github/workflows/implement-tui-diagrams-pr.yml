@@ -1,0 +1,59 @@
+name: Implement TUI diagrams PR
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: implement-tui-diagrams-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  implement:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/tui-workflow-diagrams'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+          ref: feat/tui-workflow-diagrams
+
+      - name: Apply implementation script
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/implement-tui-diagrams.yml').read_text()
+          start_marker = "          python <<'PY'\n"
+          end_marker = "\n          PY\n"
+          start = workflow.index(start_marker) + len(start_marker)
+          end = workflow.index(end_marker, start)
+          script = textwrap.dedent(workflow[start:end])
+          exec(compile(script, 'implement-tui-diagrams.py', 'exec'))
+          PY
+
+      - name: Update locked runtime dependencies
+        run: |
+          npm install \
+            --prefix modules/pi-npm \
+            --package-lock-only \
+            --ignore-scripts \
+            --legacy-peer-deps \
+            --no-audit \
+            --no-fund
+
+      - name: Commit implementation
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add modules/phenix-pi modules/pi-npm
+          git diff --cached --stat
+          git commit -m "Render workflows and agent sequences in the TUI [skip ci]"
+          git push origin HEAD:feat/tui-workflow-diagrams
