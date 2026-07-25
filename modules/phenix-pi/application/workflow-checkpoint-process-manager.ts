@@ -54,7 +54,7 @@ export class WorkflowCheckpointProcessManager {
 
   private async save(runId: RunId): Promise<void> {
     const run = this.store.projection.runs.get(runId);
-    if (!run || run.kind !== "workflow" || isTerminalRunState(run.state)) return;
+    if (run?.kind !== "workflow" || isTerminalRunState(run.state)) return;
     const definition = this.catalog.require(run.definitionId);
     if (definition.kind !== "workflow") return;
 
