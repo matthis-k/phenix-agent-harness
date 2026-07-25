@@ -20,6 +20,7 @@ const sources = [
   ["dispatcher", "agent.dispatcher"],
   ["coordinator", "agent.coordinator"],
   ["base", "agent.base"],
+  ["stock", "session.stock"],
   ["qa-synthesizer", "agent.qa-synthesizer"],
   ["attention-router", "agent.attention-router"],
 ] as const;
@@ -97,6 +98,16 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
   assert.equal(coordinator.limits.maxTurns, undefined);
   assert.equal(coordinator.limits.maxToolCalls, undefined);
   assert.match(coordinator.prompt.render(), /declarative workflow composer/);
+
+  const stock = byId.get("session.stock");
+  assert.ok(stock);
+  assert.equal(stock.sessionMode, "stock");
+  assert.equal(stock.input.id, "request.stock-session.v1");
+  assert.equal(stock.output.id, "outcome.stock-session-handoff.v1");
+  assert.deepEqual(stock.tools.allow, []);
+  assert.deepEqual(stock.childCapabilities.invokableDefinitions, []);
+  assert.equal(stock.persistence, "file");
+  assert.equal(stock.prompt.render(), "PHENIX_STOCK_SESSION");
 
   const attentionRouter = byId.get("agent.attention-router");
   assert.ok(attentionRouter);
