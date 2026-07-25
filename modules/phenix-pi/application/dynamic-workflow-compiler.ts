@@ -172,6 +172,7 @@ function validateBindings(
     const binding =
       node.kind === "invoke" ? node.input : node.kind === "return" ? node.output : undefined;
     if (!binding) continue;
+    assertDynamicBinding(binding, `node ${node.id} binding`);
     validateBindingReferences(binding, node.id, nodes, outgoing);
     const expectedSchema =
       node.kind === "invoke" ? definitions.get(node.id)?.input.id : proposal.outputSchema;
@@ -265,6 +266,92 @@ export function evaluateDynamicBinding(
       ? context.input
       : requireNodeResult(context.latest, binding.nodeId);
   return readPath(root, binding.path ?? []);
+}
+
+function assertDynamicBinding(
+  value: unknown,
+  location: string,
+  depth = 0,
+): asserts value is DynamicValueBinding {
+  if (depth > 16) {
+    throw new DynamicWorkflowCompileError(`${location} exceeds maximum binding depth 16`);
+  }
+  if (!isRecord(value)) {
+    throw new DynamicWorkflowCompileError(`${location} must be an object`);
+  }
+
+  const source = value.source;
+  if (source === "input") {
+    assertOnlyKeys(value, ["source", "path"], location);
+    assertBindingPath(value.path, location);
+    return;
+  }
+  if (source === "node") {
+    assertOnlyKeys(value, ["source", "nodeId", "path"], location);
+    if (!validIdentifier(value.nodeId)) {
+      throw new DynamicWorkflowCompileError(`${location}.nodeId must be a valid identifier`);
+    }
+    assertBindingPath(value.path, location);
+    return;
+  }
+  if (source === "literal") {
+    assertOnlyKeys(value, ["source", "value"], location);
+    if (!Object.hasOwn(value, "value")) {
+      throw new DynamicWorkflowCompileError(`${location}.value is required`);
+    }
+    return;
+  }
+  if (source === "object") {
+    assertOnlyKeys(value, ["source", "fields"], location);
+    if (!isRecord(value.fields)) {
+      throw new DynamicWorkflowCompileError(`${location}.fields must be an object`);
+    }
+    const entries = Object.entries(value.fields);
+    if (entries.length > 64) {
+      throw new DynamicWorkflowCompileError(`${location}.fields exceeds maximum size 64`);
+    }
+    for (const [key, nested] of entries) {
+      if (!validIdentifier(key)) {
+        throw new DynamicWorkflowCompileError(`${location}.fields has invalid key ${key}`);
+      }
+      assertDynamicBinding(nested, `${location}.fields.${key}`, depth + 1);
+    }
+    return;
+  }
+  if (source === "array") {
+    assertOnlyKeys(value, ["source", "items"], location);
+    if (!Array.isArray(value.items) || value.items.length > 64) {
+      throw new DynamicWorkflowCompileError(`${location}.items must contain at most 64 bindings`);
+    }
+    value.items.forEach((nested, index) =>
+      assertDynamicBinding(nested, `${location}.items.${index}`, depth + 1),
+    );
+    return;
+  }
+  throw new DynamicWorkflowCompileError(`${location}.source is unsupported`);
+}
+
+function assertOnlyKeys(
+  value: Readonly<Record<string, unknown>>,
+  allowed: readonly string[],
+  location: string,
+): void {
+  const allowedSet = new Set(allowed);
+  const unexpected = Object.keys(value).find((key) => !allowedSet.has(key));
+  if (unexpected) {
+    throw new DynamicWorkflowCompileError(`${location} contains unexpected property ${unexpected}`);
+  }
+}
+
+function assertBindingPath(value: unknown, location: string): void {
+  if (value === undefined) return;
+  const valid =
+    Array.isArray(value) &&
+    value.length <= 16 &&
+    value.every((segment) => typeof segment === "string" && segment.length >= 1 && segment.length <= 96);
+  if (!valid) {
+    throw new DynamicWorkflowCompileError(`${location}.path must contain at most 16 path segments`);
+  }
 }
 
 function validateBindingReferences(
@@ -462,6 +549,19 @@ function deepFreeze<T>(value: T, seen = new Set<object>()): T {
     deepFreeze(nested, seen);
   }
   return Object.freeze(value);
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validIdentifier(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= 1 &&
+    value.length <= 96 &&
+    /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value)
+  );
 }
 
 function describeError(error: unknown): string {
