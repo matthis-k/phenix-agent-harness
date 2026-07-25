@@ -150,6 +150,9 @@ test("retry declarations require a bounded awaited invocation", () => {
   const missingLimit = productionSource("implement").replace("max-retries: 1", "max-retries:");
   assert.throws(() => compileWorkflowMarkdown(missingLimit, bindings), /max-retries/);
 
+  const excessive = productionSource("implement").replace("max-retries: 1", "max-retries: 4");
+  assert.throws(() => compileWorkflowMarkdown(excessive, bindings), /must not exceed 3/);
+
   const background = productionSource("implement").replace(
     "wait: await\ndifficulty: D0\nretry: retryable",
     "wait: background\ndifficulty: D0\nretry: retryable",
