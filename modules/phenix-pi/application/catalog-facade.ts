@@ -34,11 +34,17 @@ export class CatalogFacadeImpl implements CatalogFacade {
       )
       .map((definition) => ({
         id: definition.id,
-        kind: definition.kind,
+        kind:
+          definition.kind === "agent" && definition.sessionMode === "stock"
+            ? ("session" as const)
+            : definition.kind,
         title: definition.title,
         description: definition.description,
         inputSchema: definition.input.id,
-        outputSchema: definition.output.id,
+        outputSchema:
+          definition.kind === "agent" && definition.sessionMode === "stock"
+            ? "dynamic"
+            : definition.output.id,
       }));
   }
 
