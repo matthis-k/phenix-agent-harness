@@ -46,7 +46,12 @@ const operations: LocalOperationRunner = {
 
 class PrefixIds implements IdGenerator {
   private value = 0;
-  constructor(private readonly prefix: string) {}
+  private readonly prefix: string;
+
+  constructor(prefix: string) {
+    this.prefix = prefix;
+  }
+
   next(kind: string): string {
     this.value += 1;
     return `${kind}-${this.prefix}-${this.value}`;
@@ -56,8 +61,11 @@ class PrefixIds implements IdGenerator {
 class RecoverablePendingAgent implements RunImplementation {
   starts = 0;
   recoveries = 0;
+  private readonly controller: ExecutionFacadeImpl;
 
-  constructor(private readonly controller: ExecutionFacadeImpl) {}
+  constructor(controller: ExecutionFacadeImpl) {
+    this.controller = controller;
+  }
 
   async start(command: StartImplementationCommand): Promise<void> {
     this.starts += 1;
@@ -90,7 +98,8 @@ async function createRuntime(
   const functions = new WorkflowFunctionRegistry();
   registerWorkflowFunctions(functions);
   const catalog = new DefinitionCatalog();
-  for (const definition of [...agentDefinitions, ...workflowDefinitions]) catalog.register(definition);
+  for (const definition of [...agentDefinitions, ...workflowDefinitions])
+    catalog.register(definition);
   catalog.seal(functions, operations);
 
   const execution = new ExecutionFacadeImpl({
