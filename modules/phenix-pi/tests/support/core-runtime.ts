@@ -1,6 +1,7 @@
 import { InMemoryRunLedger } from "../../adapters/persistence/in-memory-run-ledger.ts";
 import { DefinitionCatalog, WorkflowFunctionRegistry } from "../../application/catalog.ts";
 import { CatalogFacadeImpl } from "../../application/catalog-facade.ts";
+import { DispatchService } from "../../application/dispatch-service.ts";
 import { OrderedDomainEventBus } from "../../application/domain-event-bus.ts";
 import { DynamicWorkflowCompiler } from "../../application/dynamic-workflow-compiler.ts";
 import { DynamicWorkflowExecutionService } from "../../application/dynamic-workflow-execution.ts";
@@ -12,10 +13,12 @@ import {
   type StartImplementationCommand,
 } from "../../application/execution-facade.ts";
 import { ExecutionStore } from "../../application/execution-store.ts";
+import { SessionInvocationPolicy } from "../../application/invocation-policy.ts";
 import { QueryFacadeImpl } from "../../application/query-facade.ts";
 import { TaskFacadeImpl } from "../../application/task-facade.ts";
 import { WorkflowProcessManager } from "../../application/workflow-process-manager.ts";
 import { agentDefinitions } from "../../definitions/agents.ts";
+import type { DynamicWorkflowProposal } from "../../definitions/dynamic-workflow.ts";
 import {
   AGENT_ARCHITECT,
   AGENT_BASE,
@@ -74,6 +77,7 @@ const operations: LocalOperationRunner = {
 export interface TestRuntime {
   readonly execution: ExecutionFacadeImpl;
   readonly dynamicWorkflows: DynamicWorkflowExecutionService;
+  readonly dispatch: DispatchService;
   readonly controller: RunController;
   readonly store: ExecutionStore;
   readonly tasks: TaskFacadeImpl;
@@ -164,6 +168,13 @@ export async function createTestRuntime(
     ids,
     clock,
   });
+  const dispatch = new DispatchService({
+    execution,
+    dynamicWorkflows,
+    catalog: catalogFacade,
+    store,
+    invocationPolicy: new SessionInvocationPolicy({ store, catalog }),
+  });
   const rootRunId = "root-test" as RunId;
   await execution.initializeRoot({
     id: rootRunId,
@@ -172,6 +183,7 @@ export async function createTestRuntime(
   return {
     execution,
     dynamicWorkflows,
+    dispatch,
     controller: execution,
     store,
     tasks,
@@ -194,12 +206,16 @@ class ScriptedAgentImplementation implements RunImplementation {
     await this.controller.transition(command.runId, "running");
     await this.controller.complete(
       command.runId,
-      outputFor(command.definition, this.estimatedDifficulty),
+      outputFor(command.definition, this.estimatedDifficulty, command.input),
     );
   }
 }
 
-function outputFor(definition: AnyDefinition, estimatedDifficulty: Difficulty): unknown {
+function outputFor(
+  definition: AnyDefinition,
+  estimatedDifficulty: Difficulty,
+  input: unknown,
+): unknown {
   if (definition.id === AGENT_DIFFICULTY_ESTIMATOR) {
     return {
       difficulty: estimatedDifficulty,
@@ -246,14 +262,56 @@ function outputFor(definition: AnyDefinition, estimatedDifficulty: Difficulty): 
   if (definition.id === AGENT_DISPATCHER) {
     return { definitionId: AGENT_COORDINATOR, reason: "requires composition", confidence: 0.8 };
   }
-  if (
-    definition.id === AGENT_BASE ||
-    definition.id === AGENT_COORDINATOR ||
-    definition.id === AGENT_FINALIZER
-  ) {
+  if (definition.id === AGENT_COORDINATOR) {
+    return compositionFixture(input);
+  }
+  if (definition.id === AGENT_BASE || definition.id === AGENT_FINALIZER) {
     return { summary: "done", artifacts: [], unresolved: [] };
   }
   throw new Error(`No scripted output for ${definition.id}`);
+}
+
+function compositionFixture(input: unknown): DynamicWorkflowProposal {
+  if (
+    typeof input !== "object" ||
+    input === null ||
+    !("workflowInputSchema" in input) ||
+    typeof input.workflowInputSchema !== "string"
+  ) {
+    throw new Error("Dynamic composition fixture requires workflowInputSchema");
+  }
+  return {
+    title: "Composed repository scout",
+    description: "Use one reusable scout for the uncovered repository question.",
+    inputSchema: input.workflowInputSchema,
+    outputSchema: "outcome.scout-report.v1",
+    entry: "scout",
+    nodes: [
+      {
+        kind: "invoke",
+        id: "scout",
+        definitionId: AGENT_SCOUT,
+        input: {
+          source: "object",
+          fields: {
+            objective: { source: "input", path: ["objective"] },
+            focus: { source: "literal", value: "dynamic composition" },
+          },
+        },
+      },
+      {
+        kind: "return",
+        id: "return",
+        output: { source: "node", nodeId: "scout" },
+      },
+    ],
+    edges: [{ from: "scout", to: "return" }],
+    limits: {
+      timeoutMs: 120_000,
+      maxNodeRuns: 2,
+      maxParallelism: 1,
+    },
+  };
 }
 
 export class PendingAgentImplementation implements RunImplementation {
