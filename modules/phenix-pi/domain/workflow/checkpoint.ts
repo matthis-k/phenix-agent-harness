@@ -114,10 +114,12 @@ function validSnapshot(
       return false;
     }
     if (typeof activation.nodeId !== "string" || !nodeIds.has(activation.nodeId)) return false;
+    const enteredSequence = activation.enteredSequence;
     if (
-      !Number.isInteger(activation.enteredSequence) ||
-      activation.enteredSequence < 1 ||
-      activation.enteredSequence > throughSequence
+      typeof enteredSequence !== "number" ||
+      !Number.isInteger(enteredSequence) ||
+      enteredSequence < 1 ||
+      enteredSequence > throughSequence
     ) {
       return false;
     }
@@ -161,9 +163,7 @@ function stableFingerprint(value: unknown): string {
     0x811c9dc5, 0x9e3779b9, 0x85ebca6b, 0xc2b2ae35, 0x27d4eb2f, 0x165667b1, 0xd3a2646c,
     0xfd7046c5,
   ];
-  return seeds
-    .map((seed) => fnv1a(text, seed).toString(16).padStart(8, "0"))
-    .join("");
+  return seeds.map((seed) => fnv1a(text, seed).toString(16).padStart(8, "0")).join("");
 }
 
 function fnv1a(value: string, seed: number): number {
