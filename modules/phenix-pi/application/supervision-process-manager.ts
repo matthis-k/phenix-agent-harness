@@ -157,7 +157,9 @@ function changedLimitSummary(
       .filter((key) => retry[key] !== original[key])
       .map((key) => [key, retry[key] ?? null]),
   );
-  return Object.keys(changed).length > 0 ? `Adjusted limits: ${JSON.stringify(changed)}.` : undefined;
+  return Object.keys(changed).length > 0
+    ? `Adjusted limits: ${JSON.stringify(changed)}.`
+    : undefined;
 }
 
 export function summarizeTerminal(outcome: unknown, runId: RunId, retryOf?: RunId): string {
