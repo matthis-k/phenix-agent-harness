@@ -301,7 +301,7 @@ export class WorkflowProcessManager implements RunImplementation {
     const attempts = this.invocationAttempts(run.id, node.id, activationId);
     const child = attempts.at(-1);
     if (!child) {
-      if (!this.hasInvocationCapacity(run.id, state)) return false;
+      if (!(await this.hasInvocationCapacity(run.id, state))) return false;
       const mappedInput = this.functions.mapping(node.input)(state.context);
       const difficulty = this.resolveDifficulty(run, state, node);
       const handle = await this.invoker.start({
@@ -337,7 +337,7 @@ export class WorkflowProcessManager implements RunImplementation {
     }
 
     if (this.shouldRetry(node, attempts, child)) {
-      if (!this.hasInvocationCapacity(run.id, state)) return false;
+      if (!(await this.hasInvocationCapacity(run.id, state))) return false;
       const retryOverrides = suggestedRetryOverrides(child);
       await this.invoker.start({
         parentId: run.id,
@@ -392,13 +392,16 @@ export class WorkflowProcessManager implements RunImplementation {
     return child.outcome?.status === "failure" && child.outcome.failure.retryable;
   }
 
-  private hasInvocationCapacity(runId: RunId, state: WorkflowGraphState): boolean {
+  private async hasInvocationCapacity(
+    runId: RunId,
+    state: WorkflowGraphState,
+  ): Promise<boolean> {
     if (
       this.controller.activeAttachedChildren(runId).length < state.definition.limits.maxParallelism
     ) {
       return true;
     }
-    void this.controller.transition(runId, "waiting");
+    await this.controller.transition(runId, "waiting");
     return false;
   }
 
@@ -690,7 +693,11 @@ function requireWorkflow(definition: AnyDefinition): WorkflowDefinition<unknown,
 
 function childFailure(child: RunRecord, outcome: Outcome<unknown>): Failure {
   if (outcome.status === "failure") {
-    return { ...outcome.failure, causeRunId: child.id };
+    return {
+      ...outcome.failure,
+      retryable: false,
+      causeRunId: child.id,
+    };
   }
   if (outcome.status === "cancelled") {
     return {
