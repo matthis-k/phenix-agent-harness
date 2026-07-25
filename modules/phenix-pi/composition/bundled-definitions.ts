@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 
 import { compileAgentMarkdown } from "../adapters/agent/markdown.ts";
 import {
@@ -86,7 +86,9 @@ function orderWorkflowSources(sources: readonly WorkflowSource[]): readonly Work
       if (byId.has(invokedId)) {
         workflowDependencies.push(invokedId);
       } else if (!definitionsById.has(invokedId)) {
-        throw new Error(`Workflow source ${source.fileName} references unknown definition ${invokedId}`);
+        throw new Error(
+          `Workflow source ${source.fileName} references unknown definition ${invokedId}`,
+        );
       }
     }
     dependencies.set(source.id, workflowDependencies);
@@ -101,9 +103,7 @@ function orderWorkflowSources(sources: readonly WorkflowSource[]): readonly Work
       )
       .sort((left, right) => left.fileName.localeCompare(right.fileName));
     if (ready.length === 0) {
-      throw new Error(
-        `Workflow dependency cycle: ${[...remaining.keys()].sort().join(", ")}`,
-      );
+      throw new Error(`Workflow dependency cycle: ${[...remaining.keys()].sort().join(", ")}`);
     }
     for (const source of ready) {
       remaining.delete(source.id);
@@ -122,7 +122,9 @@ function registerWorkflow(source: WorkflowSource): WorkflowDefinition<unknown, u
   return definition;
 }
 
-export const workflowDefinitions = orderWorkflowSources(readWorkflowSources()).map(registerWorkflow);
+export const workflowDefinitions = orderWorkflowSources(readWorkflowSources()).map(
+  registerWorkflow,
+);
 
 function requireAgent(id: string): AgentDefinition<unknown, unknown> {
   const definition = definitionsById.get(id);
