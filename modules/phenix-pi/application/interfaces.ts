@@ -69,7 +69,7 @@ export interface TaskFacade {
 
 export interface DefinitionSummary {
   readonly id: DefinitionId;
-  readonly kind: "agent" | "workflow";
+  readonly kind: "agent" | "workflow" | "session";
   readonly title: string;
   readonly description: string;
   readonly inputSchema: string;
