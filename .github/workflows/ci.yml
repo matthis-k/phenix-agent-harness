@@ -45,7 +45,13 @@ jobs:
           rm -f modules/phenix-pi/extension/catalog-browser.ts
           rm -f modules/phenix-pi/tests/catalog-browser.test.ts
       - name: Apply canonical maintenance fixes
-        run: devenv tasks run maintenance:fix
+        shell: bash
+        run: |
+          set +e
+          devenv tasks run maintenance:fix > maintenance-fix.log 2>&1
+          status=$?
+          tail -n 320 maintenance-fix.log
+          exit "$status"
       - name: Commit refined unified UI
         shell: bash
         run: |
@@ -68,6 +74,8 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: devenv-test-log
-          path: devenv-test.log
-          if-no-files-found: error
+          name: devenv-diagnostics
+          path: |
+            maintenance-fix.log
+            devenv-test.log
+          if-no-files-found: warn
