@@ -44,14 +44,6 @@ jobs:
           rm -f .github/unified-ui-finalize-trigger
           rm -f modules/phenix-pi/extension/catalog-browser.ts
           rm -f modules/phenix-pi/tests/catalog-browser.test.ts
-      - name: Apply canonical maintenance fixes
-        shell: bash
-        run: |
-          set +e
-          devenv tasks run maintenance:fix > maintenance-fix.log 2>&1
-          status=$?
-          tail -n 320 maintenance-fix.log
-          exit "$status"
       - name: Commit refined unified UI
         shell: bash
         run: |
@@ -60,8 +52,19 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
           git diff --cached --stat
+          if git diff --cached --quiet; then
+            exit 0
+          fi
           git commit -m "Finalize unified full-screen Phenix UI [skip ci]"
           git push origin HEAD:feat/unified-phenix-ui
+      - name: Apply canonical maintenance fixes
+        shell: bash
+        run: |
+          set +e
+          devenv tasks run maintenance:fix > maintenance-fix.log 2>&1
+          status=$?
+          tail -n 320 maintenance-fix.log
+          exit "$status"
       - name: Run repository maintenance
         shell: bash
         run: |
