@@ -1,0 +1,50 @@
+name: Finalize catalog browser formatting
+
+on:
+  push:
+    branches: [fix/mermaid-viewport]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-catalog-browser-format
+  cancel-in-progress: true
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+          ref: fix/mermaid-viewport
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+
+      - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
+        with: { name: devenv }
+
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
+
+      - name: Apply repository maintenance fixes
+        run: devenv tasks run maintenance:fix
+
+      - name: Remove one-shot workflow and commit
+        shell: bash
+        run: |
+          rm .github/workflows/finalize-catalog-browser-format.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --stat
+          git commit -m "Format full-screen catalog browser [skip ci]"
+          git push origin HEAD:fix/mermaid-viewport
