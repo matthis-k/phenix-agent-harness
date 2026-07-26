@@ -1,5 +1,4 @@
 import path from "node:path";
-
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -7,6 +6,7 @@ import type {
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 
 import {
   formatIntegrationReport,
@@ -16,6 +16,7 @@ import {
 } from "../adapters/pi-sdk/integrations.ts";
 import { registerPhenixProvider } from "../adapters/routing/phenix-provider.ts";
 import { createPhenixRuntime, type PhenixRuntime } from "../composition/create-phenix-runtime.ts";
+import { type AnyDefinition, definitionRef } from "../domain/definition/definition.ts";
 import { isPhenixModelSet, PHENIX_MODEL_SETS } from "../domain/definition/model.ts";
 import {
   DEFAULT_SESSION_PROFILE,
@@ -34,6 +35,7 @@ import {
   parsePhenixHealthCommand,
 } from "./health-command.ts";
 import { formatDiagnosticEntries, PHENIX_LOGS_USAGE, parseLogsCommand } from "./log-command.ts";
+import { renderCatalogDefinition, renderTerminalMermaid } from "./mermaid-rendering.ts";
 import { statusLine } from "./observability-theme.ts";
 import {
   completePhenixSubcommands,
@@ -62,6 +64,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
   let monitor: RunMonitor | undefined;
   let integrationStatuses: readonly IntegrationStatus[] = [];
 
+  registerMermaidTool(pi);
   registerPhenixProvider(pi, {
     modelRegistry: () => modelRegistry,
     profile: async () => {
@@ -199,7 +202,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
 - Never reproduce an invariant workflow manually; phenix_dispatch is the only root execution entry point.
 - When any descendant fails, inform the user immediately, inspect the structured failure and cause run, then decide whether to retry with phenix_handle, dispatch a better-suited workflow, request user input, or stop.
 - Retry only with bounded settings and the minimum additional permissions needed; recovery may add read/search tools or explicitly escalate to bash, but never add edit/write directly to a read-only task; report every escalation to the user.
-- Available definitions: ${capabilities || "none"}.\n- Active descendant handles: ${handles || "none"}.\n- A background child remains attached. Use phenix_handle to inspect, await, send, or cancel it.\n- Use phenix_tasks only for local leaves; execution anchors are derived and read-only.`,
+- Available definitions: ${capabilities || "none"}.\n- Active descendant handles: ${handles || "none"}.\n- A background child remains attached. Use phenix_handle to inspect, await, send, or cancel it.\n- Use phenix_tasks only for local leaves; execution anchors are derived and read-only.\n- Use phenix_render_mermaid for user-facing flowcharts, sequence diagrams, state diagrams, and architecture sketches instead of manually aligned terminal art.`,
     };
   });
 
@@ -361,10 +364,32 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
       }
       if (action === "catalog") {
         const definitions = await activeRuntime.catalog.listAvailable(activeRoot);
-        ctx.ui.notify(
-          definitions.map((definition) => `${definition.id} — ${definition.title}`).join("\n"),
-          "info",
-        );
+        const query = rawOptions.trim().toLowerCase();
+        if (!query) {
+          ctx.ui.notify(
+            definitions.map((definition) => `${definition.id} — ${definition.title}`).join("\n"),
+            "info",
+          );
+          return;
+        }
+        const matches = definitions.filter((definition) => {
+          const id = String(definition.id).toLowerCase();
+          const shortId = id.replace(/^(?:agent|workflow)\./, "");
+          return id === query || shortId === query || definition.title.toLowerCase() === query;
+        });
+        if (matches.length !== 1) {
+          ctx.ui.notify(
+            matches.length === 0
+              ? `Catalog definition not found: ${rawOptions}`
+              : `Catalog selector is ambiguous: ${matches.map((item) => item.id).join(", ")}`,
+            "warning",
+          );
+          return;
+        }
+        const match = matches.at(0);
+        if (!match) throw new Error(`Catalog match disappeared for ${rawOptions}`);
+        const definition = activeRuntime.catalog.get(definitionRef(match.id)) as AnyDefinition;
+        ctx.ui.notify(limit(renderCatalogDefinition(definition)), "info");
         return;
       }
       if (action === "logs") {
@@ -501,6 +526,37 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
   });
 }
 
+function registerMermaidTool(pi: ExtensionAPI): void {
+  pi.registerTool({
+    name: "phenix_render_mermaid",
+    label: "Render Mermaid",
+    description:
+      "Render Mermaid source as terminal Unicode or plain ASCII. Use for user-facing flowcharts, sequence diagrams, state diagrams, class diagrams, ER diagrams, and architecture/design documentation.",
+    promptSnippet:
+      "Use phenix_render_mermaid when a diagram communicates a workflow, interaction sequence, state machine, or architecture more clearly than prose.",
+    parameters: Type.Object({
+      source: Type.String({ minLength: 1, maxLength: 64_000 }),
+      ascii: Type.Optional(Type.Boolean()),
+      compact: Type.Optional(Type.Boolean()),
+    }),
+    async execute(_toolCallId, input) {
+      const params = input as {
+        readonly source: string;
+        readonly ascii?: boolean;
+        readonly compact?: boolean;
+      };
+      const rendered = renderTerminalMermaid(params.source, {
+        useAscii: params.ascii ?? false,
+        compact: params.compact ?? false,
+      });
+      return {
+        content: [{ type: "text" as const, text: rendered }],
+        details: { source: params.source, format: params.ascii ? "ascii" : "unicode" },
+      };
+    },
+  } as ToolDefinition);
+}
+
 function registerAgentTool(
   pi: ExtensionAPI,
   tool: AgentTool,
@@ -579,6 +635,7 @@ async function applyAgentTools(
     "phenix_dispatch",
     "phenix_handle",
     "phenix_tasks",
+    "phenix_render_mermaid",
   ] as const;
   const policies: Readonly<Record<SessionAgentPreset, readonly string[]>> = {
     base: orchestrationTools,

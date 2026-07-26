@@ -7,6 +7,7 @@ import type { DiagnosticSummary } from "../domain/diagnostics.ts";
 import type { SessionProfile } from "../domain/run/model.ts";
 import type { RunFact } from "../domain/run/observability.ts";
 import type { RunId } from "../domain/shared.ts";
+import { renderRunTreeSequence } from "./mermaid-rendering.ts";
 import {
   color,
   fact,
@@ -226,16 +227,21 @@ export function renderDashboard(data: DashboardData, theme?: ObservabilityTheme)
   if (data.tree.root.children.length === 0) {
     lines.push(color(theme, "success", "idle"));
   } else {
-    data.tree.root.children.forEach((child, index) => {
-      appendNode(
-        lines,
-        child,
-        "",
-        index === data.tree.root.children.length - 1,
-        theme,
-        data.expanded,
-      );
-    });
+    lines.push(heading(theme, "Execution sequence"));
+    try {
+      lines.push(...renderRunTreeSequence(data.tree, { expanded: data.expanded }).split("\n"));
+    } catch {
+      data.tree.root.children.forEach((child, index) => {
+        appendNode(
+          lines,
+          child,
+          "",
+          index === data.tree.root.children.length - 1,
+          theme,
+          data.expanded,
+        );
+      });
+    }
   }
 
   const recentFacts = selectRecentFacts(data.facts);

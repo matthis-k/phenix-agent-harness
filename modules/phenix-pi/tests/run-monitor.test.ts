@@ -15,7 +15,7 @@ const DIAGNOSTICS = {
   counts: { trace: 0, info: 0, warning: 0, error: 0 },
 } as const;
 
-test("status widget renders the complete active tree without a height cap", () => {
+test("status widget renders the complete active sequence without a height cap", () => {
   const children = Array.from(
     { length: 50 },
     (_, index): RunTreeNode => ({
@@ -38,12 +38,11 @@ test("status widget renders the complete active tree without a height cap", () =
     integrationsFailed: false,
     expanded: false,
   });
+  const output = lines.join("\n");
 
-  assert.equal(lines.filter((line) => line.includes("scout [running]")).length, 50);
-  assert.equal(
-    lines.some((line) => line.includes("run tree truncated")),
-    false,
-  );
+  assert.match(output, /Execution sequence/);
+  assert.ok((output.match(/scout ·/g) ?? []).length >= 50);
+  assert.doesNotMatch(output, /truncated/);
 });
 
 test("widget component factory bypasses Pi's string-array line cap", () => {
@@ -59,7 +58,7 @@ test("widget component factory bypasses Pi's string-array line cap", () => {
   );
 });
 
-test("running nodes render current activity on a separate indented line", () => {
+test("running agents render model and current activity in the sequence", () => {
   const childId = runId("run-active-scout");
   const lines = renderDashboard({
     tree: {
@@ -103,20 +102,15 @@ test("running nodes render current activity on a separate indented line", () => 
     integrationsFailed: false,
     expanded: false,
   });
+  const output = lines.join("\n");
 
-  const rowIndex = lines.findIndex((line) => line.includes("scout [running]"));
-  assert.notEqual(rowIndex, -1);
-  const row = lines[rowIndex];
-  const activity = lines[rowIndex + 1];
-  assert.ok(row);
-  assert.ok(activity);
-  assert.match(row, /opencode-go\/model-a · low/);
-  assert.doesNotMatch(row, /Inspecting workflow scheduler/);
-  assert.match(activity, /! exploring Inspecting workflow scheduler/);
-  assert.match(activity, /workflow-process-manager\.ts/);
+  assert.match(output, /scout ·/);
+  assert.match(output, /opencode-go\/model-a · low/);
+  assert.match(output, /! exploring Inspecting workflow scheduler/);
+  assert.match(output, /workflow-process-manager\.ts/);
 });
 
-test("status uses one compact row per run, collapses completed subtrees, and keeps recent facts", () => {
+test("status collapses completed workflow boundaries and keeps recent facts", () => {
   const workflowId = runId("run-workflow");
   const scoutId = runId("run-scout");
   const workflow: RunTreeNode = {
@@ -162,46 +156,20 @@ test("status uses one compact row per run, collapses completed subtrees, and kee
     integrationsFailed: true,
   };
 
-  const collapsed = renderDashboard({ ...base, expanded: false });
-  assert.equal(
-    collapsed.some((line) => line.includes("qa [completed]")),
-    true,
-  );
-  assert.equal(
-    collapsed.some((line) => line.includes("1 children completed")),
-    true,
-  );
-  assert.equal(
-    collapsed.some((line) => line.includes("opencode-go/model-a")),
-    false,
-  );
-  assert.equal(
-    collapsed.some((line) => line.includes("root.session")),
-    false,
-  );
-  assert.equal(
-    collapsed.some((line) => line.includes("Recent facts")),
-    true,
-  );
-  assert.equal(collapsed.filter((line) => line.includes("Completed qa")).length, 1);
-  assert.equal(
-    collapsed.some((line) => line.includes("Latest fact")),
-    true,
-  );
-  assert.equal(
-    collapsed.some((line) => line.includes("Older fact")),
-    false,
-  );
-  assert.equal(
-    collapsed.some((line) => line.includes("Storage")),
-    false,
-  );
+  const collapsed = renderDashboard({ ...base, expanded: false }).join("\n");
+  assert.match(collapsed, /workflow qa · completed/);
+  assert.match(collapsed, /1 descendants/);
+  assert.doesNotMatch(collapsed, /opencode-go\/model-a/);
+  assert.doesNotMatch(collapsed, /root\.session/);
+  assert.match(collapsed, /Recent facts/);
+  assert.equal((collapsed.match(/Completed qa/g) ?? []).length, 1);
+  assert.match(collapsed, /Latest fact/);
+  assert.doesNotMatch(collapsed, /Older fact/);
+  assert.doesNotMatch(collapsed, /Storage/);
 
-  const expanded = renderDashboard({ ...base, expanded: true });
-  const scoutLine = expanded.find((line) => line.includes("scout [completed]"));
-  assert.ok(scoutLine);
-  assert.match(scoutLine, /opencode-go\/model-a · low/);
-  assert.equal(expanded.filter((line) => line.includes("scout [completed]")).length, 1);
+  const expanded = renderDashboard({ ...base, expanded: true }).join("\n");
+  assert.match(expanded, /scout ·/);
+  assert.match(expanded, /opencode-go\/model-a · low/);
 });
 
 function snapshot(

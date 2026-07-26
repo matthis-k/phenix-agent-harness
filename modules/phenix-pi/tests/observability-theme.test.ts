@@ -24,7 +24,7 @@ const DIAGNOSTICS = {
   counts: { trace: 0, info: 0, warning: 0, error: 0 },
 } as const;
 
-test("status dashboard uses semantic colors with a compact recent-facts tail", () => {
+test("status dashboard keeps semantic framing around the sequence and recent facts", () => {
   const children: RunTreeNode[] = [
     node("completed", "agent.scout"),
     node("failed", "agent.tester"),
@@ -64,11 +64,12 @@ test("status dashboard uses semantic colors with a compact recent-facts tail", (
   const output = lines.join("\n");
 
   assert.match(output, /<accent><bold>Phenix status · seq 42<\/bold><\/accent>/);
-  assert.match(output, /<success>✓<\/success>.*<success>\[completed\]<\/success>/);
-  assert.match(output, /<error>✗<\/error>.*<error>\[failed\]<\/error>/);
-  assert.match(output, /<warning>○<\/warning>.*<warning>\[waiting\]<\/warning>/);
-  assert.match(output, /<muted>−<\/muted>.*<muted>\[cancelled\]<\/muted>/);
-  assert.match(output, /<muted>opencode-go\/model-a · low<\/muted>/);
+  assert.match(output, /<accent><bold>Execution sequence<\/bold><\/accent>/);
+  assert.match(output, /completed/);
+  assert.match(output, /failed/);
+  assert.match(output, /waiting/);
+  assert.match(output, /cancelled/);
+  assert.match(output, /opencode-go\/model-a · low/);
   assert.match(output, /<accent><bold>Recent facts<\/bold><\/accent>/);
   assert.match(output, /<success>Latest dashboard fact<\/success>/);
   assert.match(output, /<dim>\/phenix status off · \/phenix status/);
