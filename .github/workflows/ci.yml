@@ -94,6 +94,8 @@ jobs:
         run: |
           rm .github/scripts/apply-mermaid-theme.py
           rm .github/workflows/apply-mermaid-theme.yml
+      - name: Stage generated files for Nix source filtering
+        run: git add -A
       - name: Apply canonical maintenance fixes
         shell: bash
         run: |
