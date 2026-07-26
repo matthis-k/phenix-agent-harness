@@ -13,6 +13,11 @@ import type { ObservabilityTheme } from "./observability-theme.ts";
 
 type CatalogPane = "definitions" | "preview";
 
+interface PreviewCache {
+  readonly selectedIndex: number;
+  readonly lines: readonly string[];
+}
+
 export interface CatalogBrowserOptions {
   readonly tui: TUI;
   readonly theme: ObservabilityTheme;
@@ -33,6 +38,7 @@ export class CatalogBrowser implements Component {
   private maxHorizontalOffset = 0;
   private maxVerticalOffset = 0;
   private previewHeight = 1;
+  private previewCache: PreviewCache | undefined;
 
   constructor(options: CatalogBrowserOptions) {
     this.tui = options.tui;
@@ -48,7 +54,7 @@ export class CatalogBrowser implements Component {
   }
 
   invalidate(): void {
-    // Rendering is derived directly from current state and terminal dimensions.
+    // Preview output is theme-independent; only terminal dimensions affect the viewport.
   }
 
   handleInput(data: string): void {
@@ -69,12 +75,12 @@ export class CatalogBrowser implements Component {
   }
 
   render(width: number): string[] {
-    const height = Math.max(8, this.tui.terminal.rows);
-    if (width < 36) return this.renderNarrow(width, height);
+    const height = Math.max(1, this.tui.terminal.rows);
+    if (width < 36 || height < 5) return this.renderNarrow(width, height);
 
     const sidebarWidth = Math.min(42, Math.max(24, Math.floor(width * 0.3)));
     const previewWidth = Math.max(1, width - sidebarWidth - 1);
-    const bodyHeight = Math.max(1, height - 3);
+    const bodyHeight = height - 3;
     this.previewHeight = bodyHeight;
 
     const previewLines = this.previewLines();
@@ -113,7 +119,7 @@ export class CatalogBrowser implements Component {
       ),
       width,
     );
-    return [header, rule, ...body, footer].slice(0, height);
+    return [header, rule, ...body, footer];
   }
 
   private handleDefinitionInput(data: string): void {
@@ -186,6 +192,7 @@ export class CatalogBrowser implements Component {
     this.selectedIndex = clamp(index, 0, this.definitions.length - 1);
     this.horizontalOffset = 0;
     this.verticalOffset = 0;
+    this.previewCache = undefined;
     this.requestRender();
   }
 
@@ -193,9 +200,17 @@ export class CatalogBrowser implements Component {
     return this.definitions[this.selectedIndex];
   }
 
-  private previewLines(): string[] {
+  private previewLines(): readonly string[] {
+    if (this.previewCache?.selectedIndex === this.selectedIndex) {
+      return this.previewCache.lines;
+    }
     const selected = this.selectedDefinition();
-    if (!selected) return ["No invokable definitions are available."];
+    const lines = selected ? this.renderPreview(selected) : ["No invokable definitions are available."];
+    this.previewCache = { selectedIndex: this.selectedIndex, lines };
+    return lines;
+  }
+
+  private renderPreview(selected: AnyDefinition): readonly string[] {
     try {
       return renderCatalogDefinition(selected).split("\n");
     } catch (error) {
@@ -239,9 +254,8 @@ export class CatalogBrowser implements Component {
   private renderNarrow(width: number, height: number): string[] {
     const lines = [
       this.theme.fg("accent", this.theme.bold(" Phenix catalog")),
-      this.theme.fg("warning", " Terminal is too narrow for the split catalog view."),
-      "",
-      " Resize to at least 36 columns.",
+      this.theme.fg("warning", " Terminal is too small for the split catalog view."),
+      " Resize to at least 36 columns and 5 rows.",
       " Esc closes the catalog.",
     ];
     return Array.from({ length: height }, (_, row) => this.fitLine(lines[row] ?? "", width));
