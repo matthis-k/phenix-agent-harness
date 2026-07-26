@@ -3,20 +3,21 @@ import test from "node:test";
 
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 
-import { PhenixModelResolver } from "../adapters/routing/phenix-model-resolver.ts";
+import {
+  defaultRoutingPolicy,
+  PhenixModelResolver,
+} from "../adapters/routing/phenix-model-resolver.ts";
 import { PiModelInventory } from "../adapters/routing/pi-model-inventory.ts";
 
 test("registered OpenCode free models are usable without configured auth", () => {
   const registry = freeModelRegistry();
   const inventory = new PiModelInventory(registry);
   const available = inventory.available();
+  const configured = defaultRoutingPolicy
+    .candidates("free", "general")
+    .map((model) => ({ provider: model.provider, model: model.model }));
 
-  assert.ok(available.length > 0);
-  assert.ok(
-    available.every(
-      (model) => model.provider === "opencode" && model.model.endsWith("-free"),
-    ),
-  );
+  assert.deepEqual(available, configured);
   const candidate = available[0];
   assert.ok(candidate);
   assert.equal(inventory.contains(candidate.provider, candidate.model), true);
