@@ -99,7 +99,9 @@ export function compileAgentMarkdown(
     ? markdownEnum(fields, "prompt-mode", owner, ["replace", "append-default"] as const)
     : undefined;
   if (sessionMode === "stock" && promptMode) {
-    throw new Error("Stock sessions use Pi's unmodified default prompt and may not declare prompt-mode");
+    throw new Error(
+      "Stock sessions use Pi's unmodified default prompt and may not declare prompt-mode",
+    );
   }
 
   return {
