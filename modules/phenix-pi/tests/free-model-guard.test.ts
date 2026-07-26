@@ -83,3 +83,45 @@ test("risk classifier recognizes explicit metadata, paths, and commands", () => 
   assert.equal(mutation.sensitive, true);
   assert.ok(mutation.reasons.some((reason) => reason.includes("sensitive command")));
 });
+
+test("risk classifier recognizes plural and compound credential terms", () => {
+  for (const text of [
+    "Rotate credentials",
+    "Replace the api_key",
+    "Update the api-key",
+    "Read the private_key",
+    "Change the passphrase",
+    "Validate the JWT",
+  ]) {
+    const assessment = assessExecutionRisk({ objective: text });
+    assert.equal(assessment.sensitive, true, text);
+  }
+});
+
+test("free-model command guard recognizes destructive local git operations", () => {
+  for (const command of [
+    "git reset --hard HEAD~1",
+    "git clean -fdx",
+    "git clean -f -d",
+    "git branch -D obsolete-work",
+    "git branch --delete --force obsolete-work",
+  ]) {
+    const assessment = assessRootMutation({
+      toolName: "bash",
+      toolInput: { command },
+    });
+    assert.equal(assessment.sensitive, true, command);
+    assert.ok(
+      assessment.reasons.some((reason) => reason.includes("sensitive command")),
+      command,
+    );
+  }
+
+  for (const command of ["git tag local-checkpoint", "git revert HEAD", "git branch -d merged-work"]) {
+    const assessment = assessRootMutation({
+      toolName: "bash",
+      toolInput: { command },
+    });
+    assert.equal(assessment.sensitive, false, command);
+  }
+});
