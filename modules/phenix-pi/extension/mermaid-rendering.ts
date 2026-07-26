@@ -1,20 +1,23 @@
 import { renderMermaidASCII } from "beautiful-mermaid";
-
 import type { RunTree, RunTreeNode } from "../application/interfaces.ts";
 import type {
   AnyDefinition,
   WorkflowDefinition,
   WorkflowNode,
 } from "../domain/definition/definition.ts";
+import { resolveBeautifulMermaidTheme } from "./mermaid-theme.ts";
+import type { ObservabilityTheme } from "./observability-theme.ts";
 
 export interface TerminalMermaidOptions {
   readonly useAscii?: boolean;
   readonly compact?: boolean;
   readonly color?: boolean;
+  readonly theme?: ObservabilityTheme;
 }
 
 export interface RunSequenceOptions {
   readonly expanded?: boolean;
+  readonly theme?: ObservabilityTheme;
 }
 
 const TERMINAL_RUN_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]);
@@ -36,12 +39,14 @@ export function renderTerminalMermaid(
       "Unsupported Mermaid diagram. Use flowchart, graph, stateDiagram, sequenceDiagram, classDiagram, erDiagram, or xychart.",
     );
   }
+  const resolvedTheme = options.theme ? resolveBeautifulMermaidTheme(options.theme) : undefined;
   return renderMermaidASCII(normalized, {
     useAscii: options.useAscii ?? false,
     paddingX: options.compact ? 3 : 5,
     paddingY: options.compact ? 2 : 4,
     boxBorderPadding: 1,
-    colorMode: options.color ? "auto" : "none",
+    colorMode: resolvedTheme?.colorMode ?? (options.color ? "auto" : "none"),
+    ...(resolvedTheme ? { theme: resolvedTheme.theme } : {}),
   }).trimEnd();
 }
 
@@ -71,14 +76,23 @@ export function workflowDefinitionMermaid(
   return lines.join("\n");
 }
 
-export function renderCatalogDefinition(definition: AnyDefinition): string {
+export function renderCatalogDefinition(
+  definition: AnyDefinition,
+  options: Pick<TerminalMermaidOptions, "theme"> = {},
+): string {
   const lines = [
     `${definition.id} — ${definition.title}`,
     definition.description,
     `kind: ${definition.kind} · input: ${definition.input.id} · output: ${definition.output.id}`,
   ];
   if (definition.kind === "workflow") {
-    lines.push("", renderTerminalMermaid(workflowDefinitionMermaid(definition), { compact: true }));
+    lines.push(
+      "",
+      renderTerminalMermaid(workflowDefinitionMermaid(definition), {
+        compact: true,
+        theme: options.theme,
+      }),
+    );
   } else {
     lines.push(
       `model: ${formatModelSelector(definition.model)} · thinking: ${formatThinking(definition.thinking)}`,
@@ -162,7 +176,10 @@ export function runTreeSequenceMermaid(tree: RunTree, options: RunSequenceOption
 }
 
 export function renderRunTreeSequence(tree: RunTree, options: RunSequenceOptions = {}): string {
-  return renderTerminalMermaid(runTreeSequenceMermaid(tree, options), { compact: true });
+  return renderTerminalMermaid(runTreeSequenceMermaid(tree, options), {
+    compact: true,
+    theme: options.theme,
+  });
 }
 
 function workflowNodeDeclaration(alias: string, node: WorkflowNode): string {
