@@ -16,7 +16,6 @@ import {
 } from "../adapters/pi-sdk/integrations.ts";
 import { registerPhenixProvider } from "../adapters/routing/phenix-provider.ts";
 import { createPhenixRuntime, type PhenixRuntime } from "../composition/create-phenix-runtime.ts";
-import { type AnyDefinition, definitionRef } from "../domain/definition/definition.ts";
 import { isPhenixModelSet, PHENIX_MODEL_SETS } from "../domain/definition/model.ts";
 import {
   DEFAULT_SESSION_PROFILE,
@@ -35,7 +34,7 @@ import {
   parsePhenixHealthCommand,
 } from "./health-command.ts";
 import { formatDiagnosticEntries, PHENIX_LOGS_USAGE, parseLogsCommand } from "./log-command.ts";
-import { renderCatalogDefinition, renderTerminalMermaid } from "./mermaid-rendering.ts";
+import { renderTerminalMermaid } from "./mermaid-rendering.ts";
 import { statusLine } from "./observability-theme.ts";
 import {
   completePhenixSubcommands,
@@ -385,49 +384,6 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
           summarizeIntegrations(integrationStatuses),
           target,
         );
-        return;
-      }
-      if (action === "catalog") {
-        if (ctx.mode === "tui") {
-          await openPhenixUi(
-            ctx,
-            activeRuntime,
-            activeRoot,
-            summarizeIntegrations(integrationStatuses),
-            rawOptions.trim()
-              ? { view: "catalog", selector: rawOptions.trim() }
-              : { view: "catalog" },
-          );
-          return;
-        }
-        const available = await activeRuntime.catalog.listAvailable(activeRoot);
-        const query = rawOptions.trim().toLowerCase();
-        const matches = query
-          ? available.filter((definition) => {
-              const id = String(definition.id).toLowerCase();
-              const shortId = id.replace(/^(?:agent|workflow)\./, "");
-              return id === query || shortId === query || definition.title.toLowerCase() === query;
-            })
-          : [];
-        if (query && matches.length !== 1) {
-          ctx.ui.notify(
-            matches.length === 0
-              ? `Catalog definition not found: ${rawOptions}`
-              : `Catalog selector is ambiguous: ${matches.map((item) => item.id).join(", ")}`,
-            "warning",
-          );
-          return;
-        }
-        const match = matches[0];
-        if (match) {
-          const definition = activeRuntime.catalog.get(definitionRef(match.id)) as AnyDefinition;
-          ctx.ui.notify(limit(renderCatalogDefinition(definition)), "info");
-        } else {
-          ctx.ui.notify(
-            available.map((definition) => `${definition.id} — ${definition.title}`).join("\n"),
-            "info",
-          );
-        }
         return;
       }
       if (action === "logs") {

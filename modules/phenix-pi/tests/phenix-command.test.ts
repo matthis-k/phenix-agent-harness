@@ -30,7 +30,7 @@ test("phenix command completion lists and filters subcommands", () => {
   assert.equal(completePhenixSubcommands("r"), null);
   assert.equal(completePhenixSubcommands("unknown"), null);
   assert.equal(completePhenixSubcommands("status extra"), null);
-  assert.equal(PHENIX_USAGE, "/phenix ui|status|health|logs|facts|tasks|catalog|integrations");
+  assert.equal(PHENIX_USAGE, "/phenix ui|status|health|logs|facts|tasks|integrations");
   assert.equal(PHENIX_UI_USAGE, "/phenix ui [status|runs [run-id]|facts|catalog [definition-id]]");
   assert.equal(PHENIX_STATUS_USAGE, "/phenix status [--json|--expanded]");
   assert.equal(
