@@ -35,6 +35,8 @@ test("diagnostics persist private JSONL, filter by threshold, and reference larg
         apiKey: "must-not-be-written",
         context: "x".repeat(2_000),
         status: 400,
+        callback: "https://example.test/callback#credential=fragment-credential&state=ready",
+        socket: "wss://agent:socket-secret@example.test/session",
         response: { accessToken: "raw-nested-token", requestId: "request-1" },
       },
     });
@@ -45,6 +47,8 @@ test("diagnostics persist private JSONL, filter by threshold, and reference larg
     assert.equal(raw.includes("must-not-be-written"), false);
     assert.equal(raw.includes("raw-message-token"), false);
     assert.equal(raw.includes("raw-nested-token"), false);
+    assert.equal(raw.includes("fragment-credential"), false);
+    assert.equal(raw.includes("socket-secret"), false);
     assert.equal(raw.includes("[redacted]"), true);
 
     const warnings = await log.entries(ROOT, "warning");
@@ -54,9 +58,16 @@ test("diagnostics persist private JSONL, filter by threshold, and reference larg
     assert.equal((await log.entries(ROOT, "error")).length, 0);
 
     const fields = warning.fields as {
+      readonly callback: string;
       readonly context: { readonly ref: string; readonly bytes: number };
+      readonly socket: string;
       readonly response: { readonly accessToken: string; readonly requestId: string };
     };
+    assert.equal(
+      fields.callback,
+      "https://example.test/callback#credential=<redacted>&state=ready",
+    );
+    assert.equal(fields.socket, "wss://<redacted>@example.test/session");
     assert.equal(fields.response.accessToken, "[redacted]");
     assert.equal(fields.response.requestId, "request-1");
     assert.match(fields.context.ref, /^artifact:sha256:[a-f0-9]{64}$/);
