@@ -165,10 +165,20 @@ jobs:
         run: git show origin/main:.github/workflows/ci.yml > .github/workflows/ci.yml
       - name: Apply canonical maintenance fixes
         shell: bash
-        run: devenv tasks run maintenance:fix
+        run: |
+          set +e
+          devenv tasks run maintenance:fix > maintenance-fix.log 2>&1
+          status=$?
+          tail -n 320 maintenance-fix.log
+          exit "$status"
       - name: Run canonical validation
         shell: bash
-        run: devenv test
+        run: |
+          set +e
+          devenv test > devenv-test.log 2>&1
+          status=$?
+          tail -n 320 devenv-test.log
+          exit "$status"
       - name: Commit implementation
         shell: bash
         run: |
@@ -178,3 +188,12 @@ jobs:
           git diff --cached --check
           git commit -m "Open Phenix UI by default"
           git push origin HEAD:fix/default-phenix-ui
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: default-phenix-ui-diagnostics
+          path: |
+            maintenance-fix.log
+            devenv-test.log
+          if-no-files-found: ignore
