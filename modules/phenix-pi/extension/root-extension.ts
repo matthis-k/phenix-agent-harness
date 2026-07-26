@@ -27,12 +27,6 @@ import {
 } from "../domain/run/model.ts";
 import { type RunId, runId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
-import {
-  loadPhenixUiSnapshot,
-  parsePhenixUiTarget,
-  PhenixUi,
-  type PhenixUiTarget,
-} from "./phenix-ui.ts";
 import { copyFactHistory, parseFactsCommand, writeFactHistory } from "./fact-export.ts";
 import {
   formatPhenixHealth,
@@ -51,6 +45,12 @@ import {
   PHENIX_UI_USAGE,
   PHENIX_USAGE,
 } from "./phenix-command.ts";
+import {
+  loadPhenixUiSnapshot,
+  PhenixUi,
+  type PhenixUiTarget,
+  parsePhenixUiTarget,
+} from "./phenix-ui.ts";
 import { RunMonitor } from "./run-monitor.ts";
 
 const ROOT_BINDING_ENTRY = "phenix:root-binding";

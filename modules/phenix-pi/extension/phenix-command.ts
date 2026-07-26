@@ -14,8 +14,7 @@ export const PHENIX_UI_USAGE = "/phenix ui [status|runs [run-id]|facts|catalog [
 export const PHENIX_STATUS_USAGE = "/phenix status [--json|--expanded]";
 export const PHENIX_HEALTH_USAGE =
   "/phenix health [integrations|models|definitions|runtime|storage] [--json]";
-export const PHENIX_FACTS_USAGE =
-  "/phenix facts [--json|--clipboard [command]|--file <file>]";
+export const PHENIX_FACTS_USAGE = "/phenix facts [--json|--clipboard [command]|--file <file>]";
 
 export function completePhenixSubcommands(prefix: string) {
   const normalized = prefix.trimStart().toLowerCase();

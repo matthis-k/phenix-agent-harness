@@ -17,13 +17,13 @@ import type { RunId } from "../domain/shared.ts";
 import { renderCatalogDefinition, renderRunTreeSequence } from "./mermaid-rendering.ts";
 import {
   color,
+  statusField as coloredStatusField,
   fact as factColor,
   heading,
+  type ObservabilityTheme,
   phase,
   reliability,
-  type ObservabilityTheme,
   state,
-  statusField as coloredStatusField,
   strong,
 } from "./observability-theme.ts";
 
@@ -144,7 +144,8 @@ export function parsePhenixUiTarget(raw: string): PhenixUiTarget | undefined {
 }
 
 export function parseSgrMouse(data: string): MouseEvent | undefined {
-  const match = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])$/.exec(data);
+  if (!data.startsWith("\x1b[<")) return undefined;
+  const match = /^(\d+);(\d+);(\d+)([Mm])$/.exec(data.slice(3));
   if (!match) return undefined;
   return {
     button: Number(match[1]),
@@ -201,7 +202,11 @@ export class PhenixUi implements Component {
     sidebarWidth: 1,
   };
   private readonly rowHits = new Map<number, RowHit>();
-  private tabHits: readonly { readonly view: PhenixUiView; readonly start: number; readonly end: number }[] = [];
+  private tabHits: readonly {
+    readonly view: PhenixUiView;
+    readonly start: number;
+    readonly end: number;
+  }[] = [];
 
   private get pane(): UiPane {
     return this.panes[this.view];
@@ -348,7 +353,11 @@ export class PhenixUi implements Component {
   private renderHeader(width: number): string {
     const prefix = `${heading(this.theme, " Phenix")}  `;
     let rawColumn = visibleWidth(prefix) + 1;
-    const hits: Array<{ readonly view: PhenixUiView; readonly start: number; readonly end: number }> = [];
+    const hits: Array<{
+      readonly view: PhenixUiView;
+      readonly start: number;
+      readonly end: number;
+    }> = [];
     const tabs = VIEW_ORDER.map((view, index) => {
       const active = this.view === view;
       const label = `[${active ? "●" : " "} ${index + 1} ${capitalize(view)}]`;
@@ -381,7 +390,10 @@ export class PhenixUi implements Component {
           : color(this.theme, "dim", `○ ${label}`),
       )
       .join(color(this.theme, "dim", "  │  "));
-    return this.fitLine(` ${color(this.theme, "muted", `${capitalize(this.view)}:`)} ${labels}`, width);
+    return this.fitLine(
+      ` ${color(this.theme, "muted", `${capitalize(this.view)}:`)} ${labels}`,
+      width,
+    );
   }
 
   private selectedRow(text: string, pane: UiPane): string {
@@ -472,7 +484,10 @@ export class PhenixUi implements Component {
     const height = this.layout.bodyHeight;
     const flat = this.filteredRuns();
     this.ensureSelectedRun(flat);
-    const selectedIndex = Math.max(0, flat.findIndex((item) => String(item.node.run.id) === this.selectedRunId));
+    const selectedIndex = Math.max(
+      0,
+      flat.findIndex((item) => String(item.node.run.id) === this.selectedRunId),
+    );
     const selected = flat[selectedIndex]?.node ?? this.snapshot.tree.root;
     if (width < 82) {
       const content =
@@ -491,7 +506,8 @@ export class PhenixUi implements Component {
     const previewWidth = width - treeWidth - inspectorWidth - (inspectorWidth > 0 ? 2 : 1);
     const tree = this.renderRunTreePane(flat, selectedIndex, treeWidth, height);
     const preview = this.renderRunPreviewPane(selected, previewWidth, height);
-    const inspector = inspectorWidth > 0 ? this.renderRunInspectorPane(selected, inspectorWidth, height) : [];
+    const inspector =
+      inspectorWidth > 0 ? this.renderRunInspectorPane(selected, inspectorWidth, height) : [];
     return Array.from({ length: height }, (_, row) => {
       const left = tree[row] ?? " ".repeat(treeWidth);
       const middle = preview[row] ?? " ".repeat(previewWidth);
@@ -561,7 +577,10 @@ export class PhenixUi implements Component {
       statusField("state", run.state),
       statusField("ownership", run.ownership),
       statusField("requested", compactTimestamp(run.requestedAt)),
-      statusField("model", model ? `${model.concrete.provider}/${model.concrete.model}` : "unresolved"),
+      statusField(
+        "model",
+        model ? `${model.concrete.provider}/${model.concrete.model}` : "unresolved",
+      ),
       statusField("thinking", model?.thinking ?? "unresolved"),
       statusField("tools", run.compiled.tools.join(", ") || "none"),
       statusField("timeout", `${run.compiled.limits.timeoutMs} ms`),
@@ -707,7 +726,11 @@ export class PhenixUi implements Component {
       "",
       "Mouse: click tabs and list rows; wheel scrolls the pane under the pointer.",
     ];
-    return fitHeight(lines.map((line) => this.fitLine(line, width)), height, width);
+    return fitHeight(
+      lines.map((line) => this.fitLine(line, width)),
+      height,
+      width,
+    );
   }
 
   private renderSmall(width: number, height: number): string[] {
@@ -717,13 +740,18 @@ export class PhenixUi implements Component {
       " Resize to at least 42 columns and 8 rows.",
       " Esc closes the UI.",
     ];
-    return fitHeight(lines.map((line) => this.fitLine(line, width)), height, width);
+    return fitHeight(
+      lines.map((line) => this.fitLine(line, width)),
+      height,
+      width,
+    );
   }
 
   private handleStatusInput(data: string): void {
     const targets = this.statusTargets();
     if (isUp(data)) this.selectedStatus = clamp(this.selectedStatus - 1, 0, targets.length - 1);
-    else if (isDown(data)) this.selectedStatus = clamp(this.selectedStatus + 1, 0, targets.length - 1);
+    else if (isDown(data))
+      this.selectedStatus = clamp(this.selectedStatus + 1, 0, targets.length - 1);
     else if (matchesKey(data, "enter")) this.openStatusTarget(targets[this.selectedStatus]);
     else return;
     this.requestRender();
@@ -732,7 +760,10 @@ export class PhenixUi implements Component {
   private handleRunsInput(data: string): void {
     const flat = this.filteredRuns();
     this.ensureSelectedRun(flat);
-    let index = Math.max(0, flat.findIndex((item) => String(item.node.run.id) === this.selectedRunId));
+    let index = Math.max(
+      0,
+      flat.findIndex((item) => String(item.node.run.id) === this.selectedRunId),
+    );
     const selected = flat[index];
     if (this.pane === 0) {
       if (isUp(data)) index -= 1;
@@ -741,11 +772,17 @@ export class PhenixUi implements Component {
       else if (matchesKey(data, "end")) index = flat.length - 1;
       else if (data === " " && selected) this.toggleRun(selected.node);
       else if (matchesKey(data, "right") || matchesKey(data, "enter")) {
-        if (selected?.node.children.length && this.collapsedRuns.has(String(selected.node.run.id))) {
+        if (
+          selected?.node.children.length &&
+          this.collapsedRuns.has(String(selected.node.run.id))
+        ) {
           this.collapsedRuns.delete(String(selected.node.run.id));
         } else this.pane = 1;
       } else if (matchesKey(data, "left") && selected) {
-        if (selected.node.children.length && !this.collapsedRuns.has(String(selected.node.run.id))) {
+        if (
+          selected.node.children.length &&
+          !this.collapsedRuns.has(String(selected.node.run.id))
+        ) {
           this.collapsedRuns.add(String(selected.node.run.id));
         } else {
           const parent = parentOf(this.snapshot.tree.root, selected.node.run.id);
@@ -762,7 +799,8 @@ export class PhenixUi implements Component {
       else if (isRight(data)) this.runHorizontalOffset += 4;
       else if (isUp(data)) this.runVerticalOffset = Math.max(0, this.runVerticalOffset - 1);
       else if (isDown(data)) this.runVerticalOffset += 1;
-      else if (matchesKey(data, "pageUp")) this.runVerticalOffset = Math.max(0, this.runVerticalOffset - this.layout.bodyHeight + 2);
+      else if (matchesKey(data, "pageUp"))
+        this.runVerticalOffset = Math.max(0, this.runVerticalOffset - this.layout.bodyHeight + 2);
       else if (matchesKey(data, "pageDown")) this.runVerticalOffset += this.layout.bodyHeight - 2;
       else if (matchesKey(data, "home")) this.runHorizontalOffset = 0;
       else if (matchesKey(data, "end")) this.runHorizontalOffset = Number.MAX_SAFE_INTEGER;
@@ -772,7 +810,8 @@ export class PhenixUi implements Component {
     }
     if (isUp(data)) this.runInspectorOffset = Math.max(0, this.runInspectorOffset - 1);
     else if (isDown(data)) this.runInspectorOffset += 1;
-    else if (matchesKey(data, "pageUp")) this.runInspectorOffset = Math.max(0, this.runInspectorOffset - this.layout.bodyHeight + 2);
+    else if (matchesKey(data, "pageUp"))
+      this.runInspectorOffset = Math.max(0, this.runInspectorOffset - this.layout.bodyHeight + 2);
     else if (matchesKey(data, "pageDown")) this.runInspectorOffset += this.layout.bodyHeight - 2;
     else return;
     this.requestRender();
@@ -813,11 +852,16 @@ export class PhenixUi implements Component {
       this.catalogHorizontalOffset = 0;
       this.catalogVerticalOffset = 0;
       this.previewCache = undefined;
-    } else if (isLeft(data)) this.catalogHorizontalOffset = Math.max(0, this.catalogHorizontalOffset - 4);
+    } else if (isLeft(data))
+      this.catalogHorizontalOffset = Math.max(0, this.catalogHorizontalOffset - 4);
     else if (isRight(data)) this.catalogHorizontalOffset += 4;
     else if (isUp(data)) this.catalogVerticalOffset = Math.max(0, this.catalogVerticalOffset - 1);
     else if (isDown(data)) this.catalogVerticalOffset += 1;
-    else if (matchesKey(data, "pageUp")) this.catalogVerticalOffset = Math.max(0, this.catalogVerticalOffset - this.layout.bodyHeight + 2);
+    else if (matchesKey(data, "pageUp"))
+      this.catalogVerticalOffset = Math.max(
+        0,
+        this.catalogVerticalOffset - this.layout.bodyHeight + 2,
+      );
     else if (matchesKey(data, "pageDown")) this.catalogVerticalOffset += this.layout.bodyHeight - 2;
     else if (matchesKey(data, "home")) this.catalogHorizontalOffset = 0;
     else if (matchesKey(data, "end")) this.catalogHorizontalOffset = Number.MAX_SAFE_INTEGER;
@@ -915,7 +959,10 @@ export class PhenixUi implements Component {
       .slice(0, Math.max(3, Math.floor(this.layout.bodyHeight / 2) - 4));
   }
 
-  private statusTargets(): readonly ({ readonly kind: "run"; readonly item: FlatRun } | { readonly kind: "fact"; readonly item: RunFact })[] {
+  private statusTargets(): readonly (
+    | { readonly kind: "run"; readonly item: FlatRun }
+    | { readonly kind: "fact"; readonly item: RunFact }
+  )[] {
     const runs = this.statusRuns();
     const facts = this.filteredFacts().slice(-5);
     return [
@@ -936,7 +983,7 @@ export class PhenixUi implements Component {
       this.switchView("runs");
       return;
     }
-    const index = this.filteredFacts().findIndex((item) => item === target.item);
+    const index = this.filteredFacts().indexOf(target.item);
     this.selectedFact = Math.max(0, index);
     this.switchView("facts");
   }
@@ -1036,7 +1083,9 @@ export class PhenixUi implements Component {
     ) {
       this.collapsedRuns.add(id);
     }
-    node.children.forEach((child) => this.initializeCollapsedRuns(child));
+    node.children.forEach((child) => {
+      this.initializeCollapsedRuns(child);
+    });
   }
 
   private applyInitialSelector(selector: string | undefined): void {
@@ -1152,7 +1201,9 @@ function flattenRuns(
 ): readonly FlatRun[] {
   target.push({ node, depth });
   if (collapsed.has(String(node.run.id))) return target;
-  node.children.forEach((child) => flattenRuns(child, collapsed, depth + 1, target));
+  node.children.forEach((child) => {
+    flattenRuns(child, collapsed, depth + 1, target);
+  });
   return target;
 }
 
@@ -1200,7 +1251,7 @@ function runStateSymbol(value: RunSnapshot["state"]): string {
 }
 
 function wrapPane(current: UiPane, delta: number, count: number): UiPane {
-  return (((current + delta) % count + count) % count) as UiPane;
+  return ((((current + delta) % count) + count) % count) as UiPane;
 }
 
 function centeredStart(selected: number, height: number, total: number): number {
@@ -1230,7 +1281,9 @@ function compactTimestamp(value: string): string {
 
 function truncate(value: string, limit: number): string {
   const normalized = value.replace(/\s+/g, " ").trim();
-  return normalized.length <= limit ? normalized : `${normalized.slice(0, Math.max(1, limit - 1))}…`;
+  return normalized.length <= limit
+    ? normalized
+    : `${normalized.slice(0, Math.max(1, limit - 1))}…`;
 }
 
 function capitalize(value: string): string {
