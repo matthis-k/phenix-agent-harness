@@ -35,6 +35,9 @@ const ANSI_16 = [
 ] as const;
 const ANSI_CUBE = [0, 95, 135, 175, 215, 255] as const;
 
+// Pi exposes the fully resolved active theme as ANSI prefixes, while Beautiful
+// Mermaid requires role-based RGB values. Convert the live values rather than
+// duplicating or looking up the user's theme declaration by name.
 export function resolveBeautifulMermaidTheme(
   theme: ObservabilityTheme,
 ): ResolvedBeautifulMermaidTheme | undefined {
