@@ -12,7 +12,7 @@ Normal routing uses `mode=auto`. The dispatch service derives the exact candidat
 
 ## Definitions and execution mechanisms
 
-An agent definition owns static system instructions, input and output schemas, model selection, tools, context policy, child capabilities, limits, and persistence.
+An agent definition owns static system instructions, prompt composition, input and output schemas, model selection, tools, context policy, child capabilities, limits, and persistence.
 
 A workflow definition owns an invariant typed graph. Only `WorkflowProcessManager` interprets workflow nodes and starts workflow children. Workflow children cannot be started through the ordinary child-agent path without trusted workflow causation.
 
@@ -90,7 +90,12 @@ Children begin attached. `wait=background` changes waiting behavior, not ownersh
 
 ## Prompt, context, and capability boundary
 
-System prompts contain only static definition instructions plus the static execution protocol. Schema-validated objectives, context, candidate descriptions, plans, findings, and other task values are sent separately as task data.
+Schema-validated objectives, context, candidate descriptions, plans, findings, and other task values are sent separately as task data. Managed agent definitions choose one explicit prompt composition policy:
+
+- omitted or `prompt-mode: replace`: replace Pi's default prompt with the static definition instructions plus the static Phenix execution protocol;
+- `prompt-mode: append-default`: retain Pi's built-in tool-aware coding prompt and append the static definition instructions plus execution protocol.
+
+`append-default` suppresses ambient project or user system-prompt replacement before appending the Phenix contract, so it always extends Pi's actual built-in default. It still uses the exact compiled tool allowlist and the definition's context policy. Only broad coding roles whose behavior matches Pi's baseline should use it; currently `agent.base` and `agent.implementer` opt in. Narrow read-only, review, planning, routing, synthesis, and orchestration roles continue to replace the default prompt. `session.stock` is separate: it runs Pi's ordinary prompt and resources without a Phenix role prompt, and a workflow controls its typed handoff and any verifier.
 
 Child sessions never inherit the parent conversation. Repository context files are admitted according to the owning agent definition:
 
