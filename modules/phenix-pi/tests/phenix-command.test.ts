@@ -36,10 +36,7 @@ test("phenix command completion lists and filters subcommands", () => {
     PHENIX_HEALTH_USAGE,
     "/phenix health [integrations|models|definitions|runtime|storage] [--json]",
   );
-  assert.equal(
-    PHENIX_FACTS_USAGE,
-    "/phenix facts [--json|--clipboard [command]|--file <file>]",
-  );
+  assert.equal(PHENIX_FACTS_USAGE, "/phenix facts [--json|--clipboard [command]|--file <file>]");
 });
 
 test("integration reports are compact in status and detailed on demand", () => {
