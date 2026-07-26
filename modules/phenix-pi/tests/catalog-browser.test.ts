@@ -47,6 +47,24 @@ test("catalog browser horizontally pans the no-wrap preview", () => {
   assert.ok(tui.renderRequests > 0);
 });
 
+test("catalog browser vertically pans without dropping preview content", () => {
+  const tui = fakeTui(8);
+  const description = Array.from({ length: 12 }, (_, index) => `description-${index}`).join("\n");
+  const browser = new CatalogBrowser({
+    tui,
+    theme,
+    definitions: [workflowDefinition("workflow.tall", description)],
+    onClose: () => undefined,
+  });
+
+  assert.match(browser.render(70).join("\n"), /description-0/);
+  browser.handleInput("\t");
+  browser.handleInput("\x1b[6~");
+  const shifted = browser.render(70).join("\n");
+  assert.doesNotMatch(shifted, /description-0/);
+  assert.match(shifted, /description-[1-9]/);
+});
+
 test("catalog browser sidebar selection changes the preview and escape closes", () => {
   const tui = fakeTui(14);
   let closed = false;
