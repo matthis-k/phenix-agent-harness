@@ -12,10 +12,10 @@ import type { RunFact } from "../domain/run/observability.ts";
 import type { RunId } from "../domain/shared.ts";
 import type { ObservabilityTheme } from "../extension/observability-theme.ts";
 import {
-  parsePhenixUiTarget,
-  parseSgrMouse,
   PhenixUi,
   type PhenixUiSnapshot,
+  parsePhenixUiTarget,
+  parseSgrMouse,
 } from "../extension/phenix-ui.ts";
 
 const theme = {
@@ -108,7 +108,7 @@ test("colors the active tab, focused pane, and semantic catalog and fact state",
   assert.ok(lines[2]?.includes("\x1b[35m\x1b[1m● Preview"));
   assert.ok(lines.join("\n").includes("\x1b[37m▷ "));
 
-  const facts = createUi(fakeTui(18), { view: "facts" }, ansiTheme).render(100).join("\n");
+  const facts = createUi(fakeTui(18), { view: "facts" }, ansiTheme).render(120).join("\n");
   assert.ok(facts.includes("\x1b[35mrun-started\x1b[0m"));
   assert.ok(facts.includes("\x1b[32m[observed]\x1b[0m"));
 });
