@@ -1052,7 +1052,7 @@ export class PhenixUi implements Component {
     try {
       const root =
         node.run.kind === "root" ? node : { ...this.snapshot.tree.root, children: [node] };
-      lines = renderRunTreeSequence({ root }, { expanded: true }).split("\n");
+      lines = renderRunTreeSequence({ root }, { expanded: true, theme: this.theme }).split("\n");
     } catch (error) {
       lines = [`Unable to render run sequence: ${errorMessage(error)}`];
     }
@@ -1066,7 +1066,7 @@ export class PhenixUi implements Component {
     if (this.previewCache?.key === key) return this.previewCache.lines;
     let lines: readonly string[];
     try {
-      lines = renderCatalogDefinition(definition).split("\n");
+      lines = renderCatalogDefinition(definition, { theme: this.theme }).split("\n");
     } catch (error) {
       lines = [`Unable to render ${definition.id}: ${errorMessage(error)}`];
     }
