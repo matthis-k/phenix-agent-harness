@@ -1,13 +1,12 @@
-import { getModels } from "@earendil-works/pi-ai";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 import type { ModelInventory } from "../../ports/model-resolver.ts";
 
-const AUTHLESS_OPENCODE_MODELS = new Set(
-  getModels("opencode")
-    .filter((model) => model.id.endsWith("-free"))
-    .map((model) => model.id),
-);
+const AUTHLESS_OPENCODE_MODELS = new Set([
+  "deepseek-v4-flash-free",
+  "mimo-v2.5-free",
+  "north-mini-code-free",
+]);
 
 export class PiModelInventory implements ModelInventory {
   private readonly registry: ModelRegistry;
