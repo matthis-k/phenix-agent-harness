@@ -55,8 +55,6 @@ function freeModelRegistry(): ModelRegistry {
   return {
     getAvailable: () => [],
     find: (provider: string, model: string) =>
-      provider === "opencode" && model.endsWith("-free")
-        ? { provider, id: model }
-        : undefined,
+      provider === "opencode" && model.endsWith("-free") ? { provider, id: model } : undefined,
   } as unknown as ModelRegistry;
 }
