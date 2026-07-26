@@ -1,0 +1,47 @@
+name: Apply theme-aware Mermaid integration
+
+on:
+  push:
+    branches: [fix/theme-aware-mermaid]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+          ref: fix/theme-aware-mermaid
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+      - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
+        with: { name: devenv }
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
+      - name: Apply source patch
+        run: python .github/scripts/apply-mermaid-theme.py
+      - name: Remove one-shot automation
+        run: |
+          rm .github/scripts/apply-mermaid-theme.py
+          rm .github/workflows/apply-mermaid-theme.yml
+      - name: Apply canonical maintenance fixes
+        run: devenv tasks run maintenance:fix
+      - name: Run canonical validation
+        run: devenv test
+      - name: Commit implementation
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --stat
+          git commit -m "Use active Pi theme for Mermaid diagrams"
+          git push origin HEAD:fix/theme-aware-mermaid
