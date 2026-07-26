@@ -77,6 +77,7 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
   assert.equal(scout.context.maxBytes, 64_000);
   assert.equal(scout.modelRoutes?.D0.capability, "fast");
   assert.equal(scout.modelRoutes?.D3.capability, "reasoning");
+  assert.equal(scout.promptMode, undefined);
   assert.match(scout.prompt.render(), /insufficient_permissions/);
 
   const implementer = byId.get("agent.implementer");
@@ -87,6 +88,11 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
   assert.equal(implementer.output.id, "outcome.change-set.v1");
   assert.equal(implementer.modelRoutes?.D0.capability, "code-fast");
   assert.equal(implementer.modelRoutes?.D3.capability, "code-max");
+  assert.equal(implementer.promptMode, "append-default");
+
+  const base = byId.get("agent.base");
+  assert.ok(base);
+  assert.equal(base.promptMode, "append-default");
 
   const coordinator = byId.get("agent.coordinator");
   assert.ok(coordinator);
@@ -97,11 +103,13 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
   assert.equal(coordinator.limits.timeoutMs, 600_000);
   assert.equal(coordinator.limits.maxTurns, undefined);
   assert.equal(coordinator.limits.maxToolCalls, undefined);
+  assert.equal(coordinator.promptMode, undefined);
   assert.match(coordinator.prompt.render(), /declarative workflow composer/);
 
   const stock = byId.get("session.stock");
   assert.ok(stock);
   assert.equal(stock.sessionMode, "stock");
+  assert.equal(stock.promptMode, undefined);
   assert.equal(stock.input.id, "request.stock-session.v1");
   assert.equal(stock.output.id, "outcome.stock-session-handoff.v1");
   assert.deepEqual(stock.tools.allow, []);
@@ -124,6 +132,17 @@ test("agent Markdown requires a complete difficulty model table", () => {
   assert.throws(
     () => compileAgentMarkdown(incomplete, { resolveSchema: resolveDefinitionSchema }),
     /agent Models is missing D3/,
+  );
+});
+
+test("stock session Markdown rejects managed prompt composition", () => {
+  const invalid = source("stock").replace(
+    "persistence: file\n",
+    "persistence: file\nprompt-mode: append-default\n",
+  );
+  assert.throws(
+    () => compileAgentMarkdown(invalid, { resolveSchema: resolveDefinitionSchema }),
+    /Stock sessions use Pi's unmodified default prompt/,
   );
 });
 

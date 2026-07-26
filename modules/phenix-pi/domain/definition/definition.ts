@@ -52,10 +52,13 @@ export interface PromptTemplate {
 }
 
 export type AgentSessionMode = "phenix" | "stock";
+export type AgentPromptMode = "replace" | "append-default";
 
 export interface AgentDefinition<I, O> extends Definition<I, O> {
   readonly kind: "agent";
   readonly sessionMode?: AgentSessionMode;
+  /** Omitted definitions replace Pi's default prompt. */
+  readonly promptMode?: AgentPromptMode;
   readonly model: ModelSelector;
   readonly modelRoutes?: DifficultyModelRoutes;
   readonly thinking: ThinkingPolicy;

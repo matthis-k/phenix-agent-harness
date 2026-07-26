@@ -210,6 +210,11 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     modelRegistry: host.modelRegistry,
     agentDir: host.agentDir,
     eventBus: host.piEventBus,
+    promptModeForRun: (runId) => {
+      const run = store.projection.requireRun(runId);
+      const definition = definitions.require(run.definitionId);
+      return definition.kind === "agent" ? definition.promptMode : undefined;
+    },
   });
   const agents = new AgentExecutor({
     backend,
