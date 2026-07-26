@@ -16,7 +16,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import { STOCK_SESSION_PROMPT_SENTINEL } from "../../definitions/stock-session.ts";
+import type { AgentPromptMode } from "../../domain/definition/definition.ts";
 import type { ConcreteModelRef } from "../../domain/definition/model.ts";
+import type { RunId } from "../../domain/shared.ts";
 import type {
   AgentSessionBackend,
   AgentSessionObservation,
@@ -28,20 +30,24 @@ import type {
 import { BoundedAgentSessionPort } from "./bounded-agent-session-port.ts";
 import { freeModelSessionExtensions } from "./free-model-guard.ts";
 import { createNixShellTool } from "./nix-shell-tool.ts";
+import { composeManagedPrompt } from "./prompt-composition.ts";
 
 export class PiSdkAgentSessionBackend implements AgentSessionBackend {
   private readonly modelRegistry: ModelRegistry;
   private readonly agentDir: string;
   private readonly eventBus?: EventBus;
+  private readonly promptModeForRun: (runId: RunId) => AgentPromptMode | undefined;
 
   constructor(input: {
     readonly modelRegistry: ModelRegistry;
     readonly agentDir: string;
     readonly eventBus?: EventBus;
+    readonly promptModeForRun?: (runId: RunId) => AgentPromptMode | undefined;
   }) {
     this.modelRegistry = input.modelRegistry;
     this.agentDir = input.agentDir;
     this.eventBus = input.eventBus;
+    this.promptModeForRun = input.promptModeForRun ?? (() => undefined);
   }
 
   async create(spec: CreateAgentSessionSpec): Promise<AgentSessionPort> {
@@ -101,7 +107,7 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
                     ),
                   }),
                 }),
-            systemPrompt: spec.systemPrompt,
+            ...composeManagedPrompt(this.promptModeForRun(spec.runId), spec.systemPrompt),
           }),
     });
     await resourceLoader.reload();
