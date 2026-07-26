@@ -27,6 +27,7 @@ import {
 } from "../domain/run/model.ts";
 import { type RunId, runId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
+import { CatalogBrowser } from "./catalog-browser.ts";
 import { copyFactHistory, parseFactsCommand, writeFactHistory } from "./fact-export.ts";
 import {
   formatPhenixHealth,
@@ -363,21 +364,16 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
         return;
       }
       if (action === "catalog") {
-        const definitions = await activeRuntime.catalog.listAvailable(activeRoot);
+        const available = await activeRuntime.catalog.listAvailable(activeRoot);
         const query = rawOptions.trim().toLowerCase();
-        if (!query) {
-          ctx.ui.notify(
-            definitions.map((definition) => `${definition.id} — ${definition.title}`).join("\n"),
-            "info",
-          );
-          return;
-        }
-        const matches = definitions.filter((definition) => {
-          const id = String(definition.id).toLowerCase();
-          const shortId = id.replace(/^(?:agent|workflow)\./, "");
-          return id === query || shortId === query || definition.title.toLowerCase() === query;
-        });
-        if (matches.length !== 1) {
+        const matches = query
+          ? available.filter((definition) => {
+              const id = String(definition.id).toLowerCase();
+              const shortId = id.replace(/^(?:agent|workflow)\./, "");
+              return id === query || shortId === query || definition.title.toLowerCase() === query;
+            })
+          : [];
+        if (query && matches.length !== 1) {
           ctx.ui.notify(
             matches.length === 0
               ? `Catalog definition not found: ${rawOptions}`
@@ -386,10 +382,41 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
           );
           return;
         }
-        const match = matches.at(0);
-        if (!match) throw new Error(`Catalog match disappeared for ${rawOptions}`);
-        const definition = activeRuntime.catalog.get(definitionRef(match.id)) as AnyDefinition;
-        ctx.ui.notify(limit(renderCatalogDefinition(definition)), "info");
+        if (ctx.mode !== "tui") {
+          const match = matches[0];
+          if (match) {
+            const definition = activeRuntime.catalog.get(definitionRef(match.id)) as AnyDefinition;
+            ctx.ui.notify(limit(renderCatalogDefinition(definition)), "info");
+          } else {
+            ctx.ui.notify(
+              available.map((definition) => `${definition.id} — ${definition.title}`).join("\n"),
+              "info",
+            );
+          }
+          return;
+        }
+        const definitions = available.map(
+          (definition) => activeRuntime.catalog.get(definitionRef(definition.id)) as AnyDefinition,
+        );
+        await ctx.ui.custom(
+          (tui, theme, _keybindings, done) =>
+            new CatalogBrowser({
+              tui,
+              theme,
+              definitions,
+              ...(matches[0] ? { initialDefinitionId: String(matches[0].id) } : {}),
+              onClose: () => done(undefined),
+            }),
+          {
+            overlay: true,
+            overlayOptions: {
+              width: "100%",
+              maxHeight: "100%",
+              anchor: "top-left",
+              margin: 0,
+            },
+          },
+        );
         return;
       }
       if (action === "logs") {
