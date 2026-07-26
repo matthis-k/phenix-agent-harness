@@ -43,6 +43,7 @@ const AGENT_FIELDS = [
   "thinking",
   "persistence",
   "session-mode",
+  "prompt-mode",
 ] as const;
 const TOOL_FIELDS = ["allow"] as const;
 const CONTEXT_FIELDS = ["project-files", "parent-conversation", "artifacts", "max-bytes"] as const;
@@ -94,6 +95,12 @@ export function compileAgentMarkdown(
   const sessionMode = fields["session-mode"]
     ? markdownEnum(fields, "session-mode", owner, ["phenix", "stock"] as const)
     : undefined;
+  const promptMode = fields["prompt-mode"]
+    ? markdownEnum(fields, "prompt-mode", owner, ["replace", "append-default"] as const)
+    : undefined;
+  if (sessionMode === "stock" && promptMode) {
+    throw new Error("Stock sessions use Pi's unmodified default prompt and may not declare prompt-mode");
+  }
 
   return {
     id: definitionId(requiredMarkdownField(fields, "id", owner)),
@@ -103,6 +110,7 @@ export function compileAgentMarkdown(
     input: bindings.resolveSchema(requiredMarkdownField(fields, "input", owner)),
     output: bindings.resolveSchema(requiredMarkdownField(fields, "output", owner)),
     ...(sessionMode ? { sessionMode } : {}),
+    ...(promptMode ? { promptMode } : {}),
     model: parseModel(requiredMarkdownField(fields, "model", owner)),
     ...(modelRoutes ? { modelRoutes } : {}),
     thinking: markdownEnum(fields, "thinking", owner, THINKING_POLICIES) as ThinkingPolicy,
