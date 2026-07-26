@@ -129,7 +129,10 @@ test("a dynamic workflow may return stock output directly without a verifier", a
     evidence: [{ path: "src/file.ts", finding: "stock evidence" }],
     risks: [],
   });
-  assert.deepEqual(children.map((child) => child.definitionId), [SESSION_STOCK]);
+  assert.deepEqual(
+    children.map((child) => child.definitionId),
+    [SESSION_STOCK],
+  );
   assert.equal(stockInput?.outputSchema, "outcome.scout-report.v1");
   assert.equal(typeof stockInput?.outputContract, "object");
 });
