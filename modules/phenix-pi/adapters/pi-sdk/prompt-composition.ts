@@ -2,7 +2,7 @@ import type { AgentPromptMode } from "../../domain/definition/definition.ts";
 
 export interface PiPromptResourceOptions {
   readonly systemPrompt?: string;
-  readonly appendSystemPrompt?: readonly string[];
+  readonly appendSystemPrompt?: string[];
   readonly systemPromptOverride?: (base: string | undefined) => string | undefined;
 }
 
