@@ -34,16 +34,21 @@ jobs:
         with: { name: devenv }
       - name: Install devenv
         run: nix profile add nixpkgs#devenv
-      - name: Refine and format unified UI
+      - name: Apply unified UI refinement
+        run: python .github/scripts/refine-unified-ui.py
+      - name: Remove superseded UI and temporary files
         shell: bash
         run: |
-          python .github/scripts/refine-unified-ui.py
           rm -f .github/scripts/refine-unified-ui.py
           rm -f .github/workflows/finalize-unified-phenix-ui.yml
           rm -f .github/unified-ui-finalize-trigger
           rm -f modules/phenix-pi/extension/catalog-browser.ts
           rm -f modules/phenix-pi/tests/catalog-browser.test.ts
-          devenv tasks run maintenance:fix
+      - name: Apply canonical maintenance fixes
+        run: devenv tasks run maintenance:fix
+      - name: Commit refined unified UI
+        shell: bash
+        run: |
           git checkout origin/main -- .github/workflows/ci.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
