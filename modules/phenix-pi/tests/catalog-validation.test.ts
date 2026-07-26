@@ -125,9 +125,11 @@ test("bundled definitions have explicit execution-authority classes", () => {
   );
   for (const definition of agentDefinitions) {
     const id = String(definition.id);
-    const classes = [commandAgents.has(id), nonExecutingAgents.has(id), stockSessions.has(id)].filter(
-      Boolean,
-    );
+    const classes = [
+      commandAgents.has(id),
+      nonExecutingAgents.has(id),
+      stockSessions.has(id),
+    ].filter(Boolean);
     assert.equal(classes.length, 1, `${id} must belong to exactly one execution-authority class`);
     if (stockSessions.has(id)) {
       assert.equal(definition.sessionMode, "stock");
@@ -165,7 +167,10 @@ test("dispatch prompts distinguish stock sessions from controlled roles", () => 
   assert.equal(coordinator?.kind, "agent");
   assert.equal(dispatcher?.kind, "agent");
   if (coordinator?.kind === "agent") {
-    assert.match(coordinator.prompt.render(), /Use session\.stock only when no predefined workflow/);
+    assert.match(
+      coordinator.prompt.render(),
+      /Use session\.stock only when no predefined workflow/,
+    );
     assert.match(coordinator.prompt.render(), /do not add verification automatically/);
     assert.match(coordinator.prompt.render(), /command-capable workflow or operational agent/);
   }
