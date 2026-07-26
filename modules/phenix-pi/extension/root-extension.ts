@@ -36,7 +36,7 @@ import {
   parsePhenixHealthCommand,
 } from "./health-command.ts";
 import { formatDiagnosticEntries, PHENIX_LOGS_USAGE, parseLogsCommand } from "./log-command.ts";
-import { renderTerminalMermaid } from "./mermaid-rendering.ts";
+import { renderCatalogDefinition, renderTerminalMermaid } from "./mermaid-rendering.ts";
 import { statusLine } from "./observability-theme.ts";
 import {
   completePhenixSubcommands,
@@ -387,23 +387,39 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
           return;
         }
         if (ctx.mode !== "tui") {
-          ctx.ui.notify(
-            available.map((definition) => `${definition.id} — ${definition.title}`).join("\n"),
-            "info",
-          );
+          const match = matches[0];
+          if (match) {
+            const definition = activeRuntime.catalog.get(definitionRef(match.id)) as AnyDefinition;
+            ctx.ui.notify(limit(renderCatalogDefinition(definition)), "info");
+          } else {
+            ctx.ui.notify(
+              available.map((definition) => `${definition.id} — ${definition.title}`).join("\n"),
+              "info",
+            );
+          }
           return;
         }
         const definitions = available.map(
           (definition) => activeRuntime.catalog.get(definitionRef(definition.id)) as AnyDefinition,
         );
-        await ctx.ui.custom((tui, theme, _keybindings, done) =>
-          new CatalogBrowser({
-            tui,
-            theme,
-            definitions,
-            ...(matches[0] ? { initialDefinitionId: String(matches[0].id) } : {}),
-            onClose: () => done(undefined),
-          }),
+        await ctx.ui.custom(
+          (tui, theme, _keybindings, done) =>
+            new CatalogBrowser({
+              tui,
+              theme,
+              definitions,
+              ...(matches[0] ? { initialDefinitionId: String(matches[0].id) } : {}),
+              onClose: () => done(undefined),
+            }),
+          {
+            overlay: true,
+            overlayOptions: {
+              width: "100%",
+              maxHeight: "100%",
+              anchor: "top-left",
+              margin: 0,
+            },
+          },
         );
         return;
       }
