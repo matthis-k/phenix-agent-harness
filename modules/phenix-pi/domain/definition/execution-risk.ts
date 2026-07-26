@@ -1,16 +1,20 @@
-const SENSITIVE_WORDS = [
-  "secret",
-  "credential",
-  "password",
-  "token",
-  "authentication",
-  "authorization",
-  "security",
-  "deployment",
-  "production",
-  "release",
-  "main-bound",
-] as const;
+const SENSITIVE_TEXT_PATTERNS = [
+  ["secret", /(?:^|[^a-z0-9])secrets?\b/i],
+  ["credential", /(?:^|[^a-z0-9])credentials?\b/i],
+  ["password", /(?:^|[^a-z0-9])passwords?\b/i],
+  ["passphrase", /(?:^|[^a-z0-9])passphrases?\b/i],
+  ["token", /(?:^|[^a-z0-9])tokens?\b/i],
+  ["api key", /\bapi[-_\s]?keys?\b/i],
+  ["private key", /\bprivate[-_\s]?keys?\b/i],
+  ["jwt", /(?:^|[^a-z0-9])jwts?\b/i],
+  ["authentication", /\bauthentication\b/i],
+  ["authorization", /\bauthorization\b/i],
+  ["security", /\bsecurity\b/i],
+  ["deployment", /\bdeployment\b/i],
+  ["production", /\bproduction\b/i],
+  ["release", /\brelease\b/i],
+  ["main-bound", /\bmain[-_\s]?bound\b/i],
+] as const satisfies readonly (readonly [label: string, pattern: RegExp])[];
 
 const SENSITIVE_PATHS = [
   /(?:^|\/)\.github\/workflows(?:\/|$)/i,
@@ -18,11 +22,14 @@ const SENSITIVE_PATHS = [
   /(?:^|\/)(?:deploy|deployment|production|release)(?:[./_-]|$)/i,
 ] as const;
 
-const SENSITIVE_COMMANDS = [
+const FREE_MODEL_BLOCKED_COMMANDS = [
   /\bgit\s+push\b/i,
   /\bgh\s+pr\s+merge\b/i,
   /\bgit\s+merge\b/i,
   /\bgit\s+(?:switch|checkout)\s+(?:main|master)\b/i,
+  /\bgit\s+reset\s+--hard\b/i,
+  /\bgit\s+clean\b(?=[^\r\n]*\s-[a-z]*f)(?=[^\r\n]*\s-[a-z]*d)/i,
+  /\bgit\s+branch\s+(?:-[A-Za-z]*D[A-Za-z]*|--delete\s+--force)\b/,
   /\bnix\s+flake\s+update\b/i,
   /\b(?:deploy|release)\b/i,
 ] as const;
@@ -75,7 +82,7 @@ export function assessRootMutation(input: {
     if (pattern.test(serialized)) reasons.add(`sensitive path matched ${pattern.source}`);
   }
   if (input.toolName === "bash" || input.toolName === "nix_shell") {
-    for (const pattern of SENSITIVE_COMMANDS) {
+    for (const pattern of FREE_MODEL_BLOCKED_COMMANDS) {
       if (pattern.test(serialized)) reasons.add(`sensitive command matched ${pattern.source}`);
     }
   }
@@ -85,10 +92,8 @@ export function assessRootMutation(input: {
 function visit(value: unknown, reasons: Set<string>, depth: number, path: string): void {
   if (depth > 5 || reasons.size >= 12 || value === null || value === undefined) return;
   if (typeof value === "string") {
-    const normalized = value.toLowerCase();
-    for (const word of SENSITIVE_WORDS) {
-      const pattern = new RegExp(`\\b${escapeRegExp(word)}\\b`, "i");
-      if (pattern.test(normalized)) reasons.add(`${path} mentions ${word}`);
+    for (const [label, pattern] of SENSITIVE_TEXT_PATTERNS) {
+      if (pattern.test(value)) reasons.add(`${path} mentions ${label}`);
     }
     for (const pattern of SENSITIVE_PATHS) {
       if (pattern.test(value)) reasons.add(`${path} contains a sensitive path`);
@@ -136,8 +141,4 @@ function collectStrings(value: unknown, output: string[], depth: number): void {
       collectStrings(item, output, depth + 1);
     }
   }
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
