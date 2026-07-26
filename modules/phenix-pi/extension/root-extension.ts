@@ -370,11 +370,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
           ? available.filter((definition) => {
               const id = String(definition.id).toLowerCase();
               const shortId = id.replace(/^(?:agent|workflow)\./, "");
-              return (
-                id === query ||
-                shortId === query ||
-                definition.title.toLowerCase() === query
-              );
+              return id === query || shortId === query || definition.title.toLowerCase() === query;
             })
           : [];
         if (query && matches.length !== 1) {

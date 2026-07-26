@@ -1,10 +1,10 @@
 import type { TUI } from "@earendil-works/pi-tui";
 import {
+  type Component,
   matchesKey,
   sliceByColumn,
   truncateToWidth,
   visibleWidth,
-  type Component,
 } from "@earendil-works/pi-tui";
 
 import type { AnyDefinition } from "../domain/definition/definition.ts";
@@ -161,17 +161,9 @@ export class CatalogBrowser implements Component {
     } else if (matchesKey(data, "down") || data === "j" || data === "J") {
       this.verticalOffset = clamp(this.verticalOffset + 1, 0, this.maxVerticalOffset);
     } else if (matchesKey(data, "pageUp")) {
-      this.verticalOffset = clamp(
-        this.verticalOffset - verticalPage,
-        0,
-        this.maxVerticalOffset,
-      );
+      this.verticalOffset = clamp(this.verticalOffset - verticalPage, 0, this.maxVerticalOffset);
     } else if (matchesKey(data, "pageDown")) {
-      this.verticalOffset = clamp(
-        this.verticalOffset + verticalPage,
-        0,
-        this.maxVerticalOffset,
-      );
+      this.verticalOffset = clamp(this.verticalOffset + verticalPage, 0, this.maxVerticalOffset);
     } else if (matchesKey(data, "home")) {
       this.horizontalOffset = 0;
     } else if (matchesKey(data, "end")) {
@@ -205,7 +197,9 @@ export class CatalogBrowser implements Component {
       return this.previewCache.lines;
     }
     const selected = this.selectedDefinition();
-    const lines = selected ? this.renderPreview(selected) : ["No invokable definitions are available."];
+    const lines = selected
+      ? this.renderPreview(selected)
+      : ["No invokable definitions are available."];
     this.previewCache = { selectedIndex: this.selectedIndex, lines };
     return lines;
   }
