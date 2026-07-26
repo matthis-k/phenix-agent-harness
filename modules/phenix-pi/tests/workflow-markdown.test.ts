@@ -177,7 +177,8 @@ test("predefined workflows bind a concrete output schema for stock sessions", ()
   }
 
   assert.throws(
-    () => compileWorkflowMarkdown(stockWorkflowSource("outcome.stock-session-handoff.v1"), bindings),
+    () =>
+      compileWorkflowMarkdown(stockWorkflowSource("outcome.stock-session-handoff.v1"), bindings),
     /must bind a concrete output schema/,
   );
 });
