@@ -16,7 +16,6 @@ import {
 } from "../adapters/pi-sdk/integrations.ts";
 import { registerPhenixProvider } from "../adapters/routing/phenix-provider.ts";
 import { createPhenixRuntime, type PhenixRuntime } from "../composition/create-phenix-runtime.ts";
-import { type AnyDefinition, definitionRef } from "../domain/definition/definition.ts";
 import { isPhenixModelSet, PHENIX_MODEL_SETS } from "../domain/definition/model.ts";
 import {
   DEFAULT_SESSION_PROFILE,
@@ -27,7 +26,6 @@ import {
 } from "../domain/run/model.ts";
 import { type RunId, runId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
-import { CatalogBrowser } from "./catalog-browser.ts";
 import { copyFactHistory, parseFactsCommand, writeFactHistory } from "./fact-export.ts";
 import {
   formatPhenixHealth,
@@ -36,15 +34,22 @@ import {
   parsePhenixHealthCommand,
 } from "./health-command.ts";
 import { formatDiagnosticEntries, PHENIX_LOGS_USAGE, parseLogsCommand } from "./log-command.ts";
-import { renderCatalogDefinition, renderTerminalMermaid } from "./mermaid-rendering.ts";
+import { renderTerminalMermaid } from "./mermaid-rendering.ts";
 import { statusLine } from "./observability-theme.ts";
 import {
   completePhenixSubcommands,
   PHENIX_FACTS_USAGE,
   PHENIX_HEALTH_USAGE,
   PHENIX_STATUS_USAGE,
+  PHENIX_UI_USAGE,
   PHENIX_USAGE,
 } from "./phenix-command.ts";
+import {
+  loadPhenixUiSnapshot,
+  PhenixUi,
+  type PhenixUiTarget,
+  parsePhenixUiTarget,
+} from "./phenix-ui.ts";
 import { RunMonitor } from "./run-monitor.ts";
 
 const ROOT_BINDING_ENTRY = "phenix:root-binding";
@@ -170,7 +175,6 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
     });
     const refresh = (): void => {
       void updateStatus(ctx, currentRuntime, currentRoot);
-      void monitor?.refresh();
     };
     const unsubscribeEvents = currentRuntime.events.subscribe(refresh);
     const unsubscribeLogs = currentRuntime.diagnostics.subscribe(refresh);
@@ -363,59 +367,22 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
         );
         return;
       }
-      if (action === "catalog") {
-        const available = await activeRuntime.catalog.listAvailable(activeRoot);
-        const query = rawOptions.trim().toLowerCase();
-        const matches = query
-          ? available.filter((definition) => {
-              const id = String(definition.id).toLowerCase();
-              const shortId = id.replace(/^(?:agent|workflow)\./, "");
-              return id === query || shortId === query || definition.title.toLowerCase() === query;
-            })
-          : [];
-        if (query && matches.length !== 1) {
-          ctx.ui.notify(
-            matches.length === 0
-              ? `Catalog definition not found: ${rawOptions}`
-              : `Catalog selector is ambiguous: ${matches.map((item) => item.id).join(", ")}`,
-            "warning",
-          );
+      if (action === "ui") {
+        const target = parsePhenixUiTarget(rawOptions);
+        if (!target) {
+          ctx.ui.notify(`Usage: ${PHENIX_UI_USAGE}`, "warning");
           return;
         }
         if (ctx.mode !== "tui") {
-          const match = matches[0];
-          if (match) {
-            const definition = activeRuntime.catalog.get(definitionRef(match.id)) as AnyDefinition;
-            ctx.ui.notify(limit(renderCatalogDefinition(definition)), "info");
-          } else {
-            ctx.ui.notify(
-              available.map((definition) => `${definition.id} — ${definition.title}`).join("\n"),
-              "info",
-            );
-          }
+          ctx.ui.notify("/phenix ui requires interactive TUI mode.", "warning");
           return;
         }
-        const definitions = available.map(
-          (definition) => activeRuntime.catalog.get(definitionRef(definition.id)) as AnyDefinition,
-        );
-        await ctx.ui.custom(
-          (tui, theme, _keybindings, done) =>
-            new CatalogBrowser({
-              tui,
-              theme,
-              definitions,
-              ...(matches[0] ? { initialDefinitionId: String(matches[0].id) } : {}),
-              onClose: () => done(undefined),
-            }),
-          {
-            overlay: true,
-            overlayOptions: {
-              width: "100%",
-              maxHeight: "100%",
-              anchor: "top-left",
-              margin: 0,
-            },
-          },
+        await openPhenixUi(
+          ctx,
+          activeRuntime,
+          activeRoot,
+          summarizeIntegrations(integrationStatuses),
+          target,
         );
         return;
       }
@@ -481,14 +448,6 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
           ctx.ui.notify(`Usage: ${PHENIX_FACTS_USAGE}`, "warning");
           return;
         }
-        if (factsAction.kind === "live") {
-          await activeMonitor.show("facts");
-          return;
-        }
-        if (factsAction.kind === "off") {
-          activeMonitor.hide();
-          return;
-        }
         if (factsAction.kind === "once") {
           ctx.ui.notify(limit(await activeMonitor.once("facts")), "info");
           return;
@@ -527,30 +486,60 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
           integrationsFailed: integrationStatuses.some((status) => status.state === "failed"),
         });
       monitor = activeMonitor;
-      const allowed = new Set(["off", "--once", "--json", "--expanded"]);
-      if (
-        options.some((option) => !allowed.has(option)) ||
-        options.filter((option) => option !== "--expanded").length > 1
-      ) {
+      const allowed = new Set(["--json", "--expanded"]);
+      if (options.some((option) => !allowed.has(option))) {
         ctx.ui.notify(`Usage: ${PHENIX_STATUS_USAGE}`, "warning");
-        return;
-      }
-      const expanded = options.includes("--expanded");
-      if (options.includes("off")) {
-        activeMonitor.hide();
-        return;
-      }
-      if (options.includes("--once")) {
-        ctx.ui.notify(limit(await activeMonitor.once("status", { expanded })), "info");
         return;
       }
       if (options.includes("--json")) {
         ctx.ui.notify(limit(await activeMonitor.json("status")), "info");
         return;
       }
-      await activeMonitor.show("status", { expanded });
+      ctx.ui.notify(
+        limit(await activeMonitor.once("status", { expanded: options.includes("--expanded") })),
+        "info",
+      );
     },
   });
+}
+
+async function openPhenixUi(
+  ctx: ExtensionContext,
+  runtime: PhenixRuntime,
+  rootRunId: RunId,
+  integrations: string,
+  initial: PhenixUiTarget,
+): Promise<void> {
+  const load = () => loadPhenixUiSnapshot(runtime, rootRunId, integrations);
+  const snapshot = await load();
+  await ctx.ui.custom(
+    (tui, theme, _keybindings, done) =>
+      new PhenixUi({
+        tui,
+        theme,
+        initial,
+        snapshot,
+        load,
+        subscribe: (listener) => {
+          const unsubscribeEvents = runtime.events.subscribe(listener);
+          const unsubscribeDiagnostics = runtime.diagnostics.subscribe(listener);
+          return () => {
+            unsubscribeEvents();
+            unsubscribeDiagnostics();
+          };
+        },
+        onClose: () => done(undefined),
+      }),
+    {
+      overlay: true,
+      overlayOptions: {
+        width: "100%",
+        maxHeight: "100%",
+        anchor: "top-left",
+        margin: 0,
+      },
+    },
+  );
 }
 
 function registerMermaidTool(pi: ExtensionAPI): void {
