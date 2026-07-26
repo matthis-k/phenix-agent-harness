@@ -15,7 +15,17 @@ import type { RunSnapshot, SessionProfile } from "../domain/run/model.ts";
 import type { RunFact } from "../domain/run/observability.ts";
 import type { RunId } from "../domain/shared.ts";
 import { renderCatalogDefinition, renderRunTreeSequence } from "./mermaid-rendering.ts";
-import { color, heading, type ObservabilityTheme, state, strong } from "./observability-theme.ts";
+import {
+  color,
+  fact as factColor,
+  heading,
+  phase,
+  reliability,
+  type ObservabilityTheme,
+  state,
+  statusField as coloredStatusField,
+  strong,
+} from "./observability-theme.ts";
 
 const MOUSE_ENABLE = "\x1b[?1000h\x1b[?1006h";
 const MOUSE_DISABLE = "\x1b[?1000l\x1b[?1006l";
@@ -24,6 +34,13 @@ const VIEW_ORDER = ["status", "runs", "facts", "catalog"] as const;
 
 export type PhenixUiView = (typeof VIEW_ORDER)[number];
 type UiPane = 0 | 1 | 2;
+
+const PANE_LABELS: Readonly<Record<PhenixUiView, readonly string[]>> = {
+  status: ["Overview"],
+  runs: ["Run tree", "Sequence", "Inspector"],
+  facts: ["Fact list", "Detail"],
+  catalog: ["Definitions", "Preview"],
+};
 
 export interface PhenixUiTarget {
   readonly view: PhenixUiView;
@@ -145,8 +162,18 @@ export class PhenixUi implements Component {
   private readonly unsubscribe: () => void;
   private snapshot: PhenixUiSnapshot;
   private view: PhenixUiView;
-  private pane: UiPane = 0;
-  private filter = "";
+  private readonly panes: Record<PhenixUiView, UiPane> = {
+    status: 0,
+    runs: 0,
+    facts: 0,
+    catalog: 0,
+  };
+  private readonly filters: Record<PhenixUiView, string> = {
+    status: "",
+    runs: "",
+    facts: "",
+    catalog: "",
+  };
   private filtering = false;
   private help = false;
   private goPrefix = false;
@@ -158,6 +185,7 @@ export class PhenixUi implements Component {
   private selectedFact = 0;
   private selectedDefinition = 0;
   private readonly collapsedRuns = new Set<string>();
+  private readonly manuallyExpandedRuns = new Set<string>();
   private runHorizontalOffset = 0;
   private runVerticalOffset = 0;
   private runInspectorOffset = 0;
@@ -174,6 +202,22 @@ export class PhenixUi implements Component {
   };
   private readonly rowHits = new Map<number, RowHit>();
   private tabHits: readonly { readonly view: PhenixUiView; readonly start: number; readonly end: number }[] = [];
+
+  private get pane(): UiPane {
+    return this.panes[this.view];
+  }
+
+  private set pane(value: UiPane) {
+    this.panes[this.view] = value;
+  }
+
+  private get filter(): string {
+    return this.filters[this.view];
+  }
+
+  private set filter(value: string) {
+    this.filters[this.view] = value;
+  }
 
   constructor(options: PhenixUiOptions) {
     this.tui = options.tui;
@@ -287,17 +331,18 @@ export class PhenixUi implements Component {
     this.layout = {
       width,
       height,
-      bodyStart: 3,
-      bodyHeight: Math.max(1, height - 3),
+      bodyStart: 4,
+      bodyHeight: Math.max(1, height - 4),
       sidebarWidth: Math.min(44, Math.max(26, Math.floor(width * 0.34))),
     };
     this.rowHits.clear();
-    if (width < 42 || height < 8) return this.renderSmall(width, height);
+    if (width < 42 || height < 9) return this.renderSmall(width, height);
     const header = this.renderHeader(width);
     const rule = this.fitLine(color(this.theme, "dim", "─".repeat(width)), width);
+    const focus = this.renderFocusBar(width);
     const body = this.help ? this.renderHelp(width, this.layout.bodyHeight) : this.renderView();
     const footer = this.renderFooter(width);
-    return [header, rule, ...fitHeight(body, this.layout.bodyHeight, width), footer];
+    return [header, rule, focus, ...fitHeight(body, this.layout.bodyHeight, width), footer];
   }
 
   private renderHeader(width: number): string {
@@ -305,12 +350,13 @@ export class PhenixUi implements Component {
     let rawColumn = visibleWidth(prefix) + 1;
     const hits: Array<{ readonly view: PhenixUiView; readonly start: number; readonly end: number }> = [];
     const tabs = VIEW_ORDER.map((view, index) => {
-      const label = `[${index + 1} ${capitalize(view)}]`;
+      const active = this.view === view;
+      const label = `[${active ? "●" : " "} ${index + 1} ${capitalize(view)}]`;
       const start = rawColumn;
       const end = start + visibleWidth(label) - 1;
       hits.push({ view, start, end });
       rawColumn = end + 2;
-      return this.view === view ? heading(this.theme, label) : color(this.theme, "muted", label);
+      return active ? heading(this.theme, label) : color(this.theme, "dim", label);
     }).join(" ");
     this.tabHits = hits;
     const active = countActive(this.snapshot.tree.root);
@@ -326,13 +372,32 @@ export class PhenixUi implements Component {
     return this.fitLine(`${left}${" ".repeat(gap)}${right}`, width);
   }
 
+  private renderFocusBar(width: number): string {
+    const panes = PANE_LABELS[this.view];
+    const labels = panes
+      .map((label, index) =>
+        index === this.pane
+          ? heading(this.theme, `● ${label}`)
+          : color(this.theme, "dim", `○ ${label}`),
+      )
+      .join(color(this.theme, "dim", "  │  "));
+    return this.fitLine(` ${color(this.theme, "muted", `${capitalize(this.view)}:`)} ${labels}`, width);
+  }
+
+  private selectedRow(text: string, pane: UiPane): string {
+    return this.pane === pane
+      ? heading(this.theme, `▶ ${text}`)
+      : color(this.theme, "text", `▷ ${text}`);
+  }
+
   private renderFooter(width: number): string {
     const filter = this.filtering
       ? color(this.theme, "accent", ` filter: ${this.filter}▌`)
       : this.filter
         ? color(this.theme, "muted", ` filter:${this.filter}`)
         : "";
-    const pane = color(this.theme, "accent", `pane ${this.pane + 1}/${this.paneCount()}`);
+    const paneLabel = PANE_LABELS[this.view][this.pane] ?? `pane ${this.pane + 1}`;
+    const pane = heading(this.theme, `focus ${paneLabel}`);
     const hints = this.footerHints();
     return this.fitLine(
       `${color(this.theme, "muted", ` ${hints}`)}${filter}${color(this.theme, "dim", "  ·  ")}${pane}`,
@@ -361,9 +426,7 @@ export class PhenixUi implements Component {
   private renderStatus(): string[] {
     const width = this.layout.width;
     const facts = this.filteredFacts().slice(-5);
-    const runs = flattenRuns(this.snapshot.tree.root, new Set())
-      .filter((item) => item.node.run.id !== this.snapshot.tree.root.run.id)
-      .filter((item) => !TERMINAL_STATES.has(item.node.run.state));
+    const runs = this.statusRuns();
     const targets = [
       ...runs.map((item) => ({ kind: "run" as const, item })),
       ...facts.map((item) => ({ kind: "fact" as const, item })),
@@ -371,16 +434,16 @@ export class PhenixUi implements Component {
     this.selectedStatus = clamp(this.selectedStatus, 0, Math.max(0, targets.length - 1));
     const lines = [
       heading(this.theme, " Session"),
-      ` ${statusField("agent", this.snapshot.profile.agent)}  ${statusField("model", this.snapshot.profile.modelSet)}  ${statusField("difficulty", this.snapshot.profile.difficulty)}  ${statusField("integrations", this.snapshot.integrations)}`,
-      ` ${statusField("sequence", String(this.snapshot.sequence))}  ${statusField("diagnostics", `${this.snapshot.diagnostics.counts.warning} warning / ${this.snapshot.diagnostics.counts.error} error`)}`,
+      ` ${coloredStatusField(this.theme, "agent", this.snapshot.profile.agent, "text")}  ${coloredStatusField(this.theme, "model", this.snapshot.profile.modelSet, "accent")}  ${coloredStatusField(this.theme, "difficulty", this.snapshot.profile.difficulty, "warning")}  ${coloredStatusField(this.theme, "integrations", this.snapshot.integrations, "success")}`,
+      ` ${coloredStatusField(this.theme, "sequence", String(this.snapshot.sequence), "accent")}  ${coloredStatusField(this.theme, "diagnostics", `${this.snapshot.diagnostics.counts.warning} warning / ${this.snapshot.diagnostics.counts.error} error`, this.snapshot.diagnostics.counts.error > 0 ? "error" : this.snapshot.diagnostics.counts.warning > 0 ? "warning" : "success")}`,
       "",
       heading(this.theme, " Active execution"),
     ];
     if (runs.length === 0) lines.push(` ${color(this.theme, "success", "✓ idle")}`);
-    runs.slice(0, Math.max(3, Math.floor(this.layout.bodyHeight / 2) - 4)).forEach((run, index) => {
+    runs.forEach((run, index) => {
       const selected = index === this.selectedStatus;
-      const line = runSummary(run.node, run.depth);
-      lines.push(selected ? heading(this.theme, `→ ${line}`) : `  ${line}`);
+      const line = runSummary(this.theme, run.node, run.depth);
+      lines.push(selected ? this.selectedRow(line, 0) : `  ${line}`);
       this.rowHits.set(this.layout.bodyStart + lines.length - 1, {
         view: "status",
         index,
@@ -391,8 +454,8 @@ export class PhenixUi implements Component {
     facts.forEach((fact, index) => {
       const targetIndex = runs.length + index;
       const selected = targetIndex === this.selectedStatus;
-      const line = formatFactLine(fact);
-      lines.push(selected ? heading(this.theme, `→ ${line}`) : `  ${line}`);
+      const line = formatFactLine(this.theme, fact);
+      lines.push(selected ? this.selectedRow(line, 0) : `  ${line}`);
       this.rowHits.set(this.layout.bodyStart + lines.length - 1, {
         view: "status",
         index: targetIndex,
@@ -420,6 +483,9 @@ export class PhenixUi implements Component {
             : this.renderRunInspectorPane(selected, width, height);
       return content;
     }
+    if (width < 126 && this.pane === 2) {
+      return this.renderRunInspectorPane(selected, width, height);
+    }
     const treeWidth = Math.min(46, Math.max(30, Math.floor(width * 0.32)));
     const inspectorWidth = width >= 126 ? Math.min(42, Math.floor(width * 0.28)) : 0;
     const previewWidth = width - treeWidth - inspectorWidth - (inspectorWidth > 0 ? 2 : 1);
@@ -429,9 +495,17 @@ export class PhenixUi implements Component {
     return Array.from({ length: height }, (_, row) => {
       const left = tree[row] ?? " ".repeat(treeWidth);
       const middle = preview[row] ?? " ".repeat(previewWidth);
-      const firstRule = color(this.theme, this.pane === 0 ? "accent" : "dim", "│");
+      const firstRule = color(
+        this.theme,
+        this.pane === 0 || this.pane === 1 ? "accent" : "dim",
+        this.pane === 0 || this.pane === 1 ? "┃" : "│",
+      );
       if (inspectorWidth === 0) return `${left}${firstRule}${middle}`;
-      const secondRule = color(this.theme, this.pane === 2 ? "accent" : "dim", "│");
+      const secondRule = color(
+        this.theme,
+        this.pane === 1 || this.pane === 2 ? "accent" : "dim",
+        this.pane === 1 || this.pane === 2 ? "┃" : "│",
+      );
       return `${left}${firstRule}${middle}${secondRule}${inspector[row] ?? " ".repeat(inspectorWidth)}`;
     });
   }
@@ -456,9 +530,9 @@ export class PhenixUi implements Component {
       const model = run.resolvedModel
         ? ` ${color(this.theme, "muted", `${run.resolvedModel.concrete.model}/${run.resolvedModel.thinking}`)}`
         : "";
-      const text = `${"  ".repeat(item.depth)}${disclosure} ${symbol} ${definitionLabel(String(run.definitionId))} ${color(this.theme, "dim", run.state)}${model}`;
+      const text = `${"  ".repeat(item.depth)}${disclosure} ${symbol} ${strong(this.theme, definitionLabel(String(run.definitionId)))} ${state(this.theme, run.state, run.state)}${model}`;
       this.rowHits.set(this.layout.bodyStart + row, { view: "runs", index, pane: 0 });
-      return this.fitLine(selected ? heading(this.theme, `→ ${text}`) : `  ${text}`, width);
+      return this.fitLine(selected ? this.selectedRow(text, 0) : `  ${text}`, width);
     });
   }
 
@@ -494,7 +568,7 @@ export class PhenixUi implements Component {
       statusField("children", String(node.children.length)),
       "",
       heading(this.theme, " Latest facts"),
-      ...facts.map((item) => formatFactLine(item)),
+      ...facts.map((item) => formatFactLine(this.theme, item)),
     ];
     const maxY = Math.max(0, lines.length - height);
     this.runInspectorOffset = clamp(this.runInspectorOffset, 0, maxY);
@@ -529,8 +603,8 @@ export class PhenixUi implements Component {
       if (!item) return " ".repeat(width);
       const selected = index === this.selectedFact;
       this.rowHits.set(this.layout.bodyStart + row, { view: "facts", index, pane: 0 });
-      const line = formatFactLine(item);
-      return this.fitLine(selected ? heading(this.theme, `→ ${line}`) : `  ${line}`, width);
+      const line = formatFactLine(this.theme, item);
+      return this.fitLine(selected ? this.selectedRow(line, 0) : `  ${line}`, width);
     });
   }
 
@@ -588,10 +662,13 @@ export class PhenixUi implements Component {
       const item = definitions[index];
       if (!item) return " ".repeat(width);
       const selected = index === this.selectedDefinition;
-      const kind = item.kind === "workflow" ? "W" : "A";
-      const text = `${kind} ${definitionLabel(String(item.id))}`;
+      const kind =
+        item.kind === "workflow"
+          ? color(this.theme, "accent", "W")
+          : color(this.theme, "success", "A");
+      const text = `${kind} ${strong(this.theme, definitionLabel(String(item.id)))}`;
       this.rowHits.set(this.layout.bodyStart + row, { view: "catalog", index, pane: 0 });
-      return this.fitLine(selected ? heading(this.theme, `→ ${text}`) : `  ${text}`, width);
+      return this.fitLine(selected ? this.selectedRow(text, 0) : `  ${text}`, width);
     });
   }
 
@@ -802,9 +879,17 @@ export class PhenixUi implements Component {
 
   private handleMouseWheel(direction: number, x: number): void {
     if (this.view === "runs" && this.layout.width >= 82) {
-      this.pane = x <= this.layout.sidebarWidth ? 0 : this.pane;
-    } else if ((this.view === "facts" || this.view === "catalog") && x <= this.layout.sidebarWidth) {
-      this.pane = 0;
+      const treeWidth = Math.min(46, Math.max(30, Math.floor(this.layout.width * 0.32)));
+      if (x <= treeWidth) this.pane = 0;
+      else if (this.layout.width >= 126) {
+        const inspectorWidth = Math.min(42, Math.floor(this.layout.width * 0.28));
+        this.pane = x > this.layout.width - inspectorWidth ? 2 : 1;
+      } else this.pane = 1;
+    } else if (this.view === "facts" && this.layout.width >= 76) {
+      const listWidth = Math.min(68, Math.max(38, Math.floor(this.layout.width * 0.55)));
+      this.pane = x <= listWidth ? 0 : 1;
+    } else if (this.view === "catalog" && this.layout.width >= 76) {
+      this.pane = x <= this.layout.sidebarWidth ? 0 : 1;
     }
     const data = direction < 0 ? "\x1b[A" : "\x1b[B";
     switch (this.view) {
@@ -823,10 +908,15 @@ export class PhenixUi implements Component {
     }
   }
 
-  private statusTargets(): readonly ({ readonly kind: "run"; readonly item: FlatRun } | { readonly kind: "fact"; readonly item: RunFact })[] {
-    const runs = flattenRuns(this.snapshot.tree.root, new Set())
+  private statusRuns(): readonly FlatRun[] {
+    return flattenRuns(this.snapshot.tree.root, new Set())
       .filter((item) => item.node.run.id !== this.snapshot.tree.root.run.id)
-      .filter((item) => !TERMINAL_STATES.has(item.node.run.state));
+      .filter((item) => !TERMINAL_STATES.has(item.node.run.state))
+      .slice(0, Math.max(3, Math.floor(this.layout.bodyHeight / 2) - 4));
+  }
+
+  private statusTargets(): readonly ({ readonly kind: "run"; readonly item: FlatRun } | { readonly kind: "fact"; readonly item: RunFact })[] {
+    const runs = this.statusRuns();
     const facts = this.filteredFacts().slice(-5);
     return [
       ...runs.map((item) => ({ kind: "run" as const, item })),
@@ -853,7 +943,6 @@ export class PhenixUi implements Component {
 
   private switchView(view: PhenixUiView): void {
     this.view = view;
-    this.pane = 0;
     this.goPrefix = false;
     this.requestRender();
   }
@@ -914,7 +1003,9 @@ export class PhenixUi implements Component {
     if (this.previewCache?.key === key) return this.previewCache.lines;
     let lines: readonly string[];
     try {
-      lines = renderRunTreeSequence({ root: node }, { expanded: true }).split("\n");
+      const root =
+        node.run.kind === "root" ? node : { ...this.snapshot.tree.root, children: [node] };
+      lines = renderRunTreeSequence({ root }, { expanded: true }).split("\n");
     } catch (error) {
       lines = [`Unable to render run sequence: ${errorMessage(error)}`];
     }
@@ -937,8 +1028,13 @@ export class PhenixUi implements Component {
   }
 
   private initializeCollapsedRuns(node: RunTreeNode): void {
-    if (node.run.kind === "workflow" && TERMINAL_STATES.has(node.run.state)) {
-      this.collapsedRuns.add(String(node.run.id));
+    const id = String(node.run.id);
+    if (
+      node.run.kind === "workflow" &&
+      TERMINAL_STATES.has(node.run.state) &&
+      !this.manuallyExpandedRuns.has(id)
+    ) {
+      this.collapsedRuns.add(id);
     }
     node.children.forEach((child) => this.initializeCollapsedRuns(child));
   }
@@ -985,18 +1081,34 @@ export class PhenixUi implements Component {
   private toggleRun(node: RunTreeNode): void {
     if (node.children.length === 0) return;
     const id = String(node.run.id);
-    if (this.collapsedRuns.has(id)) this.collapsedRuns.delete(id);
-    else this.collapsedRuns.add(id);
+    if (this.collapsedRuns.has(id)) {
+      this.collapsedRuns.delete(id);
+      this.manuallyExpandedRuns.add(id);
+    } else {
+      this.collapsedRuns.add(id);
+      this.manuallyExpandedRuns.delete(id);
+    }
   }
 
   private resetSelectionForFilter(): void {
-    this.selectedStatus = 0;
-    this.selectedFact = 0;
-    this.selectedDefinition = 0;
-    this.runHorizontalOffset = 0;
-    this.runVerticalOffset = 0;
-    this.catalogHorizontalOffset = 0;
-    this.catalogVerticalOffset = 0;
+    switch (this.view) {
+      case "status":
+        this.selectedStatus = 0;
+        break;
+      case "runs":
+        this.runHorizontalOffset = 0;
+        this.runVerticalOffset = 0;
+        break;
+      case "facts":
+        this.selectedFact = 0;
+        this.factDetailOffset = 0;
+        break;
+      case "catalog":
+        this.selectedDefinition = 0;
+        this.catalogHorizontalOffset = 0;
+        this.catalogVerticalOffset = 0;
+        break;
+    }
     this.previewCache = undefined;
   }
 
@@ -1010,7 +1122,10 @@ export class PhenixUi implements Component {
     try {
       do {
         this.pendingRefresh = false;
-        this.snapshot = await this.load();
+        const snapshot = await this.load();
+        if (this.disposed) return;
+        this.snapshot = snapshot;
+        this.initializeCollapsedRuns(snapshot.tree.root);
         this.previewCache = undefined;
         this.requestRender();
       } while (this.pendingRefresh && !this.disposed);
@@ -1057,17 +1172,19 @@ function countActive(node: RunTreeNode): number {
   );
 }
 
-function runSummary(node: RunTreeNode, depth: number): string {
+function runSummary(theme: ObservabilityTheme, node: RunTreeNode, depth: number): string {
   const run = node.run;
   const model = run.resolvedModel
-    ? ` · ${run.resolvedModel.concrete.model}/${run.resolvedModel.thinking}`
+    ? ` ${color(theme, "dim", "·")} ${color(theme, "muted", `${run.resolvedModel.concrete.model}/${run.resolvedModel.thinking}`)}`
     : "";
-  const activity = node.activity ? ` · ${node.activity.phase} ${truncate(node.activity.summary, 48)}` : "";
-  return `${"  ".repeat(depth)}${runStateSymbol(run.state)} ${definitionLabel(String(run.definitionId))} [${run.state}]${model}${activity}`;
+  const activity = node.activity
+    ? ` ${color(theme, "dim", "·")} ${phase(theme, node.activity.phase, node.activity.phase)} ${color(theme, "text", truncate(node.activity.summary, 48))}`
+    : "";
+  return `${"  ".repeat(depth)}${state(theme, run.state, runStateSymbol(run.state))} ${strong(theme, definitionLabel(String(run.definitionId)))} ${state(theme, run.state, `[${run.state}]`)}${model}${activity}`;
 }
 
-function formatFactLine(item: RunFact): string {
-  return `${compactTimestamp(item.timestamp)} ${shortRunId(String(item.runId))} · ${item.kind} · ${truncate(item.summary, 96)}`;
+function formatFactLine(theme: ObservabilityTheme, item: RunFact): string {
+  return `${color(theme, "dim", compactTimestamp(item.timestamp))} ${color(theme, "muted", shortRunId(String(item.runId)))} ${color(theme, "dim", "·")} ${factColor(theme, item.kind, item.summary, item.kind)} ${color(theme, "dim", "·")} ${factColor(theme, item.kind, item.summary, truncate(item.summary, 84))} ${reliability(theme, item.reliability, `[${item.reliability}]`)}`;
 }
 
 function statusField(label: string, value: string): string {

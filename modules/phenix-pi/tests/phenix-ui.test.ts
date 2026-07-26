@@ -23,6 +23,20 @@ const theme = {
   bold: (text: string) => text,
 } as unknown as ObservabilityTheme;
 
+const ANSI_TONES: Readonly<Record<string, string>> = {
+  accent: "35",
+  success: "32",
+  error: "31",
+  warning: "33",
+  muted: "90",
+  dim: "2",
+  text: "37",
+};
+const ansiTheme = {
+  fg: (tone: string, text: string) => `\x1b[${ANSI_TONES[tone] ?? "37"}m${text}\x1b[0m`,
+  bold: (text: string) => `\x1b[1m${text}\x1b[22m`,
+} as unknown as ObservabilityTheme;
+
 test("parses Phenix UI view targets", () => {
   assert.deepEqual(parsePhenixUiTarget(""), { view: "status" });
   assert.deepEqual(parsePhenixUiTarget("runs run-123"), {
@@ -72,19 +86,45 @@ test("keyboard and mouse switch unified UI views", () => {
   const ui = createUi(tui, { view: "status" });
 
   ui.handleInput("4");
-  assert.match(ui.render(100)[0] ?? "", /\[4 Catalog\]/);
+  assert.match(ui.render(100)[0] ?? "", /4 Catalog/);
   assert.match(ui.render(100).join("\n"), /workflow/);
 
   ui.handleInput("\x1b[<0;20;1M");
-  assert.match(ui.render(100)[0] ?? "", /\[2 Runs\]/);
+  assert.match(ui.render(100)[0] ?? "", /2 Runs/);
   assert.ok(tui.renderRequests > 0);
 });
 
-function createUi(tui: FakeTui, initial: { readonly view: "status" | "runs" | "facts" | "catalog"; readonly selector?: string }): PhenixUi {
+test("colors the active tab, focused pane, and semantic catalog and fact state", () => {
+  const tui = fakeTui(18);
+  const ui = createUi(tui, { view: "catalog", selector: "qa" }, ansiTheme);
+
+  let lines = ui.render(100);
+  assert.ok(lines[0]?.includes("\x1b[35m\x1b[1m[● 4 Catalog]"));
+  assert.ok(lines[2]?.includes("\x1b[35m\x1b[1m● Definitions"));
+  assert.ok(lines.join("\n").includes("\x1b[35mW\x1b[0m"));
+
+  ui.handleInput("\t");
+  lines = ui.render(100);
+  assert.ok(lines[2]?.includes("\x1b[35m\x1b[1m● Preview"));
+  assert.ok(lines.join("\n").includes("\x1b[37m▷ "));
+
+  const facts = createUi(fakeTui(18), { view: "facts" }, ansiTheme).render(100).join("\n");
+  assert.ok(facts.includes("\x1b[35mrun-started\x1b[0m"));
+  assert.ok(facts.includes("\x1b[32m[observed]\x1b[0m"));
+});
+
+function createUi(
+  tui: FakeTui,
+  initial: {
+    readonly view: "status" | "runs" | "facts" | "catalog";
+    readonly selector?: string;
+  },
+  uiTheme: ObservabilityTheme = theme,
+): PhenixUi {
   const snapshot = fixtureSnapshot();
   return new PhenixUi({
     tui,
-    theme,
+    theme: uiTheme,
     initial,
     snapshot,
     load: async () => snapshot,
