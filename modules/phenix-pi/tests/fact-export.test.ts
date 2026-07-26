@@ -13,8 +13,7 @@ import {
 } from "../extension/fact-export.ts";
 
 test("fact export command parsing preserves commands and file names", () => {
-  assert.deepEqual(parseFactsCommand(""), { kind: "live" });
-  assert.deepEqual(parseFactsCommand("off"), { kind: "off" });
+  assert.deepEqual(parseFactsCommand(""), { kind: "once" });
   assert.deepEqual(parseFactsCommand("--once"), { kind: "once" });
   assert.deepEqual(parseFactsCommand("--json"), { kind: "json" });
   assert.deepEqual(parseFactsCommand("--clipboard"), {
@@ -29,6 +28,7 @@ test("fact export command parsing preserves commands and file names", () => {
     kind: "file",
     file: "reports/fact history.txt",
   });
+  assert.equal(parseFactsCommand("off"), undefined);
   assert.equal(parseFactsCommand("--file"), undefined);
   assert.equal(parseFactsCommand("--unknown"), undefined);
 });
