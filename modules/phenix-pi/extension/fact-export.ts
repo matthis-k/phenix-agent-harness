@@ -5,8 +5,6 @@ import path from "node:path";
 export const DEFAULT_CLIPBOARD_COMMAND = "wl-copy";
 
 export type FactsCommand =
-  | { readonly kind: "live" }
-  | { readonly kind: "off" }
   | { readonly kind: "once" }
   | { readonly kind: "json" }
   | { readonly kind: "clipboard"; readonly command: string }
@@ -19,9 +17,7 @@ interface ProcessInvocation {
 
 export function parseFactsCommand(raw: string): FactsCommand | undefined {
   const value = raw.trim();
-  if (!value) return { kind: "live" };
-  if (value === "off") return { kind: "off" };
-  if (value === "--once") return { kind: "once" };
+  if (!value || value === "--once") return { kind: "once" };
   if (value === "--json") return { kind: "json" };
 
   const clipboard = /^--clipboard(?:\s+([\s\S]+))?$/.exec(value);
