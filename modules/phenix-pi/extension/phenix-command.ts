@@ -22,6 +22,7 @@ export const PHENIX_HEALTH_USAGE =
   "/phenix health [integrations|models|definitions|runtime|storage] [--json]";
 export const PHENIX_FACTS_USAGE = "/phenix facts [--json|--clipboard [command]|--file <file>]";
 
+/** Resolve blank input to the UI while preserving explicit quick-output subcommands. */
 export function parsePhenixInvocation(args: string): PhenixInvocation {
   const trimmed = args.trim();
   const separator = trimmed.search(/\s/);
