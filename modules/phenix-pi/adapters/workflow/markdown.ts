@@ -155,7 +155,9 @@ function compileState(
       const declaredOutput = bindings.resolveSchema(read("output-schema"));
       const isStock = invoked.kind === "agent" && invoked.sessionMode === "stock";
       if (!isStock && declaredOutput.id !== invoked.output.id) {
-        throw new Error(`${owner} output schema ${declaredOutput.id} does not match ${invoked.output.id}`);
+        throw new Error(
+          `${owner} output schema ${declaredOutput.id} does not match ${invoked.output.id}`,
+        );
       }
       if (isStock && declaredOutput.id === invoked.output.id) {
         throw new Error(`${owner} must bind a concrete output schema for ${invoked.id}`);
