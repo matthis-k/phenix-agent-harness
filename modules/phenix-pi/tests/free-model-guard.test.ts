@@ -117,7 +117,11 @@ test("free-model command guard recognizes destructive local git operations", () 
     );
   }
 
-  for (const command of ["git tag local-checkpoint", "git revert HEAD", "git branch -d merged-work"]) {
+  for (const command of [
+    "git tag local-checkpoint",
+    "git revert HEAD",
+    "git branch -d merged-work",
+  ]) {
     const assessment = assessRootMutation({
       toolName: "bash",
       toolInput: { command },
