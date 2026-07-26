@@ -1,6 +1,6 @@
 import { JsonlRunLedger } from "../adapters/persistence/jsonl-run-ledger.ts";
-import { OrderedDomainEventBus } from "../application/domain-event-bus.ts";
-import { DynamicWorkflowExecutionService } from "../application/dynamic-workflow-execution.ts";
+import type { OrderedDomainEventBus } from "../application/domain-event-bus.ts";
+import type { DynamicWorkflowExecutionService } from "../application/dynamic-workflow-execution.ts";
 import type {
   AttentionFacade,
   CatalogFacade,
@@ -59,9 +59,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     infrastructure,
     definitionRuntime,
     currentProfile: async () =>
-      activeRootRunId
-        ? infrastructure.profiles.current(activeRootRunId)
-        : DEFAULT_SESSION_PROFILE,
+      activeRootRunId ? infrastructure.profiles.current(activeRootRunId) : DEFAULT_SESSION_PROFILE,
     notifyRoot: (message) => rootNotifier?.(message),
   });
   const unsubscribePiBridge = createPiEventBridge(host.piEventBus, infrastructure.events);
