@@ -8,6 +8,7 @@ output: outcome.base.v1
 model: session
 thinking: route
 persistence: memory
+prompt-mode: append-default
 ```
 
 ## Tools
