@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -20,7 +20,22 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
+          ref: feat/unified-phenix-ui
+      - name: Apply unified UI integration patch
+        shell: bash
+        run: |
+          python .github/scripts/wire-unified-ui.py
+          rm -f .github/scripts/wire-unified-ui.py
+          rm -f .github/workflows/wire-unified-phenix-ui.yml
+          rm -f .github/unified-ui-wire-trigger
+          git checkout origin/main -- .github/workflows/ci.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Wire unified Phenix UI command routing [skip ci]"
+          git push origin HEAD:feat/unified-phenix-ui
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
