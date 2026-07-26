@@ -10,6 +10,7 @@ import {
   PHENIX_SUBCOMMANDS,
   PHENIX_UI_USAGE,
   PHENIX_USAGE,
+  parsePhenixInvocation,
 } from "../extension/phenix-command.ts";
 
 test("phenix command completion lists and filters subcommands", () => {
@@ -34,7 +35,7 @@ test("phenix command completion lists and filters subcommands", () => {
   assert.equal(completePhenixSubcommands("r"), null);
   assert.equal(completePhenixSubcommands("unknown"), null);
   assert.equal(completePhenixSubcommands("status extra"), null);
-  assert.equal(PHENIX_USAGE, "/phenix ui|status|health|logs|facts|tasks|integrations");
+  assert.equal(PHENIX_USAGE, "/phenix [ui|status|health|logs|facts|tasks|integrations]");
   assert.equal(PHENIX_UI_USAGE, "/phenix ui [status|runs [run-id]|facts|catalog [definition-id]]");
   assert.equal(PHENIX_STATUS_USAGE, "/phenix status [--json|--expanded]");
   assert.equal(
@@ -42,6 +43,27 @@ test("phenix command completion lists and filters subcommands", () => {
     "/phenix health [integrations|models|definitions|runtime|storage] [--json]",
   );
   assert.equal(PHENIX_FACTS_USAGE, "/phenix facts [--json|--clipboard [command]|--file <file>]");
+});
+
+test("bare phenix resolves to the UI while subcommands remain explicit", () => {
+  assert.deepEqual(parsePhenixInvocation(""), {
+    action: "ui",
+    rawOptions: "",
+    options: [],
+    implicitUi: true,
+  });
+  assert.deepEqual(parsePhenixInvocation(" status --JSON --Expanded "), {
+    action: "status",
+    rawOptions: "--JSON --Expanded",
+    options: ["--json", "--expanded"],
+    implicitUi: false,
+  });
+  assert.deepEqual(parsePhenixInvocation("ui runs run-123"), {
+    action: "ui",
+    rawOptions: "runs run-123",
+    options: ["runs", "run-123"],
+    implicitUi: false,
+  });
 });
 
 test("integration reports are compact in status and detailed on demand", () => {

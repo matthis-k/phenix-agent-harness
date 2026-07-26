@@ -2,10 +2,12 @@ name: CI
 
 on:
   pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -30,148 +32,7 @@ jobs:
         with: { name: devenv }
       - name: Install devenv
         run: nix profile add nixpkgs#devenv
-      - name: Apply default UI command behavior
-        shell: bash
-        run: |
-          python <<'PY'
-          from pathlib import Path
-
-          command_path = Path("modules/phenix-pi/extension/phenix-command.ts")
-          command_path.write_text('''export const PHENIX_SUBCOMMANDS = [
-            { value: "ui", label: "ui — Open the full-screen Status, Runs, Facts, and Catalog interface" },
-            { value: "status", label: "status — Print a compact status snapshot" },
-            { value: "health", label: "health — Inspect runtime and configuration health" },
-            { value: "logs", label: "logs — Inspect or export structured diagnostics" },
-            { value: "facts", label: "facts — Print or export the complete fact history" },
-            { value: "tasks", label: "tasks — Show the task projection" },
-            { value: "integrations", label: "integrations — Show integration health" },
-          ] as const;
-
-          export interface PhenixInvocation {
-            readonly action: string;
-            readonly rawOptions: string;
-            readonly options: readonly string[];
-            readonly implicitUi: boolean;
-          }
-
-          export const PHENIX_USAGE = `/phenix [${PHENIX_SUBCOMMANDS.map((item) => item.value).join("|")}]`;
-          export const PHENIX_UI_USAGE = "/phenix ui [status|runs [run-id]|facts|catalog [definition-id]]";
-          export const PHENIX_STATUS_USAGE = "/phenix status [--json|--expanded]";
-          export const PHENIX_HEALTH_USAGE =
-            "/phenix health [integrations|models|definitions|runtime|storage] [--json]";
-          export const PHENIX_FACTS_USAGE = "/phenix facts [--json|--clipboard [command]|--file <file>]";
-
-          export function parsePhenixInvocation(args: string): PhenixInvocation {
-            const trimmed = args.trim();
-            const separator = trimmed.search(/\\s/);
-            const actionToken = separator === -1 ? trimmed : trimmed.slice(0, separator);
-            const rawOptions = separator === -1 ? "" : trimmed.slice(separator).trim();
-            return {
-              action: (actionToken || "ui").toLowerCase(),
-              rawOptions,
-              options: rawOptions
-                .split(/\\s+/)
-                .filter(Boolean)
-                .map((value) => value.toLowerCase()),
-              implicitUi: actionToken.length === 0,
-            };
-          }
-
-          export function completePhenixSubcommands(prefix: string) {
-            const normalized = prefix.trimStart().toLowerCase();
-            if (/\\s/.test(normalized)) return null;
-
-            const matches = PHENIX_SUBCOMMANDS.filter((item) => item.value.startsWith(normalized));
-            return matches.length > 0
-              ? matches.map((item) => ({ value: item.value, label: item.label }))
-              : null;
-          }
-          ''')
-
-          root_path = Path("modules/phenix-pi/extension/root-extension.ts")
-          root = root_path.read_text()
-          root = root.replace(
-              '  completePhenixSubcommands,\n  PHENIX_FACTS_USAGE,',
-              '  completePhenixSubcommands,\n  parsePhenixInvocation,\n  PHENIX_FACTS_USAGE,',
-          )
-          root = root.replace(
-              '    description: `Inspect Phenix; usage: ${PHENIX_USAGE}`,',
-              '    description: `Open the Phenix UI or inspect and export data; usage: ${PHENIX_USAGE}`,',
-          )
-          old = '''      const trimmed = args.trim();
-                const separator = trimmed.search(/\\s/);
-                const actionToken = separator === -1 ? trimmed : trimmed.slice(0, separator);
-                const rawOptions = separator === -1 ? "" : trimmed.slice(separator).trim();
-                const action = (actionToken || "status").toLowerCase();
-                const options = rawOptions
-                  .split(/\\s+/)
-                  .filter(Boolean)
-                  .map((value) => value.toLowerCase());'''
-          new = '''      const invocation = parsePhenixInvocation(args);
-                const { action, rawOptions, options } = invocation;'''
-          if old not in root:
-              raise SystemExit("root command parsing block not found")
-          root = root.replace(old, new)
-          root = root.replace(
-              '          ctx.ui.notify("/phenix ui requires interactive TUI mode.", "warning");',
-              '''          ctx.ui.notify(
-                    invocation.implicitUi
-                      ? "/phenix requires interactive TUI mode; use an explicit subcommand for quick output."
-                      : "/phenix ui requires interactive TUI mode.",
-                    "warning",
-                  );''',
-          )
-          root_path.write_text(root)
-
-          test_path = Path("modules/phenix-pi/tests/phenix-command.test.ts")
-          tests = test_path.read_text()
-          tests = tests.replace(
-              '  completePhenixSubcommands,\n  PHENIX_FACTS_USAGE,',
-              '  completePhenixSubcommands,\n  parsePhenixInvocation,\n  PHENIX_FACTS_USAGE,',
-          )
-          tests = tests.replace(
-              '  assert.equal(PHENIX_USAGE, "/phenix ui|status|health|logs|facts|tasks|integrations");',
-              '  assert.equal(PHENIX_USAGE, "/phenix [ui|status|health|logs|facts|tasks|integrations]");',
-          )
-          marker = 'test("integration reports are compact in status and detailed on demand", () => {'
-          addition = '''test("bare phenix resolves to the UI while subcommands remain explicit", () => {
-            assert.deepEqual(parsePhenixInvocation(""), {
-              action: "ui",
-              rawOptions: "",
-              options: [],
-              implicitUi: true,
-            });
-            assert.deepEqual(parsePhenixInvocation(" status --JSON --Expanded "), {
-              action: "status",
-              rawOptions: "--JSON --Expanded",
-              options: ["--json", "--expanded"],
-              implicitUi: false,
-            });
-            assert.deepEqual(parsePhenixInvocation("ui runs run-123"), {
-              action: "ui",
-              rawOptions: "runs run-123",
-              options: ["runs", "run-123"],
-              implicitUi: false,
-            });
-          });
-
-          '''
-          if marker not in tests:
-              raise SystemExit("test insertion marker not found")
-          tests = tests.replace(marker, addition + marker)
-          test_path.write_text(tests)
-          PY
-      - name: Restore canonical CI workflow
-        run: git show origin/main:.github/workflows/ci.yml > .github/workflows/ci.yml
-      - name: Apply canonical maintenance fixes
-        shell: bash
-        run: |
-          set +e
-          devenv tasks run maintenance:fix > maintenance-fix.log 2>&1
-          status=$?
-          tail -n 320 maintenance-fix.log
-          exit "$status"
-      - name: Run canonical validation
+      - name: Run repository maintenance
         shell: bash
         run: |
           set +e
@@ -179,21 +40,10 @@ jobs:
           status=$?
           tail -n 320 devenv-test.log
           exit "$status"
-      - name: Commit implementation
-        shell: bash
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add .github/workflows/ci.yml modules/phenix-pi/extension/root-extension.ts modules/phenix-pi/extension/phenix-command.ts modules/phenix-pi/tests/phenix-command.test.ts
-          git diff --cached --check
-          git commit -m "Open Phenix UI by default"
-          git push origin HEAD:fix/default-phenix-ui
-      - name: Upload diagnostics
+      - name: Upload devenv diagnostics
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: default-phenix-ui-diagnostics
-          path: |
-            maintenance-fix.log
-            devenv-test.log
-          if-no-files-found: ignore
+          name: devenv-test-log
+          path: devenv-test.log
+          if-no-files-found: error

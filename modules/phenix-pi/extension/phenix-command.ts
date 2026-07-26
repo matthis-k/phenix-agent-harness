@@ -8,12 +8,35 @@ export const PHENIX_SUBCOMMANDS = [
   { value: "integrations", label: "integrations — Show integration health" },
 ] as const;
 
-export const PHENIX_USAGE = `/phenix ${PHENIX_SUBCOMMANDS.map((item) => item.value).join("|")}`;
+export interface PhenixInvocation {
+  readonly action: string;
+  readonly rawOptions: string;
+  readonly options: readonly string[];
+  readonly implicitUi: boolean;
+}
+
+export const PHENIX_USAGE = `/phenix [${PHENIX_SUBCOMMANDS.map((item) => item.value).join("|")}]`;
 export const PHENIX_UI_USAGE = "/phenix ui [status|runs [run-id]|facts|catalog [definition-id]]";
 export const PHENIX_STATUS_USAGE = "/phenix status [--json|--expanded]";
 export const PHENIX_HEALTH_USAGE =
   "/phenix health [integrations|models|definitions|runtime|storage] [--json]";
 export const PHENIX_FACTS_USAGE = "/phenix facts [--json|--clipboard [command]|--file <file>]";
+
+export function parsePhenixInvocation(args: string): PhenixInvocation {
+  const trimmed = args.trim();
+  const separator = trimmed.search(/\s/);
+  const actionToken = separator === -1 ? trimmed : trimmed.slice(0, separator);
+  const rawOptions = separator === -1 ? "" : trimmed.slice(separator).trim();
+  return {
+    action: (actionToken || "ui").toLowerCase(),
+    rawOptions,
+    options: rawOptions
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((value) => value.toLowerCase()),
+    implicitUi: actionToken.length === 0,
+  };
+}
 
 export function completePhenixSubcommands(prefix: string) {
   const normalized = prefix.trimStart().toLowerCase();

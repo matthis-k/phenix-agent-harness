@@ -43,6 +43,7 @@ import {
   PHENIX_STATUS_USAGE,
   PHENIX_UI_USAGE,
   PHENIX_USAGE,
+  parsePhenixInvocation,
 } from "./phenix-command.ts";
 import {
   loadPhenixUiSnapshot,
@@ -327,7 +328,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
   });
 
   pi.registerCommand("phenix", {
-    description: `Inspect Phenix; usage: ${PHENIX_USAGE}`,
+    description: `Open the Phenix UI or inspect and export data; usage: ${PHENIX_USAGE}`,
     getArgumentCompletions: completePhenixSubcommands,
     handler: async (args, ctx) => {
       const activeRuntime = runtime;
@@ -336,15 +337,8 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
         ctx.ui.notify("Phenix runtime is not initialized.", "warning");
         return;
       }
-      const trimmed = args.trim();
-      const separator = trimmed.search(/\s/);
-      const actionToken = separator === -1 ? trimmed : trimmed.slice(0, separator);
-      const rawOptions = separator === -1 ? "" : trimmed.slice(separator).trim();
-      const action = (actionToken || "status").toLowerCase();
-      const options = rawOptions
-        .split(/\s+/)
-        .filter(Boolean)
-        .map((value) => value.toLowerCase());
+      const invocation = parsePhenixInvocation(args);
+      const { action, rawOptions, options } = invocation;
       if (action === "health") {
         const command = parsePhenixHealthCommand(rawOptions);
         if (!command) {
@@ -374,7 +368,12 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
           return;
         }
         if (ctx.mode !== "tui") {
-          ctx.ui.notify("/phenix ui requires interactive TUI mode.", "warning");
+          ctx.ui.notify(
+            invocation.implicitUi
+              ? "/phenix requires interactive TUI mode; use an explicit subcommand for quick output."
+              : "/phenix ui requires interactive TUI mode.",
+            "warning",
+          );
           return;
         }
         await openPhenixUi(
