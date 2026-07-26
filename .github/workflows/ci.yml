@@ -35,7 +35,61 @@ jobs:
       - name: Install devenv
         run: nix profile add nixpkgs#devenv
       - name: Apply theme-aware Mermaid integration
-        run: python .github/scripts/apply-mermaid-theme.py
+        shell: bash
+        run: |
+          python .github/scripts/apply-mermaid-theme.py
+          python - <<'PY'
+          from pathlib import Path
+
+          helper = Path("modules/phenix-pi/extension/mermaid-theme.ts")
+          text = helper.read_text()
+          old = r'''export function ansiForegroundToHex(ansi: string): string | undefined {
+            const truecolor = /\x1b\[38;2;(\d+);(\d+);(\d+)m/.exec(ansi);
+            if (truecolor) {
+              const channels = truecolor.slice(1).map(Number);
+              if (channels.every((channel) => Number.isInteger(channel) && channel >= 0 && channel <= 255)) {
+                return rgbHex(channels[0], channels[1], channels[2]);
+              }
+            }
+            const indexed = /\x1b\[38;5;(\d+)m/.exec(ansi);
+            if (!indexed) return undefined;
+            const index = Number(indexed[1]);
+            if (!Number.isInteger(index) || index < 0 || index > 255) return undefined;
+            return ansi256Hex(index);
+          }'''
+          new = r'''export function ansiForegroundToHex(ansi: string): string | undefined {
+            const truecolorPrefix = "\x1b[38;2;";
+            if (ansi.startsWith(truecolorPrefix) && ansi.endsWith("m")) {
+              const channels = ansi.slice(truecolorPrefix.length, -1).split(";").map(Number);
+              if (
+                channels.length === 3 &&
+                channels.every(
+                  (channel) => Number.isInteger(channel) && channel >= 0 && channel <= 255,
+                )
+              ) {
+                return rgbHex(channels[0], channels[1], channels[2]);
+              }
+            }
+            const indexedPrefix = "\x1b[38;5;";
+            if (!ansi.startsWith(indexedPrefix) || !ansi.endsWith("m")) return undefined;
+            const index = Number(ansi.slice(indexedPrefix.length, -1));
+            if (!Number.isInteger(index) || index < 0 || index > 255) return undefined;
+            return ansi256Hex(index);
+          }'''
+          if text.count(old) != 1:
+              raise RuntimeError("ANSI parser patch did not match exactly once")
+          helper.write_text(text.replace(old, new, 1))
+
+          test_file = Path("modules/phenix-pi/tests/mermaid-theme.test.ts")
+          test_text = test_file.read_text()
+          old_test = r'''  assert.match(rendered, /\x1b\[38;2;/);
+            assert.match(rendered, /\x1b\[38;2;205;214;244m/);'''
+          new_test = r'''  assert.ok(rendered.includes("\x1b[38;2;"));
+            assert.ok(rendered.includes("\x1b[38;2;205;214;244m"));'''
+          if test_text.count(old_test) != 1:
+              raise RuntimeError("ANSI assertion patch did not match exactly once")
+          test_file.write_text(test_text.replace(old_test, new_test, 1))
+          PY
       - name: Remove temporary automation
         run: |
           rm .github/scripts/apply-mermaid-theme.py
