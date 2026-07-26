@@ -1,0 +1,63 @@
+name: Apply unified UI fixes
+
+on:
+  push:
+    branches: [feat/unified-phenix-ui]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fix-unified-ui
+  cancel-in-progress: true
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: feat/unified-phenix-ui
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+      - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
+        with: { name: devenv }
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
+      - name: Apply non-format lint fixes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("modules/phenix-pi/extension/phenix-ui.ts")
+          text = path.read_text()
+          replacements = {
+              '  const match = /^\\x1b\\[<(\\d+);(\\d+);(\\d+)([Mm])$/.exec(data);\n': '''  if (!data.startsWith("\\x1b[<")) return undefined;\n  const match = /^(\\d+);(\\d+);(\\d+)([Mm])$/.exec(data.slice(3));\n''',
+              '    const index = this.filteredFacts().findIndex((item) => item === target.item);\n': '    const index = this.filteredFacts().indexOf(target.item);\n',
+              '    node.children.forEach((child) => this.initializeCollapsedRuns(child));\n': '''    node.children.forEach((child) => {\n      this.initializeCollapsedRuns(child);\n    });\n''',
+              '  node.children.forEach((child) => flattenRuns(child, collapsed, depth + 1, target));\n': '''  node.children.forEach((child) => {\n    flattenRuns(child, collapsed, depth + 1, target);\n  });\n''',
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f"missing expected source: {old!r}")
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+      - name: Apply canonical formatting fixes
+        run: devenv tasks run maintenance:fix
+      - name: Commit clean result
+        shell: bash
+        run: |
+          rm -f .github/workflows/fix-unified-ui.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --stat
+          git commit -m "Fix unified UI maintenance findings"
+          git push origin HEAD:feat/unified-phenix-ui
