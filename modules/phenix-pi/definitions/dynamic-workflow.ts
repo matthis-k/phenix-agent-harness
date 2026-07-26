@@ -30,6 +30,8 @@ export interface DynamicInvokeNodeProposal {
   readonly id: string;
   readonly title?: string;
   readonly definitionId: string;
+  /** Required when definitionId is session.stock; omitted for fixed-output definitions. */
+  readonly outputSchema?: string;
   readonly input: DynamicValueBinding;
   readonly retry?: {
     readonly maxRetries: number;
@@ -79,7 +81,7 @@ export interface DynamicWorkflowProposal {
 
 export interface DynamicWorkflowCandidate {
   readonly definitionId: string;
-  readonly kind: "agent" | "workflow";
+  readonly kind: "agent" | "workflow" | "session";
   readonly title: string;
   readonly description: string;
   readonly inputSchema: string;
@@ -148,6 +150,7 @@ const DynamicInvokeNodeType = Type.Object(
     id: IdentifierType,
     title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
     definitionId: Type.String({ minLength: 1, maxLength: 160 }),
+    outputSchema: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
     input: DynamicValueBindingType,
     retry: Type.Optional(
       Type.Object(
@@ -194,7 +197,7 @@ export const DynamicWorkflowCompositionRequestSchema =
           Type.Object(
             {
               definitionId: Type.String({ minLength: 1, maxLength: 160 }),
-              kind: Type.Enum(["agent", "workflow"]),
+              kind: Type.Enum(["agent", "workflow", "session"]),
               title: Type.String({ minLength: 1, maxLength: 160 }),
               description: Type.String({ minLength: 1, maxLength: 1000 }),
               inputSchema: Type.String({ minLength: 1, maxLength: 160 }),

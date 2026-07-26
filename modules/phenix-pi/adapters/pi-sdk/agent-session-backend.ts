@@ -15,6 +15,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 
+import { STOCK_SESSION_PROMPT_SENTINEL } from "../../definitions/stock-session.ts";
 import type { ConcreteModelRef } from "../../domain/definition/model.ts";
 import type {
   AgentSessionBackend,
@@ -70,6 +71,7 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
     const model = this.modelRegistry.find(spec.model.provider, spec.model.model);
     if (!model)
       throw new Error(`Pi model ${spec.model.provider}/${spec.model.model} is unavailable`);
+    const stock = spec.systemPrompt.trimStart().startsWith(STOCK_SESSION_PROMPT_SENTINEL);
     const settingsManager = SettingsManager.create(spec.cwd, this.agentDir);
     const resourceLoader = new DefaultResourceLoader({
       cwd: spec.cwd,
@@ -78,31 +80,35 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
       ...(this.eventBus ? { eventBus: this.eventBus } : {}),
       noExtensions: true,
       extensionFactories: [...freeModelSessionExtensions(isFreeTierModel(spec.model))],
-      noSkills: true,
-      noPromptTemplates: true,
-      noThemes: true,
-      noContextFiles: spec.context.projectFiles === "none",
-      ...(spec.context.projectFiles === "none"
+      ...(stock
         ? {}
         : {
-            agentsFilesOverride: (current: {
-              agentsFiles: Array<{ path: string; content: string }>;
-            }) => ({
-              agentsFiles: limitContextFiles(
-                current.agentsFiles,
-                spec.context.projectFiles === "inherit" ? "inherit" : "selected",
-                spec.context.artifacts,
-                spec.context.maxBytes,
-              ),
-            }),
+            noSkills: true,
+            noPromptTemplates: true,
+            noThemes: true,
+            noContextFiles: spec.context.projectFiles === "none",
+            ...(spec.context.projectFiles === "none"
+              ? {}
+              : {
+                  agentsFilesOverride: (current: {
+                    agentsFiles: Array<{ path: string; content: string }>;
+                  }) => ({
+                    agentsFiles: limitContextFiles(
+                      current.agentsFiles,
+                      spec.context.projectFiles === "inherit" ? "inherit" : "selected",
+                      spec.context.artifacts,
+                      spec.context.maxBytes,
+                    ),
+                  }),
+                }),
+            systemPrompt: spec.systemPrompt,
           }),
-      systemPrompt: spec.systemPrompt,
     });
     await resourceLoader.reload();
     const modelRuntime = await this.createModelRuntime();
     const customTools = [
-      ...spec.customTools.map(toPiTool),
-      ...(spec.tools.includes("nix_shell") ? [createNixShellTool(spec.cwd)] : []),
+      ...spec.customTools.filter((tool) => !stock || tool.name !== "phenix_progress").map(toPiTool),
+      ...(!stock && spec.tools.includes("nix_shell") ? [createNixShellTool(spec.cwd)] : []),
     ] as ToolDefinition[];
     const { session } = await createAgentSession({
       cwd: spec.cwd,
@@ -110,7 +116,7 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
       model,
       modelRuntime,
       thinkingLevel: spec.thinking,
-      tools: [...spec.tools],
+      ...(stock ? {} : { tools: [...spec.tools] }),
       customTools,
       resourceLoader,
       sessionManager,
@@ -262,47 +268,8 @@ class PiAgentSessionPort implements AgentSessionPort {
   }
 
   private emit(event: AgentSessionObservation): void {
-    for (const listener of this.listeners) {
-      try {
-        listener(event);
-      } catch {
-        // Observers cannot change Pi transport state.
-      }
-    }
+    for (const listener of this.listeners) listener(event);
   }
-}
-
-function isFreeTierModel(model: ConcreteModelRef): boolean {
-  return model.provider === "opencode" && model.model.endsWith("-free");
-}
-
-function limitContextFiles(
-  files: readonly { readonly path: string; readonly content: string }[],
-  policy: "inherit" | "selected",
-  selectors: readonly string[],
-  maxBytes: number,
-): Array<{ path: string; content: string }> {
-  const selected =
-    policy === "inherit"
-      ? files
-      : files.filter((file) => selectors.some((selector) => file.path.includes(selector)));
-  let remaining = Math.max(0, maxBytes);
-  const output: Array<{ path: string; content: string }> = [];
-  for (const file of selected) {
-    if (remaining === 0) break;
-    const encoded = Buffer.from(file.content, "utf8");
-    const content =
-      encoded.byteLength <= remaining ? file.content : truncateUtf8(encoded, remaining);
-    output.push({ path: file.path, content });
-    remaining -= Buffer.byteLength(content, "utf8");
-  }
-  return output;
-}
-
-function truncateUtf8(encoded: Buffer, maxBytes: number): string {
-  let value = encoded.subarray(0, maxBytes).toString("utf8");
-  while (Buffer.byteLength(value, "utf8") > maxBytes) value = value.slice(0, -1);
-  return value;
 }
 
 function toPiTool(tool: AgentTool): ToolDefinition {
@@ -310,9 +277,10 @@ function toPiTool(tool: AgentTool): ToolDefinition {
     name: tool.name,
     label: tool.label,
     description: tool.description,
+    promptSnippet: tool.description,
     parameters: tool.parameters.jsonSchema,
-    async execute(_toolCallId, input, signal) {
-      const result = await tool.execute(input, signal);
+    execute: async (_toolCallId, params, signal) => {
+      const result = await tool.execute(params, signal);
       return {
         content: [{ type: "text" as const, text: result.text }],
         ...(result.details === undefined ? {} : { details: result.details }),
@@ -320,4 +288,29 @@ function toPiTool(tool: AgentTool): ToolDefinition {
       };
     },
   } as ToolDefinition;
+}
+
+function isFreeTierModel(model: ConcreteModelRef): boolean {
+  return model.model.includes("free") || model.provider.includes("free");
+}
+
+function limitContextFiles(
+  files: readonly { path: string; content: string }[],
+  mode: "inherit" | "selected",
+  selected: readonly string[],
+  maxBytes: number,
+): Array<{ path: string; content: string }> {
+  const allowed =
+    mode === "inherit"
+      ? files
+      : files.filter((file) => selected.some((entry) => file.path.endsWith(entry)));
+  const result: Array<{ path: string; content: string }> = [];
+  let used = 0;
+  for (const file of allowed) {
+    const bytes = Buffer.byteLength(file.content, "utf8");
+    if (used + bytes > maxBytes) break;
+    result.push({ path: file.path, content: file.content });
+    used += bytes;
+  }
+  return result;
 }

@@ -152,7 +152,16 @@ function compileState(
     case "invoke": {
       const invoked = bindings.resolveDefinition(read("run"));
       assertSchema(bindings, read("input-schema"), invoked.input, `${owner} input`);
-      assertSchema(bindings, read("output-schema"), invoked.output, `${owner} output`);
+      const declaredOutput = bindings.resolveSchema(read("output-schema"));
+      const isStock = invoked.kind === "agent" && invoked.sessionMode === "stock";
+      if (!isStock && declaredOutput.id !== invoked.output.id) {
+        throw new Error(
+          `${owner} output schema ${declaredOutput.id} does not match ${invoked.output.id}`,
+        );
+      }
+      if (isStock && declaredOutput.id === invoked.output.id) {
+        throw new Error(`${owner} must bind a concrete output schema for ${invoked.id}`);
+      }
       const wait = parseWait(fields.wait ?? "await", state.id);
       const retry = parseInvokeRetry(fields, owner);
       if (retry && wait === "background") {
@@ -164,6 +173,7 @@ function compileState(
         definition: definitionRef(definitionId(invoked.id)),
         input: read("input"),
         wait,
+        ...(isStock ? { outputSchema: declaredOutput.id } : {}),
         ...(fields.difficulty
           ? { difficulty: parseDifficultyBinding(fields.difficulty, owner) }
           : {}),

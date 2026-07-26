@@ -51,8 +51,11 @@ export interface PromptTemplate {
   render(): string;
 }
 
+export type AgentSessionMode = "phenix" | "stock";
+
 export interface AgentDefinition<I, O> extends Definition<I, O> {
   readonly kind: "agent";
+  readonly sessionMode?: AgentSessionMode;
   readonly model: ModelSelector;
   readonly modelRoutes?: DifficultyModelRoutes;
   readonly thinking: ThinkingPolicy;
@@ -89,6 +92,8 @@ export interface InvokeNode {
   readonly definition: DefinitionRef<unknown, unknown>;
   readonly input: ValueMappingRef;
   readonly wait: "await" | "background";
+  /** Required for catalogued stock sessions; forbidden as an override for ordinary definitions. */
+  readonly outputSchema?: string;
   /** Omit to inherit the parent run difficulty. */
   readonly difficulty?: DifficultyBinding;
   /** Omit to propagate the first unhandled child failure. */

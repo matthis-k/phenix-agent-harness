@@ -48,6 +48,49 @@ function fixtureSource(name: string): string {
   return readFileSync(new URL(`${name}.workflow.md`, fixtureDirectory), "utf8");
 }
 
+function stockWorkflowSource(outputSchema = "outcome.scout-report.v1"): string {
+  return `# Stock workflow fixture
+
+\`\`\`phenix-workflow
+id: workflow.stock-fixture
+description: Exercise a catalogued stock Pi session.
+input: request.objective.v1
+output: outcome.scout-report.v1
+entry: stock
+timeout-ms: 120000
+max-node-runs: 2
+max-parallelism: 1
+\`\`\`
+
+## States
+
+### stock
+
+\`\`\`phenix-state
+kind: invoke
+run: session.stock
+input: stock.input
+wait: await
+input-schema: request.stock-session.v1
+output-schema: ${outputSchema}
+\`\`\`
+
+### return
+
+\`\`\`phenix-state
+kind: return
+output: stock.output
+output-schema: outcome.scout-report.v1
+\`\`\`
+
+## Transitions
+
+| From | To |
+|---|---|
+| stock | return |
+`;
+}
+
 test("all production workflow definitions come from Markdown sources", () => {
   const sourceIds = productionSourceFileNames()
     .map((fileName) => {
@@ -121,6 +164,22 @@ test("workflow states may invoke other workflows through the normal definition b
   assert.deepEqual(
     invocations.map((node) => node.definition.id),
     ["workflow.qa", "workflow.implement"],
+  );
+});
+
+test("predefined workflows bind a concrete output schema for stock sessions", () => {
+  const compiled = compileWorkflowMarkdown(stockWorkflowSource(), bindings);
+  const stock = compiled.graph.nodes.find((node) => node.kind === "invoke" && node.id === "stock");
+  assert.equal(stock?.kind, "invoke");
+  if (stock?.kind === "invoke") {
+    assert.equal(stock.definition.id, "session.stock");
+    assert.equal(stock.outputSchema, "outcome.scout-report.v1");
+  }
+
+  assert.throws(
+    () =>
+      compileWorkflowMarkdown(stockWorkflowSource("outcome.stock-session-handoff.v1"), bindings),
+    /must bind a concrete output schema/,
   );
 });
 

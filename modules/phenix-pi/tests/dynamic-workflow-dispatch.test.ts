@@ -6,6 +6,7 @@ import {
   AGENT_COORDINATOR,
   AGENT_DISPATCHER,
   AGENT_SCOUT,
+  SESSION_STOCK,
   WORKFLOW_QA,
 } from "../definitions/ids.ts";
 import { createTestRuntime } from "./support/core-runtime.ts";
@@ -50,6 +51,15 @@ test("automatic dispatch composes and executes a sealed workflow only as the fal
         candidate.definitionId === AGENT_SCOUT &&
         candidate.inputSchema === "request.scout.v1" &&
         candidate.outputSchema === "outcome.scout-report.v1",
+    ),
+  );
+  assert.ok(
+    composerInput.candidates.some(
+      (candidate) =>
+        candidate.definitionId === SESSION_STOCK &&
+        candidate.kind === "session" &&
+        candidate.inputSchema === "request.stock-session.v1" &&
+        candidate.outputSchema === "dynamic",
     ),
   );
   assert.ok(dynamic.compiled.dynamicWorkflow);

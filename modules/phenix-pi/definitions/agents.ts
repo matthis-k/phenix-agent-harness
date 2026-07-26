@@ -12,6 +12,7 @@ export {
   plannerDefinition,
   qaSynthesizerDefinition,
   scoutDefinition,
+  stockSessionDefinition,
   testerDefinition,
   verifierDefinition,
 } from "../composition/bundled-definitions.ts";

@@ -26,6 +26,7 @@ function reachesCommandAuthority(id: string, visited = new Set<string>()): boole
   const nextVisited = new Set(visited).add(id);
 
   if (definition.kind === "agent") {
+    if (definition.sessionMode === "stock") return true;
     const tools = new Set(definition.tools.allow);
     if (tools.has("bash") && tools.has("nix_shell")) return true;
     if (!tools.has("phenix_run")) return false;
@@ -97,7 +98,7 @@ test("open-ended QA analysis agents omit fixed turn caps", () => {
   for (const definition of qaAgents) assert.equal(definition.limits.maxTurns, undefined);
 });
 
-test("every bundled agent has an explicit shell-authority class", () => {
+test("bundled definitions have explicit execution-authority classes", () => {
   const commandAgents = new Set([
     "agent.tester",
     "agent.implementer",
@@ -116,15 +117,25 @@ test("every bundled agent has an explicit shell-authority class", () => {
     "agent.qa-synthesizer",
     "agent.attention-router",
   ]);
+  const stockSessions = new Set(["session.stock"]);
 
-  assert.equal(commandAgents.size + nonExecutingAgents.size, agentDefinitions.length);
+  assert.equal(
+    commandAgents.size + nonExecutingAgents.size + stockSessions.size,
+    agentDefinitions.length,
+  );
   for (const definition of agentDefinitions) {
     const id = String(definition.id);
-    assert.notEqual(
+    const classes = [
       commandAgents.has(id),
       nonExecutingAgents.has(id),
-      `${id} must belong to exactly one shell-authority class`,
-    );
+      stockSessions.has(id),
+    ].filter(Boolean);
+    assert.equal(classes.length, 1, `${id} must belong to exactly one execution-authority class`);
+    if (stockSessions.has(id)) {
+      assert.equal(definition.sessionMode, "stock");
+      assert.deepEqual(definition.tools.allow, []);
+      continue;
+    }
     const hasBash = definition.tools.allow.includes("bash");
     const hasNixShell = definition.tools.allow.includes("nix_shell");
     assert.equal(hasBash, hasNixShell, `${id} must grant bash and nix_shell together`);
@@ -150,7 +161,7 @@ test("predefined dispatch routes reach command authority while the composer only
   }
 });
 
-test("dispatch prompts prohibit read-only command fallbacks", () => {
+test("dispatch prompts distinguish stock sessions from controlled roles", () => {
   const coordinator = definitionsById.get("agent.coordinator");
   const dispatcher = definitionsById.get("agent.dispatcher");
   assert.equal(coordinator?.kind, "agent");
@@ -158,8 +169,9 @@ test("dispatch prompts prohibit read-only command fallbacks", () => {
   if (coordinator?.kind === "agent") {
     assert.match(
       coordinator.prompt.render(),
-      /Never use agent\.scout, agent\.planner, agent\.architect, or agent\.finalizer/,
+      /Use session\.stock only when no predefined workflow/,
     );
+    assert.match(coordinator.prompt.render(), /do not add verification automatically/);
     assert.match(coordinator.prompt.render(), /command-capable workflow or operational agent/);
   }
   if (dispatcher?.kind === "agent") {
@@ -194,7 +206,7 @@ test("agent context inheritance is scoped to role needs", () => {
     assert.equal(definition.context.maxBytes, 64_000);
   }
 
-  for (const id of ["agent.implementer", "agent.verifier", "agent.base"]) {
+  for (const id of ["agent.implementer", "agent.verifier", "agent.base", "session.stock"]) {
     const definition = byId.get(id);
     assert.ok(definition);
     assert.equal(definition.context.projectFiles, "inherit");
@@ -202,7 +214,7 @@ test("agent context inheritance is scoped to role needs", () => {
   }
 });
 
-test("structured presentation is available only to operational agents", () => {
+test("structured presentation is available only to operational Phenix agents", () => {
   const byId = new Map(
     agentDefinitions.map((definition) => [String(definition.id), definition] as const),
   );
@@ -219,7 +231,12 @@ test("structured presentation is available only to operational agents", () => {
   ]) {
     assert.ok(byId.get(id)?.tools.allow.includes("phenix_present"), id);
   }
-  for (const id of ["agent.coordinator", "agent.dispatcher", "agent.qa-synthesizer"]) {
+  for (const id of [
+    "agent.coordinator",
+    "agent.dispatcher",
+    "agent.qa-synthesizer",
+    "session.stock",
+  ]) {
     assert.equal(byId.get(id)?.tools.allow.includes("phenix_present"), false, id);
   }
 });
