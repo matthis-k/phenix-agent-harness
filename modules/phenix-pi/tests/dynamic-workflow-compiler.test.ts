@@ -260,7 +260,8 @@ test("dynamic workflow compiler binds stock session result schemas", () => {
     node.id === "stock" && node.kind === "invoke" ? { ...node, outputSchema: undefined } : node,
   );
   assert.throws(
-    () => compiler().compile({ ...missing, nodes: missingNodes }, { allowedDefinitionIds: [STOCK] }),
+    () =>
+      compiler().compile({ ...missing, nodes: missingNodes }, { allowedDefinitionIds: [STOCK] }),
     /must declare outputSchema/,
   );
 
