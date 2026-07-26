@@ -88,13 +88,17 @@ test("catalog browser sidebar selection changes the preview and escape closes", 
 });
 
 function fakeTui(rows: number): TUI & { renderRequests: number } {
-  return {
+  let renderRequests = 0;
+  const tui = {
     terminal: { rows },
-    renderRequests: 0,
-    requestRender() {
-      this.renderRequests += 1;
+    get renderRequests() {
+      return renderRequests;
     },
-  } as unknown as TUI & { renderRequests: number };
+    requestRender() {
+      renderRequests += 1;
+    },
+  };
+  return tui as unknown as TUI & { renderRequests: number };
 }
 
 function workflowDefinition(id: string, description: string): AnyDefinition {
