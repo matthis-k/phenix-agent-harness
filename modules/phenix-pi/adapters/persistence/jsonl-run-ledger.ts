@@ -6,14 +6,67 @@ import type { DomainEvent, UnsequencedDomainEvent } from "../../domain/run/event
 import type { RunId } from "../../domain/shared.ts";
 import { LedgerConflictError, type RunLedger } from "../../ports/run-ledger.ts";
 
+/**
+ * A root ledger has one runtime writer. ExecutionStore serializes commits per root;
+ * this adapter caches the last durable sequence so append does not reparse history.
+ * A new adapter instance initializes that cache from disk on its first load or append.
+ */
 export class JsonlRunLedger implements RunLedger {
   private readonly stateDirectory: string;
+  private readonly sequences = new Map<RunId, number>();
 
   constructor(stateDirectory: string) {
     this.stateDirectory = stateDirectory;
   }
 
   async load(rootRunId: RunId): Promise<readonly DomainEvent[]> {
+    const events = await this.readEvents(rootRunId);
+    this.sequences.set(rootRunId, events.length);
+    return events;
+  }
+
+  async append(
+    rootRunId: RunId,
+    expectedSequence: number,
+    events: readonly UnsequencedDomainEvent[],
+  ): Promise<readonly DomainEvent[]> {
+    const currentSequence = await this.currentSequence(rootRunId);
+    if (currentSequence !== expectedSequence) {
+      throw new LedgerConflictError(expectedSequence, currentSequence);
+    }
+    if (events.some((event) => event.rootRunId !== rootRunId)) {
+      throw new Error(`Cannot append an event to a different root ledger`);
+    }
+    const committed = events.map((event, index) => ({
+      ...event,
+      sequence: expectedSequence + index + 1,
+    }));
+    if (committed.length === 0) return committed;
+
+    const file = this.file(rootRunId);
+    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+    const handle = await open(file, "a", 0o600);
+    try {
+      await handle.write(`${committed.map((event) => JSON.stringify(event)).join("\n")}\n`);
+      await handle.sync();
+      this.sequences.set(rootRunId, expectedSequence + committed.length);
+    } finally {
+      await handle.close();
+    }
+    return committed;
+  }
+
+  pathFor(rootRunId: RunId): string {
+    return this.file(rootRunId);
+  }
+
+  private async currentSequence(rootRunId: RunId): Promise<number> {
+    const cached = this.sequences.get(rootRunId);
+    if (cached !== undefined) return cached;
+    return (await this.load(rootRunId)).length;
+  }
+
+  private async readEvents(rootRunId: RunId): Promise<readonly DomainEvent[]> {
     const file = this.file(rootRunId);
     let content: string;
     try {
@@ -35,40 +88,6 @@ export class JsonlRunLedger implements RunLedger {
           );
         }
       });
-  }
-
-  async append(
-    rootRunId: RunId,
-    expectedSequence: number,
-    events: readonly UnsequencedDomainEvent[],
-  ): Promise<readonly DomainEvent[]> {
-    const current = await this.load(rootRunId);
-    if (current.length !== expectedSequence) {
-      throw new LedgerConflictError(expectedSequence, current.length);
-    }
-    if (events.some((event) => event.rootRunId !== rootRunId)) {
-      throw new Error(`Cannot append an event to a different root ledger`);
-    }
-    const committed = events.map((event, index) => ({
-      ...event,
-      sequence: expectedSequence + index + 1,
-    }));
-    if (committed.length === 0) return committed;
-
-    const file = this.file(rootRunId);
-    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-    const handle = await open(file, "a", 0o600);
-    try {
-      await handle.write(`${committed.map((event) => JSON.stringify(event)).join("\n")}\n`);
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-    return committed;
-  }
-
-  pathFor(rootRunId: RunId): string {
-    return this.file(rootRunId);
   }
 
   private file(rootRunId: RunId): string {
