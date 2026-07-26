@@ -8,6 +8,7 @@ import {
   PHENIX_HEALTH_USAGE,
   PHENIX_STATUS_USAGE,
   PHENIX_SUBCOMMANDS,
+  PHENIX_UI_USAGE,
   PHENIX_USAGE,
 } from "../extension/phenix-command.ts";
 
@@ -28,15 +29,16 @@ test("phenix command completion lists and filters subcommands", () => {
   assert.equal(completePhenixSubcommands("r"), null);
   assert.equal(completePhenixSubcommands("unknown"), null);
   assert.equal(completePhenixSubcommands("status extra"), null);
-  assert.equal(PHENIX_USAGE, "/phenix status|health|logs|facts|tasks|catalog|integrations");
-  assert.equal(PHENIX_STATUS_USAGE, "/phenix status [off|--once|--json|--expanded]");
+  assert.equal(PHENIX_USAGE, "/phenix ui|status|health|logs|facts|tasks|catalog|integrations");
+  assert.equal(PHENIX_UI_USAGE, "/phenix ui [status|runs [run-id]|facts|catalog [definition-id]]");
+  assert.equal(PHENIX_STATUS_USAGE, "/phenix status [--json|--expanded]");
   assert.equal(
     PHENIX_HEALTH_USAGE,
     "/phenix health [integrations|models|definitions|runtime|storage] [--json]",
   );
   assert.equal(
     PHENIX_FACTS_USAGE,
-    "/phenix facts [off|--once|--json|--clipboard [command]|--file <file>]",
+    "/phenix facts [--json|--clipboard [command]|--file <file>]",
   );
 });
 
