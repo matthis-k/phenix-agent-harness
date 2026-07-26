@@ -17,6 +17,7 @@ test("phenix command completion lists and filters subcommands", () => {
     completePhenixSubcommands("")?.map((item) => item.value),
     PHENIX_SUBCOMMANDS.map((item) => item.value),
   );
+  assert.ok(PHENIX_SUBCOMMANDS.some((item) => item.value === "ui"));
   assert.deepEqual(completePhenixSubcommands("h"), [
     { value: "health", label: "health — Inspect runtime and configuration health" },
   ]);
