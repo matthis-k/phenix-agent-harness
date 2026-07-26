@@ -17,7 +17,10 @@ test("phenix command completion lists and filters subcommands", () => {
     completePhenixSubcommands("")?.map((item) => item.value),
     PHENIX_SUBCOMMANDS.map((item) => item.value),
   );
-  assert.ok(PHENIX_SUBCOMMANDS.some((item) => item.value === "ui"));
+  assert.deepEqual(
+    PHENIX_SUBCOMMANDS.map((item) => item.value),
+    ["ui", "status", "health", "logs", "facts", "tasks", "integrations"],
+  );
   assert.deepEqual(completePhenixSubcommands("h"), [
     { value: "health", label: "health — Inspect runtime and configuration health" },
   ]);
@@ -27,6 +30,7 @@ test("phenix command completion lists and filters subcommands", () => {
   assert.deepEqual(completePhenixSubcommands("l"), [
     { value: "logs", label: "logs — Inspect or export structured diagnostics" },
   ]);
+  assert.equal(completePhenixSubcommands("c"), null);
   assert.equal(completePhenixSubcommands("r"), null);
   assert.equal(completePhenixSubcommands("unknown"), null);
   assert.equal(completePhenixSubcommands("status extra"), null);
