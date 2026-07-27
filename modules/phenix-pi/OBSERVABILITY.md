@@ -1,92 +1,62 @@
-# Phenix run observability
+# Phenix observability
 
-Phenix exposes deterministic execution telemetry without routing it through another model.
+Phenix records deterministic execution telemetry without invoking another model.
 
-## Live dashboard
+## Dashboard
 
-- `/phenix status` opens the live session dashboard.
-- `/phenix status off` hides the active widget.
-- `/phenix status --once` renders one static dashboard snapshot.
-- `/phenix status --json` renders the complete structured status projection, including durable storage locations.
-- `/phenix status --expanded` expands completed execution subtrees for inspection.
+- `/phenix` opens the full-screen UI on Status.
+- `/phenix ui <view>` opens Status, Runs, Facts, or Catalog directly.
+- `/phenix status` prints a compact static overview.
+- `/phenix status --json` prints the complete status data, including storage locations.
+- `/phenix status --expanded` expands completed run subtrees.
 
-The default dashboard is a compact execution overview. Its header combines the root profile, model set, difficulty, active descendant count, diagnostic health, and integration health. The synthetic root run is omitted. Every visible agent or workflow occupies one compact summary row containing its semantic role, state, and dimmed concrete provider/model and thinking level. A running node with current activity may add one indented short description beneath its summary. Completed subtrees collapse automatically and summarize how many descendants completed or ended exceptionally. Waiting, active, and failed branches remain expanded.
+The status overview shows the root profile, selected model set, difficulty, active descendants, diagnostics, integrations, current execution, and recent facts. Completed subtrees collapse by default; active, waiting, and failed branches remain visible.
 
-The dashboard retains a three-line deduplicated recent-facts tail for quick context. `/phenix facts` remains the complete chronological history and export surface. Storage paths are omitted from the default text dashboard and remain available through `/phenix status --json` and diagnostic export commands.
+## Facts
 
-## Fact history
+- `/phenix facts` prints the complete chronological fact history.
+- `/phenix facts --json` prints structured facts.
+- `/phenix facts --clipboard` pipes plain text to `wl-copy`.
+- `/phenix facts --clipboard <program> [args...]` uses another executable directly.
+- `/phenix facts --file <file>` writes plain text with private permissions.
 
-- `/phenix facts` shows the merged chronological fact history for the full session tree.
-- Append `off` to hide the active widget.
-- Append `--once` for a static text snapshot.
-- Append `--json` for the complete structured fact projection.
-- `/phenix facts --clipboard` pipes the complete text history to `wl-copy`.
-- `/phenix facts --clipboard <program> [args...]` spawns another program directly.
-- Use an explicit shell program, for example `sh -c '...'`, only when shell composition is genuinely required.
-- `/phenix facts --file <file>` writes the complete text history to a relative or absolute path with private file permissions.
+Exports are complete, uncolored, and ordered across the full run tree.
 
-Clipboard and file exports use the same complete ANSI-free plain-text history. Export operations report their fact count and destination, and failures do not modify the live view.
+Fact reliability symbols are:
 
-## Structured diagnostic logs
+- `✓`: observed directly;
+- `≈`: derived from observed data;
+- `!`: reported by an agent and not independently verified.
 
-`/phenix logs` reads the root-scoped structured diagnostic stream. Severity options are thresholds:
+## Logs
 
-- `--trace`: trace, info, warning, and error
-- `--info`: info, warning, and error; this is the default
-- `--warning` or `--warn`: warning and error
-- `--error`: error only
+`/phenix logs` reads structured diagnostics. Severity options are thresholds:
 
-The interactive view renders the latest matching entries in a grepable single-line form. `/phenix logs --json` exposes the matching structured records. `/phenix logs <severity> --copy [program]` pipes the complete filtered JSONL stream to `wl-copy` or another directly spawned program. `/phenix logs <severity> --file <file>` writes the complete filtered JSONL stream with private permissions.
+- `--trace`: trace and above;
+- `--info`: info and above; default;
+- `--warning` or `--warn`: warning and error;
+- `--error`: error only.
 
-Scopes are stable lowercase dot-separated identifiers such as `run.lifecycle.failed`, `model.routing.resolved`, `workflow.node.entered`, and `tool.execution.started`. Runtime IDs, model names, durations, exit states, counts, and other short scalar fields stay inline. Large strings, context, inputs, outcomes, nested reports, and provider bodies are stored once as private content-addressed artifacts and represented by `artifact:sha256:<digest>` references. Resolve one with `/phenix logs --resolve <reference>`.
+Use `--json` for structured records, `--copy [program]` for filtered JSONL on standard input, and `--file <file>` for a private JSONL export. Resolve an artifact reference with `/phenix logs --resolve <reference>`.
 
-The diagnostic stream is not canonical execution state. The append-only run ledger remains authoritative; diagnostics are a durable reconstruction aid derived from runtime boundaries and domain events.
+Diagnostic scopes are stable lowercase dotted names. Short values remain inline. Large or nested values are stored once as private content-addressed artifacts and replaced by `artifact:sha256:<digest>` references. Secret-bearing fields are redacted before storage.
 
-## Semantic colors
+The event ledger remains the complete run history. Logs are supporting diagnostic evidence.
 
-The live views and status surfaces use theme-aware semantic colors:
+## Activity and progress
 
-- active work: accent
-- waiting or repair: warning
-- successful or completed: success
-- failed: error
-- cancelled: muted/error distinction
-- concrete model and thinking metadata: muted in the compact status tree
-- agent-reported facts: warning
-- deterministically derived facts: secondary
-- IDs, timestamps, paths, and tree guides: muted
+Current activity describes what a run is doing now. Facts record completed or observed events. Tool arguments are reduced to bounded summaries, paths are repository-relative where possible, and raw tool output is not stored as activity or facts.
 
-Exports remain uncolored and retain explicit state labels and symbols so meaning does not depend on color.
+`phenix_progress` updates the current activity and fact projections. It does not notify the parent or root model.
 
-## Activity and facts
+## Material findings
 
-Current activity answers what a run is doing now. Fact history records concrete events in sequence and is rebuilt from the JSONL run ledger during recovery.
+Operational child agents may call `phenix_present` for a warning, high-severity, or critical issue that should be visible before completion.
 
-Fact reliability is rendered as:
+A presentation contains a title, summary, optional subject, and bounded evidence. The first occurrence is recorded as a reported fact, shown in the root UI, and delivered to the root model on its next turn. Repeated identical presentations are acknowledged without another notification.
 
-- `✓` observed directly by the runtime or tool lifecycle
-- `≈` derived deterministically from observed data
-- `!` reported by an agent and not independently verified
+Presentations are not a progress stream and do not replace the final typed result.
 
-Tool arguments are reduced to bounded summaries. Paths are repository-relative where possible. Raw tool output is never stored in activity or fact events. Durable command summaries omit shell bodies and redact environment assignments, credentials, authorization headers, URL credentials, and secret-bearing flags or query parameters.
+## Result volume
 
-## Agent progress
-
-Child agents may call `phenix_progress` when their phase, current target, hypothesis, or next action materially changes. The report updates only run activity and fact projections used by the TUI. It is not sent to the root or parent model and is not inserted into the root conversation transcript.
-
-## Structured presentation
-
-Operational child agents may call `phenix_present` when they discover a warning, high-severity, or critical issue that should be visible before the run finishes.
-
-Presentation input is bounded to a title, summary, optional subject, and at most eight short evidence items. The runtime derives a deterministic presentation fingerprint from the source run and normalized content. The first occurrence is recorded as a reported `finding-reported` fact; duplicate occurrences are acknowledged without another fact or notification.
-
-The root notifier handles the first occurrence in two ways:
-
-1. it renders the bounded notice directly in the root UI;
-2. it delivers the same notice to the root model on its next turn so the root can inspect, reroute, stop, or request input.
-
-A presentation is an attention signal, not a replacement for the child's final typed outcome. It must not be used for ordinary progress, repeated commentary, or raw command output.
-
-## Model-facing result volume
-
-Awaited run and dispatch tools return compact projections by default. Complete outcomes remain in the canonical run ledger and are admitted to a model only through an explicit `phenix_handle` result view. Tool-result details report source, inline, and omitted byte counts so transport savings remain observable without reintroducing the omitted payload.
+Awaited run and dispatch tools return compact results by default. Complete outcomes remain available through explicit `phenix_handle` result views. Tool results report source, inline, and omitted byte counts.
