@@ -9,7 +9,7 @@ def replace_once(path: Path, old: str, new: str) -> None:
     path.write_text(text.replace(old, new, 1))
 
 
-def normalize_hunk_counts(path: Path) -> None:
+def normalize_patch(path: Path) -> None:
     lines = path.read_text().splitlines(keepends=True)
     header = re.compile(
         r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(?P<suffix>.*?)(?P<newline>\r?\n)?$"
@@ -44,7 +44,9 @@ def normalize_hunk_counts(path: Path) -> None:
         normalized.extend(body)
         index = end
 
-    path.write_text("".join(normalized))
+    text = "".join(normalized)
+    text = re.sub(r"^(index [0-9a-f]+)\.\.0000000( 100644)$", r"\1..1111111\2", text, flags=re.MULTILINE)
+    path.write_text(text)
 
 
 script = Path(".github/apply-phenix-session-ui.py")
@@ -63,4 +65,4 @@ replace_once(
 )
 ''',
 )
-normalize_hunk_counts(Path("modules/patches/pi-extension-sidebar.patch"))
+normalize_patch(Path("modules/patches/pi-extension-sidebar.patch"))
