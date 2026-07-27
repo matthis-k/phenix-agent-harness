@@ -14,6 +14,7 @@ import type { ExtensionAPI, ModelRegistry } from "@earendil-works/pi-coding-agen
 import {
   isPhenixModelSet,
   PHENIX_MODEL_SETS,
+  type PhenixModelSetId,
   type PiThinkingLevel,
   virtualModel,
 } from "../../domain/definition/model.ts";
@@ -24,6 +25,38 @@ import { PiModelInventory } from "./pi-model-inventory.ts";
 
 const PHENIX_PROVIDER = "phenix";
 const PHENIX_API = "phenix-router" as Api;
+
+const MODEL_SET_LIMITS = {
+  free: {
+    input: ["text"],
+    contextWindow: 200_000,
+    maxTokens: 128_000,
+  },
+  "opencode-go": {
+    input: ["text"],
+    contextWindow: 202_752,
+    maxTokens: 32_768,
+  },
+  "chatgpt-plus": {
+    input: ["text", "image"],
+    contextWindow: 372_000,
+    maxTokens: 128_000,
+  },
+  mixed: {
+    input: ["text", "image"],
+    contextWindow: 262_144,
+    maxTokens: 65_536,
+  },
+} satisfies Readonly<
+  Record<
+    PhenixModelSetId,
+    {
+      readonly input: Model<Api>["input"];
+      readonly contextWindow: number;
+      readonly maxTokens: number;
+    }
+  >
+>;
 
 type RouterStream = (
   model: Model<Api>,
@@ -53,10 +86,8 @@ export function registerPhenixProvider(
       name: displayName(modelSet),
       api: PHENIX_API,
       reasoning: true,
-      input: ["text", "image"] satisfies Model<Api>["input"],
+      ...MODEL_SET_LIMITS[modelSet],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 128_000,
-      maxTokens: 32_768,
     })),
     streamSimple: createPhenixStream(dependencies),
   });
