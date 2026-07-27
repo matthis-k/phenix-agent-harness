@@ -162,7 +162,9 @@ export class PhenixModelResolver implements ModelResolver {
   ): void {
     if (this.inventory.contains(concrete.provider, concrete.model)) return;
     const route = modelSet && capability ? ` for phenix/${modelSet} capability ${capability}` : "";
-    throw new Error(`Configured model ${concrete.provider}/${concrete.model}${route} is unavailable`);
+    throw new Error(
+      `Configured model ${concrete.provider}/${concrete.model}${route} is unavailable`,
+    );
   }
 }
 
