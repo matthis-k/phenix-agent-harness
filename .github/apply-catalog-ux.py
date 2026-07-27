@@ -1,0 +1,191 @@
+from pathlib import Path
+import re
+
+ui_path = Path("modules/phenix-pi/extension/phenix-ui.ts")
+ui = ui_path.read_text()
+
+render_replacement = '''  render(width: number): string[] {
+    const height = Math.max(1, this.tui.terminal.rows);
+    const showFocusBar = this.paneCount() > 1;
+    const bodyStart = showFocusBar ? 4 : 3;
+    this.layout = {
+      width,
+      height,
+      bodyStart,
+      bodyHeight: Math.max(1, height - bodyStart),
+      sidebarWidth: Math.min(44, Math.max(26, Math.floor(width * 0.34))),
+    };
+    this.rowHits.clear();
+    if (width < 42 || height < 9) return this.renderSmall(width, height);
+    const chrome = [this.renderTitleBar(width), this.renderTabs(width)];
+    if (showFocusBar) chrome.push(this.renderFocusBar(width));
+    const body = this.help ? this.renderHelp(width, this.layout.bodyHeight) : this.renderView();
+    const footer = this.renderFooter(width);
+    return [...chrome, ...fitHeight(body, this.layout.bodyHeight, width), footer];
+  }
+
+'''
+ui, count = re.subn(
+    r"  render\(width: number\): string\[\] \{.*?(?=  private renderTitleBar\()",
+    lambda _match: render_replacement,
+    ui,
+    count=1,
+    flags=re.S,
+)
+if count != 1:
+    raise SystemExit(f"render replacement count was {count}")
+
+catalog_replacement = '''  private renderCatalog(): string[] {
+    const width = this.layout.width;
+    const height = this.layout.bodyHeight;
+    const definitions = this.filteredDefinitions();
+    this.selectedDefinition = clamp(
+      this.selectedDefinition,
+      0,
+      Math.max(0, definitions.length - 1),
+    );
+    const selected = definitions[this.selectedDefinition];
+    if (width < 76) {
+      return this.pane === 0
+        ? this.renderDefinitionSidebar(definitions, selected, width, height)
+        : this.renderDefinitionPreview(selected, width, height);
+    }
+    const sidebarWidth = this.layout.sidebarWidth;
+    const previewWidth = width - sidebarWidth - 1;
+    const sidebar = this.renderDefinitionSidebar(
+      definitions,
+      selected,
+      sidebarWidth,
+      height,
+    );
+    const preview = this.renderDefinitionPreview(selected, previewWidth, height);
+    return Array.from(
+      { length: height },
+      (_, row) =>
+        `${sidebar[row] ?? " ".repeat(sidebarWidth)} ${this.panelLine(preview[row] ?? "", previewWidth, 1)}`,
+    );
+  }
+
+  private renderDefinitionSidebar(
+    definitions: readonly AnyDefinition[],
+    selected: AnyDefinition | undefined,
+    width: number,
+    height: number,
+  ): string[] {
+    const inspectorHeight = Math.min(
+      8,
+      Math.max(4, Math.floor(height * 0.45)),
+      Math.max(1, height - 1),
+    );
+    const listHeight = Math.max(1, height - inspectorHeight);
+    const list = this.renderDefinitionList(definitions, width, listHeight).map((line) =>
+      this.panelLine(line, width, 0),
+    );
+    const inspector = this.definitionInspectorLines(selected, width);
+    const details = Array.from({ length: inspectorHeight }, (_, row) =>
+      surface(
+        this.theme,
+        "customMessageBg",
+        this.fitLine(inspector[row] ?? "", width),
+      ),
+    );
+    return [...list, ...details];
+  }
+
+  private definitionInspectorLines(
+    definition: AnyDefinition | undefined,
+    width: number,
+  ): readonly string[] {
+    if (!definition) {
+      return [
+        heading(this.theme, " Selected definition"),
+        color(this.theme, "muted", " No definitions match the current filter."),
+      ];
+    }
+    const identity = color(
+      this.theme,
+      "muted",
+      ` ${definition.kind} · ${String(definition.id)}`,
+    );
+    const description = color(
+      this.theme,
+      "text",
+      ` ${truncate(definition.description, Math.max(12, width - 2))}`,
+    );
+    if (definition.kind === "workflow") {
+      const nodes = definition.graph.nodes.length;
+      const edges = definition.graph.edges.length;
+      return [
+        heading(this.theme, " Selected definition"),
+        strong(this.theme, ` ${definition.title}`),
+        identity,
+        description,
+        color(
+          this.theme,
+          "muted",
+          ` ${nodes} nodes · ${edges} transitions · entry ${definition.graph.entry}`,
+        ),
+        color(
+          this.theme,
+          "muted",
+          ` ${definition.limits.timeoutMs} ms timeout · ${definition.limits.maxParallelism} parallel`,
+        ),
+      ];
+    }
+    const model =
+      definition.model.kind === "session"
+        ? "session"
+        : `${definition.model.provider}/${definition.model.model}`;
+    const tools = definition.tools.allow.length
+      ? truncate(definition.tools.allow.join(", "), Math.max(12, width - 9))
+      : "none";
+    return [
+      heading(this.theme, " Selected definition"),
+      strong(this.theme, ` ${definition.title}`),
+      identity,
+      description,
+      coloredStatusField(this.theme, "model", model, "accent"),
+      coloredStatusField(this.theme, "thinking", definition.thinking, "warning"),
+      coloredStatusField(this.theme, "tools", tools, "text"),
+    ];
+  }
+
+'''
+ui, count = re.subn(
+    r"  private renderCatalog\(\): string\[\] \{.*?(?=  private renderDefinitionList\()",
+    lambda _match: catalog_replacement,
+    ui,
+    count=1,
+    flags=re.S,
+)
+if count != 1:
+    raise SystemExit(f"catalog replacement count was {count}")
+
+ui_path.write_text(ui)
+
+test_path = Path("modules/phenix-pi/tests/phenix-ui.test.ts")
+tests = test_path.read_text()
+marker = 'test("uses centered background surfaces without redundant active markers", () => {'
+added = '''test("hides redundant pane navigation for single-pane views", () => {
+  const lines = createUi(fakeTui(18), { view: "status" }).render(100);
+
+  assert.equal(lines.length, 18);
+  assert.match(lines[2] ?? "", /Session/);
+  assert.doesNotMatch(lines.join("\\n"), /Overview/);
+});
+
+test("pins selected Catalog metadata beneath the definition list", () => {
+  const lines = createUi(fakeTui(18), { view: "catalog", selector: "qa" }).render(100);
+  const definitionRow = lines.findIndex((line) => /W qa/.test(line));
+  const inspectorRow = lines.findIndex((line) => /Selected definition/.test(line));
+
+  assert.ok(definitionRow >= 0);
+  assert.ok(inspectorRow > definitionRow);
+  assert.match(lines.join("\\n"), /Validate the repository/);
+  assert.match(lines.join("\\n"), /2 nodes · 1 transitions · entry start/);
+});
+
+'''
+if tests.count(marker) != 1:
+    raise SystemExit("visual test marker was not found exactly once")
+test_path.write_text(tests.replace(marker, added + marker))
