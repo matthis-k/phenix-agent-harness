@@ -117,7 +117,8 @@ test("pins selected Catalog metadata beneath the definition list", () => {
   assert.ok(definitionRow >= 0);
   assert.ok(inspectorRow > definitionRow);
   assert.match(lines.join("\n"), /Validate the repository/);
-  assert.match(lines.join("\n"), /2 nodes · 1 transition · entry start/);
+  assert.match(lines.join("\n"), /2 nodes · 1 transition/);
+  assert.match(lines.join("\n"), /entry start · 1000ms · parallel 1/);
 });
 
 test("uses centered background surfaces without redundant active markers", () => {

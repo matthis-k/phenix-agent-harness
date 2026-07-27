@@ -754,15 +754,11 @@ export class PhenixUi implements Component {
         strong(this.theme, ` ${definition.title}`),
         identity,
         description,
+        color(this.theme, "muted", ` ${nodeCount} · ${transitionCount}`),
         color(
           this.theme,
           "muted",
-          ` ${nodeCount} · ${transitionCount} · entry ${definition.graph.entry}`,
-        ),
-        color(
-          this.theme,
-          "muted",
-          ` ${definition.limits.timeoutMs} ms timeout · ${definition.limits.maxParallelism} parallel`,
+          ` entry ${definition.graph.entry} · ${definition.limits.timeoutMs}ms · parallel ${definition.limits.maxParallelism}`,
         ),
       ];
     }
