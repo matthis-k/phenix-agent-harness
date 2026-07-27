@@ -4,7 +4,7 @@
 id: workflow.qa
 description: Run deterministic project checks and independent repository, architecture, test, and security reviews, then synthesize with deliberately capable review routes.
 input: request.objective.v1
-output: outcome.structured-document.v1
+output: outcome.qa-report.v1
 entry: checks
 timeout-ms: 2400000
 max-node-runs: 20
@@ -25,7 +25,7 @@ flowchart LR
     architecture --> join
     security --> join
     join --> synthesize[Synthesize]
-    synthesize --> return([Return structured report])
+    synthesize --> return([Return QA report])
 ```
 
 ## States
@@ -126,7 +126,7 @@ kind: invoke
 run: agent.qa-synthesizer
 input: qa.synthesize.input
 input-schema: request.qa-synthesis.v1
-output-schema: outcome.qa-analysis.v1
+output-schema: outcome.qa-report.v1
 wait: await
 difficulty: D3
 retry: retryable
@@ -138,7 +138,7 @@ max-retries: 1
 ```phenix-state
 kind: return
 output: qa.output
-output-schema: outcome.structured-document.v1
+output-schema: outcome.qa-report.v1
 ```
 
 ## Transitions
