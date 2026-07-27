@@ -175,7 +175,7 @@ function addNativeMessage(
     }
     case "custom": {
       if (!message.display) return;
-      const component = new CustomMessageComponent(message, undefined, markdownTheme, 1);
+      const component = new CustomMessageComponent(message, undefined, markdownTheme);
       component.setExpanded(false);
       transcript.addChild(component);
       return;
