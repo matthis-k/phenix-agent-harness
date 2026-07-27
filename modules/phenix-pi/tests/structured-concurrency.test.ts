@@ -115,7 +115,7 @@ test("an invocation resolving its model cannot attach after parent cancellation 
         requested: selector,
         concrete: { kind: "concrete", provider: "test", model: "model" },
         thinking: context.thinking === "route" ? "medium" : context.thinking,
-        policyRevision: "test",
+        capability: context.capability ?? "general",
       };
     },
   };
