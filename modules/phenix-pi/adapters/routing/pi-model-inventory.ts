@@ -15,23 +15,6 @@ export class PiModelInventory implements ModelInventory {
     this.registry = registry;
   }
 
-  available(): readonly { readonly provider: string; readonly model: string }[] {
-    const available = this.registry.getAvailable().map((model) => ({
-      provider: model.provider,
-      model: model.id,
-    }));
-    const included = new Set(available.map((model) => `${model.provider}/${model.model}`));
-
-    for (const model of AUTHLESS_OPENCODE_MODELS) {
-      const key = `opencode/${model}`;
-      if (included.has(key) || !this.registry.find("opencode", model)) continue;
-      available.push({ provider: "opencode", model });
-      included.add(key);
-    }
-
-    return available;
-  }
-
   contains(provider: string, model: string): boolean {
     if (
       provider === "opencode" &&
