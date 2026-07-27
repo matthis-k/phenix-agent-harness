@@ -145,7 +145,9 @@ function renderTable(node: StructuredContentNode): string {
     ...row,
     ...Array.from({ length: width - row.length }, () => ""),
   ]);
-  const [header, ...body] = normalized;
+  const header = normalized[0];
+  if (!header) return "";
+  const body = normalized.slice(1);
   return [
     `| ${header.join(" | ")} |`,
     `|${header.map(() => "---").join("|")}|`,
