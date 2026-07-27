@@ -2,14 +2,16 @@ import type { Outcome } from "../../domain/shared.ts";
 import type { WorkflowFunctionRegistrar } from "../../domain/workflow/functions.ts";
 import type { WorkflowEvaluationContext } from "../../domain/workflow/graph-state.ts";
 import type { DifficultyAssessment } from "../difficulty.ts";
+import { qaDocument } from "../qa-document.ts";
 import type {
   ChangeSet,
   CheckResult,
   ImplementationRequest,
   ImplementationResult,
   ObjectiveRequest,
-  QAReport,
+  QAAnalysis,
   QASynthesisRequest,
+  StructuredDocument,
   VerificationResult,
 } from "../schemas.ts";
 
@@ -152,10 +154,11 @@ export function registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): 
   );
   registry.registerMapping(
     "qa.output",
-    (context): QAReport => ({
-      ...successAt<QAReport>(context, "synthesize"),
-      checks: localAt<readonly CheckResult[]>(context, "checks"),
-    }),
+    (context): StructuredDocument =>
+      qaDocument({
+        analysis: successAt<QAAnalysis>(context, "synthesize"),
+        checks: localAt<readonly CheckResult[]>(context, "checks"),
+      }),
   );
 }
 
