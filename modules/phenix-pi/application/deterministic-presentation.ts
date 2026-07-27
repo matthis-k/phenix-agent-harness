@@ -91,7 +91,7 @@ function transformResult(result: AgentToolResult, transform: ResultTransform): T
   }
   if (transform === "json") {
     return {
-      text: JSON.stringify(contract ?? result.text, null, 2),
+      text: jsonText(contract ?? result.text),
       transform,
     };
   }
@@ -120,7 +120,7 @@ function withPresentationMetadata(
     return {
       ...record,
       transport: {
-        ...transport,
+        ...(transport ?? {}),
         presentation,
       },
     };
@@ -189,7 +189,11 @@ function renderTable(rows: readonly Readonly<Record<string, unknown>>[]): string
 }
 
 function fencedJson(value: unknown): string[] {
-  return ["```json", JSON.stringify(value, null, 2), "```"];
+  return ["```json", jsonText(value), "```"];
+}
+
+function jsonText(value: unknown): string {
+  return JSON.stringify(value, null, 2) ?? "null";
 }
 
 function renderScalarOrJson(value: unknown): string {
@@ -215,7 +219,7 @@ function markdownInline(value: string): string {
 }
 
 function markdownCell(value: string): string {
-  return markdownInline(value).replace(/\|/g, "\\|");
+  return markdownInline(value);
 }
 
 function recordOf(value: unknown): Readonly<Record<string, unknown>> | undefined {
