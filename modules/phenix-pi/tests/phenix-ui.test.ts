@@ -101,6 +101,25 @@ test("keyboard and mouse switch unified UI views", () => {
   assert.ok(tui.renderRequests > 0);
 });
 
+test("hides redundant pane navigation for single-pane views", () => {
+  const lines = createUi(fakeTui(18), { view: "status" }).render(100);
+
+  assert.equal(lines.length, 18);
+  assert.match(lines[2] ?? "", /Session/);
+  assert.doesNotMatch(lines.join("\n"), /Overview/);
+});
+
+test("pins selected Catalog metadata beneath the definition list", () => {
+  const lines = createUi(fakeTui(18), { view: "catalog", selector: "qa" }).render(100);
+  const definitionRow = lines.findIndex((line) => /W qa/.test(line));
+  const inspectorRow = lines.findIndex((line) => /Selected definition/.test(line));
+
+  assert.ok(definitionRow >= 0);
+  assert.ok(inspectorRow > definitionRow);
+  assert.match(lines.join("\n"), /Validate the repository/);
+  assert.match(lines.join("\n"), /2 nodes · 1 transitions · entry start/);
+});
+
 test("uses centered background surfaces without redundant active markers", () => {
   const tui = fakeTui(18);
   const ui = createUi(tui, { view: "catalog", selector: "qa" }, ansiTheme);

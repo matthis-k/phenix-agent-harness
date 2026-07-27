@@ -334,21 +334,22 @@ export class PhenixUi implements Component {
 
   render(width: number): string[] {
     const height = Math.max(1, this.tui.terminal.rows);
+    const showFocusBar = this.paneCount() > 1;
+    const bodyStart = showFocusBar ? 4 : 3;
     this.layout = {
       width,
       height,
-      bodyStart: 4,
-      bodyHeight: Math.max(1, height - 4),
+      bodyStart,
+      bodyHeight: Math.max(1, height - bodyStart),
       sidebarWidth: Math.min(44, Math.max(26, Math.floor(width * 0.34))),
     };
     this.rowHits.clear();
     if (width < 42 || height < 9) return this.renderSmall(width, height);
-    const title = this.renderTitleBar(width);
-    const tabs = this.renderTabs(width);
-    const focus = this.renderFocusBar(width);
+    const chrome = [this.renderTitleBar(width), this.renderTabs(width)];
+    if (showFocusBar) chrome.push(this.renderFocusBar(width));
     const body = this.help ? this.renderHelp(width, this.layout.bodyHeight) : this.renderView();
     const footer = this.renderFooter(width);
-    return [title, tabs, focus, ...fitHeight(body, this.layout.bodyHeight, width), footer];
+    return [...chrome, ...fitHeight(body, this.layout.bodyHeight, width), footer];
   }
 
   private renderTitleBar(width: number): string {
@@ -685,18 +686,94 @@ export class PhenixUi implements Component {
     const selected = definitions[this.selectedDefinition];
     if (width < 76) {
       return this.pane === 0
-        ? this.renderDefinitionList(definitions, width, height)
+        ? this.renderDefinitionSidebar(definitions, selected, width, height)
         : this.renderDefinitionPreview(selected, width, height);
     }
     const sidebarWidth = this.layout.sidebarWidth;
     const previewWidth = width - sidebarWidth - 1;
-    const list = this.renderDefinitionList(definitions, sidebarWidth, height);
+    const sidebar = this.renderDefinitionSidebar(definitions, selected, sidebarWidth, height);
     const preview = this.renderDefinitionPreview(selected, previewWidth, height);
     return Array.from(
       { length: height },
       (_, row) =>
-        `${this.panelLine(list[row] ?? "", sidebarWidth, 0)} ${this.panelLine(preview[row] ?? "", previewWidth, 1)}`,
+        `${sidebar[row] ?? " ".repeat(sidebarWidth)} ${this.panelLine(preview[row] ?? "", previewWidth, 1)}`,
     );
+  }
+
+  private renderDefinitionSidebar(
+    definitions: readonly AnyDefinition[],
+    selected: AnyDefinition | undefined,
+    width: number,
+    height: number,
+  ): string[] {
+    const inspectorHeight = Math.min(
+      8,
+      Math.max(4, Math.floor(height * 0.45)),
+      Math.max(1, height - 1),
+    );
+    const listHeight = Math.max(1, height - inspectorHeight);
+    const list = this.renderDefinitionList(definitions, width, listHeight).map((line) =>
+      this.panelLine(line, width, 0),
+    );
+    const inspector = this.definitionInspectorLines(selected, width);
+    const details = Array.from({ length: inspectorHeight }, (_, row) =>
+      surface(this.theme, "customMessageBg", this.fitLine(inspector[row] ?? "", width)),
+    );
+    return [...list, ...details];
+  }
+
+  private definitionInspectorLines(
+    definition: AnyDefinition | undefined,
+    width: number,
+  ): readonly string[] {
+    if (!definition) {
+      return [
+        heading(this.theme, " Selected definition"),
+        color(this.theme, "muted", " No definitions match the current filter."),
+      ];
+    }
+    const identity = color(this.theme, "muted", ` ${definition.kind} · ${String(definition.id)}`);
+    const description = color(
+      this.theme,
+      "text",
+      ` ${truncate(definition.description, Math.max(12, width - 2))}`,
+    );
+    if (definition.kind === "workflow") {
+      const nodes = definition.graph.nodes.length;
+      const edges = definition.graph.edges.length;
+      return [
+        heading(this.theme, " Selected definition"),
+        strong(this.theme, ` ${definition.title}`),
+        identity,
+        description,
+        color(
+          this.theme,
+          "muted",
+          ` ${nodes} nodes · ${edges} transitions · entry ${definition.graph.entry}`,
+        ),
+        color(
+          this.theme,
+          "muted",
+          ` ${definition.limits.timeoutMs} ms timeout · ${definition.limits.maxParallelism} parallel`,
+        ),
+      ];
+    }
+    const model =
+      definition.model.kind === "session"
+        ? "session"
+        : `${definition.model.provider}/${definition.model.model}`;
+    const tools = definition.tools.allow.length
+      ? truncate(definition.tools.allow.join(", "), Math.max(12, width - 9))
+      : "none";
+    return [
+      heading(this.theme, " Selected definition"),
+      strong(this.theme, ` ${definition.title}`),
+      identity,
+      description,
+      coloredStatusField(this.theme, "model", model, "accent"),
+      coloredStatusField(this.theme, "thinking", definition.thinking, "warning"),
+      coloredStatusField(this.theme, "tools", tools, "text"),
+    ];
   }
 
   private renderDefinitionList(
