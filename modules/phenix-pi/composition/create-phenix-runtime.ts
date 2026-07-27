@@ -1,6 +1,5 @@
 import { JsonlRunLedger } from "../adapters/persistence/jsonl-run-ledger.ts";
-import type { OrderedDomainEventBus } from "../application/domain-event-bus.ts";
-import type { DynamicWorkflowExecutionService } from "../application/dynamic-workflow-execution.ts";
+import type { DomainEventSource } from "../application/domain-event-bus.ts";
 import type {
   AttentionFacade,
   CatalogFacade,
@@ -23,13 +22,12 @@ export type { PhenixHostServices } from "./host-services.ts";
 
 export interface PhenixRuntime {
   readonly execution: ExecutionFacade;
-  readonly dynamicWorkflows: DynamicWorkflowExecutionService;
   readonly attention: AttentionFacade;
   readonly profiles: SessionProfileFacade;
   readonly tasks: TaskFacade;
   readonly catalog: CatalogFacade;
   readonly queries: QueryFacade;
-  readonly events: OrderedDomainEventBus;
+  readonly events: DomainEventSource;
   readonly diagnostics: DiagnosticLog;
   startRoot(input: {
     readonly id: RunId;
@@ -63,7 +61,6 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
 
   return {
     execution: services.execution,
-    dynamicWorkflows: services.dynamicWorkflows,
     attention: services.attention,
     profiles: infrastructure.profiles,
     tasks: services.tasks,
