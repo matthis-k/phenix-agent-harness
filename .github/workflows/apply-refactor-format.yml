@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   patch:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -18,47 +17,57 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
           execution = Path("modules/phenix-pi/application/execution-facade.ts")
           text = execution.read_text()
-          old = '''      .sort(
-                (left, right) => this.admission.depthOf(right.id) - this.admission.depthOf(left.id),
-              );'''
-          new = '''      .sort((left, right) => this.admission.depthOf(right.id) - this.admission.depthOf(left.id));'''
-          if text.count(old) != 2:
-              raise SystemExit(f"expected two execution sort blocks, found {text.count(old)}")
-          execution.write_text(text.replace(old, new))
+          pattern = re.compile(
+              r"      \.sort\(\n"
+              r"\s+\(left, right\) => this\.admission\.depthOf\(right\.id\) - this\.admission\.depthOf\(left\.id\),\n"
+              r"\s+\);"
+          )
+          replacement = "      .sort((left, right) => this.admission.depthOf(right.id) - this.admission.depthOf(left.id));"
+          text, count = pattern.subn(replacement, text)
+          if count != 2:
+              raise SystemExit(f"expected two execution sort blocks, found {count}")
+          execution.write_text(text)
 
           admission = Path("modules/phenix-pi/application/run-admission-policy.ts")
           text = admission.read_text()
-          old_imports = '''import type {
-            CompiledRunSpec,
-            RunLimits,
-            RunRecord,
-            RunRetryOptions,
-            StartRun,
-            WorkflowCausation,
-          } from "../domain/run/model.ts";
-          import type { DefinitionId, RunId } from "../domain/shared.ts";
-          import { isTerminalRunState } from "../domain/run/invariants.ts";'''
-          new_imports = '''import { isTerminalRunState } from "../domain/run/invariants.ts";
-          import type {
-            CompiledRunSpec,
-            RunLimits,
-            RunRecord,
-            RunRetryOptions,
-            StartRun,
-            WorkflowCausation,
-          } from "../domain/run/model.ts";
-          import type { DefinitionId, RunId } from "../domain/shared.ts";'''
+          old_imports = (
+              'import type {\n'
+              '  CompiledRunSpec,\n'
+              '  RunLimits,\n'
+              '  RunRecord,\n'
+              '  RunRetryOptions,\n'
+              '  StartRun,\n'
+              '  WorkflowCausation,\n'
+              '} from "../domain/run/model.ts";\n'
+              'import type { DefinitionId, RunId } from "../domain/shared.ts";\n'
+              'import { isTerminalRunState } from "../domain/run/invariants.ts";'
+          )
+          new_imports = (
+              'import { isTerminalRunState } from "../domain/run/invariants.ts";\n'
+              'import type {\n'
+              '  CompiledRunSpec,\n'
+              '  RunLimits,\n'
+              '  RunRecord,\n'
+              '  RunRetryOptions,\n'
+              '  StartRun,\n'
+              '  WorkflowCausation,\n'
+              '} from "../domain/run/model.ts";\n'
+              'import type { DefinitionId, RunId } from "../domain/shared.ts";'
+          )
           if old_imports not in text:
               raise SystemExit("admission import block did not match")
           text = text.replace(old_imports, new_imports)
-          old_workflow = '''    const workflow = this.catalog.require(parent.definitionId) as WorkflowDefinition<unknown, unknown>;'''
-          new_workflow = '''    const workflow = this.catalog.require(parent.definitionId) as WorkflowDefinition<
-              unknown,
-              unknown
-            >;'''
+          old_workflow = '    const workflow = this.catalog.require(parent.definitionId) as WorkflowDefinition<unknown, unknown>;'
+          new_workflow = (
+              '    const workflow = this.catalog.require(parent.definitionId) as WorkflowDefinition<\n'
+              '      unknown,\n'
+              '      unknown\n'
+              '    >;'
+          )
           if old_workflow not in text:
               raise SystemExit("admission workflow cast did not match")
           admission.write_text(text.replace(old_workflow, new_workflow))
