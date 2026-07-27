@@ -191,15 +191,15 @@ export const ImplementationResultType = Type.Object({
 });
 
 export const ObjectiveRequestSchema = defineSchema<ObjectiveRequest>(
-  "request.objective.v1",
+  "request.objective",
   Type.Object(objective),
 );
 export const ScoutRequestSchema = defineSchema<ScoutRequest>(
-  "request.scout.v1",
+  "request.scout",
   Type.Object({ ...objective, focus: Type.Optional(Type.String()) }),
 );
 export const ScoutReportSchema = defineSchema<ScoutReport>(
-  "outcome.scout-report.v1",
+  "outcome.scout-report",
   Type.Object({
     summary: Type.String(),
     evidence: Type.Array(evidenceItem),
@@ -207,11 +207,11 @@ export const ScoutReportSchema = defineSchema<ScoutReport>(
   }),
 );
 export const PlanRequestSchema = defineSchema<PlanRequest>(
-  "request.plan.v1",
+  "request.plan",
   Type.Object({ ...objective, evidence: Type.Optional(Type.Unknown()) }),
 );
 export const PlanResultSchema = defineSchema<PlanResult>(
-  "outcome.plan.v1",
+  "outcome.plan",
   Type.Object({
     summary: Type.String(),
     steps: Type.Array(Type.String()),
@@ -220,7 +220,7 @@ export const PlanResultSchema = defineSchema<PlanResult>(
   }),
 );
 export const ImplementationRequestSchema = defineSchema<ImplementationRequest>(
-  "request.implementation.v1",
+  "request.implementation",
   Type.Object({
     ...objective,
     plan: Type.Optional(
@@ -236,11 +236,11 @@ export const ImplementationRequestSchema = defineSchema<ImplementationRequest>(
   }),
 );
 export const TestRequestSchema = defineSchema<TestRequest>(
-  "request.test.v1",
+  "request.test",
   Type.Object({ ...objective, checks: Type.Array(checkResult) }),
 );
 export const TestReportSchema = defineSchema<TestReport>(
-  "outcome.test-report.v1",
+  "outcome.test-report",
   Type.Object({
     summary: Type.String(),
     checks: Type.Array(checkResult),
@@ -248,17 +248,17 @@ export const TestReportSchema = defineSchema<TestReport>(
     evidence: Type.Array(Type.String()),
   }),
 );
-export const ChangeSetSchema = defineSchema<ChangeSet>("outcome.change-set.v1", ChangeSetType);
+export const ChangeSetSchema = defineSchema<ChangeSet>("outcome.change-set", ChangeSetType);
 export const VerificationRequestSchema = defineSchema<VerificationRequest>(
-  "request.verification.v1",
+  "request.verification",
   Type.Object({ ...objective, changeSet: ChangeSetType }),
 );
 export const VerificationResultSchema = defineSchema<VerificationResult>(
-  "outcome.verification.v1",
+  "outcome.verification",
   VerificationResultType,
 );
 export const CriticRequestSchema = defineSchema<CriticRequest>(
-  "request.critic.v1",
+  "request.critic",
   Type.Object({
     ...objective,
     artifact: Type.Optional(Type.Unknown()),
@@ -266,7 +266,7 @@ export const CriticRequestSchema = defineSchema<CriticRequest>(
   }),
 );
 export const CriticReportSchema = defineSchema<CriticReport>(
-  "outcome.critic-report.v1",
+  "outcome.critic-report",
   Type.Object({
     summary: Type.String(),
     findings: Type.Array(
@@ -279,7 +279,7 @@ export const CriticReportSchema = defineSchema<CriticReport>(
   }),
 );
 export const BaseResultSchema = defineSchema<BaseResult>(
-  "outcome.base.v1",
+  "outcome.base",
   Type.Object({
     summary: Type.String(),
     artifacts: Type.Array(Type.Unknown()),
@@ -287,20 +287,20 @@ export const BaseResultSchema = defineSchema<BaseResult>(
   }),
 );
 export const QASynthesisRequestSchema = defineSchema<QASynthesisRequest>(
-  "request.qa-synthesis.v1",
+  "request.qa-synthesis",
   Type.Object({
     objective: Type.String(),
     checks: Type.Array(checkResult),
     reports: Type.Array(Type.Unknown()),
   }),
 );
-export const QAReportSchema = defineSchema<QAReport>("outcome.qa-report.v1", QAReportType);
+export const QAReportSchema = defineSchema<QAReport>("outcome.qa-report", QAReportType);
 export const ImplementationResultSchema = defineSchema<ImplementationResult>(
-  "outcome.implementation-result.v1",
+  "outcome.implementation-result",
   ImplementationResultType,
 );
 export const FinalReportSchema = defineSchema<FinalReport>(
-  "outcome.final-report.v1",
+  "outcome.final-report",
   Type.Object({
     summary: Type.String(),
     changed: Type.Boolean(),
