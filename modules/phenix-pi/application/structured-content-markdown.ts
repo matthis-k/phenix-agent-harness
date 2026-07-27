@@ -3,19 +3,31 @@ import {
   type StructuredContentNode,
   type StructuredDocument,
 } from "../domain/presentation/structured-content.ts";
-import type { ResultTransformStrategy } from "./result-presentation.ts";
+import type { ResultTransformStep } from "./result-presentation.ts";
 
 interface RenderContext {
   readonly headingLevel: number;
   readonly listDepth: number;
 }
 
-export const structuredContentMarkdownTransform: ResultTransformStrategy = {
+export const structuredContentContractStep: ResultTransformStep = {
+  id: "structured-content-contract",
+  inputKind: "contract",
+  outputKind: "structured-content",
+  transform(input) {
+    return input.kind === "contract" && isStructuredDocument(input.value)
+      ? { kind: "structured-content", document: input.value }
+      : undefined;
+  },
+};
+
+export const structuredContentMarkdownStep: ResultTransformStep = {
   id: "structured-content-markdown",
-  auto: true,
-  transform(contract) {
-    return isStructuredDocument(contract)
-      ? { kind: "markdown", content: renderStructuredContentMarkdown(contract) }
+  inputKind: "structured-content",
+  outputKind: "markdown",
+  transform(input) {
+    return input.kind === "structured-content"
+      ? { kind: "markdown", content: renderStructuredContentMarkdown(input.document) }
       : undefined;
   },
 };
