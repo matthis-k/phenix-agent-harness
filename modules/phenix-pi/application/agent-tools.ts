@@ -10,7 +10,7 @@ import {
   runId,
   type TaskId,
 } from "../domain/shared.ts";
-import type { AgentTool } from "../ports/agent-session-backend.ts";
+import type { AgentTool, AgentToolResult } from "../ports/agent-session-backend.ts";
 import {
   awaitOutcomeOrBudget,
   type BudgetSuspension,
@@ -18,6 +18,7 @@ import {
   pendingBudgetSuspension,
   pendingBudgetSuspensionInScope,
 } from "./budget-suspension.ts";
+import { finalizeRootPresentation } from "./deterministic-presentation.ts";
 import type { DispatchService } from "./dispatch-service.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import type { CatalogFacade, ExecutionFacade, TaskFacade } from "./interfaces.ts";
@@ -148,6 +149,8 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
   async forRun(parentId: RunId): Promise<readonly AgentTool[]> {
     const parent = this.store.projection.requireRun(parentId);
     const available = await this.catalog.listAvailable(parentId);
+    const completionResult = (result: AgentToolResult): AgentToolResult =>
+      parent.kind === "root" ? finalizeRootPresentation(result) : result;
     const runTool: AgentTool = {
       name: "phenix_run",
       label: "Phenix Run",
@@ -214,7 +217,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
             result,
           );
         }
-        return projectedToolResult(projectDispatchResult(result), result);
+        return completionResult(projectedToolResult(projectDispatchResult(result), result));
       },
     };
 
@@ -257,9 +260,11 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
               settled.suspension,
             );
           }
-          return projectedToolResult(
-            projectOutcomeForView(settled.outcome, params.view),
-            settled.outcome,
+          return completionResult(
+            projectedToolResult(
+              projectOutcomeForView(settled.outcome, params.view),
+              settled.outcome,
+            ),
           );
         }
         if (params.action === "resume") {
@@ -303,9 +308,11 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
             );
           }
           const projected = projectOutcomeForView(settled.outcome, params.view);
-          return projectedToolResult(
-            { runId: targetId, resumed: true, sameSession: true, outcome: projected },
-            settled.outcome,
+          return completionResult(
+            projectedToolResult(
+              { runId: targetId, resumed: true, sameSession: true, outcome: projected },
+              settled.outcome,
+            ),
           );
         }
         if (params.action === "retry") {
@@ -339,7 +346,9 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
               : params.view === "failure" && outcome.status === "failure"
                 ? { runId: handle.id, retryOf: targetId, failure: outcome.failure }
                 : projectRetryResult(handle.id, targetId, outcome);
-          return projectedToolResult(projected, { runId: handle.id, retryOf: targetId, outcome });
+          return completionResult(
+            projectedToolResult(projected, { runId: handle.id, retryOf: targetId, outcome }),
+          );
         }
         const caller = this.store.projection.requireRun(parentId);
         if (params.action === "send") {
