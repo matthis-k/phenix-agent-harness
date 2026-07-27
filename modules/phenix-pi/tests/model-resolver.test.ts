@@ -37,13 +37,13 @@ test("virtual mixed model resolves once to the first authenticated capability ca
   if (result.requested.kind === "virtual") assert.equal(result.requested.model, "mixed");
   assert.equal(result.capability, "code");
   assert.equal(result.thinking, "low");
-  assert.equal(result.policyRevision, "phenix-routing-v3");
+  assert.equal(result.policyRevision, "phenix-routing-v4");
 });
 
 test("a definition-declared capability overrides role fallback routing", async () => {
   const resolver = new PhenixModelResolver({
     available: () => [
-      { provider: "openai-codex", model: "gpt-5.6" },
+      { provider: "openai-codex", model: "gpt-5.6-sol" },
       { provider: "openai-codex", model: "gpt-5.6-terra" },
     ],
     contains: () => true,
@@ -64,6 +64,6 @@ test("a definition-declared capability overrides role fallback routing", async (
   assert.deepEqual(result.concrete, {
     kind: "concrete",
     provider: "openai-codex",
-    model: "gpt-5.6",
+    model: "gpt-5.6-sol",
   });
 });
