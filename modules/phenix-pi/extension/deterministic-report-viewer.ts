@@ -24,7 +24,9 @@ export default function deterministicReportViewer(pi: ExtensionAPI): void {
     return new Markdown(entry.data?.markdown ?? "", 1, 0, getMarkdownTheme());
   });
 
-  pi.on("tool_result", (event) => {
+  pi.on("tool_result", (event, ctx) => {
+    if (ctx.mode !== "tui") return;
+
     const report = deterministicQaReportEntry(event, pi.getActiveTools());
     if (!report) return;
 
