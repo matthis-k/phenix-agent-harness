@@ -1,15 +1,17 @@
 import { JsonlRunLedger } from "../adapters/persistence/jsonl-run-ledger.ts";
 import type { DomainEventSource } from "../application/domain-event-bus.ts";
 import type {
-  AttentionFacade,
   CatalogFacade,
-  ExecutionFacade,
   QueryFacade,
   SessionProfileFacade,
   TaskFacade,
 } from "../application/interfaces.ts";
 import type { ConcreteModelRef } from "../domain/definition/model.ts";
-import { DEFAULT_SESSION_PROFILE, type RootRunInput } from "../domain/run/model.ts";
+import {
+  DEFAULT_SESSION_PROFILE,
+  type RootRunInput,
+  type RunSnapshot,
+} from "../domain/run/model.ts";
 import type { RunId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import type { DiagnosticLog } from "../ports/diagnostic-log.ts";
@@ -21,8 +23,6 @@ import { createPiEventBridge, createRuntimeInfrastructure } from "./runtime-infr
 export type { PhenixHostServices } from "./host-services.ts";
 
 export interface PhenixRuntime {
-  readonly execution: ExecutionFacade;
-  readonly attention: AttentionFacade;
   readonly profiles: SessionProfileFacade;
   readonly tasks: TaskFacade;
   readonly catalog: CatalogFacade;
@@ -34,6 +34,7 @@ export interface PhenixRuntime {
     readonly session: RootRunInput;
     readonly model?: ConcreteModelRef;
   }): Promise<void>;
+  inspectRun(runId: RunId): Promise<RunSnapshot>;
   rootTools(rootRunId: RunId): Promise<readonly AgentTool[]>;
   setRootNotifier(listener: ((message: string) => void | Promise<void>) | undefined): void;
   amendRootInput(rootRunId: RunId, text: string): Promise<void>;
@@ -60,8 +61,6 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
   const unsubscribePiBridge = createPiEventBridge(host.piEventBus, infrastructure.events);
 
   return {
-    execution: services.execution,
-    attention: services.attention,
     profiles: infrastructure.profiles,
     tasks: services.tasks,
     catalog: services.catalog,
@@ -97,6 +96,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
         fields: { sequence: infrastructure.store.sequence(input.id) },
       });
     },
+    inspectRun: (runId) => services.execution.inspect(runId),
     rootTools: (rootRunId) => services.tools.forRun(rootRunId),
     setRootNotifier(listener) {
       rootNotifier = listener;
