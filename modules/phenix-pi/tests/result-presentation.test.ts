@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  isDeterministicQaPresentation,
   presentRootResult,
-  renderContractMarkdown,
-} from "../application/deterministic-presentation.ts";
+  transformResult,
+} from "../application/result-presentation.ts";
 import {
   projectDispatchResult,
   projectedToolResult,
@@ -36,72 +37,77 @@ function qaResult() {
   );
 }
 
-test("auto transformation preserves canonical QA Markdown and displays it natively", () => {
-  const result = presentRootResult(qaResult());
+test("auto selects the QA transform and Pi Markdown renderer", () => {
+  const result = qaResult();
+  const presented = presentRootResult(result);
 
-  assert.match(result.text, /^## QA report\n/);
-  assert.equal(result.terminate, true);
+  assert.equal(isDeterministicQaPresentation(result), true);
+  assert.equal(presented.terminate, true);
+  assert.match(presented.text, /^## QA report/);
   assert.deepEqual(
-    (result.details as { transport: { presentation: unknown } }).transport.presentation,
-    { transform: "markdown", display: "native" },
+    (presented.details as { transport: { presentation: unknown } }).transport.presentation,
+    {
+      transform: "qa-report",
+      renderer: "pi-markdown",
+      inputKind: "markdown",
+    },
   );
 });
 
-test("explicit tool display keeps deterministic Markdown in the ordinary tool flow", () => {
-  const result = presentRootResult(qaResult(), {
-    transform: "markdown",
-    display: "tool",
+test("the QA transform can keep Markdown in the ordinary tool result", () => {
+  const presented = presentRootResult(qaResult(), {
+    transform: "qa-report",
+    renderer: "tool",
   });
 
-  assert.match(result.text, /^## QA report\n/);
-  assert.equal(result.terminate, undefined);
-  assert.deepEqual(
-    (result.details as { transport: { presentation: unknown } }).transport.presentation,
-    { transform: "markdown", display: "tool" },
-  );
+  assert.equal(presented.terminate, undefined);
+  assert.match(presented.text, /^## QA report/);
 });
 
-test("generic contract data can be transformed into deterministic Markdown", () => {
-  const result = presentRootResult(
-    projectedToolResult({
-      status: "success",
-      summary: "Implementation completed.",
-      files: [
-        { path: "src/a.ts", changed: true },
-        { path: "src/b.ts", changed: false },
-      ],
-    }),
-    { transform: "markdown", display: "native" },
-  );
-
-  assert.match(result.text, /^## Result\n/);
-  assert.match(result.text, /\| Field \| Value \|/);
-  assert.match(result.text, /### Files/);
-  assert.match(result.text, /\| path \| changed \|/);
-  assert.equal(result.terminate, true);
-});
-
-test("explicit JSON transformation remains a normal tool result by default", () => {
-  const result = presentRootResult(projectedToolResult({ status: "success", count: 2 }), {
-    transform: "json",
+test("the Mermaid source transform feeds the Beautiful Mermaid renderer", () => {
+  const source = "flowchart TD\n  A --> B";
+  const result = {
+    text: JSON.stringify({ source }),
+    details: { source, transport: { sourceBytes: 32, inlineBytes: 32, omittedBytes: 0 } },
+  };
+  const transformed = transformResult(result, "mermaid-source");
+  const presented = presentRootResult(result, {
+    transform: "mermaid-source",
+    renderer: "beautiful-mermaid",
   });
 
-  assert.equal(result.text, '{\n  "status": "success",\n  "count": 2\n}');
-  assert.equal(result.terminate, undefined);
+  assert.deepEqual(transformed, {
+    id: "mermaid-source",
+    input: { kind: "mermaid", source },
+  });
+  assert.equal(presented.text, source);
+  assert.equal(presented.terminate, true);
   assert.deepEqual(
-    (result.details as { transport: { presentation: unknown } }).transport.presentation,
-    { transform: "json", display: "tool" },
+    (presented.details as { transport: { presentation: unknown } }).transport.presentation,
+    {
+      transform: "mermaid-source",
+      renderer: "beautiful-mermaid",
+      inputKind: "mermaid",
+    },
   );
 });
 
-test("contract Markdown renders scalar arrays and nested objects deterministically", () => {
-  const markdown = renderContractMarkdown({
-    status: "success",
-    tags: ["qa", "architecture"],
-    metrics: { checks: 3, findings: 1 },
-  });
+test("renderer compatibility is enforced", () => {
+  assert.throws(
+    () =>
+      presentRootResult(qaResult(), {
+        transform: "qa-report",
+        renderer: "beautiful-mermaid",
+      }),
+    /cannot render markdown input/,
+  );
+});
 
-  assert.match(markdown, /\| status \| success \|/);
-  assert.match(markdown, /### Tags\n\n- qa\n- architecture/);
-  assert.match(markdown, /### Metrics\n\n\| Field \| Value \|/);
+test("ordinary results remain unchanged when no automatic transform matches", () => {
+  const result = {
+    text: JSON.stringify({ status: "success", summary: "ordinary" }),
+    details: { status: "success", summary: "ordinary" },
+  };
+
+  assert.strictEqual(presentRootResult(result), result);
 });
