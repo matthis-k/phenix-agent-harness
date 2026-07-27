@@ -18,7 +18,12 @@ import {
   pendingBudgetSuspension,
   pendingBudgetSuspensionInScope,
 } from "./budget-suspension.ts";
-import { finalizeRootPresentation } from "./deterministic-presentation.ts";
+import {
+  presentRootResult,
+  type ResultDisplay,
+  type ResultPresentationRequest,
+  type ResultTransform,
+} from "./deterministic-presentation.ts";
 import type { DispatchService } from "./dispatch-service.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import type { CatalogFacade, ExecutionFacade, TaskFacade } from "./interfaces.ts";
@@ -38,6 +43,21 @@ export interface AgentToolFactory {
   forRun(runId: RunId): Promise<readonly AgentTool[]>;
 }
 
+const resultPresentationProperties = {
+  transform: Type.Optional(
+    Type.Enum(["auto", "json", "markdown"], {
+      description:
+        "Deterministic transformation applied to the completed contract result. auto keeps specialized renderers when available and otherwise returns JSON.",
+    }),
+  ),
+  display: Type.Optional(
+    Type.Enum(["auto", "tool", "native"], {
+      description:
+        "Display backend for the transformed result. native publishes an LLM-excluded Pi entry and ends the frontend turn; auto uses native for Markdown and the ordinary tool row for JSON.",
+    }),
+  ),
+} as const;
+
 const runParameters = defineSchema<{
   definition: string;
   input: unknown;
@@ -56,6 +76,8 @@ const dispatchParameters = defineSchema<{
   context?: unknown;
   mode?: "auto" | "qa" | "implement" | "coordinate";
   wait?: "await" | "background";
+  transform?: ResultTransform;
+  display?: ResultDisplay;
 }>(
   "tool.phenix-dispatch",
   Type.Object({
@@ -63,6 +85,7 @@ const dispatchParameters = defineSchema<{
     context: Type.Optional(Type.Unknown()),
     mode: Type.Optional(Type.Enum(["auto", "qa", "implement", "coordinate"])),
     wait: Type.Optional(Type.Enum(["await", "background"])),
+    ...resultPresentationProperties,
   }),
 );
 
@@ -72,6 +95,8 @@ const handleParameters = defineSchema<{
   message?: string;
   wait?: "await" | "background";
   view?: RunResultView;
+  transform?: ResultTransform;
+  display?: ResultDisplay;
   addTools?: string[];
   limits?: {
     timeoutMs?: number;
@@ -87,6 +112,7 @@ const handleParameters = defineSchema<{
     message: Type.Optional(Type.String()),
     wait: Type.Optional(Type.Enum(["await", "background"])),
     view: Type.Optional(Type.Enum(["summary", "outcome", "failure", "full"])),
+    ...resultPresentationProperties,
     addTools: Type.Optional(Type.Array(Type.String(), { maxItems: 8 })),
     limits: Type.Optional(
       Type.Object({
@@ -149,8 +175,11 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
   async forRun(parentId: RunId): Promise<readonly AgentTool[]> {
     const parent = this.store.projection.requireRun(parentId);
     const available = await this.catalog.listAvailable(parentId);
-    const completionResult = (result: AgentToolResult): AgentToolResult =>
-      parent.kind === "root" ? finalizeRootPresentation(result) : result;
+    const completionResult = (
+      result: AgentToolResult,
+      presentation: ResultPresentationRequest,
+    ): AgentToolResult =>
+      parent.kind === "root" ? presentRootResult(result, presentation) : result;
     const runTool: AgentTool = {
       name: "phenix_run",
       label: "Phenix Run",
@@ -199,7 +228,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       name: "phenix_dispatch",
       label: "Phenix Dispatch",
       description:
-        "Route substantial work through a mandatory catalog-driven selector. Use auto for normal requests; explicit qa, implement, or coordinate modes are operator overrides only. Awaited dispatches return either the result or a structured budget suspension for the exact existing child session that needs a parent decision.",
+        "Route substantial work through a mandatory catalog-driven selector. Use auto for normal requests; explicit qa, implement, or coordinate modes are operator overrides only. Awaited dispatches return either the result or a structured budget suspension for the exact existing child session that needs a parent decision. Use transform=markdown and display=native for a final deterministic report that should be shown directly without frontend synthesis.",
       parameters: dispatchParameters,
       execute: async (raw, signal) => {
         const params = requireValid(dispatchParameters, raw);
@@ -217,7 +246,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
             result,
           );
         }
-        return completionResult(projectedToolResult(projectDispatchResult(result), result));
+        return completionResult(projectedToolResult(projectDispatchResult(result), result), params);
       },
     };
 
@@ -225,7 +254,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       name: "phenix_handle",
       label: "Phenix Handle",
       description:
-        "Inspect, await, message, resume, cancel, or retry an accessible run. Resume increases limits on the same budget-suspended Pi session and preserves its context. Retry is reserved for creating a linked replacement run after a terminal non-budget failure.",
+        "Inspect, await, message, resume, cancel, or retry an accessible run. Resume increases limits on the same budget-suspended Pi session and preserves its context. Retry is reserved for creating a linked replacement run after a terminal non-budget failure. Completed inspect, await, resume, and retry results accept the same transform and display modes as phenix_dispatch.",
       parameters: handleParameters,
       execute: async (raw, signal) => {
         const params = requireValid(handleParameters, raw);
@@ -238,14 +267,17 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
           const snapshot = await this.execution.inspect(targetId);
           const projected = projectRunSnapshot(snapshot, params.view);
           const suspension = pendingBudgetSuspensionInScope(this.store, targetId);
-          return projectedToolResult(
-            suspension
-              ? {
-                  ...asRecord(projected),
-                  suspension: projectBudgetSuspension(targetId, suspension).suspension,
-                }
-              : projected,
-            snapshot,
+          return completionResult(
+            projectedToolResult(
+              suspension
+                ? {
+                    ...asRecord(projected),
+                    suspension: projectBudgetSuspension(targetId, suspension).suspension,
+                  }
+                : projected,
+              snapshot,
+            ),
+            params,
           );
         }
         if (params.action === "await") {
@@ -265,6 +297,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
               projectOutcomeForView(settled.outcome, params.view),
               settled.outcome,
             ),
+            params,
           );
         }
         if (params.action === "resume") {
@@ -313,6 +346,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
               { runId: targetId, resumed: true, sameSession: true, outcome: projected },
               settled.outcome,
             ),
+            params,
           );
         }
         if (params.action === "retry") {
@@ -348,6 +382,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
                 : projectRetryResult(handle.id, targetId, outcome);
           return completionResult(
             projectedToolResult(projected, { runId: handle.id, retryOf: targetId, outcome }),
+            params,
           );
         }
         const caller = this.store.projection.requireRun(parentId);
