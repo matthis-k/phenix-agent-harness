@@ -163,22 +163,90 @@ output-schema: outcome.qa-report.v1
 
 ```phenix-test
 {
-  "input": { "objective": "Run a full repository QA review" },
+  "input": {
+    "objective": "Run a full repository QA review"
+  },
   "mocks": {
-    "checks": [{ "return": [{ "command": "devenv test", "ok": true, "summary": "passed" }] }],
-    "fanout": [{ "return": { "objective": "Run a full repository QA review" } }],
-    "repo": [{ "return": { "summary": "Repository review passed", "evidence": [], "risks": [] } }],
-    "tests": [{ "return": { "summary": "Checks passed", "checks": [], "findings": [], "evidence": [] } }],
-    "architecture": [{ "return": { "summary": "Architecture review passed", "findings": [] } }],
-    "security": [{ "return": { "summary": "Security review passed", "findings": [] } }],
-    "synthesize": [{
-      "return": {
-        "summary": "QA passed",
-        "checks": [{ "command": "devenv test", "ok": true, "summary": "passed" }],
-        "findings": [],
-        "reports": []
+    "checks": [
+      {
+        "return": [
+          {
+            "command": "devenv test",
+            "ok": true,
+            "summary": "passed"
+          }
+        ]
       }
-    }]
+    ],
+    "fanout": [
+      {
+        "return": {
+          "objective": "Run a full repository QA review"
+        }
+      }
+    ],
+    "repo": [
+      {
+        "return": {
+          "summary": "Repository review passed",
+          "evidence": [
+            {
+              "path": "src/file.ts",
+              "finding": "Structure is consistent"
+            }
+          ],
+          "risks": []
+        }
+      }
+    ],
+    "tests": [
+      {
+        "return": {
+          "summary": "Checks passed",
+          "checks": [
+            {
+              "command": "devenv test",
+              "ok": true,
+              "summary": "passed"
+            }
+          ],
+          "findings": [],
+          "evidence": ["devenv test passed"]
+        }
+      }
+    ],
+    "architecture": [
+      {
+        "return": {
+          "summary": "Architecture review passed",
+          "findings": []
+        }
+      }
+    ],
+    "security": [
+      {
+        "return": {
+          "summary": "Security review passed",
+          "findings": []
+        }
+      }
+    ],
+    "synthesize": [
+      {
+        "return": {
+          "summary": "QA passed",
+          "checks": [
+            {
+              "command": "devenv test",
+              "ok": true,
+              "summary": "passed"
+            }
+          ],
+          "findings": [],
+          "reports": []
+        }
+      }
+    ]
   },
   "expect": {
     "status": "success",
@@ -201,13 +269,55 @@ output-schema: outcome.qa-report.v1
 
 ```phenix-test
 {
-  "input": { "objective": "Run QA while recovering one transient security timeout" },
+  "input": {
+    "objective": "Run QA while recovering one transient security timeout"
+  },
   "mocks": {
-    "checks": [{ "return": [{ "command": "devenv test", "ok": true, "summary": "passed" }] }],
-    "fanout": [{ "return": { "objective": "Run QA while recovering one transient security timeout" } }],
-    "repo": [{ "return": { "summary": "Repository review passed", "evidence": [], "risks": [] } }],
-    "tests": [{ "return": { "summary": "Checks passed", "checks": [], "findings": [], "evidence": [] } }],
-    "architecture": [{ "return": { "summary": "Architecture review passed", "findings": [] } }],
+    "checks": [
+      {
+        "return": [
+          {
+            "command": "devenv test",
+            "ok": true,
+            "summary": "passed"
+          }
+        ]
+      }
+    ],
+    "fanout": [
+      {
+        "return": {
+          "objective": "Run QA while recovering one transient security timeout"
+        }
+      }
+    ],
+    "repo": [
+      {
+        "return": {
+          "summary": "Repository review passed",
+          "evidence": [],
+          "risks": []
+        }
+      }
+    ],
+    "tests": [
+      {
+        "return": {
+          "summary": "Checks passed",
+          "checks": [],
+          "findings": [],
+          "evidence": []
+        }
+      }
+    ],
+    "architecture": [
+      {
+        "return": {
+          "summary": "Architecture review passed",
+          "findings": []
+        }
+      }
+    ],
     "security": [
       {
         "fail": {
@@ -217,24 +327,49 @@ output-schema: outcome.qa-report.v1
           "details": {
             "source": "automatic",
             "category": "resource_limit",
-            "suggestedLimits": { "timeoutMs": 960000 }
+            "suggestedLimits": {
+              "timeoutMs": 960000
+            }
           }
         }
       },
-      { "return": { "summary": "Security review passed after retry", "findings": [] } }
-    ],
-    "synthesize": [{
-      "return": {
-        "summary": "QA passed after bounded recovery",
-        "checks": [{ "command": "devenv test", "ok": true, "summary": "passed" }],
-        "findings": [],
-        "reports": []
+      {
+        "return": {
+          "summary": "Security review passed after retry",
+          "findings": []
+        }
       }
-    }]
+    ],
+    "synthesize": [
+      {
+        "return": {
+          "summary": "QA passed after bounded recovery",
+          "checks": [
+            {
+              "command": "devenv test",
+              "ok": true,
+              "summary": "passed"
+            }
+          ],
+          "findings": [],
+          "reports": []
+        }
+      }
+    ]
   },
   "expect": {
     "status": "success",
-    "visits": ["checks", "fanout", "repo", "tests", "architecture", "security", "join", "synthesize", "return"],
+    "visits": [
+      "checks",
+      "fanout",
+      "repo",
+      "tests",
+      "architecture",
+      "security",
+      "join",
+      "synthesize",
+      "return"
+    ],
     "counts": {
       "checks": 1,
       "fanout": 1,
