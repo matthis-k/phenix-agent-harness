@@ -41,7 +41,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          allowed='^(modules/phenix-pi/extension/(native-run-transcript|phenix-ui|root-extension)\.ts|modules/phenix-pi/tests/(native-run-transcript|phenix-ui)\.test\.ts|\.github/(apply-native-transcript-viewer\.py|workflows/ci\.yml))$'
+          allowed='^(modules/tooling\.nix|modules/phenix-pi/extension/(native-run-transcript|phenix-ui|root-extension)\.ts|modules/phenix-pi/tests/(native-run-transcript|phenix-ui)\.test\.ts|\.github/(apply-native-transcript-viewer\.py|workflows/ci\.yml))$'
           while IFS= read -r file; do
             if [[ ! "$file" =~ $allowed ]]; then
               git restore -- "$file"
