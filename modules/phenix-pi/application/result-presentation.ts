@@ -110,10 +110,7 @@ function resolveTransformation(
   return { id: definition.id, input };
 }
 
-function qaReportInput(
-  _result: AgentToolResult,
-  contract: unknown,
-): ResultRenderInput | undefined {
+function qaReportInput(_result: AgentToolResult, contract: unknown): ResultRenderInput | undefined {
   const markdown = projectedToolResult(contract).text;
   return markdown.startsWith(QA_REPORT_HEADING)
     ? { kind: "markdown", content: markdown }
@@ -139,9 +136,12 @@ function mermaidSource(value: unknown): string | undefined {
     recordOf(root.outcome)?.source,
     recordOf(recordOf(root.outcome)?.value)?.source,
   ];
-  return candidates.find(
-    (candidate): candidate is string => typeof candidate === "string" && candidate.trim().length > 0,
-  )?.trim();
+  return candidates
+    .find(
+      (candidate): candidate is string =>
+        typeof candidate === "string" && candidate.trim().length > 0,
+    )
+    ?.trim();
 }
 
 function resolveRenderer(
