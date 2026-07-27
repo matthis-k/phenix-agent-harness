@@ -80,7 +80,7 @@ function fixtureNode(sessionFile: string | undefined): RunTreeNode {
 }
 
 function fixtureSession(cwd: string): string {
-  return [
+  return `${[
     {
       type: "session",
       version: 3,
@@ -147,7 +147,7 @@ function fixtureSession(cwd: string): string {
     },
   ]
     .map((entry) => JSON.stringify(entry))
-    .join("\n") + "\n";
+    .join("\n")}\n`;
 }
 
 function fakeTui(): TUI {
