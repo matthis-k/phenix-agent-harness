@@ -5,6 +5,7 @@ import type {
   WorkflowDefinition,
 } from "../domain/definition/definition.ts";
 import type { Difficulty, ResolvedModel } from "../domain/definition/model.ts";
+import { isTerminalRunState } from "../domain/run/invariants.ts";
 import type {
   CompiledRunSpec,
   RunLimits,
@@ -14,7 +15,6 @@ import type {
   WorkflowCausation,
 } from "../domain/run/model.ts";
 import type { DefinitionId, RunId } from "../domain/shared.ts";
-import { isTerminalRunState } from "../domain/run/invariants.ts";
 import type { ModelResolver } from "../ports/model-resolver.ts";
 import type { DefinitionCatalog } from "./catalog.ts";
 import type { ExecutionStore } from "./execution-store.ts";
@@ -105,7 +105,10 @@ export class RunAdmissionPolicy {
     }
     if (parent.kind !== "workflow") return undefined;
 
-    const workflow = this.catalog.require(parent.definitionId) as WorkflowDefinition<unknown, unknown>;
+    const workflow = this.catalog.require(parent.definitionId) as WorkflowDefinition<
+      unknown,
+      unknown
+    >;
     const invocation = workflow.graph.nodes.find(
       (node) => node.kind === "invoke" && node.id === request.causation?.nodeId,
     );

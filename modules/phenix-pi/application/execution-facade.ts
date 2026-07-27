@@ -760,9 +760,7 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
           this.store.projection.rootOf(run.id) === rootRunId &&
           !isTerminalRunState(run.state),
       )
-      .sort(
-        (left, right) => this.admission.depthOf(right.id) - this.admission.depthOf(left.id),
-      );
+      .sort((left, right) => this.admission.depthOf(right.id) - this.admission.depthOf(left.id));
 
     for (const discovered of runs) {
       const run = this.store.projection.requireRun(discovered.id);
@@ -792,9 +790,7 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
           this.store.projection.rootOf(run.id) === rootRunId &&
           !isTerminalRunState(run.state),
       )
-      .sort(
-        (left, right) => this.admission.depthOf(right.id) - this.admission.depthOf(left.id),
-      );
+      .sort((left, right) => this.admission.depthOf(right.id) - this.admission.depthOf(left.id));
     for (const run of activeAgents) {
       if (
         (this.catalog.require(run.definitionId) as AgentDefinition<unknown, unknown>)
