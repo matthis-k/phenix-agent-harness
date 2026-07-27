@@ -18,8 +18,9 @@ import {
   virtualModel,
 } from "../../domain/definition/model.ts";
 import type { SessionProfile } from "../../domain/run/model.ts";
+import type { RoutingPolicy } from "../../ports/model-resolver.ts";
 import { registerFreeModelGuard } from "../pi-sdk/free-model-guard.ts";
-import { PhenixModelResolver, type RoutingPolicy } from "./phenix-model-resolver.ts";
+import { PhenixModelResolver } from "./phenix-model-resolver.ts";
 import { PiModelInventory } from "./pi-model-inventory.ts";
 
 const PHENIX_PROVIDER = "phenix";
