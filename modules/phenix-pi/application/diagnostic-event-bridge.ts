@@ -71,8 +71,6 @@ function describe(event: DomainEvent): Description {
           model: concrete?.model,
           thinking: resolved.thinking,
           capability: resolved.capability,
-          pool: resolved.pool,
-          policyRevision: resolved.policyRevision,
           requested: resolved.requested,
           virtual: resolved.virtual,
         },
