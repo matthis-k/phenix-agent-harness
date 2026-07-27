@@ -29,8 +29,9 @@ const all = [
   { provider: "opencode-go", model: "qwen3.7-plus" },
   { provider: "opencode-go", model: "glm-5.2" },
   { provider: "opencode-go", model: "kimi-k2.7-code" },
+  { provider: "openai-codex", model: "gpt-5.6-luna" },
   { provider: "openai-codex", model: "gpt-5.6-terra" },
-  { provider: "openai-codex", model: "gpt-5.6" },
+  { provider: "openai-codex", model: "gpt-5.6-sol" },
 ];
 
 async function resolve(
@@ -64,8 +65,20 @@ test("OpenCode Go, ChatGPT Plus, and mixed select the capability-specific provid
   const go = await resolve("opencode-go", "agent.planner", "D3");
   assert.equal(`${go.concrete.provider}/${go.concrete.model}`, "opencode-go/glm-5.2");
 
+  const plusFast = await resolve("chatgpt-plus", "agent.scout", "D0");
+  assert.equal(
+    `${plusFast.concrete.provider}/${plusFast.concrete.model}`,
+    "openai-codex/gpt-5.6-luna",
+  );
+
   const plus = await resolve("chatgpt-plus", "agent.verifier", "D2");
   assert.equal(`${plus.concrete.provider}/${plus.concrete.model}`, "openai-codex/gpt-5.6-terra");
+
+  const plusMax = await resolve("chatgpt-plus", "agent.verifier", "D3");
+  assert.equal(
+    `${plusMax.concrete.provider}/${plusMax.concrete.model}`,
+    "openai-codex/gpt-5.6-sol",
+  );
 
   const mixedCode = await resolve("mixed", "agent.implementer", "D2");
   assert.equal(
