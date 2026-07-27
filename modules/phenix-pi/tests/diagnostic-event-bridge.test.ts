@@ -83,8 +83,6 @@ test("domain events map to stable model, workflow, and failure diagnostics", asy
         concrete: { kind: "concrete", provider: "opencode-go", model: "model-a" },
         thinking: "low",
         capability: "code",
-        pool: "go.code",
-        policyRevision: "test-policy",
       },
     }),
   );
@@ -116,8 +114,6 @@ test("domain events map to stable model, workflow, and failure diagnostics", asy
     model: "model-a",
     thinking: "low",
     capability: "code",
-    pool: "go.code",
-    policyRevision: "test-policy",
     requested: { kind: "session" },
     virtual: undefined,
   });
