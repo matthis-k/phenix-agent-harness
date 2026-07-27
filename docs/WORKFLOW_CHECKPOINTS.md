@@ -1,63 +1,29 @@
 # Workflow replay checkpoints
 
-Phenix persists automatic workflow replay checkpoints for live workflow runs. A checkpoint is a derived optimization over the canonical event ledger; it is not a second source of truth and is not a model-authored workflow node.
+Phenix saves replay checkpoints for live workflows to reduce restart work. The event ledger remains the complete record of node visits, transitions, child runs, outcomes, and terminal state.
 
-## Canonical authority
+A checkpoint records:
 
-The root-scoped append-only domain-event stream remains authoritative. Node entries, node completions, transitions, child causation, child outcomes, and terminal results continue to be persisted as ordinary events.
-
-A crash may occur before a checkpoint is written. Recovery must therefore remain correct with:
-
-- the latest compatible checkpoint plus later canonical events;
-- an older compatible checkpoint plus a longer event tail; or
-- complete event replay when no checkpoint can be trusted.
-
-## Checkpoint contract
-
-`workflow.checkpoint.saved` contains:
-
-- checkpoint contract version;
-- workflow definition ID;
-- a deterministic fingerprint of the workflow graph, schemas, and limits;
-- the canonical event sequence included by the snapshot;
-- a deterministic snapshot fingerprint;
-- activations and their completion state;
+- its format version;
+- workflow definition ID and digest;
+- the included event sequence;
+- a snapshot digest;
+- active and completed node activations;
 - accumulated node results;
 - transition traversal counts.
 
-Child outcomes are not duplicated into the checkpoint. They remain derived from child run records and their workflow causation metadata.
+Child outcomes stay in child run records and are not copied into checkpoints.
 
-## Validation and fallback
+## Recovery
 
-Graph-state reconstruction scans newest checkpoints first. A checkpoint is ignored when:
+Recovery uses the newest compatible checkpoint and replays later events. A checkpoint is ignored when its version, digest, event range, node references, result references, or transition counters are invalid.
 
-- its version or shape is unsupported;
-- its definition ID differs;
-- the current workflow contract fingerprint differs;
-- its included sequence is outside the valid event range;
-- its snapshot fingerprint does not match;
-- activations reference unknown nodes;
-- result entries reference unknown nodes;
-- transition counters reference undeclared edges;
-- IDs or counters are duplicated or malformed.
+An ignored or missing checkpoint does not fail the workflow. Recovery falls back to an older compatible checkpoint or replays the complete event stream.
 
-Ignoring a checkpoint is not a workflow failure. Reconstruction falls back to an older compatible checkpoint or complete canonical replay.
-
-## Persistence process
-
-`WorkflowCheckpointProcessManager` observes committed workflow state events. It serializes checkpoint writes per workflow run and coalesces multiple events from one transition batch. Checkpoint persistence failures are reported through the ordered domain-event subscriber error boundary; they do not mutate workflow execution state.
-
-Only live workflow runs accept new checkpoints. Terminal outcomes remain immutable evidence.
+Only live workflows receive new checkpoints. Multiple events from one transition are coalesced, and checkpoint write failures do not alter workflow state.
 
 ## Dynamic workflows
 
-Dynamic workflow snapshots and workflow replay checkpoints are separate contracts:
+A dynamic workflow snapshot stores the generated definition. A replay checkpoint stores progress through that definition. Generated definitions are restored before their live workflow runs are recovered.
 
-- the dynamic workflow snapshot persists the generated definition and its definition/schema identity;
-- the replay checkpoint persists the current execution position for that already-restored definition.
-
-Dynamic definition restoration therefore occurs before nonterminal workflow recovery. A definition-drift failure prevents execution before a replay checkpoint is considered.
-
-## DSL boundary
-
-The workflow DSL still has no explicit checkpoint node. Checkpoint placement is an engine concern and cannot grant tools, capabilities, local operations, or control-flow authority to a model-generated graph.
+The workflow Markdown format has no checkpoint state. Checkpoint creation is automatic.
