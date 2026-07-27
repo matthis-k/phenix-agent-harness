@@ -1,20 +1,8 @@
 # Phenix definition Markdown
 
-Bundled Phenix agents and workflows are authored as constrained Markdown and compiled into typed `AgentDefinition` and `WorkflowDefinition` runtime objects.
+Bundled agents and workflows are authored as constrained Markdown. IDs and schema references must be stable, prompts must remain static, and Mermaid diagrams are descriptive only.
 
-Markdown is the authoring surface. Compiled definitions, schemas, graph validation, capability enforcement, and run-scoped routing remain execution authority. Mermaid is explanatory and never authoritative.
-
-## Design rules
-
-1. Every definition declares a stable ID and explicit input/output schema IDs.
-2. Agent prompts remain static instructions; task data is supplied through the input schema.
-3. Tools, context, child capabilities, limits, and model routes are structured metadata.
-4. Workflow states invoke public agent or workflow definitions through typed boundaries.
-5. Transition tables are authoritative; Mermaid diagrams are for readers.
-6. Difficulty is run-scoped data. It is never inferred inside provider adapters or stored as mutable workflow-global state.
-7. Arbitrary expressions, JavaScript, shell expansion, and prompt-granted permissions are not supported.
-
-## Agent format
+## Agent definitions
 
 ````md
 # Repository scout
@@ -75,46 +63,24 @@ max-repair-attempts: 1
 Act as a read-only repository scout. Search narrowly, cite concrete paths and lines, distinguish evidence from inference, and do not edit files.
 ````
 
-The compiler resolves both schema IDs, validates every field and enum, and produces the effective runtime definition directly. There is no secondary TypeScript policy overlay for agents that declare a model table.
+### Model selectors
 
-### Model syntax
+- `session`: use the owning session's selected model set.
+- `phenix:<set>`: use a named Phenix model set.
+- `<provider>/<model>`: use one concrete provider model.
 
-- `session` — resolve through the owning session's model set.
-- `phenix:<set>` — select a named virtual Phenix model set.
-- `<provider>/<model>` — select a concrete provider model.
+`## Models` is optional. When present, it must contain one row for each difficulty from `D0` through `D3`. Tool names, artifacts, and child definition IDs use comma-separated lists; an empty value means an empty list.
 
-### Difficulty model table
+### Prompt mode
 
-`## Models` is optional. When present it must contain exactly one row for each of `D0`, `D1`, `D2`, and `D3`.
+`prompt-mode` may be:
 
-| Column | Meaning |
-|---|---|
-| `Difficulty` | The effective run difficulty. |
-| `Model` | A model selector using the syntax above. |
-| `Capability` | The provider-independent pool capability, such as `code`, `reasoning-max`, or `review`. |
-| `Thinking` | A concrete Pi thinking level. `route` is not allowed in this table. |
+- `replace`: use the definition prompt and Phenix execution instructions;
+- `append-default`: retain Pi's built-in coding prompt and append the definition prompt.
 
-The execution application layer selects one row. The provider resolver receives only the selected model, capability, thinking level, and difficulty. It does not inspect workflow graphs or Markdown.
+Omitted means `replace`. `session.stock` uses Pi's ordinary prompt and does not use this field.
 
-### Lists
-
-Tool names, artifacts, and invokable child definitions use comma-separated values. An empty value declares an empty list.
-
-## Difficulty estimator
-
-Difficulty estimation is implemented as an ordinary typed agent. Its Markdown prompt contains a small decision flowchart and rubric; its output schema is:
-
-```ts
-{
-  difficulty: "D0" | "D1" | "D2" | "D3";
-  summary: string;
-  signals: string[];
-}
-```
-
-The estimator has no repository tools and does not solve the task. Workflows decide whether to invoke it and how to consume its result. A workflow such as QA may instead pin strong routes directly.
-
-## Workflow format
+## Workflow definitions
 
 ````md
 # Difficulty-aware implementation
@@ -136,8 +102,7 @@ flowchart LR
     estimate -->|D0| implement
     estimate -->|D1-D3| plan
     plan --> implement
-    implement -->|D0| return
-    implement -->|D1-D3| verify
+    implement --> verify
     verify --> return
 ```
 
@@ -205,65 +170,34 @@ output-schema: outcome.implementation-result.v1
 
 ## Transitions
 
-| From | To | When | Max traversals |
-|---|---|---|---|
-| `estimate` | `implement` | `difficulty.D0` | |
-| `estimate` | `plan` | `difficulty.at-least-D1` | |
-| `plan` | `implement` | | |
-| `implement` | `return` | `difficulty.D0` | |
-| `implement` | `verify` | `difficulty.at-least-D1` | |
-| `verify` | `return` | | |
+| From | To | On | When | Max traversals |
+|---|---|---|---|---|
+| `estimate` | `implement` | `success` | `difficulty.D0` | |
+| `estimate` | `plan` | `success` | `difficulty.at-least-D1` | |
+| `plan` | `implement` | `success` | | |
+| `implement` | `verify` | `success` | | |
+| `verify` | `return` | `success` | | |
 ````
 
-## Invoke difficulty binding
+The transition table controls execution. `On` accepts `success`, `failure`, `cancelled`, or `any`; omitted means `success`. Every cycle edge must set `Max traversals`.
 
-An `invoke` state may declare one of three policies:
-
-- Omitted — inherit the parent run's effective difficulty.
-- `difficulty: D3` — pin this invocation to a fixed route. QA uses this for architecture, security, and synthesis.
-- `difficulty: result:estimate` — read the validated `difficulty` field from a successful earlier state result.
-
-The compiler verifies that a result-bound state exists and is not self-referential. The workflow process manager extracts the validated difficulty and passes it through the child invocation boundary. The execution facade persists it in the child's compiled run specification.
-
-## Invoke recovery
-
-An awaited `invoke` state may declare bounded recovery:
-
-```phenix-state
-kind: invoke
-run: agent.critic
-input: qa.security.input
-input-schema: request.critic.v1
-output-schema: outcome.critic-report.v1
-wait: await
-retry: retryable
-max-retries: 1
-```
-
-`retry: retryable` means that only a child failure explicitly marked `retryable: true` may create a replacement attempt. `max-retries` counts replacement attempts after the initial run and must be a positive integer.
-
-Recovery belongs to the original workflow activation:
-
-- completed sibling states and their typed results remain authoritative;
-- the failed attempt remains immutable and the replacement records `retryOf`;
-- the replacement retains the original workflow node and activation causation;
-- validated `suggestedLimits` from a failure may adjust the replacement's bounded agent limits;
-- the state completes only after the final successful or exhausted attempt;
-- joins evaluate the activation's final outcome rather than every historical attempt.
-
-Background invocations cannot declare recovery because the workflow has already advanced. Side-effecting states should omit automatic retry unless their operation is explicitly idempotent. Production implementation workflows therefore retry estimator, planner, and verifier states but not the implementer state.
-
-Intermediate workflow-child failures remain diagnostic events, but presentation is owned by the workflow supervisor. The root receives a compact retry notice and only sees an error if the workflow exhausts its recovery policy.
-
-## State contracts
+## State kinds
 
 ### `invoke`
 
-An invoked state declares the mapping used to construct the child input and the expected child schemas. The compiler rejects schema mismatches.
+Runs an agent, workflow, or `session.stock`. It declares an input mapping, input schema, output schema, waiting policy, optional difficulty, and optional retry settings.
+
+Difficulty may be:
+
+- omitted: inherit the current workflow difficulty;
+- `D0` through `D3`: use a fixed difficulty;
+- `result:<state>`: use the validated `difficulty` field from an earlier successful state.
+
+`retry: retryable` permits replacement only when the child failure is marked retryable. `max-retries` counts replacement attempts after the first run. Background invocations cannot use automatic retry.
 
 ### `local`
 
-A deterministic local operation declares input and output schemas:
+Runs a registered deterministic operation:
 
 ```phenix-state
 kind: local
@@ -273,11 +207,9 @@ input-schema: request.qa-checks.v1
 output-schema: outcome.check-results.v1
 ```
 
-Local operation implementations remain separately registered runtime authorities.
-
 ### `decision`
 
-A decision evaluates a registered pure function. Outgoing edge conditions select transitions:
+Evaluates a registered pure decision function:
 
 ```phenix-state
 kind: decision
@@ -286,38 +218,20 @@ decide: implement.acceptance
 
 ### `join`
 
-A join combines fan-out branches using `all`, `all-success`, `first-success`, or `quorum`.
+Combines fan-out branches using `all`, `all-success`, `first-success`, or `quorum`.
 
 ### `return` and `fail`
 
-A return declares the workflow's public output schema. A fail resolves its reason through a registered mapping.
+`return` produces the workflow result through a registered mapping. `fail` produces a typed failure through a registered mapping.
 
-## Workflow composition
+A workflow may invoke another workflow with an ordinary `invoke` state. The caller enters through the nested workflow's public input and receives its public result.
 
-A workflow may invoke another workflow through the same `invoke` node used for agents. Callers cannot jump into another workflow's private state. This preserves independent entry points, schemas, limits, failure handling, cancellation ownership, and implementation freedom.
+## Tests
 
-A nested workflow inherits the invoking run's difficulty unless the invocation pins another value. The nested workflow may also run its own estimator and bind subsequent states to that result.
+Workflow files may include `## Tests` scenarios. See `docs/WORKFLOW_TESTS.md`.
 
-## Conditions and bounded cycles
-
-Conditions are registered pure function references, not inline expressions. Difficulty branches use the same condition registry as any other branch:
-
-```md
-| `estimate` | `implement` | `difficulty.D0` | |
-```
-
-Every cycle edge must declare `Max traversals`. The graph validator enforces bounded cycles, reachability, terminal paths, definition existence, mapping references, decision references, condition references, retry policies, and parallelism limits.
-
-## Workflow prompt templates
-
-A state may reserve an optional prompt body, but compilation currently rejects it. Template execution will only be enabled once replacements can be attached to schema-validated invocation input without bypassing capability enforcement.
-
-## Source layout
+## Source files
 
 - `modules/phenix-pi/definitions/agents/sources/*.agent.md`
 - `modules/phenix-pi/definitions/workflows/sources/*.workflow.md`
 - `modules/phenix-pi/definitions/schema-registry.ts`
-- `modules/phenix-pi/adapters/agent/markdown.ts`
-- `modules/phenix-pi/adapters/workflow/markdown.ts`
-
-The bundled registries load these Markdown files directly. Tests verify source compilation, route-table completeness, graph validation, step contracts, difficulty-dependent execution, pinned QA routes, activation-scoped recovery, and nested workflow behavior.
