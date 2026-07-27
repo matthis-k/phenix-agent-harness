@@ -49,10 +49,7 @@ export function createExecutionServices(input: {
   const { ids, store, operations } = infrastructure;
   const { definitions, functions, dynamicRegistry } = definitionRuntime;
 
-  const baseResolver = new PhenixModelResolver(
-    new PiModelInventory(host.modelRegistry),
-    host.routingPolicy,
-  );
+  const baseResolver = new PhenixModelResolver(new PiModelInventory(host.modelRegistry));
   const resolver = new ProfileAwareModelResolver(baseResolver, input.currentProfile);
   const execution = new ExecutionFacadeImpl({
     catalog: definitions,
