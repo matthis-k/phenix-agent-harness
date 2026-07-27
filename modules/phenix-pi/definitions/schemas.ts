@@ -1,11 +1,6 @@
 import { Type } from "typebox";
 
 import { defineSchema } from "../domain/definition/schema.ts";
-import {
-  STRUCTURED_CONTENT_TYPES,
-  type StructuredContentNode,
-  type StructuredDocument,
-} from "../domain/presentation/structured-content.ts";
 
 export interface ObjectiveRequest {
   readonly objective: string;
@@ -122,7 +117,7 @@ export interface QAFinding {
   readonly notes: string;
 }
 
-export interface QAAnalysis {
+export interface QAReport {
   readonly summary: string;
   readonly checks: readonly CheckResult[];
   readonly findings: readonly QAFinding[];
@@ -139,7 +134,7 @@ export interface ImplementationResult {
 export interface FinalReport {
   readonly summary: string;
   readonly changed: boolean;
-  readonly qa: StructuredDocument;
+  readonly qa: QAReport;
   readonly implementation?: ImplementationResult;
   readonly verification?: VerificationResult;
 }
@@ -182,23 +177,11 @@ const qaFinding = Type.Object({
   locations: Type.Array(qaLocation),
   notes: Type.String(),
 });
-export const QAAnalysisType = Type.Object({
+export const QAReportType = Type.Object({
   summary: Type.String(),
   checks: Type.Array(checkResult),
   findings: Type.Array(qaFinding),
   reports: Type.Array(Type.Unknown()),
-});
-export const StructuredContentNodeType = Type.Recursive((Node) =>
-  Type.Object({
-    contentType: Type.Enum([...STRUCTURED_CONTENT_TYPES]),
-    content: Type.Optional(Type.String()),
-    children: Type.Optional(Type.Array(Node)),
-  }),
-);
-export const StructuredDocumentType = Type.Object({
-  contentType: Type.Literal("document"),
-  content: Type.Optional(Type.String()),
-  children: Type.Optional(Type.Array(StructuredContentNodeType)),
 });
 export const ImplementationResultType = Type.Object({
   summary: Type.String(),
@@ -311,11 +294,7 @@ export const QASynthesisRequestSchema = defineSchema<QASynthesisRequest>(
     reports: Type.Array(Type.Unknown()),
   }),
 );
-export const QAAnalysisSchema = defineSchema<QAAnalysis>("outcome.qa-analysis.v1", QAAnalysisType);
-export const StructuredDocumentSchema = defineSchema<StructuredDocument>(
-  "outcome.structured-document.v1",
-  StructuredDocumentType,
-);
+export const QAReportSchema = defineSchema<QAReport>("outcome.qa-report.v1", QAReportType);
 export const ImplementationResultSchema = defineSchema<ImplementationResult>(
   "outcome.implementation-result.v1",
   ImplementationResultType,
@@ -325,10 +304,8 @@ export const FinalReportSchema = defineSchema<FinalReport>(
   Type.Object({
     summary: Type.String(),
     changed: Type.Boolean(),
-    qa: StructuredDocumentType,
+    qa: QAReportType,
     implementation: Type.Optional(ImplementationResultType),
     verification: Type.Optional(VerificationResultType),
   }),
 );
-
-export type { StructuredContentNode, StructuredDocument };
