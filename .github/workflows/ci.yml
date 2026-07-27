@@ -5,15 +5,15 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  export-native-transcript:
-    name: Export Pi-native transcript viewer
+  apply-native-transcript:
+    name: Apply validated Pi-native transcript source
     if: github.event_name == 'pull_request' && github.head_ref == 'feature/native-run-transcript-viewer'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -45,15 +45,18 @@ jobs:
               git restore -- "$file"
             fi
           done < <(git diff --name-only)
-      - name: Export generated source
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: native-transcript-generated-source
-          path: |
-            modules/tooling.nix
-            modules/phenix-pi/extension/native-run-transcript.ts
-            modules/phenix-pi/extension/phenix-ui.ts
-            modules/phenix-pi/extension/root-extension.ts
-            modules/phenix-pi/tests/native-run-transcript.test.ts
+      - name: Commit generated source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            modules/tooling.nix \
+            modules/phenix-pi/extension/native-run-transcript.ts \
+            modules/phenix-pi/extension/phenix-ui.ts \
+            modules/phenix-pi/extension/root-extension.ts \
+            modules/phenix-pi/tests/native-run-transcript.test.ts \
             modules/phenix-pi/tests/phenix-ui.test.ts
-          if-no-files-found: error
+          git -c core.hooksPath=/dev/null commit -m 'Add Pi-native run transcript viewer'
+          git push origin HEAD:feature/native-run-transcript-viewer
