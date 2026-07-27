@@ -56,6 +56,14 @@ export function color(
   return theme ? theme.fg(tone, text) : text;
 }
 
+export function surface(
+  theme: ObservabilityTheme | undefined,
+  tone: "selectedBg" | "customMessageBg" | "userMessageBg",
+  text: string,
+): string {
+  return theme ? theme.bg(tone, text) : text;
+}
+
 export function heading(theme: ObservabilityTheme | undefined, text: string): string {
   return theme ? theme.fg("accent", theme.bold(text)) : text;
 }
