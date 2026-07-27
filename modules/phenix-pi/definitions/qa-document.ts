@@ -1,14 +1,16 @@
-import type { StructuredContentNode, StructuredDocument } from "../domain/presentation/structured-content.ts";
-import type { CheckResult, QAAnalysis, QAFinding } from "./schemas.ts";
+import type {
+  StructuredContentNode,
+  StructuredDocument,
+} from "../domain/presentation/structured-content.ts";
+import type { CheckResult, QAFinding, QAReport } from "./schemas.ts";
 
 const UNAVAILABLE_CHECK =
   /\b(enoent|command not found|executable not found|binary (?:was )?unavailable|could not run|couldn't run)\b/i;
 
-export function qaDocument(input: {
-  readonly analysis: QAAnalysis;
-  readonly checks: readonly CheckResult[];
-}): StructuredDocument {
-  const findings = input.analysis.findings;
+export function qaReportDocument(value: unknown): StructuredDocument | undefined {
+  const report = qaReportOf(value);
+  if (!report) return undefined;
+
   return {
     contentType: "document",
     content: "QA report",
@@ -16,19 +18,19 @@ export function qaDocument(input: {
       section("Overview", [
         table([
           ["Field", "Value"],
-          ["Gate status", gateStatus(input.checks)],
-          ["Review status", reviewStatus(findings)],
+          ["Gate status", gateStatus(report.checks)],
+          ["Review status", reviewStatus(report.findings)],
         ]),
-        paragraph(input.analysis.summary),
+        paragraph(report.summary),
       ]),
       section(
         "Deterministic checks",
-        input.checks.length === 0
+        report.checks.length === 0
           ? [paragraph("No deterministic checks were reported.")]
           : [
               table([
                 ["Check", "Status", "Details"],
-                ...input.checks.map((check) => [
+                ...report.checks.map((check) => [
                   check.command,
                   checkStatus(check).toUpperCase(),
                   check.summary,
@@ -38,17 +40,54 @@ export function qaDocument(input: {
       ),
       section(
         "Findings",
-        findings.length === 0
+        report.findings.length === 0
           ? [paragraph("No review findings were reported.")]
           : [
               {
                 contentType: "ordered-list",
-                children: findings.map(findingItem),
+                children: report.findings.map(findingItem),
               },
             ],
       ),
     ],
   };
+}
+
+function qaReportOf(value: unknown): QAReport | undefined {
+  const report = recordOf(value);
+  if (
+    !report ||
+    typeof report.summary !== "string" ||
+    !Array.isArray(report.checks) ||
+    !Array.isArray(report.findings) ||
+    !report.checks.every(isCheckResult) ||
+    !report.findings.every(isQaFinding)
+  ) {
+    return undefined;
+  }
+  return report as unknown as QAReport;
+}
+
+function isCheckResult(value: unknown): value is CheckResult {
+  const check = recordOf(value);
+  return (
+    check !== undefined &&
+    typeof check.command === "string" &&
+    typeof check.ok === "boolean" &&
+    typeof check.summary === "string"
+  );
+}
+
+function isQaFinding(value: unknown): value is QAFinding {
+  const finding = recordOf(value);
+  return (
+    finding !== undefined &&
+    typeof finding.severity === "string" &&
+    typeof finding.kind === "string" &&
+    typeof finding.description === "string" &&
+    Array.isArray(finding.locations) &&
+    typeof finding.notes === "string"
+  );
 }
 
 function findingItem(finding: QAFinding): StructuredContentNode {
@@ -113,4 +152,10 @@ function table(rows: readonly (readonly string[])[]): StructuredContentNode {
       children: row.map((content) => ({ contentType: "table-cell", content })),
     })),
   };
+}
+
+function recordOf(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : undefined;
 }
