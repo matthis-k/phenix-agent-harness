@@ -7,6 +7,7 @@ import type {
   ResultRenderInput,
 } from "../application/result-presentation.ts";
 import { renderTerminalMermaid } from "./mermaid-rendering.ts";
+import type { ObservabilityTheme } from "./observability-theme.ts";
 
 const RESULT_ENTRY_TYPE = "phenix:result-display";
 const ROOT_RESULT_TOOLS = new Set(["phenix_dispatch", "phenix_handle"]);
@@ -16,6 +17,7 @@ export interface NativeResultEntry {
   readonly inputKind: ResultRenderInput["kind"];
   readonly renderer: Exclude<ResolvedResultRenderer, "tool">;
   readonly transform: ResolvedResultTransform;
+  readonly steps: readonly string[];
   readonly toolCallId: string;
   readonly toolName: string;
 }
@@ -28,22 +30,59 @@ export interface ToolResultProjection {
   readonly isError: boolean;
 }
 
+export interface NativeResultRendererStrategy {
+  readonly id: Exclude<ResolvedResultRenderer, "tool">;
+  readonly inputKind: ResultRenderInput["kind"];
+  render(content: string, theme: ObservabilityTheme): Markdown | Text;
+}
+
+export const defaultNativeResultRenderers: readonly NativeResultRendererStrategy[] = [
+  {
+    id: "pi-markdown",
+    inputKind: "markdown",
+    render: (content) => new Markdown(content, 1, 0, getMarkdownTheme()),
+  },
+  {
+    id: "beautiful-mermaid",
+    inputKind: "mermaid",
+    render: (content, theme) =>
+      new Text(renderTerminalMermaid(content, { color: true, compact: true, theme }), 1, 0),
+  },
+];
+
 export default function resultDisplay(pi: ExtensionAPI): void {
+  registerResultDisplay(pi, { renderers: defaultNativeResultRenderers });
+}
+
+export function registerResultDisplay(
+  pi: ExtensionAPI,
+  input: { readonly renderers: readonly NativeResultRendererStrategy[] },
+): void {
+  const renderers = rendererMap(input.renderers);
+
   pi.registerEntryRenderer<NativeResultEntry>(RESULT_ENTRY_TYPE, (entry, _options, theme) => {
     const data = entry.data;
     if (!data) return new Text("", 0, 0);
-    if (data.renderer === "pi-markdown") {
-      return new Markdown(data.content, 1, 0, getMarkdownTheme());
-    }
-    try {
+    const renderer = renderers.get(data.renderer);
+    if (!renderer || renderer.inputKind !== data.inputKind) {
       return new Text(
-        renderTerminalMermaid(data.content, { color: true, compact: true, theme }),
+        theme.fg(
+          "error",
+          `Unable to render ${data.inputKind} result with ${data.renderer}: incompatible renderer`,
+        ),
         1,
         0,
       );
+    }
+    try {
+      return renderer.render(data.content, theme);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return new Text(theme.fg("error", `Unable to render Mermaid result: ${message}`), 1, 0);
+      return new Text(
+        theme.fg("error", `Unable to render ${data.inputKind} result: ${message}`),
+        1,
+        0,
+      );
     }
   });
 
@@ -88,6 +127,7 @@ export function nativeResultEntry(
     inputKind: presentation.inputKind,
     renderer: presentation.renderer,
     transform: presentation.transform,
+    steps: presentation.steps,
     toolCallId: event.toolCallId,
     toolName: event.toolName,
   };
@@ -96,6 +136,7 @@ export function nativeResultEntry(
 function presentationMetadata(details: unknown):
   | {
       readonly transform: ResolvedResultTransform;
+      readonly steps: readonly string[];
       readonly renderer: ResolvedResultRenderer;
       readonly inputKind: ResultRenderInput["kind"];
     }
@@ -106,14 +147,30 @@ function presentationMetadata(details: unknown):
   const transform = presentation?.transform;
   const renderer = presentation?.renderer;
   const inputKind = presentation?.inputKind;
+  const steps = presentation?.steps;
   if (
-    (transform !== "qa-report" && transform !== "mermaid-source") ||
+    (transform !== "qa-report" &&
+      transform !== "structured-content-markdown" &&
+      transform !== "mermaid-source") ||
     (renderer !== "tool" && renderer !== "pi-markdown" && renderer !== "beautiful-mermaid") ||
-    (inputKind !== "markdown" && inputKind !== "mermaid")
+    (inputKind !== "markdown" && inputKind !== "mermaid") ||
+    !Array.isArray(steps) ||
+    !steps.every((step): step is string => typeof step === "string")
   ) {
     return undefined;
   }
-  return { transform, renderer, inputKind };
+  return { transform, steps, renderer, inputKind };
+}
+
+function rendererMap(
+  renderers: readonly NativeResultRendererStrategy[],
+): ReadonlyMap<NativeResultRendererStrategy["id"], NativeResultRendererStrategy> {
+  const map = new Map<NativeResultRendererStrategy["id"], NativeResultRendererStrategy>();
+  for (const renderer of renderers) {
+    if (map.has(renderer.id)) throw new Error(`Duplicate native result renderer ${renderer.id}`);
+    map.set(renderer.id, renderer);
+  }
+  return map;
 }
 
 function textContent(content: readonly unknown[]): string | undefined {
