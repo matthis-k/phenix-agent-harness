@@ -17,11 +17,11 @@ interface QALocation {
 }
 
 interface QAFinding {
-  readonly severity: string;
-  readonly kind: string;
+  readonly severity?: string;
+  readonly kind?: string;
   readonly description: string;
   readonly locations: readonly QALocation[];
-  readonly notes: string;
+  readonly notes?: string;
 }
 
 interface QAReport {
@@ -119,12 +119,12 @@ function isQaFinding(value: unknown): value is QAFinding {
   const finding = recordOf(value);
   return (
     finding !== undefined &&
-    typeof finding.severity === "string" &&
-    typeof finding.kind === "string" &&
+    (finding.severity === undefined || typeof finding.severity === "string") &&
+    (finding.kind === undefined || typeof finding.kind === "string") &&
     typeof finding.description === "string" &&
     Array.isArray(finding.locations) &&
     finding.locations.every(isLocation) &&
-    typeof finding.notes === "string"
+    (finding.notes === undefined || typeof finding.notes === "string")
   );
 }
 
@@ -152,10 +152,10 @@ function findingItem(finding: QAFinding): StructuredContentNode {
       })),
     });
   }
-  if (finding.notes.trim()) children.push(paragraph(finding.notes));
+  if (finding.notes?.trim()) children.push(paragraph(finding.notes));
   return {
     contentType: "list-item",
-    content: `${finding.severity.toUpperCase()} · ${finding.kind} — ${finding.description}`,
+    content: `${finding.severity?.toUpperCase() ?? "UNSPECIFIED"} · ${finding.kind ?? "—"} — ${finding.description}`,
     ...(children.length > 0 ? { children } : {}),
   };
 }
