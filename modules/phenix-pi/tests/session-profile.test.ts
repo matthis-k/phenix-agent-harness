@@ -56,7 +56,7 @@ test("session profile changes are event-sourced and survive recovery", async () 
           requested: selector,
           concrete: { kind: "concrete", provider: "test", model: "model" },
           thinking: "medium",
-          policyRevision: "test",
+          capability: "general",
         };
       },
     },
