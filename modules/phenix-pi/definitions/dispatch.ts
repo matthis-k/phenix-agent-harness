@@ -33,7 +33,7 @@ const DispatchCandidateType = Type.Object({
 });
 
 export const DispatchSelectionRequestSchema = defineSchema<DispatchSelectionRequest>(
-  "request.dispatch-selection.v1",
+  "request.dispatch-selection",
   Type.Object({
     objective: Type.String({ minLength: 1 }),
     context: Type.Optional(Type.Unknown()),
@@ -42,7 +42,7 @@ export const DispatchSelectionRequestSchema = defineSchema<DispatchSelectionRequ
 );
 
 export const DispatchDecisionSchema = defineSchema<DispatchDecision>(
-  "outcome.dispatch-decision.v2",
+  "outcome.dispatch-decision",
   Type.Object({
     definitionId: Type.String({ minLength: 1 }),
     reason: Type.String({ minLength: 1 }),
