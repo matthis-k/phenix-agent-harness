@@ -1,0 +1,340 @@
+name: Apply flat Phenix UI refinement
+
+on:
+  push:
+    branches:
+      - refine/flat-phenix-ui
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: refine/flat-phenix-ui
+          fetch-depth: 0
+      - name: Apply focused flat-layout changes
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          ui_path = Path("modules/phenix-pi/extension/phenix-ui.ts")
+          ui = ui_path.read_text()
+
+          ui = ui.replace(
+              "  state,\n  strong,\n} from \"./observability-theme.ts\";",
+              "  state,\n  strong,\n  surface,\n} from \"./observability-theme.ts\";",
+          )
+
+          old_render = '''    const header = this.renderHeader(width);
+              const rule = this.fitLine(color(this.theme, "dim", "─".repeat(width)), width);
+              const focus = this.renderFocusBar(width);
+              const body = this.help ? this.renderHelp(width, this.layout.bodyHeight) : this.renderView();
+              const footer = this.renderFooter(width);
+              return [header, rule, focus, ...fitHeight(body, this.layout.bodyHeight, width), footer];'''.replace("              ", "")
+          new_render = '''    const title = this.renderTitleBar(width);
+              const tabs = this.renderTabs(width);
+              const focus = this.renderFocusBar(width);
+              const body = this.help ? this.renderHelp(width, this.layout.bodyHeight) : this.renderView();
+              const footer = this.renderFooter(width);
+              return [title, tabs, focus, ...fitHeight(body, this.layout.bodyHeight, width), footer];'''.replace("              ", "")
+          if old_render not in ui:
+              raise SystemExit("render shell did not match")
+          ui = ui.replace(old_render, new_render)
+
+          replacement = '''  private renderTitleBar(width: number): string {
+            const active = countActive(this.snapshot.tree.root);
+            const health =
+              this.snapshot.diagnostics.counts.error > 0
+                ? color(this.theme, "error", `${this.snapshot.diagnostics.counts.error} errors`)
+                : this.snapshot.diagnostics.counts.warning > 0
+                  ? color(this.theme, "warning", `${this.snapshot.diagnostics.counts.warning} warnings`)
+                  : color(this.theme, "success", "healthy");
+            const title = heading(this.theme, ` Phenix · ${capitalize(this.view)}`);
+            const status = `${color(this.theme, active > 0 ? "warning" : "success", active > 0 ? `${active} active` : "idle")}  ${health}  ${strong(this.theme, this.snapshot.profile.agent)}/${color(this.theme, "accent", this.snapshot.profile.modelSet)}/${this.snapshot.profile.difficulty} `;
+            const gap = Math.max(1, width - visibleWidth(title) - visibleWidth(status));
+            return surface(
+              this.theme,
+              "customMessageBg",
+              this.fitLine(`${title}${" ".repeat(gap)}${status}`, width),
+            );
+          }
+
+          private renderTabs(width: number): string {
+            return this.renderSegments(
+              VIEW_ORDER.map((view, index) => `${index + 1} ${capitalize(view)}`),
+              VIEW_ORDER.indexOf(this.view),
+              width,
+              true,
+            );
+          }
+
+          private renderFocusBar(width: number): string {
+            return this.renderSegments(PANE_LABELS[this.view], this.pane, width, false);
+          }
+
+          private renderSegments(
+            labels: readonly string[],
+            activeIndex: number,
+            width: number,
+            recordTabHits: boolean,
+          ): string {
+            const widths = distributeWidths(width, labels.length);
+            let column = 1;
+            const hits: Array<{
+              readonly view: PhenixUiView;
+              readonly start: number;
+              readonly end: number;
+            }> = [];
+            const segments = labels.map((label, index) => {
+              const segmentWidth = widths[index] ?? 0;
+              const start = column;
+              const end = start + segmentWidth - 1;
+              if (recordTabHits) {
+                const view = VIEW_ORDER[index];
+                if (view) hits.push({ view, start, end });
+              }
+              column = end + 1;
+              const text = centerToWidth(label, segmentWidth);
+              const active = index === activeIndex;
+              return surface(
+                this.theme,
+                active ? "selectedBg" : "customMessageBg",
+                active ? strong(this.theme, text) : color(this.theme, "muted", text),
+              );
+            });
+            if (recordTabHits) this.tabHits = hits;
+            return this.fitLine(segments.join(""), width);
+          }
+
+          private selectedRow(text: string, pane: UiPane, width: number): string {
+            const line = this.fitLine(`  ${text}`, width);
+            return surface(
+              this.theme,
+              this.pane === pane ? "selectedBg" : "customMessageBg",
+              this.pane === pane ? strong(this.theme, line) : color(this.theme, "text", line),
+            );
+          }
+
+          private panelLine(text: string, width: number, pane: UiPane): string {
+            return surface(
+              this.theme,
+              this.pane === pane ? "userMessageBg" : "customMessageBg",
+              this.fitLine(text, width),
+            );
+          }
+
+'''.replace("          ", "")
+          ui, count = re.subn(
+              r"  private renderHeader\(width: number\): string \{.*?(?=  private renderFooter\(width: number\): string \{)",
+              replacement,
+              ui,
+              flags=re.S,
+          )
+          if count != 1:
+              raise SystemExit(f"header/focus replacement count was {count}")
+
+          ui = ui.replace("this.selectedRow(line, 0)", "this.selectedRow(line, 0, width)")
+          ui = ui.replace("this.selectedRow(text, 0)", "this.selectedRow(text, 0, width)")
+          ui = ui.replace("if (event.y === 1 && tab)", "if (event.y === 2 && tab)")
+
+          old_runs = '''    return Array.from({ length: height }, (_, row) => {
+              const left = tree[row] ?? " ".repeat(treeWidth);
+              const middle = preview[row] ?? " ".repeat(previewWidth);
+              const firstRule = color(
+                this.theme,
+                this.pane === 0 || this.pane === 1 ? "accent" : "dim",
+                this.pane === 0 || this.pane === 1 ? "┃" : "│",
+              );
+              if (inspectorWidth === 0) return `${left}${firstRule}${middle}`;
+              const secondRule = color(
+                this.theme,
+                this.pane === 1 || this.pane === 2 ? "accent" : "dim",
+                this.pane === 1 || this.pane === 2 ? "┃" : "│",
+              );
+              return `${left}${firstRule}${middle}${secondRule}${inspector[row] ?? " ".repeat(inspectorWidth)}`;
+            });'''.replace("              ", "")
+          new_runs = '''    return Array.from({ length: height }, (_, row) => {
+              const left = this.panelLine(tree[row] ?? "", treeWidth, 0);
+              const middle = this.panelLine(preview[row] ?? "", previewWidth, 1);
+              if (inspectorWidth === 0) return `${left} ${middle}`;
+              const right = this.panelLine(inspector[row] ?? "", inspectorWidth, 2);
+              return `${left} ${middle} ${right}`;
+            });'''.replace("              ", "")
+          if old_runs not in ui:
+              raise SystemExit("runs split did not match")
+          ui = ui.replace(old_runs, new_runs)
+
+          old_facts = '''    const list = this.renderFactList(facts, listWidth, height);
+              const detail = this.renderFactDetail(facts[this.selectedFact], detailWidth, height);
+              const rule = color(this.theme, this.pane === 0 ? "accent" : "dim", "│");
+              return Array.from({ length: height }, (_, row) => `${list[row]}${rule}${detail[row]}`);'''.replace("              ", "")
+          new_facts = '''    const list = this.renderFactList(facts, listWidth, height);
+              const detail = this.renderFactDetail(facts[this.selectedFact], detailWidth, height);
+              return Array.from({ length: height }, (_, row) =>
+                `${this.panelLine(list[row] ?? "", listWidth, 0)} ${this.panelLine(detail[row] ?? "", detailWidth, 1)}`,
+              );'''.replace("              ", "")
+          if old_facts not in ui:
+              raise SystemExit("facts split did not match")
+          ui = ui.replace(old_facts, new_facts)
+
+          old_catalog = '''    const list = this.renderDefinitionList(definitions, sidebarWidth, height);
+              const preview = this.renderDefinitionPreview(selected, previewWidth, height);
+              const rule = color(this.theme, this.pane === 0 ? "accent" : "dim", "│");
+              return Array.from({ length: height }, (_, row) => `${list[row]}${rule}${preview[row]}`);'''.replace("              ", "")
+          new_catalog = '''    const list = this.renderDefinitionList(definitions, sidebarWidth, height);
+              const preview = this.renderDefinitionPreview(selected, previewWidth, height);
+              return Array.from({ length: height }, (_, row) =>
+                `${this.panelLine(list[row] ?? "", sidebarWidth, 0)} ${this.panelLine(preview[row] ?? "", previewWidth, 1)}`,
+              );'''.replace("              ", "")
+          if old_catalog not in ui:
+              raise SystemExit("catalog split did not match")
+          ui = ui.replace(old_catalog, new_catalog)
+
+          footer_old = '''    return this.fitLine(
+              `${color(this.theme, "muted", ` ${hints}`)}${filter}${color(this.theme, "dim", "  ·  ")}${pane}`,
+              width,
+            );'''.replace("              ", "")
+          footer_new = '''    return surface(
+              this.theme,
+              "customMessageBg",
+              this.fitLine(`${color(this.theme, "muted", ` ${hints}`)}${filter}  ${pane}`, width),
+            );'''.replace("              ", "")
+          if footer_old not in ui:
+              raise SystemExit("footer did not match")
+          ui = ui.replace(footer_old, footer_new)
+
+          utility_anchor = '''function centeredStart(selected: number, height: number, total: number): number {
+            return clamp(selected - Math.floor(height / 2), 0, Math.max(0, total - height));
+          }
+'''.replace("          ", "")
+          utility_add = utility_anchor + '''
+          function distributeWidths(width: number, count: number): readonly number[] {
+            const base = Math.floor(width / count);
+            const remainder = width % count;
+            return Array.from({ length: count }, (_, index) => base + (index < remainder ? 1 : 0));
+          }
+
+          function centerToWidth(text: string, width: number): string {
+            const clipped = truncateToWidth(text, width, "");
+            const padding = Math.max(0, width - visibleWidth(clipped));
+            const left = Math.floor(padding / 2);
+            return `${" ".repeat(left)}${clipped}${" ".repeat(padding - left)}`;
+          }
+'''.replace("          ", "")
+          if utility_anchor not in ui:
+              raise SystemExit("utility anchor did not match")
+          ui = ui.replace(utility_anchor, utility_add)
+          ui_path.write_text(ui)
+
+          theme_path = Path("modules/phenix-pi/extension/observability-theme.ts")
+          theme = theme_path.read_text()
+          color_fn = '''export function color(
+            theme: ObservabilityTheme | undefined,
+            tone: ObservabilityTone,
+            text: string,
+          ): string {
+            return theme ? theme.fg(tone, text) : text;
+          }
+'''.replace("          ", "")
+          surface_fn = color_fn + '''
+          export function surface(
+            theme: ObservabilityTheme | undefined,
+            tone: "selectedBg" | "customMessageBg" | "userMessageBg",
+            text: string,
+          ): string {
+            return theme ? theme.bg(tone, text) : text;
+          }
+'''.replace("          ", "")
+          if color_fn not in theme:
+              raise SystemExit("theme color helper did not match")
+          theme_path.write_text(theme.replace(color_fn, surface_fn))
+
+          test_path = Path("modules/phenix-pi/tests/phenix-ui.test.ts")
+          tests = test_path.read_text()
+          tests = tests.replace(
+              '''const theme = {
+            fg: (_tone: string, text: string) => text,
+            bold: (text: string) => text,
+          } as unknown as ObservabilityTheme;'''.replace("          ", ""),
+              '''const theme = {
+            fg: (_tone: string, text: string) => text,
+            bg: (_tone: string, text: string) => text,
+            bold: (text: string) => text,
+          } as unknown as ObservabilityTheme;'''.replace("          ", ""),
+          )
+          tests = tests.replace(
+              '''const ansiTheme = {
+            fg: (tone: string, text: string) => `\\x1b[${ANSI_TONES[tone] ?? "37"}m${text}\\x1b[0m`,
+            bold: (text: string) => `\\x1b[1m${text}\\x1b[22m`,
+          } as unknown as ObservabilityTheme;'''.replace("          ", ""),
+              '''const ANSI_BACKGROUNDS: Readonly<Record<string, string>> = {
+            selectedBg: "45",
+            customMessageBg: "40",
+            userMessageBg: "100",
+          };
+          const ansiTheme = {
+            fg: (tone: string, text: string) => `\\x1b[${ANSI_TONES[tone] ?? "37"}m${text}\\x1b[0m`,
+            bg: (tone: string, text: string) =>
+              `\\x1b[${ANSI_BACKGROUNDS[tone] ?? "40"}m${text}\\x1b[49m`,
+            bold: (text: string) => `\\x1b[1m${text}\\x1b[22m`,
+          } as unknown as ObservabilityTheme;'''.replace("          ", ""),
+          )
+          tests = tests.replace('assert.match(ui.render(100)[0] ?? "", /4 Catalog/);', 'assert.match(ui.render(100)[1] ?? "", /4 Catalog/);')
+          tests = tests.replace('ui.handleInput("\\x1b[<0;20;1M");', 'ui.handleInput("\\x1b[<0;30;2M");')
+          tests = tests.replace('assert.match(ui.render(100)[0] ?? "", /2 Runs/);', 'assert.match(ui.render(100)[1] ?? "", /2 Runs/);')
+          tests, count = re.subn(
+              r'test\("colors the active tab, focused pane, and semantic catalog and fact state", \(\) => \{.*?\n\}\);',
+              '''test("uses centered background surfaces without redundant active markers", () => {
+            const tui = fakeTui(18);
+            const ui = createUi(tui, { view: "catalog", selector: "qa" }, ansiTheme);
+
+            let lines = ui.render(100);
+            assert.match(lines[0] ?? "", /Phenix · Catalog/);
+            assert.ok(lines[1]?.includes("\\x1b[45m"));
+            assert.match(lines[1] ?? "", /4 Catalog/);
+            assert.doesNotMatch(lines[1] ?? "", /[●○▶▷│┃]/);
+            assert.ok(lines[2]?.includes("\\x1b[45m"));
+            assert.match(lines[2] ?? "", /Definitions/);
+            assert.doesNotMatch(lines[2] ?? "", /[●○▶▷│┃]/);
+            assert.ok(lines.join("\\n").includes("\\x1b[35mW\\x1b[0m"));
+            assert.ok(lines.join("\\n").includes("\\x1b[100m"));
+
+            ui.handleInput("\\t");
+            lines = ui.render(100);
+            assert.ok(lines[2]?.includes("\\x1b[45m"));
+            assert.match(lines[2] ?? "", /Preview/);
+            assert.doesNotMatch(lines.join("\\n"), /[▶▷]/);
+
+            const facts = createUi(fakeTui(18), { view: "facts" }, ansiTheme).render(120).join("\\n");
+            assert.ok(facts.includes("\\x1b[35mrun-started\\x1b[0m"));
+            assert.ok(facts.includes("\\x1b[32m[observed]\\x1b[0m"));
+          });'''.replace("          ", ""),
+              tests,
+              flags=re.S,
+          )
+          if count != 1:
+              raise SystemExit(f"visual test replacement count was {count}")
+          test_path.write_text(tests)
+          PY
+
+          rm .github/workflows/apply-flat-ui.yml
+          git diff --check
+          git status --short
+      - name: Commit refinement
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add modules/phenix-pi/extension/phenix-ui.ts \
+            modules/phenix-pi/extension/observability-theme.ts \
+            modules/phenix-pi/tests/phenix-ui.test.ts \
+            .github/workflows/apply-flat-ui.yml
+          git commit -m "refine Phenix UI visual hierarchy"
+          git push origin HEAD:refine/flat-phenix-ui
