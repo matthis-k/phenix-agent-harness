@@ -79,7 +79,10 @@ test("tool rendering, child tools, and errors remain ordinary tool output", () =
   };
 
   assert.equal(nativeResultEntry(toolRendered, activeTools), undefined);
-  assert.equal(nativeResultEntry({ ...toolRendered, toolName: "phenix_run" }, activeTools), undefined);
+  assert.equal(
+    nativeResultEntry({ ...toolRendered, toolName: "phenix_run" }, activeTools),
+    undefined,
+  );
   assert.equal(nativeResultEntry({ ...toolRendered, isError: true }, activeTools), undefined);
   assert.equal(nativeResultEntry(toolRendered, ["phenix_handle"]), undefined);
 });
