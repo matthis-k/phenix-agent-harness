@@ -54,6 +54,18 @@ test("auto selects the QA transform and Pi Markdown renderer", () => {
   );
 });
 
+test("the QA transform generates Markdown from contract data", () => {
+  const result = { ...qaResult(), text: "raw transport text" };
+  const transformed = transformResult(result, "qa-report");
+
+  assert.equal(isDeterministicQaPresentation(result), true);
+  assert.equal(transformed?.input.kind, "markdown");
+  assert.match(
+    transformed?.input.kind === "markdown" ? transformed.input.content : "",
+    /^## QA report/,
+  );
+});
+
 test("the QA transform can keep Markdown in the ordinary tool result", () => {
   const presented = presentRootResult(qaResult(), {
     transform: "qa-report",
