@@ -12,7 +12,8 @@
   },
   "pi": {
     "extensions": [
-      "./extension/root-extension.ts"
+      "./extension/root-extension.ts",
+      "./extension/deterministic-report-viewer.ts"
     ]
   },
   "peerDependencies": {
