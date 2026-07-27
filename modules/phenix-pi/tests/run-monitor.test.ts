@@ -76,7 +76,7 @@ test("running agents render model and current activity in the sequence", () => {
                   model: "model-a",
                 },
                 thinking: "low",
-                policyRevision: "test",
+                capability: "general",
               },
             },
             activity: {
@@ -124,7 +124,7 @@ test("status collapses completed workflow boundaries and keeps recent facts", ()
             requested: { kind: "session" },
             concrete: { kind: "concrete", provider: "opencode-go", model: "model-a" },
             thinking: "low",
-            policyRevision: "test",
+            capability: "general",
           },
         },
         children: [],
