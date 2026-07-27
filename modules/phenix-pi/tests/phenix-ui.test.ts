@@ -40,8 +40,7 @@ const ANSI_BACKGROUNDS: Readonly<Record<string, string>> = {
 };
 const ansiTheme = {
   fg: (tone: string, text: string) => `\x1b[${ANSI_TONES[tone] ?? "37"}m${text}\x1b[0m`,
-  bg: (tone: string, text: string) =>
-    `\x1b[${ANSI_BACKGROUNDS[tone] ?? "40"}m${text}\x1b[49m`,
+  bg: (tone: string, text: string) => `\x1b[${ANSI_BACKGROUNDS[tone] ?? "40"}m${text}\x1b[49m`,
   bold: (text: string) => `\x1b[1m${text}\x1b[22m`,
 } as unknown as ObservabilityTheme;
 

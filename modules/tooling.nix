@@ -64,5 +64,10 @@ let
   harnessRuntime = agentRuntime ++ localOperationRuntime;
 in
 {
-  inherit agentRuntime harnessRuntime localOperationRuntime quality;
+  inherit
+    agentRuntime
+    harnessRuntime
+    localOperationRuntime
+    quality
+    ;
 }
