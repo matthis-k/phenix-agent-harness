@@ -9,5 +9,8 @@ const source = readFileSync(
 
 test("deterministic report entries use Pi's native Markdown component", () => {
   assert.match(source, /import \{ Markdown \} from "@earendil-works\/pi-tui"/);
-  assert.match(source, /new Markdown\(entry\.data\?\.markdown \?\? "", 1, 0, getMarkdownTheme\(\)\)/);
+  assert.match(
+    source,
+    /new Markdown\(entry\.data\?\.markdown \?\? "", 1, 0, getMarkdownTheme\(\)\)/,
+  );
 });
