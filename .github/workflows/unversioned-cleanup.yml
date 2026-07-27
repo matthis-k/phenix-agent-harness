@@ -1,0 +1,83 @@
+name: Unversioned interface cleanup
+
+on:
+  push:
+    branches:
+      - cleanup/unversioned-interfaces
+
+permissions:
+  contents: write
+
+jobs:
+  rewrite:
+    if: ${{ !contains(github.event.head_commit.message, '[unversioned-generated]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: cleanup/unversioned-interfaces
+          fetch-depth: 0
+      - name: Rewrite versioned contracts
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          roots = [Path("docs"), Path("modules/phenix-pi")]
+          paths = sorted(
+              path
+              for root in roots
+              for path in root.rglob("*")
+              if path.is_file() and path.suffix in {".ts", ".md"}
+          )
+
+          for path in paths:
+              text = path.read_text()
+              updated = re.sub(r"\.v\d+\b", "", text)
+              updated = re.sub(r"^\s*readonly version: 1;\n", "", updated, flags=re.MULTILINE)
+              updated = re.sub(r"^\s*version: 1,\n", "", updated, flags=re.MULTILINE)
+              updated = re.sub(r"^.*policyRevision.*\n", "", updated, flags=re.MULTILINE)
+              updated = re.sub(r"^\s*readonly revision: string;\n", "", updated, flags=re.MULTILINE)
+              updated = re.sub(r'^\s*revision:\s*"[^"]+",\n', "", updated, flags=re.MULTILINE)
+              updated = updated.replace(
+                  "  if (!isRecord(value) || value.version !== 1) return undefined;",
+                  "  if (!isRecord(value)) return undefined;",
+              )
+              updated = updated.replace(
+                  "  const graphDigest = digest({ version: 1, proposal, definitionDigests, schemaDigests });",
+                  "  const graphDigest = digest({ proposal, definitionDigests, schemaDigests });",
+              )
+              updated = updated.replace(
+                  "  return Object.freeze({ version: 1, graphDigest, definitionDigests, schemaDigests });",
+                  "  return Object.freeze({ graphDigest, definitionDigests, schemaDigests });",
+              )
+              updated = updated.replace("    left.version === right.version &&\n", "")
+              updated = re.sub(
+                  r"^\s*assert\.[^(]+\([^\n]*\.version[^\n]*\);\n",
+                  "",
+                  updated,
+                  flags=re.MULTILINE,
+              )
+              if updated != text:
+                  path.write_text(updated)
+
+          remaining = []
+          for path in paths:
+              text = path.read_text()
+              if re.search(r"\.v\d+\b|policyRevision|readonly version: 1|version: 1,", text):
+                  remaining.append(str(path))
+          if remaining:
+              raise SystemExit("Versioned contracts remain in: " + ", ".join(remaining))
+          PY
+      - name: Commit generated cleanup
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs modules/phenix-pi
+          git commit -m "Remove versioned interface contracts [unversioned-generated]"
+          git push origin HEAD:cleanup/unversioned-interfaces
