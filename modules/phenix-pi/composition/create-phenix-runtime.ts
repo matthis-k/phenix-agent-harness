@@ -14,15 +14,12 @@ import { DEFAULT_SESSION_PROFILE, type RootRunInput } from "../domain/run/model.
 import type { RunId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import type { DiagnosticLog } from "../ports/diagnostic-log.ts";
-import {
-  createDefinitionRuntime,
-  createExecutionServices,
-  createPiEventBridge,
-  createRuntimeInfrastructure,
-  type PhenixHostServices,
-} from "./runtime-assembly.ts";
+import { createDefinitionRuntime } from "./definition-runtime.ts";
+import { createExecutionServices } from "./execution-services.ts";
+import type { PhenixHostServices } from "./host-services.ts";
+import { createPiEventBridge, createRuntimeInfrastructure } from "./runtime-infrastructure.ts";
 
-export type { PhenixHostServices } from "./runtime-assembly.ts";
+export type { PhenixHostServices } from "./host-services.ts";
 
 export interface PhenixRuntime {
   readonly execution: ExecutionFacade;
