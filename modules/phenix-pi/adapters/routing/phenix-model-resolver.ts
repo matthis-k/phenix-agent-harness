@@ -64,7 +64,8 @@ const POOLS: Readonly<Record<string, readonly ModelCandidate[]>> = {
     candidate("openai-codex", "gpt-5.4"),
   ],
   "gpt.pro": [
-    candidate("openai-codex", "gpt-5.6"),
+    candidate("openai-codex", "gpt-5.6-sol"),
+    candidate("openai-codex", "gpt-5.6-terra"),
     candidate("openai-codex", "gpt-5.5"),
     candidate("openai-codex", "gpt-5.4"),
   ],
@@ -78,7 +79,8 @@ const POOLS: Readonly<Record<string, readonly ModelCandidate[]>> = {
     candidate("openai-codex", "gpt-5.4"),
   ],
   "gpt.code-max": [
-    candidate("openai-codex", "gpt-5.6"),
+    candidate("openai-codex", "gpt-5.6-sol"),
+    candidate("openai-codex", "gpt-5.6-terra"),
     candidate("openai-codex", "gpt-5.5"),
     candidate("openai-codex", "gpt-5.4"),
   ],
@@ -195,7 +197,7 @@ const ROUTES: Readonly<Record<string, Readonly<Record<Difficulty, ModelRoute>>>>
 };
 
 export const defaultRoutingPolicy: RoutingPolicy = {
-  revision: "phenix-routing-v3",
+  revision: "phenix-routing-v4",
   route(context) {
     const role = roleFromDefinition(context.definitionId);
     const difficulty = context.difficulty ?? defaultDifficulty(role);
