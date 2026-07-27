@@ -4,10 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { initTheme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 
 import type { RunTreeNode } from "../application/interfaces.ts";
 import { loadNativeRunTranscript } from "../extension/native-run-transcript.ts";
+
+initTheme("dark");
 
 test("loads a Pi session read-only and composes native message components", async () => {
   const directory = await mkdtemp(join(tmpdir(), "phenix-transcript-"));
