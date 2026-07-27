@@ -25,6 +25,7 @@ import {
   reliability,
   state,
   strong,
+  surface,
 } from "./observability-theme.ts";
 
 const MOUSE_ENABLE = "\x1b[?1000h\x1b[?1006h";
@@ -333,41 +334,25 @@ export class PhenixUi implements Component {
 
   render(width: number): string[] {
     const height = Math.max(1, this.tui.terminal.rows);
+    const showFocusBar = this.paneCount() > 1;
+    const bodyStart = showFocusBar ? 4 : 3;
     this.layout = {
       width,
       height,
-      bodyStart: 4,
-      bodyHeight: Math.max(1, height - 4),
+      bodyStart,
+      bodyHeight: Math.max(1, height - bodyStart),
       sidebarWidth: Math.min(44, Math.max(26, Math.floor(width * 0.34))),
     };
     this.rowHits.clear();
     if (width < 42 || height < 9) return this.renderSmall(width, height);
-    const header = this.renderHeader(width);
-    const rule = this.fitLine(color(this.theme, "dim", "─".repeat(width)), width);
-    const focus = this.renderFocusBar(width);
+    const chrome = [this.renderTitleBar(width), this.renderTabs(width)];
+    if (showFocusBar) chrome.push(this.renderFocusBar(width));
     const body = this.help ? this.renderHelp(width, this.layout.bodyHeight) : this.renderView();
     const footer = this.renderFooter(width);
-    return [header, rule, focus, ...fitHeight(body, this.layout.bodyHeight, width), footer];
+    return [...chrome, ...fitHeight(body, this.layout.bodyHeight, width), footer];
   }
 
-  private renderHeader(width: number): string {
-    const prefix = `${heading(this.theme, " Phenix")}  `;
-    let rawColumn = visibleWidth(prefix) + 1;
-    const hits: Array<{
-      readonly view: PhenixUiView;
-      readonly start: number;
-      readonly end: number;
-    }> = [];
-    const tabs = VIEW_ORDER.map((view, index) => {
-      const active = this.view === view;
-      const label = `[${active ? "●" : " "} ${index + 1} ${capitalize(view)}]`;
-      const start = rawColumn;
-      const end = start + visibleWidth(label) - 1;
-      hits.push({ view, start, end });
-      rawColumn = end + 2;
-      return active ? heading(this.theme, label) : color(this.theme, "dim", label);
-    }).join(" ");
-    this.tabHits = hits;
+  private renderTitleBar(width: number): string {
     const active = countActive(this.snapshot.tree.root);
     const health =
       this.snapshot.diagnostics.counts.error > 0
@@ -375,31 +360,78 @@ export class PhenixUi implements Component {
         : this.snapshot.diagnostics.counts.warning > 0
           ? color(this.theme, "warning", `${this.snapshot.diagnostics.counts.warning} warnings`)
           : color(this.theme, "success", "healthy");
-    const right = `${color(this.theme, active > 0 ? "warning" : "success", active > 0 ? `${active} active` : "idle")} · ${health} · ${strong(this.theme, this.snapshot.profile.agent)}/${color(this.theme, "accent", this.snapshot.profile.modelSet)}/${this.snapshot.profile.difficulty}`;
-    const left = `${prefix}${tabs}`;
-    const gap = Math.max(1, width - visibleWidth(left) - visibleWidth(right));
-    return this.fitLine(`${left}${" ".repeat(gap)}${right}`, width);
-  }
-
-  private renderFocusBar(width: number): string {
-    const panes = PANE_LABELS[this.view];
-    const labels = panes
-      .map((label, index) =>
-        index === this.pane
-          ? heading(this.theme, `● ${label}`)
-          : color(this.theme, "dim", `○ ${label}`),
-      )
-      .join(color(this.theme, "dim", "  │  "));
-    return this.fitLine(
-      ` ${color(this.theme, "muted", `${capitalize(this.view)}:`)} ${labels}`,
-      width,
+    const title = heading(this.theme, ` Phenix · ${capitalize(this.view)}`);
+    const status = `${color(this.theme, active > 0 ? "warning" : "success", active > 0 ? `${active} active` : "idle")}  ${health}  ${strong(this.theme, this.snapshot.profile.agent)}/${color(this.theme, "accent", this.snapshot.profile.modelSet)}/${this.snapshot.profile.difficulty} `;
+    const gap = Math.max(1, width - visibleWidth(title) - visibleWidth(status));
+    return surface(
+      this.theme,
+      "customMessageBg",
+      this.fitLine(`${title}${" ".repeat(gap)}${status}`, width),
     );
   }
 
-  private selectedRow(text: string, pane: UiPane): string {
-    return this.pane === pane
-      ? heading(this.theme, `▶ ${text}`)
-      : color(this.theme, "text", `▷ ${text}`);
+  private renderTabs(width: number): string {
+    return this.renderSegments(
+      VIEW_ORDER.map((view, index) => `${index + 1} ${capitalize(view)}`),
+      VIEW_ORDER.indexOf(this.view),
+      width,
+      true,
+    );
+  }
+
+  private renderFocusBar(width: number): string {
+    return this.renderSegments(PANE_LABELS[this.view], this.pane, width, false);
+  }
+
+  private renderSegments(
+    labels: readonly string[],
+    activeIndex: number,
+    width: number,
+    recordTabHits: boolean,
+  ): string {
+    const widths = distributeWidths(width, labels.length);
+    let column = 1;
+    const hits: Array<{
+      readonly view: PhenixUiView;
+      readonly start: number;
+      readonly end: number;
+    }> = [];
+    const segments = labels.map((label, index) => {
+      const segmentWidth = widths[index] ?? 0;
+      const start = column;
+      const end = start + segmentWidth - 1;
+      if (recordTabHits) {
+        const view = VIEW_ORDER[index];
+        if (view) hits.push({ view, start, end });
+      }
+      column = end + 1;
+      const text = centerToWidth(label, segmentWidth);
+      const active = index === activeIndex;
+      return surface(
+        this.theme,
+        active ? "selectedBg" : "customMessageBg",
+        active ? strong(this.theme, text) : color(this.theme, "muted", text),
+      );
+    });
+    if (recordTabHits) this.tabHits = hits;
+    return this.fitLine(segments.join(""), width);
+  }
+
+  private selectedRow(text: string, pane: UiPane, width: number): string {
+    const line = this.fitLine(`  ${text}`, width);
+    return surface(
+      this.theme,
+      this.pane === pane ? "selectedBg" : "customMessageBg",
+      this.pane === pane ? strong(this.theme, line) : color(this.theme, "text", line),
+    );
+  }
+
+  private panelLine(text: string, width: number, pane: UiPane): string {
+    return surface(
+      this.theme,
+      this.pane === pane ? "userMessageBg" : "customMessageBg",
+      this.fitLine(text, width),
+    );
   }
 
   private renderFooter(width: number): string {
@@ -408,18 +440,25 @@ export class PhenixUi implements Component {
       : this.filter
         ? color(this.theme, "muted", ` filter:${this.filter}`)
         : "";
-    const paneLabel = PANE_LABELS[this.view][this.pane] ?? `pane ${this.pane + 1}`;
-    const pane = heading(this.theme, `focus ${paneLabel}`);
+    const pane =
+      this.paneCount() > 1
+        ? `  ${heading(
+            this.theme,
+            `focus ${PANE_LABELS[this.view][this.pane] ?? `pane ${this.pane + 1}`}`,
+          )}`
+        : "";
     const hints = this.footerHints();
-    return this.fitLine(
-      `${color(this.theme, "muted", ` ${hints}`)}${filter}${color(this.theme, "dim", "  ·  ")}${pane}`,
-      width,
+    return surface(
+      this.theme,
+      "customMessageBg",
+      this.fitLine(`${color(this.theme, "muted", ` ${hints}`)}${filter}${pane}`, width),
     );
   }
 
   private footerHints(): string {
     if (this.goPrefix) return "g…  s status · r runs · f facts · c catalog";
-    return "1-4 views · Tab pane · / filter · arrows/hjkl navigate · ? help · r refresh · Esc close";
+    const paneHint = this.paneCount() > 1 ? " · Tab pane" : "";
+    return `1-4 views${paneHint} · / filter · arrows/hjkl navigate · ? help · r refresh · Esc close`;
   }
 
   private renderView(): string[] {
@@ -455,7 +494,7 @@ export class PhenixUi implements Component {
     runs.forEach((run, index) => {
       const selected = index === this.selectedStatus;
       const line = runSummary(this.theme, run.node, run.depth);
-      lines.push(selected ? this.selectedRow(line, 0) : `  ${line}`);
+      lines.push(selected ? this.selectedRow(line, 0, width) : `  ${line}`);
       this.rowHits.set(this.layout.bodyStart + lines.length - 1, {
         view: "status",
         index,
@@ -467,7 +506,7 @@ export class PhenixUi implements Component {
       const targetIndex = runs.length + index;
       const selected = targetIndex === this.selectedStatus;
       const line = formatFactLine(this.theme, fact);
-      lines.push(selected ? this.selectedRow(line, 0) : `  ${line}`);
+      lines.push(selected ? this.selectedRow(line, 0, width) : `  ${line}`);
       this.rowHits.set(this.layout.bodyStart + lines.length - 1, {
         view: "status",
         index: targetIndex,
@@ -509,20 +548,11 @@ export class PhenixUi implements Component {
     const inspector =
       inspectorWidth > 0 ? this.renderRunInspectorPane(selected, inspectorWidth, height) : [];
     return Array.from({ length: height }, (_, row) => {
-      const left = tree[row] ?? " ".repeat(treeWidth);
-      const middle = preview[row] ?? " ".repeat(previewWidth);
-      const firstRule = color(
-        this.theme,
-        this.pane === 0 || this.pane === 1 ? "accent" : "dim",
-        this.pane === 0 || this.pane === 1 ? "┃" : "│",
-      );
-      if (inspectorWidth === 0) return `${left}${firstRule}${middle}`;
-      const secondRule = color(
-        this.theme,
-        this.pane === 1 || this.pane === 2 ? "accent" : "dim",
-        this.pane === 1 || this.pane === 2 ? "┃" : "│",
-      );
-      return `${left}${firstRule}${middle}${secondRule}${inspector[row] ?? " ".repeat(inspectorWidth)}`;
+      const left = this.panelLine(tree[row] ?? "", treeWidth, 0);
+      const middle = this.panelLine(preview[row] ?? "", previewWidth, 1);
+      if (inspectorWidth === 0) return `${left} ${middle}`;
+      const right = this.panelLine(inspector[row] ?? "", inspectorWidth, 2);
+      return `${left} ${middle} ${right}`;
     });
   }
 
@@ -548,7 +578,7 @@ export class PhenixUi implements Component {
         : "";
       const text = `${"  ".repeat(item.depth)}${disclosure} ${symbol} ${strong(this.theme, definitionLabel(String(run.definitionId)))} ${state(this.theme, run.state, run.state)}${model}`;
       this.rowHits.set(this.layout.bodyStart + row, { view: "runs", index, pane: 0 });
-      return this.fitLine(selected ? this.selectedRow(text, 0) : `  ${text}`, width);
+      return this.fitLine(selected ? this.selectedRow(text, 0, width) : `  ${text}`, width);
     });
   }
 
@@ -610,8 +640,11 @@ export class PhenixUi implements Component {
     const detailWidth = width - listWidth - 1;
     const list = this.renderFactList(facts, listWidth, height);
     const detail = this.renderFactDetail(facts[this.selectedFact], detailWidth, height);
-    const rule = color(this.theme, this.pane === 0 ? "accent" : "dim", "│");
-    return Array.from({ length: height }, (_, row) => `${list[row]}${rule}${detail[row]}`);
+    return Array.from(
+      { length: height },
+      (_, row) =>
+        `${this.panelLine(list[row] ?? "", listWidth, 0)} ${this.panelLine(detail[row] ?? "", detailWidth, 1)}`,
+    );
   }
 
   private renderFactList(facts: readonly RunFact[], width: number, height: number): string[] {
@@ -623,7 +656,7 @@ export class PhenixUi implements Component {
       const selected = index === this.selectedFact;
       this.rowHits.set(this.layout.bodyStart + row, { view: "facts", index, pane: 0 });
       const line = formatFactLine(this.theme, item);
-      return this.fitLine(selected ? this.selectedRow(line, 0) : `  ${line}`, width);
+      return this.fitLine(selected ? this.selectedRow(line, 0, width) : `  ${line}`, width);
     });
   }
 
@@ -659,15 +692,92 @@ export class PhenixUi implements Component {
     const selected = definitions[this.selectedDefinition];
     if (width < 76) {
       return this.pane === 0
-        ? this.renderDefinitionList(definitions, width, height)
+        ? this.renderDefinitionSidebar(definitions, selected, width, height)
         : this.renderDefinitionPreview(selected, width, height);
     }
     const sidebarWidth = this.layout.sidebarWidth;
     const previewWidth = width - sidebarWidth - 1;
-    const list = this.renderDefinitionList(definitions, sidebarWidth, height);
+    const sidebar = this.renderDefinitionSidebar(definitions, selected, sidebarWidth, height);
     const preview = this.renderDefinitionPreview(selected, previewWidth, height);
-    const rule = color(this.theme, this.pane === 0 ? "accent" : "dim", "│");
-    return Array.from({ length: height }, (_, row) => `${list[row]}${rule}${preview[row]}`);
+    return Array.from(
+      { length: height },
+      (_, row) =>
+        `${sidebar[row] ?? " ".repeat(sidebarWidth)} ${this.panelLine(preview[row] ?? "", previewWidth, 1)}`,
+    );
+  }
+
+  private renderDefinitionSidebar(
+    definitions: readonly AnyDefinition[],
+    selected: AnyDefinition | undefined,
+    width: number,
+    height: number,
+  ): string[] {
+    const inspectorHeight = Math.min(
+      8,
+      Math.max(4, Math.floor(height * 0.45)),
+      Math.max(1, height - 1),
+    );
+    const listHeight = Math.max(1, height - inspectorHeight);
+    const list = this.renderDefinitionList(definitions, width, listHeight).map((line) =>
+      this.panelLine(line, width, 0),
+    );
+    const inspector = this.definitionInspectorLines(selected, width);
+    const details = Array.from({ length: inspectorHeight }, (_, row) =>
+      surface(this.theme, "customMessageBg", this.fitLine(inspector[row] ?? "", width)),
+    );
+    return [...list, ...details];
+  }
+
+  private definitionInspectorLines(
+    definition: AnyDefinition | undefined,
+    width: number,
+  ): readonly string[] {
+    if (!definition) {
+      return [
+        heading(this.theme, " Selected definition"),
+        color(this.theme, "muted", " No definitions match the current filter."),
+      ];
+    }
+    const identity = color(this.theme, "muted", ` ${definition.kind} · ${String(definition.id)}`);
+    const description = color(
+      this.theme,
+      "text",
+      ` ${truncate(definition.description, Math.max(12, width - 2))}`,
+    );
+    if (definition.kind === "workflow") {
+      const nodes = definition.graph.nodes.length;
+      const edges = definition.graph.edges.length;
+      const nodeCount = `${nodes} ${nodes === 1 ? "node" : "nodes"}`;
+      const transitionCount = `${edges} ${edges === 1 ? "transition" : "transitions"}`;
+      return [
+        heading(this.theme, " Selected definition"),
+        strong(this.theme, ` ${definition.title}`),
+        identity,
+        description,
+        color(this.theme, "muted", ` ${nodeCount} · ${transitionCount}`),
+        color(
+          this.theme,
+          "muted",
+          ` entry ${definition.graph.entry} · ${definition.limits.timeoutMs}ms · parallel ${definition.limits.maxParallelism}`,
+        ),
+      ];
+    }
+    const model =
+      definition.model.kind === "session"
+        ? "session"
+        : `${definition.model.provider}/${definition.model.model}`;
+    const tools = definition.tools.allow.length
+      ? truncate(definition.tools.allow.join(", "), Math.max(12, width - 9))
+      : "none";
+    return [
+      heading(this.theme, " Selected definition"),
+      strong(this.theme, ` ${definition.title}`),
+      identity,
+      description,
+      ` ${coloredStatusField(this.theme, "model", model, "accent")}`,
+      ` ${coloredStatusField(this.theme, "thinking", definition.thinking, "warning")}`,
+      ` ${coloredStatusField(this.theme, "tools", tools, "text")}`,
+    ];
   }
 
   private renderDefinitionList(
@@ -687,7 +797,7 @@ export class PhenixUi implements Component {
           : color(this.theme, "success", "A");
       const text = `${kind} ${strong(this.theme, definitionLabel(String(item.id)))}`;
       this.rowHits.set(this.layout.bodyStart + row, { view: "catalog", index, pane: 0 });
-      return this.fitLine(selected ? this.selectedRow(text, 0) : `  ${text}`, width);
+      return this.fitLine(selected ? this.selectedRow(text, 0, width) : `  ${text}`, width);
     });
   }
 
@@ -896,7 +1006,7 @@ export class PhenixUi implements Component {
     }
     if (event.button !== 0) return;
     const tab = this.tabHits.find((item) => event.x >= item.start && event.x <= item.end);
-    if (event.y === 1 && tab) {
+    if (event.y === 2 && tab) {
       this.switchView(tab.view);
       return;
     }
@@ -1256,6 +1366,19 @@ function wrapPane(current: UiPane, delta: number, count: number): UiPane {
 
 function centeredStart(selected: number, height: number, total: number): number {
   return clamp(selected - Math.floor(height / 2), 0, Math.max(0, total - height));
+}
+
+function distributeWidths(width: number, count: number): readonly number[] {
+  const base = Math.floor(width / count);
+  const remainder = width % count;
+  return Array.from({ length: count }, (_, index) => base + (index < remainder ? 1 : 0));
+}
+
+function centerToWidth(text: string, width: number): string {
+  const clipped = truncateToWidth(text, width, "");
+  const padding = Math.max(0, width - visibleWidth(clipped));
+  const left = Math.floor(padding / 2);
+  return `${" ".repeat(left)}${clipped}${" ".repeat(padding - left)}`;
 }
 
 function fitHeight(lines: readonly string[], height: number, width: number): string[] {

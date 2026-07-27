@@ -20,6 +20,7 @@ import {
 
 const theme = {
   fg: (_tone: string, text: string) => text,
+  bg: (_tone: string, text: string) => text,
   bold: (text: string) => text,
 } as unknown as ObservabilityTheme;
 
@@ -32,8 +33,14 @@ const ANSI_TONES: Readonly<Record<string, string>> = {
   dim: "2",
   text: "37",
 };
+const ANSI_BACKGROUNDS: Readonly<Record<string, string>> = {
+  selectedBg: "45",
+  customMessageBg: "40",
+  userMessageBg: "100",
+};
 const ansiTheme = {
   fg: (tone: string, text: string) => `\x1b[${ANSI_TONES[tone] ?? "37"}m${text}\x1b[0m`,
+  bg: (tone: string, text: string) => `\x1b[${ANSI_BACKGROUNDS[tone] ?? "40"}m${text}\x1b[49m`,
   bold: (text: string) => `\x1b[1m${text}\x1b[22m`,
 } as unknown as ObservabilityTheme;
 
@@ -86,27 +93,54 @@ test("keyboard and mouse switch unified UI views", () => {
   const ui = createUi(tui, { view: "status" });
 
   ui.handleInput("4");
-  assert.match(ui.render(100)[0] ?? "", /4 Catalog/);
+  assert.match(ui.render(100)[1] ?? "", /4 Catalog/);
   assert.match(ui.render(100).join("\n"), /workflow/);
 
-  ui.handleInput("\x1b[<0;20;1M");
-  assert.match(ui.render(100)[0] ?? "", /2 Runs/);
+  ui.handleInput("\x1b[<0;30;2M");
+  assert.match(ui.render(100)[1] ?? "", /2 Runs/);
   assert.ok(tui.renderRequests > 0);
 });
 
-test("colors the active tab, focused pane, and semantic catalog and fact state", () => {
+test("hides redundant pane navigation for single-pane views", () => {
+  const lines = createUi(fakeTui(18), { view: "status" }).render(100);
+
+  assert.equal(lines.length, 18);
+  assert.match(lines[2] ?? "", /Session/);
+  assert.doesNotMatch(lines.join("\n"), /Overview|Tab pane|focus Overview/);
+});
+
+test("pins selected Catalog metadata beneath the definition list", () => {
+  const lines = createUi(fakeTui(18), { view: "catalog", selector: "qa" }).render(100);
+  const definitionRow = lines.findIndex((line) => /W qa/.test(line));
+  const inspectorRow = lines.findIndex((line) => /Selected definition/.test(line));
+
+  assert.ok(definitionRow >= 0);
+  assert.ok(inspectorRow > definitionRow);
+  assert.match(lines.join("\n"), /Validate the repository/);
+  assert.match(lines.join("\n"), /2 nodes · 1 transition/);
+  assert.match(lines.join("\n"), /entry start · 1000ms · parallel 1/);
+});
+
+test("uses centered background surfaces without redundant active markers", () => {
   const tui = fakeTui(18);
   const ui = createUi(tui, { view: "catalog", selector: "qa" }, ansiTheme);
 
   let lines = ui.render(100);
-  assert.ok(lines[0]?.includes("\x1b[35m\x1b[1m[● 4 Catalog]"));
-  assert.ok(lines[2]?.includes("\x1b[35m\x1b[1m● Definitions"));
+  assert.match(lines[0] ?? "", /Phenix · Catalog/);
+  assert.ok(lines[1]?.includes("\x1b[45m"));
+  assert.match(lines[1] ?? "", /4 Catalog/);
+  assert.doesNotMatch(lines[1] ?? "", /[●○▶▷│┃]/);
+  assert.ok(lines[2]?.includes("\x1b[45m"));
+  assert.match(lines[2] ?? "", /Definitions/);
+  assert.doesNotMatch(lines[2] ?? "", /[●○▶▷│┃]/);
   assert.ok(lines.join("\n").includes("\x1b[35mW\x1b[0m"));
+  assert.ok(lines.join("\n").includes("\x1b[100m"));
 
   ui.handleInput("\t");
   lines = ui.render(100);
-  assert.ok(lines[2]?.includes("\x1b[35m\x1b[1m● Preview"));
-  assert.ok(lines.join("\n").includes("\x1b[37m▷ "));
+  assert.ok(lines[2]?.includes("\x1b[45m"));
+  assert.match(lines[2] ?? "", /Preview/);
+  assert.doesNotMatch(lines.join("\n"), /[▶▷]/);
 
   const facts = createUi(fakeTui(18), { view: "facts" }, ansiTheme).render(120).join("\n");
   assert.ok(facts.includes("\x1b[35mrun-started\x1b[0m"));
