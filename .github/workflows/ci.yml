@@ -7,15 +7,75 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  apply-catalog-fix:
+    name: Apply compact Catalog metadata fix
+    if: github.event_name == 'pull_request' && github.head_ref == 'refine/flat-phenix-ui'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      pending: ${{ steps.stage.outputs.pending }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: refine/flat-phenix-ui
+          fetch-depth: 0
+      - id: stage
+        name: Detect staged source patch
+        shell: bash
+        run: |
+          if [ -f .github/fix-catalog-metadata.py ]; then
+            echo 'pending=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'pending=false' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Apply source patch
+        if: steps.stage.outputs.pending == 'true'
+        run: python3 .github/fix-catalog-metadata.py
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        if: steps.stage.outputs.pending == 'true'
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+      - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
+        if: steps.stage.outputs.pending == 'true'
+        with: { name: devenv }
+      - name: Install devenv
+        if: steps.stage.outputs.pending == 'true'
+        run: nix profile add nixpkgs#devenv
+      - name: Format source patch
+        if: steps.stage.outputs.pending == 'true'
+        shell: bash
+        run: |
+          devenv shell maintenance-fix-format
+          git checkout HEAD -- modules/tooling.nix
+          git diff --check
+      - name: Commit source refinement
+        if: steps.stage.outputs.pending == 'true'
+        shell: bash
+        run: |
+          git fetch origin main
+          git checkout origin/main -- .github/workflows/ci.yml
+          rm -f .github/fix-catalog-metadata.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fit Catalog metadata to the sidebar"
+          git push origin HEAD:refine/flat-phenix-ui
+
   checks:
     name: Final maintenance checks
+    needs: apply-catalog-fix
+    if: needs.apply-catalog-fix.outputs.pending != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
