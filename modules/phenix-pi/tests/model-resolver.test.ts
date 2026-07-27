@@ -3,14 +3,10 @@ import test from "node:test";
 
 import { PhenixModelResolver } from "../adapters/routing/phenix-model-resolver.ts";
 
-test("virtual mixed model resolves once to the first authenticated capability candidate", async () => {
+test("virtual mixed model resolves deterministically to its configured model", async () => {
   const resolver = new PhenixModelResolver({
-    available: () => [
-      { provider: "opencode-go", model: "kimi-k2.7-code" },
-      { provider: "opencode-go", model: "deepseek-v4-pro" },
-      { provider: "openai-codex", model: "gpt-5.6-terra" },
-    ],
-    contains: () => true,
+    contains: (provider, model) =>
+      provider === "opencode-go" && model === "kimi-k2.7-code",
   });
   const context = {
     definitionId: "agent.implementer",
@@ -37,16 +33,12 @@ test("virtual mixed model resolves once to the first authenticated capability ca
   if (result.requested.kind === "virtual") assert.equal(result.requested.model, "mixed");
   assert.equal(result.capability, "code");
   assert.equal(result.thinking, "low");
-  assert.equal(result.policyRevision, "phenix-routing-v4");
 });
 
-test("a definition-declared capability overrides role fallback routing", async () => {
+test("a definition-declared capability overrides role routing", async () => {
   const resolver = new PhenixModelResolver({
-    available: () => [
-      { provider: "openai-codex", model: "gpt-5.6-sol" },
-      { provider: "openai-codex", model: "gpt-5.6-terra" },
-    ],
-    contains: () => true,
+    contains: (provider, model) =>
+      provider === "openai-codex" && model === "gpt-5.6-sol",
   });
   const result = await resolver.resolve(
     { kind: "virtual", provider: "phenix", model: "mixed" },
