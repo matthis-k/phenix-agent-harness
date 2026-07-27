@@ -1,11 +1,10 @@
 import { DefinitionCatalog, WorkflowFunctionRegistry } from "../application/catalog.ts";
 import { DynamicWorkflowCompiler } from "../application/dynamic-workflow-compiler.ts";
 import { DynamicWorkflowRuntimeRegistry } from "../application/dynamic-workflow-runtime.ts";
-import { agentDefinitions } from "../definitions/agents.ts";
 import { resolveDefinitionSchema } from "../definitions/schema-registry.ts";
 import { registerWorkflowFunctions } from "../definitions/workflows/functions.ts";
-import { workflowDefinitions } from "../definitions/workflows/index.ts";
 import type { LocalOperationRunner } from "../ports/local-operation-runner.ts";
+import { agentDefinitions, workflowDefinitions } from "./bundled-definitions.ts";
 
 export interface DefinitionRuntime {
   readonly functions: WorkflowFunctionRegistry;
