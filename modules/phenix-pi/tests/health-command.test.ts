@@ -55,9 +55,7 @@ function runtimeFixture(input: {
       runTree: async () => ({ root: { run: rootSnapshot, children: [] } }),
       activeRuns: async () => [rootSnapshot],
     },
-    execution: {
-      inspect: async () => rootSnapshot,
-    },
+    inspectRun: async () => rootSnapshot,
     diagnostics: {
       summary: async () => ({
         total: 0,
