@@ -1,4 +1,5 @@
 import type { AgentToolResult } from "../ports/agent-session-backend.ts";
+import { projectedToolResult } from "./tool-result-projection.ts";
 
 export type ResultTransform = "auto" | "qa-report" | "mermaid-source";
 export type ResultRenderer = "auto" | "tool" | "pi-markdown" | "beautiful-mermaid";
@@ -109,18 +110,14 @@ function resolveTransformation(
   return { id: definition.id, input };
 }
 
-function qaReportInput(result: AgentToolResult, contract: unknown): ResultRenderInput | undefined {
-  if (!result.text.startsWith(QA_REPORT_HEADING)) return undefined;
-  const envelope = recordOf(contract);
-  const outcome = recordOf(envelope?.outcome) ?? envelope;
-  if (
-    outcome?.status !== "success" ||
-    !Array.isArray(outcome.checks) ||
-    !Array.isArray(outcome.findings)
-  ) {
-    return undefined;
-  }
-  return { kind: "markdown", content: result.text };
+function qaReportInput(
+  _result: AgentToolResult,
+  contract: unknown,
+): ResultRenderInput | undefined {
+  const markdown = projectedToolResult(contract).text;
+  return markdown.startsWith(QA_REPORT_HEADING)
+    ? { kind: "markdown", content: markdown }
+    : undefined;
 }
 
 function mermaidSourceInput(
