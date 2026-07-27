@@ -1,4 +1,5 @@
 import type {
+  ConcreteModelRef,
   Difficulty,
   ModelCapability,
   ModelResolutionContext,
@@ -9,136 +10,59 @@ import type {
   VirtualModelRef,
 } from "../../domain/definition/model.ts";
 import { virtualModel } from "../../domain/definition/model.ts";
-import type {
-  ModelCandidate,
-  ModelInventory,
-  ModelResolver,
-  ModelRoute,
-  RoutingPolicy,
-} from "../../ports/model-resolver.ts";
+import type { ModelInventory, ModelResolver } from "../../ports/model-resolver.ts";
 
-interface ModelSetDefinition {
-  readonly capabilityPools: Readonly<Record<ModelCapability, string>>;
-  readonly allowedProviders: readonly string[];
+interface CapabilityRoute {
+  readonly capability: ModelCapability;
+  readonly thinking: PiThinkingLevel;
 }
 
-const POOLS: Readonly<Record<string, readonly ModelCandidate[]>> = {
-  "free.universal": [
-    candidate("opencode", "deepseek-v4-flash-free"),
-    candidate("opencode", "mimo-v2.5-free"),
-    candidate("opencode", "north-mini-code-free"),
-  ],
-  "go.fast": [candidate("opencode-go", "mimo-v2.5"), candidate("opencode-go", "deepseek-v4-flash")],
-  "go.general": [
-    candidate("opencode-go", "qwen3.7-plus"),
-    candidate("opencode-go", "deepseek-v4-pro"),
-  ],
-  "go.reasoning": [candidate("opencode-go", "glm-5.1"), candidate("opencode-go", "qwen3.7-max")],
-  "go.reasoning-max": [candidate("opencode-go", "glm-5.2"), candidate("opencode-go", "glm-5.1")],
-  "go.code-fast": [
-    candidate("opencode-go", "kimi-k2.6"),
-    candidate("opencode-go", "deepseek-v4-flash"),
-  ],
-  "go.code": [
-    candidate("opencode-go", "kimi-k2.7-code"),
-    candidate("opencode-go", "deepseek-v4-pro"),
-  ],
-  "go.code-max": [candidate("opencode-go", "kimi-k2.7-code"), candidate("opencode-go", "glm-5.1")],
-  "go.review": [
-    candidate("opencode-go", "qwen3.7-max"),
-    candidate("opencode-go", "deepseek-v4-pro"),
-  ],
-  "go.review-max": [candidate("opencode-go", "glm-5.2"), candidate("opencode-go", "qwen3.7-max")],
-  "gpt.fast": [
-    candidate("openai-codex", "gpt-5.6-luna"),
-    candidate("openai-codex", "gpt-5.4-mini"),
-  ],
-  "gpt.general": [
-    candidate("openai-codex", "gpt-5.6-terra"),
-    candidate("openai-codex", "gpt-5.5"),
-    candidate("openai-codex", "gpt-5.4"),
-  ],
-  "gpt.reasoning": [
-    candidate("openai-codex", "gpt-5.6-terra"),
-    candidate("openai-codex", "gpt-5.5"),
-    candidate("openai-codex", "gpt-5.4"),
-  ],
-  "gpt.pro": [
-    candidate("openai-codex", "gpt-5.6-sol"),
-    candidate("openai-codex", "gpt-5.6-terra"),
-    candidate("openai-codex", "gpt-5.5"),
-    candidate("openai-codex", "gpt-5.4"),
-  ],
-  "gpt.code-fast": [
-    candidate("openai-codex", "gpt-5.6-luna"),
-    candidate("openai-codex", "gpt-5.4-mini"),
-  ],
-  "gpt.code": [
-    candidate("openai-codex", "gpt-5.6-terra"),
-    candidate("openai-codex", "gpt-5.5"),
-    candidate("openai-codex", "gpt-5.4"),
-  ],
-  "gpt.code-max": [
-    candidate("openai-codex", "gpt-5.6-sol"),
-    candidate("openai-codex", "gpt-5.6-terra"),
-    candidate("openai-codex", "gpt-5.5"),
-    candidate("openai-codex", "gpt-5.4"),
-  ],
-  "gpt.review": [
-    candidate("openai-codex", "gpt-5.6-terra"),
-    candidate("openai-codex", "gpt-5.5"),
-    candidate("openai-codex", "gpt-5.4"),
-  ],
+type ModelRoutes = Readonly<Record<ModelCapability, ConcreteModelRef>>;
+
+const FREE_MODELS = allCapabilities(model("opencode", "deepseek-v4-flash-free"));
+
+const GO_MODELS: ModelRoutes = {
+  fast: model("opencode-go", "mimo-v2.5"),
+  general: model("opencode-go", "qwen3.7-plus"),
+  reasoning: model("opencode-go", "glm-5.1"),
+  "reasoning-max": model("opencode-go", "glm-5.2"),
+  "code-fast": model("opencode-go", "kimi-k2.6"),
+  code: model("opencode-go", "kimi-k2.7-code"),
+  "code-max": model("opencode-go", "kimi-k2.7-code"),
+  review: model("opencode-go", "qwen3.7-max"),
+  "review-max": model("opencode-go", "glm-5.2"),
 };
 
-const FREE_POOLS = allCapabilities("free.universal");
-const GO_POOLS: Readonly<Record<ModelCapability, string>> = {
-  fast: "go.fast",
-  general: "go.general",
-  reasoning: "go.reasoning",
-  "reasoning-max": "go.reasoning-max",
-  "code-fast": "go.code-fast",
-  code: "go.code",
-  "code-max": "go.code-max",
-  review: "go.review",
-  "review-max": "go.review-max",
-};
-const GPT_POOLS: Readonly<Record<ModelCapability, string>> = {
-  fast: "gpt.fast",
-  general: "gpt.general",
-  reasoning: "gpt.reasoning",
-  "reasoning-max": "gpt.pro",
-  "code-fast": "gpt.code-fast",
-  code: "gpt.code",
-  "code-max": "gpt.code-max",
-  review: "gpt.review",
-  "review-max": "gpt.pro",
+const GPT_MODELS: ModelRoutes = {
+  fast: model("openai-codex", "gpt-5.6-luna"),
+  general: model("openai-codex", "gpt-5.6-terra"),
+  reasoning: model("openai-codex", "gpt-5.6-terra"),
+  "reasoning-max": model("openai-codex", "gpt-5.6-sol"),
+  "code-fast": model("openai-codex", "gpt-5.6-luna"),
+  code: model("openai-codex", "gpt-5.6-terra"),
+  "code-max": model("openai-codex", "gpt-5.6-sol"),
+  review: model("openai-codex", "gpt-5.6-terra"),
+  "review-max": model("openai-codex", "gpt-5.6-sol"),
 };
 
-export const MODEL_SETS: Readonly<Record<PhenixModelSetId, ModelSetDefinition>> = {
-  free: { capabilityPools: FREE_POOLS, allowedProviders: ["opencode"] },
-  "opencode-go": { capabilityPools: GO_POOLS, allowedProviders: ["opencode-go"] },
-  "chatgpt-plus": {
-    capabilityPools: GPT_POOLS,
-    allowedProviders: ["openai", "openai-codex"],
-  },
+const MODEL_SETS: Readonly<Record<PhenixModelSetId, ModelRoutes>> = {
+  free: FREE_MODELS,
+  "opencode-go": GO_MODELS,
+  "chatgpt-plus": GPT_MODELS,
   mixed: {
-    capabilityPools: {
-      fast: "go.fast",
-      general: "go.general",
-      reasoning: "gpt.reasoning",
-      "reasoning-max": "gpt.pro",
-      "code-fast": "go.code-fast",
-      code: "go.code",
-      "code-max": "go.code-max",
-      review: "gpt.review",
-      "review-max": "gpt.pro",
-    },
-    allowedProviders: ["opencode-go", "openai", "openai-codex"],
+    fast: GO_MODELS.fast,
+    general: GO_MODELS.general,
+    reasoning: GPT_MODELS.reasoning,
+    "reasoning-max": GPT_MODELS["reasoning-max"],
+    "code-fast": GO_MODELS["code-fast"],
+    code: GO_MODELS.code,
+    "code-max": GO_MODELS["code-max"],
+    review: GPT_MODELS.review,
+    "review-max": GPT_MODELS["review-max"],
   },
 };
 
-const ROUTES: Readonly<Record<string, Readonly<Record<Difficulty, ModelRoute>>>> = {
+const ROUTES: Readonly<Record<string, Readonly<Record<Difficulty, CapabilityRoute>>>> = {
   base: difficulties("fast", "general", "reasoning", "reasoning-max", [
     "minimal",
     "low",
@@ -196,113 +120,77 @@ const ROUTES: Readonly<Record<string, Readonly<Record<Difficulty, ModelRoute>>>>
   ]),
 };
 
-export const defaultRoutingPolicy: RoutingPolicy = {
-  revision: "phenix-routing-v4",
-  route(context) {
-    const role = roleFromDefinition(context.definitionId);
-    const difficulty = context.difficulty ?? defaultDifficulty(role);
-    const routed = (ROUTES[role] ?? ROUTES.base)[difficulty];
-    return {
-      capability: context.capability ?? routed.capability,
-      thinking: routed.thinking,
-    };
-  },
-  candidates(modelSet, capability) {
-    const pool = MODEL_SETS[modelSet].capabilityPools[capability];
-    return POOLS[pool] ?? [];
-  },
-  allows(modelSet, candidateValue) {
-    return MODEL_SETS[modelSet].allowedProviders.includes(candidateValue.provider);
-  },
-};
-
 export class PhenixModelResolver implements ModelResolver {
   private readonly inventory: ModelInventory;
-  private readonly policy: RoutingPolicy;
 
-  constructor(inventory: ModelInventory, policy: RoutingPolicy = defaultRoutingPolicy) {
+  constructor(inventory: ModelInventory) {
     this.inventory = inventory;
-    this.policy = policy;
   }
 
   async resolve(selector: ModelSelector, context: ModelResolutionContext): Promise<ResolvedModel> {
-    const candidates = await this.resolveCandidates(selector, context);
-    const selected = candidates[0];
-    if (!selected) throw new Error(`No eligible model candidate was resolved`);
-    return selected;
-  }
-
-  async resolveCandidates(
-    selector: ModelSelector,
-    context: ModelResolutionContext,
-  ): Promise<readonly ResolvedModel[]> {
-    const route = this.policy.route(context);
+    const route = routeFor(context);
     const thinking = context.thinking === "route" ? route.thinking : context.thinking;
 
     if (selector.kind === "concrete") {
-      if (!this.inventory.contains(selector.provider, selector.model)) {
-        throw new Error(`Concrete model ${selector.provider}/${selector.model} is unavailable`);
-      }
-      return [
-        {
-          requested: selector,
-          concrete: selector,
-          thinking,
-          capability: route.capability,
-          policyRevision: this.policy.revision,
-        },
-      ];
+      this.requireAvailable(selector);
+      return {
+        requested: selector,
+        concrete: selector,
+        thinking,
+        capability: route.capability,
+      };
     }
 
     const modelSet = selector.kind === "virtual" ? selector.model : (context.modelSet ?? "mixed");
     const virtual: VirtualModelRef = virtualModel(modelSet);
-    const pool = MODEL_SETS[modelSet].capabilityPools[route.capability];
-    const available = new Set(
-      this.inventory.available().map((item) => `${item.provider}/${item.model}`),
-    );
-    const eligible = this.policy
-      .candidates(modelSet, route.capability)
-      .filter((item) => this.policy.allows(modelSet, item))
-      .filter((item) => available.has(`${item.provider}/${item.model}`));
+    const concrete = MODEL_SETS[modelSet][route.capability];
+    this.requireAvailable(concrete, modelSet, route.capability);
 
-    if (eligible.length === 0) {
-      const configured = this.policy
-        .candidates(modelSet, route.capability)
-        .map((item) => `${item.provider}/${item.model}`)
-        .join(", ");
-      throw new Error(
-        `No authenticated model is available for phenix/${modelSet} capability ${route.capability}. ` +
-          `Configured candidates: ${configured || "none"}`,
-      );
-    }
-
-    return eligible.map((item) => ({
+    return {
       requested: selector,
       virtual,
-      concrete: { kind: "concrete", provider: item.provider, model: item.model },
+      concrete,
       thinking,
       capability: route.capability,
-      pool,
-      policyRevision: this.policy.revision,
-    }));
+    };
+  }
+
+  private requireAvailable(
+    concrete: ConcreteModelRef,
+    modelSet?: PhenixModelSetId,
+    capability?: ModelCapability,
+  ): void {
+    if (this.inventory.contains(concrete.provider, concrete.model)) return;
+    const route = modelSet && capability ? ` for phenix/${modelSet} capability ${capability}` : "";
+    throw new Error(`Configured model ${concrete.provider}/${concrete.model}${route} is unavailable`);
   }
 }
 
-function candidate(provider: string, model: string): ModelCandidate {
-  return { provider, model };
+function model(provider: string, name: string): ConcreteModelRef {
+  return { kind: "concrete", provider, model: name };
 }
 
-function allCapabilities(pool: string): Readonly<Record<ModelCapability, string>> {
+function allCapabilities(concrete: ConcreteModelRef): ModelRoutes {
   return {
-    fast: pool,
-    general: pool,
-    reasoning: pool,
-    "reasoning-max": pool,
-    "code-fast": pool,
-    code: pool,
-    "code-max": pool,
-    review: pool,
-    "review-max": pool,
+    fast: concrete,
+    general: concrete,
+    reasoning: concrete,
+    "reasoning-max": concrete,
+    "code-fast": concrete,
+    code: concrete,
+    "code-max": concrete,
+    review: concrete,
+    "review-max": concrete,
+  };
+}
+
+function routeFor(context: ModelResolutionContext): CapabilityRoute {
+  const role = roleFromDefinition(context.definitionId);
+  const difficulty = context.difficulty ?? defaultDifficulty(role);
+  const routed = (ROUTES[role] ?? ROUTES.base)[difficulty];
+  return {
+    capability: context.capability ?? routed.capability,
+    thinking: routed.thinking,
   };
 }
 
@@ -312,7 +200,7 @@ function difficulties(
   d2: ModelCapability,
   d3: ModelCapability,
   thinking: readonly [PiThinkingLevel, PiThinkingLevel, PiThinkingLevel, PiThinkingLevel],
-): Readonly<Record<Difficulty, ModelRoute>> {
+): Readonly<Record<Difficulty, CapabilityRoute>> {
   return {
     D0: { capability: d0, thinking: thinking[0] },
     D1: { capability: d1, thinking: thinking[1] },
