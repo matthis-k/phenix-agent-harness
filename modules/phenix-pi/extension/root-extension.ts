@@ -35,6 +35,7 @@ import {
 } from "./health-command.ts";
 import { formatDiagnosticEntries, PHENIX_LOGS_USAGE, parseLogsCommand } from "./log-command.ts";
 import { renderTerminalMermaid } from "./mermaid-rendering.ts";
+import { loadNativeRunTranscript } from "./native-run-transcript.ts";
 import { statusLine } from "./observability-theme.ts";
 import {
   completePhenixSubcommands,
@@ -519,6 +520,7 @@ async function openPhenixUi(
         initial,
         snapshot,
         load,
+        loadTranscript: (node) => loadNativeRunTranscript(node, tui),
         subscribe: (listener) => {
           const unsubscribeEvents = runtime.events.subscribe(listener);
           const unsubscribeDiagnostics = runtime.diagnostics.subscribe(listener);

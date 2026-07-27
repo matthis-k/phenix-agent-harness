@@ -13,9 +13,9 @@ import {
   migrateSessionEntries,
   parseSessionEntries,
   parseSkillBlock,
-  sessionEntryToContextMessages,
-  SkillInvocationMessageComponent,
   type SessionEntry,
+  SkillInvocationMessageComponent,
+  sessionEntryToContextMessages,
   ToolExecutionComponent,
   type TruncationResult,
   UserMessageComponent,
@@ -161,7 +161,11 @@ function addNativeMessage(
       return;
     }
     case "bashExecution": {
-      const component = new BashExecutionComponent(message.command, tui, message.excludeFromContext);
+      const component = new BashExecutionComponent(
+        message.command,
+        tui,
+        message.excludeFromContext,
+      );
       if (message.output) component.appendOutput(message.output);
       component.setComplete(
         message.exitCode,
@@ -200,8 +204,9 @@ function addNativeMessage(
 function userMessageText(message: Extract<AgentMessage, { role: "user" }>): string {
   if (typeof message.content === "string") return message.content;
   return message.content
-    .filter((content): content is Extract<(typeof message.content)[number], { type: "text" }> =>
-      content.type === "text",
+    .filter(
+      (content): content is Extract<(typeof message.content)[number], { type: "text" }> =>
+        content.type === "text",
     )
     .map((content) => content.text)
     .join("");
