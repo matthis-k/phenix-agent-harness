@@ -1,14 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-
+import { qaReportDocument } from "../application/qa-report-structured-content.ts";
 import {
   composeResultTransformStrategy,
   createResultPresenter,
   presentRootResult,
-  transformResult,
   type ResultTransformStep,
+  transformResult,
 } from "../application/result-presentation.ts";
-import { qaReportDocument } from "../application/qa-report-structured-content.ts";
 import { renderStructuredContentMarkdown } from "../application/structured-content-markdown.ts";
 import {
   projectDispatchResult,
@@ -115,7 +114,7 @@ test("generic structured content derives heading and list depth", () => {
   assert.match(markdown, /^### Child/m);
   assert.match(markdown, /^0\. First/m);
   assert.match(markdown, /^0\. Second/m);
-  assert.match(markdown, /^  - Nested/m);
+  assert.match(markdown, /^ {2}- Nested/m);
   assert.doesNotMatch(markdown, /^1\./m);
   assert.doesNotMatch(markdown, /^2\./m);
 });
@@ -163,9 +162,7 @@ test("transform and renderer strategies are dependency-injected", () => {
     transform: () => ({ kind: "markdown", content: "injected" }),
   };
   const presenter = createResultPresenter({
-    transforms: [
-      composeResultTransformStrategy({ id: "qa-report", auto: true, steps: [step] }),
-    ],
+    transforms: [composeResultTransformStrategy({ id: "qa-report", auto: true, steps: [step] })],
     renderers: [
       {
         id: "tool",
