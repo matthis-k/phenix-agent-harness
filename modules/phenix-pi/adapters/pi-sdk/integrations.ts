@@ -1,12 +1,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-export type IntegrationId = "hypa" | "lsp" | "mcp" | "context" | "web";
+import type { IntegrationId, IntegrationStatus } from "../../ports/integration-status.ts";
 
-export interface IntegrationStatus {
-  readonly id: IntegrationId;
-  readonly state: "loaded" | "failed";
-  readonly error?: string;
-}
+export type { IntegrationId, IntegrationStatus } from "../../ports/integration-status.ts";
 
 type ExtensionModule = {
   readonly default: (pi: ExtensionAPI) => void | Promise<void>;
