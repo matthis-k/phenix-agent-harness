@@ -11,11 +11,12 @@ test("Pi Markdown presentations become durable native entries", () => {
       {
         toolCallId: "tool-1",
         toolName: "phenix_dispatch",
-        content: [{ type: "text", text: "## QA report\n\nPassed." }],
+        content: [{ type: "text", text: "# QA report\n\nPassed." }],
         details: {
           transport: {
             presentation: {
               transform: "qa-report",
+              steps: ["qa-report-structured-content", "structured-content-markdown"],
               renderer: "pi-markdown",
               inputKind: "markdown",
             },
@@ -26,13 +27,39 @@ test("Pi Markdown presentations become durable native entries", () => {
       activeTools,
     ),
     {
-      content: "## QA report\n\nPassed.",
+      content: "# QA report\n\nPassed.",
       inputKind: "markdown",
       renderer: "pi-markdown",
       transform: "qa-report",
+      steps: ["qa-report-structured-content", "structured-content-markdown"],
       toolCallId: "tool-1",
       toolName: "phenix_dispatch",
     },
+  );
+});
+
+test("generic structured documents use the same Markdown renderer", () => {
+  assert.equal(
+    nativeResultEntry(
+      {
+        toolCallId: "tool-generic",
+        toolName: "phenix_dispatch",
+        content: [{ type: "text", text: "# Generic" }],
+        details: {
+          transport: {
+            presentation: {
+              transform: "structured-content-markdown",
+              steps: ["structured-content-contract", "structured-content-markdown"],
+              renderer: "pi-markdown",
+              inputKind: "markdown",
+            },
+          },
+        },
+        isError: false,
+      },
+      activeTools,
+    )?.content,
+    "# Generic",
   );
 });
 
@@ -48,6 +75,7 @@ test("Beautiful Mermaid presentations preserve Mermaid source", () => {
           transport: {
             presentation: {
               transform: "mermaid-source",
+              steps: ["mermaid-source"],
               renderer: "beautiful-mermaid",
               inputKind: "mermaid",
             },
@@ -61,15 +89,16 @@ test("Beautiful Mermaid presentations preserve Mermaid source", () => {
   );
 });
 
-test("tool rendering, child tools, and errors remain ordinary tool output", () => {
+test("tool rendering, child tools, errors, and incomplete metadata stay ordinary", () => {
   const toolRendered = {
     toolCallId: "tool-3",
     toolName: "phenix_dispatch",
-    content: [{ type: "text", text: "## QA report" }],
+    content: [{ type: "text", text: "# QA report" }],
     details: {
       transport: {
         presentation: {
           transform: "qa-report",
+          steps: ["qa-report-structured-content", "structured-content-markdown"],
           renderer: "tool",
           inputKind: "markdown",
         },
@@ -85,4 +114,22 @@ test("tool rendering, child tools, and errors remain ordinary tool output", () =
   );
   assert.equal(nativeResultEntry({ ...toolRendered, isError: true }, activeTools), undefined);
   assert.equal(nativeResultEntry(toolRendered, ["phenix_handle"]), undefined);
+  assert.equal(
+    nativeResultEntry(
+      {
+        ...toolRendered,
+        details: {
+          transport: {
+            presentation: {
+              transform: "qa-report",
+              renderer: "pi-markdown",
+              inputKind: "markdown",
+            },
+          },
+        },
+      },
+      activeTools,
+    ),
+    undefined,
+  );
 });
