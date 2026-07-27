@@ -102,7 +102,8 @@ flowchart LR
     estimate -->|D0| implement
     estimate -->|D1-D3| plan
     plan --> implement
-    implement --> verify
+    implement -->|D0| return
+    implement -->|D1-D3| verify
     verify --> return
 ```
 
@@ -175,7 +176,8 @@ output-schema: outcome.implementation-result.v1
 | `estimate` | `implement` | `success` | `difficulty.D0` | |
 | `estimate` | `plan` | `success` | `difficulty.at-least-D1` | |
 | `plan` | `implement` | `success` | | |
-| `implement` | `verify` | `success` | | |
+| `implement` | `return` | `success` | `difficulty.D0` | |
+| `implement` | `verify` | `success` | `difficulty.at-least-D1` | |
 | `verify` | `return` | `success` | | |
 ````
 
