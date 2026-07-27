@@ -1,11 +1,11 @@
 import { existsSync } from "node:fs";
 
-import type { IntegrationStatus } from "../adapters/pi-sdk/integrations.ts";
 import type { PhenixRuntime } from "../composition/create-phenix-runtime.ts";
 import { PHENIX_MODEL_SETS, type PhenixModelSetId } from "../domain/definition/model.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
 import type { RunRecord } from "../domain/run/model.ts";
 import type { RunId } from "../domain/shared.ts";
+import type { IntegrationStatus } from "../ports/integration-status.ts";
 
 export const PHENIX_HEALTH_TOPICS = [
   "integrations",
@@ -245,7 +245,7 @@ async function definitionsHealth(input: PhenixHealthInput): Promise<PhenixHealth
 
 async function runtimeHealth(input: PhenixHealthInput): Promise<PhenixHealthSection> {
   const [root, active, diagnostics] = await Promise.all([
-    input.runtime.execution.inspect(input.rootRunId),
+    input.runtime.inspectRun(input.rootRunId),
     input.runtime.queries.activeRuns(input.rootRunId),
     input.runtime.diagnostics.summary(input.rootRunId),
   ]);
