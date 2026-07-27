@@ -3,27 +3,15 @@ import test from "node:test";
 
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 
-import {
-  defaultRoutingPolicy,
-  PhenixModelResolver,
-} from "../adapters/routing/phenix-model-resolver.ts";
+import { PhenixModelResolver } from "../adapters/routing/phenix-model-resolver.ts";
 import { PiModelInventory } from "../adapters/routing/pi-model-inventory.ts";
 
-test("registered OpenCode free models are usable without configured auth", () => {
-  const registry = freeModelRegistry();
-  const inventory = new PiModelInventory(registry);
-  const available = inventory.available();
-  const configured = defaultRoutingPolicy
-    .candidates("free", "general")
-    .map((model) => ({ provider: model.provider, model: model.model }));
-
-  assert.deepEqual(available, configured);
-  const candidate = available[0];
-  assert.ok(candidate);
-  assert.equal(inventory.contains(candidate.provider, candidate.model), true);
+test("the configured OpenCode free model is usable without configured auth", () => {
+  const inventory = new PiModelInventory(freeModelRegistry());
+  assert.equal(inventory.contains("opencode", "deepseek-v4-flash-free"), true);
 });
 
-test("phenix/free resolves a registered anonymous OpenCode model", async () => {
+test("phenix/free resolves the configured anonymous OpenCode model", async () => {
   const resolver = new PhenixModelResolver(new PiModelInventory(freeModelRegistry()));
   const resolved = await resolver.resolve(
     { kind: "virtual", provider: "phenix", model: "free" },
@@ -36,8 +24,11 @@ test("phenix/free resolves a registered anonymous OpenCode model", async () => {
     },
   );
 
-  assert.equal(resolved.concrete.provider, "opencode");
-  assert.match(resolved.concrete.model, /-free$/);
+  assert.deepEqual(resolved.concrete, {
+    kind: "concrete",
+    provider: "opencode",
+    model: "deepseek-v4-flash-free",
+  });
 });
 
 test("registered paid models still require configured auth", () => {
@@ -48,7 +39,7 @@ test("registered paid models still require configured auth", () => {
   const inventory = new PiModelInventory(registry);
 
   assert.equal(inventory.contains("opencode", "some-paid-model"), false);
-  assert.equal(inventory.contains("openai-codex", "gpt-5.6"), false);
+  assert.equal(inventory.contains("openai-codex", "gpt-5.6-sol"), false);
 });
 
 function freeModelRegistry(): ModelRegistry {
