@@ -11,10 +11,6 @@ class Inventory implements ModelInventory {
     this.models = models;
   }
 
-  available() {
-    return this.models;
-  }
-
   contains(provider: string, model: string): boolean {
     return this.models.some(
       (candidate) => candidate.provider === provider && candidate.model === model,
@@ -24,11 +20,13 @@ class Inventory implements ModelInventory {
 
 const all = [
   { provider: "opencode", model: "deepseek-v4-flash-free" },
-  { provider: "opencode", model: "mimo-v2.5-free" },
   { provider: "opencode-go", model: "mimo-v2.5" },
   { provider: "opencode-go", model: "qwen3.7-plus" },
+  { provider: "opencode-go", model: "glm-5.1" },
   { provider: "opencode-go", model: "glm-5.2" },
+  { provider: "opencode-go", model: "kimi-k2.6" },
   { provider: "opencode-go", model: "kimi-k2.7-code" },
+  { provider: "opencode-go", model: "qwen3.7-max" },
   { provider: "openai-codex", model: "gpt-5.6-luna" },
   { provider: "openai-codex", model: "gpt-5.6-terra" },
   { provider: "openai-codex", model: "gpt-5.6-sol" },
@@ -51,7 +49,7 @@ async function resolve(
   );
 }
 
-test("free routes every capability only to authenticated free candidates", async () => {
+test("free routes every capability to its configured free model", async () => {
   const result = await resolve("free", "agent.implementer", "D3");
   assert.deepEqual(result.concrete, {
     kind: "concrete",
@@ -61,7 +59,7 @@ test("free routes every capability only to authenticated free candidates", async
   assert.equal(result.capability, "code-max");
 });
 
-test("OpenCode Go, ChatGPT Plus, and mixed select the capability-specific provider", async () => {
+test("model sets select exactly one capability-specific model", async () => {
   const go = await resolve("opencode-go", "agent.planner", "D3");
   assert.equal(`${go.concrete.provider}/${go.concrete.model}`, "opencode-go/glm-5.2");
 
@@ -93,21 +91,23 @@ test("OpenCode Go, ChatGPT Plus, and mixed select the capability-specific provid
   );
 });
 
-test("routing preserves ordered fallback candidates", async () => {
-  const inventory = new Inventory([{ provider: "opencode", model: "mimo-v2.5-free" }]);
-  const candidates = await new PhenixModelResolver(inventory).resolveCandidates(
-    { kind: "virtual", provider: "phenix", model: "free" },
-    {
-      definitionId: "agent.base",
-      parentDefinitionId: "root.session",
-      thinking: "route",
-      modelSet: "free",
-      difficulty: "D1",
-    },
+test("an unavailable configured model fails instead of falling back", async () => {
+  const resolver = new PhenixModelResolver(
+    new Inventory([{ provider: "openai-codex", model: "gpt-5.6-terra" }]),
   );
-  assert.deepEqual(
-    candidates.map((item) => item.concrete.model),
-    ["mimo-v2.5-free"],
+
+  await assert.rejects(
+    resolver.resolve(
+      { kind: "virtual", provider: "phenix", model: "chatgpt-plus" },
+      {
+        definitionId: "agent.verifier",
+        parentDefinitionId: "root.session",
+        thinking: "route",
+        modelSet: "chatgpt-plus",
+        difficulty: "D3",
+      },
+    ),
+    /gpt-5\.6-sol.*is unavailable/,
   );
 });
 
