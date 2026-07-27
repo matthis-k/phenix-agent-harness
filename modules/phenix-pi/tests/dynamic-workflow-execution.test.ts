@@ -9,8 +9,8 @@ function scoutWorkflow(): DynamicWorkflowProposal {
   return {
     title: "Dynamic repository scout",
     description: "Adapt the root objective to the reusable scout building block.",
-    inputSchema: "request.objective.v1",
-    outputSchema: "outcome.scout-report.v1",
+    inputSchema: "request.objective",
+    outputSchema: "outcome.scout-report",
     entry: "scout",
     nodes: [
       {
@@ -63,7 +63,6 @@ test("trusted dynamic workflows execute through the ordinary workflow lifecycle"
     risks: [],
   });
   assert.match(run.definitionId, /^workflow\.dynamic\.[a-f0-9]{24}$/);
-  assert.equal(run.compiled.dynamicWorkflow?.identity.version, 1);
   assert.equal(run.compiled.dynamicWorkflow?.identity.graphDigest.length, 64);
   assert.deepEqual(run.compiled.capabilities.invokableDefinitions, [AGENT_SCOUT]);
   assert.equal(children.length, 1);

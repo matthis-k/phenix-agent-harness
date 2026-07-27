@@ -44,13 +44,13 @@ test("automatic dispatch composes and executes a sealed workflow only as the fal
   assert.equal(composer.definitionId, AGENT_COORDINATOR);
   assert.deepEqual(composer.compiled.tools, []);
   assert.equal(runtime.store.projection.childrenOf(composer.id).length, 0);
-  assert.equal(composerInput.workflowInputSchema, "request.objective.v1");
+  assert.equal(composerInput.workflowInputSchema, "request.objective");
   assert.ok(
     composerInput.candidates.some(
       (candidate) =>
         candidate.definitionId === AGENT_SCOUT &&
-        candidate.inputSchema === "request.scout.v1" &&
-        candidate.outputSchema === "outcome.scout-report.v1",
+        candidate.inputSchema === "request.scout" &&
+        candidate.outputSchema === "outcome.scout-report",
     ),
   );
   assert.ok(
@@ -58,7 +58,7 @@ test("automatic dispatch composes and executes a sealed workflow only as the fal
       (candidate) =>
         candidate.definitionId === SESSION_STOCK &&
         candidate.kind === "session" &&
-        candidate.inputSchema === "request.stock-session.v1" &&
+        candidate.inputSchema === "request.stock-session" &&
         candidate.outputSchema === "dynamic",
     ),
   );

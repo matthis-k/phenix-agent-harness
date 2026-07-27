@@ -3,8 +3,8 @@
 ```phenix-agent
 id: agent.coordinator
 description: Propose one bounded declarative workflow graph when no complete predefined workflow covers the request.
-input: request.dynamic-workflow-composition.v1
-output: request.dynamic-workflow-proposal.v1
+input: request.dynamic-workflow-composition
+output: request.dynamic-workflow-proposal
 model: session
 thinking: route
 persistence: memory

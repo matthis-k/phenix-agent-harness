@@ -23,23 +23,23 @@ import { type DefinitionId, definitionId, runId } from "../domain/shared.ts";
 import type { WorkflowEvaluationContext } from "../domain/workflow/graph-state.ts";
 
 const ObjectiveSchema = defineSchema<{ readonly objective: string }>(
-  "test.dynamic.objective.v1",
+  "test.dynamic.objective",
   Type.Object({ objective: Type.String() }),
 );
 const ScoutRequestSchema = defineSchema<{ readonly objective: string }>(
-  "test.dynamic.scout-request.v1",
+  "test.dynamic.scout-request",
   Type.Object({ objective: Type.String() }),
 );
 const ScoutResultSchema = defineSchema<{ readonly summary: string }>(
-  "test.dynamic.scout-result.v1",
+  "test.dynamic.scout-result",
   Type.Object({ summary: Type.String() }),
 );
 const FinalRequestSchema = defineSchema<{ readonly evidence: { readonly summary: string } }>(
-  "test.dynamic.final-request.v1",
+  "test.dynamic.final-request",
   Type.Object({ evidence: Type.Object({ summary: Type.String() }) }),
 );
 const FinalResultSchema = defineSchema<{ readonly answer: string }>(
-  "test.dynamic.final-result.v1",
+  "test.dynamic.final-result",
   Type.Object({ answer: Type.String() }),
 );
 

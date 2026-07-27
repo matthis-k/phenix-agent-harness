@@ -43,7 +43,6 @@ test("live workflows persist one compatible replay checkpoint per state boundary
   const latest = checkpoints.at(-1);
   assert.ok(latest);
   const data = latest.data as WorkflowCheckpointSavedData;
-  assert.equal(data.version, 1);
   assert.equal(data.definitionId, WORKFLOW_IMPLEMENT);
   assert.equal(data.definitionFingerprint.length, 64);
   assert.equal(data.snapshotFingerprint.length, 64);

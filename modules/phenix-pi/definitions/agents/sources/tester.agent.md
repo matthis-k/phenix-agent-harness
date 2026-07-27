@@ -3,8 +3,8 @@
 ```phenix-agent
 id: agent.tester
 description: Interpret deterministic check output and identify concrete failures and coverage gaps.
-input: request.test.v1
-output: outcome.test-report.v1
+input: request.test
+output: outcome.test-report
 model: session
 thinking: route
 persistence: memory

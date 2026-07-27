@@ -48,7 +48,6 @@ test("log command parsing applies severity thresholds and export destinations", 
 
 test("formatted logs retain stable grepable scopes and flattened fields", () => {
   const text = formatDiagnosticEntry({
-    version: 1,
     timestamp: "2026-07-24T05:18:53.114Z",
     severity: "warning",
     scope: "model.routing.candidate_failed",

@@ -62,7 +62,6 @@ const models: ModelResolver = {
       concrete: { kind: "concrete", provider: "test", model: "model" },
       thinking: context.thinking === "route" ? "medium" : context.thinking,
       capability: context.capability,
-      policyRevision: "test",
     };
   },
 };
@@ -303,7 +302,7 @@ function compositionFixture(input: unknown): DynamicWorkflowProposal {
     title: "Composed repository scout",
     description: "Use one reusable scout for the uncovered repository question.",
     inputSchema: input.workflowInputSchema,
-    outputSchema: "outcome.scout-report.v1",
+    outputSchema: "outcome.scout-report",
     entry: "scout",
     nodes: [
       {

@@ -27,7 +27,6 @@ interface ModelSetDefinition {
 }
 
 export interface RoutingPolicy {
-  readonly revision: string;
   route(context: ModelResolutionContext): CapabilityRoute;
   candidates(modelSet: PhenixModelSetId, capability: ModelCapability): readonly ModelCandidate[];
   allows(modelSet: PhenixModelSetId, candidate: ModelCandidate): boolean;
@@ -206,7 +205,6 @@ const ROUTES: Readonly<Record<string, Readonly<Record<Difficulty, CapabilityRout
 };
 
 export const defaultRoutingPolicy: RoutingPolicy = {
-  revision: "phenix-routing-v3",
   route(context) {
     const role = roleFromDefinition(context.definitionId);
     const difficulty = context.difficulty ?? defaultDifficulty(role);
@@ -258,7 +256,6 @@ export class PhenixModelResolver implements ModelResolver {
           concrete: selector,
           thinking,
           capability: route.capability,
-          policyRevision: this.policy.revision,
         },
       ];
     }
@@ -292,7 +289,6 @@ export class PhenixModelResolver implements ModelResolver {
       thinking,
       capability: route.capability,
       pool,
-      policyRevision: this.policy.revision,
     }));
   }
 }

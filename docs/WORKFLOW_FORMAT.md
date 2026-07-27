@@ -22,8 +22,8 @@ Markdown is the authoring surface. Compiled definitions, schemas, graph validati
 ```phenix-agent
 id: agent.scout
 description: Answer a focused repository question with path-grounded evidence.
-input: request.scout.v1
-output: outcome.scout-report.v1
+input: request.scout
+output: outcome.scout-report
 model: session
 thinking: route
 persistence: memory
@@ -121,8 +121,8 @@ The estimator has no repository tools and does not solve the task. Workflows dec
 
 ```phenix-workflow
 id: workflow.example
-input: request.implementation.v1
-output: outcome.implementation-result.v1
+input: request.implementation
+output: outcome.implementation-result
 entry: estimate
 timeout-ms: 600000
 max-node-runs: 12
@@ -149,8 +149,8 @@ flowchart LR
 kind: invoke
 run: agent.difficulty-estimator
 input: difficulty.input
-input-schema: request.difficulty-assessment.v1
-output-schema: outcome.difficulty-assessment.v1
+input-schema: request.difficulty-assessment
+output-schema: outcome.difficulty-assessment
 wait: await
 difficulty: D0
 retry: retryable
@@ -163,8 +163,8 @@ max-retries: 1
 kind: invoke
 run: agent.planner
 input: example.plan.input
-input-schema: request.plan.v1
-output-schema: outcome.plan.v1
+input-schema: request.plan
+output-schema: outcome.plan
 wait: await
 difficulty: result:estimate
 ```
@@ -175,8 +175,8 @@ difficulty: result:estimate
 kind: invoke
 run: agent.implementer
 input: example.implement.input
-input-schema: request.implementation.v1
-output-schema: outcome.change-set.v1
+input-schema: request.implementation
+output-schema: outcome.change-set
 wait: await
 difficulty: result:estimate
 ```
@@ -187,8 +187,8 @@ difficulty: result:estimate
 kind: invoke
 run: agent.verifier
 input: example.verify.input
-input-schema: request.verification.v1
-output-schema: outcome.verification.v1
+input-schema: request.verification
+output-schema: outcome.verification
 wait: await
 difficulty: result:estimate
 retry: retryable
@@ -200,7 +200,7 @@ max-retries: 1
 ```phenix-state
 kind: return
 output: example.output
-output-schema: outcome.implementation-result.v1
+output-schema: outcome.implementation-result
 ```
 
 ## Transitions
@@ -233,8 +233,8 @@ An awaited `invoke` state may declare bounded recovery:
 kind: invoke
 run: agent.critic
 input: qa.security.input
-input-schema: request.critic.v1
-output-schema: outcome.critic-report.v1
+input-schema: request.critic
+output-schema: outcome.critic-report
 wait: await
 retry: retryable
 max-retries: 1
@@ -269,8 +269,8 @@ A deterministic local operation declares input and output schemas:
 kind: local
 operation: local.qa-checks
 input: qa.checks.input
-input-schema: request.qa-checks.v1
-output-schema: outcome.check-results.v1
+input-schema: request.qa-checks
+output-schema: outcome.check-results
 ```
 
 Local operation implementations remain separately registered runtime authorities.

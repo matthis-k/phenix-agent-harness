@@ -79,7 +79,6 @@ export interface WorkflowCausation {
 }
 
 export interface PersistedDynamicWorkflowIdentity {
-  readonly version: 1;
   readonly graphDigest: string;
   readonly definitionDigests: Readonly<Record<string, string>>;
   readonly schemaDigests: Readonly<Record<string, string>>;

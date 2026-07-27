@@ -3,8 +3,8 @@
 ```phenix-agent
 id: agent.difficulty-estimator
 description: Classify an objective from D0 to D3 using a compact architectural-risk rubric.
-input: request.difficulty-assessment.v1
-output: outcome.difficulty-assessment.v1
+input: request.difficulty-assessment
+output: outcome.difficulty-assessment
 model: session
 thinking: route
 persistence: memory

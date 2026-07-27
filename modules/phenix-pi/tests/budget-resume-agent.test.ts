@@ -114,7 +114,6 @@ test("resource-limit reports suspend and resume the original child session", asy
           requested: selector,
           concrete: { kind: "concrete", provider: "test", model: "model" },
           thinking: "medium",
-          policyRevision: "test",
         };
       },
     },

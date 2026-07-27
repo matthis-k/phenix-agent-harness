@@ -16,11 +16,11 @@ import { type DefinitionId, definitionId } from "../domain/shared.ts";
 import type { LocalOperationRunner } from "../ports/local-operation-runner.ts";
 
 const RequestSchema = defineSchema<{ readonly objective: string }>(
-  "test.dynamic-runtime.request.v1",
+  "test.dynamic-runtime.request",
   Type.Object({ objective: Type.String() }),
 );
 const ResultSchema = defineSchema<{ readonly summary: string }>(
-  "test.dynamic-runtime.result.v1",
+  "test.dynamic-runtime.result",
   Type.Object({ summary: Type.String() }),
 );
 const SCOUT = definitionId("agent.test-dynamic-runtime-scout");

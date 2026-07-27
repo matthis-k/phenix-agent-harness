@@ -48,14 +48,14 @@ function fixtureSource(name: string): string {
   return readFileSync(new URL(`${name}.workflow.md`, fixtureDirectory), "utf8");
 }
 
-function stockWorkflowSource(outputSchema = "outcome.scout-report.v1"): string {
+function stockWorkflowSource(outputSchema = "outcome.scout-report"): string {
   return `# Stock workflow fixture
 
 \`\`\`phenix-workflow
 id: workflow.stock-fixture
 description: Exercise a catalogued stock Pi session.
-input: request.objective.v1
-output: outcome.scout-report.v1
+input: request.objective
+output: outcome.scout-report
 entry: stock
 timeout-ms: 120000
 max-node-runs: 2
@@ -71,7 +71,7 @@ kind: invoke
 run: session.stock
 input: stock.input
 wait: await
-input-schema: request.stock-session.v1
+input-schema: request.stock-session
 output-schema: ${outputSchema}
 \`\`\`
 
@@ -80,7 +80,7 @@ output-schema: ${outputSchema}
 \`\`\`phenix-state
 kind: return
 output: stock.output
-output-schema: outcome.scout-report.v1
+output-schema: outcome.scout-report
 \`\`\`
 
 ## Transitions
@@ -173,24 +173,24 @@ test("predefined workflows bind a concrete output schema for stock sessions", ()
   assert.equal(stock?.kind, "invoke");
   if (stock?.kind === "invoke") {
     assert.equal(stock.definition.id, "session.stock");
-    assert.equal(stock.outputSchema, "outcome.scout-report.v1");
+    assert.equal(stock.outputSchema, "outcome.scout-report");
   }
 
   assert.throws(
     () =>
-      compileWorkflowMarkdown(stockWorkflowSource("outcome.stock-session-handoff.v1"), bindings),
+      compileWorkflowMarkdown(stockWorkflowSource("outcome.stock-session-handoff"), bindings),
     /must bind a concrete output schema/,
   );
 });
 
 test("invoked step contracts must match the referenced definition", () => {
   const invalid = productionSource("implement").replace(
-    "output-schema: outcome.plan.v1",
-    "output-schema: outcome.change-set.v1",
+    "output-schema: outcome.plan",
+    "output-schema: outcome.change-set",
   );
   assert.throws(
     () => compileWorkflowMarkdown(invalid, bindings),
-    /schema outcome.change-set.v1 does not match outcome.plan.v1/,
+    /schema outcome.change-set does not match outcome.plan/,
   );
 });
 

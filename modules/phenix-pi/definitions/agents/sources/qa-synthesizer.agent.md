@@ -3,8 +3,8 @@
 ```phenix-agent
 id: agent.qa-synthesizer
 description: Deduplicate and rank deterministic and semantic QA reports.
-input: request.qa-synthesis.v1
-output: outcome.qa-report.v1
+input: request.qa-synthesis
+output: outcome.qa-report
 model: session
 thinking: route
 persistence: memory

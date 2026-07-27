@@ -3,8 +3,8 @@
 ```phenix-agent
 id: agent.architect
 description: Analyze module boundaries, ownership, data flow, and replacement seams without editing.
-input: request.critic.v1
-output: outcome.critic-report.v1
+input: request.critic
+output: outcome.critic-report
 model: session
 thinking: route
 persistence: memory
