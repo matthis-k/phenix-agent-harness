@@ -9,28 +9,17 @@ import type {
   VirtualModelRef,
 } from "../../domain/definition/model.ts";
 import { virtualModel } from "../../domain/definition/model.ts";
-import type { ModelInventory, ModelResolver } from "../../ports/model-resolver.ts";
-
-export interface ModelCandidate {
-  readonly provider: string;
-  readonly model: string;
-}
-
-interface CapabilityRoute {
-  readonly capability: ModelCapability;
-  readonly thinking: PiThinkingLevel;
-}
+import type {
+  ModelCandidate,
+  ModelInventory,
+  ModelResolver,
+  ModelRoute,
+  RoutingPolicy,
+} from "../../ports/model-resolver.ts";
 
 interface ModelSetDefinition {
   readonly capabilityPools: Readonly<Record<ModelCapability, string>>;
   readonly allowedProviders: readonly string[];
-}
-
-export interface RoutingPolicy {
-  readonly revision: string;
-  route(context: ModelResolutionContext): CapabilityRoute;
-  candidates(modelSet: PhenixModelSetId, capability: ModelCapability): readonly ModelCandidate[];
-  allows(modelSet: PhenixModelSetId, candidate: ModelCandidate): boolean;
 }
 
 const POOLS: Readonly<Record<string, readonly ModelCandidate[]>> = {
@@ -147,7 +136,7 @@ export const MODEL_SETS: Readonly<Record<PhenixModelSetId, ModelSetDefinition>> 
   },
 };
 
-const ROUTES: Readonly<Record<string, Readonly<Record<Difficulty, CapabilityRoute>>>> = {
+const ROUTES: Readonly<Record<string, Readonly<Record<Difficulty, ModelRoute>>>> = {
   base: difficulties("fast", "general", "reasoning", "reasoning-max", [
     "minimal",
     "low",
@@ -321,7 +310,7 @@ function difficulties(
   d2: ModelCapability,
   d3: ModelCapability,
   thinking: readonly [PiThinkingLevel, PiThinkingLevel, PiThinkingLevel, PiThinkingLevel],
-): Readonly<Record<Difficulty, CapabilityRoute>> {
+): Readonly<Record<Difficulty, ModelRoute>> {
   return {
     D0: { capability: d0, thinking: thinking[0] },
     D1: { capability: d1, thinking: thinking[1] },
