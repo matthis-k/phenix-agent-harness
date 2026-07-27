@@ -33,8 +33,7 @@ _: {
 
       devShells.default = pkgs.mkShell {
         name = "phenix-agent-harness-dev";
-        packages = tooling.agentRuntime ++ [
-          pkgs.devenv
+        packages = tooling.harnessRuntime ++ [
           updatePiNpmLock
           self'.packages.stitch
           self'.packages.stitch-mcp

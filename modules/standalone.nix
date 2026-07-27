@@ -52,6 +52,16 @@ _:
         '';
       };
 
+      localOperationRuntimeSmoke =
+        pkgs.runCommand "phenix-local-operation-runtime-smoke"
+          {
+            nativeBuildInputs = tooling.localOperationRuntime;
+          }
+          ''
+            command -v devenv >/dev/null
+            touch "$out"
+          '';
+
       mcpDefaultsSmoke =
         pkgs.runCommand "phenix-mcp-defaults-smoke"
           {
@@ -80,6 +90,7 @@ _:
       };
 
       checks = {
+        local-operation-runtime = localOperationRuntimeSmoke;
         mcp-defaults = mcpDefaultsSmoke;
         pi-wrapper = wrappedPi;
       };

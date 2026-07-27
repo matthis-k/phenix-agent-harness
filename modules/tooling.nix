@@ -53,10 +53,16 @@ let
     basedpyright
   ];
 
-  # Runtime composition and repository maintenance are separate boundaries.
+  # Local workflow operations are runtime behavior, not maintenance-only tooling.
+  # Keep their executables in the packaged wrapper closure so discovery and execution agree.
+  localOperationRuntime = with pkgs; [
+    devenv
+  ];
+
+  # Runtime composition and repository maintenance remain separate boundaries.
   # Maintenance scripts inject quality tools only for their own checks.
-  harnessRuntime = agentRuntime;
+  harnessRuntime = agentRuntime ++ localOperationRuntime;
 in
 {
-  inherit agentRuntime harnessRuntime quality;
+  inherit agentRuntime harnessRuntime localOperationRuntime quality;
 }
