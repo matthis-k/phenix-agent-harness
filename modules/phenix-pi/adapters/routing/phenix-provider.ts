@@ -18,7 +18,6 @@ import {
   virtualModel,
 } from "../../domain/definition/model.ts";
 import type { SessionProfile } from "../../domain/run/model.ts";
-import type { RoutingPolicy } from "../../ports/model-resolver.ts";
 import { registerFreeModelGuard } from "../pi-sdk/free-model-guard.ts";
 import { PhenixModelResolver } from "./phenix-model-resolver.ts";
 import { PiModelInventory } from "./pi-model-inventory.ts";
@@ -35,7 +34,6 @@ type RouterStream = (
 export interface PhenixProviderDependencies {
   readonly modelRegistry: () => ModelRegistry | undefined;
   readonly profile: (sessionId: string) => Promise<SessionProfile>;
-  readonly routingPolicy?: RoutingPolicy;
 }
 
 export function registerPhenixProvider(
@@ -88,59 +86,29 @@ async function route(
 
   const sessionId = options?.sessionId ?? "default";
   const profile = await dependencies.profile(sessionId);
-  const resolver = new PhenixModelResolver(
-    new PiModelInventory(registry),
-    dependencies.routingPolicy,
+  const resolved = await new PhenixModelResolver(new PiModelInventory(registry)).resolve(
+    virtualModel(model.id),
+    {
+      definitionId: `agent.${profile.agent}`,
+      parentDefinitionId: "root.session",
+      thinking: "route",
+      modelSet: model.id,
+      difficulty: profile.difficulty,
+    },
   );
-  const candidates = await resolver.resolveCandidates(virtualModel(model.id), {
-    definitionId: `agent.${profile.agent}`,
-    parentDefinitionId: "root.session",
-    thinking: "route",
-    modelSet: model.id,
-    difficulty: profile.difficulty,
-  });
-
-  const failures: string[] = [];
-  for (const resolved of candidates) {
-    const concrete = registry.find(resolved.concrete.provider, resolved.concrete.model);
-    if (!concrete) {
-      failures.push(`${resolved.concrete.provider}/${resolved.concrete.model}: not registered`);
-      continue;
-    }
-    const auth = await registry.getApiKeyAndHeaders(concrete);
-    if (!auth.ok) {
-      failures.push(`${concrete.provider}/${concrete.id}: ${auth.error}`);
-      continue;
-    }
-
-    const attempt = await forwardAttempt(
-      output,
-      model.id,
-      concrete,
-      context,
-      options,
-      auth,
-      resolved.thinking,
+  const concrete = registry.find(resolved.concrete.provider, resolved.concrete.model);
+  if (!concrete) {
+    throw new Error(
+      `Configured model ${resolved.concrete.provider}/${resolved.concrete.model} is not registered`,
     );
-    if (attempt.completed) return;
-    failures.push(`${concrete.provider}/${concrete.id}: ${attempt.error}`);
-    if (attempt.substantiveOutput) {
-      output.push(terminalError(model.id, attempt.error));
-      output.end();
-      return;
-    }
   }
+  const auth = await registry.getApiKeyAndHeaders(concrete);
+  if (!auth.ok) throw new Error(`${concrete.provider}/${concrete.id}: ${auth.error}`);
 
-  output.push(
-    terminalError(
-      model.id,
-      `All routed candidates failed before producing output: ${failures.join("; ") || "none"}`,
-    ),
-  );
-  output.end();
+  await forward(output, model.id, concrete, context, options, auth, resolved.thinking);
 }
 
-async function forwardAttempt(
+async function forward(
   output: AssistantMessageEventStream,
   virtualModelId: string,
   concrete: Model<Api>,
@@ -152,11 +120,7 @@ async function forwardAttempt(
     readonly env?: Record<string, string>;
   },
   thinking: PiThinkingLevel,
-): Promise<{
-  readonly completed: boolean;
-  readonly substantiveOutput: boolean;
-  readonly error: string;
-}> {
+): Promise<void> {
   const { apiKey: _virtualApiKey, headers, env, ...rest } = options ?? {};
   const reasoning = thinking === "off" ? undefined : (thinking satisfies ThinkingLevel);
   const upstream = streamSimple(concrete, context, {
@@ -167,38 +131,16 @@ async function forwardAttempt(
     ...(reasoning ? { reasoning } : {}),
   });
 
-  const pending: AssistantMessageEvent[] = [];
-  let substantiveOutput = false;
   for await (const event of upstream) {
-    if (event.type === "error") {
-      return {
-        completed: false,
-        substantiveOutput,
-        error: event.error.errorMessage ?? "provider stream failed",
-      };
-    }
-    if (event.type === "done") {
-      for (const buffered of pending) output.push(buffered);
-      output.push(maskEvent(event, virtualModelId));
+    output.push(maskEvent(event, virtualModelId));
+    if (event.type === "done" || event.type === "error") {
       output.end();
-      return { completed: true, substantiveOutput, error: "" };
+      return;
     }
-
-    const masked = maskEvent(event, virtualModelId);
-    if (!substantiveOutput && isSubstantive(event)) {
-      substantiveOutput = true;
-      for (const buffered of pending) output.push(buffered);
-      pending.length = 0;
-    }
-    if (substantiveOutput) output.push(masked);
-    else pending.push(masked);
   }
 
-  return {
-    completed: false,
-    substantiveOutput,
-    error: `provider stream ended without a terminal event`,
-  };
+  output.push(terminalError(virtualModelId, `Provider stream ended without a terminal event`));
+  output.end();
 }
 
 function maskMessage(message: AssistantMessage, virtualModelId: string): AssistantMessage {
@@ -215,10 +157,6 @@ function maskEvent(event: AssistantMessageEvent, virtualModelId: string): Assist
     return { ...event, message: maskMessage(event.message, virtualModelId) };
   if (event.type === "error") return { ...event, error: maskMessage(event.error, virtualModelId) };
   return { ...event, partial: maskMessage(event.partial, virtualModelId) };
-}
-
-function isSubstantive(event: AssistantMessageEvent): boolean {
-  return ["text_delta", "thinking_delta", "toolcall_delta", "toolcall_end"].includes(event.type);
 }
 
 function terminalError(virtualModelId: string, message: string): AssistantMessageEvent {
