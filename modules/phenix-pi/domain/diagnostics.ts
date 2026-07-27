@@ -11,7 +11,6 @@ export interface DiagnosticArtifactReference {
 }
 
 export interface DiagnosticLogEntry {
-  readonly version: 1;
   readonly timestamp: string;
   readonly severity: DiagnosticSeverity;
   readonly scope: string;
