@@ -440,19 +440,25 @@ export class PhenixUi implements Component {
       : this.filter
         ? color(this.theme, "muted", ` filter:${this.filter}`)
         : "";
-    const paneLabel = PANE_LABELS[this.view][this.pane] ?? `pane ${this.pane + 1}`;
-    const pane = heading(this.theme, `focus ${paneLabel}`);
+    const pane =
+      this.paneCount() > 1
+        ? `  ${heading(
+            this.theme,
+            `focus ${PANE_LABELS[this.view][this.pane] ?? `pane ${this.pane + 1}`}`,
+          )}`
+        : "";
     const hints = this.footerHints();
     return surface(
       this.theme,
       "customMessageBg",
-      this.fitLine(`${color(this.theme, "muted", ` ${hints}`)}${filter}  ${pane}`, width),
+      this.fitLine(`${color(this.theme, "muted", ` ${hints}`)}${filter}${pane}`, width),
     );
   }
 
   private footerHints(): string {
     if (this.goPrefix) return "g…  s status · r runs · f facts · c catalog";
-    return "1-4 views · Tab pane · / filter · arrows/hjkl navigate · ? help · r refresh · Esc close";
+    const paneHint = this.paneCount() > 1 ? " · Tab pane" : "";
+    return `1-4 views${paneHint} · / filter · arrows/hjkl navigate · ? help · r refresh · Esc close`;
   }
 
   private renderView(): string[] {
@@ -741,6 +747,8 @@ export class PhenixUi implements Component {
     if (definition.kind === "workflow") {
       const nodes = definition.graph.nodes.length;
       const edges = definition.graph.edges.length;
+      const nodeCount = `${nodes} ${nodes === 1 ? "node" : "nodes"}`;
+      const transitionCount = `${edges} ${edges === 1 ? "transition" : "transitions"}`;
       return [
         heading(this.theme, " Selected definition"),
         strong(this.theme, ` ${definition.title}`),
@@ -749,7 +757,7 @@ export class PhenixUi implements Component {
         color(
           this.theme,
           "muted",
-          ` ${nodes} nodes · ${edges} transitions · entry ${definition.graph.entry}`,
+          ` ${nodeCount} · ${transitionCount} · entry ${definition.graph.entry}`,
         ),
         color(
           this.theme,
@@ -770,9 +778,9 @@ export class PhenixUi implements Component {
       strong(this.theme, ` ${definition.title}`),
       identity,
       description,
-      coloredStatusField(this.theme, "model", model, "accent"),
-      coloredStatusField(this.theme, "thinking", definition.thinking, "warning"),
-      coloredStatusField(this.theme, "tools", tools, "text"),
+      ` ${coloredStatusField(this.theme, "model", model, "accent")}`,
+      ` ${coloredStatusField(this.theme, "thinking", definition.thinking, "warning")}`,
+      ` ${coloredStatusField(this.theme, "tools", tools, "text")}`,
     ];
   }
 

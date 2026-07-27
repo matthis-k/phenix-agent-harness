@@ -106,7 +106,7 @@ test("hides redundant pane navigation for single-pane views", () => {
 
   assert.equal(lines.length, 18);
   assert.match(lines[2] ?? "", /Session/);
-  assert.doesNotMatch(lines.join("\n"), /Overview/);
+  assert.doesNotMatch(lines.join("\n"), /Overview|Tab pane|focus Overview/);
 });
 
 test("pins selected Catalog metadata beneath the definition list", () => {
@@ -117,7 +117,7 @@ test("pins selected Catalog metadata beneath the definition list", () => {
   assert.ok(definitionRow >= 0);
   assert.ok(inspectorRow > definitionRow);
   assert.match(lines.join("\n"), /Validate the repository/);
-  assert.match(lines.join("\n"), /2 nodes · 1 transitions · entry start/);
+  assert.match(lines.join("\n"), /2 nodes · 1 transition · entry start/);
 });
 
 test("uses centered background surfaces without redundant active markers", () => {
