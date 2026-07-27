@@ -9,10 +9,12 @@ import { ProcessLocalOperationRunner } from "../adapters/process/local-operation
 import { logDomainEvent } from "../application/diagnostic-event-bridge.ts";
 import { OrderedDomainEventBus } from "../application/domain-event-bus.ts";
 import { ExecutionStore } from "../application/execution-store.ts";
+import type { SessionProfileFacade } from "../application/interfaces.ts";
 import { SessionProfileFacadeImpl } from "../application/session-profile-facade.ts";
 import type { IdGenerator } from "../ports/clock.ts";
 import { systemClock } from "../ports/clock.ts";
 import type { DiagnosticLog } from "../ports/diagnostic-log.ts";
+import type { LocalOperationRunner } from "../ports/local-operation-runner.ts";
 import type { RunLedger } from "../ports/run-ledger.ts";
 import type { PhenixHostServices } from "./host-services.ts";
 
@@ -23,8 +25,8 @@ export interface RuntimeInfrastructure {
   readonly ledger: RunLedger;
   readonly store: ExecutionStore;
   readonly unsubscribeDiagnostics: () => void;
-  readonly profiles: SessionProfileFacadeImpl;
-  readonly operations: ProcessLocalOperationRunner;
+  readonly profiles: SessionProfileFacade;
+  readonly operations: LocalOperationRunner;
 }
 
 export function createRuntimeInfrastructure(host: PhenixHostServices): RuntimeInfrastructure {
