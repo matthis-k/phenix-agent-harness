@@ -88,11 +88,7 @@ function renderChildren(
     .join("\n\n");
 }
 
-function renderList(
-  node: StructuredContentNode,
-  ordered: boolean,
-  context: RenderContext,
-): string {
+function renderList(node: StructuredContentNode, ordered: boolean, context: RenderContext): string {
   const marker = ordered ? "0." : "-";
   return (node.children ?? [])
     .filter((child) => child.contentType === "list-item")
