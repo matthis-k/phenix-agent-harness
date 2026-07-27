@@ -33,8 +33,7 @@ const models: ModelResolver = {
       requested: selector,
       concrete: { kind: "concrete", provider: "test", model: "model" },
       thinking: context.thinking === "route" ? "medium" : context.thinking,
-      capability: context.capability,
-      policyRevision: "test",
+      capability: context.capability ?? "general",
     };
   },
 };
