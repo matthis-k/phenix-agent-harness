@@ -3,103 +3,83 @@ import test from "node:test";
 
 import { nativeResultEntry } from "../extension/result-display.ts";
 
-const nativeMarkdownDetails = {
-  status: "success",
-  transport: {
-    presentation: {
-      transform: "markdown",
-      display: "native",
-    },
-  },
-};
+const activeTools = ["read", "phenix_dispatch", "phenix_handle"];
 
-test("native presentation metadata extracts a Pi display entry", () => {
+test("Pi Markdown presentations become durable native entries", () => {
   assert.deepEqual(
-    nativeResultEntry({
-      toolCallId: "tool-1",
-      toolName: "phenix_dispatch",
-      content: [{ type: "text", text: "## Result\n\nDone." }],
-      details: nativeMarkdownDetails,
-      isError: false,
-    }),
-    {
-      content: "## Result\n\nDone.",
-      transform: "markdown",
-      toolCallId: "tool-1",
-      toolName: "phenix_dispatch",
-    },
-  );
-});
-
-test("native JSON results use the same display entry contract", () => {
-  assert.deepEqual(
-    nativeResultEntry({
-      toolCallId: "tool-2",
-      toolName: "phenix_handle",
-      content: [{ type: "text", text: '{"status":"success"}' }],
-      details: {
-        transport: {
-          presentation: {
-            transform: "json",
-            display: "native",
+    nativeResultEntry(
+      {
+        toolCallId: "tool-1",
+        toolName: "phenix_dispatch",
+        content: [{ type: "text", text: "## QA report\n\nPassed." }],
+        details: {
+          transport: {
+            presentation: {
+              transform: "qa-report",
+              renderer: "pi-markdown",
+              inputKind: "markdown",
+            },
           },
         },
+        isError: false,
       },
-      isError: false,
-    }),
+      activeTools,
+    ),
     {
-      content: '{"status":"success"}',
-      transform: "json",
-      toolCallId: "tool-2",
-      toolName: "phenix_handle",
+      content: "## QA report\n\nPassed.",
+      inputKind: "markdown",
+      renderer: "pi-markdown",
+      transform: "qa-report",
+      toolCallId: "tool-1",
+      toolName: "phenix_dispatch",
     },
   );
 });
 
-test("ordinary tool display and malformed metadata remain ordinary tool output", () => {
-  const base = {
+test("Beautiful Mermaid presentations preserve Mermaid source", () => {
+  const source = "flowchart TD\n  A --> B";
+  assert.deepEqual(
+    nativeResultEntry(
+      {
+        toolCallId: "tool-2",
+        toolName: "phenix_handle",
+        content: [{ type: "text", text: source }],
+        details: {
+          transport: {
+            presentation: {
+              transform: "mermaid-source",
+              renderer: "beautiful-mermaid",
+              inputKind: "mermaid",
+            },
+          },
+        },
+        isError: false,
+      },
+      activeTools,
+    )?.content,
+    source,
+  );
+});
+
+test("tool rendering, child tools, and errors remain ordinary tool output", () => {
+  const toolRendered = {
     toolCallId: "tool-3",
     toolName: "phenix_dispatch",
-    content: [{ type: "text", text: "## Result" }],
-    isError: false,
-  } as const;
-
-  assert.equal(
-    nativeResultEntry({
-      ...base,
-      details: {
-        transport: {
-          presentation: {
-            transform: "markdown",
-            display: "tool",
-          },
+    content: [{ type: "text", text: "## QA report" }],
+    details: {
+      transport: {
+        presentation: {
+          transform: "qa-report",
+          renderer: "tool",
+          inputKind: "markdown",
         },
       },
-    }),
-    undefined,
-  );
-  assert.equal(nativeResultEntry({ ...base, details: {} }), undefined);
-});
+    },
+    isError: false,
+  };
 
-test("errors and empty text never create display entries", () => {
-  assert.equal(
-    nativeResultEntry({
-      toolCallId: "tool-4",
-      toolName: "phenix_dispatch",
-      content: [{ type: "text", text: "## Result" }],
-      details: nativeMarkdownDetails,
-      isError: true,
-    }),
-    undefined,
-  );
-  assert.equal(
-    nativeResultEntry({
-      toolCallId: "tool-5",
-      toolName: "phenix_dispatch",
-      content: [],
-      details: nativeMarkdownDetails,
-      isError: false,
-    }),
-    undefined,
-  );
+  assert.equal(nativeResultEntry(toolRendered, activeTools), undefined);
+  assert.equal(nativeResultEntry({ ...toolRendered, toolName: "phenix_run" }, activeTools), undefined);
+  assert.equal(nativeResultEntry({ ...toolRendered, isError: true }, activeTools), undefined);
+  assert.equal(nativeResultEntry(toolRendered, ["phenix_handle"]), undefined);
 });
