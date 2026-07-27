@@ -124,7 +124,7 @@ async function createHarness(input: {
           requested: selector,
           concrete: { kind: "concrete", provider: "test", model: "model" },
           thinking: "minimal",
-          policyRevision: "test",
+          capability: "general",
         };
       },
     },
