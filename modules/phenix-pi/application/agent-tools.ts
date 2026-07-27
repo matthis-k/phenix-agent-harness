@@ -18,17 +18,17 @@ import {
   pendingBudgetSuspension,
   pendingBudgetSuspensionInScope,
 } from "./budget-suspension.ts";
-import {
-  presentRootResult,
-  type ResultDisplay,
-  type ResultPresentationRequest,
-  type ResultTransform,
-} from "./deterministic-presentation.ts";
 import type { DispatchService } from "./dispatch-service.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import type { CatalogFacade, ExecutionFacade, TaskFacade } from "./interfaces.ts";
 import { allowAllInvocations, type InvocationPolicy } from "./invocation-policy.ts";
 import { PresentationRequestSchema, presentationFact } from "./presentation.ts";
+import {
+  presentRootResult,
+  type ResultPresentationRequest,
+  type ResultRenderer,
+  type ResultTransform,
+} from "./result-presentation.ts";
 import {
   projectCompletedRun,
   projectDispatchResult,
@@ -45,15 +45,15 @@ export interface AgentToolFactory {
 
 const resultPresentationProperties = {
   transform: Type.Optional(
-    Type.Enum(["auto", "json", "markdown"], {
+    Type.Enum(["auto", "qa-report", "mermaid-source"], {
       description:
-        "Deterministic transformation applied to the completed contract result. auto keeps specialized renderers when available and otherwise returns JSON.",
+        "Named transform from completed contract data into typed renderer input. auto currently selects qa-report only when the QA contract shape is present.",
     }),
   ),
-  display: Type.Optional(
-    Type.Enum(["auto", "tool", "native"], {
+  renderer: Type.Optional(
+    Type.Enum(["auto", "tool", "pi-markdown", "beautiful-mermaid"], {
       description:
-        "Display backend for the transformed result. native publishes an LLM-excluded Pi entry and ends the frontend turn; auto uses native for Markdown and the ordinary tool row for JSON.",
+        "Renderer for transformed output. auto selects pi-markdown for Markdown and beautiful-mermaid for Mermaid; tool keeps the transformed source in the ordinary tool result.",
     }),
   ),
 } as const;
@@ -77,7 +77,7 @@ const dispatchParameters = defineSchema<{
   mode?: "auto" | "qa" | "implement" | "coordinate";
   wait?: "await" | "background";
   transform?: ResultTransform;
-  display?: ResultDisplay;
+  renderer?: ResultRenderer;
 }>(
   "tool.phenix-dispatch",
   Type.Object({
@@ -96,7 +96,7 @@ const handleParameters = defineSchema<{
   wait?: "await" | "background";
   view?: RunResultView;
   transform?: ResultTransform;
-  display?: ResultDisplay;
+  renderer?: ResultRenderer;
   addTools?: string[];
   limits?: {
     timeoutMs?: number;
@@ -228,7 +228,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       name: "phenix_dispatch",
       label: "Phenix Dispatch",
       description:
-        "Route substantial work through a mandatory catalog-driven selector. Use auto for normal requests; explicit qa, implement, or coordinate modes are operator overrides only. Awaited dispatches return either the result or a structured budget suspension for the exact existing child session that needs a parent decision. Use transform=markdown and display=native for a final deterministic report that should be shown directly without frontend synthesis.",
+        "Route substantial work through a mandatory catalog-driven selector. Use auto for normal requests; explicit qa, implement, or coordinate modes are operator overrides only. Awaited results may apply a named contract transform and renderer. For example, transform=qa-report with renderer=pi-markdown deterministically renders the QA contract directly without frontend synthesis.",
       parameters: dispatchParameters,
       execute: async (raw, signal) => {
         const params = requireValid(dispatchParameters, raw);
@@ -254,7 +254,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       name: "phenix_handle",
       label: "Phenix Handle",
       description:
-        "Inspect, await, message, resume, cancel, or retry an accessible run. Resume increases limits on the same budget-suspended Pi session and preserves its context. Retry is reserved for creating a linked replacement run after a terminal non-budget failure. Completed inspect, await, resume, and retry results accept the same transform and display modes as phenix_dispatch.",
+        "Inspect, await, message, resume, cancel, or retry an accessible run. Resume increases limits on the same budget-suspended Pi session and preserves its context. Retry is reserved for creating a linked replacement run after a terminal non-budget failure. Completed inspect, await, resume, and retry results accept the same transform and renderer pipeline as phenix_dispatch.",
       parameters: handleParameters,
       execute: async (raw, signal) => {
         const params = requireValid(handleParameters, raw);
