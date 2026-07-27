@@ -47,7 +47,7 @@ export async function loadNativeRunTranscript(
   const fileEntries = parseSessionEntries(source);
   migrateSessionEntries(fileEntries);
   const header = fileEntries.find((entry) => entry.type === "session");
-  if (!header || header.type !== "session") {
+  if (header?.type !== "session") {
     return {
       sessionId: node.run.pi?.sessionId,
       sessionFile,
