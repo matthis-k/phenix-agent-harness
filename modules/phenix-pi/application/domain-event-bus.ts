@@ -2,6 +2,10 @@ import type { DomainEvent } from "../domain/run/events.ts";
 
 export type DomainEventListener = (event: DomainEvent) => void | Promise<void>;
 
+export interface DomainEventSource {
+  subscribe(listener: DomainEventListener): () => void;
+}
+
 export interface DomainEventSubscriberError {
   readonly event: DomainEvent;
   readonly error: unknown;
@@ -13,7 +17,7 @@ interface Subscription {
   tail: Promise<void>;
 }
 
-export class OrderedDomainEventBus {
+export class OrderedDomainEventBus implements DomainEventSource {
   private readonly subscriptions = new Set<Subscription>();
   private readonly onSubscriberError: (failure: DomainEventSubscriberError) => void | Promise<void>;
 
