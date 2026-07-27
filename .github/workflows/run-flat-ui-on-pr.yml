@@ -58,6 +58,12 @@ jobs:
               raise SystemExit('footer guard was not found in extracted script')
           script = script.replace(old_footer_guard, new_footer_guard)
 
+          visual_value = '\n    \'\'\'test("uses centered background surfaces without redundant active markers"'
+          visual_lambda = '\n    lambda _match: \'\'\'test("uses centered background surfaces without redundant active markers"'
+          if script.count(visual_value) != 1:
+              raise SystemExit('visual test replacement value was not found exactly once')
+          script = script.replace(visual_value, visual_lambda)
+
           Path('/tmp/apply-flat-ui.py').write_text(script + '\n')
           PY
       - name: Apply refinement
