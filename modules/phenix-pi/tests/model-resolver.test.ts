@@ -5,8 +5,7 @@ import { PhenixModelResolver } from "../adapters/routing/phenix-model-resolver.t
 
 test("virtual mixed model resolves deterministically to its configured model", async () => {
   const resolver = new PhenixModelResolver({
-    contains: (provider, model) =>
-      provider === "opencode-go" && model === "kimi-k2.7-code",
+    contains: (provider, model) => provider === "opencode-go" && model === "kimi-k2.7-code",
   });
   const context = {
     definitionId: "agent.implementer",
@@ -37,8 +36,7 @@ test("virtual mixed model resolves deterministically to its configured model", a
 
 test("a definition-declared capability overrides role routing", async () => {
   const resolver = new PhenixModelResolver({
-    contains: (provider, model) =>
-      provider === "openai-codex" && model === "gpt-5.6-sol",
+    contains: (provider, model) => provider === "openai-codex" && model === "gpt-5.6-sol",
   });
   const result = await resolver.resolve(
     { kind: "virtual", provider: "phenix", model: "mixed" },
