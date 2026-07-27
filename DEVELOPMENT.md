@@ -1,59 +1,55 @@
 # Development
 
-The repository uses a standalone devenv task graph for maintenance. Nix provides the toolchain, build closures, and reproducibility boundary; `maintenance.nix` is the canonical source for local and CI checks.
-
-## Enter the development shell
+## Shell
 
 ```sh
 nix develop
 ```
 
-The shell includes devenv, the Pi runtime toolchain, Stitch, and the repository helpers shown at startup.
+The shell includes devenv, the Pi runtime toolchain, Stitch, and repository helpers.
 
-## Canonical commands
+## Verification
 
-Run the complete read-only maintenance graph:
+Run the complete read-only check suite:
 
 ```sh
 devenv test
 ```
 
-The equivalent explicit task is:
+The explicit equivalent is:
 
 ```sh
 devenv tasks run maintenance:check
 ```
 
-Apply the repository-owned mechanical fixes, then review the resulting diff:
+Apply repository-owned mechanical fixes before reviewing the diff:
 
 ```sh
 devenv tasks run maintenance:fix
 ```
 
-Update the independently locked Pi extension dependencies after editing `modules/pi-npm/package.json`:
+After editing `modules/pi-npm/package.json`, refresh its independent lock:
 
 ```sh
 update-pi-npm-lock
 ```
 
-## Maintenance graph
+## Tasks
 
-| Task | Responsibility |
+| Task | Checks |
 | --- | --- |
-| `maintenance:format` | Check Nix formatting and Biome formatting/lint rules |
-| `maintenance:statix` | Check Nix static-analysis rules |
-| `maintenance:workflows` | Validate GitHub Actions workflows with actionlint |
-| `maintenance:runtime` | Build and run the packaged Phenix runtime tests |
-| `maintenance:typecheck` | Build the TypeScript compiler gate |
-| `maintenance:flake` | Run the complete flake check |
-| `maintenance:check` | Aggregate every read-only maintenance task |
-| `maintenance:fix` | Apply statix and formatter fixes |
+| `maintenance:format` | Nix formatting and Biome rules |
+| `maintenance:statix` | Nix static analysis |
+| `maintenance:workflows` | GitHub Actions with actionlint |
+| `maintenance:runtime` | Packaged Phenix runtime tests |
+| `maintenance:typecheck` | TypeScript compilation |
+| `maintenance:flake` | Complete flake checks |
+| `maintenance:check` | All read-only checks |
+| `maintenance:fix` | Statix and formatter fixes |
 
-Do not duplicate task selection in GitHub Actions, shell wrappers, or extra Nix applications. CI installs devenv and runs `devenv test`, so local and remote verification use the same graph.
+CI runs `devenv test`. Do not duplicate task selection in GitHub Actions or shell wrappers.
 
-## Stitch
-
-Inspect the repository workspace graph with:
+## Workspace
 
 ```sh
 stitch workspace discover --json
