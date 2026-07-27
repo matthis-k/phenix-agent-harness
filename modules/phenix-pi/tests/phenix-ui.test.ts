@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { TUI } from "@earendil-works/pi-tui";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { Container, Text, visibleWidth } from "@earendil-works/pi-tui";
 
 import type { RunTree } from "../application/interfaces.ts";
 import type { AnyDefinition } from "../domain/definition/definition.ts";
@@ -121,6 +121,33 @@ test("pins selected Catalog metadata beneath the definition list", () => {
   assert.match(lines.join("\n"), /entry start · 1000ms · parallel 1/);
 });
 
+test("opens a selected agent with Pi-native transcript rendering and toggles its diagram", async () => {
+  const ui = createUi(fakeTui(20), { view: "runs", selector: "run-child" });
+
+  ui.handleInput("\r");
+  await new Promise((resolve) => setImmediate(resolve));
+  let output = ui.render(140).join("\n");
+  assert.match(output, /Transcript/);
+  assert.match(output, /Pi native transcript for session-child/);
+  assert.match(output, /session: session-child/);
+
+  ui.handleInput("v");
+  output = ui.render(140).join("\n");
+  assert.match(output, /Diagram/);
+  assert.doesNotMatch(output, /Pi native transcript for session-child/);
+});
+
+test("Status opens an active agent directly in its native transcript", async () => {
+  const ui = createUi(fakeTui(20), { view: "status" });
+
+  ui.handleInput("\r");
+  await new Promise((resolve) => setImmediate(resolve));
+  const output = ui.render(120).join("\n");
+  assert.match(output, /Phenix · Runs/);
+  assert.match(output, /Transcript/);
+  assert.match(output, /Pi native transcript for session-child/);
+});
+
 test("uses centered background surfaces without redundant active markers", () => {
   const tui = fakeTui(18);
   const ui = createUi(tui, { view: "catalog", selector: "qa" }, ansiTheme);
@@ -162,6 +189,17 @@ function createUi(
     initial,
     snapshot,
     load: async () => snapshot,
+    loadTranscript: async (node) => {
+      const component = new Container();
+      component.addChild(
+        new Text(`Pi native transcript for ${node.run.pi?.sessionId ?? "none"}`, 0, 0),
+      );
+      return {
+        component,
+        sessionId: node.run.pi?.sessionId,
+        sessionFile: node.run.pi?.sessionFile,
+      };
+    },
     subscribe: () => () => undefined,
     onClose: () => undefined,
   });
@@ -241,6 +279,10 @@ function fixtureSnapshot(): PhenixUiSnapshot {
             ownership: "attached",
             state: "running",
             revision: 1,
+            pi: {
+              sessionId: "session-child",
+              sessionFile: "/tmp/session-child.jsonl",
+            },
             compiled: {
               definitionId: "agent.scout",
               input: {},

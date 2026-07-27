@@ -15,6 +15,7 @@ import type { RunSnapshot, SessionProfile } from "../domain/run/model.ts";
 import type { RunFact } from "../domain/run/observability.ts";
 import type { RunId } from "../domain/shared.ts";
 import { renderCatalogDefinition, renderRunTreeSequence } from "./mermaid-rendering.ts";
+import type { NativeRunTranscript } from "./native-run-transcript.ts";
 import {
   color,
   statusField as coloredStatusField,
@@ -35,10 +36,11 @@ const VIEW_ORDER = ["status", "runs", "facts", "catalog"] as const;
 
 export type PhenixUiView = (typeof VIEW_ORDER)[number];
 type UiPane = 0 | 1 | 2;
+type RunViewerMode = "diagram" | "transcript";
 
 const PANE_LABELS: Readonly<Record<PhenixUiView, readonly string[]>> = {
   status: ["Overview"],
-  runs: ["Run tree", "Sequence", "Inspector"],
+  runs: ["Run tree", "Diagram", "Inspector"],
   facts: ["Fact list", "Detail"],
   catalog: ["Definitions", "Preview"],
 };
@@ -64,6 +66,7 @@ export interface PhenixUiOptions {
   readonly initial: PhenixUiTarget;
   readonly snapshot: PhenixUiSnapshot;
   readonly load: () => Promise<PhenixUiSnapshot>;
+  readonly loadTranscript: (node: RunTreeNode) => Promise<NativeRunTranscript>;
   readonly subscribe: (listener: () => void) => () => void;
   readonly onClose: () => void;
 }
@@ -160,6 +163,7 @@ export class PhenixUi implements Component {
   private readonly tui: TUI;
   private readonly theme: ObservabilityTheme;
   private readonly load: () => Promise<PhenixUiSnapshot>;
+  private readonly loadTranscript: (node: RunTreeNode) => Promise<NativeRunTranscript>;
   private readonly onClose: () => void;
   private readonly unsubscribe: () => void;
   private snapshot: PhenixUiSnapshot;
@@ -188,9 +192,13 @@ export class PhenixUi implements Component {
   private selectedDefinition = 0;
   private readonly collapsedRuns = new Set<string>();
   private readonly manuallyExpandedRuns = new Set<string>();
+  private runViewerMode: RunViewerMode = "diagram";
   private runHorizontalOffset = 0;
   private runVerticalOffset = 0;
+  private runTranscriptOffset = Number.MAX_SAFE_INTEGER;
   private runInspectorOffset = 0;
+  private readonly transcriptCache = new Map<string, NativeRunTranscript>();
+  private readonly transcriptLoading = new Set<string>();
   private factDetailOffset = 0;
   private catalogHorizontalOffset = 0;
   private catalogVerticalOffset = 0;
@@ -229,6 +237,7 @@ export class PhenixUi implements Component {
     this.tui = options.tui;
     this.theme = options.theme;
     this.load = options.load;
+    this.loadTranscript = options.loadTranscript;
     this.onClose = options.onClose;
     this.snapshot = options.snapshot;
     this.view = options.initial.view;
@@ -243,6 +252,7 @@ export class PhenixUi implements Component {
 
   invalidate(): void {
     this.previewCache = undefined;
+    for (const transcript of this.transcriptCache.values()) transcript.component?.invalidate();
   }
 
   dispose(): void {
@@ -380,7 +390,12 @@ export class PhenixUi implements Component {
   }
 
   private renderFocusBar(width: number): string {
-    return this.renderSegments(PANE_LABELS[this.view], this.pane, width, false);
+    return this.renderSegments(this.paneLabels(), this.pane, width, false);
+  }
+
+  private paneLabels(): readonly string[] {
+    if (this.view === "runs") return ["Run tree", capitalize(this.runViewerMode), "Inspector"];
+    return PANE_LABELS[this.view];
   }
 
   private renderSegments(
@@ -444,7 +459,7 @@ export class PhenixUi implements Component {
       this.paneCount() > 1
         ? `  ${heading(
             this.theme,
-            `focus ${PANE_LABELS[this.view][this.pane] ?? `pane ${this.pane + 1}`}`,
+            `focus ${this.paneLabels()[this.pane] ?? `pane ${this.pane + 1}`}`,
           )}`
         : "";
     const hints = this.footerHints();
@@ -458,7 +473,8 @@ export class PhenixUi implements Component {
   private footerHints(): string {
     if (this.goPrefix) return "g…  s status · r runs · f facts · c catalog";
     const paneHint = this.paneCount() > 1 ? " · Tab pane" : "";
-    return `1-4 views${paneHint} · / filter · arrows/hjkl navigate · ? help · r refresh · Esc close`;
+    const viewerHint = this.view === "runs" ? " · v diagram/transcript" : "";
+    return `1-4 views${paneHint}${viewerHint} · / filter · arrows/hjkl navigate · ? help · r refresh · Esc close`;
   }
 
   private renderView(): string[] {
@@ -533,7 +549,7 @@ export class PhenixUi implements Component {
         this.pane === 0
           ? this.renderRunTreePane(flat, selectedIndex, width, height)
           : this.pane === 1
-            ? this.renderRunPreviewPane(selected, width, height)
+            ? this.renderRunViewerPane(selected, width, height)
             : this.renderRunInspectorPane(selected, width, height);
       return content;
     }
@@ -544,12 +560,15 @@ export class PhenixUi implements Component {
     const inspectorWidth = width >= 126 ? Math.min(42, Math.floor(width * 0.28)) : 0;
     const previewWidth = width - treeWidth - inspectorWidth - (inspectorWidth > 0 ? 2 : 1);
     const tree = this.renderRunTreePane(flat, selectedIndex, treeWidth, height);
-    const preview = this.renderRunPreviewPane(selected, previewWidth, height);
+    const preview = this.renderRunViewerPane(selected, previewWidth, height);
     const inspector =
       inspectorWidth > 0 ? this.renderRunInspectorPane(selected, inspectorWidth, height) : [];
     return Array.from({ length: height }, (_, row) => {
       const left = this.panelLine(tree[row] ?? "", treeWidth, 0);
-      const middle = this.panelLine(preview[row] ?? "", previewWidth, 1);
+      const middle =
+        this.runViewerMode === "transcript"
+          ? this.fitLine(preview[row] ?? "", previewWidth)
+          : this.panelLine(preview[row] ?? "", previewWidth, 1);
       if (inspectorWidth === 0) return `${left} ${middle}`;
       const right = this.panelLine(inspector[row] ?? "", inspectorWidth, 2);
       return `${left} ${middle} ${right}`;
@@ -582,7 +601,13 @@ export class PhenixUi implements Component {
     });
   }
 
-  private renderRunPreviewPane(node: RunTreeNode, width: number, height: number): string[] {
+  private renderRunViewerPane(node: RunTreeNode, width: number, height: number): string[] {
+    return this.runViewerMode === "diagram"
+      ? this.renderRunDiagramPane(node, width, height)
+      : this.renderRunTranscriptPane(node, width, height);
+  }
+
+  private renderRunDiagramPane(node: RunTreeNode, width: number, height: number): string[] {
     const lines = this.runPreviewLines(node);
     const longest = maxVisibleWidth(lines);
     const maxX = Math.max(0, longest - width);
@@ -593,6 +618,35 @@ export class PhenixUi implements Component {
       const source = lines[this.runVerticalOffset + row] ?? "";
       return this.fitLine(sliceByColumn(source, this.runHorizontalOffset, width, true), width);
     });
+  }
+
+  private renderRunTranscriptPane(node: RunTreeNode, width: number, height: number): string[] {
+    const key = String(node.run.id);
+    const transcript = this.transcriptCache.get(key);
+    const sessionId = transcript?.sessionId ?? node.run.pi?.sessionId;
+    const lines: string[] = [
+      heading(this.theme, " Transcript"),
+      color(
+        this.theme,
+        "muted",
+        ` ${definitionLabel(String(node.run.definitionId))}${sessionId ? ` · ${sessionId}` : ""}`,
+      ),
+      "",
+    ];
+    if (this.transcriptLoading.has(key) && !transcript) {
+      lines.push(color(this.theme, "muted", " Loading Pi transcript…"));
+    } else if (!transcript) {
+      lines.push(color(this.theme, "muted", " Press v or Enter to load this Pi session."));
+    } else if (transcript.unavailable) {
+      lines.push(color(this.theme, "warning", ` ${transcript.unavailable}`));
+    } else if (transcript.component) {
+      lines.push(...transcript.component.render(width));
+    }
+    const maxY = Math.max(0, lines.length - height);
+    this.runTranscriptOffset = clamp(this.runTranscriptOffset, 0, maxY);
+    return Array.from({ length: height }, (_, row) =>
+      this.fitLine(lines[this.runTranscriptOffset + row] ?? "", width),
+    );
   }
 
   private renderRunInspectorPane(node: RunTreeNode, width: number, height: number): string[] {
@@ -607,6 +661,8 @@ export class PhenixUi implements Component {
       statusField("state", run.state),
       statusField("ownership", run.ownership),
       statusField("requested", compactTimestamp(run.requestedAt)),
+      statusField("session", run.pi?.sessionId ?? "none"),
+      statusField("transcript", run.pi?.sessionFile ? "persisted" : "none"),
       statusField(
         "model",
         model ? `${model.concrete.provider}/${model.concrete.model}` : "unresolved",
@@ -827,7 +883,8 @@ export class PhenixUi implements Component {
       "arrows or h/j/k/l   navigate or pan the active pane",
       "PageUp/PageDown     page vertically",
       "Home/End            jump to boundaries",
-      "Enter               drill into selected item",
+      "Enter               open the selected run or session",
+      "v                   toggle run diagram/transcript",
       "Space               expand or collapse a run",
       "/                   filter the active view",
       "r                   refresh immediately",
@@ -875,13 +932,25 @@ export class PhenixUi implements Component {
       flat.findIndex((item) => String(item.node.run.id) === this.selectedRunId),
     );
     const selected = flat[index];
+    if ((data === "v" || data === "V") && selected) {
+      this.toggleRunViewer(selected.node);
+      return;
+    }
     if (this.pane === 0) {
       if (isUp(data)) index -= 1;
       else if (isDown(data)) index += 1;
       else if (matchesKey(data, "home")) index = 0;
       else if (matchesKey(data, "end")) index = flat.length - 1;
       else if (data === " " && selected) this.toggleRun(selected.node);
-      else if (matchesKey(data, "right") || matchesKey(data, "enter")) {
+      else if (matchesKey(data, "enter") && selected) {
+        if (selected.node.children.length && this.collapsedRuns.has(String(selected.node.run.id))) {
+          this.collapsedRuns.delete(String(selected.node.run.id));
+        } else {
+          this.runViewerMode = selected.node.run.pi?.sessionFile ? "transcript" : "diagram";
+          this.pane = 1;
+          if (this.runViewerMode === "transcript") void this.ensureRunTranscript(selected.node);
+        }
+      } else if (matchesKey(data, "right")) {
         if (
           selected?.node.children.length &&
           this.collapsedRuns.has(String(selected.node.run.id))
@@ -905,7 +974,20 @@ export class PhenixUi implements Component {
       return;
     }
     if (this.pane === 1) {
-      if (isLeft(data)) this.runHorizontalOffset = Math.max(0, this.runHorizontalOffset - 4);
+      if (this.runViewerMode === "transcript") {
+        if (isUp(data)) this.runTranscriptOffset = Math.max(0, this.runTranscriptOffset - 1);
+        else if (isDown(data)) this.runTranscriptOffset += 1;
+        else if (matchesKey(data, "pageUp"))
+          this.runTranscriptOffset = Math.max(
+            0,
+            this.runTranscriptOffset - this.layout.bodyHeight + 2,
+          );
+        else if (matchesKey(data, "pageDown"))
+          this.runTranscriptOffset += this.layout.bodyHeight - 2;
+        else if (matchesKey(data, "home")) this.runTranscriptOffset = 0;
+        else if (matchesKey(data, "end")) this.runTranscriptOffset = Number.MAX_SAFE_INTEGER;
+        else return;
+      } else if (isLeft(data)) this.runHorizontalOffset = Math.max(0, this.runHorizontalOffset - 4);
       else if (isRight(data)) this.runHorizontalOffset += 4;
       else if (isUp(data)) this.runVerticalOffset = Math.max(0, this.runVerticalOffset - 1);
       else if (isDown(data)) this.runVerticalOffset += 1;
@@ -1090,6 +1172,9 @@ export class PhenixUi implements Component {
     if (!target) return;
     if (target.kind === "run") {
       this.selectRun(target.item.node);
+      this.runViewerMode = target.item.node.run.pi?.sessionFile ? "transcript" : "diagram";
+      this.pane = 1;
+      if (this.runViewerMode === "transcript") void this.ensureRunTranscript(target.item.node);
       this.switchView("runs");
       return;
     }
@@ -1233,8 +1318,40 @@ export class PhenixUi implements Component {
     this.selectedRunId = String(node.run.id);
     this.runHorizontalOffset = 0;
     this.runVerticalOffset = 0;
+    this.runTranscriptOffset = Number.MAX_SAFE_INTEGER;
     this.runInspectorOffset = 0;
     this.previewCache = undefined;
+  }
+
+  private toggleRunViewer(node: RunTreeNode): void {
+    this.runViewerMode = this.runViewerMode === "diagram" ? "transcript" : "diagram";
+    this.runHorizontalOffset = 0;
+    this.runVerticalOffset = 0;
+    this.runTranscriptOffset = Number.MAX_SAFE_INTEGER;
+    if (this.runViewerMode === "transcript") void this.ensureRunTranscript(node);
+    this.requestRender();
+  }
+
+  private async ensureRunTranscript(node: RunTreeNode, reload = false): Promise<void> {
+    const key = String(node.run.id);
+    if ((!reload && this.transcriptCache.has(key)) || this.transcriptLoading.has(key)) return;
+    this.transcriptLoading.add(key);
+    this.requestRender();
+    try {
+      const transcript = await this.loadTranscript(node);
+      if (this.disposed) return;
+      this.transcriptCache.set(key, transcript);
+      if (this.selectedRunId === key) this.runTranscriptOffset = Number.MAX_SAFE_INTEGER;
+    } catch (error) {
+      this.transcriptCache.set(key, {
+        sessionId: node.run.pi?.sessionId,
+        sessionFile: node.run.pi?.sessionFile,
+        unavailable: `Unable to load Pi transcript: ${errorMessage(error)}`,
+      });
+    } finally {
+      this.transcriptLoading.delete(key);
+      this.requestRender();
+    }
   }
 
   private toggleRun(node: RunTreeNode): void {
@@ -1286,6 +1403,12 @@ export class PhenixUi implements Component {
         this.snapshot = snapshot;
         this.initializeCollapsedRuns(snapshot.tree.root);
         this.previewCache = undefined;
+        if (this.view === "runs" && this.runViewerMode === "transcript") {
+          const selected = flattenRuns(snapshot.tree.root, new Set()).find(
+            (item) => String(item.node.run.id) === this.selectedRunId,
+          );
+          if (selected) void this.ensureRunTranscript(selected.node, true);
+        }
         this.requestRender();
       } while (this.pendingRefresh && !this.disposed);
     } finally {
