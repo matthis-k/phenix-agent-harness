@@ -26,6 +26,20 @@ jobs:
           start = next(i for i, line in enumerate(source) if line.strip() == "python3 <<'PY'") + 1
           end = next(i for i in range(start, len(source)) if source[i].strip() == 'PY')
           script = '\n'.join(line[10:] if line.startswith('          ') else line for line in source[start:end])
+          old_guard = '''if old_runs not in ui:
+              raise SystemExit("runs split did not match")
+          ui = ui.replace(old_runs, new_runs)'''.replace('          ', '')
+          new_guard = '''ui, count = re.subn(
+              r'    return Array\\.from\\(\\{ length: height \\}, \\(_, row\\) => \\{\\n      const left = tree\\[row\\].*?\\n    \\}\\);',
+              new_runs,
+              ui,
+              flags=re.S,
+          )
+          if count != 1:
+              raise SystemExit(f"runs split replacement count was {count}")'''.replace('          ', '')
+          if old_guard not in script:
+              raise SystemExit('runs guard was not found in extracted script')
+          script = script.replace(old_guard, new_guard)
           Path('/tmp/apply-flat-ui.py').write_text(script + '\n')
           PY
       - name: Apply refinement
