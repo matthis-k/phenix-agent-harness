@@ -1,7 +1,7 @@
 import type { AgentToolResult } from "../ports/agent-session-backend.ts";
-import { projectedToolResult } from "./tool-result-projection.ts";
+import { structuredContentMarkdownTransform } from "./structured-content-markdown.ts";
 
-export type ResultTransform = "auto" | "qa-report" | "mermaid-source";
+export type ResultTransform = "auto" | "structured-content-markdown" | "mermaid-source";
 export type ResultRenderer = "auto" | "tool" | "pi-markdown" | "beautiful-mermaid";
 export type ResolvedResultTransform = Exclude<ResultTransform, "auto">;
 export type ResolvedResultRenderer = Exclude<ResultRenderer, "auto">;
@@ -25,141 +25,142 @@ export interface ResultTransformation {
   readonly input: ResultRenderInput;
 }
 
-interface ResultTransformDefinition {
+export interface ResultTransformStrategy {
   readonly id: ResolvedResultTransform;
   readonly auto: boolean;
-  transform(result: AgentToolResult, contract: unknown): ResultRenderInput | undefined;
+  transform(contract: unknown): ResultRenderInput | undefined;
 }
 
-const QA_REPORT_HEADING = "## QA report\n";
-const TRANSFORMS: readonly ResultTransformDefinition[] = [
-  {
-    id: "qa-report",
-    auto: true,
-    transform: qaReportInput,
+export interface ResultRendererDefinition {
+  readonly id: ResolvedResultRenderer;
+  readonly inputKind: ResultRenderInput["kind"] | "any";
+  readonly auto: boolean;
+  readonly native: boolean;
+}
+
+export type ResultPresenter = (
+  result: AgentToolResult,
+  request?: ResultPresentationRequest,
+) => AgentToolResult;
+
+export const mermaidSourceTransform: ResultTransformStrategy = {
+  id: "mermaid-source",
+  auto: false,
+  transform(contract) {
+    const source = mermaidSource(contract);
+    return source ? { kind: "mermaid", source } : undefined;
   },
-  {
-    id: "mermaid-source",
-    auto: false,
-    transform: mermaidSourceInput,
-  },
+};
+
+export const defaultResultRendererDefinitions: readonly ResultRendererDefinition[] = [
+  { id: "tool", inputKind: "any", auto: false, native: false },
+  { id: "pi-markdown", inputKind: "markdown", auto: true, native: true },
+  { id: "beautiful-mermaid", inputKind: "mermaid", auto: true, native: true },
 ];
 
-export function presentRootResult(
-  result: AgentToolResult,
-  request: ResultPresentationRequest = {},
-): AgentToolResult {
-  const transformation = resolveTransformation(result, request.transform ?? "auto");
-  const requestedRenderer = request.renderer ?? "auto";
+export const defaultResultTransformStrategies: readonly ResultTransformStrategy[] = [
+  structuredContentMarkdownTransform,
+  mermaidSourceTransform,
+];
 
-  if (!transformation) {
-    if (requestedRenderer !== "auto" && requestedRenderer !== "tool") {
-      throw new Error(
-        `Renderer ${requestedRenderer} requires a compatible result transform; no automatic transform matched this contract`,
-      );
+export const presentRootResult = createResultPresenter({
+  transforms: defaultResultTransformStrategies,
+  renderers: defaultResultRendererDefinitions,
+});
+
+export function createResultPresenter(input: {
+  readonly transforms: readonly ResultTransformStrategy[];
+  readonly renderers: readonly ResultRendererDefinition[];
+}): ResultPresenter {
+  const transforms = uniqueById(input.transforms, "transform");
+  const renderers = uniqueById(input.renderers, "renderer");
+
+  return (result, request = {}) => {
+    const transformation = resolveTransformation(
+      presentationContract(result.details),
+      request.transform ?? "auto",
+      transforms,
+    );
+    const requestedRenderer = request.renderer ?? "auto";
+
+    if (!transformation) {
+      if (requestedRenderer !== "auto" && requestedRenderer !== "tool") {
+        throw new Error(
+          `Renderer ${requestedRenderer} requires a compatible result transform; no automatic transform matched this contract`,
+        );
+      }
+      return result;
     }
-    return result;
-  }
 
-  const renderer = resolveRenderer(requestedRenderer, transformation.input);
-  assertRendererCompatible(renderer, transformation.input);
-  const details = withPresentationMetadata(result.details, {
-    transform: transformation.id,
-    renderer,
-    inputKind: transformation.input.kind,
-  });
-  const { terminate: _terminate, ...base } = result;
+    const renderer = resolveRenderer(requestedRenderer, transformation.input, renderers);
+    const details = withPresentationMetadata(result.details, {
+      transform: transformation.id,
+      renderer: renderer.id,
+      inputKind: transformation.input.kind,
+    });
+    const { terminate: _terminate, ...base } = result;
 
-  return {
-    ...base,
-    text: renderInputSource(transformation.input),
-    details,
-    ...(renderer === "tool" ? {} : { terminate: true }),
+    return {
+      ...base,
+      text: renderInputSource(transformation.input),
+      details,
+      ...(renderer.native ? { terminate: true } : {}),
+    };
   };
 }
 
-export function isDeterministicQaPresentation(result: AgentToolResult): boolean {
-  return qaReportInput(result, contractData(result.details)) !== undefined;
-}
-
 export function transformResult(
-  result: AgentToolResult,
+  contract: unknown,
   transform: ResultTransform,
+  strategies: readonly ResultTransformStrategy[] = defaultResultTransformStrategies,
 ): ResultTransformation | undefined {
-  return resolveTransformation(result, transform);
+  return resolveTransformation(presentationContract(contract), transform, strategies);
 }
 
 function resolveTransformation(
-  result: AgentToolResult,
+  contract: unknown,
   requested: ResultTransform,
+  strategies: readonly ResultTransformStrategy[],
 ): ResultTransformation | undefined {
-  const contract = contractData(result.details);
   if (requested === "auto") {
-    for (const definition of TRANSFORMS) {
-      if (!definition.auto) continue;
-      const input = definition.transform(result, contract);
-      if (input) return { id: definition.id, input };
+    for (const strategy of strategies) {
+      if (!strategy.auto) continue;
+      const transformed = strategy.transform(contract);
+      if (transformed) return { id: strategy.id, input: transformed };
     }
     return undefined;
   }
 
-  const definition = TRANSFORMS.find((candidate) => candidate.id === requested);
-  if (!definition) throw new Error(`Unknown result transform: ${requested}`);
-  const input = definition.transform(result, contract);
-  if (!input) throw new Error(`Transform ${requested} does not accept this result contract`);
-  return { id: definition.id, input };
-}
-
-function qaReportInput(_result: AgentToolResult, contract: unknown): ResultRenderInput | undefined {
-  const markdown = projectedToolResult(contract).text;
-  return markdown.startsWith(QA_REPORT_HEADING)
-    ? { kind: "markdown", content: markdown }
-    : undefined;
-}
-
-function mermaidSourceInput(
-  _result: AgentToolResult,
-  contract: unknown,
-): ResultRenderInput | undefined {
-  const source = mermaidSource(contract);
-  return source ? { kind: "mermaid", source } : undefined;
-}
-
-function mermaidSource(value: unknown): string | undefined {
-  if (typeof value === "string") return value.trim() || undefined;
-  const root = recordOf(value);
-  if (!root) return undefined;
-
-  const candidates = [
-    root.source,
-    recordOf(root.value)?.source,
-    recordOf(root.outcome)?.source,
-    recordOf(recordOf(root.outcome)?.value)?.source,
-  ];
-  return candidates
-    .find(
-      (candidate): candidate is string =>
-        typeof candidate === "string" && candidate.trim().length > 0,
-    )
-    ?.trim();
+  const strategy = strategies.find((candidate) => candidate.id === requested);
+  if (!strategy) throw new Error(`Unknown result transform: ${requested}`);
+  const transformed = strategy.transform(contract);
+  if (!transformed) throw new Error(`Transform ${requested} does not accept this result contract`);
+  return { id: strategy.id, input: transformed };
 }
 
 function resolveRenderer(
   requested: ResultRenderer,
-  input: ResultRenderInput,
-): ResolvedResultRenderer {
-  if (requested !== "auto") return requested;
-  return input.kind === "markdown" ? "pi-markdown" : "beautiful-mermaid";
+  renderInput: ResultRenderInput,
+  renderers: readonly ResultRendererDefinition[],
+): ResultRendererDefinition {
+  const renderer =
+    requested === "auto"
+      ? renderers.find(
+          (candidate) => candidate.auto && rendererAccepts(candidate, renderInput.kind),
+        )
+      : renderers.find((candidate) => candidate.id === requested);
+  if (!renderer) throw new Error(`Unknown or unavailable result renderer: ${requested}`);
+  if (!rendererAccepts(renderer, renderInput.kind)) {
+    throw new Error(`Renderer ${renderer.id} cannot render ${renderInput.kind} input`);
+  }
+  return renderer;
 }
 
-function assertRendererCompatible(
-  renderer: ResolvedResultRenderer,
-  input: ResultRenderInput,
-): void {
-  if (renderer === "tool") return;
-  if (renderer === "pi-markdown" && input.kind === "markdown") return;
-  if (renderer === "beautiful-mermaid" && input.kind === "mermaid") return;
-  throw new Error(`Renderer ${renderer} cannot render ${input.kind} input`);
+function rendererAccepts(
+  renderer: ResultRendererDefinition,
+  inputKind: ResultRenderInput["kind"],
+): boolean {
+  return renderer.inputKind === "any" || renderer.inputKind === inputKind;
 }
 
 function renderInputSource(input: ResultRenderInput): string {
@@ -187,11 +188,39 @@ function withPresentationMetadata(
   };
 }
 
-function contractData(details: unknown): unknown {
-  const record = recordOf(details);
-  if (!record) return details;
-  const { transport: _transport, ...contract } = record;
-  return contract;
+function presentationContract(value: unknown): unknown {
+  const record = recordOf(value);
+  if (!record) return value;
+  if (record.outcome !== undefined) return presentationContract(record.outcome);
+  if (record.status === "success" && record.value !== undefined) {
+    return presentationContract(record.value);
+  }
+  return record.document ?? record.value ?? value;
+}
+
+function mermaidSource(value: unknown): string | undefined {
+  if (typeof value === "string") return value.trim() || undefined;
+  const root = recordOf(value);
+  if (!root) return undefined;
+  const candidates = [root.source, recordOf(root.value)?.source, recordOf(root.document)?.source];
+  return candidates
+    .find(
+      (candidate): candidate is string =>
+        typeof candidate === "string" && candidate.trim().length > 0,
+    )
+    ?.trim();
+}
+
+function uniqueById<T extends { readonly id: string }>(
+  values: readonly T[],
+  kind: string,
+): readonly T[] {
+  const ids = new Set<string>();
+  for (const value of values) {
+    if (ids.has(value.id)) throw new Error(`Duplicate result ${kind} ${value.id}`);
+    ids.add(value.id);
+  }
+  return values;
 }
 
 function recordOf(value: unknown): Readonly<Record<string, unknown>> | undefined {
