@@ -1,10 +1,10 @@
 # Stock Pi sessions
 
-`session.stock` is a first-class Phenix catalog entry for running an ordinary Pi session when no predefined workflow or specialized Phenix agent fits a bounded task well enough.
+`session.stock` runs an ordinary Pi session for a bounded task that does not fit a predefined workflow or specialized Phenix agent.
 
-The stock session is selectable by predefined and dynamic workflows. It is supervised by Phenix for run identity, cancellation, persistence, recovery, budgets, diagnostics, and typed completion, but it does not receive a Phenix role prompt, workflow API, delegation instructions, or a specialized tool policy.
+It remains supervised for run identity, cancellation, persistence, recovery, budgets, diagnostics, and typed completion. It does not receive a Phenix role prompt, delegation tools, or workflow instructions.
 
-## Catalog contract
+## Catalog entry
 
 ```text
 session.stock — Stock Pi session
@@ -13,20 +13,13 @@ input: request.stock-session.v1
 output: dynamic
 ```
 
-The catalog output is marked `dynamic` because every workflow invocation must bind one concrete registered output schema.
+Each invocation must select one concrete registered output schema.
 
-## Workflow policy
+## Workflow use
 
-Verification is not intrinsic to a stock session. The owning workflow decides whether to:
+The owning workflow may return the result directly, verify it, combine it with other results, or retry it through declared transitions. Phenix does not add a verifier automatically.
 
-- return the typed stock result directly;
-- pass it to `agent.verifier` or `agent.critic`;
-- combine it with other typed branches; or
-- reject or retry it through ordinary workflow control flow.
-
-Phenix does not automatically append a verifier.
-
-## Dynamic workflow example
+Dynamic graph example:
 
 ```json
 {
@@ -44,9 +37,7 @@ Phenix does not automatically append a verifier.
 }
 ```
 
-A verifier is represented as an explicit downstream invoke node. Omitting that node is valid.
-
-## Markdown workflow example
+Markdown state example:
 
 ````markdown
 ### investigate
@@ -61,31 +52,15 @@ output-schema: outcome.scout-report.v1
 ```
 ````
 
-For ordinary definitions, `output-schema` must match the definition's fixed public output. For `session.stock`, it must be a concrete schema and may not use the stock handoff envelope itself.
+For ordinary definitions, `output-schema` must match the fixed definition output. For `session.stock`, it names the concrete result expected from this invocation.
 
-## Runtime handoff
+## Result handoff
 
-Before starting the child, the workflow runtime adds:
-
-- `outputSchema`: the concrete schema ID;
-- `outputContract`: that schema's JSON contract.
-
-The stock session receives Pi's ordinary resources and built-in tools, plus only two Phenix run-scoped tools:
+The child receives the selected schema ID and JSON contract. Its Phenix tools are limited to:
 
 - `phenix_return`, accepting `{ outputSchema, value }`;
 - `phenix_fail`, accepting a bounded structured failure.
 
-The root Phenix extension remains disabled inside the child to prevent recursive orchestration sessions. `phenix_progress` and workflow/delegation tools are not exposed.
+The returned schema ID and value are validated before the workflow advances. Invalid results fail with `output_invalid` and retain the stock child as the cause run.
 
-When the child returns, the workflow runtime verifies the schema ID, validates `value` against the registered concrete schema, unwraps the value, and only then advances the workflow. Invalid handoffs fail the workflow with `output_invalid` and preserve the stock child as the cause run.
-
-## Selection trade-off
-
-A stock session is deliberately less behaviorally controlled than a Phenix workflow or specialized agent. The composer should prefer, in order:
-
-1. one complete predefined workflow;
-2. a composition of predefined workflows;
-3. specialized Phenix agents;
-4. `session.stock` for a genuinely uncovered bounded task.
-
-This is a selection preference, not an authorization distinction. Once a workflow selects `session.stock`, its ordinary Pi capabilities are intentional and its output remains subject to the workflow's typed boundary and any verification nodes chosen by that workflow.
+Prefer predefined workflows and specialized agents when they fit. Use `session.stock` for genuinely uncovered bounded work.
