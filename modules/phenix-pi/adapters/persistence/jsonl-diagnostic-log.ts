@@ -350,7 +350,7 @@ function redactString(value: string): string {
     .replace(/((?:authorization|cookie|x-api-key)\s*:\s*)[^\r\n]+/gi, "$1<redacted>")
     .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/gi, "$1<redacted>@")
     .replace(
-      /([?&](?:access_key|api_key|client_secret|credential|key|password|secret|signature|token)=)[^&\s]+/gi,
+      /([?&#](?:access_key|api_key|client_secret|credential|key|password|secret|signature|token)=)[^&#\s]+/gi,
       "$1<redacted>",
     );
 }
