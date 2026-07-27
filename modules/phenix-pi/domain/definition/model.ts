@@ -61,9 +61,7 @@ export interface ResolvedModel {
   readonly virtual?: VirtualModelRef;
   readonly concrete: ConcreteModelRef;
   readonly thinking: PiThinkingLevel;
-  readonly capability?: ModelCapability;
-  readonly pool?: string;
-  readonly policyRevision: string;
+  readonly capability: ModelCapability;
 }
 
 export function isDifficulty(value: string): value is Difficulty {
