@@ -206,7 +206,7 @@ export class VisualizationView implements Component {
       this.onClose();
       return;
     }
-    const page = Math.max(1, this.tui.terminal.rows - 6);
+    const page = Math.max(1, this.tui.terminal.rows - 4);
     if (matchesKey(data, "left") || data === "h" || data === "H") {
       this.horizontalOffset = Math.max(0, this.horizontalOffset - 4);
     } else if (matchesKey(data, "right") || data === "l" || data === "L") {
@@ -233,7 +233,7 @@ export class VisualizationView implements Component {
 
   render(width: number): string[] {
     const height = Math.max(5, this.tui.terminal.rows);
-    const bodyHeight = Math.max(1, height - 3);
+    const bodyHeight = Math.max(1, height - 2);
     const longest = this.lines.reduce((maximum, line) => Math.max(maximum, visibleWidth(line)), 0);
     this.horizontalOffset = clamp(this.horizontalOffset, 0, Math.max(0, longest - width));
     this.verticalOffset = clamp(
