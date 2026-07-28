@@ -33,7 +33,7 @@ export function createVisualizationPublisherExtension(): ExtensionFactory {
         },
         { additionalProperties: false },
       ),
-      async execute(_toolCallId, input) {
+      async execute(_toolCallId: string, input: unknown) {
         const request = input as {
           readonly title: string;
           readonly summary?: string;
