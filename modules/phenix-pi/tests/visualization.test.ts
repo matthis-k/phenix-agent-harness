@@ -58,13 +58,21 @@ test("managed child sessions publish diagrams without returning source or render
   assert.ok(sessionStart);
   sessionStart({}, { sessionManager: { getSessionId: () => "session-architect" } });
   assert.ok(tool);
+  const execute = tool.execute as unknown as (
+    toolCallId: string,
+    input: unknown,
+    signal: AbortSignal,
+  ) => Promise<unknown>;
 
-  const first = await tool.execute("call-1", request, new AbortController().signal);
-  const second = await tool.execute("call-2", request, new AbortController().signal);
+  const first = await execute("call-1", request, new AbortController().signal);
+  const second = await execute("call-2", request, new AbortController().signal);
   assert.equal(emitted.length, 1);
   assert.equal(emitted[0]?.name, VISUALIZATION_EVENT);
   assert.equal(isVisualizationArtifact(emitted[0]?.value), true);
   assert.deepEqual(first, { content: [{ type: "text", text: "Visual accepted." }] });
   assert.deepEqual(second, { content: [{ type: "text", text: "Visual accepted." }] });
-  assert.doesNotMatch(JSON.stringify(first), /flowchart|visualization-|Open with|Beautiful Mermaid/);
+  assert.doesNotMatch(
+    JSON.stringify(first),
+    /flowchart|visualization-|Open with|Beautiful Mermaid/,
+  );
 });
