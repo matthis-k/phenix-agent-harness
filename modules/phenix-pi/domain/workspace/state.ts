@@ -20,7 +20,7 @@ export interface TranscriptHandle {
 
 export type TranscriptAvailability =
   | { readonly kind: "ready"; readonly transcript: TranscriptHandle }
-  | { readonly kind: "pending"; readonly sessionId: string; readonly sessionFile?: string }
+  | { readonly kind: "pending"; readonly requestId: EffectId; readonly runId: RunId }
   | { readonly kind: "not-applicable"; readonly reason: "workflow" | "root-projection" }
   | { readonly kind: "legacy"; readonly runId: RunId }
   | { readonly kind: "invalid"; readonly reason: string }
@@ -35,6 +35,7 @@ export interface TranscriptState {
 
 export interface PendingEffect {
   readonly id: EffectId;
+  readonly type: "snapshot.load" | "transcript.load";
   readonly sourceRevision: number;
   readonly owner: PaneId | "workspace";
 }
