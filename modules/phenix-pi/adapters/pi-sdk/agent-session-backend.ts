@@ -51,11 +51,10 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
   }
 
   async create(spec: CreateAgentSessionSpec): Promise<AgentSessionPort> {
-    const manager =
-      spec.persistence === "memory"
-        ? SessionManager.inMemory(spec.cwd)
-        : SessionManager.create(spec.cwd);
-    return this.createWithManager(spec, manager);
+    // Every child gets a native Pi JSONL transcript for live inspection. The
+    // definition persistence policy still controls whether that session may be
+    // recovered after a runtime restart.
+    return this.createWithManager(spec, SessionManager.create(spec.cwd));
   }
 
   async recover(
