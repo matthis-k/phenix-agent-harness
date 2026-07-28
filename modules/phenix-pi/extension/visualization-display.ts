@@ -12,9 +12,9 @@ import {
 import {
   createVisualizationArtifact,
   isVisualizationArtifact,
-  type VisualizationArtifact,
   VISUALIZATION_ENTRY_TYPE,
   VISUALIZATION_EVENT,
+  type VisualizationArtifact,
 } from "../domain/presentation/visualization.ts";
 import { renderTerminalMermaid } from "./mermaid-rendering.ts";
 import type { ObservabilityTheme } from "./observability-theme.ts";
