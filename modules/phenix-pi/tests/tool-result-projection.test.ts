@@ -176,7 +176,7 @@ test("summary run inspection excludes repeated input and compiled payloads", () 
     kind: "agent",
     definitionId: "agent.tester",
     input: { objective: "large", context: "x".repeat(20_000) },
-    outputSchemaId: "outcome.test-report.v1",
+    outputSchemaId: "outcome.test-report",
     requestedAt: "2026-01-01T00:00:00.000Z",
     ownership: "attached",
     state: "completed",
@@ -184,7 +184,7 @@ test("summary run inspection excludes repeated input and compiled payloads", () 
     compiled: {
       definitionId: "agent.tester",
       input: { objective: "large", context: "x".repeat(20_000) },
-      outputSchemaId: "outcome.test-report.v1",
+      outputSchemaId: "outcome.test-report",
       tools: ["read"],
       limits: { timeoutMs: 1_000 },
       capabilities: {

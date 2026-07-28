@@ -3,8 +3,8 @@
 ```phenix-agent
 id: agent.base
 description: General-purpose bounded coordinator and escape hatch for open-ended tasks.
-input: request.objective.v1
-output: outcome.base.v1
+input: request.objective
+output: outcome.base
 model: session
 thinking: route
 persistence: memory

@@ -20,8 +20,8 @@ const source = `# Test workflow composition
 \`\`\`phenix-workflow
 id: workflow.test-compose
 description: Invoke the implementation workflow and return its typed result.
-input: request.implementation.v1
-output: outcome.implementation-result.v1
+input: request.implementation
+output: outcome.implementation-result
 entry: implement
 timeout-ms: 2400000
 max-node-runs: 4
@@ -36,8 +36,8 @@ max-parallelism: 1
 kind: invoke
 run: workflow.implement
 input: input.identity
-input-schema: request.implementation.v1
-output-schema: outcome.implementation-result.v1
+input-schema: request.implementation
+output-schema: outcome.implementation-result
 wait: await
 \`\`\`
 
@@ -46,7 +46,7 @@ wait: await
 \`\`\`phenix-state
 kind: return
 output: test.composed.output
-output-schema: outcome.implementation-result.v1
+output-schema: outcome.implementation-result
 \`\`\`
 
 ## Transitions

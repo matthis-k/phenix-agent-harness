@@ -3,8 +3,8 @@
 ```phenix-agent
 id: session.stock
 description: Run an ordinary Pi session with no Phenix role prompt or workflow tools; the invoking workflow supplies the concrete typed output schema.
-input: request.stock-session.v1
-output: outcome.stock-session-handoff.v1
+input: request.stock-session
+output: outcome.stock-session-handoff
 model: session
 thinking: route
 persistence: file

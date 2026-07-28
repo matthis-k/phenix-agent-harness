@@ -9,8 +9,8 @@ function scoutWorkflow(): DynamicWorkflowProposal {
   return {
     title: "Dynamic repository scout",
     description: "Adapt the root objective to the reusable scout building block.",
-    inputSchema: "request.objective.v1",
-    outputSchema: "outcome.scout-report.v1",
+    inputSchema: "request.objective",
+    outputSchema: "outcome.scout-report",
     entry: "scout",
     nodes: [
       {

@@ -187,7 +187,7 @@ const DynamicReturnNodeType = Type.Object(
 
 export const DynamicWorkflowCompositionRequestSchema =
   defineSchema<DynamicWorkflowCompositionRequest>(
-    "request.dynamic-workflow-composition.v1",
+    "request.dynamic-workflow-composition",
     Type.Object(
       {
         objective: Type.String({ minLength: 1, maxLength: 20_000 }),
@@ -213,7 +213,7 @@ export const DynamicWorkflowCompositionRequestSchema =
   );
 
 export const DynamicWorkflowProposalSchema = defineSchema<DynamicWorkflowProposal>(
-  "request.dynamic-workflow-proposal.v1",
+  "request.dynamic-workflow-proposal",
   Type.Object(
     {
       title: Type.String({ minLength: 1, maxLength: 160 }),

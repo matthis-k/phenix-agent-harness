@@ -3,8 +3,8 @@
 ```phenix-agent
 id: agent.dispatcher
 description: Select one authorized execution definition from catalog descriptions.
-input: request.dispatch-selection.v1
-output: outcome.dispatch-decision.v2
+input: request.dispatch-selection
+output: outcome.dispatch-decision
 model: session
 thinking: minimal
 persistence: memory

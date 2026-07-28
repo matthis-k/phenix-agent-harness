@@ -3,8 +3,8 @@
 ```phenix-agent
 id: agent.verifier
 description: Independently run deterministic checks and judge a claimed change without mutating it.
-input: request.verification.v1
-output: outcome.verification.v1
+input: request.verification
+output: outcome.verification
 model: session
 thinking: route
 persistence: memory
