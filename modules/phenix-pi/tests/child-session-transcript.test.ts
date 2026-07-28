@@ -15,8 +15,10 @@ test("memory-recovery agents still receive native Pi transcript files", async ()
     assert.ok(scout);
     assert.equal(scout.persistence, "memory");
 
-    const manager = createObservableChildSessionManager(directory);
+    const sessionDir = join(directory, "sessions");
+    const manager = createObservableChildSessionManager(directory, sessionDir);
     assert.equal(manager.isPersisted(), true);
+    assert.equal(manager.getSessionDir(), sessionDir);
     assert.match(manager.getSessionFile() ?? "", /\.jsonl$/);
   } finally {
     await rm(directory, { recursive: true, force: true });
