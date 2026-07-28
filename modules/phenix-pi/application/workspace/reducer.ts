@@ -10,6 +10,7 @@ import type {
   PaneId,
   PaneState,
   ScrollState,
+  TranscriptHandle,
   WorkspaceState,
 } from "../../domain/workspace/state.ts";
 
@@ -41,7 +42,10 @@ export function reduceWorkspace<TSnapshot>(
     case "focus.set":
       return update(state, { focusedPaneId: event.paneId });
     case "selection.set":
-      return updatePane(state, event.paneId, (pane) => ({ ...pane, selectedItemId: event.itemId }));
+      return updatePane(state, event.paneId, (pane) => ({
+        ...pane,
+        selectedItemId: event.itemId,
+      }));
     case "selection.move":
       return moveSelection(state, event.paneId, event.itemIds, event.direction);
     case "selection.edge":
@@ -87,22 +91,30 @@ function receiveSnapshot<TSnapshot>(
   }
 
   const panes = reconcilePanes(state.panes, event.previousItemIds, event.snapshot.itemIds);
-  const runIds = event.snapshot.itemIds.runs;
-  const activeRunId = runIds.includes(String(state.activeRunId))
+  const activeRunId = event.snapshot.itemIds.runs.includes(String(state.activeRunId))
     ? state.activeRunId
     : event.snapshot.rootRunId;
   const activeChanged = activeRunId !== state.activeRunId;
+  const transcriptScroll: ScrollState = activeChanged
+    ? { mode: "follow-end" }
+    : state.transcript.scroll;
+  const nextPanes: Readonly<Record<PaneId, PaneState>> = activeChanged
+    ? {
+        ...panes,
+        transcript: { ...panes.transcript, scroll: transcriptScroll },
+      }
+    : panes;
 
   return commit({
     ...state,
     snapshotRevision: event.snapshot.revision,
     activeRunId,
-    panes,
+    panes: nextPanes,
     transcript: activeChanged
       ? {
           runId: activeRunId,
           availability: { kind: "not-applicable", reason: "root-projection" },
-          scroll: { mode: "follow-end" },
+          scroll: transcriptScroll,
           horizontalOrigin: 0,
         }
       : state.transcript,
@@ -134,8 +146,12 @@ function moveSelection(
   if (itemIds.length === 0) return clearSelection(state, paneId);
   const current = state.panes[paneId].selectedItemId;
   const index = current ? itemIds.indexOf(current) : -1;
-  const next = clamp(index < 0 ? (direction > 0 ? 0 : itemIds.length - 1) : index + direction, 0, itemIds.length - 1);
-  const selectedItemId = itemIds[next];
+  const nextIndex = clamp(
+    index < 0 ? (direction > 0 ? 0 : itemIds.length - 1) : index + direction,
+    0,
+    itemIds.length - 1,
+  );
+  const selectedItemId = itemIds[nextIndex];
   return selectedItemId
     ? updatePane(state, paneId, (pane) => ({ ...pane, selectedItemId }))
     : unchanged(state);
@@ -158,11 +174,19 @@ function setScroll(state: WorkspaceState, paneId: PaneId, scroll: ScrollState): 
   if (scroll.mode === "fixed" && (!Number.isInteger(scroll.offset) || scroll.offset < 0)) {
     return withDiagnostic(state, invalidInput("Fixed scroll offsets must be non-negative integers"));
   }
-  return updatePane(state, paneId, (pane) => ({ ...pane, scroll }));
+  const pane = { ...state.panes[paneId], scroll };
+  return update(state, {
+    panes: { ...state.panes, [paneId]: pane },
+    ...(paneId === "transcript"
+      ? { transcript: { ...state.transcript, scroll, horizontalOrigin: 0 as const } }
+      : {}),
+  });
 }
 
 function scrollBy(state: WorkspaceState, paneId: PaneId, rows: number): WorkspaceUpdate {
-  if (!Number.isInteger(rows)) return withDiagnostic(state, invalidInput("Scroll delta must be an integer"));
+  if (!Number.isInteger(rows)) {
+    return withDiagnostic(state, invalidInput("Scroll delta must be an integer"));
+  }
   const current = state.panes[paneId].scroll;
   if (current.mode === "follow-end") {
     return rows >= 0
@@ -187,21 +211,33 @@ function requestTranscript(
   requestId: EffectId,
   runId: RunId,
 ): WorkspaceUpdate {
-  const requested = requestEffectState(state, requestId, "transcript.load", "transcript");
-  const runs = {
-    ...requested.panes.runs,
-    selectedItemId: String(runId),
-  };
+  const pendingEffects = new Map(state.pendingEffects);
+  for (const [id, pending] of pendingEffects) {
+    if (pending.type === "transcript.load") pendingEffects.delete(id);
+  }
+  pendingEffects.set(requestId, {
+    id: requestId,
+    type: "transcript.load",
+    sourceRevision: state.revision,
+    owner: "transcript",
+  });
+
+  const scroll: ScrollState = { mode: "follow-end" };
   const next: WorkspaceState = {
-    ...requested,
+    ...state,
     activeRunId: runId,
-    panes: { ...requested.panes, runs },
+    panes: {
+      ...state.panes,
+      runs: { ...state.panes.runs, selectedItemId: String(runId) },
+      transcript: { ...state.panes.transcript, scroll },
+    },
     transcript: {
       runId,
       availability: { kind: "pending", requestId, runId },
-      scroll: { mode: "follow-end" },
+      scroll,
       horizontalOrigin: 0,
     },
+    pendingEffects,
   };
   return commit(next, [
     {
@@ -217,14 +253,17 @@ function receiveTranscript(
   state: WorkspaceState,
   requestId: EffectId,
   runId: RunId,
-  handle: { readonly key: string },
+  handle: TranscriptHandle,
 ): WorkspaceUpdate {
-  if (!isCurrentTranscriptRequest(state, requestId, runId)) return staleEffect(state, requestId);
+  if (!isCurrentTranscriptRequest(state, requestId, runId)) {
+    return staleEffect(state, requestId);
+  }
   return commit({
     ...state,
     transcript: {
       ...state.transcript,
       availability: { kind: "ready", transcript: handle },
+      horizontalOrigin: 0,
     },
     pendingEffects: withoutEffect(state.pendingEffects, requestId),
   });
@@ -236,13 +275,16 @@ function failTranscript(
   runId: RunId,
   error: WorkspaceError,
 ): WorkspaceUpdate {
-  if (!isCurrentTranscriptRequest(state, requestId, runId)) return staleEffect(state, requestId);
+  if (!isCurrentTranscriptRequest(state, requestId, runId)) {
+    return staleEffect(state, requestId);
+  }
   return commit(
     {
       ...state,
       transcript: {
         ...state.transcript,
         availability: { kind: "invalid", reason: error.message },
+        horizontalOrigin: 0,
       },
       pendingEffects: withoutEffect(state.pendingEffects, requestId),
     },
@@ -269,15 +311,6 @@ function requestEffect(
   owner: PaneId | "workspace",
   effect: WorkspaceEffect,
 ): WorkspaceUpdate {
-  return commit(requestEffectState(state, requestId, type, owner), [effect]);
-}
-
-function requestEffectState(
-  state: WorkspaceState,
-  requestId: EffectId,
-  type: "snapshot.load" | "transcript.load",
-  owner: PaneId | "workspace",
-): WorkspaceState {
   const pendingEffects = new Map(state.pendingEffects);
   pendingEffects.set(requestId, {
     id: requestId,
@@ -285,7 +318,7 @@ function requestEffectState(
     sourceRevision: state.revision,
     owner,
   });
-  return { ...state, pendingEffects };
+  return commit({ ...state, pendingEffects }, [effect]);
 }
 
 function isCurrentTranscriptRequest(
@@ -313,11 +346,7 @@ function reconcilePanes(
       {
         ...panes[paneId],
         ...selectedProperty(
-          reconcileSelection(
-            panes[paneId].selectedItemId,
-            previous[paneId],
-            next[paneId],
-          ),
+          reconcileSelection(panes[paneId].selectedItemId, previous[paneId], next[paneId]),
         ),
       },
     ]),
@@ -337,10 +366,10 @@ export function reconcileSelection(
 }
 
 function clearSelection(state: WorkspaceState, paneId: PaneId): WorkspaceUpdate {
-  return updatePane(state, paneId, (pane) => {
-    const { selectedItemId: _selectedItemId, ...remaining } = pane;
-    return remaining;
-  });
+  return updatePane(state, paneId, (pane) => ({
+    collapsed: pane.collapsed,
+    scroll: pane.scroll,
+  }));
 }
 
 function selectedProperty(selectedItemId: string | undefined): { readonly selectedItemId?: string } {
@@ -369,10 +398,10 @@ function unchanged(state: WorkspaceState): WorkspaceUpdate {
 }
 
 function withoutEffect(
-  pendingEffects: ReadonlyMap<EffectId, unknown>,
+  pendingEffects: WorkspaceState["pendingEffects"],
   requestId: EffectId,
-): ReadonlyMap<EffectId, WorkspaceState["pendingEffects"] extends ReadonlyMap<EffectId, infer T> ? T : never> {
-  const next = new Map(pendingEffects as WorkspaceState["pendingEffects"]);
+): WorkspaceState["pendingEffects"] {
+  const next = new Map(pendingEffects);
   next.delete(requestId);
   return next;
 }
