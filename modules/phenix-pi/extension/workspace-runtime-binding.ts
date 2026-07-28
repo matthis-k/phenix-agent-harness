@@ -30,10 +30,7 @@ export function publishWorkspaceRuntime(
   } satisfies WorkspaceRuntimeEvent);
 }
 
-export function clearWorkspaceRuntime(
-  events: WorkspaceRuntimeEventBus,
-  rootRunId: RunId,
-): void {
+export function clearWorkspaceRuntime(events: WorkspaceRuntimeEventBus, rootRunId: RunId): void {
   events.emit(WORKSPACE_RUNTIME_EVENT, {
     kind: "cleared",
     rootRunId,
