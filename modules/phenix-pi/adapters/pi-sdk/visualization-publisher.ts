@@ -51,6 +51,6 @@ export function createVisualizationPublisherExtension(): ExtensionFactory {
           content: [{ type: "text" as const, text: VISUAL_ACCEPTED }],
         };
       },
-    } as ToolDefinition);
+    } as unknown as ToolDefinition);
   };
 }
