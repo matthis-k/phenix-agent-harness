@@ -34,7 +34,7 @@ test("visual artifacts are normalized, validated, and stable", () => {
   );
 });
 
-test("managed child sessions publish one event per distinct diagram", async () => {
+test("managed child sessions publish diagrams without returning source or rendered output", async () => {
   let sessionStart:
     | ((event: unknown, context: { sessionManager: { getSessionId(): string } }) => void)
     | undefined;
@@ -64,6 +64,7 @@ test("managed child sessions publish one event per distinct diagram", async () =
   assert.equal(emitted.length, 1);
   assert.equal(emitted[0]?.name, VISUALIZATION_EVENT);
   assert.equal(isVisualizationArtifact(emitted[0]?.value), true);
-  assert.match(JSON.stringify(first), /Published visualization/);
-  assert.match(JSON.stringify(second), /already published/);
+  assert.deepEqual(first, { content: [{ type: "text", text: "Visual accepted." }] });
+  assert.deepEqual(second, { content: [{ type: "text", text: "Visual accepted." }] });
+  assert.doesNotMatch(JSON.stringify(first), /flowchart|visualization-|Open with|Beautiful Mermaid/);
 });
