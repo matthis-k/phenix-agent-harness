@@ -6,11 +6,7 @@ import type {
   WorkspaceSnapshotEnvelope,
 } from "../../domain/workspace/events.ts";
 import type { WorkspaceError } from "../../domain/workspace/errors.ts";
-import type {
-  EffectId,
-  TranscriptHandle,
-  WorkspaceState,
-} from "../../domain/workspace/state.ts";
+import type { EffectId, WorkspaceState } from "../../domain/workspace/state.ts";
 import type {
   ExternalWorkspaceEffect,
   WorkspaceEffectRuntime,
@@ -44,6 +40,7 @@ export class WorkspaceController<TSnapshot, TTranscript> {
   private readonly runtime: WorkspaceEffectRuntime<TSnapshot, TTranscript>;
   private readonly listeners = new Set<Listener>();
   private readonly inFlight = new Set<Promise<void>>();
+  private readonly externalAborts = new Set<AbortController>();
   private readonly transcripts = new Map<string, TTranscript>();
   private stateValue: WorkspaceState;
   private snapshotValue: WorkspaceSnapshotEnvelope<TSnapshot> | undefined;
@@ -76,10 +73,11 @@ export class WorkspaceController<TSnapshot, TTranscript> {
   }
 
   view(): WorkspaceControllerView<TSnapshot, TTranscript> {
+    const transcript = this.currentTranscript;
     return {
       state: this.stateValue,
       ...(this.snapshotValue ? { snapshot: this.snapshotValue } : {}),
-      ...(this.currentTranscript !== undefined ? { transcript: this.currentTranscript } : {}),
+      ...(transcript !== undefined ? { transcript } : {}),
     };
   }
 
@@ -121,6 +119,8 @@ export class WorkspaceController<TSnapshot, TTranscript> {
     this.disposed = true;
     this.snapshotAbort?.abort();
     this.transcriptAbort?.abort();
+    for (const abort of this.externalAborts) abort.abort();
+    this.externalAborts.clear();
     this.listeners.clear();
   }
 
@@ -158,16 +158,16 @@ export class WorkspaceController<TSnapshot, TTranscript> {
       const snapshot = await this.runtime.loadSnapshot(abort.signal);
       if (this.disposed || abort.signal.aborted) return;
       const previousItemIds = this.snapshotValue?.itemIds ?? EMPTY_ITEM_INDEX;
-      const previousRevision = this.stateValue.snapshotRevision;
+      const pending = this.stateValue.pendingEffects.get(requestId);
+      const accepted =
+        pending?.type === "snapshot.load" && snapshot.revision >= this.stateValue.snapshotRevision;
+      if (accepted) this.snapshotValue = snapshot;
       this.dispatch({
         type: "snapshot.received",
         requestId,
         previousItemIds,
         snapshot,
       });
-      if (this.stateValue.snapshotRevision >= previousRevision && this.stateValue.snapshotRevision === snapshot.revision) {
-        this.snapshotValue = snapshot;
-      }
     } catch (error) {
       if (this.disposed || abort.signal.aborted) return;
       this.dispatch({
@@ -224,18 +224,20 @@ export class WorkspaceController<TSnapshot, TTranscript> {
   private async performExternal(effect: ExternalWorkspaceEffect): Promise<void> {
     if (!this.runtime.perform || this.disposed) return;
     const abort = new AbortController();
+    this.externalAborts.add(abort);
     try {
       await this.runtime.perform(effect, abort.signal);
     } catch (error) {
       if (this.disposed || abort.signal.aborted) return;
       this.recordDiagnostic(effectFailure("invariant-violation", "workspace", error));
+    } finally {
+      this.externalAborts.delete(abort);
     }
   }
 
   private recordDiagnostic(error: WorkspaceError): void {
     try {
-      const result = this.runtime.recordDiagnostic(error);
-      if (result instanceof Promise) void result.catch(() => undefined);
+      void Promise.resolve(this.runtime.recordDiagnostic(error)).catch(() => undefined);
     } catch {
       // Diagnostic persistence is deliberately non-authoritative.
     }
