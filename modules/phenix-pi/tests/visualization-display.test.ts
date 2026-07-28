@@ -8,7 +8,10 @@ import {
   VISUALIZATION_ENTRY_TYPE,
   VISUALIZATION_EVENT,
 } from "../domain/presentation/visualization.ts";
-import visualizationDisplay, { VisualizationView } from "../extension/visualization-display.ts";
+import visualizationDisplay, {
+  completeVisualizationIds,
+  VisualizationView,
+} from "../extension/visualization-display.ts";
 
 class FakeTheme {
   fg(_color: string, value: string): string {
@@ -24,14 +27,44 @@ class FakeTheme {
   }
 }
 
-function artifact() {
+function artifact(title = "Runtime boundaries", sourceSessionId = "session-architect") {
   return createVisualizationArtifact({
-    title: "Runtime boundaries",
+    title,
     summary: "Shows ownership and dependency direction.",
-    source: "flowchart LR\n  UI --> Application\n  Application --> Domain",
-    sourceSessionId: "session-architect",
+    source: `flowchart LR\n  ${title.replaceAll(" ", "_")} --> Application\n  Application --> Domain`,
+    sourceSessionId,
   });
 }
+
+test("visual artifact IDs complete by full or short prefix with newest first", () => {
+  const older = artifact("Older architecture", "session-older");
+  const newer = artifact("Newer architecture", "session-newer");
+  const artifacts = new Map([
+    [older.visualizationId, older],
+    [newer.visualizationId, newer],
+  ]);
+
+  const all = completeVisualizationIds(artifacts, "");
+  assert.deepEqual(
+    all?.map((item) => item.value),
+    [newer.visualizationId, older.visualizationId],
+  );
+  assert.match(all?.[0]?.label ?? "", /Newer architecture/);
+
+  const fullPrefix = newer.visualizationId.slice(0, -4);
+  assert.deepEqual(
+    completeVisualizationIds(artifacts, fullPrefix)?.map((item) => item.value),
+    [newer.visualizationId],
+  );
+
+  const shortPrefix = newer.visualizationId.slice("visualization-".length, -4);
+  assert.deepEqual(
+    completeVisualizationIds(artifacts, shortPrefix)?.map((item) => item.value),
+    [newer.visualizationId],
+  );
+  assert.equal(completeVisualizationIds(artifacts, "missing"), null);
+  assert.equal(completeVisualizationIds(artifacts, "two words"), null);
+});
 
 test("published visualizations become durable Beautiful Mermaid transcript entries", () => {
   let eventHandler: ((value: unknown) => void) | undefined;
@@ -80,7 +113,7 @@ test("published visualizations become durable Beautiful Mermaid transcript entri
 
   const rendered = renderer({ data: visual }, {}, new FakeTheme()).render(160).join("\n");
   assert.match(rendered, /Diagram · Runtime boundaries/);
-  assert.match(rendered, /UI/);
+  assert.match(rendered, /Runtime_boundaries/);
   assert.match(rendered, /Application/);
   assert.match(rendered, /Open scrollable view: \/visual visualization-/);
 });
