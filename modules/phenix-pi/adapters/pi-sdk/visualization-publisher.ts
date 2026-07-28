@@ -6,6 +6,8 @@ import {
   VISUALIZATION_EVENT,
 } from "../../domain/presentation/visualization.ts";
 
+const VISUAL_ACCEPTED = "Visual accepted.";
+
 export function createVisualizationPublisherExtension(): ExtensionFactory {
   return (pi) => {
     let sourceSessionId = "unknown";
@@ -18,11 +20,11 @@ export function createVisualizationPublisherExtension(): ExtensionFactory {
 
     pi.registerTool({
       name: "phenix_visualize",
-      label: "Visualize Architecture",
+      label: "Render Mermaid",
       description:
-        "Publish one Mermaid diagram directly into the root transcript. Use for architecture boundaries, data flow, interaction sequences, state machines, and implementation plans that are materially clearer visually. The user can open the resulting artifact in a full-screen scrollable view with /visual <id>.",
+        "Mark one section as a Mermaid diagram for UI-only Beautiful Mermaid rendering. Put the Mermaid source in this tool call instead of reproducing it in prose or the final report. The rendered diagram and its scrollable-view affordance are written directly to the user transcript; this tool returns only a minimal receipt so rendered output does not consume agent context.",
       promptSnippet:
-        "Use phenix_visualize when a Mermaid diagram would materially simplify understanding. Keep the accompanying prose concise and ensure the diagram is consistent with the grounded analysis.",
+        "Use phenix_visualize as a presentation directive when a diagram materially simplifies understanding. Do not repeat the Mermaid source or rendered diagram in the final response; accompany it only with the prose needed to explain the conclusion.",
       parameters: Type.Object(
         {
           title: Type.String({ minLength: 1, maxLength: 160 }),
@@ -41,21 +43,12 @@ export function createVisualizationPublisherExtension(): ExtensionFactory {
           ...request,
           sourceSessionId,
         });
-        const duplicate = published.has(artifact.visualizationId);
-        if (!duplicate) {
+        if (!published.has(artifact.visualizationId)) {
           published.add(artifact.visualizationId);
           pi.events.emit(VISUALIZATION_EVENT, artifact);
         }
         return {
-          content: [
-            {
-              type: "text" as const,
-              text: duplicate
-                ? `Visualization already published: ${artifact.visualizationId}. Open with /visual ${artifact.visualizationId}.`
-                : `Published visualization ${artifact.visualizationId}. Open with /visual ${artifact.visualizationId}.`,
-            },
-          ],
-          details: { ...artifact, duplicate },
+          content: [{ type: "text" as const, text: VISUAL_ACCEPTED }],
         };
       },
     } as ToolDefinition);
