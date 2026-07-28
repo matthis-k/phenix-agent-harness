@@ -45,21 +45,23 @@ test("visual artifact IDs complete by full or short prefix with newest first", (
   ]);
 
   const all = completeVisualizationIds(artifacts, "");
-  assert.deepEqual(all?.map((item) => item.value), [
-    newer.visualizationId,
-    older.visualizationId,
-  ]);
+  assert.deepEqual(
+    all?.map((item) => item.value),
+    [newer.visualizationId, older.visualizationId],
+  );
   assert.match(all?.[0]?.label ?? "", /Newer architecture/);
 
   const fullPrefix = newer.visualizationId.slice(0, -4);
-  assert.deepEqual(completeVisualizationIds(artifacts, fullPrefix)?.map((item) => item.value), [
-    newer.visualizationId,
-  ]);
+  assert.deepEqual(
+    completeVisualizationIds(artifacts, fullPrefix)?.map((item) => item.value),
+    [newer.visualizationId],
+  );
 
   const shortPrefix = newer.visualizationId.slice("visualization-".length, -4);
-  assert.deepEqual(completeVisualizationIds(artifacts, shortPrefix)?.map((item) => item.value), [
-    newer.visualizationId,
-  ]);
+  assert.deepEqual(
+    completeVisualizationIds(artifacts, shortPrefix)?.map((item) => item.value),
+    [newer.visualizationId],
+  );
   assert.equal(completeVisualizationIds(artifacts, "missing"), null);
   assert.equal(completeVisualizationIds(artifacts, "two words"), null);
 });
