@@ -144,7 +144,7 @@ export default function visualizationDisplay(pi: ExtensionAPI): void {
 export function completeVisualizationIds(
   artifacts: ReadonlyMap<string, VisualizationArtifact>,
   prefix: string,
-): readonly { readonly value: string; readonly label: string }[] | null {
+): Array<{ readonly value: string; readonly label: string }> | null {
   const normalized = prefix.trimStart().toLowerCase();
   if (/\s/.test(normalized)) return null;
   const matches = [...artifacts.values()].reverse().filter((artifact) => {
