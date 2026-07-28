@@ -188,7 +188,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
     await applyAgentTools(pi, ctx, (await currentRuntime.profiles.current(currentRoot)).agent);
     await updateStatus(ctx, currentRuntime, currentRoot);
     appendBinding(pi, currentRuntime, currentRoot, sessionId);
-    publishWorkspaceRuntime({
+    publishWorkspaceRuntime(pi.events, {
       runtime: currentRuntime,
       rootRunId: currentRoot,
       integrations: summarizeIntegrations(integrationStatuses),
@@ -239,7 +239,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
   pi.on("session_shutdown", async (_event, ctx) => {
     const currentRuntime = runtime;
     const currentRoot = rootRunId;
-    if (currentRoot) clearWorkspaceRuntime(currentRoot);
+    if (currentRoot) clearWorkspaceRuntime(pi.events, currentRoot);
     runtime = undefined;
     rootRunId = undefined;
     modelRegistry = undefined;

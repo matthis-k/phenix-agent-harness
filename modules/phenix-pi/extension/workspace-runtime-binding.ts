@@ -1,34 +1,81 @@
 import type { PhenixRuntime } from "../composition/create-phenix-runtime.ts";
 import type { RunId } from "../domain/shared.ts";
 
+export const WORKSPACE_RUNTIME_EVENT = "phenix:workspace-runtime";
+
 export interface WorkspaceRuntimeBinding {
   readonly runtime: PhenixRuntime;
   readonly rootRunId: RunId;
   readonly integrations: string;
 }
 
+export interface WorkspaceRuntimeEventBus {
+  readonly on: (event: string, listener: (value: unknown) => void) => unknown;
+  readonly emit: (event: string, value: unknown) => unknown;
+}
+
 type Listener = (binding: WorkspaceRuntimeBinding | undefined) => void;
 
-let current: WorkspaceRuntimeBinding | undefined;
-const listeners = new Set<Listener>();
+type WorkspaceRuntimeEvent =
+  | { readonly kind: "ready"; readonly binding: WorkspaceRuntimeBinding }
+  | { readonly kind: "cleared"; readonly rootRunId: RunId };
 
-export function currentWorkspaceRuntime(): WorkspaceRuntimeBinding | undefined {
-  return current;
+export function publishWorkspaceRuntime(
+  events: WorkspaceRuntimeEventBus,
+  binding: WorkspaceRuntimeBinding,
+): void {
+  events.emit(WORKSPACE_RUNTIME_EVENT, {
+    kind: "ready",
+    binding,
+  } satisfies WorkspaceRuntimeEvent);
 }
 
-export function publishWorkspaceRuntime(binding: WorkspaceRuntimeBinding): void {
-  current = binding;
-  for (const listener of listeners) listener(binding);
+export function clearWorkspaceRuntime(events: WorkspaceRuntimeEventBus, rootRunId: RunId): void {
+  events.emit(WORKSPACE_RUNTIME_EVENT, {
+    kind: "cleared",
+    rootRunId,
+  } satisfies WorkspaceRuntimeEvent);
 }
 
-export function clearWorkspaceRuntime(rootRunId?: RunId): void {
-  if (rootRunId && current?.rootRunId !== rootRunId) return;
-  current = undefined;
-  for (const listener of listeners) listener(undefined);
+export function subscribeWorkspaceRuntime(
+  events: WorkspaceRuntimeEventBus,
+  listener: Listener,
+): void {
+  let currentRootRunId: RunId | undefined;
+  events.on(WORKSPACE_RUNTIME_EVENT, (value) => {
+    const event = parseWorkspaceRuntimeEvent(value);
+    if (!event) return;
+    if (event.kind === "ready") {
+      currentRootRunId = event.binding.rootRunId;
+      listener(event.binding);
+      return;
+    }
+    if (currentRootRunId && event.rootRunId !== currentRootRunId) return;
+    currentRootRunId = undefined;
+    listener(undefined);
+  });
 }
 
-export function subscribeWorkspaceRuntime(listener: Listener): () => void {
-  listeners.add(listener);
-  listener(current);
-  return () => listeners.delete(listener);
+function parseWorkspaceRuntimeEvent(value: unknown): WorkspaceRuntimeEvent | undefined {
+  if (!isRecord(value)) return undefined;
+  if (value.kind === "ready" && isWorkspaceRuntimeBinding(value.binding)) {
+    return { kind: "ready", binding: value.binding };
+  }
+  if (value.kind === "cleared" && typeof value.rootRunId === "string") {
+    return { kind: "cleared", rootRunId: value.rootRunId as RunId };
+  }
+  return undefined;
+}
+
+function isWorkspaceRuntimeBinding(value: unknown): value is WorkspaceRuntimeBinding {
+  return (
+    isRecord(value) &&
+    isRecord(value.runtime) &&
+    typeof value.rootRunId === "string" &&
+    typeof value.integrations === "string"
+  );
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

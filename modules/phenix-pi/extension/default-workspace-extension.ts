@@ -15,7 +15,6 @@ import {
   type PhenixWorkspaceSnapshot,
 } from "./phenix-workspace.ts";
 import {
-  currentWorkspaceRuntime,
   subscribeWorkspaceRuntime,
   type WorkspaceRuntimeBinding,
 } from "./workspace-runtime-binding.ts";
@@ -26,18 +25,25 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
   let workspace: PhenixWorkspace | undefined;
   let finish: ((action: PhenixWorkspaceAction) => void) | undefined;
   let opening = false;
-  let unsubscribeBinding: (() => void) | undefined;
 
   const requestOpen = (): void => {
     if (opening || workspace || context?.mode !== "tui" || !binding) return;
     void openWorkspaceLoop();
   };
 
+  subscribeWorkspaceRuntime(pi.events, (next) => {
+    binding = next;
+    if (!next) {
+      finish?.({ kind: "close" });
+      return;
+    }
+    requestOpen();
+  });
+
   pi.registerCommand("workspace", {
     description: "Open the default Phenix transcript and status workspace",
     handler: async (_args, ctx) => {
       context = ctx;
-      binding = currentWorkspaceRuntime();
       if (!binding) {
         ctx.ui.notify("Phenix runtime is not initialized.", "warning");
         return;
@@ -48,15 +54,7 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
 
   pi.on("session_start", (_event, ctx) => {
     context = ctx;
-    unsubscribeBinding?.();
-    unsubscribeBinding = subscribeWorkspaceRuntime((next) => {
-      binding = next;
-      if (!next) {
-        finish?.({ kind: "close" });
-        return;
-      }
-      requestOpen();
-    });
+    requestOpen();
   });
 
   pi.on("message_update", (event) => {
@@ -71,8 +69,6 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", () => {
-    unsubscribeBinding?.();
-    unsubscribeBinding = undefined;
     finish?.({ kind: "close" });
     workspace = undefined;
     context = undefined;
