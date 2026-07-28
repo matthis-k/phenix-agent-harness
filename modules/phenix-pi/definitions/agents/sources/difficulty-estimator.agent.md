@@ -7,7 +7,7 @@ input: request.difficulty-assessment
 output: outcome.difficulty-assessment
 model: session
 thinking: route
-persistence: memory
+persistence: file
 ```
 
 ## Models
