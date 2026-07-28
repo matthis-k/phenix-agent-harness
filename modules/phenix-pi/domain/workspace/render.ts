@@ -1,6 +1,6 @@
-import { containsPoint, intersection, localRect, point, rect, type Point, type Rect } from "./geometry.ts";
-import type { LayoutFrame } from "./layout.ts";
 import type { WorkspaceError } from "./errors.ts";
+import { containsPoint, intersection, localRect, type Point, type Rect, rect } from "./geometry.ts";
+import type { LayoutFrame } from "./layout.ts";
 import type { PaneId, ViewId } from "./state.ts";
 
 export interface RenderCell {
@@ -69,11 +69,14 @@ export class Surface {
   }
 
   write(row: number, column: number, cells: readonly RenderCell[]): void {
-    if (!Number.isInteger(row) || !Number.isInteger(column) || row < 0 || row >= this.height) return;
+    if (!Number.isInteger(row) || !Number.isInteger(column) || row < 0 || row >= this.height)
+      return;
+    const targetRow = this.rows[row];
+    if (!targetRow) return;
     for (const [index, value] of cells.entries()) {
       const target = column + index;
       if (target < 0 || target >= this.width) continue;
-      this.rows[row]![target] = value;
+      targetRow[target] = value;
     }
   }
 
@@ -89,8 +92,10 @@ export class Surface {
     const clipped = intersection(bounds, rect(0, 0, this.width, this.height));
     if (!clipped) return;
     for (let row = clipped.y; row < clipped.y + clipped.height; row += 1) {
+      const targetRow = this.rows[row];
+      if (!targetRow) continue;
       for (let column = clipped.x; column < clipped.x + clipped.width; column += 1) {
-        this.rows[row]![column] = value;
+        targetRow[column] = value;
       }
     }
   }
@@ -149,7 +154,9 @@ export function composeFrame(
 
     if (paneId !== focusedPaneId || !output.cursor) continue;
     if (!containsPoint(rect(0, 0, paneBounds.width, paneBounds.height), output.cursor)) {
-      diagnostics.push(renderError(paneId, "Focused view requested a cursor outside its rectangle"));
+      diagnostics.push(
+        renderError(paneId, "Focused view requested a cursor outside its rectangle"),
+      );
       continue;
     }
     cursor = {
@@ -167,7 +174,11 @@ export function composeFrame(
   };
 }
 
-export function hitTest(hitMap: HitMap, layoutRevision: number, target: Point): AbsoluteHitRegion | undefined {
+export function hitTest(
+  hitMap: HitMap,
+  layoutRevision: number,
+  target: Point,
+): AbsoluteHitRegion | undefined {
   if (hitMap.layoutRevision !== layoutRevision) return undefined;
   return hitMap.regions.find((region) => containsPoint(region.bounds, target));
 }

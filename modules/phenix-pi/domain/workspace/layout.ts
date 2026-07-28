@@ -1,4 +1,4 @@
-import { containsRect, intersects, rect, type Rect } from "./geometry.ts";
+import { containsRect, intersects, type Rect, rect } from "./geometry.ts";
 import type { PaneId, ViewId } from "./state.ts";
 
 export type LayoutNode = PaneLayout | SplitLayout | StackLayout | ConditionalLayout;
@@ -38,8 +38,8 @@ export interface StackLayout {
 export interface ConditionalLayout {
   readonly kind: "conditional";
   readonly predicate: LayoutPredicate;
-  readonly then: LayoutNode;
-  readonly otherwise?: LayoutNode;
+  readonly whenTrue: LayoutNode;
+  readonly whenFalse?: LayoutNode;
 }
 
 export type LayoutPredicate =
@@ -174,8 +174,8 @@ export function validateLayoutFrame(frame: LayoutFrame): LayoutError | undefined
 function solveNode(node: LayoutNode, bounds: Rect, context: SolveContext): LayoutError | undefined {
   if (node.kind === "conditional") {
     const branch = evaluatePredicate(node.predicate, context.terminal, context.environment)
-      ? node.then
-      : node.otherwise;
+      ? node.whenTrue
+      : node.whenFalse;
     return branch ? solveNode(branch, bounds, context) : undefined;
   }
   if (node.kind === "stack") {
@@ -225,8 +225,10 @@ function solveNode(node: LayoutNode, bounds: Rect, context: SolveContext): Layou
   for (const [index, child] of node.children.entries()) {
     const measurement = measureNode(child.node, context.terminal, context.environment);
     if (!measurement) continue;
-    const intrinsicMinimum = node.axis === "horizontal" ? measurement.minWidth : measurement.minHeight;
-    const intrinsicMaximum = node.axis === "horizontal" ? measurement.maxWidth : measurement.maxHeight;
+    const intrinsicMinimum =
+      node.axis === "horizontal" ? measurement.minWidth : measurement.minHeight;
+    const intrinsicMaximum =
+      node.axis === "horizontal" ? measurement.maxWidth : measurement.maxHeight;
     const minimum = Math.max(nonNegative(child.min) ?? 0, intrinsicMinimum);
     const maximum = Math.min(nonNegative(child.max) ?? Number.POSITIVE_INFINITY, intrinsicMaximum);
     if (maximum < minimum || child.weight < 0 || !Number.isFinite(child.weight)) {
@@ -271,8 +273,7 @@ function collapseUntilFits(
       .filter((plan) => plan.measurement.collapsePriority !== undefined)
       .sort(
         (left, right) =>
-          (right.measurement.collapsePriority ?? 0) -
-            (left.measurement.collapsePriority ?? 0) ||
+          (right.measurement.collapsePriority ?? 0) - (left.measurement.collapsePriority ?? 0) ||
           right.index - left.index,
       )[0];
     if (!candidate) return;
@@ -295,7 +296,8 @@ function allocateRemaining(plans: ChildPlan[], usable: number): void {
     const totalWeight = eligible.reduce((sum, plan) => sum + plan.child.weight, 0);
     let assigned = 0;
     for (const plan of eligible) {
-      const weighted = totalWeight > 0 ? Math.floor((remaining * plan.child.weight) / totalWeight) : 0;
+      const weighted =
+        totalWeight > 0 ? Math.floor((remaining * plan.child.weight) / totalWeight) : 0;
       const requested = Math.max(1, weighted);
       const delta = Math.min(requested, plan.maximum - plan.size, remaining - assigned);
       if (delta <= 0) continue;
@@ -309,9 +311,7 @@ function allocateRemaining(plans: ChildPlan[], usable: number): void {
 }
 
 function requiredLength(plans: readonly ChildPlan[], gap: number): number {
-  return (
-    plans.reduce((sum, plan) => sum + plan.minimum, 0) + gap * Math.max(0, plans.length - 1)
-  );
+  return plans.reduce((sum, plan) => sum + plan.minimum, 0) + gap * Math.max(0, plans.length - 1);
 }
 
 function measureNode(
@@ -321,8 +321,8 @@ function measureNode(
 ): Measurement | undefined {
   if (node.kind === "conditional") {
     const branch = evaluatePredicate(node.predicate, terminal, environment)
-      ? node.then
-      : node.otherwise;
+      ? node.whenTrue
+      : node.whenFalse;
     return branch ? measureNode(branch, terminal, environment) : undefined;
   }
   if (node.kind === "stack") {
@@ -358,7 +358,10 @@ function measureNode(
     return {
       minWidth: children.reduce((sum, child) => sum + child.minWidth, gaps),
       minHeight: Math.max(...children.map((child) => child.minHeight)),
-      maxWidth: sumMaximum(children.map((child) => child.maxWidth), gaps),
+      maxWidth: sumMaximum(
+        children.map((child) => child.maxWidth),
+        gaps,
+      ),
       maxHeight: Math.min(...children.map((child) => child.maxHeight)),
       collapsePriority: nodeCollapsePriority(node, terminal, environment),
     };
@@ -367,7 +370,10 @@ function measureNode(
     minWidth: Math.max(...children.map((child) => child.minWidth)),
     minHeight: children.reduce((sum, child) => sum + child.minHeight, gaps),
     maxWidth: Math.min(...children.map((child) => child.maxWidth)),
-    maxHeight: sumMaximum(children.map((child) => child.maxHeight), gaps),
+    maxHeight: sumMaximum(
+      children.map((child) => child.maxHeight),
+      gaps,
+    ),
     collapsePriority: nodeCollapsePriority(node, terminal, environment),
   };
 }
@@ -380,8 +386,8 @@ function collectPaneIds(
   if (node.kind === "pane") return [node.paneId];
   if (node.kind === "conditional") {
     const branch = evaluatePredicate(node.predicate, terminal, environment)
-      ? node.then
-      : node.otherwise;
+      ? node.whenTrue
+      : node.whenFalse;
     return branch ? collectPaneIds(branch, terminal, environment) : [];
   }
   if (node.kind === "stack") {
@@ -415,8 +421,8 @@ function findPane(
   if (node.kind === "pane") return node.paneId === paneId ? node : undefined;
   if (node.kind === "conditional") {
     const branch = evaluatePredicate(node.predicate, terminal, environment)
-      ? node.then
-      : node.otherwise;
+      ? node.whenTrue
+      : node.whenFalse;
     return branch ? findPane(branch, paneId, terminal, environment) : undefined;
   }
   return node.children

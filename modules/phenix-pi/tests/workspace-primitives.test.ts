@@ -11,16 +11,11 @@ import {
 } from "../domain/workspace/geometry.ts";
 import {
   allocateSidebarSections,
+  type LayoutNode,
   solveLayout,
   validateLayoutFrame,
-  type LayoutNode,
 } from "../domain/workspace/layout.ts";
-import {
-  composeFrame,
-  hitTest,
-  Surface,
-  type RenderOutput,
-} from "../domain/workspace/render.ts";
+import { composeFrame, hitTest, type RenderOutput, Surface } from "../domain/workspace/render.ts";
 import {
   createInitialWorkspaceState,
   type PaneId,
@@ -89,7 +84,11 @@ test("layout solver produces deterministic bounded non-overlapping frames", () =
       const panes = [...first.value.panes.values()];
       for (let left = 0; left < panes.length; left += 1) {
         for (let right = left + 1; right < panes.length; right += 1) {
-          assert.equal(intersects(panes[left]!, panes[right]!), false);
+          const leftPane = panes[left];
+          const rightPane = panes[right];
+          assert.ok(leftPane);
+          assert.ok(rightPane);
+          assert.equal(intersects(leftPane, rightPane), false);
         }
       }
     }
@@ -194,19 +193,14 @@ function defaultLayout(): LayoutNode {
         node: {
           kind: "conditional",
           predicate: { kind: "flag", flag: "sidebar" },
-          then: pane("runs", 32, 1, 100),
+          whenTrue: pane("runs", 32, 1, 100),
         },
       },
     ],
   };
 }
 
-function pane(
-  paneId: PaneId,
-  minWidth = 1,
-  minHeight = 1,
-  collapsePriority?: number,
-): LayoutNode {
+function pane(paneId: PaneId, minWidth = 1, minHeight = 1, collapsePriority?: number): LayoutNode {
   return {
     kind: "pane",
     paneId,

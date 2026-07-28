@@ -1,6 +1,6 @@
 import type { RunId } from "../shared.ts";
-import type { Size } from "./geometry.ts";
 import type { WorkspaceError } from "./errors.ts";
+import type { Size } from "./geometry.ts";
 import type { EffectId, PaneId } from "./state.ts";
 
 export interface WorkspaceSnapshotEnvelope<TSnapshot> {
