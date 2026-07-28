@@ -37,7 +37,11 @@ test("published visualizations become durable Beautiful Mermaid transcript entri
   let eventHandler: ((value: unknown) => void) | undefined;
   let sessionStart: ((event: unknown, context: unknown) => void) | undefined;
   let renderer:
-    | ((entry: { readonly data?: unknown }, options: unknown, theme: FakeTheme) => {
+    | ((
+        entry: { readonly data?: unknown },
+        options: unknown,
+        theme: FakeTheme,
+      ) => {
         render(width: number): string[];
       })
     | undefined;
@@ -113,7 +117,10 @@ test("root Mermaid tool results are replaced with a context-light receipt in eve
   assert.deepEqual(replacement, {
     content: [{ type: "text", text: "Visual accepted." }],
   });
-  assert.doesNotMatch(JSON.stringify(replacement), /flowchart|visualization-|Open with|Beautiful Mermaid/);
+  assert.doesNotMatch(
+    JSON.stringify(replacement),
+    /flowchart|visualization-|Open with|Beautiful Mermaid/,
+  );
 });
 
 test("session startup restores visualizations from custom transcript entries", async () => {
