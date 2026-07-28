@@ -1,0 +1,108 @@
+name: Fix unversioned cleanup
+
+on:
+  push:
+    branches:
+      - cleanup/remove-contract-versioning
+
+permissions:
+  contents: write
+
+jobs:
+  rewrite:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: cleanup/remove-contract-versioning
+      - name: Apply cleanup fixes
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          diagnostic = Path("modules/phenix-pi/application/diagnostic-event-bridge.ts")
+          text = diagnostic.read_text().replace("          version: data.version,\n", "")
+          diagnostic.write_text(text)
+
+          checkpoint_test = Path("modules/phenix-pi/tests/workflow-checkpoint.test.ts")
+          text = checkpoint_test.read_text().replace(
+              "  assert.equal(data.version, 1);\n",
+              '''  assert.deepEqual(Object.keys(data).sort(), [
+    "definitionFingerprint",
+    "definitionId",
+    "snapshot",
+    "snapshotFingerprint",
+    "throughSequence",
+  ]);
+''',
+          )
+          checkpoint_test.write_text(text)
+
+          Path("modules/phenix-pi/tests/unversioned-contracts.test.ts").write_text('''import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+const packageRoot = fileURLToPath(new URL("..", import.meta.url));
+const versionedContractId = /\\b(?:request|outcome|tool)\\.[a-z0-9.-]+\\.v\\d+\\b/;
+const versionedTypeName = /\\b[A-Za-z_][A-Za-z0-9_]*V\\d+\\b/;
+
+test("contract identifiers and interface names are unversioned", () => {
+  const violations = sourceFiles(packageRoot).flatMap((file) =>
+    readFileSync(file, "utf8")
+      .split("\\n")
+      .map((text, index) => ({
+        file: path.relative(packageRoot, file),
+        line: index + 1,
+        text,
+      }))
+      .filter(({ text }) => versionedContractId.test(text) || versionedTypeName.test(text)),
+  );
+
+  assert.deepEqual(violations, []);
+});
+
+function sourceFiles(directory: string): readonly string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) return entry.name === "node_modules" ? [] : sourceFiles(target);
+    return entry.isFile() && (entry.name.endsWith(".ts") || entry.name.endsWith(".md"))
+      ? [target]
+      : [];
+  });
+}
+''')
+
+          Path("modules/phenix-pi/tests/workflow-checkpoint-versioning.test.ts").write_text('''import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+const source = readFileSync(new URL("../domain/workflow/checkpoint.ts", import.meta.url), "utf8");
+
+test("workflow checkpoints do not carry a version discriminator", () => {
+  assert.doesNotMatch(source, /readonly version:/);
+  assert.doesNotMatch(source, /version:\\s*\\d+/);
+  assert.doesNotMatch(source, /value\\.version/);
+});
+''')
+
+          workflow_test = Path("modules/phenix-pi/tests/workflow-markdown.test.ts")
+          text = workflow_test.read_text().replace(
+              '''    () =>
+      compileWorkflowMarkdown(stockWorkflowSource("outcome.stock-session-handoff"), bindings),
+''',
+              '''    () => compileWorkflowMarkdown(stockWorkflowSource("outcome.stock-session-handoff"), bindings),
+''',
+          )
+          workflow_test.write_text(text)
+          PY
+          git diff --check
+          if git diff --quiet; then exit 1; fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add modules/phenix-pi/application/diagnostic-event-bridge.ts modules/phenix-pi/tests
+          git commit -m "Fix unversioned contract cleanup"
+          git push origin HEAD:cleanup/remove-contract-versioning
