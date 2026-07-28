@@ -10,6 +10,7 @@ import {
 } from "@earendil-works/pi-tui";
 
 import {
+  createVisualizationArtifact,
   isVisualizationArtifact,
   type VisualizationArtifact,
   VISUALIZATION_ENTRY_TYPE,
@@ -20,6 +21,7 @@ import type { ObservabilityTheme } from "./observability-theme.ts";
 
 export default function visualizationDisplay(pi: ExtensionAPI): void {
   const artifacts = new Map<string, VisualizationArtifact>();
+  let rootSessionId = "root";
 
   pi.registerEntryRenderer<VisualizationArtifact>(
     VISUALIZATION_ENTRY_TYPE,
@@ -61,12 +63,12 @@ export default function visualizationDisplay(pi: ExtensionAPI): void {
   );
 
   pi.events.on(VISUALIZATION_EVENT, (value) => {
-    if (!isVisualizationArtifact(value) || artifacts.has(value.visualizationId)) return;
-    artifacts.set(value.visualizationId, value);
-    pi.appendEntry(VISUALIZATION_ENTRY_TYPE, value);
+    if (!isVisualizationArtifact(value)) return;
+    appendArtifact(pi, artifacts, value);
   });
 
   pi.on("session_start", (_event, ctx) => {
+    rootSessionId = ctx.sessionManager.getSessionId();
     artifacts.clear();
     for (const entry of ctx.sessionManager.getBranch()) {
       if (
@@ -77,6 +79,30 @@ export default function visualizationDisplay(pi: ExtensionAPI): void {
         artifacts.set(entry.data.visualizationId, entry.data);
       }
     }
+  });
+
+  pi.on("tool_result", (event, ctx) => {
+    if (ctx.mode !== "tui" || event.isError || event.toolName !== "phenix_render_mermaid") {
+      return;
+    }
+    const details = recordOf(event.details);
+    const source = details?.source;
+    if (typeof source !== "string") return;
+    const artifact = createVisualizationArtifact({
+      title: "Mermaid diagram",
+      summary: "Visual explanation published by the active design session.",
+      source,
+      sourceSessionId: rootSessionId,
+    });
+    appendArtifact(pi, artifacts, artifact);
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `Published visualization ${artifact.visualizationId}. Open with /visual ${artifact.visualizationId}.`,
+        },
+      ],
+    };
   });
 
   pi.registerCommand("visual", {
@@ -116,6 +142,16 @@ export default function visualizationDisplay(pi: ExtensionAPI): void {
       );
     },
   });
+}
+
+function appendArtifact(
+  pi: ExtensionAPI,
+  artifacts: Map<string, VisualizationArtifact>,
+  artifact: VisualizationArtifact,
+): void {
+  if (artifacts.has(artifact.visualizationId)) return;
+  artifacts.set(artifact.visualizationId, artifact);
+  pi.appendEntry(VISUALIZATION_ENTRY_TYPE, artifact);
 }
 
 function resolveArtifact(
@@ -227,6 +263,12 @@ export class VisualizationView implements Component {
     const clipped = truncateToWidth(line, width, "");
     return clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped)));
   }
+}
+
+function recordOf(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : undefined;
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
