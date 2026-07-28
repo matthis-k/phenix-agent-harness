@@ -19,6 +19,8 @@ import {
 import { renderTerminalMermaid } from "./mermaid-rendering.ts";
 import type { ObservabilityTheme } from "./observability-theme.ts";
 
+const VISUAL_ACCEPTED = "Visual accepted.";
+
 export default function visualizationDisplay(pi: ExtensionAPI): void {
   const artifacts = new Map<string, VisualizationArtifact>();
   let rootSessionId = "root";
@@ -81,10 +83,8 @@ export default function visualizationDisplay(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("tool_result", (event, ctx) => {
-    if (ctx.mode !== "tui" || event.isError || event.toolName !== "phenix_render_mermaid") {
-      return;
-    }
+  pi.on("tool_result", (event) => {
+    if (event.isError || event.toolName !== "phenix_render_mermaid") return;
     const details = recordOf(event.details);
     const source = details?.source;
     if (typeof source !== "string") return;
@@ -96,12 +96,7 @@ export default function visualizationDisplay(pi: ExtensionAPI): void {
     });
     appendArtifact(pi, artifacts, artifact);
     return {
-      content: [
-        {
-          type: "text" as const,
-          text: `Published visualization ${artifact.visualizationId}. Open with /visual ${artifact.visualizationId}.`,
-        },
-      ],
+      content: [{ type: "text" as const, text: VISUAL_ACCEPTED }],
     };
   });
 
