@@ -3,6 +3,7 @@ import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-a
 import { assessRootMutation } from "../../domain/definition/execution-risk.ts";
 import type { ConcreteModelRef } from "../../domain/definition/model.ts";
 import type { SessionProfile } from "../../domain/run/model.ts";
+import { createVisualizationPublisherExtension } from "./visualization-publisher.ts";
 
 const MUTATION_TOOLS = new Set(["edit", "write", "bash", "nix_shell"]);
 
@@ -35,11 +36,18 @@ export function blockSensitiveFreeModelMutation(
   };
 }
 
+/**
+ * Inline extensions for every managed child session. Visualization publishing
+ * is universal; free-tier sessions additionally receive the mutation guard.
+ */
 export function freeModelSessionExtensions(
   model: ConcreteModelRef | boolean,
 ): readonly ExtensionFactory[] {
   const guarded = typeof model === "boolean" ? model : isFreeTierModel(model);
-  return guarded ? [createFreeModelGuardExtension()] : [];
+  return [
+    createVisualizationPublisherExtension(),
+    ...(guarded ? [createFreeModelGuardExtension()] : []),
+  ];
 }
 
 export function isFreeTierModel(model: ConcreteModelRef): boolean {
