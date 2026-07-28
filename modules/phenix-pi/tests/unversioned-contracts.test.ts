@@ -1,25 +1,34 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
-const trackedSources = execFileSync("git", ["grep", "-Il", "", "--", "*.ts", "*.md"], {
-  encoding: "utf8",
-})
-  .trim()
-  .split("\n")
-  .filter(Boolean);
-
+const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const versionedContractId = /\b(?:request|outcome|tool)\.[a-z0-9.-]+\.v\d+\b/;
 const versionedTypeName = /\b[A-Za-z_][A-Za-z0-9_]*V\d+\b/;
 
 test("contract identifiers and interface names are unversioned", () => {
-  const violations = trackedSources.flatMap((file) => {
-    const content = execFileSync("git", ["show", `HEAD:${file}`], { encoding: "utf8" });
-    return content
+  const violations = sourceFiles(packageRoot).flatMap((file) =>
+    readFileSync(file, "utf8")
       .split("\n")
-      .map((line, index) => ({ file, line: index + 1, text: line }))
-      .filter(({ text }) => versionedContractId.test(text) || versionedTypeName.test(text));
-  });
+      .map((text, index) => ({
+        file: path.relative(packageRoot, file),
+        line: index + 1,
+        text,
+      }))
+      .filter(({ text }) => versionedContractId.test(text) || versionedTypeName.test(text)),
+  );
 
   assert.deepEqual(violations, []);
 });
+
+function sourceFiles(directory: string): readonly string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) return entry.name === "node_modules" ? [] : sourceFiles(target);
+    return entry.isFile() && (entry.name.endsWith(".ts") || entry.name.endsWith(".md"))
+      ? [target]
+      : [];
+  });
+}
