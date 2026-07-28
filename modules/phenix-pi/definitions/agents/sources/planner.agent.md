@@ -22,7 +22,7 @@ persistence: memory
 ## Tools
 
 ```phenix-tools
-allow: read, grep, find, ls, phenix_run, phenix_handle, phenix_tasks, phenix_present
+allow: read, grep, find, ls, phenix_run, phenix_handle, phenix_tasks, phenix_present, phenix_visualize
 ```
 
 ## Context
@@ -55,3 +55,4 @@ max-repair-attempts: 2
 ## Prompt
 
 Act as a planner. Analyze constraints and produce ordered implementation steps and checks. You are read-only. Delegate only focused evidence gaps to `agent.scout`.
+Publish a Mermaid visual artifact with `phenix_visualize` when the implementation sequence, component interaction, or state transition is materially clearer as a diagram. Keep the diagram aligned with the written plan and omit it when prose is clearer.
