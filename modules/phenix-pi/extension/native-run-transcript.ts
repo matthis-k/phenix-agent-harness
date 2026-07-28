@@ -39,11 +39,22 @@ export async function loadNativeRunTranscript(
   if (!sessionFile) {
     return {
       sessionId: node.run.pi?.sessionId,
-      unavailable: "This run has no persisted Pi session transcript.",
+      unavailable:
+        "This run has no Pi transcript reference; it may predate transcript persistence.",
     };
   }
 
-  const source = await readFile(sessionFile, "utf8");
+  let source: string;
+  try {
+    source = await readFile(sessionFile, "utf8");
+  } catch (error) {
+    if (!isMissingFileError(error)) throw error;
+    return {
+      sessionId: node.run.pi?.sessionId,
+      sessionFile,
+      unavailable: "Pi has allocated this transcript but has not flushed its first response yet.",
+    };
+  }
   const fileEntries = parseSessionEntries(source);
   migrateSessionEntries(fileEntries);
   const header = fileEntries.find((entry) => entry.type === "session");
@@ -210,6 +221,12 @@ function userMessageText(message: Extract<AgentMessage, { role: "user" }>): stri
     )
     .map((content) => content.text)
     .join("");
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return (
+    error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT"
+  );
 }
 
 export function transcriptFileEntries(source: string): readonly FileEntry[] {
