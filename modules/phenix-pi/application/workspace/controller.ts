@@ -1,11 +1,11 @@
 import type { RunId } from "../../domain/shared.ts";
+import type { WorkspaceError } from "../../domain/workspace/errors.ts";
 import type {
   WorkspaceEffect,
   WorkspaceEvent,
   WorkspaceItemIndex,
   WorkspaceSnapshotEnvelope,
 } from "../../domain/workspace/events.ts";
-import type { WorkspaceError } from "../../domain/workspace/errors.ts";
 import type { EffectId, WorkspaceState } from "../../domain/workspace/state.ts";
 import type {
   ExternalWorkspaceEffect,
