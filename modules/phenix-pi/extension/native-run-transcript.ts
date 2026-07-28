@@ -39,7 +39,8 @@ export async function loadNativeRunTranscript(
   if (!sessionFile) {
     return {
       sessionId: node.run.pi?.sessionId,
-      unavailable: "This run has no Pi transcript reference; it may predate transcript persistence.",
+      unavailable:
+        "This run has no Pi transcript reference; it may predate transcript persistence.",
     };
   }
 
@@ -224,9 +225,7 @@ function userMessageText(message: Extract<AgentMessage, { role: "user" }>): stri
 
 function isMissingFileError(error: unknown): boolean {
   return (
-    error instanceof Error &&
-    "code" in error &&
-    (error as NodeJS.ErrnoException).code === "ENOENT"
+    error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT"
   );
 }
 
