@@ -13,6 +13,7 @@ export type ExternalWorkspaceEffect = Exclude<
   { readonly type: "snapshot.load" | "transcript.load" | "diagnostic.record" }
 >;
 
+/** Aborted operations must not publish a successful or failed completion event. */
 export interface WorkspaceEffectRuntime<TSnapshot, TTranscript> {
   loadSnapshot(signal: AbortSignal): Promise<WorkspaceSnapshotEnvelope<TSnapshot>>;
   loadTranscript(
