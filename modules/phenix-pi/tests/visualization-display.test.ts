@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import {
   createVisualizationArtifact,
@@ -27,9 +27,7 @@ function artifact() {
 
 test("published visualizations become durable Beautiful Mermaid transcript entries", () => {
   let eventHandler: ((value: unknown) => void) | undefined;
-  let sessionStart:
-    | ((event: unknown, context: Pick<ExtensionContext, "sessionManager">) => void)
-    | undefined;
+  let sessionStart: ((event: unknown, context: unknown) => void) | undefined;
   let renderer:
     | ((entry: { readonly data?: unknown }, options: unknown, theme: FakeTheme) => {
         render(width: number): string[];
@@ -48,7 +46,7 @@ test("published visualizations become durable Beautiful Mermaid transcript entri
         eventHandler = candidate;
       },
     },
-    on(name: string, candidate: typeof sessionStart) {
+    on(name: string, candidate: (event: unknown, context: unknown) => void) {
       if (name === "session_start") sessionStart = candidate;
     },
     registerCommand() {},
@@ -62,14 +60,7 @@ test("published visualizations become durable Beautiful Mermaid transcript entri
   assert.ok(eventHandler);
   assert.ok(sessionStart);
 
-  sessionStart(
-    {},
-    {
-      sessionManager: {
-        getBranch: () => [],
-      },
-    } as unknown as Pick<ExtensionContext, "sessionManager">,
-  );
+  sessionStart({}, sessionContext([]));
   const visual = artifact();
   eventHandler(visual);
   eventHandler(visual);
@@ -82,19 +73,50 @@ test("published visualizations become durable Beautiful Mermaid transcript entri
   assert.match(rendered, /Open scrollable view: \/visual visualization-/);
 });
 
-test("session startup restores visualizations from custom transcript entries", () => {
-  let sessionStart:
-    | ((event: unknown, context: Pick<ExtensionContext, "sessionManager">) => void)
-    | undefined;
-  let command:
-    | ((args: string, context: Pick<ExtensionContext, "mode" | "ui">) => Promise<void>)
-    | undefined;
+test("root Mermaid tool results use the same persisted artifact path", () => {
+  let sessionStart: ((event: unknown, context: unknown) => void) | undefined;
+  let toolResult: ((event: unknown, context: unknown) => unknown) | undefined;
+  const appended: Array<{ readonly type: string; readonly data: unknown }> = [];
+  const pi = {
+    registerEntryRenderer() {},
+    events: { on() {} },
+    on(name: string, candidate: (event: unknown, context: unknown) => unknown) {
+      if (name === "session_start") sessionStart = candidate;
+      if (name === "tool_result") toolResult = candidate;
+    },
+    registerCommand() {},
+    appendEntry(type: string, data: unknown) {
+      appended.push({ type, data });
+    },
+  } as unknown as ExtensionAPI;
+
+  visualizationDisplay(pi);
+  assert.ok(sessionStart);
+  assert.ok(toolResult);
+  sessionStart({}, sessionContext([]));
+  const replacement = toolResult(
+    {
+      toolName: "phenix_render_mermaid",
+      isError: false,
+      details: { source: "flowchart TD\n  A --> B" },
+    },
+    { mode: "tui" },
+  ) as { readonly content?: readonly { readonly text?: string }[] };
+
+  assert.equal(appended.length, 1);
+  assert.equal(appended[0]?.type, VISUALIZATION_ENTRY_TYPE);
+  assert.match(replacement.content?.[0]?.text ?? "", /Published visualization/);
+});
+
+test("session startup restores visualizations from custom transcript entries", async () => {
+  let sessionStart: ((event: unknown, context: unknown) => void) | undefined;
+  let command: ((args: string, context: unknown) => Promise<void>) | undefined;
   const visual = artifact();
   let opened = false;
   const pi = {
     registerEntryRenderer() {},
     events: { on() {} },
-    on(name: string, candidate: typeof sessionStart) {
+    on(name: string, candidate: (event: unknown, context: unknown) => void) {
       if (name === "session_start") sessionStart = candidate;
     },
     registerCommand(name: string, input: { handler: typeof command }) {
@@ -109,17 +131,13 @@ test("session startup restores visualizations from custom transcript entries", (
   assert.ok(command);
   sessionStart(
     {},
-    {
-      sessionManager: {
-        getBranch: () => [
-          {
-            type: "custom",
-            customType: VISUALIZATION_ENTRY_TYPE,
-            data: visual,
-          },
-        ],
+    sessionContext([
+      {
+        type: "custom",
+        customType: VISUALIZATION_ENTRY_TYPE,
+        data: visual,
       },
-    } as unknown as Pick<ExtensionContext, "sessionManager">,
+    ]),
   );
 
   await command(visual.visualizationId.slice(-8), {
@@ -131,7 +149,7 @@ test("session startup restores visualizations from custom transcript entries", (
       },
       notify() {},
     },
-  } as unknown as Pick<ExtensionContext, "mode" | "ui">);
+  });
   assert.equal(opened, true);
 });
 
@@ -167,3 +185,12 @@ test("the full-screen visualization view supports two-dimensional scrolling", ()
   view.handleInput("q");
   assert.equal(closed, true);
 });
+
+function sessionContext(entries: readonly unknown[]): unknown {
+  return {
+    sessionManager: {
+      getSessionId: () => "root-session",
+      getBranch: () => entries,
+    },
+  };
+}
