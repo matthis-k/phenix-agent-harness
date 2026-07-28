@@ -73,14 +73,14 @@ test("published visualizations become durable Beautiful Mermaid transcript entri
   assert.match(rendered, /Open scrollable view: \/visual visualization-/);
 });
 
-test("root Mermaid tool results use the same persisted artifact path", () => {
+test("root Mermaid tool results are replaced with a context-light receipt in every mode", () => {
   let sessionStart: ((event: unknown, context: unknown) => void) | undefined;
-  let toolResult: ((event: unknown, context: unknown) => unknown) | undefined;
+  let toolResult: ((event: unknown, context?: unknown) => unknown) | undefined;
   const appended: Array<{ readonly type: string; readonly data: unknown }> = [];
   const pi = {
     registerEntryRenderer() {},
     events: { on() {} },
-    on(name: string, candidate: (event: unknown, context: unknown) => unknown) {
+    on(name: string, candidate: (event: unknown, context?: unknown) => unknown) {
       if (name === "session_start") sessionStart = candidate;
       if (name === "tool_result") toolResult = candidate;
     },
@@ -94,18 +94,18 @@ test("root Mermaid tool results use the same persisted artifact path", () => {
   assert.ok(sessionStart);
   assert.ok(toolResult);
   sessionStart({}, sessionContext([]));
-  const replacement = toolResult(
-    {
-      toolName: "phenix_render_mermaid",
-      isError: false,
-      details: { source: "flowchart TD\n  A --> B" },
-    },
-    { mode: "tui" },
-  ) as { readonly content?: readonly { readonly text?: string }[] };
+  const replacement = toolResult({
+    toolName: "phenix_render_mermaid",
+    isError: false,
+    details: { source: "flowchart TD\n  A --> B" },
+  }) as { readonly content?: readonly { readonly text?: string }[] };
 
   assert.equal(appended.length, 1);
   assert.equal(appended[0]?.type, VISUALIZATION_ENTRY_TYPE);
-  assert.match(replacement.content?.[0]?.text ?? "", /Published visualization/);
+  assert.deepEqual(replacement, {
+    content: [{ type: "text", text: "Visual accepted." }],
+  });
+  assert.doesNotMatch(JSON.stringify(replacement), /flowchart|visualization-|Open with|Beautiful Mermaid/);
 });
 
 test("session startup restores visualizations from custom transcript entries", async () => {
