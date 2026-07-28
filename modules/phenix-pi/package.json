@@ -13,7 +13,8 @@
   "pi": {
     "extensions": [
       "./extension/root-extension.ts",
-      "./extension/result-display.ts"
+      "./extension/result-display.ts",
+      "./extension/visualization-display.ts"
     ]
   },
   "peerDependencies": {
