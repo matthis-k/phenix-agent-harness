@@ -235,7 +235,6 @@ function describe(event: DomainEvent): Description {
         scope: "workflow.checkpoint.saved",
         message: "Workflow replay checkpoint saved",
         fields: {
-          version: data.version,
           definitionId: data.definitionId,
           definitionFingerprint: data.definitionFingerprint,
           throughSequence: data.throughSequence,
