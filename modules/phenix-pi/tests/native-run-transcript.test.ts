@@ -35,11 +35,27 @@ test("loads a Pi session read-only and composes native message components", asyn
   }
 });
 
-test("reports runs without persisted sessions without opening a file", async () => {
+test("reports an allocated transcript that Pi has not flushed yet", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "phenix-transcript-pending-"));
+  const sessionFile = join(directory, "pending.jsonl");
+
+  try {
+    const transcript = await loadNativeRunTranscript(fixtureNode(sessionFile), fakeTui());
+
+    assert.equal(transcript.sessionId, "session-child");
+    assert.equal(transcript.sessionFile, sessionFile);
+    assert.equal(transcript.component, undefined);
+    assert.match(transcript.unavailable ?? "", /not flushed its first response/i);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("reports legacy runs without transcript references without opening a file", async () => {
   const transcript = await loadNativeRunTranscript(fixtureNode(undefined), fakeTui());
 
   assert.equal(transcript.component, undefined);
-  assert.match(transcript.unavailable ?? "", /no persisted Pi session/i);
+  assert.match(transcript.unavailable ?? "", /no Pi transcript reference/i);
 });
 
 function fixtureNode(sessionFile: string | undefined): RunTreeNode {
