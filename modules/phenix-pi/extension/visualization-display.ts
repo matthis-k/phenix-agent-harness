@@ -196,6 +196,8 @@ export class VisualizationView implements Component {
     }
   }
 
+  invalidate(): void {}
+
   handleInput(data: string): void {
     if (matchesKey(data, "escape") || data === "q" || data === "Q") {
       this.onClose();
