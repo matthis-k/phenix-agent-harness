@@ -13,6 +13,7 @@
   "pi": {
     "extensions": [
       "./extension/root-extension.ts",
+      "./extension/default-workspace-extension.ts",
       "./extension/result-display.ts",
       "./extension/visualization-display.ts"
     ]

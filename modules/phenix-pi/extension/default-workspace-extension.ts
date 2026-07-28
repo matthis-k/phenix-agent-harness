@@ -1,0 +1,223 @@
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import {
+  buildContextEntries,
+  type ExtensionAPI,
+  type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import type { SlashCommand } from "@earendil-works/pi-tui";
+
+import type { RunTreeNode } from "../application/interfaces.ts";
+import { loadNativeRunTranscript, renderNativeTranscript } from "./native-run-transcript.ts";
+import { loadPhenixUiSnapshot, PhenixUi, type PhenixUiTarget } from "./phenix-ui.ts";
+import {
+  PhenixWorkspace,
+  type PhenixWorkspaceAction,
+  type PhenixWorkspaceSnapshot,
+} from "./phenix-workspace.ts";
+import {
+  currentWorkspaceRuntime,
+  subscribeWorkspaceRuntime,
+  type WorkspaceRuntimeBinding,
+} from "./workspace-runtime-binding.ts";
+
+export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
+  let context: ExtensionContext | undefined;
+  let binding: WorkspaceRuntimeBinding | undefined;
+  let workspace: PhenixWorkspace | undefined;
+  let finish: ((action: PhenixWorkspaceAction) => void) | undefined;
+  let opening = false;
+  let unsubscribeBinding: (() => void) | undefined;
+
+  const requestOpen = (): void => {
+    if (opening || workspace || context?.mode !== "tui" || !binding) return;
+    void openWorkspaceLoop();
+  };
+
+  pi.registerCommand("workspace", {
+    description: "Open the default Phenix transcript and status workspace",
+    handler: async (_args, ctx) => {
+      context = ctx;
+      binding = currentWorkspaceRuntime();
+      if (!binding) {
+        ctx.ui.notify("Phenix runtime is not initialized.", "warning");
+        return;
+      }
+      requestOpen();
+    },
+  });
+
+  pi.on("session_start", (_event, ctx) => {
+    context = ctx;
+    unsubscribeBinding?.();
+    unsubscribeBinding = subscribeWorkspaceRuntime((next) => {
+      binding = next;
+      if (!next) {
+        finish?.({ kind: "close" });
+        return;
+      }
+      requestOpen();
+    });
+  });
+
+  pi.on("message_update", (event) => {
+    if (event.message.role === "assistant") {
+      workspace?.setStreamingMessage(event.message as Extract<AgentMessage, { role: "assistant" }>);
+    }
+  });
+
+  pi.on("message_end", () => {
+    workspace?.setStreamingMessage(undefined);
+    workspace?.refreshRootTranscript();
+  });
+
+  pi.on("session_shutdown", () => {
+    unsubscribeBinding?.();
+    unsubscribeBinding = undefined;
+    finish?.({ kind: "close" });
+    workspace = undefined;
+    context = undefined;
+    binding = undefined;
+  });
+
+  async function openWorkspaceLoop(): Promise<void> {
+    const ctx = context;
+    const active = binding;
+    if (!ctx || !active || ctx.mode !== "tui" || opening || workspace) return;
+    opening = true;
+    try {
+      let reopen = true;
+      while (reopen && context === ctx && binding?.rootRunId === active.rootRunId) {
+        const action = await openWorkspace(pi, ctx, active, (instance, done) => {
+          workspace = instance;
+          finish = done;
+        });
+        workspace = undefined;
+        finish = undefined;
+        if (action.kind === "inspector") {
+          await openInspector(ctx, active, action.target);
+          continue;
+        }
+        if (action.kind === "native") {
+          ctx.ui.setEditorText(action.text);
+        }
+        reopen = false;
+      }
+    } finally {
+      opening = false;
+    }
+  }
+}
+
+async function openWorkspace(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  binding: WorkspaceRuntimeBinding,
+  ready: (workspace: PhenixWorkspace, done: (action: PhenixWorkspaceAction) => void) => void,
+): Promise<PhenixWorkspaceAction> {
+  return ctx.ui.custom(
+    async (tui, theme, keybindings, done) => {
+      const load = () => loadWorkspaceSnapshot(ctx, binding, tui);
+      const snapshot = await load();
+      const commands: SlashCommand[] = pi.getCommands().map((command) => ({
+        name: command.name,
+        description: command.description,
+      }));
+      const instance = new PhenixWorkspace({
+        tui,
+        theme,
+        keybindings,
+        cwd: ctx.cwd,
+        commands,
+        snapshot,
+        load,
+        loadTranscript: (node) => loadNativeRunTranscript(node, tui),
+        subscribe: (listener) => {
+          const unsubscribeEvents = binding.runtime.events.subscribe(listener);
+          const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
+          return () => {
+            unsubscribeEvents();
+            unsubscribeDiagnostics();
+          };
+        },
+        submit: async (text) => {
+          await Promise.resolve(
+            pi.sendUserMessage(text, ctx.isIdle() ? undefined : { deliverAs: "steer" }),
+          );
+        },
+        onAction: done,
+      });
+      ready(instance, done);
+      return instance;
+    },
+    {
+      overlay: true,
+      overlayOptions: {
+        width: "100%",
+        maxHeight: "100%",
+        anchor: "top-left",
+        margin: 0,
+      },
+    },
+  );
+}
+
+async function loadWorkspaceSnapshot(
+  ctx: ExtensionContext,
+  binding: WorkspaceRuntimeBinding,
+  tui: Parameters<typeof renderNativeTranscript>[1],
+): Promise<PhenixWorkspaceSnapshot> {
+  const [ui, tasks] = await Promise.all([
+    loadPhenixUiSnapshot(binding.runtime, binding.rootRunId, binding.integrations),
+    binding.runtime.tasks.tree(binding.rootRunId),
+  ]);
+  const entries = buildContextEntries([...ctx.sessionManager.getBranch()]);
+  return {
+    ui,
+    tasks,
+    rootTranscript: {
+      component: renderNativeTranscript(entries, tui, ctx.cwd),
+      sessionId: ctx.sessionManager.getSessionId(),
+      ...(ctx.sessionManager.getSessionFile()
+        ? { sessionFile: ctx.sessionManager.getSessionFile() }
+        : {}),
+    },
+  };
+}
+
+async function openInspector(
+  ctx: ExtensionContext,
+  binding: WorkspaceRuntimeBinding,
+  initial: PhenixUiTarget,
+): Promise<void> {
+  const load = () => loadPhenixUiSnapshot(binding.runtime, binding.rootRunId, binding.integrations);
+  const snapshot = await load();
+  await ctx.ui.custom(
+    (tui, theme, _keybindings, done) =>
+      new PhenixUi({
+        tui,
+        theme,
+        initial,
+        snapshot,
+        load,
+        loadTranscript: (node: RunTreeNode) => loadNativeRunTranscript(node, tui),
+        subscribe: (listener) => {
+          const unsubscribeEvents = binding.runtime.events.subscribe(listener);
+          const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
+          return () => {
+            unsubscribeEvents();
+            unsubscribeDiagnostics();
+          };
+        },
+        onClose: () => done(undefined),
+      }),
+    {
+      overlay: true,
+      overlayOptions: {
+        width: "100%",
+        maxHeight: "100%",
+        anchor: "top-left",
+        margin: 0,
+      },
+    },
+  );
+}

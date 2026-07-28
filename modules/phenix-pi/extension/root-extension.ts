@@ -53,6 +53,7 @@ import {
   parsePhenixUiTarget,
 } from "./phenix-ui.ts";
 import { RunMonitor } from "./run-monitor.ts";
+import { clearWorkspaceRuntime, publishWorkspaceRuntime } from "./workspace-runtime-binding.ts";
 
 const ROOT_BINDING_ENTRY = "phenix:root-binding";
 const STATUS_KEY = "phenix";
@@ -187,6 +188,11 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
     await applyAgentTools(pi, ctx, (await currentRuntime.profiles.current(currentRoot)).agent);
     await updateStatus(ctx, currentRuntime, currentRoot);
     appendBinding(pi, currentRuntime, currentRoot, sessionId);
+    publishWorkspaceRuntime({
+      runtime: currentRuntime,
+      rootRunId: currentRoot,
+      integrations: summarizeIntegrations(integrationStatuses),
+    });
   });
 
   pi.on("before_agent_start", async (event) => {
@@ -233,6 +239,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
   pi.on("session_shutdown", async (_event, ctx) => {
     const currentRuntime = runtime;
     const currentRoot = rootRunId;
+    if (currentRoot) clearWorkspaceRuntime(currentRoot);
     runtime = undefined;
     rootRunId = undefined;
     modelRegistry = undefined;
