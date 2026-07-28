@@ -1,12 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  reconcileSelection,
-  reduceWorkspace,
-} from "../application/workspace/reducer.ts";
+import { reconcileSelection, reduceWorkspace } from "../application/workspace/reducer.ts";
 import { runId } from "../domain/shared.ts";
 import type { WorkspaceItemIndex, WorkspaceSnapshotEnvelope } from "../domain/workspace/events.ts";
-import type { EffectId, PaneId, WorkspaceState } from "../domain/workspace/state.ts";
+import type { EffectId, PaneId } from "../domain/workspace/state.ts";
 import { createInitialWorkspaceState } from "../domain/workspace/state.ts";
 
 const effectId = (value: string): EffectId => value as EffectId;
