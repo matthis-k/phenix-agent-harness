@@ -1,17 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-
-import { runId } from "../domain/shared.ts";
-import type {
-  WorkspaceItemIndex,
-  WorkspaceSnapshotEnvelope,
-} from "../domain/workspace/events.ts";
-import type { EffectId, PaneId, WorkspaceState } from "../domain/workspace/state.ts";
-import { createInitialWorkspaceState } from "../domain/workspace/state.ts";
 import {
   reconcileSelection,
   reduceWorkspace,
 } from "../application/workspace/reducer.ts";
+import { runId } from "../domain/shared.ts";
+import type { WorkspaceItemIndex, WorkspaceSnapshotEnvelope } from "../domain/workspace/events.ts";
+import type { EffectId, PaneId, WorkspaceState } from "../domain/workspace/state.ts";
+import { createInitialWorkspaceState } from "../domain/workspace/state.ts";
 
 const effectId = (value: string): EffectId => value as EffectId;
 const PANES: readonly PaneId[] = ["transcript", "editor", "runs", "tasks", "files", "facts"];
@@ -221,5 +217,7 @@ function snapshot(
 }
 
 function itemIndex(items: Partial<WorkspaceItemIndex> = {}): WorkspaceItemIndex {
-  return Object.fromEntries(PANES.map((paneId) => [paneId, items[paneId] ?? []])) as WorkspaceItemIndex;
+  return Object.fromEntries(
+    PANES.map((paneId) => [paneId, items[paneId] ?? []]),
+  ) as WorkspaceItemIndex;
 }

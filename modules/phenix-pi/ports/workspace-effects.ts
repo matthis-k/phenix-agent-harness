@@ -1,9 +1,6 @@
 import type { RunId } from "../domain/shared.ts";
-import type {
-  WorkspaceEffect,
-  WorkspaceSnapshotEnvelope,
-} from "../domain/workspace/events.ts";
 import type { WorkspaceError } from "../domain/workspace/errors.ts";
+import type { WorkspaceEffect, WorkspaceSnapshotEnvelope } from "../domain/workspace/events.ts";
 import type { TranscriptHandle } from "../domain/workspace/state.ts";
 
 export interface LoadedWorkspaceTranscript<TTranscript> {

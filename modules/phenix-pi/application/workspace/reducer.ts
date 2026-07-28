@@ -1,10 +1,10 @@
 import type { RunId } from "../../domain/shared.ts";
+import type { WorkspaceError } from "../../domain/workspace/errors.ts";
 import type {
   WorkspaceEffect,
   WorkspaceEvent,
   WorkspaceItemIndex,
 } from "../../domain/workspace/events.ts";
-import type { WorkspaceError } from "../../domain/workspace/errors.ts";
 import type {
   EffectId,
   PaneId,
@@ -84,10 +84,9 @@ function receiveSnapshot<TSnapshot>(
 
   const pendingEffects = withoutEffect(state.pendingEffects, event.requestId);
   if (event.snapshot.revision < state.snapshotRevision) {
-    return commit(
-      { ...state, pendingEffects },
-      [diagnostic(staleError(event.requestId, "Snapshot completion is older than current state"))],
-    );
+    return commit({ ...state, pendingEffects }, [
+      diagnostic(staleError(event.requestId, "Snapshot completion is older than current state")),
+    ]);
   }
 
   const panes = reconcilePanes(state.panes, event.previousItemIds, event.snapshot.itemIds);
@@ -172,7 +171,10 @@ function selectEdge(
 
 function setScroll(state: WorkspaceState, paneId: PaneId, scroll: ScrollState): WorkspaceUpdate {
   if (scroll.mode === "fixed" && (!Number.isInteger(scroll.offset) || scroll.offset < 0)) {
-    return withDiagnostic(state, invalidInput("Fixed scroll offsets must be non-negative integers"));
+    return withDiagnostic(
+      state,
+      invalidInput("Fixed scroll offsets must be non-negative integers"),
+    );
   }
   const pane = { ...state.panes[paneId], scroll };
   return update(state, {
@@ -298,10 +300,9 @@ function failEffect(
   error: WorkspaceError,
 ): WorkspaceUpdate {
   if (!state.pendingEffects.has(requestId)) return staleEffect(state, requestId);
-  return commit(
-    { ...state, pendingEffects: withoutEffect(state.pendingEffects, requestId) },
-    [diagnostic(error)],
-  );
+  return commit({ ...state, pendingEffects: withoutEffect(state.pendingEffects, requestId) }, [
+    diagnostic(error),
+  ]);
 }
 
 function requestEffect(
@@ -372,7 +373,9 @@ function clearSelection(state: WorkspaceState, paneId: PaneId): WorkspaceUpdate 
   }));
 }
 
-function selectedProperty(selectedItemId: string | undefined): { readonly selectedItemId?: string } {
+function selectedProperty(selectedItemId: string | undefined): {
+  readonly selectedItemId?: string;
+} {
   return selectedItemId ? { selectedItemId } : {};
 }
 

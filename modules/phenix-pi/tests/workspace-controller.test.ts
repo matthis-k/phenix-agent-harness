@@ -1,14 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-
-import { runId, type RunId } from "../domain/shared.ts";
-import type {
-  WorkspaceItemIndex,
-  WorkspaceSnapshotEnvelope,
-} from "../domain/workspace/events.ts";
-import type { WorkspaceError } from "../domain/workspace/errors.ts";
-import { createInitialWorkspaceState } from "../domain/workspace/state.ts";
 import { WorkspaceController } from "../application/workspace/controller.ts";
+import { type RunId, runId } from "../domain/shared.ts";
+import type { WorkspaceError } from "../domain/workspace/errors.ts";
+import type { WorkspaceItemIndex, WorkspaceSnapshotEnvelope } from "../domain/workspace/events.ts";
+import { createInitialWorkspaceState } from "../domain/workspace/state.ts";
 import type {
   LoadedWorkspaceTranscript,
   WorkspaceEffectRuntime,
@@ -208,7 +204,9 @@ function snapshot(
 }
 
 function itemIndex(items: Partial<WorkspaceItemIndex> = {}): WorkspaceItemIndex {
-  return Object.fromEntries(PANES.map((paneId) => [paneId, items[paneId] ?? []])) as WorkspaceItemIndex;
+  return Object.fromEntries(
+    PANES.map((paneId) => [paneId, items[paneId] ?? []]),
+  ) as WorkspaceItemIndex;
 }
 
 async function settle(): Promise<void> {
