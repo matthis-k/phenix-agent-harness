@@ -112,11 +112,10 @@ test("generic structured content derives heading and list depth", () => {
   assert.match(markdown, /^# Report/m);
   assert.match(markdown, /^## Parent/m);
   assert.match(markdown, /^### Child/m);
-  assert.match(markdown, /^0\. First/m);
-  assert.match(markdown, /^0\. Second/m);
+  assert.match(markdown, /^1\. First/m);
+  assert.match(markdown, /^2\. Second/m);
   assert.match(markdown, /^ {2}- Nested/m);
-  assert.doesNotMatch(markdown, /^1\./m);
-  assert.doesNotMatch(markdown, /^2\./m);
+  assert.doesNotMatch(markdown, /^0\./m);
 });
 
 test("a structured document can use the generic transform directly", () => {
