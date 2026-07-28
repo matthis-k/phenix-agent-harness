@@ -1,0 +1,30 @@
+name: Format workspace state machine
+
+on:
+  push:
+    branches: [migration/workspace-state-machine]
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with: { fetch-depth: 0 }
+      - name: Apply canonical source formatting
+        run: python .github/format-workspace-state-machine.py
+      - name: Remove one-shot files
+        run: rm .github/format-workspace-state-machine.py .github/workflows/format-workspace-state-machine.yml
+      - name: Validate patch
+        run: git diff --check
+      - name: Commit formatted source
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Format workspace state machine"
+          git push origin HEAD:migration/workspace-state-machine
