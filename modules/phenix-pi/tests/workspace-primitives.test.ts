@@ -112,6 +112,7 @@ test("sidebar allocation never exceeds the available rows", () => {
       nextStart += frame.height;
       if (frame.hidden) assert.equal(frame.height, 0);
     }
+    assert.ok(nextStart <= height);
   }
 });
 
