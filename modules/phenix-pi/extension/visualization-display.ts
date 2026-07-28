@@ -20,6 +20,7 @@ import { renderTerminalMermaid } from "./mermaid-rendering.ts";
 import type { ObservabilityTheme } from "./observability-theme.ts";
 
 const VISUAL_ACCEPTED = "Visual accepted.";
+const VISUALIZATION_ID_PREFIX = "visualization-";
 
 export default function visualizationDisplay(pi: ExtensionAPI): void {
   const artifacts = new Map<string, VisualizationArtifact>();
@@ -102,6 +103,7 @@ export default function visualizationDisplay(pi: ExtensionAPI): void {
 
   pi.registerCommand("visual", {
     description: "Open a published Mermaid artifact; usage: /visual [visualization-id]",
+    getArgumentCompletions: (prefix) => completeVisualizationIds(artifacts, prefix),
     handler: async (args, ctx) => {
       if (ctx.mode !== "tui") {
         ctx.ui.notify("/visual requires interactive TUI mode.", "warning");
@@ -137,6 +139,27 @@ export default function visualizationDisplay(pi: ExtensionAPI): void {
       );
     },
   });
+}
+
+export function completeVisualizationIds(
+  artifacts: ReadonlyMap<string, VisualizationArtifact>,
+  prefix: string,
+): readonly { readonly value: string; readonly label: string }[] | null {
+  const normalized = prefix.trimStart().toLowerCase();
+  if (/\s/.test(normalized)) return null;
+  const matches = [...artifacts.values()].reverse().filter((artifact) => {
+    const id = artifact.visualizationId.toLowerCase();
+    const shortId = id.startsWith(VISUALIZATION_ID_PREFIX)
+      ? id.slice(VISUALIZATION_ID_PREFIX.length)
+      : id;
+    return !normalized || id.startsWith(normalized) || shortId.startsWith(normalized);
+  });
+  return matches.length > 0
+    ? matches.map((artifact) => ({
+        value: artifact.visualizationId,
+        label: `${artifact.visualizationId} — ${artifact.title}`,
+      }))
+    : null;
 }
 
 function appendArtifact(
