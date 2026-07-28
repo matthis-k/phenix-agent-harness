@@ -32,13 +32,7 @@ test("ordered lists emit explicit sibling numbers and reset for nested lists", (
 
   assert.equal(
     markdown,
-    [
-      "1. First",
-      "2. Second",
-      "  1. Nested first",
-      "  2. Nested second",
-      "3. Third",
-    ].join("\n"),
+    ["1. First", "2. Second", "  1. Nested first", "  2. Nested second", "3. Third"].join("\n"),
   );
   assert.doesNotMatch(markdown, /^0\./m);
 });
