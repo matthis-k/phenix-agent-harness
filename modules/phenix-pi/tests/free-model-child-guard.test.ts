@@ -20,14 +20,14 @@ type ToolCallHandler = (
   context?: unknown,
 ) => Promise<ToolCallBlock | undefined> | ToolCallBlock | undefined;
 
-test("free-tier concrete models receive an inline child-session guard", () => {
+test("managed child sessions receive visualization and free models also receive a guard", () => {
   const freeModel = {
     kind: "concrete" as const,
     provider: "opencode",
     model: "deepseek-v4-flash-free",
   };
   assert.equal(isFreeTierModel(freeModel), true);
-  assert.equal(freeModelSessionExtensions(freeModel).length, 1);
+  assert.equal(freeModelSessionExtensions(freeModel).length, 2);
   assert.equal(
     isFreeTierModel({
       kind: "concrete",
@@ -42,7 +42,7 @@ test("free-tier concrete models receive an inline child-session guard", () => {
       provider: "opencode-go",
       model: "deepseek-v4-flash",
     }).length,
-    0,
+    1,
   );
 });
 
@@ -53,7 +53,7 @@ test("the inline child guard blocks sensitive bash and nix-shell commands", asyn
       if (event === "tool_call") handler = candidate;
     },
   } as unknown as ExtensionAPI;
-  const [factory] = freeModelSessionExtensions({
+  const [, factory] = freeModelSessionExtensions({
     kind: "concrete",
     provider: "opencode",
     model: "mimo-v2.5-free",

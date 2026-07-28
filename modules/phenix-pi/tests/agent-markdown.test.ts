@@ -80,6 +80,17 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
   assert.equal(scout.promptMode, undefined);
   assert.match(scout.prompt.render(), /insufficient_permissions/);
 
+  const planner = byId.get("agent.planner");
+  const architect = byId.get("agent.architect");
+  assert.ok(planner);
+  assert.ok(architect);
+  assert.ok(planner.tools.allow.includes("phenix_visualize"));
+  assert.ok(architect.tools.allow.includes("phenix_visualize"));
+  assert.match(planner.prompt.render(), /mark that section for UI rendering/);
+  assert.match(architect.prompt.render(), /mark that section for UI rendering/);
+  assert.match(planner.prompt.render(), /Do not include the Mermaid source/);
+  assert.match(architect.prompt.render(), /Do not include the Mermaid source/);
+
   const implementer = byId.get("agent.implementer");
   assert.ok(implementer);
   assert.ok(implementer.tools.allow.includes("edit"));
