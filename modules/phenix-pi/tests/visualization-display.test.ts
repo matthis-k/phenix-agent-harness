@@ -14,6 +14,14 @@ class FakeTheme {
   fg(_color: string, value: string): string {
     return value;
   }
+
+  getFgAnsi(_color: string): string {
+    return "\x1b[38;2;205;214;244m";
+  }
+
+  getColorMode(): "truecolor" {
+    return "truecolor";
+  }
 }
 
 function artifact() {
