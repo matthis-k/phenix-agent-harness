@@ -3,8 +3,8 @@
 ```phenix-workflow
 id: workflow.qa-fix
 description: Run QA, invoke the implementation workflow only for actionable findings, and return one final report.
-input: request.objective.v1
-output: outcome.final-report.v1
+input: request.objective
+output: outcome.final-report
 entry: qa
 timeout-ms: 4800000
 max-node-runs: 12
@@ -30,8 +30,8 @@ kind: invoke
 title: Run the complete QA workflow
 run: workflow.qa
 input: input.identity
-input-schema: request.objective.v1
-output-schema: outcome.qa-report.v1
+input-schema: request.objective
+output-schema: outcome.qa-report
 wait: await
 ```
 
@@ -49,8 +49,8 @@ kind: invoke
 title: Repair actionable QA findings
 run: workflow.implement
 input: qa-fix.implement.input
-input-schema: request.implementation.v1
-output-schema: outcome.implementation-result.v1
+input-schema: request.implementation
+output-schema: outcome.implementation-result
 wait: await
 ```
 
@@ -59,7 +59,7 @@ wait: await
 ```phenix-state
 kind: return
 output: qa-fix.output
-output-schema: outcome.final-report.v1
+output-schema: outcome.final-report
 ```
 
 ## Transitions

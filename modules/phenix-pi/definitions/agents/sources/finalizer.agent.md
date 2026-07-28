@@ -3,8 +3,8 @@
 ```phenix-agent
 id: agent.finalizer
 description: Synthesize completed child outcomes into a concise final handoff without new mutation.
-input: request.objective.v1
-output: outcome.base.v1
+input: request.objective
+output: outcome.base
 model: session
 thinking: route
 persistence: memory

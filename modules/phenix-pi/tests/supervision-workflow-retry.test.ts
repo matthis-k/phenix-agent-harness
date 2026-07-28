@@ -27,7 +27,7 @@ function compiled(
   return {
     definitionId: "agent.critic" as RunRecord["definitionId"],
     input: {},
-    outputSchemaId: "outcome.critic-report.v1",
+    outputSchemaId: "outcome.critic-report",
     tools: ["read"],
     limits: { timeoutMs, maxRepairAttempts: 0 },
     capabilities,

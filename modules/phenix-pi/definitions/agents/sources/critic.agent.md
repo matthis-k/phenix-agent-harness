@@ -3,8 +3,8 @@
 ```phenix-agent
 id: agent.critic
 description: Search an artifact or handoff for contradictions, omissions, and ranked risks.
-input: request.critic.v1
-output: outcome.critic-report.v1
+input: request.critic
+output: outcome.critic-report
 model: session
 thinking: route
 persistence: memory

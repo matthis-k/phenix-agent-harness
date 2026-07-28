@@ -3,8 +3,8 @@
 ```phenix-workflow
 id: workflow.implement
 description: Estimate difficulty, use a trivial fast path when safe, otherwise plan, implement, independently verify, and perform bounded repairs.
-input: request.implementation.v1
-output: outcome.implementation-result.v1
+input: request.implementation
+output: outcome.implementation-result
 entry: estimate
 timeout-ms: 2400000
 max-node-runs: 24
@@ -38,8 +38,8 @@ kind: invoke
 title: Estimate task difficulty
 run: agent.difficulty-estimator
 input: difficulty.input
-input-schema: request.difficulty-assessment.v1
-output-schema: outcome.difficulty-assessment.v1
+input-schema: request.difficulty-assessment
+output-schema: outcome.difficulty-assessment
 wait: await
 difficulty: D0
 retry: retryable
@@ -53,8 +53,8 @@ kind: invoke
 title: Produce an executable plan
 run: agent.planner
 input: implement.plan.input
-input-schema: request.plan.v1
-output-schema: outcome.plan.v1
+input-schema: request.plan
+output-schema: outcome.plan
 wait: await
 difficulty: result:estimate
 retry: retryable
@@ -68,8 +68,8 @@ kind: invoke
 title: Apply the current implementation attempt
 run: agent.implementer
 input: implement.work.input
-input-schema: request.implementation.v1
-output-schema: outcome.change-set.v1
+input-schema: request.implementation
+output-schema: outcome.change-set
 wait: await
 difficulty: result:estimate
 ```
@@ -81,8 +81,8 @@ kind: local
 title: Accept a trivial change only from deterministic evidence
 operation: local.noop
 input: implement.trivial-verification
-input-schema: outcome.verification.v1
-output-schema: outcome.verification.v1
+input-schema: outcome.verification
+output-schema: outcome.verification
 ```
 
 ### trivial-decision
@@ -99,8 +99,8 @@ kind: invoke
 title: Independently verify the attempt
 run: agent.verifier
 input: implement.verify.input
-input-schema: request.verification.v1
-output-schema: outcome.verification.v1
+input-schema: request.verification
+output-schema: outcome.verification
 wait: await
 difficulty: result:estimate
 retry: retryable
@@ -119,7 +119,7 @@ decide: implement.acceptance
 ```phenix-state
 kind: return
 output: implement.output
-output-schema: outcome.implementation-result.v1
+output-schema: outcome.implementation-result
 ```
 
 ### fail

@@ -14,11 +14,11 @@ const CheckResultType = Type.Object({
 });
 
 export const QAChecksRequestSchema = defineSchema<QAChecksRequest>(
-  "request.qa-checks.v1",
+  "request.qa-checks",
   Type.Object({ checks: Type.Optional(Type.Array(Type.Unknown())) }),
 );
 
 export const CheckResultsSchema = defineSchema<readonly CheckResult[]>(
-  "outcome.check-results.v1",
+  "outcome.check-results",
   Type.Array(CheckResultType),
 );

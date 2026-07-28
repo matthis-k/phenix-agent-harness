@@ -3,8 +3,8 @@
 ```phenix-workflow
 id: workflow.test-failure-retry
 description: Exercise bounded in-place child recovery and retry exhaustion.
-input: request.implementation.v1
-output: outcome.implementation-result.v1
+input: request.implementation
+output: outcome.implementation-result
 entry: implement
 timeout-ms: 30000
 max-node-runs: 6
@@ -19,8 +19,8 @@ max-parallelism: 1
 kind: invoke
 run: agent.implementer
 input: implement.work.input
-input-schema: request.implementation.v1
-output-schema: outcome.change-set.v1
+input-schema: request.implementation
+output-schema: outcome.change-set
 wait: await
 retry: retryable
 max-retries: 1
@@ -32,8 +32,8 @@ max-retries: 1
 kind: invoke
 run: agent.verifier
 input: implement.verify.input
-input-schema: request.verification.v1
-output-schema: outcome.verification.v1
+input-schema: request.verification
+output-schema: outcome.verification
 wait: await
 ```
 
@@ -42,7 +42,7 @@ wait: await
 ```phenix-state
 kind: return
 output: implement.output
-output-schema: outcome.implementation-result.v1
+output-schema: outcome.implementation-result
 ```
 
 ## Transitions

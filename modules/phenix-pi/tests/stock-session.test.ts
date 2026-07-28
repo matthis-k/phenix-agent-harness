@@ -18,15 +18,15 @@ function directStockWorkflow(): DynamicWorkflowProposal {
   return {
     title: "Direct stock session",
     description: "Use one stock Pi session and return its typed result directly.",
-    inputSchema: "request.objective.v1",
-    outputSchema: "outcome.scout-report.v1",
+    inputSchema: "request.objective",
+    outputSchema: "outcome.scout-report",
     entry: "stock",
     nodes: [
       {
         kind: "invoke",
         id: "stock",
         definitionId: SESSION_STOCK,
-        outputSchema: "outcome.scout-report.v1",
+        outputSchema: "outcome.scout-report",
         input: {
           source: "object",
           fields: {
@@ -50,8 +50,8 @@ function verifiedStockWorkflow(): DynamicWorkflowProposal {
   return {
     title: "Verified stock session",
     description: "Use a stock Pi session and explicitly route its result through a critic.",
-    inputSchema: "request.objective.v1",
-    outputSchema: "outcome.critic-report.v1",
+    inputSchema: "request.objective",
+    outputSchema: "outcome.critic-report",
     entry: "stock",
     nodes: [
       ...directStockWorkflow().nodes.filter((node) => node.id === "stock"),
@@ -104,7 +104,7 @@ test("the catalog exposes stock Pi as a session with a dynamic output", async ()
 
   assert.ok(stock);
   assert.equal(stock.kind, "session");
-  assert.equal(stock.inputSchema, "request.stock-session.v1");
+  assert.equal(stock.inputSchema, "request.stock-session");
   assert.equal(stock.outputSchema, "dynamic");
 });
 
@@ -133,7 +133,7 @@ test("a dynamic workflow may return stock output directly without a verifier", a
     children.map((child) => child.definitionId),
     [SESSION_STOCK],
   );
-  assert.equal(stockInput?.outputSchema, "outcome.scout-report.v1");
+  assert.equal(stockInput?.outputSchema, "outcome.scout-report");
   assert.equal(typeof stockInput?.outputContract, "object");
 });
 
@@ -166,7 +166,7 @@ test("malformed stock output fails the workflow before downstream execution", as
       await runtime.controller.transition(command.runId, "starting");
       await runtime.controller.transition(command.runId, "running");
       await runtime.controller.complete(command.runId, {
-        outputSchema: "outcome.scout-report.v1",
+        outputSchema: "outcome.scout-report",
         value: { summary: "missing required fields" },
       });
     },

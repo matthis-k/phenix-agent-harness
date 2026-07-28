@@ -3,8 +3,8 @@
 ```phenix-agent
 id: agent.implementer
 description: Apply an exact plan, edit files, and run targeted checks without redesigning it.
-input: request.implementation.v1
-output: outcome.change-set.v1
+input: request.implementation
+output: outcome.change-set
 model: session
 thinking: route
 persistence: memory

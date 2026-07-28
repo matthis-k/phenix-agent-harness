@@ -3,8 +3,8 @@
 ```phenix-agent
 id: agent.scout
 description: Answer a focused repository question with path-grounded evidence.
-input: request.scout.v1
-output: outcome.scout-report.v1
+input: request.scout
+output: outcome.scout-report
 model: session
 thinking: route
 persistence: memory

@@ -6,7 +6,7 @@ Phenix may dynamically author orchestration without treating model-generated sou
 
 The root supervisor first prefers one complete predefined workflow. When no single definition covers the request, the Markdown-defined `agent.coordinator` may propose a graph assembled from its capability-filtered building-block catalog.
 
-The composer receives `request.dynamic-workflow-composition.v1` and returns `request.dynamic-workflow-proposal.v1`. It has no tools, repository context, or direct child execution authority. It does not execute JavaScript, register functions, grant tools, or construct runtime objects directly.
+The composer receives `request.dynamic-workflow-composition` and returns `request.dynamic-workflow-proposal`. It has no tools, repository context, or direct child execution authority. It does not execute JavaScript, register functions, grant tools, or construct runtime objects directly.
 
 A trusted compiler:
 

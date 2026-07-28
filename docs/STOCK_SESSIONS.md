@@ -9,7 +9,7 @@ The stock session is selectable by predefined and dynamic workflows. It is super
 ```text
 session.stock — Stock Pi session
 kind: session
-input: request.stock-session.v1
+input: request.stock-session
 output: dynamic
 ```
 
@@ -33,7 +33,7 @@ Phenix does not automatically append a verifier.
   "kind": "invoke",
   "id": "investigate",
   "definitionId": "session.stock",
-  "outputSchema": "outcome.scout-report.v1",
+  "outputSchema": "outcome.scout-report",
   "input": {
     "source": "object",
     "fields": {
@@ -56,8 +56,8 @@ kind: invoke
 run: session.stock
 input: stock-task.input
 wait: await
-input-schema: request.stock-session.v1
-output-schema: outcome.scout-report.v1
+input-schema: request.stock-session
+output-schema: outcome.scout-report
 ```
 ````
 

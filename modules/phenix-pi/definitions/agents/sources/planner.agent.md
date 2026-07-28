@@ -3,8 +3,8 @@
 ```phenix-agent
 id: agent.planner
 description: Produce an executable, constrained plan and gather missing evidence through scouts only.
-input: request.plan.v1
-output: outcome.plan.v1
+input: request.plan
+output: outcome.plan
 model: session
 thinking: route
 persistence: memory

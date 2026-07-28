@@ -17,7 +17,7 @@ export interface StockSessionHandoff {
 }
 
 export const StockSessionRequestSchema = defineSchema<StockSessionRequest>(
-  "request.stock-session.v1",
+  "request.stock-session",
   Type.Object(
     {
       task: Type.String({ minLength: 1, maxLength: 40_000 }),
@@ -30,7 +30,7 @@ export const StockSessionRequestSchema = defineSchema<StockSessionRequest>(
 );
 
 export const StockSessionHandoffSchema = defineSchema<StockSessionHandoff>(
-  "outcome.stock-session-handoff.v1",
+  "outcome.stock-session-handoff",
   Type.Object(
     {
       outputSchema: Type.String({ minLength: 1, maxLength: 160 }),

@@ -17,7 +17,6 @@ export interface WorkflowCheckpointSnapshot {
 }
 
 export interface WorkflowCheckpointSavedData {
-  readonly version: 1;
   readonly definitionId: DefinitionId;
   readonly definitionFingerprint: string;
   readonly throughSequence: number;
@@ -36,7 +35,6 @@ export function createWorkflowCheckpoint(input: {
   readonly snapshot: WorkflowCheckpointSnapshot;
 }): WorkflowCheckpointSavedData {
   return {
-    version: 1,
     definitionId: input.definition.id,
     definitionFingerprint: workflowDefinitionFingerprint(input.definition),
     throughSequence: input.throughSequence,
@@ -82,7 +80,7 @@ export function workflowSnapshotFingerprint(snapshot: WorkflowCheckpointSnapshot
 }
 
 function validCheckpointData(value: unknown): WorkflowCheckpointSavedData | undefined {
-  if (!isRecord(value) || value.version !== 1) return undefined;
+  if (!isRecord(value)) return undefined;
   if (typeof value.definitionId !== "string") return undefined;
   if (typeof value.definitionFingerprint !== "string") return undefined;
   if (typeof value.throughSequence !== "number" || !Number.isInteger(value.throughSequence)) {
