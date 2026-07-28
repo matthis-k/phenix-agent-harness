@@ -32,6 +32,10 @@ import { freeModelSessionExtensions } from "./free-model-guard.ts";
 import { createNixShellTool } from "./nix-shell-tool.ts";
 import { composeManagedPrompt } from "./prompt-composition.ts";
 
+export function createObservableChildSessionManager(cwd: string): SessionManager {
+  return SessionManager.create(cwd);
+}
+
 export class PiSdkAgentSessionBackend implements AgentSessionBackend {
   private readonly modelRegistry: ModelRegistry;
   private readonly agentDir: string;
@@ -54,7 +58,7 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
     // Every child gets a native Pi JSONL transcript for live inspection. The
     // definition persistence policy still controls whether that session may be
     // recovered after a runtime restart.
-    return this.createWithManager(spec, SessionManager.create(spec.cwd));
+    return this.createWithManager(spec, createObservableChildSessionManager(spec.cwd));
   }
 
   async recover(
