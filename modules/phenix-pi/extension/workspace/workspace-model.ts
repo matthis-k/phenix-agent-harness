@@ -1,5 +1,6 @@
 import type { RunTreeNode } from "../../application/interfaces.ts";
 import type { WorkspaceItemIndex } from "../../domain/workspace/events.ts";
+import type { ReadyWorkspaceTranscript } from "../../ports/workspace-effects.ts";
 import type { NativeRunTranscript } from "../native-run-transcript.ts";
 import type { WorkspaceViewSnapshot } from "./views/workspace-view.ts";
 import { workspaceViewRegistry } from "./views/workspace-view-registry.ts";
@@ -12,7 +13,7 @@ export type { WorkspaceTaskRow } from "./views/tasks-view.ts";
 export { projectWorkspaceTasks } from "./views/tasks-view.ts";
 
 export interface PhenixWorkspaceSnapshot extends WorkspaceViewSnapshot {
-  readonly rootTranscript: NativeRunTranscript;
+  readonly rootTranscript: ReadyWorkspaceTranscript<NativeRunTranscript>;
 }
 
 export function workspaceItemIndex(snapshot: PhenixWorkspaceSnapshot): WorkspaceItemIndex {
