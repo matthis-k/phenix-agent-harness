@@ -1,8 +1,8 @@
-# Stock Pi session
+# Stock Pi agent
 
 ```phenix-agent
-id: session.stock
-description: Run an ordinary Pi session when no predefined workflow, specialist, or useful specialist composition fits; the caller supplies the concrete typed output schema.
+id: agent.stock
+description: Run an ordinary Pi agent when no predefined workflow, specialist, or useful specialist composition fits; the caller supplies the concrete typed output schema.
 input: request.stock-session
 output: outcome.stock-session-handoff
 model: session
