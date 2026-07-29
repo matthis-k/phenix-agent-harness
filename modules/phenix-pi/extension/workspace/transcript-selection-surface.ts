@@ -85,12 +85,7 @@ export class TranscriptSelectionSurface {
     return true;
   }
 
-  renderLine(
-    line: string,
-    absoluteRow: number,
-    width: number,
-    theme: ObservabilityTheme,
-  ): string {
+  renderLine(line: string, absoluteRow: number, width: number, theme: ObservabilityTheme): string {
     const plain = stripTranscriptAnsi(line);
     const columns = transcriptSelectionColumns(this.selectionValue, absoluteRow, plain);
     if (!columns) return line;
