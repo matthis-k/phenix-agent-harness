@@ -73,6 +73,44 @@ test("QA presentation composes contract to structured content to Markdown", () =
   );
 });
 
+test("QA findings render as a numbered table", () => {
+  const document = qaReportDocument({
+    ...qaContract(),
+    findings: [
+      {
+        severity: "medium",
+        kind: "architecture",
+        description: "A boundary needs cleanup.",
+        locations: [{ path: "src/example.ts", line: 12 }],
+        notes: "Keep ownership one-way.",
+      },
+      {
+        severity: "high",
+        kind: "security",
+        description: "Unsafe boundary.",
+        locations: [
+          { path: "src/a.ts", line: 3, endLine: 5 },
+          { path: "src/b.ts", line: 9 },
+        ],
+        notes: "",
+      },
+    ],
+  });
+  assert.ok(document);
+
+  const markdown = renderStructuredContentMarkdown(document);
+  assert.match(markdown, /^\| # \| Severity \| Kind \| Description \| Locations \| Notes \|$/m);
+  assert.match(
+    markdown,
+    /^\| 1 \| MEDIUM \| architecture \| A boundary needs cleanup\. \| src\/example\.ts:12 \| Keep ownership one-way\. \|$/m,
+  );
+  assert.match(
+    markdown,
+    /^\| 2 \| HIGH \| security \| Unsafe boundary\. \| src\/a\.ts:3-5<br>src\/b\.ts:9 \| — \|$/m,
+  );
+  assert.doesNotMatch(markdown, /^1\. /m);
+});
+
 test("generic structured content derives heading and list depth", () => {
   const markdown = renderStructuredContentMarkdown({
     contentType: "document",
