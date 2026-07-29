@@ -1,6 +1,5 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
-import type { SessionProfile } from "../../domain/run/model.ts";
 import { color, type ObservabilityTheme, surface } from "../observability-theme.ts";
 import { stripTranscriptAnsi } from "./transcript-selection.ts";
 
@@ -10,8 +9,6 @@ export interface WorkspaceComposerInput {
   readonly lines: readonly string[];
   readonly width: number;
   readonly active: boolean;
-  readonly sidebarVisible: boolean;
-  readonly profile: SessionProfile;
   readonly theme: ObservabilityTheme;
 }
 
@@ -26,11 +23,6 @@ export function renderWorkspaceComposer(input: WorkspaceComposerInput): readonly
     ),
     "",
   ];
-  const profile = `${input.profile.agent} · ${input.profile.modelSet} · ${input.profile.difficulty}`;
-  const help = input.sidebarVisible
-    ? "tab main/sidebar · pgup/pgdn · native keys preserved"
-    : "tab sidebar · pgup/pgdn · native keys preserved";
-  rows.push(joinColumns(profile, help, innerWidth));
 
   const tone = input.active ? "userMessageBg" : "customMessageBg";
   const rail = color(input.theme, input.active ? "accent" : "muted", input.active ? "┃" : "│");
@@ -49,16 +41,6 @@ export function editorBody(lines: readonly string[]): readonly string[] {
 function isEditorRule(line: string): boolean {
   const plain = stripTranscriptAnsi(line).trim();
   return plain.length > 0 && /^[─━═┄┅┈┉╌╍┌┐└┘╭╮╰╯\s-]+$/u.test(plain);
-}
-
-function joinColumns(left: string, right: string, width: number): string {
-  if (width <= 0) return "";
-  const rightWidth = visibleWidth(right);
-  if (rightWidth >= width) return truncateToWidth(right, width, "");
-  const leftLimit = Math.max(0, width - rightWidth - 1);
-  const clippedLeft = truncateToWidth(left, leftLimit, leftLimit > 1 ? "…" : "");
-  const gap = Math.max(1, width - visibleWidth(clippedLeft) - rightWidth);
-  return fitLine(`${clippedLeft}${" ".repeat(gap)}${right}`, width);
 }
 
 function fitLine(line: string, width: number): string {
