@@ -57,7 +57,7 @@ export class WorkspaceController<TSnapshot, TTranscript> {
     this.runtime = options.runtime;
     this.stateValue = options.state;
     this.snapshotValue = options.snapshot;
-    if (options.transcript) {
+    if (options.transcript?.kind === "ready") {
       this.transcripts.set(options.transcript.handle.key, options.transcript.value);
     }
   }
@@ -196,14 +196,18 @@ export class WorkspaceController<TSnapshot, TTranscript> {
     try {
       const loaded = await this.runtime.loadTranscript(runId, abort.signal);
       if (this.disposed || abort.signal.aborted) return;
-      this.transcripts.set(loaded.handle.key, loaded.value);
+      if (loaded.kind === "ready") {
+        this.transcripts.set(loaded.handle.key, loaded.value);
+      }
       const previous = this.stateValue.transcript.availability;
       this.dispatch({
         type: "transcript.loaded",
         requestId,
         runId,
-        handle: loaded.handle,
+        availability:
+          loaded.kind === "ready" ? { kind: "ready", transcript: loaded.handle } : loaded,
       });
+      if (loaded.kind !== "ready") return;
       const current = this.stateValue.transcript.availability;
       if (
         current.kind !== "ready" ||

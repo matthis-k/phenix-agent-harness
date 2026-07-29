@@ -166,7 +166,7 @@ test("late transcript completion cannot replace the selected run", () => {
     type: "transcript.loaded",
     requestId: first,
     runId: childA,
-    handle: { key: "old" },
+    availability: { kind: "ready", transcript: { key: "old" } },
   });
   assert.equal(late.state.transcript.runId, childB);
   assert.equal(late.state.transcript.availability.kind, "pending");
@@ -176,7 +176,7 @@ test("late transcript completion cannot replace the selected run", () => {
     type: "transcript.loaded",
     requestId: second,
     runId: childB,
-    handle: { key: "current" },
+    availability: { kind: "ready", transcript: { key: "current" } },
   });
   assert.deepEqual(current.state.transcript.availability, {
     kind: "ready",

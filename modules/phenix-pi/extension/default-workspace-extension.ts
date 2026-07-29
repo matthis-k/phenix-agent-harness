@@ -7,11 +7,17 @@ import {
 import type { SlashCommand } from "@earendil-works/pi-tui";
 
 import type { RunTreeNode } from "../application/interfaces.ts";
-import { loadNativeRunTranscript, renderNativeTranscript } from "./native-run-transcript.ts";
+import {
+  loadNativeRunTranscript,
+  loadNativeRunTranscriptResult,
+  readyNativeRunTranscript,
+  renderNativeTranscript,
+} from "./native-run-transcript.ts";
 import { loadPhenixUiSnapshot, PhenixUi, type PhenixUiTarget } from "./phenix-ui.ts";
 import {
   PhenixWorkspace,
   type PhenixWorkspaceAction,
+  type PhenixWorkspaceOptions,
   type PhenixWorkspaceSnapshot,
 } from "./phenix-workspace.ts";
 import {
@@ -118,6 +124,11 @@ async function openWorkspace(
         name: command.name,
         description: command.description,
       }));
+      const loadTranscript = ((node: RunTreeNode) =>
+        loadNativeRunTranscriptResult(
+          node,
+          tui,
+        )) as unknown as PhenixWorkspaceOptions["loadTranscript"];
       const instance = new PhenixWorkspace({
         tui,
         theme,
@@ -126,7 +137,7 @@ async function openWorkspace(
         commands,
         snapshot,
         load,
-        loadTranscript: (node) => loadNativeRunTranscript(node, tui),
+        loadTranscript,
         subscribe: (listener) => {
           const unsubscribeEvents = binding.runtime.events.subscribe(listener);
           const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
@@ -167,16 +178,16 @@ async function loadWorkspaceSnapshot(
     binding.runtime.tasks.tree(binding.rootRunId),
   ]);
   const entries = buildContextEntries([...ctx.sessionManager.getBranch()]);
+  const sessionId = ctx.sessionManager.getSessionId();
+  const sessionFile = ctx.sessionManager.getSessionFile();
   return {
     ui,
     tasks,
-    rootTranscript: {
+    rootTranscript: readyNativeRunTranscript({
       component: renderNativeTranscript(entries, tui, ctx.cwd),
-      sessionId: ctx.sessionManager.getSessionId(),
-      ...(ctx.sessionManager.getSessionFile()
-        ? { sessionFile: ctx.sessionManager.getSessionFile() }
-        : {}),
-    },
+      sessionId,
+      ...(sessionFile ? { sessionFile } : {}),
+    }),
   };
 }
 

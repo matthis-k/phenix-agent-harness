@@ -1,12 +1,17 @@
 import type { RunId } from "../domain/shared.ts";
 import type { WorkspaceError } from "../domain/workspace/errors.ts";
 import type { WorkspaceEffect, WorkspaceSnapshotEnvelope } from "../domain/workspace/events.ts";
-import type { TranscriptHandle } from "../domain/workspace/state.ts";
+import type { SettledTranscriptAvailability, TranscriptHandle } from "../domain/workspace/state.ts";
 
-export interface LoadedWorkspaceTranscript<TTranscript> {
+export interface ReadyWorkspaceTranscript<TTranscript> {
+  readonly kind: "ready";
   readonly handle: TranscriptHandle;
   readonly value: TTranscript;
 }
+
+export type LoadedWorkspaceTranscript<TTranscript> =
+  | ReadyWorkspaceTranscript<TTranscript>
+  | Exclude<SettledTranscriptAvailability, { readonly kind: "ready" }>;
 
 export type ExternalWorkspaceEffect = Exclude<
   WorkspaceEffect,

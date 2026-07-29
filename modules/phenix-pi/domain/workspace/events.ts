@@ -1,7 +1,7 @@
 import type { RunId } from "../shared.ts";
 import type { WorkspaceError } from "./errors.ts";
 import type { Size } from "./geometry.ts";
-import type { EffectId, PaneId, ScrollState, TranscriptHandle } from "./state.ts";
+import type { EffectId, PaneId, ScrollState, SettledTranscriptAvailability } from "./state.ts";
 
 export type WorkspaceItemIndex = Readonly<Record<PaneId, readonly string[]>>;
 
@@ -64,7 +64,7 @@ export type WorkspaceEvent<TSnapshot = unknown> =
       readonly type: "transcript.loaded";
       readonly requestId: EffectId;
       readonly runId: RunId;
-      readonly handle: TranscriptHandle;
+      readonly availability: SettledTranscriptAvailability;
     }
   | {
       readonly type: "transcript.failed";

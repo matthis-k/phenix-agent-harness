@@ -8,7 +8,8 @@ import type {
   LoadedWorkspaceTranscript,
   WorkspaceEffectRuntime,
 } from "../../ports/workspace-effects.ts";
-import type { NativeRunTranscript } from "../native-run-transcript.ts";
+import { type NativeRunTranscript, readyNativeRunTranscript } from "../native-run-transcript.ts";
+import { transcriptAvailabilityMessage } from "../transcript-availability.ts";
 import {
   findWorkspaceRun,
   type PhenixWorkspaceSnapshot,
@@ -18,7 +19,9 @@ import {
 export interface WorkspaceControllerAdapterOptions {
   readonly snapshot: PhenixWorkspaceSnapshot;
   readonly load: () => Promise<PhenixWorkspaceSnapshot>;
-  readonly loadTranscript: (node: RunTreeNode) => Promise<NativeRunTranscript>;
+  readonly loadTranscript: (
+    node: RunTreeNode,
+  ) => Promise<LoadedWorkspaceTranscript<NativeRunTranscript> | NativeRunTranscript>;
   readonly subscribe: (listener: () => void) => () => void;
   readonly onChange: () => void;
   readonly recordDiagnostic?: (error: WorkspaceError) => void | Promise<void>;
@@ -33,10 +36,7 @@ export class WorkspaceControllerAdapter {
 
   constructor(options: WorkspaceControllerAdapterOptions) {
     const initialSnapshot = snapshotEnvelope(options.snapshot);
-    const initialTranscript = loadedTranscript(
-      initialSnapshot.rootRunId,
-      options.snapshot.rootTranscript,
-    );
+    const initialTranscript = options.snapshot.rootTranscript;
     this.lastSnapshot = initialSnapshot;
 
     let controller!: WorkspaceController<PhenixWorkspaceSnapshot, NativeRunTranscript>;
@@ -45,11 +45,14 @@ export class WorkspaceControllerAdapter {
       loadTranscript: async (selectedRunId) => {
         const snapshot = controller.snapshot?.value ?? options.snapshot;
         const node = findWorkspaceRun(snapshot.ui.tree.root, String(selectedRunId));
-        if (!node)
+        if (!node) {
           throw new Error(`Run ${selectedRunId} is not present in the current workspace snapshot`);
-        const loaded =
-          node.run.kind === "root" ? snapshot.rootTranscript : await options.loadTranscript(node);
-        return loadedTranscript(selectedRunId, normalizeTranscript(node, loaded));
+        }
+        if (node.run.kind === "root") return snapshot.rootTranscript;
+        const loaded = await options.loadTranscript(node);
+        return "kind" in loaded
+          ? loaded
+          : readyNativeRunTranscript(loaded, `run:${String(selectedRunId)}:transcript`);
       },
       recordDiagnostic: (error) => options.recordDiagnostic?.(error),
     };
@@ -84,22 +87,20 @@ export class WorkspaceControllerAdapter {
     const current = this.controller.currentTranscript;
     if (current) return current;
     if (this.controller.state.activeRunId === this.snapshot.ui.tree.root.run.id) {
-      return this.snapshot.rootTranscript;
+      return this.snapshot.rootTranscript.value;
     }
-    const availability = this.controller.state.transcript.availability;
-    if (availability.kind === "pending") {
-      return { unavailable: "Loading Pi transcript…" };
-    }
-    if (availability.kind === "legacy") {
-      return { unavailable: "This persisted run predates Pi transcript persistence." };
-    }
-    if (availability.kind === "not-applicable") {
-      return { unavailable: "This run does not own a Pi transcript." };
-    }
-    if (availability.kind === "invalid" || availability.kind === "invariant-violation") {
-      return { unavailable: availability.reason };
-    }
-    return { unavailable: "Transcript data is unavailable." };
+    const selected = findWorkspaceRun(
+      this.snapshot.ui.tree.root,
+      String(this.controller.state.activeRunId),
+    );
+    const unavailable = transcriptAvailabilityMessage(
+      this.controller.state.transcript.availability,
+    );
+    return {
+      ...(selected?.run.pi?.sessionId ? { sessionId: selected.run.pi.sessionId } : {}),
+      ...(selected?.run.pi?.sessionFile ? { sessionFile: selected.run.pi.sessionFile } : {}),
+      ...(unavailable ? { unavailable } : {}),
+    };
   }
 
   dispatch(event: WorkspaceEvent<PhenixWorkspaceSnapshot>): void {
@@ -142,48 +143,9 @@ function snapshotEnvelope(
   };
 }
 
-function loadedTranscript(
-  selectedRunId: RunId,
-  transcript: NativeRunTranscript,
-): LoadedWorkspaceTranscript<NativeRunTranscript> {
-  return {
-    handle: {
-      key:
-        transcript.sessionFile ?? transcript.sessionId ?? `run:${String(selectedRunId)}:transcript`,
-    },
-    value: transcript,
-  };
-}
-
-function normalizeTranscript(
-  node: RunTreeNode,
-  transcript: NativeRunTranscript,
-): NativeRunTranscript {
-  if (!transcript.unavailable?.startsWith("This run has no Pi transcript reference")) {
-    return transcript;
-  }
-  if (node.run.kind === "workflow") {
-    return {
-      ...(transcript.sessionId ? { sessionId: transcript.sessionId } : {}),
-      ...(transcript.sessionFile ? { sessionFile: transcript.sessionFile } : {}),
-      unavailable: "This workflow run does not own a Pi transcript.",
-    };
-  }
-  if (node.run.pi?.sessionId) {
-    return {
-      sessionId: node.run.pi.sessionId,
-      ...(node.run.pi.sessionFile ? { sessionFile: node.run.pi.sessionFile } : {}),
-      unavailable: "Pi has allocated this transcript but has not persisted it yet.",
-    };
-  }
-  return {
-    unavailable: "This agent run has no persisted Pi transcript reference.",
-  };
-}
-
 function initialState(
   snapshot: WorkspaceSnapshotEnvelope<PhenixWorkspaceSnapshot>,
-  transcript: LoadedWorkspaceTranscript<NativeRunTranscript>,
+  transcript: PhenixWorkspaceSnapshot["rootTranscript"],
 ): WorkspaceState {
   const state = createInitialWorkspaceState(snapshot.rootRunId);
   return {
