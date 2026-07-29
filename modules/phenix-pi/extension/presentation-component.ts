@@ -1,4 +1,4 @@
-import type { Component } from "@earendil-works/pi-tui";
+import { Container } from "@earendil-works/pi-tui";
 
 import { DocumentView, textBlock } from "./components/document-view.ts";
 
@@ -6,18 +6,19 @@ export interface PresentationView {
   render(width: number): { readonly lines: readonly string[] };
 }
 
-export class PresentationComponent implements Component {
+export class PresentationComponent extends Container {
   private readonly view: PresentationView;
 
   constructor(view: PresentationView) {
+    super();
     this.view = view;
   }
 
-  render(width: number): string[] {
+  override render(width: number): string[] {
     return [...this.view.render(width).lines];
   }
 
-  invalidate(): void {}
+  override invalidate(): void {}
 }
 
 export function documentComponent(
