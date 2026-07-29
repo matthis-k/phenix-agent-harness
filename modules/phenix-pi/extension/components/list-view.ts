@@ -97,7 +97,10 @@ export class ListView<T> {
         next = this.moveIndex(current, intent.direction);
         break;
       case "page":
-        next = clampIndex(current + intent.direction * Math.max(1, viewportHeight), this.items.length);
+        next = clampIndex(
+          current + intent.direction * Math.max(1, viewportHeight),
+          this.items.length,
+        );
         break;
       case "edge":
         next = intent.edge === "first" ? 0 : this.items.length - 1;
@@ -121,12 +124,7 @@ export class ListView<T> {
   render(width: number, height: number, focused = false): ListViewFrame {
     const viewportHeight = Math.max(0, Math.floor(height));
     const selectedIndex = this.selectedIndex();
-    this.offset = keepIndexVisible(
-      this.offset,
-      selectedIndex,
-      viewportHeight,
-      this.items.length,
-    );
+    this.offset = keepIndexVisible(this.offset, selectedIndex, viewportHeight, this.items.length);
     const visible = this.items.slice(this.offset, this.offset + viewportHeight);
     const lines = Array.from({ length: viewportHeight }, (_, row) => {
       const item = visible[row];
@@ -164,9 +162,7 @@ export class ListView<T> {
   }
 
   private itemById(id: string | undefined): T | undefined {
-    return id === undefined
-      ? undefined
-      : this.items.find((item) => this.adapter.id(item) === id);
+    return id === undefined ? undefined : this.items.find((item) => this.adapter.id(item) === id);
   }
 
   private itemIdAt(index: number): string | undefined {
