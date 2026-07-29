@@ -118,7 +118,7 @@ test("health report is compact globally and detailed by topic", async () => {
     assert.match(formatPhenixHealth(report, { json: false }), /✓ storage/);
     assert.match(
       formatPhenixHealth(report, { topic: "runtime", json: false }),
-      /root running; 1 active runs; sequence 7; 0 recovering, 0 terminal errors/,
+      /root running; 1 active runs; sequence 7; 0 recovering; 0 terminal errors/,
     );
     assert.deepEqual(
       JSON.parse(formatPhenixHealth(report, { topic: "models", json: true })),
@@ -156,7 +156,7 @@ test("active recovery degrades health without becoming a terminal error", async 
 
     const runtime = report.sections.find((section) => section.topic === "runtime");
     assert.equal(runtime?.state, "degraded");
-    assert.match(runtime?.summary ?? "", /1 recovering, 0 terminal errors/);
+    assert.match(runtime?.summary ?? "", /1 recovering; 0 terminal errors/);
     assert.match(runtime?.details.join("\n") ?? "", /1 recovering, 0 recovered, 0 terminal/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -190,7 +190,7 @@ test("terminal workflow failures remain final health errors", async () => {
 
     const runtime = report.sections.find((section) => section.topic === "runtime");
     assert.equal(runtime?.state, "degraded");
-    assert.match(runtime?.summary ?? "", /0 recovering, 1 terminal errors/);
+    assert.match(runtime?.summary ?? "", /0 recovering; 1 terminal errors/);
     assert.match(runtime?.details.join("\n") ?? "", /0 recovering, 1 recovered, 1 terminal/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
