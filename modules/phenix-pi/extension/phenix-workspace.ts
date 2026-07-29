@@ -9,6 +9,8 @@ import {
 import {
   CombinedAutocompleteProvider,
   type Component,
+  CURSOR_MARKER,
+  type Focusable,
   matchesKey,
   type SlashCommand,
   sliceByColumn,
@@ -20,7 +22,7 @@ import {
 import type { RunTreeNode } from "../application/interfaces.ts";
 import type { RunSnapshot } from "../domain/run/model.ts";
 import type { TaskNode } from "../domain/task/projection.ts";
-import { allocateSidebarSections } from "../domain/workspace/layout.ts";
+import { allocateSidebarSections, type LayoutFrame } from "../domain/workspace/layout.ts";
 import type { PaneId, ScrollState } from "../domain/workspace/state.ts";
 import type { NativeRunTranscript } from "./native-run-transcript.ts";
 import {
@@ -34,6 +36,14 @@ import {
 import type { PhenixUiTarget } from "./phenix-ui.ts";
 import { WorkspaceControllerAdapter } from "./workspace/workspace-controller-adapter.ts";
 import {
+  composeWorkspaceTextFrame,
+  computeWorkspaceDimensions,
+  paneRect,
+  solveWorkspaceLayout,
+  type WorkspaceDimensions,
+  type WorkspacePaneOutput,
+} from "./workspace/workspace-layout-frame.ts";
+import {
   findWorkspaceRun,
   type PhenixWorkspaceSnapshot,
   projectWorkspaceRuns,
@@ -46,7 +56,6 @@ export type { PhenixWorkspaceSnapshot } from "./workspace/workspace-model.ts";
 const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]);
 const MOUSE_ENABLE = "\x1b[?1000h\x1b[?1006h";
 const MOUSE_DISABLE = "\x1b[?1000l\x1b[?1006l";
-const SIDEBAR_MIN_WIDTH = 90;
 
 export type WorkspaceFocus = "transcript" | "editor" | "runs" | "tasks" | "facts";
 export type WorkspaceSection = "runs" | "tasks" | "facts";
@@ -95,34 +104,13 @@ interface TranscriptRender {
 }
 
 interface RenderFrame {
-  readonly layout: WorkspaceLayout;
+  readonly layout: LayoutFrame;
   readonly sections: readonly SectionLayout[];
   readonly transcriptMaxOffset: number;
 }
 
-export interface WorkspaceLayout {
-  readonly width: number;
-  readonly height: number;
-  readonly sidebarVisible: boolean;
-  readonly sidebarWidth: number;
-  readonly mainWidth: number;
-}
-
-export function computeWorkspaceLayout(
-  width: number,
-  height: number,
-  sidebarRequested = true,
-): WorkspaceLayout {
-  const sidebarVisible = sidebarRequested && width >= SIDEBAR_MIN_WIDTH;
-  const sidebarWidth = sidebarVisible ? Math.min(42, Math.max(32, Math.floor(width * 0.3))) : 0;
-  return {
-    width,
-    height,
-    sidebarVisible,
-    sidebarWidth,
-    mainWidth: Math.max(1, width - sidebarWidth - (sidebarVisible ? 1 : 0)),
-  };
-}
+export type WorkspaceLayout = WorkspaceDimensions;
+export const computeWorkspaceLayout = computeWorkspaceDimensions;
 
 export function allocateWorkspaceSections(
   height: number,
@@ -164,20 +152,18 @@ export function allocateWorkspaceSections(
 export const flattenWorkspaceRuns = projectWorkspaceRuns;
 export const flattenWorkspaceTasks = projectWorkspaceTasks;
 
-export class PhenixWorkspace implements Component {
+export class PhenixWorkspace implements Component, Focusable {
   private readonly tui: TUI;
   private readonly theme: ObservabilityTheme;
   private readonly submit: (text: string) => Promise<void>;
   private readonly onAction: (action: PhenixWorkspaceAction) => void;
   private readonly editor: CustomEditor;
   private readonly controller: WorkspaceControllerAdapter;
+  focused = true;
   private streamingMessage: AssistantMessage | undefined;
   private disposed = false;
-  private frame: RenderFrame = {
-    layout: computeWorkspaceLayout(1, 1),
-    sections: [],
-    transcriptMaxOffset: 0,
-  };
+  private renderRevision = 0;
+  private frame: RenderFrame | undefined;
 
   constructor(options: PhenixWorkspaceOptions) {
     this.tui = options.tui;
@@ -274,35 +260,89 @@ export class PhenixWorkspace implements Component {
 
   render(width: number): string[] {
     const height = Math.max(1, this.tui.terminal.rows);
-    const layout = computeWorkspaceLayout(width, height, this.controller.state.sidebarVisible);
+    const dimensions = computeWorkspaceDimensions(
+      width,
+      height,
+      this.controller.state.sidebarVisible,
+    );
     if (width < 42 || height < 9) {
-      this.frame = { layout, sections: [], transcriptMaxOffset: 0 };
+      this.frame = undefined;
       return this.renderSmall(width, height);
     }
 
-    const focus = effectiveFocus(this.controller.state.focusedPaneId, layout.sidebarVisible);
-    this.editor.focused = focus === "editor";
-    const editorLines = this.editor.render(layout.mainWidth);
-    const mainHeight = Math.max(1, height - editorLines.length);
-    const transcript = this.renderTranscript(layout.mainWidth, mainHeight, focus);
-    const main = [...transcript.lines, ...editorLines];
-
-    if (!layout.sidebarVisible) {
-      this.frame = { layout, sections: [], transcriptMaxOffset: transcript.maxOffset };
-      return fitHeight(main, height, layout.mainWidth);
+    const focus = effectiveFocus(this.controller.state.focusedPaneId, dimensions.sidebarVisible);
+    this.editor.focused = this.focused && focus === "editor";
+    const editorLines = this.renderPaneSafely(
+      "Editor",
+      dimensions.mainWidth,
+      Math.max(1, height - 1),
+      () => this.editor.render(dimensions.mainWidth),
+      false,
+    );
+    this.renderRevision += 1;
+    const solved = solveWorkspaceLayout({
+      width,
+      height,
+      editorHeight: editorLines.length,
+      sidebarRequested: this.controller.state.sidebarVisible,
+      revision: this.renderRevision,
+    });
+    if (!solved.ok) {
+      this.frame = undefined;
+      return this.renderFailure(width, height, "Layout", solved.error.message);
     }
 
-    const sidebar = this.renderSidebar(layout.sidebarWidth, height, focus);
+    const layout = solved.value;
+    const transcriptBounds = paneRect(layout, "transcript");
+    const editorBounds = paneRect(layout, "editor");
+    let transcript: TranscriptRender;
+    try {
+      transcript = this.renderTranscript(transcriptBounds.width, transcriptBounds.height, focus);
+    } catch (error) {
+      transcript = {
+        lines: this.renderPaneError(
+          "Transcript",
+          transcriptBounds.width,
+          transcriptBounds.height,
+          error,
+        ),
+        maxOffset: 0,
+      };
+    }
+
+    const outputs = new Map<PaneId, WorkspacePaneOutput>([
+      ["transcript", { lines: transcript.lines }],
+      [
+        "editor",
+        {
+          lines: fitHeight(editorLines, editorBounds.height, editorBounds.width),
+        },
+      ],
+    ]);
+    let sections: readonly SectionLayout[] = [];
+    const sidebarBounds = layout.panes.get("runs");
+    if (sidebarBounds) {
+      try {
+        const sidebar = this.renderSidebar(sidebarBounds.width, sidebarBounds.height, focus);
+        outputs.set("runs", { lines: sidebar.lines });
+        sections = sidebar.layouts.map((section) => ({
+          ...section,
+          start: sidebarBounds.y + section.start,
+        }));
+      } catch (error) {
+        outputs.set("runs", {
+          lines: this.renderPaneError("Sidebar", sidebarBounds.width, sidebarBounds.height, error),
+        });
+      }
+    }
+
+    const lines = composeWorkspaceTextFrame(layout, outputs);
     this.frame = {
       layout,
-      sections: sidebar.layouts,
+      sections,
       transcriptMaxOffset: transcript.maxOffset,
     };
-    return Array.from({ length: height }, (_, row) => {
-      const left = fitLine(main[row] ?? "", layout.mainWidth);
-      const right = fitLine(sidebar.lines[row] ?? "", layout.sidebarWidth);
-      return `${left} ${right}`;
-    });
+    return [...lines];
   }
 
   private async handleSubmit(raw: string): Promise<void> {
@@ -473,8 +513,9 @@ export class PhenixWorkspace implements Component {
       ? ` ${color(this.theme, "muted", truncate(item.node.activity.summary, Math.max(8, width - 24 - item.depth * 2)))}`
       : "";
     const label = run.kind === "root" ? "Root session" : definitionLabel(String(run.definitionId));
+    const cursor = this.focused && focus === "runs" && selected ? CURSOR_MARKER : "";
     const line = fitLine(
-      ` ${active ? "◆" : " "} ${"  ".repeat(item.depth)}${runStateSymbol(run.state)} ${label} ${run.state}${model}${TERMINAL_STATES.has(run.state) ? "" : activity}`,
+      `${cursor} ${active ? "◆" : " "} ${"  ".repeat(item.depth)}${runStateSymbol(run.state)} ${label} ${run.state}${model}${TERMINAL_STATES.has(run.state) ? "" : activity}`,
       width,
     );
     if (selected) {
@@ -507,8 +548,9 @@ export class PhenixWorkspace implements Component {
       if (!item) return " ".repeat(width);
       const selected = item.node.id === pane.selectedItemId;
       const symbol = taskStateSymbol(item.node.effectiveState);
+      const cursor = this.focused && focus === "tasks" && selected ? CURSOR_MARKER : "";
       const line = fitLine(
-        ` ${"  ".repeat(item.depth)}${symbol} ${truncate(item.node.title, Math.max(8, width - 5 - item.depth * 2))}`,
+        `${cursor} ${"  ".repeat(item.depth)}${symbol} ${truncate(item.node.title, Math.max(8, width - 5 - item.depth * 2))}`,
         width,
       );
       if (!selected) return line;
@@ -540,8 +582,9 @@ export class PhenixWorkspace implements Component {
       const item = items[offset + row];
       if (!item) return " ".repeat(width);
       const selected = item.id === pane.selectedItemId;
+      const cursor = this.focused && focus === "facts" && selected ? CURSOR_MARKER : "";
       const line = fitLine(
-        ` ${compactTime(item.timestamp)} ${truncate(item.summary, Math.max(8, width - 8))}`,
+        `${cursor} ${compactTime(item.timestamp)} ${truncate(item.summary, Math.max(8, width - 8))}`,
         width,
       );
       if (selected) {
@@ -577,14 +620,18 @@ export class PhenixWorkspace implements Component {
   private handleTranscriptInput(data: string): void {
     const current = transcriptOffset(
       this.controller.state.transcript.scroll,
-      this.frame.transcriptMaxOffset,
+      this.frame?.transcriptMaxOffset ?? 0,
     );
     if (isUp(data)) this.setTranscriptOffset(current - 1);
     else if (isDown(data)) this.setTranscriptOffset(current + 1);
     else if (matchesKey(data, "pageUp")) {
-      this.setTranscriptOffset(current - Math.max(1, this.frame.layout.height - 4));
+      this.setTranscriptOffset(
+        current - Math.max(1, (this.frame?.layout.terminal.height ?? this.tui.terminal.rows) - 4),
+      );
     } else if (matchesKey(data, "pageDown")) {
-      this.setTranscriptOffset(current + Math.max(1, this.frame.layout.height - 4));
+      this.setTranscriptOffset(
+        current + Math.max(1, (this.frame?.layout.terminal.height ?? this.tui.terminal.rows) - 4),
+      );
     } else if (matchesKey(data, "home")) {
       this.setTranscriptOffset(0);
     } else if (matchesKey(data, "end")) {
@@ -593,8 +640,9 @@ export class PhenixWorkspace implements Component {
   }
 
   private setTranscriptOffset(value: number): void {
-    const offset = clamp(value, 0, this.frame.transcriptMaxOffset);
-    if (offset >= this.frame.transcriptMaxOffset) {
+    const maximum = this.frame?.transcriptMaxOffset ?? 0;
+    const offset = clamp(value, 0, maximum);
+    if (offset >= maximum) {
       this.controller.dispatch({ type: "scroll.end", paneId: "transcript" });
       return;
     }
@@ -665,20 +713,21 @@ export class PhenixWorkspace implements Component {
   }
 
   private cycleFocus(delta: 1 | -1): void {
-    const order: readonly PaneId[] = this.frame.layout.sidebarVisible
+    const order: readonly PaneId[] = this.frame?.layout.panes.has("runs")
       ? ["transcript", "editor", "runs", "tasks", "facts"]
       : ["transcript", "editor"];
     this.controller.dispatch({ type: "focus.move", direction: delta, order });
   }
 
   private handleMouse(event: MouseEvent): void {
-    if (event.release) return;
-    if (!this.frame.layout.sidebarVisible || event.x <= this.frame.layout.mainWidth) {
+    if (event.release || !this.frame) return;
+    const sidebarBounds = this.frame.layout.panes.get("runs");
+    if (!sidebarBounds || event.x <= sidebarBounds.x) {
       if (event.button === 64 || event.button === 65) {
         this.controller.dispatch({ type: "focus.set", paneId: "transcript" });
         const current = transcriptOffset(
           this.controller.state.transcript.scroll,
-          this.frame.transcriptMaxOffset,
+          this.frame?.transcriptMaxOffset ?? 0,
         );
         this.setTranscriptOffset(current + (event.button === 64 ? -3 : 3));
       }
@@ -743,7 +792,49 @@ export class PhenixWorkspace implements Component {
   }
 
   private effectiveFocus(): WorkspaceFocus {
-    return effectiveFocus(this.controller.state.focusedPaneId, this.frame.layout.sidebarVisible);
+    return effectiveFocus(
+      this.controller.state.focusedPaneId,
+      this.frame?.layout.panes.has("runs") ?? false,
+    );
+  }
+
+  private renderPaneSafely(
+    title: string,
+    width: number,
+    maximumHeight: number,
+    render: () => readonly string[],
+    exactHeight = true,
+  ): string[] {
+    try {
+      const lines = [...render()];
+      return exactHeight ? fitHeight(lines, maximumHeight, width) : lines.slice(0, maximumHeight);
+    } catch (error) {
+      return this.renderPaneError(title, width, Math.max(1, maximumHeight), error);
+    }
+  }
+
+  private renderPaneError(title: string, width: number, height: number, error: unknown): string[] {
+    const message = error instanceof Error ? error.message : String(error);
+    return fitHeight(
+      [
+        surface(this.theme, "customMessageBg", fitLine(` ${strong(this.theme, title)}`, width)),
+        color(this.theme, "error", ` ${truncate(message, Math.max(0, width - 1))}`),
+      ],
+      height,
+      width,
+    );
+  }
+
+  private renderFailure(width: number, height: number, title: string, message: string): string[] {
+    return fitHeight(
+      [
+        heading(this.theme, ` ${title}`),
+        color(this.theme, "error", ` ${truncate(message, Math.max(0, width - 1))}`),
+        " Ctrl+O returns to Pi's native UI.",
+      ],
+      height,
+      width,
+    );
   }
 
   private renderSmall(width: number, height: number): string[] {
