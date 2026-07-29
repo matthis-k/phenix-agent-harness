@@ -11,17 +11,27 @@ import type {
 import {
   AGENT_COORDINATOR,
   AGENT_DISPATCHER,
+  SESSION_STOCK,
   WORKFLOW_IMPLEMENT,
   WORKFLOW_QA,
 } from "../definitions/ids.ts";
-import { type ObjectiveRequest, ObjectiveRequestSchema } from "../definitions/schemas.ts";
+import {
+  BaseResultSchema,
+  type ObjectiveRequest,
+  ObjectiveRequestSchema,
+} from "../definitions/schemas.ts";
+import {
+  type StockSessionHandoff,
+  StockSessionHandoffSchema,
+  type StockSessionRequest,
+} from "../definitions/stock-session.ts";
 import {
   type AgentDefinition,
   type AnyDefinition,
   type DefinitionRef,
   definitionRef,
 } from "../domain/definition/definition.ts";
-import type { DefinitionId, Outcome, RunId } from "../domain/shared.ts";
+import { failed, type DefinitionId, type Outcome, type RunId, success } from "../domain/shared.ts";
 import { awaitOutcomeOrBudget, type BudgetSuspension } from "./budget-suspension.ts";
 import type { DynamicWorkflowExecutionService } from "./dynamic-workflow-execution.ts";
 import type { ExecutionStore } from "./execution-store.ts";
@@ -86,7 +96,7 @@ export class DispatchService {
     } else {
       const candidates = selectDispatchCandidates(await this.catalog.listAvailable(parentId));
       if (candidates.length === 0) {
-        throw new Error("No workflow or dynamic composer is available for dispatch");
+        throw new Error("No workflow, stock session, or dynamic composer is available for dispatch");
       }
 
       const classifierRef = definitionRef(AGENT_DISPATCHER);
@@ -130,6 +140,16 @@ export class DispatchService {
         signal,
       );
     }
+    if (targetRef.id === SESSION_STOCK) {
+      return this.dispatchStock(
+        parentId,
+        input,
+        request.wait ?? "await",
+        selectedBy,
+        classifierRunId,
+        signal,
+      );
+    }
 
     this.assertAllowed(parentId, this.catalog.get(targetRef) as AnyDefinition, input);
     const handle = await this.execution.start({
@@ -145,6 +165,39 @@ export class DispatchService {
       classifierRunId,
       wait: request.wait ?? "await",
       signal,
+    });
+  }
+
+  private async dispatchStock(
+    parentId: RunId,
+    input: ObjectiveRequest,
+    wait: "await" | "background",
+    selectedBy: DispatchResult["selectedBy"],
+    classifierRunId: RunId | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<DispatchResult> {
+    const stockRef = definitionRef<StockSessionRequest, StockSessionHandoff>(SESSION_STOCK);
+    const stockInput: StockSessionRequest = {
+      task: input.objective,
+      ...(input.context === undefined ? {} : { context: input.context }),
+      outputSchema: BaseResultSchema.id,
+      outputContract: BaseResultSchema.jsonSchema,
+    };
+    this.assertAllowed(parentId, this.catalog.get(stockRef) as AnyDefinition, stockInput);
+    const handle = await this.execution.start({
+      parentId,
+      definition: stockRef,
+      input: stockInput,
+      wait,
+    });
+    return this.resultForHandle({
+      handle,
+      definition: SESSION_STOCK,
+      selectedBy,
+      classifierRunId,
+      wait,
+      signal,
+      mapOutcome: unwrapStockOutcome,
     });
   }
 
@@ -207,6 +260,7 @@ export class DispatchService {
     readonly composerRunId?: RunId;
     readonly wait: "await" | "background";
     readonly signal?: AbortSignal;
+    readonly mapOutcome?: (outcome: Outcome<unknown>) => Outcome<unknown>;
   }): Promise<DispatchResult> {
     if (input.wait === "background") {
       return {
@@ -242,7 +296,7 @@ export class DispatchService {
       ...(input.classifierRunId ? { classifierRunId: input.classifierRunId } : {}),
       ...(input.composerRunId ? { composerRunId: input.composerRunId } : {}),
       status: "completed",
-      outcome: settled.outcome,
+      outcome: input.mapOutcome ? input.mapOutcome(settled.outcome) : settled.outcome,
     };
   }
 
@@ -260,10 +314,20 @@ export function selectDispatchCandidates(
   available: readonly DefinitionSummary[],
 ): readonly DispatchCandidate[] {
   return available
-    .filter((definition) => definition.kind === "workflow" || definition.id === AGENT_COORDINATOR)
+    .filter(
+      (definition) =>
+        definition.kind === "workflow" ||
+        definition.id === SESSION_STOCK ||
+        definition.id === AGENT_COORDINATOR,
+    )
     .map((definition) => ({
       definitionId: definition.id,
-      kind: definition.kind === "workflow" ? "workflow" : "generic",
+      kind:
+        definition.kind === "workflow"
+          ? "workflow"
+          : definition.id === SESSION_STOCK
+            ? "session"
+            : "generic",
       title: definition.title,
       description: definition.description,
     }));
@@ -302,6 +366,38 @@ function definitionForRoute(route: DispatchRoute): DefinitionRef<unknown, unknow
   if (route === "qa") return definitionRef(WORKFLOW_QA);
   if (route === "implement") return definitionRef(WORKFLOW_IMPLEMENT);
   return definitionRef(AGENT_COORDINATOR);
+}
+
+function unwrapStockOutcome(outcome: Outcome<unknown>): Outcome<unknown> {
+  if (outcome.status !== "success") return outcome;
+  const handoff = StockSessionHandoffSchema.validate(outcome.value);
+  if (!handoff.ok) {
+    return failed({
+      code: "output_invalid",
+      message: `Stock session returned an invalid handoff: ${handoff.issues
+        .map((issue) => `${issue.path} ${issue.message}`)
+        .join("; ")}`,
+      retryable: false,
+    });
+  }
+  if (handoff.value.outputSchema !== BaseResultSchema.id) {
+    return failed({
+      code: "output_invalid",
+      message: `Stock session returned schema ${handoff.value.outputSchema} instead of ${BaseResultSchema.id}`,
+      retryable: false,
+    });
+  }
+  const value = BaseResultSchema.validate(handoff.value.value);
+  if (!value.ok) {
+    return failed({
+      code: "output_invalid",
+      message: `Stock session output is invalid: ${value.issues
+        .map((issue) => `${issue.path} ${issue.message}`)
+        .join("; ")}`,
+      retryable: false,
+    });
+  }
+  return success(value.value);
 }
 
 function describeOutcome(outcome: Outcome<unknown>): string {
