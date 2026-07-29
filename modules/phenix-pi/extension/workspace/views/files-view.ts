@@ -1,10 +1,7 @@
 import type { RunTreeNode } from "../../../application/interfaces.ts";
 import type { RunFact } from "../../../domain/run/observability.ts";
 import type { RunId } from "../../../domain/shared.ts";
-import {
-  type WorkspaceViewSnapshot,
-  defineWorkspaceView,
-} from "./workspace-view.ts";
+import { defineWorkspaceView, type WorkspaceViewSnapshot } from "./workspace-view.ts";
 
 export interface WorkspaceFileRow {
   readonly id: string;
