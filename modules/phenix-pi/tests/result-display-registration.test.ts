@@ -8,8 +8,9 @@ const packageJson = JSON.parse(
   readonly pi?: { readonly extensions?: readonly string[] };
 };
 
-test("workspace and native display extensions load after the root extension", () => {
+test("theme, runtime, workspace, and display extensions load in dependency order", () => {
   assert.deepEqual(packageJson.pi?.extensions, [
+    "./extension/theme-extension.ts",
     "./extension/root-extension.ts",
     "./extension/default-workspace-extension.ts",
     "./extension/result-display.ts",
