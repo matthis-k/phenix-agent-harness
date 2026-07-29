@@ -102,6 +102,10 @@ export class WorkspaceControllerAdapter {
     }
   }
 
+  async whenIdle(): Promise<void> {
+    await this.controller.whenIdle();
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -111,7 +115,15 @@ export class WorkspaceControllerAdapter {
   }
 
   private reloadTranscript(): void {
+    const selectedRunId = this.controller.state.panes.runs.selectedItemId;
     this.selectTranscript(this.controller.state.activeRunId, false);
+    if (selectedRunId && selectedRunId !== this.controller.state.panes.runs.selectedItemId) {
+      this.controller.dispatch({
+        type: "selection.set",
+        paneId: "runs",
+        itemId: selectedRunId,
+      });
+    }
   }
 }
 
