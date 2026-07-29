@@ -28,8 +28,8 @@ export function renderWorkspaceComposer(input: WorkspaceComposerInput): readonly
   ];
   const profile = `${input.profile.agent} · ${input.profile.modelSet} · ${input.profile.difficulty}`;
   const help = input.sidebarVisible
-    ? "tab sidebar · pgup/pgdn transcript · ctrl+o native"
-    : "ctrl+b sidebar · pgup/pgdn transcript · ctrl+o native";
+    ? "tab main/sidebar · pgup/pgdn · native keys preserved"
+    : "tab sidebar · pgup/pgdn · native keys preserved";
   rows.push(joinColumns(profile, help, innerWidth));
 
   const tone = input.active ? "userMessageBg" : "customMessageBg";

@@ -3,6 +3,7 @@ import {
   buildContextEntries,
   type ExtensionAPI,
   type ExtensionContext,
+  type KeybindingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { SlashCommand } from "@earendil-works/pi-tui";
 
@@ -19,16 +20,25 @@ import {
   type PhenixWorkspaceAction,
   type PhenixWorkspaceSnapshot,
 } from "./phenix-workspace.ts";
+import { handoffNativeWorkspaceInput } from "./workspace/native-input-handoff.ts";
+import {
+  type NativeInputDelegation,
+  WORKSPACE_NATIVE_HANDOFF,
+} from "./workspace/workspace-interaction.ts";
 import {
   subscribeWorkspaceRuntime,
   type WorkspaceRuntimeBinding,
 } from "./workspace-runtime-binding.ts";
 
+type WorkspaceCompletion = PhenixWorkspaceAction & {
+  readonly reopenWorkspace?: boolean;
+};
+
 export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
   let context: ExtensionContext | undefined;
   let binding: WorkspaceRuntimeBinding | undefined;
   let workspace: PhenixWorkspace | undefined;
-  let finish: ((action: PhenixWorkspaceAction) => void) | undefined;
+  let finish: ((action: WorkspaceCompletion) => void) | undefined;
   let opening = false;
 
   const requestOpen = (): void => {
@@ -100,6 +110,8 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
         }
         if (action.kind === "native") {
           ctx.ui.setEditorText(action.text);
+          reopen = action.reopenWorkspace === true;
+          continue;
         }
         reopen = false;
       }
@@ -113,53 +125,91 @@ async function openWorkspace(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   binding: WorkspaceRuntimeBinding,
-  ready: (workspace: PhenixWorkspace, done: (action: PhenixWorkspaceAction) => void) => void,
-): Promise<PhenixWorkspaceAction> {
-  return ctx.ui.custom(
-    async (tui, theme, keybindings, done) => {
-      const load = () => loadWorkspaceSnapshot(ctx, binding, tui, theme);
-      const snapshot = await load();
-      const commands: SlashCommand[] = pi.getCommands().map((command) => ({
-        name: command.name,
-        description: command.description,
-      }));
-      const instance = new PhenixWorkspace({
-        tui,
-        theme,
-        keybindings,
-        cwd: ctx.cwd,
-        commands,
-        snapshot,
-        load,
-        loadTranscript: (node) => loadNativeRunTranscriptResult(node, tui, theme),
-        subscribe: (listener) => {
-          const unsubscribeEvents = binding.runtime.events.subscribe(listener);
-          const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
-          return () => {
-            unsubscribeEvents();
-            unsubscribeDiagnostics();
-          };
-        },
-        submit: async (text) => {
-          await Promise.resolve(
-            pi.sendUserMessage(text, ctx.isIdle() ? undefined : { deliverAs: "steer" }),
-          );
-        },
-        onAction: done,
-      });
-      ready(instance, done);
-      return instance;
-    },
-    {
-      overlay: true,
-      overlayOptions: {
-        width: "100%",
-        maxHeight: "100%",
-        anchor: "top-left",
-        margin: 0,
+  ready: (workspace: PhenixWorkspace, done: (action: WorkspaceCompletion) => void) => void,
+): Promise<WorkspaceCompletion> {
+  let activeWorkspace: PhenixWorkspace | undefined;
+  let activeKeybindings: KeybindingsManager | undefined;
+  let pendingDelegation: NativeInputDelegation | undefined;
+  const unsubscribeInput = ctx.ui.onTerminalInput((data) => {
+    if (!activeWorkspace || !activeKeybindings) return undefined;
+    return handoffNativeWorkspaceInput({
+      data,
+      keybindings: activeKeybindings,
+      handoff: (delegation) => {
+        pendingDelegation = delegation;
+        activeWorkspace?.handleInput(WORKSPACE_NATIVE_HANDOFF);
+        pendingDelegation = undefined;
       },
-    },
-  );
+    });
+  });
+
+  try {
+    return await ctx.ui.custom<WorkspaceCompletion>(
+      async (tui, theme, keybindings, done) => {
+        const load = () => loadWorkspaceSnapshot(ctx, binding, tui, theme);
+        const snapshot = await load();
+        const commands: SlashCommand[] = pi.getCommands().map((command) => ({
+          name: command.name,
+          description: command.description,
+        }));
+        const complete = (action: PhenixWorkspaceAction): void => {
+          const delegation = action.kind === "native" ? pendingDelegation : undefined;
+          if (action.kind === "native" && delegation) {
+            ctx.ui.setEditorText(action.text);
+            activeWorkspace = undefined;
+            activeKeybindings = undefined;
+            done({
+              ...action,
+              reopenWorkspace: delegation.reopenWorkspace,
+            });
+            return;
+          }
+          activeWorkspace = undefined;
+          activeKeybindings = undefined;
+          done(action);
+        };
+        const instance = new PhenixWorkspace({
+          tui,
+          theme,
+          keybindings,
+          cwd: ctx.cwd,
+          commands,
+          snapshot,
+          load,
+          loadTranscript: (node) => loadNativeRunTranscriptResult(node, tui, theme),
+          subscribe: (listener) => {
+            const unsubscribeEvents = binding.runtime.events.subscribe(listener);
+            const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
+            return () => {
+              unsubscribeEvents();
+              unsubscribeDiagnostics();
+            };
+          },
+          submit: async (text) => {
+            await Promise.resolve(
+              pi.sendUserMessage(text, ctx.isIdle() ? undefined : { deliverAs: "steer" }),
+            );
+          },
+          onAction: complete,
+        });
+        activeWorkspace = instance;
+        activeKeybindings = keybindings;
+        ready(instance, complete);
+        return instance;
+      },
+      {
+        overlay: true,
+        overlayOptions: {
+          width: "100%",
+          maxHeight: "100%",
+          anchor: "top-left",
+          margin: 0,
+        },
+      },
+    );
+  } finally {
+    unsubscribeInput();
+  }
 }
 
 async function loadWorkspaceSnapshot(

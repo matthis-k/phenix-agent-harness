@@ -1,10 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { AppKeybinding, KeybindingsManager } from "@earendil-works/pi-coding-agent";
+
 import {
   nextWorkspaceSection,
+  resolveNativeInputDelegation,
   resolveWorkspaceInput,
+  WORKSPACE_NATIVE_HANDOFF,
 } from "../extension/workspace/workspace-interaction.ts";
+
+const KEY_ACTIONS: Readonly<Record<string, AppKeybinding>> = {
+  "\x04": "app.exit",
+  "\x07": "app.editor.external",
+  "\x0c": "app.model.select",
+  "\x0f": "app.tools.expand",
+  "\x1b[Z": "app.thinking.cycle",
+};
+const KEYBINDINGS = {
+  matches: (data: string, action: AppKeybinding) => KEY_ACTIONS[data] === action,
+} as Pick<KeybindingsManager, "matches">;
 
 test("main input keeps arrows and ordinary typing in the editor", () => {
   assert.deepEqual(resolveWorkspaceInput("\x1b[A", "main"), { kind: "editor" });
@@ -13,7 +28,7 @@ test("main input keeps arrows and ordinary typing in the editor", () => {
   assert.deepEqual(resolveWorkspaceInput("hello", "main"), { kind: "editor" });
 });
 
-test("main input reserves only paging for transcript navigation", () => {
+test("main input reserves only paging and plain Tab for workspace navigation", () => {
   assert.deepEqual(resolveWorkspaceInput("\x1b[5~", "main"), {
     kind: "transcript-page",
     direction: -1,
@@ -22,6 +37,8 @@ test("main input reserves only paging for transcript navigation", () => {
     kind: "transcript-page",
     direction: 1,
   });
+  assert.deepEqual(resolveWorkspaceInput("\t", "main"), { kind: "focus-toggle" });
+  assert.deepEqual(resolveWorkspaceInput("\x1b[Z", "main"), { kind: "editor" });
 });
 
 test("sidebar input uses hjkl and actions while routing other typing to the editor", () => {
@@ -46,8 +63,44 @@ test("sidebar input uses hjkl and actions while routing other typing to the edit
   assert.deepEqual(resolveWorkspaceInput("x", "sidebar"), { kind: "editor" });
 });
 
-test("tab switches focus groups and Ctrl+C copies only an existing transcript selection", () => {
-  assert.deepEqual(resolveWorkspaceInput("\t", "main"), { kind: "focus-toggle" });
+test("native application shortcuts are not shadowed by workspace controls", () => {
+  assert.deepEqual(resolveWorkspaceInput("\x0f", "main"), { kind: "editor" });
+  assert.deepEqual(resolveWorkspaceInput("\x02", "main"), { kind: "editor" });
+  assert.deepEqual(resolveNativeInputDelegation("\x0f", KEYBINDINGS), {
+    action: "app.tools.expand",
+    reopenWorkspace: true,
+  });
+  assert.deepEqual(resolveNativeInputDelegation("\x07", KEYBINDINGS), {
+    action: "app.editor.external",
+    reopenWorkspace: true,
+  });
+  assert.deepEqual(resolveNativeInputDelegation("\x1b[Z", KEYBINDINGS), {
+    action: "app.thinking.cycle",
+    reopenWorkspace: true,
+  });
+});
+
+test("Ctrl+D delegates native exit semantics to Pi", () => {
+  assert.deepEqual(resolveNativeInputDelegation("\x04", KEYBINDINGS), {
+    action: "app.exit",
+    reopenWorkspace: false,
+  });
+});
+
+test("native modal actions leave the workspace closed", () => {
+  assert.deepEqual(resolveNativeInputDelegation("\x0c", KEYBINDINGS), {
+    action: "app.model.select",
+    reopenWorkspace: false,
+  });
+});
+
+test("the private handoff input closes without occupying a user shortcut", () => {
+  assert.deepEqual(resolveWorkspaceInput(WORKSPACE_NATIVE_HANDOFF, "main"), {
+    kind: "native-ui",
+  });
+});
+
+test("Ctrl+C copies only an existing transcript selection", () => {
   assert.deepEqual(resolveWorkspaceInput("\x03", "main", true), { kind: "copy-selection" });
   assert.deepEqual(resolveWorkspaceInput("\x03", "main", false), { kind: "editor" });
 });
