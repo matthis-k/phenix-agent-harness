@@ -10,12 +10,12 @@ import {
   AGENT_COORDINATOR,
   AGENT_DISPATCHER,
   AGENT_SCOUT,
-  SESSION_STOCK,
+  AGENT_STOCK,
   WORKFLOW_QA,
 } from "../definitions/ids.ts";
 import { createTestRuntime } from "./support/core-runtime.ts";
 
-test("automatic dispatch sends an unmatched one-shot task directly to the stock session", async () => {
+test("automatic dispatch sends an unmatched one-shot task directly to the stock agent", async () => {
   let runtime: Awaited<ReturnType<typeof createTestRuntime>>;
   const implementation: RunImplementation = {
     async start(command: StartImplementationCommand) {
@@ -24,15 +24,15 @@ test("automatic dispatch sends an unmatched one-shot task directly to the stock 
       if (command.definition.id === AGENT_DISPATCHER) {
         const candidates = (command.input as { candidates: readonly { definitionId: string }[] })
           .candidates;
-        assert.ok(candidates.some((candidate) => candidate.definitionId === SESSION_STOCK));
+        assert.ok(candidates.some((candidate) => candidate.definitionId === AGENT_STOCK));
         await runtime.controller.complete(command.runId, {
-          definitionId: SESSION_STOCK,
+          definitionId: AGENT_STOCK,
           reason: "no specialist or workflow suits creative writing",
           confidence: 0.99,
         });
         return;
       }
-      if (command.definition.id === SESSION_STOCK) {
+      if (command.definition.id === AGENT_STOCK) {
         const input = command.input as Readonly<Record<string, unknown>>;
         assert.equal(input.task, "Tell me a short story as a test delegate");
         assert.equal(input.outputSchema, "outcome.base");
@@ -58,7 +58,7 @@ test("automatic dispatch sends an unmatched one-shot task directly to the stock 
     wait: "await",
   });
 
-  assert.equal(result.definition, SESSION_STOCK);
+  assert.equal(result.definition, AGENT_STOCK);
   assert.equal(result.selectedBy, "dispatcher");
   assert.equal(result.status, "completed");
   assert.ok(result.classifierRunId);
@@ -69,7 +69,7 @@ test("automatic dispatch sends an unmatched one-shot task directly to the stock 
   });
   assert.deepEqual(
     runtime.store.projection.childrenOf(runtime.rootRunId).map((run) => run.definitionId),
-    [AGENT_DISPATCHER, SESSION_STOCK],
+    [AGENT_DISPATCHER, AGENT_STOCK],
   );
   assert.equal(runtime.store.projection.requireRun(result.runId).compiled.dynamicWorkflow, undefined);
 });
@@ -119,8 +119,8 @@ test("automatic dispatch composes and executes a sealed workflow only as the fal
   assert.ok(
     composerInput.candidates.some(
       (candidate) =>
-        candidate.definitionId === SESSION_STOCK &&
-        candidate.kind === "session" &&
+        candidate.definitionId === AGENT_STOCK &&
+        candidate.kind === "agent" &&
         candidate.inputSchema === "request.stock-session" &&
         candidate.outputSchema === "dynamic",
     ),
