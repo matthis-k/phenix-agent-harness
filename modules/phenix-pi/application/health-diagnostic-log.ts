@@ -21,10 +21,13 @@ const RUN_FAILURE_SCOPES = new Set([
  * current run-tree health state.
  */
 export class HealthDiagnosticLog implements DiagnosticLog {
-  constructor(
-    private readonly source: DiagnosticLog,
-    private readonly queries: QueryFacade,
-  ) {}
+  private readonly source: DiagnosticLog;
+  private readonly queries: QueryFacade;
+
+  constructor(source: DiagnosticLog, queries: QueryFacade) {
+    this.source = source;
+    this.queries = queries;
+  }
 
   record(input: DiagnosticWrite): Promise<DiagnosticLogEntry> {
     return this.source.record(input);
