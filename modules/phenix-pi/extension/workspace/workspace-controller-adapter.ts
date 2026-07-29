@@ -11,9 +11,9 @@ import type {
 import {
   type NativeRunTranscript,
   type NativeRunTranscriptPresentation,
-  presentNativeRunTranscript,
   readyNativeRunTranscript,
 } from "../native-run-transcript.ts";
+import { transcriptAvailabilityMessage } from "../transcript-availability.ts";
 import {
   findWorkspaceRun,
   type PhenixWorkspaceSnapshot,
@@ -95,7 +95,12 @@ export class WorkspaceControllerAdapter {
       this.snapshot.ui.tree.root,
       String(this.controller.state.activeRunId),
     );
-    return presentNativeRunTranscript(this.controller.state.transcript.availability, selected);
+    const unavailable = transcriptAvailabilityMessage(this.controller.state.transcript.availability);
+    return {
+      ...(selected?.run.pi?.sessionId ? { sessionId: selected.run.pi.sessionId } : {}),
+      ...(selected?.run.pi?.sessionFile ? { sessionFile: selected.run.pi.sessionFile } : {}),
+      ...(unavailable ? { unavailable } : {}),
+    };
   }
 
   dispatch(event: WorkspaceEvent<PhenixWorkspaceSnapshot>): void {
