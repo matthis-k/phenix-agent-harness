@@ -10,12 +10,7 @@ import type { DiagnosticLog } from "../ports/diagnostic-log.ts";
 
 const rootRunId = runId("root-diagnostics");
 
-function record(
-  id: string,
-  kind: RunKind,
-  state: RunState,
-  parentId?: RunId,
-): RunRecord {
+function record(id: string, kind: RunKind, state: RunState, parentId?: RunId): RunRecord {
   const outcome =
     state === "completed"
       ? success({})
