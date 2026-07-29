@@ -20,7 +20,9 @@ import {
   type PhenixWorkspaceAction,
   type PhenixWorkspaceSnapshot,
 } from "./phenix-workspace.ts";
+import { interruptActiveRootWork } from "./workspace/interrupt-active-work.ts";
 import { handoffNativeWorkspaceInput } from "./workspace/native-input-handoff.ts";
+import { renderWorkspaceTurn } from "./workspace/turn-indicator.ts";
 import {
   type NativeInputDelegation,
   WORKSPACE_NATIVE_HANDOFF,
@@ -29,6 +31,8 @@ import {
   subscribeWorkspaceRuntime,
   type WorkspaceRuntimeBinding,
 } from "./workspace-runtime-binding.ts";
+
+const TURN_STATUS_KEY = "phenix-turn";
 
 type WorkspaceCompletion = PhenixWorkspaceAction & {
   readonly reopenWorkspace?: boolean;
@@ -40,18 +44,30 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
   let workspace: PhenixWorkspace | undefined;
   let finish: ((action: WorkspaceCompletion) => void) | undefined;
   let opening = false;
+  let rootTurnActive = false;
+  let turnRevision = 0;
+  let disposeTurnEvents: (() => void) | undefined;
 
   const requestOpen = (): void => {
     if (opening || workspace || context?.mode !== "tui" || !binding) return;
     void openWorkspaceLoop();
   };
 
+  const refreshTurn = (): void => {
+    void updateTurnIndicator();
+  };
+
   subscribeWorkspaceRuntime(pi.events, (next) => {
+    disposeTurnEvents?.();
+    disposeTurnEvents = undefined;
     binding = next;
     if (!next) {
+      context?.ui.setStatus(TURN_STATUS_KEY, undefined);
       finish?.({ kind: "close" });
       return;
     }
+    disposeTurnEvents = next.runtime.events.subscribe(refreshTurn);
+    refreshTurn();
     requestOpen();
   });
 
@@ -63,13 +79,21 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
         ctx.ui.notify("Phenix runtime is not initialized.", "warning");
         return;
       }
+      refreshTurn();
       requestOpen();
     },
   });
 
   pi.on("session_start", (_event, ctx) => {
     context = ctx;
+    rootTurnActive = false;
+    refreshTurn();
     requestOpen();
+  });
+
+  pi.on("agent_start", () => {
+    rootTurnActive = true;
+    refreshTurn();
   });
 
   pi.on("message_update", (event) => {
@@ -83,12 +107,48 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
     workspace?.refreshRootTranscript();
   });
 
+  pi.on("agent_end", () => {
+    rootTurnActive = false;
+    refreshTurn();
+  });
+
   pi.on("session_shutdown", () => {
+    context?.ui.setStatus(TURN_STATUS_KEY, undefined);
+    disposeTurnEvents?.();
+    disposeTurnEvents = undefined;
     finish?.({ kind: "close" });
     workspace = undefined;
     context = undefined;
     binding = undefined;
+    rootTurnActive = false;
   });
+
+  async function updateTurnIndicator(): Promise<void> {
+    const ctx = context;
+    const active = binding;
+    const revision = ++turnRevision;
+    if (!ctx || !active) {
+      ctx?.ui.setStatus(TURN_STATUS_KEY, undefined);
+      return;
+    }
+    try {
+      const descendants = (await active.runtime.queries.activeRuns(active.rootRunId)).filter(
+        (run) => run.id !== active.rootRunId,
+      ).length;
+      if (revision !== turnRevision || context !== ctx || binding !== active) return;
+      ctx.ui.setStatus(
+        TURN_STATUS_KEY,
+        renderWorkspaceTurn(ctx.ui.theme, {
+          rootActive: rootTurnActive,
+          activeDescendants: descendants,
+        }),
+      );
+    } catch {
+      if (revision === turnRevision && context === ctx) {
+        ctx.ui.setStatus(TURN_STATUS_KEY, undefined);
+      }
+    }
+  }
 
   async function openWorkspaceLoop(): Promise<void> {
     const ctx = context;
@@ -98,10 +158,25 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
     try {
       let reopen = true;
       while (reopen && context === ctx && binding?.rootRunId === active.rootRunId) {
-        const action = await openWorkspace(pi, ctx, active, (instance, done) => {
-          workspace = instance;
-          finish = done;
-        });
+        const action = await openWorkspace(
+          pi,
+          ctx,
+          active,
+          (instance, done) => {
+            workspace = instance;
+            finish = done;
+          },
+          {
+            onSubmitStarted: () => {
+              rootTurnActive = true;
+              refreshTurn();
+            },
+            onSubmitFailed: () => {
+              rootTurnActive = false;
+              refreshTurn();
+            },
+          },
+        );
         workspace = undefined;
         finish = undefined;
         if (action.kind === "inspector") {
@@ -121,11 +196,17 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
   }
 }
 
+interface WorkspaceLifecycleCallbacks {
+  readonly onSubmitStarted: () => void;
+  readonly onSubmitFailed: () => void;
+}
+
 async function openWorkspace(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   binding: WorkspaceRuntimeBinding,
   ready: (workspace: PhenixWorkspace, done: (action: WorkspaceCompletion) => void) => void,
+  lifecycle: WorkspaceLifecycleCallbacks,
 ): Promise<WorkspaceCompletion> {
   let activeWorkspace: PhenixWorkspace | undefined;
   let activeKeybindings: KeybindingsManager | undefined;
@@ -137,6 +218,23 @@ async function openWorkspace(
       keybindings: activeKeybindings,
       handoff: (delegation) => {
         pendingDelegation = delegation;
+        if (delegation.action === "app.interrupt") {
+          void interruptActiveRootWork(binding.runtime, binding.rootRunId)
+            .then((targets) => {
+              if (targets.length > 0) {
+                ctx.ui.notify(
+                  `Interrupted current task and ${targets.length} attached run${targets.length === 1 ? "" : "s"}.`,
+                  "warning",
+                );
+              }
+            })
+            .catch((error) => {
+              ctx.ui.notify(
+                `Unable to interrupt Phenix work: ${error instanceof Error ? error.message : String(error)}`,
+                "warning",
+              );
+            });
+        }
         activeWorkspace?.handleInput(WORKSPACE_NATIVE_HANDOFF);
         pendingDelegation = undefined;
       },
@@ -186,9 +284,15 @@ async function openWorkspace(
             };
           },
           submit: async (text) => {
-            await Promise.resolve(
-              pi.sendUserMessage(text, ctx.isIdle() ? undefined : { deliverAs: "steer" }),
-            );
+            lifecycle.onSubmitStarted();
+            try {
+              await Promise.resolve(
+                pi.sendUserMessage(text, ctx.isIdle() ? undefined : { deliverAs: "steer" }),
+              );
+            } catch (error) {
+              lifecycle.onSubmitFailed();
+              throw error;
+            }
           },
           onAction: complete,
         });

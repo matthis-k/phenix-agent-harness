@@ -15,7 +15,10 @@ const KEY_ACTIONS: Readonly<Record<string, AppKeybinding>> = {
   "\x07": "app.editor.external",
   "\x0c": "app.model.select",
   "\x0f": "app.tools.expand",
+  "\x1b": "app.interrupt",
   "\x1b[Z": "app.thinking.cycle",
+  follow: "app.message.followUp",
+  dequeue: "app.message.dequeue",
 };
 const KEYBINDINGS = {
   matches: (data: string, action: AppKeybinding) => KEY_ACTIONS[data] === action,
@@ -76,6 +79,21 @@ test("native application shortcuts are not shadowed by workspace controls", () =
   });
   assert.deepEqual(resolveNativeInputDelegation("\x1b[Z", KEYBINDINGS), {
     action: "app.thinking.cycle",
+    reopenWorkspace: true,
+  });
+});
+
+test("interrupt and message queue actions retain Pi semantics", () => {
+  assert.deepEqual(resolveNativeInputDelegation("\x1b", KEYBINDINGS), {
+    action: "app.interrupt",
+    reopenWorkspace: true,
+  });
+  assert.deepEqual(resolveNativeInputDelegation("follow", KEYBINDINGS), {
+    action: "app.message.followUp",
+    reopenWorkspace: true,
+  });
+  assert.deepEqual(resolveNativeInputDelegation("dequeue", KEYBINDINGS), {
+    action: "app.message.dequeue",
     reopenWorkspace: true,
   });
 });
