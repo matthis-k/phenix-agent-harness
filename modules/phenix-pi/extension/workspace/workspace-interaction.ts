@@ -55,11 +55,7 @@ export function resolveWorkspaceInput(
   return { kind: "editor" };
 }
 
-export function nextWorkspaceSection<T>(
-  current: T,
-  direction: 1 | -1,
-  sections: readonly T[],
-): T {
+export function nextWorkspaceSection<T>(current: T, direction: 1 | -1, sections: readonly T[]): T {
   if (sections.length === 0) return current;
   const currentIndex = sections.indexOf(current);
   const index = currentIndex < 0 ? 0 : currentIndex;
