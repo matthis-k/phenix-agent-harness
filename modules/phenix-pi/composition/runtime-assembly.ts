@@ -129,6 +129,7 @@ export function createExecutionServices(input: {
     clock: systemClock,
   });
   execution.registerImplementation("agent", agents);
+  execution.registerImplementation("workflow", workflows);
   execution.seal();
 
   const attention = new AttentionProcessManager({
