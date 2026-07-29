@@ -42,6 +42,7 @@ export interface TreeViewAdapter<T> {
 
 export interface TreeViewOptions {
   readonly wrapNavigation?: boolean;
+  readonly selectFirstItem?: boolean;
   readonly indent?: string;
   readonly expandedMarker?: string;
   readonly collapsedMarker?: string;
@@ -82,7 +83,10 @@ export class TreeView<T> {
         id: (row) => row.id,
         render: (row, context) => this.renderRow(row, context),
       },
-      { wrapNavigation: options.wrapNavigation },
+      {
+        wrapNavigation: options.wrapNavigation,
+        selectFirstItem: options.selectFirstItem,
+      },
     );
   }
 
