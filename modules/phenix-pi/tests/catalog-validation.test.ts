@@ -117,10 +117,10 @@ test("bundled definitions have explicit execution-authority classes", () => {
     "agent.qa-synthesizer",
     "agent.attention-router",
   ]);
-  const stockSessions = new Set(["session.stock"]);
+  const stockAgents = new Set(["agent.stock"]);
 
   assert.equal(
-    commandAgents.size + nonExecutingAgents.size + stockSessions.size,
+    commandAgents.size + nonExecutingAgents.size + stockAgents.size,
     agentDefinitions.length,
   );
   for (const definition of agentDefinitions) {
@@ -128,10 +128,10 @@ test("bundled definitions have explicit execution-authority classes", () => {
     const classes = [
       commandAgents.has(id),
       nonExecutingAgents.has(id),
-      stockSessions.has(id),
+      stockAgents.has(id),
     ].filter(Boolean);
     assert.equal(classes.length, 1, `${id} must belong to exactly one execution-authority class`);
-    if (stockSessions.has(id)) {
+    if (stockAgents.has(id)) {
       assert.equal(definition.sessionMode, "stock");
       assert.deepEqual(definition.tools.allow, []);
       continue;
@@ -161,7 +161,7 @@ test("predefined dispatch routes reach command authority while the composer only
   }
 });
 
-test("dispatch prompts distinguish stock sessions from controlled roles", () => {
+test("dispatch prompts distinguish stock agents from controlled roles", () => {
   const coordinator = definitionsById.get("agent.coordinator");
   const dispatcher = definitionsById.get("agent.dispatcher");
   assert.equal(coordinator?.kind, "agent");
@@ -169,13 +169,14 @@ test("dispatch prompts distinguish stock sessions from controlled roles", () => 
   if (coordinator?.kind === "agent") {
     assert.match(
       coordinator.prompt.render(),
-      /Use session\.stock only when no predefined workflow/,
+      /Use agent\.stock only when no predefined workflow/,
     );
     assert.match(coordinator.prompt.render(), /do not add verification automatically/);
     assert.match(coordinator.prompt.render(), /command-capable workflow or operational agent/);
   }
   if (dispatcher?.kind === "agent") {
     assert.match(dispatcher.prompt.render(), /full repository QA/);
+    assert.match(dispatcher.prompt.render(), /stock agent only when no predefined workflow/);
     assert.match(dispatcher.prompt.render(), /never use a read-only analysis role/);
   }
 });
@@ -206,7 +207,7 @@ test("agent context inheritance is scoped to role needs", () => {
     assert.equal(definition.context.maxBytes, 64_000);
   }
 
-  for (const id of ["agent.implementer", "agent.verifier", "agent.base", "session.stock"]) {
+  for (const id of ["agent.implementer", "agent.verifier", "agent.base", "agent.stock"]) {
     const definition = byId.get(id);
     assert.ok(definition);
     assert.equal(definition.context.projectFiles, "inherit");
@@ -235,7 +236,7 @@ test("structured presentation is available only to operational Phenix agents", (
     "agent.coordinator",
     "agent.dispatcher",
     "agent.qa-synthesizer",
-    "session.stock",
+    "agent.stock",
   ]) {
     assert.equal(byId.get(id)?.tools.allow.includes("phenix_present"), false, id);
   }
