@@ -80,10 +80,19 @@ export function qaReportDocument(value: unknown): StructuredDocument | undefined
         report.findings.length === 0
           ? [paragraph("No review findings were reported.")]
           : [
-              {
-                contentType: "ordered-list",
-                children: report.findings.map(findingItem),
-              },
+              table([
+                ["#", "Severity", "Kind", "Description", "Locations", "Notes"],
+                ...report.findings.map((finding, index) => [
+                  String(index + 1),
+                  finding.severity?.toUpperCase() ?? "UNSPECIFIED",
+                  finding.kind ?? "—",
+                  finding.description,
+                  finding.locations.length > 0
+                    ? finding.locations.map(formatLocation).join("\n")
+                    : "—",
+                  finding.notes?.trim() || "—",
+                ]),
+              ]),
             ],
       ),
     ],
@@ -138,26 +147,10 @@ function isLocation(value: unknown): value is QALocation {
   );
 }
 
-function findingItem(finding: QAFinding): StructuredContentNode {
-  const children: StructuredContentNode[] = [];
-  if (finding.locations.length > 0) {
-    children.push({
-      contentType: "unordered-list",
-      children: finding.locations.map((location) => ({
-        contentType: "list-item",
-        content:
-          location.endLine === undefined || location.endLine === location.line
-            ? `${location.path}:${location.line}`
-            : `${location.path}:${location.line}-${location.endLine}`,
-      })),
-    });
-  }
-  if (finding.notes?.trim()) children.push(paragraph(finding.notes));
-  return {
-    contentType: "list-item",
-    content: `${finding.severity?.toUpperCase() ?? "UNSPECIFIED"} · ${finding.kind ?? "—"} — ${finding.description}`,
-    ...(children.length > 0 ? { children } : {}),
-  };
+function formatLocation(location: QALocation): string {
+  return location.endLine === undefined || location.endLine === location.line
+    ? `${location.path}:${location.line}`
+    : `${location.path}:${location.line}-${location.endLine}`;
 }
 
 function gateStatus(checks: readonly CheckResult[]): string {
