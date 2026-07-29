@@ -9,15 +9,15 @@ import type {
 } from "../application/execution-facade.ts";
 import { agentDefinitions } from "../definitions/agents.ts";
 import type { DynamicWorkflowProposal } from "../definitions/dynamic-workflow.ts";
-import { AGENT_CRITIC, SESSION_STOCK } from "../definitions/ids.ts";
+import { AGENT_CRITIC, AGENT_STOCK } from "../definitions/ids.ts";
 import { registerWorkflowFunctions } from "../definitions/workflows/functions.ts";
 import { workflowDefinitions } from "../definitions/workflows/index.ts";
 import { createTestRuntime } from "./support/core-runtime.ts";
 
 function directStockWorkflow(): DynamicWorkflowProposal {
   return {
-    title: "Direct stock session",
-    description: "Use one stock Pi session and return its typed result directly.",
+    title: "Direct stock agent",
+    description: "Use one stock Pi agent and return its typed result directly.",
     inputSchema: "request.objective",
     outputSchema: "outcome.scout-report",
     entry: "stock",
@@ -25,7 +25,7 @@ function directStockWorkflow(): DynamicWorkflowProposal {
       {
         kind: "invoke",
         id: "stock",
-        definitionId: SESSION_STOCK,
+        definitionId: AGENT_STOCK,
         outputSchema: "outcome.scout-report",
         input: {
           source: "object",
@@ -48,8 +48,8 @@ function directStockWorkflow(): DynamicWorkflowProposal {
 
 function verifiedStockWorkflow(): DynamicWorkflowProposal {
   return {
-    title: "Verified stock session",
-    description: "Use a stock Pi session and explicitly route its result through a critic.",
+    title: "Verified stock agent",
+    description: "Use a stock Pi agent and explicitly route its result through a critic.",
     inputSchema: "request.objective",
     outputSchema: "outcome.critic-report",
     entry: "stock",
@@ -82,9 +82,9 @@ function verifiedStockWorkflow(): DynamicWorkflowProposal {
   };
 }
 
-test("the catalog exposes stock Pi as a session with a dynamic output", async () => {
+test("the catalog exposes stock Pi as an agent with a dynamic output", async () => {
   const runtime = await createTestRuntime(undefined, {
-    rootInvokableDefinitions: [SESSION_STOCK],
+    rootInvokableDefinitions: [AGENT_STOCK],
   });
   const functions = new WorkflowFunctionRegistry();
   registerWorkflowFunctions(functions);
@@ -100,23 +100,23 @@ test("the catalog exposes stock Pi as a session with a dynamic output", async ()
   });
   const catalog = new CatalogFacadeImpl(definitions, runtime.store);
   const entries = await catalog.listAvailable(runtime.rootRunId);
-  const stock = entries.find((entry) => entry.id === SESSION_STOCK);
+  const stock = entries.find((entry) => entry.id === AGENT_STOCK);
 
   assert.ok(stock);
-  assert.equal(stock.kind, "session");
+  assert.equal(stock.kind, "agent");
   assert.equal(stock.inputSchema, "request.stock-session");
   assert.equal(stock.outputSchema, "dynamic");
 });
 
 test("a dynamic workflow may return stock output directly without a verifier", async () => {
   const runtime = await createTestRuntime(undefined, {
-    rootInvokableDefinitions: [SESSION_STOCK],
+    rootInvokableDefinitions: [AGENT_STOCK],
   });
   const handle = await runtime.dynamicWorkflows.start({
     parentId: runtime.rootRunId,
     scopeRunId: runtime.rootRunId,
     proposal: directStockWorkflow(),
-    input: { objective: "Inspect the repository with an ordinary Pi session" },
+    input: { objective: "Inspect the repository with an ordinary Pi agent" },
     wait: "await",
   });
   const outcome = await handle.result();
@@ -131,7 +131,7 @@ test("a dynamic workflow may return stock output directly without a verifier", a
   });
   assert.deepEqual(
     children.map((child) => child.definitionId),
-    [SESSION_STOCK],
+    [AGENT_STOCK],
   );
   assert.equal(stockInput?.outputSchema, "outcome.scout-report");
   assert.equal(typeof stockInput?.outputContract, "object");
@@ -139,7 +139,7 @@ test("a dynamic workflow may return stock output directly without a verifier", a
 
 test("verification is added only when the workflow explicitly invokes it", async () => {
   const runtime = await createTestRuntime(undefined, {
-    rootInvokableDefinitions: [SESSION_STOCK, AGENT_CRITIC],
+    rootInvokableDefinitions: [AGENT_STOCK, AGENT_CRITIC],
   });
   const handle = await runtime.dynamicWorkflows.start({
     parentId: runtime.rootRunId,
@@ -155,7 +155,7 @@ test("verification is added only when the workflow explicitly invokes it", async
   assert.deepEqual(outcome.value, { summary: "reviewed", findings: [] });
   assert.deepEqual(
     children.map((child) => child.definitionId),
-    [SESSION_STOCK, AGENT_CRITIC],
+    [AGENT_STOCK, AGENT_CRITIC],
   );
 });
 
@@ -172,7 +172,7 @@ test("malformed stock output fails the workflow before downstream execution", as
     },
   };
   runtime = await createTestRuntime(implementation, {
-    rootInvokableDefinitions: [SESSION_STOCK],
+    rootInvokableDefinitions: [AGENT_STOCK],
   });
   const handle = await runtime.dynamicWorkflows.start({
     parentId: runtime.rootRunId,
@@ -186,6 +186,6 @@ test("malformed stock output fails the workflow before downstream execution", as
   assert.equal(outcome.status, "failure");
   if (outcome.status === "failure") {
     assert.equal(outcome.failure.code, "output_invalid");
-    assert.match(outcome.failure.message, /Stock session stock output is invalid/);
+    assert.match(outcome.failure.message, /Stock agent stock output is invalid/);
   }
 });
