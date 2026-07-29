@@ -9,7 +9,7 @@ import type { SlashCommand } from "@earendil-works/pi-tui";
 import type { RunTreeNode } from "../application/interfaces.ts";
 import {
   loadNativeRunTranscript,
-  presentNativeRunTranscript,
+  loadNativeRunTranscriptResult,
   readyNativeRunTranscript,
   renderNativeTranscript,
 } from "./native-run-transcript.ts";
@@ -125,7 +125,10 @@ async function openWorkspace(
         description: command.description,
       }));
       const loadTranscript = ((node: RunTreeNode) =>
-        loadNativeRunTranscript(node, tui)) as unknown as PhenixWorkspaceOptions["loadTranscript"];
+        loadNativeRunTranscriptResult(
+          node,
+          tui,
+        )) as unknown as PhenixWorkspaceOptions["loadTranscript"];
       const instance = new PhenixWorkspace({
         tui,
         theme,
@@ -203,8 +206,7 @@ async function openInspector(
         initial,
         snapshot,
         load,
-        loadTranscript: async (node: RunTreeNode) =>
-          presentNativeRunTranscript(await loadNativeRunTranscript(node, tui), node),
+        loadTranscript: (node: RunTreeNode) => loadNativeRunTranscript(node, tui),
         subscribe: (listener) => {
           const unsubscribeEvents = binding.runtime.events.subscribe(listener);
           const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
