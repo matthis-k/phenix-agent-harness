@@ -49,6 +49,7 @@ export interface DiagnosticSummary {
   /** Immutable log-entry counts before lifecycle-aware health projection. */
   readonly observedCounts?: DiagnosticCounts;
   readonly failures?: DiagnosticFailureCounts;
+  readonly infrastructureErrors?: number;
   readonly latest?: DiagnosticLogEntry;
 }
 
