@@ -91,17 +91,18 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
     requestOpen();
   });
 
+  pi.on("agent_start", () => {
+    rootTurnActive = true;
+    refreshTurn();
+  });
+
   pi.on("message_update", (event) => {
     if (event.message.role === "assistant") {
-      rootTurnActive = true;
-      refreshTurn();
       workspace?.setStreamingMessage(event.message as Extract<AgentMessage, { role: "assistant" }>);
     }
   });
 
   pi.on("message_end", () => {
-    rootTurnActive = false;
-    refreshTurn();
     workspace?.setStreamingMessage(undefined);
     workspace?.refreshRootTranscript();
   });
@@ -157,19 +158,25 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
     try {
       let reopen = true;
       while (reopen && context === ctx && binding?.rootRunId === active.rootRunId) {
-        const action = await openWorkspace(pi, ctx, active, (instance, done) => {
-          workspace = instance;
-          finish = done;
-        }, {
-          onSubmitStarted: () => {
-            rootTurnActive = true;
-            refreshTurn();
+        const action = await openWorkspace(
+          pi,
+          ctx,
+          active,
+          (instance, done) => {
+            workspace = instance;
+            finish = done;
           },
-          onSubmitFailed: () => {
-            rootTurnActive = false;
-            refreshTurn();
+          {
+            onSubmitStarted: () => {
+              rootTurnActive = true;
+              refreshTurn();
+            },
+            onSubmitFailed: () => {
+              rootTurnActive = false;
+              refreshTurn();
+            },
           },
-        });
+        );
         workspace = undefined;
         finish = undefined;
         if (action.kind === "inspector") {
