@@ -17,13 +17,13 @@ const EXPANDED_SECTIONS = {
   facts: false,
 } as const;
 
-test("uses an OpenCode-like sidebar only when the terminal can preserve a useful transcript", () => {
+test("gives the conversation most of the terminal while keeping an OpenCode-like sidebar", () => {
   assert.deepEqual(computeWorkspaceLayout(120, 40), {
     width: 120,
     height: 40,
     sidebarVisible: true,
-    sidebarWidth: 36,
-    mainWidth: 83,
+    sidebarWidth: 28,
+    mainWidth: 91,
   });
   assert.deepEqual(computeWorkspaceLayout(89, 40), {
     width: 89,
