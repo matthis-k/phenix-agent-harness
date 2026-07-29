@@ -7,6 +7,7 @@ import {
   nextWorkspaceSection,
   resolveNativeInputDelegation,
   resolveWorkspaceInput,
+  WORKSPACE_NATIVE_HANDOFF,
 } from "../extension/workspace/workspace-interaction.ts";
 
 const KEY_ACTIONS: Readonly<Record<string, AppKeybinding>> = {
@@ -65,32 +66,37 @@ test("sidebar input uses hjkl and actions while routing other typing to the edit
 test("native application shortcuts are not shadowed by workspace controls", () => {
   assert.deepEqual(resolveWorkspaceInput("\x0f", "main"), { kind: "editor" });
   assert.deepEqual(resolveWorkspaceInput("\x02", "main"), { kind: "editor" });
-  assert.deepEqual(resolveNativeInputDelegation("\x0f", KEYBINDINGS, true), {
+  assert.deepEqual(resolveNativeInputDelegation("\x0f", KEYBINDINGS), {
     action: "app.tools.expand",
     reopenWorkspace: true,
   });
-  assert.deepEqual(resolveNativeInputDelegation("\x07", KEYBINDINGS, true), {
+  assert.deepEqual(resolveNativeInputDelegation("\x07", KEYBINDINGS), {
     action: "app.editor.external",
     reopenWorkspace: true,
   });
-  assert.deepEqual(resolveNativeInputDelegation("\x1b[Z", KEYBINDINGS, true), {
+  assert.deepEqual(resolveNativeInputDelegation("\x1b[Z", KEYBINDINGS), {
     action: "app.thinking.cycle",
     reopenWorkspace: true,
   });
 });
 
-test("Ctrl+D preserves native empty-editor exit semantics", () => {
-  assert.equal(resolveNativeInputDelegation("\x04", KEYBINDINGS, false), undefined);
-  assert.deepEqual(resolveNativeInputDelegation("\x04", KEYBINDINGS, true), {
+test("Ctrl+D delegates native exit semantics to Pi", () => {
+  assert.deepEqual(resolveNativeInputDelegation("\x04", KEYBINDINGS), {
     action: "app.exit",
     reopenWorkspace: false,
   });
 });
 
 test("native modal actions leave the workspace closed", () => {
-  assert.deepEqual(resolveNativeInputDelegation("\x0c", KEYBINDINGS, true), {
+  assert.deepEqual(resolveNativeInputDelegation("\x0c", KEYBINDINGS), {
     action: "app.model.select",
     reopenWorkspace: false,
+  });
+});
+
+test("the private handoff input closes without occupying a user shortcut", () => {
+  assert.deepEqual(resolveWorkspaceInput(WORKSPACE_NATIVE_HANDOFF, "main"), {
+    kind: "native-ui",
   });
 });
 
