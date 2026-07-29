@@ -11,7 +11,7 @@ import type {
 import {
   AGENT_COORDINATOR,
   AGENT_DISPATCHER,
-  SESSION_STOCK,
+  AGENT_STOCK,
   WORKFLOW_IMPLEMENT,
   WORKFLOW_QA,
 } from "../definitions/ids.ts";
@@ -96,7 +96,7 @@ export class DispatchService {
     } else {
       const candidates = selectDispatchCandidates(await this.catalog.listAvailable(parentId));
       if (candidates.length === 0) {
-        throw new Error("No workflow, stock session, or dynamic composer is available for dispatch");
+        throw new Error("No workflow, stock agent, or dynamic composer is available for dispatch");
       }
 
       const classifierRef = definitionRef(AGENT_DISPATCHER);
@@ -140,7 +140,7 @@ export class DispatchService {
         signal,
       );
     }
-    if (targetRef.id === SESSION_STOCK) {
+    if (targetRef.id === AGENT_STOCK) {
       return this.dispatchStock(
         parentId,
         input,
@@ -176,7 +176,7 @@ export class DispatchService {
     classifierRunId: RunId | undefined,
     signal: AbortSignal | undefined,
   ): Promise<DispatchResult> {
-    const stockRef = definitionRef<StockSessionRequest, StockSessionHandoff>(SESSION_STOCK);
+    const stockRef = definitionRef<StockSessionRequest, StockSessionHandoff>(AGENT_STOCK);
     const stockInput: StockSessionRequest = {
       task: input.objective,
       ...(input.context === undefined ? {} : { context: input.context }),
@@ -192,7 +192,7 @@ export class DispatchService {
     });
     return this.resultForHandle({
       handle,
-      definition: SESSION_STOCK,
+      definition: AGENT_STOCK,
       selectedBy,
       classifierRunId,
       wait,
@@ -317,7 +317,7 @@ export function selectDispatchCandidates(
     .filter(
       (definition) =>
         definition.kind === "workflow" ||
-        definition.id === SESSION_STOCK ||
+        definition.id === AGENT_STOCK ||
         definition.id === AGENT_COORDINATOR,
     )
     .map((definition) => ({
@@ -325,8 +325,8 @@ export function selectDispatchCandidates(
       kind:
         definition.kind === "workflow"
           ? "workflow"
-          : definition.id === SESSION_STOCK
-            ? "session"
+          : definition.id === AGENT_STOCK
+            ? "agent"
             : "generic",
       title: definition.title,
       description: definition.description,
@@ -353,7 +353,7 @@ function compositionCandidates(
     const stock = definition.kind === "agent" && definition.sessionMode === "stock";
     return {
       definitionId: definition.id,
-      kind: stock ? "session" : definition.kind,
+      kind: definition.kind,
       title: definition.title,
       description: definition.description,
       inputSchema: definition.input.id,
@@ -374,7 +374,7 @@ function unwrapStockOutcome(outcome: Outcome<unknown>): Outcome<unknown> {
   if (!handoff.ok) {
     return failed({
       code: "output_invalid",
-      message: `Stock session returned an invalid handoff: ${handoff.issues
+      message: `Stock agent returned an invalid handoff: ${handoff.issues
         .map((issue) => `${issue.path} ${issue.message}`)
         .join("; ")}`,
       retryable: false,
@@ -383,7 +383,7 @@ function unwrapStockOutcome(outcome: Outcome<unknown>): Outcome<unknown> {
   if (handoff.value.outputSchema !== BaseResultSchema.id) {
     return failed({
       code: "output_invalid",
-      message: `Stock session returned schema ${handoff.value.outputSchema} instead of ${BaseResultSchema.id}`,
+      message: `Stock agent returned schema ${handoff.value.outputSchema} instead of ${BaseResultSchema.id}`,
       retryable: false,
     });
   }
@@ -391,7 +391,7 @@ function unwrapStockOutcome(outcome: Outcome<unknown>): Outcome<unknown> {
   if (!value.ok) {
     return failed({
       code: "output_invalid",
-      message: `Stock session output is invalid: ${value.issues
+      message: `Stock agent output is invalid: ${value.issues
         .map((issue) => `${issue.path} ${issue.message}`)
         .join("; ")}`,
       retryable: false,
