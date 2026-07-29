@@ -1,0 +1,43 @@
+name: Fix turn import order
+
+on:
+  push:
+    branches:
+      - ui/turn-steering-interrupt
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ui/turn-steering-interrupt
+          fetch-depth: 0
+      - name: Organize workspace imports
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("modules/phenix-pi/extension/phenix-workspace.ts")
+          text = path.read_text()
+          old = '''import { renderWorkspaceTurn } from "./workspace/turn-indicator.ts";
+import { stripTranscriptAnsi } from "./workspace/transcript-selection.ts";
+import { TranscriptSelectionSurface } from "./workspace/transcript-selection-surface.ts";
+'''
+          new = '''import { stripTranscriptAnsi } from "./workspace/transcript-selection.ts";
+import { TranscriptSelectionSurface } from "./workspace/transcript-selection-surface.ts";
+import { renderWorkspaceTurn } from "./workspace/turn-indicator.ts";
+'''
+          if text.count(old) != 1:
+              raise SystemExit("workspace import block did not match")
+          path.write_text(text.replace(old, new))
+          PY
+          rm .github/workflows/fix-turn-import-order.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Organize workspace imports"
+          git push origin HEAD:ui/turn-steering-interrupt
