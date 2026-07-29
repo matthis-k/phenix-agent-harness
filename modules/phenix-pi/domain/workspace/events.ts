@@ -1,12 +1,7 @@
 import type { RunId } from "../shared.ts";
 import type { WorkspaceError } from "./errors.ts";
 import type { Size } from "./geometry.ts";
-import type {
-  EffectId,
-  PaneId,
-  ScrollState,
-  SettledTranscriptAvailability,
-} from "./state.ts";
+import type { EffectId, PaneId, ScrollState, SettledTranscriptAvailability } from "./state.ts";
 
 export type WorkspaceItemIndex = Readonly<Record<PaneId, readonly string[]>>;
 
