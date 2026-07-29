@@ -43,6 +43,7 @@ import type { PhenixUiTarget } from "./phenix-ui.ts";
 import { transcriptAvailabilityMessage } from "./transcript-availability.ts";
 import { stripTranscriptAnsi } from "./workspace/transcript-selection.ts";
 import { TranscriptSelectionSurface } from "./workspace/transcript-selection-surface.ts";
+import { renderWorkspaceTurn } from "./workspace/turn-indicator.ts";
 import type {
   WorkspaceViewPaneId,
   WorkspaceViewRegistration,
@@ -180,6 +181,7 @@ export class PhenixWorkspace implements Component, Focusable {
   private readonly expandedRowIds = new Set<string>();
   focused = true;
   private streamingMessage: AssistantMessage | undefined;
+  private rootTurnActive = false;
   private disposed = false;
   private renderRevision = 0;
   private frame: RenderFrame | undefined;
@@ -222,6 +224,12 @@ export class PhenixWorkspace implements Component, Focusable {
 
   setStreamingMessage(message: AssistantMessage | undefined): void {
     this.streamingMessage = message;
+    this.requestRender();
+  }
+
+  setRootTurnActive(active: boolean): void {
+    if (this.rootTurnActive === active) return;
+    this.rootTurnActive = active;
     this.requestRender();
   }
 
@@ -519,14 +527,6 @@ export class PhenixWorkspace implements Component, Focusable {
     const snapshot = this.controller.snapshot;
     const diagnostics = snapshot.ui.diagnostics.counts;
     const active = countActive(snapshot.ui.tree.root);
-    const activity =
-      active > 0
-        ? `${state(this.theme, "running", "● RUNNING")} ${color(
-            this.theme,
-            "dim",
-            `· ${active} active`,
-          )}`
-        : state(this.theme, "completed", "✓ IDLE");
     const healthTone =
       diagnostics.error > 0 ? "error" : diagnostics.warning > 0 ? "warning" : "success";
     const health =
@@ -536,8 +536,15 @@ export class PhenixWorkspace implements Component, Focusable {
           ? `${diagnostics.warning} WARNING${diagnostics.warning === 1 ? "" : "S"}`
           : "HEALTHY";
     const header = [
-      ` ${heading(this.theme, "PHENIX")}`,
-      ` ${activity} ${color(this.theme, "dim", "·")} ${color(this.theme, healthTone, health)}`,
+      ` ${heading(this.theme, "PHENIX")} ${color(this.theme, "dim", "·")} ${color(
+        this.theme,
+        healthTone,
+        health,
+      )}`,
+      ` ${renderWorkspaceTurn(this.theme, {
+        rootActive: this.rootTurnActive,
+        activeDescendants: active,
+      })}`,
     ].map((line) => surface(this.theme, "customMessageBg", fitViewLine(line, width)));
     const available = Math.max(0, height - header.length);
     const frames = allocateSidebarSections(
