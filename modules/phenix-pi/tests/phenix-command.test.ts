@@ -45,7 +45,7 @@ test("phenix command completion lists and filters subcommands", () => {
   assert.equal(PHENIX_FACTS_USAGE, "/phenix facts [--json|--clipboard [command]|--file <file>]");
 });
 
-test("bare phenix resolves to the UI while subcommands remain explicit", () => {
+test("bare phenix resolves to the UI while known subcommands are parsed", () => {
   assert.deepEqual(parsePhenixInvocation(""), {
     action: "ui",
     rawOptions: "",
@@ -62,6 +62,16 @@ test("bare phenix resolves to the UI while subcommands remain explicit", () => {
     action: "ui",
     rawOptions: "runs run-123",
     options: ["runs", "run-123"],
+    implicitUi: false,
+  });
+});
+
+test("unknown actions parse to an explicit invalid variant", () => {
+  assert.deepEqual(parsePhenixInvocation("wat --JSON"), {
+    action: "invalid",
+    requestedAction: "wat",
+    rawOptions: "--JSON",
+    options: ["--json"],
     implicitUi: false,
   });
 });
