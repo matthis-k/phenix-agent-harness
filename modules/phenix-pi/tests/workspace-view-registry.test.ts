@@ -125,8 +125,14 @@ test("derives pane identity and row behavior exclusively from registered project
       assert.equal(typeof row.render, "function");
     }
   }
-  assert.equal(workspaceViewRegistry.get("runs").project(snapshot)[0]?.activation?.kind, "transcript");
-  assert.equal(workspaceViewRegistry.get("facts").project(snapshot)[0]?.activation?.kind, "inspector");
+  assert.equal(
+    workspaceViewRegistry.get("runs").project(snapshot)[0]?.activation?.kind,
+    "transcript",
+  );
+  assert.equal(
+    workspaceViewRegistry.get("facts").project(snapshot)[0]?.activation?.kind,
+    "inspector",
+  );
 });
 
 function runNode(
