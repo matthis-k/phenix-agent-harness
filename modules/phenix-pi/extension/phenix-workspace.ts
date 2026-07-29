@@ -11,7 +11,6 @@ import {
   type Component,
   CURSOR_MARKER,
   type Focusable,
-  matchesKey,
   type SlashCommand,
   sliceByColumn,
   type TUI,
@@ -42,7 +41,9 @@ import type {
   WorkspaceViewRow,
 } from "./workspace/views/workspace-view.ts";
 import { workspaceViewRegistry } from "./workspace/views/workspace-view-registry.ts";
+import { renderWorkspaceComposer } from "./workspace/workspace-composer.ts";
 import { WorkspaceControllerAdapter } from "./workspace/workspace-controller-adapter.ts";
+import { nextWorkspaceSection, resolveWorkspaceInput } from "./workspace/workspace-interaction.ts";
 import {
   composeWorkspaceTextFrame,
   computeWorkspaceDimensions,
@@ -64,7 +65,7 @@ const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]
 const MOUSE_ENABLE = "\x1b[?1000h\x1b[?1002h\x1b[?1006h";
 const MOUSE_DISABLE = "\x1b[?1000l\x1b[?1002l\x1b[?1006l";
 
-export type WorkspaceFocus = "transcript" | "editor" | WorkspaceViewPaneId;
+export type WorkspaceFocus = "main" | WorkspaceViewPaneId;
 export type WorkspaceSection = WorkspaceViewPaneId;
 
 export type PhenixWorkspaceAction =
@@ -167,6 +168,7 @@ export class PhenixWorkspace implements Component, Focusable {
   private disposed = false;
   private renderRevision = 0;
   private frame: RenderFrame | undefined;
+  private lastSidebarSection: WorkspaceSection = "runs";
 
   constructor(options: PhenixWorkspaceOptions) {
     this.tui = options.tui;
@@ -180,7 +182,7 @@ export class PhenixWorkspace implements Component, Focusable {
         selectList: getSelectListTheme(),
       },
       options.keybindings,
-      { paddingX: 1, autocompleteMaxVisible: 8 },
+      { paddingX: 0, autocompleteMaxVisible: 8 },
     );
     if (options.commands.length > 0) {
       this.editor.setAutocompleteProvider(
@@ -226,48 +228,55 @@ export class PhenixWorkspace implements Component, Focusable {
       this.handleMouse(mouse);
       return;
     }
-    if (data === "\x03" && this.effectiveFocus() === "transcript") {
-      void this.transcriptSelection.copy().catch(() => undefined);
-      return;
-    }
-    if (data === "\x0f") {
-      this.onAction({ kind: "native", text: this.editor.getText() });
-      return;
-    }
-    if (data === "\x02") {
-      this.controller.dispatch({ type: "sidebar.toggle" });
-      return;
-    }
-    if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
-      this.cycleFocus(matchesKey(data, "shift+tab") ? -1 : 1);
-      return;
-    }
 
     const focus = this.effectiveFocus();
-    if (focus === "editor") {
-      this.editor.focused = true;
-      this.editor.handleInput(data);
-      return;
+    const intent = resolveWorkspaceInput(
+      data,
+      focus === "main" ? "main" : "sidebar",
+      this.transcriptSelection.selection !== undefined,
+    );
+    switch (intent.kind) {
+      case "copy-selection":
+        void this.transcriptSelection.copy().catch(() => undefined);
+        return;
+      case "native-ui":
+        this.onAction({ kind: "native", text: this.editor.getText() });
+        return;
+      case "sidebar-toggle":
+        this.controller.dispatch({ type: "sidebar.toggle" });
+        if (focus !== "main") this.focusMain();
+        return;
+      case "focus-toggle":
+        this.toggleFocusGroup();
+        return;
+      case "focus-main":
+        this.focusMain();
+        return;
+      case "transcript-page":
+        this.scrollTranscriptPage(intent.direction);
+        return;
+      case "sidebar-section":
+        this.moveSidebarSection(intent.direction);
+        return;
+      case "sidebar-item":
+        this.moveSidebarItem(focus, intent.direction);
+        return;
+      case "sidebar-edge":
+        this.moveSidebarEdge(focus, intent.edge);
+        return;
+      case "sidebar-activate":
+        if (focus !== "main") this.activateSection(focus);
+        return;
+      case "sidebar-collapse":
+        if (focus !== "main") {
+          this.controller.dispatch({ type: "section.toggle", paneId: focus });
+        }
+        return;
+      case "editor":
+        this.focusMain();
+        this.editor.focused = true;
+        this.editor.handleInput(data);
     }
-    this.editor.focused = false;
-    if (matchesKey(data, "escape")) {
-      if (focus === "transcript" && this.transcriptSelection.selection) {
-        this.transcriptSelection.clear();
-        this.requestRender();
-      } else {
-        this.controller.dispatch({ type: "focus.set", paneId: "editor" });
-      }
-      return;
-    }
-    if (data === "i" || data === "I") {
-      this.openInspector();
-      return;
-    }
-    if (focus === "transcript") {
-      this.handleTranscriptInput(data);
-      return;
-    }
-    this.handleSectionInput(focus, data);
   }
 
   render(width: number): string[] {
@@ -283,12 +292,20 @@ export class PhenixWorkspace implements Component, Focusable {
     }
 
     const focus = effectiveFocus(this.controller.state.focusedPaneId, dimensions.sidebarVisible);
-    this.editor.focused = this.focused && focus === "editor";
+    this.editor.focused = this.focused && focus === "main";
     const editorLines = this.renderPaneSafely(
       "Editor",
       dimensions.mainWidth,
       Math.max(1, height - 1),
-      () => this.editor.render(dimensions.mainWidth),
+      () =>
+        renderWorkspaceComposer({
+          lines: this.editor.render(Math.max(1, dimensions.mainWidth - 3)),
+          width: dimensions.mainWidth,
+          active: focus === "main",
+          sidebarVisible: dimensions.sidebarVisible,
+          profile: this.controller.snapshot.ui.profile,
+          theme: this.theme,
+        }),
       false,
     );
     this.renderRevision += 1;
@@ -424,13 +441,13 @@ export class PhenixWorkspace implements Component, Focusable {
     const transcript = this.controller.transcript;
     const session = transcript?.sessionId ?? selected?.run.pi?.sessionId;
     const copyHint = this.transcriptSelection.selection
-      ? ` ${color(this.theme, "muted", "· Ctrl+C copies · Esc clears")}`
+      ? ` ${color(this.theme, "muted", "· Ctrl+C copies · Esc edits")}`
       : "";
     const header = surface(
       this.theme,
-      focus === "transcript" ? "selectedBg" : "customMessageBg",
+      focus === "main" ? "selectedBg" : "customMessageBg",
       fitLine(
-        ` ${strong(this.theme, title)}${session ? ` ${color(this.theme, "muted", `· ${session}`)}` : ""}${selected?.run.kind !== "root" ? ` ${color(this.theme, "muted", "· i inspects")}` : ""}${copyHint}`,
+        ` ${strong(this.theme, title)}${session ? ` ${color(this.theme, "muted", `· ${session}`)}` : ""}${focus === "main" ? ` ${color(this.theme, "muted", "· PgUp/PgDn scroll")}` : ""}${copyHint}`,
         width,
       ),
     );
@@ -475,21 +492,17 @@ export class PhenixWorkspace implements Component, Focusable {
     const diagnostics = snapshot.ui.diagnostics.counts;
     const active = countActive(snapshot.ui.tree.root);
     const header = [
-      surface(
-        this.theme,
-        "customMessageBg",
-        fitLine(
-          ` ${strong(this.theme, "PHENIX")} ${color(this.theme, "muted", `${profile.agent}/${profile.modelSet}/${profile.difficulty}`)}`,
-          width,
-        ),
+      fitLine(
+        ` ${strong(this.theme, "PHENIX")} ${color(this.theme, "muted", `${profile.agent}/${profile.modelSet}/${profile.difficulty}`)}`,
+        width,
       ),
-      surface(
-        this.theme,
-        "customMessageBg",
-        fitLine(
-          ` ${state(this.theme, active > 0 ? "running" : "completed", active > 0 ? `${active} active` : "idle")} ${color(this.theme, diagnostics.error > 0 ? "error" : diagnostics.warning > 0 ? "warning" : "success", diagnostics.error > 0 ? `${diagnostics.error} errors` : diagnostics.warning > 0 ? `${diagnostics.warning} warnings` : "healthy")}`,
-          width,
-        ),
+      fitLine(
+        ` ${state(this.theme, active > 0 ? "running" : "completed", active > 0 ? `${active} active` : "idle")} ${color(this.theme, diagnostics.error > 0 ? "error" : diagnostics.warning > 0 ? "warning" : "success", diagnostics.error > 0 ? `${diagnostics.error} errors` : diagnostics.warning > 0 ? `${diagnostics.warning} warnings` : "healthy")}`,
+        width,
+      ),
+      fitLine(
+        ` ${color(this.theme, "muted", "h/l views · j/k rows · ↵ open · space fold")}`,
+        width,
       ),
     ];
     const available = Math.max(0, height - header.length);
@@ -529,10 +542,12 @@ export class PhenixWorkspace implements Component, Focusable {
       });
       start += section.lines.length;
     }
-    return {
-      lines: fitHeight([...header, ...sections.flatMap((section) => section.lines)], height, width),
-      layouts,
-    };
+    const lines = fitHeight(
+      [...header, ...sections.flatMap((section) => section.lines)],
+      height,
+      width,
+    ).map((line) => surface(this.theme, "customMessageBg", fitLine(line, width)));
+    return { lines, layouts };
   }
 
   private renderViewSection(
@@ -588,7 +603,7 @@ export class PhenixWorkspace implements Component, Focusable {
         focus === section ? strong(this.theme, line) : line,
       );
     }
-    if (rendered.active) return surface(this.theme, "customMessageBg", line);
+    if (rendered.active) return surface(this.theme, "userMessageBg", line);
     return rendered.muted ? color(this.theme, "muted", line) : line;
   }
 
@@ -610,26 +625,16 @@ export class PhenixWorkspace implements Component, Focusable {
     );
   }
 
-  private handleTranscriptInput(data: string): void {
+  private scrollTranscriptPage(direction: 1 | -1): void {
     const current = transcriptOffset(
       this.controller.state.transcript.scroll,
       this.frame?.transcriptMaxOffset ?? 0,
     );
-    if (isUp(data)) this.setTranscriptOffset(current - 1);
-    else if (isDown(data)) this.setTranscriptOffset(current + 1);
-    else if (matchesKey(data, "pageUp")) {
-      this.setTranscriptOffset(
-        current - Math.max(1, (this.frame?.layout.terminal.height ?? this.tui.terminal.rows) - 4),
-      );
-    } else if (matchesKey(data, "pageDown")) {
-      this.setTranscriptOffset(
-        current + Math.max(1, (this.frame?.layout.terminal.height ?? this.tui.terminal.rows) - 4),
-      );
-    } else if (matchesKey(data, "home")) {
-      this.setTranscriptOffset(0);
-    } else if (matchesKey(data, "end")) {
-      this.controller.dispatch({ type: "scroll.end", paneId: "transcript" });
-    }
+    const page = Math.max(
+      1,
+      (this.frame?.layout.panes.get("transcript")?.height ?? this.tui.terminal.rows) - 3,
+    );
+    this.setTranscriptOffset(current + direction * page);
   }
 
   private setTranscriptOffset(value: number): void {
@@ -646,21 +651,30 @@ export class PhenixWorkspace implements Component, Focusable {
     });
   }
 
-  private handleSectionInput(section: WorkspaceSection, data: string): void {
-    const itemIds = this.sectionItemIds(section);
-    if (isUp(data)) {
-      this.controller.dispatch({ type: "selection.move", paneId: section, direction: -1, itemIds });
-    } else if (isDown(data)) {
-      this.controller.dispatch({ type: "selection.move", paneId: section, direction: 1, itemIds });
-    } else if (matchesKey(data, "home")) {
-      this.controller.dispatch({ type: "selection.edge", paneId: section, edge: "first", itemIds });
-    } else if (matchesKey(data, "end")) {
-      this.controller.dispatch({ type: "selection.edge", paneId: section, edge: "last", itemIds });
-    } else if (data === " ") {
-      this.controller.dispatch({ type: "section.toggle", paneId: section });
-    } else if (matchesKey(data, "enter")) {
-      this.activateSection(section);
-    }
+  private moveSidebarItem(focus: WorkspaceFocus, direction: 1 | -1): void {
+    if (focus === "main") return;
+    this.controller.dispatch({
+      type: "selection.move",
+      paneId: focus,
+      direction,
+      itemIds: this.sectionItemIds(focus),
+    });
+  }
+
+  private moveSidebarEdge(focus: WorkspaceFocus, edge: "first" | "last"): void {
+    if (focus === "main") return;
+    this.controller.dispatch({
+      type: "selection.edge",
+      paneId: focus,
+      edge,
+      itemIds: this.sectionItemIds(focus),
+    });
+  }
+
+  private moveSidebarSection(direction: 1 | -1): void {
+    const sections = workspaceViewRegistry.ordered.map((view) => view.id);
+    const next = nextWorkspaceSection(this.lastSidebarSection, direction, sections);
+    this.focusSidebar(next);
   }
 
   private activateSection(section: WorkspaceSection): void {
@@ -680,27 +694,27 @@ export class PhenixWorkspace implements Component, Focusable {
 
   private selectTranscript(node: RunTreeNode): void {
     this.transcriptSelection.clear();
-    this.controller.dispatch({ type: "focus.set", paneId: "transcript" });
     this.controller.selectTranscript(node.run.id);
   }
 
-  private openInspector(): void {
-    const activeRunId = String(this.controller.state.activeRunId);
-    const selected = findWorkspaceRun(this.controller.snapshot.ui.tree.root, activeRunId);
-    this.onAction({
-      kind: "inspector",
-      target:
-        selected?.run.kind === "root"
-          ? { view: "status" }
-          : { view: "runs", selector: activeRunId },
-    });
+  private toggleFocusGroup(): void {
+    const sidebarVisible =
+      this.frame?.layout.panes.has("runs") ?? this.controller.state.sidebarVisible;
+    if (!sidebarVisible) {
+      this.focusMain();
+      return;
+    }
+    if (this.effectiveFocus() === "main") this.focusSidebar(this.lastSidebarSection);
+    else this.focusMain();
   }
 
-  private cycleFocus(delta: 1 | -1): void {
-    const order: readonly PaneId[] = this.frame?.layout.panes.has("runs")
-      ? ["transcript", "editor", ...workspaceViewRegistry.ordered.map((view) => view.id)]
-      : ["transcript", "editor"];
-    this.controller.dispatch({ type: "focus.move", direction: delta, order });
+  private focusMain(): void {
+    this.controller.dispatch({ type: "focus.set", paneId: "editor" });
+  }
+
+  private focusSidebar(section: WorkspaceSection): void {
+    this.lastSidebarSection = section;
+    this.controller.dispatch({ type: "focus.set", paneId: section });
   }
 
   private handleMouse(event: MouseEvent): void {
@@ -715,15 +729,15 @@ export class PhenixWorkspace implements Component, Focusable {
 
     if (event.release) return;
     if (event.button === 0 && this.transcriptSelection.begin(event)) {
-      this.controller.dispatch({ type: "focus.set", paneId: "transcript" });
+      this.focusMain();
       this.requestRender();
       return;
     }
 
     const sidebarBounds = this.frame.layout.panes.get("runs");
     if (!sidebarBounds || event.x <= sidebarBounds.x) {
+      this.focusMain();
       if (event.button === 64 || event.button === 65) {
-        this.controller.dispatch({ type: "focus.set", paneId: "transcript" });
         const current = transcriptOffset(
           this.controller.state.transcript.scroll,
           this.frame.transcriptMaxOffset,
@@ -741,7 +755,7 @@ export class PhenixWorkspace implements Component, Focusable {
         event.y <= candidate.start + candidate.height,
     );
     if (!section) return;
-    this.controller.dispatch({ type: "focus.set", paneId: section.section });
+    this.focusSidebar(section.section);
     const itemIds = this.sectionItemIds(section.section);
     if (event.button === 64 || event.button === 65) {
       const offset = clamp(
@@ -851,11 +865,10 @@ export class PhenixWorkspace implements Component, Focusable {
 }
 
 function effectiveFocus(paneId: PaneId, sidebarVisible: boolean): WorkspaceFocus {
-  if (paneId === "transcript" || paneId === "editor") return paneId;
   if (sidebarVisible && workspaceViewRegistry.ordered.some((view) => view.id === paneId)) {
     return paneId as WorkspaceViewPaneId;
   }
-  return "editor";
+  return "main";
 }
 
 function countActive(node: RunTreeNode): number {
@@ -926,12 +939,4 @@ function keepVisible(offset: number, selected: number, height: number, total: nu
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(Math.max(value, minimum), Math.max(minimum, maximum));
-}
-
-function isUp(data: string): boolean {
-  return matchesKey(data, "up") || data === "k";
-}
-
-function isDown(data: string): boolean {
-  return matchesKey(data, "down") || data === "j";
 }

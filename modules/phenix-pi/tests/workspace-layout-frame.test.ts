@@ -14,13 +14,13 @@ import {
 
 const RESET_BACKGROUND = "\x1b[49m";
 
-test("preserves the established responsive workspace dimensions", () => {
+test("preserves the conversation-first responsive workspace dimensions", () => {
   assert.deepEqual(computeWorkspaceDimensions(120, 40), {
     width: 120,
     height: 40,
     sidebarVisible: true,
-    sidebarWidth: 36,
-    mainWidth: 83,
+    sidebarWidth: 28,
+    mainWidth: 91,
   });
   assert.deepEqual(computeWorkspaceDimensions(89, 40), {
     width: 89,
@@ -42,9 +42,9 @@ test("solves transcript, editor, and sidebar into one immutable frame", () => {
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  assert.deepEqual(paneRect(result.value, "transcript"), rect(0, 0, 83, 36));
-  assert.deepEqual(paneRect(result.value, "editor"), rect(0, 36, 83, 4));
-  assert.deepEqual(paneRect(result.value, "runs"), rect(84, 0, 36, 40));
+  assert.deepEqual(paneRect(result.value, "transcript"), rect(0, 0, 91, 36));
+  assert.deepEqual(paneRect(result.value, "editor"), rect(0, 36, 91, 4));
+  assert.deepEqual(paneRect(result.value, "runs"), rect(92, 0, 28, 40));
   assert.deepEqual(result.value.focusOrder, ["transcript", "editor"]);
 });
 
