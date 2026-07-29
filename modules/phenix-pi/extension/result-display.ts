@@ -102,12 +102,15 @@ export function renderNativeResultEntry(
 ): Component {
   const renderer = renderers.get(data.renderer);
   if (!renderer || renderer.inputKind !== data.inputKind) {
-    return documentComponent([
-      theme.fg(
-        "error",
-        `Unable to render ${data.inputKind} result with ${data.renderer}: incompatible renderer`,
-      ),
-    ], { paddingX: 1 });
+    return documentComponent(
+      [
+        theme.fg(
+          "error",
+          `Unable to render ${data.inputKind} result with ${data.renderer}: incompatible renderer`,
+        ),
+      ],
+      { paddingX: 1 },
+    );
   }
   try {
     return renderer.render(data.content, theme);
