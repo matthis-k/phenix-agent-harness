@@ -28,6 +28,7 @@ import {
   WORKSPACE_NATIVE_HANDOFF,
 } from "./workspace/workspace-interaction.ts";
 import {
+  subscribeWorkspaceChanges,
   subscribeWorkspaceRuntime,
   type WorkspaceRuntimeBinding,
 } from "./workspace-runtime-binding.ts";
@@ -282,16 +283,7 @@ async function openWorkspace(
               binding.runtime.transcripts.get(node.run.id),
               ctx.cwd,
             ),
-          subscribe: (listener) => {
-            const unsubscribeEvents = binding.runtime.events.subscribe(listener);
-            const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
-            const unsubscribeTranscripts = binding.runtime.transcripts.subscribe(() => listener());
-            return () => {
-              unsubscribeEvents();
-              unsubscribeDiagnostics();
-              unsubscribeTranscripts();
-            };
-          },
+          subscribe: (listener) => subscribeWorkspaceChanges(binding, listener),
           submit: async (text) => {
             lifecycle.onSubmitStarted();
             try {
@@ -372,16 +364,7 @@ async function openInspector(
             binding.runtime.transcripts.get(node.run.id),
             ctx.cwd,
           ),
-        subscribe: (listener) => {
-          const unsubscribeEvents = binding.runtime.events.subscribe(listener);
-          const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
-          const unsubscribeTranscripts = binding.runtime.transcripts.subscribe(() => listener());
-          return () => {
-            unsubscribeEvents();
-            unsubscribeDiagnostics();
-            unsubscribeTranscripts();
-          };
-        },
+        subscribe: (listener) => subscribeWorkspaceChanges(binding, listener),
         onClose: () => done(undefined),
       }),
     {
