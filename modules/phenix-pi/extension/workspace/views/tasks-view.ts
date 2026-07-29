@@ -1,4 +1,5 @@
 import type { TaskNode } from "../../../domain/task/projection.ts";
+import { taskStateSymbol, truncateWorkspaceText } from "./workspace-view-format.ts";
 import { defineWorkspaceView } from "./workspace-view.ts";
 
 export interface WorkspaceTaskRow {
@@ -30,5 +31,14 @@ export const tasksWorkspaceView = defineWorkspaceView<WorkspaceTaskRow>({
     projectWorkspaceTasks(snapshot.tasks.root).map((value) => ({
       id: value.node.id,
       value,
+      ...(value.node.kind === "execution"
+        ? { activation: { kind: "transcript" as const, runId: value.node.runId } }
+        : {}),
+      render: ({ width }) => ({
+        text: `${"  ".repeat(value.depth)}${taskStateSymbol(value.node.effectiveState)} ${truncateWorkspaceText(
+          value.node.title,
+          Math.max(8, width - 5 - value.depth * 2),
+        )}`,
+      }),
     })),
 });
