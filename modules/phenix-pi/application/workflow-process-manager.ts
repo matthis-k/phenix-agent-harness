@@ -31,7 +31,7 @@ import type { ExecutionStore } from "./execution-store.ts";
 import type { TaskFacade } from "./interfaces.ts";
 import { KeyedSerialExecutor } from "./keyed-serial-executor.ts";
 
-const STOCK_SESSION_ID = "session.stock";
+const STOCK_AGENT_ID = "agent.stock";
 
 export class WorkflowProcessManager implements RunImplementation {
   private readonly invoker: ChildInvoker;
@@ -392,9 +392,9 @@ export class WorkflowProcessManager implements RunImplementation {
   private prepareInvokeInput(node: InvokeNode, state: WorkflowGraphState): unknown {
     const mapped = this.functions.mapping(node.input)(state.context);
     if (!this.isStockNode(node)) return mapped;
-    if (!node.outputSchema) throw new Error(`Stock session node ${node.id} has no output schema`);
+    if (!node.outputSchema) throw new Error(`Stock agent node ${node.id} has no output schema`);
     if (!isRecord(mapped)) {
-      throw new Error(`Stock session node ${node.id} input mapping must return an object`);
+      throw new Error(`Stock agent node ${node.id} input mapping must return an object`);
     }
     const schema = this.resolveSchema(node.outputSchema);
     return {
@@ -405,19 +405,19 @@ export class WorkflowProcessManager implements RunImplementation {
   }
 
   private validateStockOutcome(node: InvokeNode, value: unknown): Outcome<unknown> {
-    if (!node.outputSchema) throw new Error(`Stock session node ${node.id} has no output schema`);
-    if (!isRecord(value)) throw new Error(`Stock session ${node.id} returned no typed handoff`);
+    if (!node.outputSchema) throw new Error(`Stock agent node ${node.id} has no output schema`);
+    if (!isRecord(value)) throw new Error(`Stock agent ${node.id} returned no typed handoff`);
     const outputSchema = value.outputSchema;
     if (outputSchema !== node.outputSchema) {
       throw new Error(
-        `Stock session ${node.id} returned schema ${String(outputSchema)} instead of ${node.outputSchema}`,
+        `Stock agent ${node.id} returned schema ${String(outputSchema)} instead of ${node.outputSchema}`,
       );
     }
     const schema = this.resolveSchema(node.outputSchema);
     const validation = schema.validate(value.value);
     if (!validation.ok) {
       throw new Error(
-        `Stock session ${node.id} output is invalid: ${validation.issues
+        `Stock agent ${node.id} output is invalid: ${validation.issues
           .map((issue) => `${issue.path} ${issue.message}`)
           .join("; ")}`,
       );
@@ -427,7 +427,7 @@ export class WorkflowProcessManager implements RunImplementation {
 
   private isStockNode(node: InvokeNode): boolean {
     const definition = this.catalog.require(node.definition.id);
-    return definition.id === STOCK_SESSION_ID && definition.kind === "agent";
+    return definition.id === STOCK_AGENT_ID && definition.kind === "agent";
   }
 
   private invocationAttempts(
