@@ -37,6 +37,7 @@ export interface ListViewFrame {
 }
 
 export class ListView<T> {
+  private readonly adapter: ListViewAdapter<T>;
   private items: readonly T[] = [];
   private selectedItemId: string | undefined;
   private offset = 0;
@@ -44,10 +45,8 @@ export class ListView<T> {
   private readonly selectFirstItem: boolean;
   private readonly renderEmpty: (width: number) => string;
 
-  constructor(
-    private readonly adapter: ListViewAdapter<T>,
-    options: ListViewOptions = {},
-  ) {
+  constructor(adapter: ListViewAdapter<T>, options: ListViewOptions = {}) {
+    this.adapter = adapter;
     this.wrapNavigation = options.wrapNavigation ?? false;
     this.selectFirstItem = options.selectFirstItem ?? true;
     this.renderEmpty = options.renderEmpty ?? (() => "");
