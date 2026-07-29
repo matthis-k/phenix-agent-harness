@@ -32,20 +32,19 @@ export class CatalogFacadeImpl implements CatalogFacade {
       .filter(
         (definition) => allowed.has(definition.id) && !this.hiddenDefinitions.has(definition.id),
       )
-      .map((definition) => ({
-        id: definition.id,
-        kind:
-          definition.kind === "agent" && definition.sessionMode === "stock"
-            ? ("session" as const)
-            : definition.kind,
-        title: definition.title,
-        description: definition.description,
-        inputSchema: definition.input.id,
-        outputSchema:
-          definition.kind === "agent" && definition.sessionMode === "stock"
-            ? "dynamic"
-            : definition.output.id,
-      }));
+      .map((definition) => {
+        const stockSession = definition.kind === "agent" && definition.sessionMode === "stock";
+        const kind: DefinitionSummary["kind"] = stockSession ? "session" : definition.kind;
+        const outputSchema = stockSession ? "dynamic" : definition.output.id;
+        return {
+          id: definition.id,
+          kind,
+          title: definition.title,
+          description: definition.description,
+          inputSchema: definition.input.id,
+          outputSchema,
+        };
+      });
   }
 
   validateAll() {
