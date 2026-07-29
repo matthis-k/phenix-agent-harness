@@ -45,7 +45,7 @@ const FinalResultSchema = defineSchema<{ readonly answer: string }>(
 
 const SCOUT = definitionId("agent.test-dynamic-scout");
 const FINALIZER = definitionId("agent.test-dynamic-finalizer");
-const STOCK = definitionId("session.stock");
+const STOCK = definitionId("agent.stock");
 
 function agent(
   id: DefinitionId,
@@ -175,7 +175,7 @@ function proposal(): DynamicWorkflowProposal {
 function stockProposal(): DynamicWorkflowProposal {
   return {
     title: "Stock investigation",
-    description: "Bind a concrete typed result to a stock Pi session.",
+    description: "Bind a concrete typed result to a stock Pi agent.",
     inputSchema: ObjectiveSchema.id,
     outputSchema: ScoutResultSchema.id,
     entry: "stock",
@@ -247,7 +247,7 @@ test("dynamic workflow compiler seals deterministic typed graphs", () => {
   );
 });
 
-test("dynamic workflow compiler binds stock session result schemas", () => {
+test("dynamic workflow compiler binds stock agent result schemas", () => {
   const compiled = compiler().compile(stockProposal(), { allowedDefinitionIds: [STOCK] });
   const stock = compiled.definition.graph.nodes.find((node) => node.id === "stock");
 
