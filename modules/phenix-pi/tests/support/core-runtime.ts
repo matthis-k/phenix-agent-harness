@@ -1,23 +1,13 @@
 import { InMemoryRunLedger } from "../../adapters/persistence/in-memory-run-ledger.ts";
 import { DefinitionCatalog, WorkflowFunctionRegistry } from "../../application/catalog.ts";
-import { CatalogFacadeImpl } from "../../application/catalog-facade.ts";
-import { DispatchService } from "../../application/dispatch-service.ts";
 import { OrderedDomainEventBus } from "../../application/domain-event-bus.ts";
-import { DynamicWorkflowCompiler } from "../../application/dynamic-workflow-compiler.ts";
-import { DynamicWorkflowExecutionService } from "../../application/dynamic-workflow-execution.ts";
-import { DynamicWorkflowRuntimeRegistry } from "../../application/dynamic-workflow-runtime.ts";
-import {
-  ExecutionFacadeImpl,
-  type RunController,
-  type RunImplementation,
-  type StartImplementationCommand,
+import type {
+  RunController,
+  RunImplementation,
+  StartImplementationCommand,
 } from "../../application/execution-facade.ts";
 import { ExecutionStore } from "../../application/execution-store.ts";
-import { SessionInvocationPolicy } from "../../application/invocation-policy.ts";
-import { QueryFacadeImpl } from "../../application/query-facade.ts";
-import { TaskFacadeImpl } from "../../application/task-facade.ts";
-import { WorkflowCheckpointProcessManager } from "../../application/workflow-checkpoint-process-manager.ts";
-import { WorkflowProcessManager } from "../../application/workflow-process-manager.ts";
+import { createExecutionKernel } from "../../composition/execution-kernel.ts";
 import { agentDefinitions } from "../../definitions/agents.ts";
 import type { DynamicWorkflowProposal } from "../../definitions/dynamic-workflow.ts";
 import {
@@ -76,15 +66,17 @@ const operations: LocalOperationRunner = {
   },
 };
 
+type ExecutionKernel = ReturnType<typeof createExecutionKernel>;
+
 export interface TestRuntime {
-  readonly execution: ExecutionFacadeImpl;
-  readonly dynamicWorkflows: DynamicWorkflowExecutionService;
-  readonly dispatch: DispatchService;
-  readonly checkpoints: WorkflowCheckpointProcessManager;
+  readonly execution: ExecutionKernel["execution"];
+  readonly dynamicWorkflows: ExecutionKernel["dynamicWorkflows"];
+  readonly dispatch: ExecutionKernel["dispatch"];
+  readonly checkpoints: ExecutionKernel["checkpoints"];
   readonly controller: RunController;
   readonly store: ExecutionStore;
-  readonly tasks: TaskFacadeImpl;
-  readonly queries: QueryFacadeImpl;
+  readonly tasks: ExecutionKernel["tasks"];
+  readonly queries: ExecutionKernel["queries"];
   readonly rootRunId: RunId;
 }
 
@@ -112,41 +104,31 @@ export async function createTestRuntime(
   const functions = new WorkflowFunctionRegistry();
   registerWorkflowFunctions(functions);
   options.registerFunctions?.(functions);
-  const catalog = new DefinitionCatalog();
+  const definitions = new DefinitionCatalog();
   for (const definition of [
     ...agentDefinitions,
     ...workflowDefinitions,
     ...(options.definitions ?? []),
   ]) {
-    catalog.register(definition);
+    definitions.register(definition);
   }
   const operationRunner = options.operations
     ? layeredOperations(options.operations, operations)
     : operations;
-  catalog.seal(functions, operationRunner);
-  const execution = new ExecutionFacadeImpl({
-    catalog,
+  definitions.seal(functions, operationRunner);
+  const kernel = createExecutionKernel({
+    definitions,
+    functions,
+    operations: operationRunner,
     store,
     models: options.modelResolver ?? models,
     ids,
     clock,
+    cwd: process.cwd(),
+    resolveSchema: resolveDefinitionSchema,
     rootInvokableDefinitions: options.rootInvokableDefinitions,
   });
-  const tasks = new TaskFacadeImpl({ store, catalog, clock, ids });
-  const workflows = new WorkflowProcessManager({
-    invoker: execution.childInvoker(),
-    controller: execution,
-    operations: operationRunner,
-    store,
-    catalog,
-    functions,
-    tasks,
-    ids,
-    cwd: process.cwd(),
-    clock,
-    resolveSchema: resolveDefinitionSchema,
-  });
-  const checkpoints = new WorkflowCheckpointProcessManager({ store, catalog });
+  const { execution, workflows, checkpoints, dynamicWorkflows, dispatch, tasks, queries } = kernel;
   execution.registerImplementation(
     "agent",
     agentImplementation ??
@@ -154,32 +136,7 @@ export async function createTestRuntime(
   );
   execution.registerImplementation("workflow", workflows);
   execution.seal();
-  const catalogFacade = new CatalogFacadeImpl(catalog, store);
-  const dynamicRegistry = new DynamicWorkflowRuntimeRegistry({
-    compiler: new DynamicWorkflowCompiler({
-      resolveDefinition: (id) => catalog.require(id),
-      resolveSchema: resolveDefinitionSchema,
-    }),
-    catalog,
-    functions,
-  });
-  const dynamicWorkflows = new DynamicWorkflowExecutionService({
-    registry: dynamicRegistry,
-    catalog: catalogFacade,
-    store,
-    controller: execution,
-    workflow: workflows,
-    execution,
-    ids,
-    clock,
-  });
-  const dispatch = new DispatchService({
-    execution,
-    dynamicWorkflows,
-    catalog: catalogFacade,
-    store,
-    invocationPolicy: new SessionInvocationPolicy({ store, catalog }),
-  });
+
   const rootRunId = "root-test" as RunId;
   await execution.initializeRoot({
     id: rootRunId,
@@ -193,7 +150,7 @@ export async function createTestRuntime(
     controller: execution,
     store,
     tasks,
-    queries: new QueryFacadeImpl(store, tasks),
+    queries,
     rootRunId,
   };
 }
