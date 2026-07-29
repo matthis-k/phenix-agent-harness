@@ -18,23 +18,19 @@ test("removes the editor rules before composing the surfaced input box", () => {
   assert.deepEqual(editorBody(["message"]), ["message"]);
 });
 
-test("renders a larger background-backed composer with profile and navigation help", () => {
+test("renders a focused input surface without persistent key hints", () => {
   const lines = renderWorkspaceComposer({
     lines: ["────────", "hello", "────────"],
     width: 72,
     active: true,
-    sidebarVisible: true,
-    profile: { agent: "base", modelSet: "free", difficulty: "D1" },
     theme: THEME,
   });
 
-  assert.equal(lines.length, 5);
+  assert.equal(lines.length, 4);
   assert.ok(lines.every((line) => visibleWidth(line) === 72));
   const plain = lines.map(stripTranscriptAnsi).join("\n");
   assert.match(plain, /hello/);
-  assert.match(plain, /base · free · D1/);
-  assert.match(plain, /tab main\/sidebar/);
-  assert.match(plain, /native keys preserved/);
-  assert.doesNotMatch(plain, /ctrl\+[ob] native|ctrl\+b sidebar/);
+  assert.doesNotMatch(plain, /base|free|D1/);
+  assert.doesNotMatch(plain, /tab|pgup|pgdn|native keys preserved/i);
   assert.doesNotMatch(plain, /────────/);
 });
