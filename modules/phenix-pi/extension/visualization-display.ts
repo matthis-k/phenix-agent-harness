@@ -1,6 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { TUI } from "@earendil-works/pi-tui";
-import { type Component, matchesKey, Text } from "@earendil-works/pi-tui";
+import { type Component, matchesKey, type TUI } from "@earendil-works/pi-tui";
 
 import {
   createVisualizationArtifact,
@@ -12,6 +11,7 @@ import {
 import { fitViewLine, renderPanel, TerminalView } from "./components/index.ts";
 import { renderTerminalMermaid } from "./mermaid-rendering.ts";
 import type { ObservabilityTheme } from "./observability-theme.ts";
+import { documentComponent } from "./presentation-component.ts";
 
 const VISUAL_ACCEPTED = "Visual accepted.";
 const VISUALIZATION_ID_PREFIX = "visualization-";
@@ -24,7 +24,7 @@ export default function visualizationDisplay(pi: ExtensionAPI): void {
     VISUALIZATION_ENTRY_TYPE,
     (entry, _options, theme) => {
       const artifact = entry.data;
-      if (!isVisualizationArtifact(artifact)) return new Text("", 0, 0);
+      if (!isVisualizationArtifact(artifact)) return documentComponent([]);
       artifacts.set(artifact.visualizationId, artifact);
       try {
         const diagram = renderTerminalMermaid(artifact.source, {
@@ -32,28 +32,26 @@ export default function visualizationDisplay(pi: ExtensionAPI): void {
           compact: true,
           theme,
         });
-        return new Text(
+        return documentComponent(
           [
-            theme.fg("accent", ` Diagram · ${artifact.title}`),
-            theme.fg("muted", ` ${artifact.summary}`),
+            theme.fg("accent", `Diagram · ${artifact.title}`),
+            theme.fg("muted", artifact.summary),
             "",
-            diagram,
+            ...diagram.split("\n"),
             "",
-            theme.fg("muted", ` Open scrollable view: /visual ${artifact.visualizationId}`),
-          ].join("\n"),
-          1,
-          0,
+            theme.fg("muted", `Open scrollable view: /visual ${artifact.visualizationId}`),
+          ],
+          { paddingX: 1 },
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        return new Text(
+        return documentComponent(
           [
-            theme.fg("accent", ` Diagram · ${artifact.title}`),
-            theme.fg("error", ` Unable to render Mermaid: ${message}`),
-            theme.fg("muted", ` Open source: /visual ${artifact.visualizationId}`),
-          ].join("\n"),
-          1,
-          0,
+            theme.fg("accent", `Diagram · ${artifact.title}`),
+            theme.fg("error", `Unable to render Mermaid: ${message}`),
+            theme.fg("muted", `Open source: /visual ${artifact.visualizationId}`),
+          ],
+          { paddingX: 1 },
         );
       }
     },
