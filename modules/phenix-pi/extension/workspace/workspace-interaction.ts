@@ -1,11 +1,15 @@
 import type { AppKeybinding, KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import { matchesKey } from "@earendil-works/pi-tui";
 
+export const WORKSPACE_NATIVE_HANDOFF = "\x1b]phenix-native\x07";
+
 export type WorkspaceInputGroup = "main" | "sidebar";
 
 export type WorkspaceInputIntent =
   | { readonly kind: "editor" }
   | { readonly kind: "copy-selection" }
+  | { readonly kind: "native-ui" }
+  | { readonly kind: "sidebar-toggle" }
   | { readonly kind: "focus-toggle" }
   | { readonly kind: "focus-main" }
   | { readonly kind: "transcript-page"; readonly direction: 1 | -1 }
@@ -52,11 +56,9 @@ const NATIVE_MODAL_ACTIONS = new Set<AppKeybinding>([
 export function resolveNativeInputDelegation(
   data: string,
   keybindings: Pick<KeybindingsManager, "matches">,
-  editorEmpty: boolean,
 ): NativeInputDelegation | undefined {
   for (const action of NATIVE_HANDOFF_ACTIONS) {
     if (!keybindings.matches(data, action)) continue;
-    if (action === "app.exit" && !editorEmpty) return undefined;
     return {
       action,
       reopenWorkspace: !NATIVE_MODAL_ACTIONS.has(action),
@@ -70,6 +72,7 @@ export function resolveWorkspaceInput(
   group: WorkspaceInputGroup,
   hasTranscriptSelection = false,
 ): WorkspaceInputIntent {
+  if (data === WORKSPACE_NATIVE_HANDOFF) return { kind: "native-ui" };
   if (data === "\x03" && hasTranscriptSelection) return { kind: "copy-selection" };
   if (matchesKey(data, "tab")) return { kind: "focus-toggle" };
 
