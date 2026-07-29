@@ -1,13 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
-import {
-  type Component,
-  matchesKey,
-  sliceByColumn,
-  Text,
-  truncateToWidth,
-  visibleWidth,
-} from "@earendil-works/pi-tui";
+import { type Component, matchesKey, Text } from "@earendil-works/pi-tui";
 
 import {
   createVisualizationArtifact,
@@ -16,6 +9,7 @@ import {
   VISUALIZATION_EVENT,
   type VisualizationArtifact,
 } from "../domain/presentation/visualization.ts";
+import { fitViewLine, renderPanel, TerminalView } from "./components/index.ts";
 import { renderTerminalMermaid } from "./mermaid-rendering.ts";
 import type { ObservabilityTheme } from "./observability-theme.ts";
 
@@ -193,9 +187,7 @@ export class VisualizationView implements Component {
   private readonly theme: ObservabilityTheme;
   private readonly artifact: VisualizationArtifact;
   private readonly onClose: () => void;
-  private readonly lines: readonly string[];
-  private horizontalOffset = 0;
-  private verticalOffset = 0;
+  private readonly viewport = new TerminalView();
 
   constructor(input: {
     readonly tui: TUI;
@@ -208,14 +200,16 @@ export class VisualizationView implements Component {
     this.artifact = input.artifact;
     this.onClose = input.onClose;
     try {
-      this.lines = renderTerminalMermaid(input.artifact.source, {
-        color: true,
-        compact: false,
-        theme: input.theme,
-      }).split("\n");
+      this.viewport.setLines(
+        renderTerminalMermaid(input.artifact.source, {
+          color: true,
+          compact: false,
+          theme: input.theme,
+        }).split("\n"),
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.lines = [`Unable to render Mermaid: ${message}`, "", input.artifact.source];
+      this.viewport.setLines([`Unable to render Mermaid: ${message}`, "", input.artifact.source]);
     }
   }
 
@@ -226,25 +220,25 @@ export class VisualizationView implements Component {
       this.onClose();
       return;
     }
-    const page = Math.max(1, this.tui.terminal.rows - 4);
+    const bodyHeight = Math.max(1, this.tui.terminal.rows - 2);
     if (matchesKey(data, "left") || data === "h" || data === "H") {
-      this.horizontalOffset = Math.max(0, this.horizontalOffset - 4);
+      this.viewport.dispatch({ kind: "horizontal", columns: -4 }, bodyHeight);
     } else if (matchesKey(data, "right") || data === "l" || data === "L") {
-      this.horizontalOffset += 4;
+      this.viewport.dispatch({ kind: "horizontal", columns: 4 }, bodyHeight);
     } else if (matchesKey(data, "up") || data === "k" || data === "K") {
-      this.verticalOffset = Math.max(0, this.verticalOffset - 1);
+      this.viewport.dispatch({ kind: "scroll", lines: -1 }, bodyHeight);
     } else if (matchesKey(data, "down") || data === "j" || data === "J") {
-      this.verticalOffset += 1;
+      this.viewport.dispatch({ kind: "scroll", lines: 1 }, bodyHeight);
     } else if (matchesKey(data, "pageUp")) {
-      this.verticalOffset = Math.max(0, this.verticalOffset - page);
+      this.viewport.dispatch({ kind: "page", direction: -1 }, bodyHeight);
     } else if (matchesKey(data, "pageDown")) {
-      this.verticalOffset += page;
+      this.viewport.dispatch({ kind: "page", direction: 1 }, bodyHeight);
     } else if (matchesKey(data, "home") || data === "0") {
-      this.horizontalOffset = 0;
-      this.verticalOffset = 0;
+      this.viewport.dispatch({ kind: "home" }, bodyHeight);
+      this.viewport.dispatch({ kind: "horizontal", columns: -Number.MAX_SAFE_INTEGER }, bodyHeight);
     } else if (matchesKey(data, "end") || data === "G") {
-      this.horizontalOffset = Number.MAX_SAFE_INTEGER;
-      this.verticalOffset = Number.MAX_SAFE_INTEGER;
+      this.viewport.dispatch({ kind: "end" }, bodyHeight);
+      this.viewport.dispatch({ kind: "horizontal", columns: Number.MAX_SAFE_INTEGER }, bodyHeight);
     } else {
       return;
     }
@@ -254,34 +248,29 @@ export class VisualizationView implements Component {
   render(width: number): string[] {
     const height = Math.max(5, this.tui.terminal.rows);
     const bodyHeight = Math.max(1, height - 2);
-    const longest = this.lines.reduce((maximum, line) => Math.max(maximum, visibleWidth(line)), 0);
-    this.horizontalOffset = clamp(this.horizontalOffset, 0, Math.max(0, longest - width));
-    this.verticalOffset = clamp(
-      this.verticalOffset,
-      0,
-      Math.max(0, this.lines.length - bodyHeight),
-    );
-    const header = this.fit(
+    const body = this.viewport.render(width, bodyHeight);
+    const header = fitViewLine(
       `${this.theme.fg("accent", ` Diagram · ${this.artifact.title}`)} ${this.theme.fg("muted", `· ${this.artifact.visualizationId}`)}`,
       width,
     );
-    const body = Array.from({ length: bodyHeight }, (_, row) => {
-      const source = this.lines[this.verticalOffset + row] ?? "";
-      return this.fit(sliceByColumn(source, this.horizontalOffset, width, true), width);
+    const panel = renderPanel({
+      lines: body.lines,
+      width,
+      height: height - 1,
+      title: header,
+      style: {
+        surface: (line) => line,
+        title: (title) => title,
+      },
     });
-    const footer = this.fit(
+    const footer = fitViewLine(
       this.theme.fg(
         "muted",
         " ↑↓/jk scroll · ←→/hl pan · PgUp/PgDn · Home/0 reset · End/G bottom-right · q close ",
       ),
       width,
     );
-    return [header, ...body, footer];
-  }
-
-  private fit(line: string, width: number): string {
-    const clipped = truncateToWidth(line, width, "");
-    return clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped)));
+    return [...panel.lines, footer];
   }
 }
 
@@ -289,8 +278,4 @@ function recordOf(value: unknown): Readonly<Record<string, unknown>> | undefined
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Readonly<Record<string, unknown>>)
     : undefined;
-}
-
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.max(minimum, Math.min(value, maximum));
 }
