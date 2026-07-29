@@ -65,6 +65,7 @@ test("keeps active run detail while collapsing completed subtrees", () => {
     readonly node: RunTreeNode;
     readonly depth: number;
   }>;
+  assert.equal(flattened[0]?.node.run.kind, "root");
   assert.deepEqual(
     flattened.map((item) => [String(item.node.run.id), item.depth]),
     [
