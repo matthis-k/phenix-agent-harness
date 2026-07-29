@@ -16,24 +16,12 @@ import { AgentExecutor } from "../application/agent-executor.ts";
 import { FacadeAgentToolFactory } from "../application/agent-tools.ts";
 import { AttentionProcessManager } from "../application/attention-process-manager.ts";
 import { DefinitionCatalog, WorkflowFunctionRegistry } from "../application/catalog.ts";
-import { CatalogFacadeImpl } from "../application/catalog-facade.ts";
 import { logDomainEvent } from "../application/diagnostic-event-bridge.ts";
-import { DispatchService } from "../application/dispatch-service.ts";
 import { OrderedDomainEventBus } from "../application/domain-event-bus.ts";
-import { DynamicWorkflowCompiler } from "../application/dynamic-workflow-compiler.ts";
-import { DynamicWorkflowExecutionService } from "../application/dynamic-workflow-execution.ts";
-import { DynamicWorkflowRuntimeRegistry } from "../application/dynamic-workflow-runtime.ts";
-import { ExecutionFacadeImpl } from "../application/execution-facade.ts";
 import { ExecutionStore } from "../application/execution-store.ts";
-import { SessionInvocationPolicy } from "../application/invocation-policy.ts";
-import { ModelExecutionFacade } from "../application/model-execution-facade.ts";
 import { ProfileAwareModelResolver } from "../application/profile-aware-model-resolver.ts";
-import { QueryFacadeImpl } from "../application/query-facade.ts";
 import { SessionProfileFacadeImpl } from "../application/session-profile-facade.ts";
 import { SupervisionProcessManager } from "../application/supervision-process-manager.ts";
-import { TaskFacadeImpl } from "../application/task-facade.ts";
-import { WorkflowCheckpointProcessManager } from "../application/workflow-checkpoint-process-manager.ts";
-import { WorkflowProcessManager } from "../application/workflow-process-manager.ts";
 import { agentDefinitions } from "../definitions/agents.ts";
 import { ROOT_DISPATCH_DEFINITION_IDS, ROOT_INTERNAL_DEFINITION_IDS } from "../definitions/ids.ts";
 import { resolveDefinitionSchema } from "../definitions/schema-registry.ts";
@@ -44,6 +32,7 @@ import type { IdGenerator } from "../ports/clock.ts";
 import { systemClock } from "../ports/clock.ts";
 import type { DiagnosticLog } from "../ports/diagnostic-log.ts";
 import type { RunLedger } from "../ports/run-ledger.ts";
+import { createExecutionKernel } from "./execution-kernel.ts";
 
 export interface PhenixHostServices {
   readonly cwd: string;
@@ -87,15 +76,7 @@ export function createDefinitionRuntime(operations: ProcessLocalOperationRunner)
     definitions.register(definition);
   }
   definitions.seal(functions, operations);
-  const dynamicRegistry = new DynamicWorkflowRuntimeRegistry({
-    compiler: new DynamicWorkflowCompiler({
-      resolveDefinition: (id) => definitions.require(id),
-      resolveSchema: resolveDefinitionSchema,
-    }),
-    catalog: definitions,
-    functions,
-  });
-  return { functions, definitions, dynamicRegistry };
+  return { functions, definitions };
 }
 
 export function createExecutionServices(input: {
@@ -107,66 +88,37 @@ export function createExecutionServices(input: {
 }) {
   const { host, infrastructure, definitionRuntime } = input;
   const { ids, store, operations } = infrastructure;
-  const { definitions, functions, dynamicRegistry } = definitionRuntime;
+  const { definitions, functions } = definitionRuntime;
   const baseResolver = new PhenixModelResolver(
     new PiModelInventory(host.modelRegistry),
     host.routingPolicy,
   );
   const resolver = new ProfileAwareModelResolver(baseResolver, input.currentProfile);
-  const execution = new ExecutionFacadeImpl({
-    catalog: definitions,
+  const kernel = createExecutionKernel({
+    definitions,
+    functions,
+    operations,
     store,
     models: resolver,
     ids,
     clock: systemClock,
-    rootInvokableDefinitions: [...ROOT_DISPATCH_DEFINITION_IDS, ...ROOT_INTERNAL_DEFINITION_IDS],
-  });
-  const modelExecution = new ModelExecutionFacade({
-    execution,
-    store,
-    hiddenDefinitions: ROOT_INTERNAL_DEFINITION_IDS,
-  });
-  const tasks = new TaskFacadeImpl({
-    store,
-    catalog: definitions,
-    clock: systemClock,
-    ids,
-  });
-  const catalog = new CatalogFacadeImpl(definitions, store, {
-    hiddenDefinitions: ROOT_INTERNAL_DEFINITION_IDS,
-  });
-  const invocationPolicy = new SessionInvocationPolicy({ store, catalog: definitions });
-  const workflows = new WorkflowProcessManager({
-    invoker: execution.childInvoker(),
-    controller: execution,
-    operations,
-    store,
-    catalog: definitions,
-    functions,
-    tasks,
-    ids,
     cwd: host.cwd,
-    clock: systemClock,
     resolveSchema: resolveDefinitionSchema,
+    rootInvokableDefinitions: [...ROOT_DISPATCH_DEFINITION_IDS, ...ROOT_INTERNAL_DEFINITION_IDS],
+    hiddenDefinitions: ROOT_INTERNAL_DEFINITION_IDS,
   });
-  const checkpoints = new WorkflowCheckpointProcessManager({ store, catalog: definitions });
-  const dynamicWorkflows = new DynamicWorkflowExecutionService({
-    registry: dynamicRegistry,
-    catalog,
-    store,
-    controller: execution,
-    workflow: workflows,
+  const {
     execution,
-    ids,
-    clock: systemClock,
-  });
-  const dispatch = new DispatchService({
-    execution: modelExecution,
-    dynamicWorkflows,
+    modelExecution,
+    tasks,
     catalog,
-    store,
     invocationPolicy,
-  });
+    workflows,
+    checkpoints,
+    dynamicWorkflows,
+    dispatch,
+    queries,
+  } = kernel;
   const tools = new FacadeAgentToolFactory({
     execution: modelExecution,
     dispatch,
@@ -199,7 +151,6 @@ export function createExecutionServices(input: {
   execution.registerImplementation("workflow", workflows);
   execution.seal();
 
-  const queries = new QueryFacadeImpl(store, tasks);
   const attention = new AttentionProcessManager({
     execution,
     store,
