@@ -13,7 +13,6 @@ import {
 } from "../adapters/routing/phenix-model-resolver.ts";
 import { PiModelInventory } from "../adapters/routing/pi-model-inventory.ts";
 import { AgentExecutor } from "../application/agent-executor.ts";
-import { FacadeAgentToolFactory } from "../application/agent-tools.ts";
 import { AttentionProcessManager } from "../application/attention-process-manager.ts";
 import { DefinitionCatalog, WorkflowFunctionRegistry } from "../application/catalog.ts";
 import { logDomainEvent } from "../application/diagnostic-event-bridge.ts";
@@ -107,26 +106,8 @@ export function createExecutionServices(input: {
     rootInvokableDefinitions: [...ROOT_DISPATCH_DEFINITION_IDS, ...ROOT_INTERNAL_DEFINITION_IDS],
     hiddenDefinitions: ROOT_INTERNAL_DEFINITION_IDS,
   });
-  const {
-    execution,
-    modelExecution,
-    tasks,
-    catalog,
-    invocationPolicy,
-    workflows,
-    checkpoints,
-    dynamicWorkflows,
-    dispatch,
-    queries,
-  } = kernel;
-  const tools = new FacadeAgentToolFactory({
-    execution: modelExecution,
-    dispatch,
-    tasks,
-    catalog,
-    store,
-    invocationPolicy,
-  });
+  const { execution, tasks, catalog, workflows, checkpoints, dynamicWorkflows, tools, queries } =
+    kernel;
   const transcripts = new LiveAgentTranscriptStore();
   const backend = new PiSdkAgentSessionBackend({
     modelRegistry: host.modelRegistry,
@@ -148,7 +129,6 @@ export function createExecutionServices(input: {
     clock: systemClock,
   });
   execution.registerImplementation("agent", agents);
-  execution.registerImplementation("workflow", workflows);
   execution.seal();
 
   const attention = new AttentionProcessManager({
