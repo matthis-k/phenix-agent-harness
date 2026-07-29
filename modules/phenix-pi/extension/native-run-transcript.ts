@@ -23,11 +23,11 @@ import {
 import { type Component, Container, Spacer, type TUI } from "@earendil-works/pi-tui";
 
 import type { RunTreeNode } from "../application/interfaces.ts";
+import type { LiveAgentTranscriptSnapshot } from "../ports/live-agent-transcripts.ts";
 import type {
   LoadedWorkspaceTranscript,
   ReadyWorkspaceTranscript,
 } from "../ports/workspace-effects.ts";
-import type { LiveAgentTranscriptSnapshot } from "../ports/live-agent-transcripts.ts";
 import { renderNativeRunTranscriptResult } from "./native-run-transcript-view.ts";
 import type { ObservabilityTheme } from "./observability-theme.ts";
 import {
@@ -110,7 +110,7 @@ export async function loadNativeRunTranscriptResult(
     return { kind: "not-applicable", reason: "workflow" };
   }
 
-  const liveTranscript = readyLiveTranscript(node, live, tui, cwd, theme);
+  const liveTranscript = readyLiveTranscript(node, live, tui, cwd);
   if (liveTranscript && live?.completeHistory && !TERMINAL_STATES.has(node.run.state)) {
     return liveTranscript;
   }
@@ -176,7 +176,7 @@ export function renderNativeTranscript(
   cwd: string,
   theme?: ObservabilityTheme,
 ): NativeTranscriptComponent {
-  const renderer = createNativeTranscriptRenderer(tui, cwd, theme);
+  const renderer = createNativeTranscriptRenderer(tui, cwd);
   for (const entry of entries) {
     if (entry.type === "custom" && entry.customType === RESULT_ENTRY_TYPE) {
       const data = nativeResultEntryData(entry.data);
@@ -192,9 +192,8 @@ export function renderNativeMessages(
   messages: readonly AgentMessage[],
   tui: TUI,
   cwd: string,
-  theme?: ObservabilityTheme,
 ): NativeTranscriptComponent {
-  const renderer = createNativeTranscriptRenderer(tui, cwd, theme);
+  const renderer = createNativeTranscriptRenderer(tui, cwd);
   for (const message of messages) renderer.addMessage(message);
   return renderer.transcript;
 }
@@ -205,11 +204,7 @@ interface NativeTranscriptRenderer {
   addResult(component: Component, sourceId?: string): void;
 }
 
-function createNativeTranscriptRenderer(
-  tui: TUI,
-  cwd: string,
-  theme?: ObservabilityTheme,
-): NativeTranscriptRenderer {
+function createNativeTranscriptRenderer(tui: TUI, cwd: string): NativeTranscriptRenderer {
   const transcript = new NativeTranscriptComponent();
   const markdownTheme = getMarkdownTheme();
   const pendingTools = new Map<string, ToolExecutionComponent>();
@@ -296,12 +291,11 @@ function readyLiveTranscript(
   live: LiveAgentTranscriptSnapshot | undefined,
   tui: TUI,
   cwd: string,
-  theme?: ObservabilityTheme,
 ): ReadyWorkspaceTranscript<NativeRunTranscript> | undefined {
   if (!live || live.messages.length === 0) return undefined;
   return readyNativeRunTranscript(
     {
-      component: renderNativeMessages(live.messages as readonly AgentMessage[], tui, cwd, theme),
+      component: renderNativeMessages(live.messages as readonly AgentMessage[], tui, cwd),
       sessionId: live.sessionId,
       ...(live.sessionFile ? { sessionFile: live.sessionFile } : {}),
     },

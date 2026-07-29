@@ -5,8 +5,8 @@ import type { RunTreeNode } from "../application/interfaces.ts";
 import type { RunSnapshot } from "../domain/run/model.ts";
 import { runId } from "../domain/shared.ts";
 import {
-  NativeTranscriptComponent,
   type NativeRunTranscript,
+  NativeTranscriptComponent,
   readyNativeRunTranscript,
 } from "../extension/native-run-transcript.ts";
 import { WorkspaceControllerAdapter } from "../extension/workspace/workspace-controller-adapter.ts";
@@ -61,9 +61,7 @@ test("transcript refresh retains the visible child until its replacement is read
     load: async () => current,
     loadTranscript: async () => {
       loadCount += 1;
-      return loadCount === 1
-        ? readyNativeRunTranscript(first, "child-first")
-        : pendingReplacement;
+      return loadCount === 1 ? readyNativeRunTranscript(first, "child-first") : pendingReplacement;
     },
     subscribe: (listener) => {
       publish = listener;
