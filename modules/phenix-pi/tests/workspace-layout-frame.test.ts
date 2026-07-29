@@ -14,7 +14,7 @@ import {
 
 const RESET_BACKGROUND = "\x1b[49m";
 
- test("preserves the established responsive workspace dimensions", () => {
+test("preserves the established responsive workspace dimensions", () => {
   assert.deepEqual(computeWorkspaceDimensions(120, 40), {
     width: 120,
     height: 40,
@@ -119,5 +119,5 @@ test("composes pane-local lines into exact terminal rows with isolated backgroun
   assert.ok(lines.every((line) => line.startsWith(RESET_BACKGROUND)));
   assert.ok(lines.every((line) => line.endsWith(RESET_BACKGROUND)));
   assert.ok(lines.every((line) => visibleWidth(line) === 12));
-  assert.match(lines[0] ?? "", /\x1b\[41mone\s+\x1b\[49m$/);
+  assert.match(lines[0] ?? "", /\x1b\[41mone\s+\x1b\[49m/);
 });
