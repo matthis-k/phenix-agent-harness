@@ -8,7 +8,12 @@ import type {
   LoadedWorkspaceTranscript,
   WorkspaceEffectRuntime,
 } from "../../ports/workspace-effects.ts";
-import type { NativeRunTranscript } from "../native-run-transcript.ts";
+import {
+  type NativeRunTranscript,
+  type NativeRunTranscriptPresentation,
+  presentNativeRunTranscript,
+  readyNativeRunTranscript,
+} from "../native-run-transcript.ts";
 import {
   findWorkspaceRun,
   type PhenixWorkspaceSnapshot,
@@ -20,7 +25,7 @@ export interface WorkspaceControllerAdapterOptions {
   readonly load: () => Promise<PhenixWorkspaceSnapshot>;
   readonly loadTranscript: (
     node: RunTreeNode,
-  ) => Promise<LoadedWorkspaceTranscript<NativeRunTranscript>>;
+  ) => Promise<LoadedWorkspaceTranscript<NativeRunTranscript> | NativeRunTranscript>;
   readonly subscribe: (listener: () => void) => () => void;
   readonly onChange: () => void;
   readonly recordDiagnostic?: (error: WorkspaceError) => void | Promise<void>;
@@ -47,7 +52,9 @@ export class WorkspaceControllerAdapter {
         if (!node) {
           throw new Error(`Run ${selectedRunId} is not present in the current workspace snapshot`);
         }
-        return node.run.kind === "root" ? snapshot.rootTranscript : options.loadTranscript(node);
+        if (node.run.kind === "root") return snapshot.rootTranscript;
+        const loaded = await options.loadTranscript(node);
+        return "kind" in loaded ? loaded : readyNativeRunTranscript(loaded);
       },
       recordDiagnostic: (error) => options.recordDiagnostic?.(error),
     };
@@ -78,13 +85,17 @@ export class WorkspaceControllerAdapter {
     return this.controller.snapshot?.value ?? this.lastSnapshot.value;
   }
 
-  get transcript(): NativeRunTranscript | undefined {
+  get transcript(): NativeRunTranscriptPresentation {
     const current = this.controller.currentTranscript;
     if (current) return current;
     if (this.controller.state.activeRunId === this.snapshot.ui.tree.root.run.id) {
       return this.snapshot.rootTranscript.value;
     }
-    return undefined;
+    const selected = findWorkspaceRun(
+      this.snapshot.ui.tree.root,
+      String(this.controller.state.activeRunId),
+    );
+    return presentNativeRunTranscript(this.controller.state.transcript.availability, selected);
   }
 
   dispatch(event: WorkspaceEvent<PhenixWorkspaceSnapshot>): void {
