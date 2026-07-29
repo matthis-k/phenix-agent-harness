@@ -25,6 +25,7 @@ import { DynamicWorkflowRuntimeRegistry } from "../application/dynamic-workflow-
 import { ExecutionFacadeImpl } from "../application/execution-facade.ts";
 import { ExecutionStore } from "../application/execution-store.ts";
 import { SessionInvocationPolicy } from "../application/invocation-policy.ts";
+import { LiveAgentTranscriptStore } from "../application/live-agent-transcripts.ts";
 import { ModelExecutionFacade } from "../application/model-execution-facade.ts";
 import { ProfileAwareModelResolver } from "../application/profile-aware-model-resolver.ts";
 import { QueryFacadeImpl } from "../application/query-facade.ts";
@@ -174,9 +175,11 @@ export function createExecutionServices(input: {
     store,
     invocationPolicy,
   });
+  const transcripts = new LiveAgentTranscriptStore();
   const backend = new PiSdkAgentSessionBackend({
     modelRegistry: host.modelRegistry,
     agentDir: host.agentDir,
+    transcripts,
     eventBus: host.piEventBus,
     promptModeForRun: (runId) => {
       const run = store.projection.requireRun(runId);
@@ -219,6 +222,7 @@ export function createExecutionServices(input: {
     workflows,
     checkpoints,
     agents,
+    transcripts,
     attention,
     supervision,
   };
