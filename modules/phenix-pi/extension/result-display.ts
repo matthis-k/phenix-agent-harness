@@ -11,6 +11,11 @@ import type { ObservabilityTheme } from "./observability-theme.ts";
 
 export const RESULT_ENTRY_TYPE = "phenix:result-display";
 const ROOT_RESULT_TOOLS = new Set(["phenix_dispatch", "phenix_handle"]);
+const PLAIN_THEME = {
+  fg: (_tone: string, text: string) => text,
+  bg: (_tone: string, text: string) => text,
+  bold: (text: string) => text,
+} as unknown as ObservabilityTheme;
 
 export interface NativeResultEntry {
   readonly content: string;
@@ -85,7 +90,7 @@ export function registerResultDisplay(
 
 export function renderNativeResultEntry(
   data: NativeResultEntry,
-  theme: ObservabilityTheme,
+  theme: ObservabilityTheme = PLAIN_THEME,
   renderers: ReadonlyMap<
     NativeResultRendererStrategy["id"],
     NativeResultRendererStrategy
