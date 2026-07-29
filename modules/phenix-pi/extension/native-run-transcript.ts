@@ -23,11 +23,11 @@ import {
 import { type Component, Container, Spacer, type TUI } from "@earendil-works/pi-tui";
 
 import type { RunTreeNode } from "../application/interfaces.ts";
-import type { LiveAgentTranscriptSnapshot } from "../application/live-agent-transcripts.ts";
 import type {
   LoadedWorkspaceTranscript,
   ReadyWorkspaceTranscript,
 } from "../ports/workspace-effects.ts";
+import type { LiveAgentTranscriptSnapshot } from "../ports/live-agent-transcripts.ts";
 import { renderNativeRunTranscriptResult } from "./native-run-transcript-view.ts";
 import type { ObservabilityTheme } from "./observability-theme.ts";
 import {
@@ -301,7 +301,7 @@ function readyLiveTranscript(
   if (!live || live.messages.length === 0) return undefined;
   return readyNativeRunTranscript(
     {
-      component: renderNativeMessages(live.messages, tui, cwd, theme),
+      component: renderNativeMessages(live.messages as readonly AgentMessage[], tui, cwd, theme),
       sessionId: live.sessionId,
       ...(live.sessionFile ? { sessionFile: live.sessionFile } : {}),
     },
