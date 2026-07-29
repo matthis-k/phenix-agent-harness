@@ -35,6 +35,7 @@ test("uses an already-loaded transcript without scheduling an effect", () => {
     },
     runtime,
     transcript: {
+      kind: "ready",
       handle: { key: "root-transcript" },
       value: { text: "root" },
     },
@@ -127,10 +128,12 @@ test("a newer transcript selection aborts and supersedes the older load", async 
   assert.equal(runtime.transcriptCalls[0]?.signal.aborted, true);
 
   runtime.transcriptCalls[0]?.deferred.resolve({
+    kind: "ready",
     handle: { key: "child-a" },
     value: { text: "old" },
   });
   runtime.transcriptCalls[1]?.deferred.resolve({
+    kind: "ready",
     handle: { key: "child-b" },
     value: { text: "current" },
   });
@@ -141,6 +144,27 @@ test("a newer transcript selection aborts and supersedes the older load", async 
   assert.deepEqual(controller.currentTranscript, { text: "current" });
   assert.deepEqual(controller.state.transcript.scroll, { mode: "follow-end" });
   assert.equal(controller.state.transcript.horizontalOrigin, 0);
+});
+
+test("publishes typed unavailable transcript outcomes without caching a value", async () => {
+  const root = runId("root");
+  const child = runId("child");
+  const runtime = new TestRuntime();
+  const controller = new WorkspaceController({
+    state: createInitialWorkspaceState(root),
+    runtime,
+  });
+
+  controller.selectTranscript(child);
+  runtime.transcriptCalls[0]?.deferred.resolve({ kind: "pending-persistence", runId: child });
+  await controller.whenIdle();
+
+  assert.deepEqual(controller.state.transcript.availability, {
+    kind: "pending-persistence",
+    runId: child,
+  });
+  assert.equal(controller.currentTranscript, undefined);
+  assert.equal(controller.state.pendingEffects.size, 0);
 });
 
 test("dispose aborts owned effects and ignores their late completion", async () => {
@@ -161,6 +185,7 @@ test("dispose aborts owned effects and ignores their late completion", async () 
   controller.dispose();
   assert.equal(runtime.transcriptCalls[0]?.signal.aborted, true);
   runtime.transcriptCalls[0]?.deferred.resolve({
+    kind: "ready",
     handle: { key: "late" },
     value: { text: "late" },
   });
