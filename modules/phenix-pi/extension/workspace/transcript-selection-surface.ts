@@ -1,5 +1,5 @@
 import { copyToClipboard } from "@earendil-works/pi-coding-agent";
-import { sliceByColumn, visibleWidth } from "@earendil-works/pi-tui";
+import { sliceByColumn, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 import type { Rect } from "../../domain/workspace/geometry.ts";
 import type { ObservabilityTheme } from "../observability-theme.ts";
@@ -98,7 +98,11 @@ export class TranscriptSelectionSurface {
     const prefix = sliceByColumn(plain, 0, from, true);
     const selected = sliceByColumn(plain, from, to - from, true);
     const suffix = sliceByColumn(plain, to, Math.max(0, visibleWidth(plain) - to), true);
-    return `${prefix}${surface(theme, "selectedBg", selected)}${suffix}`.slice(0, Math.max(width, 0) * 8);
+    return truncateToWidth(
+      `${prefix}${surface(theme, "selectedBg", selected)}${suffix}`,
+      Math.max(0, width),
+      "",
+    );
   }
 
   private pointFromMouse(
@@ -124,7 +128,6 @@ export class TranscriptSelectionSurface {
     }
     const localRow = clamp(terminalY, minimumY, maximumY) - minimumY;
     const row = clamp(frame.offset + localRow, 0, frame.lines.length - 1);
-    const line = frame.lines[row] ?? "";
     return {
       row,
       column: clamp(terminalX, minimumX, maximumX) - minimumX,
