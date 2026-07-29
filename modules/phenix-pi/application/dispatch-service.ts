@@ -46,11 +46,13 @@ export interface DispatchResult {
   readonly suspension?: BudgetSuspension;
 }
 
-interface DispatchSelection {
+type DispatchOrigin =
+  | { readonly selectedBy: "explicit" }
+  | { readonly selectedBy: "dispatcher"; readonly classifierRunId: RunId };
+
+type DispatchSelection = DispatchOrigin & {
   readonly target: DefinitionRef<unknown, unknown>;
-  readonly selectedBy: DispatchResult["selectedBy"];
-  readonly classifierRunId?: RunId;
-}
+};
 
 type DispatchWait = NonNullable<DispatchRequest["wait"]>;
 
@@ -104,8 +106,7 @@ export class DispatchService {
     return this.resultForHandle({
       handle,
       definition: selection.target.id,
-      selectedBy: selection.selectedBy,
-      ...(selection.classifierRunId ? { classifierRunId: selection.classifierRunId } : {}),
+      origin: selection,
       wait,
       signal,
     });
@@ -193,8 +194,7 @@ export class DispatchService {
     return this.resultForHandle({
       handle,
       definition,
-      selectedBy: selection.selectedBy,
-      ...(selection.classifierRunId ? { classifierRunId: selection.classifierRunId } : {}),
+      origin: selection,
       composerRunId: composer.id,
       wait,
       signal,
@@ -204,17 +204,15 @@ export class DispatchService {
   private async resultForHandle(input: {
     readonly handle: RunHandle<unknown>;
     readonly definition: DefinitionId;
-    readonly selectedBy: DispatchResult["selectedBy"];
-    readonly classifierRunId?: RunId;
+    readonly origin: DispatchOrigin;
     readonly composerRunId?: RunId;
     readonly wait: DispatchWait;
     readonly signal?: AbortSignal;
   }): Promise<DispatchResult> {
     const result = {
       definition: input.definition,
-      selectedBy: input.selectedBy,
+      ...input.origin,
       runId: input.handle.id,
-      ...(input.classifierRunId ? { classifierRunId: input.classifierRunId } : {}),
       ...(input.composerRunId ? { composerRunId: input.composerRunId } : {}),
     };
     if (input.wait === "background") return { ...result, status: "running" };
