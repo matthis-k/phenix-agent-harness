@@ -27,13 +27,13 @@ import type {
   LoadedWorkspaceTranscript,
   ReadyWorkspaceTranscript,
 } from "../ports/workspace-effects.ts";
+import { renderNativeRunTranscriptResult } from "./native-run-transcript-view.ts";
 import type { ObservabilityTheme } from "./observability-theme.ts";
 import {
   nativeResultEntryData,
-  renderNativeResultEntry,
   RESULT_ENTRY_TYPE,
+  renderNativeResultEntry,
 } from "./result-display.ts";
-import { renderNativeRunTranscriptResult } from "./native-run-transcript-view.ts";
 
 export type NativeTranscriptChunkKind =
   | "user"
@@ -65,7 +65,9 @@ export class NativeTranscriptComponent extends Container {
 }
 
 export interface NativeRunTranscript {
-  readonly component: NativeTranscriptComponent;
+  readonly component: Container & {
+    readonly chunks?: readonly NativeTranscriptChunk[];
+  };
   readonly sessionId: string;
   readonly sessionFile?: string;
 }
@@ -138,9 +140,10 @@ export async function loadNativeRunTranscriptResult(
   }
 
   const entries = fileEntries.filter((entry): entry is SessionEntry => entry.type !== "session");
+  const component = renderNativeTranscript(buildContextEntries(entries), tui, header.cwd, theme);
   return readyNativeRunTranscript(
     {
-      component: renderNativeTranscript(buildContextEntries(entries), tui, header.cwd, theme),
+      component,
       sessionId: header.id,
       sessionFile,
     },
