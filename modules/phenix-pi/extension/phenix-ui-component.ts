@@ -262,12 +262,13 @@ export class PhenixUi implements Component {
     this.factList = new ListView<RunFact>(
       {
         id: (fact) => factId(fact),
-        render: (fact, context) => this.renderSelectableLine(
-          formatFactLine(this.theme, fact),
-          context.width,
-          context.selected,
-          context.focused,
-        ),
+        render: (fact, context) =>
+          this.renderSelectableLine(
+            formatFactLine(this.theme, fact),
+            context.width,
+            context.selected,
+            context.focused,
+          ),
       },
       { selectFirstItem: true },
     );
@@ -506,10 +507,14 @@ export class PhenixUi implements Component {
     const height = Math.max(0, this.layout.bodyHeight - header.length);
     const frame = this.statusList.render(width, height, true);
     this.recordHits("status", 0, frame.visibleItemIds, header.length);
-    if (this.statusList.itemCount === 0) {
-      frame.lines[0] = fitViewLine(` ${color(this.theme, "success", "✓ idle")}`, width);
-    }
-    return [...header.map((line) => fitViewLine(line, width)), ...frame.lines];
+    const body =
+      this.statusList.itemCount === 0 && frame.lines.length > 0
+        ? [
+            fitViewLine(` ${color(this.theme, "success", "✓ idle")}`, width),
+            ...frame.lines.slice(1),
+          ]
+        : frame.lines;
+    return [...header.map((line) => fitViewLine(line, width)), ...body];
   }
 
   private renderRuns(): string[] {
@@ -546,12 +551,14 @@ export class PhenixUi implements Component {
     this.runTree.setRoots([this.snapshot.tree.root]);
     const frame = this.runTree.render(width, height, this.pane === 0);
     this.recordHits("runs", 0, frame.visibleNodeIds, 0);
-    return renderPanel({
-      lines: frame.lines,
-      width,
-      height,
-      style: { surface: (line) => this.panelSurface(line, 0) },
-    }).lines as string[];
+    return [
+      ...renderPanel({
+        lines: frame.lines,
+        width,
+        height,
+        style: { surface: (line) => this.panelSurface(line, 0) },
+      }).lines,
+    ];
   }
 
   private renderRunViewerPane(node: RunTreeNode, width: number, height: number): string[] {
@@ -633,19 +640,22 @@ export class PhenixUi implements Component {
     const detail = this.renderFactDetail(selected, detailWidth, height);
     return Array.from(
       { length: height },
-      (_, row) => `${list[row] ?? " ".repeat(listWidth)} ${detail[row] ?? " ".repeat(detailWidth)}`,
+      (_, row) =>
+        `${list[row] ?? " ".repeat(listWidth)} ${detail[row] ?? " ".repeat(detailWidth)}`,
     );
   }
 
   private renderFactList(width: number, height: number): string[] {
     const frame = this.factList.render(width, height, this.pane === 0);
     this.recordHits("facts", 0, frame.visibleItemIds, 0);
-    return renderPanel({
-      lines: frame.lines,
-      width,
-      height,
-      style: { surface: (line) => this.panelSurface(line, 0) },
-    }).lines as string[];
+    return [
+      ...renderPanel({
+        lines: frame.lines,
+        width,
+        height,
+        style: { surface: (line) => this.panelSurface(line, 0) },
+      }).lines,
+    ];
   }
 
   private renderFactDetail(item: RunFact | undefined, width: number, height: number): string[] {
@@ -681,7 +691,8 @@ export class PhenixUi implements Component {
     const preview = this.renderDefinitionPreview(selected, previewWidth, height);
     return Array.from(
       { length: height },
-      (_, row) => `${sidebar[row] ?? " ".repeat(sidebarWidth)} ${preview[row] ?? " ".repeat(previewWidth)}`,
+      (_, row) =>
+        `${sidebar[row] ?? " ".repeat(sidebarWidth)} ${preview[row] ?? " ".repeat(previewWidth)}`,
     );
   }
 
@@ -781,12 +792,14 @@ export class PhenixUi implements Component {
     pane: UiPane,
   ): string[] {
     const frame = viewport.render(width, height);
-    return renderPanel({
-      lines: frame.lines,
-      width,
-      height,
-      style: { surface: (line) => this.panelSurface(line, pane) },
-    }).lines as string[];
+    return [
+      ...renderPanel({
+        lines: frame.lines,
+        width,
+        height,
+        style: { surface: (line) => this.panelSurface(line, pane) },
+      }).lines,
+    ];
   }
 
   private renderHelp(width: number, height: number): string[] {
@@ -809,26 +822,30 @@ export class PhenixUi implements Component {
       "",
       "Mouse: click tabs and list rows; wheel scrolls the pane under the pointer.",
     ];
-    return renderPanel({
-      lines,
-      width,
-      height,
-      style: { surface: (line) => line },
-    }).lines as string[];
+    return [
+      ...renderPanel({
+        lines,
+        width,
+        height,
+        style: { surface: (line) => line },
+      }).lines,
+    ];
   }
 
   private renderSmall(width: number, height: number): string[] {
-    return renderPanel({
-      lines: [
-        color(this.theme, "warning", " Terminal is too small for the full-screen interface."),
-        " Resize to at least 42 columns and 8 rows.",
-        " Esc closes the UI.",
-      ],
-      width,
-      height,
-      title: heading(this.theme, " Phenix UI"),
-      style: { surface: (line) => line, title: (title) => title },
-    }).lines as string[];
+    return [
+      ...renderPanel({
+        lines: [
+          color(this.theme, "warning", " Terminal is too small for the full-screen interface."),
+          " Resize to at least 42 columns and 8 rows.",
+          " Esc closes the UI.",
+        ],
+        width,
+        height,
+        title: heading(this.theme, " Phenix UI"),
+        style: { surface: (line) => line, title: (title) => title },
+      }).lines,
+    ];
   }
 
   private renderFooter(width: number): string {
@@ -857,11 +874,16 @@ export class PhenixUi implements Component {
     }
     if (this.pane === 0) {
       let event: TreeViewEvent<RunTreeNode> | undefined;
-      if (isUp(data)) event = this.runTree.dispatch({ kind: "move", direction: -1 }, this.layout.bodyHeight);
-      else if (isDown(data)) event = this.runTree.dispatch({ kind: "move", direction: 1 }, this.layout.bodyHeight);
-      else if (matchesKey(data, "home")) event = this.runTree.dispatch({ kind: "edge", edge: "first" }, this.layout.bodyHeight);
-      else if (matchesKey(data, "end")) event = this.runTree.dispatch({ kind: "edge", edge: "last" }, this.layout.bodyHeight);
-      else if (data === " ") event = this.runTree.dispatch({ kind: "toggle" }, this.layout.bodyHeight);
+      if (isUp(data))
+        event = this.runTree.dispatch({ kind: "move", direction: -1 }, this.layout.bodyHeight);
+      else if (isDown(data))
+        event = this.runTree.dispatch({ kind: "move", direction: 1 }, this.layout.bodyHeight);
+      else if (matchesKey(data, "home"))
+        event = this.runTree.dispatch({ kind: "edge", edge: "first" }, this.layout.bodyHeight);
+      else if (matchesKey(data, "end"))
+        event = this.runTree.dispatch({ kind: "edge", edge: "last" }, this.layout.bodyHeight);
+      else if (data === " ")
+        event = this.runTree.dispatch({ kind: "toggle" }, this.layout.bodyHeight);
       else if (matchesKey(data, "right")) {
         event = this.runTree.dispatch({ kind: "expand" }, this.layout.bodyHeight);
         if (!event) this.pane = 1;
@@ -925,10 +947,14 @@ export class PhenixUi implements Component {
     let event: ReturnType<ListView<T>["dispatch"]>;
     if (isUp(data)) event = list.dispatch({ kind: "move", direction: -1 }, height);
     else if (isDown(data)) event = list.dispatch({ kind: "move", direction: 1 }, height);
-    else if (matchesKey(data, "pageUp")) event = list.dispatch({ kind: "page", direction: -1 }, height);
-    else if (matchesKey(data, "pageDown")) event = list.dispatch({ kind: "page", direction: 1 }, height);
-    else if (matchesKey(data, "home")) event = list.dispatch({ kind: "edge", edge: "first" }, height);
-    else if (matchesKey(data, "end")) event = list.dispatch({ kind: "edge", edge: "last" }, height);
+    else if (matchesKey(data, "pageUp"))
+      event = list.dispatch({ kind: "page", direction: -1 }, height);
+    else if (matchesKey(data, "pageDown"))
+      event = list.dispatch({ kind: "page", direction: 1 }, height);
+    else if (matchesKey(data, "home"))
+      event = list.dispatch({ kind: "edge", edge: "first" }, height);
+    else if (matchesKey(data, "end"))
+      event = list.dispatch({ kind: "edge", edge: "last" }, height);
     else if (matchesKey(data, "enter")) event = list.dispatch({ kind: "activate" }, height);
     else return undefined;
     this.requestRender();
@@ -1357,10 +1383,7 @@ function defaultExpandedRunIds(root: RunTreeNode): readonly string[] {
   return flattenRuns(root)
     .filter(({ node }) => {
       if (node.children.length === 0) return false;
-      return !(
-        node.run.kind === "workflow" &&
-        TERMINAL_STATES.has(node.run.state)
-      );
+      return !(node.run.kind === "workflow" && TERMINAL_STATES.has(node.run.state));
     })
     .map(({ node }) => String(node.run.id));
 }
@@ -1401,15 +1424,13 @@ function depthOf(root: RunTreeNode, runId: RunId, depth = 0): number {
 
 function runSummary(theme: ObservabilityTheme, node: RunTreeNode, depth: number): string {
   const run = node.run;
-  const activity = node.activity;
-  const label = definitionLabel(String(run.definitionId));
+  const activity = node.activity
+    ? ` ${phase(theme, node.activity.phase, truncate(node.activity.summary, 48))}`
+    : "";
   const model = run.resolvedModel
     ? ` ${color(theme, "muted", `${run.resolvedModel.concrete.model}/${run.resolvedModel.thinking}`)}`
     : "";
-  const current = activity
-    ? ` ${phase(theme, activity.phase)} ${color(theme, "muted", activity.summary)}`
-    : "";
-  return `${"  ".repeat(Math.max(0, depth - 1))}${state(theme, run.state, runStateSymbol(run.state))} ${strong(theme, label)} ${state(theme, run.state, run.state)}${model}${current}`;
+  return `${"  ".repeat(Math.max(0, depth - 1))}${state(theme, run.state, runStateSymbol(run.state))} ${strong(theme, definitionLabel(String(run.definitionId)))} ${state(theme, run.state, run.state)}${model}${activity}`;
 }
 
 function runStateSymbol(value: string): string {
@@ -1430,7 +1451,7 @@ function runStateSymbol(value: string): string {
 }
 
 function formatFactLine(theme: ObservabilityTheme, item: RunFact): string {
-  return `${color(theme, "muted", compactTimestamp(item.timestamp))} ${factColor(theme, item.kind)} ${reliability(theme, item.reliability)} ${item.summary}`;
+  return `${compactTimestamp(item.timestamp)} ${factColor(theme, item.kind, item.summary, item.kind)} ${reliability(theme, item.reliability, `[${item.reliability}]`)} ${item.summary}`;
 }
 
 function factId(item: RunFact): string {
@@ -1442,7 +1463,7 @@ function definitionLabel(value: string): string {
 }
 
 function statusField(label: string, value: string): string {
-  return ` ${label.padEnd(12)} ${value}`;
+  return `${label}: ${value}`;
 }
 
 function compactTimestamp(value: string): string {
