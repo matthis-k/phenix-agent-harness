@@ -1,8 +1,8 @@
 import type { RunTreeNode } from "../../application/interfaces.ts";
 import type { WorkspaceItemIndex } from "../../domain/workspace/events.ts";
 import type { NativeRunTranscript } from "../native-run-transcript.ts";
-import { workspaceViewRegistry } from "./views/workspace-view-registry.ts";
 import type { WorkspaceViewSnapshot } from "./views/workspace-view.ts";
+import { workspaceViewRegistry } from "./views/workspace-view-registry.ts";
 
 export type { WorkspaceRunRow } from "./views/runs-view.ts";
 export { projectWorkspaceRuns } from "./views/runs-view.ts";
