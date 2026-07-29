@@ -25,12 +25,13 @@ test("loads a Pi session read-only as ordered native and custom-rendered chunks"
     if (loaded.kind !== "ready") return;
     assert.equal(loaded.value.sessionId, "session-child");
     assert.equal(loaded.value.sessionFile, sessionFile);
+    const chunks = loaded.value.component.chunks ?? [];
     assert.deepEqual(
-      loaded.value.component.chunks.map((chunk) => chunk.kind),
+      chunks.map((chunk) => chunk.kind),
       ["user", "assistant", "tool", "result"],
     );
     assert.deepEqual(
-      loaded.value.component.chunks.map((chunk) => chunk.component.constructor.name),
+      chunks.map((chunk) => chunk.component.constructor.name),
       ["UserMessageComponent", "AssistantMessageComponent", "ToolExecutionComponent", "Markdown"],
     );
     const rendered = loaded.value.component.render(100).join("\n");
