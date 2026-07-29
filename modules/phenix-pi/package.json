@@ -16,6 +16,9 @@
       "./extension/default-workspace-extension.ts",
       "./extension/result-display.ts",
       "./extension/visualization-display.ts"
+    ],
+    "themes": [
+      "./themes/catppuccin-mocha.json"
     ]
   },
   "peerDependencies": {
