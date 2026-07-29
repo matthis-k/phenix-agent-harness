@@ -1,3 +1,4 @@
+import { FacadeAgentToolFactory } from "../application/agent-tools.ts";
 import type { DefinitionCatalog, WorkflowFunctionRegistry } from "../application/catalog.ts";
 import { CatalogFacadeImpl } from "../application/catalog-facade.ts";
 import { DispatchService } from "../application/dispatch-service.ts";
@@ -34,89 +35,79 @@ interface ExecutionKernelDependencies {
 
 /** Assemble the runtime-independent execution kernel once for production and tests. */
 export function createExecutionKernel(input: ExecutionKernelDependencies) {
+  const { definitions, functions, operations, store, models, ids, clock, cwd, resolveSchema } = input;
   const execution = new ExecutionFacadeImpl({
-    catalog: input.definitions,
-    store: input.store,
-    models: input.models,
-    ids: input.ids,
-    clock: input.clock,
+    catalog: definitions,
+    store,
+    models,
+    ids,
+    clock,
     ...(input.rootInvokableDefinitions !== undefined
       ? { rootInvokableDefinitions: input.rootInvokableDefinitions }
       : {}),
   });
-  const visibility =
-    input.hiddenDefinitions !== undefined
-      ? { hiddenDefinitions: input.hiddenDefinitions }
-      : undefined;
-  const modelExecution = new ModelExecutionFacade({
-    execution,
-    store: input.store,
-    ...(visibility ?? {}),
-  });
-  const tasks = new TaskFacadeImpl({
-    store: input.store,
-    catalog: input.definitions,
-    clock: input.clock,
-    ids: input.ids,
-  });
-  const catalog = new CatalogFacadeImpl(input.definitions, input.store, visibility);
-  const invocationPolicy = new SessionInvocationPolicy({
-    store: input.store,
-    catalog: input.definitions,
-  });
+  const visibility = { hiddenDefinitions: input.hiddenDefinitions ?? [] };
+  const modelExecution = new ModelExecutionFacade({ execution, store, ...visibility });
+  const tasks = new TaskFacadeImpl({ store, catalog: definitions, clock, ids });
+  const catalog = new CatalogFacadeImpl(definitions, store, visibility);
+  const invocationPolicy = new SessionInvocationPolicy({ store, catalog: definitions });
   const workflows = new WorkflowProcessManager({
     invoker: execution.childInvoker(),
     controller: execution,
-    operations: input.operations,
-    store: input.store,
-    catalog: input.definitions,
-    functions: input.functions,
+    operations,
+    store,
+    catalog: definitions,
+    functions,
     tasks,
-    ids: input.ids,
-    cwd: input.cwd,
-    clock: input.clock,
-    resolveSchema: input.resolveSchema,
+    ids,
+    cwd,
+    clock,
+    resolveSchema,
   });
-  const checkpoints = new WorkflowCheckpointProcessManager({
-    store: input.store,
-    catalog: input.definitions,
-  });
-  const dynamicRegistry = new DynamicWorkflowRuntimeRegistry({
-    compiler: new DynamicWorkflowCompiler({
-      resolveDefinition: (id) => input.definitions.require(id),
-      resolveSchema: input.resolveSchema,
-    }),
-    catalog: input.definitions,
-    functions: input.functions,
-  });
+  const checkpoints = new WorkflowCheckpointProcessManager({ store, catalog: definitions });
   const dynamicWorkflows = new DynamicWorkflowExecutionService({
-    registry: dynamicRegistry,
+    registry: new DynamicWorkflowRuntimeRegistry({
+      compiler: new DynamicWorkflowCompiler({
+        resolveDefinition: (id) => definitions.require(id),
+        resolveSchema,
+      }),
+      catalog: definitions,
+      functions,
+    }),
     catalog,
-    store: input.store,
+    store,
     controller: execution,
     workflow: workflows,
     execution,
-    ids: input.ids,
-    clock: input.clock,
+    ids,
+    clock,
   });
   const dispatch = new DispatchService({
     execution: modelExecution,
     dynamicWorkflows,
     catalog,
-    store: input.store,
+    store,
     invocationPolicy,
   });
+  const tools = new FacadeAgentToolFactory({
+    execution: modelExecution,
+    dispatch,
+    tasks,
+    catalog,
+    store,
+    invocationPolicy,
+  });
+  execution.registerImplementation("workflow", workflows);
 
   return {
     execution,
-    modelExecution,
+    dynamicWorkflows,
     tasks,
     catalog,
-    invocationPolicy,
+    queries: new QueryFacadeImpl(store, tasks),
+    tools,
     workflows,
     checkpoints,
-    dynamicWorkflows,
     dispatch,
-    queries: new QueryFacadeImpl(input.store, tasks),
   } as const;
 }
