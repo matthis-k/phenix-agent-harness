@@ -523,9 +523,7 @@ export class PhenixWorkspace implements Component, Focusable {
       ` ${strong(this.theme, "PHENIX")} ${color(this.theme, "muted", `${profile.agent}/${profile.modelSet}/${profile.difficulty}`)}`,
       ` ${state(this.theme, active > 0 ? "running" : "completed", active > 0 ? `${active} active` : "idle")} ${color(this.theme, diagnostics.error > 0 ? "error" : diagnostics.warning > 0 ? "warning" : "success", diagnostics.error > 0 ? `${diagnostics.error} errors` : diagnostics.warning > 0 ? `${diagnostics.warning} warnings` : "healthy")}`,
       ` ${color(this.theme, "muted", "h/l views · j/k rows · ↵ open · space fold")}`,
-    ].map((line) =>
-      surface(this.theme, "customMessageBg", fitViewLine(line, width)),
-    );
+    ].map((line) => surface(this.theme, "customMessageBg", fitViewLine(line, width)));
     const available = Math.max(0, height - header.length);
     const frames = allocateSidebarSections(
       available,
@@ -566,11 +564,7 @@ export class PhenixWorkspace implements Component, Focusable {
       start += section.lines.length;
     }
     return {
-      lines: fitHeight(
-        [...header, ...sections.flatMap((section) => section.lines)],
-        height,
-        width,
-      ),
+      lines: fitHeight([...header, ...sections.flatMap((section) => section.lines)], height, width),
       layouts,
     };
   }
@@ -621,7 +615,7 @@ export class PhenixWorkspace implements Component, Focusable {
   }
 
   private renderViewRow(
-    section: WorkspaceSection,
+    _section: WorkspaceSection,
     row: WorkspaceViewRow,
     width: number,
     selected: boolean,
@@ -783,11 +777,7 @@ export class PhenixWorkspace implements Component, Focusable {
     const component = this.prepareSectionView(section.section);
     if (event.button === 64 || event.button === 65) {
       if (rows.length === 0) return;
-      const target = clamp(
-        section.offset + (event.button === 64 ? -2 : 2),
-        0,
-        rows.length - 1,
-      );
+      const target = clamp(section.offset + (event.button === 64 ? -2 : 2), 0, rows.length - 1);
       const row = rows[target];
       if (!row) return;
       component.setViewport({ selectedId: row.id, offset: target });
