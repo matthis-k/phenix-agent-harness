@@ -1,6 +1,6 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
-import type { SessionProfile } from "../../application/interfaces.ts";
+import type { SessionProfile } from "../../domain/run/model.ts";
 import { color, type ObservabilityTheme, surface } from "../observability-theme.ts";
 import { stripTranscriptAnsi } from "./transcript-selection.ts";
 
@@ -48,7 +48,7 @@ export function editorBody(lines: readonly string[]): readonly string[] {
 
 function isEditorRule(line: string): boolean {
   const plain = stripTranscriptAnsi(line).trim();
-  return plain.length > 0 && /^[─━═┄┅┈┉╌╍┌┐└┘╭╮╰╯\-\s]+$/u.test(plain);
+  return plain.length > 0 && /^[─━═┄┅┈┉╌╍┌┐└┘╭╮╰╯\s-]+$/u.test(plain);
 }
 
 function joinColumns(left: string, right: string, width: number): string {
