@@ -6,6 +6,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { SlashCommand } from "@earendil-works/pi-tui";
 
+import type { ObservabilityTheme } from "./observability-theme.ts";
 import {
   loadNativeRunTranscript,
   loadNativeRunTranscriptResult,
@@ -116,7 +117,7 @@ async function openWorkspace(
 ): Promise<PhenixWorkspaceAction> {
   return ctx.ui.custom(
     async (tui, theme, keybindings, done) => {
-      const load = () => loadWorkspaceSnapshot(ctx, binding, tui);
+      const load = () => loadWorkspaceSnapshot(ctx, binding, tui, theme);
       const snapshot = await load();
       const commands: SlashCommand[] = pi.getCommands().map((command) => ({
         name: command.name,
@@ -130,7 +131,7 @@ async function openWorkspace(
         commands,
         snapshot,
         load,
-        loadTranscript: (node) => loadNativeRunTranscriptResult(node, tui),
+        loadTranscript: (node) => loadNativeRunTranscriptResult(node, tui, theme),
         subscribe: (listener) => {
           const unsubscribeEvents = binding.runtime.events.subscribe(listener);
           const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
@@ -165,6 +166,7 @@ async function loadWorkspaceSnapshot(
   ctx: ExtensionContext,
   binding: WorkspaceRuntimeBinding,
   tui: Parameters<typeof renderNativeTranscript>[1],
+  theme: ObservabilityTheme,
 ): Promise<PhenixWorkspaceSnapshot> {
   const [ui, tasks] = await Promise.all([
     loadPhenixUiSnapshot(binding.runtime, binding.rootRunId, binding.integrations),
@@ -177,7 +179,7 @@ async function loadWorkspaceSnapshot(
     ui,
     tasks,
     rootTranscript: readyNativeRunTranscript({
-      component: renderNativeTranscript(entries, tui, ctx.cwd),
+      component: renderNativeTranscript(entries, tui, ctx.cwd, theme),
       sessionId,
       ...(sessionFile ? { sessionFile } : {}),
     }),
@@ -199,7 +201,7 @@ async function openInspector(
         initial,
         snapshot,
         load,
-        loadTranscript: (node) => loadNativeRunTranscript(node, tui),
+        loadTranscript: (node) => loadNativeRunTranscript(node, tui, theme),
         subscribe: (listener) => {
           const unsubscribeEvents = binding.runtime.events.subscribe(listener);
           const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
