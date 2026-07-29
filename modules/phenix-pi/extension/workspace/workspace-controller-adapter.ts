@@ -10,7 +10,6 @@ import type {
 } from "../../ports/workspace-effects.ts";
 import {
   type NativeRunTranscript,
-  type NativeRunTranscriptPresentation,
   readyNativeRunTranscript,
 } from "../native-run-transcript.ts";
 import { transcriptAvailabilityMessage } from "../transcript-availability.ts";
@@ -54,7 +53,9 @@ export class WorkspaceControllerAdapter {
         }
         if (node.run.kind === "root") return snapshot.rootTranscript;
         const loaded = await options.loadTranscript(node);
-        return "kind" in loaded ? loaded : readyNativeRunTranscript(loaded);
+        return "kind" in loaded
+          ? loaded
+          : readyNativeRunTranscript(loaded, `run:${String(selectedRunId)}:transcript`);
       },
       recordDiagnostic: (error) => options.recordDiagnostic?.(error),
     };
@@ -85,7 +86,7 @@ export class WorkspaceControllerAdapter {
     return this.controller.snapshot?.value ?? this.lastSnapshot.value;
   }
 
-  get transcript(): NativeRunTranscriptPresentation {
+  get transcript(): NativeRunTranscript {
     const current = this.controller.currentTranscript;
     if (current) return current;
     if (this.controller.state.activeRunId === this.snapshot.ui.tree.root.run.id) {
@@ -95,7 +96,9 @@ export class WorkspaceControllerAdapter {
       this.snapshot.ui.tree.root,
       String(this.controller.state.activeRunId),
     );
-    const unavailable = transcriptAvailabilityMessage(this.controller.state.transcript.availability);
+    const unavailable = transcriptAvailabilityMessage(
+      this.controller.state.transcript.availability,
+    );
     return {
       ...(selected?.run.pi?.sessionId ? { sessionId: selected.run.pi.sessionId } : {}),
       ...(selected?.run.pi?.sessionFile ? { sessionFile: selected.run.pi.sessionFile } : {}),
