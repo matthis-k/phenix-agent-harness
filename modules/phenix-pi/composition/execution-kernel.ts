@@ -35,7 +35,17 @@ interface ExecutionKernelDependencies {
 
 /** Assemble the runtime-independent execution kernel once for production and tests. */
 export function createExecutionKernel(input: ExecutionKernelDependencies) {
-  const { definitions, functions, operations, store, models, ids, clock, cwd, resolveSchema } = input;
+  const {
+    definitions,
+    functions,
+    operations,
+    store,
+    models,
+    ids,
+    clock,
+    cwd,
+    resolveSchema,
+  } = input;
   const execution = new ExecutionFacadeImpl({
     catalog: definitions,
     store,
@@ -64,7 +74,10 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
     clock,
     resolveSchema,
   });
-  const checkpoints = new WorkflowCheckpointProcessManager({ store, catalog: definitions });
+  const checkpoints = new WorkflowCheckpointProcessManager({
+    store,
+    catalog: definitions,
+  });
   const dynamicWorkflows = new DynamicWorkflowExecutionService({
     registry: new DynamicWorkflowRuntimeRegistry({
       compiler: new DynamicWorkflowCompiler({
