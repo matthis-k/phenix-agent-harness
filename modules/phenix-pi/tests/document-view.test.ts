@@ -7,9 +7,9 @@ import {
   listBlock,
   spacerBlock,
   TerminalView,
+  TreeView,
   terminalBlock,
   textBlock,
-  TreeView,
   treeBlock,
 } from "../extension/components/index.ts";
 import { documentComponent } from "../extension/presentation-component.ts";
