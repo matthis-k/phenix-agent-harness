@@ -46,6 +46,14 @@ export interface DispatchResult {
   readonly suspension?: BudgetSuspension;
 }
 
+interface DispatchSelection {
+  readonly target: DefinitionRef<unknown, unknown>;
+  readonly selectedBy: DispatchResult["selectedBy"];
+  readonly classifierRunId?: RunId;
+}
+
+type DispatchWait = NonNullable<DispatchRequest["wait"]>;
+
 export class DispatchService {
   private readonly execution: ExecutionFacade;
   private readonly dynamicWorkflows: DynamicWorkflowExecutionService;
@@ -75,85 +83,79 @@ export class DispatchService {
     const objective = request.objective.trim();
     if (!objective) throw new Error("Dispatch objective must not be empty");
 
-    const explicit = request.mode && request.mode !== "auto" ? request.mode : undefined;
-    let targetRef: DefinitionRef<unknown, unknown>;
-    let classifierRunId: RunId | undefined;
-    let selectedBy: DispatchResult["selectedBy"];
-
-    if (explicit) {
-      targetRef = definitionForRoute(explicit);
-      selectedBy = "explicit";
-    } else {
-      const candidates = selectDispatchCandidates(await this.catalog.listAvailable(parentId));
-      if (candidates.length === 0) {
-        throw new Error("No workflow or dynamic composer is available for dispatch");
-      }
-
-      const classifierRef = definitionRef(AGENT_DISPATCHER);
-      const classifierInput = {
-        objective,
-        ...(request.context === undefined ? {} : { context: request.context }),
-        candidates,
-      };
-      this.assertAllowed(
-        parentId,
-        this.catalog.get(classifierRef) as AnyDefinition,
-        classifierInput,
-      );
-      const classifier = await this.execution.start({
-        parentId,
-        definition: classifierRef,
-        input: classifierInput,
-        wait: "await",
-      });
-      classifierRunId = classifier.id;
-      const decision = await classifier.result(signal);
-      if (decision.status !== "success") {
-        throw new Error(`Dispatch selector failed: ${describeOutcome(decision)}`);
-      }
-      const selected = requireSelectedCandidate(candidates, decision.value as DispatchDecision);
-      targetRef = definitionRef(selected.definitionId);
-      selectedBy = "dispatcher";
-    }
-
-    const input = {
+    const input: ObjectiveRequest = {
       objective,
       ...(request.context === undefined ? {} : { context: request.context }),
     };
-    if (targetRef.id === AGENT_COORDINATOR) {
-      return this.compose(
-        parentId,
-        input,
-        request.wait ?? "await",
-        selectedBy,
-        classifierRunId,
-        signal,
-      );
+    const wait = request.wait ?? "await";
+    const selection = await this.selectTarget(parentId, input, request.mode, signal);
+
+    if (selection.target.id === AGENT_COORDINATOR) {
+      return this.compose(parentId, input, wait, selection, signal);
     }
 
-    this.assertAllowed(parentId, this.catalog.get(targetRef) as AnyDefinition, input);
+    this.assertAllowed(parentId, this.catalog.get(selection.target) as AnyDefinition, input);
     const handle = await this.execution.start({
       parentId,
-      definition: targetRef,
+      definition: selection.target,
       input,
-      wait: request.wait ?? "await",
+      wait,
     });
     return this.resultForHandle({
       handle,
-      definition: targetRef.id,
-      selectedBy,
-      classifierRunId,
-      wait: request.wait ?? "await",
+      definition: selection.target.id,
+      selectedBy: selection.selectedBy,
+      ...(selection.classifierRunId ? { classifierRunId: selection.classifierRunId } : {}),
+      wait,
       signal,
     });
+  }
+
+  private async selectTarget(
+    parentId: RunId,
+    input: ObjectiveRequest,
+    mode: DispatchMode | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<DispatchSelection> {
+    if (mode && mode !== "auto") {
+      return { target: definitionForRoute(mode), selectedBy: "explicit" };
+    }
+
+    const candidates = selectDispatchCandidates(await this.catalog.listAvailable(parentId));
+    if (candidates.length === 0) {
+      throw new Error("No workflow or dynamic composer is available for dispatch");
+    }
+
+    const classifierRef = definitionRef(AGENT_DISPATCHER);
+    const classifierInput = { ...input, candidates };
+    this.assertAllowed(
+      parentId,
+      this.catalog.get(classifierRef) as AnyDefinition,
+      classifierInput,
+    );
+    const classifier = await this.execution.start({
+      parentId,
+      definition: classifierRef,
+      input: classifierInput,
+      wait: "await",
+    });
+    const decision = await classifier.result(signal);
+    if (decision.status !== "success") {
+      throw new Error(`Dispatch selector failed: ${describeOutcome(decision)}`);
+    }
+    const selected = requireSelectedCandidate(candidates, decision.value as DispatchDecision);
+    return {
+      target: definitionRef(selected.definitionId),
+      selectedBy: "dispatcher",
+      classifierRunId: classifier.id,
+    };
   }
 
   private async compose(
     parentId: RunId,
     input: ObjectiveRequest,
-    wait: "await" | "background",
-    selectedBy: DispatchResult["selectedBy"],
-    classifierRunId: RunId | undefined,
+    wait: DispatchWait,
+    selection: DispatchSelection,
     signal: AbortSignal | undefined,
   ): Promise<DispatchResult> {
     const composerRef = definitionRef<DynamicWorkflowCompositionRequest, DynamicWorkflowProposal>(
@@ -191,8 +193,8 @@ export class DispatchService {
     return this.resultForHandle({
       handle,
       definition,
-      selectedBy,
-      classifierRunId,
+      selectedBy: selection.selectedBy,
+      ...(selection.classifierRunId ? { classifierRunId: selection.classifierRunId } : {}),
       composerRunId: composer.id,
       wait,
       signal,
@@ -205,19 +207,17 @@ export class DispatchService {
     readonly selectedBy: DispatchResult["selectedBy"];
     readonly classifierRunId?: RunId;
     readonly composerRunId?: RunId;
-    readonly wait: "await" | "background";
+    readonly wait: DispatchWait;
     readonly signal?: AbortSignal;
   }): Promise<DispatchResult> {
-    if (input.wait === "background") {
-      return {
-        definition: input.definition,
-        selectedBy: input.selectedBy,
-        runId: input.handle.id,
-        ...(input.classifierRunId ? { classifierRunId: input.classifierRunId } : {}),
-        ...(input.composerRunId ? { composerRunId: input.composerRunId } : {}),
-        status: "running",
-      };
-    }
+    const result = {
+      definition: input.definition,
+      selectedBy: input.selectedBy,
+      runId: input.handle.id,
+      ...(input.classifierRunId ? { classifierRunId: input.classifierRunId } : {}),
+      ...(input.composerRunId ? { composerRunId: input.composerRunId } : {}),
+    };
+    if (input.wait === "background") return { ...result, status: "running" };
 
     const settled = await awaitOutcomeOrBudget({
       store: this.store,
@@ -225,25 +225,9 @@ export class DispatchService {
       signal: input.signal,
     });
     if (settled.status === "suspended") {
-      return {
-        definition: input.definition,
-        selectedBy: input.selectedBy,
-        runId: input.handle.id,
-        ...(input.classifierRunId ? { classifierRunId: input.classifierRunId } : {}),
-        ...(input.composerRunId ? { composerRunId: input.composerRunId } : {}),
-        status: "suspended",
-        suspension: settled.suspension,
-      };
+      return { ...result, status: "suspended", suspension: settled.suspension };
     }
-    return {
-      definition: input.definition,
-      selectedBy: input.selectedBy,
-      runId: input.handle.id,
-      ...(input.classifierRunId ? { classifierRunId: input.classifierRunId } : {}),
-      ...(input.composerRunId ? { composerRunId: input.composerRunId } : {}),
-      status: "completed",
-      outcome: settled.outcome,
-    };
+    return { ...result, status: "completed", outcome: settled.outcome };
   }
 
   private assertAllowed(parentId: RunId, definition: AnyDefinition, input: unknown): void {
