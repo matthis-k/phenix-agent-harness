@@ -63,6 +63,7 @@ export class WorkspaceControllerAdapter {
       state: initialState(initialSnapshot, initialTranscript),
       runtime,
       snapshot: initialSnapshot,
+      transcript: initialTranscript,
     });
     this.controller = controller;
     this.unsubscribeController = controller.subscribe(() => {
@@ -74,7 +75,6 @@ export class WorkspaceControllerAdapter {
       options.onChange();
     });
     this.unsubscribeSource = options.subscribe(() => controller.invalidateSnapshot());
-    controller.selectTranscript(initialSnapshot.rootRunId);
   }
 
   get state(): WorkspaceState {
