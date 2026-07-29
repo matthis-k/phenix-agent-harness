@@ -26,7 +26,6 @@ export interface NativeInputDelegation {
 
 const NATIVE_HANDOFF_ACTIONS = [
   "app.interrupt",
-  "app.clear",
   "app.exit",
   "app.suspend",
   "app.thinking.cycle",
