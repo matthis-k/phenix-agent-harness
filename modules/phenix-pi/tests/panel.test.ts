@@ -42,8 +42,5 @@ test("renders a background-owned empty panel", () => {
     style: { surface: (line) => `${BACKGROUND}${line}${RESET}` },
   });
 
-  assert.deepEqual(frame.lines, [
-    `${BACKGROUND}    ${RESET}`,
-    `${BACKGROUND}    ${RESET}`,
-  ]);
+  assert.deepEqual(frame.lines, [`${BACKGROUND}    ${RESET}`, `${BACKGROUND}    ${RESET}`]);
 });
