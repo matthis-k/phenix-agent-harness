@@ -8,7 +8,7 @@ export type DispatchRoute = (typeof DISPATCH_ROUTES)[number];
 
 export interface DispatchCandidate {
   readonly definitionId: DefinitionId;
-  readonly kind: "workflow" | "session" | "generic";
+  readonly kind: "workflow" | "agent" | "generic";
   readonly title: string;
   readonly description: string;
 }
@@ -27,7 +27,7 @@ export interface DispatchDecision {
 
 const DispatchCandidateType = Type.Object({
   definitionId: Type.String({ minLength: 1 }),
-  kind: Type.Enum(["workflow", "session", "generic"]),
+  kind: Type.Enum(["workflow", "agent", "generic"]),
   title: Type.String({ minLength: 1 }),
   description: Type.String({ minLength: 1 }),
 });
