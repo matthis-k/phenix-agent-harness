@@ -4,6 +4,7 @@ import test from "node:test";
 import type { RunTreeNode } from "../application/interfaces.ts";
 import type { RunSnapshot } from "../domain/run/model.ts";
 import type { TaskNode } from "../domain/task/projection.ts";
+import type { ObservabilityTheme } from "../extension/observability-theme.ts";
 import { factsWorkspaceView } from "../extension/workspace/views/facts-view.ts";
 import { filesWorkspaceView } from "../extension/workspace/views/files-view.ts";
 import { runsWorkspaceView } from "../extension/workspace/views/runs-view.ts";
@@ -19,6 +20,12 @@ import {
   projectWorkspaceTasks,
   workspaceItemIndex,
 } from "../extension/workspace/workspace-model.ts";
+
+const THEME = {
+  fg: (_tone: string, text: string) => text,
+  bg: (_tone: string, text: string) => text,
+  bold: (text: string) => text,
+} as unknown as ObservabilityTheme;
 
 test("registers every independent workspace view in stable order", () => {
   assert.deepEqual(
@@ -74,6 +81,38 @@ test("view projections preserve run and task collapse semantics", () => {
       ["active-task", 0],
     ],
   );
+});
+
+test("run rows disclose model profile and session metadata only when expanded", () => {
+  const root = runNode("root", "running", [], "root");
+  root.run = {
+    ...root.run,
+    profile: { agent: "base", modelSet: "free", difficulty: "D1" },
+    pi: { sessionId: "session-123" },
+  } as RunSnapshot;
+  const snapshot = {
+    ui: { tree: { root }, facts: [] },
+    tasks: { root: taskNode("root-task", "wip") },
+  } as unknown as PhenixWorkspaceSnapshot;
+  const row = runsWorkspaceView.project(snapshot)[0];
+  assert.ok(row?.expandable);
+
+  const collapsed = row.render({
+    theme: THEME,
+    width: 120,
+    activeRunId: "root",
+    expanded: false,
+  }).text;
+  assert.doesNotMatch(collapsed, /free\/D1|session-123/);
+
+  const expanded = row.render({
+    theme: THEME,
+    width: 120,
+    activeRunId: "root",
+    expanded: true,
+  }).text;
+  assert.match(expanded, /free\/D1/);
+  assert.match(expanded, /session session-123/);
 });
 
 test("derives pane identity and row behavior exclusively from registered projections", () => {
