@@ -4,21 +4,21 @@ import test from "node:test";
 import type { RunTreeNode } from "../application/interfaces.ts";
 import type { RunSnapshot } from "../domain/run/model.ts";
 import type { TaskNode } from "../domain/task/projection.ts";
+import { factsWorkspaceView } from "../extension/workspace/views/facts-view.ts";
+import { filesWorkspaceView } from "../extension/workspace/views/files-view.ts";
+import { runsWorkspaceView } from "../extension/workspace/views/runs-view.ts";
+import { tasksWorkspaceView } from "../extension/workspace/views/tasks-view.ts";
+import { WORKSPACE_VIEW_IDS } from "../extension/workspace/views/workspace-view.ts";
+import {
+  createWorkspaceViewRegistry,
+  workspaceViewRegistry,
+} from "../extension/workspace/views/workspace-view-registry.ts";
 import {
   type PhenixWorkspaceSnapshot,
   projectWorkspaceRuns,
   projectWorkspaceTasks,
   workspaceItemIndex,
 } from "../extension/workspace/workspace-model.ts";
-import { factsWorkspaceView } from "../extension/workspace/views/facts-view.ts";
-import { filesWorkspaceView } from "../extension/workspace/views/files-view.ts";
-import { runsWorkspaceView } from "../extension/workspace/views/runs-view.ts";
-import { tasksWorkspaceView } from "../extension/workspace/views/tasks-view.ts";
-import {
-  createWorkspaceViewRegistry,
-  workspaceViewRegistry,
-} from "../extension/workspace/views/workspace-view-registry.ts";
-import { WORKSPACE_VIEW_IDS } from "../extension/workspace/views/workspace-view.ts";
 
 test("registers every independent workspace view in stable order", () => {
   assert.deepEqual(
@@ -44,12 +44,7 @@ test("rejects duplicate and incomplete workspace registries", () => {
     /runs is registered more than once/,
   );
   assert.throws(
-    () =>
-      createWorkspaceViewRegistry([
-        runsWorkspaceView,
-        tasksWorkspaceView,
-        filesWorkspaceView,
-      ]),
+    () => createWorkspaceViewRegistry([runsWorkspaceView, tasksWorkspaceView, filesWorkspaceView]),
     /missing: facts/,
   );
 });
