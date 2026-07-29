@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { visibleWidth } from "@earendil-works/pi-tui";
 
 import type { RunTree, RunTreeNode } from "../application/interfaces.ts";
 import type { PhenixRuntime } from "../composition/create-phenix-runtime.ts";
@@ -7,7 +7,15 @@ import type { DiagnosticSummary } from "../domain/diagnostics.ts";
 import type { SessionProfile } from "../domain/run/model.ts";
 import type { RunFact } from "../domain/run/observability.ts";
 import type { RunId } from "../domain/shared.ts";
-import { renderRunTreeSequence } from "./mermaid-rendering.ts";
+import {
+  DocumentView,
+  ListView,
+  listBlock,
+  spacerBlock,
+  textBlock,
+  TreeView,
+  treeBlock,
+} from "./components/index.ts";
 import {
   color,
   fact,
@@ -18,10 +26,12 @@ import {
   state,
   strong,
 } from "./observability-theme.ts";
+import { documentComponent, type PresentationComponent } from "./presentation-component.ts";
 
 const WIDGET_KEY = "phenix-live-status";
 const MAX_FACT_LINES = 24;
 const DASHBOARD_FACT_LINES = 3;
+const DEFAULT_PRESENTATION_WIDTH = 240;
 const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]);
 const STATE_SYMBOLS: Readonly<Record<string, string>> = {
   completed: "✓",
@@ -213,77 +223,129 @@ export class RunMonitor {
   }
 }
 
-export function createUnboundedWidget(lines: readonly string[]): () => Text {
-  const content = lines.join("\n");
-  return () => new Text(content, 1, 0);
+export function createUnboundedWidget(lines: readonly string[]): () => PresentationComponent {
+  return () => documentComponent(lines, { paddingX: 1 });
 }
 
-export function renderDashboard(data: DashboardData, theme?: ObservabilityTheme): string[] {
+export function renderDashboard(
+  data: DashboardData,
+  theme?: ObservabilityTheme,
+  width = DEFAULT_PRESENTATION_WIDTH,
+): string[] {
   const activeDescendants = countNodes(
     data.tree.root,
     (node) => node.run.id !== data.tree.root.run.id && !isTerminal(node.run.state),
   );
-  const lines = [dashboardHeader(data, activeDescendants, theme), ""];
+  const blocks = [textBlock([dashboardHeader(data, activeDescendants, theme)]), spacerBlock()];
+
   if (data.tree.root.children.length === 0) {
-    lines.push(color(theme, "success", "idle"));
+    blocks.push(textBlock([color(theme, "success", "idle")]));
   } else {
-    lines.push(heading(theme, "Execution sequence"));
-    try {
-      lines.push(...renderRunTreeSequence(data.tree, { expanded: data.expanded }).split("\n"));
-    } catch {
-      data.tree.root.children.forEach((child, index) => {
-        appendNode(
-          lines,
-          child,
-          "",
-          index === data.tree.root.children.length - 1,
-          theme,
-          data.expanded,
-        );
-      });
-    }
+    const tree = createRunTreeView(data, theme);
+    blocks.push(textBlock([heading(theme, "Execution sequence")]), treeBlock(tree));
   }
 
   const recentFacts = selectRecentFacts(data.facts);
   if (recentFacts.length > 0) {
-    lines.push("", heading(theme, "Recent facts"));
-    for (const factItem of recentFacts) {
-      lines.push(`  ${formatFact(factItem, true, theme)}`);
-    }
+    const facts = createFactList(recentFacts, theme, true);
+    blocks.push(spacerBlock(), textBlock([heading(theme, "Recent facts")]), listBlock(facts));
   }
 
-  lines.push(
-    "",
-    color(
-      theme,
-      "dim",
-      data.expanded
-        ? "/phenix status off · /phenix status · /phenix facts · /phenix logs"
-        : "/phenix status off · /phenix status --expanded · /phenix facts · /phenix logs",
-    ),
+  blocks.push(
+    spacerBlock(),
+    textBlock([
+      color(
+        theme,
+        "dim",
+        data.expanded
+          ? "/phenix status off · /phenix status · /phenix facts · /phenix logs"
+          : "/phenix status off · /phenix status --expanded · /phenix facts · /phenix logs",
+      ),
+    ]),
   );
-  return lines;
+  return [...new DocumentView(blocks).render(width, { trimEnd: true }).lines];
 }
 
 export function renderFacts(
   facts: readonly RunFact[],
   sequence: number,
   theme?: ObservabilityTheme,
+  width = DEFAULT_PRESENTATION_WIDTH,
 ): string[] {
-  const lines = [heading(theme, `Phenix fact history · seq ${sequence}`)];
-  if (facts.length === 0) lines.push(color(theme, "muted", "No facts recorded yet."));
-  for (const factItem of facts.slice(-MAX_FACT_LINES)) {
-    lines.push(formatFact(factItem, true, theme));
+  const list = createFactList(facts.slice(-MAX_FACT_LINES), theme, true);
+  const blocks = [textBlock([heading(theme, `Phenix fact history · seq ${sequence}`)])];
+  if (facts.length === 0) {
+    blocks.push(textBlock([color(theme, "muted", "No facts recorded yet.")]));
+  } else {
+    blocks.push(listBlock(list));
   }
-  lines.push("", color(theme, "dim", "/phenix facts off · /phenix status"));
-  return lines;
+  blocks.push(spacerBlock(), textBlock([color(theme, "dim", "/phenix facts off · /phenix status")]));
+  return [...new DocumentView(blocks).render(width, { trimEnd: true }).lines];
 }
 
 export function renderCompleteFactHistory(facts: readonly RunFact[], sequence: number): string {
-  const lines = [`Phenix fact history · seq ${sequence}`];
-  if (facts.length === 0) lines.push("No facts recorded yet.");
-  for (const factItem of facts) lines.push(formatFact(factItem, false));
-  return `${lines.join("\n")}\n`;
+  const rows = facts.map((item) => formatFact(item, false));
+  const width = Math.max(
+    1,
+    visibleWidth(`Phenix fact history · seq ${sequence}`),
+    ...rows.map((line) => visibleWidth(line)),
+  );
+  const list = createFactList(facts, undefined, false);
+  const blocks = [textBlock([`Phenix fact history · seq ${sequence}`])];
+  if (facts.length === 0) blocks.push(textBlock(["No facts recorded yet."]));
+  else blocks.push(listBlock(list));
+  return `${new DocumentView(blocks).render(width, { trimEnd: true }).lines.join("\n")}\n`;
+}
+
+function createRunTreeView(
+  data: DashboardData,
+  theme: ObservabilityTheme | undefined,
+): TreeView<RunTreeNode> {
+  const tree = new TreeView<RunTreeNode>(
+    {
+      id: (node) => String(node.run.id),
+      children: (node) => node.children,
+      render: (node) => formatRun(node, data.expanded, theme),
+    },
+    {
+      selectFirstItem: false,
+      indent: "  ",
+      expandedMarker: "▾",
+      collapsedMarker: "▸",
+      leafMarker: "·",
+    },
+  );
+  tree.setRoots(data.tree.root.children);
+  tree.setExpanded(expandedRunIds(data.tree.root, data.expanded));
+  return tree;
+}
+
+function createFactList(
+  facts: readonly RunFact[],
+  theme: ObservabilityTheme | undefined,
+  compact: boolean,
+): ListView<RunFact> {
+  const list = new ListView<RunFact>(
+    {
+      id: (item) => String(item.id),
+      render: (item) => formatFact(item, compact, theme),
+    },
+    { selectFirstItem: false },
+  );
+  list.setItems(facts);
+  return list;
+}
+
+function expandedRunIds(root: RunTreeNode, expanded: boolean): ReadonlySet<string> {
+  const ids = new Set<string>();
+  const visit = (node: RunTreeNode): void => {
+    if (node.children.length > 0 && (expanded || node.run.state !== "completed")) {
+      ids.add(String(node.run.id));
+    }
+    for (const child of node.children) visit(child);
+  };
+  for (const child of root.children) visit(child);
+  return ids;
 }
 
 function dashboardHeader(
@@ -313,35 +375,25 @@ function dashboardHeader(
   return parts.join(color(theme, "dim", "  ·  "));
 }
 
-function appendNode(
-  lines: string[],
+function formatRun(
   node: RunTreeNode,
-  prefix: string,
-  last: boolean,
-  theme: ObservabilityTheme | undefined,
   expanded: boolean,
-): void {
-  const branch = last ? "└─ " : "├─ ";
-  const symbol = state(theme, node.run.state, stateSymbol(node.run.state));
-  const label = strong(theme, definitionLabel(String(node.run.definitionId)));
-  const stateLabel = state(theme, node.run.state, `[${node.run.state}]`);
-  const collapsed = node.run.state === "completed" && node.children.length > 0 && !expanded;
-  const details = [modelDetails(node, theme)];
-  if (collapsed) details.push(collapsedDetails(node, theme));
-  const suffix = details.filter(Boolean).join(color(theme, "dim", "  ·  "));
-  lines.push(
-    `${color(theme, "dim", `${prefix}${branch}`)}${symbol} ${label} ${stateLabel}${
-      suffix ? `  ${suffix}` : ""
-    }`,
-  );
-  if (collapsed) return;
-  const childPrefix = `${prefix}${last ? "   " : "│  "}`;
-  if (node.run.state === "running" && node.activity) {
-    lines.push(`${color(theme, "dim", childPrefix)}${activityDetails(node, theme)}`);
+  theme: ObservabilityTheme | undefined,
+): string {
+  const run = node.run;
+  const label = strong(theme, definitionLabel(String(run.definitionId)));
+  const status = state(theme, run.state, run.state);
+  const parts = [
+    `${state(theme, run.state, stateSymbol(run.state))} ${label}${color(theme, "dim", " · ")}${status}`,
+  ];
+  const model = modelDetails(node, theme);
+  if (model) parts.push(model);
+  if (!expanded && run.state === "completed" && node.children.length > 0) {
+    parts.push(collapsedDetails(node, theme));
   }
-  node.children.forEach((child, index) => {
-    appendNode(lines, child, childPrefix, index === node.children.length - 1, theme, expanded);
-  });
+  const activity = activityDetails(node, theme);
+  if (activity) parts.push(activity);
+  return parts.join(color(theme, "dim", "  "));
 }
 
 function modelDetails(node: RunTreeNode, theme: ObservabilityTheme | undefined): string {
@@ -356,17 +408,16 @@ function modelDetails(node: RunTreeNode, theme: ObservabilityTheme | undefined):
 
 function collapsedDetails(node: RunTreeNode, theme: ObservabilityTheme | undefined): string {
   const stats = descendantStats(node);
-  const parts: string[] = [];
-  if (stats.completed > 0) parts.push(`${stats.completed} children completed`);
+  const parts = [`${stats.total} descendants`];
+  if (stats.completed > 0) parts.push(`${stats.completed} completed`);
   if (stats.failed > 0) parts.push(`${stats.failed} failed`);
   if (stats.cancelled > 0) parts.push(`${stats.cancelled} cancelled`);
   if (stats.active > 0) parts.push(`${stats.active} active`);
-  if (parts.length === 0) parts.push(`${stats.total} children`);
   return color(theme, stats.failed > 0 ? "error" : "success", parts.join(" · "));
 }
 
 function activityDetails(node: RunTreeNode, theme: ObservabilityTheme | undefined): string {
-  if (!node.activity) return "";
+  if (!node.activity || node.run.state !== "running") return "";
   const reported = node.activity.source === "reported" ? `${color(theme, "warning", "!")} ` : "";
   const target = node.activity.target
     ? `${color(theme, "dim", " → ")}${color(theme, "muted", truncate(node.activity.target, 48))}`
@@ -443,7 +494,7 @@ function descendantStats(node: RunTreeNode): DescendantStats {
 }
 
 function definitionLabel(value: string): string {
-  return value.replace(/^(?:agent|workflow)\./, "");
+  return value.replace(/^(?:agent|workflow)/, (prefix) => `${prefix} `).replace(".", "");
 }
 
 function shortRunId(value: RunId): string {
