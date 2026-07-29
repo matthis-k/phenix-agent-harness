@@ -8,15 +8,14 @@ import {
 export interface NativeWorkspaceHandoffOptions {
   readonly data: string;
   readonly keybindings: Pick<KeybindingsManager, "matches">;
-  readonly handoff: (delegation: NativeInputDelegation) => void;
+  readonly handoff: (delegation: NativeInputDelegation) => "consume" | "forward";
 }
 
 export function handoffNativeWorkspaceInput(
   options: NativeWorkspaceHandoffOptions,
-): { readonly data: string } | undefined {
+): { readonly consume: true } | { readonly data: string } | undefined {
   const delegation = resolveNativeInputDelegation(options.data, options.keybindings);
   if (!delegation) return undefined;
 
-  options.handoff(delegation);
-  return { data: options.data };
+  return options.handoff(delegation) === "consume" ? { consume: true } : { data: options.data };
 }

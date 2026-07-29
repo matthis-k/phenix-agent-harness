@@ -8,6 +8,7 @@ import type { NativeInputDelegation } from "../extension/workspace/workspace-int
 
 const KEY_ACTIONS: Readonly<Record<string, AppKeybinding>> = {
   "\x07": "app.editor.external",
+  "\x0c": "app.model.select",
 };
 const KEYBINDINGS = {
   matches: (data: string, action: AppKeybinding) => KEY_ACTIONS[data] === action,
@@ -20,6 +21,7 @@ test("resolves the native action before forwarding the same key", () => {
     keybindings: KEYBINDINGS,
     handoff: (next) => {
       delegation = next;
+      return "forward";
     },
   });
 
@@ -30,6 +32,24 @@ test("resolves the native action before forwarding the same key", () => {
   assert.deepEqual(result, { data: "\x07" });
 });
 
+test("consumes a native action handled by a Phenix dialog", () => {
+  let delegation: NativeInputDelegation | undefined;
+  const result = handoffNativeWorkspaceInput({
+    data: "\x0c",
+    keybindings: KEYBINDINGS,
+    handoff: (next) => {
+      delegation = next;
+      return "consume";
+    },
+  });
+
+  assert.deepEqual(delegation, {
+    action: "app.model.select",
+    reopenWorkspace: false,
+  });
+  assert.deepEqual(result, { consume: true });
+});
+
 test("leaves unrelated input in the focused workspace", () => {
   let touched = false;
   const result = handoffNativeWorkspaceInput({
@@ -37,6 +57,7 @@ test("leaves unrelated input in the focused workspace", () => {
     keybindings: KEYBINDINGS,
     handoff: () => {
       touched = true;
+      return "forward";
     },
   });
 

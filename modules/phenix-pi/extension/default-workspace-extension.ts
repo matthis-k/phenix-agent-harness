@@ -28,7 +28,10 @@ import {
   WORKSPACE_NATIVE_HANDOFF,
 } from "./workspace/workspace-interaction.ts";
 import {
-  subscribeWorkspaceChanges,
+  WorkspaceSelectDialog,
+  type WorkspaceSelectDialogItem,
+} from "./workspace/workspace-select-dialog.ts";
+import {
   subscribeWorkspaceRuntime,
   type WorkspaceRuntimeBinding,
 } from "./workspace-runtime-binding.ts";
@@ -38,6 +41,11 @@ const TURN_STATUS_KEY = "phenix-turn";
 type WorkspaceCompletion = PhenixWorkspaceAction & {
   readonly reopenWorkspace?: boolean;
 };
+
+interface WorkspaceModelChoice {
+  readonly provider: string;
+  readonly modelId: string;
+}
 
 export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
   let context: ExtensionContext | undefined;
@@ -212,12 +220,31 @@ async function openWorkspace(
   let activeWorkspace: PhenixWorkspace | undefined;
   let activeKeybindings: KeybindingsManager | undefined;
   let pendingDelegation: NativeInputDelegation | undefined;
+  let nativeDialogActive = false;
+
+  const showModelDialog = async (): Promise<void> => {
+    if (nativeDialogActive) return;
+    nativeDialogActive = true;
+    try {
+      await openWorkspaceModelDialog(pi, ctx);
+    } finally {
+      nativeDialogActive = false;
+    }
+  };
+
   const unsubscribeInput = ctx.ui.onTerminalInput((data) => {
-    if (!activeWorkspace || !activeKeybindings) return undefined;
+    if (!activeWorkspace || !activeKeybindings || nativeDialogActive) return undefined;
     return handoffNativeWorkspaceInput({
       data,
       keybindings: activeKeybindings,
       handoff: (delegation) => {
+        if (delegation.action === "app.model.select") {
+          void showModelDialog().catch((error) => {
+            notifyWorkspaceCommandError(ctx, "model selector", error);
+          });
+          return "consume";
+        }
+
         pendingDelegation = delegation;
         if (delegation.action === "app.interrupt") {
           void interruptActiveRootWork(binding.runtime, binding.rootRunId)
@@ -238,6 +265,7 @@ async function openWorkspace(
         }
         activeWorkspace?.handleInput(WORKSPACE_NATIVE_HANDOFF);
         pendingDelegation = undefined;
+        return "forward";
       },
     });
   });
@@ -252,6 +280,19 @@ async function openWorkspace(
           description: command.description,
         }));
         const complete = (action: PhenixWorkspaceAction): void => {
+          if (action.kind === "native" && slashCommandName(action.text) === "model") {
+            void showModelDialog().catch((error) => {
+              notifyWorkspaceCommandError(ctx, "model selector", error);
+            });
+            return;
+          }
+          if (action.kind === "native" && isRegisteredWorkspaceCommand(action.text, commands)) {
+            void executeWorkspaceCommand(pi, ctx, action.text).catch((error) => {
+              notifyWorkspaceCommandError(ctx, action.text, error);
+            });
+            return;
+          }
+
           const delegation = action.kind === "native" ? pendingDelegation : undefined;
           if (action.kind === "native" && delegation) {
             ctx.ui.setEditorText(action.text);
@@ -283,7 +324,16 @@ async function openWorkspace(
               binding.runtime.transcripts.get(node.run.id),
               ctx.cwd,
             ),
-          subscribe: (listener) => subscribeWorkspaceChanges(binding.runtime, listener),
+          subscribe: (listener) => {
+            const unsubscribeEvents = binding.runtime.events.subscribe(listener);
+            const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
+            const unsubscribeTranscripts = binding.runtime.transcripts.subscribe(() => listener());
+            return () => {
+              unsubscribeEvents();
+              unsubscribeDiagnostics();
+              unsubscribeTranscripts();
+            };
+          },
           submit: async (text) => {
             lifecycle.onSubmitStarted();
             try {
@@ -315,6 +365,92 @@ async function openWorkspace(
   } finally {
     unsubscribeInput();
   }
+}
+
+async function openWorkspaceModelDialog(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
+  const models = await ctx.modelRegistry.getAvailable();
+  const items: WorkspaceSelectDialogItem<WorkspaceModelChoice>[] = models.map((model) => {
+    const id = `${model.provider}/${model.id}`;
+    return {
+      id,
+      label: model.name || model.id,
+      detail: id,
+      searchText: `${model.provider} ${model.id} ${model.name ?? ""}`,
+      current: ctx.model?.provider === model.provider && ctx.model?.id === model.id,
+      value: { provider: model.provider, modelId: model.id },
+    };
+  });
+  items.sort((left, right) => {
+    if (left.current !== right.current) return left.current ? -1 : 1;
+    return left.label.localeCompare(right.label);
+  });
+
+  const selection = await ctx.ui.custom<WorkspaceModelChoice | undefined>(
+    (tui, theme, keybindings, done) =>
+      new WorkspaceSelectDialog({
+        tui,
+        theme,
+        keybindings,
+        title: "Select model",
+        items,
+        emptyMessage: "No available models",
+        onClose: done,
+      }),
+    {
+      overlay: true,
+      overlayOptions: {
+        width: "72%",
+        maxHeight: "75%",
+        anchor: "center",
+        margin: 1,
+      },
+    },
+  );
+  if (!selection) return;
+
+  const model = ctx.modelRegistry.find(selection.provider, selection.modelId);
+  if (!model) {
+    ctx.ui.notify(
+      `Model ${selection.provider}/${selection.modelId} is no longer available.`,
+      "warning",
+    );
+    return;
+  }
+  if (!(await pi.setModel(model))) {
+    ctx.ui.notify(
+      `No configured authentication for ${selection.provider}/${selection.modelId}.`,
+      "error",
+    );
+  }
+}
+
+async function executeWorkspaceCommand(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  text: string,
+): Promise<void> {
+  await Promise.resolve(
+    pi.sendUserMessage(text, ctx.isIdle() ? undefined : { deliverAs: "steer" }),
+  );
+}
+
+function isRegisteredWorkspaceCommand(text: string, commands: readonly SlashCommand[]): boolean {
+  const name = slashCommandName(text);
+  return name !== undefined && commands.some((command) => command.name === name);
+}
+
+function slashCommandName(text: string): string | undefined {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("/")) return undefined;
+  const [name] = trimmed.slice(1).split(/\s+/, 1);
+  return name || undefined;
+}
+
+function notifyWorkspaceCommandError(ctx: ExtensionContext, command: string, error: unknown): void {
+  ctx.ui.notify(
+    `Unable to run ${command}: ${error instanceof Error ? error.message : String(error)}`,
+    "warning",
+  );
 }
 
 async function loadWorkspaceSnapshot(
@@ -364,7 +500,16 @@ async function openInspector(
             binding.runtime.transcripts.get(node.run.id),
             ctx.cwd,
           ),
-        subscribe: (listener) => subscribeWorkspaceChanges(binding.runtime, listener),
+        subscribe: (listener) => {
+          const unsubscribeEvents = binding.runtime.events.subscribe(listener);
+          const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
+          const unsubscribeTranscripts = binding.runtime.transcripts.subscribe(() => listener());
+          return () => {
+            unsubscribeEvents();
+            unsubscribeDiagnostics();
+            unsubscribeTranscripts();
+          };
+        },
         onClose: () => done(undefined),
       }),
     {
