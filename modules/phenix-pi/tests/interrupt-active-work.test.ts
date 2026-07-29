@@ -2,56 +2,59 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { PhenixRuntime } from "../composition/create-phenix-runtime.ts";
+import { AGENT_BASE } from "../definitions/ids.ts";
+import { definitionRef } from "../domain/definition/definition.ts";
 import type { RunId } from "../domain/shared.ts";
-import {
-  interruptActiveRootWork,
-  USER_INTERRUPT_REASON,
-} from "../extension/workspace/interrupt-active-work.ts";
+import { interruptActiveRootWork } from "../extension/workspace/interrupt-active-work.ts";
+import { createTestRuntime } from "./support/core-runtime.ts";
 
-const rootRunId = "root-test" as RunId;
-const firstRunId = "run-first" as RunId;
-const secondRunId = "run-second" as RunId;
-const detachedRunId = "run-detached" as RunId;
-const nestedRunId = "run-nested" as RunId;
-
-test("interrupt cancels attached foreground roots and leaves recursive propagation to execution", async () => {
-  const cancellations: Array<{ readonly runId: RunId; readonly reason: string }> = [];
-  const runtime = {
-    queries: {
-      activeRuns: async (runId: RunId) => {
-        assert.equal(runId, rootRunId);
-        return [
-          { id: rootRunId, parentId: undefined, ownership: "attached" },
-          { id: firstRunId, parentId: rootRunId, ownership: "attached" },
-          { id: secondRunId, parentId: rootRunId, ownership: "attached" },
-          { id: detachedRunId, parentId: rootRunId, ownership: "detached" },
-          { id: nestedRunId, parentId: firstRunId, ownership: "attached" },
-        ];
-      },
+test("interrupt cancels the attached foreground subtree and preserves detached background work", async () => {
+  let runtime: Awaited<ReturnType<typeof createTestRuntime>>;
+  runtime = await createTestRuntime({
+    async start(command) {
+      await runtime.controller.transition(command.runId, "starting");
+      await runtime.controller.transition(command.runId, "running");
     },
-    execution: {
-      cancel: async (runId: RunId, reason: string) => {
-        cancellations.push({ runId, reason });
-      },
-    },
-  } as unknown as Pick<PhenixRuntime, "execution" | "queries">;
+  });
 
-  const interrupted = await interruptActiveRootWork(runtime, rootRunId);
+  const foreground = await runtime.execution.start({
+    parentId: runtime.rootRunId,
+    definition: definitionRef(AGENT_BASE),
+    input: { objective: "foreground" },
+    wait: "background",
+  });
+  const nested = await runtime.execution.start({
+    parentId: foreground.id,
+    definition: definitionRef(AGENT_BASE),
+    input: { objective: "nested foreground work" },
+    wait: "background",
+  });
+  const background = await runtime.execution.start({
+    parentId: foreground.id,
+    definition: definitionRef(AGENT_BASE),
+    input: { objective: "detached background work" },
+    wait: "background",
+  });
+  await runtime.execution.reparent(background.id, runtime.rootRunId);
 
-  assert.deepEqual(interrupted, [firstRunId, secondRunId]);
-  assert.deepEqual(cancellations, [
-    { runId: firstRunId, reason: USER_INTERRUPT_REASON },
-    { runId: secondRunId, reason: USER_INTERRUPT_REASON },
-  ]);
+  assert.deepEqual(await interruptActiveRootWork(runtime, runtime.rootRunId), [foreground.id]);
+  assert.equal(runtime.store.projection.requireRun(foreground.id).state, "cancelled");
+  assert.equal(runtime.store.projection.requireRun(nested.id).state, "cancelled");
+  assert.equal(runtime.store.projection.requireRun(background.id).state, "running");
 });
 
 test("interrupt is a no-op when the root has no attached foreground work", async () => {
   let cancelled = false;
+  const rootRunId = "root-test" as RunId;
   const runtime = {
     queries: {
       activeRuns: async () => [
         { id: rootRunId, parentId: undefined, ownership: "attached" },
-        { id: detachedRunId, parentId: rootRunId, ownership: "detached" },
+        {
+          id: "run-detached" as RunId,
+          parentId: rootRunId,
+          ownership: "detached",
+        },
       ],
     },
     execution: {
