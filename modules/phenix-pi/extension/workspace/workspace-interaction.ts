@@ -1,3 +1,4 @@
+import type { AppKeybinding, KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import { matchesKey } from "@earendil-works/pi-tui";
 
 export type WorkspaceInputGroup = "main" | "sidebar";
@@ -5,8 +6,6 @@ export type WorkspaceInputGroup = "main" | "sidebar";
 export type WorkspaceInputIntent =
   | { readonly kind: "editor" }
   | { readonly kind: "copy-selection" }
-  | { readonly kind: "native-ui" }
-  | { readonly kind: "sidebar-toggle" }
   | { readonly kind: "focus-toggle" }
   | { readonly kind: "focus-main" }
   | { readonly kind: "transcript-page"; readonly direction: 1 | -1 }
@@ -16,17 +15,63 @@ export type WorkspaceInputIntent =
   | { readonly kind: "sidebar-activate" }
   | { readonly kind: "sidebar-collapse" };
 
+export interface NativeInputDelegation {
+  readonly action: AppKeybinding;
+  readonly reopenWorkspace: boolean;
+}
+
+const NATIVE_HANDOFF_ACTIONS = [
+  "app.exit",
+  "app.suspend",
+  "app.thinking.cycle",
+  "app.model.cycleForward",
+  "app.model.cycleBackward",
+  "app.model.select",
+  "app.tools.expand",
+  "app.thinking.toggle",
+  "app.editor.external",
+  "app.message.copy",
+  "app.message.followUp",
+  "app.message.dequeue",
+  "app.clipboard.pasteImage",
+  "app.session.new",
+  "app.session.tree",
+  "app.session.fork",
+  "app.session.resume",
+] as const satisfies readonly AppKeybinding[];
+
+const NATIVE_MODAL_ACTIONS = new Set<AppKeybinding>([
+  "app.exit",
+  "app.model.select",
+  "app.session.new",
+  "app.session.tree",
+  "app.session.fork",
+  "app.session.resume",
+]);
+
+export function resolveNativeInputDelegation(
+  data: string,
+  keybindings: Pick<KeybindingsManager, "matches">,
+  editorEmpty: boolean,
+): NativeInputDelegation | undefined {
+  for (const action of NATIVE_HANDOFF_ACTIONS) {
+    if (!keybindings.matches(data, action)) continue;
+    if (action === "app.exit" && !editorEmpty) return undefined;
+    return {
+      action,
+      reopenWorkspace: !NATIVE_MODAL_ACTIONS.has(action),
+    };
+  }
+  return undefined;
+}
+
 export function resolveWorkspaceInput(
   data: string,
   group: WorkspaceInputGroup,
   hasTranscriptSelection = false,
 ): WorkspaceInputIntent {
   if (data === "\x03" && hasTranscriptSelection) return { kind: "copy-selection" };
-  if (data === "\x0f") return { kind: "native-ui" };
-  if (data === "\x02") return { kind: "sidebar-toggle" };
-  if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
-    return { kind: "focus-toggle" };
-  }
+  if (matchesKey(data, "tab")) return { kind: "focus-toggle" };
 
   if (group === "main") {
     if (matchesKey(data, "pageUp")) return { kind: "transcript-page", direction: -1 };
