@@ -23,25 +23,43 @@ import {
 import { Container, Spacer, type TUI } from "@earendil-works/pi-tui";
 
 import type { RunTreeNode } from "../application/interfaces.ts";
+import type {
+  LoadedWorkspaceTranscript,
+  ReadyWorkspaceTranscript,
+} from "../ports/workspace-effects.ts";
 
 export interface NativeRunTranscript {
-  readonly component?: Container;
-  readonly sessionId?: string;
+  readonly component: Container;
+  readonly sessionId: string;
   readonly sessionFile?: string;
-  readonly unavailable?: string;
+}
+
+export function readyNativeRunTranscript(
+  transcript: NativeRunTranscript,
+): ReadyWorkspaceTranscript<NativeRunTranscript> {
+  return {
+    kind: "ready",
+    handle: { key: transcript.sessionFile ?? transcript.sessionId },
+    value: transcript,
+  };
 }
 
 export async function loadNativeRunTranscript(
   node: RunTreeNode,
   tui: TUI,
-): Promise<NativeRunTranscript> {
+): Promise<LoadedWorkspaceTranscript<NativeRunTranscript>> {
+  if (node.run.kind === "workflow") {
+    return { kind: "not-applicable", reason: "workflow" };
+  }
+
   const sessionFile = node.run.pi?.sessionFile;
   if (!sessionFile) {
-    return {
-      sessionId: node.run.pi?.sessionId,
-      unavailable:
-        "This run has no Pi transcript reference; it may predate transcript persistence.",
-    };
+    if (node.run.kind === "root") {
+      return { kind: "not-applicable", reason: "root-projection" };
+    }
+    return node.run.pi?.sessionId
+      ? { kind: "pending-persistence", runId: node.run.id }
+      : { kind: "legacy", runId: node.run.id };
   }
 
   let source: string;
@@ -49,30 +67,33 @@ export async function loadNativeRunTranscript(
     source = await readFile(sessionFile, "utf8");
   } catch (error) {
     if (!isMissingFileError(error)) throw error;
+    return { kind: "pending-persistence", runId: node.run.id };
+  }
+
+  let fileEntries: FileEntry[];
+  try {
+    fileEntries = parseSessionEntries(source);
+    migrateSessionEntries(fileEntries);
+  } catch (error) {
     return {
-      sessionId: node.run.pi?.sessionId,
-      sessionFile,
-      unavailable: "Pi has allocated this transcript but has not flushed its first response yet.",
+      kind: "invalid",
+      reason: `The persisted Pi transcript is invalid: ${errorMessage(error)}`,
     };
   }
-  const fileEntries = parseSessionEntries(source);
-  migrateSessionEntries(fileEntries);
   const header = fileEntries.find((entry) => entry.type === "session");
   if (header?.type !== "session") {
     return {
-      sessionId: node.run.pi?.sessionId,
-      sessionFile,
-      unavailable: "The persisted session file is not a valid Pi transcript.",
+      kind: "invalid",
+      reason: "The persisted session file is not a valid Pi transcript.",
     };
   }
 
   const entries = fileEntries.filter((entry): entry is SessionEntry => entry.type !== "session");
-  const component = renderNativeTranscript(buildContextEntries(entries), tui, header.cwd);
-  return {
-    component,
+  return readyNativeRunTranscript({
+    component: renderNativeTranscript(buildContextEntries(entries), tui, header.cwd),
     sessionId: header.id,
     sessionFile,
-  };
+  });
 }
 
 export function renderNativeTranscript(
@@ -227,6 +248,10 @@ function isMissingFileError(error: unknown): boolean {
   return (
     error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT"
   );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function transcriptFileEntries(source: string): readonly FileEntry[] {
