@@ -11,6 +11,7 @@ import {
 } from "../extension/workspace/workspace-interaction.ts";
 
 const KEY_ACTIONS: Readonly<Record<string, AppKeybinding>> = {
+  "\x03": "app.clear",
   "\x04": "app.exit",
   "\x07": "app.editor.external",
   "\x0c": "app.model.select",
@@ -69,6 +70,10 @@ test("sidebar input uses hjkl and actions while routing other typing to the edit
 test("native application shortcuts are not shadowed by workspace controls", () => {
   assert.deepEqual(resolveWorkspaceInput("\x0f", "main"), { kind: "editor" });
   assert.deepEqual(resolveWorkspaceInput("\x02", "main"), { kind: "editor" });
+  assert.deepEqual(resolveNativeInputDelegation("\x03", KEYBINDINGS), {
+    action: "app.clear",
+    reopenWorkspace: true,
+  });
   assert.deepEqual(resolveNativeInputDelegation("\x0f", KEYBINDINGS), {
     action: "app.tools.expand",
     reopenWorkspace: true,
