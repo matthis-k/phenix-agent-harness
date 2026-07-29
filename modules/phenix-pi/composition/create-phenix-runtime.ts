@@ -9,12 +9,12 @@ import type {
   SessionProfileFacade,
   TaskFacade,
 } from "../application/interfaces.ts";
-import type { LiveAgentTranscriptReader } from "../application/live-agent-transcripts.ts";
 import type { ConcreteModelRef } from "../domain/definition/model.ts";
 import { DEFAULT_SESSION_PROFILE, type RootRunInput } from "../domain/run/model.ts";
 import type { RunId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import type { DiagnosticLog } from "../ports/diagnostic-log.ts";
+import type { LiveAgentTranscriptReader } from "../ports/live-agent-transcripts.ts";
 import {
   createDefinitionRuntime,
   createExecutionServices,
