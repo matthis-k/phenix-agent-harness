@@ -33,10 +33,22 @@ export interface DiagnosticWrite {
   readonly fields?: Readonly<Record<string, unknown>>;
 }
 
+export type DiagnosticCounts = Readonly<Record<DiagnosticSeverity, number>>;
+
+export interface DiagnosticFailureCounts {
+  readonly recovering: number;
+  readonly recovered: number;
+  readonly terminal: number;
+}
+
 export interface DiagnosticSummary {
   readonly total: number;
   readonly artifacts: number;
-  readonly counts: Readonly<Record<DiagnosticSeverity, number>>;
+  /** Current health counts. Error means terminal; warning includes active recovery. */
+  readonly counts: DiagnosticCounts;
+  /** Immutable log-entry counts before lifecycle-aware health projection. */
+  readonly observedCounts?: DiagnosticCounts;
+  readonly failures?: DiagnosticFailureCounts;
   readonly latest?: DiagnosticLogEntry;
 }
 
