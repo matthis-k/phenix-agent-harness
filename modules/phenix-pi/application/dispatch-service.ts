@@ -129,11 +129,7 @@ export class DispatchService {
 
     const classifierRef = definitionRef(AGENT_DISPATCHER);
     const classifierInput = { ...input, candidates };
-    this.assertAllowed(
-      parentId,
-      this.catalog.get(classifierRef) as AnyDefinition,
-      classifierInput,
-    );
+    this.assertAllowed(parentId, this.catalog.get(classifierRef) as AnyDefinition, classifierInput);
     const classifier = await this.execution.start({
       parentId,
       definition: classifierRef,
