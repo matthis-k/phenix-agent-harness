@@ -1,5 +1,3 @@
-import { sliceByColumn, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-
 import { type Rect, rect } from "../../domain/workspace/geometry.ts";
 import {
   type LayoutFrame,
@@ -8,6 +6,7 @@ import {
   solveLayout,
 } from "../../domain/workspace/layout.ts";
 import type { PaneId, ViewId } from "../../domain/workspace/state.ts";
+import { fitViewLine, sliceViewLine } from "../components/index.ts";
 
 const SIDEBAR_MIN_WIDTH = 90;
 const RESET_BACKGROUND = "\x1b[49m";
@@ -100,14 +99,14 @@ export function composeWorkspaceTextFrame(
       const localRow = row - bounds.y;
       const source = outputs.get(paneId)?.lines[localRow] ?? "";
       line += RESET_BACKGROUND;
-      line += fitLine(sliceByColumn(source, 0, bounds.width, true), bounds.width);
+      line += sliceViewLine(source, 0, bounds.width);
       line += RESET_BACKGROUND;
       column = bounds.x + bounds.width;
     }
     if (column < frame.terminal.x + frame.terminal.width) {
       line += " ".repeat(frame.terminal.x + frame.terminal.width - column);
     }
-    return `${fitLine(line, frame.terminal.width)}${RESET_BACKGROUND}`;
+    return `${fitViewLine(line, frame.terminal.width)}${RESET_BACKGROUND}`;
   });
 }
 
@@ -154,11 +153,6 @@ function fixedPane(paneId: PaneId, width: number, height: number, focusable = tr
     maxHeight: height,
     focusable,
   };
-}
-
-function fitLine(line: string, width: number): string {
-  const clipped = truncateToWidth(line, Math.max(0, width), "");
-  return clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped)));
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

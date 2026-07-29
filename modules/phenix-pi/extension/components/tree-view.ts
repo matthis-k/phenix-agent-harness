@@ -5,6 +5,7 @@ import {
   type ListViewEvent,
   type ListViewFrame,
   type ListViewIntent,
+  type ListViewportState,
 } from "./list-view.ts";
 
 export type TreeViewIntent =
@@ -97,6 +98,10 @@ export class TreeView<T> {
     return new Set(this.expanded);
   }
 
+  get viewport(): ListViewportState {
+    return this.list.viewport;
+  }
+
   setRoots(roots: readonly T[]): void {
     this.roots = roots;
     this.rebuild();
@@ -106,6 +111,10 @@ export class TreeView<T> {
     this.expanded.clear();
     for (const id of ids) this.expanded.add(id);
     this.rebuild();
+  }
+
+  setViewport(state: ListViewportState): void {
+    this.list.setViewport(state);
   }
 
   setSelectedId(id: string | undefined): boolean {

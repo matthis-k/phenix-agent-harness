@@ -29,10 +29,13 @@ export interface ListViewOptions {
   readonly renderEmpty?: (width: number) => string;
 }
 
-export interface ListViewFrame {
-  readonly lines: readonly string[];
-  readonly offset: number;
+export interface ListViewportState {
   readonly selectedId: string | undefined;
+  readonly offset: number;
+}
+
+export interface ListViewFrame extends ListViewportState {
+  readonly lines: readonly string[];
   readonly visibleItemIds: readonly string[];
 }
 
@@ -64,11 +67,20 @@ export class ListView<T> {
     return this.items.length;
   }
 
+  get viewport(): ListViewportState {
+    return { selectedId: this.selectedItemId, offset: this.offset };
+  }
+
   setItems(items: readonly T[]): void {
     this.items = items;
     if (this.selectedItemId && this.itemById(this.selectedItemId)) return;
     this.selectedItemId = this.selectFirstItem ? this.itemIdAt(0) : undefined;
     this.offset = 0;
+  }
+
+  setViewport(state: ListViewportState): void {
+    this.offset = Math.max(0, Math.floor(state.offset));
+    this.setSelectedId(state.selectedId);
   }
 
   setSelectedId(id: string | undefined): boolean {

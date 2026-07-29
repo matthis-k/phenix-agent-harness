@@ -37,15 +37,34 @@ test("bounds scrollback and reconciles a fixed viewport after trimming", () => {
   assert.match(frame.lines[0] ?? "", /two/);
 });
 
-test("clips ANSI output by visible columns and supports horizontal scrolling", () => {
+test("clips ANSI output by visible columns and bounds horizontal scrolling", () => {
   const view = new TerminalView();
   view.setLines(["\x1b[31mabcdef\x1b[0m"]);
   view.dispatch({ kind: "horizontal", columns: 2 }, 1);
 
   const frame = view.render(3, 1);
   assert.equal(frame.horizontalOffset, 2);
+  assert.equal(frame.maximumHorizontalOffset, 3);
   assert.equal(visibleWidth(frame.lines[0] ?? ""), 3);
   assert.match(frame.lines[0] ?? "", /cde/);
+
+  view.dispatch({ kind: "horizontal", columns: Number.MAX_SAFE_INTEGER }, 1);
+  assert.equal(view.render(3, 1).horizontalOffset, 3);
+});
+
+test("accepts controlled viewport state without taking domain ownership", () => {
+  const view = new TerminalView();
+  view.setLines(["zero", "one", "two", "three"]);
+  view.setViewport({ offset: 1, horizontalOffset: 2, followEnd: false });
+
+  assert.deepEqual(view.viewport, {
+    offset: 1,
+    horizontalOffset: 2,
+    followEnd: false,
+  });
+  const frame = view.render(4, 2);
+  assert.equal(frame.offset, 1);
+  assert.equal(frame.followEnd, false);
 });
 
 test("normalizes appended terminal text into lines", () => {
