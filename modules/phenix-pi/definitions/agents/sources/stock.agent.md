@@ -2,7 +2,7 @@
 
 ```phenix-agent
 id: session.stock
-description: Run an ordinary Pi session with no Phenix role prompt or workflow tools; the invoking workflow supplies the concrete typed output schema.
+description: Run an ordinary Pi session when no predefined workflow, specialist, or useful specialist composition fits; the caller supplies the concrete typed output schema.
 input: request.stock-session
 output: outcome.stock-session-handoff
 model: session
