@@ -84,7 +84,7 @@ export function readyNativeRunTranscript(
 export async function loadNativeRunTranscript(
   node: RunTreeNode,
   tui: TUI,
-  theme: ObservabilityTheme,
+  theme?: ObservabilityTheme,
 ): Promise<NativeRunTranscript> {
   return renderNativeRunTranscriptResult(
     await loadNativeRunTranscriptResult(node, tui, theme),
@@ -95,7 +95,7 @@ export async function loadNativeRunTranscript(
 export async function loadNativeRunTranscriptResult(
   node: RunTreeNode,
   tui: TUI,
-  theme: ObservabilityTheme,
+  theme?: ObservabilityTheme,
 ): Promise<LoadedWorkspaceTranscript<NativeRunTranscript>> {
   if (node.run.kind === "workflow") {
     return { kind: "not-applicable", reason: "workflow" };
@@ -152,7 +152,7 @@ export function renderNativeTranscript(
   entries: readonly SessionEntry[],
   tui: TUI,
   cwd: string,
-  theme: ObservabilityTheme,
+  theme?: ObservabilityTheme,
 ): NativeTranscriptComponent {
   const transcript = new NativeTranscriptComponent();
   const markdownTheme = getMarkdownTheme();
