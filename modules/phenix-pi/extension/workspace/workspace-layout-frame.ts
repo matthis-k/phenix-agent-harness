@@ -1,11 +1,11 @@
 import { sliceByColumn, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
-import { rect, type Rect } from "../../domain/workspace/geometry.ts";
+import { type Rect, rect } from "../../domain/workspace/geometry.ts";
 import {
-  solveLayout,
   type LayoutFrame,
   type LayoutNode,
   type LayoutResult,
+  solveLayout,
 } from "../../domain/workspace/layout.ts";
 import type { PaneId, ViewId } from "../../domain/workspace/state.ts";
 
@@ -48,11 +48,7 @@ export function computeWorkspaceDimensions(
 }
 
 export function solveWorkspaceLayout(input: WorkspaceLayoutInput): LayoutResult {
-  const dimensions = computeWorkspaceDimensions(
-    input.width,
-    input.height,
-    input.sidebarRequested,
-  );
+  const dimensions = computeWorkspaceDimensions(input.width, input.height, input.sidebarRequested);
   const editorHeight = clamp(input.editorHeight, 1, Math.max(1, input.height - 1));
   const transcriptHeight = Math.max(1, input.height - editorHeight);
   const conversation = fixedVerticalConversation(
@@ -144,12 +140,7 @@ function fixedVerticalConversation(
   };
 }
 
-function fixedPane(
-  paneId: PaneId,
-  width: number,
-  height: number,
-  focusable = true,
-): LayoutNode {
+function fixedPane(paneId: PaneId, width: number, height: number, focusable = true): LayoutNode {
   return {
     kind: "pane",
     paneId,
