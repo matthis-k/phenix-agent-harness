@@ -6,6 +6,7 @@ import type { RunSnapshot } from "../domain/run/model.ts";
 import { runId } from "../domain/shared.ts";
 import {
   NativeTranscriptComponent,
+  type NativeRunTranscript,
   readyNativeRunTranscript,
 } from "../extension/native-run-transcript.ts";
 import { WorkspaceControllerAdapter } from "../extension/workspace/workspace-controller-adapter.ts";
@@ -47,15 +48,14 @@ test("transcript refresh retains the visible child until its replacement is read
   let publish = (): void => undefined;
   const first = nativeTranscript("child-first");
   const replacement = nativeTranscript("child-replacement");
-  let resolveReplacement: (
-    value: LoadedWorkspaceTranscript<ReturnType<typeof nativeTranscript>>,
-  ) => void = () => undefined;
+  let resolveReplacement: (value: LoadedWorkspaceTranscript<NativeRunTranscript>) => void = () =>
+    undefined;
   let loadCount = 0;
-  const pendingReplacement = new Promise<
-    LoadedWorkspaceTranscript<ReturnType<typeof nativeTranscript>>
-  >((resolve) => {
-    resolveReplacement = resolve;
-  });
+  const pendingReplacement = new Promise<LoadedWorkspaceTranscript<NativeRunTranscript>>(
+    (resolve) => {
+      resolveReplacement = resolve;
+    },
+  );
   const adapter = new WorkspaceControllerAdapter({
     snapshot: current,
     load: async () => current,
@@ -116,11 +116,14 @@ function snapshot(sequence: number): PhenixWorkspaceSnapshot {
         children: [],
       },
     },
-    rootTranscript: readyNativeRunTranscript(nativeTranscript(`root-${sequence}`), `root-${sequence}`),
+    rootTranscript: readyNativeRunTranscript(
+      nativeTranscript(`root-${sequence}`),
+      `root-${sequence}`,
+    ),
   } as unknown as PhenixWorkspaceSnapshot;
 }
 
-function nativeTranscript(sessionId = "root-session") {
+function nativeTranscript(sessionId = "root-session"): NativeRunTranscript {
   return {
     component: new NativeTranscriptComponent(),
     sessionId,
