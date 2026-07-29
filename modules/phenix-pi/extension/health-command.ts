@@ -249,17 +249,26 @@ async function runtimeHealth(input: PhenixHealthInput): Promise<PhenixHealthSect
     input.runtime.queries.activeRuns(input.rootRunId),
     input.runtime.diagnostics.summary(input.rootRunId),
   ]);
+  const failures = diagnostics.failures ?? {
+    recovering: diagnostics.counts.warning,
+    recovered: 0,
+    terminal: diagnostics.counts.error,
+  };
+  const rootHealthy = root.state === "running" || root.state === "waiting";
+  const hasFailureIncident = failures.recovering > 0 || failures.terminal > 0;
   const state: PhenixHealthState = isTerminalRunState(root.state)
     ? "unavailable"
-    : root.state === "running" || root.state === "waiting"
+    : rootHealthy && !hasFailureIncident
       ? "healthy"
       : "degraded";
+  const observed = diagnostics.observedCounts ?? diagnostics.counts;
   return {
     topic: "runtime",
     state,
-    summary: `root ${root.state}; ${active.length} active runs; sequence ${input.runtime.sequence(input.rootRunId)}`,
+    summary: `root ${root.state}; ${active.length} active runs; sequence ${input.runtime.sequence(input.rootRunId)}; ${failures.recovering} recovering, ${failures.terminal} terminal errors`,
     details: [
-      `diagnostics: ${diagnostics.counts.error} errors, ${diagnostics.counts.warning} warnings, ${diagnostics.total} total`,
+      `failure incidents: ${failures.recovering} recovering, ${failures.recovered} recovered, ${failures.terminal} terminal`,
+      `observed diagnostics: ${observed.error} error entries, ${observed.warning} warning entries, ${diagnostics.total} total`,
       ...active.map((run) => `${run.id}: ${run.definitionId} ${run.state}`),
     ],
   };
