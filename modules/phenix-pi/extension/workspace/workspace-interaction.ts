@@ -97,7 +97,7 @@ export function resolveWorkspaceInput(
   if (data === "j" || matchesKey(data, "down")) {
     return { kind: "sidebar-item", direction: 1 };
   }
-  if (matchesKey(data, "home")) return { kind: "sidebar-edge", edge: "first" | "last" };
+  if (matchesKey(data, "home")) return { kind: "sidebar-edge", edge: "first" };
   if (matchesKey(data, "end")) return { kind: "sidebar-edge", edge: "last" };
   if (matchesKey(data, "enter")) return { kind: "sidebar-activate" };
   if (data === " ") return { kind: "sidebar-collapse" };
