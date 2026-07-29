@@ -20,7 +20,7 @@ const sources = [
   ["dispatcher", "agent.dispatcher"],
   ["coordinator", "agent.coordinator"],
   ["base", "agent.base"],
-  ["stock", "session.stock"],
+  ["stock", "agent.stock"],
   ["qa-synthesizer", "agent.qa-synthesizer"],
   ["attention-router", "agent.attention-router"],
 ] as const;
@@ -117,7 +117,7 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
   assert.equal(coordinator.promptMode, undefined);
   assert.match(coordinator.prompt.render(), /declarative workflow composer/);
 
-  const stock = byId.get("session.stock");
+  const stock = byId.get("agent.stock");
   assert.ok(stock);
   assert.equal(stock.sessionMode, "stock");
   assert.equal(stock.promptMode, undefined);
@@ -146,7 +146,7 @@ test("agent Markdown requires a complete difficulty model table", () => {
   );
 });
 
-test("stock session Markdown rejects managed prompt composition", () => {
+test("stock agent Markdown rejects managed prompt composition", () => {
   const invalid = source("stock").replace(
     "persistence: file\n",
     "persistence: file\nprompt-mode: append-default\n",
