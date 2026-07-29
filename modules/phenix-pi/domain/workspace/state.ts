@@ -18,12 +18,16 @@ export interface TranscriptHandle {
   readonly key: string;
 }
 
-export type TranscriptAvailability =
+export type SettledTranscriptAvailability =
   | { readonly kind: "ready"; readonly transcript: TranscriptHandle }
-  | { readonly kind: "pending"; readonly requestId: EffectId; readonly runId: RunId }
+  | { readonly kind: "pending-persistence"; readonly runId: RunId }
   | { readonly kind: "not-applicable"; readonly reason: "workflow" | "root-projection" }
   | { readonly kind: "legacy"; readonly runId: RunId }
-  | { readonly kind: "invalid"; readonly reason: string }
+  | { readonly kind: "invalid"; readonly reason: string };
+
+export type TranscriptAvailability =
+  | SettledTranscriptAvailability
+  | { readonly kind: "pending"; readonly requestId: EffectId; readonly runId: RunId }
   | { readonly kind: "invariant-violation"; readonly reason: string };
 
 export interface TranscriptState {
