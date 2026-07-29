@@ -33,11 +33,6 @@ import {
 } from "./observability-theme.ts";
 import type { PhenixUiTarget } from "./phenix-ui.ts";
 import { transcriptAvailabilityMessage } from "./transcript-availability.ts";
-import { renderWorkspaceComposer } from "./workspace/workspace-composer.ts";
-import {
-  nextWorkspaceSection,
-  resolveWorkspaceInput,
-} from "./workspace/workspace-interaction.ts";
 import { stripTranscriptAnsi } from "./workspace/transcript-selection.ts";
 import { TranscriptSelectionSurface } from "./workspace/transcript-selection-surface.ts";
 import type {
@@ -46,7 +41,9 @@ import type {
   WorkspaceViewRow,
 } from "./workspace/views/workspace-view.ts";
 import { workspaceViewRegistry } from "./workspace/views/workspace-view-registry.ts";
+import { renderWorkspaceComposer } from "./workspace/workspace-composer.ts";
 import { WorkspaceControllerAdapter } from "./workspace/workspace-controller-adapter.ts";
+import { nextWorkspaceSection, resolveWorkspaceInput } from "./workspace/workspace-interaction.ts";
 import {
   composeWorkspaceTextFrame,
   computeWorkspaceDimensions,
@@ -503,7 +500,10 @@ export class PhenixWorkspace implements Component, Focusable {
         ` ${state(this.theme, active > 0 ? "running" : "completed", active > 0 ? `${active} active` : "idle")} ${color(this.theme, diagnostics.error > 0 ? "error" : diagnostics.warning > 0 ? "warning" : "success", diagnostics.error > 0 ? `${diagnostics.error} errors` : diagnostics.warning > 0 ? `${diagnostics.warning} warnings` : "healthy")}`,
         width,
       ),
-      fitLine(` ${color(this.theme, "muted", "h/l views · j/k rows · ↵ open · space fold")}`, width),
+      fitLine(
+        ` ${color(this.theme, "muted", "h/l views · j/k rows · ↵ open · space fold")}`,
+        width,
+      ),
     ];
     const available = Math.max(0, height - header.length);
     const frames = allocateSidebarSections(
