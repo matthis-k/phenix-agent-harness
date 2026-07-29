@@ -6,7 +6,7 @@ This document defines the current runtime design. Historical interfaces, deleted
 
 The root Pi session is a read-only frontend and root supervisor. It directly answers only simple read-only questions. Every substantial request enters execution through `phenix_dispatch`.
 
-Normal routing uses `mode=auto`. The dispatch service derives the exact candidate set from the caller's capability-filtered catalog and asks the typed dispatcher to select one definition. The selector must prefer the most specific invariant workflow whose complete contract matches the request. It may choose `agent.coordinator` only when no single workflow covers the task, multiple workflows are required, order depends on intermediate results, or the task is genuinely open-ended.
+Normal routing uses `mode=auto`. The dispatch service derives the exact candidate set from the caller's capability-filtered catalog and asks the typed dispatcher to select one `workflow.*` or `agent.*` definition. The selector prefers a predefined workflow that completely covers the request, chooses `agent.coordinator` when a useful combination of workflows or specialized agents is required, and chooses `agent.stock` when no workflow, specialist, or useful specialist composition fits the bounded task.
 
 `qa`, `implement`, and `coordinate` are explicit operator overrides. The frontend must not substitute them for normal catalog-driven selection. The root has no direct shell authority, and neither implementation mode nor dynamic composition is a shell bypass.
 
@@ -95,14 +95,14 @@ Schema-validated objectives, context, candidate descriptions, plans, findings, a
 - omitted or `prompt-mode: replace`: replace Pi's default prompt with the static definition instructions plus the static Phenix execution protocol;
 - `prompt-mode: append-default`: retain Pi's built-in tool-aware coding prompt and append the static definition instructions plus execution protocol.
 
-`append-default` suppresses ambient project or user system-prompt replacement before appending the Phenix contract, so it always extends Pi's actual built-in default. It still uses the exact compiled tool allowlist and the definition's context policy. Only broad coding roles whose behavior matches Pi's baseline should use it; currently `agent.base` and `agent.implementer` opt in. Narrow read-only, review, planning, routing, synthesis, and orchestration roles continue to replace the default prompt. `session.stock` is separate: it runs Pi's ordinary prompt and resources without a Phenix role prompt, and a workflow controls its typed handoff and any verifier.
+`append-default` suppresses ambient project or user system-prompt replacement before appending the Phenix contract, so it always extends Pi's actual built-in default. It still uses the exact compiled tool allowlist and the definition's context policy. Only broad coding roles whose behavior matches Pi's baseline should use it; currently `agent.base` and `agent.implementer` opt in. Narrow read-only, review, planning, routing, synthesis, and orchestration roles continue to replace the default prompt. `agent.stock` is separate: its internal `session-mode: stock` runs Pi's ordinary prompt and resources without a Phenix role prompt, while the caller controls its typed handoff and any verification.
 
 Child sessions never inherit the parent conversation. Repository context files are admitted according to the owning agent definition:
 
 - dispatcher, attention router, coordinator, finalizer, and QA synthesizer: no automatic repository context;
 - tester: 32 KB maximum;
 - scout, planner, architect, and critic: 64 KB maximum;
-- implementer, verifier, and internal base: 128 KB maximum.
+- implementer, verifier, internal base, and stock agent: 128 KB maximum.
 
 Prompt text does not authorize behavior. Authorization is enforced by:
 
