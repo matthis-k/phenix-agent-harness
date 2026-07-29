@@ -114,10 +114,7 @@ export class TranscriptSelectionSurface {
     const maximumY = frame.bounds.y + Math.max(1, frame.bounds.height - 1);
     if (
       !clampOutside &&
-      (terminalX < minimumX ||
-        terminalX > maximumX ||
-        terminalY < minimumY ||
-        terminalY > maximumY)
+      (terminalX < minimumX || terminalX > maximumX || terminalY < minimumY || terminalY > maximumY)
     ) {
       return undefined;
     }
