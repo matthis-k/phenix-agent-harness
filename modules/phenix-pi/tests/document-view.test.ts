@@ -14,6 +14,11 @@ import {
 } from "../extension/components/index.ts";
 import { documentComponent } from "../extension/presentation-component.ts";
 
+interface TestNode {
+  readonly id: string;
+  readonly children: readonly TestNode[];
+}
+
 test("document view composes generic blocks without domain knowledge", () => {
   const list = new ListView<string>(
     { id: (item) => item, render: (item) => `list:${item}` },
@@ -21,7 +26,7 @@ test("document view composes generic blocks without domain knowledge", () => {
   );
   list.setItems(["a", "b"]);
 
-  const tree = new TreeView<{ readonly id: string; readonly children: readonly any[] }>(
+  const tree = new TreeView<TestNode>(
     {
       id: (node) => node.id,
       children: (node) => node.children,
@@ -66,7 +71,7 @@ test("document component is a thin Pi adapter over a headless document", () => {
 });
 
 test("tree view exposes its visible row count for document composition", () => {
-  const tree = new TreeView<{ readonly id: string; readonly children: readonly any[] }>(
+  const tree = new TreeView<TestNode>(
     {
       id: (node) => node.id,
       children: (node) => node.children,
