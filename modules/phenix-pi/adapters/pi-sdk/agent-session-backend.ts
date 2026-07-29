@@ -16,7 +16,6 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 
-import type { LiveAgentTranscriptWriter } from "../../application/live-agent-transcripts.ts";
 import { STOCK_SESSION_PROMPT_SENTINEL } from "../../definitions/stock-session.ts";
 import type { AgentPromptMode } from "../../domain/definition/definition.ts";
 import type { ConcreteModelRef } from "../../domain/definition/model.ts";
@@ -29,6 +28,7 @@ import type {
   AgentTool,
   CreateAgentSessionSpec,
 } from "../../ports/agent-session-backend.ts";
+import type { LiveAgentTranscriptWriter } from "../../ports/live-agent-transcripts.ts";
 import { BoundedAgentSessionPort } from "./bounded-agent-session-port.ts";
 import { freeModelSessionExtensions } from "./free-model-guard.ts";
 import { createNixShellTool } from "./nix-shell-tool.ts";
