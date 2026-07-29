@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { visibleWidth } from "@earendil-works/pi-tui";
+
 import { containsRect, intersects, rect } from "../domain/workspace/geometry.ts";
 import type { PaneId } from "../domain/workspace/state.ts";
 import {
@@ -9,6 +11,8 @@ import {
   paneRect,
   solveWorkspaceLayout,
 } from "../extension/workspace/workspace-layout-frame.ts";
+
+const RESET_BACKGROUND = "\x1b[49m";
 
 test("preserves the established responsive workspace dimensions", () => {
   assert.deepEqual(computeWorkspaceDimensions(120, 40), {
@@ -91,7 +95,7 @@ test("all solved frames stay bounded and non-overlapping", () => {
   }
 });
 
-test("composes pane-local lines into exact terminal rows", () => {
+test("composes pane-local lines into exact terminal rows with isolated backgrounds", () => {
   const result = solveWorkspaceLayout({
     width: 12,
     height: 4,
@@ -103,11 +107,17 @@ test("composes pane-local lines into exact terminal rows", () => {
   if (!result.ok) return;
 
   const outputs = new Map<PaneId, { readonly lines: readonly string[] }>([
-    ["transcript", { lines: ["one", "two", "three"] }],
+    ["transcript", { lines: ["\x1b[41mone", "two", "three"] }],
     ["editor", { lines: ["> input"] }],
   ]);
   const lines = composeWorkspaceTextFrame(result.value, outputs);
-  assert.deepEqual(lines, ["one         ", "two         ", "three       ", "> input     "]);
+  assert.deepEqual(
+    lines.map((line) => line.replaceAll(RESET_BACKGROUND, "").replace("\x1b[41m", "")),
+    ["one         ", "two         ", "three       ", "> input     "],
+  );
   assert.equal(lines.length, 4);
-  assert.ok(lines.every((line) => line.length === 12));
+  assert.ok(lines.every((line) => line.startsWith(RESET_BACKGROUND)));
+  assert.ok(lines.every((line) => line.endsWith(RESET_BACKGROUND)));
+  assert.ok(lines.every((line) => visibleWidth(line) === 12));
+  assert.ok(lines[0]?.includes("\x1b[41mone"));
 });

@@ -10,6 +10,7 @@ import {
 import type { PaneId, ViewId } from "../../domain/workspace/state.ts";
 
 const SIDEBAR_MIN_WIDTH = 90;
+const RESET_BACKGROUND = "\x1b[49m";
 
 export interface WorkspaceDimensions {
   readonly width: number;
@@ -93,18 +94,20 @@ export function composeWorkspaceTextFrame(
       .filter(([, bounds]) => row >= bounds.y && row < bounds.y + bounds.height)
       .sort((left, right) => left[1].x - right[1].x);
     let column = frame.terminal.x;
-    let line = "";
+    let line = RESET_BACKGROUND;
     for (const [paneId, bounds] of panes) {
       if (bounds.x > column) line += " ".repeat(bounds.x - column);
       const localRow = row - bounds.y;
       const source = outputs.get(paneId)?.lines[localRow] ?? "";
+      line += RESET_BACKGROUND;
       line += fitLine(sliceByColumn(source, 0, bounds.width, true), bounds.width);
+      line += RESET_BACKGROUND;
       column = bounds.x + bounds.width;
     }
     if (column < frame.terminal.x + frame.terminal.width) {
       line += " ".repeat(frame.terminal.x + frame.terminal.width - column);
     }
-    return fitLine(line, frame.terminal.width);
+    return `${fitLine(line, frame.terminal.width)}${RESET_BACKGROUND}`;
   });
 }
 

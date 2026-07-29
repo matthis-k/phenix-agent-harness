@@ -11,6 +11,16 @@ export type ObservabilityTone =
   | "muted"
   | "dim"
   | "text";
+type SurfaceTone = "selectedBg" | "customMessageBg" | "userMessageBg";
+
+interface BackgroundFrame {
+  readonly prefix: string;
+  readonly suffix: string;
+}
+
+const BACKGROUND_MARKER = "\u0000";
+const SGR_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[([0-9;]*)m`, "g");
+const BACKGROUND_FRAMES = new WeakMap<object, Map<SurfaceTone, BackgroundFrame>>();
 
 const RELIABILITY_TONES: Readonly<Record<FactReliability, ObservabilityTone>> = {
   observed: "success",
@@ -58,10 +68,13 @@ export function color(
 
 export function surface(
   theme: ObservabilityTheme | undefined,
-  tone: "selectedBg" | "customMessageBg" | "userMessageBg",
+  tone: SurfaceTone,
   text: string,
 ): string {
-  return theme ? theme.bg(tone, text) : text;
+  if (!theme) return text;
+  const frame = backgroundFrame(theme, tone);
+  if (!frame) return theme.bg(tone, text);
+  return `${frame.prefix}${restoreBackground(text, frame.prefix)}${frame.suffix}`;
 }
 
 export function heading(theme: ObservabilityTheme | undefined, text: string): string {
@@ -133,6 +146,38 @@ export function statusField(
   tone: ObservabilityTone = "text",
 ): string {
   return `${color(theme, "dim", `${label}:`)} ${color(theme, tone, value)}`;
+}
+
+function backgroundFrame(
+  theme: ObservabilityTheme,
+  tone: SurfaceTone,
+): BackgroundFrame | undefined {
+  const key = theme as object;
+  let frames = BACKGROUND_FRAMES.get(key);
+  if (!frames) {
+    frames = new Map();
+    BACKGROUND_FRAMES.set(key, frames);
+  }
+  const cached = frames.get(tone);
+  if (cached) return cached;
+
+  const wrapped = theme.bg(tone, BACKGROUND_MARKER);
+  const marker = wrapped.indexOf(BACKGROUND_MARKER);
+  if (marker < 0) return undefined;
+  const frame = {
+    prefix: wrapped.slice(0, marker),
+    suffix: wrapped.slice(marker + BACKGROUND_MARKER.length),
+  };
+  frames.set(tone, frame);
+  return frame;
+}
+
+function restoreBackground(text: string, prefix: string): string {
+  if (!prefix) return text;
+  return text.replace(SGR_PATTERN, (sequence, parameters: string) => {
+    const values = parameters === "" ? [0] : parameters.split(";").map(Number);
+    return values.includes(0) || values.includes(49) ? `${sequence}${prefix}` : sequence;
+  });
 }
 
 function factTone(kind: FactKind, summary: string): ObservabilityTone {

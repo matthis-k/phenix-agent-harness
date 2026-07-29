@@ -5,7 +5,12 @@ import type { RunTreeNode } from "../application/interfaces.ts";
 import type { RunSnapshot, RunState } from "../domain/run/model.ts";
 import type { RunFact } from "../domain/run/observability.ts";
 import { definitionId, runId } from "../domain/shared.ts";
-import { type ObservabilityTheme, statusLine } from "../extension/observability-theme.ts";
+import {
+  color,
+  type ObservabilityTheme,
+  statusLine,
+  surface,
+} from "../extension/observability-theme.ts";
 import {
   renderCompleteFactHistory,
   renderDashboard,
@@ -16,6 +21,11 @@ const ROOT = runId("root-colors");
 const THEME = {
   fg: (tone: string, text: string) => `<${tone}>${text}</${tone}>`,
   bold: (text: string) => `<bold>${text}</bold>`,
+} as unknown as ObservabilityTheme;
+const ANSI_THEME = {
+  fg: (_tone: string, text: string) => `\x1b[37m${text}\x1b[0m`,
+  bg: (tone: string, text: string) => `\x1b[${tone === "selectedBg" ? "45" : "40"}m${text}\x1b[49m`,
+  bold: (text: string) => `\x1b[1m${text}\x1b[22m`,
 } as unknown as ObservabilityTheme;
 
 const DIAGNOSTICS = {
@@ -107,6 +117,18 @@ test("footer status distinguishes active work from idle", () => {
   assert.match(active, /<accent>mixed<\/accent>/);
   assert.match(active, /<warning>3 active<\/warning>/);
   assert.match(idle, /<success>idle<\/success>/);
+});
+
+test("panel surfaces restore their background after nested full resets", () => {
+  const rendered = surface(ANSI_THEME, "selectedBg", `${color(ANSI_THEME, "text", "label")} rest`);
+
+  assert.equal(rendered, "\x1b[45m\x1b[37mlabel\x1b[0m\x1b[45m rest\x1b[49m");
+});
+
+test("panel surfaces restore their background after nested background resets", () => {
+  const rendered = surface(ANSI_THEME, "selectedBg", "left \x1b[100mnested\x1b[49m right");
+
+  assert.equal(rendered, "\x1b[45mleft \x1b[100mnested\x1b[49m\x1b[45m right\x1b[49m");
 });
 
 test("complete fact export remains plain text", () => {
