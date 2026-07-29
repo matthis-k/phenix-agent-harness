@@ -322,12 +322,7 @@ export function selectDispatchCandidates(
     )
     .map((definition) => ({
       definitionId: definition.id,
-      kind:
-        definition.kind === "workflow"
-          ? "workflow"
-          : definition.id === AGENT_STOCK
-            ? "agent"
-            : "generic",
+      kind: definition.kind,
       title: definition.title,
       description: definition.description,
     }));
