@@ -48,47 +48,59 @@ export class SupervisionProcessManager {
     const run = this.store.projection.runs.get(event.runId);
     if (!run) return;
 
-    if (event.type === "run.fact.recorded" && isPresentationFact(event.data)) {
-      await this.notifyRoot(formatPresentationNotice(run.id, event.data));
-      return;
+    switch (event.type) {
+      case "run.fact.recorded":
+        if (isPresentationFact(event.data)) {
+          await this.notifyRoot(formatPresentationNotice(run.id, event.data));
+        }
+        return;
+      case BUDGET_SUSPENDED_EVENT:
+        await this.onBudgetSuspended(run);
+        return;
+      case "run.created":
+        await this.onRetryStarted(run);
+        return;
+      default:
+        if (isTerminalEvent(event.type)) await this.onTerminal(run);
     }
+  }
 
-    if (event.type === BUDGET_SUSPENDED_EVENT) {
-      const suspension = pendingBudgetSuspension(this.store, run.id);
-      if (!suspension) return;
-      const summary = summarizeBudgetSuspension(suspension);
-      await this.notifyRoot(summary);
-      const parent = run.parentId ? this.store.projection.runs.get(run.parentId) : undefined;
-      if (parent?.kind === "agent" && !isTerminalRunState(parent.state)) {
-        await this.execution.notify(
-          parent.id,
-          `${summary} Decide whether to resume the same session with phenix_handle action=resume, supply different larger limits, cancel it, or leave it suspended. Do not use retry for this budget request.`,
-        );
-      }
-      return;
+  private async onBudgetSuspended(run: RunRecord): Promise<void> {
+    const suspension = pendingBudgetSuspension(this.store, run.id);
+    if (!suspension) return;
+
+    const summary = summarizeBudgetSuspension(suspension);
+    await this.notifyRoot(summary);
+
+    const parent = run.parentId ? this.store.projection.runs.get(run.parentId) : undefined;
+    const parentCanResume = parent?.kind === "agent" && !isTerminalRunState(parent.state);
+    if (parentCanResume) {
+      await this.execution.notify(
+        parent.id,
+        `${summary} Decide whether to resume the same session with phenix_handle action=resume, supply different larger limits, cancel it, or leave it suspended. Do not use retry for this budget request.`,
+      );
     }
+  }
+
+  private async onRetryStarted(run: RunRecord): Promise<void> {
+    const retryOf = run.compiled.invocation.retryOf;
+    if (!retryOf) return;
+
+    const original = this.store.projection.runs.get(retryOf);
+    const parent = run.parentId ? this.store.projection.runs.get(run.parentId) : undefined;
+    await this.notifyRoot(
+      parent?.kind === "workflow"
+        ? summarizeWorkflowRetryStart(run, original, parent)
+        : summarizeRetryStart(run, original),
+    );
+  }
+
+  private async onTerminal(run: RunRecord): Promise<void> {
+    if (!run.parentId) return;
+    const parent = this.store.projection.runs.get(run.parentId);
+    if (!parent || parent.kind === "workflow") return;
 
     const retryOf = run.compiled.invocation.retryOf;
-    if (event.type === "run.created" && retryOf) {
-      const original = this.store.projection.runs.get(retryOf);
-      const parent = run.parentId ? this.store.projection.runs.get(run.parentId) : undefined;
-      await this.notifyRoot(
-        parent?.kind === "workflow"
-          ? summarizeWorkflowRetryStart(run, original, parent)
-          : summarizeRetryStart(run, original),
-      );
-      return;
-    }
-
-    if (!isTerminalEvent(event.type) || !run.parentId) return;
-    const parent = this.store.projection.runs.get(run.parentId);
-    if (!parent) return;
-
-    // A workflow owns the terminal policy for its private child attempts. The
-    // root sees one retry notice and, if recovery is exhausted, the terminal
-    // workflow failure rather than every intermediate child failure.
-    if (parent.kind === "workflow") return;
-
     const failed = run.outcome?.status === "failure";
     const recoveryAttempted =
       run.kind === "workflow" &&
@@ -99,15 +111,13 @@ export class SupervisionProcessManager {
       run.kind === "workflow" && failed
         ? summarizeWorkflowTerminal(run, recoveryAttempted)
         : summarizeTerminal(run.outcome, run.id, retryOf);
-    if (
-      failed ||
-      retryOf ||
-      (run.compiled.invocation.wait === "background" && parent.kind === "root")
-    ) {
-      await this.notifyRoot(summary);
-    }
+    const completedInBackground =
+      run.compiled.invocation.wait === "background" && parent.kind === "root";
+    const shouldNotifyRoot = failed || retryOf !== undefined || completedInBackground;
 
+    if (shouldNotifyRoot) await this.notifyRoot(summary);
     if (parent.kind !== "agent" || isTerminalRunState(parent.state)) return;
+
     if (failed) {
       await this.execution.notify(
         parent.id,
@@ -135,21 +145,11 @@ export function summarizeRetryStart(
 ): string {
   const originalTools = new Set(original?.compiled.tools ?? []);
   const addedTools = retry.compiled.tools.filter((tool) => !originalTools.has(tool));
-  const retryLimits = retry.compiled.limits;
-  const originalLimits = original?.compiled.limits;
-  const changedLimits = originalLimits
-    ? Object.fromEntries(
-        [...new Set([...Object.keys(originalLimits), ...Object.keys(retryLimits)])]
-          .map((key) => key as keyof typeof retryLimits)
-          .filter((key) => retryLimits[key] !== originalLimits[key])
-          .map((key) => [key, retryLimits[key] ?? null]),
-      )
-    : retryLimits;
+  const changes = original
+    ? changedLimits(retry.compiled.limits, original.compiled.limits)
+    : retry.compiled.limits;
   const tools = addedTools.length > 0 ? ` Added tools: ${addedTools.join(", ")}.` : "";
-  const limits =
-    Object.keys(changedLimits).length > 0
-      ? ` Changed limits: ${JSON.stringify(changedLimits)}.`
-      : "";
+  const limits = changes ? ` Changed limits: ${JSON.stringify(changes)}.` : "";
   return `Recovery run ${retry.id} started for failed run ${original?.id ?? "unknown"}.${tools}${limits} The original outcome remains immutable.`;
 }
 
@@ -161,8 +161,8 @@ export function summarizeWorkflowRetryStart(
   const nodeId = retry.compiled.invocation.causation?.nodeId ?? "unknown";
   const failure = original?.outcome?.status === "failure" ? original.outcome.failure : undefined;
   const reason = failure ? ` after ${failure.code}: ${failure.message}` : "";
-  const changedLimits = changedLimitSummary(retry.compiled.limits, original?.compiled.limits);
-  const limits = changedLimits ? ` ${changedLimits}` : "";
+  const changes = changedLimits(retry.compiled.limits, original?.compiled.limits);
+  const limits = changes ? ` Adjusted limits: ${JSON.stringify(changes)}.` : "";
   return `${workflow.definitionId} state ${nodeId} is retrying${reason}.${limits} Completed workflow states are retained.`;
 }
 
@@ -181,20 +181,18 @@ export function summarizeWorkflowTerminal(
   return `${run.definitionId}${recovery} [${failure.code}]: ${failure.message}.${cause} Completed states were not rerun. Do not restart the full workflow automatically.`;
 }
 
-function changedLimitSummary(
-  retry: RunRecord["compiled"]["limits"],
-  original: RunRecord["compiled"]["limits"] | undefined,
-): string | undefined {
-  if (!original) return undefined;
-  const changed = Object.fromEntries(
-    [...new Set([...Object.keys(original), ...Object.keys(retry)])]
-      .map((key) => key as keyof typeof retry)
-      .filter((key) => retry[key] !== original[key])
-      .map((key) => [key, retry[key] ?? null]),
+function changedLimits(
+  current: RunRecord["compiled"]["limits"],
+  previous: RunRecord["compiled"]["limits"] | undefined,
+): Record<string, unknown> | undefined {
+  if (!previous) return undefined;
+  const changes = Object.fromEntries(
+    [...new Set([...Object.keys(previous), ...Object.keys(current)])]
+      .map((key) => key as keyof typeof current)
+      .filter((key) => current[key] !== previous[key])
+      .map((key) => [key, current[key] ?? null]),
   );
-  return Object.keys(changed).length > 0
-    ? `Adjusted limits: ${JSON.stringify(changed)}.`
-    : undefined;
+  return Object.keys(changes).length > 0 ? changes : undefined;
 }
 
 export function summarizeTerminal(outcome: unknown, runId: RunId, retryOf?: RunId): string {
