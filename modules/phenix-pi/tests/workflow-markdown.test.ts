@@ -53,7 +53,7 @@ function stockWorkflowSource(outputSchema = "outcome.scout-report"): string {
 
 \`\`\`phenix-workflow
 id: workflow.stock-fixture
-description: Exercise a catalogued stock Pi session.
+description: Exercise a catalogued stock Pi agent.
 input: request.objective
 output: outcome.scout-report
 entry: stock
@@ -68,7 +68,7 @@ max-parallelism: 1
 
 \`\`\`phenix-state
 kind: invoke
-run: session.stock
+run: agent.stock
 input: stock.input
 wait: await
 input-schema: request.stock-session
@@ -167,12 +167,12 @@ test("workflow states may invoke other workflows through the normal definition b
   );
 });
 
-test("predefined workflows bind a concrete output schema for stock sessions", () => {
+test("predefined workflows bind a concrete output schema for stock agents", () => {
   const compiled = compileWorkflowMarkdown(stockWorkflowSource(), bindings);
   const stock = compiled.graph.nodes.find((node) => node.kind === "invoke" && node.id === "stock");
   assert.equal(stock?.kind, "invoke");
   if (stock?.kind === "invoke") {
-    assert.equal(stock.definition.id, "session.stock");
+    assert.equal(stock.definition.id, "agent.stock");
     assert.equal(stock.outputSchema, "outcome.scout-report");
   }
 
