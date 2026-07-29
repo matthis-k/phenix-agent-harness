@@ -41,7 +41,6 @@ import {
 } from "./observability-theme.ts";
 import type { PhenixUiTarget } from "./phenix-ui.ts";
 import { transcriptAvailabilityMessage } from "./transcript-availability.ts";
-import { renderWorkspaceTurn } from "./workspace/turn-indicator.ts";
 import { stripTranscriptAnsi } from "./workspace/transcript-selection.ts";
 import { TranscriptSelectionSurface } from "./workspace/transcript-selection-surface.ts";
 import type {
@@ -181,7 +180,6 @@ export class PhenixWorkspace implements Component, Focusable {
   private readonly expandedRowIds = new Set<string>();
   focused = true;
   private streamingMessage: AssistantMessage | undefined;
-  private rootTurnActive = false;
   private disposed = false;
   private renderRevision = 0;
   private frame: RenderFrame | undefined;
@@ -224,12 +222,6 @@ export class PhenixWorkspace implements Component, Focusable {
 
   setStreamingMessage(message: AssistantMessage | undefined): void {
     this.streamingMessage = message;
-    this.requestRender();
-  }
-
-  setRootTurnActive(active: boolean): void {
-    if (this.rootTurnActive === active) return;
-    this.rootTurnActive = active;
     this.requestRender();
   }
 
@@ -527,6 +519,14 @@ export class PhenixWorkspace implements Component, Focusable {
     const snapshot = this.controller.snapshot;
     const diagnostics = snapshot.ui.diagnostics.counts;
     const active = countActive(snapshot.ui.tree.root);
+    const activity =
+      active > 0
+        ? `${state(this.theme, "running", "● RUNNING")} ${color(
+            this.theme,
+            "dim",
+            `· ${active} active`,
+          )}`
+        : state(this.theme, "completed", "✓ IDLE");
     const healthTone =
       diagnostics.error > 0 ? "error" : diagnostics.warning > 0 ? "warning" : "success";
     const health =
@@ -536,15 +536,8 @@ export class PhenixWorkspace implements Component, Focusable {
           ? `${diagnostics.warning} WARNING${diagnostics.warning === 1 ? "" : "S"}`
           : "HEALTHY";
     const header = [
-      ` ${heading(this.theme, "PHENIX")} ${color(this.theme, "dim", "·")} ${color(
-        this.theme,
-        healthTone,
-        health,
-      )}`,
-      ` ${renderWorkspaceTurn(this.theme, {
-        rootActive: this.rootTurnActive,
-        activeDescendants: active,
-      })}`,
+      ` ${heading(this.theme, "PHENIX")}`,
+      ` ${activity} ${color(this.theme, "dim", "·")} ${color(this.theme, healthTone, health)}`,
     ].map((line) => surface(this.theme, "customMessageBg", fitViewLine(line, width)));
     const available = Math.max(0, height - header.length);
     const frames = allocateSidebarSections(
@@ -648,8 +641,7 @@ export class PhenixWorkspace implements Component, Focusable {
       theme: this.theme,
       width: Math.max(0, width - 2),
       activeRunId: this.controller.state.activeRunId,
-      expanded:
-        row.expandable === true && this.expandedRowIds.has(rowExpansionKey(section, row.id)),
+      expanded: row.expandable === true && this.expandedRowIds.has(rowExpansionKey(section, row.id)),
     });
     const cursor = focused && selected ? CURSOR_MARKER : "";
     const line = fitViewLine(`${cursor} ${rendered.text}`, width);
@@ -750,9 +742,7 @@ export class PhenixWorkspace implements Component, Focusable {
 
   private toggleFocusedDisclosure(section: WorkspaceSection): void {
     const selectedId = this.controller.state.panes[section].selectedItemId;
-    const row = selectedId
-      ? this.viewRows(section).find((candidate) => candidate.id === selectedId)
-      : undefined;
+    const row = selectedId ? this.viewRows(section).find((candidate) => candidate.id === selectedId) : undefined;
     if (row?.expandable) {
       this.toggleRowExpansion(section, row.id);
       return;

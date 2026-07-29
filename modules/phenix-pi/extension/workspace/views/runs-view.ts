@@ -51,12 +51,7 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
           const active = run.id === activeRunId;
           const label =
             run.kind === "root" ? "Root session" : definitionLabel(String(run.definitionId));
-          const activity = activityText(
-            value.node.activity?.summary,
-            run.state,
-            width,
-            value.depth,
-          );
+          const activity = activityText(value.node.activity?.summary, run.state, width, value.depth);
           const details = expanded ? runDetails(value.node) : [];
           const detailText =
             details.length > 0 ? ` ${color(theme, "dim", `· ${details.join(" · ")}`)}` : "";

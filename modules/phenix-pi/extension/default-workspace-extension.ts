@@ -93,7 +93,6 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
 
   pi.on("agent_start", () => {
     rootTurnActive = true;
-    workspace?.setRootTurnActive(true);
     refreshTurn();
   });
 
@@ -110,7 +109,6 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
 
   pi.on("agent_end", () => {
     rootTurnActive = false;
-    workspace?.setRootTurnActive(false);
     refreshTurn();
   });
 
@@ -169,15 +167,12 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
             finish = done;
           },
           {
-            rootTurnActive: () => rootTurnActive,
             onSubmitStarted: () => {
               rootTurnActive = true;
-              workspace?.setRootTurnActive(true);
               refreshTurn();
             },
             onSubmitFailed: () => {
               rootTurnActive = false;
-              workspace?.setRootTurnActive(false);
               refreshTurn();
             },
           },
@@ -202,7 +197,6 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
 }
 
 interface WorkspaceLifecycleCallbacks {
-  readonly rootTurnActive: () => boolean;
   readonly onSubmitStarted: () => void;
   readonly onSubmitFailed: () => void;
 }
@@ -302,7 +296,6 @@ async function openWorkspace(
           },
           onAction: complete,
         });
-        instance.setRootTurnActive(lifecycle.rootTurnActive());
         activeWorkspace = instance;
         activeKeybindings = keybindings;
         ready(instance, complete);
