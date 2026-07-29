@@ -84,12 +84,15 @@ test("view projections preserve run and task collapse semantics", () => {
 });
 
 test("run rows disclose model profile and session metadata only when expanded", () => {
-  const root = runNode("root", "running", [], "root");
-  root.run = {
-    ...root.run,
-    profile: { agent: "base", modelSet: "free", difficulty: "D1" },
-    pi: { sessionId: "session-123" },
-  } as RunSnapshot;
+  const baseRoot = runNode("root", "running", [], "root");
+  const root = {
+    ...baseRoot,
+    run: {
+      ...baseRoot.run,
+      profile: { agent: "base", modelSet: "free", difficulty: "D1" },
+      pi: { sessionId: "session-123" },
+    } as RunSnapshot,
+  } satisfies RunTreeNode;
   const snapshot = {
     ui: { tree: { root }, facts: [] },
     tasks: { root: taskNode("root-task", "wip") },
@@ -100,7 +103,7 @@ test("run rows disclose model profile and session metadata only when expanded", 
   const collapsed = row.render({
     theme: THEME,
     width: 120,
-    activeRunId: "root",
+    activeRunId: root.run.id,
     expanded: false,
   }).text;
   assert.doesNotMatch(collapsed, /free\/D1|session-123/);
@@ -108,7 +111,7 @@ test("run rows disclose model profile and session metadata only when expanded", 
   const expanded = row.render({
     theme: THEME,
     width: 120,
-    activeRunId: "root",
+    activeRunId: root.run.id,
     expanded: true,
   }).text;
   assert.match(expanded, /free\/D1/);
