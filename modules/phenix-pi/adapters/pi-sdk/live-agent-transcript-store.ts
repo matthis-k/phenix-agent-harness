@@ -22,13 +22,7 @@ export class LiveAgentTranscriptStore
   }
 
   open(runId: RunId, reference: AgentSessionReference, completeHistory: boolean): void {
-    this.snapshots.set(runId, {
-      runId,
-      sessionId: reference.sessionId,
-      ...(reference.sessionFile ? { sessionFile: reference.sessionFile } : {}),
-      completeHistory,
-      messages: [],
-    });
+    this.snapshots.set(runId, parseTranscriptSnapshot(runId, reference, completeHistory));
     this.notify(runId);
   }
 
@@ -47,4 +41,32 @@ export class LiveAgentTranscriptStore
   private notify(runId: RunId): void {
     for (const listener of this.listeners) listener(runId);
   }
+}
+
+function parseTranscriptSnapshot(
+  runId: RunId,
+  reference: AgentSessionReference,
+  completeHistory: boolean,
+): LiveAgentTranscriptSnapshot {
+  if (completeHistory) {
+    return {
+      runId,
+      sessionId: reference.sessionId,
+      ...(reference.sessionFile ? { sessionFile: reference.sessionFile } : {}),
+      completeHistory: true,
+      messages: [],
+    };
+  }
+
+  if (!reference.sessionFile) {
+    throw new Error("A partial live transcript requires a durable Pi session file");
+  }
+
+  return {
+    runId,
+    sessionId: reference.sessionId,
+    sessionFile: reference.sessionFile,
+    completeHistory: false,
+    messages: [],
+  };
 }
