@@ -33,6 +33,8 @@ test("renders a larger background-backed composer with profile and navigation he
   const plain = lines.map(stripTranscriptAnsi).join("\n");
   assert.match(plain, /hello/);
   assert.match(plain, /base · free · D1/);
-  assert.match(plain, /tab sidebar/);
+  assert.match(plain, /tab main\/sidebar/);
+  assert.match(plain, /native keys preserved/);
+  assert.doesNotMatch(plain, /ctrl\+[ob] native|ctrl\+b sidebar/);
   assert.doesNotMatch(plain, /────────/);
 });
