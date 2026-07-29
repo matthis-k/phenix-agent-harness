@@ -19,14 +19,14 @@ test("loads a Pi session read-only and composes native message components", asyn
   await writeFile(sessionFile, source);
 
   try {
-    const transcript = await loadNativeRunTranscript(fixtureNode(sessionFile), fakeTui());
+    const loaded = await loadNativeRunTranscript(fixtureNode(sessionFile), fakeTui());
 
-    assert.equal(transcript.sessionId, "session-child");
-    assert.equal(transcript.sessionFile, sessionFile);
-    assert.equal(transcript.unavailable, undefined);
-    assert.ok(transcript.component);
+    assert.equal(loaded.kind, "ready");
+    if (loaded.kind !== "ready") return;
+    assert.equal(loaded.value.sessionId, "session-child");
+    assert.equal(loaded.value.sessionFile, sessionFile);
     assert.deepEqual(
-      transcript.component.children.map((component) => component.constructor.name),
+      loaded.value.component.children.map((component) => component.constructor.name),
       ["UserMessageComponent", "AssistantMessageComponent", "ToolExecutionComponent"],
     );
     assert.equal(await readFile(sessionFile, "utf8"), source);
@@ -35,35 +35,50 @@ test("loads a Pi session read-only and composes native message components", asyn
   }
 });
 
-test("reports an allocated transcript that Pi has not flushed yet", async () => {
+test("types an allocated transcript that Pi has not flushed yet", async () => {
   const directory = await mkdtemp(join(tmpdir(), "phenix-transcript-pending-"));
   const sessionFile = join(directory, "pending.jsonl");
 
   try {
-    const transcript = await loadNativeRunTranscript(fixtureNode(sessionFile), fakeTui());
+    const loaded = await loadNativeRunTranscript(fixtureNode(sessionFile), fakeTui());
 
-    assert.equal(transcript.sessionId, "session-child");
-    assert.equal(transcript.sessionFile, sessionFile);
-    assert.equal(transcript.component, undefined);
-    assert.match(transcript.unavailable ?? "", /not flushed its first response/i);
+    assert.deepEqual(loaded, {
+      kind: "pending-persistence",
+      runId: "run-child",
+    });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
 
-test("reports legacy runs without transcript references without opening a file", async () => {
-  const transcript = await loadNativeRunTranscript(fixtureNode(undefined), fakeTui());
+test("types legacy runs without transcript references without opening a file", async () => {
+  const loaded = await loadNativeRunTranscript(fixtureNode(undefined, false), fakeTui());
 
-  assert.equal(transcript.component, undefined);
-  assert.match(transcript.unavailable ?? "", /no Pi transcript reference/i);
+  assert.deepEqual(loaded, { kind: "legacy", runId: "run-child" });
 });
 
-function fixtureNode(sessionFile: string | undefined): RunTreeNode {
+test("types allocated runs without a persisted file", async () => {
+  const loaded = await loadNativeRunTranscript(fixtureNode(undefined), fakeTui());
+
+  assert.deepEqual(loaded, { kind: "pending-persistence", runId: "run-child" });
+});
+
+test("types workflow transcripts as structurally not applicable", async () => {
+  const loaded = await loadNativeRunTranscript(fixtureNode(undefined, false, "workflow"), fakeTui());
+
+  assert.deepEqual(loaded, { kind: "not-applicable", reason: "workflow" });
+});
+
+function fixtureNode(
+  sessionFile: string | undefined,
+  allocated = true,
+  kind: "agent" | "workflow" = "agent",
+): RunTreeNode {
   return {
     run: {
       id: "run-child",
-      kind: "agent",
-      definitionId: "agent.scout",
+      kind,
+      definitionId: kind === "workflow" ? "workflow.qa" : "agent.scout",
       input: {},
       outputSchemaId: "scout.output",
       requestedAt: "2026-07-27T08:00:00.000Z",
@@ -71,7 +86,7 @@ function fixtureNode(sessionFile: string | undefined): RunTreeNode {
       state: "completed",
       revision: 1,
       compiled: {
-        definitionId: "agent.scout",
+        definitionId: kind === "workflow" ? "workflow.qa" : "agent.scout",
         input: {},
         outputSchemaId: "scout.output",
         tools: ["read"],
@@ -85,10 +100,14 @@ function fixtureNode(sessionFile: string | undefined): RunTreeNode {
         },
         invocation: { wait: "await" },
       },
-      pi: {
-        sessionId: "session-child",
-        ...(sessionFile ? { sessionFile } : {}),
-      },
+      ...(allocated
+        ? {
+            pi: {
+              sessionId: "session-child",
+              ...(sessionFile ? { sessionFile } : {}),
+            },
+          }
+        : {}),
       activeChildren: [],
     },
     children: [],
