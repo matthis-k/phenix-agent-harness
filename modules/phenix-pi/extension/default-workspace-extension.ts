@@ -8,10 +8,10 @@ import type { SlashCommand } from "@earendil-works/pi-tui";
 
 import {
   loadNativeRunTranscript,
+  loadNativeRunTranscriptResult,
   readyNativeRunTranscript,
   renderNativeTranscript,
 } from "./native-run-transcript.ts";
-import { renderNativeRunTranscriptResult } from "./native-run-transcript-view.ts";
 import { loadPhenixUiSnapshot, PhenixUi, type PhenixUiTarget } from "./phenix-ui.ts";
 import {
   PhenixWorkspace,
@@ -130,7 +130,7 @@ async function openWorkspace(
         commands,
         snapshot,
         load,
-        loadTranscript: (node) => loadNativeRunTranscript(node, tui),
+        loadTranscript: (node) => loadNativeRunTranscriptResult(node, tui),
         subscribe: (listener) => {
           const unsubscribeEvents = binding.runtime.events.subscribe(listener);
           const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
@@ -199,8 +199,7 @@ async function openInspector(
         initial,
         snapshot,
         load,
-        loadTranscript: async (node) =>
-          renderNativeRunTranscriptResult(await loadNativeRunTranscript(node, tui), node),
+        loadTranscript: (node) => loadNativeRunTranscript(node, tui),
         subscribe: (listener) => {
           const unsubscribeEvents = binding.runtime.events.subscribe(listener);
           const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
