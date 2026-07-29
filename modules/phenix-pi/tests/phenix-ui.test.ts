@@ -196,8 +196,8 @@ function createUi(
       );
       return {
         component,
-        sessionId: node.run.pi?.sessionId,
-        sessionFile: node.run.pi?.sessionFile,
+        sessionId: node.run.pi?.sessionId ?? String(node.run.id),
+        ...(node.run.pi?.sessionFile ? { sessionFile: node.run.pi.sessionFile } : {}),
       };
     },
     subscribe: () => () => undefined,
