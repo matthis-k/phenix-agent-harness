@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { renderWorkspaceTurn } from "../extension/workspace/turn-indicator.ts";
 
-test("turn indicator distinguishes user, root, descendants, and concurrent work", () => {
+test("turn indicator distinguishes user, foreground work, and background agents", () => {
   assert.equal(
     renderWorkspaceTurn(undefined, { rootActive: false, activeDescendants: 0 }),
     "TURN · YOU",
@@ -14,7 +14,7 @@ test("turn indicator distinguishes user, root, descendants, and concurrent work"
   );
   assert.equal(
     renderWorkspaceTurn(undefined, { rootActive: false, activeDescendants: 2 }),
-    "TURN · AGENTS · 2 active · input steers",
+    "TURN · YOU · 2 agents background",
   );
   assert.equal(
     renderWorkspaceTurn(undefined, { rootActive: true, activeDescendants: 3 }),
