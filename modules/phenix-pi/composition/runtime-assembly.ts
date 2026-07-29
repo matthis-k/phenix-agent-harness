@@ -5,6 +5,7 @@ import type { EventBus, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { JsonlDiagnosticLog } from "../adapters/persistence/jsonl-diagnostic-log.ts";
 import { JsonlRunLedger } from "../adapters/persistence/jsonl-run-ledger.ts";
 import { PiSdkAgentSessionBackend } from "../adapters/pi-sdk/agent-session-backend.ts";
+import { LiveAgentTranscriptStore } from "../adapters/pi-sdk/live-agent-transcript-store.ts";
 import { ProcessLocalOperationRunner } from "../adapters/process/local-operation-runner.ts";
 import {
   PhenixModelResolver,
@@ -174,9 +175,11 @@ export function createExecutionServices(input: {
     store,
     invocationPolicy,
   });
+  const transcripts = new LiveAgentTranscriptStore();
   const backend = new PiSdkAgentSessionBackend({
     modelRegistry: host.modelRegistry,
     agentDir: host.agentDir,
+    transcripts,
     eventBus: host.piEventBus,
     promptModeForRun: (runId) => {
       const run = store.projection.requireRun(runId);
@@ -219,6 +222,7 @@ export function createExecutionServices(input: {
     workflows,
     checkpoints,
     agents,
+    transcripts,
     attention,
     supervision,
   };

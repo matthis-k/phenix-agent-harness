@@ -5,11 +5,13 @@ import type { RunTreeNode } from "../application/interfaces.ts";
 import type { RunSnapshot } from "../domain/run/model.ts";
 import { runId } from "../domain/shared.ts";
 import {
+  type NativeRunTranscript,
   NativeTranscriptComponent,
   readyNativeRunTranscript,
 } from "../extension/native-run-transcript.ts";
 import { WorkspaceControllerAdapter } from "../extension/workspace/workspace-controller-adapter.ts";
 import type { PhenixWorkspaceSnapshot } from "../extension/workspace/workspace-model.ts";
+import type { LoadedWorkspaceTranscript } from "../ports/workspace-effects.ts";
 
 const ROOT = runId("root");
 const CHILD = runId("child");
@@ -38,6 +40,48 @@ test("snapshot refresh preserves a browsed run selection independently of the ac
 
   assert.equal(adapter.state.activeRunId, ROOT);
   assert.equal(adapter.state.panes.runs.selectedItemId, CHILD);
+  adapter.dispose();
+});
+
+test("transcript refresh retains the visible child until its replacement is ready", async () => {
+  let current = snapshot(1);
+  let publish = (): void => undefined;
+  const first = nativeTranscript("child-first");
+  const replacement = nativeTranscript("child-replacement");
+  let resolveReplacement: (value: LoadedWorkspaceTranscript<NativeRunTranscript>) => void = () =>
+    undefined;
+  let loadCount = 0;
+  const pendingReplacement = new Promise<LoadedWorkspaceTranscript<NativeRunTranscript>>(
+    (resolve) => {
+      resolveReplacement = resolve;
+    },
+  );
+  const adapter = new WorkspaceControllerAdapter({
+    snapshot: current,
+    load: async () => current,
+    loadTranscript: async () => {
+      loadCount += 1;
+      return loadCount === 1 ? readyNativeRunTranscript(first, "child-first") : pendingReplacement;
+    },
+    subscribe: (listener) => {
+      publish = listener;
+      return () => undefined;
+    },
+    onChange: () => undefined,
+  });
+
+  adapter.selectTranscript(CHILD);
+  await adapter.whenIdle();
+  assert.equal(adapter.transcript, first);
+
+  current = snapshot(2);
+  publish();
+  await eventually(() => adapter.state.transcript.availability.kind === "pending");
+  assert.equal(adapter.transcript, first);
+
+  resolveReplacement(readyNativeRunTranscript(replacement, "child-replacement"));
+  await adapter.whenIdle();
+  assert.equal(adapter.transcript, replacement);
   adapter.dispose();
 });
 
@@ -70,14 +114,17 @@ function snapshot(sequence: number): PhenixWorkspaceSnapshot {
         children: [],
       },
     },
-    rootTranscript: readyNativeRunTranscript(nativeTranscript(), `root-${sequence}`),
+    rootTranscript: readyNativeRunTranscript(
+      nativeTranscript(`root-${sequence}`),
+      `root-${sequence}`,
+    ),
   } as unknown as PhenixWorkspaceSnapshot;
 }
 
-function nativeTranscript() {
+function nativeTranscript(sessionId = "root-session"): NativeRunTranscript {
   return {
     component: new NativeTranscriptComponent(),
-    sessionId: "root-session",
+    sessionId,
   };
 }
 
@@ -96,4 +143,12 @@ function node(
     } as RunSnapshot,
     children,
   };
+}
+
+async function eventually(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error("Condition was not reached");
 }

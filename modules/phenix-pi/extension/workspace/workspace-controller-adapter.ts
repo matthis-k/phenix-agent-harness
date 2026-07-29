@@ -31,6 +31,9 @@ export class WorkspaceControllerAdapter {
   private readonly unsubscribeController: () => void;
   private readonly unsubscribeSource: () => void;
   private lastSnapshot: WorkspaceSnapshotEnvelope<PhenixWorkspaceSnapshot>;
+  private retainedTranscript:
+    | { readonly runId: RunId; readonly transcript: NativeRunTranscript }
+    | undefined;
   private disposed = false;
 
   constructor(options: WorkspaceControllerAdapterOptions) {
@@ -80,7 +83,16 @@ export class WorkspaceControllerAdapter {
 
   get transcript(): NativeRunTranscript | undefined {
     const current = this.controller.currentTranscript;
-    if (current) return current;
+    if (current) {
+      this.retainedTranscript = {
+        runId: this.controller.state.activeRunId,
+        transcript: current,
+      };
+      return current;
+    }
+    if (this.retainedTranscript?.runId === this.controller.state.activeRunId) {
+      return this.retainedTranscript.transcript;
+    }
     return this.controller.state.activeRunId === this.snapshot.ui.tree.root.run.id
       ? this.snapshot.rootTranscript.value
       : undefined;
@@ -94,7 +106,18 @@ export class WorkspaceControllerAdapter {
     this.controller.invalidateSnapshot();
   }
 
+  refreshTranscript(runId: RunId): void {
+    if (runId !== this.controller.state.activeRunId) return;
+    this.reloadTranscript();
+  }
+
   selectTranscript(selectedRunId: RunId, resetViewport = true): void {
+    const previousRunId = this.controller.state.activeRunId;
+    if (selectedRunId !== previousRunId) {
+      this.retainedTranscript = undefined;
+    } else {
+      this.retainCurrentTranscript();
+    }
     const scroll = this.controller.state.transcript.scroll;
     this.controller.selectTranscript(selectedRunId);
     if (!resetViewport) {
@@ -115,6 +138,7 @@ export class WorkspaceControllerAdapter {
   }
 
   private reloadTranscript(): void {
+    this.retainCurrentTranscript();
     const selectedRunId = this.controller.state.panes.runs.selectedItemId;
     this.selectTranscript(this.controller.state.activeRunId, false);
     if (selectedRunId && selectedRunId !== this.controller.state.panes.runs.selectedItemId) {
@@ -124,6 +148,15 @@ export class WorkspaceControllerAdapter {
         itemId: selectedRunId,
       });
     }
+  }
+
+  private retainCurrentTranscript(): void {
+    const transcript = this.controller.currentTranscript;
+    if (!transcript) return;
+    this.retainedTranscript = {
+      runId: this.controller.state.activeRunId,
+      transcript,
+    };
   }
 }
 

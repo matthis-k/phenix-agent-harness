@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type {
   AgentSession,
   AgentSessionEvent,
@@ -27,6 +28,7 @@ import type {
   AgentTool,
   CreateAgentSessionSpec,
 } from "../../ports/agent-session-backend.ts";
+import type { LiveAgentTranscriptWriter } from "../../ports/live-agent-transcripts.ts";
 import { BoundedAgentSessionPort } from "./bounded-agent-session-port.ts";
 import { freeModelSessionExtensions } from "./free-model-guard.ts";
 import { createNixShellTool } from "./nix-shell-tool.ts";
@@ -44,29 +46,32 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
   private readonly agentDir: string;
   private readonly eventBus?: EventBus;
   private readonly promptModeForRun: (runId: RunId) => AgentPromptMode | undefined;
+  private readonly transcripts: LiveAgentTranscriptWriter;
 
   constructor(input: {
     readonly modelRegistry: ModelRegistry;
     readonly agentDir: string;
+    readonly transcripts: LiveAgentTranscriptWriter;
     readonly eventBus?: EventBus;
     readonly promptModeForRun?: (runId: RunId) => AgentPromptMode | undefined;
   }) {
     this.modelRegistry = input.modelRegistry;
     this.agentDir = input.agentDir;
+    this.transcripts = input.transcripts;
     this.eventBus = input.eventBus;
     this.promptModeForRun = input.promptModeForRun ?? (() => undefined);
   }
 
   async create(spec: CreateAgentSessionSpec): Promise<AgentSessionPort> {
-    // Every child gets a native Pi JSONL transcript for live inspection. The
-    // definition persistence policy still controls whether that session may be
-    // recovered after a runtime restart.
+    // Every child gets a native Pi JSONL transcript for recovery plus a
+    // process-local projection that can be inspected before the first flush.
     return this.createWithManager(
       spec,
       createObservableChildSessionManager(
         spec.cwd,
         path.join(this.agentDir, "sessions", "phenix-children"),
       ),
+      true,
     );
   }
 
@@ -76,7 +81,7 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
   ): Promise<AgentSessionPort | undefined> {
     if (spec.persistence !== "file" || !reference.sessionFile) return undefined;
     try {
-      return await this.createWithManager(spec, SessionManager.open(reference.sessionFile));
+      return await this.createWithManager(spec, SessionManager.open(reference.sessionFile), false);
     } catch {
       return undefined;
     }
@@ -85,6 +90,7 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
   private async createWithManager(
     spec: CreateAgentSessionSpec,
     sessionManager: SessionManager,
+    completeHistory: boolean,
   ): Promise<AgentSessionPort> {
     const model = this.modelRegistry.find(spec.model.provider, spec.model.model);
     if (!model)
@@ -140,7 +146,9 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
       sessionManager,
       settingsManager,
     });
-    return new BoundedAgentSessionPort(new PiAgentSessionPort(session));
+    return new BoundedAgentSessionPort(
+      new PiAgentSessionPort(spec.runId, session, this.transcripts, completeHistory),
+    );
   }
 
   private async createModelRuntime(): Promise<ModelRuntime> {
@@ -158,12 +166,24 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
 
 class PiAgentSessionPort implements AgentSessionPort {
   private readonly session: AgentSession;
+  private readonly transcripts: LiveAgentTranscriptWriter;
+  private readonly runId: RunId;
+  private readonly completedMessages: AgentMessage[] = [];
+  private streamingMessage: AgentMessage | undefined;
   private readonly listeners = new Set<(event: AgentSessionObservation) => void>();
   private readonly unsubscribe: () => void;
   private disposed = false;
 
-  constructor(session: AgentSession) {
+  constructor(
+    runId: RunId,
+    session: AgentSession,
+    transcripts: LiveAgentTranscriptWriter,
+    completeHistory: boolean,
+  ) {
+    this.runId = runId;
     this.session = session;
+    this.transcripts = transcripts;
+    this.transcripts.open(runId, this.reference, completeHistory);
     this.unsubscribe = session.subscribe((event) => this.observe(event));
   }
 
@@ -246,6 +266,24 @@ class PiAgentSessionPort implements AgentSessionPort {
   }
 
   private observe(event: AgentSessionEvent): void {
+    if (event.type === "message_update" && event.message.role === "assistant") {
+      this.streamingMessage = event.message;
+      this.publishTranscript();
+      return;
+    }
+    if (event.type === "message_end") {
+      this.completedMessages.push(event.message);
+      if (event.message.role === "assistant") this.streamingMessage = undefined;
+      this.publishTranscript();
+      if (event.message.role === "assistant" && event.message.stopReason === "error") {
+        this.emit({
+          type: "backend.failed",
+          message: event.message.errorMessage ?? "Pi provider failed",
+          retryable: true,
+        });
+      }
+      return;
+    }
     if (event.type === "agent_settled") {
       this.emit({ type: "cycle.settled" });
       return;
@@ -270,19 +308,14 @@ class PiAgentSessionPort implements AgentSessionPort {
         toolCallId: event.toolCallId,
         isError: event.isError,
       });
-      return;
     }
-    if (
-      event.type === "message_end" &&
-      event.message.role === "assistant" &&
-      event.message.stopReason === "error"
-    ) {
-      this.emit({
-        type: "backend.failed",
-        message: event.message.errorMessage ?? "Pi provider failed",
-        retryable: true,
-      });
-    }
+  }
+
+  private publishTranscript(): void {
+    this.transcripts.replace(this.runId, [
+      ...this.completedMessages,
+      ...(this.streamingMessage ? [this.streamingMessage] : []),
+    ]);
   }
 
   private emit(event: AgentSessionObservation): void {

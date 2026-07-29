@@ -23,6 +23,7 @@ import {
 import { type Component, Container, Spacer, type TUI } from "@earendil-works/pi-tui";
 
 import type { RunTreeNode } from "../application/interfaces.ts";
+import type { LiveAgentTranscriptSnapshot } from "../ports/live-agent-transcripts.ts";
 import type {
   LoadedWorkspaceTranscript,
   ReadyWorkspaceTranscript,
@@ -34,6 +35,8 @@ import {
   RESULT_ENTRY_TYPE,
   renderNativeResultEntry,
 } from "./result-display.ts";
+
+const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]);
 
 export type NativeTranscriptChunkKind =
   | "user"
@@ -87,9 +90,11 @@ export async function loadNativeRunTranscript(
   node: RunTreeNode,
   tui: TUI,
   theme?: ObservabilityTheme,
+  live?: LiveAgentTranscriptSnapshot,
+  cwd = process.cwd(),
 ): Promise<NativeRunTranscript> {
   return renderNativeRunTranscriptResult(
-    await loadNativeRunTranscriptResult(node, tui, theme),
+    await loadNativeRunTranscriptResult(node, tui, theme, live, cwd),
     node,
   );
 }
@@ -98,19 +103,29 @@ export async function loadNativeRunTranscriptResult(
   node: RunTreeNode,
   tui: TUI,
   theme?: ObservabilityTheme,
+  live?: LiveAgentTranscriptSnapshot,
+  cwd = process.cwd(),
 ): Promise<LoadedWorkspaceTranscript<NativeRunTranscript>> {
   if (node.run.kind === "workflow") {
     return { kind: "not-applicable", reason: "workflow" };
   }
 
-  const sessionFile = node.run.pi?.sessionFile;
+  const liveTranscript = readyLiveTranscript(node, live, tui, cwd);
+  if (liveTranscript && live?.completeHistory && !TERMINAL_STATES.has(node.run.state)) {
+    return liveTranscript;
+  }
+
+  const sessionFile = node.run.pi?.sessionFile ?? live?.sessionFile;
   if (!sessionFile) {
     if (node.run.kind === "root") {
       return { kind: "not-applicable", reason: "root-projection" };
     }
-    return node.run.pi?.sessionId
-      ? { kind: "pending-persistence", runId: node.run.id }
-      : { kind: "legacy", runId: node.run.id };
+    return (
+      liveTranscript ??
+      (node.run.pi?.sessionId || live?.sessionId
+        ? { kind: "pending-persistence", runId: node.run.id }
+        : { kind: "legacy", runId: node.run.id })
+    );
   }
 
   let source: string;
@@ -118,7 +133,7 @@ export async function loadNativeRunTranscriptResult(
     source = await readFile(sessionFile, "utf8");
   } catch (error) {
     if (!isMissingFileError(error)) throw error;
-    return { kind: "pending-persistence", runId: node.run.id };
+    return liveTranscript ?? { kind: "pending-persistence", runId: node.run.id };
   }
 
   let fileEntries: FileEntry[];
@@ -126,17 +141,21 @@ export async function loadNativeRunTranscriptResult(
     fileEntries = parseSessionEntries(source);
     migrateSessionEntries(fileEntries);
   } catch (error) {
-    return {
-      kind: "invalid",
-      reason: `The persisted Pi transcript is invalid: ${errorMessage(error)}`,
-    };
+    return (
+      liveTranscript ?? {
+        kind: "invalid",
+        reason: `The persisted Pi transcript is invalid: ${errorMessage(error)}`,
+      }
+    );
   }
   const header = fileEntries.find((entry) => entry.type === "session");
   if (header?.type !== "session") {
-    return {
-      kind: "invalid",
-      reason: "The persisted session file is not a valid Pi transcript.",
-    };
+    return (
+      liveTranscript ?? {
+        kind: "invalid",
+        reason: "The persisted session file is not a valid Pi transcript.",
+      }
+    );
   }
 
   const entries = fileEntries.filter((entry): entry is SessionEntry => entry.type !== "session");
@@ -157,6 +176,35 @@ export function renderNativeTranscript(
   cwd: string,
   theme?: ObservabilityTheme,
 ): NativeTranscriptComponent {
+  const renderer = createNativeTranscriptRenderer(tui, cwd);
+  for (const entry of entries) {
+    if (entry.type === "custom" && entry.customType === RESULT_ENTRY_TYPE) {
+      const data = nativeResultEntryData(entry.data);
+      if (data) renderer.addResult(renderNativeResultEntry(data, theme), entry.id);
+      continue;
+    }
+    for (const message of sessionEntryToContextMessages(entry)) renderer.addMessage(message);
+  }
+  return renderer.transcript;
+}
+
+export function renderNativeMessages(
+  messages: readonly AgentMessage[],
+  tui: TUI,
+  cwd: string,
+): NativeTranscriptComponent {
+  const renderer = createNativeTranscriptRenderer(tui, cwd);
+  for (const message of messages) renderer.addMessage(message);
+  return renderer.transcript;
+}
+
+interface NativeTranscriptRenderer {
+  readonly transcript: NativeTranscriptComponent;
+  addMessage(message: AgentMessage): void;
+  addResult(component: Component, sourceId?: string): void;
+}
+
+function createNativeTranscriptRenderer(tui: TUI, cwd: string): NativeTranscriptRenderer {
   const transcript = new NativeTranscriptComponent();
   const markdownTheme = getMarkdownTheme();
   const pendingTools = new Map<string, ToolExecutionComponent>();
@@ -179,67 +227,80 @@ export function renderNativeTranscript(
     chunkSequence += 1;
   };
 
-  for (const entry of entries) {
-    if (entry.type === "custom" && entry.customType === RESULT_ENTRY_TYPE) {
-      const data = nativeResultEntryData(entry.data);
-      if (data) add("result", renderNativeResultEntry(data, theme), true, entry.id);
-      continue;
-    }
-
-    for (const message of sessionEntryToContextMessages(entry)) {
-      if (message.role === "assistant") {
-        add(
-          "assistant",
-          new AssistantMessageComponent(message, true, markdownTheme, "Thinking...", 1),
-          true,
+  const addMessage = (message: AgentMessage): void => {
+    if (message.role === "assistant") {
+      add(
+        "assistant",
+        new AssistantMessageComponent(message, true, markdownTheme, "Thinking...", 1),
+        true,
+      );
+      for (const content of message.content) {
+        if (content.type !== "toolCall") continue;
+        const tool = new ToolExecutionComponent(
+          content.name,
+          content.id,
+          content.arguments,
+          { showImages: true, imageWidthCells: 60 },
+          undefined,
+          tui,
+          cwd,
         );
-        for (const content of message.content) {
-          if (content.type !== "toolCall") continue;
-          const tool = new ToolExecutionComponent(
-            content.name,
-            content.id,
-            content.arguments,
-            { showImages: true, imageWidthCells: 60 },
-            undefined,
-            tui,
-            cwd,
-          );
-          tool.setExpanded(false);
-          add("tool", tool, false, content.id);
-          if (message.stopReason === "aborted" || message.stopReason === "error") {
-            tool.updateResult({
-              content: [
-                {
-                  type: "text",
-                  text:
-                    message.stopReason === "aborted"
-                      ? "Operation aborted"
-                      : message.errorMessage || "Error",
-                },
-              ],
-              isError: true,
-            });
-          } else {
-            pendingTools.set(content.id, tool);
-          }
+        tool.setExpanded(false);
+        add("tool", tool, false, content.id);
+        if (message.stopReason === "aborted" || message.stopReason === "error") {
+          tool.updateResult({
+            content: [
+              {
+                type: "text",
+                text:
+                  message.stopReason === "aborted"
+                    ? "Operation aborted"
+                    : message.errorMessage || "Error",
+              },
+            ],
+            isError: true,
+          });
+        } else {
+          pendingTools.set(content.id, tool);
         }
-        continue;
       }
-
-      if (message.role === "toolResult") {
-        const tool = pendingTools.get(message.toolCallId);
-        if (tool) {
-          tool.updateResult(message);
-          pendingTools.delete(message.toolCallId);
-        }
-        continue;
-      }
-
-      addNativeMessage(message, tui, markdownTheme, add);
+      return;
     }
-  }
 
-  return transcript;
+    if (message.role === "toolResult") {
+      const tool = pendingTools.get(message.toolCallId);
+      if (tool) {
+        tool.updateResult(message);
+        pendingTools.delete(message.toolCallId);
+      }
+      return;
+    }
+
+    addNativeMessage(message, tui, markdownTheme, add);
+  };
+
+  return {
+    transcript,
+    addMessage,
+    addResult: (component, sourceId) => add("result", component, true, sourceId),
+  };
+}
+
+function readyLiveTranscript(
+  node: RunTreeNode,
+  live: LiveAgentTranscriptSnapshot | undefined,
+  tui: TUI,
+  cwd: string,
+): ReadyWorkspaceTranscript<NativeRunTranscript> | undefined {
+  if (!live || live.messages.length === 0) return undefined;
+  return readyNativeRunTranscript(
+    {
+      component: renderNativeMessages(live.messages as readonly AgentMessage[], tui, cwd),
+      sessionId: live.sessionId,
+      ...(live.sessionFile ? { sessionFile: live.sessionFile } : {}),
+    },
+    `run:${String(node.run.id)}:live-transcript`,
+  );
 }
 
 function addNativeMessage(

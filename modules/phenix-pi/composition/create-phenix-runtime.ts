@@ -14,6 +14,7 @@ import { DEFAULT_SESSION_PROFILE, type RootRunInput } from "../domain/run/model.
 import type { RunId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import type { DiagnosticLog } from "../ports/diagnostic-log.ts";
+import type { LiveAgentTranscriptReader } from "../ports/live-agent-transcripts.ts";
 import {
   createDefinitionRuntime,
   createExecutionServices,
@@ -32,6 +33,7 @@ export interface PhenixRuntime {
   readonly tasks: TaskFacade;
   readonly catalog: CatalogFacade;
   readonly queries: QueryFacade;
+  readonly transcripts: LiveAgentTranscriptReader;
   readonly events: OrderedDomainEventBus;
   readonly diagnostics: DiagnosticLog;
   startRoot(input: {
@@ -72,6 +74,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     tasks: services.tasks,
     catalog: services.catalog,
     queries: services.queries,
+    transcripts: services.transcripts,
     events: infrastructure.events,
     diagnostics: infrastructure.diagnostics,
     async startRoot(input) {
@@ -130,6 +133,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
       await infrastructure.events.drain();
       await services.checkpoints.shutdown();
       services.supervision.shutdown();
+      services.transcripts.clear();
       await infrastructure.diagnostics.record({
         rootRunId,
         runId: rootRunId,
