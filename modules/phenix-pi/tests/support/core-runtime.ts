@@ -32,9 +32,9 @@ import {
   AGENT_PLANNER,
   AGENT_QA_SYNTHESIZER,
   AGENT_SCOUT,
+  AGENT_STOCK,
   AGENT_TESTER,
   AGENT_VERIFIER,
-  SESSION_STOCK,
 } from "../../definitions/ids.ts";
 import { resolveDefinitionSchema } from "../../definitions/schema-registry.ts";
 import { registerWorkflowFunctions } from "../../definitions/workflows/functions.ts";
@@ -271,9 +271,9 @@ function outputFor(
   if (definition.id === AGENT_COORDINATOR) {
     return compositionFixture(input);
   }
-  if (definition.id === SESSION_STOCK) {
+  if (definition.id === AGENT_STOCK) {
     if (typeof input !== "object" || input === null || !("outputSchema" in input)) {
-      throw new Error("Stock session fixture requires an output schema");
+      throw new Error("Stock agent fixture requires an output schema");
     }
     return {
       outputSchema: input.outputSchema,
