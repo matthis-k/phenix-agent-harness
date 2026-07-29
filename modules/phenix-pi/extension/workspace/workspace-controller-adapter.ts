@@ -8,7 +8,6 @@ import type {
 import type { WorkspaceError } from "../../domain/workspace/errors.ts";
 import {
   createInitialWorkspaceState,
-  type PaneId,
   type WorkspaceState,
 } from "../../domain/workspace/state.ts";
 import type {
@@ -64,18 +63,18 @@ export class WorkspaceControllerAdapter {
       state: initialState(initialSnapshot, initialTranscript),
       runtime,
       snapshot: initialSnapshot,
-      transcript: initialTranscript,
     });
     this.controller = controller;
     this.unsubscribeController = controller.subscribe(() => {
       const nextSnapshot = controller.snapshot;
       if (nextSnapshot && nextSnapshot !== this.lastSnapshot) {
         this.lastSnapshot = nextSnapshot;
-        controller.selectTranscript(controller.state.activeRunId, { resetViewport: false });
+        this.reloadTranscript();
       }
       options.onChange();
     });
     this.unsubscribeSource = options.subscribe(() => controller.invalidateSnapshot());
+    controller.selectTranscript(initialSnapshot.rootRunId);
   }
 
   get state(): WorkspaceState {
@@ -89,6 +88,9 @@ export class WorkspaceControllerAdapter {
   get transcript(): NativeRunTranscript {
     const current = this.controller.currentTranscript;
     if (current) return current;
+    if (this.controller.state.activeRunId === this.snapshot.ui.tree.root.run.id) {
+      return this.snapshot.rootTranscript;
+    }
     const availability = this.controller.state.transcript.availability;
     if (availability.kind === "pending") {
       return { unavailable: "Loading Pi transcript…" };
@@ -113,8 +115,12 @@ export class WorkspaceControllerAdapter {
     this.controller.invalidateSnapshot();
   }
 
-  selectTranscript(runId: RunId, resetViewport = true): void {
-    this.controller.selectTranscript(runId, { resetViewport });
+  selectTranscript(selectedRunId: RunId, resetViewport = true): void {
+    const scroll = this.controller.state.transcript.scroll;
+    this.controller.selectTranscript(selectedRunId);
+    if (!resetViewport) {
+      this.controller.dispatch({ type: "scroll.set", paneId: "transcript", scroll });
+    }
   }
 
   dispose(): void {
@@ -123,6 +129,10 @@ export class WorkspaceControllerAdapter {
     this.unsubscribeController();
     this.unsubscribeSource();
     this.controller.dispose();
+  }
+
+  private reloadTranscript(): void {
+    this.selectTranscript(this.controller.state.activeRunId, false);
   }
 }
 
