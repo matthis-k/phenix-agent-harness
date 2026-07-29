@@ -9,6 +9,13 @@ import type { DiagnosticLog, DiagnosticLogListener } from "../ports/diagnostic-l
 import type { QueryFacade } from "./interfaces.ts";
 import { summarizeRunFailures } from "./run-failure-health.ts";
 
+const RUN_FAILURE_SCOPES = new Set([
+  "run.lifecycle.state_changed",
+  "run.lifecycle.failed",
+  "run.lifecycle.orphaned",
+  "fact.error_observed.recorded",
+]);
+
 /**
  * Preserves the immutable diagnostic log while projecting its summary into the
  * current run-tree health state.
@@ -40,21 +47,26 @@ export class HealthDiagnosticLog implements DiagnosticLog {
   }
 
   async summary(rootRunId: RunId): Promise<DiagnosticSummary> {
-    const [observed, tree] = await Promise.all([
+    const [observed, tree, errorEntries] = await Promise.all([
       this.source.summary(rootRunId),
       this.queries.runTree(rootRunId),
+      this.source.entries(rootRunId, "error"),
     ]);
     const observedCounts = observed.observedCounts ?? observed.counts;
     const failures = summarizeRunFailures(tree.root);
+    const infrastructureErrors = errorEntries.filter(
+      (entry) => !RUN_FAILURE_SCOPES.has(entry.scope),
+    ).length;
     return {
       ...observed,
       observedCounts,
       failures,
+      infrastructureErrors,
       counts: {
         trace: observedCounts.trace,
         info: observedCounts.info,
         warning: failures.recovering,
-        error: failures.terminal,
+        error: failures.terminal + infrastructureErrors,
       },
     };
   }
