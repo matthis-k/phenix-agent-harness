@@ -641,7 +641,8 @@ export class PhenixWorkspace implements Component, Focusable {
       theme: this.theme,
       width: Math.max(0, width - 2),
       activeRunId: this.controller.state.activeRunId,
-      expanded: row.expandable === true && this.expandedRowIds.has(rowExpansionKey(section, row.id)),
+      expanded:
+        row.expandable === true && this.expandedRowIds.has(rowExpansionKey(section, row.id)),
     });
     const cursor = focused && selected ? CURSOR_MARKER : "";
     const line = fitViewLine(`${cursor} ${rendered.text}`, width);
@@ -742,7 +743,9 @@ export class PhenixWorkspace implements Component, Focusable {
 
   private toggleFocusedDisclosure(section: WorkspaceSection): void {
     const selectedId = this.controller.state.panes[section].selectedItemId;
-    const row = selectedId ? this.viewRows(section).find((candidate) => candidate.id === selectedId) : undefined;
+    const row = selectedId
+      ? this.viewRows(section).find((candidate) => candidate.id === selectedId)
+      : undefined;
     if (row?.expandable) {
       this.toggleRowExpansion(section, row.id);
       return;
