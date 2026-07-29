@@ -52,9 +52,9 @@ export class WorkspaceControllerAdapter {
         const snapshot = controller.snapshot?.value ?? options.snapshot;
         const node = findWorkspaceRun(snapshot.ui.tree.root, String(selectedRunId));
         if (!node) throw new Error(`Run ${selectedRunId} is not present in the current workspace snapshot`);
-        const transcript =
+        const loaded =
           node.run.kind === "root" ? snapshot.rootTranscript : await options.loadTranscript(node);
-        return loadedTranscript(selectedRunId, transcript);
+        return loadedTranscript(selectedRunId, normalizeTranscript(node, loaded));
       },
       recordDiagnostic: (error) => options.recordDiagnostic?.(error),
     };
@@ -159,6 +159,32 @@ function loadedTranscript(
         `run:${String(selectedRunId)}:transcript`,
     },
     value: transcript,
+  };
+}
+
+function normalizeTranscript(
+  node: RunTreeNode,
+  transcript: NativeRunTranscript,
+): NativeRunTranscript {
+  if (!transcript.unavailable?.startsWith("This run has no Pi transcript reference")) {
+    return transcript;
+  }
+  if (node.run.kind === "workflow") {
+    return {
+      sessionId: transcript.sessionId,
+      sessionFile: transcript.sessionFile,
+      unavailable: "This workflow run does not own a Pi transcript.",
+    };
+  }
+  if (node.run.pi?.sessionId) {
+    return {
+      sessionId: node.run.pi.sessionId,
+      sessionFile: node.run.pi.sessionFile,
+      unavailable: "Pi has allocated this transcript but has not persisted it yet.",
+    };
+  }
+  return {
+    unavailable: "This agent run has no persisted Pi transcript reference.",
   };
 }
 
