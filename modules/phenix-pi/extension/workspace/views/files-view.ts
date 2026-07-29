@@ -1,7 +1,9 @@
 import type { RunTreeNode } from "../../../application/interfaces.ts";
 import type { RunFact } from "../../../domain/run/observability.ts";
 import type { RunId } from "../../../domain/shared.ts";
+import { color } from "../../observability-theme.ts";
 import { defineWorkspaceView, type WorkspaceViewSnapshot } from "./workspace-view.ts";
+import { truncateWorkspaceText } from "./workspace-view-format.ts";
 
 export interface WorkspaceFileRow {
   readonly id: string;
@@ -75,6 +77,14 @@ export const filesWorkspaceView = defineWorkspaceView<WorkspaceFileRow>({
     projectWorkspaceFiles(snapshot, context?.selectedRunId).map((value) => ({
       id: value.id,
       value,
+      render: ({ theme, width }) => {
+        const count = value.changeCount > 1 ? color(theme, "muted", ` ×${value.changeCount}`) : "";
+        const owners =
+          value.runIds.length > 1 ? color(theme, "muted", ` · ${value.runIds.length} runs`) : "";
+        return {
+          text: `Δ ${truncateWorkspaceText(value.path, Math.max(8, width - 12))}${count}${owners}`,
+        };
+      },
     })),
 });
 

@@ -1,5 +1,6 @@
 import type { RunFact } from "../../../domain/run/observability.ts";
 import { defineWorkspaceView, type WorkspaceViewSnapshot } from "./workspace-view.ts";
+import { compactTime, truncateWorkspaceText } from "./workspace-view-format.ts";
 
 const RECENT_FACT_LIMIT = 50;
 
@@ -20,5 +21,10 @@ export const factsWorkspaceView = defineWorkspaceView<RunFact>({
     projectWorkspaceFacts(snapshot).map((value) => ({
       id: value.id,
       value,
+      activation: { kind: "inspector", view: "facts" },
+      render: ({ width }) => ({
+        muted: true,
+        text: `${compactTime(value.timestamp)} ${truncateWorkspaceText(value.summary, Math.max(8, width - 8))}`,
+      }),
     })),
 });

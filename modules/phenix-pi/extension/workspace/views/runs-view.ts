@@ -1,5 +1,7 @@
 import type { RunTreeNode } from "../../../application/interfaces.ts";
+import { color } from "../../observability-theme.ts";
 import { defineWorkspaceView } from "./workspace-view.ts";
+import { definitionLabel, runStateSymbol, truncateWorkspaceText } from "./workspace-view-format.ts";
 
 const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]);
 
@@ -34,5 +36,29 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
     projectWorkspaceRuns(snapshot.ui.tree.root).map((value) => ({
       id: String(value.node.run.id),
       value,
+      activation: { kind: "transcript", runId: value.node.run.id },
+      render: ({ theme, width, activeRunId }) => {
+        const run = value.node.run;
+        const active = run.id === activeRunId;
+        const model = run.resolvedModel
+          ? ` ${color(theme, "muted", `${run.resolvedModel.concrete.model}/${run.resolvedModel.thinking}`)}`
+          : "";
+        const activity = value.node.activity?.summary
+          ? ` ${color(
+              theme,
+              "muted",
+              truncateWorkspaceText(
+                value.node.activity.summary,
+                Math.max(8, width - 24 - value.depth * 2),
+              ),
+            )}`
+          : "";
+        const label =
+          run.kind === "root" ? "Root session" : definitionLabel(String(run.definitionId));
+        return {
+          active,
+          text: `${active ? "◆" : " "} ${"  ".repeat(value.depth)}${runStateSymbol(run.state)} ${label} ${run.state}${model}${TERMINAL_STATES.has(run.state) ? "" : activity}`,
+        };
+      },
     })),
 });

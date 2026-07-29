@@ -20,10 +20,9 @@ import {
 } from "@earendil-works/pi-tui";
 
 import type { RunTreeNode } from "../application/interfaces.ts";
-import type { RunSnapshot } from "../domain/run/model.ts";
-import type { TaskNode } from "../domain/task/projection.ts";
 import { allocateSidebarSections, type LayoutFrame } from "../domain/workspace/layout.ts";
 import type { PaneId, ScrollState } from "../domain/workspace/state.ts";
+import type { LoadedWorkspaceTranscript } from "../ports/workspace-effects.ts";
 import type { NativeRunTranscript } from "./native-run-transcript.ts";
 import {
   color,
@@ -34,6 +33,13 @@ import {
   surface,
 } from "./observability-theme.ts";
 import type { PhenixUiTarget } from "./phenix-ui.ts";
+import { transcriptAvailabilityMessage } from "./transcript-availability.ts";
+import type {
+  WorkspaceViewPaneId,
+  WorkspaceViewRegistration,
+  WorkspaceViewRow,
+} from "./workspace/views/workspace-view.ts";
+import { workspaceViewRegistry } from "./workspace/views/workspace-view-registry.ts";
 import { WorkspaceControllerAdapter } from "./workspace/workspace-controller-adapter.ts";
 import {
   composeWorkspaceTextFrame,
@@ -48,7 +54,6 @@ import {
   type PhenixWorkspaceSnapshot,
   projectWorkspaceRuns,
   projectWorkspaceTasks,
-  type WorkspaceRunRow,
 } from "./workspace/workspace-model.ts";
 
 export type { PhenixWorkspaceSnapshot } from "./workspace/workspace-model.ts";
@@ -57,8 +62,8 @@ const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]
 const MOUSE_ENABLE = "\x1b[?1000h\x1b[?1006h";
 const MOUSE_DISABLE = "\x1b[?1000l\x1b[?1006l";
 
-export type WorkspaceFocus = "transcript" | "editor" | "runs" | "tasks" | "facts";
-export type WorkspaceSection = "runs" | "tasks" | "facts";
+export type WorkspaceFocus = "transcript" | "editor" | WorkspaceViewPaneId;
+export type WorkspaceSection = WorkspaceViewPaneId;
 
 export type PhenixWorkspaceAction =
   | { readonly kind: "close" }
@@ -73,7 +78,9 @@ export interface PhenixWorkspaceOptions {
   readonly commands: readonly SlashCommand[];
   readonly snapshot: PhenixWorkspaceSnapshot;
   readonly load: () => Promise<PhenixWorkspaceSnapshot>;
-  readonly loadTranscript: (node: RunTreeNode) => Promise<NativeRunTranscript>;
+  readonly loadTranscript: (
+    node: RunTreeNode,
+  ) => Promise<LoadedWorkspaceTranscript<NativeRunTranscript>>;
   readonly subscribe: (listener: () => void) => () => void;
   readonly submit: (text: string) => Promise<void>;
   readonly onAction: (action: PhenixWorkspaceAction) => void;
@@ -98,6 +105,12 @@ interface SidebarRender {
   readonly layouts: readonly SectionLayout[];
 }
 
+interface SectionRender {
+  readonly section: WorkspaceSection;
+  readonly lines: readonly string[];
+  readonly offset: number;
+}
+
 interface TranscriptRender {
   readonly lines: readonly string[];
   readonly maxOffset: number;
@@ -116,37 +129,20 @@ export function allocateWorkspaceSections(
   height: number,
   collapsed: Readonly<Record<WorkspaceSection, boolean>>,
 ): Readonly<Record<WorkspaceSection, number>> {
-  const frames = allocateSidebarSections(height, [
-    {
-      id: "runs",
-      weight: 5,
-      minRows: 2,
-      headerRows: 2,
-      collapsePriority: 0,
-      collapsed: collapsed.runs,
-    },
-    {
-      id: "tasks",
-      weight: 2,
-      minRows: 2,
-      headerRows: 2,
-      collapsePriority: 20,
-      collapsed: collapsed.tasks,
-    },
-    {
-      id: "facts",
-      weight: 3,
-      minRows: 2,
-      headerRows: 2,
-      collapsePriority: 40,
-      collapsed: collapsed.facts,
-    },
-  ]);
-  return {
-    runs: frames.find((frame) => frame.id === "runs")?.height ?? 0,
-    tasks: frames.find((frame) => frame.id === "tasks")?.height ?? 0,
-    facts: frames.find((frame) => frame.id === "facts")?.height ?? 0,
-  };
+  const frames = allocateSidebarSections(
+    height,
+    workspaceViewRegistry.ordered.map((view) => ({
+      id: view.id,
+      ...view.layout,
+      collapsed: collapsed[view.id],
+    })),
+  );
+  return Object.fromEntries(
+    workspaceViewRegistry.ordered.map((view) => [
+      view.id,
+      frames.find((frame) => frame.id === view.id)?.height ?? 0,
+    ]),
+  ) as Readonly<Record<WorkspaceSection, number>>;
 }
 
 export const flattenWorkspaceRuns = projectWorkspaceRuns;
@@ -207,7 +203,7 @@ export class PhenixWorkspace implements Component, Focusable {
   }
 
   invalidate(): void {
-    this.controller.transcript.component?.invalidate();
+    this.controller.transcript?.component.invalidate();
   }
 
   dispose(): void {
@@ -391,7 +387,7 @@ export class PhenixWorkspace implements Component, Focusable {
           ? definitionLabel(String(selected.run.definitionId))
           : "Session";
     const transcript = this.controller.transcript;
-    const session = transcript.sessionId;
+    const session = transcript?.sessionId ?? selected?.run.pi?.sessionId;
     const header = surface(
       this.theme,
       focus === "transcript" ? "selectedBg" : "customMessageBg",
@@ -401,10 +397,13 @@ export class PhenixWorkspace implements Component, Focusable {
       ),
     );
     const content: string[] = [header];
-    if (transcript.unavailable) {
-      content.push("", color(this.theme, "warning", ` ${transcript.unavailable}`));
-    } else if (transcript.component) {
+    if (transcript) {
       content.push(...transcript.component.render(width).map((line) => leftOrigin(line, width)));
+    } else {
+      const unavailable = transcriptAvailabilityMessage(
+        this.controller.state.transcript.availability,
+      );
+      if (unavailable) content.push("", color(this.theme, "warning", ` ${unavailable}`));
     }
     if (selected?.run.kind === "root" && this.streamingMessage) {
       const streaming = new AssistantMessageComponent(
@@ -451,18 +450,34 @@ export class PhenixWorkspace implements Component, Focusable {
       ),
     ];
     const available = Math.max(0, height - header.length);
-    const sizes = allocateWorkspaceSections(available, {
-      runs: this.controller.state.panes.runs.collapsed,
-      tasks: this.controller.state.panes.tasks.collapsed,
-      facts: this.controller.state.panes.facts.collapsed,
-    });
+    const frames = allocateSidebarSections(
+      available,
+      workspaceViewRegistry.ordered.map((view) => ({
+        id: view.id,
+        ...view.layout,
+        collapsed: this.controller.state.panes[view.id].collapsed,
+      })),
+    );
 
-    const runs = this.renderRunSection(width, sizes.runs, focus);
-    const tasks = this.renderTaskSection(width, sizes.tasks, focus);
-    const facts = this.renderFactSection(width, sizes.facts, focus);
+    const sections: SectionRender[] = [];
+    for (const view of workspaceViewRegistry.ordered) {
+      const frame = frames.find((candidate) => candidate.id === view.id);
+      const sectionHeight = frame?.height ?? 0;
+      if (sectionHeight <= 0) continue;
+      try {
+        sections.push(this.renderViewSection(view, width, sectionHeight, focus));
+      } catch (error) {
+        sections.push({
+          section: view.id,
+          lines: this.renderPaneError(view.title, width, sectionHeight, error),
+          offset: 0,
+        });
+      }
+    }
+
     const layouts: SectionLayout[] = [];
     let start = header.length;
-    for (const section of [runs, tasks, facts]) {
+    for (const section of sections) {
       layouts.push({
         section: section.section,
         start,
@@ -471,132 +486,67 @@ export class PhenixWorkspace implements Component, Focusable {
       });
       start += section.lines.length;
     }
-
     return {
-      lines: fitHeight([...header, ...runs.lines, ...tasks.lines, ...facts.lines], height, width),
+      lines: fitHeight([...header, ...sections.flatMap((section) => section.lines)], height, width),
       layouts,
     };
   }
 
-  private renderRunSection(width: number, height: number, focus: WorkspaceFocus): SectionRender {
-    const items = projectWorkspaceRuns(this.controller.snapshot.ui.tree.root);
-    const pane = this.controller.state.panes.runs;
-    const selectedIndex = rowIndex(items, pane.selectedItemId, (item) => String(item.node.run.id));
-    if (height <= 0) return { section: "runs", lines: [], offset: 0 };
-    const title = this.sectionHeader("runs", `RUNS ${items.length}`, width, focus);
+  private renderViewSection(
+    view: WorkspaceViewRegistration,
+    width: number,
+    height: number,
+    focus: WorkspaceFocus,
+  ): SectionRender {
+    const rows = this.viewRows(view.id);
+    const pane = this.controller.state.panes[view.id];
+    const selectedIndex = rowIndex(rows, pane.selectedItemId);
+    if (height <= 0) return { section: view.id, lines: [], offset: 0 };
+    const title = this.sectionHeader(
+      view.id,
+      `${view.title.toUpperCase()} ${rows.length}`,
+      width,
+      focus,
+    );
     if (pane.collapsed || height === 1) {
       return {
-        section: "runs",
+        section: view.id,
         lines: [title, ...blankLines(height - 1, width)],
         offset: 0,
       };
     }
     const bodyHeight = height - 1;
-    const offset = keepVisible(scrollOffset(pane.scroll), selectedIndex, bodyHeight, items.length);
+    const offset = keepVisible(scrollOffset(pane.scroll), selectedIndex, bodyHeight, rows.length);
     const body = Array.from({ length: bodyHeight }, (_, row) => {
-      const item = items[offset + row];
-      if (!item) return " ".repeat(width);
-      return this.renderRunRow(item, width, focus);
+      const item = rows[offset + row];
+      return item ? this.renderViewRow(view.id, item, width, focus) : " ".repeat(width);
     });
-    return { section: "runs", lines: [title, ...body], offset };
+    return { section: view.id, lines: [title, ...body], offset };
   }
 
-  private renderRunRow(item: WorkspaceRunRow, width: number, focus: WorkspaceFocus): string {
-    const run = item.node.run;
-    const runId = String(run.id);
-    const active = runId === String(this.controller.state.activeRunId);
-    const selected = runId === this.controller.state.panes.runs.selectedItemId;
-    const model = run.resolvedModel
-      ? ` ${color(this.theme, "muted", `${run.resolvedModel.concrete.model}/${run.resolvedModel.thinking}`)}`
-      : "";
-    const activity = item.node.activity?.summary
-      ? ` ${color(this.theme, "muted", truncate(item.node.activity.summary, Math.max(8, width - 24 - item.depth * 2)))}`
-      : "";
-    const label = run.kind === "root" ? "Root session" : definitionLabel(String(run.definitionId));
-    const cursor = this.focused && focus === "runs" && selected ? CURSOR_MARKER : "";
-    const line = fitLine(
-      `${cursor} ${active ? "◆" : " "} ${"  ".repeat(item.depth)}${runStateSymbol(run.state)} ${label} ${run.state}${model}${TERMINAL_STATES.has(run.state) ? "" : activity}`,
-      width,
-    );
+  private renderViewRow(
+    section: WorkspaceSection,
+    row: WorkspaceViewRow,
+    width: number,
+    focus: WorkspaceFocus,
+  ): string {
+    const selected = row.id === this.controller.state.panes[section].selectedItemId;
+    const rendered = row.render({
+      theme: this.theme,
+      width: Math.max(0, width - 2),
+      activeRunId: this.controller.state.activeRunId,
+    });
+    const cursor = this.focused && focus === section && selected ? CURSOR_MARKER : "";
+    const line = fitLine(`${cursor} ${rendered.text}`, width);
     if (selected) {
       return surface(
         this.theme,
-        focus === "runs" ? "selectedBg" : "userMessageBg",
-        focus === "runs" ? strong(this.theme, line) : line,
+        focus === section ? "selectedBg" : "userMessageBg",
+        focus === section ? strong(this.theme, line) : line,
       );
     }
-    return active ? surface(this.theme, "customMessageBg", line) : line;
-  }
-
-  private renderTaskSection(width: number, height: number, focus: WorkspaceFocus): SectionRender {
-    const items = projectWorkspaceTasks(this.controller.snapshot.tasks.root);
-    const pane = this.controller.state.panes.tasks;
-    const selectedIndex = rowIndex(items, pane.selectedItemId, (item) => item.node.id);
-    if (height <= 0) return { section: "tasks", lines: [], offset: 0 };
-    const title = this.sectionHeader("tasks", `TASKS ${items.length}`, width, focus);
-    if (pane.collapsed || height === 1) {
-      return {
-        section: "tasks",
-        lines: [title, ...blankLines(height - 1, width)],
-        offset: 0,
-      };
-    }
-    const bodyHeight = height - 1;
-    const offset = keepVisible(scrollOffset(pane.scroll), selectedIndex, bodyHeight, items.length);
-    const body = Array.from({ length: bodyHeight }, (_, row) => {
-      const item = items[offset + row];
-      if (!item) return " ".repeat(width);
-      const selected = item.node.id === pane.selectedItemId;
-      const symbol = taskStateSymbol(item.node.effectiveState);
-      const cursor = this.focused && focus === "tasks" && selected ? CURSOR_MARKER : "";
-      const line = fitLine(
-        `${cursor} ${"  ".repeat(item.depth)}${symbol} ${truncate(item.node.title, Math.max(8, width - 5 - item.depth * 2))}`,
-        width,
-      );
-      if (!selected) return line;
-      return surface(
-        this.theme,
-        focus === "tasks" ? "selectedBg" : "userMessageBg",
-        focus === "tasks" ? strong(this.theme, line) : line,
-      );
-    });
-    return { section: "tasks", lines: [title, ...body], offset };
-  }
-
-  private renderFactSection(width: number, height: number, focus: WorkspaceFocus): SectionRender {
-    const items = [...this.controller.snapshot.ui.facts].reverse().slice(0, 50);
-    const pane = this.controller.state.panes.facts;
-    const selectedIndex = rowIndex(items, pane.selectedItemId, (item) => item.id);
-    if (height <= 0) return { section: "facts", lines: [], offset: 0 };
-    const title = this.sectionHeader("facts", `RECENT FACTS ${items.length}`, width, focus);
-    if (pane.collapsed || height === 1) {
-      return {
-        section: "facts",
-        lines: [title, ...blankLines(height - 1, width)],
-        offset: 0,
-      };
-    }
-    const bodyHeight = height - 1;
-    const offset = keepVisible(scrollOffset(pane.scroll), selectedIndex, bodyHeight, items.length);
-    const body = Array.from({ length: bodyHeight }, (_, row) => {
-      const item = items[offset + row];
-      if (!item) return " ".repeat(width);
-      const selected = item.id === pane.selectedItemId;
-      const cursor = this.focused && focus === "facts" && selected ? CURSOR_MARKER : "";
-      const line = fitLine(
-        `${cursor} ${compactTime(item.timestamp)} ${truncate(item.summary, Math.max(8, width - 8))}`,
-        width,
-      );
-      if (selected) {
-        return surface(
-          this.theme,
-          focus === "facts" ? "selectedBg" : "userMessageBg",
-          focus === "facts" ? strong(this.theme, line) : line,
-        );
-      }
-      return color(this.theme, "muted", line);
-    });
-    return { section: "facts", lines: [title, ...body], offset };
+    if (rendered.active) return surface(this.theme, "customMessageBg", line);
+    return rendered.muted ? color(this.theme, "muted", line) : line;
   }
 
   private sectionHeader(
@@ -671,28 +621,18 @@ export class PhenixWorkspace implements Component, Focusable {
   }
 
   private activateSection(section: WorkspaceSection): void {
-    if (section === "runs") {
-      const selectedRunId = this.controller.state.panes.runs.selectedItemId;
-      if (!selectedRunId) return;
-      const run = findWorkspaceRun(this.controller.snapshot.ui.tree.root, selectedRunId);
+    const selectedItemId = this.controller.state.panes[section].selectedItemId;
+    const row = this.viewRows(section).find((candidate) => candidate.id === selectedItemId);
+    if (!row?.activation) return;
+    if (row.activation.kind === "transcript") {
+      const run = findWorkspaceRun(
+        this.controller.snapshot.ui.tree.root,
+        String(row.activation.runId),
+      );
       if (run) this.selectTranscript(run);
       return;
     }
-    if (section === "tasks") {
-      const selectedTaskId = this.controller.state.panes.tasks.selectedItemId;
-      const task = projectWorkspaceTasks(this.controller.snapshot.tasks.root).find(
-        (item) => item.node.id === selectedTaskId,
-      );
-      if (task?.node.kind === "execution") {
-        const run = findWorkspaceRun(
-          this.controller.snapshot.ui.tree.root,
-          String(task.node.runId),
-        );
-        if (run) this.selectTranscript(run);
-      }
-      return;
-    }
-    this.onAction({ kind: "inspector", target: { view: "facts" } });
+    this.onAction({ kind: "inspector", target: { view: row.activation.view } });
   }
 
   private selectTranscript(node: RunTreeNode): void {
@@ -714,7 +654,7 @@ export class PhenixWorkspace implements Component, Focusable {
 
   private cycleFocus(delta: 1 | -1): void {
     const order: readonly PaneId[] = this.frame?.layout.panes.has("runs")
-      ? ["transcript", "editor", "runs", "tasks", "facts"]
+      ? ["transcript", "editor", ...workspaceViewRegistry.ordered.map((view) => view.id)]
       : ["transcript", "editor"];
     this.controller.dispatch({ type: "focus.move", direction: delta, order });
   }
@@ -727,7 +667,7 @@ export class PhenixWorkspace implements Component, Focusable {
         this.controller.dispatch({ type: "focus.set", paneId: "transcript" });
         const current = transcriptOffset(
           this.controller.state.transcript.scroll,
-          this.frame?.transcriptMaxOffset ?? 0,
+          this.frame.transcriptMaxOffset,
         );
         this.setTranscriptOffset(current + (event.button === 64 ? -3 : 3));
       }
@@ -776,19 +716,14 @@ export class PhenixWorkspace implements Component, Focusable {
     }
   }
 
+  private viewRows(section: WorkspaceSection): readonly WorkspaceViewRow[] {
+    return workspaceViewRegistry.get(section).project(this.controller.snapshot, {
+      selectedRunId: this.controller.state.activeRunId,
+    });
+  }
+
   private sectionItemIds(section: WorkspaceSection): readonly string[] {
-    if (section === "runs") {
-      return projectWorkspaceRuns(this.controller.snapshot.ui.tree.root).map((item) =>
-        String(item.node.run.id),
-      );
-    }
-    if (section === "tasks") {
-      return projectWorkspaceTasks(this.controller.snapshot.tasks.root).map((item) => item.node.id);
-    }
-    return [...this.controller.snapshot.ui.facts]
-      .reverse()
-      .slice(0, 50)
-      .map((item) => item.id);
+    return this.viewRows(section).map((row) => row.id);
   }
 
   private effectiveFocus(): WorkspaceFocus {
@@ -855,16 +790,10 @@ export class PhenixWorkspace implements Component, Focusable {
   }
 }
 
-interface SectionRender {
-  readonly section: WorkspaceSection;
-  readonly lines: readonly string[];
-  readonly offset: number;
-}
-
 function effectiveFocus(paneId: PaneId, sidebarVisible: boolean): WorkspaceFocus {
   if (paneId === "transcript" || paneId === "editor") return paneId;
-  if (sidebarVisible && (paneId === "runs" || paneId === "tasks" || paneId === "facts")) {
-    return paneId;
+  if (sidebarVisible && workspaceViewRegistry.ordered.some((view) => view.id === paneId)) {
+    return paneId as WorkspaceViewPaneId;
   }
   return "editor";
 }
@@ -888,29 +817,8 @@ function parseMouse(data: string): MouseEvent | undefined {
   };
 }
 
-function runStateSymbol(value: RunSnapshot["state"]): string {
-  if (value === "completed") return "✓";
-  if (value === "failed" || value === "orphaned") return "✗";
-  if (value === "cancelled") return "−";
-  if (value === "waiting") return "○";
-  return "●";
-}
-
-function taskStateSymbol(value: TaskNode["effectiveState"]): string {
-  if (value === "done") return "✓";
-  if (value === "failed") return "!";
-  if (value === "wip") return "●";
-  return "○";
-}
-
 function definitionLabel(value: string): string {
-  return value.replace(/^(?:agent|workflow|session)\./, "");
-}
-
-function compactTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value.slice(0, 5);
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  return value.replace(/^(?:agent|workflow|session|root)\./, "");
 }
 
 function truncate(value: string, width: number): string {
@@ -942,13 +850,9 @@ function transcriptOffset(scroll: ScrollState, maximum: number): number {
   return scroll.mode === "follow-end" ? maximum : clamp(scroll.offset, 0, maximum);
 }
 
-function rowIndex<T>(
-  items: readonly T[],
-  selectedItemId: string | undefined,
-  itemId: (item: T) => string,
-): number {
-  if (items.length === 0) return 0;
-  const index = selectedItemId ? items.findIndex((item) => itemId(item) === selectedItemId) : -1;
+function rowIndex(rows: readonly WorkspaceViewRow[], selectedItemId: string | undefined): number {
+  if (rows.length === 0) return 0;
+  const index = selectedItemId ? rows.findIndex((row) => row.id === selectedItemId) : -1;
   return index >= 0 ? index : 0;
 }
 

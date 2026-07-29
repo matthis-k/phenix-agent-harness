@@ -27,13 +27,12 @@ import type {
   LoadedWorkspaceTranscript,
   ReadyWorkspaceTranscript,
 } from "../ports/workspace-effects.ts";
-import { transcriptAvailabilityMessage } from "./transcript-availability.ts";
+import { renderNativeRunTranscriptResult } from "./native-run-transcript-view.ts";
 
 export interface NativeRunTranscript {
-  readonly component?: Container;
-  readonly sessionId?: string;
+  readonly component: Container;
+  readonly sessionId: string;
   readonly sessionFile?: string;
-  readonly unavailable?: string;
 }
 
 export function readyNativeRunTranscript(
@@ -47,24 +46,11 @@ export function readyNativeRunTranscript(
   };
 }
 
-export function presentNativeRunTranscript(
-  loaded: LoadedWorkspaceTranscript<NativeRunTranscript>,
-  node?: RunTreeNode,
-): NativeRunTranscript {
-  if (loaded.kind === "ready") return loaded.value;
-  const unavailable = transcriptAvailabilityMessage(loaded);
-  return {
-    ...(node?.run.pi?.sessionId ? { sessionId: node.run.pi.sessionId } : {}),
-    ...(node?.run.pi?.sessionFile ? { sessionFile: node.run.pi.sessionFile } : {}),
-    ...(unavailable ? { unavailable } : {}),
-  };
-}
-
 export async function loadNativeRunTranscript(
   node: RunTreeNode,
   tui: TUI,
 ): Promise<NativeRunTranscript> {
-  return presentNativeRunTranscript(await loadNativeRunTranscriptResult(node, tui), node);
+  return renderNativeRunTranscriptResult(await loadNativeRunTranscriptResult(node, tui), node);
 }
 
 export async function loadNativeRunTranscriptResult(

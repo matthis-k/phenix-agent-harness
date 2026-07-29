@@ -10,6 +10,13 @@ import {
   flattenWorkspaceTasks,
 } from "../extension/phenix-workspace.ts";
 
+const EXPANDED_SECTIONS = {
+  runs: false,
+  tasks: false,
+  files: false,
+  facts: false,
+} as const;
+
 test("uses an OpenCode-like sidebar only when the terminal can preserve a useful transcript", () => {
   assert.deepEqual(computeWorkspaceLayout(120, 40), {
     width: 120,
@@ -27,24 +34,22 @@ test("uses an OpenCode-like sidebar only when the terminal can preserve a useful
   });
 });
 
-test("allocates independent scroll regions by section weight", () => {
-  assert.deepEqual(allocateWorkspaceSections(30, { runs: false, tasks: false, facts: false }), {
-    runs: 15,
-    tasks: 6,
-    facts: 9,
+test("allocates every registered view as an independent scroll region", () => {
+  assert.deepEqual(allocateWorkspaceSections(30, EXPANDED_SECTIONS), {
+    runs: 11,
+    tasks: 5,
+    files: 7,
+    facts: 7,
   });
-  assert.deepEqual(allocateWorkspaceSections(30, { runs: false, tasks: true, facts: false }), {
-    runs: 17,
+  assert.deepEqual(allocateWorkspaceSections(30, { ...EXPANDED_SECTIONS, tasks: true }), {
+    runs: 12,
     tasks: 2,
-    facts: 11,
+    files: 8,
+    facts: 8,
   });
-  for (let height = 0; height <= 8; height += 1) {
-    const allocated = allocateWorkspaceSections(height, {
-      runs: false,
-      tasks: false,
-      facts: false,
-    });
-    assert.ok(allocated.runs + allocated.tasks + allocated.facts <= height);
+  for (let height = 0; height <= 10; height += 1) {
+    const allocated = allocateWorkspaceSections(height, EXPANDED_SECTIONS);
+    assert.ok(allocated.runs + allocated.tasks + allocated.files + allocated.facts <= height);
   }
 });
 
