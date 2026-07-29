@@ -1,4 +1,4 @@
-import type { TUI } from "@earendil-works/pi-tui";
+import { Container, Text, type TUI } from "@earendil-works/pi-tui";
 import {
   type Component,
   matchesKey,
@@ -252,7 +252,7 @@ export class PhenixUi implements Component {
 
   invalidate(): void {
     this.previewCache = undefined;
-    for (const transcript of this.transcriptCache.values()) transcript.component?.invalidate();
+    for (const transcript of this.transcriptCache.values()) transcript.component.invalidate();
   }
 
   dispose(): void {
@@ -436,45 +436,9 @@ export class PhenixUi implements Component {
     const line = this.fitLine(`  ${text}`, width);
     return surface(
       this.theme,
-      this.pane === pane ? "selectedBg" : "customMessageBg",
-      this.pane === pane ? strong(this.theme, line) : color(this.theme, "text", line),
+      this.pane === pane ? "selectedBg" : "userMessageBg",
+      this.pane === pane ? strong(this.theme, line) : line,
     );
-  }
-
-  private panelLine(text: string, width: number, pane: UiPane): string {
-    return surface(
-      this.theme,
-      this.pane === pane ? "userMessageBg" : "customMessageBg",
-      this.fitLine(text, width),
-    );
-  }
-
-  private renderFooter(width: number): string {
-    const filter = this.filtering
-      ? color(this.theme, "accent", ` filter: ${this.filter}▌`)
-      : this.filter
-        ? color(this.theme, "muted", ` filter:${this.filter}`)
-        : "";
-    const pane =
-      this.paneCount() > 1
-        ? `  ${heading(
-            this.theme,
-            `focus ${this.paneLabels()[this.pane] ?? `pane ${this.pane + 1}`}`,
-          )}`
-        : "";
-    const hints = this.footerHints();
-    return surface(
-      this.theme,
-      "customMessageBg",
-      this.fitLine(`${color(this.theme, "muted", ` ${hints}`)}${filter}${pane}`, width),
-    );
-  }
-
-  private footerHints(): string {
-    if (this.goPrefix) return "g…  s status · r runs · f facts · c catalog";
-    const paneHint = this.paneCount() > 1 ? " · Tab pane" : "";
-    const viewerHint = this.view === "runs" ? " · v diagram/transcript" : "";
-    return `1-4 views${paneHint}${viewerHint} · / filter · arrows/hjkl navigate · ? help · r refresh · Esc close`;
   }
 
   private renderView(): string[] {
@@ -492,12 +456,9 @@ export class PhenixUi implements Component {
 
   private renderStatus(): string[] {
     const width = this.layout.width;
-    const facts = this.filteredFacts().slice(-5);
     const runs = this.statusRuns();
-    const targets = [
-      ...runs.map((item) => ({ kind: "run" as const, item })),
-      ...facts.map((item) => ({ kind: "fact" as const, item })),
-    ];
+    const facts = this.filteredFacts().slice(-5);
+    const targets = this.statusTargets();
     this.selectedStatus = clamp(this.selectedStatus, 0, Math.max(0, targets.length - 1));
     const lines = [
       heading(this.theme, " Session"),
@@ -530,7 +491,6 @@ export class PhenixUi implements Component {
       });
     });
     if (facts.length === 0) lines.push(` ${color(this.theme, "muted", "No facts recorded yet.")}`);
-    while (lines.length < this.layout.bodyHeight) lines.push("");
     return lines.map((line) => this.fitLine(line, width));
   }
 
@@ -545,13 +505,11 @@ export class PhenixUi implements Component {
     );
     const selected = flat[selectedIndex]?.node ?? this.snapshot.tree.root;
     if (width < 82) {
-      const content =
-        this.pane === 0
-          ? this.renderRunTreePane(flat, selectedIndex, width, height)
-          : this.pane === 1
-            ? this.renderRunViewerPane(selected, width, height)
-            : this.renderRunInspectorPane(selected, width, height);
-      return content;
+      return this.pane === 0
+        ? this.renderRunTreePane(flat, selectedIndex, width, height)
+        : this.pane === 1
+          ? this.renderRunViewerPane(selected, width, height)
+          : this.renderRunInspectorPane(selected, width, height);
     }
     if (width < 126 && this.pane === 2) {
       return this.renderRunInspectorPane(selected, width, height);
@@ -609,8 +567,7 @@ export class PhenixUi implements Component {
 
   private renderRunDiagramPane(node: RunTreeNode, width: number, height: number): string[] {
     const lines = this.runPreviewLines(node);
-    const longest = maxVisibleWidth(lines);
-    const maxX = Math.max(0, longest - width);
+    const maxX = Math.max(0, maxVisibleWidth(lines) - width);
     const maxY = Math.max(0, lines.length - height);
     this.runHorizontalOffset = clamp(this.runHorizontalOffset, 0, maxX);
     this.runVerticalOffset = clamp(this.runVerticalOffset, 0, maxY);
@@ -637,9 +594,7 @@ export class PhenixUi implements Component {
       lines.push(color(this.theme, "muted", " Loading Pi transcript…"));
     } else if (!transcript) {
       lines.push(color(this.theme, "muted", " Press v or Enter to load this Pi session."));
-    } else if (transcript.unavailable) {
-      lines.push(color(this.theme, "warning", ` ${transcript.unavailable}`));
-    } else if (transcript.component) {
+    } else {
       lines.push(...transcript.component.render(width));
     }
     const maxY = Math.max(0, lines.length - height);
@@ -914,11 +869,19 @@ export class PhenixUi implements Component {
     );
   }
 
+  private renderFooter(width: number): string {
+    const text = this.filtering
+      ? ` Filter: ${this.filter}`
+      : this.filter
+        ? ` /${this.filter} · ? help · q close`
+        : " ? help · / filter · q close";
+    return surface(this.theme, "customMessageBg", this.fitLine(color(this.theme, "muted", text), width));
+  }
+
   private handleStatusInput(data: string): void {
     const targets = this.statusTargets();
     if (isUp(data)) this.selectedStatus = clamp(this.selectedStatus - 1, 0, targets.length - 1);
-    else if (isDown(data))
-      this.selectedStatus = clamp(this.selectedStatus + 1, 0, targets.length - 1);
+    else if (isDown(data)) this.selectedStatus = clamp(this.selectedStatus + 1, 0, targets.length - 1);
     else if (matchesKey(data, "enter")) this.openStatusTarget(targets[this.selectedStatus]);
     else return;
     this.requestRender();
@@ -1245,8 +1208,7 @@ export class PhenixUi implements Component {
     if (this.previewCache?.key === key) return this.previewCache.lines;
     let lines: readonly string[];
     try {
-      const root =
-        node.run.kind === "root" ? node : { ...this.snapshot.tree.root, children: [node] };
+      const root = node.run.kind === "root" ? node : { ...this.snapshot.tree.root, children: [node] };
       lines = renderRunTreeSequence({ root }, { expanded: true, theme: this.theme }).split("\n");
     } catch (error) {
       lines = [`Unable to render run sequence: ${errorMessage(error)}`];
@@ -1343,10 +1305,12 @@ export class PhenixUi implements Component {
       this.transcriptCache.set(key, transcript);
       if (this.selectedRunId === key) this.runTranscriptOffset = Number.MAX_SAFE_INTEGER;
     } catch (error) {
+      const component = new Container();
+      component.addChild(new Text(`Unable to load Pi transcript: ${errorMessage(error)}`, 0, 0));
       this.transcriptCache.set(key, {
-        sessionId: node.run.pi?.sessionId,
-        sessionFile: node.run.pi?.sessionFile,
-        unavailable: `Unable to load Pi transcript: ${errorMessage(error)}`,
+        component,
+        sessionId: node.run.pi?.sessionId ?? key,
+        ...(node.run.pi?.sessionFile ? { sessionFile: node.run.pi.sessionFile } : {}),
       });
     } finally {
       this.transcriptLoading.delete(key);
@@ -1416,6 +1380,13 @@ export class PhenixUi implements Component {
     }
   }
 
+  private panelLine(line: string, width: number, pane: UiPane): string {
+    const fitted = this.fitLine(line, width);
+    return this.pane === pane
+      ? surface(this.theme, "userMessageBg", fitted)
+      : surface(this.theme, "customMessageBg", fitted);
+  }
+
   private fitLine(line: string, width: number): string {
     const clipped = truncateToWidth(line, width, "");
     return clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped)));
@@ -1452,27 +1423,16 @@ function parentOf(root: RunTreeNode, runId: RunId): RunTreeNode | undefined {
 function countActive(node: RunTreeNode): number {
   return (
     (node.run.kind !== "root" && !TERMINAL_STATES.has(node.run.state) ? 1 : 0) +
-    node.children.reduce((total, child) => total + countActive(child), 0)
+    node.children.reduce((sum, child) => sum + countActive(child), 0)
   );
 }
 
 function runSummary(theme: ObservabilityTheme, node: RunTreeNode, depth: number): string {
   const run = node.run;
-  const model = run.resolvedModel
-    ? ` ${color(theme, "dim", "·")} ${color(theme, "muted", `${run.resolvedModel.concrete.model}/${run.resolvedModel.thinking}`)}`
-    : "";
   const activity = node.activity
-    ? ` ${color(theme, "dim", "·")} ${phase(theme, node.activity.phase, node.activity.phase)} ${color(theme, "text", truncate(node.activity.summary, 48))}`
+    ? ` ${phase(theme, node.activity.phase, truncate(node.activity.summary, 48))}`
     : "";
-  return `${"  ".repeat(depth)}${state(theme, run.state, runStateSymbol(run.state))} ${strong(theme, definitionLabel(String(run.definitionId)))} ${state(theme, run.state, `[${run.state}]`)}${model}${activity}`;
-}
-
-function formatFactLine(theme: ObservabilityTheme, item: RunFact): string {
-  return `${color(theme, "dim", compactTimestamp(item.timestamp))} ${color(theme, "muted", shortRunId(String(item.runId)))} ${color(theme, "dim", "·")} ${factColor(theme, item.kind, item.summary, item.kind)} ${color(theme, "dim", "·")} ${factColor(theme, item.kind, item.summary, truncate(item.summary, 84))} ${reliability(theme, item.reliability, `[${item.reliability}]`)}`;
-}
-
-function statusField(label: string, value: string): string {
-  return `${label}: ${value}`;
+  return `${"  ".repeat(depth)}${state(theme, run.state, runStateSymbol(run.state))} ${strong(theme, definitionLabel(String(run.definitionId)))} ${state(theme, run.state, run.state)}${activity}`;
 }
 
 function runStateSymbol(value: RunSnapshot["state"]): string {
@@ -1483,8 +1443,26 @@ function runStateSymbol(value: RunSnapshot["state"]): string {
   return "●";
 }
 
-function wrapPane(current: UiPane, delta: number, count: number): UiPane {
-  return ((((current + delta) % count) + count) % count) as UiPane;
+function formatFactLine(theme: ObservabilityTheme, item: RunFact): string {
+  return `${compactTimestamp(item.timestamp)} ${factColor(theme, item.kind, item.summary, item.kind)} ${reliability(theme, item.reliability, `[${item.reliability}]`)} ${item.summary}`;
+}
+
+function statusField(label: string, value: string): string {
+  return `${label}: ${value}`;
+}
+
+function definitionLabel(value: string): string {
+  return value.replace(/^(?:agent|workflow|session|root)\./, "");
+}
+
+function compactTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}`;
+}
+
+function shortRunId(value: string): string {
+  return value.length <= 18 ? value : `${value.slice(0, 8)}…${value.slice(-8)}`;
 }
 
 function centeredStart(selected: number, height: number, total: number): number {
@@ -1492,6 +1470,7 @@ function centeredStart(selected: number, height: number, total: number): number 
 }
 
 function distributeWidths(width: number, count: number): readonly number[] {
+  if (count <= 0) return [];
   const base = Math.floor(width / count);
   const remainder = width % count;
   return Array.from({ length: count }, (_, index) => base + (index < remainder ? 1 : 0));
@@ -1499,63 +1478,55 @@ function distributeWidths(width: number, count: number): readonly number[] {
 
 function centerToWidth(text: string, width: number): string {
   const clipped = truncateToWidth(text, width, "");
-  const padding = Math.max(0, width - visibleWidth(clipped));
-  const left = Math.floor(padding / 2);
-  return `${" ".repeat(left)}${clipped}${" ".repeat(padding - left)}`;
-}
-
-function fitHeight(lines: readonly string[], height: number, width: number): string[] {
-  return Array.from({ length: height }, (_, row) => lines[row] ?? " ".repeat(width));
+  const remaining = Math.max(0, width - visibleWidth(clipped));
+  const left = Math.floor(remaining / 2);
+  return `${" ".repeat(left)}${clipped}${" ".repeat(remaining - left)}`;
 }
 
 function maxVisibleWidth(lines: readonly string[]): number {
   return lines.reduce((maximum, line) => Math.max(maximum, visibleWidth(line)), 0);
 }
 
-function definitionLabel(value: string): string {
-  return value.replace(/^(?:agent|workflow)\./, "");
+function fitHeight(lines: readonly string[], height: number, width: number): string[] {
+  return Array.from({ length: height }, (_, row) => {
+    const source = lines[row] ?? "";
+    const clipped = truncateToWidth(source, width, "");
+    return clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped)));
+  });
 }
 
-function shortRunId(value: string): string {
-  const normalized = value.replace(/^run-/, "");
-  return normalized.length <= 12 ? normalized : normalized.slice(-12);
-}
-
-function compactTimestamp(value: string): string {
-  return value.length >= 19 ? value.slice(11, 19) : value;
-}
-
-function truncate(value: string, limit: number): string {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  return normalized.length <= limit
-    ? normalized
-    : `${normalized.slice(0, Math.max(1, limit - 1))}…`;
+function wrapPane(current: UiPane, delta: number, count: number): UiPane {
+  return ((current + delta + count) % count) as UiPane;
 }
 
 function capitalize(value: string): string {
-  return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`;
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.max(minimum, Math.min(value, maximum));
-}
-
-function isUp(data: string): boolean {
-  return matchesKey(data, "up") || data === "k" || data === "K";
-}
-
-function isDown(data: string): boolean {
-  return matchesKey(data, "down") || data === "j" || data === "J";
-}
-
-function isLeft(data: string): boolean {
-  return matchesKey(data, "left") || data === "h" || data === "H";
-}
-
-function isRight(data: string): boolean {
-  return matchesKey(data, "right") || data === "l" || data === "L";
+function truncate(value: string, width: number): string {
+  return truncateToWidth(value, Math.max(0, width), width > 1 ? "…" : "");
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(Math.max(value, minimum), Math.max(minimum, maximum));
+}
+
+function isUp(data: string): boolean {
+  return matchesKey(data, "up") || data === "k";
+}
+
+function isDown(data: string): boolean {
+  return matchesKey(data, "down") || data === "j";
+}
+
+function isLeft(data: string): boolean {
+  return matchesKey(data, "left") || data === "h";
+}
+
+function isRight(data: string): boolean {
+  return matchesKey(data, "right") || data === "l";
 }
