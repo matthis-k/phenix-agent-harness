@@ -10,7 +10,7 @@ import type {
   PaneId,
   PaneState,
   ScrollState,
-  TranscriptHandle,
+  SettledTranscriptAvailability,
   WorkspaceState,
 } from "../../domain/workspace/state.ts";
 
@@ -65,7 +65,7 @@ export function reduceWorkspace<TSnapshot>(
     case "transcript.requested":
       return requestTranscript(state, event.requestId, event.runId);
     case "transcript.loaded":
-      return receiveTranscript(state, event.requestId, event.runId, event.handle);
+      return receiveTranscript(state, event.requestId, event.runId, event.availability);
     case "transcript.failed":
       return failTranscript(state, event.requestId, event.runId, event.error);
     case "terminal.resized":
@@ -255,7 +255,7 @@ function receiveTranscript(
   state: WorkspaceState,
   requestId: EffectId,
   runId: RunId,
-  handle: TranscriptHandle,
+  availability: SettledTranscriptAvailability,
 ): WorkspaceUpdate {
   if (!isCurrentTranscriptRequest(state, requestId, runId)) {
     return staleEffect(state, requestId);
@@ -264,7 +264,7 @@ function receiveTranscript(
     ...state,
     transcript: {
       ...state.transcript,
-      availability: { kind: "ready", transcript: handle },
+      availability,
       horizontalOrigin: 0,
     },
     pendingEffects: withoutEffect(state.pendingEffects, requestId),
