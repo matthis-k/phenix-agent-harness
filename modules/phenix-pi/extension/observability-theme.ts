@@ -19,7 +19,7 @@ interface BackgroundFrame {
 }
 
 const BACKGROUND_MARKER = "\u0000";
-const SGR_PATTERN = /\x1b\[([0-9;]*)m/g;
+const SGR_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[([0-9;]*)m`, "g");
 const BACKGROUND_FRAMES = new WeakMap<object, Map<SurfaceTone, BackgroundFrame>>();
 
 const RELIABILITY_TONES: Readonly<Record<FactReliability, ObservabilityTone>> = {
