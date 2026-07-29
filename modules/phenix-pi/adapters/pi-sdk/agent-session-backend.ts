@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type {
   AgentSession,
   AgentSessionEvent,
@@ -167,12 +168,8 @@ class PiAgentSessionPort implements AgentSessionPort {
   private readonly session: AgentSession;
   private readonly transcripts: LiveAgentTranscriptWriter;
   private readonly runId: RunId;
-  private readonly completedMessages: AgentSessionEvent extends { message: infer Message }
-    ? Message[]
-    : never[] = [];
-  private streamingMessage:
-    | (AgentSessionEvent extends { message: infer Message } ? Message : never)
-    | undefined;
+  private readonly completedMessages: AgentMessage[] = [];
+  private streamingMessage: AgentMessage | undefined;
   private readonly listeners = new Set<(event: AgentSessionObservation) => void>();
   private readonly unsubscribe: () => void;
   private disposed = false;
