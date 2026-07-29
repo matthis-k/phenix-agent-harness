@@ -274,13 +274,22 @@ async function openWorkspace(
           commands,
           snapshot,
           load,
-          loadTranscript: (node) => loadNativeRunTranscriptResult(node, tui, theme),
+          loadTranscript: (node) =>
+            loadNativeRunTranscriptResult(
+              node,
+              tui,
+              theme,
+              binding.runtime.transcripts.get(node.run.id),
+              ctx.cwd,
+            ),
           subscribe: (listener) => {
             const unsubscribeEvents = binding.runtime.events.subscribe(listener);
             const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
+            const unsubscribeTranscripts = binding.runtime.transcripts.subscribe(() => listener());
             return () => {
               unsubscribeEvents();
               unsubscribeDiagnostics();
+              unsubscribeTranscripts();
             };
           },
           submit: async (text) => {
@@ -355,13 +364,22 @@ async function openInspector(
         initial,
         snapshot,
         load,
-        loadTranscript: (node) => loadNativeRunTranscript(node, tui, theme),
+        loadTranscript: (node) =>
+          loadNativeRunTranscript(
+            node,
+            tui,
+            theme,
+            binding.runtime.transcripts.get(node.run.id),
+            ctx.cwd,
+          ),
         subscribe: (listener) => {
           const unsubscribeEvents = binding.runtime.events.subscribe(listener);
           const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
+          const unsubscribeTranscripts = binding.runtime.transcripts.subscribe(() => listener());
           return () => {
             unsubscribeEvents();
             unsubscribeDiagnostics();
+            unsubscribeTranscripts();
           };
         },
         onClose: () => done(undefined),
