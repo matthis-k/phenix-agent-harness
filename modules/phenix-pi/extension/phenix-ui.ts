@@ -1,8 +1,10 @@
-import { Container, Text, type TUI } from "@earendil-works/pi-tui";
 import {
   type Component,
+  Container,
   matchesKey,
   sliceByColumn,
+  Text,
+  type TUI,
   truncateToWidth,
   visibleWidth,
 } from "@earendil-works/pi-tui";
@@ -875,13 +877,18 @@ export class PhenixUi implements Component {
       : this.filter
         ? ` /${this.filter} · ? help · q close`
         : " ? help · / filter · q close";
-    return surface(this.theme, "customMessageBg", this.fitLine(color(this.theme, "muted", text), width));
+    return surface(
+      this.theme,
+      "customMessageBg",
+      this.fitLine(color(this.theme, "muted", text), width),
+    );
   }
 
   private handleStatusInput(data: string): void {
     const targets = this.statusTargets();
     if (isUp(data)) this.selectedStatus = clamp(this.selectedStatus - 1, 0, targets.length - 1);
-    else if (isDown(data)) this.selectedStatus = clamp(this.selectedStatus + 1, 0, targets.length - 1);
+    else if (isDown(data))
+      this.selectedStatus = clamp(this.selectedStatus + 1, 0, targets.length - 1);
     else if (matchesKey(data, "enter")) this.openStatusTarget(targets[this.selectedStatus]);
     else return;
     this.requestRender();
@@ -1208,7 +1215,8 @@ export class PhenixUi implements Component {
     if (this.previewCache?.key === key) return this.previewCache.lines;
     let lines: readonly string[];
     try {
-      const root = node.run.kind === "root" ? node : { ...this.snapshot.tree.root, children: [node] };
+      const root =
+        node.run.kind === "root" ? node : { ...this.snapshot.tree.root, children: [node] };
       lines = renderRunTreeSequence({ root }, { expanded: true, theme: this.theme }).split("\n");
     } catch (error) {
       lines = [`Unable to render run sequence: ${errorMessage(error)}`];
