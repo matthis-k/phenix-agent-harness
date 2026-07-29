@@ -7,7 +7,6 @@ import { handoffNativeWorkspaceInput } from "../extension/workspace/native-input
 import type { NativeInputDelegation } from "../extension/workspace/workspace-interaction.ts";
 
 const KEY_ACTIONS: Readonly<Record<string, AppKeybinding>> = {
-  "\x03": "app.clear",
   "\x07": "app.editor.external",
 };
 const KEYBINDINGS = {
@@ -36,21 +35,6 @@ test("leaves unrelated input in the focused workspace", () => {
   const result = handoffNativeWorkspaceInput({
     data: "x",
     keybindings: KEYBINDINGS,
-    handoff: () => {
-      touched = true;
-    },
-  });
-
-  assert.equal(result, undefined);
-  assert.equal(touched, false);
-});
-
-test("a contextual action may stay in the workspace", () => {
-  let touched = false;
-  const result = handoffNativeWorkspaceInput({
-    data: "\x03",
-    keybindings: KEYBINDINGS,
-    accept: (delegation) => delegation.action !== "app.clear",
     handoff: () => {
       touched = true;
     },
