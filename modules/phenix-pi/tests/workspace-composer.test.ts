@@ -4,11 +4,8 @@ import test from "node:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
 
 import type { ObservabilityTheme } from "../extension/observability-theme.ts";
-import {
-  editorBody,
-  renderWorkspaceComposer,
-} from "../extension/workspace/workspace-composer.ts";
 import { stripTranscriptAnsi } from "../extension/workspace/transcript-selection.ts";
+import { editorBody, renderWorkspaceComposer } from "../extension/workspace/workspace-composer.ts";
 
 const THEME = {
   fg: (_tone: string, text: string) => text,
