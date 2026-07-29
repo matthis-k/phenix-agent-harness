@@ -60,6 +60,7 @@ interface TreeRow<T> {
 }
 
 export class TreeView<T> {
+  private readonly adapter: TreeViewAdapter<T>;
   private roots: readonly T[] = [];
   private rows: readonly TreeRow<T>[] = [];
   private readonly expanded = new Set<string>();
@@ -69,10 +70,8 @@ export class TreeView<T> {
   private readonly collapsedMarker: string;
   private readonly leafMarker: string;
 
-  constructor(
-    private readonly adapter: TreeViewAdapter<T>,
-    options: TreeViewOptions = {},
-  ) {
+  constructor(adapter: TreeViewAdapter<T>, options: TreeViewOptions = {}) {
+    this.adapter = adapter;
     this.indent = options.indent ?? "  ";
     this.expandedMarker = options.expandedMarker ?? "▾";
     this.collapsedMarker = options.collapsedMarker ?? "▸";
@@ -115,7 +114,7 @@ export class TreeView<T> {
 
   dispatch(intent: TreeViewIntent, viewportHeight: number): TreeViewEvent<T> | undefined {
     if (intent.kind === "toggle" || intent.kind === "expand" || intent.kind === "collapse") {
-      return this.dispatchExpansion(intent.kind);
+      return this.dispatchExpansion(intent.kind, viewportHeight);
     }
     return this.fromListEvent(this.list.dispatch(intent, viewportHeight));
   }
@@ -127,20 +126,26 @@ export class TreeView<T> {
 
   private dispatchExpansion(
     intent: "toggle" | "expand" | "collapse",
+    viewportHeight: number,
   ): TreeViewEvent<T> | undefined {
     const row = this.list.selectedItem;
     if (!row) return undefined;
 
     if (intent === "collapse" && !this.expanded.has(row.id)) {
       if (!row.parentId) return undefined;
-      const event = this.list.dispatch({ kind: "select", id: row.parentId }, 1);
+      const event = this.list.dispatch(
+        { kind: "select", id: row.parentId },
+        viewportHeight,
+      );
       return this.fromListEvent(event);
     }
 
     if (intent === "expand" && this.expanded.has(row.id)) {
       const child = this.rows.find((candidate) => candidate.parentId === row.id);
       if (!child) return undefined;
-      return this.fromListEvent(this.list.dispatch({ kind: "select", id: child.id }, 1));
+      return this.fromListEvent(
+        this.list.dispatch({ kind: "select", id: child.id }, viewportHeight),
+      );
     }
 
     if (!row.hasChildren) return undefined;
