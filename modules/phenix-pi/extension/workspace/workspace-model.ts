@@ -1,12 +1,8 @@
 import type { RunTreeNode } from "../../application/interfaces.ts";
 import type { WorkspaceItemIndex } from "../../domain/workspace/events.ts";
-import type { PaneId } from "../../domain/workspace/state.ts";
 import type { NativeRunTranscript } from "../native-run-transcript.ts";
 import { workspaceViewRegistry } from "./views/workspace-view-registry.ts";
-import {
-  WORKSPACE_VIEW_IDS,
-  type WorkspaceViewSnapshot,
-} from "./views/workspace-view.ts";
+import type { WorkspaceViewSnapshot } from "./views/workspace-view.ts";
 
 export type { WorkspaceRunRow } from "./views/runs-view.ts";
 export { projectWorkspaceRuns } from "./views/runs-view.ts";
@@ -18,11 +14,14 @@ export interface PhenixWorkspaceSnapshot extends WorkspaceViewSnapshot {
 }
 
 export function workspaceItemIndex(snapshot: PhenixWorkspaceSnapshot): WorkspaceItemIndex {
-  const paneIds = ["transcript", "editor", ...WORKSPACE_VIEW_IDS] as const;
-  const itemIds = Object.fromEntries(paneIds.map((paneId) => [paneId, []])) as Record<
-    PaneId,
-    string[]
-  >;
+  const itemIds: Record<keyof WorkspaceItemIndex, string[]> = {
+    transcript: [],
+    editor: [],
+    runs: [],
+    tasks: [],
+    files: [],
+    facts: [],
+  };
   for (const view of workspaceViewRegistry.ordered) {
     itemIds[view.id] = view.project(snapshot).map((row) => row.id);
   }
