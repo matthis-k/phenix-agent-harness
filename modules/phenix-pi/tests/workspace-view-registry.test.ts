@@ -76,15 +76,34 @@ test("view projections preserve run and task collapse semantics", () => {
   );
 });
 
-test("derives pane item identity exclusively from registered projections", () => {
+test("derives pane identity and row behavior exclusively from registered projections", () => {
   const snapshot = {
     ui: {
       tree: {
         root: runNode("root", "running", [runNode("child", "running")], "root"),
       },
       facts: [
-        { id: "fact-old", timestamp: "2026-07-28T10:00:00Z", summary: "old" },
-        { id: "fact-new", timestamp: "2026-07-28T11:00:00Z", summary: "new" },
+        {
+          id: "fact-old",
+          timestamp: "2026-07-28T10:00:00Z",
+          runId: "root",
+          summary: "old",
+        },
+        {
+          id: "fact-file",
+          timestamp: "2026-07-28T10:30:00Z",
+          runId: "child",
+          kind: "file-changed",
+          subject: "README.md",
+          summary: "Changed README.md",
+          sequence: 2,
+        },
+        {
+          id: "fact-new",
+          timestamp: "2026-07-28T11:00:00Z",
+          runId: "root",
+          summary: "new",
+        },
       ],
     },
     tasks: {
@@ -98,10 +117,16 @@ test("derives pane item identity exclusively from registered projections", () =>
     editor: [],
     runs: ["root", "child"],
     tasks: ["task-child"],
-    files: [],
-    facts: ["fact-new", "fact-old"],
+    files: ["README.md"],
+    facts: ["fact-new", "fact-file", "fact-old"],
   });
-  assert.deepEqual(workspaceViewRegistry.get("files").project(snapshot), []);
+  for (const view of workspaceViewRegistry.ordered) {
+    for (const row of view.project(snapshot)) {
+      assert.equal(typeof row.render, "function");
+    }
+  }
+  assert.equal(workspaceViewRegistry.get("runs").project(snapshot)[0]?.activation?.kind, "transcript");
+  assert.equal(workspaceViewRegistry.get("facts").project(snapshot)[0]?.activation?.kind, "inspector");
 });
 
 function runNode(
