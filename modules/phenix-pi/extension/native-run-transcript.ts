@@ -27,6 +27,7 @@ import type {
   LoadedWorkspaceTranscript,
   ReadyWorkspaceTranscript,
 } from "../ports/workspace-effects.ts";
+import { renderNativeRunTranscriptResult } from "./native-run-transcript-view.ts";
 
 export interface NativeRunTranscript {
   readonly component: Container;
@@ -46,6 +47,13 @@ export function readyNativeRunTranscript(
 }
 
 export async function loadNativeRunTranscript(
+  node: RunTreeNode,
+  tui: TUI,
+): Promise<NativeRunTranscript> {
+  return renderNativeRunTranscriptResult(await loadNativeRunTranscriptResult(node, tui), node);
+}
+
+export async function loadNativeRunTranscriptResult(
   node: RunTreeNode,
   tui: TUI,
 ): Promise<LoadedWorkspaceTranscript<NativeRunTranscript>> {
