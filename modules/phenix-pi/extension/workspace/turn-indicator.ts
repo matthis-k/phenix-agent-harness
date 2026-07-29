@@ -10,15 +10,22 @@ export function renderWorkspaceTurn(
   state: WorkspaceTurnState,
 ): string {
   const activeDescendants = Math.max(0, state.activeDescendants);
-  if (!state.rootActive && activeDescendants === 0) {
-    return `${heading(theme, "TURN")} ${color(theme, "dim", "·")} ${strong(theme, "YOU")}`;
+  if (!state.rootActive) {
+    const background =
+      activeDescendants > 0
+        ? ` ${color(theme, "dim", "·")} ${color(
+            theme,
+            "muted",
+            `${activeDescendants} agent${activeDescendants === 1 ? "" : "s"} background`,
+          )}`
+        : "";
+    return `${heading(theme, "TURN")} ${color(theme, "dim", "·")} ${strong(
+      theme,
+      "YOU",
+    )}${background}`;
   }
 
-  const owner = state.rootActive
-    ? activeDescendants > 0
-      ? "PHENIX + AGENTS"
-      : "PHENIX"
-    : "AGENTS";
+  const owner = activeDescendants > 0 ? "PHENIX + AGENTS" : "PHENIX";
   const count =
     activeDescendants > 0
       ? ` ${color(theme, "dim", "·")} ${color(theme, "warning", `${activeDescendants} active`)}`
