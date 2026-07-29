@@ -1,34 +1,30 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  handoffNativeWorkspaceInput,
-  type NativeWorkspaceHandoffAction,
-} from "../extension/workspace/native-input-handoff.ts";
+import type { AppKeybinding, KeybindingsManager } from "@earendil-works/pi-coding-agent";
 
-test("closes the workspace before forwarding the same native key", () => {
-  const calls: string[] = [];
-  let action: NativeWorkspaceHandoffAction | undefined;
+import { handoffNativeWorkspaceInput } from "../extension/workspace/native-input-handoff.ts";
+import type { NativeInputDelegation } from "../extension/workspace/workspace-interaction.ts";
+
+const KEY_ACTIONS: Readonly<Record<string, AppKeybinding>> = {
+  "\x07": "app.editor.external",
+};
+const KEYBINDINGS = {
+  matches: (data: string, action: AppKeybinding) => KEY_ACTIONS[data] === action,
+} as Pick<KeybindingsManager, "matches">;
+
+test("resolves the native action before forwarding the same key", () => {
+  let delegation: NativeInputDelegation | undefined;
   const result = handoffNativeWorkspaceInput({
     data: "\x07",
-    workspace: {
-      getEditorText: () => "draft prompt",
-      resolveNativeInputDelegation: () => ({
-        action: "app.editor.external",
-        reopenWorkspace: true,
-      }),
-    },
-    setNativeEditorText: (text) => calls.push(`set:${text}`),
-    closeWorkspace: (next) => {
-      calls.push("close");
-      action = next;
+    keybindings: KEYBINDINGS,
+    handoff: (next) => {
+      delegation = next;
     },
   });
 
-  assert.deepEqual(calls, ["set:draft prompt", "close"]);
-  assert.deepEqual(action, {
-    kind: "native",
-    text: "draft prompt",
+  assert.deepEqual(delegation, {
+    action: "app.editor.external",
     reopenWorkspace: true,
   });
   assert.deepEqual(result, { data: "\x07" });
@@ -38,14 +34,8 @@ test("leaves unrelated input in the focused workspace", () => {
   let touched = false;
   const result = handoffNativeWorkspaceInput({
     data: "x",
-    workspace: {
-      getEditorText: () => "draft",
-      resolveNativeInputDelegation: () => undefined,
-    },
-    setNativeEditorText: () => {
-      touched = true;
-    },
-    closeWorkspace: () => {
+    keybindings: KEYBINDINGS,
+    handoff: () => {
       touched = true;
     },
   });
