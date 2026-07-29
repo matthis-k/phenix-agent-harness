@@ -53,7 +53,10 @@ export function workspaceItemIndex(snapshot: PhenixWorkspaceSnapshot): Workspace
     runs: projectWorkspaceRuns(snapshot.ui.tree.root).map((row) => String(row.node.run.id)),
     tasks: projectWorkspaceTasks(snapshot.tasks.root).map((row) => row.node.id),
     files: [],
-    facts: [...snapshot.ui.facts].reverse().slice(0, 50).map((fact) => fact.id),
+    facts: [...snapshot.ui.facts]
+      .reverse()
+      .slice(0, 50)
+      .map((fact) => fact.id),
   };
 }
 

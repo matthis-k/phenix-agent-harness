@@ -1,15 +1,9 @@
 import type { RunTreeNode } from "../../application/interfaces.ts";
 import { WorkspaceController } from "../../application/workspace/controller.ts";
 import type { RunId } from "../../domain/shared.ts";
-import type {
-  WorkspaceEvent,
-  WorkspaceSnapshotEnvelope,
-} from "../../domain/workspace/events.ts";
 import type { WorkspaceError } from "../../domain/workspace/errors.ts";
-import {
-  createInitialWorkspaceState,
-  type WorkspaceState,
-} from "../../domain/workspace/state.ts";
+import type { WorkspaceEvent, WorkspaceSnapshotEnvelope } from "../../domain/workspace/events.ts";
+import { createInitialWorkspaceState, type WorkspaceState } from "../../domain/workspace/state.ts";
 import type {
   LoadedWorkspaceTranscript,
   WorkspaceEffectRuntime,
@@ -51,7 +45,8 @@ export class WorkspaceControllerAdapter {
       loadTranscript: async (selectedRunId) => {
         const snapshot = controller.snapshot?.value ?? options.snapshot;
         const node = findWorkspaceRun(snapshot.ui.tree.root, String(selectedRunId));
-        if (!node) throw new Error(`Run ${selectedRunId} is not present in the current workspace snapshot`);
+        if (!node)
+          throw new Error(`Run ${selectedRunId} is not present in the current workspace snapshot`);
         const loaded =
           node.run.kind === "root" ? snapshot.rootTranscript : await options.loadTranscript(node);
         return loadedTranscript(selectedRunId, normalizeTranscript(node, loaded));
@@ -154,9 +149,7 @@ function loadedTranscript(
   return {
     handle: {
       key:
-        transcript.sessionFile ??
-        transcript.sessionId ??
-        `run:${String(selectedRunId)}:transcript`,
+        transcript.sessionFile ?? transcript.sessionId ?? `run:${String(selectedRunId)}:transcript`,
     },
     value: transcript,
   };

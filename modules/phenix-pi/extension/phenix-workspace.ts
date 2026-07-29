@@ -10,8 +10,8 @@ import {
   CombinedAutocompleteProvider,
   type Component,
   matchesKey,
-  sliceByColumn,
   type SlashCommand,
+  sliceByColumn,
   type TUI,
   truncateToWidth,
   visibleWidth,
@@ -338,13 +338,12 @@ export class PhenixWorkspace implements Component {
     await this.submit(text);
   }
 
-  private renderTranscript(
-    width: number,
-    height: number,
-    focus: WorkspaceFocus,
-  ): TranscriptRender {
+  private renderTranscript(width: number, height: number, focus: WorkspaceFocus): TranscriptRender {
     const snapshot = this.controller.snapshot;
-    const selected = findWorkspaceRun(snapshot.ui.tree.root, String(this.controller.state.activeRunId));
+    const selected = findWorkspaceRun(
+      snapshot.ui.tree.root,
+      String(this.controller.state.activeRunId),
+    );
     const title =
       selected?.run.kind === "root"
         ? "Root session"
@@ -388,11 +387,7 @@ export class PhenixWorkspace implements Component {
     return { lines: [header, ...lines], maxOffset };
   }
 
-  private renderSidebar(
-    width: number,
-    height: number,
-    focus: WorkspaceFocus,
-  ): SidebarRender {
+  private renderSidebar(width: number, height: number, focus: WorkspaceFocus): SidebarRender {
     const snapshot = this.controller.snapshot;
     const profile = snapshot.ui.profile;
     const diagnostics = snapshot.ui.diagnostics.counts;
@@ -443,11 +438,7 @@ export class PhenixWorkspace implements Component {
     };
   }
 
-  private renderRunSection(
-    width: number,
-    height: number,
-    focus: WorkspaceFocus,
-  ): SectionRender {
+  private renderRunSection(width: number, height: number, focus: WorkspaceFocus): SectionRender {
     const items = projectWorkspaceRuns(this.controller.snapshot.ui.tree.root);
     const pane = this.controller.state.panes.runs;
     const selectedIndex = rowIndex(items, pane.selectedItemId, (item) => String(item.node.run.id));
@@ -496,11 +487,7 @@ export class PhenixWorkspace implements Component {
     return active ? surface(this.theme, "customMessageBg", line) : line;
   }
 
-  private renderTaskSection(
-    width: number,
-    height: number,
-    focus: WorkspaceFocus,
-  ): SectionRender {
+  private renderTaskSection(width: number, height: number, focus: WorkspaceFocus): SectionRender {
     const items = projectWorkspaceTasks(this.controller.snapshot.tasks.root);
     const pane = this.controller.state.panes.tasks;
     const selectedIndex = rowIndex(items, pane.selectedItemId, (item) => item.node.id);
@@ -534,11 +521,7 @@ export class PhenixWorkspace implements Component {
     return { section: "tasks", lines: [title, ...body], offset };
   }
 
-  private renderFactSection(
-    width: number,
-    height: number,
-    focus: WorkspaceFocus,
-  ): SectionRender {
+  private renderFactSection(width: number, height: number, focus: WorkspaceFocus): SectionRender {
     const items = [...this.controller.snapshot.ui.facts].reverse().slice(0, 50);
     const pane = this.controller.state.panes.facts;
     const selectedIndex = rowIndex(items, pane.selectedItemId, (item) => item.id);
@@ -760,10 +743,7 @@ export class PhenixWorkspace implements Component {
   }
 
   private effectiveFocus(): WorkspaceFocus {
-    return effectiveFocus(
-      this.controller.state.focusedPaneId,
-      this.frame.layout.sidebarVisible,
-    );
+    return effectiveFocus(this.controller.state.focusedPaneId, this.frame.layout.sidebarVisible);
   }
 
   private renderSmall(width: number, height: number): string[] {
@@ -891,4 +871,12 @@ function keepVisible(offset: number, selected: number, height: number, total: nu
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(Math.max(value, minimum), Math.max(minimum, maximum));
+}
+
+function isUp(data: string): boolean {
+  return matchesKey(data, "up") || data === "k";
+}
+
+function isDown(data: string): boolean {
+  return matchesKey(data, "down") || data === "j";
 }
