@@ -12,8 +12,8 @@ import {
   ListView,
   listBlock,
   spacerBlock,
-  textBlock,
   TreeView,
+  textBlock,
   treeBlock,
 } from "./components/index.ts";
 import {
@@ -279,7 +279,10 @@ export function renderFacts(
   } else {
     blocks.push(listBlock(list));
   }
-  blocks.push(spacerBlock(), textBlock([color(theme, "dim", "/phenix facts off · /phenix status")]));
+  blocks.push(
+    spacerBlock(),
+    textBlock([color(theme, "dim", "/phenix facts off · /phenix status")]),
+  );
   return [...new DocumentView(blocks).render(width, { trimEnd: true }).lines];
 }
 
