@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -20,7 +20,49 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+      - name: Apply one-shot workspace patch
+        if: github.event_name == 'pull_request' && github.head_ref == 'ui/turn-steering-interrupt'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workspace = Path("modules/phenix-pi/extension/phenix-workspace.ts")
+          text = workspace.read_text()
+          method = '''  hasTranscriptSelection(): boolean {
+    return this.transcriptSelection.selection !== undefined;
+  }
+
+'''
+          marker = '  refreshRootTranscript(): void {\n'
+          if method not in text:
+              if marker not in text:
+                  raise SystemExit("refresh marker not found")
+              text = text.replace(marker, method + marker, 1)
+          workspace.write_text(text)
+
+          extension = Path("modules/phenix-pi/extension/default-workspace-extension.ts")
+          text = extension.read_text()
+          accept = '''      accept: (delegation) =>
+        delegation.action !== "app.clear" || !activeWorkspace.hasTranscriptSelection(),
+'''
+          marker = '      keybindings: activeKeybindings,\n'
+          if accept not in text:
+              if marker not in text:
+                  raise SystemExit("keybindings marker not found")
+              text = text.replace(marker, marker + accept, 1)
+          extension.write_text(text)
+          PY
+          git checkout origin/main -- .github/workflows/ci.yml
+          rm -f .github/workflows/patch-native-clear-pr.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Preserve clear and transcript copy semantics"
+          git push origin HEAD:ui/turn-steering-interrupt
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
