@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import type { PhenixRuntime } from "../composition/create-phenix-runtime.ts";
+import type { DiagnosticSummary } from "../domain/diagnostics.ts";
 import type { RunSnapshot } from "../domain/run/model.ts";
 import type { RunId } from "../domain/shared.ts";
 import {
@@ -29,10 +30,18 @@ const rootSnapshot = {
   activeChildren: [],
 } as unknown as RunSnapshot;
 
+const healthyDiagnostics: DiagnosticSummary = {
+  total: 0,
+  artifacts: 0,
+  counts: { trace: 0, info: 0, warning: 0, error: 0 },
+  failures: { recovering: 0, recovered: 0, terminal: 0 },
+};
+
 function runtimeFixture(input: {
   readonly ledger: string;
   readonly diagnostics: string;
   readonly profile?: Promise<{ readonly modelSet: "mixed" }>;
+  readonly diagnosticSummary?: DiagnosticSummary;
 }): PhenixRuntime {
   return {
     profiles: {
@@ -59,11 +68,7 @@ function runtimeFixture(input: {
       inspect: async () => rootSnapshot,
     },
     diagnostics: {
-      summary: async () => ({
-        total: 0,
-        artifacts: 0,
-        counts: { trace: 0, info: 0, warning: 0, error: 0 },
-      }),
+      summary: async () => input.diagnosticSummary ?? healthyDiagnostics,
       pathFor: () => input.diagnostics,
       artifactDirectoryFor: () => undefined,
     },
@@ -113,12 +118,80 @@ test("health report is compact globally and detailed by topic", async () => {
     assert.match(formatPhenixHealth(report, { json: false }), /✓ storage/);
     assert.match(
       formatPhenixHealth(report, { topic: "runtime", json: false }),
-      /root running; 1 active runs; sequence 7/,
+      /root running; 1 active runs; sequence 7; 0 recovering; 0 terminal errors/,
     );
     assert.deepEqual(
       JSON.parse(formatPhenixHealth(report, { topic: "models", json: true })),
       report.sections.find((section) => section.topic === "models"),
     );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("active recovery degrades health without becoming a terminal error", async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "phenix-health-recovering-"));
+  const ledger = path.join(directory, "events.jsonl");
+  const diagnostics = path.join(directory, "logs.jsonl");
+  writeFileSync(ledger, "");
+  writeFileSync(diagnostics, "");
+
+  try {
+    const report = await inspectPhenixHealth({
+      runtime: runtimeFixture({
+        ledger,
+        diagnostics,
+        diagnosticSummary: {
+          total: 6,
+          artifacts: 0,
+          counts: { trace: 2, info: 3, warning: 1, error: 0 },
+          observedCounts: { trace: 2, info: 2, warning: 0, error: 2 },
+          failures: { recovering: 1, recovered: 0, terminal: 0 },
+        },
+      }),
+      rootRunId,
+      integrations: [{ id: "hypa", state: "loaded" }],
+      hasModelSet: () => true,
+    });
+
+    const runtime = report.sections.find((section) => section.topic === "runtime");
+    assert.equal(runtime?.state, "degraded");
+    assert.match(runtime?.summary ?? "", /1 recovering; 0 terminal errors/);
+    assert.match(runtime?.details.join("\n") ?? "", /1 recovering, 0 recovered, 0 terminal/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("terminal workflow failures remain final health errors", async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "phenix-health-terminal-"));
+  const ledger = path.join(directory, "events.jsonl");
+  const diagnostics = path.join(directory, "logs.jsonl");
+  writeFileSync(ledger, "");
+  writeFileSync(diagnostics, "");
+
+  try {
+    const report = await inspectPhenixHealth({
+      runtime: runtimeFixture({
+        ledger,
+        diagnostics,
+        diagnosticSummary: {
+          total: 8,
+          artifacts: 0,
+          counts: { trace: 2, info: 5, warning: 0, error: 1 },
+          observedCounts: { trace: 2, info: 3, warning: 0, error: 3 },
+          failures: { recovering: 0, recovered: 1, terminal: 1 },
+        },
+      }),
+      rootRunId,
+      integrations: [{ id: "hypa", state: "loaded" }],
+      hasModelSet: () => true,
+    });
+
+    const runtime = report.sections.find((section) => section.topic === "runtime");
+    assert.equal(runtime?.state, "degraded");
+    assert.match(runtime?.summary ?? "", /0 recovering; 1 terminal errors/);
+    assert.match(runtime?.details.join("\n") ?? "", /0 recovering, 1 recovered, 1 terminal/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

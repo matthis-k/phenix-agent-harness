@@ -1,6 +1,7 @@
 import { JsonlRunLedger } from "../adapters/persistence/jsonl-run-ledger.ts";
 import type { OrderedDomainEventBus } from "../application/domain-event-bus.ts";
 import type { DynamicWorkflowExecutionService } from "../application/dynamic-workflow-execution.ts";
+import { HealthDiagnosticLog } from "../application/health-diagnostic-log.ts";
 import type {
   AttentionFacade,
   CatalogFacade,
@@ -64,6 +65,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
       activeRootRunId ? infrastructure.profiles.current(activeRootRunId) : DEFAULT_SESSION_PROFILE,
     notifyRoot: (message) => rootNotifier?.(message),
   });
+  const diagnostics = new HealthDiagnosticLog(infrastructure.diagnostics, services.queries);
   const unsubscribePiBridge = createPiEventBridge(host.piEventBus, infrastructure.events);
 
   return {
@@ -76,7 +78,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     queries: services.queries,
     transcripts: services.transcripts,
     events: infrastructure.events,
-    diagnostics: infrastructure.diagnostics,
+    diagnostics,
     async startRoot(input) {
       activeRootRunId = input.id;
       await infrastructure.diagnostics.record({
