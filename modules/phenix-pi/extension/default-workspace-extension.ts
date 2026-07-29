@@ -283,7 +283,7 @@ async function openWorkspace(
               binding.runtime.transcripts.get(node.run.id),
               ctx.cwd,
             ),
-          subscribe: (listener) => subscribeWorkspaceChanges(binding, listener),
+          subscribe: (listener) => subscribeWorkspaceChanges(binding.runtime, listener),
           submit: async (text) => {
             lifecycle.onSubmitStarted();
             try {
@@ -364,7 +364,7 @@ async function openInspector(
             binding.runtime.transcripts.get(node.run.id),
             ctx.cwd,
           ),
-        subscribe: (listener) => subscribeWorkspaceChanges(binding, listener),
+        subscribe: (listener) => subscribeWorkspaceChanges(binding.runtime, listener),
         onClose: () => done(undefined),
       }),
     {
