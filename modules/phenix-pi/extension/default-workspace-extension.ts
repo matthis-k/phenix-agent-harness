@@ -6,18 +6,16 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { SlashCommand } from "@earendil-works/pi-tui";
 
-import type { RunTreeNode } from "../application/interfaces.ts";
 import {
   loadNativeRunTranscript,
-  loadNativeRunTranscriptResult,
   readyNativeRunTranscript,
   renderNativeTranscript,
 } from "./native-run-transcript.ts";
+import { renderNativeRunTranscriptResult } from "./native-run-transcript-view.ts";
 import { loadPhenixUiSnapshot, PhenixUi, type PhenixUiTarget } from "./phenix-ui.ts";
 import {
   PhenixWorkspace,
   type PhenixWorkspaceAction,
-  type PhenixWorkspaceOptions,
   type PhenixWorkspaceSnapshot,
 } from "./phenix-workspace.ts";
 import {
@@ -124,11 +122,6 @@ async function openWorkspace(
         name: command.name,
         description: command.description,
       }));
-      const loadTranscript = ((node: RunTreeNode) =>
-        loadNativeRunTranscriptResult(
-          node,
-          tui,
-        )) as unknown as PhenixWorkspaceOptions["loadTranscript"];
       const instance = new PhenixWorkspace({
         tui,
         theme,
@@ -137,7 +130,7 @@ async function openWorkspace(
         commands,
         snapshot,
         load,
-        loadTranscript,
+        loadTranscript: (node) => loadNativeRunTranscript(node, tui),
         subscribe: (listener) => {
           const unsubscribeEvents = binding.runtime.events.subscribe(listener);
           const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
@@ -206,7 +199,8 @@ async function openInspector(
         initial,
         snapshot,
         load,
-        loadTranscript: (node: RunTreeNode) => loadNativeRunTranscript(node, tui),
+        loadTranscript: async (node) =>
+          renderNativeRunTranscriptResult(await loadNativeRunTranscript(node, tui), node),
         subscribe: (listener) => {
           const unsubscribeEvents = binding.runtime.events.subscribe(listener);
           const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
