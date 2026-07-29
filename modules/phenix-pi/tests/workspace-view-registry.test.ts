@@ -126,7 +126,11 @@ function runNode(
   };
 }
 
-function taskNode(id: string, effectiveState: TaskNode["effectiveState"], children: TaskNode[] = []): TaskNode {
+function taskNode(
+  id: string,
+  effectiveState: TaskNode["effectiveState"],
+  children: TaskNode[] = [],
+): TaskNode {
   return {
     kind: "execution",
     id,
@@ -136,5 +140,5 @@ function taskNode(id: string, effectiveState: TaskNode["effectiveState"], childr
     effectiveState,
     progress: [],
     children,
-  } as TaskNode;
+  } as unknown as TaskNode;
 }
