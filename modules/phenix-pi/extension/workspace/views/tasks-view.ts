@@ -1,6 +1,6 @@
 import type { TaskNode } from "../../../domain/task/projection.ts";
-import { taskStateSymbol, truncateWorkspaceText } from "./workspace-view-format.ts";
 import { defineWorkspaceView } from "./workspace-view.ts";
+import { taskStateSymbol, truncateWorkspaceText } from "./workspace-view-format.ts";
 
 export interface WorkspaceTaskRow {
   readonly node: TaskNode;
