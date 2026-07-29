@@ -8,8 +8,11 @@ import { initTheme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 
 import type { RunTreeNode } from "../application/interfaces.ts";
+import { runId } from "../domain/shared.ts";
 import { loadNativeRunTranscriptResult } from "../extension/native-run-transcript.ts";
 import type { LiveAgentTranscriptSnapshot } from "../ports/live-agent-transcripts.ts";
+
+const LIVE_RUN_ID = runId("run-live-child");
 
 initTheme("dark");
 
@@ -75,7 +78,7 @@ test("switches a completed child to its durable transcript without an unavailabl
 function fixtureNode(state: string, sessionFile?: string): RunTreeNode {
   return {
     run: {
-      id: "run-live-child",
+      id: LIVE_RUN_ID,
       kind: "agent",
       definitionId: "agent.scout",
       input: {},
@@ -111,12 +114,12 @@ function fixtureNode(state: string, sessionFile?: string): RunTreeNode {
 
 function liveTranscript(text: string, sessionFile?: string): LiveAgentTranscriptSnapshot {
   return {
-    runId: "run-live-child",
+    runId: LIVE_RUN_ID,
     sessionId: "session-live-child",
     ...(sessionFile ? { sessionFile } : {}),
     completeHistory: true,
     messages: [assistantMessage(text)],
-  } as LiveAgentTranscriptSnapshot;
+  };
 }
 
 function assistantMessage(text: string): unknown {
