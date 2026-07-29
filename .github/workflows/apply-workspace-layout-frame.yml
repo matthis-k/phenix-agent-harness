@@ -1,0 +1,30 @@
+name: Apply immutable workspace frame
+
+on:
+  push:
+    branches: [migration/workspace-layout-frame]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with: { fetch-depth: 0 }
+      - name: Apply production frame migration
+        run: python .github/apply-workspace-layout-frame.py
+      - name: Remove one-shot files
+        run: rm .github/apply-workspace-layout-frame.py .github/workflows/apply-workspace-layout-frame.yml
+      - name: Validate patch
+        run: git diff --check
+      - name: Commit migrated source
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Migrate workspace to immutable layout frames"
+          git push origin HEAD:migration/workspace-layout-frame
