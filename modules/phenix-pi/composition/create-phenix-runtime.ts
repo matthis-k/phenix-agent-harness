@@ -9,6 +9,7 @@ import type {
   SessionProfileFacade,
   TaskFacade,
 } from "../application/interfaces.ts";
+import type { LiveAgentTranscriptReader } from "../application/live-agent-transcripts.ts";
 import type { ConcreteModelRef } from "../domain/definition/model.ts";
 import { DEFAULT_SESSION_PROFILE, type RootRunInput } from "../domain/run/model.ts";
 import type { RunId } from "../domain/shared.ts";
@@ -32,6 +33,7 @@ export interface PhenixRuntime {
   readonly tasks: TaskFacade;
   readonly catalog: CatalogFacade;
   readonly queries: QueryFacade;
+  readonly transcripts: LiveAgentTranscriptReader;
   readonly events: OrderedDomainEventBus;
   readonly diagnostics: DiagnosticLog;
   startRoot(input: {
@@ -72,6 +74,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     tasks: services.tasks,
     catalog: services.catalog,
     queries: services.queries,
+    transcripts: services.transcripts,
     events: infrastructure.events,
     diagnostics: infrastructure.diagnostics,
     async startRoot(input) {
@@ -130,6 +133,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
       await infrastructure.events.drain();
       await services.checkpoints.shutdown();
       services.supervision.shutdown();
+      services.transcripts.clear();
       await infrastructure.diagnostics.record({
         rootRunId,
         runId: rootRunId,
