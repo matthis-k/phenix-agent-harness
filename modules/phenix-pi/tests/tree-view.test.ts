@@ -46,12 +46,7 @@ test("flattens only expanded branches and preserves selection", () => {
   view.dispatch({ kind: "move", direction: 1 }, 5);
   assert.equal(view.selectedId, "child");
   view.dispatch({ kind: "expand" }, 5);
-  assert.deepEqual(view.render(30, 5).visibleNodeIds, [
-    "root",
-    "child",
-    "grandchild",
-    "sibling",
-  ]);
+  assert.deepEqual(view.render(30, 5).visibleNodeIds, ["root", "child", "grandchild", "sibling"]);
   assert.equal(view.selectedId, "child");
 });
 
