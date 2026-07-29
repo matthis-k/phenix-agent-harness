@@ -24,7 +24,5 @@ export function documentComponent(
   lines: readonly string[],
   options: { readonly paddingX?: number } = {},
 ): PresentationComponent {
-  return new PresentationComponent(
-    new DocumentView([textBlock(lines, { paddingX: options.paddingX })]),
-  );
+  return new PresentationComponent(new DocumentView([textBlock(lines, options)]));
 }
