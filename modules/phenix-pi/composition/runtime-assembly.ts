@@ -5,6 +5,7 @@ import type { EventBus, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { JsonlDiagnosticLog } from "../adapters/persistence/jsonl-diagnostic-log.ts";
 import { JsonlRunLedger } from "../adapters/persistence/jsonl-run-ledger.ts";
 import { PiSdkAgentSessionBackend } from "../adapters/pi-sdk/agent-session-backend.ts";
+import { LiveAgentTranscriptStore } from "../adapters/pi-sdk/live-agent-transcript-store.ts";
 import { ProcessLocalOperationRunner } from "../adapters/process/local-operation-runner.ts";
 import {
   PhenixModelResolver,
@@ -25,7 +26,6 @@ import { DynamicWorkflowRuntimeRegistry } from "../application/dynamic-workflow-
 import { ExecutionFacadeImpl } from "../application/execution-facade.ts";
 import { ExecutionStore } from "../application/execution-store.ts";
 import { SessionInvocationPolicy } from "../application/invocation-policy.ts";
-import { LiveAgentTranscriptStore } from "../application/live-agent-transcripts.ts";
 import { ModelExecutionFacade } from "../application/model-execution-facade.ts";
 import { ProfileAwareModelResolver } from "../application/profile-aware-model-resolver.ts";
 import { QueryFacadeImpl } from "../application/query-facade.ts";
