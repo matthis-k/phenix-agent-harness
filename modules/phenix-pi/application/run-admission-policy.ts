@@ -59,7 +59,9 @@ export class RunAdmissionPolicy {
       const original = this.store.projection.requireRun(request.retryOf);
       this.assertRetryAccessible(parent, original);
       if (original.definitionId !== definition.id) {
-        throw new Error(`Retry definition ${definition.id} does not match ${original.definitionId}`);
+        throw new Error(
+          `Retry definition ${definition.id} does not match ${original.definitionId}`,
+        );
       }
       return undefined;
     }
@@ -158,9 +160,7 @@ export class RunAdmissionPolicy {
           };
     if (!override) return base;
 
-    const allowedDefinitions = new Set(
-      override.invokableDefinitions ?? base.invokableDefinitions,
-    );
+    const allowedDefinitions = new Set(override.invokableDefinitions ?? base.invokableDefinitions);
     return {
       invokableDefinitions: base.invokableDefinitions.filter((id) => allowedDefinitions.has(id)),
       maxDepth: Math.min(base.maxDepth, override.maxDepth ?? base.maxDepth),
