@@ -8,10 +8,7 @@ import type {
   LoadedWorkspaceTranscript,
   WorkspaceEffectRuntime,
 } from "../../ports/workspace-effects.ts";
-import {
-  type NativeRunTranscript,
-  readyNativeRunTranscript,
-} from "../native-run-transcript.ts";
+import { type NativeRunTranscript, readyNativeRunTranscript } from "../native-run-transcript.ts";
 import { transcriptAvailabilityMessage } from "../transcript-availability.ts";
 import {
   findWorkspaceRun,
