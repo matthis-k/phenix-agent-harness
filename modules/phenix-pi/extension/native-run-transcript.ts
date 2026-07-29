@@ -20,17 +20,52 @@ import {
   type TruncationResult,
   UserMessageComponent,
 } from "@earendil-works/pi-coding-agent";
-import { Container, Spacer, type TUI } from "@earendil-works/pi-tui";
+import { type Component, Container, Spacer, type TUI } from "@earendil-works/pi-tui";
 
 import type { RunTreeNode } from "../application/interfaces.ts";
 import type {
   LoadedWorkspaceTranscript,
   ReadyWorkspaceTranscript,
 } from "../ports/workspace-effects.ts";
+import type { ObservabilityTheme } from "./observability-theme.ts";
+import {
+  nativeResultEntryData,
+  renderNativeResultEntry,
+  RESULT_ENTRY_TYPE,
+} from "./result-display.ts";
 import { renderNativeRunTranscriptResult } from "./native-run-transcript-view.ts";
 
+export type NativeTranscriptChunkKind =
+  | "user"
+  | "assistant"
+  | "tool"
+  | "bash"
+  | "custom-message"
+  | "summary"
+  | "result";
+
+export interface NativeTranscriptChunk {
+  readonly id: string;
+  readonly kind: NativeTranscriptChunkKind;
+  readonly component: Component;
+}
+
+export class NativeTranscriptComponent extends Container {
+  private readonly chunkValues: NativeTranscriptChunk[] = [];
+
+  get chunks(): readonly NativeTranscriptChunk[] {
+    return this.chunkValues;
+  }
+
+  addChunk(chunk: NativeTranscriptChunk, spacer = false): void {
+    if (spacer && this.chunkValues.length > 0) this.addChild(new Spacer(1));
+    this.chunkValues.push(chunk);
+    this.addChild(chunk.component);
+  }
+}
+
 export interface NativeRunTranscript {
-  readonly component: Container;
+  readonly component: NativeTranscriptComponent;
   readonly sessionId: string;
   readonly sessionFile?: string;
 }
@@ -49,13 +84,18 @@ export function readyNativeRunTranscript(
 export async function loadNativeRunTranscript(
   node: RunTreeNode,
   tui: TUI,
+  theme: ObservabilityTheme,
 ): Promise<NativeRunTranscript> {
-  return renderNativeRunTranscriptResult(await loadNativeRunTranscriptResult(node, tui), node);
+  return renderNativeRunTranscriptResult(
+    await loadNativeRunTranscriptResult(node, tui, theme),
+    node,
+  );
 }
 
 export async function loadNativeRunTranscriptResult(
   node: RunTreeNode,
   tui: TUI,
+  theme: ObservabilityTheme,
 ): Promise<LoadedWorkspaceTranscript<NativeRunTranscript>> {
   if (node.run.kind === "workflow") {
     return { kind: "not-applicable", reason: "workflow" };
@@ -100,7 +140,7 @@ export async function loadNativeRunTranscriptResult(
   const entries = fileEntries.filter((entry): entry is SessionEntry => entry.type !== "session");
   return readyNativeRunTranscript(
     {
-      component: renderNativeTranscript(buildContextEntries(entries), tui, header.cwd),
+      component: renderNativeTranscript(buildContextEntries(entries), tui, header.cwd, theme),
       sessionId: header.id,
       sessionFile,
     },
@@ -112,22 +152,44 @@ export function renderNativeTranscript(
   entries: readonly SessionEntry[],
   tui: TUI,
   cwd: string,
-): Container {
-  const transcript = new Container();
+  theme: ObservabilityTheme,
+): NativeTranscriptComponent {
+  const transcript = new NativeTranscriptComponent();
   const markdownTheme = getMarkdownTheme();
   const pendingTools = new Map<string, ToolExecutionComponent>();
-  let hasContent = false;
+  let chunkSequence = 0;
 
-  const add = (component: Parameters<Container["addChild"]>[0], spacer = false): void => {
-    if (spacer && hasContent) transcript.addChild(new Spacer(1));
-    transcript.addChild(component);
-    hasContent = true;
+  const add = (
+    kind: NativeTranscriptChunkKind,
+    component: Component,
+    spacer = false,
+    sourceId?: string,
+  ): void => {
+    transcript.addChunk(
+      {
+        id: sourceId ?? `chunk-${chunkSequence}`,
+        kind,
+        component,
+      },
+      spacer,
+    );
+    chunkSequence += 1;
   };
 
   for (const entry of entries) {
+    if (entry.type === "custom" && entry.customType === RESULT_ENTRY_TYPE) {
+      const data = nativeResultEntryData(entry.data);
+      if (data) add("result", renderNativeResultEntry(data, theme), true, entry.id);
+      continue;
+    }
+
     for (const message of sessionEntryToContextMessages(entry)) {
       if (message.role === "assistant") {
-        add(new AssistantMessageComponent(message, true, markdownTheme, "Thinking...", 1));
+        add(
+          "assistant",
+          new AssistantMessageComponent(message, true, markdownTheme, "Thinking...", 1),
+          true,
+        );
         for (const content of message.content) {
           if (content.type !== "toolCall") continue;
           const tool = new ToolExecutionComponent(
@@ -140,7 +202,7 @@ export function renderNativeTranscript(
             cwd,
           );
           tool.setExpanded(false);
-          add(tool);
+          add("tool", tool, false, content.id);
           if (message.stopReason === "aborted" || message.stopReason === "error") {
             tool.updateResult({
               content: [
@@ -170,8 +232,7 @@ export function renderNativeTranscript(
         continue;
       }
 
-      addNativeMessage(transcript, message, tui, markdownTheme, hasContent);
-      hasContent = true;
+      addNativeMessage(message, tui, markdownTheme, add);
     }
   }
 
@@ -179,28 +240,30 @@ export function renderNativeTranscript(
 }
 
 function addNativeMessage(
-  transcript: Container,
   message: Exclude<AgentMessage, { role: "assistant" | "toolResult" }>,
   tui: TUI,
   markdownTheme: ReturnType<typeof getMarkdownTheme>,
-  hasContent: boolean,
+  add: (
+    kind: NativeTranscriptChunkKind,
+    component: Component,
+    spacer?: boolean,
+    sourceId?: string,
+  ) => void,
 ): void {
   switch (message.role) {
     case "user": {
       const text = userMessageText(message);
       if (!text) return;
-      if (hasContent) transcript.addChild(new Spacer(1));
       const skill = parseSkillBlock(text);
       if (skill) {
         const invocation = new SkillInvocationMessageComponent(skill, markdownTheme);
         invocation.setExpanded(false);
-        transcript.addChild(invocation);
+        add("user", invocation, true);
         if (skill.userMessage) {
-          transcript.addChild(new Spacer(1));
-          transcript.addChild(new UserMessageComponent(skill.userMessage, markdownTheme, 1));
+          add("user", new UserMessageComponent(skill.userMessage, markdownTheme, 1), true);
         }
       } else {
-        transcript.addChild(new UserMessageComponent(text, markdownTheme, 1));
+        add("user", new UserMessageComponent(text, markdownTheme, 1), true);
       }
       return;
     }
@@ -218,28 +281,26 @@ function addNativeMessage(
         message.fullOutputPath,
       );
       component.setExpanded(false);
-      transcript.addChild(component);
+      add("bash", component, false);
       return;
     }
     case "custom": {
       if (!message.display) return;
       const component = new CustomMessageComponent(message, undefined, markdownTheme);
       component.setExpanded(false);
-      transcript.addChild(component);
+      add("custom-message", component, false);
       return;
     }
     case "compactionSummary": {
-      if (hasContent) transcript.addChild(new Spacer(1));
       const component = new CompactionSummaryMessageComponent(message, markdownTheme);
       component.setExpanded(false);
-      transcript.addChild(component);
+      add("summary", component, true);
       return;
     }
     case "branchSummary": {
-      if (hasContent) transcript.addChild(new Spacer(1));
       const component = new BranchSummaryMessageComponent(message, markdownTheme);
       component.setExpanded(false);
-      transcript.addChild(component);
+      add("summary", component, true);
       return;
     }
   }
