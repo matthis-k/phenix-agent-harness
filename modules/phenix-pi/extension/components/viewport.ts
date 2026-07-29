@@ -11,17 +11,11 @@ export interface ViewportRange {
   readonly maximumOffset: number;
 }
 
-export function viewportRange(
-  total: number,
-  height: number,
-  state: ViewportState,
-): ViewportRange {
+export function viewportRange(total: number, height: number, state: ViewportState): ViewportRange {
   const visibleHeight = Math.max(0, Math.floor(height));
   const itemCount = Math.max(0, Math.floor(total));
   const maximumOffset = Math.max(0, itemCount - visibleHeight);
-  const offset = state.followEnd
-    ? maximumOffset
-    : clamp(state.offset, 0, maximumOffset);
+  const offset = state.followEnd ? maximumOffset : clamp(state.offset, 0, maximumOffset);
   return {
     offset,
     end: Math.min(itemCount, offset + visibleHeight),
