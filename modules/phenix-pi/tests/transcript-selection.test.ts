@@ -36,7 +36,10 @@ test("normalizes reverse selections and exposes row-local highlight columns", ()
   assert.deepEqual(transcriptSelectionColumns(selection, 0, "abcdef"), [3, 6]);
   assert.deepEqual(transcriptSelectionColumns(selection, 1, "abcdef"), [0, 6]);
   assert.deepEqual(transcriptSelectionColumns(selection, 2, "abcdef"), [0, 4]);
-  assert.equal(selectedTranscriptText(["abcdef", "ghijkl", "mnopqr"], selection), "def\nghijkl\nmnop");
+  assert.equal(
+    selectedTranscriptText(["abcdef", "ghijkl", "mnopqr"], selection),
+    "def\nghijkl\nmnop",
+  );
 });
 
 test("dragging beyond transcript bounds clamps selection without including sidebar content", () => {
