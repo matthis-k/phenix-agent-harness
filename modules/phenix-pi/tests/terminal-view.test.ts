@@ -5,7 +5,6 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 
 import { TerminalView } from "../extension/components/terminal-view.ts";
 
-
 test("follows appended output until the user scrolls away", () => {
   const view = new TerminalView();
   view.setLines(["zero", "one", "two", "three", "four"]);
