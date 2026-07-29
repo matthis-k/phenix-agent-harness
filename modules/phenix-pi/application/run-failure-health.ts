@@ -23,9 +23,7 @@ export function summarizeRunFailures(root: RunTreeNode): DiagnosticFailureCounts
   const statusById = new Map(
     candidates.map((run) => [run.id, classifyFailure(run, byId, retries)] as const),
   );
-  const visible = candidates.filter(
-    (run) => !hasClassifiedFailureAncestor(run, byId, statusById),
-  );
+  const visible = candidates.filter((run) => !hasClassifiedFailureAncestor(run, byId, statusById));
   const counts: Record<FailureState, number> = {
     recovering: 0,
     recovered: 0,
@@ -90,10 +88,7 @@ function retryAttempts(
   return attempts;
 }
 
-function retryIncidentRoot(
-  run: RunRecord,
-  byId: ReadonlyMap<RunId, RunRecord>,
-): RunRecord {
+function retryIncidentRoot(run: RunRecord, byId: ReadonlyMap<RunId, RunRecord>): RunRecord {
   let current = run;
   const seen = new Set<RunId>();
   while (current.compiled.invocation.retryOf) {
@@ -106,10 +101,7 @@ function retryIncidentRoot(
   return current;
 }
 
-function ancestors(
-  run: RunRecord,
-  byId: ReadonlyMap<RunId, RunRecord>,
-): readonly RunRecord[] {
+function ancestors(run: RunRecord, byId: ReadonlyMap<RunId, RunRecord>): readonly RunRecord[] {
   const output: RunRecord[] = [];
   const seen = new Set<RunId>();
   let parentId = run.parentId;
