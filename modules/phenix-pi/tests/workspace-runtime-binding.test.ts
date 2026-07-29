@@ -68,18 +68,14 @@ test("workspace views subscribe and dispose all changing runtime projections tog
       };
     },
   };
-  const ready = {
-    runtime: {
-      events: source,
-      diagnostics: source,
-      transcripts: source,
-    } as unknown as WorkspaceRuntimeBinding["runtime"],
-    rootRunId: "root-current" as WorkspaceRuntimeBinding["rootRunId"],
-    integrations: "healthy",
-  };
+  const runtime = {
+    events: source,
+    diagnostics: source,
+    transcripts: source,
+  } as unknown as WorkspaceRuntimeBinding["runtime"];
   let notifications = 0;
 
-  const dispose = subscribeWorkspaceChanges(ready, () => {
+  const dispose = subscribeWorkspaceChanges(runtime, () => {
     notifications += 1;
   });
   for (const listener of listeners) listener();
