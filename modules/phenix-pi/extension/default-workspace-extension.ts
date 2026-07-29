@@ -19,6 +19,7 @@ import {
   type PhenixWorkspaceAction,
   type PhenixWorkspaceSnapshot,
 } from "./phenix-workspace.ts";
+import { handoffNativeWorkspaceInput } from "./workspace/native-input-handoff.ts";
 import {
   subscribeWorkspaceRuntime,
   type WorkspaceRuntimeBinding,
@@ -100,6 +101,8 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
         }
         if (action.kind === "native") {
           ctx.ui.setEditorText(action.text);
+          reopen = action.reopenWorkspace === true;
+          continue;
         }
         reopen = false;
       }
@@ -115,51 +118,74 @@ async function openWorkspace(
   binding: WorkspaceRuntimeBinding,
   ready: (workspace: PhenixWorkspace, done: (action: PhenixWorkspaceAction) => void) => void,
 ): Promise<PhenixWorkspaceAction> {
-  return ctx.ui.custom(
-    async (tui, theme, keybindings, done) => {
-      const load = () => loadWorkspaceSnapshot(ctx, binding, tui, theme);
-      const snapshot = await load();
-      const commands: SlashCommand[] = pi.getCommands().map((command) => ({
-        name: command.name,
-        description: command.description,
-      }));
-      const instance = new PhenixWorkspace({
-        tui,
-        theme,
-        keybindings,
-        cwd: ctx.cwd,
-        commands,
-        snapshot,
-        load,
-        loadTranscript: (node) => loadNativeRunTranscriptResult(node, tui, theme),
-        subscribe: (listener) => {
-          const unsubscribeEvents = binding.runtime.events.subscribe(listener);
-          const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
-          return () => {
-            unsubscribeEvents();
-            unsubscribeDiagnostics();
-          };
-        },
-        submit: async (text) => {
-          await Promise.resolve(
-            pi.sendUserMessage(text, ctx.isIdle() ? undefined : { deliverAs: "steer" }),
-          );
-        },
-        onAction: done,
-      });
-      ready(instance, done);
-      return instance;
-    },
-    {
-      overlay: true,
-      overlayOptions: {
-        width: "100%",
-        maxHeight: "100%",
-        anchor: "top-left",
-        margin: 0,
+  let activeWorkspace: PhenixWorkspace | undefined;
+  let closeWorkspace: ((action: PhenixWorkspaceAction) => void) | undefined;
+  const unsubscribeInput = ctx.ui.onTerminalInput((data) => {
+    if (!activeWorkspace || !closeWorkspace) return undefined;
+    return handoffNativeWorkspaceInput({
+      data,
+      workspace: activeWorkspace,
+      setNativeEditorText: (text) => ctx.ui.setEditorText(text),
+      closeWorkspace: (action) => {
+        const close = closeWorkspace;
+        activeWorkspace = undefined;
+        closeWorkspace = undefined;
+        close?.(action);
       },
-    },
-  );
+    });
+  });
+
+  try {
+    return await ctx.ui.custom(
+      async (tui, theme, keybindings, done) => {
+        const load = () => loadWorkspaceSnapshot(ctx, binding, tui, theme);
+        const snapshot = await load();
+        const commands: SlashCommand[] = pi.getCommands().map((command) => ({
+          name: command.name,
+          description: command.description,
+        }));
+        const instance = new PhenixWorkspace({
+          tui,
+          theme,
+          keybindings,
+          cwd: ctx.cwd,
+          commands,
+          snapshot,
+          load,
+          loadTranscript: (node) => loadNativeRunTranscriptResult(node, tui, theme),
+          subscribe: (listener) => {
+            const unsubscribeEvents = binding.runtime.events.subscribe(listener);
+            const unsubscribeDiagnostics = binding.runtime.diagnostics.subscribe(listener);
+            return () => {
+              unsubscribeEvents();
+              unsubscribeDiagnostics();
+            };
+          },
+          submit: async (text) => {
+            await Promise.resolve(
+              pi.sendUserMessage(text, ctx.isIdle() ? undefined : { deliverAs: "steer" }),
+            );
+          },
+          onAction: done,
+        });
+        activeWorkspace = instance;
+        closeWorkspace = done;
+        ready(instance, done);
+        return instance;
+      },
+      {
+        overlay: true,
+        overlayOptions: {
+          width: "100%",
+          maxHeight: "100%",
+          anchor: "top-left",
+          margin: 0,
+        },
+      },
+    );
+  } finally {
+    unsubscribeInput();
+  }
 }
 
 async function loadWorkspaceSnapshot(
