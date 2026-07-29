@@ -1,0 +1,103 @@
+name: Branch autofix
+
+on:
+  push:
+    branches: [ui/live-subsession-transcripts]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: branch-autofix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+          ref: ui/live-subsession-transcripts
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
+      - name: Apply targeted fixes
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          path = Path("modules/phenix-pi/extension/native-run-transcript.ts")
+          source = path.read_text()
+
+          replacements = {
+              '''import type {
+            LoadedWorkspaceTranscript,
+            ReadyWorkspaceTranscript,
+          } from "../ports/workspace-effects.ts";
+          import type { LiveAgentTranscriptSnapshot } from "../ports/live-agent-transcripts.ts";''': '''import type { LiveAgentTranscriptSnapshot } from "../ports/live-agent-transcripts.ts";
+          import type {
+            LoadedWorkspaceTranscript,
+            ReadyWorkspaceTranscript,
+          } from "../ports/workspace-effects.ts";''',
+              'const liveTranscript = readyLiveTranscript(node, live, tui, cwd, theme);': 'const liveTranscript = readyLiveTranscript(node, live, tui, cwd);',
+              'const renderer = createNativeTranscriptRenderer(tui, cwd, theme);': 'const renderer = createNativeTranscriptRenderer(tui, cwd);',
+              '''export function renderNativeMessages(
+            messages: readonly AgentMessage[],
+            tui: TUI,
+            cwd: string,
+            theme?: ObservabilityTheme,
+          ): NativeTranscriptComponent {''': '''export function renderNativeMessages(
+            messages: readonly AgentMessage[],
+            tui: TUI,
+            cwd: string,
+          ): NativeTranscriptComponent {''',
+              '''function createNativeTranscriptRenderer(
+            tui: TUI,
+            cwd: string,
+            theme?: ObservabilityTheme,
+          ): NativeTranscriptRenderer {''': '''function createNativeTranscriptRenderer(
+            tui: TUI,
+            cwd: string,
+          ): NativeTranscriptRenderer {''',
+              '''function readyLiveTranscript(
+            node: RunTreeNode,
+            live: LiveAgentTranscriptSnapshot | undefined,
+            tui: TUI,
+            cwd: string,
+            theme?: ObservabilityTheme,
+          ): ReadyWorkspaceTranscript<NativeRunTranscript> | undefined {''': '''function readyLiveTranscript(
+            node: RunTreeNode,
+            live: LiveAgentTranscriptSnapshot | undefined,
+            tui: TUI,
+            cwd: string,
+          ): ReadyWorkspaceTranscript<NativeRunTranscript> | undefined {''',
+              'component: renderNativeMessages(live.messages as readonly AgentMessage[], tui, cwd, theme),': 'component: renderNativeMessages(live.messages as readonly AgentMessage[], tui, cwd),',
+          }
+
+          for old, new in replacements.items():
+              if old not in source:
+                  raise SystemExit(f"Expected source fragment not found:\n{old}")
+              source = source.replace(old, new)
+
+          path.write_text(source)
+          PY
+      - name: Apply repository formatting
+        run: devenv tasks run maintenance:fix
+      - name: Commit fixes and remove helper workflow
+        shell: bash
+        run: |
+          rm .github/workflows/branch-autofix.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Apply live transcript maintenance fixes"
+          git push origin HEAD:ui/live-subsession-transcripts
