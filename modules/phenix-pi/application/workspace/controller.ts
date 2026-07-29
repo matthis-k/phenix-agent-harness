@@ -204,10 +204,7 @@ export class WorkspaceController<TSnapshot, TTranscript> {
         type: "transcript.loaded",
         requestId,
         runId,
-        availability:
-          loaded.kind === "ready"
-            ? { kind: "ready", transcript: loaded.handle }
-            : loaded,
+        availability: loaded.kind === "ready" ? { kind: "ready", transcript: loaded.handle } : loaded,
       });
       if (loaded.kind !== "ready") return;
       const current = this.stateValue.transcript.availability;
