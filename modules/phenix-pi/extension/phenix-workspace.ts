@@ -39,7 +39,6 @@ import {
   projectWorkspaceRuns,
   projectWorkspaceTasks,
   type WorkspaceRunRow,
-  type WorkspaceTaskRow,
 } from "./workspace/workspace-model.ts";
 
 export type { PhenixWorkspaceSnapshot } from "./workspace/workspace-model.ts";
@@ -452,8 +451,9 @@ export class PhenixWorkspace implements Component {
     const items = projectWorkspaceRuns(this.controller.snapshot.ui.tree.root);
     const pane = this.controller.state.panes.runs;
     const selectedIndex = rowIndex(items, pane.selectedItemId, (item) => String(item.node.run.id));
+    if (height <= 0) return { section: "runs", lines: [], offset: 0 };
     const title = this.sectionHeader("runs", `RUNS ${items.length}`, width, focus);
-    if (pane.collapsed || height <= 1) {
+    if (pane.collapsed || height === 1) {
       return {
         section: "runs",
         lines: [title, ...blankLines(height - 1, width)],
@@ -504,8 +504,9 @@ export class PhenixWorkspace implements Component {
     const items = projectWorkspaceTasks(this.controller.snapshot.tasks.root);
     const pane = this.controller.state.panes.tasks;
     const selectedIndex = rowIndex(items, pane.selectedItemId, (item) => item.node.id);
+    if (height <= 0) return { section: "tasks", lines: [], offset: 0 };
     const title = this.sectionHeader("tasks", `TASKS ${items.length}`, width, focus);
-    if (pane.collapsed || height <= 1) {
+    if (pane.collapsed || height === 1) {
       return {
         section: "tasks",
         lines: [title, ...blankLines(height - 1, width)],
@@ -541,8 +542,9 @@ export class PhenixWorkspace implements Component {
     const items = [...this.controller.snapshot.ui.facts].reverse().slice(0, 50);
     const pane = this.controller.state.panes.facts;
     const selectedIndex = rowIndex(items, pane.selectedItemId, (item) => item.id);
+    if (height <= 0) return { section: "facts", lines: [], offset: 0 };
     const title = this.sectionHeader("facts", `RECENT FACTS ${items.length}`, width, focus);
-    if (pane.collapsed || height <= 1) {
+    if (pane.collapsed || height === 1) {
       return {
         section: "facts",
         lines: [title, ...blankLines(height - 1, width)],
@@ -609,13 +611,15 @@ export class PhenixWorkspace implements Component {
 
   private setTranscriptOffset(value: number): void {
     const offset = clamp(value, 0, this.frame.transcriptMaxOffset);
+    if (offset >= this.frame.transcriptMaxOffset) {
+      this.controller.dispatch({ type: "scroll.end", paneId: "transcript" });
+      return;
+    }
     this.controller.dispatch({
-      type: offset >= this.frame.transcriptMaxOffset ? "scroll.end" : "scroll.set",
+      type: "scroll.set",
       paneId: "transcript",
-      ...(offset >= this.frame.transcriptMaxOffset
-        ? {}
-        : { scroll: { mode: "fixed", offset } as const }),
-    } as Parameters<WorkspaceControllerAdapter["dispatch"]>[0]);
+      scroll: { mode: "fixed", offset },
+    });
   }
 
   private handleSectionInput(section: WorkspaceSection, data: string): void {

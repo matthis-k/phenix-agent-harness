@@ -59,7 +59,6 @@ export type WorkspaceEvent<TSnapshot = unknown> =
       readonly type: "transcript.requested";
       readonly requestId: EffectId;
       readonly runId: RunId;
-      readonly resetViewport?: boolean;
     }
   | {
       readonly type: "transcript.loaded";

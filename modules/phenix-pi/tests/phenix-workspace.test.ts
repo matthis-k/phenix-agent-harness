@@ -38,6 +38,14 @@ test("allocates independent scroll regions by section weight", () => {
     tasks: 2,
     facts: 11,
   });
+  for (let height = 0; height <= 8; height += 1) {
+    const allocated = allocateWorkspaceSections(height, {
+      runs: false,
+      tasks: false,
+      facts: false,
+    });
+    assert.ok(allocated.runs + allocated.tasks + allocated.facts <= height);
+  }
 });
 
 test("keeps active run detail while collapsing completed subtrees", () => {
@@ -60,9 +68,10 @@ test("keeps active run detail while collapsing completed subtrees", () => {
   assert.deepEqual(
     flattened.map((item) => [String(item.node.run.id), item.depth]),
     [
-      ["run-active", 0],
-      ["run-active-leaf", 1],
-      ["run-completed", 0],
+      ["root-session", 0],
+      ["run-active", 1],
+      ["run-active-leaf", 2],
+      ["run-completed", 1],
     ],
   );
 });

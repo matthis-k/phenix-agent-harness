@@ -171,15 +171,15 @@ function normalizeTranscript(
   }
   if (node.run.kind === "workflow") {
     return {
-      sessionId: transcript.sessionId,
-      sessionFile: transcript.sessionFile,
+      ...(transcript.sessionId ? { sessionId: transcript.sessionId } : {}),
+      ...(transcript.sessionFile ? { sessionFile: transcript.sessionFile } : {}),
       unavailable: "This workflow run does not own a Pi transcript.",
     };
   }
   if (node.run.pi?.sessionId) {
     return {
       sessionId: node.run.pi.sessionId,
-      sessionFile: node.run.pi.sessionFile,
+      ...(node.run.pi.sessionFile ? { sessionFile: node.run.pi.sessionFile } : {}),
       unavailable: "Pi has allocated this transcript but has not persisted it yet.",
     };
   }
