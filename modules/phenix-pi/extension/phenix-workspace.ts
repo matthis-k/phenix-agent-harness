@@ -11,6 +11,7 @@ import {
   type Component,
   matchesKey,
   type SlashCommand,
+  sliceByColumn,
   type TUI,
   truncateToWidth,
   visibleWidth,
@@ -18,7 +19,9 @@ import {
 
 import type { RunTreeNode } from "../application/interfaces.ts";
 import type { RunSnapshot } from "../domain/run/model.ts";
-import type { TaskNode, TaskTree } from "../domain/task/projection.ts";
+import type { TaskNode } from "../domain/task/projection.ts";
+import { allocateSidebarSections } from "../domain/workspace/layout.ts";
+import type { PaneId, ScrollState } from "../domain/workspace/state.ts";
 import type { NativeRunTranscript } from "./native-run-transcript.ts";
 import {
   color,
@@ -28,7 +31,17 @@ import {
   strong,
   surface,
 } from "./observability-theme.ts";
-import type { PhenixUiSnapshot, PhenixUiTarget } from "./phenix-ui.ts";
+import type { PhenixUiTarget } from "./phenix-ui.ts";
+import { WorkspaceControllerAdapter } from "./workspace/workspace-controller-adapter.ts";
+import {
+  findWorkspaceRun,
+  type PhenixWorkspaceSnapshot,
+  projectWorkspaceRuns,
+  projectWorkspaceTasks,
+  type WorkspaceRunRow,
+} from "./workspace/workspace-model.ts";
+
+export type { PhenixWorkspaceSnapshot } from "./workspace/workspace-model.ts";
 
 const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]);
 const MOUSE_ENABLE = "\x1b[?1000h\x1b[?1006h";
@@ -42,12 +55,6 @@ export type PhenixWorkspaceAction =
   | { readonly kind: "close" }
   | { readonly kind: "native"; readonly text: string }
   | { readonly kind: "inspector"; readonly target: PhenixUiTarget };
-
-export interface PhenixWorkspaceSnapshot {
-  readonly ui: PhenixUiSnapshot;
-  readonly tasks: TaskTree;
-  readonly rootTranscript: NativeRunTranscript;
-}
 
 export interface PhenixWorkspaceOptions {
   readonly tui: TUI;
@@ -63,26 +70,11 @@ export interface PhenixWorkspaceOptions {
   readonly onAction: (action: PhenixWorkspaceAction) => void;
 }
 
-interface SectionState {
-  selected: number;
-  offset: number;
-  collapsed: boolean;
-}
-
-interface FlatRun {
-  readonly node: RunTreeNode;
-  readonly depth: number;
-}
-
-interface FlatTask {
-  readonly node: TaskNode;
-  readonly depth: number;
-}
-
 interface SectionLayout {
   readonly section: WorkspaceSection;
   readonly start: number;
   readonly height: number;
+  readonly offset: number;
 }
 
 interface MouseEvent {
@@ -90,6 +82,22 @@ interface MouseEvent {
   readonly x: number;
   readonly y: number;
   readonly release: boolean;
+}
+
+interface SidebarRender {
+  readonly lines: readonly string[];
+  readonly layouts: readonly SectionLayout[];
+}
+
+interface TranscriptRender {
+  readonly lines: readonly string[];
+  readonly maxOffset: number;
+}
+
+interface RenderFrame {
+  readonly layout: WorkspaceLayout;
+  readonly sections: readonly SectionLayout[];
+  readonly transcriptMaxOffset: number;
 }
 
 export interface WorkspaceLayout {
@@ -120,102 +128,62 @@ export function allocateWorkspaceSections(
   height: number,
   collapsed: Readonly<Record<WorkspaceSection, boolean>>,
 ): Readonly<Record<WorkspaceSection, number>> {
-  const sections: readonly WorkspaceSection[] = ["runs", "tasks", "facts"];
-  const minimum = 2;
-  const result: Record<WorkspaceSection, number> = {
-    runs: minimum,
-    tasks: minimum,
-    facts: minimum,
+  const frames = allocateSidebarSections(height, [
+    {
+      id: "runs",
+      weight: 5,
+      minRows: 2,
+      headerRows: 2,
+      collapsePriority: 0,
+      collapsed: collapsed.runs,
+    },
+    {
+      id: "tasks",
+      weight: 2,
+      minRows: 2,
+      headerRows: 2,
+      collapsePriority: 20,
+      collapsed: collapsed.tasks,
+    },
+    {
+      id: "facts",
+      weight: 3,
+      minRows: 2,
+      headerRows: 2,
+      collapsePriority: 40,
+      collapsed: collapsed.facts,
+    },
+  ]);
+  return {
+    runs: frames.find((frame) => frame.id === "runs")?.height ?? 0,
+    tasks: frames.find((frame) => frame.id === "tasks")?.height ?? 0,
+    facts: frames.find((frame) => frame.id === "facts")?.height ?? 0,
   };
-  const remaining = Math.max(0, height - minimum * sections.length);
-  const weights: Record<WorkspaceSection, number> = {
-    runs: collapsed.runs ? 0 : 5,
-    tasks: collapsed.tasks ? 0 : 2,
-    facts: collapsed.facts ? 0 : 3,
-  };
-  const totalWeight = sections.reduce((sum, section) => sum + weights[section], 0);
-  if (totalWeight === 0) return result;
-  let assigned = 0;
-  for (const section of sections) {
-    const share = Math.floor((remaining * weights[section]) / totalWeight);
-    result[section] += share;
-    assigned += share;
-  }
-  let remainder = remaining - assigned;
-  for (const section of sections) {
-    if (remainder <= 0) break;
-    if (weights[section] === 0) continue;
-    result[section] += 1;
-    remainder -= 1;
-  }
-  return result;
 }
 
-export function flattenWorkspaceRuns(root: RunTreeNode): readonly FlatRun[] {
-  const result: FlatRun[] = [];
-  const visit = (node: RunTreeNode, depth: number): void => {
-    if (node.run.kind !== "root") result.push({ node, depth: Math.max(0, depth - 1) });
-    const autoCollapsed =
-      node.run.kind !== "root" && TERMINAL_STATES.has(node.run.state) && node.children.length > 0;
-    if (autoCollapsed) return;
-    node.children.forEach((child) => {
-      visit(child, depth + 1);
-    });
-  };
-  visit(root, 0);
-  return result;
-}
-
-export function flattenWorkspaceTasks(root: TaskNode): readonly FlatTask[] {
-  const result: FlatTask[] = [];
-  const visit = (node: TaskNode, depth: number): void => {
-    if (depth > 0) result.push({ node, depth: depth - 1 });
-    if (node.effectiveState === "done" && node.children.length > 0) return;
-    node.children.forEach((child) => {
-      visit(child, depth + 1);
-    });
-  };
-  visit(root, 0);
-  return result;
-}
+export const flattenWorkspaceRuns = projectWorkspaceRuns;
+export const flattenWorkspaceTasks = projectWorkspaceTasks;
 
 export class PhenixWorkspace implements Component {
   private readonly tui: TUI;
   private readonly theme: ObservabilityTheme;
-  private readonly load: () => Promise<PhenixWorkspaceSnapshot>;
-  private readonly loadTranscript: (node: RunTreeNode) => Promise<NativeRunTranscript>;
   private readonly submit: (text: string) => Promise<void>;
   private readonly onAction: (action: PhenixWorkspaceAction) => void;
-  private readonly unsubscribe: () => void;
   private readonly editor: CustomEditor;
-  private snapshot: PhenixWorkspaceSnapshot;
-  private focus: WorkspaceFocus = "editor";
-  private selectedRunId: string;
-  private selectedTranscript: NativeRunTranscript;
-  private transcriptOffset = Number.MAX_SAFE_INTEGER;
+  private readonly controller: WorkspaceControllerAdapter;
   private streamingMessage: AssistantMessage | undefined;
-  private refreshing = false;
-  private pendingRefresh = false;
   private disposed = false;
-  private sidebarRequested = true;
-  private layout: WorkspaceLayout = computeWorkspaceLayout(1, 1);
-  private sectionLayouts: readonly SectionLayout[] = [];
-  private readonly sections: Record<WorkspaceSection, SectionState> = {
-    runs: { selected: 0, offset: 0, collapsed: false },
-    tasks: { selected: 0, offset: 0, collapsed: false },
-    facts: { selected: 0, offset: 0, collapsed: false },
+  private frame: RenderFrame = {
+    layout: computeWorkspaceLayout(1, 1),
+    sections: [],
+    transcriptMaxOffset: 0,
   };
 
   constructor(options: PhenixWorkspaceOptions) {
     this.tui = options.tui;
     this.theme = options.theme;
-    this.load = options.load;
-    this.loadTranscript = options.loadTranscript;
     this.submit = options.submit;
     this.onAction = options.onAction;
-    this.snapshot = options.snapshot;
-    this.selectedRunId = String(options.snapshot.ui.tree.root.run.id);
-    this.selectedTranscript = options.snapshot.rootTranscript;
     this.editor = new CustomEditor(
       options.tui,
       {
@@ -233,8 +201,12 @@ export class PhenixWorkspace implements Component {
     this.editor.onSubmit = (text) => {
       void this.handleSubmit(text);
     };
-    this.unsubscribe = options.subscribe(() => {
-      void this.refresh();
+    this.controller = new WorkspaceControllerAdapter({
+      snapshot: options.snapshot,
+      load: options.load,
+      loadTranscript: options.loadTranscript,
+      subscribe: options.subscribe,
+      onChange: () => this.requestRender(),
     });
     this.tui.terminal.write(MOUSE_ENABLE);
   }
@@ -245,17 +217,17 @@ export class PhenixWorkspace implements Component {
   }
 
   refreshRootTranscript(): void {
-    void this.refresh();
+    this.controller.invalidateSnapshot();
   }
 
   invalidate(): void {
-    this.selectedTranscript.component?.invalidate();
+    this.controller.transcript.component?.invalidate();
   }
 
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.unsubscribe();
+    this.controller.dispose();
     this.tui.terminal.write(MOUSE_DISABLE);
   }
 
@@ -270,55 +242,65 @@ export class PhenixWorkspace implements Component {
       return;
     }
     if (data === "\x02") {
-      this.sidebarRequested = !this.sidebarRequested;
-      this.requestRender();
+      this.controller.dispatch({ type: "sidebar.toggle" });
       return;
     }
     if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
       this.cycleFocus(matchesKey(data, "shift+tab") ? -1 : 1);
       return;
     }
-    if (this.focus === "editor") {
+
+    const focus = this.effectiveFocus();
+    if (focus === "editor") {
       this.editor.focused = true;
       this.editor.handleInput(data);
       return;
     }
     this.editor.focused = false;
     if (matchesKey(data, "escape")) {
-      this.focus = "editor";
-      this.requestRender();
+      this.controller.dispatch({ type: "focus.set", paneId: "editor" });
       return;
     }
     if (data === "i" || data === "I") {
       this.openInspector();
       return;
     }
-    if (this.focus === "transcript") {
+    if (focus === "transcript") {
       this.handleTranscriptInput(data);
       return;
     }
-    this.handleSectionInput(this.focus, data);
+    this.handleSectionInput(focus, data);
   }
 
   render(width: number): string[] {
     const height = Math.max(1, this.tui.terminal.rows);
-    this.layout = computeWorkspaceLayout(width, height, this.sidebarRequested);
-    if (width < 42 || height < 9) return this.renderSmall(width, height);
-    if (!this.layout.sidebarVisible && this.focus !== "transcript" && this.focus !== "editor") {
-      this.focus = "editor";
+    const layout = computeWorkspaceLayout(width, height, this.controller.state.sidebarVisible);
+    if (width < 42 || height < 9) {
+      this.frame = { layout, sections: [], transcriptMaxOffset: 0 };
+      return this.renderSmall(width, height);
     }
-    this.editor.focused = this.focus === "editor";
-    const editorLines = this.editor.render(this.layout.mainWidth);
+
+    const focus = effectiveFocus(this.controller.state.focusedPaneId, layout.sidebarVisible);
+    this.editor.focused = focus === "editor";
+    const editorLines = this.editor.render(layout.mainWidth);
     const mainHeight = Math.max(1, height - editorLines.length);
-    const transcript = this.renderTranscript(this.layout.mainWidth, mainHeight);
-    const main = [...transcript, ...editorLines];
-    if (!this.layout.sidebarVisible) {
-      return fitHeight(main, height, this.layout.mainWidth);
+    const transcript = this.renderTranscript(layout.mainWidth, mainHeight, focus);
+    const main = [...transcript.lines, ...editorLines];
+
+    if (!layout.sidebarVisible) {
+      this.frame = { layout, sections: [], transcriptMaxOffset: transcript.maxOffset };
+      return fitHeight(main, height, layout.mainWidth);
     }
-    const sidebar = this.renderSidebar(this.layout.sidebarWidth, height);
+
+    const sidebar = this.renderSidebar(layout.sidebarWidth, height, focus);
+    this.frame = {
+      layout,
+      sections: sidebar.layouts,
+      transcriptMaxOffset: transcript.maxOffset,
+    };
     return Array.from({ length: height }, (_, row) => {
-      const left = fitLine(main[row] ?? "", this.layout.mainWidth);
-      const right = fitLine(sidebar[row] ?? "", this.layout.sidebarWidth);
+      const left = fitLine(main[row] ?? "", layout.mainWidth);
+      const right = fitLine(sidebar.lines[row] ?? "", layout.sidebarWidth);
       return `${left} ${right}`;
     });
   }
@@ -356,28 +338,33 @@ export class PhenixWorkspace implements Component {
     await this.submit(text);
   }
 
-  private renderTranscript(width: number, height: number): string[] {
-    const selected = findRun(this.snapshot.ui.tree.root, this.selectedRunId);
+  private renderTranscript(width: number, height: number, focus: WorkspaceFocus): TranscriptRender {
+    const snapshot = this.controller.snapshot;
+    const selected = findWorkspaceRun(
+      snapshot.ui.tree.root,
+      String(this.controller.state.activeRunId),
+    );
     const title =
       selected?.run.kind === "root"
         ? "Root session"
         : selected
           ? definitionLabel(String(selected.run.definitionId))
           : "Session";
-    const session = this.selectedTranscript.sessionId;
+    const transcript = this.controller.transcript;
+    const session = transcript.sessionId;
     const header = surface(
       this.theme,
-      this.focus === "transcript" ? "selectedBg" : "customMessageBg",
+      focus === "transcript" ? "selectedBg" : "customMessageBg",
       fitLine(
-        ` ${strong(this.theme, title)}${session ? ` ${color(this.theme, "muted", `· ${session}`)}` : ""}${selected?.run.kind !== "root" ? ` ${color(this.theme, "muted", "· Enter in Runs selects a child · i inspects")}` : ""}`,
+        ` ${strong(this.theme, title)}${session ? ` ${color(this.theme, "muted", `· ${session}`)}` : ""}${selected?.run.kind !== "root" ? ` ${color(this.theme, "muted", "· i inspects")}` : ""}`,
         width,
       ),
     );
     const content: string[] = [header];
-    if (this.selectedTranscript.unavailable) {
-      content.push("", color(this.theme, "warning", ` ${this.selectedTranscript.unavailable}`));
-    } else if (this.selectedTranscript.component) {
-      content.push(...this.selectedTranscript.component.render(width));
+    if (transcript.unavailable) {
+      content.push("", color(this.theme, "warning", ` ${transcript.unavailable}`));
+    } else if (transcript.component) {
+      content.push(...transcript.component.render(width).map((line) => leftOrigin(line, width)));
     }
     if (selected?.run.kind === "root" && this.streamingMessage) {
       const streaming = new AssistantMessageComponent(
@@ -387,21 +374,24 @@ export class PhenixWorkspace implements Component {
         "Thinking...",
         1,
       );
-      content.push(...streaming.render(width));
+      content.push(...streaming.render(width).map((line) => leftOrigin(line, width)));
     }
+
     const bodyHeight = Math.max(0, height - 1);
     const maxOffset = Math.max(0, content.length - height);
-    this.transcriptOffset = clamp(this.transcriptOffset, 0, maxOffset);
+    const scroll = this.controller.state.transcript.scroll;
+    const offset = scroll.mode === "follow-end" ? maxOffset : clamp(scroll.offset, 0, maxOffset);
     const lines = Array.from({ length: bodyHeight }, (_, row) =>
-      fitLine(content[this.transcriptOffset + row + 1] ?? "", width),
+      leftOrigin(content[offset + row + 1] ?? "", width),
     );
-    return [header, ...lines];
+    return { lines: [header, ...lines], maxOffset };
   }
 
-  private renderSidebar(width: number, height: number): string[] {
-    const profile = this.snapshot.ui.profile;
-    const diagnostics = this.snapshot.ui.diagnostics.counts;
-    const active = countActive(this.snapshot.ui.tree.root);
+  private renderSidebar(width: number, height: number, focus: WorkspaceFocus): SidebarRender {
+    const snapshot = this.controller.snapshot;
+    const profile = snapshot.ui.profile;
+    const diagnostics = snapshot.ui.diagnostics.counts;
+    const active = countActive(snapshot.ui.tree.root);
     const header = [
       surface(
         this.theme,
@@ -420,115 +410,160 @@ export class PhenixWorkspace implements Component {
         ),
       ),
     ];
-    const available = Math.max(6, height - header.length);
+    const available = Math.max(0, height - header.length);
     const sizes = allocateWorkspaceSections(available, {
-      runs: this.sections.runs.collapsed,
-      tasks: this.sections.tasks.collapsed,
-      facts: this.sections.facts.collapsed,
+      runs: this.controller.state.panes.runs.collapsed,
+      tasks: this.controller.state.panes.tasks.collapsed,
+      facts: this.controller.state.panes.facts.collapsed,
     });
+
+    const runs = this.renderRunSection(width, sizes.runs, focus);
+    const tasks = this.renderTaskSection(width, sizes.tasks, focus);
+    const facts = this.renderFactSection(width, sizes.facts, focus);
     const layouts: SectionLayout[] = [];
     let start = header.length;
-    for (const section of ["runs", "tasks", "facts"] as const) {
-      layouts.push({ section, start, height: sizes[section] });
-      start += sizes[section];
+    for (const section of [runs, tasks, facts]) {
+      layouts.push({
+        section: section.section,
+        start,
+        height: section.lines.length,
+        offset: section.offset,
+      });
+      start += section.lines.length;
     }
-    this.sectionLayouts = layouts;
-    return [
-      ...header,
-      ...this.renderRunSection(width, sizes.runs),
-      ...this.renderTaskSection(width, sizes.tasks),
-      ...this.renderFactSection(width, sizes.facts),
-    ].slice(0, height);
+
+    return {
+      lines: fitHeight([...header, ...runs.lines, ...tasks.lines, ...facts.lines], height, width),
+      layouts,
+    };
   }
 
-  private renderRunSection(width: number, height: number): string[] {
-    const items = flattenWorkspaceRuns(this.snapshot.ui.tree.root);
-    const section = this.sections.runs;
-    section.selected = clamp(section.selected, 0, Math.max(0, items.length - 1));
-    const title = this.sectionHeader("runs", `RUNS ${items.length}`, width);
-    if (section.collapsed || height <= 1) return [title, ...blankLines(height - 1, width)];
+  private renderRunSection(width: number, height: number, focus: WorkspaceFocus): SectionRender {
+    const items = projectWorkspaceRuns(this.controller.snapshot.ui.tree.root);
+    const pane = this.controller.state.panes.runs;
+    const selectedIndex = rowIndex(items, pane.selectedItemId, (item) => String(item.node.run.id));
+    if (height <= 0) return { section: "runs", lines: [], offset: 0 };
+    const title = this.sectionHeader("runs", `RUNS ${items.length}`, width, focus);
+    if (pane.collapsed || height === 1) {
+      return {
+        section: "runs",
+        lines: [title, ...blankLines(height - 1, width)],
+        offset: 0,
+      };
+    }
     const bodyHeight = height - 1;
-    section.offset = keepVisible(section.offset, section.selected, bodyHeight, items.length);
+    const offset = keepVisible(scrollOffset(pane.scroll), selectedIndex, bodyHeight, items.length);
     const body = Array.from({ length: bodyHeight }, (_, row) => {
-      const index = section.offset + row;
-      const item = items[index];
+      const item = items[offset + row];
       if (!item) return " ".repeat(width);
-      const selected = this.focus === "runs" && index === section.selected;
-      const run = item.node.run;
-      const model = run.resolvedModel
-        ? ` ${color(this.theme, "muted", `${run.resolvedModel.concrete.model}/${run.resolvedModel.thinking}`)}`
-        : "";
-      const activity = item.node.activity?.summary
-        ? ` ${color(this.theme, "muted", truncate(item.node.activity.summary, Math.max(12, width - 8 - item.depth * 2)))}`
-        : "";
-      const text = `${"  ".repeat(item.depth)}${runStateSymbol(run.state)} ${definitionLabel(String(run.definitionId))} ${run.state}${model}`;
-      const line = fitLine(` ${text}`, width);
-      if (selected) return surface(this.theme, "selectedBg", strong(this.theme, line));
-      if (activity && !TERMINAL_STATES.has(run.state) && row + 1 < bodyHeight) {
-        return fitLine(
-          `${line.slice(0, Math.max(0, width - visibleWidth(activity)))}${activity}`,
-          width,
+      return this.renderRunRow(item, width, focus);
+    });
+    return { section: "runs", lines: [title, ...body], offset };
+  }
+
+  private renderRunRow(item: WorkspaceRunRow, width: number, focus: WorkspaceFocus): string {
+    const run = item.node.run;
+    const runId = String(run.id);
+    const active = runId === String(this.controller.state.activeRunId);
+    const selected = runId === this.controller.state.panes.runs.selectedItemId;
+    const model = run.resolvedModel
+      ? ` ${color(this.theme, "muted", `${run.resolvedModel.concrete.model}/${run.resolvedModel.thinking}`)}`
+      : "";
+    const activity = item.node.activity?.summary
+      ? ` ${color(this.theme, "muted", truncate(item.node.activity.summary, Math.max(8, width - 24 - item.depth * 2)))}`
+      : "";
+    const label = run.kind === "root" ? "Root session" : definitionLabel(String(run.definitionId));
+    const line = fitLine(
+      ` ${active ? "◆" : " "} ${"  ".repeat(item.depth)}${runStateSymbol(run.state)} ${label} ${run.state}${model}${TERMINAL_STATES.has(run.state) ? "" : activity}`,
+      width,
+    );
+    if (selected) {
+      return surface(
+        this.theme,
+        focus === "runs" ? "selectedBg" : "userMessageBg",
+        focus === "runs" ? strong(this.theme, line) : line,
+      );
+    }
+    return active ? surface(this.theme, "customMessageBg", line) : line;
+  }
+
+  private renderTaskSection(width: number, height: number, focus: WorkspaceFocus): SectionRender {
+    const items = projectWorkspaceTasks(this.controller.snapshot.tasks.root);
+    const pane = this.controller.state.panes.tasks;
+    const selectedIndex = rowIndex(items, pane.selectedItemId, (item) => item.node.id);
+    if (height <= 0) return { section: "tasks", lines: [], offset: 0 };
+    const title = this.sectionHeader("tasks", `TASKS ${items.length}`, width, focus);
+    if (pane.collapsed || height === 1) {
+      return {
+        section: "tasks",
+        lines: [title, ...blankLines(height - 1, width)],
+        offset: 0,
+      };
+    }
+    const bodyHeight = height - 1;
+    const offset = keepVisible(scrollOffset(pane.scroll), selectedIndex, bodyHeight, items.length);
+    const body = Array.from({ length: bodyHeight }, (_, row) => {
+      const item = items[offset + row];
+      if (!item) return " ".repeat(width);
+      const selected = item.node.id === pane.selectedItemId;
+      const symbol = taskStateSymbol(item.node.effectiveState);
+      const line = fitLine(
+        ` ${"  ".repeat(item.depth)}${symbol} ${truncate(item.node.title, Math.max(8, width - 5 - item.depth * 2))}`,
+        width,
+      );
+      if (!selected) return line;
+      return surface(
+        this.theme,
+        focus === "tasks" ? "selectedBg" : "userMessageBg",
+        focus === "tasks" ? strong(this.theme, line) : line,
+      );
+    });
+    return { section: "tasks", lines: [title, ...body], offset };
+  }
+
+  private renderFactSection(width: number, height: number, focus: WorkspaceFocus): SectionRender {
+    const items = [...this.controller.snapshot.ui.facts].reverse().slice(0, 50);
+    const pane = this.controller.state.panes.facts;
+    const selectedIndex = rowIndex(items, pane.selectedItemId, (item) => item.id);
+    if (height <= 0) return { section: "facts", lines: [], offset: 0 };
+    const title = this.sectionHeader("facts", `RECENT FACTS ${items.length}`, width, focus);
+    if (pane.collapsed || height === 1) {
+      return {
+        section: "facts",
+        lines: [title, ...blankLines(height - 1, width)],
+        offset: 0,
+      };
+    }
+    const bodyHeight = height - 1;
+    const offset = keepVisible(scrollOffset(pane.scroll), selectedIndex, bodyHeight, items.length);
+    const body = Array.from({ length: bodyHeight }, (_, row) => {
+      const item = items[offset + row];
+      if (!item) return " ".repeat(width);
+      const selected = item.id === pane.selectedItemId;
+      const line = fitLine(
+        ` ${compactTime(item.timestamp)} ${truncate(item.summary, Math.max(8, width - 8))}`,
+        width,
+      );
+      if (selected) {
+        return surface(
+          this.theme,
+          focus === "facts" ? "selectedBg" : "userMessageBg",
+          focus === "facts" ? strong(this.theme, line) : line,
         );
       }
-      return line;
+      return color(this.theme, "muted", line);
     });
-    return [title, ...body];
+    return { section: "facts", lines: [title, ...body], offset };
   }
 
-  private renderTaskSection(width: number, height: number): string[] {
-    const items = flattenWorkspaceTasks(this.snapshot.tasks.root);
-    const section = this.sections.tasks;
-    section.selected = clamp(section.selected, 0, Math.max(0, items.length - 1));
-    const title = this.sectionHeader("tasks", `TASKS ${items.length}`, width);
-    if (section.collapsed || height <= 1) return [title, ...blankLines(height - 1, width)];
-    const bodyHeight = height - 1;
-    section.offset = keepVisible(section.offset, section.selected, bodyHeight, items.length);
-    return [
-      title,
-      ...Array.from({ length: bodyHeight }, (_, row) => {
-        const index = section.offset + row;
-        const item = items[index];
-        if (!item) return " ".repeat(width);
-        const selected = this.focus === "tasks" && index === section.selected;
-        const symbol = taskStateSymbol(item.node.effectiveState);
-        const line = fitLine(
-          ` ${"  ".repeat(item.depth)}${symbol} ${truncate(item.node.title, Math.max(8, width - 5 - item.depth * 2))}`,
-          width,
-        );
-        return selected ? surface(this.theme, "selectedBg", strong(this.theme, line)) : line;
-      }),
-    ];
-  }
-
-  private renderFactSection(width: number, height: number): string[] {
-    const items = [...this.snapshot.ui.facts].reverse().slice(0, 50);
-    const section = this.sections.facts;
-    section.selected = clamp(section.selected, 0, Math.max(0, items.length - 1));
-    const title = this.sectionHeader("facts", `RECENT FACTS ${items.length}`, width);
-    if (section.collapsed || height <= 1) return [title, ...blankLines(height - 1, width)];
-    const bodyHeight = height - 1;
-    section.offset = keepVisible(section.offset, section.selected, bodyHeight, items.length);
-    return [
-      title,
-      ...Array.from({ length: bodyHeight }, (_, row) => {
-        const index = section.offset + row;
-        const item = items[index];
-        if (!item) return " ".repeat(width);
-        const selected = this.focus === "facts" && index === section.selected;
-        const line = fitLine(
-          ` ${compactTime(item.timestamp)} ${truncate(item.summary, Math.max(8, width - 8))}`,
-          width,
-        );
-        return selected
-          ? surface(this.theme, "selectedBg", strong(this.theme, line))
-          : color(this.theme, "muted", line);
-      }),
-    ];
-  }
-
-  private sectionHeader(section: WorkspaceSection, title: string, width: number): string {
-    const active = this.focus === section;
-    const disclosure = this.sections[section].collapsed ? "▸" : "▾";
+  private sectionHeader(
+    section: WorkspaceSection,
+    title: string,
+    width: number,
+    focus: WorkspaceFocus,
+  ): string {
+    const active = focus === section;
+    const disclosure = this.controller.state.panes[section].collapsed ? "▸" : "▾";
     return surface(
       this.theme,
       active ? "userMessageBg" : "customMessageBg",
@@ -540,149 +575,175 @@ export class PhenixWorkspace implements Component {
   }
 
   private handleTranscriptInput(data: string): void {
-    if (isUp(data)) this.transcriptOffset = Math.max(0, this.transcriptOffset - 1);
-    else if (isDown(data)) this.transcriptOffset += 1;
-    else if (matchesKey(data, "pageUp"))
-      this.transcriptOffset = Math.max(
-        0,
-        this.transcriptOffset - Math.max(1, this.layout.height - 4),
-      );
-    else if (matchesKey(data, "pageDown"))
-      this.transcriptOffset += Math.max(1, this.layout.height - 4);
-    else if (matchesKey(data, "home")) this.transcriptOffset = 0;
-    else if (matchesKey(data, "end")) this.transcriptOffset = Number.MAX_SAFE_INTEGER;
-    else return;
-    this.requestRender();
+    const current = transcriptOffset(
+      this.controller.state.transcript.scroll,
+      this.frame.transcriptMaxOffset,
+    );
+    if (isUp(data)) this.setTranscriptOffset(current - 1);
+    else if (isDown(data)) this.setTranscriptOffset(current + 1);
+    else if (matchesKey(data, "pageUp")) {
+      this.setTranscriptOffset(current - Math.max(1, this.frame.layout.height - 4));
+    } else if (matchesKey(data, "pageDown")) {
+      this.setTranscriptOffset(current + Math.max(1, this.frame.layout.height - 4));
+    } else if (matchesKey(data, "home")) {
+      this.setTranscriptOffset(0);
+    } else if (matchesKey(data, "end")) {
+      this.controller.dispatch({ type: "scroll.end", paneId: "transcript" });
+    }
+  }
+
+  private setTranscriptOffset(value: number): void {
+    const offset = clamp(value, 0, this.frame.transcriptMaxOffset);
+    if (offset >= this.frame.transcriptMaxOffset) {
+      this.controller.dispatch({ type: "scroll.end", paneId: "transcript" });
+      return;
+    }
+    this.controller.dispatch({
+      type: "scroll.set",
+      paneId: "transcript",
+      scroll: { mode: "fixed", offset },
+    });
   }
 
   private handleSectionInput(section: WorkspaceSection, data: string): void {
-    const state = this.sections[section];
-    const count = this.sectionItemCount(section);
-    if (isUp(data)) state.selected -= 1;
-    else if (isDown(data)) state.selected += 1;
-    else if (matchesKey(data, "home")) state.selected = 0;
-    else if (matchesKey(data, "end")) state.selected = count - 1;
-    else if (data === " ") state.collapsed = !state.collapsed;
-    else if (matchesKey(data, "enter")) {
-      void this.activateSection(section);
-      return;
-    } else return;
-    state.selected = clamp(state.selected, 0, Math.max(0, count - 1));
-    this.requestRender();
+    const itemIds = this.sectionItemIds(section);
+    if (isUp(data)) {
+      this.controller.dispatch({ type: "selection.move", paneId: section, direction: -1, itemIds });
+    } else if (isDown(data)) {
+      this.controller.dispatch({ type: "selection.move", paneId: section, direction: 1, itemIds });
+    } else if (matchesKey(data, "home")) {
+      this.controller.dispatch({ type: "selection.edge", paneId: section, edge: "first", itemIds });
+    } else if (matchesKey(data, "end")) {
+      this.controller.dispatch({ type: "selection.edge", paneId: section, edge: "last", itemIds });
+    } else if (data === " ") {
+      this.controller.dispatch({ type: "section.toggle", paneId: section });
+    } else if (matchesKey(data, "enter")) {
+      this.activateSection(section);
+    }
   }
 
-  private async activateSection(section: WorkspaceSection): Promise<void> {
+  private activateSection(section: WorkspaceSection): void {
     if (section === "runs") {
-      const item = flattenWorkspaceRuns(this.snapshot.ui.tree.root)[this.sections.runs.selected];
-      if (!item) return;
-      await this.selectTranscript(item.node);
+      const selectedRunId = this.controller.state.panes.runs.selectedItemId;
+      if (!selectedRunId) return;
+      const run = findWorkspaceRun(this.controller.snapshot.ui.tree.root, selectedRunId);
+      if (run) this.selectTranscript(run);
       return;
     }
     if (section === "tasks") {
-      const item = flattenWorkspaceTasks(this.snapshot.tasks.root)[this.sections.tasks.selected];
-      if (item?.node.kind === "execution") {
-        const run = findRun(this.snapshot.ui.tree.root, String(item.node.runId));
-        if (run) await this.selectTranscript(run);
+      const selectedTaskId = this.controller.state.panes.tasks.selectedItemId;
+      const task = projectWorkspaceTasks(this.controller.snapshot.tasks.root).find(
+        (item) => item.node.id === selectedTaskId,
+      );
+      if (task?.node.kind === "execution") {
+        const run = findWorkspaceRun(
+          this.controller.snapshot.ui.tree.root,
+          String(task.node.runId),
+        );
+        if (run) this.selectTranscript(run);
       }
       return;
     }
     this.onAction({ kind: "inspector", target: { view: "facts" } });
   }
 
-  private async selectTranscript(node: RunTreeNode): Promise<void> {
-    this.selectedRunId = String(node.run.id);
-    this.focus = "transcript";
-    this.transcriptOffset = Number.MAX_SAFE_INTEGER;
-    this.selectedTranscript = await this.loadTranscript(node);
-    if (!this.disposed) this.requestRender();
+  private selectTranscript(node: RunTreeNode): void {
+    this.controller.dispatch({ type: "focus.set", paneId: "transcript" });
+    this.controller.selectTranscript(node.run.id);
   }
 
   private openInspector(): void {
-    const selected = findRun(this.snapshot.ui.tree.root, this.selectedRunId);
+    const activeRunId = String(this.controller.state.activeRunId);
+    const selected = findWorkspaceRun(this.controller.snapshot.ui.tree.root, activeRunId);
     this.onAction({
       kind: "inspector",
       target:
         selected?.run.kind === "root"
           ? { view: "status" }
-          : { view: "runs", selector: this.selectedRunId },
+          : { view: "runs", selector: activeRunId },
     });
   }
 
-  private cycleFocus(delta: number): void {
-    const order: WorkspaceFocus[] = this.layout.sidebarVisible
+  private cycleFocus(delta: 1 | -1): void {
+    const order: readonly PaneId[] = this.frame.layout.sidebarVisible
       ? ["transcript", "editor", "runs", "tasks", "facts"]
       : ["transcript", "editor"];
-    const index = Math.max(0, order.indexOf(this.focus));
-    this.focus = order[(index + delta + order.length) % order.length] ?? "editor";
-    this.editor.focused = this.focus === "editor";
-    this.requestRender();
+    this.controller.dispatch({ type: "focus.move", direction: delta, order });
   }
 
   private handleMouse(event: MouseEvent): void {
     if (event.release) return;
-    if (!this.layout.sidebarVisible || event.x <= this.layout.mainWidth) {
+    if (!this.frame.layout.sidebarVisible || event.x <= this.frame.layout.mainWidth) {
       if (event.button === 64 || event.button === 65) {
-        this.focus = "transcript";
-        this.transcriptOffset = Math.max(0, this.transcriptOffset + (event.button === 64 ? -3 : 3));
-        this.requestRender();
+        this.controller.dispatch({ type: "focus.set", paneId: "transcript" });
+        const current = transcriptOffset(
+          this.controller.state.transcript.scroll,
+          this.frame.transcriptMaxOffset,
+        );
+        this.setTranscriptOffset(current + (event.button === 64 ? -3 : 3));
       }
       return;
     }
-    const section = this.sectionLayouts.find(
-      (candidate) => event.y > candidate.start && event.y <= candidate.start + candidate.height,
+
+    const section = this.frame.sections.find(
+      (candidate) =>
+        candidate.height > 0 &&
+        event.y > candidate.start &&
+        event.y <= candidate.start + candidate.height,
     );
     if (!section) return;
-    this.focus = section.section;
-    const state = this.sections[section.section];
+    this.controller.dispatch({ type: "focus.set", paneId: section.section });
+    const itemIds = this.sectionItemIds(section.section);
     if (event.button === 64 || event.button === 65) {
-      state.offset = Math.max(0, state.offset + (event.button === 64 ? -2 : 2));
-      state.selected = state.offset;
-      this.requestRender();
+      const offset = clamp(
+        section.offset + (event.button === 64 ? -2 : 2),
+        0,
+        Math.max(0, itemIds.length - 1),
+      );
+      this.controller.dispatch({
+        type: "scroll.set",
+        paneId: section.section,
+        scroll: { mode: "fixed", offset },
+      });
+      const selectedItemId = itemIds[offset];
+      if (selectedItemId) {
+        this.controller.dispatch({
+          type: "selection.set",
+          paneId: section.section,
+          itemId: selectedItemId,
+        });
+      }
       return;
     }
     if (event.button !== 0) return;
     const row = event.y - section.start - 2;
-    if (row >= 0) {
-      state.selected = clamp(
-        state.offset + row,
-        0,
-        Math.max(0, this.sectionItemCount(section.section) - 1),
+    const selectedItemId = row >= 0 ? itemIds[section.offset + row] : undefined;
+    if (selectedItemId) {
+      this.controller.dispatch({
+        type: "selection.set",
+        paneId: section.section,
+        itemId: selectedItemId,
+      });
+    }
+  }
+
+  private sectionItemIds(section: WorkspaceSection): readonly string[] {
+    if (section === "runs") {
+      return projectWorkspaceRuns(this.controller.snapshot.ui.tree.root).map((item) =>
+        String(item.node.run.id),
       );
-      this.requestRender();
     }
+    if (section === "tasks") {
+      return projectWorkspaceTasks(this.controller.snapshot.tasks.root).map((item) => item.node.id);
+    }
+    return [...this.controller.snapshot.ui.facts]
+      .reverse()
+      .slice(0, 50)
+      .map((item) => item.id);
   }
 
-  private sectionItemCount(section: WorkspaceSection): number {
-    if (section === "runs") return flattenWorkspaceRuns(this.snapshot.ui.tree.root).length;
-    if (section === "tasks") return flattenWorkspaceTasks(this.snapshot.tasks.root).length;
-    return Math.min(50, this.snapshot.ui.facts.length);
-  }
-
-  private async refresh(): Promise<void> {
-    if (this.disposed) return;
-    if (this.refreshing) {
-      this.pendingRefresh = true;
-      return;
-    }
-    this.refreshing = true;
-    try {
-      do {
-        this.pendingRefresh = false;
-        const next = await this.load();
-        if (this.disposed) return;
-        this.snapshot = next;
-        const selected = findRun(next.ui.tree.root, this.selectedRunId);
-        if (!selected || selected.run.kind === "root") {
-          this.selectedRunId = String(next.ui.tree.root.run.id);
-          this.selectedTranscript = next.rootTranscript;
-        } else {
-          this.selectedTranscript = await this.loadTranscript(selected);
-        }
-        this.requestRender();
-      } while (this.pendingRefresh && !this.disposed);
-    } finally {
-      this.refreshing = false;
-    }
+  private effectiveFocus(): WorkspaceFocus {
+    return effectiveFocus(this.controller.state.focusedPaneId, this.frame.layout.sidebarVisible);
   }
 
   private renderSmall(width: number, height: number): string[] {
@@ -703,13 +764,18 @@ export class PhenixWorkspace implements Component {
   }
 }
 
-function findRun(root: RunTreeNode, id: string): RunTreeNode | undefined {
-  if (String(root.run.id) === id) return root;
-  for (const child of root.children) {
-    const found = findRun(child, id);
-    if (found) return found;
+interface SectionRender {
+  readonly section: WorkspaceSection;
+  readonly lines: readonly string[];
+  readonly offset: number;
+}
+
+function effectiveFocus(paneId: PaneId, sidebarVisible: boolean): WorkspaceFocus {
+  if (paneId === "transcript" || paneId === "editor") return paneId;
+  if (sidebarVisible && (paneId === "runs" || paneId === "tasks" || paneId === "facts")) {
+    return paneId;
   }
-  return undefined;
+  return "editor";
 }
 
 function countActive(node: RunTreeNode): number {
@@ -760,6 +826,10 @@ function truncate(value: string, width: number): string {
   return truncateToWidth(value, Math.max(0, width), width > 1 ? "…" : "");
 }
 
+function leftOrigin(line: string, width: number): string {
+  return fitLine(sliceByColumn(line, 0, Math.max(0, width), true), width);
+}
+
 function fitLine(line: string, width: number): string {
   const clipped = truncateToWidth(line, Math.max(0, width), "");
   return clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped)));
@@ -773,12 +843,30 @@ function blankLines(count: number, width: number): string[] {
   return Array.from({ length: Math.max(0, count) }, () => " ".repeat(width));
 }
 
+function scrollOffset(scroll: ScrollState): number {
+  return scroll.mode === "fixed" ? scroll.offset : 0;
+}
+
+function transcriptOffset(scroll: ScrollState, maximum: number): number {
+  return scroll.mode === "follow-end" ? maximum : clamp(scroll.offset, 0, maximum);
+}
+
+function rowIndex<T>(
+  items: readonly T[],
+  selectedItemId: string | undefined,
+  itemId: (item: T) => string,
+): number {
+  if (items.length === 0) return 0;
+  const index = selectedItemId ? items.findIndex((item) => itemId(item) === selectedItemId) : -1;
+  return index >= 0 ? index : 0;
+}
+
 function keepVisible(offset: number, selected: number, height: number, total: number): number {
-  const max = Math.max(0, total - height);
-  let next = clamp(offset, 0, max);
+  const maximum = Math.max(0, total - Math.max(0, height));
+  let next = clamp(offset, 0, maximum);
   if (selected < next) next = selected;
   if (selected >= next + height) next = selected - height + 1;
-  return clamp(next, 0, max);
+  return clamp(next, 0, maximum);
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

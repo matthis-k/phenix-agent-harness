@@ -9,6 +9,7 @@ import type {
 import type { EffectId, WorkspaceState } from "../../domain/workspace/state.ts";
 import type {
   ExternalWorkspaceEffect,
+  LoadedWorkspaceTranscript,
   WorkspaceEffectRuntime,
 } from "../../ports/workspace-effects.ts";
 import { reduceWorkspace } from "./reducer.ts";
@@ -23,6 +24,7 @@ export interface WorkspaceControllerOptions<TSnapshot, TTranscript> {
   readonly state: WorkspaceState;
   readonly runtime: WorkspaceEffectRuntime<TSnapshot, TTranscript>;
   readonly snapshot?: WorkspaceSnapshotEnvelope<TSnapshot>;
+  readonly transcript?: LoadedWorkspaceTranscript<TTranscript>;
 }
 
 type Listener = () => void;
@@ -55,6 +57,9 @@ export class WorkspaceController<TSnapshot, TTranscript> {
     this.runtime = options.runtime;
     this.stateValue = options.state;
     this.snapshotValue = options.snapshot;
+    if (options.transcript) {
+      this.transcripts.set(options.transcript.handle.key, options.transcript.value);
+    }
   }
 
   get state(): WorkspaceState {

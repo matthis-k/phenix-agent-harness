@@ -20,6 +20,31 @@ interface TranscriptValue {
 
 const PANES = ["transcript", "editor", "runs", "tasks", "files", "facts"] as const;
 
+test("uses an already-loaded transcript without scheduling an effect", () => {
+  const root = runId("root");
+  const runtime = new TestRuntime();
+  const controller = new WorkspaceController({
+    state: {
+      ...createInitialWorkspaceState(root),
+      transcript: {
+        runId: root,
+        availability: { kind: "ready", transcript: { key: "root-transcript" } },
+        scroll: { mode: "follow-end" },
+        horizontalOrigin: 0,
+      },
+    },
+    runtime,
+    transcript: {
+      handle: { key: "root-transcript" },
+      value: { text: "root" },
+    },
+  });
+
+  assert.deepEqual(controller.currentTranscript, { text: "root" });
+  assert.equal(runtime.transcriptCalls.length, 0);
+  assert.equal(controller.state.pendingEffects.size, 0);
+});
+
 test("coalesces refresh bursts into the current load plus one follow-up", async () => {
   const root = runId("root");
   const runtime = new TestRuntime();
