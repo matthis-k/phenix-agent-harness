@@ -12,7 +12,7 @@ import { loadNativeRunTranscriptResult } from "../extension/native-run-transcrip
 
 initTheme("dark");
 
-test("loads a Pi session read-only and composes native message components", async () => {
+test("loads a Pi session read-only as ordered native and custom-rendered chunks", async () => {
   const directory = await mkdtemp(join(tmpdir(), "phenix-transcript-"));
   const sessionFile = join(directory, "session.jsonl");
   const source = fixtureSession(directory);
@@ -25,11 +25,18 @@ test("loads a Pi session read-only and composes native message components", asyn
     if (loaded.kind !== "ready") return;
     assert.equal(loaded.value.sessionId, "session-child");
     assert.equal(loaded.value.sessionFile, sessionFile);
-    assert.ok(loaded.value.component);
+    const chunks = loaded.value.component.chunks ?? [];
     assert.deepEqual(
-      loaded.value.component.children.map((component) => component.constructor.name),
-      ["UserMessageComponent", "AssistantMessageComponent", "ToolExecutionComponent"],
+      chunks.map((chunk) => chunk.kind),
+      ["user", "assistant", "tool", "result"],
     );
+    assert.deepEqual(
+      chunks.map((chunk) => chunk.component.constructor.name),
+      ["UserMessageComponent", "AssistantMessageComponent", "ToolExecutionComponent", "Markdown"],
+    );
+    const rendered = loaded.value.component.render(100).join("\n");
+    assert.match(rendered, /QA Report/);
+    assert.match(rendered, /Repository checks passed/);
     assert.equal(await readFile(sessionFile, "utf8"), source);
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -182,6 +189,22 @@ function fixtureSession(cwd: string): string {
         details: {},
         isError: false,
         timestamp: 3,
+      },
+    },
+    {
+      type: "custom",
+      id: "result-1",
+      parentId: "tool-result-1",
+      timestamp: "2026-07-27T08:00:04.000Z",
+      customType: "phenix:result-display",
+      data: {
+        content: "# QA Report\n\n- Repository checks passed",
+        inputKind: "markdown",
+        renderer: "pi-markdown",
+        transform: "qa-report",
+        steps: [],
+        toolCallId: "tool-qa",
+        toolName: "phenix_dispatch",
       },
     },
   ]

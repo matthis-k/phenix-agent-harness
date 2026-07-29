@@ -34,6 +34,8 @@ import {
 } from "./observability-theme.ts";
 import type { PhenixUiTarget } from "./phenix-ui.ts";
 import { transcriptAvailabilityMessage } from "./transcript-availability.ts";
+import { stripTranscriptAnsi } from "./workspace/transcript-selection.ts";
+import { TranscriptSelectionSurface } from "./workspace/transcript-selection-surface.ts";
 import type {
   WorkspaceViewPaneId,
   WorkspaceViewRegistration,
@@ -59,8 +61,8 @@ import {
 export type { PhenixWorkspaceSnapshot } from "./workspace/workspace-model.ts";
 
 const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]);
-const MOUSE_ENABLE = "\x1b[?1000h\x1b[?1006h";
-const MOUSE_DISABLE = "\x1b[?1000l\x1b[?1006l";
+const MOUSE_ENABLE = "\x1b[?1000h\x1b[?1002h\x1b[?1006h";
+const MOUSE_DISABLE = "\x1b[?1000l\x1b[?1002l\x1b[?1006l";
 
 export type WorkspaceFocus = "transcript" | "editor" | WorkspaceViewPaneId;
 export type WorkspaceSection = WorkspaceViewPaneId;
@@ -114,12 +116,16 @@ interface SectionRender {
 interface TranscriptRender {
   readonly lines: readonly string[];
   readonly maxOffset: number;
+  readonly offset: number;
+  readonly plainLines: readonly string[];
 }
 
 interface RenderFrame {
   readonly layout: LayoutFrame;
   readonly sections: readonly SectionLayout[];
   readonly transcriptMaxOffset: number;
+  readonly transcriptOffset: number;
+  readonly transcriptLines: readonly string[];
 }
 
 export type WorkspaceLayout = WorkspaceDimensions;
@@ -155,6 +161,7 @@ export class PhenixWorkspace implements Component, Focusable {
   private readonly onAction: (action: PhenixWorkspaceAction) => void;
   private readonly editor: CustomEditor;
   private readonly controller: WorkspaceControllerAdapter;
+  private readonly transcriptSelection = new TranscriptSelectionSurface();
   focused = true;
   private streamingMessage: AssistantMessage | undefined;
   private disposed = false;
@@ -219,6 +226,10 @@ export class PhenixWorkspace implements Component, Focusable {
       this.handleMouse(mouse);
       return;
     }
+    if (data === "\x03" && this.effectiveFocus() === "transcript") {
+      void this.transcriptSelection.copy().catch(() => undefined);
+      return;
+    }
     if (data === "\x0f") {
       this.onAction({ kind: "native", text: this.editor.getText() });
       return;
@@ -240,7 +251,12 @@ export class PhenixWorkspace implements Component, Focusable {
     }
     this.editor.focused = false;
     if (matchesKey(data, "escape")) {
-      this.controller.dispatch({ type: "focus.set", paneId: "editor" });
+      if (focus === "transcript" && this.transcriptSelection.selection) {
+        this.transcriptSelection.clear();
+        this.requestRender();
+      } else {
+        this.controller.dispatch({ type: "focus.set", paneId: "editor" });
+      }
       return;
     }
     if (data === "i" || data === "I") {
@@ -303,11 +319,28 @@ export class PhenixWorkspace implements Component, Focusable {
           error,
         ),
         maxOffset: 0,
+        offset: 0,
+        plainLines: [],
       };
     }
 
+    this.transcriptSelection.setFrame({
+      bounds: transcriptBounds,
+      offset: transcript.offset,
+      lines: transcript.plainLines,
+    });
+    const selectedTranscriptLines = transcript.lines.map((line, row) =>
+      row === 0
+        ? line
+        : this.transcriptSelection.renderLine(
+            line,
+            transcript.offset + row - 1,
+            transcriptBounds.width,
+            this.theme,
+          ),
+    );
     const outputs = new Map<PaneId, WorkspacePaneOutput>([
-      ["transcript", { lines: transcript.lines }],
+      ["transcript", { lines: selectedTranscriptLines }],
       [
         "editor",
         {
@@ -337,6 +370,8 @@ export class PhenixWorkspace implements Component, Focusable {
       layout,
       sections,
       transcriptMaxOffset: transcript.maxOffset,
+      transcriptOffset: transcript.offset,
+      transcriptLines: transcript.plainLines,
     };
     return [...lines];
   }
@@ -388,22 +423,25 @@ export class PhenixWorkspace implements Component, Focusable {
           : "Session";
     const transcript = this.controller.transcript;
     const session = transcript?.sessionId ?? selected?.run.pi?.sessionId;
+    const copyHint = this.transcriptSelection.selection
+      ? ` ${color(this.theme, "muted", "· Ctrl+C copies · Esc clears")}`
+      : "";
     const header = surface(
       this.theme,
       focus === "transcript" ? "selectedBg" : "customMessageBg",
       fitLine(
-        ` ${strong(this.theme, title)}${session ? ` ${color(this.theme, "muted", `· ${session}`)}` : ""}${selected?.run.kind !== "root" ? ` ${color(this.theme, "muted", "· i inspects")}` : ""}`,
+        ` ${strong(this.theme, title)}${session ? ` ${color(this.theme, "muted", `· ${session}`)}` : ""}${selected?.run.kind !== "root" ? ` ${color(this.theme, "muted", "· i inspects")}` : ""}${copyHint}`,
         width,
       ),
     );
-    const content: string[] = [header];
+    const body: string[] = [];
     if (transcript) {
-      content.push(...transcript.component.render(width).map((line) => leftOrigin(line, width)));
+      body.push(...transcript.component.render(width).map((line) => leftOrigin(line, width)));
     } else {
       const unavailable = transcriptAvailabilityMessage(
         this.controller.state.transcript.availability,
       );
-      if (unavailable) content.push("", color(this.theme, "warning", ` ${unavailable}`));
+      if (unavailable) body.push("", color(this.theme, "warning", ` ${unavailable}`));
     }
     if (selected?.run.kind === "root" && this.streamingMessage) {
       const streaming = new AssistantMessageComponent(
@@ -413,17 +451,22 @@ export class PhenixWorkspace implements Component, Focusable {
         "Thinking...",
         1,
       );
-      content.push(...streaming.render(width).map((line) => leftOrigin(line, width)));
+      body.push(...streaming.render(width).map((line) => leftOrigin(line, width)));
     }
 
     const bodyHeight = Math.max(0, height - 1);
-    const maxOffset = Math.max(0, content.length - height);
+    const maxOffset = Math.max(0, body.length - bodyHeight);
     const scroll = this.controller.state.transcript.scroll;
     const offset = scroll.mode === "follow-end" ? maxOffset : clamp(scroll.offset, 0, maxOffset);
     const lines = Array.from({ length: bodyHeight }, (_, row) =>
-      leftOrigin(content[offset + row + 1] ?? "", width),
+      leftOrigin(body[offset + row] ?? "", width),
     );
-    return { lines: [header, ...lines], maxOffset };
+    return {
+      lines: [header, ...lines],
+      maxOffset,
+      offset,
+      plainLines: body.map(stripTranscriptAnsi),
+    };
   }
 
   private renderSidebar(width: number, height: number, focus: WorkspaceFocus): SidebarRender {
@@ -636,6 +679,7 @@ export class PhenixWorkspace implements Component, Focusable {
   }
 
   private selectTranscript(node: RunTreeNode): void {
+    this.transcriptSelection.clear();
     this.controller.dispatch({ type: "focus.set", paneId: "transcript" });
     this.controller.selectTranscript(node.run.id);
   }
@@ -660,7 +704,22 @@ export class PhenixWorkspace implements Component, Focusable {
   }
 
   private handleMouse(event: MouseEvent): void {
-    if (event.release || !this.frame) return;
+    if (!this.frame) return;
+    if (this.transcriptSelection.dragging) {
+      const changed = event.release
+        ? this.transcriptSelection.end(event)
+        : this.transcriptSelection.update(event);
+      if (changed) this.requestRender();
+      return;
+    }
+
+    if (event.release) return;
+    if (event.button === 0 && this.transcriptSelection.begin(event)) {
+      this.controller.dispatch({ type: "focus.set", paneId: "transcript" });
+      this.requestRender();
+      return;
+    }
+
     const sidebarBounds = this.frame.layout.panes.get("runs");
     if (!sidebarBounds || event.x <= sidebarBounds.x) {
       if (event.button === 64 || event.button === 65) {
@@ -674,6 +733,7 @@ export class PhenixWorkspace implements Component, Focusable {
       return;
     }
 
+    this.transcriptSelection.clear();
     const section = this.frame.sections.find(
       (candidate) =>
         candidate.height > 0 &&

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { Container } from "@earendil-works/pi-tui";
-
 import type { RunTreeNode } from "../application/interfaces.ts";
 import type { RunSnapshot } from "../domain/run/model.ts";
 import { runId } from "../domain/shared.ts";
-import { readyNativeRunTranscript } from "../extension/native-run-transcript.ts";
+import {
+  NativeTranscriptComponent,
+  readyNativeRunTranscript,
+} from "../extension/native-run-transcript.ts";
 import { WorkspaceControllerAdapter } from "../extension/workspace/workspace-controller-adapter.ts";
 import type { PhenixWorkspaceSnapshot } from "../extension/workspace/workspace-model.ts";
 
@@ -75,7 +76,7 @@ function snapshot(sequence: number): PhenixWorkspaceSnapshot {
 
 function nativeTranscript() {
   return {
-    component: new Container(),
+    component: new NativeTranscriptComponent(),
     sessionId: "root-session",
   };
 }

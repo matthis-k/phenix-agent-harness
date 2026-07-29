@@ -9,8 +9,13 @@ import type {
 import { renderTerminalMermaid } from "./mermaid-rendering.ts";
 import type { ObservabilityTheme } from "./observability-theme.ts";
 
-const RESULT_ENTRY_TYPE = "phenix:result-display";
+export const RESULT_ENTRY_TYPE = "phenix:result-display";
 const ROOT_RESULT_TOOLS = new Set(["phenix_dispatch", "phenix_handle"]);
+const PLAIN_THEME = {
+  fg: (_tone: string, text: string) => text,
+  bg: (_tone: string, text: string) => text,
+  bold: (text: string) => text,
+} as unknown as ObservabilityTheme;
 
 export interface NativeResultEntry {
   readonly content: string;
@@ -61,29 +66,8 @@ export function registerResultDisplay(
   const renderers = rendererMap(input.renderers);
 
   pi.registerEntryRenderer<NativeResultEntry>(RESULT_ENTRY_TYPE, (entry, _options, theme) => {
-    const data = entry.data;
-    if (!data) return new Text("", 0, 0);
-    const renderer = renderers.get(data.renderer);
-    if (!renderer || renderer.inputKind !== data.inputKind) {
-      return new Text(
-        theme.fg(
-          "error",
-          `Unable to render ${data.inputKind} result with ${data.renderer}: incompatible renderer`,
-        ),
-        1,
-        0,
-      );
-    }
-    try {
-      return renderer.render(data.content, theme);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Text(
-        theme.fg("error", `Unable to render ${data.inputKind} result: ${message}`),
-        1,
-        0,
-      );
-    }
+    const data = nativeResultEntryData(entry.data);
+    return data ? renderNativeResultEntry(data, theme, renderers) : new Text("", 0, 0);
   });
 
   pi.on("tool_result", (event, ctx) => {
@@ -102,6 +86,58 @@ export function registerResultDisplay(
       ],
     };
   });
+}
+
+export function renderNativeResultEntry(
+  data: NativeResultEntry,
+  theme: ObservabilityTheme = PLAIN_THEME,
+  renderers: ReadonlyMap<
+    NativeResultRendererStrategy["id"],
+    NativeResultRendererStrategy
+  > = rendererMap(defaultNativeResultRenderers),
+): Markdown | Text {
+  const renderer = renderers.get(data.renderer);
+  if (!renderer || renderer.inputKind !== data.inputKind) {
+    return new Text(
+      theme.fg(
+        "error",
+        `Unable to render ${data.inputKind} result with ${data.renderer}: incompatible renderer`,
+      ),
+      1,
+      0,
+    );
+  }
+  try {
+    return renderer.render(data.content, theme);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return new Text(
+      theme.fg("error", `Unable to render ${data.inputKind} result: ${message}`),
+      1,
+      0,
+    );
+  }
+}
+
+export function nativeResultEntryData(value: unknown): NativeResultEntry | undefined {
+  const data = recordOf(value);
+  if (!data) return undefined;
+  const { content, inputKind, renderer, transform, steps, toolCallId, toolName } = data;
+  if (
+    typeof content !== "string" ||
+    (inputKind !== "markdown" && inputKind !== "mermaid") ||
+    (renderer !== "pi-markdown" && renderer !== "beautiful-mermaid") ||
+    (transform !== "qa-report" &&
+      transform !== "structured-content-markdown" &&
+      transform !== "mermaid-source") ||
+    !Array.isArray(steps) ||
+    !steps.every((step): step is string => typeof step === "string") ||
+    typeof toolCallId !== "string" ||
+    typeof toolName !== "string"
+  ) {
+    return undefined;
+  }
+  return { content, inputKind, renderer, transform, steps, toolCallId, toolName };
 }
 
 export function nativeResultEntry(
