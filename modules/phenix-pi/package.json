@@ -12,11 +12,7 @@
   },
   "pi": {
     "extensions": [
-      "./extension/theme-extension.ts",
-      "./extension/root-extension.ts",
-      "./extension/default-workspace-extension.ts",
-      "./extension/result-display.ts",
-      "./extension/visualization-display.ts"
+      "./extension/phenix.ts"
     ],
     "themes": [
       "./themes/catppuccin-mocha.json"

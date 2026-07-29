@@ -8,12 +8,6 @@ const packageJson = JSON.parse(
   readonly pi?: { readonly extensions?: readonly string[] };
 };
 
-test("theme, runtime, workspace, and display extensions load in dependency order", () => {
-  assert.deepEqual(packageJson.pi?.extensions, [
-    "./extension/theme-extension.ts",
-    "./extension/root-extension.ts",
-    "./extension/default-workspace-extension.ts",
-    "./extension/result-display.ts",
-    "./extension/visualization-display.ts",
-  ]);
+test("Pi registers one public Phenix extension entrypoint", () => {
+  assert.deepEqual(packageJson.pi?.extensions, ["./extension/phenix.ts"]);
 });
