@@ -133,10 +133,7 @@ export class TreeView<T> {
 
     if (intent === "collapse" && !this.expanded.has(row.id)) {
       if (!row.parentId) return undefined;
-      const event = this.list.dispatch(
-        { kind: "select", id: row.parentId },
-        viewportHeight,
-      );
+      const event = this.list.dispatch({ kind: "select", id: row.parentId }, viewportHeight);
       return this.fromListEvent(event);
     }
 
@@ -149,8 +146,7 @@ export class TreeView<T> {
     }
 
     if (!row.hasChildren) return undefined;
-    const expanded =
-      intent === "toggle" ? !this.expanded.has(row.id) : intent === "expand";
+    const expanded = intent === "toggle" ? !this.expanded.has(row.id) : intent === "expand";
     if (expanded) this.expanded.add(row.id);
     else this.expanded.delete(row.id);
     this.rebuild();
@@ -186,7 +182,9 @@ export class TreeView<T> {
     })}`;
   }
 
-  private fromListEvent(event: ListViewEvent<TreeRow<T>> | undefined): TreeViewEvent<T> | undefined {
+  private fromListEvent(
+    event: ListViewEvent<TreeRow<T>> | undefined,
+  ): TreeViewEvent<T> | undefined {
     if (!event) return undefined;
     return event.kind === "activate"
       ? { kind: "activate", id: event.id, node: event.item.node }
