@@ -4,6 +4,8 @@ import type { NativeRunTranscript } from "../native-run-transcript.ts";
 import type { WorkspaceViewSnapshot } from "./views/workspace-view.ts";
 import { workspaceViewRegistry } from "./views/workspace-view-registry.ts";
 
+export type { WorkspaceFileRow } from "./views/files-view.ts";
+export { projectWorkspaceFiles } from "./views/files-view.ts";
 export type { WorkspaceRunRow } from "./views/runs-view.ts";
 export { projectWorkspaceRuns } from "./views/runs-view.ts";
 export type { WorkspaceTaskRow } from "./views/tasks-view.ts";
