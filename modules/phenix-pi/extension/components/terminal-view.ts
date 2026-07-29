@@ -1,3 +1,5 @@
+import { visibleWidth } from "@earendil-works/pi-tui";
+
 import { clamp, sliceViewLine, viewportRange } from "./viewport.ts";
 
 export type TerminalViewIntent =
@@ -11,12 +13,16 @@ export interface TerminalViewOptions {
   readonly maxLines?: number;
 }
 
-export interface TerminalViewFrame {
-  readonly lines: readonly string[];
+export interface TerminalViewportState {
   readonly offset: number;
   readonly horizontalOffset: number;
-  readonly maximumOffset: number;
   readonly followEnd: boolean;
+}
+
+export interface TerminalViewFrame extends TerminalViewportState {
+  readonly lines: readonly string[];
+  readonly maximumOffset: number;
+  readonly maximumHorizontalOffset: number;
 }
 
 export class TerminalView {
@@ -38,6 +44,14 @@ export class TerminalView {
     return this.buffer;
   }
 
+  get viewport(): TerminalViewportState {
+    return {
+      offset: this.offset,
+      horizontalOffset: this.horizontalOffset,
+      followEnd: this.followEnd,
+    };
+  }
+
   setLines(lines: readonly string[]): void {
     this.buffer = lines.slice(-this.maxLines);
     this.reconcileAfterMutation(Math.max(0, lines.length - this.buffer.length));
@@ -57,6 +71,12 @@ export class TerminalView {
     const lines = normalized.split("\n");
     if (lines[lines.length - 1] === "") lines.pop();
     this.appendLines(lines);
+  }
+
+  setViewport(state: TerminalViewportState): void {
+    this.offset = Math.max(0, Math.floor(state.offset));
+    this.horizontalOffset = Math.max(0, Math.floor(state.horizontalOffset));
+    this.followEnd = state.followEnd;
   }
 
   clear(): void {
@@ -94,19 +114,27 @@ export class TerminalView {
   }
 
   render(width: number, height: number): TerminalViewFrame {
+    const visibleWidthLimit = Math.max(0, Math.floor(width));
     const range = viewportRange(this.buffer.length, height, {
       offset: this.offset,
       followEnd: this.followEnd,
     });
+    const maximumHorizontalOffset = Math.max(
+      0,
+      this.buffer.reduce((maximum, line) => Math.max(maximum, visibleWidth(line)), 0) -
+        visibleWidthLimit,
+    );
     this.offset = range.offset;
+    this.horizontalOffset = clamp(this.horizontalOffset, 0, maximumHorizontalOffset);
     const visible = this.buffer.slice(range.offset, range.end);
     return {
       lines: Array.from({ length: Math.max(0, Math.floor(height)) }, (_, row) =>
-        sliceViewLine(visible[row] ?? "", this.horizontalOffset, width),
+        sliceViewLine(visible[row] ?? "", this.horizontalOffset, visibleWidthLimit),
       ),
       offset: range.offset,
       horizontalOffset: this.horizontalOffset,
       maximumOffset: range.maximumOffset,
+      maximumHorizontalOffset,
       followEnd: this.followEnd,
     };
   }
