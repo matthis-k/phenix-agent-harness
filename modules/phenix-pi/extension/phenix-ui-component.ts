@@ -640,8 +640,7 @@ export class PhenixUi implements Component {
     const detail = this.renderFactDetail(selected, detailWidth, height);
     return Array.from(
       { length: height },
-      (_, row) =>
-        `${list[row] ?? " ".repeat(listWidth)} ${detail[row] ?? " ".repeat(detailWidth)}`,
+      (_, row) => `${list[row] ?? " ".repeat(listWidth)} ${detail[row] ?? " ".repeat(detailWidth)}`,
     );
   }
 
@@ -953,8 +952,7 @@ export class PhenixUi implements Component {
       event = list.dispatch({ kind: "page", direction: 1 }, height);
     else if (matchesKey(data, "home"))
       event = list.dispatch({ kind: "edge", edge: "first" }, height);
-    else if (matchesKey(data, "end"))
-      event = list.dispatch({ kind: "edge", edge: "last" }, height);
+    else if (matchesKey(data, "end")) event = list.dispatch({ kind: "edge", edge: "last" }, height);
     else if (matchesKey(data, "enter")) event = list.dispatch({ kind: "activate" }, height);
     else return undefined;
     this.requestRender();
