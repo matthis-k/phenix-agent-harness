@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { HealthDiagnosticLog } from "../application/health-diagnostic-log.ts";
 import type { QueryFacade, RunTreeNode } from "../application/interfaces.ts";
-import type { DiagnosticSummary } from "../domain/diagnostics.ts";
+import type { DiagnosticLogEntry, DiagnosticSummary } from "../domain/diagnostics.ts";
 import type { RunKind, RunRecord, RunState } from "../domain/run/model.ts";
 import { definitionId, failed, type RunId, runId, success } from "../domain/shared.ts";
 import type { DiagnosticLog } from "../ports/diagnostic-log.ts";
@@ -58,13 +58,16 @@ function node(run: RunRecord, children: readonly RunTreeNode[] = []): RunTreeNod
   return { run: { ...run, activeChildren: [] }, children };
 }
 
-function diagnosticLog(summary: DiagnosticSummary): DiagnosticLog {
+function diagnosticLog(
+  summary: DiagnosticSummary,
+  errorEntries: readonly DiagnosticLogEntry[] = [],
+): DiagnosticLog {
   return {
     summary: async () => summary,
     record: async () => {
       throw new Error("not used");
     },
-    entries: async () => [],
+    entries: async () => errorEntries,
     export: async () => "",
     resolve: async () => "",
     pathFor: () => undefined,
@@ -80,6 +83,17 @@ function queries(tree: RunTreeNode): QueryFacade {
   } as unknown as QueryFacade;
 }
 
+function errorEntry(scope: string): DiagnosticLogEntry {
+  return {
+    version: 1,
+    timestamp: "2026-07-29T00:00:00.000Z",
+    severity: "error",
+    scope,
+    message: scope,
+    rootRunId,
+  };
+}
+
 const observed: DiagnosticSummary = {
   total: 12,
   artifacts: 1,
@@ -91,7 +105,11 @@ test("health projection replaces historical errors with active failure incidents
   const workflow = record("qa", "workflow", "running", root.id);
   const child = record("critic", "agent", "failed", workflow.id);
   const log = new HealthDiagnosticLog(
-    diagnosticLog(observed),
+    diagnosticLog(observed, [
+      errorEntry("run.lifecycle.state_changed"),
+      errorEntry("run.lifecycle.failed"),
+      errorEntry("fact.error_observed.recorded"),
+    ]),
     queries(node(root, [node(workflow, [node(child)])])),
   );
 
@@ -99,6 +117,7 @@ test("health projection replaces historical errors with active failure incidents
   assert.deepEqual(summary.observedCounts, observed.counts);
   assert.deepEqual(summary.failures, { recovering: 1, recovered: 0, terminal: 0 });
   assert.deepEqual(summary.counts, { trace: 2, info: 3, warning: 1, error: 0 });
+  assert.equal(summary.infrastructureErrors, 0);
   assert.equal(summary.total, 12);
 });
 
@@ -130,5 +149,18 @@ test("a failed workflow boundary is a terminal health error", async () => {
   const summary = await log.summary(rootRunId);
   assert.deepEqual(summary.failures, { recovering: 0, recovered: 0, terminal: 1 });
   assert.equal(summary.counts.warning, 0);
+  assert.equal(summary.counts.error, 1);
+});
+
+test("infrastructure errors remain terminal independently of run recovery", async () => {
+  const root = record("root-diagnostics", "root", "running");
+  const log = new HealthDiagnosticLog(
+    diagnosticLog(observed, [errorEntry("runtime.event.subscriber_failed")]),
+    queries(node(root)),
+  );
+
+  const summary = await log.summary(rootRunId);
+  assert.deepEqual(summary.failures, { recovering: 0, recovered: 0, terminal: 0 });
+  assert.equal(summary.infrastructureErrors, 1);
   assert.equal(summary.counts.error, 1);
 });
