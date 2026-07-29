@@ -6,13 +6,13 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { SlashCommand } from "@earendil-works/pi-tui";
 
-import type { ObservabilityTheme } from "./observability-theme.ts";
 import {
   loadNativeRunTranscript,
   loadNativeRunTranscriptResult,
   readyNativeRunTranscript,
   renderNativeTranscript,
 } from "./native-run-transcript.ts";
+import type { ObservabilityTheme } from "./observability-theme.ts";
 import { loadPhenixUiSnapshot, PhenixUi, type PhenixUiTarget } from "./phenix-ui.ts";
 import {
   PhenixWorkspace,
