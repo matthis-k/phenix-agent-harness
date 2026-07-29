@@ -34,6 +34,12 @@ import {
 } from "./observability-theme.ts";
 import type { PhenixUiTarget } from "./phenix-ui.ts";
 import { transcriptAvailabilityMessage } from "./transcript-availability.ts";
+import type {
+  WorkspaceViewPaneId,
+  WorkspaceViewRegistration,
+  WorkspaceViewRow,
+} from "./workspace/views/workspace-view.ts";
+import { workspaceViewRegistry } from "./workspace/views/workspace-view-registry.ts";
 import { WorkspaceControllerAdapter } from "./workspace/workspace-controller-adapter.ts";
 import {
   composeWorkspaceTextFrame,
@@ -49,12 +55,6 @@ import {
   projectWorkspaceRuns,
   projectWorkspaceTasks,
 } from "./workspace/workspace-model.ts";
-import { workspaceViewRegistry } from "./workspace/views/workspace-view-registry.ts";
-import type {
-  WorkspaceViewPaneId,
-  WorkspaceViewRegistration,
-  WorkspaceViewRow,
-} from "./workspace/views/workspace-view.ts";
 
 export type { PhenixWorkspaceSnapshot } from "./workspace/workspace-model.ts";
 
@@ -400,7 +400,9 @@ export class PhenixWorkspace implements Component, Focusable {
     if (transcript) {
       content.push(...transcript.component.render(width).map((line) => leftOrigin(line, width)));
     } else {
-      const unavailable = transcriptAvailabilityMessage(this.controller.state.transcript.availability);
+      const unavailable = transcriptAvailabilityMessage(
+        this.controller.state.transcript.availability,
+      );
       if (unavailable) content.push("", color(this.theme, "warning", ` ${unavailable}`));
     }
     if (selected?.run.kind === "root" && this.streamingMessage) {
@@ -500,7 +502,12 @@ export class PhenixWorkspace implements Component, Focusable {
     const pane = this.controller.state.panes[view.id];
     const selectedIndex = rowIndex(rows, pane.selectedItemId);
     if (height <= 0) return { section: view.id, lines: [], offset: 0 };
-    const title = this.sectionHeader(view.id, `${view.title.toUpperCase()} ${rows.length}`, width, focus);
+    const title = this.sectionHeader(
+      view.id,
+      `${view.title.toUpperCase()} ${rows.length}`,
+      width,
+      focus,
+    );
     if (pane.collapsed || height === 1) {
       return {
         section: view.id,
