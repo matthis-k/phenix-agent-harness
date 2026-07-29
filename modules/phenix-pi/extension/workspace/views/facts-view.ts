@@ -1,6 +1,6 @@
 import type { RunFact } from "../../../domain/run/observability.ts";
-import { compactTime, truncateWorkspaceText } from "./workspace-view-format.ts";
 import { defineWorkspaceView, type WorkspaceViewSnapshot } from "./workspace-view.ts";
+import { compactTime, truncateWorkspaceText } from "./workspace-view-format.ts";
 
 const RECENT_FACT_LIMIT = 50;
 
