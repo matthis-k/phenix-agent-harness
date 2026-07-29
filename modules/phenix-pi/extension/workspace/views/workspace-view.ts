@@ -1,3 +1,4 @@
+import type { RunId } from "../../../domain/shared.ts";
 import type { TaskTree } from "../../../domain/task/projection.ts";
 import type { PaneId } from "../../../domain/workspace/state.ts";
 import type { PhenixUiSnapshot } from "../../phenix-ui.ts";
@@ -10,6 +11,10 @@ export type WorkspaceViewPaneId = Extract<PaneId, WorkspaceViewId>;
 export interface WorkspaceViewSnapshot {
   readonly ui: PhenixUiSnapshot;
   readonly tasks: TaskTree;
+}
+
+export interface WorkspaceViewContext {
+  readonly selectedRunId?: RunId;
 }
 
 export interface WorkspaceViewLayout {
@@ -28,7 +33,10 @@ export interface WorkspaceViewRegistration<TValue = unknown> {
   readonly id: WorkspaceViewPaneId;
   readonly title: string;
   readonly layout: WorkspaceViewLayout;
-  project(snapshot: WorkspaceViewSnapshot): readonly WorkspaceViewRow<TValue>[];
+  project(
+    snapshot: WorkspaceViewSnapshot,
+    context?: WorkspaceViewContext,
+  ): readonly WorkspaceViewRow<TValue>[];
 }
 
 export function defineWorkspaceView<TValue>(
