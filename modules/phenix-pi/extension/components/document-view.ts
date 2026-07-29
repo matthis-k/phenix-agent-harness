@@ -1,7 +1,7 @@
-import { fitViewLine } from "./viewport.ts";
 import type { ListView } from "./list-view.ts";
 import type { TerminalView } from "./terminal-view.ts";
 import type { TreeView } from "./tree-view.ts";
+import { fitViewLine } from "./viewport.ts";
 
 export interface DocumentBlock {
   render(width: number): readonly string[];
@@ -48,7 +48,8 @@ export function textBlock(
     render: (width) => {
       const contentWidth = Math.max(0, width - paddingX * 2);
       return lines.map(
-        (line) => `${" ".repeat(paddingX)}${fitViewLine(line, contentWidth)}${" ".repeat(paddingX)}`,
+        (line) =>
+          `${" ".repeat(paddingX)}${fitViewLine(line, contentWidth)}${" ".repeat(paddingX)}`,
       );
     },
   };
