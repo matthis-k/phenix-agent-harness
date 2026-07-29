@@ -1,4 +1,5 @@
 import type { RunFact } from "../../../domain/run/observability.ts";
+import { color, fact } from "../../observability-theme.ts";
 import { defineWorkspaceView, type WorkspaceViewSnapshot } from "./workspace-view.ts";
 import { compactTime, truncateWorkspaceText } from "./workspace-view-format.ts";
 
@@ -22,9 +23,13 @@ export const factsWorkspaceView = defineWorkspaceView<RunFact>({
       id: value.id,
       value,
       activation: { kind: "inspector", view: "facts" },
-      render: ({ width }) => ({
-        muted: true,
-        text: `${compactTime(value.timestamp)} ${truncateWorkspaceText(value.summary, Math.max(8, width - 8))}`,
+      render: ({ theme, width }) => ({
+        text: `${color(theme, "dim", compactTime(value.timestamp))} ${fact(
+          theme,
+          value.kind,
+          value.summary,
+          truncateWorkspaceText(value.summary, Math.max(8, width - 8)),
+        )}`,
       }),
     })),
 });
