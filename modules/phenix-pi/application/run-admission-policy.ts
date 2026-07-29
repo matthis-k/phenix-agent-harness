@@ -2,6 +2,7 @@ import type {
   AgentDefinition,
   AnyDefinition,
   CapabilitySet,
+  InvokeNode,
   WorkflowDefinition,
 } from "../domain/definition/definition.ts";
 import type { Difficulty, ResolvedModel } from "../domain/definition/model.ts";
@@ -65,54 +66,32 @@ export class RunAdmissionPolicy {
       return undefined;
     }
 
-    let capabilities = parent.compiled.capabilities;
-    if (parent.kind === "workflow") {
-      if (!request.trustedWorkflowInvocation || !request.causation) {
-        throw new Error(`Workflow children may only be started by their process manager`);
-      }
-      const parentDefinition = this.catalog.require(parent.definitionId) as WorkflowDefinition<
-        unknown,
-        unknown
-      >;
-      const invocation = parentDefinition.graph.nodes.find(
-        (node) => node.kind === "invoke" && node.id === request.causation?.nodeId,
-      );
-      if (invocation?.kind !== "invoke" || invocation.definition.id !== definition.id) {
-        throw new Error(`Definition ${definition.id} is not authorized at workflow node`);
-      }
-      if (!parent.compiled.capabilities.invokableDefinitions.includes(definition.id)) {
-        throw new Error(`Workflow capability scope excludes ${definition.id}`);
-      }
-      capabilities = {
-        invokableDefinitions: [definition.id],
-        maxDepth: parent.compiled.capabilities.maxDepth,
-        mayDetach: false,
-        maySend: false,
-        mayCancelChildren: true,
-      };
-    }
-
+    const workflowInvocation = this.authorizedWorkflowInvocation(parent, definition, request);
+    const capabilities: CapabilitySet = workflowInvocation
+      ? {
+          invokableDefinitions: [definition.id],
+          maxDepth: parent.compiled.capabilities.maxDepth,
+          mayDetach: false,
+          maySend: false,
+          mayCancelChildren: true,
+        }
+      : parent.compiled.capabilities;
     const invokableDefinitions =
       parent.kind === "root" ? this.rootInvokableDefinitions : capabilities.invokableDefinitions;
+    const nextDepth = this.depthOf(parent.id) + 1;
+    const requestsDetachment = request.lifetime === "detached-to-root";
+
     if (!invokableDefinitions.includes(definition.id)) {
       throw new Error(`Parent ${parent.id} cannot invoke ${definition.id}`);
     }
-    if (this.depthOf(parent.id) + 1 > capabilities.maxDepth) {
+    if (nextDepth > capabilities.maxDepth) {
       throw new Error(`Invocation of ${definition.id} exceeds delegation depth`);
     }
-    if (request.lifetime === "detached-to-root" && !capabilities.mayDetach) {
+    if (requestsDetachment && !capabilities.mayDetach) {
       throw new Error(`Parent ${parent.id} may not detach children`);
     }
-    if (parent.kind !== "workflow") return undefined;
 
-    const workflow = this.catalog.require(parent.definitionId) as WorkflowDefinition<
-      unknown,
-      unknown
-    >;
-    const invocation = workflow.graph.nodes.find(
-      (node) => node.kind === "invoke" && node.id === request.causation?.nodeId,
-    );
-    return invocation?.kind === "invoke" ? invocation.capabilityOverride : undefined;
+    return workflowInvocation?.capabilityOverride;
   }
 
   assertRetryAccessible(caller: RunRecord, target: RunRecord): void {
@@ -120,11 +99,11 @@ export class RunAdmissionPolicy {
     if (this.store.projection.rootOf(caller.id) !== this.store.projection.rootOf(target.id)) {
       throw new Error(`Run ${target.id} is outside caller ${caller.id}'s root scope`);
     }
-    if (
-      !isTerminalRunState(target.state) ||
-      !target.outcome ||
-      target.outcome.status === "success"
-    ) {
+    const isRetryableTerminal =
+      isTerminalRunState(target.state) &&
+      target.outcome !== undefined &&
+      target.outcome.status !== "success";
+    if (!isRetryableTerminal) {
       throw new Error(`Run ${target.id} is not a failed or cancelled terminal run`);
     }
     if (caller.kind === "root") return;
@@ -142,7 +121,8 @@ export class RunAdmissionPolicy {
     options: RunRetryOptions,
   ): Omit<RunRetryOptions, "wait"> | undefined {
     const addTools = [...new Set(options.addTools ?? [])];
-    if (kind !== "agent" && (addTools.length > 0 || options.limits !== undefined)) {
+    const overridesAgentRuntime = addTools.length > 0 || options.limits !== undefined;
+    if (kind !== "agent" && overridesAgentRuntime) {
       throw new Error(`Only agent retries may override tools or limits`);
     }
     for (const tool of addTools) {
@@ -180,9 +160,9 @@ export class RunAdmissionPolicy {
           };
     if (!override) return base;
 
-    const allowed = new Set(override.invokableDefinitions ?? base.invokableDefinitions);
+    const allowedDefinitions = new Set(override.invokableDefinitions ?? base.invokableDefinitions);
     return {
-      invokableDefinitions: base.invokableDefinitions.filter((id) => allowed.has(id)),
+      invokableDefinitions: base.invokableDefinitions.filter((id) => allowedDefinitions.has(id)),
       maxDepth: Math.min(base.maxDepth, override.maxDepth ?? base.maxDepth),
       mayDetach: base.mayDetach && (override.mayDetach ?? true),
       maySend: base.maySend && (override.maySend ?? true),
@@ -206,6 +186,7 @@ export class RunAdmissionPolicy {
       ...(input.retryOf ? { retryOf: input.retryOf } : {}),
     };
     const { definition } = input;
+
     if (definition.kind === "agent") {
       const route = definition.modelRoutes?.[input.difficulty];
       return {
@@ -256,6 +237,34 @@ export class RunAdmissionPolicy {
       current = this.store.projection.requireRun(current.parentId);
     }
     return depth;
+  }
+
+  private authorizedWorkflowInvocation(
+    parent: RunRecord,
+    definition: AnyDefinition,
+    request: RunAdmissionRequest,
+  ): InvokeNode | undefined {
+    if (parent.kind !== "workflow") return undefined;
+
+    const causation = request.causation;
+    if (!request.trustedWorkflowInvocation || !causation) {
+      throw new Error(`Workflow children may only be started by their process manager`);
+    }
+
+    const workflow = this.catalog.require(parent.definitionId) as WorkflowDefinition<
+      unknown,
+      unknown
+    >;
+    const invocation = workflow.graph.nodes.find(
+      (node): node is InvokeNode => node.kind === "invoke" && node.id === causation.nodeId,
+    );
+    if (!invocation || invocation.definition.id !== definition.id) {
+      throw new Error(`Definition ${definition.id} is not authorized at workflow node`);
+    }
+    if (!parent.compiled.capabilities.invokableDefinitions.includes(definition.id)) {
+      throw new Error(`Workflow capability scope excludes ${definition.id}`);
+    }
+    return invocation;
   }
 }
 
