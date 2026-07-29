@@ -98,6 +98,10 @@ export class TreeView<T> {
     return this.list.selectedItem?.node;
   }
 
+  get itemCount(): number {
+    return this.rows.length;
+  }
+
   get expandedIds(): ReadonlySet<string> {
     return new Set(this.expanded);
   }
