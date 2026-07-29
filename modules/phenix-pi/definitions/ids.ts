@@ -12,7 +12,7 @@ export const AGENT_FINALIZER = definitionId("agent.finalizer");
 export const AGENT_DISPATCHER = definitionId("agent.dispatcher");
 export const AGENT_COORDINATOR = definitionId("agent.coordinator");
 export const AGENT_BASE = definitionId("agent.base");
-export const SESSION_STOCK = definitionId("session.stock");
+export const AGENT_STOCK = definitionId("agent.stock");
 export const AGENT_QA_SYNTHESIZER = definitionId("agent.qa-synthesizer");
 export const AGENT_ATTENTION_ROUTER = definitionId("agent.attention-router");
 
@@ -21,7 +21,7 @@ export const WORKFLOW_QA = definitionId("workflow.qa");
 
 export const ROOT_DISPATCH_DEFINITION_IDS = [
   AGENT_DISPATCHER,
-  SESSION_STOCK,
+  AGENT_STOCK,
   AGENT_COORDINATOR,
   WORKFLOW_IMPLEMENT,
   WORKFLOW_QA,
@@ -45,7 +45,7 @@ export const ALL_DEFINITION_IDS = [
   AGENT_DISPATCHER,
   AGENT_COORDINATOR,
   AGENT_BASE,
-  SESSION_STOCK,
+  AGENT_STOCK,
   AGENT_QA_SYNTHESIZER,
   AGENT_ATTENTION_ROUTER,
   WORKFLOW_IMPLEMENT,
