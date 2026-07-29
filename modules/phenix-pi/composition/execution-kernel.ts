@@ -97,7 +97,6 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
     store,
     invocationPolicy,
   });
-  execution.registerImplementation("workflow", workflows);
 
   return {
     execution,
