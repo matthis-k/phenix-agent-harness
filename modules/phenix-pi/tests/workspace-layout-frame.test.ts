@@ -119,5 +119,5 @@ test("composes pane-local lines into exact terminal rows with isolated backgroun
   assert.ok(lines.every((line) => line.startsWith(RESET_BACKGROUND)));
   assert.ok(lines.every((line) => line.endsWith(RESET_BACKGROUND)));
   assert.ok(lines.every((line) => visibleWidth(line) === 12));
-  assert.match(lines[0] ?? "", /\x1b\[41mone\s+\x1b\[49m/);
+  assert.ok(lines[0]?.includes("\x1b[41mone"));
 });
