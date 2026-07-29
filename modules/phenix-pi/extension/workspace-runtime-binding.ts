@@ -56,6 +56,21 @@ export function subscribeWorkspaceRuntime(
   });
 }
 
+/** Subscribe a workspace view to every runtime projection that can change its snapshot. */
+export function subscribeWorkspaceChanges(
+  runtime: PhenixRuntime,
+  listener: () => void,
+): () => void {
+  const subscriptions = [
+    runtime.events.subscribe(listener),
+    runtime.diagnostics.subscribe(listener),
+    runtime.transcripts.subscribe(listener),
+  ];
+  return () => {
+    for (const unsubscribe of subscriptions) unsubscribe();
+  };
+}
+
 function parseWorkspaceRuntimeEvent(value: unknown): WorkspaceRuntimeEvent | undefined {
   if (!isRecord(value)) return undefined;
   if (value.kind === "ready" && isWorkspaceRuntimeBinding(value.binding)) {

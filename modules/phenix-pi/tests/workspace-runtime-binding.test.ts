@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   clearWorkspaceRuntime,
   publishWorkspaceRuntime,
+  subscribeWorkspaceChanges,
   subscribeWorkspaceRuntime,
   type WorkspaceRuntimeBinding,
   type WorkspaceRuntimeEventBus,
@@ -54,4 +55,32 @@ test("ignores stale clears and malformed shared events", () => {
   events.emit("phenix:workspace-runtime", { kind: "ready", binding: null });
 
   assert.deepEqual(received, [ready]);
+});
+
+test("workspace views subscribe and dispose all changing runtime projections together", () => {
+  const listeners: Array<() => void> = [];
+  let disposals = 0;
+  const source = {
+    subscribe(listener: () => void): () => void {
+      listeners.push(listener);
+      return () => {
+        disposals += 1;
+      };
+    },
+  };
+  const runtime = {
+    events: source,
+    diagnostics: source,
+    transcripts: source,
+  } as unknown as WorkspaceRuntimeBinding["runtime"];
+  let notifications = 0;
+
+  const dispose = subscribeWorkspaceChanges(runtime, () => {
+    notifications += 1;
+  });
+  for (const listener of listeners) listener();
+  dispose();
+
+  assert.equal(notifications, 3);
+  assert.equal(disposals, 3);
 });
