@@ -84,7 +84,12 @@ function fileSnapshot(): PhenixWorkspaceSnapshot {
       tree: { root },
       facts,
     },
-    tasks: { root: {} },
+    tasks: {
+      root: {
+        effectiveState: "wip",
+        children: [],
+      },
+    },
     rootTranscript: {},
   } as unknown as PhenixWorkspaceSnapshot;
 }
