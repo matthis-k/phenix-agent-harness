@@ -1,11 +1,21 @@
 import type { RunId } from "../domain/shared.ts";
 import type { AgentSessionReference } from "./agent-session-backend.ts";
 
-export interface LiveAgentTranscriptSnapshot extends AgentSessionReference {
+interface LiveAgentTranscriptBase {
   readonly runId: RunId;
-  readonly completeHistory: boolean;
+  readonly sessionId: string;
   readonly messages: readonly unknown[];
 }
+
+export type LiveAgentTranscriptSnapshot =
+  | (LiveAgentTranscriptBase & {
+      readonly completeHistory: true;
+      readonly sessionFile?: string;
+    })
+  | (LiveAgentTranscriptBase & {
+      readonly completeHistory: false;
+      readonly sessionFile: string;
+    });
 
 export interface LiveAgentTranscriptReader {
   get(runId: RunId): LiveAgentTranscriptSnapshot | undefined;
