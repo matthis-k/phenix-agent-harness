@@ -30,12 +30,6 @@ import type {
 import { transcriptAvailabilityMessage } from "./transcript-availability.ts";
 
 export interface NativeRunTranscript {
-  readonly component: Container;
-  readonly sessionId: string;
-  readonly sessionFile?: string;
-}
-
-export interface NativeRunTranscriptPresentation {
   readonly component?: Container;
   readonly sessionId?: string;
   readonly sessionFile?: string;
@@ -44,10 +38,11 @@ export interface NativeRunTranscriptPresentation {
 
 export function readyNativeRunTranscript(
   transcript: NativeRunTranscript,
+  fallbackKey = "native-transcript",
 ): ReadyWorkspaceTranscript<NativeRunTranscript> {
   return {
     kind: "ready",
-    handle: { key: transcript.sessionFile ?? transcript.sessionId },
+    handle: { key: transcript.sessionFile ?? transcript.sessionId ?? fallbackKey },
     value: transcript,
   };
 }
@@ -55,7 +50,7 @@ export function readyNativeRunTranscript(
 export function presentNativeRunTranscript(
   loaded: LoadedWorkspaceTranscript<NativeRunTranscript>,
   node?: RunTreeNode,
-): NativeRunTranscriptPresentation {
+): NativeRunTranscript {
   if (loaded.kind === "ready") return loaded.value;
   const unavailable = transcriptAvailabilityMessage(loaded);
   return {
@@ -66,6 +61,13 @@ export function presentNativeRunTranscript(
 }
 
 export async function loadNativeRunTranscript(
+  node: RunTreeNode,
+  tui: TUI,
+): Promise<NativeRunTranscript> {
+  return presentNativeRunTranscript(await loadNativeRunTranscriptResult(node, tui), node);
+}
+
+export async function loadNativeRunTranscriptResult(
   node: RunTreeNode,
   tui: TUI,
 ): Promise<LoadedWorkspaceTranscript<NativeRunTranscript>> {
@@ -110,11 +112,14 @@ export async function loadNativeRunTranscript(
   }
 
   const entries = fileEntries.filter((entry): entry is SessionEntry => entry.type !== "session");
-  return readyNativeRunTranscript({
-    component: renderNativeTranscript(buildContextEntries(entries), tui, header.cwd),
-    sessionId: header.id,
-    sessionFile,
-  });
+  return readyNativeRunTranscript(
+    {
+      component: renderNativeTranscript(buildContextEntries(entries), tui, header.cwd),
+      sessionId: header.id,
+      sessionFile,
+    },
+    `run:${String(node.run.id)}:transcript`,
+  );
 }
 
 export function renderNativeTranscript(
