@@ -7,7 +7,11 @@ import {
 import type { SlashCommand } from "@earendil-works/pi-tui";
 
 import type { RunTreeNode } from "../application/interfaces.ts";
-import { loadNativeRunTranscript, renderNativeTranscript } from "./native-run-transcript.ts";
+import {
+  loadNativeRunTranscript,
+  readyNativeRunTranscript,
+  renderNativeTranscript,
+} from "./native-run-transcript.ts";
 import { loadPhenixUiSnapshot, PhenixUi, type PhenixUiTarget } from "./phenix-ui.ts";
 import {
   PhenixWorkspace,
@@ -167,16 +171,16 @@ async function loadWorkspaceSnapshot(
     binding.runtime.tasks.tree(binding.rootRunId),
   ]);
   const entries = buildContextEntries([...ctx.sessionManager.getBranch()]);
+  const sessionId = ctx.sessionManager.getSessionId();
+  const sessionFile = ctx.sessionManager.getSessionFile();
   return {
     ui,
     tasks,
-    rootTranscript: {
+    rootTranscript: readyNativeRunTranscript({
       component: renderNativeTranscript(entries, tui, ctx.cwd),
-      sessionId: ctx.sessionManager.getSessionId(),
-      ...(ctx.sessionManager.getSessionFile()
-        ? { sessionFile: ctx.sessionManager.getSessionFile() }
-        : {}),
-    },
+      sessionId,
+      ...(sessionFile ? { sessionFile } : {}),
+    }),
   };
 }
 
