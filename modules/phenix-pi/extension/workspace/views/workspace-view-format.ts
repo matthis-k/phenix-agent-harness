@@ -15,11 +15,32 @@ export function runStateSymbol(value: RunSnapshot["state"]): string {
   return "●";
 }
 
+export function runStateLabel(value: RunSnapshot["state"]): string {
+  if (value === "completed") return "DONE";
+  if (value === "completing") return "FINISHING";
+  return value.toUpperCase();
+}
+
 export function taskStateSymbol(value: TaskNode["effectiveState"]): string {
   if (value === "done") return "✓";
   if (value === "failed") return "!";
   if (value === "wip") return "●";
   return "○";
+}
+
+export function taskStateLabel(value: TaskNode["effectiveState"]): string {
+  if (value === "done") return "DONE";
+  if (value === "wip") return "ACTIVE";
+  return value.toUpperCase();
+}
+
+export function taskStateTone(
+  value: TaskNode["effectiveState"],
+): "success" | "error" | "warning" | "muted" {
+  if (value === "done") return "success";
+  if (value === "failed") return "error";
+  if (value === "wip") return "warning";
+  return "muted";
 }
 
 export function compactTime(value: string): string {

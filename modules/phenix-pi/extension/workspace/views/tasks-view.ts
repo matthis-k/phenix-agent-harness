@@ -1,6 +1,12 @@
 import type { TaskNode } from "../../../domain/task/projection.ts";
+import { color, strong } from "../../observability-theme.ts";
 import { defineWorkspaceView } from "./workspace-view.ts";
-import { taskStateSymbol, truncateWorkspaceText } from "./workspace-view-format.ts";
+import {
+  taskStateLabel,
+  taskStateSymbol,
+  taskStateTone,
+  truncateWorkspaceText,
+} from "./workspace-view-format.ts";
 
 export interface WorkspaceTaskRow {
   readonly node: TaskNode;
@@ -34,11 +40,18 @@ export const tasksWorkspaceView = defineWorkspaceView<WorkspaceTaskRow>({
       ...(value.node.kind === "execution"
         ? { activation: { kind: "transcript" as const, runId: value.node.runId } }
         : {}),
-      render: ({ width }) => ({
-        text: `${"  ".repeat(value.depth)}${taskStateSymbol(value.node.effectiveState)} ${truncateWorkspaceText(
-          value.node.title,
-          Math.max(8, width - 5 - value.depth * 2),
-        )}`,
-      }),
+      render: ({ theme, width }) => {
+        const status = color(
+          theme,
+          taskStateTone(value.node.effectiveState),
+          `${taskStateSymbol(value.node.effectiveState)} ${taskStateLabel(value.node.effectiveState)}`,
+        );
+        return {
+          text: `${"  ".repeat(value.depth)}${status} ${strong(
+            theme,
+            truncateWorkspaceText(value.node.title, Math.max(8, width - 13 - value.depth * 2)),
+          )}`,
+        };
+      },
     })),
 });

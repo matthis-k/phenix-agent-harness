@@ -22,6 +22,7 @@ export interface WorkspaceViewRenderContext {
   readonly theme: ObservabilityTheme;
   readonly width: number;
   readonly activeRunId: RunId;
+  readonly expanded: boolean;
 }
 
 export interface WorkspaceViewRenderedRow {
@@ -45,6 +46,7 @@ export interface WorkspaceViewRow<TValue = unknown> {
   readonly id: string;
   readonly value: TValue;
   readonly activation?: WorkspaceViewActivation;
+  readonly expandable?: boolean;
   render(context: WorkspaceViewRenderContext): WorkspaceViewRenderedRow;
 }
 

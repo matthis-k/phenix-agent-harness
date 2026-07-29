@@ -14,6 +14,7 @@ import {
   type SlashCommand,
   type TUI,
   truncateToWidth,
+  visibleWidth,
 } from "@earendil-works/pi-tui";
 
 import type { RunTreeNode } from "../application/interfaces.ts";
@@ -33,6 +34,7 @@ import {
   color,
   heading,
   type ObservabilityTheme,
+  type ObservabilityTone,
   state,
   strong,
   surface,
@@ -175,6 +177,7 @@ export class PhenixWorkspace implements Component, Focusable {
   private readonly transcriptSelection = new TranscriptSelectionSurface();
   private readonly transcriptView = new TerminalView();
   private readonly sectionViews: ReadonlyMap<WorkspaceSection, ListView<WorkspaceViewRow>>;
+  private readonly expandedRowIds = new Set<string>();
   focused = true;
   private streamingMessage: AssistantMessage | undefined;
   private disposed = false;
@@ -283,9 +286,7 @@ export class PhenixWorkspace implements Component, Focusable {
         if (focus !== "main") this.activateSection(focus);
         return;
       case "sidebar-collapse":
-        if (focus !== "main") {
-          this.controller.dispatch({ type: "section.toggle", paneId: focus });
-        }
+        if (focus !== "main") this.toggleFocusedDisclosure(focus);
         return;
       case "editor":
         this.focusMain();
@@ -317,8 +318,6 @@ export class PhenixWorkspace implements Component, Focusable {
           lines: this.editor.render(Math.max(1, dimensions.mainWidth - 3)),
           width: dimensions.mainWidth,
           active: focus === "main",
-          sidebarVisible: dimensions.sidebarVisible,
-          profile: this.controller.snapshot.ui.profile,
           theme: this.theme,
         }),
       false,
@@ -455,12 +454,14 @@ export class PhenixWorkspace implements Component, Focusable {
         : selected
           ? definitionLabel(String(selected.run.definitionId))
           : "Session";
+    const header = selected
+      ? ` ${strong(this.theme, title)} ${color(this.theme, "dim", "·")} ${state(
+          this.theme,
+          selected.run.state,
+          selected.run.state.toUpperCase(),
+        )}`
+      : ` ${strong(this.theme, title)}`;
     const transcript = this.controller.transcript;
-    const session = transcript?.sessionId ?? selected?.run.pi?.sessionId;
-    const copyHint = this.transcriptSelection.selection
-      ? ` ${color(this.theme, "muted", "· Ctrl+C copies · Esc edits")}`
-      : "";
-    const header = ` ${strong(this.theme, title)}${session ? ` ${color(this.theme, "muted", `· ${session}`)}` : ""}${focus === "main" ? ` ${color(this.theme, "muted", "· PgUp/PgDn scroll")}` : ""}${copyHint}`;
     const body: string[] = [];
     if (transcript) {
       body.push(...transcript.component.render(width).map((line) => sliceViewLine(line, 0, width)));
@@ -516,13 +517,27 @@ export class PhenixWorkspace implements Component, Focusable {
 
   private renderSidebar(width: number, height: number, focus: WorkspaceFocus): SidebarRender {
     const snapshot = this.controller.snapshot;
-    const profile = snapshot.ui.profile;
     const diagnostics = snapshot.ui.diagnostics.counts;
     const active = countActive(snapshot.ui.tree.root);
+    const activity =
+      active > 0
+        ? `${state(this.theme, "running", "● RUNNING")} ${color(
+            this.theme,
+            "dim",
+            `· ${active} active`,
+          )}`
+        : state(this.theme, "completed", "✓ IDLE");
+    const healthTone =
+      diagnostics.error > 0 ? "error" : diagnostics.warning > 0 ? "warning" : "success";
+    const health =
+      diagnostics.error > 0
+        ? `${diagnostics.error} ERROR${diagnostics.error === 1 ? "" : "S"}`
+        : diagnostics.warning > 0
+          ? `${diagnostics.warning} WARNING${diagnostics.warning === 1 ? "" : "S"}`
+          : "HEALTHY";
     const header = [
-      ` ${strong(this.theme, "PHENIX")} ${color(this.theme, "muted", `${profile.agent}/${profile.modelSet}/${profile.difficulty}`)}`,
-      ` ${state(this.theme, active > 0 ? "running" : "completed", active > 0 ? `${active} active` : "idle")} ${color(this.theme, diagnostics.error > 0 ? "error" : diagnostics.warning > 0 ? "warning" : "success", diagnostics.error > 0 ? `${diagnostics.error} errors` : diagnostics.warning > 0 ? `${diagnostics.warning} warnings` : "healthy")}`,
-      ` ${color(this.theme, "muted", "h/l views · j/k rows · ↵ open · space fold")}`,
+      ` ${heading(this.theme, "PHENIX")}`,
+      ` ${activity} ${color(this.theme, "dim", "·")} ${color(this.theme, healthTone, health)}`,
     ].map((line) => surface(this.theme, "customMessageBg", fitViewLine(line, width)));
     const available = Math.max(0, height - header.length);
     const frames = allocateSidebarSections(
@@ -589,10 +604,11 @@ export class PhenixWorkspace implements Component, Focusable {
       lines: frame.lines,
       width,
       height,
-      title: `${registration.title.toUpperCase()} ${rows.length}`,
+      title: registration.title,
       style: {
         surface: (line) => surface(this.theme, "customMessageBg", line),
-        title: (title) => this.renderSectionTitle(registration.id, title, width, focus),
+        title: () =>
+          this.renderSectionTitle(registration.id, registration.title, rows.length, width, focus),
       },
     });
     return {
@@ -615,7 +631,7 @@ export class PhenixWorkspace implements Component, Focusable {
   }
 
   private renderViewRow(
-    _section: WorkspaceSection,
+    section: WorkspaceSection,
     row: WorkspaceViewRow,
     width: number,
     selected: boolean,
@@ -625,6 +641,7 @@ export class PhenixWorkspace implements Component, Focusable {
       theme: this.theme,
       width: Math.max(0, width - 2),
       activeRunId: this.controller.state.activeRunId,
+      expanded: row.expandable === true && this.expandedRowIds.has(rowExpansionKey(section, row.id)),
     });
     const cursor = focused && selected ? CURSOR_MARKER : "";
     const line = fitViewLine(`${cursor} ${rendered.text}`, width);
@@ -642,18 +659,28 @@ export class PhenixWorkspace implements Component, Focusable {
   private renderSectionTitle(
     section: WorkspaceSection,
     title: string,
+    count: number,
     width: number,
     focus: WorkspaceFocus,
   ): string {
     const active = focus === section;
     const disclosure = this.controller.state.panes[section].collapsed ? "▸" : "▾";
+    const label = `${disclosure} ${title.toUpperCase()}`;
+    const styledLabel = color(
+      this.theme,
+      sectionTone(section),
+      active ? this.theme.bold(label) : label,
+    );
+    const prefix = ` ${styledLabel} ${color(this.theme, "muted", String(count))} `;
+    const separator = color(
+      this.theme,
+      "dim",
+      "─".repeat(Math.max(0, width - visibleWidth(prefix))),
+    );
     return surface(
       this.theme,
       active ? "userMessageBg" : "customMessageBg",
-      fitViewLine(
-        ` ${disclosure} ${active ? strong(this.theme, title) : heading(this.theme, title)}`,
-        width,
-      ),
+      fitViewLine(`${prefix}${separator}`, width),
     );
   }
 
@@ -711,6 +738,23 @@ export class PhenixWorkspace implements Component, Focusable {
   private selectTranscript(node: RunTreeNode): void {
     this.transcriptSelection.clear();
     this.controller.selectTranscript(node.run.id);
+  }
+
+  private toggleFocusedDisclosure(section: WorkspaceSection): void {
+    const selectedId = this.controller.state.panes[section].selectedItemId;
+    const row = selectedId ? this.viewRows(section).find((candidate) => candidate.id === selectedId) : undefined;
+    if (row?.expandable) {
+      this.toggleRowExpansion(section, row.id);
+      return;
+    }
+    this.controller.dispatch({ type: "section.toggle", paneId: section });
+  }
+
+  private toggleRowExpansion(section: WorkspaceSection, rowId: string): void {
+    const key = rowExpansionKey(section, rowId);
+    if (this.expandedRowIds.has(key)) this.expandedRowIds.delete(key);
+    else this.expandedRowIds.add(key);
+    this.requestRender();
   }
 
   private toggleFocusGroup(): void {
@@ -786,10 +830,16 @@ export class PhenixWorkspace implements Component, Focusable {
     }
     if (event.button !== 0) return;
     const rowIndex = event.y - section.start - 2;
-    const row = rowIndex >= 0 ? rows[section.offset + rowIndex] : undefined;
+    if (rowIndex < 0) {
+      this.controller.dispatch({ type: "section.toggle", paneId: section.section });
+      return;
+    }
+    const row = rows[section.offset + rowIndex];
     if (!row) return;
+    const wasSelected = this.controller.state.panes[section.section].selectedItemId === row.id;
     component.dispatch({ kind: "select", id: row.id }, section.bodyHeight);
     this.syncSectionViewport(section.section);
+    if (wasSelected && row.expandable) this.toggleRowExpansion(section.section, row.id);
   }
 
   private prepareTranscriptViewport(): void {
@@ -952,6 +1002,16 @@ function countActive(node: RunTreeNode): number {
     (node.run.kind !== "root" && !TERMINAL_STATES.has(node.run.state) ? 1 : 0) +
     node.children.reduce((sum, child) => sum + countActive(child), 0)
   );
+}
+
+function sectionTone(section: WorkspaceSection): ObservabilityTone {
+  if (section === "tasks" || section === "files") return "warning";
+  if (section === "facts") return "success";
+  return "accent";
+}
+
+function rowExpansionKey(section: WorkspaceSection, rowId: string): string {
+  return `${section}:${rowId}`;
 }
 
 function parseMouse(data: string): MouseEvent | undefined {

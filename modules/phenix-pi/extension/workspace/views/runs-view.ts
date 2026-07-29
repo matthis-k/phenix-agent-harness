@@ -1,9 +1,15 @@
 import type { RunTreeNode } from "../../../application/interfaces.ts";
-import { color } from "../../observability-theme.ts";
+import { color, state, strong } from "../../observability-theme.ts";
 import { defineWorkspaceView } from "./workspace-view.ts";
-import { definitionLabel, runStateSymbol, truncateWorkspaceText } from "./workspace-view-format.ts";
+import {
+  definitionLabel,
+  runStateLabel,
+  runStateSymbol,
+  truncateWorkspaceText,
+} from "./workspace-view-format.ts";
 
 const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]);
+const GENERIC_ACTIVITIES = new Set(["working", "running", "waiting"]);
 
 export interface WorkspaceRunRow {
   readonly node: RunTreeNode;
@@ -33,32 +39,59 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
     collapsePriority: 0,
   },
   project: (snapshot) =>
-    projectWorkspaceRuns(snapshot.ui.tree.root).map((value) => ({
-      id: String(value.node.run.id),
-      value,
-      activation: { kind: "transcript", runId: value.node.run.id },
-      render: ({ theme, width, activeRunId }) => {
-        const run = value.node.run;
-        const active = run.id === activeRunId;
-        const model = run.resolvedModel
-          ? ` ${color(theme, "muted", `${run.resolvedModel.concrete.model}/${run.resolvedModel.thinking}`)}`
-          : "";
-        const activity = value.node.activity?.summary
-          ? ` ${color(
-              theme,
-              "muted",
-              truncateWorkspaceText(
-                value.node.activity.summary,
-                Math.max(8, width - 24 - value.depth * 2),
-              ),
-            )}`
-          : "";
-        const label =
-          run.kind === "root" ? "Root session" : definitionLabel(String(run.definitionId));
-        return {
-          active,
-          text: `${active ? "◆" : " "} ${"  ".repeat(value.depth)}${runStateSymbol(run.state)} ${label} ${run.state}${model}${TERMINAL_STATES.has(run.state) ? "" : activity}`,
-        };
-      },
-    })),
+    projectWorkspaceRuns(snapshot.ui.tree.root).map((value) => {
+      const run = value.node.run;
+      const expandable = Boolean(run.resolvedModel || run.profile || run.pi?.sessionId);
+      return {
+        id: String(run.id),
+        value,
+        expandable,
+        activation: { kind: "transcript" as const, runId: run.id },
+        render: ({ theme, width, activeRunId, expanded }) => {
+          const active = run.id === activeRunId;
+          const label =
+            run.kind === "root" ? "Root session" : definitionLabel(String(run.definitionId));
+          const activity = activityText(value.node.activity?.summary, run.state, width, value.depth);
+          const details = expanded ? runDetails(value.node) : [];
+          const detailText =
+            details.length > 0 ? ` ${color(theme, "dim", `· ${details.join(" · ")}`)}` : "";
+          const disclosure = expandable ? (expanded ? "▾" : "▸") : " ";
+          const status = state(
+            theme,
+            run.state,
+            `${runStateSymbol(run.state)} ${runStateLabel(run.state)}`,
+          );
+          return {
+            active,
+            text: `${"  ".repeat(value.depth)}${disclosure} ${status} ${strong(theme, label)}${
+              activity ? ` ${color(theme, "muted", activity)}` : ""
+            }${detailText}`,
+          };
+        },
+      };
+    }),
 });
+
+function activityText(
+  summary: string | undefined,
+  runState: string,
+  width: number,
+  depth: number,
+): string {
+  if (!summary || TERMINAL_STATES.has(runState)) return "";
+  const normalized = summary.trim().toLowerCase();
+  if (!normalized || normalized === runState || GENERIC_ACTIVITIES.has(normalized)) return "";
+  return truncateWorkspaceText(summary, Math.max(8, width - 22 - depth * 2));
+}
+
+function runDetails(node: RunTreeNode): string[] {
+  const run = node.run;
+  const details: string[] = [];
+  if (run.resolvedModel) {
+    details.push(`${run.resolvedModel.concrete.model}/${run.resolvedModel.thinking}`);
+  } else if (run.profile) {
+    details.push(`${run.profile.modelSet}/${run.profile.difficulty}`);
+  }
+  if (run.pi?.sessionId) details.push(`session ${run.pi.sessionId}`);
+  return details;
+}
