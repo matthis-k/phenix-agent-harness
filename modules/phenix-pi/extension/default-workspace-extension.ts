@@ -93,6 +93,7 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
 
   pi.on("agent_start", () => {
     rootTurnActive = true;
+    workspace?.setRootTurnActive(true);
     refreshTurn();
   });
 
@@ -109,6 +110,7 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
 
   pi.on("agent_end", () => {
     rootTurnActive = false;
+    workspace?.setRootTurnActive(false);
     refreshTurn();
   });
 
@@ -169,10 +171,12 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
           {
             onSubmitStarted: () => {
               rootTurnActive = true;
+              workspace?.setRootTurnActive(true);
               refreshTurn();
             },
             onSubmitFailed: () => {
               rootTurnActive = false;
+              workspace?.setRootTurnActive(false);
               refreshTurn();
             },
           },
@@ -296,6 +300,7 @@ async function openWorkspace(
           },
           onAction: complete,
         });
+        instance.setRootTurnActive(rootTurnActive);
         activeWorkspace = instance;
         activeKeybindings = keybindings;
         ready(instance, complete);
