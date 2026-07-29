@@ -1,11 +1,7 @@
 import type { RunTreeNode } from "../../../application/interfaces.ts";
 import { color } from "../../observability-theme.ts";
-import {
-  definitionLabel,
-  runStateSymbol,
-  truncateWorkspaceText,
-} from "./workspace-view-format.ts";
 import { defineWorkspaceView } from "./workspace-view.ts";
+import { definitionLabel, runStateSymbol, truncateWorkspaceText } from "./workspace-view-format.ts";
 
 const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]);
 
