@@ -8,7 +8,7 @@ import { initTheme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 
 import type { RunTreeNode } from "../application/interfaces.ts";
-import { loadNativeRunTranscript } from "../extension/native-run-transcript.ts";
+import { loadNativeRunTranscriptResult } from "../extension/native-run-transcript.ts";
 
 initTheme("dark");
 
@@ -19,12 +19,13 @@ test("loads a Pi session read-only and composes native message components", asyn
   await writeFile(sessionFile, source);
 
   try {
-    const loaded = await loadNativeRunTranscript(fixtureNode(sessionFile), fakeTui());
+    const loaded = await loadNativeRunTranscriptResult(fixtureNode(sessionFile), fakeTui());
 
     assert.equal(loaded.kind, "ready");
     if (loaded.kind !== "ready") return;
     assert.equal(loaded.value.sessionId, "session-child");
     assert.equal(loaded.value.sessionFile, sessionFile);
+    assert.ok(loaded.value.component);
     assert.deepEqual(
       loaded.value.component.children.map((component) => component.constructor.name),
       ["UserMessageComponent", "AssistantMessageComponent", "ToolExecutionComponent"],
@@ -40,7 +41,7 @@ test("types an allocated transcript that Pi has not flushed yet", async () => {
   const sessionFile = join(directory, "pending.jsonl");
 
   try {
-    const loaded = await loadNativeRunTranscript(fixtureNode(sessionFile), fakeTui());
+    const loaded = await loadNativeRunTranscriptResult(fixtureNode(sessionFile), fakeTui());
 
     assert.deepEqual(loaded, {
       kind: "pending-persistence",
@@ -52,19 +53,22 @@ test("types an allocated transcript that Pi has not flushed yet", async () => {
 });
 
 test("types legacy runs without transcript references without opening a file", async () => {
-  const loaded = await loadNativeRunTranscript(fixtureNode(undefined, false), fakeTui());
+  const loaded = await loadNativeRunTranscriptResult(fixtureNode(undefined, false), fakeTui());
 
   assert.deepEqual(loaded, { kind: "legacy", runId: "run-child" });
 });
 
 test("types allocated runs without a persisted file", async () => {
-  const loaded = await loadNativeRunTranscript(fixtureNode(undefined), fakeTui());
+  const loaded = await loadNativeRunTranscriptResult(fixtureNode(undefined), fakeTui());
 
   assert.deepEqual(loaded, { kind: "pending-persistence", runId: "run-child" });
 });
 
 test("types workflow transcripts as structurally not applicable", async () => {
-  const loaded = await loadNativeRunTranscript(fixtureNode(undefined, false, "workflow"), fakeTui());
+  const loaded = await loadNativeRunTranscriptResult(
+    fixtureNode(undefined, false, "workflow"),
+    fakeTui(),
+  );
 
   assert.deepEqual(loaded, { kind: "not-applicable", reason: "workflow" });
 });
