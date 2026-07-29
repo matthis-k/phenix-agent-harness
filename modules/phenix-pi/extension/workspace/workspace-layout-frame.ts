@@ -38,7 +38,7 @@ export function computeWorkspaceDimensions(
   sidebarRequested = true,
 ): WorkspaceDimensions {
   const sidebarVisible = sidebarRequested && width >= SIDEBAR_MIN_WIDTH;
-  const sidebarWidth = sidebarVisible ? Math.min(42, Math.max(32, Math.floor(width * 0.3))) : 0;
+  const sidebarWidth = sidebarVisible ? Math.min(38, Math.max(28, Math.floor(width * 0.22))) : 0;
   return {
     width,
     height,
