@@ -270,10 +270,7 @@ export class PhenixWorkspace implements Component, Focusable {
       return this.renderSmall(width, height);
     }
 
-    const focus = effectiveFocus(
-      this.controller.state.focusedPaneId,
-      dimensions.sidebarVisible,
-    );
+    const focus = effectiveFocus(this.controller.state.focusedPaneId, dimensions.sidebarVisible);
     this.editor.focused = this.focused && focus === "editor";
     const editorLines = this.renderPaneSafely(
       "Editor",
@@ -300,11 +297,7 @@ export class PhenixWorkspace implements Component, Focusable {
     const editorBounds = paneRect(layout, "editor");
     let transcript: TranscriptRender;
     try {
-      transcript = this.renderTranscript(
-        transcriptBounds.width,
-        transcriptBounds.height,
-        focus,
-      );
+      transcript = this.renderTranscript(transcriptBounds.width, transcriptBounds.height, focus);
     } catch (error) {
       transcript = {
         lines: this.renderPaneError(
@@ -338,12 +331,7 @@ export class PhenixWorkspace implements Component, Focusable {
         }));
       } catch (error) {
         outputs.set("runs", {
-          lines: this.renderPaneError(
-            "Sidebar",
-            sidebarBounds.width,
-            sidebarBounds.height,
-            error,
-          ),
+          lines: this.renderPaneError("Sidebar", sidebarBounds.width, sidebarBounds.height, error),
         });
       }
     }
@@ -825,12 +813,7 @@ export class PhenixWorkspace implements Component, Focusable {
     }
   }
 
-  private renderPaneError(
-    title: string,
-    width: number,
-    height: number,
-    error: unknown,
-  ): string[] {
+  private renderPaneError(title: string, width: number, height: number, error: unknown): string[] {
     const message = error instanceof Error ? error.message : String(error);
     return fitHeight(
       [
