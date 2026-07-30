@@ -161,28 +161,24 @@ export async function runWorkspaceActivity(
   },
 ): Promise<void> {
   let failure: unknown;
-  await ctx.ui.custom<void>(
-    (tui, theme, keybindings, done) => {
-      const activity = new WorkspaceActivityDialog({
-        tui,
-        theme,
-        keybindings,
-        title: options.title,
-        lines: options.lines ?? [],
-        onClose: done,
-      });
-      queueMicrotask(() => {
-        void options
-          .run(activity)
-          .catch((error) => {
-            failure = error;
-          })
-          .finally(() => done());
-      });
-      return activity;
-    },
-    DIALOG_OPTIONS,
-  );
+  await ctx.ui.custom<void>((tui, theme, keybindings, done) => {
+    const activity = new WorkspaceActivityDialog({
+      tui,
+      theme,
+      keybindings,
+      title: options.title,
+      lines: options.lines ?? [],
+    });
+    queueMicrotask(() => {
+      void options
+        .run(activity)
+        .catch((error) => {
+          failure = error;
+        })
+        .finally(() => done());
+    });
+    return activity;
+  }, DIALOG_OPTIONS);
   if (failure) throw failure;
 }
 
@@ -248,7 +244,7 @@ class WorkspaceInputDialog implements Component, Focusable {
       ? value.length > 0
         ? `${"•".repeat(Math.max(1, Array.from(value).length))} `
         : ""
-      : this.input.render(Math.max(1, width - 4))[0] ?? "";
+      : (this.input.render(Math.max(1, width - 4))[0] ?? "");
     const empty =
       value.length === 0 && this.placeholder ? color(this.theme, "dim", this.placeholder) : "";
     const rows = [
@@ -325,7 +321,8 @@ class WorkspaceDocumentDialog implements Component, Focusable {
     else if (this.keybindings.matches(data, "tui.select.pageUp")) this.move(-this.lastHeight);
     else if (this.keybindings.matches(data, "tui.select.pageDown")) this.move(this.lastHeight);
     else if (matchesKey(data, "home")) this.offset = 0;
-    else if (matchesKey(data, "end")) this.offset = Math.max(0, this.lines.length - this.lastHeight);
+    else if (matchesKey(data, "end"))
+      this.offset = Math.max(0, this.lines.length - this.lastHeight);
     else return;
     this.tui.requestRender();
   }
@@ -335,9 +332,9 @@ class WorkspaceDocumentDialog implements Component, Focusable {
     this.lastHeight = viewportHeight;
     const maxOffset = Math.max(0, this.lines.length - viewportHeight);
     this.offset = Math.max(0, Math.min(this.offset, maxOffset));
-    const body = this.lines.slice(this.offset, this.offset + viewportHeight).map((line) =>
-      truncateToWidth(line, Math.max(1, width - 4)),
-    );
+    const body = this.lines
+      .slice(this.offset, this.offset + viewportHeight)
+      .map((line) => truncateToWidth(line, Math.max(1, width - 4)));
     while (body.length < viewportHeight) body.push("");
     const range =
       this.lines.length > viewportHeight
@@ -374,7 +371,6 @@ interface WorkspaceActivityDialogOptions {
   readonly keybindings: KeybindingsManager;
   readonly title: string;
   readonly lines: readonly string[];
-  readonly onClose: () => void;
 }
 
 class WorkspaceActivityDialog implements Component, Focusable, WorkspaceActivityController {
@@ -385,11 +381,9 @@ class WorkspaceActivityDialog implements Component, Focusable, WorkspaceActivity
   private readonly tui: TUI;
   private readonly theme: ObservabilityTheme;
   private readonly keybindings: KeybindingsManager;
-  private readonly onClose: () => void;
   private readonly abortController = new AbortController();
   private title: string;
   private lines: string[];
-  private closed = false;
 
   constructor(options: WorkspaceActivityDialogOptions) {
     this.tui = options.tui;
@@ -397,16 +391,20 @@ class WorkspaceActivityDialog implements Component, Focusable, WorkspaceActivity
     this.keybindings = options.keybindings;
     this.title = options.title;
     this.lines = [...options.lines];
-    this.onClose = options.onClose;
     this.signal = this.abortController.signal;
   }
 
   invalidate(): void {}
 
   handleInput(data: string): void {
-    if (this.closed || !this.keybindings.matches(data, "tui.select.cancel")) return;
+    if (
+      this.signal.aborted ||
+      !this.keybindings.matches(data, "tui.select.cancel")
+    ) {
+      return;
+    }
     this.abortController.abort();
-    this.close();
+    this.appendLine("Cancelling...");
   }
 
   setTitle(title: string): void {
@@ -428,7 +426,7 @@ class WorkspaceActivityDialog implements Component, Focusable, WorkspaceActivity
     const rows = [
       ...this.lines.slice(-18).map((line) => truncateToWidth(line, Math.max(1, width - 4))),
       "",
-      color(this.theme, "dim", "Esc cancel"),
+      color(this.theme, "dim", this.signal.aborted ? "Cancelling..." : "Esc cancel"),
     ];
     return renderPanel({
       lines: rows,
@@ -441,12 +439,6 @@ class WorkspaceActivityDialog implements Component, Focusable, WorkspaceActivity
         title: (line) => surface(this.theme, "selectedBg", line),
       },
     }).lines;
-  }
-
-  private close(): void {
-    if (this.closed) return;
-    this.closed = true;
-    this.onClose();
   }
 }
 
