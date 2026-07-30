@@ -30,7 +30,7 @@ Decision tickets answer questions. They are not implementation slices by default
 
 ## Working a decision
 
-A session loads the project at low resolution, selects an open unblocked decision, and claims it before work. The frontier is the set of nonterminal decisions whose dependencies are all resolved.
+A session loads the project at low resolution, selects an open unblocked decision, and claims it before work. The actionable frontier contains open, unclaimed decisions whose dependencies are all resolved. Claimed and user-blocked decisions remain visible as active work, but another session cannot claim them.
 
 A decision resolution is canonical only when it records:
 
