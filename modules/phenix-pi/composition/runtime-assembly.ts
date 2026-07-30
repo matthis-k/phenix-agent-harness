@@ -23,6 +23,7 @@ import { ExecutionStore } from "../application/execution-store.ts";
 import type { ExecutionFacade } from "../application/interfaces.ts";
 import { ProfileAwareModelResolver } from "../application/profile-aware-model-resolver.ts";
 import { ProjectPlannerService } from "../application/project-planner.ts";
+import { PublishedProjectTracker } from "../application/published-project-tracker.ts";
 import { SessionProfileFacadeImpl } from "../application/session-profile-facade.ts";
 import { SupervisionProcessManager } from "../application/supervision-process-manager.ts";
 import { agentDefinitions } from "../definitions/agents.ts";
@@ -103,7 +104,7 @@ export function createExecutionServices(input: {
     new JsonlProjectLedger(stateDir),
     ids,
     systemClock,
-    new GhProjectTracker(host.cwd),
+    new PublishedProjectTracker(new GhProjectTracker(host.cwd)),
     input.notifyRoot,
     async (runId, message) => {
       if (!projectExecution) throw new Error("Execution runtime is not initialized");
