@@ -1,6 +1,6 @@
 import type { TaskNode } from "../../../domain/task/projection.ts";
 import { color, strong } from "../../observability-theme.ts";
-import { defineWorkspaceView } from "./workspace-view.ts";
+import { defineWorkspaceView, workspaceViewLayout } from "./workspace-view.ts";
 import {
   taskStateLabel,
   taskStateSymbol,
@@ -27,12 +27,7 @@ export function projectWorkspaceTasks(root: TaskNode): readonly WorkspaceTaskRow
 export const tasksWorkspaceView = defineWorkspaceView<WorkspaceTaskRow>({
   id: "tasks",
   title: "Tasks",
-  layout: {
-    weight: 2,
-    minRows: 2,
-    headerRows: 2,
-    collapsePriority: 20,
-  },
+  layout: workspaceViewLayout("tasks"),
   project: (snapshot) =>
     projectWorkspaceTasks(snapshot.tasks.root).map((value) => ({
       id: value.node.id,
