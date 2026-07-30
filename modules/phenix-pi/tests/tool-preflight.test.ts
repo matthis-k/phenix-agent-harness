@@ -12,6 +12,7 @@ export const TEST_CUSTOM_TOOLS = [
   "phenix_handle",
   "phenix_present",
   "phenix_tasks",
+  "phenix_project",
   "phenix_visualize",
   "phenix_return",
   "phenix_fail",
