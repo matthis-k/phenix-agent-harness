@@ -17,7 +17,11 @@ const LOCK_RETRY_MS = 10;
 const STALE_LOCK_MS = 60_000;
 
 export class JsonlProjectLedger implements ProjectLedger {
-  constructor(private readonly stateDirectory: string) {}
+  private readonly stateDirectory: string;
+
+  constructor(stateDirectory: string) {
+    this.stateDirectory = stateDirectory;
+  }
 
   async list(): Promise<readonly ProjectId[]> {
     const directory = this.projectsDirectory();
