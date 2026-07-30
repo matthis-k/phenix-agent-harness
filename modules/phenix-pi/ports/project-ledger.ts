@@ -5,11 +5,13 @@ import type {
 } from "../domain/project/model.ts";
 
 export class ProjectLedgerConflictError extends Error {
-  constructor(
-    readonly expectedRevision: number,
-    readonly actualRevision: number,
-  ) {
+  readonly expectedRevision: number;
+  readonly actualRevision: number;
+
+  constructor(expectedRevision: number, actualRevision: number) {
     super(`Project ledger revision conflict: expected ${expectedRevision}, found ${actualRevision}`);
+    this.expectedRevision = expectedRevision;
+    this.actualRevision = actualRevision;
   }
 }
 
