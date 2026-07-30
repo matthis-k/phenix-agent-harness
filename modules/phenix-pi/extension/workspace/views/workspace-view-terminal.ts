@@ -1,6 +1,18 @@
 import type { WorkspaceRowPresentation } from "../../../application/workspace/presentation.ts";
 import { color, type ObservabilityTheme } from "../../observability-theme.ts";
-import type { WorkspaceViewRenderedRow } from "./workspace-view.ts";
+import type { WorkspaceViewRenderedRow, WorkspaceViewRow } from "./workspace-view.ts";
+
+export type SemanticWorkspaceViewRow<TValue> = Omit<WorkspaceViewRow<TValue>, "render">;
+
+export function withTerminalWorkspaceRenderer<TValue>(
+  row: SemanticWorkspaceViewRow<TValue>,
+): WorkspaceViewRow<TValue> {
+  return {
+    ...row,
+    render: ({ theme, ...context }) =>
+      renderWorkspaceRowForTerminal(row.present(context), theme),
+  };
+}
 
 export function renderWorkspaceRowForTerminal(
   presentation: WorkspaceRowPresentation,
