@@ -63,7 +63,9 @@ test("a project survives sessions and advances only its unblocked decision front
     new Ids(),
     { now: () => "2026-07-30T12:00:00.000Z" },
     undefined,
-    (message) => notices.push(message),
+    (message) => {
+      notices.push(message);
+    },
     async (runId, message) => {
       deliveries.push({ runId, message });
     },
