@@ -46,7 +46,7 @@ export const WORKSPACE_SURFACES = [
   }),
   defineSurface("runs", "collection", {
     minWidth: 24,
-    minHeight: 4,
+    minHeight: 2,
     grow: 5,
     shrink: 1,
     overflow: "collapse",
