@@ -1,0 +1,84 @@
+diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/coding-agent/src/core/extensions/types.ts
+--- a/packages/coding-agent/src/core/extensions/types.ts
++++ b/packages/coding-agent/src/core/extensions/types.ts
+@@ -1279,6 +1279,15 @@ export interface ExtensionAPI {
+ 		options?: { deliverAs?: "steer" | "followUp" },
+ 	): void;
+ 
++	/**
++	 * Submit input originating from an extension-owned user interface.
++	 * Runs the same command, input-handler, skill, and prompt-template pipeline
++	 * as input entered in Pi's native interactive editor.
++	 */
++	submitUserInput(
++		text: string,
++		options?: { deliverAs?: "steer" | "followUp" },
++	): Promise<void>;
++
+ 	/** Append a custom entry to the session for state persistence (not sent to LLM). */
+ 	appendEntry<T = unknown>(customType: string, data?: T): void;
+@@ -1519,6 +1528,11 @@ export type SendUserMessageHandler = (
+ 	options?: { deliverAs?: "steer" | "followUp" },
+ ) => void;
+ 
++export type SubmitUserInputHandler = (
++	text: string,
++	options?: { deliverAs?: "steer" | "followUp" },
++) => Promise<void>;
++
+ export type AppendEntryHandler = <T = unknown>(customType: string, data?: T) => void;
+@@ -1577,6 +1591,7 @@ export interface ExtensionActions {
+ 	sendMessage: SendMessageHandler;
+ 	sendUserMessage: SendUserMessageHandler;
++	submitUserInput: SubmitUserInputHandler;
+ 	appendEntry: AppendEntryHandler;
+ 	setSessionName: SetSessionNameHandler;
+ 	getSessionName: GetSessionNameHandler;
+diff --git a/packages/coding-agent/src/core/extensions/loader.ts b/packages/coding-agent/src/core/extensions/loader.ts
+--- a/packages/coding-agent/src/core/extensions/loader.ts
++++ b/packages/coding-agent/src/core/extensions/loader.ts
+@@ -181,6 +181,7 @@ export function createExtensionRuntime(): ExtensionRuntime {
+ 	const runtime: ExtensionRuntime = {
+ 		sendMessage: notInitialized,
+ 		sendUserMessage: notInitialized,
++		submitUserInput: notInitialized,
+ 		appendEntry: notInitialized,
+ 		setSessionName: notInitialized,
+ 		getSessionName: notInitialized,
+@@ -306,6 +307,11 @@ function createExtensionAPI(
+ 			runtime.sendUserMessage(content, options);
+ 		},
+ 
++		submitUserInput(text, options) {
++			runtime.assertActive();
++			return runtime.submitUserInput(text, options);
++		},
++
+ 		appendEntry(customType: string, data?: unknown): void {
+ 			runtime.assertActive();
+ 			runtime.appendEntry(customType, data);
+diff --git a/packages/coding-agent/src/core/extensions/runner.ts b/packages/coding-agent/src/core/extensions/runner.ts
+--- a/packages/coding-agent/src/core/extensions/runner.ts
++++ b/packages/coding-agent/src/core/extensions/runner.ts
+@@ -321,6 +321,7 @@ export class ExtensionRunner {
+ 		// Copy actions into the shared runtime (all extension APIs reference this)
+ 		this.runtime.sendMessage = actions.sendMessage;
+ 		this.runtime.sendUserMessage = actions.sendUserMessage;
++		this.runtime.submitUserInput = actions.submitUserInput;
+ 		this.runtime.appendEntry = actions.appendEntry;
+ 		this.runtime.setSessionName = actions.setSessionName;
+ 		this.runtime.getSessionName = actions.getSessionName;
+diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
+--- a/packages/coding-agent/src/core/agent-session.ts
++++ b/packages/coding-agent/src/core/agent-session.ts
+@@ -2338,6 +2338,10 @@ export class AgentSession {
+ 					});
+ 				},
++				submitUserInput: (text, options) =>
++					this.prompt(text, {
++						streamingBehavior: options?.deliverAs,
++						source: "interactive",
++					}),
+ 				appendEntry: (customType, data) => {
+ 					const entryId = this.sessionManager.appendCustomEntry(customType, data);
+ 					const entry = this.sessionManager.getEntry(entryId);
