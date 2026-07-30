@@ -1,10 +1,11 @@
+import type { RunTree } from "../../../application/interfaces.ts";
 import type { WorkspaceRowPresentation } from "../../../application/workspace/presentation.ts";
+import type { RunFact } from "../../../domain/run/observability.ts";
 import type { RunId } from "../../../domain/shared.ts";
 import type { TaskTree } from "../../../domain/task/projection.ts";
 import type { PaneId } from "../../../domain/workspace/state.ts";
 import { workspaceSurface } from "../../../domain/workspace/surfaces.ts";
 import type { ObservabilityTheme } from "../../observability-theme.ts";
-import type { PhenixUiSnapshot } from "../../phenix-ui.ts";
 
 export const WORKSPACE_VIEW_IDS = ["runs", "tasks", "files", "facts"] as const;
 
@@ -12,7 +13,10 @@ export type WorkspaceViewId = (typeof WORKSPACE_VIEW_IDS)[number];
 export type WorkspaceViewPaneId = Extract<PaneId, WorkspaceViewId>;
 
 export interface WorkspaceViewSnapshot {
-  readonly ui: PhenixUiSnapshot;
+  readonly ui: {
+    readonly tree: RunTree;
+    readonly facts: readonly RunFact[];
+  };
   readonly tasks: TaskTree;
 }
 
