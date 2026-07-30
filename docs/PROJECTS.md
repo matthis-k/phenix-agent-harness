@@ -42,11 +42,15 @@ A decision resolution is canonical only when it records:
 
 One session should resolve one decision. Independent frontier decisions may be claimed by separate sessions concurrently.
 
-## User intervention
+## User intervention and direct session input
 
-A claimed child calls `phenix_project` with `action=request_input` when it needs operator judgment or action. Phenix persists the request, focuses the root UI, and identifies it with an intervention ID. The root answers with `action=answer_input` and that ID.
+A claimed child calls `phenix_project` with `action=request_input` when it needs operator judgment or action. The request may be `normal` or `urgent`. Phenix persists it and marks that session as `INPUT REQUIRED` or `URGENT INPUT` in the workspace run sidebar.
 
-The delivery contains only the request and answer. It does not copy the root conversation into the child. If the child is no longer live, the answer remains durable in the project ledger for a later session.
+The transcript selected in the sidebar is also the workspace input target. After activating a child session, its transcript remains visible while ordinary text submitted through the composer is routed explicitly to that run. Selecting the root transcript restores normal Pi input. Slash commands remain root/native commands rather than being sent to a child.
+
+When the selected session has a pending project intervention, the next ordinary reply answers its newest pending request, records the answer in the project ledger, delivers it to the child when live, and clears that request's badge. Without a pending intervention, the message is delivered as explicit urgent attention to the selected run; no model-based routing decision is involved.
+
+The delivery contains only the focused message or request answer. It does not copy the root conversation into the child. If the child is no longer live, an intervention answer remains durable in the project ledger for a later session.
 
 ## GitHub projection
 
