@@ -7,6 +7,7 @@ export type InterventionId = string & { readonly __brand: "InterventionId" };
 export type DecisionType = "research" | "prototype" | "grilling" | "task";
 export type DecisionMode = "afk" | "hitl";
 export type DecisionState = "open" | "claimed" | "awaiting_user" | "resolved" | "out_of_scope";
+export type InterventionUrgency = "normal" | "urgent";
 
 export interface ProjectActor {
   readonly rootRunId: RunId;
@@ -67,6 +68,7 @@ export interface ProjectIntervention {
   readonly question: string;
   readonly context?: string;
   readonly options: readonly string[];
+  readonly urgency: InterventionUrgency;
   readonly requestedAt: string;
   readonly status: "pending" | "answered";
   readonly answer?: string;
