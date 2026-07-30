@@ -94,6 +94,23 @@ export class GhProjectTracker implements ProjectTracker {
     );
   }
 
+  async release(project: ProjectMap, decision: ProjectDecision): Promise<void> {
+    const link = requireIssue(project, decision);
+    await this.commands.run(
+      "gh",
+      [
+        "issue",
+        "edit",
+        String(link.issueNumber),
+        "--repo",
+        requireTracker(project).repository,
+        "--remove-assignee",
+        "@me",
+      ],
+      this.cwd,
+    );
+  }
+
   async resolve(project: ProjectMap, decision: ProjectDecision): Promise<void> {
     const link = requireIssue(project, decision);
     const tracker = requireTracker(project);
