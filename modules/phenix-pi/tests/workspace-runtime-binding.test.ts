@@ -72,6 +72,7 @@ test("workspace views subscribe and dispose all changing runtime projections tog
     events: source,
     diagnostics: source,
     transcripts: source,
+    projects: source,
   } as unknown as WorkspaceRuntimeBinding["runtime"];
   let notifications = 0;
 
@@ -81,6 +82,6 @@ test("workspace views subscribe and dispose all changing runtime projections tog
   for (const listener of listeners) listener();
   dispose();
 
-  assert.equal(notifications, 3);
-  assert.equal(disposals, 3);
+  assert.equal(notifications, 4);
+  assert.equal(disposals, 4);
 });
