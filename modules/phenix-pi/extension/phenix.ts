@@ -5,8 +5,8 @@ import registerResultDisplay from "./result-display.ts";
 import registerRuntime from "./root-extension.ts";
 import registerTheme from "./theme-extension.ts";
 import registerVisualizationDisplay from "./visualization-display.ts";
-import registerWorkspaceStatus from "./workspace-status-extension.ts";
 import { registerWorkspaceStandardBuiltins } from "./workspace/workspace-standard-builtins.ts";
+import registerWorkspaceStatus from "./workspace-status-extension.ts";
 
 /**
  * Public Phenix extension entrypoint.
