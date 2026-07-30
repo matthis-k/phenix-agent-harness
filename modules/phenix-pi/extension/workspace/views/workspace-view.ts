@@ -1,16 +1,12 @@
 import type {
-  WorkspaceViewContext,
-  WorkspaceViewPresentationContext,
   WorkspaceViewRegistration as SemanticWorkspaceViewRegistration,
   WorkspaceViewRow as SemanticWorkspaceViewRow,
+  WorkspaceViewContext,
+  WorkspaceViewPresentationContext,
   WorkspaceViewSnapshot,
 } from "../../../application/workspace/views/workspace-view.ts";
 import type { ObservabilityTheme } from "../../observability-theme.ts";
 
-export {
-  WORKSPACE_VIEW_IDS,
-  workspaceViewLayout,
-} from "../../../application/workspace/views/workspace-view.ts";
 export type {
   WorkspaceViewActivation,
   WorkspaceViewContext,
@@ -19,6 +15,10 @@ export type {
   WorkspaceViewPaneId,
   WorkspaceViewPresentationContext,
   WorkspaceViewSnapshot,
+} from "../../../application/workspace/views/workspace-view.ts";
+export {
+  WORKSPACE_VIEW_IDS,
+  workspaceViewLayout,
 } from "../../../application/workspace/views/workspace-view.ts";
 
 export interface WorkspaceViewRenderContext extends WorkspaceViewPresentationContext {
