@@ -66,6 +66,7 @@ export class WorkspaceFrontend<TSnapshot, TTranscript> {
   private readonly unsubscribeController: () => void;
   private readonly unsubscribeSource: () => void;
   private lastSnapshot: WorkspaceSnapshotEnvelope<TSnapshot>;
+  private rootTranscript: { readonly runId: RunId; readonly transcript: TTranscript };
   private retainedTranscript:
     | { readonly runId: RunId; readonly transcript: TTranscript }
     | undefined;
@@ -75,16 +76,22 @@ export class WorkspaceFrontend<TSnapshot, TTranscript> {
 
   constructor(options: WorkspaceFrontendOptions<TSnapshot, TTranscript>) {
     this.lastSnapshot = options.initialSnapshot;
+    this.rootTranscript = {
+      runId: options.initialSnapshot.rootRunId,
+      transcript: options.initialTranscript.value,
+    };
 
     let controller!: WorkspaceController<TSnapshot, TTranscript>;
     const runtime: WorkspaceEffectRuntime<TSnapshot, TTranscript> = {
       loadSnapshot: options.loadSnapshot,
-      loadTranscript: (runId, signal) =>
-        options.loadTranscript(
-          runId,
-          controller.snapshot?.value ?? options.initialSnapshot.value,
-          signal,
-        ),
+      loadTranscript: async (runId, signal) => {
+        const snapshot = controller.snapshot ?? options.initialSnapshot;
+        const loaded = await options.loadTranscript(runId, snapshot.value, signal);
+        if (loaded.kind === "ready" && runId === snapshot.rootRunId) {
+          this.rootTranscript = { runId, transcript: loaded.value };
+        }
+        return loaded;
+      },
       recordDiagnostic: (error) => options.recordDiagnostic?.(error),
       ...(options.perform ? { perform: options.perform } : {}),
     };
@@ -124,6 +131,9 @@ export class WorkspaceFrontend<TSnapshot, TTranscript> {
     }
     if (this.retainedTranscript?.runId === this.controller.state.activeRunId) {
       return this.retainedTranscript.transcript;
+    }
+    if (this.rootTranscript.runId === this.controller.state.activeRunId) {
+      return this.rootTranscript.transcript;
     }
     return undefined;
   }
