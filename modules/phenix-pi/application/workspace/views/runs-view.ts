@@ -1,9 +1,5 @@
 import type { RunTreeNode } from "../../interfaces.ts";
-import {
-  runStateTone,
-  textSpan,
-  type WorkspaceRowPresentation,
-} from "../presentation.ts";
+import { runStateTone, textSpan, type WorkspaceRowPresentation } from "../presentation.ts";
 import { defineWorkspaceView, workspaceViewLayout } from "./workspace-view.ts";
 import {
   definitionLabel,
@@ -53,12 +49,7 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
         const active = run.id === activeRunId;
         const label =
           run.kind === "root" ? "Root session" : definitionLabel(String(run.definitionId));
-        const activity = activityText(
-          value.node.activity?.summary,
-          run.state,
-          width,
-          value.depth,
-        );
+        const activity = activityText(value.node.activity?.summary, run.state, width, value.depth);
         const details = expanded ? runDetails(value.node) : [];
         const disclosure = expandable ? (expanded ? "▾" : "▸") : " ";
         return {
