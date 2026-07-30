@@ -25,8 +25,7 @@ export function withTerminalWorkspaceRenderer<TValue>(
 ): WorkspaceViewRow<TValue> {
   return {
     ...row,
-    render: ({ theme, ...context }) =>
-      renderWorkspaceRowForTerminal(row.present(context), theme),
+    render: ({ theme, ...context }) => renderWorkspaceRowForTerminal(row.present(context), theme),
   };
 }
 
