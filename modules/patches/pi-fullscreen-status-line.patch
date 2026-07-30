@@ -1,7 +1,7 @@
 diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 --- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-@@ -2469,2 +2469,29 @@
+@@ -2469,2 +2469,38 @@
  					component = c;
 +					const overlayLayout =
 +						typeof options?.overlayOptions === "function"
@@ -14,6 +14,7 @@ diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/p
 +						overlayLayout.margin === 0;
 +					if (preserveStatusLine) {
 +						const content = component;
++						const focusableContent = content as Component & { focused?: boolean };
 +						component = {
 +							render: (width) => {
 +								const lines = content.render(width);
@@ -26,8 +27,16 @@ diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/p
 +								const status = this.footer.render(width).at(-1);
 +								return status ? [...lines.slice(0, -1), status] : lines;
 +							},
++							handleInput: (data) => content.handleInput?.(data),
++							wantsKeyRelease: content.wantsKeyRelease,
 +							invalidate: () => content.invalidate(),
 +							dispose: () => content.dispose?.(),
++							get focused() {
++								return focusableContent.focused ?? false;
++							},
++							set focused(value) {
++								focusableContent.focused = value;
++							},
 +						};
 +					}
  					if (isOverlay) {
