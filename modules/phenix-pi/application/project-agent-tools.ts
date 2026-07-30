@@ -72,6 +72,7 @@ const projectParameters = defineSchema<{
   question?: string;
   context?: string;
   options?: string[];
+  urgency?: "normal" | "urgent";
   answer?: string;
 }>(
   "tool.phenix-project",
@@ -136,6 +137,7 @@ const projectParameters = defineSchema<{
     question: Type.Optional(Type.String()),
     context: Type.Optional(Type.String()),
     options: Type.Optional(Type.Array(Type.String())),
+    urgency: Type.Optional(Type.Enum(["normal", "urgent"])),
     answer: Type.Optional(Type.String()),
   }),
 );
@@ -156,7 +158,7 @@ export class ProjectAgentToolFactory implements AgentToolFactory {
       name: "phenix_project",
       label: "Phenix Project",
       description:
-        "Plan and execute work that spans multiple independent sessions. First pin the destination, use case, completion criteria, and non-goals; then chart decision tickets breadth-first. The project ledger is durable across sessions. Use request_input from a claimed decision to focus the user without inheriting the root conversation. GitHub publication creates a map issue, native sub-issues, and native blocked-by edges.",
+        "Plan and execute work that spans multiple independent sessions. First pin the destination, use case, completion criteria, and non-goals; then chart decision tickets breadth-first. The project ledger is durable across sessions. Use request_input from a claimed decision to focus the user without inheriting the root conversation; set urgency=urgent only when work is blocked on an immediate operator response. GitHub publication creates a map issue, native sub-issues, and native blocked-by edges.",
       parameters: projectParameters,
       execute: async (raw) => {
         const params = requireValid(raw);
@@ -307,6 +309,7 @@ function inputRequest(params: ReturnType<typeof requireValid>): RequestProjectIn
     question: requireField("question", params.question),
     ...(params.context ? { context: params.context } : {}),
     ...(params.options ? { options: params.options } : {}),
+    ...(params.urgency ? { urgency: params.urgency } : {}),
   };
 }
 
