@@ -10,6 +10,7 @@ import type {
   SessionProfileFacade,
   TaskFacade,
 } from "../application/interfaces.ts";
+import type { ProjectPlannerFacade } from "../application/project-planner.ts";
 import type { ConcreteModelRef } from "../domain/definition/model.ts";
 import { DEFAULT_SESSION_PROFILE, type RootRunInput } from "../domain/run/model.ts";
 import type { RunId } from "../domain/shared.ts";
@@ -30,6 +31,7 @@ export interface PhenixRuntime {
   readonly execution: ExecutionFacade;
   readonly dynamicWorkflows: DynamicWorkflowExecutionService;
   readonly attention: AttentionFacade;
+  readonly projects: ProjectPlannerFacade;
   readonly profiles: SessionProfileFacade;
   readonly tasks: TaskFacade;
   readonly catalog: CatalogFacade;
@@ -72,6 +74,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     execution: services.execution,
     dynamicWorkflows: services.dynamicWorkflows,
     attention: services.attention,
+    projects: services.projects,
     profiles: infrastructure.profiles,
     tasks: services.tasks,
     catalog: services.catalog,
