@@ -8,6 +8,7 @@ import type { WorkspaceViewSnapshot } from "../application/workspace/views/works
 import type { RunSnapshot } from "../domain/run/model.ts";
 import { runId } from "../domain/shared.ts";
 
+const ANSI_ESCAPE_PREFIX = `${String.fromCharCode(27)}[`;
 const HOST_NEUTRAL_MODULES = [
   "../application/workspace/frontend.ts",
   "../application/workspace/presentation.ts",
@@ -55,11 +56,17 @@ test("registered rows expose host-neutral semantic presentations", () => {
     expanded: false,
   });
   assert.equal(presentation.active, true);
-  assert.equal(presentation.spans.some((span) => span.tone === "accent"), true);
-  assert.equal(presentation.spans.some((span) => span.strong), true);
-  assert.doesNotMatch(
-    presentation.spans.map((span) => span.text).join(""),
-    /\u001b\[/,
+  assert.equal(
+    presentation.spans.some((span) => span.tone === "accent"),
+    true,
+  );
+  assert.equal(
+    presentation.spans.some((span) => span.strong),
+    true,
+  );
+  assert.equal(
+    presentation.spans.map((span) => span.text).join("").includes(ANSI_ESCAPE_PREFIX),
+    false,
   );
 });
 
