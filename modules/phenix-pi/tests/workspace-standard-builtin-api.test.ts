@@ -2,9 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-import { STANDARD_BUILTIN_COMMANDS } from "../extension/workspace/workspace-standard-builtins.ts";
 import { withWorkspaceStandardBuiltins } from "../extension/workspace/workspace-standard-builtin-api.ts";
+import { STANDARD_BUILTIN_COMMANDS } from "../extension/workspace/workspace-standard-builtins.ts";
 
 function testPi() {
   const sent: unknown[] = [];
