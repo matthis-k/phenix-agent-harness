@@ -1,16 +1,13 @@
-import { mkdir, open, readFile, readdir, rm, stat } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 
 import {
-  projectId,
   type ProjectEvent,
   type ProjectId,
+  projectId,
   type UnsequencedProjectEvent,
 } from "../../domain/project/model.ts";
-import {
-  ProjectLedgerConflictError,
-  type ProjectLedger,
-} from "../../ports/project-ledger.ts";
+import { type ProjectLedger, ProjectLedgerConflictError } from "../../ports/project-ledger.ts";
 
 const LOCK_RETRIES = 200;
 const LOCK_RETRY_MS = 10;
