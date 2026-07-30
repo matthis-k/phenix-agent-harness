@@ -1,6 +1,6 @@
-import type { RunTreeNode } from "../../interfaces.ts";
 import type { RunFact } from "../../../domain/run/observability.ts";
 import type { RunId } from "../../../domain/shared.ts";
+import type { RunTreeNode } from "../../interfaces.ts";
 import { textSpan, type WorkspaceRowPresentation } from "../presentation.ts";
 import {
   defineWorkspaceView,
