@@ -7,7 +7,7 @@ import {
   taskStateTone,
   truncateWorkspaceText,
 } from "./workspace-view-format.ts";
-import { renderWorkspaceRowForTerminal } from "./workspace-view-terminal.ts";
+import { withTerminalWorkspaceRenderer } from "./workspace-view-terminal.ts";
 
 export interface WorkspaceTaskRow {
   readonly node: TaskNode;
@@ -45,14 +45,13 @@ export const tasksWorkspaceView = defineWorkspaceView<WorkspaceTaskRow>({
           ),
         ],
       });
-      return {
+      return withTerminalWorkspaceRenderer({
         id: value.node.id,
         value,
         ...(value.node.kind === "execution"
           ? { activation: { kind: "transcript" as const, runId: value.node.runId } }
           : {}),
         present,
-        render: ({ theme, ...context }) => renderWorkspaceRowForTerminal(present(context), theme),
-      };
+      });
     }),
 });
