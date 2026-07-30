@@ -1,7 +1,6 @@
-import { truncateToWidth } from "@earendil-works/pi-tui";
-
 import type { RunSnapshot } from "../../../domain/run/model.ts";
 import type { TaskNode } from "../../../domain/task/projection.ts";
+import type { WorkspaceTextTone } from "../presentation.ts";
 
 export function definitionLabel(value: string): string {
   return value.replace(/^(?:agent|workflow|session|root)\./, "");
@@ -34,9 +33,7 @@ export function taskStateLabel(value: TaskNode["effectiveState"]): string {
   return value.toUpperCase();
 }
 
-export function taskStateTone(
-  value: TaskNode["effectiveState"],
-): "success" | "error" | "warning" | "muted" {
+export function taskStateTone(value: TaskNode["effectiveState"]): WorkspaceTextTone {
   if (value === "done") return "success";
   if (value === "failed") return "error";
   if (value === "wip") return "warning";
@@ -50,5 +47,10 @@ export function compactTime(value: string): string {
 }
 
 export function truncateWorkspaceText(value: string, width: number): string {
-  return truncateToWidth(value, Math.max(0, width), width > 1 ? "…" : "");
+  const limit = Math.max(0, Math.floor(width));
+  const characters = Array.from(value);
+  if (characters.length <= limit) return value;
+  if (limit === 0) return "";
+  if (limit === 1) return "…";
+  return `${characters.slice(0, limit - 1).join("")}…`;
 }
