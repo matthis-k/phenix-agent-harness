@@ -1,12 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { GhProjectTracker, type CommandRunner } from "../adapters/github/gh-project-tracker.ts";
-import {
-  decisionId,
-  projectId,
-  type ProjectMap,
-} from "../domain/project/model.ts";
+import { type CommandRunner, GhProjectTracker } from "../adapters/github/gh-project-tracker.ts";
+import { decisionId, type ProjectMap, projectId } from "../domain/project/model.ts";
 
 class FakeCommands implements CommandRunner {
   readonly calls: Array<{
@@ -85,7 +81,8 @@ test("publishing creates a map, sub-issues, then native dependency edges", async
   assert.equal(publication.decisions.get(second)?.issueNumber, 3);
 
   const childCreates = commands.calls.filter(
-    (call) => call.args[0] === "issue" && call.args[1] === "create" && call.args.includes("--parent"),
+    (call) =>
+      call.args[0] === "issue" && call.args[1] === "create" && call.args.includes("--parent"),
   );
   assert.equal(childCreates.length, 2);
   assert.ok(childCreates.every((call) => call.args.includes("1")));
