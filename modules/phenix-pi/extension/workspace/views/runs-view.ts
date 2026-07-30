@@ -11,7 +11,7 @@ import {
   runStateSymbol,
   truncateWorkspaceText,
 } from "./workspace-view-format.ts";
-import { renderWorkspaceRowForTerminal } from "./workspace-view-terminal.ts";
+import { withTerminalWorkspaceRenderer } from "./workspace-view-terminal.ts";
 
 const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]);
 const GENERIC_ACTIVITIES = new Set(["working", "running", "waiting"]);
@@ -78,14 +78,13 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
           ],
         };
       };
-      return {
+      return withTerminalWorkspaceRenderer({
         id: String(run.id),
         value,
         expandable,
         activation: { kind: "transcript" as const, runId: run.id },
         present,
-        render: ({ theme, ...context }) => renderWorkspaceRowForTerminal(present(context), theme),
-      };
+      });
     }),
 });
 
