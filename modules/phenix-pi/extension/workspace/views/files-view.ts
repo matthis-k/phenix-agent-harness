@@ -1,13 +1,14 @@
 import type { RunTreeNode } from "../../../application/interfaces.ts";
+import { textSpan, type WorkspaceRowPresentation } from "../../../application/workspace/presentation.ts";
 import type { RunFact } from "../../../domain/run/observability.ts";
 import type { RunId } from "../../../domain/shared.ts";
-import { color, strong } from "../../observability-theme.ts";
 import {
   defineWorkspaceView,
   type WorkspaceViewSnapshot,
   workspaceViewLayout,
 } from "./workspace-view.ts";
 import { truncateWorkspaceText } from "./workspace-view-format.ts";
+import { renderWorkspaceRowForTerminal } from "./workspace-view-terminal.ts";
 
 export interface WorkspaceFileRow {
   readonly id: string;
@@ -73,21 +74,28 @@ export const filesWorkspaceView = defineWorkspaceView<WorkspaceFileRow>({
   title: "Files",
   layout: workspaceViewLayout("files"),
   project: (snapshot, context) =>
-    projectWorkspaceFiles(snapshot, context?.selectedRunId).map((value) => ({
-      id: value.id,
-      value,
-      render: ({ theme, width }) => {
-        const count = value.changeCount > 1 ? color(theme, "muted", ` ×${value.changeCount}`) : "";
-        const owners =
-          value.runIds.length > 1 ? color(theme, "dim", ` · ${value.runIds.length} runs`) : "";
-        return {
-          text: `${color(theme, "warning", "Δ")} ${strong(
-            theme,
-            truncateWorkspaceText(value.path, Math.max(8, width - 12)),
-          )}${count}${owners}`,
-        };
-      },
-    })),
+    projectWorkspaceFiles(snapshot, context?.selectedRunId).map((value) => {
+      const present = ({ width }: { readonly width: number }): WorkspaceRowPresentation => ({
+        spans: [
+          textSpan("Δ", { tone: "warning" }),
+          textSpan(" "),
+          textSpan(truncateWorkspaceText(value.path, Math.max(8, width - 12)), { strong: true }),
+          ...(value.changeCount > 1
+            ? [textSpan(` ×${value.changeCount}`, { tone: "muted" as const })]
+            : []),
+          ...(value.runIds.length > 1
+            ? [textSpan(` · ${value.runIds.length} runs`, { tone: "dim" as const })]
+            : []),
+        ],
+      });
+      return {
+        id: value.id,
+        value,
+        present,
+        render: ({ theme, ...renderContext }) =>
+          renderWorkspaceRowForTerminal(present(renderContext), theme),
+      };
+    }),
 });
 
 function collectRunSubtreeIds(root: RunTreeNode, selectedRunId: RunId): ReadonlySet<RunId> {
