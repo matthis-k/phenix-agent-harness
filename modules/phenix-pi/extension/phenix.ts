@@ -5,6 +5,7 @@ import registerResultDisplay from "./result-display.ts";
 import registerRuntime from "./root-extension.ts";
 import registerTheme from "./theme-extension.ts";
 import registerVisualizationDisplay from "./visualization-display.ts";
+import { withWorkspaceInputSubmission } from "./workspace/workspace-input-api.ts";
 import { registerWorkspaceStandardBuiltins } from "./workspace/workspace-standard-builtins.ts";
 
 /**
@@ -17,7 +18,7 @@ export default async function phenix(pi: ExtensionAPI): Promise<void> {
   registerTheme(pi);
   await registerRuntime(pi);
   registerWorkspaceStandardBuiltins(pi);
-  registerWorkspace(pi);
+  registerWorkspace(withWorkspaceInputSubmission(pi));
   registerResultDisplay(pi);
   registerVisualizationDisplay(pi);
 }
