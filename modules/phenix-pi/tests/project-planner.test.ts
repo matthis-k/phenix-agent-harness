@@ -70,6 +70,10 @@ test("a project survives sessions and advances only its unblocked decision front
       deliveries.push({ runId, message });
     },
   );
+  let projectChanges = 0;
+  const unsubscribe = service.subscribe(() => {
+    projectChanges += 1;
+  });
   const foundation = decisionId("decision-foundation");
   const implementation = decisionId("decision-implementation");
   const created = await service.create(
@@ -115,10 +119,12 @@ test("a project survives sessions and advances only its unblocked decision front
       question: "Should GitHub issues or the local ledger be canonical?",
       context: "The answer determines offline behavior.",
       options: ["Local ledger", "GitHub"],
+      urgency: "urgent",
     },
     CHILD_ACTOR,
   );
-  assert.match(notices[0] ?? "", /needs input/);
+  assert.equal(intervention.urgency, "urgent");
+  assert.match(notices[0] ?? "", /Urgent project input/);
 
   const answered = await service.answerInput(
     created.id,
@@ -144,6 +150,8 @@ test("a project survives sessions and advances only its unblocked decision front
     (await service.frontier(created.id)).map((item) => item.id),
     [implementation],
   );
+  assert.ok(projectChanges >= 5);
+  unsubscribe();
 
   const nextSession = new ProjectPlannerService(ledger, new Ids(), {
     now: () => "2026-07-31T12:00:00.000Z",
