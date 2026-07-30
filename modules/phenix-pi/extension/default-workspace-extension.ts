@@ -24,6 +24,10 @@ import { interruptActiveRootWork } from "./workspace/interrupt-active-work.ts";
 import { handoffNativeWorkspaceInput } from "./workspace/native-input-handoff.ts";
 import { renderWorkspaceTurn } from "./workspace/turn-indicator.ts";
 import {
+  isWorkspaceCommandInput,
+  workspaceCommandName,
+} from "./workspace/workspace-input-api.ts";
+import {
   type NativeInputDelegation,
   WORKSPACE_NATIVE_HANDOFF,
 } from "./workspace/workspace-interaction.ts";
@@ -280,15 +284,36 @@ async function openWorkspace(
           name: command.name,
           description: command.description,
         }));
+        const submitWorkspaceMessage = async (text: string): Promise<void> => {
+          lifecycle.onSubmitStarted();
+          try {
+            await Promise.resolve(
+              pi.sendUserMessage(text, ctx.isIdle() ? undefined : { deliverAs: "steer" }),
+            );
+          } catch (error) {
+            lifecycle.onSubmitFailed();
+            throw error;
+          }
+        };
         const complete = (action: PhenixWorkspaceAction): void => {
-          if (action.kind === "native" && slashCommandName(action.text) === "model") {
+          if (action.kind === "native" && workspaceCommandName(action.text) === "model") {
             void showModelDialog().catch((error) => {
               notifyWorkspaceCommandError(ctx, "model selector", error);
             });
             return;
           }
-          if (action.kind === "native" && isRegisteredWorkspaceCommand(action.text, commands)) {
+          if (action.kind === "native" && isWorkspaceCommandInput(action.text, commands)) {
             void executeWorkspaceCommand(pi, ctx, action.text).catch((error) => {
+              notifyWorkspaceCommandError(ctx, action.text, error);
+            });
+            return;
+          }
+          if (
+            action.kind === "native" &&
+            pendingDelegation === undefined &&
+            action.text.trim().startsWith("/")
+          ) {
+            void submitWorkspaceMessage(action.text).catch((error) => {
               notifyWorkspaceCommandError(ctx, action.text, error);
             });
             return;
@@ -326,17 +351,7 @@ async function openWorkspace(
               ctx.cwd,
             ),
           subscribe: (listener) => subscribeWorkspaceChanges(binding.runtime, listener),
-          submit: async (text) => {
-            lifecycle.onSubmitStarted();
-            try {
-              await Promise.resolve(
-                pi.sendUserMessage(text, ctx.isIdle() ? undefined : { deliverAs: "steer" }),
-              );
-            } catch (error) {
-              lifecycle.onSubmitFailed();
-              throw error;
-            }
-          },
+          submit: submitWorkspaceMessage,
           onAction: complete,
         });
         activeWorkspace = instance;
@@ -424,18 +439,6 @@ async function executeWorkspaceCommand(
   await Promise.resolve(
     pi.sendUserMessage(text, ctx.isIdle() ? undefined : { deliverAs: "steer" }),
   );
-}
-
-function isRegisteredWorkspaceCommand(text: string, commands: readonly SlashCommand[]): boolean {
-  const name = slashCommandName(text);
-  return name !== undefined && commands.some((command) => command.name === name);
-}
-
-function slashCommandName(text: string): string | undefined {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith("/")) return undefined;
-  const [name] = trimmed.slice(1).split(/\s+/, 1);
-  return name || undefined;
 }
 
 function notifyWorkspaceCommandError(ctx: ExtensionContext, command: string, error: unknown): void {
