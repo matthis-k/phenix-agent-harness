@@ -1,6 +1,7 @@
 import type { RunId } from "../../../domain/shared.ts";
 import type { TaskTree } from "../../../domain/task/projection.ts";
 import type { PaneId } from "../../../domain/workspace/state.ts";
+import { workspaceSurface } from "../../../domain/workspace/surfaces.ts";
 import type { ObservabilityTheme } from "../../observability-theme.ts";
 import type { PhenixUiSnapshot } from "../../phenix-ui.ts";
 
@@ -64,4 +65,17 @@ export function defineWorkspaceView<TValue>(
   registration: WorkspaceViewRegistration<TValue>,
 ): WorkspaceViewRegistration<TValue> {
   return registration;
+}
+
+export function workspaceViewLayout(
+  id: WorkspaceViewPaneId,
+  headerRows = 2,
+): WorkspaceViewLayout {
+  const constraints = workspaceSurface(id).constraints;
+  return {
+    weight: constraints.grow,
+    minRows: constraints.minHeight,
+    headerRows,
+    collapsePriority: constraints.collapsePriority ?? 0,
+  };
 }
