@@ -1,5 +1,6 @@
 import type { RunTreeNode } from "../../application/interfaces.ts";
 import { WorkspaceFrontend } from "../../application/workspace/frontend.ts";
+import type { RunId } from "../../domain/shared.ts";
 import type { WorkspaceError } from "../../domain/workspace/errors.ts";
 import type { WorkspaceSnapshotEnvelope } from "../../domain/workspace/events.ts";
 import type { LoadedWorkspaceTranscript } from "../../ports/workspace-effects.ts";
@@ -9,6 +10,12 @@ import {
   type PhenixWorkspaceSnapshot,
   workspaceItemIndex,
 } from "./workspace-model.ts";
+
+const inputTargets = new Map<RunId, RunId>();
+
+export function selectedWorkspaceInputTarget(rootRunId: RunId): RunId {
+  return inputTargets.get(rootRunId) ?? rootRunId;
+}
 
 export interface WorkspaceControllerAdapterOptions {
   readonly snapshot: PhenixWorkspaceSnapshot;
@@ -25,11 +32,13 @@ export class WorkspaceControllerAdapter extends WorkspaceFrontend<
   PhenixWorkspaceSnapshot,
   NativeRunTranscript
 > {
+  private readonly rootRunId: RunId;
   private readonly unsubscribeHost: () => void;
 
   constructor(options: WorkspaceControllerAdapterOptions) {
+    const initial = snapshotEnvelope(options.snapshot);
     super({
-      initialSnapshot: snapshotEnvelope(options.snapshot),
+      initialSnapshot: initial,
       initialTranscript: options.snapshot.rootTranscript,
       loadSnapshot: async () => snapshotEnvelope(await options.load()),
       loadTranscript: async (runId, snapshot) => {
@@ -42,11 +51,17 @@ export class WorkspaceControllerAdapter extends WorkspaceFrontend<
       subscribeSource: options.subscribe,
       ...(options.recordDiagnostic ? { recordDiagnostic: options.recordDiagnostic } : {}),
     });
-    this.unsubscribeHost = this.subscribe(options.onChange);
+    this.rootRunId = initial.rootRunId;
+    inputTargets.set(this.rootRunId, this.state.activeRunId);
+    this.unsubscribeHost = this.subscribe(() => {
+      inputTargets.set(this.rootRunId, this.state.activeRunId);
+      options.onChange();
+    });
   }
 
   override dispose(): void {
     this.unsubscribeHost();
+    inputTargets.delete(this.rootRunId);
     super.dispose();
   }
 }
