@@ -1,6 +1,6 @@
 import type { RunTreeNode } from "../../../application/interfaces.ts";
 import { color, state, strong } from "../../observability-theme.ts";
-import { defineWorkspaceView } from "./workspace-view.ts";
+import { defineWorkspaceView, workspaceViewLayout } from "./workspace-view.ts";
 import {
   definitionLabel,
   runStateLabel,
@@ -32,12 +32,7 @@ export function projectWorkspaceRuns(root: RunTreeNode): readonly WorkspaceRunRo
 export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
   id: "runs",
   title: "Runs",
-  layout: {
-    weight: 5,
-    minRows: 2,
-    headerRows: 2,
-    collapsePriority: 0,
-  },
+  layout: workspaceViewLayout("runs"),
   project: (snapshot) =>
     projectWorkspaceRuns(snapshot.ui.tree.root).map((value) => {
       const run = value.node.run;
