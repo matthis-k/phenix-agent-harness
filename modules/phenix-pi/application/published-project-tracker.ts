@@ -6,7 +6,11 @@ import type {
 
 /** Keep the local ledger usable before a project has a tracker projection. */
 export class PublishedProjectTracker implements ProjectTracker {
-  constructor(private readonly inner: ProjectTracker) {}
+  private readonly inner: ProjectTracker;
+
+  constructor(inner: ProjectTracker) {
+    this.inner = inner;
+  }
 
   publish(project: ProjectMap): Promise<ProjectTrackerPublication> {
     return this.inner.publish(project);
