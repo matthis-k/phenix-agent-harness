@@ -5,15 +5,6 @@
     phenix-pins.url = "github:matthis-k/phenix-pins";
     nixpkgs.follows = "phenix-pins/nixpkgs";
 
-    phenix-packages = {
-      url = "github:matthis-k/phenix-packages";
-      inputs = {
-        flake-parts.follows = "phenix-pins/flake-parts";
-        phenix-pins.follows = "phenix-pins";
-        nixpkgs.follows = "nixpkgs";
-      };
-    };
-
     pi-src = {
       url = "github:earendil-works/pi/v0.80.10";
       flake = false;
