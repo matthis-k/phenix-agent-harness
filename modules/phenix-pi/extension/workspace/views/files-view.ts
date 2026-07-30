@@ -8,7 +8,7 @@ import {
   workspaceViewLayout,
 } from "./workspace-view.ts";
 import { truncateWorkspaceText } from "./workspace-view-format.ts";
-import { renderWorkspaceRowForTerminal } from "./workspace-view-terminal.ts";
+import { withTerminalWorkspaceRenderer } from "./workspace-view-terminal.ts";
 
 export interface WorkspaceFileRow {
   readonly id: string;
@@ -88,13 +88,11 @@ export const filesWorkspaceView = defineWorkspaceView<WorkspaceFileRow>({
             : []),
         ],
       });
-      return {
+      return withTerminalWorkspaceRenderer({
         id: value.id,
         value,
         present,
-        render: ({ theme, ...renderContext }) =>
-          renderWorkspaceRowForTerminal(present(renderContext), theme),
-      };
+      });
     }),
 });
 
