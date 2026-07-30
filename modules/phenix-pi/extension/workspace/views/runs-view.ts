@@ -1,5 +1,9 @@
 import type { RunTreeNode } from "../../../application/interfaces.ts";
-import { color, state, strong } from "../../observability-theme.ts";
+import {
+  runStateTone,
+  textSpan,
+  type WorkspaceRowPresentation,
+} from "../../../application/workspace/presentation.ts";
 import { defineWorkspaceView, workspaceViewLayout } from "./workspace-view.ts";
 import {
   definitionLabel,
@@ -7,6 +11,7 @@ import {
   runStateSymbol,
   truncateWorkspaceText,
 } from "./workspace-view-format.ts";
+import { renderWorkspaceRowForTerminal } from "./workspace-view-terminal.ts";
 
 const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]);
 const GENERIC_ACTIVITIES = new Set(["working", "running", "waiting"]);
@@ -37,37 +42,49 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
     projectWorkspaceRuns(snapshot.ui.tree.root).map((value) => {
       const run = value.node.run;
       const expandable = Boolean(run.resolvedModel || run.profile || run.pi?.sessionId);
+      const present = ({
+        width,
+        activeRunId,
+        expanded,
+      }: {
+        readonly width: number;
+        readonly activeRunId: typeof run.id;
+        readonly expanded: boolean;
+      }): WorkspaceRowPresentation => {
+        const active = run.id === activeRunId;
+        const label =
+          run.kind === "root" ? "Root session" : definitionLabel(String(run.definitionId));
+        const activity = activityText(
+          value.node.activity?.summary,
+          run.state,
+          width,
+          value.depth,
+        );
+        const details = expanded ? runDetails(value.node) : [];
+        const disclosure = expandable ? (expanded ? "▾" : "▸") : " ";
+        return {
+          active,
+          spans: [
+            textSpan(`${"  ".repeat(value.depth)}${disclosure} `),
+            textSpan(`${runStateSymbol(run.state)} ${runStateLabel(run.state)}`, {
+              tone: runStateTone(run.state),
+            }),
+            textSpan(" "),
+            textSpan(label, { strong: true }),
+            ...(activity ? [textSpan(` ${activity}`, { tone: "muted" as const })] : []),
+            ...(details.length > 0
+              ? [textSpan(` · ${details.join(" · ")}`, { tone: "dim" as const })]
+              : []),
+          ],
+        };
+      };
       return {
         id: String(run.id),
         value,
         expandable,
         activation: { kind: "transcript" as const, runId: run.id },
-        render: ({ theme, width, activeRunId, expanded }) => {
-          const active = run.id === activeRunId;
-          const label =
-            run.kind === "root" ? "Root session" : definitionLabel(String(run.definitionId));
-          const activity = activityText(
-            value.node.activity?.summary,
-            run.state,
-            width,
-            value.depth,
-          );
-          const details = expanded ? runDetails(value.node) : [];
-          const detailText =
-            details.length > 0 ? ` ${color(theme, "dim", `· ${details.join(" · ")}`)}` : "";
-          const disclosure = expandable ? (expanded ? "▾" : "▸") : " ";
-          const status = state(
-            theme,
-            run.state,
-            `${runStateSymbol(run.state)} ${runStateLabel(run.state)}`,
-          );
-          return {
-            active,
-            text: `${"  ".repeat(value.depth)}${disclosure} ${status} ${strong(theme, label)}${
-              activity ? ` ${color(theme, "muted", activity)}` : ""
-            }${detailText}`,
-          };
-        },
+        present,
+        render: ({ theme, ...context }) => renderWorkspaceRowForTerminal(present(context), theme),
       };
     }),
 });
