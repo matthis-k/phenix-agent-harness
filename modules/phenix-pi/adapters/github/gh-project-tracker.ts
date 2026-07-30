@@ -81,7 +81,15 @@ export class GhProjectTracker implements ProjectTracker {
     const link = requireIssue(project, decision);
     await this.commands.run(
       "gh",
-      ["issue", "edit", String(link.issueNumber), "--repo", requireTracker(project).repository, "--add-assignee", "@me"],
+      [
+        "issue",
+        "edit",
+        String(link.issueNumber),
+        "--repo",
+        requireTracker(project).repository,
+        "--add-assignee",
+        "@me",
+      ],
       this.cwd,
     );
   }
@@ -205,7 +213,7 @@ class SpawnCommandRunner implements CommandRunner {
     return new Promise((resolve, reject) => {
       const child = spawn(command, [...args], {
         cwd,
-        stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
       });
       let stdout = "";
       let stderr = "";
@@ -223,9 +231,7 @@ class SpawnCommandRunner implements CommandRunner {
         }
         reject(new Error(`Command ${command} ${args.join(" ")} failed (${code}): ${stderr.trim()}`));
       });
-      if (stdin !== undefined) {
-        child.stdin.end(stdin);
-      }
+      child.stdin.end(stdin ?? "");
     });
   }
 }
@@ -252,7 +258,9 @@ function renderMapBody(project: ProjectMap): string {
     "",
     ...(decisions.length > 0
       ? decisions.map((decision) => {
-          const title = decision.issue ? `[${decision.title}](${decision.issue.url})` : decision.title;
+          const title = decision.issue
+            ? `[${decision.title}](${decision.issue.url})`
+            : decision.title;
           return `- ${title} — ${decision.resolution?.summary ?? "Resolved"}`;
         })
       : ["- None yet."]),
@@ -265,7 +273,9 @@ function renderMapBody(project: ProjectMap): string {
     "",
     ...(outOfScope.length > 0
       ? outOfScope.map((decision) => {
-          const title = decision.issue ? `[${decision.title}](${decision.issue.url})` : decision.title;
+          const title = decision.issue
+            ? `[${decision.title}](${decision.issue.url})`
+            : decision.title;
           return `- ${title} — ${decision.outOfScopeReason ?? "Outside the destination"}`;
         })
       : ["- None."]),
