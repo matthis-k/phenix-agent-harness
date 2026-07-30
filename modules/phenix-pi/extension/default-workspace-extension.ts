@@ -7,6 +7,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { SlashCommand } from "@earendil-works/pi-tui";
 
+import { projectWorkspaceAttention } from "../application/workspace/project-attention.ts";
 import {
   loadNativeRunTranscript,
   loadNativeRunTranscriptResult,
@@ -24,9 +25,13 @@ import { interruptActiveRootWork } from "./workspace/interrupt-active-work.ts";
 import { handoffNativeWorkspaceInput } from "./workspace/native-input-handoff.ts";
 import { renderWorkspaceTurn } from "./workspace/turn-indicator.ts";
 import {
+  selectedWorkspaceInputTarget,
+} from "./workspace/workspace-controller-adapter.ts";
+import {
   type NativeInputDelegation,
   WORKSPACE_NATIVE_HANDOFF,
 } from "./workspace/workspace-interaction.ts";
+import { routeWorkspaceMessage } from "./workspace/workspace-message-routing.ts";
 import {
   WorkspaceSelectDialog,
   type WorkspaceSelectDialogItem,
@@ -327,13 +332,25 @@ async function openWorkspace(
             ),
           subscribe: (listener) => subscribeWorkspaceChanges(binding.runtime, listener),
           submit: async (text) => {
-            lifecycle.onSubmitStarted();
+            const targetRunId = selectedWorkspaceInputTarget(binding.rootRunId);
+            const targetsRoot = targetRunId === binding.rootRunId;
+            if (targetsRoot) lifecycle.onSubmitStarted();
             try {
-              await Promise.resolve(
-                pi.sendUserMessage(text, ctx.isIdle() ? undefined : { deliverAs: "steer" }),
-              );
+              await routeWorkspaceMessage({
+                runtime: binding.runtime,
+                rootRunId: binding.rootRunId,
+                targetRunId,
+                text,
+                sendRoot: (message) =>
+                  Promise.resolve(
+                    pi.sendUserMessage(
+                      message,
+                      ctx.isIdle() ? undefined : { deliverAs: "steer" },
+                    ),
+                  ),
+              });
             } catch (error) {
-              lifecycle.onSubmitFailed();
+              if (targetsRoot) lifecycle.onSubmitFailed();
               throw error;
             }
           },
@@ -451,9 +468,10 @@ async function loadWorkspaceSnapshot(
   tui: Parameters<typeof renderNativeTranscript>[1],
   theme: ObservabilityTheme,
 ): Promise<PhenixWorkspaceSnapshot> {
-  const [ui, tasks] = await Promise.all([
+  const [ui, tasks, projects] = await Promise.all([
     loadPhenixUiSnapshot(binding.runtime, binding.rootRunId, binding.integrations),
     binding.runtime.tasks.tree(binding.rootRunId),
+    binding.runtime.projects.list(),
   ]);
   const entries = buildContextEntries([...ctx.sessionManager.getBranch()]);
   const sessionId = ctx.sessionManager.getSessionId();
@@ -461,6 +479,7 @@ async function loadWorkspaceSnapshot(
   return {
     ui,
     tasks,
+    attentionByRun: projectWorkspaceAttention(projects),
     rootTranscript: readyNativeRunTranscript({
       component: renderNativeTranscript(entries, tui, ctx.cwd, theme),
       sessionId,
