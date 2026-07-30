@@ -5,10 +5,7 @@ import type {
   ProjectMap,
   ProjectTrackerLink,
 } from "../../domain/project/model.ts";
-import type {
-  ProjectTracker,
-  ProjectTrackerPublication,
-} from "../../ports/project-tracker.ts";
+import type { ProjectTracker, ProjectTrackerPublication } from "../../ports/project-tracker.ts";
 
 interface CommandResult {
   readonly stdout: string;
@@ -16,7 +13,12 @@ interface CommandResult {
 }
 
 export interface CommandRunner {
-  run(command: string, args: readonly string[], cwd: string, stdin?: string): Promise<CommandResult>;
+  run(
+    command: string,
+    args: readonly string[],
+    cwd: string,
+    stdin?: string,
+  ): Promise<CommandResult>;
 }
 
 export class GhProjectTracker implements ProjectTracker {
@@ -37,7 +39,10 @@ export class GhProjectTracker implements ProjectTracker {
       labels: ["phenix:project-map"],
     });
     const mapIssueNumber = issueNumber(mapUrl);
-    const issueByDecision = new Map<string, { readonly issueNumber: number; readonly url: string }>();
+    const issueByDecision = new Map<
+      string,
+      { readonly issueNumber: number; readonly url: string }
+    >();
 
     for (const decision of project.decisions) {
       const url = await this.createIssue(repository.nameWithOwner, {
@@ -162,8 +167,12 @@ export class GhProjectTracker implements ProjectTracker {
       ["repo", "view", "--json", "nameWithOwner,url"],
       this.cwd,
     );
-    const parsed = JSON.parse(result.stdout) as { readonly nameWithOwner?: string; readonly url?: string };
-    if (!parsed.nameWithOwner || !parsed.url) throw new Error("Unable to identify GitHub repository");
+    const parsed = JSON.parse(result.stdout) as {
+      readonly nameWithOwner?: string;
+      readonly url?: string;
+    };
+    if (!parsed.nameWithOwner || !parsed.url)
+      throw new Error("Unable to identify GitHub repository");
     return { nameWithOwner: parsed.nameWithOwner, url: parsed.url };
   }
 
@@ -229,7 +238,12 @@ export class GhProjectTracker implements ProjectTracker {
 }
 
 class SpawnCommandRunner implements CommandRunner {
-  run(command: string, args: readonly string[], cwd: string, stdin?: string): Promise<CommandResult> {
+  run(
+    command: string,
+    args: readonly string[],
+    cwd: string,
+    stdin?: string,
+  ): Promise<CommandResult> {
     return new Promise((resolve, reject) => {
       const child = spawn(command, [...args], {
         cwd,
@@ -249,7 +263,9 @@ class SpawnCommandRunner implements CommandRunner {
           resolve({ stdout, stderr });
           return;
         }
-        reject(new Error(`Command ${command} ${args.join(" ")} failed (${code}): ${stderr.trim()}`));
+        reject(
+          new Error(`Command ${command} ${args.join(" ")} failed (${code}): ${stderr.trim()}`),
+        );
       });
       child.stdin.end(stdin ?? "");
     });
