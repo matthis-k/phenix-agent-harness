@@ -79,16 +79,29 @@ export interface ProjectPlannerFacade {
 }
 
 export class ProjectPlannerService implements ProjectPlannerFacade {
+  private readonly ledger: ProjectLedger;
+  private readonly ids: IdGenerator;
+  private readonly clock: Clock;
+  private readonly tracker: ProjectTracker | undefined;
+  private readonly notifyRoot: ((message: string) => void | Promise<void>) | undefined;
+  private readonly deliverToRun: ((runId: RunId, message: string) => Promise<void>) | undefined;
   private readonly serial = new KeyedSerialExecutor<ProjectId>();
 
   constructor(
-    private readonly ledger: ProjectLedger,
-    private readonly ids: IdGenerator,
-    private readonly clock: Clock,
-    private readonly tracker?: ProjectTracker,
-    private readonly notifyRoot?: (message: string) => void | Promise<void>,
-    private readonly deliverToRun?: (runId: RunId, message: string) => Promise<void>,
-  ) {}
+    ledger: ProjectLedger,
+    ids: IdGenerator,
+    clock: Clock,
+    tracker?: ProjectTracker,
+    notifyRoot?: (message: string) => void | Promise<void>,
+    deliverToRun?: (runId: RunId, message: string) => Promise<void>,
+  ) {
+    this.ledger = ledger;
+    this.ids = ids;
+    this.clock = clock;
+    this.tracker = tracker;
+    this.notifyRoot = notifyRoot;
+    this.deliverToRun = deliverToRun;
+  }
 
   async list(): Promise<readonly ProjectMap[]> {
     const ids = await this.ledger.list();
@@ -156,10 +169,7 @@ export class ProjectPlannerService implements ProjectPlannerFacade {
       if (!frontierOf(project).some((candidate) => candidate.id === decision)) {
         throw new Error(`Decision ${decision} is not on the current frontier`);
       }
-      if (target.claim && !sameActor(target.claim.actor, actor)) {
-        throw new Error(`Decision ${decision} is already claimed by ${target.claim.actor.runId}`);
-      }
-      if (target.state !== "open" && target.state !== "claimed") {
+      if (target.state !== "open") {
         throw new Error(`Decision ${decision} cannot be claimed from ${target.state}`);
       }
       await this.tracker?.claim(project, target);
@@ -168,11 +178,12 @@ export class ProjectPlannerService implements ProjectPlannerFacade {
   }
 
   release(id: ProjectId, decision: DecisionId, actor: ProjectActor): Promise<ProjectMap> {
-    return this.mutate(id, actor, (project) => {
+    return this.mutate(id, actor, async (project) => {
       const target = requireDecision(project, decision);
-      if (!target.claim || !sameActor(target.claim.actor, actor)) {
-        throw new Error(`Decision ${decision} is not claimed by ${actor.runId}`);
+      if (!target.claim || (!sameActor(target.claim.actor, actor) && !isRootActor(actor))) {
+        throw new Error(`Decision ${decision} is not controlled by ${actor.runId}`);
       }
+      await this.tracker?.release(project, target);
       return { type: "decision.released", data: { decisionId: decision } };
     });
   }
@@ -218,15 +229,22 @@ export class ProjectPlannerService implements ProjectPlannerFacade {
       if (target.state === "resolved" || target.state === "out_of_scope") {
         throw new Error(`Decision ${decision} is already terminal`);
       }
+      if (target.claim && !sameActor(target.claim.actor, actor) && !isRootActor(actor)) {
+        throw new Error(`Decision ${decision} is not controlled by ${actor.runId}`);
+      }
+      if (!target.claim && !isRootActor(actor)) {
+        throw new Error(`Only the root supervisor may remove an unclaimed decision from scope`);
+      }
+      const normalizedReason = requireText("out-of-scope reason", reason);
       const projected = applySynthetic(project, {
         type: "decision.out_of_scope",
-        data: { decisionId: decision, reason: requireText("out-of-scope reason", reason) },
+        data: { decisionId: decision, reason: normalizedReason },
       });
       await this.tracker?.resolve(projected, requireDecision(projected, decision));
       await this.tracker?.refresh(projected);
       return {
         type: "decision.out_of_scope",
-        data: { decisionId: decision, reason: requireText("out-of-scope reason", reason) },
+        data: { decisionId: decision, reason: normalizedReason },
       };
     });
   }
@@ -271,12 +289,15 @@ export class ProjectPlannerService implements ProjectPlannerFacade {
     answer: string,
     actor: ProjectActor,
   ): Promise<ProjectIntervention> {
+    if (!isRootActor(actor)) throw new Error("Only the root supervisor may answer project input");
     const response = requireText("intervention answer", answer);
-    let target: ProjectIntervention | undefined;
+    let answered = false;
     await this.mutate(id, actor, async (project) => {
       const pending = project.interventions.find((candidate) => candidate.id === intervention);
       if (!pending) throw new Error(`Unknown intervention ${intervention}`);
-      if (pending.status !== "pending") throw new Error(`Intervention ${intervention} is already answered`);
+      if (pending.status !== "pending") {
+        throw new Error(`Intervention ${intervention} is already answered`);
+      }
       let delivered = false;
       if (this.deliverToRun) {
         try {
@@ -289,14 +310,16 @@ export class ProjectPlannerService implements ProjectPlannerFacade {
           delivered = false;
         }
       }
-      target = { ...pending, status: "answered", answer: response, delivered };
+      answered = true;
       return {
         type: "intervention.answered",
         data: { interventionId: intervention, answer: response, delivered },
       };
     });
-    if (!target) throw new Error(`Unknown intervention ${intervention}`);
-    return (await this.inspect(id)).interventions.find((item) => item.id === intervention) as ProjectIntervention;
+    if (!answered) throw new Error(`Unknown intervention ${intervention}`);
+    return (await this.inspect(id)).interventions.find(
+      (item) => item.id === intervention,
+    ) as ProjectIntervention;
   }
 
   publish(id: ProjectId, actor: ProjectActor): Promise<ProjectMap> {
@@ -311,7 +334,9 @@ export class ProjectPlannerService implements ProjectPlannerFacade {
         { type: "project.tracker.linked", data: { tracker: publication.tracker } },
         ...project.decisions.flatMap((decision) => {
           const issue = publication.decisions.get(decision.id);
-          return issue ? [{ type: "decision.issue.linked" as const, data: { decisionId: decision.id, issue } }] : [];
+          return issue
+            ? [{ type: "decision.issue.linked" as const, data: { decisionId: decision.id, issue } }]
+            : [];
         }),
       ];
       return events;
@@ -361,17 +386,18 @@ export class ProjectPlannerService implements ProjectPlannerFacade {
 
 export function frontierOf(project: ProjectMap): readonly ProjectDecision[] {
   const byId = new Map(project.decisions.map((decision) => [decision.id, decision] as const));
-  return project.decisions.filter((decision) => {
-    if (decision.state !== "open" && decision.state !== "claimed" && decision.state !== "awaiting_user") {
-      return false;
-    }
-    return decision.dependsOn.every((dependency) => byId.get(dependency)?.state === "resolved");
-  });
+  return project.decisions.filter(
+    (decision) =>
+      decision.state === "open" &&
+      decision.dependsOn.every((dependency) => byId.get(dependency)?.state === "resolved"),
+  );
 }
 
 export function projectFromEvents(events: readonly ProjectEvent[]): ProjectMap {
   const created = events[0];
-  if (!created || created.type !== "project.created") throw new Error("Project ledger has no creation event");
+  if (!created || created.type !== "project.created") {
+    throw new Error("Project ledger has no creation event");
+  }
   const data = created.data as {
     readonly title: string;
     readonly destination: ProjectDestination;
@@ -514,6 +540,10 @@ function assertClaimOwner(decision: ProjectDecision, actor: ProjectActor): void 
   }
 }
 
+function isRootActor(actor: ProjectActor): boolean {
+  return actor.runId === actor.rootRunId;
+}
+
 function sameActor(left: ProjectActor, right: ProjectActor): boolean {
   return left.rootRunId === right.rootRunId && left.runId === right.runId;
 }
@@ -531,8 +561,12 @@ function validateDecisionGraph(decisions: readonly ProjectDecision[]): void {
   if (byId.size !== decisions.length) throw new Error("Decision IDs must be unique");
   for (const decision of decisions) {
     for (const dependency of decision.dependsOn) {
-      if (!byId.has(dependency)) throw new Error(`Decision ${decision.id} depends on unknown ${dependency}`);
-      if (dependency === decision.id) throw new Error(`Decision ${decision.id} cannot depend on itself`);
+      if (!byId.has(dependency)) {
+        throw new Error(`Decision ${decision.id} depends on unknown ${dependency}`);
+      }
+      if (dependency === decision.id) {
+        throw new Error(`Decision ${decision.id} cannot depend on itself`);
+      }
     }
   }
   const visiting = new Set<DecisionId>();
@@ -564,6 +598,7 @@ function renderProjectSpec(project: ProjectMap): string {
   const outstanding = project.decisions.filter(
     (decision) => decision.state !== "resolved" && decision.state !== "out_of_scope",
   );
+  const frontier = frontierOf(project);
   const outOfScope = project.decisions.filter((decision) => decision.state === "out_of_scope");
   const lines = [
     `# ${project.title}`,
@@ -599,9 +634,10 @@ function renderProjectSpec(project: ProjectMap): string {
       `**Rationale:** ${resolution.rationale}`,
       "",
       "**Evidence:**",
-      ...((resolution.evidence.length > 0 ? resolution.evidence : ["No external evidence recorded."]).map(
-        (item) => `- ${item}`,
-      )),
+      ...((resolution.evidence.length > 0
+        ? resolution.evidence
+        : ["No external evidence recorded."]
+      ).map((item) => `- ${item}`)),
       "",
       "**Consequences:**",
       ...((resolution.consequences.length > 0
@@ -615,9 +651,11 @@ function renderProjectSpec(project: ProjectMap): string {
   }
   lines.push("## Open frontier", "");
   lines.push(
-    ...(outstanding.length > 0
-      ? frontierOf(project).map((decision) => `- ${decision.title} — ${decision.question}`)
-      : ["- No unresolved decisions."]),
+    ...(frontier.length > 0
+      ? frontier.map((decision) => `- ${decision.title} — ${decision.question}`)
+      : outstanding.length > 0
+        ? ["- No currently unblocked, unclaimed decisions."]
+        : ["- No unresolved decisions."]),
     "",
     "## Not yet specified",
     "",
