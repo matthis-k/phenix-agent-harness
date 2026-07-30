@@ -12,6 +12,7 @@ export interface ProjectTrackerPublication {
 export interface ProjectTracker {
   publish(project: ProjectMap): Promise<ProjectTrackerPublication>;
   claim(project: ProjectMap, decision: ProjectDecision): Promise<void>;
+  release(project: ProjectMap, decision: ProjectDecision): Promise<void>;
   resolve(project: ProjectMap, decision: ProjectDecision): Promise<void>;
   refresh(project: ProjectMap): Promise<void>;
 }
