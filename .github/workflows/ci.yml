@@ -32,6 +32,14 @@ jobs:
         with: { name: devenv }
       - name: Install devenv
         run: nix profile add nixpkgs#devenv
+      - name: Refresh flake lock
+        run: nix flake lock --update-input phenix-packages
+      - name: Upload refreshed lock
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: refreshed-flake-lock
+          path: flake.lock
+          if-no-files-found: error
       - name: Run repository maintenance
         shell: bash
         run: |
