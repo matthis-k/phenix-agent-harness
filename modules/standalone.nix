@@ -12,9 +12,9 @@
       tooling = import ./tooling.nix { inherit pkgs; };
       phenixPiPackage = self'.packages.phenix-pi-package;
       mcpConfig = ./phenix-pi/config/mcp.json;
-      mkPhenixWrapper = inputs.phenix-packages.lib.mkPhenixWrapper pkgs;
+      mkPhenixProgram = inputs.phenix-packages.lib.mkPhenixProgram pkgs;
 
-      wrappedPi = mkPhenixWrapper {
+      piProgram = mkPhenixProgram {
         name = "pi";
         repository = "phenix-agent-harness";
         storePath = phenixPiPackage;
@@ -88,14 +88,18 @@
     in
     {
       packages = {
-        default = wrappedPi;
-        pi = wrappedPi;
+        default = piProgram.wrapper;
+        pi = piProgram.wrapper;
+        pi-store = piProgram.store;
+        pi-dev = piProgram.development;
       };
 
       checks = {
         local-operation-runtime = localOperationRuntimeSmoke;
         mcp-defaults = mcpDefaultsSmoke;
-        pi-wrapper = wrappedPi;
+        pi-wrapper = piProgram.wrapper;
+        pi-store = piProgram.store;
+        pi-dev = piProgram.development;
       };
     };
 }
