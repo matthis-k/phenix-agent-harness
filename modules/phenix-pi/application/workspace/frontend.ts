@@ -1,18 +1,12 @@
 import type { RunId } from "../../domain/shared.ts";
 import type { WorkspaceError } from "../../domain/workspace/errors.ts";
-import type {
-  WorkspaceEvent,
-  WorkspaceSnapshotEnvelope,
-} from "../../domain/workspace/events.ts";
+import type { WorkspaceEvent, WorkspaceSnapshotEnvelope } from "../../domain/workspace/events.ts";
 import {
   createInitialWorkspaceState,
   type PaneId,
   type WorkspaceState,
 } from "../../domain/workspace/state.ts";
-import {
-  WORKSPACE_SURFACE_IDS,
-  type WorkspaceSurfaceId,
-} from "../../domain/workspace/surfaces.ts";
+import { WORKSPACE_SURFACE_IDS, type WorkspaceSurfaceId } from "../../domain/workspace/surfaces.ts";
 import type {
   ExternalWorkspaceEffect,
   LoadedWorkspaceTranscript,
@@ -24,9 +18,7 @@ import { WorkspaceController } from "./controller.ts";
 export interface WorkspaceFrontendOptions<TSnapshot, TTranscript> {
   readonly initialSnapshot: WorkspaceSnapshotEnvelope<TSnapshot>;
   readonly initialTranscript: ReadyWorkspaceTranscript<TTranscript>;
-  readonly loadSnapshot: (
-    signal: AbortSignal,
-  ) => Promise<WorkspaceSnapshotEnvelope<TSnapshot>>;
+  readonly loadSnapshot: (signal: AbortSignal) => Promise<WorkspaceSnapshotEnvelope<TSnapshot>>;
   readonly loadTranscript: (
     runId: RunId,
     snapshot: TSnapshot,
@@ -34,10 +26,7 @@ export interface WorkspaceFrontendOptions<TSnapshot, TTranscript> {
   ) => Promise<LoadedWorkspaceTranscript<TTranscript>>;
   readonly subscribeSource: (listener: () => void) => () => void;
   readonly recordDiagnostic?: (error: WorkspaceError) => void | Promise<void>;
-  readonly perform?: (
-    effect: ExternalWorkspaceEffect,
-    signal: AbortSignal,
-  ) => void | Promise<void>;
+  readonly perform?: (effect: ExternalWorkspaceEffect, signal: AbortSignal) => void | Promise<void>;
 }
 
 export interface WorkspaceFrontendChange {
@@ -277,7 +266,10 @@ function changedSurfaces<TSnapshot, TTranscript>(
     if (previous.state.panes[id] !== next.state.panes[id]) dirty.add(id);
   }
 
-  if (previous.state.transcript !== next.state.transcript || previous.transcript !== next.transcript) {
+  if (
+    previous.state.transcript !== next.state.transcript ||
+    previous.transcript !== next.transcript
+  ) {
     dirty.add("transcript");
   }
   if (previous.state.activeRunId !== next.state.activeRunId) {
