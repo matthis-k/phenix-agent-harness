@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { WorkspaceFrontend } from "../application/workspace/frontend.ts";
+import {
+  WorkspaceFrontend,
+  type WorkspaceFrontendChange,
+} from "../application/workspace/frontend.ts";
 import { runId, type RunId } from "../domain/shared.ts";
 import type {
   WorkspaceItemIndex,
@@ -31,7 +34,7 @@ test("frontend publishes surface-scoped changes for independent hosts", () => {
     loadTranscript: async (runIdValue) => transcript(String(runIdValue), String(runIdValue)),
     subscribeSource: () => () => undefined,
   });
-  const changes: Parameters<Parameters<typeof frontend.subscribe>[0]>[0][] = [];
+  const changes: WorkspaceFrontendChange[] = [];
   frontend.subscribe((change) => changes.push(change));
 
   frontend.dispatch({ type: "focus.set", paneId: "runs" });
@@ -57,7 +60,7 @@ test("snapshot changes invalidate components without discarding browsed selectio
       return () => undefined;
     },
   });
-  const changes: Parameters<Parameters<typeof frontend.subscribe>[0]>[0][] = [];
+  const changes: WorkspaceFrontendChange[] = [];
   frontend.subscribe((change) => changes.push(change));
   frontend.dispatch({ type: "selection.set", paneId: "runs", itemId: String(CHILD) });
 
