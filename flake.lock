@@ -132,6 +132,33 @@
         "type": "github"
       }
     },
+    "phenix-packages": {
+      "inputs": {
+        "flake-parts": [
+          "phenix-pins",
+          "flake-parts"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "phenix-pins": [
+          "phenix-pins"
+        ]
+      },
+      "locked": {
+        "lastModified": 1785410340,
+        "narHash": "sha256-wOLaElGL1wMY0VEpFKnT6Whf+wTqFOiVQV3W7E+jHL8=",
+        "owner": "matthis-k",
+        "repo": "phenix-packages",
+        "rev": "dd63266f3ecd391df2edf3ce06410a72edb6e8fb",
+        "type": "github"
+      },
+      "original": {
+        "owner": "matthis-k",
+        "repo": "phenix-packages",
+        "type": "github"
+      }
+    },
     "phenix-pins": {
       "inputs": {
         "flake-file": "flake-file",
@@ -209,6 +236,7 @@
           "phenix-pins",
           "nixpkgs"
         ],
+        "phenix-packages": "phenix-packages",
         "phenix-pins": "phenix-pins",
         "phenix-stitch": "phenix-stitch",
         "pi-src": "pi-src"
