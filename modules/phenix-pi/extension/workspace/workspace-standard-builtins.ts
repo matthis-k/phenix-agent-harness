@@ -1,3 +1,6 @@
+import { copyFile, mkdir, readFile, rename, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AuthEvent, AuthPrompt, AuthType } from "@earendil-works/pi-ai";
 import {
@@ -7,16 +10,13 @@ import {
   type ExtensionContext,
   getAgentDir,
   getPackageDir,
-  ModelRuntime,
+  type ModelRuntime,
   ProjectTrustStore,
   SessionManager,
   type SessionMessageEntry,
   SettingsManager,
   VERSION,
 } from "@earendil-works/pi-coding-agent";
-import { copyFile, mkdir, readFile, rename, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
 
 import {
   confirmWorkspaceAction,
@@ -748,7 +748,7 @@ async function loginProvider(ctx: ExtensionContext, providerArgument: string): P
         detail: "account / OAuth",
       });
     }
-    if (provider.auth.apiKey) {
+    if (provider.auth.apiKey?.login) {
       items.push({
         id: `${provider.id}:api_key`,
         providerId: provider.id,
@@ -782,9 +782,7 @@ async function loginProvider(ctx: ExtensionContext, providerArgument: string): P
 
   await runWorkspaceActivity(ctx, {
     title: `Login · ${selected.providerName}`,
-    lines: [
-      `Starting ${selected.authType === "oauth" ? "account" : "API key"} authentication...`,
-    ],
+    lines: [`Starting ${selected.authType === "oauth" ? "account" : "API key"} authentication...`],
     run: async (activity) => {
       await runtime.login(selected.providerId, selected.authType, {
         signal: activity.signal,
@@ -937,9 +935,7 @@ function renderAuthEvent(activity: WorkspaceActivityController, event: AuthEvent
   } else if (event.type === "info") {
     activity.setLines([
       event.message,
-      ...(event.links ?? []).map((link) =>
-        `${link.label ? `${link.label}: ` : ""}${link.url}`,
-      ),
+      ...(event.links ?? []).map((link) => `${link.label ? `${link.label}: ` : ""}${link.url}`),
     ]);
   } else {
     activity.setLines([event.message]);
