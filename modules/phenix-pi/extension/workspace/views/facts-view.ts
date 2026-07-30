@@ -1,6 +1,10 @@
 import type { RunFact } from "../../../domain/run/observability.ts";
 import { color, fact } from "../../observability-theme.ts";
-import { defineWorkspaceView, type WorkspaceViewSnapshot } from "./workspace-view.ts";
+import {
+  defineWorkspaceView,
+  type WorkspaceViewSnapshot,
+  workspaceViewLayout,
+} from "./workspace-view.ts";
 import { compactTime, truncateWorkspaceText } from "./workspace-view-format.ts";
 
 const RECENT_FACT_LIMIT = 50;
@@ -12,12 +16,7 @@ export function projectWorkspaceFacts(snapshot: WorkspaceViewSnapshot): readonly
 export const factsWorkspaceView = defineWorkspaceView<RunFact>({
   id: "facts",
   title: "Facts",
-  layout: {
-    weight: 3,
-    minRows: 2,
-    headerRows: 2,
-    collapsePriority: 40,
-  },
+  layout: workspaceViewLayout("facts"),
   project: (snapshot) =>
     projectWorkspaceFacts(snapshot).map((value) => ({
       id: value.id,
