@@ -9,6 +9,11 @@ import { ExecutionFacadeImpl } from "../application/execution-facade.ts";
 import type { ExecutionStore } from "../application/execution-store.ts";
 import { SessionInvocationPolicy } from "../application/invocation-policy.ts";
 import { ModelExecutionFacade } from "../application/model-execution-facade.ts";
+import {
+  CompositeAgentToolFactory,
+  ProjectAgentToolFactory,
+} from "../application/project-agent-tools.ts";
+import type { ProjectPlannerFacade } from "../application/project-planner.ts";
 import { QueryFacadeImpl } from "../application/query-facade.ts";
 import { TaskFacadeImpl } from "../application/task-facade.ts";
 import { WorkflowCheckpointProcessManager } from "../application/workflow-checkpoint-process-manager.ts";
@@ -24,6 +29,7 @@ interface ExecutionKernelDependencies {
   readonly functions: WorkflowFunctionRegistry;
   readonly operations: LocalOperationRunner;
   readonly store: ExecutionStore;
+  readonly projects: ProjectPlannerFacade;
   readonly models: ModelResolver;
   readonly ids: IdGenerator;
   readonly clock: Clock;
@@ -35,8 +41,18 @@ interface ExecutionKernelDependencies {
 
 /** Assemble the runtime-independent execution kernel once for production and tests. */
 export function createExecutionKernel(input: ExecutionKernelDependencies) {
-  const { definitions, functions, operations, store, models, ids, clock, cwd, resolveSchema } =
-    input;
+  const {
+    definitions,
+    functions,
+    operations,
+    store,
+    projects,
+    models,
+    ids,
+    clock,
+    cwd,
+    resolveSchema,
+  } = input;
   const execution = new ExecutionFacadeImpl({
     catalog: definitions,
     store,
@@ -93,14 +109,17 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
     store,
     invocationPolicy,
   });
-  const tools = new FacadeAgentToolFactory({
-    execution: modelExecution,
-    dispatch,
-    tasks,
-    catalog,
-    store,
-    invocationPolicy,
-  });
+  const tools = new CompositeAgentToolFactory([
+    new FacadeAgentToolFactory({
+      execution: modelExecution,
+      dispatch,
+      tasks,
+      catalog,
+      store,
+      invocationPolicy,
+    }),
+    new ProjectAgentToolFactory(projects, store),
+  ]);
 
   return {
     execution,
