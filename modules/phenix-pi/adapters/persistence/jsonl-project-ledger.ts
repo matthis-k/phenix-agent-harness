@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -14,6 +14,7 @@ import {
 
 const LOCK_RETRIES = 200;
 const LOCK_RETRY_MS = 10;
+const STALE_LOCK_MS = 60_000;
 
 export class JsonlProjectLedger implements ProjectLedger {
   constructor(private readonly stateDirectory: string) {}
@@ -77,16 +78,28 @@ export class JsonlProjectLedger implements ProjectLedger {
     for (let attempt = 0; attempt < LOCK_RETRIES; attempt += 1) {
       try {
         const handle = await open(lock, "wx", 0o600);
+        await handle.write(`${process.pid}\n${Date.now()}\n`);
+        await handle.sync();
         return async () => {
           await handle.close();
           await rm(lock, { force: true });
         };
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        await this.removeStaleLock(lock);
         await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
       }
     }
     throw new Error(`Timed out acquiring project ledger lock for ${id}`);
+  }
+
+  private async removeStaleLock(lock: string): Promise<void> {
+    try {
+      const metadata = await stat(lock);
+      if (Date.now() - metadata.mtimeMs > STALE_LOCK_MS) await rm(lock, { force: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
   }
 
   private async readEvents(id: ProjectId): Promise<readonly ProjectEvent[]> {
