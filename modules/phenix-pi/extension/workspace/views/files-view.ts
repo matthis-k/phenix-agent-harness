@@ -2,7 +2,11 @@ import type { RunTreeNode } from "../../../application/interfaces.ts";
 import type { RunFact } from "../../../domain/run/observability.ts";
 import type { RunId } from "../../../domain/shared.ts";
 import { color, strong } from "../../observability-theme.ts";
-import { defineWorkspaceView, type WorkspaceViewSnapshot } from "./workspace-view.ts";
+import {
+  defineWorkspaceView,
+  type WorkspaceViewSnapshot,
+  workspaceViewLayout,
+} from "./workspace-view.ts";
 import { truncateWorkspaceText } from "./workspace-view-format.ts";
 
 export interface WorkspaceFileRow {
@@ -67,12 +71,7 @@ export function projectWorkspaceFiles(
 export const filesWorkspaceView = defineWorkspaceView<WorkspaceFileRow>({
   id: "files",
   title: "Files",
-  layout: {
-    weight: 3,
-    minRows: 2,
-    headerRows: 2,
-    collapsePriority: 30,
-  },
+  layout: workspaceViewLayout("files"),
   project: (snapshot, context) =>
     projectWorkspaceFiles(snapshot, context?.selectedRunId).map((value) => ({
       id: value.id,
