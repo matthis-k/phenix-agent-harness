@@ -24,9 +24,7 @@ import {
 import { interruptActiveRootWork } from "./workspace/interrupt-active-work.ts";
 import { handoffNativeWorkspaceInput } from "./workspace/native-input-handoff.ts";
 import { renderWorkspaceTurn } from "./workspace/turn-indicator.ts";
-import {
-  selectedWorkspaceInputTarget,
-} from "./workspace/workspace-controller-adapter.ts";
+import { selectedWorkspaceInputTarget } from "./workspace/workspace-controller-adapter.ts";
 import {
   type NativeInputDelegation,
   WORKSPACE_NATIVE_HANDOFF,
@@ -343,10 +341,7 @@ async function openWorkspace(
                 text,
                 sendRoot: (message) =>
                   Promise.resolve(
-                    pi.sendUserMessage(
-                      message,
-                      ctx.isIdle() ? undefined : { deliverAs: "steer" },
-                    ),
+                    pi.sendUserMessage(message, ctx.isIdle() ? undefined : { deliverAs: "steer" }),
                   ),
               });
             } catch (error) {
