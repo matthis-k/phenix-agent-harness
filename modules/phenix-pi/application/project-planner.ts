@@ -1,6 +1,7 @@
 import type {
   DecisionId,
   InterventionId,
+  InterventionUrgency,
   ProjectActor,
   ProjectDecision,
   ProjectDecisionInput,
@@ -39,6 +40,7 @@ export interface RequestProjectInput {
   readonly question: string;
   readonly context?: string;
   readonly options?: readonly string[];
+  readonly urgency?: InterventionUrgency;
 }
 
 export interface ProjectPlannerFacade {
@@ -76,6 +78,7 @@ export interface ProjectPlannerFacade {
   ): Promise<ProjectIntervention>;
   publish(id: ProjectId, actor: ProjectActor): Promise<ProjectMap>;
   exportSpec(id: ProjectId): Promise<string>;
+  subscribe(listener: () => void): () => void;
 }
 
 export class ProjectPlannerService implements ProjectPlannerFacade {
@@ -86,6 +89,7 @@ export class ProjectPlannerService implements ProjectPlannerFacade {
   private readonly notifyRoot: ((message: string) => void | Promise<void>) | undefined;
   private readonly deliverToRun: ((runId: RunId, message: string) => Promise<void>) | undefined;
   private readonly serial = new KeyedSerialExecutor<ProjectId>();
+  private readonly listeners = new Set<() => void>();
 
   constructor(
     ledger: ProjectLedger,
@@ -101,6 +105,11 @@ export class ProjectPlannerService implements ProjectPlannerFacade {
     this.tracker = tracker;
     this.notifyRoot = notifyRoot;
     this.deliverToRun = deliverToRun;
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   async list(): Promise<readonly ProjectMap[]> {
@@ -128,6 +137,7 @@ export class ProjectPlannerService implements ProjectPlannerFacade {
       },
     };
     await this.ledger.append(id, 0, [event]);
+    this.notify();
     return this.inspect(id);
   }
 
@@ -269,6 +279,7 @@ export class ProjectPlannerService implements ProjectPlannerFacade {
         question: requireText("intervention question", request.question),
         ...(request.context?.trim() ? { context: request.context.trim() } : {}),
         options: cleanList(request.options ?? []),
+        urgency: request.urgency ?? "normal",
         requestedAt: this.clock.now(),
         status: "pending",
       };
@@ -277,8 +288,9 @@ export class ProjectPlannerService implements ProjectPlannerFacade {
     if (!created) throw new Error("Intervention was not created");
     const project = await this.inspect(id);
     const target = requireDecision(project, decision);
+    const prefix = created.urgency === "urgent" ? "Urgent project input" : "Project input";
     await this.notifyRoot?.(
-      `Project ${project.title} needs input for ${target.title}: ${created.question} [${created.id}]`,
+      `${prefix} needed for ${project.title} / ${target.title}: ${created.question} [${created.id}]`,
     );
     return created;
   }
@@ -383,8 +395,13 @@ export class ProjectPlannerService implements ProjectPlannerFacade {
       const at = this.clock.now();
       const events = items.map((event) => ({ projectId: id, at, actor, ...event }));
       await this.ledger.append(id, project.revision, events);
+      this.notify();
       return this.inspect(id);
     });
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) listener();
   }
 }
 
@@ -465,7 +482,13 @@ function applyEvent(project: ProjectMap, event: ProjectEvent): ProjectMap {
         issue: data.issue as { readonly issueNumber: number; readonly url: string },
       }));
     case "intervention.requested": {
-      const intervention = data.intervention as ProjectIntervention;
+      const stored = data.intervention as ProjectIntervention & {
+        readonly urgency?: InterventionUrgency;
+      };
+      const intervention: ProjectIntervention = {
+        ...stored,
+        urgency: stored.urgency ?? "normal",
+      };
       return {
         ...updateDecision(base, intervention.decisionId, (decision) => ({
           ...decision,
