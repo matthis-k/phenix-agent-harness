@@ -3,9 +3,9 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import registerWorkspace from "./default-workspace-extension.ts";
 import registerResultDisplay from "./result-display.ts";
 import registerRuntime from "./root-extension.ts";
-import { registerWorkspaceStandardBuiltins } from "./workspace/workspace-standard-builtins.ts";
 import registerTheme from "./theme-extension.ts";
 import registerVisualizationDisplay from "./visualization-display.ts";
+import { registerWorkspaceStandardBuiltins } from "./workspace/workspace-standard-builtins.ts";
 
 /**
  * Public Phenix extension entrypoint.
