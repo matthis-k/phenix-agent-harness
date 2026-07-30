@@ -5,11 +5,8 @@ import {
   WorkspaceFrontend,
   type WorkspaceFrontendChange,
 } from "../application/workspace/frontend.ts";
-import { runId, type RunId } from "../domain/shared.ts";
-import type {
-  WorkspaceItemIndex,
-  WorkspaceSnapshotEnvelope,
-} from "../domain/workspace/events.ts";
+import { type RunId, runId } from "../domain/shared.ts";
+import type { WorkspaceItemIndex, WorkspaceSnapshotEnvelope } from "../domain/workspace/events.ts";
 import {
   WORKSPACE_SURFACE_IDS,
   WORKSPACE_SURFACES,
@@ -38,12 +35,14 @@ test("frontend publishes surface-scoped changes for independent hosts", () => {
   frontend.subscribe((change) => changes.push(change));
 
   frontend.dispatch({ type: "focus.set", paneId: "runs" });
-  assert.deepEqual([...changes.at(-1)!.dirtySurfaces], ["editor", "runs"]);
-  assert.equal(changes.at(-1)!.layoutChanged, false);
+  const focusChange = lastChange(changes);
+  assert.deepEqual([...focusChange.dirtySurfaces], ["editor", "runs"]);
+  assert.equal(focusChange.layoutChanged, false);
 
   frontend.dispatch({ type: "sidebar.toggle" });
-  assert.deepEqual([...changes.at(-1)!.dirtySurfaces], WORKSPACE_SURFACE_IDS);
-  assert.equal(changes.at(-1)!.layoutChanged, true);
+  const sidebarChange = lastChange(changes);
+  assert.deepEqual([...sidebarChange.dirtySurfaces], WORKSPACE_SURFACE_IDS);
+  assert.equal(sidebarChange.layoutChanged, true);
   frontend.dispose();
 });
 
@@ -88,6 +87,12 @@ test("surface registry exposes one constrained component contract per pane", () 
   assert.equal(workspaceSurface("editor").role, "input");
   assert.equal(workspaceSurface("facts").constraints.collapsePriority, 40);
 });
+
+function lastChange(changes: readonly WorkspaceFrontendChange[]): WorkspaceFrontendChange {
+  const change = changes.at(-1);
+  assert.ok(change);
+  return change;
+}
 
 function snapshot(
   revision: number,
