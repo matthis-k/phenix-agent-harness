@@ -364,10 +364,14 @@ export class ProjectPlannerService implements ProjectPlannerFacade {
     id: ProjectId,
     actor: ProjectActor,
     build:
-      | ((project: ProjectMap) =>
+      | ((
+          project: ProjectMap,
+        ) =>
           | Omit<UnsequencedProjectEvent, "projectId" | "at" | "actor">
           | readonly Omit<UnsequencedProjectEvent, "projectId" | "at" | "actor">[])
-      | ((project: ProjectMap) => Promise<
+      | ((
+          project: ProjectMap,
+        ) => Promise<
           | Omit<UnsequencedProjectEvent, "projectId" | "at" | "actor">
           | readonly Omit<UnsequencedProjectEvent, "projectId" | "at" | "actor">[]
         >),
@@ -395,7 +399,7 @@ export function frontierOf(project: ProjectMap): readonly ProjectDecision[] {
 
 export function projectFromEvents(events: readonly ProjectEvent[]): ProjectMap {
   const created = events[0];
-  if (!created || created.type !== "project.created") {
+  if (created?.type !== "project.created") {
     throw new Error("Project ledger has no creation event");
   }
   const data = created.data as {
@@ -634,16 +638,16 @@ function renderProjectSpec(project: ProjectMap): string {
       `**Rationale:** ${resolution.rationale}`,
       "",
       "**Evidence:**",
-      ...((resolution.evidence.length > 0
+      ...(resolution.evidence.length > 0
         ? resolution.evidence
         : ["No external evidence recorded."]
-      ).map((item) => `- ${item}`)),
+      ).map((item) => `- ${item}`),
       "",
       "**Consequences:**",
-      ...((resolution.consequences.length > 0
+      ...(resolution.consequences.length > 0
         ? resolution.consequences
         : ["No explicit consequences recorded."]
-      ).map((item) => `- ${item}`)),
+      ).map((item) => `- ${item}`),
       "",
       `*Provenance: run ${resolution.actor.runId}; resolved ${resolution.resolvedAt}.*`,
       "",
