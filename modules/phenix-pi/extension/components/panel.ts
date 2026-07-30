@@ -23,7 +23,7 @@ export interface PanelInput {
 }
 
 export interface PanelFrame {
-  readonly lines: readonly string[];
+  readonly lines: string[];
   readonly contentWidth: number;
   readonly contentHeight: number;
 }
