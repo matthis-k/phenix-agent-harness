@@ -1,10 +1,7 @@
 diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 --- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-@@ -2466,5 +2466,29 @@
- 			Promise.resolve(factory(this.ui, theme, this.keybindings, close))
- 				.then((c) => {
- 					if (closed) return;
+@@ -2469,2 +2469,26 @@
  					component = c;
 +					const overlayLayout =
 +						typeof options?.overlayOptions === "function"
@@ -20,7 +17,10 @@ diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/p
 +						component = {
 +							render: (width) => {
 +								const lines = content.render(width);
-+								if (lines.length === 0 || this.footerDataProvider.getExtensionStatuses().size === 0) {
++								if (
++									lines.length === 0 ||
++									this.footerDataProvider.getExtensionStatuses().size === 0
++								) {
 +									return lines;
 +								}
 +								const status = this.footer.render(width).at(-1);
