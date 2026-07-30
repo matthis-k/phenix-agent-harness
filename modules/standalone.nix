@@ -10,49 +10,59 @@
 
     let
       tooling = import ./tooling.nix { inherit pkgs; };
+      phenixLib = inputs.phenix-pins.lib;
       phenixPiPackage = self'.packages.phenix-pi-package;
       mcpConfig = ./phenix-pi/config/mcp.json;
-      mkPhenixProgram = inputs.phenix-packages.lib.mkPhenixProgram pkgs;
+      piRuntimeInputs = tooling.harnessRuntime ++ [
+        pkgs.mcp-nixos
+        self'.packages.stitch
+        self'.packages.stitch-mcp
+      ];
+      piRun = ''
+        agent_dir="''${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+        mkdir -p "$agent_dir"
+        chmod 0700 "$agent_dir" 2>/dev/null || true
 
-      piProgram = mkPhenixProgram {
-        name = "pi";
+        seed_config() {
+          local name="$1"
+          local source="$PHENIX_SOURCE_ROOT/config/$name"
+          local target="$agent_dir/$name"
+          if [[ ! -e "$target" && -f "$source" ]]; then
+            install -m 0600 "$source" "$target"
+          fi
+        }
+
+        seed_config lsp.json
+        seed_config mcp.json
+
+        export PI_CODING_AGENT_DIR="$agent_dir"
+        export PI_SKIP_VERSION_CHECK=1
+        export PI_TELEMETRY=0
+        export HYPA_PI_MODE="''${HYPA_PI_MODE:-replace}"
+        export HYPA_PI_ENABLE_MCP_PROXY="''${HYPA_PI_ENABLE_MCP_PROXY:-0}"
+        export HYPA_PI_ASK_NON_INTERACTIVE="''${HYPA_PI_ASK_NON_INTERACTIVE:-allow}"
+
+        exec "${self'.packages.pi-coding-agent}/bin/pi" \
+          -e "$PHENIX_SOURCE_ROOT" \
+          "$@"
+      '';
+      piStore = phenixLib.mkStoreProgram pkgs {
+        name = "pi-store";
+        source = phenixPiPackage;
+        runtimeInputs = piRuntimeInputs;
+        run = piRun;
+      };
+      piDev = phenixLib.mkDevProgram pkgs {
+        name = "pi-dev";
         repository = "phenix-agent-harness";
-        storePath = phenixPiPackage;
-        developmentPath = "modules/phenix-pi";
-        runtimeInputs = tooling.harnessRuntime ++ [
-          pkgs.mcp-nixos
-          self'.packages.stitch
-          self'.packages.stitch-mcp
-        ];
-
-        run = ''
-          agent_dir="''${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
-          mkdir -p "$agent_dir"
-          chmod 0700 "$agent_dir" 2>/dev/null || true
-
-          seed_config() {
-            local name="$1"
-            local source="$PHENIX_SOURCE_ROOT/config/$name"
-            local target="$agent_dir/$name"
-            if [[ ! -e "$target" && -f "$source" ]]; then
-              install -m 0600 "$source" "$target"
-            fi
-          }
-
-          seed_config lsp.json
-          seed_config mcp.json
-
-          export PI_CODING_AGENT_DIR="$agent_dir"
-          export PI_SKIP_VERSION_CHECK=1
-          export PI_TELEMETRY=0
-          export HYPA_PI_MODE="''${HYPA_PI_MODE:-replace}"
-          export HYPA_PI_ENABLE_MCP_PROXY="''${HYPA_PI_ENABLE_MCP_PROXY:-0}"
-          export HYPA_PI_ASK_NON_INTERACTIVE="''${HYPA_PI_ASK_NON_INTERACTIVE:-allow}"
-
-          exec "${self'.packages.pi-coding-agent}/bin/pi" \
-            -e "$PHENIX_SOURCE_ROOT" \
-            "$@"
-        '';
+        sourcePath = "modules/phenix-pi";
+        runtimeInputs = piRuntimeInputs;
+        run = piRun;
+      };
+      pi = phenixLib.mkDevWrapper pkgs {
+        name = "pi";
+        store = piStore;
+        dev = piDev;
       };
 
       localOperationRuntimeSmoke =
@@ -88,18 +98,18 @@
     in
     {
       packages = {
-        default = piProgram.wrapper;
-        pi = piProgram.wrapper;
-        pi-store = piProgram.store;
-        pi-dev = piProgram.development;
+        default = pi;
+        inherit pi;
+        pi-store = piStore;
+        pi-dev = piDev;
       };
 
       checks = {
         local-operation-runtime = localOperationRuntimeSmoke;
         mcp-defaults = mcpDefaultsSmoke;
-        pi-wrapper = piProgram.wrapper;
-        pi-store = piProgram.store;
-        pi-dev = piProgram.development;
+        inherit pi;
+        pi-store = piStore;
+        pi-dev = piDev;
       };
     };
 }
