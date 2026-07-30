@@ -136,4 +136,4 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
   assert.deepEqual(stock.childCapabilities.invokableDefinitions, []);
   assert.equal(stock.persistence, "file");
   assert.equal(stock.prompt.render(), "PHENIX_STOCK_SESSION");
-}
+});
