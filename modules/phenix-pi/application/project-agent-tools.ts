@@ -4,10 +4,10 @@ import { defineSchema } from "../domain/definition/schema.ts";
 import {
   decisionId,
   interventionId,
-  projectId,
   type ProjectActor,
   type ProjectDecisionInput,
   type ProjectDestination,
+  projectId,
 } from "../domain/project/model.ts";
 import type { RunId } from "../domain/shared.ts";
 import type { AgentTool, AgentToolResult } from "../ports/agent-session-backend.ts";
@@ -160,7 +160,10 @@ export class ProjectAgentToolFactory implements AgentToolFactory {
       parameters: projectParameters,
       execute: async (raw) => {
         const params = requireValid(raw);
-        if (["create", "publish", "answer_input"].includes(params.action) && parent.kind !== "root") {
+        if (
+          ["create", "publish", "answer_input"].includes(params.action) &&
+          parent.kind !== "root"
+        ) {
           throw new Error(`${params.action} is reserved for the root project supervisor`);
         }
         switch (params.action) {
