@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-
-import { projectWorkspaceAttention } from "../application/workspace/project-attention.ts";
 import type { ProjectPlannerFacade } from "../application/project-planner.ts";
+import { projectWorkspaceAttention } from "../application/workspace/project-attention.ts";
 import type { PhenixRuntime } from "../composition/create-phenix-runtime.ts";
 import {
   decisionId,
   interventionId,
-  projectId,
   type ProjectIntervention,
   type ProjectMap,
+  projectId,
 } from "../domain/project/model.ts";
 import type { RunId } from "../domain/shared.ts";
 import { routeWorkspaceMessage } from "../extension/workspace/workspace-message-routing.ts";
@@ -37,7 +36,11 @@ function project(interventions: readonly ProjectIntervention[]): ProjectMap {
   };
 }
 
-function pending(id: string, urgency: "normal" | "urgent", requestedAt: string): ProjectIntervention {
+function pending(
+  id: string,
+  urgency: "normal" | "urgent",
+  requestedAt: string,
+): ProjectIntervention {
   return {
     id: interventionId(id),
     decisionId: decisionId(`decision-${id}`),
