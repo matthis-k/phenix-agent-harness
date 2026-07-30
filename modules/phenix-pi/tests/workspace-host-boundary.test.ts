@@ -65,7 +65,10 @@ test("registered rows expose host-neutral semantic presentations", () => {
     true,
   );
   assert.equal(
-    presentation.spans.map((span) => span.text).join("").includes(ANSI_ESCAPE_PREFIX),
+    presentation.spans
+      .map((span) => span.text)
+      .join("")
+      .includes(ANSI_ESCAPE_PREFIX),
     false,
   );
 });
