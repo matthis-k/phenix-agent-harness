@@ -39,6 +39,12 @@ interface ExecutionKernelDependencies {
   readonly hiddenDefinitions?: readonly DefinitionId[];
 }
 
+const unavailableProjects = new Proxy({} as ProjectPlannerFacade, {
+  get: () => async () => {
+    throw new Error("Cross-session project services are unavailable in this runtime");
+  },
+});
+
 /** Assemble the runtime-independent execution kernel once for production and tests. */
 export function createExecutionKernel(input: ExecutionKernelDependencies) {
   const {
@@ -117,9 +123,10 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
     store,
     invocationPolicy,
   });
-  const tools = projects
-    ? new CompositeAgentToolFactory([executionTools, new ProjectAgentToolFactory(projects, store)])
-    : executionTools;
+  const tools = new CompositeAgentToolFactory([
+    executionTools,
+    new ProjectAgentToolFactory(projects ?? unavailableProjects, store),
+  ]);
 
   return {
     execution,
