@@ -12,6 +12,7 @@
         pname = "pi-coding-agent";
         version = piVersion;
         src = inputs.pi-src;
+        patches = [ ./patches/pi-submit-user-input.patch ];
 
         npmDepsHash = "sha256-XGvDNH+eilsgc0Z7ITqbitB/9RVc+WuDfCcr1pibNqk=";
         npmWorkspace = "packages/coding-agent";
