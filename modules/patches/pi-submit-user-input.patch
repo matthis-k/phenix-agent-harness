@@ -74,15 +74,7 @@ diff --git a/packages/coding-agent/src/core/extensions/runner.ts b/packages/codi
 diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
-@@ -2348,10 +2348,15 @@ export class AgentSession {
- 				sendUserMessage: (content, options) => {
- 					this.sendUserMessage(content, options).catch((err) => {
- 						runner.emitError({
- 							extensionPath: "<runtime>",
- 							event: "send_user_message",
- 							error: err instanceof Error ? err.message : String(err),
- 						});
- 					});
+@@ -2356,2 +2356,7 @@ export class AgentSession {
  				},
 +				submitUserInput: (text, options) =>
 +					this.prompt(text, {
