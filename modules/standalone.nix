@@ -1,4 +1,4 @@
-_:
+{ inputs, ... }:
 
 {
   perSystem =
@@ -12,24 +12,27 @@ _:
       tooling = import ./tooling.nix { inherit pkgs; };
       phenixPiPackage = self'.packages.phenix-pi-package;
       mcpConfig = ./phenix-pi/config/mcp.json;
+      mkPhenixWrapper = inputs.phenix-packages.lib.mkPhenixWrapper pkgs;
 
-      wrappedPi = pkgs.writeShellApplication {
+      wrappedPi = mkPhenixWrapper {
         name = "pi";
+        repository = "phenix-agent-harness";
+        storePath = phenixPiPackage;
+        developmentPath = "modules/phenix-pi";
         runtimeInputs = tooling.harnessRuntime ++ [
-          phenixPiPackage
           pkgs.mcp-nixos
           self'.packages.stitch
           self'.packages.stitch-mcp
         ];
 
-        text = ''
+        run = ''
           agent_dir="''${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
           mkdir -p "$agent_dir"
           chmod 0700 "$agent_dir" 2>/dev/null || true
 
           seed_config() {
             local name="$1"
-            local source="${phenixPiPackage}/config/$name"
+            local source="$PHENIX_SOURCE_ROOT/config/$name"
             local target="$agent_dir/$name"
             if [[ ! -e "$target" && -f "$source" ]]; then
               install -m 0600 "$source" "$target"
@@ -47,7 +50,7 @@ _:
           export HYPA_PI_ASK_NON_INTERACTIVE="''${HYPA_PI_ASK_NON_INTERACTIVE:-allow}"
 
           exec "${self'.packages.pi-coding-agent}/bin/pi" \
-            -e "${phenixPiPackage}" \
+            -e "$PHENIX_SOURCE_ROOT" \
             "$@"
         '';
       };
