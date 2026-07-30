@@ -25,10 +25,7 @@ export function isWorkspaceCommandInput(
  */
 export function withWorkspaceInputSubmission(pi: ExtensionAPI): ExtensionAPI {
   const sendUserMessage: ExtensionAPI["sendUserMessage"] = (content, options) => {
-    if (
-      typeof content === "string" &&
-      isWorkspaceCommandInput(content, pi.getCommands())
-    ) {
+    if (typeof content === "string" && isWorkspaceCommandInput(content, pi.getCommands())) {
       return pi.submitUserInput(content, options);
     }
     return pi.sendUserMessage(content, options);
