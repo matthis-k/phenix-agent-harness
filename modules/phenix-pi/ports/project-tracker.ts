@@ -1,8 +1,4 @@
-import type {
-  ProjectDecision,
-  ProjectMap,
-  ProjectTrackerLink,
-} from "../domain/project/model.ts";
+import type { ProjectDecision, ProjectMap, ProjectTrackerLink } from "../domain/project/model.ts";
 
 export interface ProjectTrackerPublication {
   readonly tracker: ProjectTrackerLink;
