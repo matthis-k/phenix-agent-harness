@@ -29,7 +29,7 @@ interface ExecutionKernelDependencies {
   readonly functions: WorkflowFunctionRegistry;
   readonly operations: LocalOperationRunner;
   readonly store: ExecutionStore;
-  readonly projects: ProjectPlannerFacade;
+  readonly projects?: ProjectPlannerFacade;
   readonly models: ModelResolver;
   readonly ids: IdGenerator;
   readonly clock: Clock;
@@ -109,17 +109,17 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
     store,
     invocationPolicy,
   });
-  const tools = new CompositeAgentToolFactory([
-    new FacadeAgentToolFactory({
-      execution: modelExecution,
-      dispatch,
-      tasks,
-      catalog,
-      store,
-      invocationPolicy,
-    }),
-    new ProjectAgentToolFactory(projects, store),
-  ]);
+  const executionTools = new FacadeAgentToolFactory({
+    execution: modelExecution,
+    dispatch,
+    tasks,
+    catalog,
+    store,
+    invocationPolicy,
+  });
+  const tools = projects
+    ? new CompositeAgentToolFactory([executionTools, new ProjectAgentToolFactory(projects, store)])
+    : executionTools;
 
   return {
     execution,
