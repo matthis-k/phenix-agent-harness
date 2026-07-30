@@ -263,7 +263,7 @@ class WorkspaceInputDialog implements Component, Focusable {
         surface: (line) => surface(this.theme, "customMessageBg", line),
         title: (line) => surface(this.theme, "selectedBg", line),
       },
-    }).lines;
+    }).lines.slice();
   }
 
   private close(value: string | undefined): void {
@@ -351,7 +351,7 @@ class WorkspaceDocumentDialog implements Component, Focusable {
         surface: (line) => surface(this.theme, "customMessageBg", line),
         title: (line) => surface(this.theme, "selectedBg", line),
       },
-    }).lines;
+    }).lines.slice();
   }
 
   private move(delta: number): void {
@@ -397,12 +397,7 @@ class WorkspaceActivityDialog implements Component, Focusable, WorkspaceActivity
   invalidate(): void {}
 
   handleInput(data: string): void {
-    if (
-      this.signal.aborted ||
-      !this.keybindings.matches(data, "tui.select.cancel")
-    ) {
-      return;
-    }
+    if (this.signal.aborted || !this.keybindings.matches(data, "tui.select.cancel")) return;
     this.abortController.abort();
     this.appendLine("Cancelling...");
   }
@@ -438,7 +433,7 @@ class WorkspaceActivityDialog implements Component, Focusable, WorkspaceActivity
         surface: (line) => surface(this.theme, "customMessageBg", line),
         title: (line) => surface(this.theme, "selectedBg", line),
       },
-    }).lines;
+    }).lines.slice();
   }
 }
 
@@ -541,7 +536,7 @@ class WorkspaceChecklistDialog<T> implements Component, Focusable {
         surface: (line) => surface(this.theme, "customMessageBg", line),
         title: (line) => surface(this.theme, "selectedBg", line),
       },
-    }).lines;
+    }).lines.slice();
   }
 
   private renderItem(item: WorkspaceChecklistItem<T>, width: number, selected: boolean): string {
