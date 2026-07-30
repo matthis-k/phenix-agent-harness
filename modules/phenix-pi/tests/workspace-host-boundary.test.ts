@@ -3,14 +3,21 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import type { RunTreeNode } from "../application/interfaces.ts";
+import { runsWorkspaceView } from "../application/workspace/views/runs-view.ts";
+import type { WorkspaceViewSnapshot } from "../application/workspace/views/workspace-view.ts";
 import type { RunSnapshot } from "../domain/run/model.ts";
 import { runId } from "../domain/shared.ts";
-import { runsWorkspaceView } from "../extension/workspace/views/runs-view.ts";
-import type { WorkspaceViewSnapshot } from "../extension/workspace/views/workspace-view.ts";
 
 const HOST_NEUTRAL_MODULES = [
   "../application/workspace/frontend.ts",
   "../application/workspace/presentation.ts",
+  "../application/workspace/views/facts-view.ts",
+  "../application/workspace/views/files-view.ts",
+  "../application/workspace/views/runs-view.ts",
+  "../application/workspace/views/tasks-view.ts",
+  "../application/workspace/views/workspace-view-format.ts",
+  "../application/workspace/views/workspace-view-registry.ts",
+  "../application/workspace/views/workspace-view.ts",
   "../domain/workspace/surfaces.ts",
 ] as const;
 
