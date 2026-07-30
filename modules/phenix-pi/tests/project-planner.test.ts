@@ -101,7 +101,10 @@ test("a project survives sessions and advances only its unblocked decision front
     ROOT_ACTOR,
   );
 
-  assert.deepEqual((await service.frontier(created.id)).map((item) => item.id), [foundation]);
+  assert.deepEqual(
+    (await service.frontier(created.id)).map((item) => item.id),
+    [foundation],
+  );
   await service.claim(created.id, foundation, CHILD_ACTOR);
   const intervention = await service.requestInput(
     created.id,
@@ -135,13 +138,14 @@ test("a project survives sessions and advances only its unblocked decision front
     },
     CHILD_ACTOR,
   );
-  assert.deepEqual((await service.frontier(created.id)).map((item) => item.id), [implementation]);
-
-  const nextSession = new ProjectPlannerService(
-    ledger,
-    new Ids(),
-    { now: () => "2026-07-31T12:00:00.000Z" },
+  assert.deepEqual(
+    (await service.frontier(created.id)).map((item) => item.id),
+    [implementation],
   );
+
+  const nextSession = new ProjectPlannerService(ledger, new Ids(), {
+    now: () => "2026-07-31T12:00:00.000Z",
+  });
   const restored = await nextSession.inspect(created.id);
   assert.equal(restored.decisions[0]?.resolution?.actor.runId, CHILD);
   assert.match(await nextSession.exportSpec(created.id), /Provenance: run run-decision/);
