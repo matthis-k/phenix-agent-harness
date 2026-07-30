@@ -18,6 +18,12 @@ export class PublishedProjectTracker implements ProjectTracker {
       : Promise.resolve();
   }
 
+  release(project: ProjectMap, decision: ProjectDecision): Promise<void> {
+    return project.tracker && decision.issue
+      ? this.inner.release(project, decision)
+      : Promise.resolve();
+  }
+
   resolve(project: ProjectMap, decision: ProjectDecision): Promise<void> {
     return project.tracker && decision.issue
       ? this.inner.resolve(project, decision)
