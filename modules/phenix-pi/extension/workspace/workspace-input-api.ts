@@ -11,10 +11,7 @@ export function workspaceCommandName(text: string): string | undefined {
   return name || undefined;
 }
 
-export function isWorkspaceCommandInput(
-  text: string,
-  commands: readonly NamedCommand[],
-): boolean {
+export function isWorkspaceCommandInput(text: string, commands: readonly NamedCommand[]): boolean {
   const name = workspaceCommandName(text);
   return name !== undefined && commands.some((command) => command.name === name);
 }
