@@ -11,12 +11,19 @@ export const WORKSPACE_VIEW_IDS = ["runs", "tasks", "files", "facts"] as const;
 export type WorkspaceViewId = (typeof WORKSPACE_VIEW_IDS)[number];
 export type WorkspaceViewPaneId = Extract<PaneId, WorkspaceViewId>;
 
+export interface WorkspaceRunAttention {
+  readonly kind: "input-required";
+  readonly count: number;
+  readonly urgent: boolean;
+}
+
 export interface WorkspaceViewSnapshot {
   readonly ui: {
     readonly tree: RunTree;
     readonly facts: readonly RunFact[];
   };
   readonly tasks: TaskTree;
+  readonly attentionByRun?: Readonly<Record<string, WorkspaceRunAttention>>;
 }
 
 export interface WorkspaceViewContext {
