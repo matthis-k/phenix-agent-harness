@@ -1,7 +1,9 @@
 diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/coding-agent/src/core/extensions/types.ts
 --- a/packages/coding-agent/src/core/extensions/types.ts
 +++ b/packages/coding-agent/src/core/extensions/types.ts
-@@ -1279,5 +1279,14 @@ export interface ExtensionAPI {
+@@ -1276,8 +1276,18 @@ export interface ExtensionAPI {
+ 	sendUserMessage(
+ 		content: string | (TextContent | ImageContent)[],
  		options?: { deliverAs?: "steer" | "followUp" },
  	): void;
  
@@ -17,7 +19,8 @@ diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/codin
 +
  	/** Append a custom entry to the session for state persistence (not sent to LLM). */
  	appendEntry<T = unknown>(customType: string, data?: T): void;
-@@ -1519,6 +1528,11 @@ export type SendUserMessageHandler = (
+ 
+@@ -1516,5 +1526,10 @@ export type SendUserMessageHandler = (
  	options?: { deliverAs?: "steer" | "followUp" },
  ) => void;
  
@@ -27,7 +30,8 @@ diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/codin
 +) => Promise<void>;
 +
  export type AppendEntryHandler = <T = unknown>(customType: string, data?: T) => void;
-@@ -1577,6 +1591,7 @@ export interface ExtensionActions {
+ 
+@@ -1576,5 +1591,6 @@ export interface ExtensionActions {
  	sendMessage: SendMessageHandler;
  	sendUserMessage: SendUserMessageHandler;
 +	submitUserInput: SubmitUserInputHandler;
@@ -37,7 +41,7 @@ diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/codin
 diff --git a/packages/coding-agent/src/core/extensions/loader.ts b/packages/coding-agent/src/core/extensions/loader.ts
 --- a/packages/coding-agent/src/core/extensions/loader.ts
 +++ b/packages/coding-agent/src/core/extensions/loader.ts
-@@ -181,6 +181,7 @@ export function createExtensionRuntime(): ExtensionRuntime {
+@@ -180,6 +180,7 @@ export function createExtensionRuntime(): ExtensionRuntime {
  	const runtime: ExtensionRuntime = {
  		sendMessage: notInitialized,
  		sendUserMessage: notInitialized,
@@ -45,7 +49,7 @@ diff --git a/packages/coding-agent/src/core/extensions/loader.ts b/packages/codi
  		appendEntry: notInitialized,
  		setSessionName: notInitialized,
  		getSessionName: notInitialized,
-@@ -306,6 +307,11 @@ function createExtensionAPI(
+@@ -301,6 +302,11 @@ function createExtensionAPI(
  			runtime.sendUserMessage(content, options);
  		},
  
@@ -60,8 +64,7 @@ diff --git a/packages/coding-agent/src/core/extensions/loader.ts b/packages/codi
 diff --git a/packages/coding-agent/src/core/extensions/runner.ts b/packages/coding-agent/src/core/extensions/runner.ts
 --- a/packages/coding-agent/src/core/extensions/runner.ts
 +++ b/packages/coding-agent/src/core/extensions/runner.ts
-@@ -321,6 +321,7 @@ export class ExtensionRunner {
- 		// Copy actions into the shared runtime (all extension APIs reference this)
+@@ -320,5 +320,6 @@ export class ExtensionRunner {
  		this.runtime.sendMessage = actions.sendMessage;
  		this.runtime.sendUserMessage = actions.sendUserMessage;
 +		this.runtime.submitUserInput = actions.submitUserInput;
@@ -71,7 +74,14 @@ diff --git a/packages/coding-agent/src/core/extensions/runner.ts b/packages/codi
 diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
-@@ -2338,6 +2338,10 @@ export class AgentSession {
+@@ -2348,10 +2348,15 @@ export class AgentSession {
+ 				sendUserMessage: (content, options) => {
+ 					this.sendUserMessage(content, options).catch((err) => {
+ 						runner.emitError({
+ 							extensionPath: "<runtime>",
+ 							event: "send_user_message",
+ 							error: err instanceof Error ? err.message : String(err),
+ 						});
  					});
  				},
 +				submitUserInput: (text, options) =>
@@ -80,5 +90,3 @@ diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-a
 +						source: "interactive",
 +					}),
  				appendEntry: (customType, data) => {
- 					const entryId = this.sessionManager.appendCustomEntry(customType, data);
- 					const entry = this.sessionManager.getEntry(entryId);
