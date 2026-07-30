@@ -1,5 +1,5 @@
+import { textSpan, type WorkspaceRowPresentation } from "../../../application/workspace/presentation.ts";
 import type { TaskNode } from "../../../domain/task/projection.ts";
-import { color, strong } from "../../observability-theme.ts";
 import { defineWorkspaceView, workspaceViewLayout } from "./workspace-view.ts";
 import {
   taskStateLabel,
@@ -7,6 +7,7 @@ import {
   taskStateTone,
   truncateWorkspaceText,
 } from "./workspace-view-format.ts";
+import { renderWorkspaceRowForTerminal } from "./workspace-view-terminal.ts";
 
 export interface WorkspaceTaskRow {
   readonly node: TaskNode;
@@ -29,24 +30,29 @@ export const tasksWorkspaceView = defineWorkspaceView<WorkspaceTaskRow>({
   title: "Tasks",
   layout: workspaceViewLayout("tasks"),
   project: (snapshot) =>
-    projectWorkspaceTasks(snapshot.tasks.root).map((value) => ({
-      id: value.node.id,
-      value,
-      ...(value.node.kind === "execution"
-        ? { activation: { kind: "transcript" as const, runId: value.node.runId } }
-        : {}),
-      render: ({ theme, width }) => {
-        const status = color(
-          theme,
-          taskStateTone(value.node.effectiveState),
-          `${taskStateSymbol(value.node.effectiveState)} ${taskStateLabel(value.node.effectiveState)}`,
-        );
-        return {
-          text: `${"  ".repeat(value.depth)}${status} ${strong(
-            theme,
+    projectWorkspaceTasks(snapshot.tasks.root).map((value) => {
+      const present = ({ width }: { readonly width: number }): WorkspaceRowPresentation => ({
+        spans: [
+          textSpan("  ".repeat(value.depth)),
+          textSpan(
+            `${taskStateSymbol(value.node.effectiveState)} ${taskStateLabel(value.node.effectiveState)}`,
+            { tone: taskStateTone(value.node.effectiveState) },
+          ),
+          textSpan(" "),
+          textSpan(
             truncateWorkspaceText(value.node.title, Math.max(8, width - 13 - value.depth * 2)),
-          )}`,
-        };
-      },
-    })),
+            { strong: true },
+          ),
+        ],
+      });
+      return {
+        id: value.node.id,
+        value,
+        ...(value.node.kind === "execution"
+          ? { activation: { kind: "transcript" as const, runId: value.node.runId } }
+          : {}),
+        present,
+        render: ({ theme, ...context }) => renderWorkspaceRowForTerminal(present(context), theme),
+      };
+    }),
 });
