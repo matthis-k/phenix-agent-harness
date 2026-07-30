@@ -1,4 +1,4 @@
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AuthEvent, AuthPrompt, AuthType } from "@earendil-works/pi-ai";
 import {
   copyToClipboard,
@@ -10,6 +10,7 @@ import {
   ModelRuntime,
   ProjectTrustStore,
   SessionManager,
+  type SessionMessageEntry,
   SettingsManager,
   VERSION,
 } from "@earendil-works/pi-coding-agent";
@@ -299,8 +300,9 @@ async function openSettings(pi: ExtensionAPI, ctx: ExtensionCommandContext): Pro
     else if (choice === "theme") await selectTheme(ctx, settings);
     else if (choice === "tools") await selectTools(pi, ctx);
     else if (choice === "tool-output") ctx.ui.setToolsExpanded(!ctx.ui.getToolsExpanded());
-    else if (choice === "scoped-models") await openScopedModels(ctx);
-    else if (choice === "hide-thinking") {
+    else if (choice === "scoped-models") {
+      if (await openScopedModels(ctx)) return;
+    } else if (choice === "hide-thinking") {
       settings.setHideThinkingBlock(!settings.getHideThinkingBlock());
       await settings.flush();
     } else if (choice === "retry") {
@@ -397,7 +399,7 @@ async function selectTools(pi: ExtensionAPI, ctx: ExtensionContext): Promise<voi
   if (selected) pi.setActiveTools([...selected]);
 }
 
-async function openScopedModels(ctx: ExtensionCommandContext): Promise<void> {
+async function openScopedModels(ctx: ExtensionCommandContext): Promise<boolean> {
   const settings = createSettings(ctx);
   const enabled = settings.getEnabledModels();
   const enabledSet = enabled ? new Set(enabled) : undefined;
@@ -417,7 +419,7 @@ async function openScopedModels(ctx: ExtensionCommandContext): Promise<void> {
       };
     }),
   });
-  if (!selected) return;
+  if (!selected) return false;
   settings.setEnabledModels(selected.length === models.length ? undefined : [...selected]);
   await settings.flush();
   const reload = await confirmWorkspaceAction(
@@ -426,7 +428,9 @@ async function openScopedModels(ctx: ExtensionCommandContext): Promise<void> {
     "Reload Pi resources now?",
     "Reload",
   );
-  if (reload) await ctx.reload();
+  if (!reload) return false;
+  await ctx.reload();
+  return true;
 }
 
 async function exportSession(
@@ -506,14 +510,14 @@ async function shareSession(pi: ExtensionAPI, ctx: ExtensionContext): Promise<vo
 }
 
 async function copyLastAssistantMessage(ctx: ExtensionContext): Promise<void> {
-  const entries = ctx.sessionManager.getBranch();
-  const entry = [...entries]
+  const entry = [...ctx.sessionManager.getBranch()]
     .reverse()
     .find(
-      (candidate) => candidate.type === "message" && candidate.message.role === "assistant",
+      (candidate): candidate is SessionMessageEntry =>
+        candidate.type === "message" && candidate.message.role === "assistant",
     );
-  if (!entry || entry.type !== "message") throw new Error("No assistant message to copy");
-  const text = extractMessageText(entry.message.content);
+  if (!entry) throw new Error("No assistant message to copy");
+  const text = extractAgentMessageText(entry.message);
   if (!text) throw new Error("Last assistant message contains no text");
   await copyToClipboard(text);
   ctx.ui.notify("Copied last assistant message", "info");
@@ -600,12 +604,15 @@ async function showHotkeys(ctx: ExtensionContext): Promise<void> {
 async function forkSession(ctx: ExtensionCommandContext): Promise<void> {
   const messages = ctx.sessionManager
     .getBranch()
-    .filter((entry) => entry.type === "message" && entry.message.role === "user");
+    .filter(
+      (entry): entry is SessionMessageEntry =>
+        entry.type === "message" && entry.message.role === "user",
+    );
   const selected = await pickWorkspaceItem(ctx, {
     title: "Fork from user message",
     items: messages.map((entry, index) => ({
       id: entry.id,
-      label: extractMessageText(entry.message.content) || `User message ${index + 1}`,
+      label: extractAgentMessageText(entry.message) || `User message ${index + 1}`,
       detail: entry.timestamp,
       value: entry.id,
     })),
@@ -981,7 +988,14 @@ async function exportHtmlWithPi(
   if (resolve(generated) !== resolve(target)) await rename(generated, target);
 }
 
-function extractMessageText(content: unknown): string {
+function extractAgentMessageText(message: AgentMessage): string {
+  if ("content" in message) return extractContentText(message.content);
+  if ("summary" in message && typeof message.summary === "string") return message.summary;
+  if ("output" in message && typeof message.output === "string") return message.output;
+  return "";
+}
+
+function extractContentText(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content
@@ -1000,7 +1014,7 @@ function summarizeEntry(
   entry: ReturnType<ExtensionContext["sessionManager"]["getEntries"]>[number],
 ): string {
   if (entry.type === "message") {
-    const text = extractMessageText(entry.message.content).replace(/\s+/gu, " ").trim();
+    const text = extractAgentMessageText(entry.message).replace(/\s+/gu, " ").trim();
     return `${entry.message.role}: ${text || "message"}`;
   }
   if (entry.type === "compaction") return "compaction";
