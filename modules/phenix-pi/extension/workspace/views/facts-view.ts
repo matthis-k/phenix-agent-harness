@@ -10,7 +10,7 @@ import {
   workspaceViewLayout,
 } from "./workspace-view.ts";
 import { compactTime, truncateWorkspaceText } from "./workspace-view-format.ts";
-import { renderWorkspaceRowForTerminal } from "./workspace-view-terminal.ts";
+import { withTerminalWorkspaceRenderer } from "./workspace-view-terminal.ts";
 
 const RECENT_FACT_LIMIT = 50;
 
@@ -33,12 +33,11 @@ export const factsWorkspaceView = defineWorkspaceView<RunFact>({
           }),
         ],
       });
-      return {
+      return withTerminalWorkspaceRenderer({
         id: value.id,
         value,
         activation: { kind: "inspector" as const, view: "facts" as const },
         present,
-        render: ({ theme, ...context }) => renderWorkspaceRowForTerminal(present(context), theme),
-      };
+      });
     }),
 });
