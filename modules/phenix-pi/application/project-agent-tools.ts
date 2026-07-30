@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 
+import { defineSchema } from "../domain/definition/schema.ts";
 import {
   decisionId,
   interventionId,
@@ -18,7 +19,6 @@ import type {
   RequestProjectInput,
   ResolveDecisionRequest,
 } from "./project-planner.ts";
-import { defineSchema } from "../domain/definition/schema.ts";
 
 const projectParameters = defineSchema<{
   action:
@@ -141,10 +141,13 @@ const projectParameters = defineSchema<{
 );
 
 export class ProjectAgentToolFactory implements AgentToolFactory {
-  constructor(
-    private readonly projects: ProjectPlannerFacade,
-    private readonly store: ExecutionStore,
-  ) {}
+  private readonly projects: ProjectPlannerFacade;
+  private readonly store: ExecutionStore;
+
+  constructor(projects: ProjectPlannerFacade, store: ExecutionStore) {
+    this.projects = projects;
+    this.store = store;
+  }
 
   async forRun(parentId: RunId): Promise<readonly AgentTool[]> {
     const parent = this.store.projection.requireRun(parentId);
@@ -251,7 +254,11 @@ export class ProjectAgentToolFactory implements AgentToolFactory {
 }
 
 export class CompositeAgentToolFactory implements AgentToolFactory {
-  constructor(private readonly factories: readonly AgentToolFactory[]) {}
+  private readonly factories: readonly AgentToolFactory[];
+
+  constructor(factories: readonly AgentToolFactory[]) {
+    this.factories = factories;
+  }
 
   async forRun(runId: RunId): Promise<readonly AgentTool[]> {
     return (await Promise.all(this.factories.map((factory) => factory.forRun(runId)))).flat();
