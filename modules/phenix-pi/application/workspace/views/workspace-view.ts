@@ -1,9 +1,9 @@
-import type { RunTree } from "../../interfaces.ts";
 import type { RunFact } from "../../../domain/run/observability.ts";
 import type { RunId } from "../../../domain/shared.ts";
 import type { TaskTree } from "../../../domain/task/projection.ts";
 import type { PaneId } from "../../../domain/workspace/state.ts";
 import { workspaceSurface } from "../../../domain/workspace/surfaces.ts";
+import type { RunTree } from "../../interfaces.ts";
 import type { WorkspaceRowPresentation } from "../presentation.ts";
 
 export const WORKSPACE_VIEW_IDS = ["runs", "tasks", "files", "facts"] as const;
@@ -64,10 +64,7 @@ export function defineWorkspaceView<TValue>(
   return registration;
 }
 
-export function workspaceViewLayout(
-  id: WorkspaceViewPaneId,
-  headerRows = 2,
-): WorkspaceViewLayout {
+export function workspaceViewLayout(id: WorkspaceViewPaneId, headerRows = 2): WorkspaceViewLayout {
   const constraints = workspaceSurface(id).constraints;
   return {
     weight: constraints.grow,
