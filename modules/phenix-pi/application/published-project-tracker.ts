@@ -1,8 +1,5 @@
 import type { ProjectDecision, ProjectMap } from "../domain/project/model.ts";
-import type {
-  ProjectTracker,
-  ProjectTrackerPublication,
-} from "../ports/project-tracker.ts";
+import type { ProjectTracker, ProjectTrackerPublication } from "../ports/project-tracker.ts";
 
 /** Keep the local ledger usable before a project has a tracker projection. */
 export class PublishedProjectTracker implements ProjectTracker {
