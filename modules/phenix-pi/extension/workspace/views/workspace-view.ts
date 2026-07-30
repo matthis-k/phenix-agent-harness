@@ -1,3 +1,4 @@
+import type { WorkspaceRowPresentation } from "../../../application/workspace/presentation.ts";
 import type { RunId } from "../../../domain/shared.ts";
 import type { TaskTree } from "../../../domain/task/projection.ts";
 import type { PaneId } from "../../../domain/workspace/state.ts";
@@ -19,11 +20,14 @@ export interface WorkspaceViewContext {
   readonly selectedRunId?: RunId;
 }
 
-export interface WorkspaceViewRenderContext {
-  readonly theme: ObservabilityTheme;
+export interface WorkspaceViewPresentationContext {
   readonly width: number;
   readonly activeRunId: RunId;
   readonly expanded: boolean;
+}
+
+export interface WorkspaceViewRenderContext extends WorkspaceViewPresentationContext {
+  readonly theme: ObservabilityTheme;
 }
 
 export interface WorkspaceViewRenderedRow {
@@ -48,6 +52,7 @@ export interface WorkspaceViewRow<TValue = unknown> {
   readonly value: TValue;
   readonly activation?: WorkspaceViewActivation;
   readonly expandable?: boolean;
+  present(context: WorkspaceViewPresentationContext): WorkspaceRowPresentation;
   render(context: WorkspaceViewRenderContext): WorkspaceViewRenderedRow;
 }
 
