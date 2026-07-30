@@ -1,0 +1,65 @@
+diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/coding-agent/src/core/extensions/types.ts
+--- a/packages/coding-agent/src/core/extensions/types.ts
++++ b/packages/coding-agent/src/core/extensions/types.ts
+@@ -1279,4 +1279,10 @@
+ 		options?: { deliverAs?: "steer" | "followUp" },
+ 	): void;
+ 
++	/**
++	 * Run a user-initiated extension action with a fresh command-capable context.
++	 * Use this for controls owned by an extension UI rather than background work.
++	 */
++	runCommandAction(action: (ctx: ExtensionCommandContext) => Promise<void>): Promise<void>;
++
+ 	/** Append a custom entry to the session for state persistence (not sent to LLM). */
+@@ -1520,4 +1520,8 @@
+ 	options?: { deliverAs?: "steer" | "followUp" },
+ ) => void;
+ 
++export type RunCommandActionHandler = (
++	action: (ctx: ExtensionCommandContext) => Promise<void>,
++) => Promise<void>;
++
+ export type AppendEntryHandler = <T = unknown>(customType: string, data?: T) => void;
+@@ -1576,4 +1576,5 @@
+ export interface ExtensionActions {
+ 	sendMessage: SendMessageHandler;
+ 	sendUserMessage: SendUserMessageHandler;
++	runCommandAction: RunCommandActionHandler;
+ 	appendEntry: AppendEntryHandler;
+diff --git a/packages/coding-agent/src/core/extensions/loader.ts b/packages/coding-agent/src/core/extensions/loader.ts
+--- a/packages/coding-agent/src/core/extensions/loader.ts
++++ b/packages/coding-agent/src/core/extensions/loader.ts
+@@ -180,4 +180,5 @@
+ 	const runtime: ExtensionRuntime = {
+ 		sendMessage: notInitialized,
+ 		sendUserMessage: notInitialized,
++		runCommandAction: notInitialized,
+ 		appendEntry: notInitialized,
+@@ -304,4 +304,9 @@
+ 			runtime.sendUserMessage(content, options);
+ 		},
+ 
++		runCommandAction(action) {
++			runtime.assertActive();
++			return runtime.runCommandAction(action);
++		},
++
+ 		appendEntry(customType: string, data?: unknown): void {
+diff --git a/packages/coding-agent/src/core/extensions/runner.ts b/packages/coding-agent/src/core/extensions/runner.ts
+--- a/packages/coding-agent/src/core/extensions/runner.ts
++++ b/packages/coding-agent/src/core/extensions/runner.ts
+@@ -320,3 +320,4 @@
+ 		this.runtime.sendMessage = actions.sendMessage;
+ 		this.runtime.sendUserMessage = actions.sendUserMessage;
++		this.runtime.runCommandAction = actions.runCommandAction;
+ 		this.runtime.appendEntry = actions.appendEntry;
+diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
+--- a/packages/coding-agent/src/core/agent-session.ts
++++ b/packages/coding-agent/src/core/agent-session.ts
+@@ -2362,4 +2362,5 @@
+ 						});
+ 					});
+ 				},
++				runCommandAction: (action) => action(runner.createCommandContext()),
+ 				appendEntry: (customType, data) => {
