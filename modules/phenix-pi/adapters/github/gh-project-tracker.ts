@@ -20,10 +20,13 @@ export interface CommandRunner {
 }
 
 export class GhProjectTracker implements ProjectTracker {
-  constructor(
-    private readonly cwd: string,
-    private readonly commands: CommandRunner = new SpawnCommandRunner(),
-  ) {}
+  private readonly cwd: string;
+  private readonly commands: CommandRunner;
+
+  constructor(cwd: string, commands: CommandRunner = new SpawnCommandRunner()) {
+    this.cwd = cwd;
+    this.commands = commands;
+  }
 
   async publish(project: ProjectMap): Promise<ProjectTrackerPublication> {
     const repository = await this.repository();
