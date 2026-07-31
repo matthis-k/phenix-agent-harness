@@ -1,6 +1,7 @@
 import type { RunId } from "../shared.ts";
 
 export type UserFormId = string & { readonly __brand: "UserFormId" };
+export type UserFormUrgency = "normal" | "urgent";
 
 export interface UserFormSuggestion {
   readonly label: string;
@@ -29,6 +30,7 @@ export interface UserFormRequest {
   readonly id: UserFormId;
   readonly rootRunId: RunId;
   readonly requestedByRunId: RunId;
+  readonly urgency: UserFormUrgency;
   readonly form: UserFormDefinition;
   readonly requestedAt: string;
 }
@@ -54,6 +56,11 @@ export type UserFormResult =
       readonly reason: "user" | "runtime-shutdown";
       readonly cancelledAt: string;
     };
+
+export interface UserFormCounts {
+  readonly total: number;
+  readonly urgent: number;
+}
 
 export function userFormId(value: string): UserFormId {
   if (!value || value.length > 160 || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value)) {
