@@ -73,10 +73,7 @@ test("the workflow catalog contains only bounded invariant procedures", () => {
     "workflow.security",
     "workflow.ui-change",
   ];
-  assert.deepEqual(
-    workflowDefinitions.map((workflow) => workflow.id).sort(),
-    expectedWorkflowIds,
-  );
+  assert.deepEqual(workflowDefinitions.map((workflow) => workflow.id).sort(), expectedWorkflowIds);
 
   const qa = workflowDefinitions.find((workflow) => workflow.id === "workflow.qa");
   assert.ok(qa);
