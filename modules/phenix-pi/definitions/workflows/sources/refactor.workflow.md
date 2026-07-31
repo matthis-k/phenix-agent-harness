@@ -124,10 +124,12 @@ output-schema: outcome.base
   "mocks": {
     "characterize": [{ "return": { "summary": "Behavior characterized", "evidence": [{ "path": "src/api.ts", "finding": "public behavior covered by tests" }], "risks": [] } }],
     "architecture": [{ "return": { "summary": "Simpler ownership proposed", "findings": [{ "severity": "medium", "title": "duplicate boundary", "evidence": "two modules own the same state" }] } }],
-    "implement": [{ "return": { "summary": "Refactor completed", "changeSet": { "summary": "consolidated ownership", "changedFiles": ["src/api.ts", "src/state.ts"], "checks": [{ "command": "devenv test", "ok": true, "summary": "passed" }], "unresolved": [] }, "verification": { "accepted": true, "summary": "behavior preserved", "findings": [], "evidence": ["characterization tests pass"] }, "attempts": 1 } }],
+    "estimate": [{ "return": { "difficulty": "D0", "summary": "Bounded structural change", "signals": ["characterized behavior"] } }],
+    "implement": [{ "return": { "summary": "Consolidated state ownership", "changedFiles": ["src/api.ts", "src/state.ts"], "checks": [{ "command": "devenv test", "ok": true, "summary": "passed" }], "unresolved": [] } }],
+    "trivial-accept": [{ "return": { "accepted": true, "summary": "Characterization checks passed", "findings": [], "evidence": ["devenv test passed"] } }],
     "review": [{ "return": { "summary": "Architecture is simpler", "findings": [] } }],
     "finalize": [{ "return": { "summary": "Refactor complete", "artifacts": [], "unresolved": [] } }]
   },
-  "expect": { "status": "success", "counts": { "characterize": 1, "architecture": 1, "implement": 1, "review": 1, "finalize": 1, "return": 1 } }
+  "expect": { "status": "success" }
 }
 ```
