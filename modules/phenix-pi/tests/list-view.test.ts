@@ -79,3 +79,17 @@ test("renders an exact viewport and keeps the selected row visible", () => {
   assert.ok(frame.lines.every((line) => visibleWidth(line) === 8));
   assert.match(frame.lines[2] ?? "", />\*item/);
 });
+
+test("renders an empty-state message only on the first viewport row", () => {
+  const view = new ListView<Item>(
+    {
+      id: (item) => item.id,
+      render: (item) => item.label,
+    },
+    { renderEmpty: () => "No available models" },
+  );
+
+  const frame = view.render(24, 6);
+  assert.match(frame.lines[0] ?? "", /No available models/);
+  assert.ok(frame.lines.slice(1).every((line) => line.trim() === ""));
+});
