@@ -1,37 +1,62 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+
 import { WORKFLOW_IMPLEMENT } from "../definitions/ids.ts";
 import { definitionRef } from "../domain/definition/definition.ts";
 import type { TaskNode } from "../domain/task/projection.ts";
 import { createTestRuntime } from "./support/core-runtime.ts";
 
-test("task anchors are derived one-for-one from runs and local tasks are leaves", async () => {
+test("tasks form an independent hierarchy with many-to-many run assignments", async () => {
   const runtime = await createTestRuntime();
-  const handle = await runtime.execution.start({
+  const first = await runtime.execution.start({
     parentId: runtime.rootRunId,
     definition: definitionRef(WORKFLOW_IMPLEMENT),
-    input: { objective: "Implement" },
+    input: { objective: "Implement first part" },
     wait: "await",
   });
-  await handle.result();
-  const local = await runtime.tasks.addLocal({
-    ownerRunId: handle.id,
-    title: "Record release note",
+  const second = await runtime.execution.start({
+    parentId: runtime.rootRunId,
+    definition: definitionRef(WORKFLOW_IMPLEMENT),
+    input: { objective: "Implement second part" },
+    wait: "await",
   });
-  await runtime.tasks.setLocalState(local.id, "done");
+  await Promise.all([first.result(), second.result()]);
+
+  const goal = await runtime.tasks.addLocal({
+    ownerRunId: runtime.rootRunId,
+    title: "Ship workspace improvements",
+  });
+  const child = await runtime.tasks.addLocal({
+    ownerRunId: first.id,
+    parentTaskId: goal.id,
+    title: "Verify interaction details",
+  });
+  await runtime.tasks.assignRun(goal.id, first.id);
+  await runtime.tasks.assignRun(goal.id, second.id);
+  await runtime.tasks.assignRun(child.id, second.id);
 
   const tree = await runtime.tasks.tree(runtime.rootRunId);
-  const executionTasks = flatten(tree.root).filter((task) => task.kind === "execution");
-  assert.equal(executionTasks.length, runtime.store.projection.runs.size);
+  const flattened = flatten(tree.root);
+  const executionTasks = flattened.filter((task) => task.kind === "execution");
+  assert.deepEqual(executionTasks.map((task) => task.runId), [runtime.rootRunId]);
+
+  const goalNode = flattened.find((task) => task.id === goal.id);
+  assert.ok(goalNode?.kind === "local");
+  assert.deepEqual(goalNode.children.map((task) => task.id), [child.id]);
   assert.deepEqual(
-    new Set(executionTasks.map((task) => task.id)),
-    new Set([...runtime.store.projection.runs.keys()].map((id) => `run:${id}`)),
+    goalNode.assignedRuns.map((assignment) => assignment.runId),
+    [first.id, second.id],
   );
-  const localNode = flatten(tree.root).find((task) => task.id === local.id);
-  assert.ok(localNode);
-  assert.equal(localNode.kind, "local");
-  assert.deepEqual(localNode.children, []);
-  assert.equal(localNode.effectiveState, "done");
+
+  const childNode = flattened.find((task) => task.id === child.id);
+  assert.ok(childNode?.kind === "local");
+  assert.deepEqual(childNode.assignedRuns.map((assignment) => assignment.runId), [second.id]);
+
+  const secondTasks = await runtime.tasks.tasksFor(second.id);
+  assert.deepEqual(
+    secondTasks.map((task) => task.id),
+    [goal.id, child.id],
+  );
 });
 
 function flatten(root: TaskNode): TaskNode[] {
