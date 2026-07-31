@@ -10,6 +10,7 @@ import type { LocalTask } from "../domain/task/local-task.ts";
 import {
   findTask,
   projectTaskTree,
+  tasksForRun,
   type TaskNode,
   type TaskTree,
 } from "../domain/task/projection.ts";
@@ -50,31 +51,39 @@ export class TaskFacadeImpl implements TaskFacade {
 
   async tasksFor(runId: RunId): Promise<readonly TaskNode[]> {
     const root = this.store.projection.rootOf(runId);
-    const tree = await this.tree(root);
-    const task = findTask(tree, `run:${runId}`);
-    return task?.kind === "execution" ? task.children : [];
+    return tasksForRun(await this.tree(root), runId);
   }
 
   async addLocal(input: {
     readonly ownerRunId: RunId;
+    readonly parentTaskId?: LocalTaskId;
     readonly title: string;
     readonly description?: string;
   }): Promise<LocalTask> {
     const title = input.title.trim();
     if (title.length === 0) throw new Error(`Local task title must not be empty`);
     const owner = this.store.projection.requireRun(input.ownerRunId);
+    const root = this.store.projection.rootOf(owner.id);
+    if (input.parentTaskId) {
+      const parent = this.store.projection.localTasks.get(input.parentTaskId);
+      if (!parent) throw new Error(`Unknown parent task: ${input.parentTaskId}`);
+      if (this.store.projection.rootOf(parent.ownerRunId) !== root) {
+        throw new Error(`Parent task ${input.parentTaskId} belongs to another root`);
+      }
+    }
     const now = this.clock.now();
     const task: LocalTask = {
       kind: "local",
       id: localTaskId(this.ids.next("task")),
       ownerRunId: owner.id,
+      ...(input.parentTaskId ? { parentTaskId: input.parentTaskId } : {}),
       title,
       ...(input.description?.trim() ? { description: input.description.trim() } : {}),
       state: "not_started",
       createdAt: now,
       updatedAt: now,
     };
-    await this.store.commit(this.store.projection.rootOf(owner.id), [
+    await this.store.commit(root, [
       { runId: owner.id, type: "task.local.created", data: { task } },
     ]);
     return this.store.projection.localTasks.get(task.id) as LocalTask;
@@ -96,6 +105,42 @@ export class TaskFacadeImpl implements TaskFacade {
     return this.store.projection.localTasks.get(taskId) as LocalTask;
   }
 
+  async assignRun(taskId: LocalTaskId, runId: RunId): Promise<void> {
+    const { root, task } = this.assignmentScope(taskId, runId);
+    const projected = findTask(await this.tree(root), task.id);
+    if (
+      projected?.kind === "local" &&
+      projected.assignedRuns.some((assignment) => assignment.runId === runId)
+    ) {
+      return;
+    }
+    await this.store.commit(root, [
+      {
+        runId,
+        type: "task.run.assigned",
+        data: { taskId: task.id, runId },
+      },
+    ]);
+  }
+
+  async unassignRun(taskId: LocalTaskId, runId: RunId): Promise<void> {
+    const { root, task } = this.assignmentScope(taskId, runId);
+    const projected = findTask(await this.tree(root), task.id);
+    if (
+      projected?.kind !== "local" ||
+      !projected.assignedRuns.some((assignment) => assignment.runId === runId)
+    ) {
+      return;
+    }
+    await this.store.commit(root, [
+      {
+        runId,
+        type: "task.run.unassigned",
+        data: { taskId: task.id, runId },
+      },
+    ]);
+  }
+
   async appendProgress(taskId: TaskId, message: string): Promise<void> {
     const text = message.trim();
     if (text.length === 0) throw new Error(`Progress message must not be empty`);
@@ -115,5 +160,19 @@ export class TaskFacadeImpl implements TaskFacade {
         data: { taskId, message: text },
       },
     ]);
+  }
+
+  private assignmentScope(
+    taskId: LocalTaskId,
+    runId: RunId,
+  ): { readonly root: RunId; readonly task: LocalTask } {
+    const task = this.store.projection.localTasks.get(taskId);
+    if (!task) throw new Error(`Unknown local task: ${taskId}`);
+    const run = this.store.projection.requireRun(runId);
+    const root = this.store.projection.rootOf(run.id);
+    if (this.store.projection.rootOf(task.ownerRunId) !== root) {
+      throw new Error(`Task ${taskId} and run ${runId} belong to different roots`);
+    }
+    return { root, task };
   }
 }
