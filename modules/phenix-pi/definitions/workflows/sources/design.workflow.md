@@ -116,3 +116,21 @@ output-schema: outcome.base
 | `architecture` | `critique` | | |
 | `critique` | `finalize` | | |
 | `finalize` | `return` | | |
+
+## Tests
+
+### decision-handoff
+
+```phenix-test
+{
+  "input": { "objective": "Design a host-neutral rendering boundary" },
+  "mocks": {
+    "inspect": [{ "return": { "summary": "Existing boundaries inspected", "evidence": [{ "path": "src/ui.ts", "finding": "host dependency crosses frontend boundary" }], "risks": [] } }],
+    "alternatives": [{ "return": { "summary": "Compared two designs", "steps": ["extract semantic surface", "adapt host rendering"], "constraints": ["preserve native transcript"], "checks": ["boundary tests"] } }],
+    "architecture": [{ "return": { "summary": "Ownership defined", "findings": [] } }],
+    "critique": [{ "return": { "summary": "Risks challenged", "findings": [] } }],
+    "finalize": [{ "return": { "summary": "Design selected", "artifacts": [], "unresolved": [] } }]
+  },
+  "expect": { "status": "success", "counts": { "inspect": 1, "alternatives": 1, "architecture": 1, "critique": 1, "finalize": 1, "return": 1 } }
+}
+```
