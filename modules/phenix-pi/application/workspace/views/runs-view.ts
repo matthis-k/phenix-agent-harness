@@ -1,5 +1,5 @@
-import type { RunTreeNode } from "../../interfaces.ts";
 import type { LocalTaskNode, TaskNode } from "../../../domain/task/projection.ts";
+import type { RunTreeNode } from "../../interfaces.ts";
 import { runStateTone, textSpan, type WorkspaceRowPresentation } from "../presentation.ts";
 import { defineWorkspaceView, workspaceViewLayout } from "./workspace-view.ts";
 import {
@@ -56,7 +56,7 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
           tasks.length === 0
             ? ""
             : tasks.length === 1
-              ? tasks[0]?.title ?? ""
+              ? (tasks[0]?.title ?? "")
               : `${tasks[0]?.title ?? "task"} +${tasks.length - 1}`;
         const activity = activityText(value.node.activity?.summary, run.state, width, value.depth);
         const details = expanded ? runDetails(value.node) : [];
