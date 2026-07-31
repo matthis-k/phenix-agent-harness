@@ -45,3 +45,17 @@ output-schema: outcome.qa-report
 | From | To | When | Max traversals |
 |---|---|---|---|
 | `review` | `return` | | |
+
+## Tests
+
+### read-only-review
+
+```phenix-test
+{
+  "input": { "objective": "Review the current implementation" },
+  "mocks": {
+    "review": [{ "return": { "summary": "Review complete", "checks": [{ "command": "devenv test", "ok": true, "summary": "passed" }], "findings": [], "reports": [] } }]
+  },
+  "expect": { "status": "success", "counts": { "review": 1, "return": 1 } }
+}
+```
