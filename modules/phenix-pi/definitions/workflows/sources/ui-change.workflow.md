@@ -141,9 +141,6 @@ output-schema: outcome.base
   "mocks": {
     "inspect": [{ "return": { "summary": "Interaction paths inspected", "evidence": [{ "path": "src/ui.ts", "finding": "selection and viewport state are coupled" }], "risks": ["stale asynchronous update"] } }],
     "design": [{ "return": { "summary": "Interaction invariants specified", "findings": [{ "severity": "medium", "title": "coupled viewport state", "evidence": "selection changes overwrite scroll ownership" }] } }],
-    "estimate": [{ "return": { "difficulty": "D0", "summary": "Bounded UI state change", "signals": ["known interaction invariant"] } }],
-    "implement": [{ "return": { "summary": "Separated selection and scrolling", "changedFiles": ["src/ui.ts"], "checks": [{ "command": "devenv test", "ok": true, "summary": "passed" }], "unresolved": [] } }],
-    "trivial-accept": [{ "return": { "accepted": true, "summary": "UI checks passed", "findings": [], "evidence": ["devenv test passed"] } }],
     "scenarios": [{ "return": { "summary": "Scenario matrix passed", "checks": [{ "command": "devenv test", "ok": true, "summary": "passed" }], "findings": [], "evidence": ["focus, resize, and scrolling scenarios pass"] } }],
     "critique": [{ "return": { "summary": "Interaction behavior is consistent", "findings": [] } }],
     "finalize": [{ "return": { "summary": "UI change complete", "artifacts": [], "unresolved": [] } }]
