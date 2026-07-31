@@ -1,6 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import type { DiagnosticSummary } from "../domain/diagnostics.ts";
 import type { WorkspaceRuntimeBinding } from "./workspace-runtime-binding.ts";
 import { subscribeWorkspaceRuntime } from "./workspace-runtime-binding.ts";
 
@@ -13,8 +12,6 @@ interface SelectedModel {
 
 export interface WorkspaceGenericStatusInput {
   readonly model?: SelectedModel;
-  readonly diagnostics?: DiagnosticSummary;
-  readonly integrations?: string;
 }
 
 export default function registerWorkspaceStatus(pi: ExtensionAPI): void {
@@ -22,10 +19,10 @@ export default function registerWorkspaceStatus(pi: ExtensionAPI): void {
   let binding: WorkspaceRuntimeBinding | undefined;
   let model: SelectedModel | undefined;
   let disposeRuntimeStatus: (() => void) | undefined;
-  let revision = 0;
 
   const refresh = (): void => {
-    void updateStatus();
+    if (!context) return;
+    context.ui.setStatus(STATUS_KEY, formatWorkspaceGenericStatus({ ...(model ? { model } : {}) }));
   };
 
   subscribeWorkspaceRuntime(pi.events, (next) => {
@@ -56,7 +53,6 @@ export default function registerWorkspaceStatus(pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", (_event, ctx) => {
-    revision += 1;
     disposeRuntimeStatus?.();
     disposeRuntimeStatus = undefined;
     binding = undefined;
@@ -64,50 +60,11 @@ export default function registerWorkspaceStatus(pi: ExtensionAPI): void {
     context = undefined;
     ctx.ui.setStatus(STATUS_KEY, undefined);
   });
-
-  async function updateStatus(): Promise<void> {
-    const ctx = context;
-    const active = binding;
-    const currentRevision = ++revision;
-    if (!ctx) return;
-
-    let diagnostics: DiagnosticSummary | undefined;
-    if (active) {
-      try {
-        diagnostics = await active.runtime.diagnostics.summary(active.rootRunId);
-      } catch {
-        diagnostics = undefined;
-      }
-    }
-    if (currentRevision !== revision || ctx !== context || active !== binding) return;
-
-    ctx.ui.setStatus(
-      STATUS_KEY,
-      formatWorkspaceGenericStatus({
-        ...(model ? { model } : {}),
-        ...(diagnostics ? { diagnostics } : {}),
-        ...(active ? { integrations: active.integrations } : {}),
-      }),
-    );
-  }
 }
 
 export function formatWorkspaceGenericStatus(input: WorkspaceGenericStatusInput): string {
   const model = input.model ? `${input.model.provider}/${input.model.id}` : "none";
-  return `model ${model} · phenix ${healthLabel(input)}`;
-}
-
-function healthLabel(input: WorkspaceGenericStatusInput): string {
-  if (!input.diagnostics) return "starting";
-  const errors = input.diagnostics.counts.error;
-  if (errors > 0) return `error (${errors})`;
-
-  const warnings = input.diagnostics.counts.warning;
-  const integrationsFailed = input.integrations?.includes("failed:") === true;
-  if (warnings > 0 || integrationsFailed) {
-    return warnings > 0 ? `degraded (${warnings})` : "degraded";
-  }
-  return "healthy";
+  return `model ${model}`;
 }
 
 function selectedModel(ctx: ExtensionContext): SelectedModel | undefined {
