@@ -29,7 +29,7 @@ max-bytes: 128000
 ## Children
 
 ```phenix-children
-allow: agent.scout, agent.implementer, agent.planner, agent.architect, agent.tester, agent.verifier, agent.critic, agent.finalizer, agent.dispatcher, agent.coordinator, agent.base, agent.qa-synthesizer, workflow.debug, workflow.design, workflow.implement, workflow.migrate, workflow.qa, workflow.refactor, workflow.research, workflow.review, workflow.security, workflow.ui-change
+allow: agent.scout, agent.reproducer, agent.researcher, agent.threat-modeler, agent.implementer, agent.planner, agent.architect, agent.tester, agent.verifier, agent.critic, agent.finalizer, agent.dispatcher, agent.coordinator, agent.base, agent.qa-synthesizer, workflow.debug, workflow.design, workflow.implement, workflow.migrate, workflow.qa, workflow.refactor, workflow.research, workflow.review, workflow.security, workflow.ui-change
 max-depth: 4
 may-detach: false
 may-send: true
