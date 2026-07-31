@@ -130,3 +130,22 @@ output-schema: outcome.base
 | `scenarios` | `critique` | | |
 | `critique` | `finalize` | | |
 | `finalize` | `return` | | |
+
+## Tests
+
+### interaction-scenario-matrix
+
+```phenix-test
+{
+  "input": { "objective": "Improve focus and scrolling behavior" },
+  "mocks": {
+    "inspect": [{ "return": { "summary": "Interaction paths inspected", "evidence": [{ "path": "src/ui.ts", "finding": "selection and viewport state are coupled" }], "risks": ["stale asynchronous update"] } }],
+    "design": [{ "return": { "summary": "Interaction invariants specified", "findings": [{ "severity": "medium", "title": "coupled viewport state", "evidence": "selection changes overwrite scroll ownership" }] } }],
+    "implement": [{ "return": { "summary": "UI behavior updated", "changeSet": { "summary": "separated selection and scrolling", "changedFiles": ["src/ui.ts"], "checks": [{ "command": "devenv test", "ok": true, "summary": "passed" }], "unresolved": [] }, "verification": { "accepted": true, "summary": "accepted", "findings": [], "evidence": ["UI tests pass"] }, "attempts": 1 } }],
+    "scenarios": [{ "return": { "summary": "Scenario matrix passed", "checks": [{ "command": "devenv test", "ok": true, "summary": "passed" }], "findings": [], "evidence": ["focus, resize, and scrolling scenarios pass"] } }],
+    "critique": [{ "return": { "summary": "Interaction behavior is consistent", "findings": [] } }],
+    "finalize": [{ "return": { "summary": "UI change complete", "artifacts": [], "unresolved": [] } }]
+  },
+  "expect": { "status": "success", "counts": { "inspect": 1, "design": 1, "implement": 1, "scenarios": 1, "critique": 1, "finalize": 1, "return": 1 } }
+}
+```
