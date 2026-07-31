@@ -43,7 +43,7 @@ max-retries: 1
 ```phenix-state
 kind: invoke
 title: Model ownership, trust boundaries, and attack paths
-run: agent.architect
+run: agent.threat-modeler
 input: security.threat-model.input
 input-schema: request.critic
 output-schema: outcome.critic-report
