@@ -4,6 +4,7 @@ import { type AnyDefinition, definitionRef } from "../domain/definition/definiti
 import { defineSchema, type Schema } from "../domain/definition/schema.ts";
 import {
   definitionId,
+  type LocalTaskId,
   localTaskId,
   type Outcome,
   type RunId,
@@ -62,12 +63,14 @@ const runParameters = defineSchema<{
   definition: string;
   input: unknown;
   wait?: "await" | "background";
+  taskIds?: string[];
 }>(
   "tool.phenix-run",
   Type.Object({
     definition: Type.String({ description: "Definition ID from the available Phenix catalog" }),
     input: Type.Unknown({ description: "Input matching the selected definition schema" }),
     wait: Type.Optional(Type.Enum(["await", "background"])),
+    taskIds: Type.Optional(Type.Array(Type.String(), { maxItems: 16 })),
   }),
 );
 
@@ -76,6 +79,7 @@ const dispatchParameters = defineSchema<{
   context?: unknown;
   mode?: "auto" | "qa" | "implement" | "coordinate";
   wait?: "await" | "background";
+  taskIds?: string[];
   transform?: ResultTransform;
   renderer?: ResultRenderer;
 }>(
@@ -85,6 +89,7 @@ const dispatchParameters = defineSchema<{
     context: Type.Optional(Type.Unknown()),
     mode: Type.Optional(Type.Enum(["auto", "qa", "implement", "coordinate"])),
     wait: Type.Optional(Type.Enum(["await", "background"])),
+    taskIds: Type.Optional(Type.Array(Type.String(), { maxItems: 16 })),
     ...resultPresentationProperties,
   }),
 );
@@ -193,6 +198,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       parameters: runParameters,
       execute: async (raw, signal) => {
         const params = requireValid(runParameters, raw);
+        const taskIds = requireRequestedTaskIds(params.taskIds, this.store, parentId);
         const ref = definitionRef(definitionId(params.definition));
         const currentParent = this.store.projection.requireRun(parentId);
         this.invocationPolicy.assertAllowed({
@@ -207,6 +213,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
           input: params.input,
           wait: params.wait ?? "await",
         });
+        for (const taskId of taskIds) await this.tasks.assignRun(taskId, handle.id);
         if ((params.wait ?? "await") === "background") {
           return projectedToolResult({ runId: handle.id, status: "running" });
         }
@@ -237,7 +244,12 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       execute: async (raw, signal) => {
         const params = requireValid(dispatchParameters, raw);
         if (!this.dispatch) throw new Error("Root dispatch service is not configured");
-        const result = await this.dispatch.dispatch(parentId, params, signal);
+        const taskIds = requireRequestedTaskIds(params.taskIds, this.store, parentId);
+        const result = await this.dispatch.dispatch(
+          parentId,
+          { ...params, ...(taskIds.length > 0 ? { taskIds } : {}) },
+          signal,
+        );
         if (result.status === "suspended" && result.suspension) {
           return projectedToolResult(
             {
@@ -512,6 +524,23 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
     }
     throw new Error(`Run ${targetId} is outside caller ${callerId}'s task scope`);
   }
+}
+
+function requireRequestedTaskIds(
+  values: readonly string[] | undefined,
+  store: ExecutionStore,
+  parentId: RunId,
+): readonly LocalTaskId[] {
+  const root = store.projection.rootOf(parentId);
+  return [...new Set(values ?? [])].map((value) => {
+    const taskId = localTaskId(value);
+    const task = store.projection.localTasks.get(taskId);
+    if (!task) throw new Error(`Unknown local task: ${taskId}`);
+    if (store.projection.rootOf(task.ownerRunId) !== root) {
+      throw new Error(`Task ${taskId} is outside caller root ${root}`);
+    }
+    return taskId;
+  });
 }
 
 function projectBudgetSuspension(
