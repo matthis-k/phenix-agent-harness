@@ -1,12 +1,14 @@
 import type {
   UserFormAnswer,
   UserFormCompletion,
+  UserFormCounts,
   UserFormDefinition,
   UserFormId,
   UserFormQuestion,
   UserFormRequest,
   UserFormResult,
   UserFormSuggestion,
+  UserFormUrgency,
 } from "../domain/user-form/model.ts";
 import { userFormId } from "../domain/user-form/model.ts";
 import type { RunId } from "../domain/shared.ts";
@@ -21,11 +23,14 @@ export interface UserFormFacade {
     input: {
       readonly rootRunId: RunId;
       readonly requestedByRunId: RunId;
+      readonly urgency?: UserFormUrgency;
       readonly form: UserFormDefinition;
     },
     signal?: AbortSignal,
   ): Promise<UserFormResult>;
-  next(rootRunId: RunId): UserFormRequest | undefined;
+  list(rootRunId: RunId): readonly UserFormRequest[];
+  get(id: UserFormId): UserFormRequest | undefined;
+  counts(rootRunId: RunId): UserFormCounts;
   complete(id: UserFormId, completion: UserFormCompletion): void;
   subscribe(listener: () => void): () => void;
   shutdown(): void;
@@ -55,6 +60,7 @@ export class UserFormService implements UserFormFacade {
     input: {
       readonly rootRunId: RunId;
       readonly requestedByRunId: RunId;
+      readonly urgency?: UserFormUrgency;
       readonly form: UserFormDefinition;
     },
     signal?: AbortSignal,
@@ -66,6 +72,7 @@ export class UserFormService implements UserFormFacade {
       id: userFormId(this.ids.next("userform")),
       rootRunId: input.rootRunId,
       requestedByRunId: input.requestedByRunId,
+      urgency: input.urgency ?? "normal",
       form: normalizeForm(input.form),
       requestedAt: this.clock.now(),
     };
@@ -88,12 +95,25 @@ export class UserFormService implements UserFormFacade {
     });
   }
 
-  next(rootRunId: RunId): UserFormRequest | undefined {
+  list(rootRunId: RunId): readonly UserFormRequest[] {
+    const requests: UserFormRequest[] = [];
     for (const id of this.queue) {
-      const candidate = this.pending.get(id)?.request;
-      if (candidate?.rootRunId === rootRunId) return candidate;
+      const request = this.pending.get(id)?.request;
+      if (request?.rootRunId === rootRunId) requests.push(request);
     }
-    return undefined;
+    return requests;
+  }
+
+  get(id: UserFormId): UserFormRequest | undefined {
+    return this.pending.get(id)?.request;
+  }
+
+  counts(rootRunId: RunId): UserFormCounts {
+    const requests = this.list(rootRunId);
+    return {
+      total: requests.length,
+      urgent: requests.filter((request) => request.urgency === "urgent").length,
+    };
   }
 
   complete(id: UserFormId, completion: UserFormCompletion): void {
