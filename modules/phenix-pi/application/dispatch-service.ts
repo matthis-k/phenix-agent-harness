@@ -21,11 +21,17 @@ import {
   type DefinitionRef,
   definitionRef,
 } from "../domain/definition/definition.ts";
-import type { DefinitionId, Outcome, RunId } from "../domain/shared.ts";
+import type { DefinitionId, LocalTaskId, Outcome, RunId } from "../domain/shared.ts";
 import { awaitOutcomeOrBudget, type BudgetSuspension } from "./budget-suspension.ts";
 import type { DynamicWorkflowExecutionService } from "./dynamic-workflow-execution.ts";
 import type { ExecutionStore } from "./execution-store.ts";
-import type { CatalogFacade, DefinitionSummary, ExecutionFacade, RunHandle } from "./interfaces.ts";
+import type {
+  CatalogFacade,
+  DefinitionSummary,
+  ExecutionFacade,
+  RunHandle,
+  TaskFacade,
+} from "./interfaces.ts";
 import type { InvocationPolicy } from "./invocation-policy.ts";
 
 export type DispatchMode = "auto" | DispatchRoute;
@@ -33,6 +39,7 @@ export type DispatchMode = "auto" | DispatchRoute;
 export interface DispatchRequest extends ObjectiveRequest {
   readonly mode?: DispatchMode;
   readonly wait?: "await" | "background";
+  readonly taskIds?: readonly LocalTaskId[];
 }
 
 export interface DispatchResult {
@@ -61,6 +68,7 @@ export class DispatchService {
   private readonly dynamicWorkflows: DynamicWorkflowExecutionService;
   private readonly catalog: CatalogFacade;
   private readonly store: ExecutionStore;
+  private readonly tasks: TaskFacade;
   private readonly invocationPolicy: InvocationPolicy;
 
   constructor(input: {
@@ -68,12 +76,14 @@ export class DispatchService {
     readonly dynamicWorkflows: DynamicWorkflowExecutionService;
     readonly catalog: CatalogFacade;
     readonly store: ExecutionStore;
+    readonly tasks: TaskFacade;
     readonly invocationPolicy: InvocationPolicy;
   }) {
     this.execution = input.execution;
     this.dynamicWorkflows = input.dynamicWorkflows;
     this.catalog = input.catalog;
     this.store = input.store;
+    this.tasks = input.tasks;
     this.invocationPolicy = input.invocationPolicy;
   }
 
@@ -84,6 +94,7 @@ export class DispatchService {
   ): Promise<DispatchResult> {
     const objective = request.objective.trim();
     if (!objective) throw new Error("Dispatch objective must not be empty");
+    const taskIds = this.requireTaskIds(parentId, request.taskIds);
 
     const input: ObjectiveRequest = {
       objective,
@@ -93,7 +104,7 @@ export class DispatchService {
     const selection = await this.selectTarget(parentId, input, request.mode, signal);
 
     if (selection.target.id === AGENT_COORDINATOR) {
-      return this.compose(parentId, input, wait, selection, signal);
+      return this.compose(parentId, input, wait, taskIds, selection, signal);
     }
 
     this.assertAllowed(parentId, this.catalog.get(selection.target) as AnyDefinition, input);
@@ -103,6 +114,7 @@ export class DispatchService {
       input,
       wait,
     });
+    await this.assignTasks(taskIds, handle.id);
     return this.resultForHandle({
       handle,
       definition: selection.target.id,
@@ -152,6 +164,7 @@ export class DispatchService {
     parentId: RunId,
     input: ObjectiveRequest,
     wait: DispatchWait,
+    taskIds: readonly LocalTaskId[],
     selection: DispatchSelection,
     signal: AbortSignal | undefined,
   ): Promise<DispatchResult> {
@@ -186,6 +199,7 @@ export class DispatchService {
       input,
       wait,
     });
+    await this.assignTasks(taskIds, handle.id);
     const definition = this.store.projection.requireRun(handle.id).definitionId;
     return this.resultForHandle({
       handle,
@@ -222,6 +236,25 @@ export class DispatchService {
       return { ...result, status: "suspended", suspension: settled.suspension };
     }
     return { ...result, status: "completed", outcome: settled.outcome };
+  }
+
+  private requireTaskIds(
+    parentId: RunId,
+    taskIds: readonly LocalTaskId[] | undefined,
+  ): readonly LocalTaskId[] {
+    const root = this.store.projection.rootOf(parentId);
+    return [...new Set(taskIds ?? [])].map((taskId) => {
+      const task = this.store.projection.localTasks.get(taskId);
+      if (!task) throw new Error(`Unknown local task: ${taskId}`);
+      if (this.store.projection.rootOf(task.ownerRunId) !== root) {
+        throw new Error(`Task ${taskId} is outside dispatch root ${root}`);
+      }
+      return taskId;
+    });
+  }
+
+  private async assignTasks(taskIds: readonly LocalTaskId[], runId: RunId): Promise<void> {
+    for (const taskId of taskIds) await this.tasks.assignRun(taskId, runId);
   }
 
   private assertAllowed(parentId: RunId, definition: AnyDefinition, input: unknown): void {
