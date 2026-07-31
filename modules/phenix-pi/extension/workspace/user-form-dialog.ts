@@ -29,7 +29,7 @@ export interface UserFormDialogOptions {
   readonly theme: ObservabilityTheme;
   readonly keybindings: KeybindingsManager;
   readonly request: UserFormRequest;
-  readonly onClose: (completion: UserFormCompletion) => void;
+  readonly onClose: (completion: UserFormCompletion | undefined) => void;
 }
 
 export class UserFormDraft {
@@ -64,8 +64,12 @@ export class UserFormDraft {
     if (!text) return;
     const current = this.answer();
     const characters = Array.from(current.value);
-    characters.splice(current.cursor, 0, ...Array.from(text));
-    this.replaceActive({ value: characters.join(""), cursor: current.cursor + Array.from(text).length });
+    const inserted = Array.from(text);
+    characters.splice(current.cursor, 0, ...inserted);
+    this.replaceActive({
+      value: characters.join(""),
+      cursor: current.cursor + inserted.length,
+    });
   }
 
   backspace(): void {
@@ -172,7 +176,7 @@ export class UserFormDialog implements Component, Focusable {
   private readonly tui: TUI;
   private readonly theme: ObservabilityTheme;
   private readonly keybindings: KeybindingsManager;
-  private readonly onClose: (completion: UserFormCompletion) => void;
+  private readonly onClose: (completion: UserFormCompletion | undefined) => void;
   private readonly draft: UserFormDraft;
   private closed = false;
   private viewportOffset = 0;
@@ -213,6 +217,10 @@ export class UserFormDialog implements Component, Focusable {
     }
 
     if (this.keybindings.matches(data, "tui.select.cancel")) {
+      this.close(undefined);
+      return;
+    }
+    if (matchesKey(data, "ctrl+x")) {
       this.close({ status: "cancelled", reason: "user" });
       return;
     }
@@ -308,17 +316,19 @@ export class UserFormDialog implements Component, Focusable {
     );
     const viewport = body.lines.slice(this.viewportOffset, this.viewportOffset + viewportHeight);
     while (viewport.length < viewportHeight) viewport.push("");
+    const urgency =
+      this.draft.request.urgency === "urgent" ? color(this.theme, "warning", "URGENT · ") : "";
     const status = this.draft.validationMessage
       ? color(this.theme, "warning", this.draft.validationMessage)
-      : color(
+      : `${urgency}${color(
           this.theme,
           "dim",
           `Requested by ${this.draft.request.requestedByRunId}`,
-        );
+        )}`;
     const hints = color(
       this.theme,
       "dim",
-      "Tab/↑↓ fields · Ctrl+Space suggestions · Enter next/submit · Ctrl+Enter submit · Esc cancel",
+      `Tab/↑↓ fields · Ctrl+Space suggestions · Enter next/${this.draft.request.form.submitLabel} · Ctrl+Enter ${this.draft.request.form.submitLabel} · Esc back · Ctrl+X decline`,
     );
     const rows = [
       ...(this.draft.request.form.description
@@ -329,12 +339,15 @@ export class UserFormDialog implements Component, Focusable {
       status,
       hints,
     ];
+    const title = `${this.draft.request.urgency === "urgent" ? "URGENT · " : ""}${
+      this.draft.request.form.title
+    }`;
     return [
       ...renderPanel({
         lines: rows,
         width,
         height: rows.length + 2,
-        title: ` ${strong(this.theme, this.draft.request.form.title)}`,
+        title: ` ${strong(this.theme, title)}`,
         paddingX: 1,
         style: {
           surface: (line) => surface(this.theme, "customMessageBg", line),
@@ -356,7 +369,11 @@ export class UserFormDialog implements Component, Focusable {
         ),
       );
       if (question.description) {
-        lines.push(...wrapPlain(question.description, width).map((line) => color(this.theme, "dim", line)));
+        lines.push(
+          ...wrapPlain(question.description, width).map((line) =>
+            color(this.theme, "dim", line),
+          ),
+        );
       }
       question.suggestions.forEach((suggestion, suggestionIndex) => {
         const selected =
@@ -413,7 +430,7 @@ export class UserFormDialog implements Component, Focusable {
     this.close(completion);
   }
 
-  private close(completion: UserFormCompletion): void {
+  private close(completion: UserFormCompletion | undefined): void {
     if (this.closed) return;
     this.closed = true;
     this.onClose(completion);
@@ -433,7 +450,9 @@ function renderEditableValue(
   theme: ObservabilityTheme,
 ): string {
   if (!value && !active) return color(theme, "dim", truncateToWidth(placeholder, width));
-  if (!value) return `${CURSOR_MARKER}${color(theme, "dim", truncateToWidth(placeholder, width))}`;
+  if (!value) {
+    return `${CURSOR_MARKER}${color(theme, "dim", truncateToWidth(placeholder, width))}`;
+  }
   const characters = Array.from(value);
   const start = Math.max(0, Math.min(cursor, characters.length) - Math.max(1, width - 1));
   const visible = characters.slice(start, start + width);
@@ -449,10 +468,13 @@ function suggestionShortcut(data: string): number | undefined {
 }
 
 function isPrintableInput(data: string): boolean {
-  return data.length > 0 && !Array.from(data).some((character) => {
-    const codePoint = character.codePointAt(0) ?? 0;
-    return codePoint < 0x20 || codePoint === 0x7f;
-  });
+  return (
+    data.length > 0 &&
+    !Array.from(data).some((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint < 0x20 || codePoint === 0x7f;
+    })
+  );
 }
 
 function keepVisible(offset: number, anchor: number, height: number, total: number): number {
