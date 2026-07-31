@@ -34,10 +34,11 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
   id: "runs",
   title: "Runs",
   layout: workspaceViewLayout("runs"),
-  project: (snapshot) =>
-    projectWorkspaceRuns(snapshot.ui.tree.root).map((value) => {
+  project: (snapshot) => {
+    const tasksByRun = indexWorkspaceTasks(snapshot.tasks.root);
+    return projectWorkspaceRuns(snapshot.ui.tree.root).map((value) => {
       const run = value.node.run;
-      const tasks = tasksForWorkspaceRun(snapshot.tasks.root, run.id);
+      const tasks = tasksByRun.get(String(run.id)) ?? [];
       const expandable = Boolean(run.resolvedModel || run.profile || run.pi?.sessionId);
       const present = ({
         width,
@@ -91,7 +92,8 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
         activation: { kind: "transcript" as const, runId: run.id },
         present,
       };
-    }),
+    });
+  },
 });
 
 function activityText(
@@ -118,20 +120,24 @@ function runDetails(node: RunTreeNode): string[] {
   return details;
 }
 
-function tasksForWorkspaceRun(root: TaskNode, runId: string): readonly LocalTaskNode[] {
-  const result: LocalTaskNode[] = [];
+function indexWorkspaceTasks(root: TaskNode): ReadonlyMap<string, readonly LocalTaskNode[]> {
+  const tasksByRun = new Map<string, LocalTaskNode[]>();
   const pending: TaskNode[] = [...root.children];
   while (pending.length > 0) {
     const current = pending.shift();
     if (!current) break;
-    if (
-      current.kind === "local" &&
-      (String(current.ownerRunId) === runId ||
-        current.assignedRuns.some((assignment) => String(assignment.runId) === runId))
-    ) {
-      result.push(current);
+    if (current.kind === "local") {
+      const runIds = new Set([
+        String(current.ownerRunId),
+        ...current.assignedRuns.map((assignment) => String(assignment.runId)),
+      ]);
+      for (const runId of runIds) {
+        const tasks = tasksByRun.get(runId) ?? [];
+        tasks.push(current);
+        tasksByRun.set(runId, tasks);
+      }
     }
     pending.push(...current.children);
   }
-  return result;
+  return tasksByRun;
 }
