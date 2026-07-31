@@ -1,4 +1,5 @@
 import type { RunTreeNode } from "../../interfaces.ts";
+import type { LocalTaskNode, TaskNode } from "../../../domain/task/projection.ts";
 import { runStateTone, textSpan, type WorkspaceRowPresentation } from "../presentation.ts";
 import { defineWorkspaceView, workspaceViewLayout } from "./workspace-view.ts";
 import {
@@ -36,6 +37,7 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
   project: (snapshot) =>
     projectWorkspaceRuns(snapshot.ui.tree.root).map((value) => {
       const run = value.node.run;
+      const tasks = tasksForWorkspaceRun(snapshot.tasks.root, run.id);
       const expandable = Boolean(run.resolvedModel || run.profile || run.pi?.sessionId);
       const present = ({
         width,
@@ -49,6 +51,12 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
         const active = run.id === activeRunId;
         const label =
           run.kind === "root" ? "Root session" : definitionLabel(String(run.definitionId));
+        const taskText =
+          tasks.length === 0
+            ? ""
+            : tasks.length === 1
+              ? tasks[0]?.title ?? ""
+              : `${tasks[0]?.title ?? "task"} +${tasks.length - 1}`;
         const activity = activityText(value.node.activity?.summary, run.state, width, value.depth);
         const details = expanded ? runDetails(value.node) : [];
         const disclosure = expandable ? (expanded ? "▾" : "▸") : " ";
@@ -61,6 +69,14 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
             }),
             textSpan(" "),
             textSpan(label, { strong: true }),
+            ...(taskText
+              ? [
+                  textSpan(
+                    ` → ${truncateWorkspaceText(taskText, Math.max(8, width - 24 - value.depth * 2))}`,
+                    { tone: "accent" as const },
+                  ),
+                ]
+              : []),
             ...(activity ? [textSpan(` ${activity}`, { tone: "muted" as const })] : []),
             ...(details.length > 0
               ? [textSpan(` · ${details.join(" · ")}`, { tone: "dim" as const })]
@@ -100,4 +116,22 @@ function runDetails(node: RunTreeNode): string[] {
   }
   if (run.pi?.sessionId) details.push(`session ${run.pi.sessionId}`);
   return details;
+}
+
+function tasksForWorkspaceRun(root: TaskNode, runId: string): readonly LocalTaskNode[] {
+  const result: LocalTaskNode[] = [];
+  const pending: TaskNode[] = [...root.children];
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (!current) break;
+    if (
+      current.kind === "local" &&
+      (String(current.ownerRunId) === runId ||
+        current.assignedRuns.some((assignment) => String(assignment.runId) === runId))
+    ) {
+      result.push(current);
+    }
+    pending.push(...current.children);
+  }
+  return result;
 }
