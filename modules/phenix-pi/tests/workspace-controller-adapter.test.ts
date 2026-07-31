@@ -9,7 +9,10 @@ import {
   NativeTranscriptComponent,
   readyNativeRunTranscript,
 } from "../extension/native-run-transcript.ts";
-import { WorkspaceControllerAdapter } from "../extension/workspace/workspace-controller-adapter.ts";
+import {
+  subscribeCoalescedSource,
+  WorkspaceControllerAdapter,
+} from "../extension/workspace/workspace-controller-adapter.ts";
 import type { PhenixWorkspaceSnapshot } from "../extension/workspace/workspace-model.ts";
 import type { LoadedWorkspaceTranscript } from "../ports/workspace-effects.ts";
 
@@ -27,6 +30,7 @@ test("snapshot refresh preserves a browsed run selection independently of the ac
       publish = listener;
       return () => undefined;
     },
+    sourceRefreshIntervalMs: 0,
     onChange: () => undefined,
   });
 
@@ -67,6 +71,7 @@ test("transcript refresh retains the visible child until its replacement is read
       publish = listener;
       return () => undefined;
     },
+    sourceRefreshIntervalMs: 0,
     onChange: () => undefined,
   });
 
@@ -83,6 +88,32 @@ test("transcript refresh retains the visible child until its replacement is read
   await adapter.whenIdle();
   assert.equal(adapter.transcript, replacement);
   adapter.dispose();
+});
+
+test("coalesces repeated source events into one refresh window", async () => {
+  let publish = (): void => undefined;
+  let refreshes = 0;
+  const unsubscribe = subscribeCoalescedSource(
+    (listener) => {
+      publish = listener;
+      return () => undefined;
+    },
+    () => {
+      refreshes += 1;
+    },
+    5,
+  );
+
+  publish();
+  publish();
+  publish();
+  assert.equal(refreshes, 0);
+  await eventually(() => refreshes === 1);
+
+  publish();
+  publish();
+  await eventually(() => refreshes === 2);
+  unsubscribe();
 });
 
 function snapshot(sequence: number): PhenixWorkspaceSnapshot {
@@ -146,7 +177,7 @@ function node(
 }
 
 async function eventually(condition: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
     if (condition()) return;
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
