@@ -56,7 +56,7 @@ export class TaskFacadeImpl implements TaskFacade {
 
   async addLocal(input: {
     readonly ownerRunId: RunId;
-    readonly parentTaskId?: LocalTaskId;
+    readonly parentId?: LocalTaskId;
     readonly title: string;
     readonly description?: string;
   }): Promise<LocalTask> {
@@ -64,11 +64,11 @@ export class TaskFacadeImpl implements TaskFacade {
     if (title.length === 0) throw new Error(`Local task title must not be empty`);
     const owner = this.store.projection.requireRun(input.ownerRunId);
     const root = this.store.projection.rootOf(owner.id);
-    if (input.parentTaskId) {
-      const parent = this.store.projection.localTasks.get(input.parentTaskId);
-      if (!parent) throw new Error(`Unknown parent task: ${input.parentTaskId}`);
+    if (input.parentId) {
+      const parent = this.store.projection.localTasks.get(input.parentId);
+      if (!parent) throw new Error(`Unknown parent task: ${input.parentId}`);
       if (this.store.projection.rootOf(parent.ownerRunId) !== root) {
-        throw new Error(`Parent task ${input.parentTaskId} belongs to another root`);
+        throw new Error(`Parent task ${input.parentId} belongs to another root`);
       }
     }
     const now = this.clock.now();
@@ -76,7 +76,7 @@ export class TaskFacadeImpl implements TaskFacade {
       kind: "local",
       id: localTaskId(this.ids.next("task")),
       ownerRunId: owner.id,
-      ...(input.parentTaskId ? { parentTaskId: input.parentTaskId } : {}),
+      ...(input.parentId ? { parentId: input.parentId } : {}),
       title,
       ...(input.description?.trim() ? { description: input.description.trim() } : {}),
       state: "not_started",
