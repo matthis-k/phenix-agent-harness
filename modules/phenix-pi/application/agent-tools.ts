@@ -137,7 +137,7 @@ const handleParameters = defineSchema<{
 const taskParameters = defineSchema<{
   action: "tree" | "list" | "add" | "set" | "assign" | "unassign" | "progress";
   taskId?: string;
-  parentTaskId?: string;
+  parentId?: string;
   runId?: string;
   title?: string;
   description?: string;
@@ -148,7 +148,7 @@ const taskParameters = defineSchema<{
   Type.Object({
     action: Type.Enum(["tree", "list", "add", "set", "assign", "unassign", "progress"]),
     taskId: Type.Optional(Type.String()),
-    parentTaskId: Type.Optional(Type.String()),
+    parentId: Type.Optional(Type.String()),
     runId: Type.Optional(Type.String()),
     title: Type.Optional(Type.String()),
     description: Type.Optional(Type.String()),
@@ -247,7 +247,13 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
         const taskIds = requireRequestedTaskIds(params.taskIds, this.store, parentId);
         const result = await this.dispatch.dispatch(
           parentId,
-          { ...params, ...(taskIds.length > 0 ? { taskIds } : {}) },
+          {
+            objective: params.objective,
+            ...(params.context === undefined ? {} : { context: params.context }),
+            ...(params.mode ? { mode: params.mode } : {}),
+            ...(params.wait ? { wait: params.wait } : {}),
+            ...(taskIds.length > 0 ? { taskIds } : {}),
+          },
           signal,
         );
         if (result.status === "suspended" && result.suspension) {
@@ -471,9 +477,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
           if (!params.title?.trim()) throw new Error(`add requires title`);
           const task = await this.tasks.addLocal({
             ownerRunId: parentId,
-            ...(params.parentTaskId
-              ? { parentTaskId: localTaskId(params.parentTaskId) }
-              : {}),
+            ...(params.parentId ? { parentId: localTaskId(params.parentId) } : {}),
             title: params.title,
             ...(params.description ? { description: params.description } : {}),
           });
