@@ -10,9 +10,9 @@ import type { LocalTask } from "../domain/task/local-task.ts";
 import {
   findTask,
   projectTaskTree,
-  tasksForRun,
   type TaskNode,
   type TaskTree,
+  tasksForRun,
 } from "../domain/task/projection.ts";
 import type { Clock, IdGenerator } from "../ports/clock.ts";
 import type { DefinitionCatalog } from "./catalog.ts";
