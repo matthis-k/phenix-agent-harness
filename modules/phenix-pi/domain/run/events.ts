@@ -74,7 +74,7 @@ export interface LocalTaskCreatedData {
   readonly task: {
     readonly id: LocalTaskId;
     readonly ownerRunId: RunId;
-    readonly parentTaskId?: LocalTaskId;
+    readonly parentId?: LocalTaskId;
     readonly title: string;
     readonly description?: string;
     readonly state: "not_started" | "wip" | "done" | "failed";
