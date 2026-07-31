@@ -99,3 +99,20 @@ output-schema: outcome.base
 | `threat-model` | `adversarial` | | |
 | `adversarial` | `finalize` | | |
 | `finalize` | `return` | | |
+
+## Tests
+
+### evidence-backed-threat-review
+
+```phenix-test
+{
+  "input": { "objective": "Review command execution trust boundaries" },
+  "mocks": {
+    "surface": [{ "return": { "summary": "Execution surfaces mapped", "evidence": [{ "path": "src/commands.ts", "finding": "untrusted input reaches command construction" }], "risks": ["privilege escalation"] } }],
+    "threat-model": [{ "return": { "summary": "Trust boundary modeled", "findings": [{ "severity": "high", "title": "untrusted command input", "evidence": "caller-controlled value crosses into execution authority" }] } }],
+    "adversarial": [{ "return": { "summary": "Concrete path validated", "findings": [{ "severity": "high", "title": "unsafe command construction", "evidence": "input is not structurally parsed before execution" }] } }],
+    "finalize": [{ "return": { "summary": "Security review complete", "artifacts": [], "unresolved": [] } }]
+  },
+  "expect": { "status": "success", "counts": { "surface": 1, "threat-model": 1, "adversarial": 1, "finalize": 1, "return": 1 } }
+}
+```
