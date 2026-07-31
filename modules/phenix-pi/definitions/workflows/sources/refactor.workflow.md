@@ -113,3 +113,21 @@ output-schema: outcome.base
 | `implement` | `review` | | |
 | `review` | `finalize` | | |
 | `finalize` | `return` | | |
+
+## Tests
+
+### preserve-behavior
+
+```phenix-test
+{
+  "input": { "objective": "Simplify module boundaries without changing behavior" },
+  "mocks": {
+    "characterize": [{ "return": { "summary": "Behavior characterized", "evidence": [{ "path": "src/api.ts", "finding": "public behavior covered by tests" }], "risks": [] } }],
+    "architecture": [{ "return": { "summary": "Simpler ownership proposed", "findings": [{ "severity": "medium", "title": "duplicate boundary", "evidence": "two modules own the same state" }] } }],
+    "implement": [{ "return": { "summary": "Refactor completed", "changeSet": { "summary": "consolidated ownership", "changedFiles": ["src/api.ts", "src/state.ts"], "checks": [{ "command": "devenv test", "ok": true, "summary": "passed" }], "unresolved": [] }, "verification": { "accepted": true, "summary": "behavior preserved", "findings": [], "evidence": ["characterization tests pass"] }, "attempts": 1 } }],
+    "review": [{ "return": { "summary": "Architecture is simpler", "findings": [] } }],
+    "finalize": [{ "return": { "summary": "Refactor complete", "artifacts": [], "unresolved": [] } }]
+  },
+  "expect": { "status": "success", "counts": { "characterize": 1, "architecture": 1, "implement": 1, "review": 1, "finalize": 1, "return": 1 } }
+}
+```
