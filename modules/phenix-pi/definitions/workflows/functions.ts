@@ -410,7 +410,7 @@ function registerUiChangeFunctions(registry: WorkflowFunctionRegistrar): void {
   registry.registerMapping("ui-change.finalize.input", (context) =>
     finalizerInput(
       context,
-      "UI change",
+      "ui-change",
       "Summarize interaction invariants, implementation, scenario evidence, usability review, and remaining framework-specific limitations.",
       ["inspect", "design", "implement", "scenarios", "critique"],
     ),
@@ -490,7 +490,7 @@ function registerSecurityFunctions(registry: WorkflowFunctionRegistrar): void {
   registry.registerMapping("security.finalize.input", (context) =>
     finalizerInput(
       context,
-      "security review",
+      "security",
       "Summarize assets, trust boundaries, validated risks, severity and preconditions, evidence, recommended mitigations, and unresolved uncertainty. Do not claim a fix was applied.",
       ["surface", "threat-model", "adversarial"],
     ),
@@ -561,7 +561,8 @@ function implementationTestInput(
   return {
     objective: scopedObjective(input, instruction),
     context: {
-      ...workflowContext(context, artifactNodes),
+      callerContext: input.context,
+      completed: successfulArtifacts(context, artifactNodes),
       implementation,
     },
     checks: implementation.changeSet.checks,
