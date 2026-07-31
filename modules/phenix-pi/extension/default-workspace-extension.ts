@@ -21,6 +21,7 @@ import {
   type PhenixWorkspaceAction,
   type PhenixWorkspaceSnapshot,
 } from "./phenix-workspace.ts";
+import { openUserFormInbox } from "./user-form-extension.ts";
 import { interruptActiveRootWork } from "./workspace/interrupt-active-work.ts";
 import { handoffNativeWorkspaceInput } from "./workspace/native-input-handoff.ts";
 import { renderWorkspaceTurn } from "./workspace/turn-indicator.ts";
@@ -236,6 +237,16 @@ async function openWorkspace(
     }
   };
 
+  const showUserFormInbox = async (): Promise<void> => {
+    if (nativeDialogActive) return;
+    nativeDialogActive = true;
+    try {
+      await openUserFormInbox(ctx, binding);
+    } finally {
+      nativeDialogActive = false;
+    }
+  };
+
   const unsubscribeInput = ctx.ui.onTerminalInput((data) => {
     if (!activeWorkspace || !activeKeybindings || nativeDialogActive) return undefined;
     return handoffNativeWorkspaceInput({
@@ -287,6 +298,12 @@ async function openWorkspace(
           if (action.kind === "native" && slashCommandName(action.text) === "model") {
             void showModelDialog().catch((error) => {
               notifyWorkspaceCommandError(ctx, "model selector", error);
+            });
+            return;
+          }
+          if (action.kind === "native" && slashCommandName(action.text) === "userforms") {
+            void showUserFormInbox().catch((error) => {
+              notifyWorkspaceCommandError(ctx, "user form inbox", error);
             });
             return;
           }
