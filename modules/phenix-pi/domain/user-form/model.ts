@@ -39,6 +39,10 @@ export interface UserFormAnswer {
   readonly suggestionValue?: string;
 }
 
+export type UserFormCompletion =
+  | { readonly status: "submitted"; readonly answers: readonly UserFormAnswer[] }
+  | { readonly status: "cancelled"; readonly reason: "user" };
+
 export type UserFormResult =
   | {
       readonly status: "submitted";
