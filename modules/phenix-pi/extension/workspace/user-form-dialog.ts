@@ -370,9 +370,7 @@ export class UserFormDialog implements Component, Focusable {
       );
       if (question.description) {
         lines.push(
-          ...wrapPlain(question.description, width).map((line) =>
-            color(this.theme, "dim", line),
-          ),
+          ...wrapPlain(question.description, width).map((line) => color(this.theme, "dim", line)),
         );
       }
       question.suggestions.forEach((suggestion, suggestionIndex) => {
