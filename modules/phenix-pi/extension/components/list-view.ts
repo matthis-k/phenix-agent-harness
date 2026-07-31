@@ -141,7 +141,10 @@ export class ListView<T> {
     const lines = Array.from({ length: viewportHeight }, (_, row) => {
       const item = visible[row];
       if (!item) {
-        return fitViewLine(this.items.length === 0 && row === 0 ? this.renderEmpty(width) : "", width);
+        return fitViewLine(
+          this.items.length === 0 && row === 0 ? this.renderEmpty(width) : "",
+          width,
+        );
       }
       const index = this.offset + row;
       return fitViewLine(
