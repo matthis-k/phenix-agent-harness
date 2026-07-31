@@ -101,9 +101,7 @@ export async function openUserFormInbox(
   binding: WorkspaceRuntimeBinding,
 ): Promise<void> {
   while (true) {
-    const requests = orderPendingUserForms(
-      binding.runtime.userForms.list(binding.rootRunId),
-    );
+    const requests = orderPendingUserForms(binding.runtime.userForms.list(binding.rootRunId));
     if (requests.length === 0) {
       ctx.ui.notify("No pending user forms.", "info");
       return;
