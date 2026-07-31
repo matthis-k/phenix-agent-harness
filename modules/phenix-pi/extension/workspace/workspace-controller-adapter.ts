@@ -10,6 +10,8 @@ import {
   workspaceItemIndex,
 } from "./workspace-model.ts";
 
+const DEFAULT_SOURCE_REFRESH_INTERVAL_MS = 1_000;
+
 export interface WorkspaceControllerAdapterOptions {
   readonly snapshot: PhenixWorkspaceSnapshot;
   readonly load: () => Promise<PhenixWorkspaceSnapshot>;
@@ -18,6 +20,7 @@ export interface WorkspaceControllerAdapterOptions {
   ) => Promise<LoadedWorkspaceTranscript<NativeRunTranscript>>;
   readonly subscribe: (listener: () => void) => () => void;
   readonly onChange: () => void;
+  readonly sourceRefreshIntervalMs?: number;
   readonly recordDiagnostic?: (error: WorkspaceError) => void | Promise<void>;
 }
 
@@ -39,7 +42,12 @@ export class WorkspaceControllerAdapter extends WorkspaceFrontend<
         }
         return node.run.kind === "root" ? snapshot.rootTranscript : options.loadTranscript(node);
       },
-      subscribeSource: options.subscribe,
+      subscribeSource: (listener) =>
+        subscribeCoalescedSource(
+          options.subscribe,
+          listener,
+          options.sourceRefreshIntervalMs ?? DEFAULT_SOURCE_REFRESH_INTERVAL_MS,
+        ),
       ...(options.recordDiagnostic ? { recordDiagnostic: options.recordDiagnostic } : {}),
     });
     this.unsubscribeHost = this.subscribe(options.onChange);
@@ -49,6 +57,36 @@ export class WorkspaceControllerAdapter extends WorkspaceFrontend<
     this.unsubscribeHost();
     super.dispose();
   }
+}
+
+export function subscribeCoalescedSource(
+  subscribe: (listener: () => void) => () => void,
+  listener: () => void,
+  intervalMs: number,
+): () => void {
+  const delay = Math.max(0, Math.floor(intervalMs));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let disposed = false;
+
+  const unsubscribe = subscribe(() => {
+    if (disposed) return;
+    if (delay === 0) {
+      listener();
+      return;
+    }
+    if (timer !== undefined) return;
+    timer = setTimeout(() => {
+      timer = undefined;
+      if (!disposed) listener();
+    }, delay);
+  });
+
+  return () => {
+    disposed = true;
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+    unsubscribe();
+  };
 }
 
 function snapshotEnvelope(
