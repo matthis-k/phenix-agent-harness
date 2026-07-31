@@ -16,6 +16,8 @@ import {
 import type { ProjectPlannerFacade } from "../application/project-planner.ts";
 import { QueryFacadeImpl } from "../application/query-facade.ts";
 import { TaskFacadeImpl } from "../application/task-facade.ts";
+import { UserFormAgentToolFactory } from "../application/user-form-agent-tools.ts";
+import type { UserFormFacade } from "../application/user-form-service.ts";
 import { WorkflowCheckpointProcessManager } from "../application/workflow-checkpoint-process-manager.ts";
 import { WorkflowProcessManager } from "../application/workflow-process-manager.ts";
 import type { Schema } from "../domain/definition/schema.ts";
@@ -30,6 +32,7 @@ interface ExecutionKernelDependencies {
   readonly operations: LocalOperationRunner;
   readonly store: ExecutionStore;
   readonly projects?: ProjectPlannerFacade;
+  readonly userForms?: UserFormFacade;
   readonly models: ModelResolver;
   readonly ids: IdGenerator;
   readonly clock: Clock;
@@ -45,6 +48,12 @@ const unavailableProjects = new Proxy({} as ProjectPlannerFacade, {
   },
 });
 
+const unavailableUserForms = new Proxy({} as UserFormFacade, {
+  get: () => async () => {
+    throw new Error("User form services are unavailable in this runtime");
+  },
+});
+
 /** Assemble the runtime-independent execution kernel once for production and tests. */
 export function createExecutionKernel(input: ExecutionKernelDependencies) {
   const {
@@ -53,6 +62,7 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
     operations,
     store,
     projects,
+    userForms,
     models,
     ids,
     clock,
@@ -126,6 +136,7 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
   const tools = new CompositeAgentToolFactory([
     executionTools,
     new ProjectAgentToolFactory(projects ?? unavailableProjects, store),
+    new UserFormAgentToolFactory(userForms ?? unavailableUserForms, store),
   ]);
 
   return {
