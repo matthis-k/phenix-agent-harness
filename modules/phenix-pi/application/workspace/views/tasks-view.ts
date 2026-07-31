@@ -57,7 +57,11 @@ export const tasksWorkspaceView = defineWorkspaceView<WorkspaceTaskRow>({
               { strong: true },
             ),
             ...(assignmentText
-              ? [textSpan(truncateWorkspaceText(assignmentText, Math.max(8, width / 2)), { tone: "muted" as const })]
+              ? [
+                  textSpan(truncateWorkspaceText(assignmentText, Math.max(8, width / 2)), {
+                    tone: "muted" as const,
+                  }),
+                ]
               : []),
           ],
         };
