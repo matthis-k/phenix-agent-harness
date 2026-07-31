@@ -124,9 +124,6 @@ output-schema: outcome.base
   "mocks": {
     "inventory": [{ "return": { "summary": "Provider and consumers inventoried", "evidence": [{ "path": "src/provider.ts", "finding": "two consumers depend on the old contract" }], "risks": ["stale generated consumer"] } }],
     "plan": [{ "return": { "summary": "Provider-first migration", "steps": ["change provider", "migrate consumers", "remove old contract"], "constraints": ["no compatibility fallback"], "checks": ["devenv test"] } }],
-    "estimate": [{ "return": { "difficulty": "D0", "summary": "Bounded migration slice", "signals": ["known provider and consumers"] } }],
-    "implement": [{ "return": { "summary": "Migrated provider and consumers", "changedFiles": ["src/provider.ts", "src/consumer.ts"], "checks": [{ "command": "devenv test", "ok": true, "summary": "passed" }], "unresolved": [] } }],
-    "trivial-accept": [{ "return": { "accepted": true, "summary": "Migration checks passed", "findings": [], "evidence": ["devenv test passed"] } }],
     "audit": [{ "return": { "summary": "No stale consumers remain", "findings": [] } }],
     "finalize": [{ "return": { "summary": "Migration complete", "artifacts": [], "unresolved": [] } }]
   },
