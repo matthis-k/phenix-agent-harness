@@ -1,9 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import type {
-  UserFormCounts,
-  UserFormRequest,
-} from "../domain/user-form/model.ts";
+import type { UserFormCounts, UserFormRequest } from "../domain/user-form/model.ts";
 import { UserFormDialog } from "./workspace/user-form-dialog.ts";
 import {
   WorkspaceSelectDialog,
@@ -99,7 +96,7 @@ export function orderPendingUserForms(
   });
 }
 
-async function openUserFormInbox(
+export async function openUserFormInbox(
   ctx: ExtensionContext,
   binding: WorkspaceRuntimeBinding,
 ): Promise<void> {
