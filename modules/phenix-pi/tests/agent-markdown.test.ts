@@ -79,6 +79,7 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
     "find",
     "ls",
     "phenix_project",
+    "phenix_userform",
     "phenix_present",
   ]);
   assert.equal(scout.context.maxBytes, 64_000);
@@ -92,7 +93,9 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
   assert.ok(planner);
   assert.ok(architect);
   assert.ok(planner.tools.allow.includes("phenix_project"));
+  assert.ok(planner.tools.allow.includes("phenix_userform"));
   assert.ok(planner.tools.allow.includes("phenix_visualize"));
+  assert.ok(architect.tools.allow.includes("phenix_userform"));
   assert.ok(architect.tools.allow.includes("phenix_visualize"));
   assert.match(planner.prompt.render(), /mark that section for UI rendering/);
   assert.match(architect.prompt.render(), /mark that section for UI rendering/);
@@ -103,6 +106,7 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
   assert.ok(implementer);
   assert.ok(implementer.tools.allow.includes("edit"));
   assert.ok(implementer.tools.allow.includes("phenix_project"));
+  assert.ok(implementer.tools.allow.includes("phenix_userform"));
   assert.ok(implementer.tools.allow.includes("nix_shell"));
   assert.equal(implementer.input.id, "request.implementation");
   assert.equal(implementer.output.id, "outcome.change-set");
@@ -112,6 +116,7 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
 
   const base = byId.get("agent.base");
   assert.ok(base);
+  assert.ok(base.tools.allow.includes("phenix_userform"));
   assert.equal(base.promptMode, "append-default");
 
   const coordinator = byId.get("agent.coordinator");
