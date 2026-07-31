@@ -30,26 +30,41 @@ export const tasksWorkspaceView = defineWorkspaceView<WorkspaceTaskRow>({
   layout: workspaceViewLayout("tasks"),
   project: (snapshot) =>
     projectWorkspaceTasks(snapshot.tasks.root).map((value) => {
-      const present = ({ width }: { readonly width: number }): WorkspaceRowPresentation => ({
-        spans: [
-          textSpan("  ".repeat(value.depth)),
-          textSpan(
-            `${taskStateSymbol(value.node.effectiveState)} ${taskStateLabel(value.node.effectiveState)}`,
-            { tone: taskStateTone(value.node.effectiveState) },
-          ),
-          textSpan(" "),
-          textSpan(
-            truncateWorkspaceText(value.node.title, Math.max(8, width - 13 - value.depth * 2)),
-            { strong: true },
-          ),
-        ],
-      });
+      const assignments =
+        value.node.kind === "local"
+          ? value.node.assignedRuns.map((assignment) => assignment.title)
+          : [];
+      const present = ({ width }: { readonly width: number }): WorkspaceRowPresentation => {
+        const assignmentText =
+          assignments.length === 0
+            ? ""
+            : assignments.length === 1
+              ? ` · ${assignments[0]}`
+              : ` · ${assignments.length} runs`;
+        return {
+          spans: [
+            textSpan("  ".repeat(value.depth)),
+            textSpan(
+              `${taskStateSymbol(value.node.effectiveState)} ${taskStateLabel(value.node.effectiveState)}`,
+              { tone: taskStateTone(value.node.effectiveState) },
+            ),
+            textSpan(" "),
+            textSpan(
+              truncateWorkspaceText(
+                value.node.title,
+                Math.max(8, width - 13 - value.depth * 2 - assignmentText.length),
+              ),
+              { strong: true },
+            ),
+            ...(assignmentText
+              ? [textSpan(truncateWorkspaceText(assignmentText, Math.max(8, width / 2)), { tone: "muted" as const })]
+              : []),
+          ],
+        };
+      };
       return {
         id: value.node.id,
         value,
-        ...(value.node.kind === "execution"
-          ? { activation: { kind: "transcript" as const, runId: value.node.runId } }
-          : {}),
         present,
       };
     }),
