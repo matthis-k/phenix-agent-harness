@@ -2,6 +2,9 @@ import { definitionId } from "../domain/shared.ts";
 
 export const AGENT_DIFFICULTY_ESTIMATOR = definitionId("agent.difficulty-estimator");
 export const AGENT_SCOUT = definitionId("agent.scout");
+export const AGENT_REPRODUCER = definitionId("agent.reproducer");
+export const AGENT_RESEARCHER = definitionId("agent.researcher");
+export const AGENT_THREAT_MODELER = definitionId("agent.threat-modeler");
 export const AGENT_IMPLEMENTER = definitionId("agent.implementer");
 export const AGENT_PLANNER = definitionId("agent.planner");
 export const AGENT_ARCHITECT = definitionId("agent.architect");
@@ -50,6 +53,9 @@ export const ROOT_INTERNAL_DEFINITION_IDS = [
 export const ALL_DEFINITION_IDS = [
   AGENT_DIFFICULTY_ESTIMATOR,
   AGENT_SCOUT,
+  AGENT_REPRODUCER,
+  AGENT_RESEARCHER,
+  AGENT_THREAT_MODELER,
   AGENT_IMPLEMENTER,
   AGENT_PLANNER,
   AGENT_ARCHITECT,
