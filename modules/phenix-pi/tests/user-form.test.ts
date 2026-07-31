@@ -2,11 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { UserFormService } from "../application/user-form-service.ts";
-import type {
-  UserFormDefinition,
-  UserFormRequest,
-} from "../domain/user-form/model.ts";
 import { runId } from "../domain/shared.ts";
+import type { UserFormDefinition, UserFormRequest } from "../domain/user-form/model.ts";
 import { formatUserFormStatus, orderPendingUserForms } from "../extension/user-form-extension.ts";
 import { UserFormDraft } from "../extension/workspace/user-form-dialog.ts";
 import type { Clock, IdGenerator } from "../ports/clock.ts";
@@ -149,7 +146,10 @@ test("aborting one requester removes only its pending form", async () => {
 
   abort.abort(new Error("requesting run stopped"));
   await assert.rejects(cancelled, /requesting run stopped/);
-  assert.deepEqual(service.list(ROOT).map((item) => item.form.title), ["Retained"]);
+  assert.deepEqual(
+    service.list(ROOT).map((item) => item.form.title),
+    ["Retained"],
+  );
 
   const pending = service.list(ROOT)[0];
   assert.ok(pending);
