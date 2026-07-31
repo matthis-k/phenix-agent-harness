@@ -54,8 +54,14 @@ output-schema: outcome.qa-report
 {
   "input": { "objective": "Review the current implementation" },
   "mocks": {
-    "review": [{ "return": { "summary": "Review complete", "checks": [{ "command": "devenv test", "ok": true, "summary": "passed" }], "findings": [], "reports": [] } }]
+    "checks": [{ "return": [{ "command": "devenv test", "ok": true, "summary": "passed" }] }],
+    "fanout": [{ "return": { "objective": "Review the current implementation" } }],
+    "repo": [{ "return": { "summary": "Repository review passed", "evidence": [{ "path": "src/file.ts", "finding": "structure is consistent" }], "risks": [] } }],
+    "tests": [{ "return": { "summary": "Checks passed", "checks": [{ "command": "devenv test", "ok": true, "summary": "passed" }], "findings": [], "evidence": ["devenv test passed"] } }],
+    "architecture": [{ "return": { "summary": "Architecture review passed", "findings": [] } }],
+    "security": [{ "return": { "summary": "Security review passed", "findings": [] } }],
+    "synthesize": [{ "return": { "summary": "Review complete", "checks": [{ "command": "devenv test", "ok": true, "summary": "passed" }], "findings": [], "reports": [] } }]
   },
-  "expect": { "status": "success", "counts": { "review": 1, "return": 1 } }
+  "expect": { "status": "success" }
 }
 ```
