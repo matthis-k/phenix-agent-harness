@@ -26,6 +26,7 @@ import { ProjectPlannerService } from "../application/project-planner.ts";
 import { PublishedProjectTracker } from "../application/published-project-tracker.ts";
 import { SessionProfileFacadeImpl } from "../application/session-profile-facade.ts";
 import { SupervisionProcessManager } from "../application/supervision-process-manager.ts";
+import { UserFormService } from "../application/user-form-service.ts";
 import { agentDefinitions } from "../definitions/agents.ts";
 import { ROOT_DISPATCH_DEFINITION_IDS, ROOT_INTERNAL_DEFINITION_IDS } from "../definitions/ids.ts";
 import { resolveDefinitionSchema } from "../definitions/schema-registry.ts";
@@ -111,12 +112,14 @@ export function createExecutionServices(input: {
       await projectExecution.send(runId, message);
     },
   );
+  const userForms = new UserFormService(ids, systemClock);
   const kernel = createExecutionKernel({
     definitions,
     functions,
     operations,
     store,
     projects,
+    userForms,
     models: resolver,
     ids,
     clock: systemClock,
@@ -178,6 +181,7 @@ export function createExecutionServices(input: {
     attention,
     supervision,
     projects,
+    userForms,
   };
 }
 
