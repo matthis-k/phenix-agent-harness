@@ -32,7 +32,12 @@ export async function runWorkflowScenario(
   let runtime: TestRuntime;
   const implementation: RunImplementation = {
     async start(command) {
-      await executeAgent(runtime, command, scripts);
+      const parent = runtime.store.projection.requireRun(command.parentId);
+      if (parent.definitionId === workflow.id) {
+        await executeScriptedAgent(runtime, command, scripts);
+        return;
+      }
+      await executeNestedWorkflowAgent(runtime, command, scripts);
     },
   };
   const operations = scenarioOperations(workflow, scripts);
@@ -103,37 +108,14 @@ class ScenarioScripts {
   }
 }
 
-async function executeAgent(
+async function executeScriptedAgent(
   runtime: TestRuntime,
   command: StartImplementationCommand,
   scripts: ScenarioScripts,
 ): Promise<void> {
   const run = runtime.store.projection.requireRun(command.runId);
   const nodeId = run.compiled.invocation.causation?.nodeId ?? command.definition.id;
-  await runtime.controller.transition(command.runId, "starting");
-  await runtime.controller.transition(command.runId, "running");
-
-  const available = scripts.availableTools();
-  if (available) {
-    const required = command.definition.kind === "agent" ? command.definition.tools.allow : [];
-    const missing = required.filter((tool) => !available.has(tool));
-    if (missing.length > 0) {
-      await runtime.controller.fail(command.runId, {
-        code: "tool_unavailable",
-        message: `State ${nodeId} cannot start ${command.definition.id}; unavailable tools: ${missing.join(", ")}`,
-        retryable: false,
-        details: {
-          source: "workflow_scenario",
-          definitionId: command.definition.id,
-          nodeId,
-          required,
-          missing,
-          available: [...available],
-        },
-      });
-      return;
-    }
-  }
+  if (!(await startAgent(runtime, command, scripts, nodeId))) return;
 
   const action = scripts.next(nodeId);
   if ("return" in action) {
@@ -145,6 +127,114 @@ async function executeAgent(
     return;
   }
   await runtime.execution.cancel(command.runId, action.cancel);
+}
+
+async function executeNestedWorkflowAgent(
+  runtime: TestRuntime,
+  command: StartImplementationCommand,
+  scripts: ScenarioScripts,
+): Promise<void> {
+  const nodeId = command.definition.id;
+  if (!(await startAgent(runtime, command, scripts, nodeId))) return;
+  await runtime.controller.complete(
+    command.runId,
+    deterministicOutput(command.definition, command.input),
+  );
+}
+
+async function startAgent(
+  runtime: TestRuntime,
+  command: StartImplementationCommand,
+  scripts: ScenarioScripts,
+  nodeId: string,
+): Promise<boolean> {
+  await runtime.controller.transition(command.runId, "starting");
+  await runtime.controller.transition(command.runId, "running");
+
+  const available = scripts.availableTools();
+  if (!available) return true;
+
+  const required = command.definition.kind === "agent" ? command.definition.tools.allow : [];
+  const missing = required.filter((tool) => !available.has(tool));
+  if (missing.length === 0) return true;
+
+  await runtime.controller.fail(command.runId, {
+    code: "tool_unavailable",
+    message: `State ${nodeId} cannot start ${command.definition.id}; unavailable tools: ${missing.join(", ")}`,
+    retryable: false,
+    details: {
+      source: "workflow_scenario",
+      definitionId: command.definition.id,
+      nodeId,
+      required,
+      missing,
+      available: [...available],
+    },
+  });
+  return false;
+}
+
+function deterministicOutput(definition: AnyDefinition, input: unknown): unknown {
+  switch (definition.output.id) {
+    case "outcome.difficulty-assessment":
+      return {
+        difficulty: "D1",
+        summary: "Deterministic nested-workflow assessment",
+        signals: ["workflow scenario"],
+      };
+    case "outcome.plan":
+      return { summary: "plan", steps: ["edit"], constraints: [], checks: ["test"] };
+    case "outcome.change-set":
+      return {
+        summary: "implemented",
+        changedFiles: ["src/file.ts"],
+        checks: [{ command: "test", ok: true, summary: "passed" }],
+        unresolved: [],
+      };
+    case "outcome.verification":
+      return { accepted: true, summary: "accepted", findings: [], evidence: ["tests pass"] };
+    case "outcome.scout-report":
+      return {
+        summary: "scouted",
+        evidence: [{ path: "src/file.ts", finding: "ok" }],
+        risks: [],
+      };
+    case "outcome.test-report":
+      return {
+        summary: "checks passed",
+        checks: [{ command: "test", ok: true, summary: "passed" }],
+        findings: [],
+        evidence: ["test passed"],
+      };
+    case "outcome.critic-report":
+      return { summary: "reviewed", findings: [] };
+    case "outcome.qa-report":
+      return {
+        summary: "clean",
+        checks: [{ command: "test", ok: true, summary: "passed" }],
+        findings: [],
+        reports: [],
+      };
+    case "outcome.base":
+      return { summary: "done", artifacts: [], unresolved: [] };
+    case "outcome.stock-session-handoff": {
+      if (typeof input !== "object" || input === null || !("outputSchema" in input)) {
+        throw new Error("Nested stock scenario requires outputSchema");
+      }
+      return {
+        outputSchema: input.outputSchema,
+        value: {
+          summary: "stock result",
+          evidence: [{ path: "src/file.ts", finding: "stock evidence" }],
+          risks: [],
+        },
+      };
+    }
+    default:
+      throw new Error(
+        `No deterministic nested-workflow output for ${definition.id} (${definition.output.id})`,
+      );
+  }
 }
 
 function scenarioOperations(
