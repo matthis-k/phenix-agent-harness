@@ -81,12 +81,91 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
   assert.equal(scout.modelRoutes?.D0.capability, "fast");
   assert.equal(scout.modelRoutes?.D3.capability, "reasoning");
   assert.equal(scout.promptMode, undefined);
+  assert.match(scout.prompt.render(), /insufficient_permissions/);
+
+  const planner = byId.get("agent.planner");
+  const architect = byId.get("agent.architect");
+  assert.ok(planner);
+  assert.ok(architect);
+  assert.ok(planner.tools.allow.includes("phenix_visualize"));
+  assert.ok(architect.tools.allow.includes("phenix_visualize"));
+  assert.match(planner.prompt.render(), /mark that section for UI rendering/);
+  assert.match(architect.prompt.render(), /mark that section for UI rendering/);
+  assert.match(planner.prompt.render(), /Do not include the Mermaid source/);
+  assert.match(architect.prompt.render(), /Do not include the Mermaid source/);
+
+  const implementer = byId.get("agent.implementer");
+  assert.ok(implementer);
+  assert.ok(implementer.tools.allow.includes("edit"));
+  assert.ok(implementer.tools.allow.includes("nix_shell"));
+  assert.equal(implementer.input.id, "request.implementation");
+  assert.equal(implementer.output.id, "outcome.change-set");
+  assert.equal(implementer.modelRoutes?.D0.capability, "code-fast");
+  assert.equal(implementer.modelRoutes?.D3.capability, "code-max");
+  assert.equal(implementer.promptMode, "append-default");
+
+  const base = byId.get("agent.base");
+  assert.ok(base);
+  assert.equal(base.promptMode, "append-default");
+
+  const coordinator = byId.get("agent.coordinator");
+  assert.ok(coordinator);
+  assert.equal(coordinator.input.id, "request.dynamic-workflow-composition");
+  assert.equal(coordinator.output.id, "request.dynamic-workflow-proposal");
+  assert.deepEqual(coordinator.tools.allow, []);
+  assert.equal(coordinator.context.projectFiles, "none");
+  assert.equal(coordinator.limits.timeoutMs, 600_000);
+  assert.equal(coordinator.limits.maxTurns, undefined);
+  assert.equal(coordinator.limits.maxToolCalls, undefined);
+  assert.equal(coordinator.promptMode, undefined);
+  assert.match(coordinator.prompt.render(), /declarative workflow composer/);
 
   const stock = byId.get("session.stock");
   assert.ok(stock);
   assert.equal(stock.sessionMode, "stock");
+  assert.equal(stock.promptMode, undefined);
   assert.equal(stock.input.id, "request.stock-session");
   assert.equal(stock.output.id, "outcome.stock-session-handoff");
   assert.deepEqual(stock.tools.allow, []);
-  assert.equal(stock.promptMode, "default-only");
+  assert.deepEqual(stock.childCapabilities.invokableDefinitions, []);
+  assert.equal(stock.persistence, "file");
+  assert.equal(stock.prompt.render(), "PHENIX_STOCK_SESSION");
+
+  const attentionRouter = byId.get("agent.attention-router");
+  assert.ok(attentionRouter);
+  assert.equal(attentionRouter.input.id, "attention.routing-request");
+  assert.equal(attentionRouter.output.id, "attention.routing-decision");
+  assert.deepEqual(attentionRouter.tools.allow, []);
+});
+
+test("agent Markdown requires a complete difficulty model table", () => {
+  const incomplete = source("implementer").replace(
+    "| `D3` | `session` | `code-max` | `high` |\n",
+    "",
+  );
+  assert.throws(
+    () => compileAgentMarkdown(incomplete, { resolveSchema: resolveDefinitionSchema }),
+    /agent Models is missing D3/,
+  );
+});
+
+test("stock session Markdown rejects managed prompt composition", () => {
+  const invalid = source("stock").replace(
+    "persistence: file\n",
+    "persistence: file\nprompt-mode: append-default\n",
+  );
+  assert.throws(
+    () => compileAgentMarkdown(invalid, { resolveSchema: resolveDefinitionSchema }),
+    /Stock sessions use Pi's unmodified default prompt/,
+  );
+});
+
+test("agent Markdown fails closed on unknown schemas", () => {
+  assert.throws(
+    () =>
+      compileAgentMarkdown(source("scout").replace("request.scout", "request.missing"), {
+        resolveSchema: resolveDefinitionSchema,
+      }),
+    /Unknown definition schema request.missing/,
+  );
 });
