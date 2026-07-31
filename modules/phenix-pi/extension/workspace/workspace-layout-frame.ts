@@ -9,6 +9,7 @@ import type { PaneId, ViewId } from "../../domain/workspace/state.ts";
 import { fitViewLine, sliceViewLine } from "../components/index.ts";
 
 const SIDEBAR_MIN_WIDTH = 90;
+const CONVERSATION_GAP = 1;
 const RESET_BACKGROUND = "\x1b[49m";
 
 export interface WorkspaceDimensions {
@@ -49,12 +50,14 @@ export function computeWorkspaceDimensions(
 
 export function solveWorkspaceLayout(input: WorkspaceLayoutInput): LayoutResult {
   const dimensions = computeWorkspaceDimensions(input.width, input.height, input.sidebarRequested);
-  const editorHeight = clamp(input.editorHeight, 1, Math.max(1, input.height - 1));
-  const transcriptHeight = Math.max(1, input.height - editorHeight);
+  const gap = input.height >= 3 ? CONVERSATION_GAP : 0;
+  const editorHeight = clamp(input.editorHeight, 1, Math.max(1, input.height - gap - 1));
+  const transcriptHeight = Math.max(1, input.height - editorHeight - gap);
   const conversation = fixedVerticalConversation(
     dimensions.mainWidth,
     transcriptHeight,
     editorHeight,
+    gap,
   );
   const specification: LayoutNode = dimensions.sidebarVisible
     ? {
@@ -120,11 +123,12 @@ function fixedVerticalConversation(
   width: number,
   transcriptHeight: number,
   editorHeight: number,
+  gap: number,
 ): LayoutNode {
   return {
     kind: "split",
     axis: "vertical",
-    gap: 0,
+    gap,
     children: [
       {
         node: fixedPane("transcript", width, transcriptHeight),
