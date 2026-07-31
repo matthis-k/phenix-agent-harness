@@ -124,9 +124,6 @@ output-schema: outcome.base
   "mocks": {
     "reproduce": [{ "return": { "summary": "Reproduced", "evidence": [{ "path": "src/parser.ts", "finding": "targeted command fails" }], "risks": [] } }],
     "diagnose": [{ "return": { "summary": "Root cause identified", "findings": [{ "severity": "high", "title": "stale state", "evidence": "state survives reset" }] } }],
-    "estimate": [{ "return": { "difficulty": "D0", "summary": "Targeted repair", "signals": ["single bounded edit"] } }],
-    "implement": [{ "return": { "summary": "Reset parser state", "changedFiles": ["src/parser.ts"], "checks": [{ "command": "devenv test", "ok": true, "summary": "passed" }], "unresolved": [] } }],
-    "trivial-accept": [{ "return": { "accepted": true, "summary": "Targeted checks passed", "findings": [], "evidence": ["devenv test passed"] } }],
     "regression": [{ "return": { "summary": "Regression eliminated", "checks": [{ "command": "devenv test", "ok": true, "summary": "passed" }], "findings": [], "evidence": ["original scenario passes"] } }],
     "finalize": [{ "return": { "summary": "Debug complete", "artifacts": [], "unresolved": [] } }]
   },
