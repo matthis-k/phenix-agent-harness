@@ -22,10 +22,7 @@ test("tasks form an independent hierarchy with many-to-many run assignments", as
     wait: "background",
     taskIds: [goal.id],
   });
-  await Promise.all([
-    runtime.execution.await(first.runId),
-    runtime.execution.await(second.runId),
-  ]);
+  await Promise.all([runtime.execution.await(first.runId), runtime.execution.await(second.runId)]);
 
   const child = await runtime.tasks.addLocal({
     ownerRunId: first.runId,
@@ -37,11 +34,17 @@ test("tasks form an independent hierarchy with many-to-many run assignments", as
   const tree = await runtime.tasks.tree(runtime.rootRunId);
   const flattened = flatten(tree.root);
   const executionTasks = flattened.filter((task) => task.kind === "execution");
-  assert.deepEqual(executionTasks.map((task) => task.runId), [runtime.rootRunId]);
+  assert.deepEqual(
+    executionTasks.map((task) => task.runId),
+    [runtime.rootRunId],
+  );
 
   const goalNode = flattened.find((task) => task.id === goal.id);
   assert.ok(goalNode?.kind === "local");
-  assert.deepEqual(goalNode.children.map((task) => task.id), [child.id]);
+  assert.deepEqual(
+    goalNode.children.map((task) => task.id),
+    [child.id],
+  );
   assert.deepEqual(
     goalNode.assignedRuns.map((assignment) => assignment.runId),
     [first.runId, second.runId],
@@ -49,7 +52,10 @@ test("tasks form an independent hierarchy with many-to-many run assignments", as
 
   const childNode = flattened.find((task) => task.id === child.id);
   assert.ok(childNode?.kind === "local");
-  assert.deepEqual(childNode.assignedRuns.map((assignment) => assignment.runId), [second.runId]);
+  assert.deepEqual(
+    childNode.assignedRuns.map((assignment) => assignment.runId),
+    [second.runId],
+  );
 
   const secondTasks = await runtime.tasks.tasksFor(second.runId);
   assert.deepEqual(
