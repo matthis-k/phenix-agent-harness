@@ -12,6 +12,14 @@ import type { AgentToolFactory } from "./agent-tools.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import type { UserFormFacade } from "./user-form-service.ts";
 
+type UserFormSuggestionInput =
+  | string
+  | {
+      readonly label: string;
+      readonly value?: string;
+      readonly description?: string;
+    };
+
 interface UserFormParameters {
   readonly title: string;
   readonly description?: string;
@@ -24,14 +32,7 @@ interface UserFormParameters {
     readonly required?: boolean;
     readonly placeholder?: string;
     readonly initialAnswer?: string;
-    readonly suggestions?: Array<
-      | string
-      | {
-          readonly label: string;
-          readonly value?: string;
-          readonly description?: string;
-        }
-    >;
+    readonly suggestions?: UserFormSuggestionInput[];
   }>;
 }
 
@@ -119,11 +120,7 @@ function definitionFrom(params: UserFormParameters): UserFormDefinition {
   };
 }
 
-function normalizeSuggestion(
-  suggestion: UserFormParameters["questions"][number]["suggestions"] extends Array<infer Item>
-    ? Item
-    : never,
-): UserFormSuggestion {
+function normalizeSuggestion(suggestion: UserFormSuggestionInput): UserFormSuggestion {
   if (typeof suggestion === "string") {
     return { label: suggestion, value: suggestion };
   }
