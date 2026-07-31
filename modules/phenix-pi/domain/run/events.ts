@@ -74,12 +74,18 @@ export interface LocalTaskCreatedData {
   readonly task: {
     readonly id: LocalTaskId;
     readonly ownerRunId: RunId;
+    readonly parentTaskId?: LocalTaskId;
     readonly title: string;
     readonly description?: string;
     readonly state: "not_started" | "wip" | "done" | "failed";
     readonly createdAt: string;
     readonly updatedAt: string;
   };
+}
+
+export interface TaskRunAssignmentData {
+  readonly taskId: LocalTaskId;
+  readonly runId: RunId;
 }
 
 export type DomainEventType =
@@ -118,6 +124,8 @@ export type DomainEventType =
   | "workflow.checkpoint.saved"
   | "task.local.created"
   | "task.local.state.changed"
+  | "task.run.assigned"
+  | "task.run.unassigned"
   | "task.progress.appended";
 
 export type RunActivityChangedEvent = DomainEvent<"run.activity.changed", RunActivityChangedData>;
