@@ -138,9 +138,13 @@ export class ListView<T> {
     const selectedIndex = this.selectedIndex();
     this.offset = keepIndexVisible(this.offset, selectedIndex, viewportHeight, this.items.length);
     const visible = this.items.slice(this.offset, this.offset + viewportHeight);
+    const empty = this.items.length === 0;
     const lines = Array.from({ length: viewportHeight }, (_, row) => {
       const item = visible[row];
-      if (!item) return fitViewLine(this.renderEmpty(width), width);
+      if (!item) {
+        const filler = empty && row === 0 ? this.renderEmpty(width) : "";
+        return fitViewLine(filler, width);
+      }
       const index = this.offset + row;
       return fitViewLine(
         this.adapter.render(item, {
