@@ -1,12 +1,12 @@
 import { Type } from "typebox";
 
 import { defineSchema } from "../domain/definition/schema.ts";
+import type { RunId } from "../domain/shared.ts";
 import type {
   UserFormDefinition,
   UserFormSuggestion,
   UserFormUrgency,
 } from "../domain/user-form/model.ts";
-import type { RunId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import type { AgentToolFactory } from "./agent-tools.ts";
 import type { ExecutionStore } from "./execution-store.ts";
@@ -112,9 +112,7 @@ function definitionFrom(params: UserFormParameters): UserFormDefinition {
       ...(question.description !== undefined ? { description: question.description } : {}),
       required: question.required ?? false,
       ...(question.placeholder !== undefined ? { placeholder: question.placeholder } : {}),
-      ...(question.initialAnswer !== undefined
-        ? { initialAnswer: question.initialAnswer }
-        : {}),
+      ...(question.initialAnswer !== undefined ? { initialAnswer: question.initialAnswer } : {}),
       suggestions: (question.suggestions ?? []).map(normalizeSuggestion),
     })),
   };
