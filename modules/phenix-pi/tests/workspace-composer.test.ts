@@ -33,4 +33,22 @@ test("renders a focused input surface without persistent key hints", () => {
   assert.doesNotMatch(plain, /base|free|D1/);
   assert.doesNotMatch(plain, /tab|pgup|pgdn|native keys preserved/i);
   assert.doesNotMatch(plain, /────────/);
+  assert.equal(stripTranscriptAnsi(lines.at(-1) ?? "").trim(), "");
+});
+
+test("grows by one row when the first newline is added", () => {
+  const oneLine = renderWorkspaceComposer({
+    lines: ["────────", "first", "────────"],
+    width: 40,
+    active: true,
+    theme: THEME,
+  });
+  const twoLines = renderWorkspaceComposer({
+    lines: ["────────", "first", "second", "────────"],
+    width: 40,
+    active: true,
+    theme: THEME,
+  });
+
+  assert.equal(twoLines.length, oneLine.length + 1);
 });
