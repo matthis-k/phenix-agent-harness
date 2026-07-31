@@ -60,11 +60,24 @@ test("all bundled workflow graphs validate at startup", () => {
   }
 });
 
-test("only invariant procedures are declared as workflows", () => {
+test("the workflow catalog contains only bounded invariant procedures", () => {
+  const expectedWorkflowIds = [
+    "workflow.debug",
+    "workflow.design",
+    "workflow.implement",
+    "workflow.migrate",
+    "workflow.qa",
+    "workflow.refactor",
+    "workflow.research",
+    "workflow.review",
+    "workflow.security",
+    "workflow.ui-change",
+  ];
   assert.deepEqual(
-    workflowDefinitions.map((workflow) => workflow.id),
-    ["workflow.implement", "workflow.qa"],
+    workflowDefinitions.map((workflow) => workflow.id).sort(),
+    expectedWorkflowIds,
   );
+
   const qa = workflowDefinitions.find((workflow) => workflow.id === "workflow.qa");
   assert.ok(qa);
   assert.ok(
@@ -73,6 +86,18 @@ test("only invariant procedures are declared as workflows", () => {
   assert.ok(
     qa.graph.nodes.some((node) => node.kind === "invoke" && node.definition.id === "agent.tester"),
   );
+
+  const debug = workflowDefinitions.find((workflow) => workflow.id === "workflow.debug");
+  assert.ok(debug);
+  assert.ok(
+    debug.graph.nodes.some(
+      (node) => node.kind === "invoke" && node.definition.id === "workflow.implement",
+    ),
+  );
+
+  const research = workflowDefinitions.find((workflow) => workflow.id === "workflow.research");
+  assert.ok(research);
+  assert.ok(research.graph.nodes.some((node) => node.kind === "join"));
 });
 
 test("workflow function names are unique authorities", () => {
@@ -144,8 +169,12 @@ test("bundled definitions have explicit execution-authority classes", () => {
 });
 
 test("predefined dispatch routes reach command authority while the composer only references it", () => {
-  for (const id of ["workflow.qa", "workflow.implement"]) {
-    assert.equal(reachesCommandAuthority(id), true, `${id} cannot reach command authority`);
+  for (const workflow of workflowDefinitions) {
+    assert.equal(
+      reachesCommandAuthority(String(workflow.id)),
+      true,
+      `${workflow.id} cannot reach command authority`,
+    );
   }
 
   const composer = definitionsById.get("agent.coordinator");
