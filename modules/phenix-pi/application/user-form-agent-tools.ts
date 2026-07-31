@@ -4,6 +4,7 @@ import { defineSchema } from "../domain/definition/schema.ts";
 import type {
   UserFormDefinition,
   UserFormSuggestion,
+  UserFormUrgency,
 } from "../domain/user-form/model.ts";
 import type { RunId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
@@ -15,6 +16,7 @@ interface UserFormParameters {
   readonly title: string;
   readonly description?: string;
   readonly submitLabel?: string;
+  readonly urgency?: UserFormUrgency;
   readonly questions: Array<{
     readonly id: string;
     readonly prompt: string;
@@ -48,6 +50,7 @@ const userFormParameters = defineSchema<UserFormParameters>(
     title: Type.String({ minLength: 1, maxLength: 160 }),
     description: Type.Optional(Type.String({ maxLength: 2_000 })),
     submitLabel: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
+    urgency: Type.Optional(Type.Enum(["normal", "urgent"])),
     questions: Type.Array(
       Type.Object({
         id: Type.String({ minLength: 1, maxLength: 80 }),
@@ -77,7 +80,7 @@ export class UserFormAgentToolFactory implements AgentToolFactory {
       name: "phenix_userform",
       label: "Phenix User Form",
       description:
-        "Ask the operator several related questions in one modal form. Questions are fixed, only answer fields are editable, and each question may provide selectable suggestions that remain editable after selection. The call waits for a structured submitted or cancelled result. Prefer one coherent form over a sequence of chat questions when the answers can be collected together.",
+        "Queue one operator-facing form containing several related questions. Questions are fixed, only answer fields are editable, and each question may provide selectable suggestions that remain editable after selection. Forms never steal focus: they appear in the pending-form inbox and status line. The call waits for the operator to submit or cancel that specific form. Use urgency=urgent only when work is blocked and prompt operator attention is materially required.",
       parameters: userFormParameters,
       execute: async (raw, signal) => {
         const params = requireValid(raw);
@@ -85,6 +88,7 @@ export class UserFormAgentToolFactory implements AgentToolFactory {
           {
             rootRunId: this.store.projection.rootOf(runId),
             requestedByRunId: runId,
+            urgency: params.urgency ?? "normal",
             form: definitionFrom(params),
           },
           signal,
