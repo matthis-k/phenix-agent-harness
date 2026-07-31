@@ -1,5 +1,5 @@
-import { isTerminalRunState } from "../run/invariants.ts";
 import type { DomainEvent, TaskRunAssignmentData } from "../run/events.ts";
+import { isTerminalRunState } from "../run/invariants.ts";
 import type { RunRecord, RunState } from "../run/model.ts";
 import type { RunProjection } from "../run/reducer.ts";
 import type { LocalTaskId, RunId, TaskId, TaskState } from "../shared.ts";
