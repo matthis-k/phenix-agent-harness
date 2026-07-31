@@ -57,7 +57,7 @@ export interface TaskFacade {
   tasksFor(runId: RunId): Promise<readonly TaskNode[]>;
   addLocal(input: {
     readonly ownerRunId: RunId;
-    readonly parentTaskId?: LocalTaskId;
+    readonly parentId?: LocalTaskId;
     readonly title: string;
     readonly description?: string;
   }): Promise<LocalTask>;
