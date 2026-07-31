@@ -60,11 +60,21 @@ test("all bundled workflow graphs validate at startup", () => {
   }
 });
 
-test("only invariant procedures are declared as workflows", () => {
-  assert.deepEqual(
-    workflowDefinitions.map((workflow) => workflow.id),
-    ["workflow.implement", "workflow.qa"],
-  );
+test("the workflow catalog contains only bounded invariant procedures", () => {
+  const expectedWorkflowIds = [
+    "workflow.debug",
+    "workflow.design",
+    "workflow.implement",
+    "workflow.migrate",
+    "workflow.qa",
+    "workflow.refactor",
+    "workflow.research",
+    "workflow.review",
+    "workflow.security",
+    "workflow.ui-change",
+  ];
+  assert.deepEqual(workflowDefinitions.map((workflow) => workflow.id).sort(), expectedWorkflowIds);
+
   const qa = workflowDefinitions.find((workflow) => workflow.id === "workflow.qa");
   assert.ok(qa);
   assert.ok(
@@ -72,6 +82,37 @@ test("only invariant procedures are declared as workflows", () => {
   );
   assert.ok(
     qa.graph.nodes.some((node) => node.kind === "invoke" && node.definition.id === "agent.tester"),
+  );
+
+  const debug = workflowDefinitions.find((workflow) => workflow.id === "workflow.debug");
+  assert.ok(debug);
+  assert.ok(
+    debug.graph.nodes.some(
+      (node) => node.kind === "invoke" && node.definition.id === "agent.reproducer",
+    ),
+  );
+  assert.ok(
+    debug.graph.nodes.some(
+      (node) => node.kind === "invoke" && node.definition.id === "workflow.implement",
+    ),
+  );
+
+  const research = workflowDefinitions.find((workflow) => workflow.id === "workflow.research");
+  assert.ok(research);
+  assert.ok(research.graph.nodes.some((node) => node.kind === "join"));
+  assert.equal(
+    research.graph.nodes.filter(
+      (node) => node.kind === "invoke" && node.definition.id === "agent.researcher",
+    ).length,
+    3,
+  );
+
+  const security = workflowDefinitions.find((workflow) => workflow.id === "workflow.security");
+  assert.ok(security);
+  assert.ok(
+    security.graph.nodes.some(
+      (node) => node.kind === "invoke" && node.definition.id === "agent.threat-modeler",
+    ),
   );
 });
 
@@ -100,6 +141,9 @@ test("open-ended QA analysis agents omit fixed turn caps", () => {
 
 test("bundled definitions have explicit execution-authority classes", () => {
   const commandAgents = new Set([
+    "agent.reproducer",
+    "agent.researcher",
+    "agent.threat-modeler",
     "agent.tester",
     "agent.implementer",
     "agent.verifier",
@@ -144,8 +188,12 @@ test("bundled definitions have explicit execution-authority classes", () => {
 });
 
 test("predefined dispatch routes reach command authority while the composer only references it", () => {
-  for (const id of ["workflow.qa", "workflow.implement"]) {
-    assert.equal(reachesCommandAuthority(id), true, `${id} cannot reach command authority`);
+  for (const workflow of workflowDefinitions) {
+    assert.equal(
+      reachesCommandAuthority(String(workflow.id)),
+      true,
+      `${workflow.id} cannot reach command authority`,
+    );
   }
 
   const composer = definitionsById.get("agent.coordinator");
@@ -199,7 +247,15 @@ test("agent context inheritance is scoped to role needs", () => {
   }
 
   assert.equal(byId.get("agent.tester")?.context.maxBytes, 32_000);
-  for (const id of ["agent.scout", "agent.planner", "agent.architect", "agent.critic"]) {
+  for (const id of [
+    "agent.scout",
+    "agent.reproducer",
+    "agent.researcher",
+    "agent.threat-modeler",
+    "agent.planner",
+    "agent.architect",
+    "agent.critic",
+  ]) {
     const definition = byId.get(id);
     assert.ok(definition);
     assert.equal(definition.context.projectFiles, "inherit");
@@ -220,6 +276,9 @@ test("structured presentation is available only to operational Phenix agents", (
   );
   for (const id of [
     "agent.scout",
+    "agent.reproducer",
+    "agent.researcher",
+    "agent.threat-modeler",
     "agent.planner",
     "agent.architect",
     "agent.implementer",

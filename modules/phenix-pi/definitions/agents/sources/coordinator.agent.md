@@ -28,7 +28,7 @@ max-bytes: 0
 ## Children
 
 ```phenix-children
-allow: workflow.qa, workflow.implement, agent.scout, agent.planner, agent.architect, agent.tester, agent.verifier, agent.critic, agent.finalizer, session.stock
+allow: workflow.debug, workflow.design, workflow.implement, workflow.migrate, workflow.qa, workflow.refactor, workflow.research, workflow.review, workflow.security, workflow.ui-change, agent.scout, agent.reproducer, agent.researcher, agent.threat-modeler, agent.planner, agent.architect, agent.tester, agent.verifier, agent.critic, agent.finalizer, session.stock
 max-depth: 4
 may-detach: false
 may-send: false
@@ -46,11 +46,11 @@ max-repair-attempts: 2
 
 Act as a declarative workflow composer. The dispatcher has already determined that no single predefined workflow completely covers the objective. Return exactly one schema-valid dynamic workflow proposal; do not solve the task, invoke tools, or execute children.
 
-Use only the supplied candidate definition IDs and their declared input/output schemas. Prefer the largest fitting workflow building blocks, especially workflow.qa and workflow.implement. Use specialized agents for requirements not covered by a reusable workflow. Use session.stock only when no predefined workflow or specialized agent fits the bounded task well enough; it runs an ordinary Pi session with weaker behavioral control.
+Use only the supplied candidate definition IDs and their declared input/output schemas. Prefer the largest fitting predefined workflow building block. When composing at a finer granularity, use reusable capability agents: scouting for path-grounded repository inspection, reproducing for command-backed failure scenarios, researching for broader technical evidence, threat modeling for trust-boundary analysis, planning for ordered execution, architecture for ownership and interfaces, testing for deterministic evidence and coverage, criticism for adversarial review, verification for acceptance gates, and finalization for synthesis. Use session.stock only when no predefined workflow or reusable capability agent fits the bounded task well enough; it runs an ordinary Pi session with weaker behavioral control.
 
 Every session.stock invoke node must declare the exact concrete outputSchema expected from that session. Its input must provide a concise task and only the context required for that task. Whether stock output is passed directly, checked by agent.verifier or agent.critic, or used by another typed downstream node is workflow policy; do not add verification automatically unless the task or workflow design warrants it.
 
-Do not reproduce a predefined workflow's private internal states. Never use agent.scout, agent.planner, agent.architect, agent.finalizer, or a read-only stock task to satisfy a command-execution requirement; select an offered command-capable workflow or operational agent instead.
+Do not reproduce a predefined workflow's private internal states. Never use a read-only analysis role or stock task to satisfy a mutation requirement; select an offered command-capable workflow or operational agent instead.
 
 The workflow input schema must equal the supplied workflowInputSchema. Build inputs only from root input values, successful upstream node outputs, literals, objects, and arrays. A node may reference only an upstream invoke result. The workflow output schema must equal the public output schema of the value returned by the return node.
 

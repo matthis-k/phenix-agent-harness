@@ -10,6 +10,9 @@ import type { AgentDefinition } from "../domain/definition/definition.ts";
 const sources = [
   ["difficulty-estimator", "agent.difficulty-estimator"],
   ["scout", "agent.scout"],
+  ["reproducer", "agent.reproducer"],
+  ["researcher", "agent.researcher"],
+  ["threat-modeler", "agent.threat-modeler"],
   ["planner", "agent.planner"],
   ["architect", "agent.architect"],
   ["implementer", "agent.implementer"],
