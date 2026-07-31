@@ -1,3 +1,4 @@
+import type { RunId } from "../domain/shared.ts";
 import type {
   UserFormAnswer,
   UserFormCompletion,
@@ -11,7 +12,6 @@ import type {
   UserFormUrgency,
 } from "../domain/user-form/model.ts";
 import { userFormId } from "../domain/user-form/model.ts";
-import type { RunId } from "../domain/shared.ts";
 import type { Clock, IdGenerator } from "../ports/clock.ts";
 
 const MAX_QUESTIONS = 12;
