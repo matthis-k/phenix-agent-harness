@@ -45,7 +45,7 @@ output-schema: request.objective
 ```phenix-state
 kind: invoke
 title: Investigate repository and implementation evidence
-run: agent.scout
+run: agent.researcher
 input: research.repository.input
 input-schema: request.scout
 output-schema: outcome.scout-report
@@ -60,7 +60,7 @@ max-retries: 1
 ```phenix-state
 kind: invoke
 title: Investigate upstream, documentation, and prior-art evidence
-run: agent.scout
+run: agent.researcher
 input: research.ecosystem.input
 input-schema: request.scout
 output-schema: outcome.scout-report
@@ -75,7 +75,7 @@ max-retries: 1
 ```phenix-state
 kind: invoke
 title: Investigate constraints, risks, and counterexamples
-run: agent.scout
+run: agent.researcher
 input: research.constraints.input
 input-schema: request.scout
 output-schema: outcome.scout-report
