@@ -42,7 +42,7 @@ test("solves transcript, editor, and sidebar into one immutable frame", () => {
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  assert.deepEqual(paneRect(result.value, "transcript"), rect(0, 0, 91, 36));
+  assert.deepEqual(paneRect(result.value, "transcript"), rect(0, 0, 91, 35));
   assert.deepEqual(paneRect(result.value, "editor"), rect(0, 36, 91, 4));
   assert.deepEqual(paneRect(result.value, "runs"), rect(92, 0, 28, 40));
   assert.deepEqual(result.value.focusOrder, ["transcript", "editor"]);
@@ -59,7 +59,7 @@ test("omits the sidebar without changing conversation ownership", () => {
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  assert.deepEqual(paneRect(result.value, "transcript"), rect(0, 0, 80, 21));
+  assert.deepEqual(paneRect(result.value, "transcript"), rect(0, 0, 80, 20));
   assert.deepEqual(paneRect(result.value, "editor"), rect(0, 21, 80, 3));
   assert.equal(result.value.panes.has("runs"), false);
 });
@@ -107,13 +107,13 @@ test("composes pane-local lines into exact terminal rows with isolated backgroun
   if (!result.ok) return;
 
   const outputs = new Map<PaneId, { readonly lines: readonly string[] }>([
-    ["transcript", { lines: ["\x1b[41mone", "two", "three"] }],
+    ["transcript", { lines: ["\x1b[41mone", "two"] }],
     ["editor", { lines: ["> input"] }],
   ]);
   const lines = composeWorkspaceTextFrame(result.value, outputs);
   assert.deepEqual(
     lines.map((line) => line.replaceAll(RESET_BACKGROUND, "").replace("\x1b[41m", "")),
-    ["one         ", "two         ", "three       ", "> input     "],
+    ["one         ", "two         ", "            ", "> input     "],
   );
   assert.equal(lines.length, 4);
   assert.ok(lines.every((line) => line.startsWith(RESET_BACKGROUND)));
