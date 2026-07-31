@@ -57,6 +57,7 @@ export interface TaskFacade {
   tasksFor(runId: RunId): Promise<readonly TaskNode[]>;
   addLocal(input: {
     readonly ownerRunId: RunId;
+    readonly parentTaskId?: LocalTaskId;
     readonly title: string;
     readonly description?: string;
   }): Promise<LocalTask>;
@@ -64,6 +65,8 @@ export interface TaskFacade {
     taskId: LocalTaskId,
     state: "not_started" | "wip" | "done" | "failed",
   ): Promise<LocalTask>;
+  assignRun(taskId: LocalTaskId, runId: RunId): Promise<void>;
+  unassignRun(taskId: LocalTaskId, runId: RunId): Promise<void>;
   appendProgress(taskId: TaskId, message: string): Promise<void>;
 }
 
