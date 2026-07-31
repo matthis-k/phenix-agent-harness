@@ -1,6 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import type { WorkspaceRuntimeBinding } from "./workspace-runtime-binding.ts";
 import { subscribeWorkspaceRuntime } from "./workspace-runtime-binding.ts";
 
 const STATUS_KEY = "phenix";
@@ -16,7 +15,6 @@ export interface WorkspaceGenericStatusInput {
 
 export default function registerWorkspaceStatus(pi: ExtensionAPI): void {
   let context: ExtensionContext | undefined;
-  let binding: WorkspaceRuntimeBinding | undefined;
   let model: SelectedModel | undefined;
   let disposeRuntimeStatus: (() => void) | undefined;
 
@@ -28,7 +26,6 @@ export default function registerWorkspaceStatus(pi: ExtensionAPI): void {
   subscribeWorkspaceRuntime(pi.events, (next) => {
     disposeRuntimeStatus?.();
     disposeRuntimeStatus = undefined;
-    binding = next;
     if (next) {
       const subscriptions = [
         next.runtime.events.subscribe(refresh),
@@ -55,7 +52,6 @@ export default function registerWorkspaceStatus(pi: ExtensionAPI): void {
   pi.on("session_shutdown", (_event, ctx) => {
     disposeRuntimeStatus?.();
     disposeRuntimeStatus = undefined;
-    binding = undefined;
     model = undefined;
     context = undefined;
     ctx.ui.setStatus(STATUS_KEY, undefined);
