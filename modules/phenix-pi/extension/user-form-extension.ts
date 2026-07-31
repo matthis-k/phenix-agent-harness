@@ -175,7 +175,7 @@ async function openUserForm(
         keybindings,
         request,
         onClose: (completion) => {
-          binding.runtime.userForms.complete(request.id, completion);
+          if (completion) binding.runtime.userForms.complete(request.id, completion);
           done(undefined);
         },
       }),
