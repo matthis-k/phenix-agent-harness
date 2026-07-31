@@ -24,7 +24,6 @@ import {
 import { openUserFormInbox } from "./user-form-extension.ts";
 import { interruptActiveRootWork } from "./workspace/interrupt-active-work.ts";
 import { handoffNativeWorkspaceInput } from "./workspace/native-input-handoff.ts";
-import { renderWorkspaceTurn } from "./workspace/turn-indicator.ts";
 import { selectedWorkspaceInputTarget } from "./workspace/workspace-controller-adapter.ts";
 import {
   type NativeInputDelegation,
@@ -40,8 +39,6 @@ import {
   subscribeWorkspaceRuntime,
   type WorkspaceRuntimeBinding,
 } from "./workspace-runtime-binding.ts";
-
-const TURN_STATUS_KEY = "phenix-turn";
 
 type WorkspaceCompletion = PhenixWorkspaceAction & {
   readonly reopenWorkspace?: boolean;
@@ -59,29 +56,23 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
   let finish: ((action: WorkspaceCompletion) => void) | undefined;
   let opening = false;
   let rootTurnActive = false;
-  let turnRevision = 0;
-  let disposeTurnEvents: (() => void) | undefined;
 
   const requestOpen = (): void => {
     if (opening || workspace || context?.mode !== "tui" || !binding) return;
     void openWorkspaceLoop();
   };
 
-  const refreshTurn = (): void => {
-    void updateTurnIndicator();
+  const setRootTurnActive = (active: boolean): void => {
+    rootTurnActive = active;
+    workspace?.setRootTurnActive(active);
   };
 
   subscribeWorkspaceRuntime(pi.events, (next) => {
-    disposeTurnEvents?.();
-    disposeTurnEvents = undefined;
     binding = next;
     if (!next) {
-      context?.ui.setStatus(TURN_STATUS_KEY, undefined);
       finish?.({ kind: "close" });
       return;
     }
-    disposeTurnEvents = next.runtime.events.subscribe(refreshTurn);
-    refreshTurn();
     requestOpen();
   });
 
@@ -93,21 +84,18 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
         ctx.ui.notify("Phenix runtime is not initialized.", "warning");
         return;
       }
-      refreshTurn();
       requestOpen();
     },
   });
 
   pi.on("session_start", (_event, ctx) => {
     context = ctx;
-    rootTurnActive = false;
-    refreshTurn();
+    setRootTurnActive(false);
     requestOpen();
   });
 
   pi.on("agent_start", () => {
-    rootTurnActive = true;
-    refreshTurn();
+    setRootTurnActive(true);
   });
 
   pi.on("message_update", (event) => {
@@ -122,47 +110,16 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_end", () => {
-    rootTurnActive = false;
-    refreshTurn();
+    setRootTurnActive(false);
   });
 
   pi.on("session_shutdown", () => {
-    context?.ui.setStatus(TURN_STATUS_KEY, undefined);
-    disposeTurnEvents?.();
-    disposeTurnEvents = undefined;
     finish?.({ kind: "close" });
     workspace = undefined;
     context = undefined;
     binding = undefined;
     rootTurnActive = false;
   });
-
-  async function updateTurnIndicator(): Promise<void> {
-    const ctx = context;
-    const active = binding;
-    const revision = ++turnRevision;
-    if (!ctx || !active) {
-      ctx?.ui.setStatus(TURN_STATUS_KEY, undefined);
-      return;
-    }
-    try {
-      const descendants = (await active.runtime.queries.activeRuns(active.rootRunId)).filter(
-        (run) => run.id !== active.rootRunId,
-      ).length;
-      if (revision !== turnRevision || context !== ctx || binding !== active) return;
-      ctx.ui.setStatus(
-        TURN_STATUS_KEY,
-        renderWorkspaceTurn(ctx.ui.theme, {
-          rootActive: rootTurnActive,
-          activeDescendants: descendants,
-        }),
-      );
-    } catch {
-      if (revision === turnRevision && context === ctx) {
-        ctx.ui.setStatus(TURN_STATUS_KEY, undefined);
-      }
-    }
-  }
 
   async function openWorkspaceLoop(): Promise<void> {
     const ctx = context;
@@ -178,16 +135,15 @@ export default function defaultWorkspaceExtension(pi: ExtensionAPI): void {
           active,
           (instance, done) => {
             workspace = instance;
+            workspace.setRootTurnActive(rootTurnActive);
             finish = done;
           },
           {
             onSubmitStarted: () => {
-              rootTurnActive = true;
-              refreshTurn();
+              setRootTurnActive(true);
             },
             onSubmitFailed: () => {
-              rootTurnActive = false;
-              refreshTurn();
+              setRootTurnActive(false);
             },
           },
         );
