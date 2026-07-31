@@ -29,7 +29,7 @@ flowchart LR
 ```phenix-state
 kind: invoke
 title: Reproduce the reported behavior
-run: agent.scout
+run: agent.reproducer
 input: debug.reproduce.input
 input-schema: request.scout
 output-schema: outcome.scout-report
@@ -113,3 +113,21 @@ output-schema: outcome.base
 | `implement` | `regression` | | |
 | `regression` | `finalize` | | |
 | `finalize` | `return` | | |
+
+## Tests
+
+### repaired-regression
+
+```phenix-test
+{
+  "input": { "objective": "Fix an intermittent parser regression" },
+  "mocks": {
+    "reproduce": [{ "return": { "summary": "Reproduced", "evidence": [{ "path": "src/parser.ts", "finding": "targeted command fails" }], "risks": [] } }],
+    "diagnose": [{ "return": { "summary": "Root cause identified", "findings": [{ "severity": "high", "title": "stale state", "evidence": "state survives reset" }] } }],
+    "implement": [{ "return": { "summary": "Repaired", "changeSet": { "summary": "reset state", "changedFiles": ["src/parser.ts"], "checks": [{ "command": "devenv test", "ok": true, "summary": "passed" }], "unresolved": [] }, "verification": { "accepted": true, "summary": "accepted", "findings": [], "evidence": ["tests passed"] }, "attempts": 1 } }],
+    "regression": [{ "return": { "summary": "Regression eliminated", "checks": [{ "command": "devenv test", "ok": true, "summary": "passed" }], "findings": [], "evidence": ["original scenario passes"] } }],
+    "finalize": [{ "return": { "summary": "Debug complete", "artifacts": [], "unresolved": [] } }]
+  },
+  "expect": { "status": "success", "counts": { "reproduce": 1, "diagnose": 1, "implement": 1, "regression": 1, "finalize": 1, "return": 1 } }
+}
+```
