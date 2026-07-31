@@ -91,6 +91,7 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
     dynamicWorkflows,
     catalog,
     store,
+    tasks,
     invocationPolicy,
   });
   const tools = new FacadeAgentToolFactory({
