@@ -143,3 +143,22 @@ output-schema: outcome.base
 | `join` | `challenge` | | |
 | `challenge` | `finalize` | | |
 | `finalize` | `return` | | |
+
+## Tests
+
+### evidence-synthesis
+
+```phenix-test
+{
+  "input": { "objective": "Evaluate whether an integration is feasible" },
+  "mocks": {
+    "fanout": [{ "return": { "objective": "Evaluate whether an integration is feasible" } }],
+    "repository": [{ "return": { "summary": "Local implementation inspected", "evidence": [{ "path": "src/integration.ts", "finding": "existing seam is reusable" }], "risks": [] } }],
+    "ecosystem": [{ "return": { "summary": "Upstream capability confirmed", "evidence": [{ "path": "docs/upstream.md", "finding": "required event API exists" }], "risks": [] } }],
+    "constraints": [{ "return": { "summary": "Operational limits identified", "evidence": [{ "path": "src/runtime.ts", "finding": "boundary crossings should remain bounded" }], "risks": ["additional serialization cost"] } }],
+    "challenge": [{ "return": { "summary": "Evidence reconciled", "findings": [] } }],
+    "finalize": [{ "return": { "summary": "Integration is feasible with bounded crossings", "artifacts": [], "unresolved": [] } }]
+  },
+  "expect": { "status": "success", "counts": { "fanout": 1, "repository": 1, "ecosystem": 1, "constraints": 1, "join": 1, "challenge": 1, "finalize": 1, "return": 1 } }
+}
+```
