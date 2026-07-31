@@ -16,14 +16,30 @@ export const SESSION_STOCK = definitionId("session.stock");
 export const AGENT_QA_SYNTHESIZER = definitionId("agent.qa-synthesizer");
 export const AGENT_ATTENTION_ROUTER = definitionId("agent.attention-router");
 
+export const WORKFLOW_DEBUG = definitionId("workflow.debug");
+export const WORKFLOW_DESIGN = definitionId("workflow.design");
 export const WORKFLOW_IMPLEMENT = definitionId("workflow.implement");
+export const WORKFLOW_MIGRATE = definitionId("workflow.migrate");
 export const WORKFLOW_QA = definitionId("workflow.qa");
+export const WORKFLOW_REFACTOR = definitionId("workflow.refactor");
+export const WORKFLOW_RESEARCH = definitionId("workflow.research");
+export const WORKFLOW_REVIEW = definitionId("workflow.review");
+export const WORKFLOW_SECURITY = definitionId("workflow.security");
+export const WORKFLOW_UI_CHANGE = definitionId("workflow.ui-change");
 
 export const ROOT_DISPATCH_DEFINITION_IDS = [
   AGENT_DISPATCHER,
   AGENT_COORDINATOR,
+  WORKFLOW_DEBUG,
+  WORKFLOW_DESIGN,
   WORKFLOW_IMPLEMENT,
+  WORKFLOW_MIGRATE,
   WORKFLOW_QA,
+  WORKFLOW_REFACTOR,
+  WORKFLOW_RESEARCH,
+  WORKFLOW_REVIEW,
+  WORKFLOW_SECURITY,
+  WORKFLOW_UI_CHANGE,
 ] as const;
 
 export const ROOT_INTERNAL_DEFINITION_IDS = [
@@ -47,6 +63,14 @@ export const ALL_DEFINITION_IDS = [
   SESSION_STOCK,
   AGENT_QA_SYNTHESIZER,
   AGENT_ATTENTION_ROUTER,
+  WORKFLOW_DEBUG,
+  WORKFLOW_DESIGN,
   WORKFLOW_IMPLEMENT,
+  WORKFLOW_MIGRATE,
   WORKFLOW_QA,
+  WORKFLOW_REFACTOR,
+  WORKFLOW_RESEARCH,
+  WORKFLOW_REVIEW,
+  WORKFLOW_SECURITY,
+  WORKFLOW_UI_CHANGE,
 ] as const;
