@@ -460,11 +460,20 @@ function renderEditableValue(
   return truncateToWidth(visible.join(""), width);
 }
 
+const SUGGESTION_SHORTCUTS = [
+  "alt+a",
+  "alt+b",
+  "alt+c",
+  "alt+d",
+  "alt+e",
+  "alt+f",
+  "alt+g",
+  "alt+h",
+] as const;
+
 function suggestionShortcut(data: string): number | undefined {
-  for (let index = 0; index < 8; index += 1) {
-    if (matchesKey(data, `alt+${String.fromCharCode(97 + index)}`)) return index;
-  }
-  return undefined;
+  const index = SUGGESTION_SHORTCUTS.findIndex((key) => matchesKey(data, key));
+  return index >= 0 ? index : undefined;
 }
 
 function isPrintableInput(data: string): boolean {
