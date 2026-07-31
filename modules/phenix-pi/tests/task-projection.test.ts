@@ -29,7 +29,7 @@ test("tasks form an independent hierarchy with many-to-many run assignments", as
 
   const child = await runtime.tasks.addLocal({
     ownerRunId: first.runId,
-    parentTaskId: goal.id,
+    parentId: goal.id,
     title: "Verify interaction details",
   });
   await runtime.tasks.assignRun(child.id, second.runId);
