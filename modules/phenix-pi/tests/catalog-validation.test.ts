@@ -91,6 +91,11 @@ test("the workflow catalog contains only bounded invariant procedures", () => {
   assert.ok(debug);
   assert.ok(
     debug.graph.nodes.some(
+      (node) => node.kind === "invoke" && node.definition.id === "agent.reproducer",
+    ),
+  );
+  assert.ok(
+    debug.graph.nodes.some(
       (node) => node.kind === "invoke" && node.definition.id === "workflow.implement",
     ),
   );
@@ -98,6 +103,20 @@ test("the workflow catalog contains only bounded invariant procedures", () => {
   const research = workflowDefinitions.find((workflow) => workflow.id === "workflow.research");
   assert.ok(research);
   assert.ok(research.graph.nodes.some((node) => node.kind === "join"));
+  assert.equal(
+    research.graph.nodes.filter(
+      (node) => node.kind === "invoke" && node.definition.id === "agent.researcher",
+    ).length,
+    3,
+  );
+
+  const security = workflowDefinitions.find((workflow) => workflow.id === "workflow.security");
+  assert.ok(security);
+  assert.ok(
+    security.graph.nodes.some(
+      (node) => node.kind === "invoke" && node.definition.id === "agent.threat-modeler",
+    ),
+  );
 });
 
 test("workflow function names are unique authorities", () => {
@@ -125,6 +144,9 @@ test("open-ended QA analysis agents omit fixed turn caps", () => {
 
 test("bundled definitions have explicit execution-authority classes", () => {
   const commandAgents = new Set([
+    "agent.reproducer",
+    "agent.researcher",
+    "agent.threat-modeler",
     "agent.tester",
     "agent.implementer",
     "agent.verifier",
@@ -228,7 +250,15 @@ test("agent context inheritance is scoped to role needs", () => {
   }
 
   assert.equal(byId.get("agent.tester")?.context.maxBytes, 32_000);
-  for (const id of ["agent.scout", "agent.planner", "agent.architect", "agent.critic"]) {
+  for (const id of [
+    "agent.scout",
+    "agent.reproducer",
+    "agent.researcher",
+    "agent.threat-modeler",
+    "agent.planner",
+    "agent.architect",
+    "agent.critic",
+  ]) {
     const definition = byId.get(id);
     assert.ok(definition);
     assert.equal(definition.context.projectFiles, "inherit");
@@ -249,6 +279,9 @@ test("structured presentation is available only to operational Phenix agents", (
   );
   for (const id of [
     "agent.scout",
+    "agent.reproducer",
+    "agent.researcher",
+    "agent.threat-modeler",
     "agent.planner",
     "agent.architect",
     "agent.implementer",
