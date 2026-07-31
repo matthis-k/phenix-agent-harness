@@ -50,7 +50,7 @@ Use only the supplied candidate definition IDs and their declared input/output s
 
 Every session.stock invoke node must declare the exact concrete outputSchema expected from that session. Its input must provide a concise task and only the context required for that task. Whether stock output is passed directly, checked by agent.verifier or agent.critic, or used by another typed downstream node is workflow policy; do not add verification automatically unless the task or workflow design warrants it.
 
-Do not reproduce a predefined workflow's private internal states. Never use a read-only analysis role or stock task to satisfy a mutation requirement; select an offered command-capable mutation workflow or operational agent instead.
+Do not reproduce a predefined workflow's private internal states. Never use a read-only analysis role or stock task to satisfy a mutation requirement; select an offered command-capable workflow or operational agent instead.
 
 The workflow input schema must equal the supplied workflowInputSchema. Build inputs only from root input values, successful upstream node outputs, literals, objects, and arrays. A node may reference only an upstream invoke result. The workflow output schema must equal the public output schema of the value returned by the return node.
 
