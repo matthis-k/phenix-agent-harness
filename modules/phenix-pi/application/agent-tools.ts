@@ -130,8 +130,10 @@ const handleParameters = defineSchema<{
 );
 
 const taskParameters = defineSchema<{
-  action: "tree" | "list" | "add" | "set" | "progress";
+  action: "tree" | "list" | "add" | "set" | "assign" | "unassign" | "progress";
   taskId?: string;
+  parentTaskId?: string;
+  runId?: string;
   title?: string;
   description?: string;
   state?: "not_started" | "wip" | "done" | "failed";
@@ -139,8 +141,10 @@ const taskParameters = defineSchema<{
 }>(
   "tool.phenix-tasks",
   Type.Object({
-    action: Type.Enum(["tree", "list", "add", "set", "progress"]),
+    action: Type.Enum(["tree", "list", "add", "set", "assign", "unassign", "progress"]),
     taskId: Type.Optional(Type.String()),
+    parentTaskId: Type.Optional(Type.String()),
+    runId: Type.Optional(Type.String()),
     title: Type.Optional(Type.String()),
     description: Type.Optional(Type.String()),
     state: Type.Optional(Type.Enum(["not_started", "wip", "done", "failed"])),
@@ -437,10 +441,11 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       name: "phenix_tasks",
       label: "Phenix Tasks",
       description:
-        "Read the derived task tree or manage local task leaves owned by this run. Execution task anchors are read-only.",
+        "Read or manage the independent user-goal task tree. Tasks may nest independently of run ancestry, and assign/unassign links sessions or workflows to the goals they serve.",
       parameters: taskParameters,
       execute: async (raw) => {
         const params = requireValid(taskParameters, raw);
+        const caller = this.store.projection.requireRun(parentId);
         const root = this.store.projection.rootOf(parentId);
         if (params.action === "tree") {
           const tree = await this.tasks.tree(root);
@@ -454,23 +459,37 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
           if (!params.title?.trim()) throw new Error(`add requires title`);
           const task = await this.tasks.addLocal({
             ownerRunId: parentId,
+            ...(params.parentTaskId
+              ? { parentTaskId: localTaskId(params.parentTaskId) }
+              : {}),
             title: params.title,
             ...(params.description ? { description: params.description } : {}),
           });
           return { text: JSON.stringify(task), details: task };
         }
         if (!params.taskId) throw new Error(`${params.action} requires taskId`);
-        const task = this.store.projection.localTasks.get(localTaskId(params.taskId));
-        if (task && task.ownerRunId !== parentId) {
-          throw new Error(`Agents may mutate only their own local task leaves`);
-        }
-        if (params.action === "progress" && !task && params.taskId !== `run:${parentId}`) {
-          throw new Error(`Agents may append progress only to their own execution anchor`);
+        const taskId = localTaskId(params.taskId);
+        const task = this.store.projection.localTasks.get(taskId);
+        if (!task) throw new Error(`Unknown local task ${params.taskId}`);
+        if (task.ownerRunId !== parentId && caller.kind !== "root") {
+          throw new Error(`Only the root or task owner may mutate ${params.taskId}`);
         }
         if (params.action === "set") {
           if (!params.state) throw new Error(`set requires state`);
-          const updated = await this.tasks.setLocalState(localTaskId(params.taskId), params.state);
+          const updated = await this.tasks.setLocalState(taskId, params.state);
           return { text: JSON.stringify(updated), details: updated };
+        }
+        if (params.action === "assign" || params.action === "unassign") {
+          if (!params.runId) throw new Error(`${params.action} requires runId`);
+          const targetId = runId(params.runId);
+          this.assertAccessible(parentId, targetId);
+          if (params.action === "assign") await this.tasks.assignRun(taskId, targetId);
+          else await this.tasks.unassignRun(taskId, targetId);
+          return {
+            text: `${params.action === "assign" ? "Assigned" : "Unassigned"} ${targetId} ${
+              params.action === "assign" ? "to" : "from"
+            } ${taskId}.`,
+          };
         }
         if (!params.message?.trim()) throw new Error(`progress requires message`);
         await this.tasks.appendProgress(params.taskId as TaskId, params.message);
