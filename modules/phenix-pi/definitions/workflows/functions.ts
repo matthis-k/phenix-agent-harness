@@ -211,8 +211,9 @@ function registerDebugFunctions(registry: WorkflowFunctionRegistrar): void {
       ["reproduce", "diagnose", "implement", "regression"],
     ),
   );
-  registry.registerMapping("debug.output", (context): BaseResult =>
-    successAt<BaseResult>(context, "finalize"),
+  registry.registerMapping(
+    "debug.output",
+    (context): BaseResult => successAt<BaseResult>(context, "finalize"),
   );
 }
 
@@ -256,8 +257,9 @@ function registerRefactorFunctions(registry: WorkflowFunctionRegistrar): void {
       ["characterize", "architecture", "implement", "review"],
     ),
   );
-  registry.registerMapping("refactor.output", (context): BaseResult =>
-    successAt<BaseResult>(context, "finalize"),
+  registry.registerMapping(
+    "refactor.output",
+    (context): BaseResult => successAt<BaseResult>(context, "finalize"),
   );
 }
 
@@ -308,14 +310,16 @@ function registerMigrationFunctions(registry: WorkflowFunctionRegistrar): void {
       ["inventory", "plan", "implement", "audit"],
     ),
   );
-  registry.registerMapping("migrate.output", (context): BaseResult =>
-    successAt<BaseResult>(context, "finalize"),
+  registry.registerMapping(
+    "migrate.output",
+    (context): BaseResult => successAt<BaseResult>(context, "finalize"),
   );
 }
 
 function registerReviewFunctions(registry: WorkflowFunctionRegistrar): void {
-  registry.registerMapping("review.output", (context): QAReport =>
-    successAt<QAReport>(context, "review"),
+  registry.registerMapping(
+    "review.output",
+    (context): QAReport => successAt<QAReport>(context, "review"),
   );
 }
 
@@ -362,8 +366,9 @@ function registerDesignFunctions(registry: WorkflowFunctionRegistrar): void {
       ["inspect", "alternatives", "architecture", "critique"],
     ),
   );
-  registry.registerMapping("design.output", (context): BaseResult =>
-    successAt<BaseResult>(context, "finalize"),
+  registry.registerMapping(
+    "design.output",
+    (context): BaseResult => successAt<BaseResult>(context, "finalize"),
   );
 }
 
@@ -415,8 +420,9 @@ function registerUiChangeFunctions(registry: WorkflowFunctionRegistrar): void {
       ["inspect", "design", "implement", "scenarios", "critique"],
     ),
   );
-  registry.registerMapping("ui-change.output", (context): BaseResult =>
-    successAt<BaseResult>(context, "finalize"),
+  registry.registerMapping(
+    "ui-change.output",
+    (context): BaseResult => successAt<BaseResult>(context, "finalize"),
   );
 }
 
@@ -458,8 +464,9 @@ function registerResearchFunctions(registry: WorkflowFunctionRegistrar): void {
       ["repository", "ecosystem", "constraints", "challenge"],
     ),
   );
-  registry.registerMapping("research.output", (context): BaseResult =>
-    successAt<BaseResult>(context, "finalize"),
+  registry.registerMapping(
+    "research.output",
+    (context): BaseResult => successAt<BaseResult>(context, "finalize"),
   );
 }
 
@@ -495,8 +502,9 @@ function registerSecurityFunctions(registry: WorkflowFunctionRegistrar): void {
       ["surface", "threat-model", "adversarial"],
     ),
   );
-  registry.registerMapping("security.output", (context): BaseResult =>
-    successAt<BaseResult>(context, "finalize"),
+  registry.registerMapping(
+    "security.output",
+    (context): BaseResult => successAt<BaseResult>(context, "finalize"),
   );
 }
 
@@ -577,7 +585,10 @@ function finalizerInput(
 ): ObjectiveRequest {
   const input = objectiveInput(context);
   return {
-    objective: scopedObjective(input, `${instruction} This is the final handoff for workflow.${workflow}.`),
+    objective: scopedObjective(
+      input,
+      `${instruction} This is the final handoff for workflow.${workflow}.`,
+    ),
     context: workflowContext(context, artifactNodes),
   };
 }
@@ -600,10 +611,7 @@ function successfulArtifacts(
   return Object.fromEntries(nodes.map((node) => [node, successAt(context, node)]));
 }
 
-function criticFindingsAt(
-  context: WorkflowEvaluationContext,
-  node: string,
-): readonly string[] {
+function criticFindingsAt(context: WorkflowEvaluationContext, node: string): readonly string[] {
   return successAt<CriticReport>(context, node).findings.map(
     (finding) => `${finding.title}: ${finding.evidence}`,
   );
