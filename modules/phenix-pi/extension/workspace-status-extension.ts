@@ -4,7 +4,7 @@ import type { DiagnosticSummary } from "../domain/diagnostics.ts";
 import type { WorkspaceRuntimeBinding } from "./workspace-runtime-binding.ts";
 import { subscribeWorkspaceRuntime } from "./workspace-runtime-binding.ts";
 
-const STATUS_KEY = "00-workspace";
+const STATUS_KEY = "phenix";
 
 interface SelectedModel {
   readonly provider: string;
