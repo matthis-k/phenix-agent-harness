@@ -72,12 +72,12 @@ export function projectTaskTree(
   const byId = new Map(tasks.map((task) => [task.id, task]));
   const children = new Map<LocalTaskId | undefined, LocalTask[]>();
   for (const task of tasks) {
-    if (task.parentTaskId && !byId.has(task.parentTaskId)) {
-      throw new Error(`Task ${task.id} references unknown parent ${task.parentTaskId}`);
+    if (task.parentId && !byId.has(task.parentId)) {
+      throw new Error(`Task ${task.id} references unknown parent ${task.parentId}`);
     }
-    const siblings = children.get(task.parentTaskId) ?? [];
+    const siblings = children.get(task.parentId) ?? [];
     siblings.push(task);
-    children.set(task.parentTaskId, siblings);
+    children.set(task.parentId, siblings);
   }
 
   const assignments = taskAssignments(projection, rootRunId);
