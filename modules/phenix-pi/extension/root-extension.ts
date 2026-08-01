@@ -16,6 +16,7 @@ import {
 } from "../adapters/pi-sdk/integrations.ts";
 import { registerPhenixProvider } from "../adapters/routing/phenix-provider.ts";
 import { createPhenixRuntime, type PhenixRuntime } from "../composition/create-phenix-runtime.ts";
+import { BUDGET_MODES, isBudgetMode } from "../domain/definition/effort.ts";
 import { isPhenixModelSet, PHENIX_MODEL_SETS } from "../domain/definition/model.ts";
 import {
   DEFAULT_SESSION_PROFILE,
@@ -26,6 +27,7 @@ import {
 } from "../domain/run/model.ts";
 import { type RunId, runId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
+import { subscribeBudgetModeSelection } from "./budget-mode-selection.ts";
 import { copyFactHistory, parseFactsCommand, writeFactHistory } from "./fact-export.ts";
 import {
   formatPhenixHealth,
@@ -68,6 +70,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
   let runtime: PhenixRuntime | undefined;
   let rootRunId: RunId | undefined;
   let modelRegistry: ModelRegistry | undefined;
+  let usesPhenixBudget = false;
   let toolsRegistered = false;
   let disposeStatus: (() => void) | undefined;
   let monitor: RunMonitor | undefined;
@@ -81,6 +84,12 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
       return runtime.profiles.current(rootRunId);
     },
   });
+  subscribeBudgetModeSelection(pi.events, (budget) => {
+    void (async () => {
+      if (!runtime || !rootRunId) return;
+      await runtime.profiles.select(rootRunId, { budget, source: "user" });
+    })();
+  });
   integrationStatuses = await loadPiIntegrations(pi);
 
   pi.on("session_start", async (_event, ctx) => {
@@ -89,6 +98,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
     runtime = undefined;
     rootRunId = undefined;
     modelRegistry = ctx.modelRegistry;
+    usesPhenixBudget = ctx.model?.provider === "phenix";
     disposeStatus?.();
     disposeStatus = undefined;
     monitor?.dispose();
@@ -136,6 +146,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
         modelSet: ctx.model.id,
         source: "model-select",
       });
+      pi.setThinkingLevel((await currentRuntime.profiles.current(currentRoot)).budget);
     }
 
     await Promise.all(
@@ -197,6 +208,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
 
   pi.on("before_agent_start", async (event) => {
     if (!runtime || !rootRunId) return;
+    if (usesPhenixBudget) await syncBudgetFromThinking(pi, runtime, rootRunId);
     const [available, active, profile] = await Promise.all([
       runtime.catalog.listAvailable(rootRunId),
       runtime.queries.activeRuns(rootRunId),
@@ -208,7 +220,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
       .map((run) => `${run.id}:${run.state}`)
       .join(", ");
     return {
-      systemPrompt: `${event.systemPrompt}\n\n${agentInstructions(profile.agent)}\n\nPhenix execution scope:\n- Session profile: agent=${profile.agent}, modelSet=${profile.modelSet}, difficulty=${profile.difficulty}.\n- Directly answer only simple read-only questions.\n- Cross-session project planning is supervisory state, not repository execution. When the user asks to plan work too large for one session, conduct the destination interview directly and use phenix_project instead of dispatching the charting conversation.\n- Before creating a project, pin the destination outcome, concrete use case, completion criteria, and non-goals. Then map the space breadth-first into decision questions, explicit dependencies, and fog that is not yet precise enough to ticket. Plan by default; do not silently turn decision tickets into implementation slices.\n- Every resolved project decision must record its answer, rationale, evidence, consequences, and run provenance. A claimed child may use phenix_project request_input to focus the user without inheriting the root conversation; the root answers by intervention ID.\n- All other substantial work MUST use phenix_dispatch with mode=auto so the mandatory selector chooses from the current capability-filtered catalog descriptions.\n- Do not choose qa, implement, or coordinate yourself unless the user explicitly requests that operator override.\n- The selector should prefer the most specific invariant workflow and use the generic coordinator only when no single workflow covers the whole request or execution depends on intermediate results.\n- Never reproduce an invariant workflow manually; phenix_dispatch is the only root execution entry point.\n- When any descendant fails, inform the user immediately, inspect the structured failure and cause run, then decide whether to retry with phenix_handle, dispatch a better-suited workflow, request user input, or stop.\n- Retry only with bounded settings and the minimum additional permissions needed; recovery may add read/search tools or explicitly escalate to bash, but never add edit/write directly to a read-only task; report every escalation to the user.\n- Available definitions: ${capabilities || "none"}.\n- Active descendant handles: ${handles || "none"}.\n- A background child remains attached. Use phenix_handle to inspect, await, send, or cancel it.\n- Use phenix_tasks only for local leaves; execution anchors are derived and read-only.\n- Use phenix_render_mermaid for user-facing flowcharts, sequence diagrams, state diagrams, and architecture sketches instead of manually aligned terminal art.`,
+      systemPrompt: `${event.systemPrompt}\n\n${agentInstructions(profile.agent)}\n\nPhenix execution scope:\n- Session profile: agent=${profile.agent}, modelSet=${profile.modelSet}, budget=${profile.budget}. Default difficulty=${profile.difficulty}; every child run records its own effective difficulty.\n- Directly answer only simple read-only questions.\n- Cross-session project planning is supervisory state, not repository execution. When the user asks to plan work too large for one session, conduct the destination interview directly and use phenix_project instead of dispatching the charting conversation.\n- Before creating a project, pin the destination outcome, concrete use case, completion criteria, and non-goals. Then map the space breadth-first into decision questions, explicit dependencies, and fog that is not yet precise enough to ticket. Plan by default; do not silently turn decision tickets into implementation slices.\n- Every resolved project decision must record its answer, rationale, evidence, consequences, and run provenance. A claimed child may use phenix_project request_input to focus the user without inheriting the root conversation; the root answers by intervention ID.\n- All other substantial work MUST use phenix_dispatch with mode=auto so the mandatory selector chooses from the current capability-filtered catalog descriptions.\n- Do not choose qa, implement, or coordinate yourself unless the user explicitly requests that operator override.\n- The selector should prefer the most specific invariant workflow and use the generic coordinator only when no single workflow covers the whole request or execution depends on intermediate results.\n- Never reproduce an invariant workflow manually; phenix_dispatch is the only root execution entry point.\n- When any descendant fails, inform the user immediately, inspect the structured failure and cause run, then decide whether to retry with phenix_handle, dispatch a better-suited workflow, request user input, or stop.\n- Retry only with bounded settings and the minimum additional permissions needed; recovery may add read/search tools or explicitly escalate to bash, but never add edit/write directly to a read-only task; report every escalation to the user.\n- Available definitions: ${capabilities || "none"}.\n- Active descendant handles: ${handles || "none"}.\n- A background child remains attached. Use phenix_handle to inspect, await, send, or cancel it.\n- Use phenix_tasks only for local leaves; execution anchors are derived and read-only.\n- Use phenix_render_mermaid for user-facing flowcharts, sequence diagrams, state diagrams, and architecture sketches instead of manually aligned terminal art.`,
     };
   });
 
@@ -218,12 +230,14 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
   });
 
   pi.on("model_select", async (event) => {
+    usesPhenixBudget = event.model.provider === "phenix";
     if (!runtime || !rootRunId) return;
     if (event.model.provider === "phenix" && isPhenixModelSet(event.model.id)) {
       await runtime.profiles.select(rootRunId, {
         modelSet: event.model.id,
         source: "model-select",
       });
+      pi.setThinkingLevel((await runtime.profiles.current(rootRunId)).budget);
       return;
     }
     await runtime.observeRootModel(rootRunId, concreteModel(event.model.provider, event.model.id));
@@ -236,6 +250,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
     runtime = undefined;
     rootRunId = undefined;
     modelRegistry = undefined;
+    usesPhenixBudget = false;
     disposeStatus?.();
     disposeStatus = undefined;
     monitor?.dispose();
@@ -306,6 +321,25 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
     },
   });
 
+  pi.registerCommand("budget", {
+    description: `Select the session execution budget; usage: /budget ${BUDGET_MODES.join("|")}`,
+    handler: async (args, ctx) => {
+      const active = requireRuntime(runtime, rootRunId);
+      const selected = args.trim().toLowerCase();
+      if (!isBudgetMode(selected)) {
+        const profile = await active.runtime.profiles.current(active.root);
+        ctx.ui.notify(
+          `Budget: ${profile.budget}\nAvailable: ${BUDGET_MODES.join(", ")}`,
+          selected ? "warning" : "info",
+        );
+        return;
+      }
+      await active.runtime.profiles.select(active.root, { budget: selected, source: "user" });
+      pi.setThinkingLevel(selected);
+      await updateStatus(ctx, active.runtime, active.root);
+    },
+  });
+
   pi.registerCommand("difficulty", {
     description: "Select routed reasoning difficulty; usage: /difficulty D0|D1|D2|D3",
     handler: async (args, ctx) => {
@@ -323,7 +357,6 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
         difficulty: selected,
         source: "user",
       });
-      pi.setThinkingLevel(thinkingForDifficulty(selected));
       await updateStatus(ctx, active.runtime, active.root);
     },
   });
@@ -702,14 +735,16 @@ function isDifficulty(value: string): value is SessionProfile["difficulty"] {
   return ["D0", "D1", "D2", "D3"].includes(value);
 }
 
-function thinkingForDifficulty(difficulty: SessionProfile["difficulty"]) {
-  return difficulty === "D0"
-    ? "minimal"
-    : difficulty === "D1"
-      ? "low"
-      : difficulty === "D2"
-        ? "high"
-        : "xhigh";
+async function syncBudgetFromThinking(
+  pi: ExtensionAPI,
+  runtime: PhenixRuntime,
+  rootRunId: RunId,
+): Promise<void> {
+  const selected = pi.getThinkingLevel();
+  if (!isBudgetMode(selected)) return;
+  const profile = await runtime.profiles.current(rootRunId);
+  if (profile.budget === selected) return;
+  await runtime.profiles.select(rootRunId, { budget: selected, source: "user" });
 }
 
 function integrationLevel(statuses: readonly IntegrationStatus[]): "info" | "warning" {

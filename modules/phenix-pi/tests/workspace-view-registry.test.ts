@@ -89,9 +89,9 @@ test("run rows disclose model profile and session metadata only when expanded", 
     ...baseRoot,
     run: {
       ...baseRoot.run,
-      profile: { agent: "base", modelSet: "free", difficulty: "D1" },
+      profile: { agent: "base", modelSet: "free", difficulty: "D1", budget: "high" },
       pi: { sessionId: "session-123" },
-    } as RunSnapshot,
+    } as unknown as RunSnapshot,
   } satisfies RunTreeNode;
   const snapshot = {
     ui: { tree: { root }, facts: [] },
@@ -106,7 +106,7 @@ test("run rows disclose model profile and session metadata only when expanded", 
     activeRunId: root.run.id,
     expanded: false,
   }).text;
-  assert.doesNotMatch(collapsed, /free\/D1|session-123/);
+  assert.doesNotMatch(collapsed, /free|budget-high|session-123|D1/);
 
   const expanded = row.render({
     theme: THEME,
@@ -114,8 +114,35 @@ test("run rows disclose model profile and session metadata only when expanded", 
     activeRunId: root.run.id,
     expanded: true,
   }).text;
-  assert.match(expanded, /free\/D1/);
+  assert.match(expanded, /free\/budget-high/);
   assert.match(expanded, /session session-123/);
+});
+
+test("agent session rows show their own compiled difficulty while collapsed", () => {
+  const childBase = runNode("child", "running");
+  const child = {
+    ...childBase,
+    run: {
+      ...childBase.run,
+      compiled: { ...childBase.run.compiled, difficulty: "D2", budget: "high" },
+    } as unknown as RunSnapshot,
+  } satisfies RunTreeNode;
+  const root = runNode("root", "running", [child], "root");
+  const snapshot = {
+    ui: { tree: { root }, facts: [] },
+    tasks: { root: taskNode("root-task", "wip") },
+  } as unknown as PhenixWorkspaceSnapshot;
+  const row = runsWorkspaceView.project(snapshot).find((candidate) => candidate.id === "child");
+  assert.ok(row);
+
+  const collapsed = row.render({
+    theme: THEME,
+    width: 120,
+    activeRunId: root.run.id,
+    expanded: false,
+  }).text;
+  assert.match(collapsed, /D2/);
+  assert.doesNotMatch(collapsed, /budget high/);
 });
 
 test("run rows surface normal and urgent input requirements", () => {
@@ -230,7 +257,22 @@ function runNode(
       kind,
       state,
       definitionId: kind === "root" ? "session.root" : "agent.test",
-    } as RunSnapshot,
+      compiled: {
+        definitionId: kind === "root" ? "session.root" : "agent.test",
+        input: {},
+        outputSchemaId: "test.output",
+        tools: [],
+        limits: { timeoutMs: 60_000 },
+        capabilities: {
+          invokableDefinitions: [],
+          maxDepth: 1,
+          mayDetach: false,
+          maySend: false,
+          mayCancelChildren: false,
+        },
+        invocation: { wait: "await" },
+      },
+    } as unknown as RunSnapshot,
     children,
   };
 }

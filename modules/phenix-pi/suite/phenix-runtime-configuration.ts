@@ -9,9 +9,11 @@ import {
   defineRuntimeConfiguration,
   type RuntimeConfiguration,
 } from "../framework/runtime-configuration.ts";
+import { phenixBudgetPolicy } from "./phenix-budget-policy.ts";
 import { defaultRoutingPolicy } from "./phenix-routing-policy.ts";
 
 export const phenixRuntimeConfiguration: RuntimeConfiguration = defineRuntimeConfiguration({
+  budgetPolicy: phenixBudgetPolicy,
   catalog: {
     definitions: [...agentDefinitions, ...workflowDefinitions],
     registerWorkflowFunctions,

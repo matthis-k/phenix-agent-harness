@@ -22,6 +22,7 @@ import { WorkflowCheckpointProcessManager } from "../application/workflow-checkp
 import { WorkflowProcessManager } from "../application/workflow-process-manager.ts";
 import type { Schema } from "../domain/definition/schema.ts";
 import type { DefinitionId } from "../domain/shared.ts";
+import type { BudgetPolicy } from "../ports/budget-policy.ts";
 import type { Clock, IdGenerator } from "../ports/clock.ts";
 import type { LocalOperationRunner } from "../ports/local-operation-runner.ts";
 import type { ModelResolver } from "../ports/model-resolver.ts";
@@ -34,6 +35,7 @@ interface ExecutionKernelDependencies {
   readonly projects?: ProjectPlannerFacade;
   readonly userForms?: UserFormFacade;
   readonly models: ModelResolver;
+  readonly budgetPolicy?: BudgetPolicy;
   readonly ids: IdGenerator;
   readonly clock: Clock;
   readonly cwd: string;
@@ -73,6 +75,7 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
     catalog: definitions,
     store,
     models,
+    ...(input.budgetPolicy ? { budgetPolicy: input.budgetPolicy } : {}),
     ids,
     clock,
     ...(input.rootInvokableDefinitions !== undefined

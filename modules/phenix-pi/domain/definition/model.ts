@@ -1,4 +1,6 @@
-export type PiThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+import type { BudgetMode, EffortLevel } from "./effort.ts";
+
+export type PiThinkingLevel = EffortLevel;
 
 export const PHENIX_MODEL_SETS = ["free", "opencode-go", "chatgpt-plus", "mixed"] as const;
 export type PhenixModelSetId = (typeof PHENIX_MODEL_SETS)[number];
@@ -53,6 +55,7 @@ export interface ModelResolutionContext {
   readonly thinking: ThinkingPolicy;
   readonly modelSet?: PhenixModelSetId;
   readonly difficulty?: Difficulty;
+  readonly budget?: BudgetMode;
   readonly capability?: ModelCapability;
 }
 
@@ -63,7 +66,6 @@ export interface ResolvedModel {
   readonly thinking: PiThinkingLevel;
   readonly capability?: ModelCapability;
   readonly pool?: string;
-  readonly policyRevision: string;
 }
 
 export function isDifficulty(value: string): value is Difficulty {

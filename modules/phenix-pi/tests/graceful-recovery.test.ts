@@ -110,7 +110,6 @@ test("agent failure reports remain inspectable and can be retried with bounded o
           requested: selector,
           concrete: { kind: "concrete", provider: "test", model: "model" },
           thinking: "medium",
-          policyRevision: "test",
         };
       },
     },

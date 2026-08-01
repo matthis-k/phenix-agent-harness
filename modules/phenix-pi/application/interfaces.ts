@@ -1,5 +1,6 @@
 import type { AttentionResult, AttentionSubmitRequest } from "../domain/attention/model.ts";
 import type { Definition, DefinitionRef } from "../domain/definition/definition.ts";
+import type { BudgetMode } from "../domain/definition/effort.ts";
 import type { Difficulty, PhenixModelSetId } from "../domain/definition/model.ts";
 import type { DomainEvent } from "../domain/run/events.ts";
 import type {
@@ -44,6 +45,7 @@ export interface SessionProfileUpdate {
   readonly agent?: SessionAgentPreset;
   readonly modelSet?: PhenixModelSetId;
   readonly difficulty?: Difficulty;
+  readonly budget?: BudgetMode;
   readonly source: "user" | "model-select" | "policy";
 }
 

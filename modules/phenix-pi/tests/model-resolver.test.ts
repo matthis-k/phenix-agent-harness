@@ -37,7 +37,6 @@ test("virtual mixed model resolves once to the first authenticated capability ca
   if (result.requested.kind === "virtual") assert.equal(result.requested.model, "mixed");
   assert.equal(result.capability, "code");
   assert.equal(result.thinking, "low");
-  assert.equal(result.policyRevision, "phenix-routing-v3");
 });
 
 test("a definition-declared capability overrides role fallback routing", async () => {

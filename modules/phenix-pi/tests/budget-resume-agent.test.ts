@@ -19,7 +19,7 @@ import { AGENT_BASE } from "../definitions/ids.ts";
 import { registerWorkflowFunctions } from "../definitions/workflows/functions.ts";
 import { workflowDefinitions } from "../definitions/workflows/index.ts";
 import { definitionRef } from "../domain/definition/definition.ts";
-import type { RunRetryLimitOverrides } from "../domain/run/model.ts";
+import type { RunLimits, RunRetryLimitOverrides } from "../domain/run/model.ts";
 import type { RunId } from "../domain/shared.ts";
 import type {
   AgentSessionBackend,
@@ -114,7 +114,6 @@ test("resource-limit reports suspend and resume the original child session", asy
           requested: selector,
           concrete: { kind: "concrete", provider: "test", model: "model" },
           thinking: "medium",
-          policyRevision: "test",
         };
       },
     },
@@ -184,12 +183,7 @@ test("resource-limit reports suspend and resume the original child session", asy
   await execution.cancel(handle.id, "test cleanup");
 });
 
-function increasedLimit(limits: {
-  readonly timeoutMs: number;
-  readonly maxTurns?: number;
-  readonly maxToolCalls?: number;
-  readonly maxRepairAttempts?: number;
-}): RunRetryLimitOverrides {
+function increasedLimit(limits: RunLimits): RunRetryLimitOverrides {
   if (limits.maxTurns !== undefined && limits.maxTurns < 200) {
     return { maxTurns: limits.maxTurns + 1 };
   }
@@ -199,7 +193,7 @@ function increasedLimit(limits: {
   if (limits.maxRepairAttempts !== undefined && limits.maxRepairAttempts < 10) {
     return { maxRepairAttempts: limits.maxRepairAttempts + 1 };
   }
-  if (limits.timeoutMs > 0 && limits.timeoutMs < 3_600_000) {
+  if (limits.timeoutMs !== undefined && limits.timeoutMs > 0 && limits.timeoutMs < 3_600_000) {
     return { timeoutMs: Math.min(3_600_000, limits.timeoutMs + 60_000) };
   }
   throw new Error("Agent definition has no bounded budget that can be increased for this test");

@@ -13,7 +13,7 @@ export interface BudgetSuspension {
   readonly failure: Failure;
   readonly currentLimits: RunLimits;
   readonly suggestedLimits: RunRetryLimitOverrides;
-  readonly timeoutRemainingMs: number;
+  readonly timeoutRemainingMs?: number;
   readonly turnCount: number;
   readonly toolCallCount: number;
   readonly timestamp: string;
@@ -33,14 +33,14 @@ interface BudgetSuspendedData {
   readonly failure: Failure;
   readonly currentLimits: RunLimits;
   readonly suggestedLimits: RunRetryLimitOverrides;
-  readonly timeoutRemainingMs: number;
+  readonly timeoutRemainingMs?: number;
   readonly turnCount: number;
   readonly toolCallCount: number;
 }
 
 interface BudgetResumedData {
   readonly limits: RunLimits;
-  readonly timeoutRemainingMs: number;
+  readonly timeoutRemainingMs?: number;
 }
 
 export function budgetSuspendedEvent(runId: RunId, data: BudgetSuspendedData): PendingDomainEvent {
@@ -138,7 +138,7 @@ export function resolveResumeLimits(
   const current = suspension.currentLimits;
   const timeoutMs = resolveTimeoutLimit(current.timeoutMs, selected.timeoutMs);
   const next: RunLimits = {
-    timeoutMs,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
     ...resolveOptionalLimit("maxTurns", current.maxTurns, selected.maxTurns),
     ...resolveOptionalLimit("maxToolCalls", current.maxToolCalls, selected.maxToolCalls),
     ...resolveRepairLimit(current.maxRepairAttempts, selected.maxRepairAttempts),
@@ -160,10 +160,15 @@ export function resolveResumeLimits(
 export function resumedTimeoutRemaining(
   suspension: BudgetSuspension,
   nextLimits: RunLimits,
-): number {
-  if (suspension.currentLimits.timeoutMs <= 0) return suspension.timeoutRemainingMs;
-  const added = Math.max(0, nextLimits.timeoutMs - suspension.currentLimits.timeoutMs);
-  return Math.max(0, suspension.timeoutRemainingMs + added);
+): number | undefined {
+  const currentTimeout = suspension.currentLimits.timeoutMs;
+  const nextTimeout = nextLimits.timeoutMs;
+  if (currentTimeout === undefined || nextTimeout === undefined) {
+    return suspension.timeoutRemainingMs;
+  }
+  if (currentTimeout <= 0) return suspension.timeoutRemainingMs;
+  const added = Math.max(0, nextTimeout - currentTimeout);
+  return Math.max(0, (suspension.timeoutRemainingMs ?? currentTimeout) + added);
 }
 
 export async function awaitOutcomeOrBudget<O>(input: {
@@ -241,9 +246,12 @@ function parseLimitOverrides(value: unknown): RunRetryLimitOverrides | undefined
   };
 }
 
-function resolveTimeoutLimit(current: number, requested: number | undefined): number {
+function resolveTimeoutLimit(
+  current: number | undefined,
+  requested: number | undefined,
+): number | undefined {
   if (requested === undefined) return current;
-  if (current <= 0) {
+  if (current === undefined || current <= 0) {
     throw new Error("timeoutMs is already unbounded and may not be replaced by a finite limit");
   }
   if (requested < current) throw new Error(`timeoutMs may not decrease from ${current}`);
@@ -275,8 +283,8 @@ function resolveRepairLimit(
   return { maxRepairAttempts: requested };
 }
 
-function timeoutIncreased(current: number, next: number): boolean {
-  return current > 0 && next > current;
+function timeoutIncreased(current: number | undefined, next: number | undefined): boolean {
+  return current !== undefined && next !== undefined && current > 0 && next > current;
 }
 
 function increasedOptional(current: number | undefined, next: number | undefined): boolean {

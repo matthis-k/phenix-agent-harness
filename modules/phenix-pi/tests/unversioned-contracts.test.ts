@@ -7,18 +7,29 @@ import { fileURLToPath } from "node:url";
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const versionedContractId = /\b(?:request|outcome|tool)\.[a-z0-9.-]+\.v\d+\b/;
 const versionedTypeName = /\b[A-Za-z_][A-Za-z0-9_]*V\d+\b/;
+const versionedRoutingMetadata = new RegExp(
+  `${["policy", "Revision"].join("")}|phenix-routing-v\\d+`,
+);
+const fixedProductionApiVersion = /^\s*(?:readonly\s+)?version:\s*\d+[,;]\s*$/;
 
-test("contract identifiers and interface names are unversioned", () => {
-  const violations = sourceFiles(packageRoot).flatMap((file) =>
-    readFileSync(file, "utf8")
+test("Phenix contracts and API metadata are unversioned", () => {
+  const violations = sourceFiles(packageRoot).flatMap((file) => {
+    const production = !file.split(path.sep).includes("tests");
+    return readFileSync(file, "utf8")
       .split("\n")
       .map((text, index) => ({
         file: path.relative(packageRoot, file),
         line: index + 1,
         text,
       }))
-      .filter(({ text }) => versionedContractId.test(text) || versionedTypeName.test(text)),
-  );
+      .filter(
+        ({ text }) =>
+          versionedContractId.test(text) ||
+          versionedTypeName.test(text) ||
+          versionedRoutingMetadata.test(text) ||
+          (production && fixedProductionApiVersion.test(text)),
+      );
+  });
 
   assert.deepEqual(violations, []);
 });

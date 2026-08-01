@@ -37,6 +37,7 @@ async function resolve(
   modelSet: "free" | "opencode-go" | "chatgpt-plus" | "mixed",
   definitionId: string,
   difficulty: "D0" | "D1" | "D2" | "D3",
+  budget?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
 ) {
   return new PhenixModelResolver(new Inventory(all)).resolve(
     { kind: "virtual", provider: "phenix", model: modelSet },
@@ -46,6 +47,7 @@ async function resolve(
       thinking: "route",
       modelSet,
       difficulty,
+      ...(budget ? { budget } : {}),
     },
   );
 }
@@ -58,6 +60,15 @@ test("free routes every capability only to authenticated free candidates", async
     model: "deepseek-v4-flash-free",
   });
   assert.equal(result.capability, "code-max");
+});
+
+test("session budget caps routed reasoning without changing capability selection", async () => {
+  const low = await resolve("free", "agent.implementer", "D3", "low");
+  const high = await resolve("free", "agent.implementer", "D3", "high");
+  assert.equal(low.capability, "code-max");
+  assert.equal(high.capability, "code-max");
+  assert.equal(low.thinking, "low");
+  assert.equal(high.thinking, "high");
 });
 
 test("OpenCode Go, ChatGPT Plus, and mixed select the capability-specific provider", async () => {

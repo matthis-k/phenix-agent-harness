@@ -21,7 +21,6 @@ class MemoryDiagnosticLog implements DiagnosticLog {
   async record(input: DiagnosticWrite): Promise<DiagnosticLogEntry> {
     this.writes.push(input);
     return {
-      version: 1,
       timestamp: input.timestamp ?? "2026-07-24T00:00:00.000Z",
       severity: input.severity,
       scope: input.scope,
@@ -84,7 +83,6 @@ test("domain events map to stable model, workflow, and failure diagnostics", asy
         thinking: "low",
         capability: "code",
         pool: "go.code",
-        policyRevision: "test-policy",
       },
     }),
   );
@@ -117,7 +115,6 @@ test("domain events map to stable model, workflow, and failure diagnostics", asy
     thinking: "low",
     capability: "code",
     pool: "go.code",
-    policyRevision: "test-policy",
     requested: { kind: "session" },
     virtual: undefined,
   });

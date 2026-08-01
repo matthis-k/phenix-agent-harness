@@ -4,6 +4,7 @@ import test from "node:test";
 import type { AnyDefinition } from "../domain/definition/definition.ts";
 import type { DefinitionId } from "../domain/shared.ts";
 import { defineRuntimeConfiguration } from "../framework/runtime-configuration.ts";
+import { passthroughBudgetPolicy } from "../ports/budget-policy.ts";
 import { phenixRuntimeConfiguration } from "../suite/phenix-runtime-configuration.ts";
 
 const TEST_ID = "agent.test" as DefinitionId;
@@ -11,6 +12,7 @@ const TEST_DEFINITION = { id: TEST_ID } as unknown as AnyDefinition;
 
 function configuration(root: readonly DefinitionId[], hidden: readonly DefinitionId[] = []) {
   return {
+    budgetPolicy: passthroughBudgetPolicy,
     catalog: {
       definitions: [TEST_DEFINITION],
       registerWorkflowFunctions: () => undefined,

@@ -17,7 +17,8 @@ import {
   SettingsManager,
   VERSION,
 } from "@earendil-works/pi-coding-agent";
-
+import { BUDGET_MODES, type BudgetMode } from "../../domain/definition/effort.ts";
+import { publishBudgetModeSelection } from "../budget-mode-selection.ts";
 import {
   confirmWorkspaceAction,
   inputWorkspaceValue,
@@ -233,7 +234,7 @@ async function openSettings(pi: ExtensionAPI, ctx: ExtensionCommandContext): Pro
         },
         {
           id: "thinking",
-          label: "Thinking level",
+          label: ctx.model?.provider === "phenix" ? "Budget mode" : "Thinking level",
           detail: pi.getThinkingLevel(),
           value: "thinking",
         },
@@ -349,9 +350,11 @@ async function selectThinkingLevel(
   settings: SettingsManager,
 ): Promise<void> {
   const current = pi.getThinkingLevel();
+  const usesPhenixBudget = ctx.model?.provider === "phenix";
+  const levels = usesPhenixBudget ? BUDGET_MODES : THINKING_LEVELS;
   const level = await pickWorkspaceItem(ctx, {
-    title: "Thinking level",
-    items: THINKING_LEVELS.map((value) => ({
+    title: usesPhenixBudget ? "Budget mode" : "Thinking level",
+    items: levels.map((value) => ({
       id: value,
       label: value,
       current: current === value,
@@ -362,6 +365,7 @@ async function selectThinkingLevel(
   pi.setThinkingLevel(level);
   settings.setDefaultThinkingLevel(level);
   await settings.flush();
+  if (usesPhenixBudget) publishBudgetModeSelection(pi.events, level as BudgetMode);
 }
 
 async function selectTheme(ctx: ExtensionContext, settings: SettingsManager): Promise<void> {
