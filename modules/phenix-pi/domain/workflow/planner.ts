@@ -179,8 +179,8 @@ function planJoin(
       plan: {
         kind: "fail-workflow",
         failure: {
-          code: "workflow_exhausted",
-          message: `Join ${node.id} observed a failed branch`,
+          code: "workflow_rejected",
+          message: `Join ${node.id} observed a failed required branch`,
           retryable: false,
         },
       },

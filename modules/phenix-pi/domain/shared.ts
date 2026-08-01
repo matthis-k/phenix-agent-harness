@@ -46,6 +46,7 @@ export type FailureCode =
   | "workflow_definition_drift"
   | "workflow_definition_invalid"
   | "workflow_runtime_failed"
+  | "workflow_rejected"
   | "workflow_exhausted"
   | "local_step_failed"
   | "tool_unavailable"
@@ -75,6 +76,15 @@ export interface FailureReport {
   readonly retryable: boolean;
   readonly requestedTools?: readonly string[];
   readonly suggestedLimits?: FailureLimitSuggestion;
+}
+
+export function defaultAgentFailureRetryable(
+  category: FailureCategory,
+  suggestedLimits?: FailureLimitSuggestion,
+): boolean {
+  if (category === "external_failure") return true;
+  if (category !== "resource_limit" || suggestedLimits === undefined) return false;
+  return Object.values(suggestedLimits).some((value) => value !== undefined);
 }
 
 export interface Failure {

@@ -50,6 +50,7 @@ const FAILURE_CODES = new Set<FailureCode>([
   "output_invalid",
   "workflow_invalid",
   "workflow_runtime_failed",
+  "workflow_rejected",
   "workflow_exhausted",
   "local_step_failed",
   "tool_unavailable",

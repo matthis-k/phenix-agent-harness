@@ -11,12 +11,13 @@ import {
   defaultActivity,
   type RunFactRecordedData,
 } from "../domain/run/observability.ts";
-import type {
-  Failure,
-  FailureCategory,
-  FailureLimitSuggestion,
-  FailureReport,
-  RunId,
+import {
+  defaultAgentFailureRetryable,
+  type Failure,
+  type FailureCategory,
+  type FailureLimitSuggestion,
+  type FailureReport,
+  type RunId,
 } from "../domain/shared.ts";
 import type {
   AgentSessionBackend,
@@ -420,11 +421,14 @@ export class AgentExecutor implements RunImplementation {
               validation.issues.map((issue) => `${issue.path} ${issue.message}`).join("; "),
             );
           }
+          const category = validation.value.category ?? "other";
           const report: FailureReport = {
             source: "agent",
-            category: validation.value.category ?? "other",
+            category,
             summary: validation.value.summary,
-            retryable: validation.value.retryable ?? true,
+            retryable:
+              validation.value.retryable ??
+              defaultAgentFailureRetryable(category, validation.value.suggestedLimits),
             ...(validation.value.requestedTools
               ? { requestedTools: validation.value.requestedTools }
               : {}),
@@ -799,7 +803,7 @@ export class AgentExecutor implements RunImplementation {
   }
 
   private systemPrompt(definition: AgentDefinition<unknown, unknown>): string {
-    return `${definition.prompt.render()}\n\nExecution protocol:\n- You are run-scoped and own only the supplied task.\n- Use only the exact tools provided by this definition.\n- A settled Pi cycle is not completion.\n- Use phenix_progress sparingly when your phase, current target, hypothesis, or next action materially changes; it updates only deterministic run telemetry and the TUI, not the parent model.\n- Finish successfully only by calling phenix_return with an output matching schema ${definition.output.id}.\n- If blocked, deadlocked, missing permissions, or unable to produce a valid result, call phenix_fail with a short report instead of looping or inventing success.\n- Budget exhaustion suspends the same Pi session. The parent may resume it with higher limits through phenix_handle; do not assume a replacement agent will be created.\n- When a child fails for a non-budget reason, inspect its report, surface it explicitly, and decide whether a bounded phenix_handle retry is appropriate.\n- Background children remain attached; resolve, resume, retry, or cancel them before returning.`;
+    return `${definition.prompt.render()}\n\nExecution protocol:\n- You are run-scoped and own only the supplied task.\n- Use only the exact tools provided by this definition.\n- A settled Pi cycle is not completion.\n- Use phenix_progress sparingly when your phase, current target, hypothesis, or next action materially changes; it updates only deterministic run telemetry and the TUI, not the parent model.\n- Finish successfully only by calling phenix_return with an output matching schema ${definition.output.id}.\n- If blocked, deadlocked, missing permissions, or unable to produce a valid result, call phenix_fail with a short report instead of looping or inventing success.\n- Omitted retryability is conservative: only external failures and resource-limit reports with a concrete limit suggestion retry by default; set retryable explicitly when the situation differs.\n- Budget exhaustion suspends the same Pi session. The parent may resume it with higher limits through phenix_handle; do not assume a replacement agent will be created.\n- When a child fails for a non-budget reason, inspect its report, surface it explicitly, and decide whether a bounded phenix_handle retry is appropriate.\n- Background children remain attached; resolve, resume, retry, or cancel them before returning.`;
   }
 
   private requireLive(runId: RunId): LiveAgent {

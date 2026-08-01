@@ -337,6 +337,49 @@ test("join completion is derived only from durable transition and result project
   }
 });
 
+test("strict joins classify a required branch failure as workflow rejection", () => {
+  const workflow = definition(
+    [
+      {
+        kind: "invoke",
+        id: "left",
+        definition: { id: definitionId("agent.test") },
+        input: "mapping.left",
+        wait: "await",
+      },
+      {
+        kind: "invoke",
+        id: "right",
+        definition: { id: definitionId("agent.test") },
+        input: "mapping.right",
+        wait: "await",
+      },
+      { kind: "join", id: "join", policy: "all-success" },
+    ],
+    [
+      { from: "left", to: "join" },
+      { from: "right", to: "join" },
+    ],
+  );
+  const results = new Map<string, readonly unknown[]>([
+    ["left", [failed({ code: "agent_reported_failure", message: "rejected", retryable: false })]],
+  ]);
+  const transitions = new Map([["left->join", 1]]);
+
+  const result = plan(
+    state(workflow, [{ id: "activation-join", nodeId: "join", sequence: 3 }], {
+      results,
+      transitions,
+    }),
+  );
+
+  assert.equal(result.kind, "fail-workflow");
+  if (result.kind === "fail-workflow") {
+    assert.equal(result.failure.code, "workflow_rejected");
+    assert.match(result.failure.message, /failed required branch/);
+  }
+});
+
 test("parallelism pressure becomes an explicit wait plan", () => {
   const workflow = definition(
     [
