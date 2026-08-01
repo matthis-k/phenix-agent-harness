@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { WorkspaceSourceChange } from "../application/workspace/frontend.ts";
+import { runId } from "../domain/shared.ts";
 import {
   clearWorkspaceRuntime,
   publishWorkspaceRuntime,
@@ -57,31 +59,46 @@ test("ignores stale clears and malformed shared events", () => {
   assert.deepEqual(received, [ready]);
 });
 
-test("workspace views subscribe and dispose all changing runtime projections together", () => {
-  const listeners: Array<() => void> = [];
+test("workspace subscriptions distinguish snapshot and transcript changes", () => {
+  const snapshotListeners: Array<() => void> = [];
+  const transcriptListeners: Array<(changedRunId: ReturnType<typeof runId>) => void> = [];
   let disposals = 0;
-  const source = {
+  const snapshotSource = {
     subscribe(listener: () => void): () => void {
-      listeners.push(listener);
+      snapshotListeners.push(listener);
+      return () => {
+        disposals += 1;
+      };
+    },
+  };
+  const transcriptSource = {
+    subscribe(listener: (changedRunId: ReturnType<typeof runId>) => void): () => void {
+      transcriptListeners.push(listener);
       return () => {
         disposals += 1;
       };
     },
   };
   const runtime = {
-    events: source,
-    diagnostics: source,
-    transcripts: source,
-    projects: source,
+    events: snapshotSource,
+    diagnostics: snapshotSource,
+    transcripts: transcriptSource,
+    projects: snapshotSource,
   } as unknown as WorkspaceRuntimeBinding["runtime"];
-  let notifications = 0;
+  const changes: WorkspaceSourceChange[] = [];
 
-  const dispose = subscribeWorkspaceChanges(runtime, () => {
-    notifications += 1;
+  const dispose = subscribeWorkspaceChanges(runtime, (change) => {
+    if (change) changes.push(change);
   });
-  for (const listener of listeners) listener();
+  for (const listener of snapshotListeners) listener();
+  for (const listener of transcriptListeners) listener(runId("child"));
   dispose();
 
-  assert.equal(notifications, 4);
+  assert.deepEqual(changes, [
+    { kind: "snapshot" },
+    { kind: "snapshot" },
+    { kind: "snapshot" },
+    { kind: "transcript", runId: runId("child") },
+  ]);
   assert.equal(disposals, 4);
 });
