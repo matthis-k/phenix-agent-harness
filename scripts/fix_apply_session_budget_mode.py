@@ -21,6 +21,16 @@ if source.count(needle) != 1:
     raise RuntimeError("replace_once helper changed")
 source = source.replace(needle, replacement, 1)
 
+no_op = '''replace_once(
+    "modules/phenix-pi/composition/execution-kernel.ts",
+    '    models,\\n    ids,\\n',
+    '    models,\\n    ids,\\n',
+)
+'''
+if source.count(no_op) != 1:
+    raise RuntimeError("execution-kernel no-op replacement changed")
+source = source.replace(no_op, "", 1)
+
 repeated = '''replace_once(
     "modules/phenix-pi/application/budget-suspension.ts",
     '  readonly timeoutRemainingMs: number;\\n',
