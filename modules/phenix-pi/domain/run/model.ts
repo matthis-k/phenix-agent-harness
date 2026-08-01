@@ -4,6 +4,7 @@ import type {
   DefinitionRef,
   ToolPolicy,
 } from "../definition/definition.ts";
+import type { BudgetMode } from "../definition/effort.ts";
 import type {
   Difficulty,
   ModelSelector,
@@ -42,16 +43,33 @@ export interface SessionProfile {
   readonly agent: SessionAgentPreset;
   readonly modelSet: PhenixModelSetId;
   readonly difficulty: Difficulty;
+  readonly budget: BudgetMode;
+}
+
+export interface PersistedSessionProfile {
+  readonly agent: SessionAgentPreset;
+  readonly modelSet: PhenixModelSetId;
+  readonly difficulty: Difficulty;
+  readonly budget?: BudgetMode;
 }
 
 export const DEFAULT_SESSION_PROFILE: SessionProfile = Object.freeze({
   agent: "base",
   modelSet: "mixed",
   difficulty: "D1",
+  budget: "medium",
 });
 
+export function normalizeSessionProfile(
+  profile: PersistedSessionProfile | SessionProfile | undefined,
+): SessionProfile {
+  return profile
+    ? { ...profile, budget: profile.budget ?? DEFAULT_SESSION_PROFILE.budget }
+    : DEFAULT_SESSION_PROFILE;
+}
+
 export interface RunLimits {
-  readonly timeoutMs: number;
+  readonly timeoutMs?: number;
   readonly maxTurns?: number;
   readonly maxToolCalls?: number;
   readonly maxRepairAttempts?: number;
@@ -98,6 +116,7 @@ export interface CompiledRunSpec {
   readonly contextPolicy?: ContextPolicy;
   readonly modelSelector?: ModelSelector;
   readonly difficulty?: Difficulty;
+  readonly budget?: BudgetMode;
   readonly limits: RunLimits;
   readonly capabilities: CapabilitySet;
   readonly invocation: {

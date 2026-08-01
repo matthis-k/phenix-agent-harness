@@ -29,6 +29,7 @@ import {
   success,
 } from "../domain/shared.ts";
 import type { Clock, IdGenerator } from "../ports/clock.ts";
+import type { BudgetPolicy } from "../ports/budget-policy.ts";
 import type { ModelResolver } from "../ports/model-resolver.ts";
 import type { DefinitionCatalog } from "./catalog.ts";
 import type { ExecutionStore } from "./execution-store.ts";
@@ -97,6 +98,7 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
     readonly catalog: DefinitionCatalog;
     readonly store: ExecutionStore;
     readonly models: ModelResolver;
+    readonly budgetPolicy?: BudgetPolicy;
     readonly ids: IdGenerator;
     readonly clock: Clock;
     readonly rootInvokableDefinitions?: readonly DefinitionId[];
@@ -111,6 +113,7 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
       catalog: this.catalog,
       store: this.store,
       models: input.models,
+      ...(input.budgetPolicy ? { budgetPolicy: input.budgetPolicy } : {}),
       rootInvokableDefinitions: this.rootInvokableDefinitions,
     });
   }
@@ -262,6 +265,7 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
       parent.compiled.difficulty ??
       root.profile?.difficulty ??
       DEFAULT_SESSION_PROFILE.difficulty;
+    const budget = root.profile?.budget ?? DEFAULT_SESSION_PROFILE.budget;
     const definition = this.catalog.get(request.definition) as AnyDefinition;
     const validation = definition.input.validate(request.input);
     if (!validation.ok) {
@@ -282,6 +286,7 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
           definition,
           parent.definitionId,
           difficulty,
+          budget,
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -318,6 +323,7 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
       definition,
       validatedInput: validation.value,
       difficulty,
+      budget,
       capabilities,
       wait: request.wait,
       ...(request.causation ? { causation: request.causation } : {}),

@@ -114,6 +114,7 @@ export function createExecutionServices(input: {
     projects,
     userForms,
     models: resolver,
+    budgetPolicy: configuration.budgetPolicy,
     ids,
     clock: systemClock,
     cwd: host.cwd,

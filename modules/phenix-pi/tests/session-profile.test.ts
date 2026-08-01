@@ -76,17 +76,20 @@ test("session profile changes are event-sourced and survive recovery", async () 
     agent: "base",
     modelSet: "mixed",
     difficulty: "D1",
+    budget: "medium",
   });
   const selected = await profiles.select(root, {
     agent: "architect",
     modelSet: "chatgpt-plus",
     difficulty: "D3",
+    budget: "high",
     source: "user",
   });
   assert.deepEqual(selected, {
     agent: "architect",
     modelSet: "chatgpt-plus",
     difficulty: "D3",
+    budget: "high",
   });
   assert.equal(
     store.projection.events.filter((event) => event.type === "run.profile.selected").length,

@@ -97,6 +97,7 @@ async function route(
     thinking: "route",
     modelSet: model.id,
     difficulty: profile.difficulty,
+    budget: profile.budget,
   });
 
   const failures: string[] = [];

@@ -63,7 +63,7 @@ test("status dashboard keeps semantic framing around the sequence and recent fac
       },
       facts: [factItem("test-result", "derived", "Latest dashboard fact")],
       sequence: 42,
-      profile: { agent: "base", modelSet: "mixed", difficulty: "D1" },
+      profile: { agent: "base", modelSet: "mixed", difficulty: "D1", budget: "medium" },
       diagnostics: DIAGNOSTICS,
       integrations: "5/5 loaded",
       integrationsFailed: false,
@@ -109,14 +109,15 @@ test("fact history highlights severity, reliability, timestamps, and run ids", (
 });
 
 test("footer status renders the session profile without duplicating workspace activity", () => {
-  const active = statusLine(THEME, { agent: "base", modelSet: "mixed", difficulty: "D2" }, 3);
-  const idle = statusLine(THEME, { agent: "base", modelSet: "mixed", difficulty: "D2" }, 0);
+  const active = statusLine(THEME, { agent: "base", modelSet: "mixed", budget: "high" }, 3);
+  const idle = statusLine(THEME, { agent: "base", modelSet: "mixed", budget: "high" }, 0);
 
   assert.equal(active, idle);
   assert.match(active, /<accent><bold>phenix<\/bold><\/accent>/);
   assert.match(active, /<text><bold>base<\/bold><\/text>/);
   assert.match(active, /<accent>mixed<\/accent>/);
-  assert.doesNotMatch(active, /active|idle/);
+  assert.match(active, /high/);
+  assert.doesNotMatch(active, /D2|active|idle/);
 });
 
 test("panel surfaces restore their background after nested full resets", () => {

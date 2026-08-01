@@ -55,7 +55,7 @@ interface LiveAgent {
   readonly session: AgentSessionPort;
   readonly definition: AgentDefinition<unknown, unknown>;
   limits: RunLimits;
-  timeoutRemainingMs: number;
+  timeoutRemainingMs?: number;
   timeoutStartedAtMs?: number;
   readonly toolCalls: Map<string, LiveToolCall>;
   unsubscribe: () => void;
@@ -761,10 +761,10 @@ export class AgentExecutor implements RunImplementation {
 
   private armTimeout(runId: RunId, live: LiveAgent): void {
     this.pauseTimeout(live);
-    if (live.limits.timeoutMs <= 0 || live.timeoutRemainingMs <= 0) {
-      if (live.limits.timeoutMs <= 0) return;
-    }
-    const remaining = Math.max(0, live.timeoutRemainingMs);
+    const timeoutMs = live.limits.timeoutMs;
+    if (timeoutMs === undefined || timeoutMs <= 0) return;
+    const remaining = Math.max(0, live.timeoutRemainingMs ?? timeoutMs);
+    live.timeoutRemainingMs = remaining;
     live.timeoutStartedAtMs = this.nowMs();
     live.timeout = setTimeout(() => {
       live.timeout = undefined;
@@ -775,10 +775,10 @@ export class AgentExecutor implements RunImplementation {
         live,
         automaticFailure(
           "timeout",
-          `Agent timed out after ${live.limits.timeoutMs}ms of active execution`,
+          `Agent timed out after ${timeoutMs}ms of active execution`,
           "resource_limit",
           true,
-          { timeoutMs: Math.min(3_600_000, Math.max(live.limits.timeoutMs * 2, 60_000)) },
+          { timeoutMs: Math.min(3_600_000, Math.max(timeoutMs * 2, 60_000)) },
         ),
       ).catch(() => undefined);
     }, remaining);
@@ -792,7 +792,9 @@ export class AgentExecutor implements RunImplementation {
     }
     if (live.timeoutStartedAtMs !== undefined) {
       const elapsed = Math.max(0, this.nowMs() - live.timeoutStartedAtMs);
-      live.timeoutRemainingMs = Math.max(0, live.timeoutRemainingMs - elapsed);
+      if (live.timeoutRemainingMs !== undefined) {
+        live.timeoutRemainingMs = Math.max(0, live.timeoutRemainingMs - elapsed);
+      }
       live.timeoutStartedAtMs = undefined;
     }
   }

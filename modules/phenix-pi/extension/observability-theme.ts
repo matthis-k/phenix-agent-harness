@@ -120,14 +120,14 @@ export function fact(
 
 export function statusLine(
   theme: ObservabilityTheme | undefined,
-  profile: { readonly agent: string; readonly modelSet: string; readonly difficulty: string },
+  profile: { readonly agent: string; readonly modelSet: string; readonly budget: string },
   _activeCount: number,
 ): string {
   const profileText = `${strong(theme, profile.agent)}${color(theme, "dim", "/")}${color(
     theme,
     "accent",
     profile.modelSet,
-  )}${color(theme, "dim", `/${profile.difficulty}`)}`;
+  )}${color(theme, "dim", `/${profile.budget}`)}`;
   return `${heading(theme, "phenix")}${color(theme, "dim", ":")} ${profileText}`;
 }
 

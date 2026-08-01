@@ -2,7 +2,12 @@ import type { LocalTaskId, Outcome, RunId } from "../shared.ts";
 import type { LocalTask } from "../task/local-task.ts";
 import type { DomainEvent } from "./events.ts";
 import { activeAttachedChildren, assertRunTransition, isTerminalRunState } from "./invariants.ts";
-import type { RunRecord, RunState, SessionProfile } from "./model.ts";
+import {
+  normalizeSessionProfile,
+  type PersistedSessionProfile,
+  type RunRecord,
+  type RunState,
+} from "./model.ts";
 import {
   defaultActivity,
   type RunActivity,
@@ -137,8 +142,8 @@ export class RunProjection {
       }
       case "run.profile.selected": {
         if (current.kind !== "root") throw new Error(`Only root sessions own selectable profiles`);
-        const data = event.data as { readonly profile: SessionProfile };
-        next = { ...next, profile: data.profile };
+        const data = event.data as { readonly profile: PersistedSessionProfile };
+        next = { ...next, profile: normalizeSessionProfile(data.profile) };
         break;
       }
       case "run.model.resolved":

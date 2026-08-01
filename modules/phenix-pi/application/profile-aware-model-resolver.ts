@@ -21,6 +21,7 @@ export class ProfileAwareModelResolver implements ModelResolver {
       ...context,
       modelSet: context.modelSet ?? profile.modelSet,
       difficulty: context.difficulty ?? profile.difficulty,
+      budget: context.budget ?? profile.budget,
     });
   }
 }

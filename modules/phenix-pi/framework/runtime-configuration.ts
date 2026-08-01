@@ -3,6 +3,7 @@ import type { Schema } from "../domain/definition/schema.ts";
 import type { SessionProfile } from "../domain/run/model.ts";
 import type { DefinitionId } from "../domain/shared.ts";
 import type { WorkflowFunctionRegistrar } from "../domain/workflow/functions.ts";
+import type { BudgetPolicy } from "../ports/budget-policy.ts";
 import type { ModelInventory, ModelResolver } from "../ports/model-resolver.ts";
 
 export interface RuntimeCatalogConfiguration {
@@ -20,6 +21,7 @@ export interface RuntimeResolverDependencies {
 
 export interface RuntimeConfiguration {
   readonly catalog: RuntimeCatalogConfiguration;
+  readonly budgetPolicy: BudgetPolicy;
   createModelResolver(dependencies: RuntimeResolverDependencies): ModelResolver;
 }
 
@@ -56,6 +58,7 @@ export function defineRuntimeConfiguration(
       rootInvokableDefinitions: Object.freeze(rootInvokableDefinitions),
       hiddenDefinitions: Object.freeze(hiddenDefinitions),
     }),
+    budgetPolicy: configuration.budgetPolicy,
     createModelResolver: configuration.createModelResolver,
   });
 }

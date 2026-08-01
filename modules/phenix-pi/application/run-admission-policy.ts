@@ -5,6 +5,7 @@ import type {
   InvokeNode,
   WorkflowDefinition,
 } from "../domain/definition/definition.ts";
+import type { BudgetMode } from "../domain/definition/effort.ts";
 import type { Difficulty, ResolvedModel } from "../domain/definition/model.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
 import type {
@@ -16,6 +17,7 @@ import type {
   WorkflowCausation,
 } from "../domain/run/model.ts";
 import type { DefinitionId, RunId } from "../domain/shared.ts";
+import { passthroughBudgetPolicy, type BudgetPolicy } from "../ports/budget-policy.ts";
 import type { ModelResolver } from "../ports/model-resolver.ts";
 import type { DefinitionCatalog } from "./catalog.ts";
 import type { ExecutionStore } from "./execution-store.ts";
@@ -36,17 +38,20 @@ export class RunAdmissionPolicy {
   private readonly catalog: DefinitionCatalog;
   private readonly store: ExecutionStore;
   private readonly models: ModelResolver;
+  private readonly budgetPolicy: BudgetPolicy;
   private readonly rootInvokableDefinitions: readonly DefinitionId[];
 
   constructor(input: {
     readonly catalog: DefinitionCatalog;
     readonly store: ExecutionStore;
     readonly models: ModelResolver;
+    readonly budgetPolicy?: BudgetPolicy;
     readonly rootInvokableDefinitions: readonly DefinitionId[];
   }) {
     this.catalog = input.catalog;
     this.store = input.store;
     this.models = input.models;
+    this.budgetPolicy = input.budgetPolicy ?? passthroughBudgetPolicy;
     this.rootInvokableDefinitions = input.rootInvokableDefinitions;
   }
 
@@ -174,6 +179,7 @@ export class RunAdmissionPolicy {
     readonly definition: AnyDefinition;
     readonly validatedInput: unknown;
     readonly difficulty: Difficulty;
+    readonly budget: BudgetMode;
     readonly capabilities: CapabilitySet;
     readonly wait: "await" | "background";
     readonly causation?: WorkflowCausation;
@@ -197,7 +203,11 @@ export class RunAdmissionPolicy {
         contextPolicy: definition.context,
         modelSelector: route?.model ?? definition.model,
         difficulty: input.difficulty,
-        limits: applyRetryLimits(definition.limits, input.retryOverrides?.limits),
+        budget: input.budget,
+        limits: applyRetryLimits(
+          this.budgetPolicy.applyAgentLimits(definition.limits, input.budget),
+          input.retryOverrides?.limits,
+        ),
         capabilities: input.capabilities,
         invocation,
       };
@@ -218,6 +228,7 @@ export class RunAdmissionPolicy {
     definition: AgentDefinition<unknown, unknown>,
     parentDefinitionId: string,
     difficulty: Difficulty,
+    budget: BudgetMode,
   ): Promise<ResolvedModel> {
     const route = definition.modelRoutes?.[difficulty];
     return this.models.resolve(route?.model ?? definition.model, {
@@ -225,6 +236,7 @@ export class RunAdmissionPolicy {
       parentDefinitionId,
       thinking: route?.thinking ?? definition.thinking,
       difficulty,
+      budget,
       ...(route ? { capability: route.capability } : {}),
     });
   }
@@ -304,12 +316,13 @@ function applyRetryLimits(
   override?: NonNullable<RunRetryOptions["limits"]>,
 ): RunLimits {
   if (!override) return base;
+  const timeoutMs = override.timeoutMs ?? base.timeoutMs;
   const maxTurns = override.maxTurns === null ? undefined : (override.maxTurns ?? base.maxTurns);
   const maxToolCalls =
     override.maxToolCalls === null ? undefined : (override.maxToolCalls ?? base.maxToolCalls);
   const maxRepairAttempts = override.maxRepairAttempts ?? base.maxRepairAttempts;
   return {
-    timeoutMs: override.timeoutMs ?? base.timeoutMs,
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     ...(maxTurns !== undefined ? { maxTurns } : {}),
     ...(maxToolCalls !== undefined ? { maxToolCalls } : {}),
     ...(maxRepairAttempts !== undefined ? { maxRepairAttempts } : {}),

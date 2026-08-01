@@ -421,7 +421,7 @@ export class PhenixUi implements Component {
           ? color(this.theme, "warning", `${this.snapshot.diagnostics.counts.warning} warnings`)
           : color(this.theme, "success", "healthy");
     const title = heading(this.theme, ` Phenix · ${capitalize(this.view)}`);
-    const status = `${color(this.theme, active > 0 ? "warning" : "success", active > 0 ? `${active} active` : "idle")}  ${health}  ${strong(this.theme, this.snapshot.profile.agent)}/${color(this.theme, "accent", this.snapshot.profile.modelSet)}/${this.snapshot.profile.difficulty} `;
+    const status = `${color(this.theme, active > 0 ? "warning" : "success", active > 0 ? `${active} active` : "idle")}  ${health}  ${strong(this.theme, this.snapshot.profile.agent)}/${color(this.theme, "accent", this.snapshot.profile.modelSet)}/${this.snapshot.profile.budget} `;
     const gap = Math.max(1, width - visibleWidth(title) - visibleWidth(status));
     return surface(
       this.theme,

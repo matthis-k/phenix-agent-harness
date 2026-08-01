@@ -5,6 +5,8 @@ import type {
   PhenixModelSetId,
   PiThinkingLevel,
 } from "../domain/definition/model.ts";
+import { phenixBudgetPolicy } from "./phenix-budget-policy.ts";
+
 import type {
   CapabilityRoute,
   ModelCandidate,
@@ -189,14 +191,16 @@ const ROUTES: Readonly<Record<string, Readonly<Record<Difficulty, CapabilityRout
 };
 
 export const defaultRoutingPolicy: RoutingPolicy = Object.freeze({
-  revision: "phenix-routing-v3",
+  revision: "phenix-routing-v4",
   route(context: ModelResolutionContext) {
     const role = roleFromDefinition(context.definitionId);
     const difficulty = context.difficulty ?? defaultDifficulty(role);
     const routed = (ROUTES[role] ?? ROUTES.base)[difficulty];
     return {
       capability: context.capability ?? routed.capability,
-      thinking: routed.thinking,
+      thinking: context.budget
+        ? phenixBudgetPolicy.capThinking(routed.thinking, context.budget)
+        : routed.thinking,
     };
   },
   pool(modelSet: PhenixModelSetId, capability: ModelCapability) {
