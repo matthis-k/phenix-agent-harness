@@ -26,6 +26,7 @@ flowchart LR
     security --> join
     join --> synthesize[Synthesize]
     synthesize --> return([Return QA report])
+    synthesize -. exhausted failure .-> synthesisFallback([Return validated reports])
 ```
 
 ## States
@@ -133,6 +134,14 @@ retry: retryable
 max-retries: 1
 ```
 
+### synthesis-fallback
+
+```phenix-state
+kind: return
+output: qa.synthesis-fallback
+output-schema: outcome.qa-report
+```
+
 ### return
 
 ```phenix-state
@@ -143,19 +152,20 @@ output-schema: outcome.qa-report
 
 ## Transitions
 
-| From | To | When | Max traversals |
-|---|---|---|---|
-| `checks` | `fanout` | | |
-| `fanout` | `repo` | | |
-| `fanout` | `tests` | | |
-| `fanout` | `architecture` | | |
-| `fanout` | `security` | | |
-| `repo` | `join` | | |
-| `tests` | `join` | | |
-| `architecture` | `join` | | |
-| `security` | `join` | | |
-| `join` | `synthesize` | | |
-| `synthesize` | `return` | | |
+| From | To | On | When | Max traversals |
+|---|---|---|---|---|
+| `checks` | `fanout` | | | |
+| `fanout` | `repo` | | | |
+| `fanout` | `tests` | | | |
+| `fanout` | `architecture` | | | |
+| `fanout` | `security` | | | |
+| `repo` | `join` | | | |
+| `tests` | `join` | | | |
+| `architecture` | `join` | | | |
+| `security` | `join` | | | |
+| `join` | `synthesize` | | | |
+| `synthesize` | `return` | | | |
+| `synthesize` | `synthesis-fallback` | `failure` | | |
 
 ## Tests
 
@@ -381,6 +391,34 @@ output-schema: outcome.qa-report
       "synthesize": 1,
       "return": 1
     },
+    "requireAllMocksConsumed": true
+  }
+}
+```
+
+### synthesis-failure-preserves-evidence
+
+```phenix-test
+{
+  "input": {
+    "objective": "Run QA even if the narrative synthesis provider remains unavailable"
+  },
+  "mocks": {
+    "checks": [{ "return": [{ "command": "devenv test", "ok": true, "summary": "passed" }] }],
+    "fanout": [{ "return": { "objective": "Run QA" } }],
+    "repo": [{ "return": { "summary": "Repository reviewed", "evidence": [], "risks": [] } }],
+    "tests": [{ "return": { "summary": "Tests reviewed", "checks": [], "findings": [], "evidence": [] } }],
+    "architecture": [{ "return": { "summary": "Architecture reviewed", "findings": [] } }],
+    "security": [{ "return": { "summary": "Security reviewed", "findings": [] } }],
+    "synthesize": [
+      { "fail": { "code": "provider_failed", "message": "provider unavailable", "retryable": true } },
+      { "fail": { "code": "provider_failed", "message": "provider still unavailable", "retryable": true } }
+    ]
+  },
+  "expect": {
+    "status": "success",
+    "visits": ["checks", "fanout", "repo", "tests", "architecture", "security", "join", "synthesize", "synthesis-fallback"],
+    "transitions": ["checks->fanout", "fanout->repo", "fanout->tests", "fanout->architecture", "fanout->security", "repo->join", "tests->join", "architecture->join", "security->join", "join->synthesize", "synthesize->synthesis-fallback"],
     "requireAllMocksConsumed": true
   }
 }

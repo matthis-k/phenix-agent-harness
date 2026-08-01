@@ -20,6 +20,7 @@ flowchart LR
     architecture --> critique[Challenge failure modes and assumptions]
     critique --> finalize[Produce decision-oriented design]
     finalize --> return([Return result])
+    finalize -. exhausted failure .-> fallback([Return validated design evidence])
 ```
 
 ## States
@@ -99,6 +100,14 @@ retry: retryable
 max-retries: 1
 ```
 
+### fallback
+
+```phenix-state
+kind: return
+output: design.fallback
+output-schema: outcome.base
+```
+
 ### return
 
 ```phenix-state
@@ -109,13 +118,14 @@ output-schema: outcome.base
 
 ## Transitions
 
-| From | To | When | Max traversals |
-|---|---|---|---|
-| `inspect` | `alternatives` | | |
-| `alternatives` | `architecture` | | |
-| `architecture` | `critique` | | |
-| `critique` | `finalize` | | |
-| `finalize` | `return` | | |
+| From | To | On | When | Max traversals |
+|---|---|---|---|---|
+| `inspect` | `alternatives` | | | |
+| `alternatives` | `architecture` | | | |
+| `architecture` | `critique` | | | |
+| `critique` | `finalize` | | | |
+| `finalize` | `return` | | | |
+| `finalize` | `fallback` | `failure` | | |
 
 ## Tests
 
@@ -132,5 +142,29 @@ output-schema: outcome.base
     "finalize": [{ "return": { "summary": "Design selected", "artifacts": [], "unresolved": [] } }]
   },
   "expect": { "status": "success", "counts": { "inspect": 1, "alternatives": 1, "architecture": 1, "critique": 1, "finalize": 1, "return": 1 } }
+}
+```
+
+### finalizer-failure-preserves-design
+
+```phenix-test
+{
+  "input": { "objective": "Design a resilient integration" },
+  "mocks": {
+    "inspect": [{ "return": { "summary": "Constraints inspected", "evidence": [], "risks": [] } }],
+    "alternatives": [{ "return": { "summary": "Alternatives compared", "steps": ["compose services"], "constraints": [], "checks": ["boundary tests"] } }],
+    "architecture": [{ "return": { "summary": "Ownership established", "findings": [] } }],
+    "critique": [{ "return": { "summary": "Failure modes challenged", "findings": [] } }],
+    "finalize": [
+      { "fail": { "code": "provider_failed", "message": "provider unavailable", "retryable": true } },
+      { "fail": { "code": "provider_failed", "message": "provider still unavailable", "retryable": true } }
+    ]
+  },
+  "expect": {
+    "status": "success",
+    "visits": ["inspect", "alternatives", "architecture", "critique", "finalize", "fallback"],
+    "transitions": ["inspect->alternatives", "alternatives->architecture", "architecture->critique", "critique->finalize", "finalize->fallback"],
+    "requireAllMocksConsumed": true
+  }
 }
 ```

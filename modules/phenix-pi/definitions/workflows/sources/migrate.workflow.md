@@ -20,6 +20,7 @@ flowchart LR
     implement --> audit[Audit consumers and legacy removal]
     audit --> finalize[Summarize migration completeness]
     finalize --> return([Return result])
+    finalize -. exhausted failure .-> fallback([Return validated migration evidence])
 ```
 
 ## States
@@ -96,6 +97,14 @@ retry: retryable
 max-retries: 1
 ```
 
+### fallback
+
+```phenix-state
+kind: return
+output: migrate.fallback
+output-schema: outcome.base
+```
+
 ### return
 
 ```phenix-state
@@ -106,13 +115,14 @@ output-schema: outcome.base
 
 ## Transitions
 
-| From | To | When | Max traversals |
-|---|---|---|---|
-| `inventory` | `plan` | | |
-| `plan` | `implement` | | |
-| `implement` | `audit` | | |
-| `audit` | `finalize` | | |
-| `finalize` | `return` | | |
+| From | To | On | When | Max traversals |
+|---|---|---|---|---|
+| `inventory` | `plan` | | | |
+| `plan` | `implement` | | | |
+| `implement` | `audit` | | | |
+| `audit` | `finalize` | | | |
+| `finalize` | `return` | | | |
+| `finalize` | `fallback` | `failure` | | |
 
 ## Tests
 

@@ -20,6 +20,7 @@ flowchart LR
     implement --> review[Review resulting boundaries]
     review --> finalize[Summarize preservation and simplification]
     finalize --> return([Return result])
+    finalize -. exhausted failure .-> fallback([Return validated refactor evidence])
 ```
 
 ## States
@@ -96,6 +97,14 @@ retry: retryable
 max-retries: 1
 ```
 
+### fallback
+
+```phenix-state
+kind: return
+output: refactor.fallback
+output-schema: outcome.base
+```
+
 ### return
 
 ```phenix-state
@@ -106,13 +115,14 @@ output-schema: outcome.base
 
 ## Transitions
 
-| From | To | When | Max traversals |
-|---|---|---|---|
-| `characterize` | `architecture` | | |
-| `architecture` | `implement` | | |
-| `implement` | `review` | | |
-| `review` | `finalize` | | |
-| `finalize` | `return` | | |
+| From | To | On | When | Max traversals |
+|---|---|---|---|---|
+| `characterize` | `architecture` | | | |
+| `architecture` | `implement` | | | |
+| `implement` | `review` | | | |
+| `review` | `finalize` | | | |
+| `finalize` | `return` | | | |
+| `finalize` | `fallback` | `failure` | | |
 
 ## Tests
 

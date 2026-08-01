@@ -19,6 +19,7 @@ flowchart LR
     threatModel --> adversarial[Perform adversarial review]
     adversarial --> finalize[Synthesize risks and mitigations]
     finalize --> return([Return result])
+    finalize -. exhausted failure .-> fallback([Return validated security evidence])
 ```
 
 ## States
@@ -83,6 +84,14 @@ retry: retryable
 max-retries: 1
 ```
 
+### fallback
+
+```phenix-state
+kind: return
+output: security.fallback
+output-schema: outcome.base
+```
+
 ### return
 
 ```phenix-state
@@ -93,12 +102,13 @@ output-schema: outcome.base
 
 ## Transitions
 
-| From | To | When | Max traversals |
-|---|---|---|---|
-| `surface` | `threat-model` | | |
-| `threat-model` | `adversarial` | | |
-| `adversarial` | `finalize` | | |
-| `finalize` | `return` | | |
+| From | To | On | When | Max traversals |
+|---|---|---|---|---|
+| `surface` | `threat-model` | | | |
+| `threat-model` | `adversarial` | | | |
+| `adversarial` | `finalize` | | | |
+| `finalize` | `return` | | | |
+| `finalize` | `fallback` | `failure` | | |
 
 ## Tests
 

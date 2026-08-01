@@ -20,6 +20,7 @@ flowchart LR
     implement --> regression[Exercise original scenario]
     regression --> finalize[Summarize causal and regression evidence]
     finalize --> return([Return result])
+    finalize -. exhausted failure .-> fallback([Return validated debug evidence])
 ```
 
 ## States
@@ -96,6 +97,14 @@ retry: retryable
 max-retries: 1
 ```
 
+### fallback
+
+```phenix-state
+kind: return
+output: debug.fallback
+output-schema: outcome.base
+```
+
 ### return
 
 ```phenix-state
@@ -106,13 +115,14 @@ output-schema: outcome.base
 
 ## Transitions
 
-| From | To | When | Max traversals |
-|---|---|---|---|
-| `reproduce` | `diagnose` | | |
-| `diagnose` | `implement` | | |
-| `implement` | `regression` | | |
-| `regression` | `finalize` | | |
-| `finalize` | `return` | | |
+| From | To | On | When | Max traversals |
+|---|---|---|---|---|
+| `reproduce` | `diagnose` | | | |
+| `diagnose` | `implement` | | | |
+| `implement` | `regression` | | | |
+| `regression` | `finalize` | | | |
+| `finalize` | `return` | | | |
+| `finalize` | `fallback` | `failure` | | |
 
 ## Tests
 
