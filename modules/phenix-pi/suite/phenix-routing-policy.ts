@@ -1,6 +1,7 @@
 import type {
   Difficulty,
   ModelCapability,
+  ModelResolutionContext,
   PhenixModelSetId,
   PiThinkingLevel,
 } from "../domain/definition/model.ts";
@@ -209,7 +210,7 @@ const ROUTES: Readonly<Record<string, Readonly<Record<Difficulty, CapabilityRout
 
 export const defaultRoutingPolicy: RoutingPolicy = Object.freeze({
   revision: "phenix-routing-v3",
-  route(context) {
+  route(context: ModelResolutionContext) {
     const role = roleFromDefinition(context.definitionId);
     const difficulty = context.difficulty ?? defaultDifficulty(role);
     const routed = (ROUTES[role] ?? ROUTES.base)[difficulty];
@@ -218,14 +219,14 @@ export const defaultRoutingPolicy: RoutingPolicy = Object.freeze({
       thinking: routed.thinking,
     };
   },
-  pool(modelSet, capability) {
+  pool(modelSet: PhenixModelSetId, capability: ModelCapability) {
     return MODEL_SETS[modelSet].capabilityPools[capability];
   },
-  candidates(modelSet, capability) {
+  candidates(modelSet: PhenixModelSetId, capability: ModelCapability) {
     const pool = MODEL_SETS[modelSet].capabilityPools[capability];
     return POOLS[pool] ?? [];
   },
-  allows(modelSet, candidateValue) {
+  allows(modelSet: PhenixModelSetId, candidateValue: ModelCandidate) {
     return MODEL_SETS[modelSet].allowedProviders.includes(candidateValue.provider);
   },
 });
