@@ -1,7 +1,8 @@
 import type {
   AnyDefinition,
   InvokeNode,
-  JoinNode,
+  LocalNode,
+  ReturnNode,
   WorkflowDefinition,
   WorkflowEdge,
   WorkflowNode,
@@ -18,6 +19,7 @@ import {
   type WorkflowGraphState,
   workflowNode,
 } from "../domain/workflow/graph-state.ts";
+import { planWorkflowStep, type WorkflowStepPlan } from "../domain/workflow/planner.ts";
 import type { Clock, IdGenerator } from "../ports/clock.ts";
 import type { LocalOperationRunner } from "../ports/local-operation-runner.ts";
 import type { DefinitionCatalog, WorkflowFunctionRegistry } from "./catalog.ts";
@@ -30,8 +32,6 @@ import type {
 import type { ExecutionStore } from "./execution-store.ts";
 import type { TaskFacade } from "./interfaces.ts";
 import { KeyedSerialExecutor } from "./keyed-serial-executor.ts";
-
-const STOCK_SESSION_ID = "session.stock";
 
 export class WorkflowProcessManager implements RunImplementation {
   private readonly invoker: ChildInvoker;
@@ -132,243 +132,214 @@ export class WorkflowProcessManager implements RunImplementation {
       const run = this.store.projection.requireRun(workflowRunId);
       if (isTerminalRunState(run.state) || this.controller.isTerminating(run.id)) return;
       const state = this.loadState(run);
-      if (state.nodeRuns > state.definition.limits.maxNodeRuns) {
-        await this.controller.fail(workflowRunId, {
-          code: "workflow_exhausted",
-          message: `Workflow exceeded ${state.definition.limits.maxNodeRuns} node activations`,
-          retryable: false,
-        });
+      const children = this.store.projection.childrenOf(run.id);
+      const plan = planWorkflowStep({
+        state,
+        children,
+        activeAttachedChildren: this.controller.activeAttachedChildren(run.id).length,
+        selectEdges: (currentState, node, result, outcome) =>
+          this.selectEdges(currentState, node, result, outcome),
+      });
+
+      if (plan.kind === "fail-workflow") {
+        await this.controller.fail(run.id, plan.failure);
         return;
       }
-      if (state.active.length === 0) {
-        await this.controller.fail(workflowRunId, {
-          code: "workflow_invalid",
-          message: `Workflow has no active or terminal node`,
-          retryable: false,
-        });
+      if (plan.kind === "wait") {
+        await this.controller.transition(run.id, "waiting");
         return;
       }
 
-      let progressed = false;
-      for (const activation of state.active) {
-        const latestRun = this.store.projection.requireRun(workflowRunId);
-        if (isTerminalRunState(latestRun.state) || this.controller.isTerminating(latestRun.id)) {
-          return;
-        }
-        const currentState = this.loadState(latestRun);
-        const current = currentState.activations.get(activation.activationId);
-        if (!current || current.completed) continue;
-        const node = workflowNode(currentState.definition, current.nodeId);
-        try {
-          const result = await this.processNode(
-            latestRun,
-            currentState,
-            node,
-            current.activationId,
-          );
-          progressed = progressed || result;
-        } catch (error) {
-          if (!this.isActive(workflowRunId)) return;
-          await this.controller.fail(workflowRunId, {
-            code: "workflow_runtime_failed",
-            message: error instanceof Error ? error.message : String(error),
-            retryable: false,
-          });
-          return;
-        }
+      try {
+        await this.executePlan(run, state, plan);
+      } catch (error) {
+        if (!this.isActive(workflowRunId)) return;
+        await this.controller.fail(workflowRunId, {
+          code: "workflow_runtime_failed",
+          message: error instanceof Error ? error.message : String(error),
+          retryable: false,
+        });
+        return;
       }
-      if (!progressed) return;
     }
   }
 
-  private async processNode(
+  private async executePlan(
     run: RunRecord,
     state: WorkflowGraphState,
-    node: WorkflowNode,
-    activationId: string,
-  ): Promise<boolean> {
-    switch (node.kind) {
-      case "invoke":
-        return this.processInvoke(run, state, node, activationId);
-      case "local": {
+    plan: Exclude<WorkflowStepPlan, { readonly kind: "fail-workflow" | "wait" }>,
+  ): Promise<void> {
+    switch (plan.kind) {
+      case "run-local":
+        await this.runLocal(run, state, plan.node, plan.activationId);
+        return;
+      case "evaluate-decision": {
         await this.controller.transition(run.id, "running");
-        if (!this.isActive(run.id)) return false;
-        const task = await this.tasks.addLocal({
-          ownerRunId: run.id,
-          title: node.title ?? node.id,
-          description: `Deterministic workflow operation ${node.operation}`,
-        });
-        if (!this.isActive(run.id)) return false;
-        await this.tasks.setLocalState(task.id, "wip");
-        if (!this.isActive(run.id)) return false;
-        const operationController = new AbortController();
-        const controllers = this.operationControllers.get(run.id) ?? new Set<AbortController>();
-        controllers.add(operationController);
-        this.operationControllers.set(run.id, controllers);
-        const input = this.functions.mapping(node.input)(state.context);
-        const operation = this.operations.run(node.operation, input, {
-          cwd: this.cwd,
-          signal: operationController.signal,
-        });
-        const active = this.activeOperations.get(run.id) ?? new Set<Promise<unknown>>();
-        active.add(operation);
-        this.activeOperations.set(run.id, active);
-        try {
-          const result = await operation;
-          if (!this.isActive(run.id)) return false;
-          await this.tasks.setLocalState(task.id, "done");
-          if (!this.isActive(run.id)) return false;
-          await this.completeAndAdvance(run.id, node, activationId, result, "success");
-        } catch (error) {
-          if (!this.isActive(run.id) || operationController.signal.aborted) return false;
-          await this.tasks.setLocalState(task.id, "failed");
-          const failure: Failure = {
-            code: "local_step_failed",
-            message: error instanceof Error ? error.message : String(error),
-            retryable: false,
-          };
-          const outcome = failed(failure);
-          if (this.selectEdges(state, node, outcome, "failure").length === 0) {
-            await this.controller.fail(run.id, failure);
-          } else {
-            await this.completeAndAdvance(run.id, node, activationId, outcome, "failure");
-          }
-        } finally {
-          controllers.delete(operationController);
-          active.delete(operation);
-          if (controllers.size === 0) this.operationControllers.delete(run.id);
-          if (active.size === 0) this.activeOperations.delete(run.id);
-        }
-        return true;
+        const decision = this.functions.decision(plan.node.decide)(state.context);
+        await this.completeAndAdvance(run.id, plan.node, plan.activationId, decision, "success");
+        return;
       }
-      case "decision": {
+      case "start-child":
+        await this.startChild(run, state, plan.node, plan.activationId);
+        return;
+      case "retry-child":
+        await this.retryChild(run, plan.node, plan.activationId, plan.child);
+        return;
+      case "complete-invoke":
+        await this.completeInvoke(run, plan.node, plan.activationId, plan.child);
+        return;
+      case "complete-join":
         await this.controller.transition(run.id, "running");
-        const decision = this.functions.decision(node.decide)(state.context);
-        await this.completeAndAdvance(run.id, node, activationId, decision, "success");
-        return true;
-      }
-      case "join":
-        return this.processJoin(run, state, node, activationId);
-      case "return": {
-        if (this.controller.activeAttachedChildren(run.id).length > 0) {
-          await this.controller.transition(run.id, "waiting");
-          return false;
-        }
-        const currentState = this.loadState(run);
-        const failedChild = this.store.projection
-          .childrenOf(run.id)
-          .find(
-            (child) =>
-              child.ownership === "attached" &&
-              child.outcome !== undefined &&
-              child.outcome.status !== "success" &&
-              !this.isHandledChildOutcome(currentState, child),
-          );
-        if (failedChild?.outcome) {
-          await this.controller.fail(run.id, childFailure(failedChild, failedChild.outcome));
-          return true;
-        }
-        await this.controller.transition(run.id, "completing");
-        if (!this.isActive(run.id)) return false;
-        if (this.controller.activeAttachedChildren(run.id).length > 0) {
-          await this.controller.transition(run.id, "running");
-          await this.controller.transition(run.id, "waiting");
-          return false;
-        }
-        const output = this.functions.mapping(node.output)(state.context);
-        await this.completeNode(run.id, node, activationId, output);
-        await this.controller.complete(run.id, output);
-        return true;
-      }
-      case "fail": {
-        const mapped = this.functions.mapping(node.reason)(state.context);
+        await this.completeAndAdvance(
+          run.id,
+          plan.node,
+          plan.activationId,
+          plan.result,
+          "success",
+        );
+        return;
+      case "complete-return":
+        await this.completeReturn(run, plan.node, plan.activationId);
+        return;
+      case "fail-node": {
+        const mapped = this.functions.mapping(plan.node.reason)(state.context);
         const message = typeof mapped === "string" ? mapped : JSON.stringify(mapped);
-        await this.completeNode(run.id, node, activationId, mapped);
+        await this.completeNode(run.id, plan.node, plan.activationId, mapped);
         await this.controller.fail(run.id, {
           code: "workflow_exhausted",
           message,
           retryable: false,
         });
-        return true;
+        return;
       }
     }
   }
 
-  private async processInvoke(
+  private async runLocal(
+    run: RunRecord,
+    state: WorkflowGraphState,
+    node: LocalNode,
+    activationId: string,
+  ): Promise<void> {
+    await this.controller.transition(run.id, "running");
+    if (!this.isActive(run.id)) return;
+    const task = await this.tasks.addLocal({
+      ownerRunId: run.id,
+      title: node.title ?? node.id,
+      description: `Deterministic workflow operation ${node.operation}`,
+    });
+    if (!this.isActive(run.id)) return;
+    await this.tasks.setLocalState(task.id, "wip");
+    if (!this.isActive(run.id)) return;
+
+    const operationController = new AbortController();
+    const controllers = this.operationControllers.get(run.id) ?? new Set<AbortController>();
+    controllers.add(operationController);
+    this.operationControllers.set(run.id, controllers);
+    const input = this.functions.mapping(node.input)(state.context);
+    const operation = this.operations.run(node.operation, input, {
+      cwd: this.cwd,
+      signal: operationController.signal,
+      executionId: workflowEffectId(run.id, activationId, node.id),
+    });
+    const active = this.activeOperations.get(run.id) ?? new Set<Promise<unknown>>();
+    active.add(operation);
+    this.activeOperations.set(run.id, active);
+    try {
+      const result = await operation;
+      if (!this.isActive(run.id)) return;
+      await this.tasks.setLocalState(task.id, "done");
+      if (!this.isActive(run.id)) return;
+      await this.completeAndAdvance(run.id, node, activationId, result, "success");
+    } catch (error) {
+      if (!this.isActive(run.id) || operationController.signal.aborted) return;
+      await this.tasks.setLocalState(task.id, "failed");
+      const failure: Failure = {
+        code: "local_step_failed",
+        message: error instanceof Error ? error.message : String(error),
+        retryable: false,
+      };
+      const outcome = failed(failure);
+      if (this.selectEdges(state, node, outcome, "failure").length === 0) {
+        await this.controller.fail(run.id, failure);
+      } else {
+        await this.completeAndAdvance(run.id, node, activationId, outcome, "failure");
+      }
+    } finally {
+      controllers.delete(operationController);
+      active.delete(operation);
+      if (controllers.size === 0) this.operationControllers.delete(run.id);
+      if (active.size === 0) this.activeOperations.delete(run.id);
+    }
+  }
+
+  private async startChild(
     run: RunRecord,
     state: WorkflowGraphState,
     node: InvokeNode,
     activationId: string,
-  ): Promise<boolean> {
-    const attempts = this.invocationAttempts(run.id, node.id, activationId);
-    const child = attempts.at(-1);
-    if (!child) {
-      if (!(await this.hasInvocationCapacity(run.id, state))) return false;
-      const mappedInput = this.prepareInvokeInput(node, state);
-      const difficulty = this.resolveDifficulty(run, state, node);
-      const handle = await this.invoker.start({
-        parentId: run.id,
-        definition: node.definition,
-        input: mappedInput,
-        wait: node.wait,
-        ...(difficulty ? { difficulty } : {}),
-        causation: {
-          workflowRunId: run.id,
-          nodeId: node.id,
-          activationId,
-        },
-        trustedWorkflowInvocation: true,
-      });
-      if (node.wait === "background") {
-        await this.completeAndAdvance(
-          run.id,
-          node,
-          activationId,
-          { runId: handle.id, status: "running" },
-          "success",
-        );
-        return true;
-      }
-      await this.controller.transition(run.id, "waiting");
-      return true;
+  ): Promise<void> {
+    const mappedInput = this.prepareInvokeInput(node, state);
+    const difficulty = this.resolveDifficulty(run, state, node);
+    const handle = await this.invoker.start({
+      parentId: run.id,
+      definition: node.definition,
+      input: mappedInput,
+      wait: node.wait,
+      ...(difficulty ? { difficulty } : {}),
+      causation: {
+        workflowRunId: run.id,
+        nodeId: node.id,
+        activationId,
+      },
+      trustedWorkflowInvocation: true,
+    });
+    if (node.wait === "background") {
+      await this.completeAndAdvance(
+        run.id,
+        node,
+        activationId,
+        { runId: handle.id, status: "running" },
+        "success",
+      );
+      return;
     }
+    await this.controller.transition(run.id, "waiting");
+  }
 
-    if (!isTerminalRunState(child.state) || !child.outcome) {
-      await this.controller.transition(run.id, "waiting");
-      return false;
-    }
+  private async retryChild(
+    run: RunRecord,
+    node: InvokeNode,
+    activationId: string,
+    child: RunRecord,
+  ): Promise<void> {
+    const retryOverrides = suggestedRetryOverrides(child);
+    await this.invoker.start({
+      parentId: run.id,
+      definition: node.definition,
+      input: child.input,
+      wait: node.wait,
+      ...(child.compiled.difficulty ? { difficulty: child.compiled.difficulty } : {}),
+      causation: {
+        workflowRunId: run.id,
+        nodeId: node.id,
+        activationId,
+      },
+      trustedWorkflowInvocation: true,
+      retryOf: child.id,
+      ...(retryOverrides ? { retryOverrides } : {}),
+    });
+    await this.controller.transition(run.id, "waiting");
+  }
 
-    if (this.shouldRetry(node, attempts, child)) {
-      if (!(await this.hasInvocationCapacity(run.id, state))) return false;
-      const retryOverrides = suggestedRetryOverrides(child);
-      await this.invoker.start({
-        parentId: run.id,
-        definition: node.definition,
-        input: child.input,
-        wait: node.wait,
-        ...(child.compiled.difficulty ? { difficulty: child.compiled.difficulty } : {}),
-        causation: {
-          workflowRunId: run.id,
-          nodeId: node.id,
-          activationId,
-        },
-        trustedWorkflowInvocation: true,
-        retryOf: child.id,
-        ...(retryOverrides ? { retryOverrides } : {}),
-      });
-      await this.controller.transition(run.id, "waiting");
-      return true;
-    }
-
+  private async completeInvoke(
+    run: RunRecord,
+    node: InvokeNode,
+    activationId: string,
+    child: RunRecord,
+  ): Promise<void> {
+    if (!child.outcome) throw new Error(`Child ${child.id} has no terminal outcome`);
     const outcomeStatus = child.outcome.status;
-    if (
-      outcomeStatus !== "success" &&
-      this.selectEdges(state, node, child.outcome, outcomeStatus).length === 0
-    ) {
-      await this.controller.fail(run.id, childFailure(child, child.outcome));
-      return true;
-    }
-
     let outcome = child.outcome;
     if (outcome.status === "success" && this.isStockNode(node)) {
       try {
@@ -380,13 +351,30 @@ export class WorkflowProcessManager implements RunImplementation {
           retryable: false,
           causeRunId: child.id,
         });
-        return true;
+        return;
       }
     }
 
     await this.controller.transition(run.id, "running");
     await this.completeAndAdvance(run.id, node, activationId, outcome, outcomeStatus);
-    return true;
+  }
+
+  private async completeReturn(
+    run: RunRecord,
+    node: ReturnNode,
+    activationId: string,
+  ): Promise<void> {
+    await this.controller.transition(run.id, "completing");
+    if (!this.isActive(run.id)) return;
+    if (this.controller.activeAttachedChildren(run.id).length > 0) {
+      await this.controller.transition(run.id, "running");
+      await this.controller.transition(run.id, "waiting");
+      return;
+    }
+    const state = this.loadState(this.store.projection.requireRun(run.id));
+    const output = this.functions.mapping(node.output)(state.context);
+    await this.completeNode(run.id, node, activationId, output);
+    await this.controller.complete(run.id, output);
   }
 
   private prepareInvokeInput(node: InvokeNode, state: WorkflowGraphState): unknown {
@@ -427,34 +415,7 @@ export class WorkflowProcessManager implements RunImplementation {
 
   private isStockNode(node: InvokeNode): boolean {
     const definition = this.catalog.require(node.definition.id);
-    return definition.id === STOCK_SESSION_ID && definition.kind === "agent";
-  }
-
-  private invocationAttempts(
-    workflowRunId: RunId,
-    nodeId: string,
-    activationId: string,
-  ): readonly RunRecord[] {
-    return this.store.projection.childrenOf(workflowRunId).filter((candidate) => {
-      const causation = candidate.compiled.invocation.causation;
-      return causation?.activationId === activationId && causation.nodeId === nodeId;
-    });
-  }
-
-  private shouldRetry(node: InvokeNode, attempts: readonly RunRecord[], child: RunRecord): boolean {
-    if (!node.retry || node.wait === "background") return false;
-    if (attempts.length - 1 >= node.retry.maxRetries) return false;
-    return child.outcome?.status === "failure" && child.outcome.failure.retryable;
-  }
-
-  private async hasInvocationCapacity(runId: RunId, state: WorkflowGraphState): Promise<boolean> {
-    if (
-      this.controller.activeAttachedChildren(runId).length < state.definition.limits.maxParallelism
-    ) {
-      return true;
-    }
-    await this.controller.transition(runId, "waiting");
-    return false;
+    return definition.kind === "agent" && definition.sessionMode === "stock";
   }
 
   private resolveDifficulty(
@@ -468,62 +429,6 @@ export class WorkflowProcessManager implements RunImplementation {
       state.context.latest.get(node.difficulty.nodeId),
       node.difficulty.nodeId,
     );
-  }
-
-  private async processJoin(
-    run: RunRecord,
-    state: WorkflowGraphState,
-    node: JoinNode,
-    activationId: string,
-  ): Promise<boolean> {
-    const incoming = state.definition.graph.edges.filter((edge) => edge.to === node.id);
-    const arrived = incoming.filter(
-      (edge) => (state.context.transitionCounts.get(`${edge.from}->${edge.to}`) ?? 0) > 0,
-    );
-    const statuses = arrived.map((edge) => this.sourceStatus(state, edge.from));
-    const successes = statuses.filter((status) => status === "success").length;
-    const failures = statuses.filter((status) => status === "failure").length;
-    const settled = statuses.filter((status) => status !== "pending").length;
-    const quorum = node.quorum ?? Math.max(1, Math.ceil(incoming.length / 2));
-
-    if (node.policy === "all-success" && failures > 0) {
-      await this.controller.fail(run.id, {
-        code: "workflow_exhausted",
-        message: `Join ${node.id} observed a failed branch`,
-        retryable: false,
-      });
-      return true;
-    }
-
-    const satisfied =
-      node.policy === "first-success"
-        ? successes > 0
-        : node.policy === "quorum"
-          ? successes >= quorum
-          : arrived.length === incoming.length && settled === incoming.length;
-    if (!satisfied) {
-      await this.controller.transition(run.id, "waiting");
-      return false;
-    }
-
-    await this.controller.transition(run.id, "running");
-    const result = Object.fromEntries(
-      incoming.map((edge) => [edge.from, state.context.results.get(edge.from) ?? []]),
-    );
-    await this.completeAndAdvance(run.id, node, activationId, result, "success");
-    return true;
-  }
-
-  private sourceStatus(
-    state: WorkflowGraphState,
-    sourceNodeId: string,
-  ): "pending" | "success" | "failure" {
-    const source = workflowNode(state.definition, sourceNodeId);
-    const result = state.context.latest.get(sourceNodeId);
-    if (result === undefined) return "pending";
-    if (source.kind !== "invoke") return "success";
-    const outcome = result as Outcome<unknown>;
-    return outcome.status === "success" ? "success" : "failure";
   }
 
   private async completeAndAdvance(
@@ -574,24 +479,6 @@ export class WorkflowProcessManager implements RunImplementation {
       if (edge.maxTraversals !== undefined && count >= edge.maxTraversals) return false;
       return edge.when ? this.functions.condition(edge.when)(state.context, result) : true;
     });
-  }
-
-  private isHandledChildOutcome(state: WorkflowGraphState, child: RunRecord): boolean {
-    const causation = child.compiled.invocation.causation;
-    const status = child.outcome?.status;
-    if (!causation || !status || status === "success") return false;
-    const superseded = this.store.projection
-      .childrenOf(child.parentId ?? state.context.runId)
-      .some((candidate) => candidate.compiled.invocation.retryOf === child.id);
-    if (superseded) return true;
-    const source = workflowNode(state.definition, causation.nodeId);
-    if (source.kind !== "invoke" || source.wait === "background") return false;
-    return state.definition.graph.edges.some(
-      (edge) =>
-        edge.from === causation.nodeId &&
-        matchesOutcome(edge, status) &&
-        (state.context.transitionCounts.get(`${edge.from}->${edge.to}`) ?? 0) > 0,
-    );
   }
 
   private async completeNode(
@@ -712,6 +599,10 @@ function boundedInteger(value: unknown, minimum: number, maximum: number): numbe
     : undefined;
 }
 
+function workflowEffectId(runId: RunId, activationId: string, nodeId: string): string {
+  return `${runId}:${activationId}:${nodeId}`;
+}
+
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -741,30 +632,6 @@ function requireWorkflow(definition: AnyDefinition): WorkflowDefinition<unknown,
   if (definition.kind !== "workflow")
     throw new Error(`${definition.id} is not a workflow definition`);
   return definition;
-}
-
-function childFailure(child: RunRecord, outcome: Outcome<unknown>): Failure {
-  if (outcome.status === "failure") {
-    return {
-      ...outcome.failure,
-      retryable: false,
-      causeRunId: child.id,
-    };
-  }
-  if (outcome.status === "cancelled") {
-    return {
-      code: "cancelled",
-      message: `Child ${child.id} was cancelled: ${outcome.reason}`,
-      retryable: false,
-      causeRunId: child.id,
-    };
-  }
-  return {
-    code: "workflow_exhausted",
-    message: `Child ${child.id} did not provide a usable outcome`,
-    retryable: false,
-    causeRunId: child.id,
-  };
 }
 
 function isTerminalEvent(type: string): boolean {
