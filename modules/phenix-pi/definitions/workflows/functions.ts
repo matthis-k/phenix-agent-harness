@@ -148,21 +148,24 @@ export function registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): 
       reports: qaReports(context),
     }),
   );
-  registry.registerMapping("qa.synthesis-fallback", (context): QAReport => ({
-    summary:
-      "QA checks and independent reviews completed, but the synthesis agent failed. Returning the validated reports without narrative synthesis.",
-    checks: localAt<readonly CheckResult[]>(context, "checks"),
-    findings: [
-      {
-        severity: "info",
-        kind: "synthesis-failure",
-        description: "The QA synthesis stage could not produce its typed report.",
-        locations: [],
-        notes: failureDescriptionAt(context, "synthesize"),
-      },
-    ],
-    reports: qaReports(context),
-  }));
+  registry.registerMapping(
+    "qa.synthesis-fallback",
+    (context): QAReport => ({
+      summary:
+        "QA checks and independent reviews completed, but the synthesis agent failed. Returning the validated reports without narrative synthesis.",
+      checks: localAt<readonly CheckResult[]>(context, "checks"),
+      findings: [
+        {
+          severity: "info",
+          kind: "synthesis-failure",
+          description: "The QA synthesis stage could not produce its typed report.",
+          locations: [],
+          notes: failureDescriptionAt(context, "synthesize"),
+        },
+      ],
+      reports: qaReports(context),
+    }),
+  );
   registry.registerMapping("qa.output", (context): QAReport => {
     const report =
       successfulOutcomeAt<QAReport>(context, "synthesize") ??
@@ -223,12 +226,7 @@ function registerDebugFunctions(registry: WorkflowFunctionRegistrar): void {
       ["reproduce", "diagnose", "implement", "regression"],
     ),
   );
-  registerResilientHandoff(registry, "debug", [
-    "reproduce",
-    "diagnose",
-    "implement",
-    "regression",
-  ]);
+  registerResilientHandoff(registry, "debug", ["reproduce", "diagnose", "implement", "regression"]);
 }
 
 function registerRefactorFunctions(registry: WorkflowFunctionRegistrar): void {
@@ -530,13 +528,19 @@ function registerResilientHandoff(
   workflow: string,
   artifactNodes: readonly string[],
 ): void {
-  registry.registerMapping(`${workflow}.fallback`, (context): BaseResult => ({
-    summary: `Workflow ${workflow} completed its substantive stages, but the final handoff agent failed. Returning the validated stage results directly.`,
-    artifacts: artifactNodes.map((stage) => ({ stage, result: successAt(context, stage) })),
-    unresolved: [`Final handoff failure: ${failureDescriptionAt(context, "finalize")}`],
-  }));
-  registry.registerMapping(`${workflow}.output`, (context): BaseResult =>
-    successfulOutcomeAt<BaseResult>(context, "finalize") ?? localAt<BaseResult>(context, "fallback"),
+  registry.registerMapping(
+    `${workflow}.fallback`,
+    (context): BaseResult => ({
+      summary: `Workflow ${workflow} completed its substantive stages, but the final handoff agent failed. Returning the validated stage results directly.`,
+      artifacts: artifactNodes.map((stage) => ({ stage, result: successAt(context, stage) })),
+      unresolved: [`Final handoff failure: ${failureDescriptionAt(context, "finalize")}`],
+    }),
+  );
+  registry.registerMapping(
+    `${workflow}.output`,
+    (context): BaseResult =>
+      successfulOutcomeAt<BaseResult>(context, "finalize") ??
+      localAt<BaseResult>(context, "fallback"),
   );
 }
 
