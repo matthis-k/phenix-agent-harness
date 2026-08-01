@@ -31,6 +31,22 @@ if source.count(no_op) != 1:
     raise RuntimeError("execution-kernel no-op replacement changed")
 source = source.replace(no_op, "", 1)
 
+ambiguous_kernel = '''replace_once(
+    "modules/phenix-pi/composition/execution-kernel.ts",
+    '    models,\\n    ids,\\n    clock,\\n',
+    '    models,\\n    ...(input.budgetPolicy ? { budgetPolicy: input.budgetPolicy } : {}),\\n    ids,\\n    clock,\\n',
+)
+'''
+scoped_kernel = '''replace_once(
+    "modules/phenix-pi/composition/execution-kernel.ts",
+    '  const execution = new ExecutionFacadeImpl({\\n    catalog: definitions,\\n    store,\\n    models,\\n    ids,\\n    clock,\\n',
+    '  const execution = new ExecutionFacadeImpl({\\n    catalog: definitions,\\n    store,\\n    models,\\n    ...(input.budgetPolicy ? { budgetPolicy: input.budgetPolicy } : {}),\\n    ids,\\n    clock,\\n',
+)
+'''
+if source.count(ambiguous_kernel) != 1:
+    raise RuntimeError("execution-kernel budget replacement changed")
+source = source.replace(ambiguous_kernel, scoped_kernel, 1)
+
 repeated = '''replace_once(
     "modules/phenix-pi/application/budget-suspension.ts",
     '  readonly timeoutRemainingMs: number;\\n',
