@@ -4,9 +4,9 @@ import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   defineExtensionSuite,
+  type ExtensionModule,
   installExtensionSuite,
   orderExtensionModules,
-  type ExtensionModule,
 } from "../framework/extension-suite.ts";
 
 interface Services {
