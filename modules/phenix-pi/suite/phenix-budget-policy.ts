@@ -23,7 +23,7 @@ const FINITE_BUDGETS: Readonly<Record<Exclude<BudgetMode, "max">, FiniteBudget>>
 };
 
 export const phenixBudgetPolicy: BudgetPolicy = Object.freeze({
-  applyAgentLimits(base, budget) {
+  applyAgentLimits(base: AgentLimits, budget: BudgetMode) {
     if (budget === "max") {
       return { maxRepairAttempts: Math.min(10, Math.max(5, base.maxRepairAttempts)) };
     }
@@ -53,7 +53,7 @@ export const phenixBudgetPolicy: BudgetPolicy = Object.freeze({
     };
   },
 
-  capThinking(requested, budget) {
+  capThinking(requested: PiThinkingLevel, budget: BudgetMode) {
     if (budget === "max") return requested;
     const ceiling = FINITE_BUDGETS[budget].thinkingCeiling;
     return effortIndex(requested as EffortLevel) <= effortIndex(ceiling as EffortLevel)

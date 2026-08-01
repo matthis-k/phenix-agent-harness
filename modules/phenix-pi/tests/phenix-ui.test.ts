@@ -330,6 +330,7 @@ function fixtureSnapshot(): PhenixUiSnapshot {
     agent: "base",
     modelSet: "mixed",
     difficulty: "D1",
+    budget: "medium",
   } satisfies SessionProfile;
   const definitions = [
     {

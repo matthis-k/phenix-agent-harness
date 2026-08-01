@@ -9,6 +9,6 @@ export interface BudgetPolicy {
 }
 
 export const passthroughBudgetPolicy: BudgetPolicy = Object.freeze({
-  applyAgentLimits: (base) => base,
-  capThinking: (requested) => requested,
+  applyAgentLimits: (base: AgentLimits) => base,
+  capThinking: (requested: PiThinkingLevel) => requested,
 });

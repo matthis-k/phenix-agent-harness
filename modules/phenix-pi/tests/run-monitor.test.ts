@@ -144,7 +144,12 @@ test("status collapses completed workflow boundaries and keeps recent facts", ()
       factFor(workflowId, 5, "2026-07-24T00:00:50.000Z", "test-result", "Latest fact"),
     ],
     sequence: 20,
-    profile: { agent: "base" as const, modelSet: "mixed" as const, difficulty: "D2" as const },
+    profile: {
+      agent: "base" as const,
+      modelSet: "mixed" as const,
+      difficulty: "D2" as const,
+      budget: "medium" as const,
+    },
     diagnostics: {
       total: 12,
       artifacts: 2,
