@@ -25,7 +25,6 @@ import {
 } from "../domain/workflow/validator.ts";
 
 export interface DynamicWorkflowIdentity {
-  readonly version: 1;
   readonly graphDigest: string;
   readonly definitionDigests: Readonly<Record<string, string>>;
   readonly schemaDigests: Readonly<Record<string, string>>;
@@ -492,8 +491,8 @@ function dynamicWorkflowIdentity(
       .sort((left, right) => left.id.localeCompare(right.id))
       .map((schema) => [schema.id, digest(schema.jsonSchema)]),
   );
-  const graphDigest = digest({ version: 1, proposal, definitionDigests, schemaDigests });
-  return Object.freeze({ version: 1, graphDigest, definitionDigests, schemaDigests });
+  const graphDigest = digest({ proposal, definitionDigests, schemaDigests });
+  return Object.freeze({ graphDigest, definitionDigests, schemaDigests });
 }
 
 function definitionContract(definition: AnyDefinition): unknown {

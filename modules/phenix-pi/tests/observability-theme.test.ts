@@ -49,7 +49,6 @@ test("status dashboard keeps semantic framing around the sequence and recent fac
         requested: { kind: "session" },
         concrete: { kind: "concrete", provider: "opencode-go", model: "model-a" },
         thinking: "low",
-        policyRevision: "test",
       },
     },
   };

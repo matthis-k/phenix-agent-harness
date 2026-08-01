@@ -80,7 +80,6 @@ function queries(tree: RunTreeNode): QueryFacade {
 
 function errorEntry(scope: string): DiagnosticLogEntry {
   return {
-    version: 1,
     timestamp: "2026-07-29T00:00:00.000Z",
     severity: "error",
     scope,

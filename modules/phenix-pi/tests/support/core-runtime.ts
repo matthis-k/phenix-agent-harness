@@ -52,7 +52,6 @@ const models: ModelResolver = {
       concrete: { kind: "concrete", provider: "test", model: "model" },
       thinking: context.thinking === "route" ? "medium" : context.thinking,
       capability: context.capability,
-      policyRevision: "test",
     };
   },
 };

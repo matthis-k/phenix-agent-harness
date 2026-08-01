@@ -66,7 +66,6 @@ export interface ResolvedModel {
   readonly thinking: PiThinkingLevel;
   readonly capability?: ModelCapability;
   readonly pool?: string;
-  readonly policyRevision: string;
 }
 
 export function isDifficulty(value: string): value is Difficulty {

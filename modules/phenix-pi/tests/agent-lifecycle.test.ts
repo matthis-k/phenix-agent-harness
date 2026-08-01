@@ -108,7 +108,6 @@ test("agent completion requires both typed output and a settled Pi cycle", async
           requested: selector,
           concrete: { kind: "concrete", provider: "test", model: "model" },
           thinking: "medium",
-          policyRevision: "test",
         };
       },
     },

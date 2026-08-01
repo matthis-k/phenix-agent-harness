@@ -167,7 +167,6 @@ function sameIdentity(
   right: PersistedDynamicWorkflowIdentity,
 ): boolean {
   return (
-    left.version === right.version &&
     left.graphDigest === right.graphDigest &&
     sameRecord(left.definitionDigests, right.definitionDigests) &&
     sameRecord(left.schemaDigests, right.schemaDigests)

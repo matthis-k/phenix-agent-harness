@@ -41,7 +41,6 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
         ? await this.materializeFields(input.rootRunId, input.fields)
         : undefined;
       committed = {
-        version: 1,
         timestamp: input.timestamp ?? new Date().toISOString(),
         severity: input.severity,
         scope: input.scope,
@@ -321,7 +320,6 @@ export class JsonlDiagnosticLog implements DiagnosticLog {
 
 function transientEntry(input: DiagnosticWrite): DiagnosticLogEntry {
   return {
-    version: 1,
     timestamp: input.timestamp ?? new Date().toISOString(),
     severity: input.severity,
     scope: input.scope,

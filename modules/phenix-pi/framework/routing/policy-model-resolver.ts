@@ -21,7 +21,6 @@ export interface CapabilityRoute {
 }
 
 export interface RoutingPolicy {
-  readonly revision: string;
   route(context: ModelResolutionContext): CapabilityRoute;
   pool(modelSet: PhenixModelSetId, capability: ModelCapability): string | undefined;
   candidates(modelSet: PhenixModelSetId, capability: ModelCapability): readonly ModelCandidate[];
@@ -65,7 +64,6 @@ export class PolicyModelResolver implements ModelResolver {
           concrete: selector,
           thinking,
           capability: route.capability,
-          policyRevision: this.policy.revision,
         },
       ];
     }
@@ -99,7 +97,6 @@ export class PolicyModelResolver implements ModelResolver {
       thinking,
       capability: route.capability,
       ...(pool ? { pool } : {}),
-      policyRevision: this.policy.revision,
     }));
   }
 }

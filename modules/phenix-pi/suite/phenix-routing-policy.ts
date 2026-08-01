@@ -191,7 +191,6 @@ const ROUTES: Readonly<Record<string, Readonly<Record<Difficulty, CapabilityRout
 };
 
 export const defaultRoutingPolicy: RoutingPolicy = Object.freeze({
-  revision: "phenix-routing-v4",
   route(context: ModelResolutionContext) {
     const role = roleFromDefinition(context.definitionId);
     const difficulty = context.difficulty ?? defaultDifficulty(role);

@@ -38,7 +38,7 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
       const run = value.node.run;
       const attention = snapshot.attentionByRun?.[String(run.id)];
       const expandable = Boolean(
-        run.resolvedModel || run.profile || run.compiled.budget || run.pi?.sessionId,
+        run.resolvedModel || run.profile || run.compiled?.budget || run.pi?.sessionId,
       );
       const present = ({
         width,
@@ -69,8 +69,8 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
             }),
             textSpan(" "),
             textSpan(label, { strong: true }),
-            ...(run.kind === "agent" && run.compiled.difficulty
-              ? [textSpan(` · ${run.compiled.difficulty}`, { tone: "accent" as const })]
+            ...(run.kind === "agent" && run.compiled?.difficulty
+              ? [textSpan(` · ${run.compiled?.difficulty}`, { tone: "accent" as const })]
               : []),
             ...(attentionLabel
               ? [
@@ -117,8 +117,8 @@ function runDetails(node: RunTreeNode): string[] {
   } else if (run.profile) {
     details.push(`${run.profile.modelSet}/budget-${run.profile.budget}`);
   }
-  if (run.kind === "agent" && run.compiled.budget) {
-    details.push(`budget ${run.compiled.budget}`);
+  if (run.kind === "agent" && run.compiled?.budget) {
+    details.push(`budget ${run.compiled?.budget}`);
   }
   if (run.pi?.sessionId) details.push(`session ${run.pi.sessionId}`);
   return details;

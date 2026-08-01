@@ -165,7 +165,7 @@ The root extension is a host adapter. Each child agent owns one public Pi `Agent
 
 Pi session entries store only root binding and ledger cursor information. Cross-session execution state remains in `.phenix-agent-state/runs/*/events.jsonl`. Root-scoped diagnostics live beside the ledger as `logs.jsonl`, with referenced payloads under `artifacts/sha256`.
 
-Every child records its requested model selector and the concrete model selected by the versioned routing policy. The `phenix` provider is virtual: it performs no authentication itself and forwards the concrete provider credentials obtained from Pi's model registry.
+Every child records its requested model selector and the concrete model selected by the routing policy. The `phenix` provider is virtual: it performs no authentication itself and forwards the concrete provider credentials obtained from Pi's model registry.
 
 ## Public Pi tools
 

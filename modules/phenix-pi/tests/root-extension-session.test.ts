@@ -24,7 +24,7 @@ test("registered root tools follow the active Pi session runtime", async () => {
     const handlers = new Map<string, Handler>();
     const tools = new Map<string, RegisteredTool>();
     const fakePi = {
-      events: { emit: () => undefined },
+      events: { emit: () => undefined, on: () => undefined },
       on(name: string, handler: Handler) {
         handlers.set(name, handler);
       },
