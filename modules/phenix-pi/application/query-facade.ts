@@ -9,16 +9,10 @@ import {
 } from "../domain/run/observability.ts";
 import type { RunId } from "../domain/shared.ts";
 import type { ExecutionStore } from "./execution-store.ts";
-import type { QueryFacade, RunTree, RunTreeNode, TaskFacade } from "./interfaces.ts";
+import type { QueryFacade, RunTree, RunTreeNode } from "./interfaces.ts";
 
 export class QueryFacadeImpl implements QueryFacade {
-  private readonly store: ExecutionStore;
-  private readonly tasks: TaskFacade;
-
-  constructor(store: ExecutionStore, tasks: TaskFacade) {
-    this.store = store;
-    this.tasks = tasks;
-  }
+  constructor(private readonly store: ExecutionStore) {}
 
   async runTree(rootRunId: RunId): Promise<RunTree> {
     const root = this.store.projection.requireRun(rootRunId);
@@ -42,10 +36,6 @@ export class QueryFacadeImpl implements QueryFacade {
     if (limit === undefined || !Number.isFinite(limit)) return facts;
     const bounded = Math.max(0, Math.floor(limit));
     return bounded === 0 ? [] : facts.slice(-bounded);
-  }
-
-  taskTree(rootRunId: RunId) {
-    return this.tasks.tree(rootRunId);
   }
 
   async activeRuns(rootRunId: RunId): Promise<readonly RunSnapshot[]> {
