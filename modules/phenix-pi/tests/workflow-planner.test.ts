@@ -362,10 +362,7 @@ test("strict joins classify a required branch failure as workflow rejection", ()
     ],
   );
   const results = new Map<string, readonly unknown[]>([
-    [
-      "left",
-      [failed({ code: "agent_reported_failure", message: "rejected", retryable: false })],
-    ],
+    ["left", [failed({ code: "agent_reported_failure", message: "rejected", retryable: false })]],
   ]);
   const transitions = new Map([["left->join", 1]]);
 

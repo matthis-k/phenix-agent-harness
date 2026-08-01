@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  defaultAgentFailureRetryable,
-  type FailureCategory,
-} from "../domain/shared.ts";
+import { defaultAgentFailureRetryable, type FailureCategory } from "../domain/shared.ts";
 
 test("structural agent failures are not retried by default", () => {
   const structural: readonly FailureCategory[] = [
