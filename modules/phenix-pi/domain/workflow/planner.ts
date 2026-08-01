@@ -165,8 +165,7 @@ function planJoin(
 ): ActivationCandidate {
   const incoming = input.state.definition.graph.edges.filter((edge) => edge.to === node.id);
   const arrived = incoming.filter(
-    (edge) =>
-      (input.state.context.transitionCounts.get(`${edge.from}->${edge.to}`) ?? 0) > 0,
+    (edge) => (input.state.context.transitionCounts.get(`${edge.from}->${edge.to}`) ?? 0) > 0,
   );
   const statuses = arrived.map((edge) => sourceStatus(input.state, edge.from));
   const successes = statuses.filter((status) => status === "success").length;
