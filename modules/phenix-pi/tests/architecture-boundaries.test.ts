@@ -38,6 +38,7 @@ const inwardLayers = {
 
 const allowedBoundaryImports = new Map<string, ReadonlySet<string>>([
   ["definitions/agents.ts", new Set(["../composition/bundled-definitions.ts"])],
+  ["definitions/workflows/index.ts", new Set(["../../composition/bundled-definitions.ts"])],
 ]);
 
 test("source dependencies point inward", async () => {
