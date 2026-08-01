@@ -1,0 +1,28 @@
+name: Apply workflow failure semantic fix
+
+on:
+  push:
+    branches:
+      - fix/workflow-failure-classification
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.head_commit.message == 'Stage workflow failure semantic patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 0
+      - name: Apply strict semantic patch
+        run: python3 .github/scripts/apply-workflow-failure-fix.py
+      - name: Commit resulting source change
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m "Fix workflow failure classification and retry defaults"
+          git push origin HEAD:fix/workflow-failure-classification
