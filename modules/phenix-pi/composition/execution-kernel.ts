@@ -9,8 +9,15 @@ import { ExecutionFacadeImpl } from "../application/execution-facade.ts";
 import type { ExecutionStore } from "../application/execution-store.ts";
 import { SessionInvocationPolicy } from "../application/invocation-policy.ts";
 import { ModelExecutionFacade } from "../application/model-execution-facade.ts";
+import {
+  CompositeAgentToolFactory,
+  ProjectAgentToolFactory,
+} from "../application/project-agent-tools.ts";
+import type { ProjectPlannerFacade } from "../application/project-planner.ts";
 import { QueryFacadeImpl } from "../application/query-facade.ts";
 import { TaskFacadeImpl } from "../application/task-facade.ts";
+import { UserFormAgentToolFactory } from "../application/user-form-agent-tools.ts";
+import type { UserFormFacade } from "../application/user-form-service.ts";
 import { WorkflowCheckpointProcessManager } from "../application/workflow-checkpoint-process-manager.ts";
 import { WorkflowProcessManager } from "../application/workflow-process-manager.ts";
 import type { Schema } from "../domain/definition/schema.ts";
@@ -24,6 +31,8 @@ interface ExecutionKernelDependencies {
   readonly functions: WorkflowFunctionRegistry;
   readonly operations: LocalOperationRunner;
   readonly store: ExecutionStore;
+  readonly projects?: ProjectPlannerFacade;
+  readonly userForms?: UserFormFacade;
   readonly models: ModelResolver;
   readonly ids: IdGenerator;
   readonly clock: Clock;
@@ -33,10 +42,33 @@ interface ExecutionKernelDependencies {
   readonly hiddenDefinitions?: readonly DefinitionId[];
 }
 
+const unavailableProjects = new Proxy({} as ProjectPlannerFacade, {
+  get: () => async () => {
+    throw new Error("Cross-session project services are unavailable in this runtime");
+  },
+});
+
+const unavailableUserForms = new Proxy({} as UserFormFacade, {
+  get: () => async () => {
+    throw new Error("User form services are unavailable in this runtime");
+  },
+});
+
 /** Assemble the runtime-independent execution kernel once for production and tests. */
 export function createExecutionKernel(input: ExecutionKernelDependencies) {
-  const { definitions, functions, operations, store, models, ids, clock, cwd, resolveSchema } =
-    input;
+  const {
+    definitions,
+    functions,
+    operations,
+    store,
+    projects,
+    userForms,
+    models,
+    ids,
+    clock,
+    cwd,
+    resolveSchema,
+  } = input;
   const execution = new ExecutionFacadeImpl({
     catalog: definitions,
     store,
@@ -93,7 +125,7 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
     store,
     invocationPolicy,
   });
-  const tools = new FacadeAgentToolFactory({
+  const executionTools = new FacadeAgentToolFactory({
     execution: modelExecution,
     dispatch,
     tasks,
@@ -101,6 +133,11 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
     store,
     invocationPolicy,
   });
+  const tools = new CompositeAgentToolFactory([
+    executionTools,
+    new ProjectAgentToolFactory(projects ?? unavailableProjects, store),
+    new UserFormAgentToolFactory(userForms ?? unavailableUserForms, store),
+  ]);
 
   return {
     execution,

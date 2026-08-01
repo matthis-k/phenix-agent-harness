@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import type { EventBus, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { GhProjectTracker } from "../adapters/github/gh-project-tracker.ts";
 import { JsonlDiagnosticLog } from "../adapters/persistence/jsonl-diagnostic-log.ts";
+import { JsonlProjectLedger } from "../adapters/persistence/jsonl-project-ledger.ts";
 import { JsonlRunLedger } from "../adapters/persistence/jsonl-run-ledger.ts";
 import { PiSdkAgentSessionBackend } from "../adapters/pi-sdk/agent-session-backend.ts";
 import { LiveAgentTranscriptStore } from "../adapters/pi-sdk/live-agent-transcript-store.ts";
@@ -18,9 +20,13 @@ import { DefinitionCatalog, WorkflowFunctionRegistry } from "../application/cata
 import { logDomainEvent } from "../application/diagnostic-event-bridge.ts";
 import { OrderedDomainEventBus } from "../application/domain-event-bus.ts";
 import { ExecutionStore } from "../application/execution-store.ts";
+import type { ExecutionFacade } from "../application/interfaces.ts";
 import { ProfileAwareModelResolver } from "../application/profile-aware-model-resolver.ts";
+import { ProjectPlannerService } from "../application/project-planner.ts";
+import { PublishedProjectTracker } from "../application/published-project-tracker.ts";
 import { SessionProfileFacadeImpl } from "../application/session-profile-facade.ts";
 import { SupervisionProcessManager } from "../application/supervision-process-manager.ts";
+import { UserFormService } from "../application/user-form-service.ts";
 import { agentDefinitions } from "../definitions/agents.ts";
 import { ROOT_DISPATCH_DEFINITION_IDS, ROOT_INTERNAL_DEFINITION_IDS } from "../definitions/ids.ts";
 import { resolveDefinitionSchema } from "../definitions/schema-registry.ts";
@@ -57,6 +63,7 @@ export function createRuntimeInfrastructure(host: PhenixHostServices) {
   const operations = new ProcessLocalOperationRunner();
   return {
     ids,
+    stateDir,
     diagnostics,
     events,
     ledger,
@@ -86,18 +93,33 @@ export function createExecutionServices(input: {
   readonly notifyRoot: (message: string) => void | Promise<void> | undefined;
 }) {
   const { host, infrastructure, definitionRuntime } = input;
-  const { ids, store, operations } = infrastructure;
+  const { ids, stateDir, store, operations } = infrastructure;
   const { definitions, functions } = definitionRuntime;
   const baseResolver = new PhenixModelResolver(
     new PiModelInventory(host.modelRegistry),
     host.routingPolicy,
   );
   const resolver = new ProfileAwareModelResolver(baseResolver, input.currentProfile);
+  let projectExecution: ExecutionFacade | undefined;
+  const projects = new ProjectPlannerService(
+    new JsonlProjectLedger(stateDir),
+    ids,
+    systemClock,
+    new PublishedProjectTracker(new GhProjectTracker(host.cwd)),
+    input.notifyRoot,
+    async (runId, message) => {
+      if (!projectExecution) throw new Error("Execution runtime is not initialized");
+      await projectExecution.send(runId, message);
+    },
+  );
+  const userForms = new UserFormService(ids, systemClock);
   const kernel = createExecutionKernel({
     definitions,
     functions,
     operations,
     store,
+    projects,
+    userForms,
     models: resolver,
     ids,
     clock: systemClock,
@@ -108,6 +130,7 @@ export function createExecutionServices(input: {
   });
   const { execution, tasks, catalog, workflows, checkpoints, dynamicWorkflows, tools, queries } =
     kernel;
+  projectExecution = execution;
   const transcripts = new LiveAgentTranscriptStore();
   const backend = new PiSdkAgentSessionBackend({
     modelRegistry: host.modelRegistry,
@@ -157,6 +180,8 @@ export function createExecutionServices(input: {
     transcripts,
     attention,
     supervision,
+    projects,
+    userForms,
   };
 }
 

@@ -36,6 +36,7 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
   project: (snapshot) =>
     projectWorkspaceRuns(snapshot.ui.tree.root).map((value) => {
       const run = value.node.run;
+      const attention = snapshot.attentionByRun?.[String(run.id)];
       const expandable = Boolean(run.resolvedModel || run.profile || run.pi?.sessionId);
       const present = ({
         width,
@@ -52,6 +53,11 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
         const activity = activityText(value.node.activity?.summary, run.state, width, value.depth);
         const details = expanded ? runDetails(value.node) : [];
         const disclosure = expandable ? (expanded ? "▾" : "▸") : " ";
+        const attentionLabel = attention
+          ? attention.urgent
+            ? `URGENT INPUT${attention.count > 1 ? ` ×${attention.count}` : ""}`
+            : `INPUT REQUIRED${attention.count > 1 ? ` ×${attention.count}` : ""}`
+          : undefined;
         return {
           active,
           spans: [
@@ -61,6 +67,14 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
             }),
             textSpan(" "),
             textSpan(label, { strong: true }),
+            ...(attentionLabel
+              ? [
+                  textSpan(` · ${attentionLabel}`, {
+                    tone: attention?.urgent ? "error" : "warning",
+                    strong: true,
+                  }),
+                ]
+              : []),
             ...(activity ? [textSpan(` ${activity}`, { tone: "muted" as const })] : []),
             ...(details.length > 0
               ? [textSpan(` · ${details.join(" · ")}`, { tone: "dim" as const })]

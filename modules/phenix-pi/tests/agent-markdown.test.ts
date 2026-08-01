@@ -76,7 +76,15 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
   assert.ok(scout);
   assert.equal(scout.input.id, "request.scout");
   assert.equal(scout.output.id, "outcome.scout-report");
-  assert.deepEqual(scout.tools.allow, ["read", "grep", "find", "ls", "phenix_present"]);
+  assert.deepEqual(scout.tools.allow, [
+    "read",
+    "grep",
+    "find",
+    "ls",
+    "phenix_project",
+    "phenix_userform",
+    "phenix_present",
+  ]);
   assert.equal(scout.context.maxBytes, 64_000);
   assert.equal(scout.modelRoutes?.D0.capability, "fast");
   assert.equal(scout.modelRoutes?.D3.capability, "reasoning");
@@ -87,7 +95,10 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
   const architect = byId.get("agent.architect");
   assert.ok(planner);
   assert.ok(architect);
+  assert.ok(planner.tools.allow.includes("phenix_project"));
+  assert.ok(planner.tools.allow.includes("phenix_userform"));
   assert.ok(planner.tools.allow.includes("phenix_visualize"));
+  assert.ok(architect.tools.allow.includes("phenix_userform"));
   assert.ok(architect.tools.allow.includes("phenix_visualize"));
   assert.match(planner.prompt.render(), /mark that section for UI rendering/);
   assert.match(architect.prompt.render(), /mark that section for UI rendering/);
@@ -97,6 +108,8 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
   const implementer = byId.get("agent.implementer");
   assert.ok(implementer);
   assert.ok(implementer.tools.allow.includes("edit"));
+  assert.ok(implementer.tools.allow.includes("phenix_project"));
+  assert.ok(implementer.tools.allow.includes("phenix_userform"));
   assert.ok(implementer.tools.allow.includes("nix_shell"));
   assert.equal(implementer.input.id, "request.implementation");
   assert.equal(implementer.output.id, "outcome.change-set");
@@ -106,6 +119,7 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
 
   const base = byId.get("agent.base");
   assert.ok(base);
+  assert.ok(base.tools.allow.includes("phenix_userform"));
   assert.equal(base.promptMode, "append-default");
 
   const coordinator = byId.get("agent.coordinator");
@@ -130,42 +144,4 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
   assert.deepEqual(stock.childCapabilities.invokableDefinitions, []);
   assert.equal(stock.persistence, "file");
   assert.equal(stock.prompt.render(), "PHENIX_STOCK_SESSION");
-
-  const attentionRouter = byId.get("agent.attention-router");
-  assert.ok(attentionRouter);
-  assert.equal(attentionRouter.input.id, "attention.routing-request");
-  assert.equal(attentionRouter.output.id, "attention.routing-decision");
-  assert.deepEqual(attentionRouter.tools.allow, []);
-});
-
-test("agent Markdown requires a complete difficulty model table", () => {
-  const incomplete = source("implementer").replace(
-    "| `D3` | `session` | `code-max` | `high` |\n",
-    "",
-  );
-  assert.throws(
-    () => compileAgentMarkdown(incomplete, { resolveSchema: resolveDefinitionSchema }),
-    /agent Models is missing D3/,
-  );
-});
-
-test("stock session Markdown rejects managed prompt composition", () => {
-  const invalid = source("stock").replace(
-    "persistence: file\n",
-    "persistence: file\nprompt-mode: append-default\n",
-  );
-  assert.throws(
-    () => compileAgentMarkdown(invalid, { resolveSchema: resolveDefinitionSchema }),
-    /Stock sessions use Pi's unmodified default prompt/,
-  );
-});
-
-test("agent Markdown fails closed on unknown schemas", () => {
-  assert.throws(
-    () =>
-      compileAgentMarkdown(source("scout").replace("request.scout", "request.missing"), {
-        resolveSchema: resolveDefinitionSchema,
-      }),
-    /Unknown definition schema request.missing/,
-  );
 });

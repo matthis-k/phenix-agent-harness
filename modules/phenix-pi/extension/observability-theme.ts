@@ -121,22 +121,14 @@ export function fact(
 export function statusLine(
   theme: ObservabilityTheme | undefined,
   profile: { readonly agent: string; readonly modelSet: string; readonly difficulty: string },
-  activeCount: number,
+  _activeCount: number,
 ): string {
   const profileText = `${strong(theme, profile.agent)}${color(theme, "dim", "/")}${color(
     theme,
     "accent",
     profile.modelSet,
   )}${color(theme, "dim", `/${profile.difficulty}`)}`;
-  const activity =
-    activeCount === 0
-      ? color(theme, "success", "idle")
-      : color(theme, "warning", `${activeCount} active`);
-  return `${heading(theme, "phenix")}${color(theme, "dim", ":")} ${profileText} ${color(
-    theme,
-    "dim",
-    "·",
-  )} ${activity}`;
+  return `${heading(theme, "phenix")}${color(theme, "dim", ":")} ${profileText}`;
 }
 
 export function statusField(

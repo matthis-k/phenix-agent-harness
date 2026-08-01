@@ -118,6 +118,47 @@ test("run rows disclose model profile and session metadata only when expanded", 
   assert.match(expanded, /session session-123/);
 });
 
+test("run rows surface normal and urgent input requirements", () => {
+  const root = runNode(
+    "root",
+    "running",
+    [runNode("normal", "running"), runNode("urgent", "running")],
+    "root",
+  );
+  const snapshot = {
+    ui: { tree: { root }, facts: [] },
+    tasks: { root: taskNode("root-task", "wip") },
+    attentionByRun: {
+      normal: { kind: "input-required", count: 1, urgent: false },
+      urgent: { kind: "input-required", count: 2, urgent: true },
+    },
+  } as unknown as PhenixWorkspaceSnapshot;
+  const rows = runsWorkspaceView.project(snapshot);
+  const normal = rows.find((row) => row.id === "normal");
+  const urgent = rows.find((row) => row.id === "urgent");
+  assert.ok(normal);
+  assert.ok(urgent);
+
+  assert.match(
+    normal.render({
+      theme: THEME,
+      width: 120,
+      activeRunId: root.run.id,
+      expanded: false,
+    }).text,
+    /INPUT REQUIRED/,
+  );
+  assert.match(
+    urgent.render({
+      theme: THEME,
+      width: 120,
+      activeRunId: root.run.id,
+      expanded: false,
+    }).text,
+    /URGENT INPUT ×2/,
+  );
+});
+
 test("derives pane identity and row behavior exclusively from registered projections", () => {
   const snapshot = {
     ui: {

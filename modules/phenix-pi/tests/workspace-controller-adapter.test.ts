@@ -9,7 +9,10 @@ import {
   NativeTranscriptComponent,
   readyNativeRunTranscript,
 } from "../extension/native-run-transcript.ts";
-import { WorkspaceControllerAdapter } from "../extension/workspace/workspace-controller-adapter.ts";
+import {
+  selectedWorkspaceInputTarget,
+  WorkspaceControllerAdapter,
+} from "../extension/workspace/workspace-controller-adapter.ts";
 import type { PhenixWorkspaceSnapshot } from "../extension/workspace/workspace-model.ts";
 import type { LoadedWorkspaceTranscript } from "../ports/workspace-effects.ts";
 
@@ -30,9 +33,11 @@ test("snapshot refresh preserves a browsed run selection independently of the ac
     onChange: () => undefined,
   });
 
+  assert.equal(selectedWorkspaceInputTarget(ROOT), ROOT);
   adapter.dispatch({ type: "selection.set", paneId: "runs", itemId: String(CHILD) });
   assert.equal(adapter.state.activeRunId, ROOT);
   assert.equal(adapter.state.panes.runs.selectedItemId, CHILD);
+  assert.equal(selectedWorkspaceInputTarget(ROOT), ROOT);
 
   current = snapshot(2);
   publish();
@@ -40,6 +45,27 @@ test("snapshot refresh preserves a browsed run selection independently of the ac
 
   assert.equal(adapter.state.activeRunId, ROOT);
   assert.equal(adapter.state.panes.runs.selectedItemId, CHILD);
+  assert.equal(selectedWorkspaceInputTarget(ROOT), ROOT);
+  adapter.dispose();
+});
+
+test("activating a transcript also makes that session the workspace input target", async () => {
+  const adapter = new WorkspaceControllerAdapter({
+    snapshot: snapshot(1),
+    load: async () => snapshot(1),
+    loadTranscript: async () => readyNativeRunTranscript(nativeTranscript(), "child"),
+    subscribe: () => () => undefined,
+    onChange: () => undefined,
+  });
+
+  adapter.selectTranscript(CHILD);
+  await adapter.whenIdle();
+  assert.equal(adapter.state.activeRunId, CHILD);
+  assert.equal(selectedWorkspaceInputTarget(ROOT), CHILD);
+
+  adapter.selectTranscript(ROOT);
+  await adapter.whenIdle();
+  assert.equal(selectedWorkspaceInputTarget(ROOT), ROOT);
   adapter.dispose();
 });
 

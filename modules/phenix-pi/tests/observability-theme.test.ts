@@ -108,15 +108,15 @@ test("fact history highlights severity, reliability, timestamps, and run ids", (
   assert.match(output, /<warning>Potential boundary issue<\/warning>/);
 });
 
-test("footer status distinguishes active work from idle", () => {
+test("footer status renders the session profile without duplicating workspace activity", () => {
   const active = statusLine(THEME, { agent: "base", modelSet: "mixed", difficulty: "D2" }, 3);
   const idle = statusLine(THEME, { agent: "base", modelSet: "mixed", difficulty: "D2" }, 0);
 
+  assert.equal(active, idle);
   assert.match(active, /<accent><bold>phenix<\/bold><\/accent>/);
   assert.match(active, /<text><bold>base<\/bold><\/text>/);
   assert.match(active, /<accent>mixed<\/accent>/);
-  assert.match(active, /<warning>3 active<\/warning>/);
-  assert.match(idle, /<success>idle<\/success>/);
+  assert.doesNotMatch(active, /active|idle/);
 });
 
 test("panel surfaces restore their background after nested full resets", () => {
