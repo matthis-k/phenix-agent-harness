@@ -4,10 +4,11 @@ import path from "node:path";
 import test from "node:test";
 
 const inwardLayers = {
-  domain: ["application", "definitions", "ports", "adapters", "composition", "extension"],
-  ports: ["application", "definitions", "adapters", "composition", "extension"],
-  definitions: ["application", "ports", "adapters", "extension"],
-  application: ["adapters", "composition", "extension"],
+  domain: ["application", "definitions", "ports", "framework", "adapters", "composition", "suite", "extension"],
+  ports: ["application", "definitions", "framework", "adapters", "composition", "suite", "extension"],
+  framework: ["application", "definitions", "adapters", "composition", "suite", "extension"],
+  definitions: ["application", "ports", "framework", "adapters", "composition", "suite", "extension"],
+  application: ["framework", "adapters", "composition", "suite", "extension"],
 } as const;
 
 test("source dependencies point inward", async () => {
