@@ -9,11 +9,6 @@ import { JsonlRunLedger } from "../adapters/persistence/jsonl-run-ledger.ts";
 import { PiSdkAgentSessionBackend } from "../adapters/pi-sdk/agent-session-backend.ts";
 import { LiveAgentTranscriptStore } from "../adapters/pi-sdk/live-agent-transcript-store.ts";
 import { ProcessLocalOperationRunner } from "../adapters/process/local-operation-runner.ts";
-import {
-  PhenixModelResolver,
-  type RoutingPolicy,
-} from "../adapters/routing/phenix-model-resolver.ts";
-import { PiModelInventory } from "../adapters/routing/pi-model-inventory.ts";
 import { AgentExecutor } from "../application/agent-executor.ts";
 import { AttentionProcessManager } from "../application/attention-process-manager.ts";
 import { DefinitionCatalog, WorkflowFunctionRegistry } from "../application/catalog.ts";
@@ -21,18 +16,13 @@ import { logDomainEvent } from "../application/diagnostic-event-bridge.ts";
 import { OrderedDomainEventBus } from "../application/domain-event-bus.ts";
 import { ExecutionStore } from "../application/execution-store.ts";
 import type { ExecutionFacade } from "../application/interfaces.ts";
-import { ProfileAwareModelResolver } from "../application/profile-aware-model-resolver.ts";
 import { ProjectPlannerService } from "../application/project-planner.ts";
 import { PublishedProjectTracker } from "../application/published-project-tracker.ts";
 import { SessionProfileFacadeImpl } from "../application/session-profile-facade.ts";
 import { SupervisionProcessManager } from "../application/supervision-process-manager.ts";
 import { UserFormService } from "../application/user-form-service.ts";
-import { agentDefinitions } from "../definitions/agents.ts";
-import { ROOT_DISPATCH_DEFINITION_IDS, ROOT_INTERNAL_DEFINITION_IDS } from "../definitions/ids.ts";
-import { resolveDefinitionSchema } from "../definitions/schema-registry.ts";
-import { registerWorkflowFunctions } from "../definitions/workflows/functions.ts";
-import { workflowDefinitions } from "../definitions/workflows/index.ts";
 import type { SessionProfile } from "../domain/run/model.ts";
+import type { RuntimeConfiguration } from "../framework/runtime-configuration.ts";
 import type { IdGenerator } from "../ports/clock.ts";
 import { systemClock } from "../ports/clock.ts";
 import type { DiagnosticLog } from "../ports/diagnostic-log.ts";
@@ -44,7 +34,6 @@ export interface PhenixHostServices {
   readonly agentDir: string;
   readonly stateDir?: string;
   readonly modelRegistry: ModelRegistry;
-  readonly routingPolicy?: RoutingPolicy;
   readonly piEventBus?: EventBus;
   readonly ledger?: RunLedger;
   readonly diagnostics?: DiagnosticLog;
@@ -74,11 +63,14 @@ export function createRuntimeInfrastructure(host: PhenixHostServices) {
   };
 }
 
-export function createDefinitionRuntime(operations: ProcessLocalOperationRunner) {
+export function createDefinitionRuntime(
+  operations: ProcessLocalOperationRunner,
+  configuration: RuntimeConfiguration,
+) {
   const functions = new WorkflowFunctionRegistry();
-  registerWorkflowFunctions(functions);
+  configuration.catalog.registerWorkflowFunctions(functions);
   const definitions = new DefinitionCatalog();
-  for (const definition of [...agentDefinitions, ...workflowDefinitions]) {
+  for (const definition of configuration.catalog.definitions) {
     definitions.register(definition);
   }
   definitions.seal(functions, operations);
@@ -87,19 +79,19 @@ export function createDefinitionRuntime(operations: ProcessLocalOperationRunner)
 
 export function createExecutionServices(input: {
   readonly host: PhenixHostServices;
+  readonly configuration: RuntimeConfiguration;
   readonly infrastructure: ReturnType<typeof createRuntimeInfrastructure>;
   readonly definitionRuntime: ReturnType<typeof createDefinitionRuntime>;
   readonly currentProfile: () => Promise<SessionProfile>;
   readonly notifyRoot: (message: string) => void | Promise<void> | undefined;
 }) {
-  const { host, infrastructure, definitionRuntime } = input;
+  const { host, configuration, infrastructure, definitionRuntime } = input;
   const { ids, stateDir, store, operations } = infrastructure;
   const { definitions, functions } = definitionRuntime;
-  const baseResolver = new PhenixModelResolver(
-    new PiModelInventory(host.modelRegistry),
-    host.routingPolicy,
-  );
-  const resolver = new ProfileAwareModelResolver(baseResolver, input.currentProfile);
+  const resolver = configuration.createModelResolver({
+    modelRegistry: host.modelRegistry,
+    currentProfile: input.currentProfile,
+  });
   let projectExecution: ExecutionFacade | undefined;
   const projects = new ProjectPlannerService(
     new JsonlProjectLedger(stateDir),
@@ -124,9 +116,9 @@ export function createExecutionServices(input: {
     ids,
     clock: systemClock,
     cwd: host.cwd,
-    resolveSchema: resolveDefinitionSchema,
-    rootInvokableDefinitions: [...ROOT_DISPATCH_DEFINITION_IDS, ...ROOT_INTERNAL_DEFINITION_IDS],
-    hiddenDefinitions: ROOT_INTERNAL_DEFINITION_IDS,
+    resolveSchema: configuration.catalog.resolveDefinitionSchema,
+    rootInvokableDefinitions: configuration.catalog.rootInvokableDefinitions,
+    hiddenDefinitions: configuration.catalog.hiddenDefinitions,
   });
   const { execution, tasks, catalog, workflows, checkpoints, dynamicWorkflows, tools, queries } =
     kernel;
