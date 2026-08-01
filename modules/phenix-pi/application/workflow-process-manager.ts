@@ -189,13 +189,7 @@ export class WorkflowProcessManager implements RunImplementation {
         return;
       case "complete-join":
         await this.controller.transition(run.id, "running");
-        await this.completeAndAdvance(
-          run.id,
-          plan.node,
-          plan.activationId,
-          plan.result,
-          "success",
-        );
+        await this.completeAndAdvance(run.id, plan.node, plan.activationId, plan.result, "success");
         return;
       case "complete-return":
         await this.completeReturn(run, plan.node, plan.activationId);
