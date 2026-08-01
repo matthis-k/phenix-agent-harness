@@ -15,6 +15,12 @@ import type {
 } from "../../ports/workspace-effects.ts";
 import { WorkspaceController } from "./controller.ts";
 
+export type WorkspaceSourceChange =
+  | { readonly kind: "snapshot" }
+  | { readonly kind: "transcript"; readonly runId: RunId };
+
+export type WorkspaceSourceListener = (change?: WorkspaceSourceChange) => void;
+
 export interface WorkspaceFrontendOptions<TSnapshot, TTranscript> {
   readonly initialSnapshot: WorkspaceSnapshotEnvelope<TSnapshot>;
   readonly initialTranscript: ReadyWorkspaceTranscript<TTranscript>;
@@ -24,7 +30,7 @@ export interface WorkspaceFrontendOptions<TSnapshot, TTranscript> {
     snapshot: TSnapshot,
     signal: AbortSignal,
   ) => Promise<LoadedWorkspaceTranscript<TTranscript>>;
-  readonly subscribeSource: (listener: () => void) => () => void;
+  readonly subscribeSource: (listener: WorkspaceSourceListener) => () => void;
   readonly recordDiagnostic?: (error: WorkspaceError) => void | Promise<void>;
   readonly perform?: (effect: ExternalWorkspaceEffect, signal: AbortSignal) => void | Promise<void>;
 }
@@ -61,6 +67,7 @@ export class WorkspaceFrontend<TSnapshot, TTranscript> {
     | undefined;
   private observation: WorkspaceFrontendObservation<TSnapshot, TTranscript>;
   private changeRevision = 0;
+  private suppressRunSurfaceChanges = false;
   private disposed = false;
 
   constructor(options: WorkspaceFrontendOptions<TSnapshot, TTranscript>) {
@@ -94,7 +101,13 @@ export class WorkspaceFrontend<TSnapshot, TTranscript> {
     this.controller = controller;
     this.observation = this.captureObservation();
     this.unsubscribeController = controller.subscribe(() => this.handleControllerChange());
-    this.unsubscribeSource = options.subscribeSource(() => controller.invalidateSnapshot());
+    this.unsubscribeSource = options.subscribeSource((change) => {
+      if (change?.kind === "transcript") {
+        this.refreshTranscript(change.runId);
+        return;
+      }
+      controller.invalidateSnapshot();
+    });
   }
 
   get state(): WorkspaceState {
@@ -151,7 +164,12 @@ export class WorkspaceFrontend<TSnapshot, TTranscript> {
 
   refreshTranscript(runId: RunId): void {
     if (runId !== this.controller.state.activeRunId) return;
-    this.reloadTranscript();
+    this.suppressRunSurfaceChanges = true;
+    try {
+      this.reloadTranscript();
+    } finally {
+      this.suppressRunSurfaceChanges = false;
+    }
   }
 
   selectTranscript(selectedRunId: RunId, resetViewport = true): void {
@@ -215,7 +233,8 @@ export class WorkspaceFrontend<TSnapshot, TTranscript> {
     const next = this.captureObservation();
     this.observation = next;
 
-    const dirtySurfaces = changedSurfaces(previous, next);
+    const dirtySurfaces = new Set(changedSurfaces(previous, next));
+    if (this.suppressRunSurfaceChanges) dirtySurfaces.delete("runs");
     const layoutChanged = previous.state.sidebarVisible !== next.state.sidebarVisible;
     if (dirtySurfaces.size === 0 && !layoutChanged) return;
 

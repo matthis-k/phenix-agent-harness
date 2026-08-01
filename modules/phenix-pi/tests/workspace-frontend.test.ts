@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   WorkspaceFrontend,
   type WorkspaceFrontendChange,
+  type WorkspaceSourceListener,
 } from "../application/workspace/frontend.ts";
 import { type RunId, runId } from "../domain/shared.ts";
 import type { WorkspaceItemIndex, WorkspaceSnapshotEnvelope } from "../domain/workspace/events.ts";
@@ -48,7 +49,7 @@ test("frontend publishes surface-scoped changes for independent hosts", () => {
 
 test("snapshot changes invalidate components without discarding browsed selection", async () => {
   let current = snapshot(1, [ROOT, CHILD]);
-  let publish = (): void => undefined;
+  let publish: WorkspaceSourceListener = (): void => undefined;
   const frontend = new WorkspaceFrontend({
     initialSnapshot: current,
     initialTranscript: transcript("root-1", "root-1"),
@@ -64,7 +65,7 @@ test("snapshot changes invalidate components without discarding browsed selectio
   frontend.dispatch({ type: "selection.set", paneId: "runs", itemId: String(CHILD) });
 
   current = snapshot(2, [ROOT, CHILD]);
-  publish();
+  publish({ kind: "snapshot" });
   await frontend.whenIdle();
 
   assert.equal(frontend.state.activeRunId, ROOT);
@@ -72,6 +73,58 @@ test("snapshot changes invalidate components without discarding browsed selectio
   assert.ok(
     changes.some((change) =>
       WORKSPACE_SURFACE_IDS.every((surfaceId) => change.dirtySurfaces.has(surfaceId)),
+    ),
+  );
+  frontend.dispose();
+});
+
+test("transcript changes reload only the active transcript", async () => {
+  const initial = snapshot(1, [ROOT, CHILD]);
+  let publish: WorkspaceSourceListener = (): void => undefined;
+  let snapshotLoads = 0;
+  const transcriptLoads: RunId[] = [];
+  const frontend = new WorkspaceFrontend({
+    initialSnapshot: initial,
+    initialTranscript: transcript("root", "root"),
+    loadSnapshot: async () => {
+      snapshotLoads += 1;
+      return initial;
+    },
+    loadTranscript: async (runIdValue) => {
+      transcriptLoads.push(runIdValue);
+      return transcript(`transcript-${transcriptLoads.length}`, String(runIdValue));
+    },
+    subscribeSource: (listener) => {
+      publish = listener;
+      return () => undefined;
+    },
+  });
+  const changes: WorkspaceFrontendChange[] = [];
+  frontend.subscribe((change) => changes.push(change));
+
+  frontend.selectTranscript(CHILD);
+  await frontend.whenIdle();
+  const refreshChangeStart = changes.length;
+  transcriptLoads.length = 0;
+
+  publish({ kind: "transcript", runId: ROOT });
+  await frontend.whenIdle();
+  assert.equal(snapshotLoads, 0);
+  assert.deepEqual(transcriptLoads, []);
+  assert.deepEqual(changes.slice(refreshChangeStart), []);
+
+  publish({ kind: "transcript", runId: CHILD });
+  await frontend.whenIdle();
+  const transcriptChanges = changes.slice(refreshChangeStart);
+  assert.equal(snapshotLoads, 0);
+  assert.deepEqual(transcriptLoads, [CHILD]);
+  assert.ok(transcriptChanges.length > 0);
+  assert.ok(
+    transcriptChanges.every(
+      (change) =>
+        change.dirtySurfaces.size === 1 &&
+        change.dirtySurfaces.has("transcript") &&
+        !change.layoutChanged,
     ),
   );
   frontend.dispose();

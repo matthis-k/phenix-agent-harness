@@ -1,3 +1,4 @@
+import type { WorkspaceSourceListener } from "../application/workspace/frontend.ts";
 import type { PhenixRuntime } from "../composition/create-phenix-runtime.ts";
 import type { RunId } from "../domain/shared.ts";
 
@@ -56,16 +57,17 @@ export function subscribeWorkspaceRuntime(
   });
 }
 
-/** Subscribe a workspace view to every runtime projection that can change its snapshot. */
+/** Subscribe a workspace view to the runtime projections that can change it. */
 export function subscribeWorkspaceChanges(
   runtime: PhenixRuntime,
-  listener: () => void,
+  listener: WorkspaceSourceListener,
 ): () => void {
+  const notifySnapshot = (): void => listener({ kind: "snapshot" });
   const subscriptions = [
-    runtime.events.subscribe(listener),
-    runtime.diagnostics.subscribe(listener),
-    runtime.transcripts.subscribe(listener),
-    runtime.projects.subscribe(listener),
+    runtime.events.subscribe(notifySnapshot),
+    runtime.diagnostics.subscribe(notifySnapshot),
+    runtime.transcripts.subscribe((runId) => listener({ kind: "transcript", runId })),
+    runtime.projects.subscribe(notifySnapshot),
   ];
   return () => {
     for (const unsubscribe of subscriptions) unsubscribe();
