@@ -91,7 +91,7 @@ test("run rows disclose model profile and session metadata only when expanded", 
       ...baseRoot.run,
       profile: { agent: "base", modelSet: "free", difficulty: "D1", budget: "high" },
       pi: { sessionId: "session-123" },
-    } as RunSnapshot,
+    } as unknown as RunSnapshot,
   } satisfies RunTreeNode;
   const snapshot = {
     ui: { tree: { root }, facts: [] },
@@ -125,7 +125,7 @@ test("agent session rows show their own compiled difficulty while collapsed", ()
     run: {
       ...childBase.run,
       compiled: { ...childBase.run.compiled, difficulty: "D2", budget: "high" },
-    } as RunSnapshot,
+    } as unknown as RunSnapshot,
   } satisfies RunTreeNode;
   const root = runNode("root", "running", [child], "root");
   const snapshot = {
@@ -272,7 +272,7 @@ function runNode(
         },
         invocation: { wait: "await" },
       },
-    } as RunSnapshot,
+    } as unknown as RunSnapshot,
     children,
   };
 }

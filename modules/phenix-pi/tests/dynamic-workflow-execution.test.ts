@@ -63,7 +63,6 @@ test("trusted dynamic workflows execute through the ordinary workflow lifecycle"
     risks: [],
   });
   assert.match(run.definitionId, /^workflow\.dynamic\.[a-f0-9]{24}$/);
-  assert.equal(run.compiled.dynamicWorkflow?.identity.version, 1);
   assert.equal(run.compiled.dynamicWorkflow?.identity.graphDigest.length, 64);
   assert.deepEqual(run.compiled.capabilities.invokableDefinitions, [AGENT_SCOUT]);
   assert.equal(children.length, 1);

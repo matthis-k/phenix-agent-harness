@@ -119,7 +119,7 @@ function snapshot(sequence: number): PhenixWorkspaceSnapshot {
         root: node(ROOT, "root", [node(CHILD, "agent")]),
       },
       facts: [],
-      profile: { agent: "base", modelSet: "free", difficulty: "D1" },
+      profile: { agent: "base", modelSet: "free", difficulty: "D1", budget: "medium" },
       diagnostics: {
         total: 0,
         artifacts: 0,
