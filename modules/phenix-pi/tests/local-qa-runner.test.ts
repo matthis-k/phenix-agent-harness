@@ -9,6 +9,14 @@ import {
   ProcessLocalOperationRunner,
 } from "../adapters/process/local-operation-runner.ts";
 
+function operationContext(cwd: string, executionId = "test:local-operation") {
+  return {
+    cwd,
+    signal: new AbortController().signal,
+    executionId,
+  };
+}
+
 test("QA runner reports repositories without a discoverable deterministic check", async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "phenix-qa-"));
   try {
@@ -16,10 +24,7 @@ test("QA runner reports repositories without a discoverable deterministic check"
     const result = (await runner.run(
       "local.qa-checks",
       {},
-      {
-        cwd,
-        signal: new AbortController().signal,
-      },
+      operationContext(cwd, "test:no-check"),
     )) as readonly { command: string; ok: boolean; summary: string }[];
     assert.equal(result.length, 1);
     assert.equal(result[0]?.ok, false);
@@ -39,10 +44,7 @@ test("QA runner executes structured checks directly without a shell", async () =
   const result = (await runner.run(
     "local.qa-checks",
     { checks: [{ kind: "nix-flake-check" }] },
-    {
-      cwd: process.cwd(),
-      signal: new AbortController().signal,
-    },
+    operationContext(process.cwd(), "test:structured-check"),
   )) as readonly { command: string; ok: boolean; summary: string }[];
 
   assert.deepEqual(calls, [
@@ -66,7 +68,7 @@ test("QA runner uses devenv test as the single canonical repository gate", async
       return { stdout: "passed", stderr: "" };
     });
 
-    await runner.run("local.qa-checks", {}, { cwd, signal: new AbortController().signal });
+    await runner.run("local.qa-checks", {}, operationContext(cwd, "test:devenv"));
 
     assert.deepEqual(calls, [{ executable: "devenv", args: ["test"] }]);
   } finally {
@@ -96,10 +98,7 @@ test("deterministic checks compile to fixed executable and argv pairs", () => {
 
 test("QA runner rejects command strings, mutating checks, and unknown check kinds", async () => {
   const runner = new ProcessLocalOperationRunner();
-  const context = {
-    cwd: process.cwd(),
-    signal: new AbortController().signal,
-  };
+  const context = operationContext(process.cwd(), "test:invalid-check");
   await assert.rejects(
     runner.run("local.qa-checks", { commands: ["npm test; rm -rf ."] }, context),
     /structured check objects/,
@@ -118,10 +117,7 @@ test("local noop remains the only identity operation", async () => {
   const runner = new ProcessLocalOperationRunner();
   const input = { value: 42 };
   assert.equal(
-    await runner.run("local.noop", input, {
-      cwd: process.cwd(),
-      signal: new AbortController().signal,
-    }),
+    await runner.run("local.noop", input, operationContext(process.cwd(), "test:noop")),
     input,
   );
   assert.equal(runner.has("local.command"), false);
