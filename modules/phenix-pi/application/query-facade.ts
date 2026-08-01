@@ -12,7 +12,11 @@ import type { ExecutionStore } from "./execution-store.ts";
 import type { QueryFacade, RunTree, RunTreeNode } from "./interfaces.ts";
 
 export class QueryFacadeImpl implements QueryFacade {
-  constructor(private readonly store: ExecutionStore) {}
+  private readonly store: ExecutionStore;
+
+  constructor(store: ExecutionStore) {
+    this.store = store;
+  }
 
   async runTree(rootRunId: RunId): Promise<RunTree> {
     const root = this.store.projection.requireRun(rootRunId);
