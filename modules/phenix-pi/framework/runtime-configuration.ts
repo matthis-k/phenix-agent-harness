@@ -1,11 +1,9 @@
-import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
-
 import type { AnyDefinition } from "../domain/definition/definition.ts";
 import type { Schema } from "../domain/definition/schema.ts";
 import type { SessionProfile } from "../domain/run/model.ts";
 import type { DefinitionId } from "../domain/shared.ts";
 import type { WorkflowFunctionRegistrar } from "../domain/workflow/functions.ts";
-import type { ModelResolver } from "../ports/model-resolver.ts";
+import type { ModelInventory, ModelResolver } from "../ports/model-resolver.ts";
 
 export interface RuntimeCatalogConfiguration {
   readonly definitions: readonly AnyDefinition[];
@@ -16,7 +14,7 @@ export interface RuntimeCatalogConfiguration {
 }
 
 export interface RuntimeResolverDependencies {
-  readonly modelRegistry: ModelRegistry;
+  readonly inventory: ModelInventory;
   readonly currentProfile: () => Promise<SessionProfile>;
 }
 

@@ -1,4 +1,3 @@
-import { PiModelInventory } from "../adapters/routing/pi-model-inventory.ts";
 import { ProfileAwareModelResolver } from "../application/profile-aware-model-resolver.ts";
 import { agentDefinitions } from "../definitions/agents.ts";
 import { ROOT_DISPATCH_DEFINITION_IDS, ROOT_INTERNAL_DEFINITION_IDS } from "../definitions/ids.ts";
@@ -20,11 +19,8 @@ export const phenixRuntimeConfiguration: RuntimeConfiguration = defineRuntimeCon
     rootInvokableDefinitions: [...ROOT_DISPATCH_DEFINITION_IDS, ...ROOT_INTERNAL_DEFINITION_IDS],
     hiddenDefinitions: ROOT_INTERNAL_DEFINITION_IDS,
   },
-  createModelResolver({ modelRegistry, currentProfile }) {
-    const backend = new PolicyModelResolver(
-      new PiModelInventory(modelRegistry),
-      defaultRoutingPolicy,
-    );
+  createModelResolver({ inventory, currentProfile }) {
+    const backend = new PolicyModelResolver(inventory, defaultRoutingPolicy);
     return new ProfileAwareModelResolver(backend, currentProfile);
   },
 });

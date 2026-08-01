@@ -144,7 +144,7 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
     dynamicWorkflows,
     tasks,
     catalog,
-    queries: new QueryFacadeImpl(store, tasks),
+    queries: new QueryFacadeImpl(store),
     tools,
     workflows,
     checkpoints,

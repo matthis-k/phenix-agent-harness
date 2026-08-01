@@ -95,7 +95,6 @@ export interface RunTree {
 export interface QueryFacade {
   runTree(rootRunId: RunId): Promise<RunTree>;
   facts(rootRunId: RunId, limit?: number): Promise<readonly RunFact[]>;
-  taskTree(rootRunId: RunId): Promise<TaskTree>;
   activeRuns(rootRunId: RunId): Promise<readonly RunSnapshot[]>;
   events(rootRunId: RunId, afterSequence?: number): AsyncIterable<DomainEvent>;
 }

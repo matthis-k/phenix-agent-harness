@@ -9,6 +9,7 @@ import { JsonlRunLedger } from "../adapters/persistence/jsonl-run-ledger.ts";
 import { PiSdkAgentSessionBackend } from "../adapters/pi-sdk/agent-session-backend.ts";
 import { LiveAgentTranscriptStore } from "../adapters/pi-sdk/live-agent-transcript-store.ts";
 import { ProcessLocalOperationRunner } from "../adapters/process/local-operation-runner.ts";
+import { PiModelInventory } from "../adapters/routing/pi-model-inventory.ts";
 import { AgentExecutor } from "../application/agent-executor.ts";
 import { AttentionProcessManager } from "../application/attention-process-manager.ts";
 import { DefinitionCatalog, WorkflowFunctionRegistry } from "../application/catalog.ts";
@@ -89,7 +90,7 @@ export function createExecutionServices(input: {
   const { ids, stateDir, store, operations } = infrastructure;
   const { definitions, functions } = definitionRuntime;
   const resolver = configuration.createModelResolver({
-    modelRegistry: host.modelRegistry,
+    inventory: new PiModelInventory(host.modelRegistry),
     currentProfile: input.currentProfile,
   });
   let projectExecution: ExecutionFacade | undefined;

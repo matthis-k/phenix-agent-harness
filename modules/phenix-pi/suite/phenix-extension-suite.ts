@@ -8,15 +8,15 @@ import registerUserForms from "../extension/user-form-extension.ts";
 import registerVisualizationDisplay from "../extension/visualization-display.ts";
 import { withWorkspaceStandardBuiltins } from "../extension/workspace/workspace-standard-builtin-api.ts";
 import registerWorkspaceStatus from "../extension/workspace-status-extension.ts";
-import {
-  defineExtensionSuite,
-  type ExtensionModule,
-  type ExtensionSuite,
-} from "../framework/extension-suite.ts";
 
 export type ExtensionRegistrar = (pi: ExtensionAPI) => void | Promise<void>;
 
-export interface PhenixExtensionServices {
+/**
+ * Concrete extension implementations remain configurable, but their lifecycle
+ * and ordering are part of the Phenix integration contract rather than runtime
+ * dependency data.
+ */
+export interface PhenixExtensionConfiguration {
   readonly theme: ExtensionRegistrar;
   readonly runtime: ExtensionRegistrar;
   readonly workspaceStatus: ExtensionRegistrar;
@@ -26,7 +26,7 @@ export interface PhenixExtensionServices {
   readonly visualizationDisplay: ExtensionRegistrar;
 }
 
-const defaultServices: PhenixExtensionServices = Object.freeze({
+const defaultConfiguration: PhenixExtensionConfiguration = Object.freeze({
   theme: registerTheme,
   runtime: registerRuntime,
   workspaceStatus: registerWorkspaceStatus,
@@ -36,31 +36,25 @@ const defaultServices: PhenixExtensionServices = Object.freeze({
   visualizationDisplay: registerVisualizationDisplay,
 });
 
-const modules: readonly ExtensionModule<PhenixExtensionServices>[] = [
-  module("theme", [], (services) => services.theme),
-  module("runtime", ["theme"], (services) => services.runtime),
-  module("workspace-status", ["runtime"], (services) => services.workspaceStatus),
-  module("user-forms", ["runtime"], (services) => services.userForms),
-  module("workspace", ["runtime", "user-forms"], (services) => services.workspace),
-  module("result-display", ["runtime"], (services) => services.resultDisplay),
-  module("visualization-display", ["result-display"], (services) => services.visualizationDisplay),
-];
-
-export function createPhenixExtensionSuite(
-  overrides: Partial<PhenixExtensionServices> = {},
-): ExtensionSuite<PhenixExtensionServices> {
-  const services = Object.freeze({ ...defaultServices, ...overrides });
-  return defineExtensionSuite({ services, modules });
+export function createPhenixExtensionConfiguration(
+  overrides: Partial<PhenixExtensionConfiguration> = {},
+): PhenixExtensionConfiguration {
+  return Object.freeze({ ...defaultConfiguration, ...overrides });
 }
 
-function module(
-  id: string,
-  requires: readonly string[],
-  select: (services: PhenixExtensionServices) => ExtensionRegistrar,
-): ExtensionModule<PhenixExtensionServices> {
-  return {
-    id,
-    requires,
-    register: (pi, services) => select(services)(pi),
-  };
+/**
+ * Install the fixed Phenix extension lifecycle. Configuration can replace any
+ * concrete registrar, but cannot silently reorder initialization invariants.
+ */
+export async function installPhenixExtensionSuite(
+  pi: ExtensionAPI,
+  configuration: PhenixExtensionConfiguration = createPhenixExtensionConfiguration(),
+): Promise<void> {
+  await configuration.theme(pi);
+  await configuration.runtime(pi);
+  await configuration.workspaceStatus(pi);
+  await configuration.userForms(pi);
+  await configuration.workspace(pi);
+  await configuration.resultDisplay(pi);
+  await configuration.visualizationDisplay(pi);
 }
