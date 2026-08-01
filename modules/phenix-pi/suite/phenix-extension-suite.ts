@@ -31,7 +31,7 @@ const defaultServices: PhenixExtensionServices = Object.freeze({
   runtime: registerRuntime,
   workspaceStatus: registerWorkspaceStatus,
   userForms: registerUserForms,
-  workspace: (pi) => registerWorkspace(withWorkspaceStandardBuiltins(pi)),
+  workspace: (pi: ExtensionAPI) => registerWorkspace(withWorkspaceStandardBuiltins(pi)),
   resultDisplay: registerResultDisplay,
   visualizationDisplay: registerVisualizationDisplay,
 });
