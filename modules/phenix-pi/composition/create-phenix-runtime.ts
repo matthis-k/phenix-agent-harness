@@ -18,6 +18,7 @@ import type { RunId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import type { DiagnosticLog } from "../ports/diagnostic-log.ts";
 import type { LiveAgentTranscriptReader } from "../ports/live-agent-transcripts.ts";
+import { phenixRuntimeConfiguration } from "../suite/phenix-runtime-configuration.ts";
 import {
   createDefinitionRuntime,
   createExecutionServices,
@@ -55,14 +56,17 @@ export interface PhenixRuntime {
   shutdown(rootRunId: RunId): Promise<void>;
 }
 
+/** Concrete Phenix composition root over the reusable runtime assembly. */
 export async function createPhenixRuntime(host: PhenixHostServices): Promise<PhenixRuntime> {
+  const configuration = phenixRuntimeConfiguration;
   const infrastructure = createRuntimeInfrastructure(host);
-  const definitionRuntime = createDefinitionRuntime(infrastructure.operations);
+  const definitionRuntime = createDefinitionRuntime(infrastructure.operations, configuration);
   let activeRootRunId: RunId | undefined;
   let rootNotifier: ((message: string) => void | Promise<void>) | undefined;
 
   const services = createExecutionServices({
     host,
+    configuration,
     infrastructure,
     definitionRuntime,
     currentProfile: async () =>
