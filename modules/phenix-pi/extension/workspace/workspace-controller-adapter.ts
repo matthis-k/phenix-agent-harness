@@ -1,5 +1,8 @@
 import type { RunTreeNode } from "../../application/interfaces.ts";
-import { WorkspaceFrontend } from "../../application/workspace/frontend.ts";
+import {
+  WorkspaceFrontend,
+  type WorkspaceSourceListener,
+} from "../../application/workspace/frontend.ts";
 import type { RunId } from "../../domain/shared.ts";
 import type { WorkspaceError } from "../../domain/workspace/errors.ts";
 import type { WorkspaceSnapshotEnvelope } from "../../domain/workspace/events.ts";
@@ -23,7 +26,7 @@ export interface WorkspaceControllerAdapterOptions {
   readonly loadTranscript: (
     node: RunTreeNode,
   ) => Promise<LoadedWorkspaceTranscript<NativeRunTranscript>>;
-  readonly subscribe: (listener: () => void) => () => void;
+  readonly subscribe: (listener: WorkspaceSourceListener) => () => void;
   readonly onChange: () => void;
   readonly recordDiagnostic?: (error: WorkspaceError) => void | Promise<void>;
 }
