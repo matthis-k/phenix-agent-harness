@@ -322,11 +322,10 @@ test("join completion is derived only from durable transition and result project
   ]);
 
   const result = plan(
-    state(
-      workflow,
-      [{ id: "activation-join", nodeId: "join", sequence: 3 }],
-      { results, transitions },
-    ),
+    state(workflow, [{ id: "activation-join", nodeId: "join", sequence: 3 }], {
+      results,
+      transitions,
+    }),
   );
 
   assert.equal(result.kind, "complete-join");
@@ -373,16 +372,11 @@ test("parallelism pressure becomes an explicit wait plan", () => {
 });
 
 test("node-run exhaustion is decided before any additional effect", () => {
-  const workflow = definition(
-    [{ kind: "decision", id: "next", decide: "decision.next" }],
-    [],
-  );
+  const workflow = definition([{ kind: "decision", id: "next", decide: "decision.next" }], []);
   const result = plan(
-    state(
-      workflow,
-      [{ id: "activation-next", nodeId: "next", sequence: 1 }],
-      { nodeRuns: workflow.limits.maxNodeRuns + 1 },
-    ),
+    state(workflow, [{ id: "activation-next", nodeId: "next", sequence: 1 }], {
+      nodeRuns: workflow.limits.maxNodeRuns + 1,
+    }),
   );
 
   assert.equal(result.kind, "fail-workflow");
