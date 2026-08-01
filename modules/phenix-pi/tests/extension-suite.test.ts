@@ -3,54 +3,60 @@ import test from "node:test";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
-  defineExtensionSuite,
-  type ExtensionModule,
-  installExtensionSuite,
-  orderExtensionModules,
-} from "../framework/extension-suite.ts";
+  createPhenixExtensionConfiguration,
+  installPhenixExtensionSuite,
+  type PhenixExtensionConfiguration,
+} from "../suite/phenix-extension-suite.ts";
 
-interface Services {
-  readonly record: (value: string) => void;
-}
-
-function module(id: string, requires: readonly string[] = []): ExtensionModule<Services> {
-  return {
-    id,
-    requires,
-    register: (_pi, services) => services.record(id),
+function recordingConfiguration(installed: string[]): PhenixExtensionConfiguration {
+  const registrar = (id: string) => () => {
+    installed.push(id);
   };
+  return createPhenixExtensionConfiguration({
+    theme: registrar("theme"),
+    runtime: registrar("runtime"),
+    workspaceStatus: registrar("workspace-status"),
+    userForms: registrar("user-forms"),
+    workspace: registrar("workspace"),
+    resultDisplay: registrar("result-display"),
+    visualizationDisplay: registrar("visualization-display"),
+  });
 }
 
-test("orders modules by dependencies while preserving declaration order", () => {
-  const ordered = orderExtensionModules([
-    module("tail", ["runtime"]),
-    module("theme"),
-    module("runtime", ["theme"]),
-    module("independent"),
-  ]);
-  assert.deepEqual(
-    ordered.map((item) => item.id),
-    ["theme", "runtime", "tail", "independent"],
-  );
-});
-
-test("rejects missing and cyclic extension dependencies", () => {
-  assert.throws(
-    () => orderExtensionModules([module("runtime", ["missing"])]),
-    /requires unknown module missing/,
-  );
-  assert.throws(
-    () => orderExtensionModules([module("a", ["b"]), module("b", ["a"])]),
-    /Cyclic extension module dependencies/,
-  );
-});
-
-test("installs modules with injected suite services", async () => {
+test("installs the fixed extension lifecycle in deterministic order", async () => {
   const installed: string[] = [];
-  const suite = defineExtensionSuite({
-    services: { record: (value: string) => installed.push(value) },
-    modules: [module("theme"), module("runtime", ["theme"])],
+  await installPhenixExtensionSuite({} as ExtensionAPI, recordingConfiguration(installed));
+  assert.deepEqual(installed, [
+    "theme",
+    "runtime",
+    "workspace-status",
+    "user-forms",
+    "workspace",
+    "result-display",
+    "visualization-display",
+  ]);
+});
+
+test("keeps complex integration configuration injectable", async () => {
+  const installed: string[] = [];
+  const integration = {
+    prefix: "custom",
+    enabled: new Set(["theme", "runtime"]),
+  };
+  const configured = createPhenixExtensionConfiguration({
+    theme: () => {
+      if (integration.enabled.has("theme")) installed.push(`${integration.prefix}:theme`);
+    },
+    runtime: () => {
+      if (integration.enabled.has("runtime")) installed.push(`${integration.prefix}:runtime`);
+    },
+    workspaceStatus: () => undefined,
+    userForms: () => undefined,
+    workspace: () => undefined,
+    resultDisplay: () => undefined,
+    visualizationDisplay: () => undefined,
   });
-  await installExtensionSuite({} as ExtensionAPI, suite);
-  assert.deepEqual(installed, ["theme", "runtime"]);
+
+  await installPhenixExtensionSuite({} as ExtensionAPI, configured);
+  assert.deepEqual(installed, ["custom:theme", "custom:runtime"]);
 });
