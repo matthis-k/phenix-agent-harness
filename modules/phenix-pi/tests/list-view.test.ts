@@ -79,3 +79,33 @@ test("renders an exact viewport and keeps the selected row visible", () => {
   assert.ok(frame.lines.every((line) => visibleWidth(line) === 8));
   assert.match(frame.lines[2] ?? "", />\*item/);
 });
+
+test("uses blank filler rows after real items instead of repeating the empty state", () => {
+  const view = new ListView<Item>(
+    {
+      id: (item) => item.id,
+      render: (item) => item.label,
+    },
+    { renderEmpty: () => "No matching items" },
+  );
+  view.setItems([{ id: "a", label: "Alpha" }]);
+
+  const frame = view.render(24, 4);
+  assert.match(frame.lines[0] ?? "", /Alpha/);
+  assert.equal(frame.lines.filter((line) => line.includes("No matching items")).length, 0);
+  assert.ok(frame.lines.slice(1).every((line) => line.trim().length === 0));
+});
+
+test("renders the empty state once when the list is empty", () => {
+  const view = new ListView<Item>(
+    {
+      id: (item) => item.id,
+      render: (item) => item.label,
+    },
+    { renderEmpty: () => "No matching items" },
+  );
+
+  const frame = view.render(24, 4);
+  assert.equal(frame.lines.filter((line) => line.includes("No matching items")).length, 1);
+  assert.ok(frame.lines.slice(1).every((line) => line.trim().length === 0));
+});

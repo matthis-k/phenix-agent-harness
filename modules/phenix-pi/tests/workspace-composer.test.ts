@@ -34,3 +34,28 @@ test("renders a focused input surface without persistent key hints", () => {
   assert.doesNotMatch(plain, /tab|pgup|pgdn|native keys preserved/i);
   assert.doesNotMatch(plain, /────────/);
 });
+
+test("grows on the first newline and keeps a larger gap above the status row", () => {
+  const singleLine = renderWorkspaceComposer({
+    lines: ["────────", "first", "────────"],
+    width: 40,
+    active: true,
+    theme: THEME,
+  });
+  const twoLines = renderWorkspaceComposer({
+    lines: ["────────", "first", "second", "────────"],
+    width: 40,
+    active: true,
+    theme: THEME,
+  });
+
+  assert.equal(singleLine.length, 4);
+  assert.equal(twoLines.length, 5);
+  assert.match(stripTranscriptAnsi(twoLines[1] ?? ""), /first/);
+  assert.match(stripTranscriptAnsi(twoLines[2] ?? ""), /second/);
+  assert.ok(twoLines.slice(-2).every(isBlankComposerRow));
+});
+
+function isBlankComposerRow(line: string): boolean {
+  return stripTranscriptAnsi(line).replace(/[┃│]/gu, "").trim().length === 0;
+}
