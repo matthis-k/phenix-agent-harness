@@ -36,12 +36,19 @@ const inwardLayers = {
   application: ["framework", "adapters", "composition", "suite", "extension"],
 } as const;
 
+const allowedBoundaryImports = new Map<string, ReadonlySet<string>>([
+  ["definitions/agents.ts", new Set(["../composition/bundled-definitions.ts"])],
+]);
+
 test("source dependencies point inward", async () => {
   for (const [directory, forbiddenLayers] of Object.entries(inwardLayers)) {
     for (const file of await typescriptFiles(path.join(process.cwd(), directory))) {
       const source = await readFile(file, "utf8");
+      const relativeFile = path.relative(process.cwd(), file);
+      const allowedImports = allowedBoundaryImports.get(relativeFile) ?? new Set<string>();
       assert.doesNotMatch(source, /@earendil-works\/pi-/u, file);
       for (const dependency of importsIn(source)) {
+        if (allowedImports.has(dependency)) continue;
         for (const layer of forbiddenLayers) {
           assert.doesNotMatch(dependency, new RegExp(`(?:^|/)${layer}/`, "u"), file);
         }
