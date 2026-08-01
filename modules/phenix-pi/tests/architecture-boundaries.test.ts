@@ -4,10 +4,35 @@ import path from "node:path";
 import test from "node:test";
 
 const inwardLayers = {
-  domain: ["application", "definitions", "ports", "framework", "adapters", "composition", "suite", "extension"],
-  ports: ["application", "definitions", "framework", "adapters", "composition", "suite", "extension"],
+  domain: [
+    "application",
+    "definitions",
+    "ports",
+    "framework",
+    "adapters",
+    "composition",
+    "suite",
+    "extension",
+  ],
+  ports: [
+    "application",
+    "definitions",
+    "framework",
+    "adapters",
+    "composition",
+    "suite",
+    "extension",
+  ],
   framework: ["application", "definitions", "adapters", "composition", "suite", "extension"],
-  definitions: ["application", "ports", "framework", "adapters", "composition", "suite", "extension"],
+  definitions: [
+    "application",
+    "ports",
+    "framework",
+    "adapters",
+    "composition",
+    "suite",
+    "extension",
+  ],
   application: ["framework", "adapters", "composition", "suite", "extension"],
 } as const;
 
