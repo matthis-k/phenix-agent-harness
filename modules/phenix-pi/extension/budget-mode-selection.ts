@@ -1,7 +1,4 @@
-import {
-  isBudgetMode,
-  type BudgetMode,
-} from "../domain/definition/effort.ts";
+import { type BudgetMode, isBudgetMode } from "../domain/definition/effort.ts";
 
 export const BUDGET_MODE_SELECTION_EVENT = "phenix:budget-mode-selection";
 

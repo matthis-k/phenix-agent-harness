@@ -28,8 +28,8 @@ import {
   type RunId,
   success,
 } from "../domain/shared.ts";
-import type { Clock, IdGenerator } from "../ports/clock.ts";
 import type { BudgetPolicy } from "../ports/budget-policy.ts";
+import type { Clock, IdGenerator } from "../ports/clock.ts";
 import type { ModelResolver } from "../ports/model-resolver.ts";
 import type { DefinitionCatalog } from "./catalog.ts";
 import type { ExecutionStore } from "./execution-store.ts";

@@ -1,9 +1,5 @@
 import type { AgentLimits } from "../domain/definition/definition.ts";
-import {
-  effortIndex,
-  type BudgetMode,
-  type EffortLevel,
-} from "../domain/definition/effort.ts";
+import { type BudgetMode, type EffortLevel, effortIndex } from "../domain/definition/effort.ts";
 import type { PiThinkingLevel } from "../domain/definition/model.ts";
 import type { BudgetPolicy } from "../ports/budget-policy.ts";
 

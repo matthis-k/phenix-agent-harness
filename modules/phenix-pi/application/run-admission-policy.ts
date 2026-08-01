@@ -17,7 +17,7 @@ import type {
   WorkflowCausation,
 } from "../domain/run/model.ts";
 import type { DefinitionId, RunId } from "../domain/shared.ts";
-import { passthroughBudgetPolicy, type BudgetPolicy } from "../ports/budget-policy.ts";
+import { type BudgetPolicy, passthroughBudgetPolicy } from "../ports/budget-policy.ts";
 import type { ModelResolver } from "../ports/model-resolver.ts";
 import type { DefinitionCatalog } from "./catalog.ts";
 import type { ExecutionStore } from "./execution-store.ts";

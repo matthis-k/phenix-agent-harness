@@ -283,10 +283,7 @@ function resolveRepairLimit(
   return { maxRepairAttempts: requested };
 }
 
-function timeoutIncreased(
-  current: number | undefined,
-  next: number | undefined,
-): boolean {
+function timeoutIncreased(current: number | undefined, next: number | undefined): boolean {
   return current !== undefined && next !== undefined && current > 0 && next > current;
 }
 

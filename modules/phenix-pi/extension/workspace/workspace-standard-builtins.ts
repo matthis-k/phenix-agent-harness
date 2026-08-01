@@ -17,7 +17,8 @@ import {
   SettingsManager,
   VERSION,
 } from "@earendil-works/pi-coding-agent";
-
+import { BUDGET_MODES, type BudgetMode } from "../../domain/definition/effort.ts";
+import { publishBudgetModeSelection } from "../budget-mode-selection.ts";
 import {
   confirmWorkspaceAction,
   inputWorkspaceValue,
@@ -27,8 +28,6 @@ import {
   showWorkspaceDocument,
   type WorkspaceActivityController,
 } from "./workspace-dialogs.ts";
-import { BUDGET_MODES, type BudgetMode } from "../../domain/definition/effort.ts";
-import { publishBudgetModeSelection } from "../budget-mode-selection.ts";
 import type { WorkspaceSelectDialogItem } from "./workspace-select-dialog.ts";
 
 export const STANDARD_BUILTIN_COMMANDS = [

@@ -5,13 +5,12 @@ import type {
   PhenixModelSetId,
   PiThinkingLevel,
 } from "../domain/definition/model.ts";
-import { phenixBudgetPolicy } from "./phenix-budget-policy.ts";
-
 import type {
   CapabilityRoute,
   ModelCandidate,
   RoutingPolicy,
 } from "../framework/routing/policy-model-resolver.ts";
+import { phenixBudgetPolicy } from "./phenix-budget-policy.ts";
 
 interface ModelSetDefinition {
   readonly capabilityPools: Readonly<Record<ModelCapability, string>>;
