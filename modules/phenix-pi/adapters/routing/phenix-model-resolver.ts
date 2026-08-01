@@ -1,14 +1,11 @@
-import type { ModelInventory } from "../../ports/model-resolver.ts";
 import {
-  PolicyModelResolver,
   type CapabilityRoute,
   type ModelCandidate,
+  PolicyModelResolver,
   type RoutingPolicy,
 } from "../../framework/routing/policy-model-resolver.ts";
-import {
-  defaultRoutingPolicy,
-  MODEL_SETS,
-} from "../../suite/phenix-routing-policy.ts";
+import type { ModelInventory } from "../../ports/model-resolver.ts";
+import { defaultRoutingPolicy, MODEL_SETS } from "../../suite/phenix-routing-policy.ts";
 
 export type { CapabilityRoute, ModelCandidate, RoutingPolicy };
 export { defaultRoutingPolicy, MODEL_SETS };
