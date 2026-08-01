@@ -50,9 +50,8 @@ test("workflow-owned operations receive a stable activation-scoped execution ide
     operations,
     registerFunctions(functions) {
       functions.registerMapping("operation-identity.input", (context) => context.input);
-      functions.registerMapping(
-        "operation-identity.output",
-        (context) => context.latest.get("operation"),
+      functions.registerMapping("operation-identity.output", (context) =>
+        context.latest.get("operation"),
       );
     },
   });
