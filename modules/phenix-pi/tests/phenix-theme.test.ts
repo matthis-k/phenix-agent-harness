@@ -79,14 +79,18 @@ interface PackageDocument {
 const THEME = readJson<ThemeDocument>("../themes/catppuccin-mocha.json");
 const PACKAGE = readJson<PackageDocument>("../package.json");
 const PHENIX_ENTRYPOINT = readFileSync(new URL("../extension/phenix.ts", import.meta.url), "utf8");
+const PHENIX_SUITE = readFileSync(
+  new URL("../suite/phenix-extension-suite.ts", import.meta.url),
+  "utf8",
+);
 
-test("registers the Mocha theme through the single Phenix extension", () => {
+test("registers the Mocha theme through the single configured Phenix extension", () => {
   assert.deepEqual(PACKAGE.pi.themes, ["./themes/catppuccin-mocha.json"]);
   assert.deepEqual(PACKAGE.pi.extensions, ["./extension/phenix.ts"]);
-  assert.ok(
-    PHENIX_ENTRYPOINT.indexOf("registerTheme(pi)") <
-      PHENIX_ENTRYPOINT.indexOf("registerRuntime(pi)"),
-  );
+  assert.match(PHENIX_ENTRYPOINT, /installExtensionSuite\(pi, createPhenixExtensionSuite\(\)\)/);
+  assert.match(PHENIX_SUITE, /theme: registerTheme/);
+  assert.ok(PHENIX_SUITE.indexOf('module("theme"') < PHENIX_SUITE.indexOf('module("runtime"'));
+  assert.match(PHENIX_SUITE, /module\("runtime", \["theme"\]/);
   assert.equal(THEME.name, PHENIX_THEME_NAME);
 });
 
