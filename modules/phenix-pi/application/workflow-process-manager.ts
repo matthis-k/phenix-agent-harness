@@ -131,26 +131,25 @@ export class WorkflowProcessManager implements RunImplementation {
     while (true) {
       const run = this.store.projection.requireRun(workflowRunId);
       if (isTerminalRunState(run.state) || this.controller.isTerminating(run.id)) return;
-      const state = this.loadState(run);
-      const children = this.store.projection.childrenOf(run.id);
-      const plan = planWorkflowStep({
-        state,
-        children,
-        activeAttachedChildren: this.controller.activeAttachedChildren(run.id).length,
-        selectEdges: (currentState, node, result, outcome) =>
-          this.selectEdges(currentState, node, result, outcome),
-      });
-
-      if (plan.kind === "fail-workflow") {
-        await this.controller.fail(run.id, plan.failure);
-        return;
-      }
-      if (plan.kind === "wait") {
-        await this.controller.transition(run.id, "waiting");
-        return;
-      }
-
       try {
+        const state = this.loadState(run);
+        const children = this.store.projection.childrenOf(run.id);
+        const plan = planWorkflowStep({
+          state,
+          children,
+          activeAttachedChildren: this.controller.activeAttachedChildren(run.id).length,
+          selectEdges: (currentState, node, result, outcome) =>
+            this.selectEdges(currentState, node, result, outcome),
+        });
+
+        if (plan.kind === "fail-workflow") {
+          await this.controller.fail(run.id, plan.failure);
+          return;
+        }
+        if (plan.kind === "wait") {
+          await this.controller.transition(run.id, "waiting");
+          return;
+        }
         await this.executePlan(run, state, plan);
       } catch (error) {
         if (!this.isActive(workflowRunId)) return;
@@ -213,6 +212,7 @@ export class WorkflowProcessManager implements RunImplementation {
         return;
       }
     }
+    return assertNever(plan);
   }
 
   private async runLocal(
@@ -260,7 +260,8 @@ export class WorkflowProcessManager implements RunImplementation {
         retryable: false,
       };
       const outcome = failed(failure);
-      if (this.selectEdges(state, node, outcome, "failure").length === 0) {
+      const currentState = this.loadState(this.store.projection.requireRun(run.id));
+      if (this.selectEdges(currentState, node, outcome, "failure").length === 0) {
         await this.controller.fail(run.id, failure);
       } else {
         await this.completeAndAdvance(run.id, node, activationId, outcome, "failure");
@@ -632,6 +633,10 @@ function requireWorkflow(definition: AnyDefinition): WorkflowDefinition<unknown,
   if (definition.kind !== "workflow")
     throw new Error(`${definition.id} is not a workflow definition`);
   return definition;
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unsupported workflow command: ${JSON.stringify(value)}`);
 }
 
 function isTerminalEvent(type: string): boolean {
