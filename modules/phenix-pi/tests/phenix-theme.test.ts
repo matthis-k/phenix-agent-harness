@@ -87,10 +87,19 @@ const PHENIX_SUITE = readFileSync(
 test("registers the Mocha theme through the single configured Phenix extension", () => {
   assert.deepEqual(PACKAGE.pi.themes, ["./themes/catppuccin-mocha.json"]);
   assert.deepEqual(PACKAGE.pi.extensions, ["./extension/phenix.ts"]);
-  assert.match(PHENIX_ENTRYPOINT, /installExtensionSuite\(pi, createPhenixExtensionSuite\(\)\)/);
+  assert.match(
+    PHENIX_ENTRYPOINT,
+    /installPhenixExtensionSuite\(pi, createPhenixExtensionConfiguration\(\)\)/,
+  );
   assert.match(PHENIX_SUITE, /theme: registerTheme/);
-  assert.ok(PHENIX_SUITE.indexOf('module("theme"') < PHENIX_SUITE.indexOf('module("runtime"'));
-  assert.match(PHENIX_SUITE, /module\("runtime", \["theme"\]/);
+  assert.ok(
+    PHENIX_SUITE.indexOf("await configuration.theme(pi)") <
+      PHENIX_SUITE.indexOf("await configuration.runtime(pi)"),
+  );
+  assert.ok(
+    PHENIX_SUITE.indexOf("await configuration.runtime(pi)") <
+      PHENIX_SUITE.indexOf("await configuration.workspace(pi)"),
+  );
   assert.equal(THEME.name, PHENIX_THEME_NAME);
 });
 
