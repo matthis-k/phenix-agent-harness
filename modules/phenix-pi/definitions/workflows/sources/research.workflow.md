@@ -25,6 +25,7 @@ flowchart LR
     join --> challenge[Challenge contradictions]
     challenge --> finalize[Synthesize recommendation]
     finalize --> return([Return result])
+    finalize -. exhausted failure .-> fallback([Return validated research evidence])
 ```
 
 ## States
@@ -122,6 +123,14 @@ retry: retryable
 max-retries: 1
 ```
 
+### fallback
+
+```phenix-state
+kind: return
+output: research.fallback
+output-schema: outcome.base
+```
+
 ### return
 
 ```phenix-state
@@ -132,17 +141,18 @@ output-schema: outcome.base
 
 ## Transitions
 
-| From | To | When | Max traversals |
-|---|---|---|---|
-| `fanout` | `repository` | | |
-| `fanout` | `ecosystem` | | |
-| `fanout` | `constraints` | | |
-| `repository` | `join` | | |
-| `ecosystem` | `join` | | |
-| `constraints` | `join` | | |
-| `join` | `challenge` | | |
-| `challenge` | `finalize` | | |
-| `finalize` | `return` | | |
+| From | To | On | When | Max traversals |
+|---|---|---|---|---|
+| `fanout` | `repository` | | | |
+| `fanout` | `ecosystem` | | | |
+| `fanout` | `constraints` | | | |
+| `repository` | `join` | | | |
+| `ecosystem` | `join` | | | |
+| `constraints` | `join` | | | |
+| `join` | `challenge` | | | |
+| `challenge` | `finalize` | | | |
+| `finalize` | `return` | | | |
+| `finalize` | `fallback` | `failure` | | |
 
 ## Tests
 

@@ -21,6 +21,7 @@ flowchart LR
     scenarios --> critique[Review usability and state behavior]
     critique --> finalize[Produce UI change handoff]
     finalize --> return([Return result])
+    finalize -. exhausted failure .-> fallback([Return validated UI evidence])
 ```
 
 ## States
@@ -112,6 +113,14 @@ retry: retryable
 max-retries: 1
 ```
 
+### fallback
+
+```phenix-state
+kind: return
+output: ui-change.fallback
+output-schema: outcome.base
+```
+
 ### return
 
 ```phenix-state
@@ -122,14 +131,15 @@ output-schema: outcome.base
 
 ## Transitions
 
-| From | To | When | Max traversals |
-|---|---|---|---|
-| `inspect` | `design` | | |
-| `design` | `implement` | | |
-| `implement` | `scenarios` | | |
-| `scenarios` | `critique` | | |
-| `critique` | `finalize` | | |
-| `finalize` | `return` | | |
+| From | To | On | When | Max traversals |
+|---|---|---|---|---|
+| `inspect` | `design` | | | |
+| `design` | `implement` | | | |
+| `implement` | `scenarios` | | | |
+| `scenarios` | `critique` | | | |
+| `critique` | `finalize` | | | |
+| `finalize` | `return` | | | |
+| `finalize` | `fallback` | `failure` | | |
 
 ## Tests
 

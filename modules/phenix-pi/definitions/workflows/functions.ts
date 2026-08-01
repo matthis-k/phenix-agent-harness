@@ -145,21 +145,33 @@ export function registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): 
     (context): QASynthesisRequest => ({
       objective: (context.input as ObjectiveRequest).objective,
       checks: localAt<readonly CheckResult[]>(context, "checks"),
-      reports: [
-        successAt(context, "repo"),
-        successAt(context, "tests"),
-        successAt(context, "architecture"),
-        successAt(context, "security"),
-      ],
+      reports: qaReports(context),
     }),
   );
-  registry.registerMapping(
-    "qa.output",
-    (context): QAReport => ({
-      ...successAt<QAReport>(context, "synthesize"),
+  registry.registerMapping("qa.synthesis-fallback", (context): QAReport => ({
+    summary:
+      "QA checks and independent reviews completed, but the synthesis agent failed. Returning the validated reports without narrative synthesis.",
+    checks: localAt<readonly CheckResult[]>(context, "checks"),
+    findings: [
+      {
+        severity: "info",
+        kind: "synthesis-failure",
+        description: "The QA synthesis stage could not produce its typed report.",
+        locations: [],
+        notes: failureDescriptionAt(context, "synthesize"),
+      },
+    ],
+    reports: qaReports(context),
+  }));
+  registry.registerMapping("qa.output", (context): QAReport => {
+    const report =
+      successfulOutcomeAt<QAReport>(context, "synthesize") ??
+      localAt<QAReport>(context, "synthesis-fallback");
+    return {
+      ...report,
       checks: localAt<readonly CheckResult[]>(context, "checks"),
-    }),
-  );
+    };
+  });
 
   registerDebugFunctions(registry);
   registerRefactorFunctions(registry);
@@ -211,10 +223,12 @@ function registerDebugFunctions(registry: WorkflowFunctionRegistrar): void {
       ["reproduce", "diagnose", "implement", "regression"],
     ),
   );
-  registry.registerMapping(
-    "debug.output",
-    (context): BaseResult => successAt<BaseResult>(context, "finalize"),
-  );
+  registerResilientHandoff(registry, "debug", [
+    "reproduce",
+    "diagnose",
+    "implement",
+    "regression",
+  ]);
 }
 
 function registerRefactorFunctions(registry: WorkflowFunctionRegistrar): void {
@@ -257,10 +271,12 @@ function registerRefactorFunctions(registry: WorkflowFunctionRegistrar): void {
       ["characterize", "architecture", "implement", "review"],
     ),
   );
-  registry.registerMapping(
-    "refactor.output",
-    (context): BaseResult => successAt<BaseResult>(context, "finalize"),
-  );
+  registerResilientHandoff(registry, "refactor", [
+    "characterize",
+    "architecture",
+    "implement",
+    "review",
+  ]);
 }
 
 function registerMigrationFunctions(registry: WorkflowFunctionRegistrar): void {
@@ -310,10 +326,7 @@ function registerMigrationFunctions(registry: WorkflowFunctionRegistrar): void {
       ["inventory", "plan", "implement", "audit"],
     ),
   );
-  registry.registerMapping(
-    "migrate.output",
-    (context): BaseResult => successAt<BaseResult>(context, "finalize"),
-  );
+  registerResilientHandoff(registry, "migrate", ["inventory", "plan", "implement", "audit"]);
 }
 
 function registerReviewFunctions(registry: WorkflowFunctionRegistrar): void {
@@ -366,10 +379,12 @@ function registerDesignFunctions(registry: WorkflowFunctionRegistrar): void {
       ["inspect", "alternatives", "architecture", "critique"],
     ),
   );
-  registry.registerMapping(
-    "design.output",
-    (context): BaseResult => successAt<BaseResult>(context, "finalize"),
-  );
+  registerResilientHandoff(registry, "design", [
+    "inspect",
+    "alternatives",
+    "architecture",
+    "critique",
+  ]);
 }
 
 function registerUiChangeFunctions(registry: WorkflowFunctionRegistrar): void {
@@ -420,10 +435,13 @@ function registerUiChangeFunctions(registry: WorkflowFunctionRegistrar): void {
       ["inspect", "design", "implement", "scenarios", "critique"],
     ),
   );
-  registry.registerMapping(
-    "ui-change.output",
-    (context): BaseResult => successAt<BaseResult>(context, "finalize"),
-  );
+  registerResilientHandoff(registry, "ui-change", [
+    "inspect",
+    "design",
+    "implement",
+    "scenarios",
+    "critique",
+  ]);
 }
 
 function registerResearchFunctions(registry: WorkflowFunctionRegistrar): void {
@@ -464,10 +482,12 @@ function registerResearchFunctions(registry: WorkflowFunctionRegistrar): void {
       ["repository", "ecosystem", "constraints", "challenge"],
     ),
   );
-  registry.registerMapping(
-    "research.output",
-    (context): BaseResult => successAt<BaseResult>(context, "finalize"),
-  );
+  registerResilientHandoff(registry, "research", [
+    "repository",
+    "ecosystem",
+    "constraints",
+    "challenge",
+  ]);
 }
 
 function registerSecurityFunctions(registry: WorkflowFunctionRegistrar): void {
@@ -502,10 +522,48 @@ function registerSecurityFunctions(registry: WorkflowFunctionRegistrar): void {
       ["surface", "threat-model", "adversarial"],
     ),
   );
-  registry.registerMapping(
-    "security.output",
-    (context): BaseResult => successAt<BaseResult>(context, "finalize"),
+  registerResilientHandoff(registry, "security", ["surface", "threat-model", "adversarial"]);
+}
+
+function registerResilientHandoff(
+  registry: WorkflowFunctionRegistrar,
+  workflow: string,
+  artifactNodes: readonly string[],
+): void {
+  registry.registerMapping(`${workflow}.fallback`, (context): BaseResult => ({
+    summary: `Workflow ${workflow} completed its substantive stages, but the final handoff agent failed. Returning the validated stage results directly.`,
+    artifacts: artifactNodes.map((stage) => ({ stage, result: successAt(context, stage) })),
+    unresolved: [`Final handoff failure: ${failureDescriptionAt(context, "finalize")}`],
+  }));
+  registry.registerMapping(`${workflow}.output`, (context): BaseResult =>
+    successfulOutcomeAt<BaseResult>(context, "finalize") ?? localAt<BaseResult>(context, "fallback"),
   );
+}
+
+function qaReports(context: WorkflowEvaluationContext): readonly unknown[] {
+  return [
+    successAt(context, "repo"),
+    successAt(context, "tests"),
+    successAt(context, "architecture"),
+    successAt(context, "security"),
+  ];
+}
+
+function failureDescriptionAt(context: WorkflowEvaluationContext, node: string): string {
+  const outcome = context.latest.get(node) as Outcome<unknown> | undefined;
+  if (outcome?.status === "failure") {
+    return `${outcome.failure.code}: ${outcome.failure.message}`;
+  }
+  if (outcome?.status === "cancelled") return `cancelled: ${outcome.reason}`;
+  throw new Error(`Workflow mapping expected a failed outcome at ${node}`);
+}
+
+function successfulOutcomeAt<T = unknown>(
+  context: WorkflowEvaluationContext,
+  node: string,
+): T | undefined {
+  const outcome = context.latest.get(node) as Outcome<T> | undefined;
+  return outcome?.status === "success" ? outcome.value : undefined;
 }
 
 function difficultyAt(context: WorkflowEvaluationContext) {
