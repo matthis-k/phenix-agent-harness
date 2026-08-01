@@ -58,15 +58,16 @@ export function orderExtensionModules<TServices>(
   const installed = new Set<string>();
   const ordered: ExtensionModule<TServices>[] = [];
   while (ordered.length < modules.length) {
-    let progressed = false;
-    for (const module of modules) {
-      if (installed.has(module.id)) continue;
-      if (!(module.requires ?? []).every((dependency) => installed.has(dependency))) continue;
-      installed.add(module.id);
-      ordered.push(module);
-      progressed = true;
+    const next = modules.find(
+      (module) =>
+        !installed.has(module.id) &&
+        (module.requires ?? []).every((dependency) => installed.has(dependency)),
+    );
+    if (next) {
+      installed.add(next.id);
+      ordered.push(next);
+      continue;
     }
-    if (progressed) continue;
 
     const blocked = modules
       .filter((module) => !installed.has(module.id))
