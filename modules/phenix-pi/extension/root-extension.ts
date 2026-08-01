@@ -70,6 +70,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
   let runtime: PhenixRuntime | undefined;
   let rootRunId: RunId | undefined;
   let modelRegistry: ModelRegistry | undefined;
+  let usesPhenixBudget = false;
   let toolsRegistered = false;
   let disposeStatus: (() => void) | undefined;
   let monitor: RunMonitor | undefined;
@@ -97,6 +98,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
     runtime = undefined;
     rootRunId = undefined;
     modelRegistry = ctx.modelRegistry;
+    usesPhenixBudget = ctx.model?.provider === "phenix";
     disposeStatus?.();
     disposeStatus = undefined;
     monitor?.dispose();
@@ -206,7 +208,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
 
   pi.on("before_agent_start", async (event) => {
     if (!runtime || !rootRunId) return;
-    await syncBudgetFromThinking(pi, runtime, rootRunId);
+    if (usesPhenixBudget) await syncBudgetFromThinking(pi, runtime, rootRunId);
     const [available, active, profile] = await Promise.all([
       runtime.catalog.listAvailable(rootRunId),
       runtime.queries.activeRuns(rootRunId),
@@ -228,6 +230,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
   });
 
   pi.on("model_select", async (event) => {
+    usesPhenixBudget = event.model.provider === "phenix";
     if (!runtime || !rootRunId) return;
     if (event.model.provider === "phenix" && isPhenixModelSet(event.model.id)) {
       await runtime.profiles.select(rootRunId, {
@@ -247,6 +250,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
     runtime = undefined;
     rootRunId = undefined;
     modelRegistry = undefined;
+    usesPhenixBudget = false;
     disposeStatus?.();
     disposeStatus = undefined;
     monitor?.dispose();
