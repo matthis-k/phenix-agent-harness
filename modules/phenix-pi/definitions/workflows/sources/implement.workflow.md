@@ -211,6 +211,67 @@ reason: implement.failure
 }
 ```
 
+### deterministic-rejection
+
+```phenix-test
+{
+  "input": {
+    "objective": "Reject a trivial change that lacks deterministic evidence"
+  },
+  "mocks": {
+    "estimate": [
+      {
+        "return": {
+          "difficulty": "D0",
+          "summary": "Trivial targeted change",
+          "signals": ["single bounded edit"]
+        }
+      }
+    ],
+    "implement": [
+      {
+        "return": {
+          "summary": "Applied incomplete targeted change",
+          "changedFiles": ["src/file.ts"],
+          "checks": [],
+          "unresolved": ["No deterministic check passed"]
+        }
+      }
+    ],
+    "trivial-accept": [
+      {
+        "return": {
+          "accepted": false,
+          "summary": "Deterministic evidence rejected",
+          "findings": ["No successful targeted check was reported."],
+          "evidence": []
+        }
+      }
+    ]
+  },
+  "expect": {
+    "status": "failure",
+    "visits": [
+      "estimate",
+      "implement",
+      "trivial-accept",
+      "trivial-decision",
+      "fail"
+    ],
+    "transitions": [
+      "estimate->implement",
+      "implement->trivial-accept",
+      "trivial-accept->trivial-decision",
+      "trivial-decision->fail"
+    ],
+    "failure": {
+      "code": "workflow_rejected",
+      "messageIncludes": "Implementation was rejected after 1 attempts"
+    }
+  }
+}
+```
+
 ### repair-once
 
 ```phenix-test

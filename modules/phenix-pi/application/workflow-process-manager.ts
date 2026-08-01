@@ -199,7 +199,7 @@ export class WorkflowProcessManager implements RunImplementation {
         const message = typeof mapped === "string" ? mapped : JSON.stringify(mapped);
         await this.completeNode(run.id, plan.node, plan.activationId, mapped);
         await this.controller.fail(run.id, {
-          code: "workflow_exhausted",
+          code: "workflow_rejected",
           message,
           retryable: false,
         });

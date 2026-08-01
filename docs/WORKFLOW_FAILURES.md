@@ -14,14 +14,14 @@ The default rule is conservative: preserve completed typed work, but never conve
 | External transient failure | Provider startup failure, model temporarily unavailable, transport failure | Sometimes | Retry only an awaited idempotent state with an explicit bounded retry policy. |
 | Resource exhaustion | Timeout, turn budget, tool budget, missing completion after bounded repair cycles | Sometimes | Preserve the original activation and apply only validated bounded limit suggestions. Suspend for user authority when the requested increase exceeds automatic policy. |
 | Deterministic check failure | Test, type, lint, build, or repository gate reports `ok: false` | Depends on workflow | Preserve as typed evidence. QA may continue and report it; a mutation workflow must not claim acceptance without a passing verification gate. |
-| Quality rejection | Independent verifier rejects an implementation after bounded repair attempts | Yes | Fail as a valid negative result. Do not retry the side-effecting implementation activation automatically. |
-| Strict branch failure | One required branch of an `all-success` join fails after its retry policy | Yes | Fail the workflow. Missing a required architecture, security, test, or evidence branch would make the result incomplete. |
+| Quality rejection | Independent verifier rejects an implementation after bounded repair attempts | Yes | Fail with `workflow_rejected`. Do not retry the side-effecting implementation activation automatically. |
+| Strict branch failure | One required branch of an `all-success` join fails after its retry policy | Yes | Fail with `workflow_rejected`. Missing a required architecture, security, test, or evidence branch would make the result incomplete. |
 | Final handoff failure | Finalizer or QA synthesizer fails after all substantive stages succeeded | No, when a deterministic typed fallback exists | Return a degraded typed handoff containing the validated stage results and an explicit unresolved finalizer diagnostic. |
 | Cancellation | User, parent, or supervisor cancels the run | Yes | Propagate cancellation. Never retry or activate a failure fallback. |
 
 ## Safety invariants
 
-1. **Retries are opt-in and bounded.** Only awaited invocation states declaring `retry: retryable` may replace a failed child, and only when the resulting child failure is marked retryable.
+1. **Retries are opt-in and bounded.** Only awaited invocation states declaring `retry: retryable` may replace a failed child, and only when the resulting child failure is marked retryable. Omitted agent retryability is derived conservatively from the failure category rather than assumed true.
 2. **Mutations are not replayed automatically.** Side-effecting implementation states omit automatic retry unless the operation is independently proven idempotent.
 3. **Fallback is not recovery by re-execution.** A handoff fallback is a deterministic return mapping over schema-validated results that already exist.
 4. **Fallback accepts failure only.** Cancellation remains cancellation and cannot be converted into a successful degraded result.
@@ -58,10 +58,19 @@ Use a deterministic return fallback when all of the following hold:
 
 Do not add a fallback merely to improve completion rate. A terminal failure is correct whenever returning success would overstate what the workflow established.
 
-## Known classification limitations
+## Typed classification and retry defaults
 
-Explicit workflow `fail` nodes currently use the same `workflow_exhausted` failure code as orchestration limits and failed strict joins. This is operationally safe but semantically coarse: an implementation rejected by its verifier is a valid quality rejection, not necessarily an orchestration-budget exhaustion. A future change should introduce a distinct typed rejection code after auditing all failure-code consumers and health projections.
+`workflow_exhausted` is reserved for an exhausted orchestration mechanism, such as the workflow node-activation limit. It does not describe a valid negative quality result.
 
-Agent-reported failures currently default an omitted `retryable` field to `true`. That preserves existing recovery behavior, but it means categories such as `invalid_task` or `insufficient_permissions` can be retried when an agent omits the field. Workflow and agent prompts should set `retryable: false` for structural blockers. A future typed policy should derive safe defaults from the failure category after auditing existing agents and tests.
+`workflow_rejected` represents a deliberate terminal rejection produced by a workflow fail node or a failed required branch of an `all-success` join. This keeps verifier rejection, deterministic acceptance failure, and incomplete strict evidence distinct from runtime exhaustion.
 
-These limitations are documented rather than changed here so the handoff-resilience patch does not silently alter established failure-code or retry-policy consumers.
+When an agent omits `retryable`, the runtime derives the default from the structured category:
+
+| Category | Default | Rationale |
+|---|---:|---|
+| `external_failure` | Retryable | Provider and transport failures may be transient. |
+| `resource_limit` with at least one concrete suggested limit | Retryable | A replacement attempt can apply a validated limit change. |
+| `resource_limit` without a concrete suggestion | Not retryable | Repeating the same limits cannot repair the failure. |
+| `blocked`, `deadlock`, `insufficient_permissions`, `invalid_task`, `other` | Not retryable | The input, authority, dependency, or execution plan must change first. |
+
+An explicit `retryable` value remains authoritative. This permits a caller or agent to mark an unusual structural incident transient, but omission can no longer accidentally enable automatic retry.

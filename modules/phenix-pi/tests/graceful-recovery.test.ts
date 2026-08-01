@@ -169,8 +169,10 @@ test("agent failure reports remain inspectable and can be retried with bounded o
   assert.equal(failed.status, "failure");
   if (failed.status !== "failure") throw new Error("Expected failure");
   assert.equal(failed.failure.code, "agent_reported_failure");
+  assert.equal(failed.failure.retryable, true);
   const report = failed.failure.details as FailureReport;
   assert.equal(report.category, "deadlock");
+  assert.equal(report.retryable, true);
   assert.deepEqual(report.requestedTools, ["bash"]);
 
   const retry = await execution.retry(root, first.id, {
