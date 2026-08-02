@@ -99,10 +99,7 @@ test("orders urgent forms first while retaining FIFO order within urgency", () =
     ["urgent-old", "urgent-new", "normal-old", "normal-new"],
   );
   assert.equal(formatUserFormStatus({ total: 0, urgent: 0 }), undefined);
-  assert.equal(
-    formatUserFormStatus({ total: 2, urgent: 0 }),
-    "forms 2 pending · answer in input",
-  );
+  assert.equal(formatUserFormStatus({ total: 2, urgent: 0 }), "forms 2 pending · answer in input");
   assert.equal(
     formatUserFormStatus({ total: 3, urgent: 1 }),
     "forms 3 pending · 1 urgent · answer in input",
