@@ -15,11 +15,15 @@ import type {
 import type { RunActivity, RunFact } from "../domain/run/observability.ts";
 import type {
   DefinitionId,
+  LocalTaskId,
   ObjectiveId,
   ObjectiveState,
   Outcome,
   RunId,
+  TaskId,
 } from "../domain/shared.ts";
+import type { LocalTask } from "../domain/task/local-task.ts";
+import type { TaskNode, TaskTree } from "../domain/task/projection.ts";
 import type { WorkflowDiagnostic } from "../domain/workflow/validator.ts";
 
 export interface RunHandle<O> {
@@ -73,6 +77,22 @@ export interface ObjectiveFacade {
   setState(actorRunId: RunId, objectiveId: ObjectiveId, state: ObjectiveState): Promise<Objective>;
   focus(runId: RunId, objectiveId: ObjectiveId): Promise<Objective>;
   appendProgress(actorRunId: RunId, objectiveId: ObjectiveId, message: string): Promise<void>;
+}
+
+/** Internal execution telemetry for deterministic local workflow steps. */
+export interface TaskFacade {
+  tree(rootRunId: RunId): Promise<TaskTree>;
+  tasksFor(runId: RunId): Promise<readonly TaskNode[]>;
+  addLocal(input: {
+    readonly ownerRunId: RunId;
+    readonly title: string;
+    readonly description?: string;
+  }): Promise<LocalTask>;
+  setLocalState(
+    taskId: LocalTaskId,
+    state: "not_started" | "wip" | "done" | "failed",
+  ): Promise<LocalTask>;
+  appendProgress(taskId: TaskId, message: string): Promise<void>;
 }
 
 export interface DefinitionSummary {
