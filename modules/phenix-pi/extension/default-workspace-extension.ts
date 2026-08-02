@@ -221,12 +221,14 @@ async function openWorkspace(
         if (delegation.action === "app.interrupt") {
           void interruptActiveRootWork(binding.runtime, binding.rootRunId)
             .then((targets) => {
-              if (targets.length > 0) {
-                ctx.ui.notify(
-                  `Interrupted current task and ${targets.length} attached run${targets.length === 1 ? "" : "s"}.`,
-                  "warning",
-                );
+              if (targets.length === 0) {
+                activeWorkspace?.handleInput(data);
+                return;
               }
+              ctx.ui.notify(
+                `Interrupted current task and ${targets.length} attached run${targets.length === 1 ? "" : "s"}.`,
+                "warning",
+              );
             })
             .catch((error) => {
               ctx.ui.notify(
@@ -311,7 +313,10 @@ async function openWorkspace(
             ),
           subscribe: (listener) => subscribeWorkspaceChanges(binding.runtime, listener),
           submit: async (text) => {
-            if (routeUserFormInput(pi, binding, text)) return;
+            if (routeUserFormInput(pi, binding, text)) {
+              activeWorkspace?.refreshRootTranscript();
+              return;
+            }
             const targetRunId = selectedWorkspaceInputTarget(binding.rootRunId);
             const targetsRoot = targetRunId === binding.rootRunId;
             if (targetsRoot) lifecycle.onSubmitStarted();
