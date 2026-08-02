@@ -37,7 +37,7 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
     projectWorkspaceRuns(snapshot.ui.tree.root).map((value) => {
       const run = value.node.run;
       const attention = snapshot.attentionByRun?.[String(run.id)];
-      const objective = snapshot.objectives.focusByRun[String(run.id)];
+      const objective = snapshot.objectives?.focusByRun[String(run.id)];
       const expandable = Boolean(
         run.resolvedModel || run.profile || run.compiled?.budget || run.pi?.sessionId,
       );
