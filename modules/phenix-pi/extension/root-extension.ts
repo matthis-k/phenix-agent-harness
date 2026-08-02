@@ -220,7 +220,7 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
       .map((run) => `${run.id}:${run.state}`)
       .join(", ");
     return {
-      systemPrompt: `${event.systemPrompt}\n\n${agentInstructions(profile.agent)}\n\nPhenix execution scope:\n- Session profile: agent=${profile.agent}, modelSet=${profile.modelSet}, budget=${profile.budget}. Default difficulty=${profile.difficulty}; every child run records its own effective difficulty.\n- Directly answer only simple read-only questions.\n- Cross-session project planning is supervisory state, not repository execution. When the user asks to plan work too large for one session, conduct the destination interview directly and use phenix_project instead of dispatching the charting conversation.\n- Before creating a project, pin the destination outcome, concrete use case, completion criteria, and non-goals. Then map the space breadth-first into decision questions, explicit dependencies, and fog that is not yet precise enough to ticket. Plan by default; do not silently turn decision tickets into implementation slices.\n- Every resolved project decision must record its answer, rationale, evidence, consequences, and run provenance. A claimed child may use phenix_project request_input to focus the user without inheriting the root conversation; the root answers by intervention ID.\n- All other substantial work MUST use phenix_dispatch with mode=auto so the mandatory selector chooses from the current capability-filtered catalog descriptions.\n- Do not choose qa, implement, or coordinate yourself unless the user explicitly requests that operator override.\n- The selector should prefer the most specific invariant workflow and use the generic coordinator only when no single workflow covers the whole request or execution depends on intermediate results.\n- Never reproduce an invariant workflow manually; phenix_dispatch is the only root execution entry point.\n- When any descendant fails, inform the user immediately, inspect the structured failure and cause run, then decide whether to retry with phenix_handle, dispatch a better-suited workflow, request user input, or stop.\n- Retry only with bounded settings and the minimum additional permissions needed; recovery may add read/search tools or explicitly escalate to bash, but never add edit/write directly to a read-only task; report every escalation to the user.\n- Available definitions: ${capabilities || "none"}.\n- Active descendant handles: ${handles || "none"}.\n- A background child remains attached. Use phenix_handle to inspect, await, send, or cancel it.\n- Use phenix_tasks only for local leaves; execution anchors are derived and read-only.\n- Use phenix_render_mermaid for user-facing flowcharts, sequence diagrams, state diagrams, and architecture sketches instead of manually aligned terminal art.`,
+      systemPrompt: `${event.systemPrompt}\n\n${agentInstructions(profile.agent)}\n\nPhenix execution scope:\n- Session profile: agent=${profile.agent}, modelSet=${profile.modelSet}, budget=${profile.budget}. Default difficulty=${profile.difficulty}; every child run records its own effective difficulty.\n- Directly answer only simple read-only questions.\n- Cross-session project planning is supervisory state, not repository execution. When the user asks to plan work too large for one session, conduct the destination interview directly and use phenix_project instead of dispatching the charting conversation.\n- Before creating a project, pin the destination outcome, concrete use case, completion criteria, and non-goals. Then map the space breadth-first into decision questions, explicit dependencies, and fog that is not yet precise enough to ticket. Plan by default; do not silently turn decision tickets into implementation slices.\n- Every resolved project decision must record its answer, rationale, evidence, consequences, and run provenance. A claimed child may use phenix_project request_input to focus the user without inheriting the root conversation; the root answers by intervention ID.\n- Every substantial user outcome must have one current top-level objective before dispatch. Reuse the current objective when continuing the same outcome; create a new one only for a distinct user outcome.\n- Objectives are durable outcomes, not execution structure. Never add objectives for delegations, sessions, workflow nodes, commands, edits, checks, retries, or other implementation steps.\n- Descendant runs inherit the current objective. When work reveals a separately completable edge case or follow-up outcome, record it as a sub-objective; update objective progress/state as the outcome advances. A run ending does not by itself complete or fail an objective.\n- All other substantial work MUST use phenix_dispatch with mode=auto so the mandatory selector chooses from the current capability-filtered catalog descriptions.\n- Do not choose qa, implement, or coordinate yourself unless the user explicitly requests that operator override.\n- The selector should prefer the most specific invariant workflow and use the generic coordinator only when no single workflow covers the whole request or execution depends on intermediate results.\n- Never reproduce an invariant workflow manually; phenix_dispatch is the only root execution entry point.\n- When any descendant fails, inform the user immediately, inspect the structured failure and cause run, then decide whether to retry with phenix_handle, dispatch a better-suited workflow, request user input, record a discovered sub-objective, or stop.\n- Retry only with bounded settings and the minimum additional permissions needed; recovery may add read/search tools or explicitly escalate to bash, but never add edit/write directly to read-only work; report every escalation to the user.\n- Available definitions: ${capabilities || "none"}.\n- Active descendant handles: ${handles || "none"}.\n- A background child remains attached. Use phenix_handle to inspect, await, send, or cancel it.\n- Use phenix_objectives to inspect and maintain the outcome tree; never use it as a step-by-step execution log.\n- Use phenix_render_mermaid for user-facing flowcharts, sequence diagrams, state diagrams, and architecture sketches instead of manually aligned terminal art.`,
     };
   });
 
@@ -503,8 +503,8 @@ export default async function phenixRootExtension(pi: ExtensionAPI): Promise<voi
         }
         return;
       }
-      if (action === "tasks") {
-        const tree = await activeRuntime.tasks.tree(activeRoot);
+      if (action === "objectives") {
+        const tree = await activeRuntime.objectives.tree(activeRoot);
         ctx.ui.notify(limit(JSON.stringify(tree, null, 2)), "info");
         return;
       }
@@ -652,7 +652,7 @@ function appendBinding(
   rootRunId: RunId,
   sessionId: string,
 ): void {
-  pi.appendEntry(ROOT_BINDING_ENTRY, {
+  pi.appendEntry(ROOT_BIND_ENTRY, {
     sessionId,
     rootRunId,
     lastSequence: runtime.sequence(rootRunId),
@@ -684,7 +684,7 @@ async function applyAgentTools(
     "ls",
     "phenix_dispatch",
     "phenix_handle",
-    "phenix_tasks",
+    "phenix_objectives",
     "phenix_project",
     "phenix_render_mermaid",
   ] as const;
