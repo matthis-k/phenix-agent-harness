@@ -107,16 +107,11 @@ test("fact history highlights severity, reliability, timestamps, and run ids", (
   assert.match(output, /<warning>Potential boundary issue<\/warning>/);
 });
 
-test("footer status renders the session profile without duplicating workspace activity", () => {
-  const active = statusLine(THEME, { agent: "base", modelSet: "mixed", budget: "high" }, 3);
-  const idle = statusLine(THEME, { agent: "base", modelSet: "mixed", budget: "high" }, 0);
-
-  assert.equal(active, idle);
-  assert.match(active, /<accent><bold>phenix<\/bold><\/accent>/);
-  assert.match(active, /<text><bold>base<\/bold><\/text>/);
-  assert.match(active, /<accent>mixed<\/accent>/);
-  assert.match(active, /high/);
-  assert.doesNotMatch(active, /D2|active|idle/);
+test("runtime profile status is omitted in favor of the global model status", () => {
+  assert.equal(
+    statusLine(THEME, { agent: "base", modelSet: "mixed", budget: "high" }, 3),
+    undefined,
+  );
 });
 
 test("panel surfaces restore their background after nested full resets", () => {
