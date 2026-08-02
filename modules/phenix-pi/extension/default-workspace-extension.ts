@@ -226,7 +226,7 @@ async function openWorkspace(
                 return;
               }
               ctx.ui.notify(
-                `Interrupted current task and ${targets.length} attached run${targets.length === 1 ? "" : "s"}.`,
+                `Interrupted current work and ${targets.length} attached run${targets.length === 1 ? "" : "s"}.`,
                 "warning",
               );
             })
@@ -450,9 +450,9 @@ async function loadWorkspaceSnapshot(
   tui: Parameters<typeof renderNativeTranscript>[1],
   theme: ObservabilityTheme,
 ): Promise<PhenixWorkspaceSnapshot> {
-  const [ui, tasks, projects] = await Promise.all([
+  const [ui, objectives, projects] = await Promise.all([
     loadPhenixUiSnapshot(binding.runtime, binding.rootRunId, binding.integrations),
-    binding.runtime.tasks.tree(binding.rootRunId),
+    binding.runtime.objectives.tree(binding.rootRunId),
     binding.runtime.projects.list(),
   ]);
   const entries = buildContextEntries([...ctx.sessionManager.getBranch()]);
@@ -460,7 +460,7 @@ async function loadWorkspaceSnapshot(
   const sessionFile = ctx.sessionManager.getSessionFile();
   return {
     ui,
-    tasks,
+    objectives,
     attentionByRun: projectWorkspaceAttention(projects),
     rootTranscript: readyNativeRunTranscript({
       component: renderNativeTranscript(entries, tui, ctx.cwd, theme),
