@@ -8,6 +8,7 @@ export type WorkspaceInputGroup = "main" | "sidebar";
 
 export type WorkspaceInputIntent =
   | { readonly kind: "editor" }
+  | { readonly kind: "clear-or-exit" }
   | { readonly kind: "copy-selection" }
   | { readonly kind: "native-ui" }
   | { readonly kind: "sidebar-toggle" }
@@ -77,6 +78,7 @@ export function resolveWorkspaceInput(
   if (data === WORKSPACE_COPY_TRANSCRIPT || matchesKey(data, "ctrl+shift+c")) {
     return { kind: "copy-selection" };
   }
+  if (matchesKey(data, "ctrl+c")) return { kind: "clear-or-exit" };
   if (matchesKey(data, "tab")) return { kind: "focus-toggle" };
 
   if (group === "main") {
