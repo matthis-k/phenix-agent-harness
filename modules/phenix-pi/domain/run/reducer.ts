@@ -1,5 +1,6 @@
 import type { Objective } from "../objective/model.ts";
-import type { ObjectiveId, Outcome, RunId } from "../shared.ts";
+import type { LocalTaskId, ObjectiveId, Outcome, RunId } from "../shared.ts";
+import type { LocalTask } from "../task/local-task.ts";
 import type { DomainEvent } from "./events.ts";
 import { activeAttachedChildren, assertRunTransition, isTerminalRunState } from "./invariants.ts";
 import {
@@ -24,6 +25,8 @@ interface CycleProjection {
 
 export class RunProjection {
   readonly runs = new Map<RunId, RunRecord>();
+  readonly localTasks = new Map<LocalTaskId, LocalTask>();
+  readonly progress = new Map<string, readonly string[]>();
   readonly objectives = new Map<ObjectiveId, Objective>();
   readonly objectiveFocuses = new Map<RunId, ObjectiveId>();
   readonly objectiveProgress = new Map<ObjectiveId, readonly string[]>();
@@ -124,7 +127,11 @@ export class RunProjection {
   }
 
   private applyExisting(event: DomainEvent, current: RunRecord): void {
-    if (isTerminalRunState(current.state) && !event.type.startsWith("objective.")) {
+    if (
+      isTerminalRunState(current.state) &&
+      !event.type.startsWith("task.") &&
+      !event.type.startsWith("objective.")
+    ) {
       throw new Error(`Run ${current.id} is terminal and cannot accept ${event.type}`);
     }
     let next: RunRecord = { ...current, revision: event.revision };
@@ -228,6 +235,31 @@ export class RunProjection {
           ancestor = ancestor.parentId ? this.requireRun(ancestor.parentId) : undefined;
         }
         next = { ...next, parentId: data.newParentId, ownership: data.ownership };
+        break;
+      }
+      case "task.local.created": {
+        const task = (event.data as { readonly task: LocalTask }).task;
+        if (task.ownerRunId !== current.id) throw new Error(`Local task owner mismatch`);
+        if (this.localTasks.has(task.id)) throw new Error(`Local task already exists: ${task.id}`);
+        this.localTasks.set(task.id, task);
+        break;
+      }
+      case "task.local.state.changed": {
+        const data = event.data as {
+          readonly taskId: LocalTaskId;
+          readonly state: LocalTask["state"];
+          readonly updatedAt: string;
+        };
+        const task = this.localTasks.get(data.taskId);
+        if (!task || task.ownerRunId !== current.id) {
+          throw new Error(`Unknown local task ${data.taskId}`);
+        }
+        this.localTasks.set(task.id, { ...task, state: data.state, updatedAt: data.updatedAt });
+        break;
+      }
+      case "task.progress.appended": {
+        const data = event.data as { readonly taskId: string; readonly message: string };
+        this.progress.set(data.taskId, [...(this.progress.get(data.taskId) ?? []), data.message]);
         break;
       }
       case "objective.created": {
@@ -370,6 +402,8 @@ export class RunProjection {
   private fork(): RunProjection {
     const projection = new RunProjection();
     for (const [id, run] of this.runs) projection.runs.set(id, run);
+    for (const [id, task] of this.localTasks) projection.localTasks.set(id, task);
+    for (const [id, progress] of this.progress) projection.progress.set(id, progress);
     for (const [id, objective] of this.objectives) projection.objectives.set(id, objective);
     for (const [id, objectiveId] of this.objectiveFocuses) {
       projection.objectiveFocuses.set(id, objectiveId);
