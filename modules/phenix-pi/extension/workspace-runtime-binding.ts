@@ -68,6 +68,7 @@ export function subscribeWorkspaceChanges(
     runtime.diagnostics.subscribe(notifySnapshot),
     runtime.transcripts.subscribe((runId) => listener({ kind: "transcript", runId })),
     runtime.projects.subscribe(notifySnapshot),
+    runtime.userForms.subscribe(notifySnapshot),
   ];
   return () => {
     for (const unsubscribe of subscriptions) unsubscribe();
