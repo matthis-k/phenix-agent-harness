@@ -9,13 +9,13 @@ import { ExecutionFacadeImpl } from "../application/execution-facade.ts";
 import type { ExecutionStore } from "../application/execution-store.ts";
 import { SessionInvocationPolicy } from "../application/invocation-policy.ts";
 import { ModelExecutionFacade } from "../application/model-execution-facade.ts";
+import { ObjectiveFacadeImpl } from "../application/objective-facade.ts";
 import {
   CompositeAgentToolFactory,
   ProjectAgentToolFactory,
 } from "../application/project-agent-tools.ts";
 import type { ProjectPlannerFacade } from "../application/project-planner.ts";
 import { QueryFacadeImpl } from "../application/query-facade.ts";
-import { TaskFacadeImpl } from "../application/task-facade.ts";
 import { UserFormAgentToolFactory } from "../application/user-form-agent-tools.ts";
 import type { UserFormFacade } from "../application/user-form-service.ts";
 import { WorkflowCheckpointProcessManager } from "../application/workflow-checkpoint-process-manager.ts";
@@ -84,7 +84,7 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
   });
   const visibility = { hiddenDefinitions: input.hiddenDefinitions ?? [] };
   const modelExecution = new ModelExecutionFacade({ execution, store, ...visibility });
-  const tasks = new TaskFacadeImpl({ store, catalog: definitions, clock, ids });
+  const objectives = new ObjectiveFacadeImpl({ store, clock, ids });
   const catalog = new CatalogFacadeImpl(definitions, store, visibility);
   const invocationPolicy = new SessionInvocationPolicy({ store, catalog: definitions });
   const workflows = new WorkflowProcessManager({
@@ -94,7 +94,6 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
     store,
     catalog: definitions,
     functions,
-    tasks,
     ids,
     cwd,
     clock,
@@ -131,7 +130,7 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
   const executionTools = new FacadeAgentToolFactory({
     execution: modelExecution,
     dispatch,
-    tasks,
+    objectives,
     catalog,
     store,
     invocationPolicy,
@@ -145,7 +144,7 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
   return {
     execution,
     dynamicWorkflows,
-    tasks,
+    objectives,
     catalog,
     queries: new QueryFacadeImpl(store),
     tools,
