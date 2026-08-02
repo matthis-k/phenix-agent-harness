@@ -7,6 +7,7 @@ import {
   nextWorkspaceSection,
   resolveNativeInputDelegation,
   resolveWorkspaceInput,
+  WORKSPACE_COPY_TRANSCRIPT,
   WORKSPACE_NATIVE_HANDOFF,
 } from "../extension/workspace/workspace-interaction.ts";
 
@@ -112,15 +113,19 @@ test("native modal actions leave the workspace closed", () => {
   });
 });
 
-test("the private handoff input closes without occupying a user shortcut", () => {
+test("private handoff inputs do not occupy user shortcuts", () => {
   assert.deepEqual(resolveWorkspaceInput(WORKSPACE_NATIVE_HANDOFF, "main"), {
     kind: "native-ui",
   });
+  assert.deepEqual(resolveWorkspaceInput(WORKSPACE_COPY_TRANSCRIPT, "main"), {
+    kind: "copy-selection",
+  });
 });
 
-test("Ctrl+C copies only an existing transcript selection", () => {
-  assert.deepEqual(resolveWorkspaceInput("\x03", "main", true), { kind: "copy-selection" });
+test("Ctrl+C stays with the default editor and Ctrl+Shift+C copies the transcript", () => {
+  assert.deepEqual(resolveWorkspaceInput("\x03", "main", true), { kind: "editor" });
   assert.deepEqual(resolveWorkspaceInput("\x03", "main", false), { kind: "editor" });
+  assert.deepEqual(resolveWorkspaceInput("\x1b[99;6u", "main"), { kind: "copy-selection" });
 });
 
 test("sidebar section navigation wraps in registry order", () => {
