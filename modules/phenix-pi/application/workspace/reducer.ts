@@ -19,8 +19,15 @@ export interface WorkspaceUpdate {
   readonly effects: readonly WorkspaceEffect[];
 }
 
-const PANE_IDS: readonly PaneId[] = ["transcript", "editor", "runs", "tasks", "files", "facts"];
-const COLLAPSIBLE_PANES = new Set<PaneId>(["runs", "tasks", "files", "facts"]);
+const PANE_IDS: readonly PaneId[] = [
+  "transcript",
+  "editor",
+  "runs",
+  "objectives",
+  "files",
+  "facts",
+];
+const COLLAPSIBLE_PANES = new Set<PaneId>(["runs", "objectives", "files", "facts"]);
 
 export function reduceWorkspace<TSnapshot>(
   state: WorkspaceState,
