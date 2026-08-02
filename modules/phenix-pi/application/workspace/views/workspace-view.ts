@@ -22,7 +22,7 @@ export interface WorkspaceViewSnapshot {
     readonly tree: RunTree;
     readonly facts: readonly RunFact[];
   };
-  readonly objectives: ObjectiveTree;
+  readonly objectives?: ObjectiveTree;
   readonly attentionByRun?: Readonly<Record<string, WorkspaceRunAttention>>;
 }
 
