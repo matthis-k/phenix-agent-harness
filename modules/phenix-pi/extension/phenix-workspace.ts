@@ -265,6 +265,15 @@ export class PhenixWorkspace implements Component, Focusable {
       case "copy-selection":
         void this.transcriptSelection.copy().catch(() => undefined);
         return;
+      case "clear-or-exit":
+        if (this.editor.getText().length > 0) {
+          this.focusMain();
+          this.editor.focused = true;
+          this.editor.handleInput(data);
+        } else {
+          this.onAction({ kind: "native", text: "/quit" });
+        }
+        return;
       case "native-ui":
         this.onAction({ kind: "native", text: this.editor.getText() });
         return;
