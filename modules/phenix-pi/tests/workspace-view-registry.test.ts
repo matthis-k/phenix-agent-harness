@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { RunTreeNode } from "../application/interfaces.ts";
+import type { ObjectiveNode } from "../domain/objective/projection.ts";
 import type { RunSnapshot } from "../domain/run/model.ts";
-import type { TaskNode } from "../domain/task/projection.ts";
 import type { ObservabilityTheme } from "../extension/observability-theme.ts";
 import { factsWorkspaceView } from "../extension/workspace/views/facts-view.ts";
 import { filesWorkspaceView } from "../extension/workspace/views/files-view.ts";
+import { objectivesWorkspaceView } from "../extension/workspace/views/objectives-view.ts";
 import { runsWorkspaceView } from "../extension/workspace/views/runs-view.ts";
-import { tasksWorkspaceView } from "../extension/workspace/views/tasks-view.ts";
 import { WORKSPACE_VIEW_IDS } from "../extension/workspace/views/workspace-view.ts";
 import {
   createWorkspaceViewRegistry,
@@ -16,8 +16,8 @@ import {
 } from "../extension/workspace/views/workspace-view-registry.ts";
 import {
   type PhenixWorkspaceSnapshot,
+  projectWorkspaceObjectives,
   projectWorkspaceRuns,
-  projectWorkspaceTasks,
   workspaceItemIndex,
 } from "../extension/workspace/workspace-model.ts";
 
@@ -33,7 +33,7 @@ test("registers every independent workspace view in stable order", () => {
     WORKSPACE_VIEW_IDS,
   );
   assert.equal(workspaceViewRegistry.get("runs"), runsWorkspaceView);
-  assert.equal(workspaceViewRegistry.get("tasks"), tasksWorkspaceView);
+  assert.equal(workspaceViewRegistry.get("objectives"), objectivesWorkspaceView);
   assert.equal(workspaceViewRegistry.get("files"), filesWorkspaceView);
   assert.equal(workspaceViewRegistry.get("facts"), factsWorkspaceView);
 });
@@ -44,19 +44,19 @@ test("rejects duplicate and incomplete workspace registries", () => {
       createWorkspaceViewRegistry([
         runsWorkspaceView,
         runsWorkspaceView,
-        tasksWorkspaceView,
+        objectivesWorkspaceView,
         filesWorkspaceView,
         factsWorkspaceView,
       ]),
     /runs is registered more than once/,
   );
   assert.throws(
-    () => createWorkspaceViewRegistry([runsWorkspaceView, tasksWorkspaceView, filesWorkspaceView]),
+    () => createWorkspaceViewRegistry([runsWorkspaceView, objectivesWorkspaceView, filesWorkspaceView]),
     /missing: facts/,
   );
 });
 
-test("view projections preserve run and task collapse semantics", () => {
+test("view projections preserve run and objective collapse semantics", () => {
   const hiddenRun = runNode("hidden", "running");
   const completedRun = runNode("completed", "completed", [hiddenRun]);
   const activeRun = runNode("active", "running");
@@ -70,15 +70,17 @@ test("view projections preserve run and task collapse semantics", () => {
     ],
   );
 
-  const hiddenTask = taskNode("hidden-task", "wip");
-  const completedTask = taskNode("completed-task", "done", [hiddenTask]);
-  const activeTask = taskNode("active-task", "wip");
-  const rootTask = taskNode("root-task", "wip", [completedTask, activeTask]);
+  const hiddenObjective = objectiveNode("hidden-objective", "wip");
+  const completedObjective = objectiveNode("completed-objective", "done", [hiddenObjective]);
+  const activeObjective = objectiveNode("active-objective", "wip");
   assert.deepEqual(
-    projectWorkspaceTasks(rootTask).map((row) => [row.node.id, row.depth]),
+    projectWorkspaceObjectives([completedObjective, activeObjective]).map((row) => [
+      row.node.id,
+      row.depth,
+    ]),
     [
-      ["completed-task", 0],
-      ["active-task", 0],
+      ["completed-objective", 0],
+      ["active-objective", 0],
     ],
   );
 });
@@ -93,10 +95,7 @@ test("run rows disclose model profile and session metadata only when expanded", 
       pi: { sessionId: "session-123" },
     } as unknown as RunSnapshot,
   } satisfies RunTreeNode;
-  const snapshot = {
-    ui: { tree: { root }, facts: [] },
-    tasks: { root: taskNode("root-task", "wip") },
-  } as unknown as PhenixWorkspaceSnapshot;
+  const snapshot = workspaceSnapshot(root);
   const row = runsWorkspaceView.project(snapshot)[0];
   assert.ok(row?.expandable);
 
@@ -118,7 +117,7 @@ test("run rows disclose model profile and session metadata only when expanded", 
   assert.match(expanded, /session session-123/);
 });
 
-test("agent session rows show their own compiled difficulty while collapsed", () => {
+test("agent session rows show their own difficulty and focused objective while collapsed", () => {
   const childBase = runNode("child", "running");
   const child = {
     ...childBase,
@@ -128,10 +127,17 @@ test("agent session rows show their own compiled difficulty while collapsed", ()
     } as unknown as RunSnapshot,
   } satisfies RunTreeNode;
   const root = runNode("root", "running", [child], "root");
-  const snapshot = {
-    ui: { tree: { root }, facts: [] },
-    tasks: { root: taskNode("root-task", "wip") },
-  } as unknown as PhenixWorkspaceSnapshot;
+  const objective = objectiveNode("objective-main", "wip", [], [
+    { runId: child.run.id, model: "phenix/mixed" },
+  ]);
+  const snapshot = workspaceSnapshot(root, [objective], {
+    child: {
+      id: objective.id,
+      title: objective.title,
+      state: objective.state,
+      effectiveState: objective.effectiveState,
+    },
+  });
   const row = runsWorkspaceView.project(snapshot).find((candidate) => candidate.id === "child");
   assert.ok(row);
 
@@ -142,6 +148,7 @@ test("agent session rows show their own compiled difficulty while collapsed", ()
     expanded: false,
   }).text;
   assert.match(collapsed, /D2/);
+  assert.match(collapsed, /Ship objective tracking/);
   assert.doesNotMatch(collapsed, /budget high/);
 });
 
@@ -153,8 +160,7 @@ test("run rows surface normal and urgent input requirements", () => {
     "root",
   );
   const snapshot = {
-    ui: { tree: { root }, facts: [] },
-    tasks: { root: taskNode("root-task", "wip") },
+    ...workspaceSnapshot(root),
     attentionByRun: {
       normal: { kind: "input-required", count: 1, urgent: false },
       urgent: { kind: "input-required", count: 2, urgent: true },
@@ -187,11 +193,14 @@ test("run rows surface normal and urgent input requirements", () => {
 });
 
 test("derives pane identity and row behavior exclusively from registered projections", () => {
+  const root = runNode("root", "running", [runNode("child", "running")], "root");
+  const objective = objectiveNode("objective-main", "wip", [
+    objectiveNode("objective-child", "wip"),
+  ]);
   const snapshot = {
+    ...workspaceSnapshot(root, [objective]),
     ui: {
-      tree: {
-        root: runNode("root", "running", [runNode("child", "running")], "root"),
-      },
+      tree: { root },
       facts: [
         {
           id: "fact-old",
@@ -216,9 +225,6 @@ test("derives pane identity and row behavior exclusively from registered project
         },
       ],
     },
-    tasks: {
-      root: taskNode("root-task", "wip", [taskNode("task-child", "wip")]),
-    },
     rootTranscript: {},
   } as unknown as PhenixWorkspaceSnapshot;
 
@@ -226,7 +232,7 @@ test("derives pane identity and row behavior exclusively from registered project
     transcript: [],
     editor: [],
     runs: ["root", "child"],
-    tasks: ["task-child"],
+    objectives: ["objective-main", "objective-child"],
     files: ["README.md"],
     facts: ["fact-new", "fact-file", "fact-old"],
   });
@@ -244,6 +250,17 @@ test("derives pane identity and row behavior exclusively from registered project
     "inspector",
   );
 });
+
+function workspaceSnapshot(
+  root: RunTreeNode,
+  objectives: readonly ObjectiveNode[] = [],
+  focusByRun: Readonly<Record<string, unknown>> = {},
+): PhenixWorkspaceSnapshot {
+  return {
+    ui: { tree: { root }, facts: [] },
+    objectives: { roots: objectives, focusByRun },
+  } as unknown as PhenixWorkspaceSnapshot;
+}
 
 function runNode(
   id: string,
@@ -277,19 +294,24 @@ function runNode(
   };
 }
 
-function taskNode(
+function objectiveNode(
   id: string,
-  effectiveState: TaskNode["effectiveState"],
-  children: TaskNode[] = [],
-): TaskNode {
+  effectiveState: ObjectiveNode["effectiveState"],
+  children: ObjectiveNode[] = [],
+  workers: ObjectiveNode["workers"] = [],
+): ObjectiveNode {
   return {
-    kind: "execution",
     id,
-    runId: id,
-    title: id,
-    ownState: effectiveState,
+    rootRunId: "root",
+    createdByRunId: "root",
+    title: id === "objective-main" ? "Ship objective tracking" : id,
+    source: id.includes("child") ? "discovered" : "user",
+    state: effectiveState,
     effectiveState,
+    createdAt: "2026-07-28T10:00:00Z",
+    updatedAt: "2026-07-28T10:00:00Z",
     progress: [],
+    workers,
     children,
-  } as unknown as TaskNode;
+  } as unknown as ObjectiveNode;
 }
