@@ -8,10 +8,10 @@ import { workspaceViewRegistry } from "./views/workspace-view-registry.ts";
 
 export type { WorkspaceFileRow } from "./views/files-view.ts";
 export { projectWorkspaceFiles } from "./views/files-view.ts";
+export type { WorkspaceObjectiveRow } from "./views/objectives-view.ts";
+export { projectWorkspaceObjectives } from "./views/objectives-view.ts";
 export type { WorkspaceRunRow } from "./views/runs-view.ts";
 export { projectWorkspaceRuns } from "./views/runs-view.ts";
-export type { WorkspaceTaskRow } from "./views/tasks-view.ts";
-export { projectWorkspaceTasks } from "./views/tasks-view.ts";
 
 export interface PhenixWorkspaceSnapshot extends WorkspaceViewSnapshot {
   readonly ui: PhenixUiSnapshot;
@@ -23,7 +23,7 @@ export function workspaceItemIndex(snapshot: PhenixWorkspaceSnapshot): Workspace
     transcript: [],
     editor: [],
     runs: [],
-    tasks: [],
+    objectives: [],
     files: [],
     facts: [],
   };
