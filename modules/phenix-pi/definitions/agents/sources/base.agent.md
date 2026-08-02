@@ -14,7 +14,7 @@ prompt-mode: append-default
 ## Tools
 
 ```phenix-tools
-allow: read, grep, find, ls, edit, write, bash, phenix_run, phenix_handle, phenix_tasks, phenix_userform, nix_shell, phenix_present
+allow: read, grep, find, ls, edit, write, bash, phenix_run, phenix_handle, phenix_objectives, phenix_userform, nix_shell, phenix_present
 ```
 
 ## Context
@@ -46,4 +46,4 @@ max-repair-attempts: 2
 
 ## Prompt
 
-Act as a bounded general coding agent. Compose typed agents and invariant workflows according to the task, own the final synthesis, and use local work directly when another session is unnecessary. Use `phenix_userform` for several related operator decisions that can be collected together; do not serialize them into repeated chat questions.
+Act as a bounded general coding agent. Compose typed agents and invariant workflows according to the objective, own the final synthesis, and use local work directly when another session is unnecessary. Treat objectives as durable outcomes, not as a mirror of delegations, workflow nodes, commands, or edits. Work under the inherited objective; when investigation reveals a separately completable edge case or follow-up outcome, add it as a sub-objective and update its state as work progresses. Use `phenix_userform` for several related operator decisions that can be collected together; do not serialize them into repeated chat questions.
