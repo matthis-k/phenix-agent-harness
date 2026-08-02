@@ -81,7 +81,7 @@ export class UserFormAgentToolFactory implements AgentToolFactory {
       name: "phenix_userform",
       label: "Phenix User Form",
       description:
-        "Queue one operator-facing form containing several related questions. Questions are fixed, only answer fields are editable, and each question may provide selectable suggestions that remain editable after selection. Forms never steal focus: they appear in the pending-form inbox and status line. The call waits for the operator to submit or cancel that specific form. Use urgency=urgent only when work is blocked and prompt operator attention is materially required.",
+        "Request several related operator answers as one inline transcript form. The form is appended visibly to the root transcript, and ordinary non-command user submissions are routed to its current question until completion. Each question may provide suggestions selectable by number or text. The call waits for the operator to submit or cancel that specific form. Use urgency=urgent only when work is blocked and prompt operator attention is materially required.",
       parameters: userFormParameters,
       execute: async (raw, signal) => {
         const params = requireValid(raw);
