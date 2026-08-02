@@ -2,6 +2,7 @@ import type { AppKeybinding, KeybindingsManager } from "@earendil-works/pi-codin
 import { matchesKey } from "@earendil-works/pi-tui";
 
 export const WORKSPACE_NATIVE_HANDOFF = "\x1b]phenix-native\x07";
+export const WORKSPACE_COPY_TRANSCRIPT = "\x1b]phenix-copy-transcript\x07";
 
 export type WorkspaceInputGroup = "main" | "sidebar";
 
@@ -35,7 +36,6 @@ const NATIVE_HANDOFF_ACTIONS = [
   "app.tools.expand",
   "app.thinking.toggle",
   "app.editor.external",
-  "app.message.copy",
   "app.message.followUp",
   "app.message.dequeue",
   "app.clipboard.pasteImage",
@@ -71,10 +71,12 @@ export function resolveNativeInputDelegation(
 export function resolveWorkspaceInput(
   data: string,
   group: WorkspaceInputGroup,
-  hasTranscriptSelection = false,
+  _hasTranscriptSelection = false,
 ): WorkspaceInputIntent {
   if (data === WORKSPACE_NATIVE_HANDOFF) return { kind: "native-ui" };
-  if (data === "\x03" && hasTranscriptSelection) return { kind: "copy-selection" };
+  if (data === WORKSPACE_COPY_TRANSCRIPT || matchesKey(data, "ctrl+shift+c")) {
+    return { kind: "copy-selection" };
+  }
   if (matchesKey(data, "tab")) return { kind: "focus-toggle" };
 
   if (group === "main") {
