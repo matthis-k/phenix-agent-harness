@@ -16,6 +16,7 @@ import {
 } from "../application/project-agent-tools.ts";
 import type { ProjectPlannerFacade } from "../application/project-planner.ts";
 import { QueryFacadeImpl } from "../application/query-facade.ts";
+import { TaskFacadeImpl } from "../application/task-facade.ts";
 import { UserFormAgentToolFactory } from "../application/user-form-agent-tools.ts";
 import type { UserFormFacade } from "../application/user-form-service.ts";
 import { WorkflowCheckpointProcessManager } from "../application/workflow-checkpoint-process-manager.ts";
@@ -85,6 +86,7 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
   const visibility = { hiddenDefinitions: input.hiddenDefinitions ?? [] };
   const modelExecution = new ModelExecutionFacade({ execution, store, ...visibility });
   const objectives = new ObjectiveFacadeImpl({ store, clock, ids });
+  const localTasks = new TaskFacadeImpl({ store, catalog: definitions, clock, ids });
   const catalog = new CatalogFacadeImpl(definitions, store, visibility);
   const invocationPolicy = new SessionInvocationPolicy({ store, catalog: definitions });
   const workflows = new WorkflowProcessManager({
@@ -94,6 +96,7 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
     store,
     catalog: definitions,
     functions,
+    tasks: localTasks,
     ids,
     cwd,
     clock,
