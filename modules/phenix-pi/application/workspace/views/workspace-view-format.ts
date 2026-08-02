@@ -1,5 +1,5 @@
+import type { ObjectiveState } from "../../../domain/shared.ts";
 import type { RunSnapshot } from "../../../domain/run/model.ts";
-import type { TaskNode } from "../../../domain/task/projection.ts";
 import type { WorkspaceTextTone } from "../presentation.ts";
 
 export function definitionLabel(value: string): string {
@@ -20,22 +20,22 @@ export function runStateLabel(value: RunSnapshot["state"]): string {
   return value.toUpperCase();
 }
 
-export function taskStateSymbol(value: TaskNode["effectiveState"]): string {
+export function objectiveStateSymbol(value: ObjectiveState): string {
   if (value === "done") return "✓";
-  if (value === "failed") return "!";
+  if (value === "blocked") return "!";
   if (value === "wip") return "●";
   return "○";
 }
 
-export function taskStateLabel(value: TaskNode["effectiveState"]): string {
+export function objectiveStateLabel(value: ObjectiveState): string {
   if (value === "done") return "DONE";
   if (value === "wip") return "ACTIVE";
   return value.toUpperCase();
 }
 
-export function taskStateTone(value: TaskNode["effectiveState"]): WorkspaceTextTone {
+export function objectiveStateTone(value: ObjectiveState): WorkspaceTextTone {
   if (value === "done") return "success";
-  if (value === "failed") return "error";
+  if (value === "blocked") return "error";
   if (value === "wip") return "warning";
   return "muted";
 }
