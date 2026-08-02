@@ -652,7 +652,7 @@ function appendBinding(
   rootRunId: RunId,
   sessionId: string,
 ): void {
-  pi.appendEntry(ROOT_BIND_ENTRY, {
+  pi.appendEntry(ROOT_BINDING_ENTRY, {
     sessionId,
     rootRunId,
     lastSequence: runtime.sequence(rootRunId),
