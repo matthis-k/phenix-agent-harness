@@ -16,7 +16,7 @@ export interface WorkspaceGenericStatusInput {
 export default function registerWorkspaceStatus(pi: ExtensionAPI): void {
   let context: ExtensionContext | undefined;
   let model: SelectedModel | undefined;
-  let thinking = pi.getThinkingLevel();
+  let thinking: ThinkingLevel = "off";
 
   const refresh = (): void => {
     context?.ui.setStatus(
