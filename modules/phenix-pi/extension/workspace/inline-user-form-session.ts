@@ -1,10 +1,6 @@
-import type {
-  UserFormAnswer,
-  UserFormId,
-  UserFormRequest,
-} from "../../domain/user-form/model.ts";
-import type { RunId } from "../../domain/shared.ts";
 import type { UserFormFacade } from "../../application/user-form-service.ts";
+import type { RunId } from "../../domain/shared.ts";
+import type { UserFormAnswer, UserFormId, UserFormRequest } from "../../domain/user-form/model.ts";
 
 export interface InlineUserFormSnapshot {
   readonly request: UserFormRequest;
@@ -66,11 +62,12 @@ export class InlineUserFormSession {
       };
     }
 
-    const answers = request.form.questions.map((item, index) =>
-      draft.answers[index] ?? {
-        questionId: item.id,
-        answer: item.initialAnswer ?? "",
-      },
+    const answers = request.form.questions.map(
+      (item, index) =>
+        draft.answers[index] ?? {
+          questionId: item.id,
+          answer: item.initialAnswer ?? "",
+        },
     );
     this.forms.complete(request.id, { status: "submitted", answers });
     this.drafts.delete(request.id);
