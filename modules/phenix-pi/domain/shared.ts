@@ -1,6 +1,8 @@
 export type RunId = string & { readonly __brand: "RunId" };
 export type DefinitionId = string & { readonly __brand: "DefinitionId" };
 export type ObjectiveId = string & { readonly __brand: "ObjectiveId" };
+export type LocalTaskId = string & { readonly __brand: "LocalTaskId" };
+export type TaskId = `run:${RunId}` | LocalTaskId;
 
 const MAX_ID_LENGTH = 160;
 const GENERAL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
@@ -16,6 +18,10 @@ export function definitionId(value: string): DefinitionId {
 
 export function objectiveId(value: string): ObjectiveId {
   return validateId("objective ID", value, GENERAL_ID) as ObjectiveId;
+}
+
+export function localTaskId(value: string): LocalTaskId {
+  return validateId("local task ID", value, GENERAL_ID) as LocalTaskId;
 }
 
 function validateId(name: string, value: string, pattern: RegExp): string {
@@ -111,6 +117,7 @@ export function cancelled<O = never>(reason: string): Outcome<O> {
   return { status: "cancelled", reason };
 }
 
+export type TaskState = "not_started" | "wip" | "done" | "failed";
 export type ObjectiveState = "not_started" | "wip" | "done" | "blocked";
 
 export interface ValidationIssue {
