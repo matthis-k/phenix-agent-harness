@@ -31,10 +31,12 @@ export const objectivesWorkspaceView = defineWorkspaceView<WorkspaceObjectiveRow
   title: "Objectives",
   layout: workspaceViewLayout("objectives"),
   project: (snapshot) =>
-    projectWorkspaceObjectives(snapshot.objectives.roots).map((value) => {
+    projectWorkspaceObjectives(snapshot.objectives?.roots ?? []).map((value) => {
       const node = value.node;
       const models = [...new Set(node.workers.map((worker) => worker.model))];
-      const expandable = Boolean(node.description || node.progress.length > 0 || models.length > 0);
+      const expandable = Boolean(
+        node.description || node.progress.length > 0 || models.length > 0,
+      );
       const present = ({
         width,
         expanded,
