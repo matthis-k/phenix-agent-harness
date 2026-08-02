@@ -53,7 +53,7 @@ export default function registerWorkspaceStatus(pi: ExtensionAPI): void {
 
 export function formatWorkspaceGenericStatus(input: WorkspaceGenericStatusInput): string {
   if (input.model?.provider === "phenix") {
-    return `phenix/router · budget ${input.thinking}`;
+    return `phenix/${input.model.id} · budget ${input.thinking}`;
   }
   const model = input.model ? `${input.model.provider}/${input.model.id}` : "model none";
   return `${model} · thinking ${input.thinking}`;
