@@ -2,6 +2,8 @@ import type { AttentionResult, AttentionSubmitRequest } from "../domain/attentio
 import type { Definition, DefinitionRef } from "../domain/definition/definition.ts";
 import type { BudgetMode } from "../domain/definition/effort.ts";
 import type { Difficulty, PhenixModelSetId } from "../domain/definition/model.ts";
+import type { Objective } from "../domain/objective/model.ts";
+import type { ObjectiveNode, ObjectiveTree } from "../domain/objective/projection.ts";
 import type { DomainEvent } from "../domain/run/events.ts";
 import type {
   RunRetryOptions,
@@ -11,9 +13,13 @@ import type {
   StartRun,
 } from "../domain/run/model.ts";
 import type { RunActivity, RunFact } from "../domain/run/observability.ts";
-import type { DefinitionId, LocalTaskId, Outcome, RunId, TaskId } from "../domain/shared.ts";
-import type { LocalTask } from "../domain/task/local-task.ts";
-import type { TaskNode, TaskTree } from "../domain/task/projection.ts";
+import type {
+  DefinitionId,
+  ObjectiveId,
+  ObjectiveState,
+  Outcome,
+  RunId,
+} from "../domain/shared.ts";
 import type { WorkflowDiagnostic } from "../domain/workflow/validator.ts";
 
 export interface RunHandle<O> {
@@ -54,19 +60,19 @@ export interface SessionProfileFacade {
   select(rootRunId: RunId, update: SessionProfileUpdate): Promise<SessionProfile>;
 }
 
-export interface TaskFacade {
-  tree(rootRunId: RunId): Promise<TaskTree>;
-  tasksFor(runId: RunId): Promise<readonly TaskNode[]>;
-  addLocal(input: {
-    readonly ownerRunId: RunId;
+export interface ObjectiveFacade {
+  tree(rootRunId: RunId): Promise<ObjectiveTree>;
+  current(runId: RunId): Promise<ObjectiveNode | undefined>;
+  add(input: {
+    readonly actorRunId: RunId;
+    readonly parentObjectiveId?: ObjectiveId;
     readonly title: string;
     readonly description?: string;
-  }): Promise<LocalTask>;
-  setLocalState(
-    taskId: LocalTaskId,
-    state: "not_started" | "wip" | "done" | "failed",
-  ): Promise<LocalTask>;
-  appendProgress(taskId: TaskId, message: string): Promise<void>;
+    readonly focus?: boolean;
+  }): Promise<Objective>;
+  setState(actorRunId: RunId, objectiveId: ObjectiveId, state: ObjectiveState): Promise<Objective>;
+  focus(runId: RunId, objectiveId: ObjectiveId): Promise<Objective>;
+  appendProgress(actorRunId: RunId, objectiveId: ObjectiveId, message: string): Promise<void>;
 }
 
 export interface DefinitionSummary {
