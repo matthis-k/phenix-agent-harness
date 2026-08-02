@@ -122,9 +122,9 @@ test("private handoff inputs do not occupy user shortcuts", () => {
   });
 });
 
-test("Ctrl+C stays with the default editor and Ctrl+Shift+C copies the transcript", () => {
-  assert.deepEqual(resolveWorkspaceInput("\x03", "main", true), { kind: "editor" });
-  assert.deepEqual(resolveWorkspaceInput("\x03", "main", false), { kind: "editor" });
+test("Ctrl+C clears or exits and Ctrl+Shift+C copies the transcript", () => {
+  assert.deepEqual(resolveWorkspaceInput("\x03", "main", true), { kind: "clear-or-exit" });
+  assert.deepEqual(resolveWorkspaceInput("\x03", "main", false), { kind: "clear-or-exit" });
   assert.deepEqual(resolveWorkspaceInput("\x1b[99;6u", "main"), { kind: "copy-selection" });
 });
 
