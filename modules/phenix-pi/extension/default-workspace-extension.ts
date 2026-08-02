@@ -21,12 +21,13 @@ import {
   type PhenixWorkspaceAction,
   type PhenixWorkspaceSnapshot,
 } from "./phenix-workspace.ts";
-import { openUserFormInbox } from "./user-form-extension.ts";
+import { openUserFormInbox, routeUserFormInput } from "./user-form-extension.ts";
 import { interruptActiveRootWork } from "./workspace/interrupt-active-work.ts";
 import { handoffNativeWorkspaceInput } from "./workspace/native-input-handoff.ts";
 import { selectedWorkspaceInputTarget } from "./workspace/workspace-controller-adapter.ts";
 import {
   type NativeInputDelegation,
+  WORKSPACE_COPY_TRANSCRIPT,
   WORKSPACE_NATIVE_HANDOFF,
 } from "./workspace/workspace-interaction.ts";
 import { routeWorkspaceMessage } from "./workspace/workspace-message-routing.ts";
@@ -205,6 +206,7 @@ async function openWorkspace(
 
   const unsubscribeInput = ctx.ui.onTerminalInput((data) => {
     if (!activeWorkspace || !activeKeybindings || nativeDialogActive) return undefined;
+    if (data === "\x03") return undefined;
     return handoffNativeWorkspaceInput({
       data,
       keybindings: activeKeybindings,
@@ -216,16 +218,17 @@ async function openWorkspace(
           return "consume";
         }
 
-        pendingDelegation = delegation;
         if (delegation.action === "app.interrupt") {
           void interruptActiveRootWork(binding.runtime, binding.rootRunId)
             .then((targets) => {
-              if (targets.length > 0) {
-                ctx.ui.notify(
-                  `Interrupted current task and ${targets.length} attached run${targets.length === 1 ? "" : "s"}.`,
-                  "warning",
-                );
+              if (targets.length === 0) {
+                activeWorkspace?.handleInput(data);
+                return;
               }
+              ctx.ui.notify(
+                `Interrupted current task and ${targets.length} attached run${targets.length === 1 ? "" : "s"}.`,
+                "warning",
+              );
             })
             .catch((error) => {
               ctx.ui.notify(
@@ -233,7 +236,10 @@ async function openWorkspace(
                 "warning",
               );
             });
+          return "consume";
         }
+
+        pendingDelegation = delegation;
         activeWorkspace?.handleInput(WORKSPACE_NATIVE_HANDOFF);
         pendingDelegation = undefined;
         return "forward";
@@ -261,6 +267,10 @@ async function openWorkspace(
             void showUserFormInbox().catch((error) => {
               notifyWorkspaceCommandError(ctx, "user form inbox", error);
             });
+            return;
+          }
+          if (action.kind === "native" && slashCommandName(action.text) === "copy") {
+            activeWorkspace?.handleInput(WORKSPACE_COPY_TRANSCRIPT);
             return;
           }
           if (action.kind === "native" && isRegisteredWorkspaceCommand(action.text, commands)) {
@@ -303,6 +313,10 @@ async function openWorkspace(
             ),
           subscribe: (listener) => subscribeWorkspaceChanges(binding.runtime, listener),
           submit: async (text) => {
+            if (routeUserFormInput(pi, binding, text)) {
+              activeWorkspace?.refreshRootTranscript();
+              return;
+            }
             const targetRunId = selectedWorkspaceInputTarget(binding.rootRunId);
             const targetsRoot = targetRunId === binding.rootRunId;
             if (targetsRoot) lifecycle.onSubmitStarted();

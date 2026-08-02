@@ -18,9 +18,9 @@ export type ExtensionRegistrar = (pi: ExtensionAPI) => void | Promise<void>;
  */
 export interface PhenixExtensionConfiguration {
   readonly theme: ExtensionRegistrar;
+  readonly userForms: ExtensionRegistrar;
   readonly runtime: ExtensionRegistrar;
   readonly workspaceStatus: ExtensionRegistrar;
-  readonly userForms: ExtensionRegistrar;
   readonly workspace: ExtensionRegistrar;
   readonly resultDisplay: ExtensionRegistrar;
   readonly visualizationDisplay: ExtensionRegistrar;
@@ -28,9 +28,9 @@ export interface PhenixExtensionConfiguration {
 
 const defaultConfiguration: PhenixExtensionConfiguration = Object.freeze({
   theme: registerTheme,
+  userForms: registerUserForms,
   runtime: registerRuntime,
   workspaceStatus: registerWorkspaceStatus,
-  userForms: registerUserForms,
   workspace: (pi: ExtensionAPI) => registerWorkspace(withWorkspaceStandardBuiltins(pi)),
   resultDisplay: registerResultDisplay,
   visualizationDisplay: registerVisualizationDisplay,
@@ -51,9 +51,9 @@ export async function installPhenixExtensionSuite(
   configuration: PhenixExtensionConfiguration = createPhenixExtensionConfiguration(),
 ): Promise<void> {
   await configuration.theme(pi);
+  await configuration.userForms(pi);
   await configuration.runtime(pi);
   await configuration.workspaceStatus(pi);
-  await configuration.userForms(pi);
   await configuration.workspace(pi);
   await configuration.resultDisplay(pi);
   await configuration.visualizationDisplay(pi);

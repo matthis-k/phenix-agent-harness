@@ -35,6 +35,11 @@ import {
   RESULT_ENTRY_TYPE,
   renderNativeResultEntry,
 } from "./result-display.ts";
+import {
+  renderUserFormEntry,
+  USER_FORM_ENTRY_TYPE,
+  userFormEntryData,
+} from "./user-form-extension.ts";
 
 const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "orphaned"]);
 
@@ -45,7 +50,8 @@ export type NativeTranscriptChunkKind =
   | "bash"
   | "custom-message"
   | "summary"
-  | "result";
+  | "result"
+  | "user-form";
 
 export interface NativeTranscriptChunk {
   readonly id: string;
@@ -180,7 +186,12 @@ export function renderNativeTranscript(
   for (const entry of entries) {
     if (entry.type === "custom" && entry.customType === RESULT_ENTRY_TYPE) {
       const data = nativeResultEntryData(entry.data);
-      if (data) renderer.addResult(renderNativeResultEntry(data, theme), entry.id);
+      if (data) renderer.addEntry("result", renderNativeResultEntry(data, theme), entry.id);
+      continue;
+    }
+    if (entry.type === "custom" && entry.customType === USER_FORM_ENTRY_TYPE) {
+      const data = userFormEntryData(entry.data);
+      if (data) renderer.addEntry("user-form", renderUserFormEntry(data, theme), entry.id);
       continue;
     }
     for (const message of sessionEntryToContextMessages(entry)) renderer.addMessage(message);
@@ -201,7 +212,11 @@ export function renderNativeMessages(
 interface NativeTranscriptRenderer {
   readonly transcript: NativeTranscriptComponent;
   addMessage(message: AgentMessage): void;
-  addResult(component: Component, sourceId?: string): void;
+  addEntry(
+    kind: Extract<NativeTranscriptChunkKind, "result" | "user-form">,
+    component: Component,
+    sourceId?: string,
+  ): void;
 }
 
 function createNativeTranscriptRenderer(tui: TUI, cwd: string): NativeTranscriptRenderer {
@@ -282,7 +297,7 @@ function createNativeTranscriptRenderer(tui: TUI, cwd: string): NativeTranscript
   return {
     transcript,
     addMessage,
-    addResult: (component, sourceId) => add("result", component, true, sourceId),
+    addEntry: (kind, component, sourceId) => add(kind, component, true, sourceId),
   };
 }
 

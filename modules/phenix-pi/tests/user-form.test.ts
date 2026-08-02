@@ -5,7 +5,7 @@ import { UserFormService } from "../application/user-form-service.ts";
 import { runId } from "../domain/shared.ts";
 import type { UserFormDefinition, UserFormRequest } from "../domain/user-form/model.ts";
 import { formatUserFormStatus, orderPendingUserForms } from "../extension/user-form-extension.ts";
-import { UserFormDraft } from "../extension/workspace/user-form-dialog.ts";
+import { InlineUserFormSession } from "../extension/workspace/inline-user-form-session.ts";
 import type { Clock, IdGenerator } from "../ports/clock.ts";
 
 const ROOT = runId("root");
@@ -99,32 +99,86 @@ test("orders urgent forms first while retaining FIFO order within urgency", () =
     ["urgent-old", "urgent-new", "normal-old", "normal-new"],
   );
   assert.equal(formatUserFormStatus({ total: 0, urgent: 0 }), undefined);
-  assert.equal(formatUserFormStatus({ total: 2, urgent: 0 }), "forms 2 pending · /userforms");
+  assert.equal(formatUserFormStatus({ total: 2, urgent: 0 }), "forms 2 pending · answer in input");
   assert.equal(
     formatUserFormStatus({ total: 3, urgent: 1 }),
-    "forms 3 pending · 1 urgent · /userforms",
+    "forms 3 pending · 1 urgent · answer in input",
   );
 });
 
-test("suggestions populate editable answers and required fields validate before submit", () => {
-  const draft = new UserFormDraft(request("Dialog", "normal", "2026-07-31T00:00:01.000Z"));
-
-  assert.equal(draft.completion(), undefined);
-  assert.match(draft.validationMessage ?? "", /requires an answer/);
-
-  draft.applySuggestion(1);
-  const selected = draft.completion();
-  assert.deepEqual(selected, {
-    status: "submitted",
-    answers: [{ questionId: "choice", answer: "B", suggestionValue: "B" }],
+test("default input answers the active inline form and accepts numbered suggestions", async () => {
+  const service = new UserFormService(new SequenceIds(), new SequenceClock());
+  const result = service.request({
+    rootRunId: ROOT,
+    requestedByRunId: PLANNER,
+    form: {
+      title: "Two decisions",
+      submitLabel: "Apply",
+      questions: [
+        {
+          id: "choice",
+          prompt: "Choose an approach",
+          required: true,
+          suggestions: [
+            { label: "Option A", value: "A" },
+            { label: "Option B", value: "B" },
+          ],
+        },
+        {
+          id: "detail",
+          prompt: "Add detail",
+          required: false,
+          suggestions: [],
+        },
+      ],
+    },
   });
+  const session = new InlineUserFormSession(service, ROOT);
 
-  draft.insert(" customized");
-  const edited = draft.completion();
-  assert.deepEqual(edited, {
-    status: "submitted",
-    answers: [{ questionId: "choice", answer: "B customized" }],
+  const first = session.active();
+  assert.equal(first?.questionIndex, 0);
+  const next = session.answer("2");
+  assert.equal(next?.questionIndex, 1);
+  assert.deepEqual(next?.answers[0], {
+    questionId: "choice",
+    answer: "B",
+    suggestionValue: "B",
   });
+  const completed = session.answer("custom detail");
+  assert.equal(completed?.completed, true);
+
+  assert.deepEqual(await result, {
+    status: "submitted",
+    answers: [
+      { questionId: "choice", answer: "B", suggestionValue: "B" },
+      { questionId: "detail", answer: "custom detail" },
+    ],
+    submittedAt: "2026-07-31T00:00:02.000Z",
+  });
+});
+
+test("an active form remains stable when a later urgent form enters the queue", async () => {
+  const service = new UserFormService(new SequenceIds(), new SequenceClock());
+  const normalResult = service.request({
+    rootRunId: ROOT,
+    requestedByRunId: PLANNER,
+    form: form("Normal first"),
+  });
+  const session = new InlineUserFormSession(service, ROOT);
+  assert.equal(session.active()?.request.form.title, "Normal first");
+
+  const urgentResult = service.request({
+    rootRunId: ROOT,
+    requestedByRunId: IMPLEMENTER,
+    urgency: "urgent",
+    form: form("Urgent later"),
+  });
+  assert.equal(session.active()?.request.form.title, "Normal first");
+  session.answer("A");
+  assert.equal((await normalResult).status, "submitted");
+  assert.equal(session.active()?.request.form.title, "Urgent later");
+  session.cancel();
+  assert.equal((await urgentResult).status, "cancelled");
 });
 
 test("aborting one requester removes only its pending form", async () => {

@@ -14,23 +14,23 @@ function recordingConfiguration(installed: string[]): PhenixExtensionConfigurati
   };
   return createPhenixExtensionConfiguration({
     theme: registrar("theme"),
+    userForms: registrar("user-forms"),
     runtime: registrar("runtime"),
     workspaceStatus: registrar("workspace-status"),
-    userForms: registrar("user-forms"),
     workspace: registrar("workspace"),
     resultDisplay: registrar("result-display"),
     visualizationDisplay: registrar("visualization-display"),
   });
 }
 
-test("installs the fixed extension lifecycle in deterministic order", async () => {
+test("installs input interception before runtime input accounting", async () => {
   const installed: string[] = [];
   await installPhenixExtensionSuite({} as ExtensionAPI, recordingConfiguration(installed));
   assert.deepEqual(installed, [
     "theme",
+    "user-forms",
     "runtime",
     "workspace-status",
-    "user-forms",
     "workspace",
     "result-display",
     "visualization-display",
@@ -47,11 +47,11 @@ test("keeps complex integration configuration injectable", async () => {
     theme: () => {
       if (integration.enabled.has("theme")) installed.push(`${integration.prefix}:theme`);
     },
+    userForms: () => undefined,
     runtime: () => {
       if (integration.enabled.has("runtime")) installed.push(`${integration.prefix}:runtime`);
     },
     workspaceStatus: () => undefined,
-    userForms: () => undefined,
     workspace: () => undefined,
     resultDisplay: () => undefined,
     visualizationDisplay: () => undefined,
