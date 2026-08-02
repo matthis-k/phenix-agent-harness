@@ -37,6 +37,7 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
     projectWorkspaceRuns(snapshot.ui.tree.root).map((value) => {
       const run = value.node.run;
       const attention = snapshot.attentionByRun?.[String(run.id)];
+      const objective = snapshot.objectives.focusByRun[String(run.id)];
       const expandable = Boolean(
         run.resolvedModel || run.profile || run.compiled?.budget || run.pi?.sessionId,
       );
@@ -71,6 +72,14 @@ export const runsWorkspaceView = defineWorkspaceView<WorkspaceRunRow>({
             textSpan(label, { strong: true }),
             ...(run.kind === "agent" && run.compiled?.difficulty
               ? [textSpan(` · ${run.compiled?.difficulty}`, { tone: "accent" as const })]
+              : []),
+            ...(objective
+              ? [
+                  textSpan(
+                    ` · → ${truncateWorkspaceText(objective.title, Math.max(10, width - 34 - value.depth * 2))}`,
+                    { tone: "accent" as const },
+                  ),
+                ]
               : []),
             ...(attentionLabel
               ? [
