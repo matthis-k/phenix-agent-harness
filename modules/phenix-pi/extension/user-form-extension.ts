@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { Text, type Component } from "@earendil-works/pi-tui";
 
 import type { UserFormFacade } from "../application/user-form-service.ts";
 import type { RunId } from "../domain/shared.ts";
@@ -8,6 +8,7 @@ import type {
   UserFormId,
   UserFormRequest,
 } from "../domain/user-form/model.ts";
+import { heading, type ObservabilityTheme } from "./observability-theme.ts";
 import {
   InlineUserFormSession,
   type InlineUserFormSnapshot,
@@ -19,17 +20,24 @@ import {
 } from "./workspace-runtime-binding.ts";
 
 const STATUS_KEY = "01-userforms";
-const ENTRY_TYPE = "phenix:userform";
+export const USER_FORM_ENTRY_TYPE = "phenix:userform";
 const sessions = new WeakMap<UserFormFacade, Map<RunId, InlineUserFormSession>>();
 
-type UserFormEntryPhase = "requested" | "answered" | "completed" | "cancelled";
+export type UserFormEntryPhase = "requested" | "answered" | "completed" | "cancelled";
 
-interface UserFormEntryData {
+export interface UserFormEntryData {
   readonly content: string;
   readonly formId: UserFormId;
   readonly requestedByRunId: RunId;
   readonly phase: UserFormEntryPhase;
 }
+
+const USER_FORM_ENTRY_PHASES = new Set<UserFormEntryPhase>([
+  "requested",
+  "answered",
+  "completed",
+  "cancelled",
+]);
 
 export default function registerUserForms(pi: ExtensionAPI): void {
   let context: ExtensionContext | undefined;
@@ -37,11 +45,9 @@ export default function registerUserForms(pi: ExtensionAPI): void {
   let disposeForms: (() => void) | undefined;
   const announced = new Set<UserFormId>();
 
-  pi.registerEntryRenderer(ENTRY_TYPE, (entry, _options, theme) => {
-    const data = entry.data as Partial<UserFormEntryData> | undefined;
-    const content = typeof data?.content === "string" ? data.content : "User form";
-    const [title = "User form", ...body] = content.split("\n");
-    return new Text([theme.fg("accent", theme.bold(title)), ...body].join("\n"), 0, 0);
+  pi.registerEntryRenderer(USER_FORM_ENTRY_TYPE, (entry, _options, theme) => {
+    const data = userFormEntryData(entry.data);
+    return data ? renderUserFormEntry(data, theme) : new Text("User form", 0, 0);
   });
 
   const refresh = (): void => {
@@ -114,13 +120,15 @@ export default function registerUserForms(pi: ExtensionAPI): void {
         ctx.ui.notify("Phenix runtime is not initialized.", "warning");
         return;
       }
-      const request = inlineSession(active).cancel();
-      if (!request) {
+      const session = inlineSession(active);
+      const snapshot = session.active();
+      if (!snapshot) {
         ctx.ui.notify("No pending user form.", "info");
         return;
       }
-      publishCancelledUserForm(pi, request);
-      ctx.ui.notify(`Cancelled user form: ${request.form.title}`, "warning");
+      publishCancelledUserForm(pi, snapshot.request);
+      session.cancel();
+      ctx.ui.notify(`Cancelled user form: ${snapshot.request.form.title}`, "warning");
     },
   });
 }
@@ -163,6 +171,33 @@ export async function openUserFormInbox(
       : `User form from ${snapshot.request.requestedByRunId}: ${snapshot.request.form.title}`,
     snapshot.request.urgency === "urgent" ? "warning" : "info",
   );
+}
+
+export function userFormEntryData(value: unknown): UserFormEntryData | undefined {
+  if (!isRecord(value)) return undefined;
+  if (
+    typeof value.content !== "string" ||
+    typeof value.formId !== "string" ||
+    typeof value.requestedByRunId !== "string" ||
+    typeof value.phase !== "string" ||
+    !USER_FORM_ENTRY_PHASES.has(value.phase as UserFormEntryPhase)
+  ) {
+    return undefined;
+  }
+  return {
+    content: value.content,
+    formId: value.formId as UserFormId,
+    requestedByRunId: value.requestedByRunId as RunId,
+    phase: value.phase as UserFormEntryPhase,
+  };
+}
+
+export function renderUserFormEntry(
+  data: UserFormEntryData,
+  theme?: ObservabilityTheme,
+): Component {
+  const [title = "User form", ...body] = data.content.split("\n");
+  return new Text([heading(theme, title), ...body].join("\n"), 0, 0);
 }
 
 function inlineSession(binding: WorkspaceRuntimeBinding): InlineUserFormSession {
@@ -219,7 +254,7 @@ function appendUserFormEntry(
   pi: Pick<ExtensionAPI, "appendEntry">,
   data: UserFormEntryData,
 ): void {
-  pi.appendEntry(ENTRY_TYPE, data);
+  pi.appendEntry(USER_FORM_ENTRY_TYPE, data);
 }
 
 function formatInlineUserForm(
@@ -252,4 +287,8 @@ function formatInlineUserForm(
   if (phase === "completed") lines.push("Submitted.");
   else lines.push("Reply using the normal input. A suggestion can be selected by number.");
   return lines.join("\n");
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
