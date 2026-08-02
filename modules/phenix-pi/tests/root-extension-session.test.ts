@@ -56,27 +56,29 @@ test("registered root tools follow the active Pi session runtime", async () => {
       systemPrompt: string;
     };
     assert.match(prompt.systemPrompt, /phenix_dispatch with mode=auto/);
+    assert.match(prompt.systemPrompt, /Objectives are durable outcomes/);
     assert.doesNotMatch(prompt.systemPrompt, /phenix_dispatch with mode=qa/);
-    const taskTool = tools.get("phenix_tasks");
-    assert.ok(taskTool);
+    const objectiveTool = tools.get("phenix_objectives");
+    assert.ok(objectiveTool);
+    assert.equal(tools.has("phenix_tasks"), false);
     assert.ok(tools.has("phenix_dispatch"));
     assert.equal(tools.has("phenix_run"), false);
-    const firstResult = await taskTool.execute(
+    const firstResult = await objectiveTool.execute(
       "call-1",
-      { action: "tree" },
+      { action: "add", title: "First session objective" },
       new AbortController().signal,
     );
-    assert.equal(rootId(firstResult.details), "root-session-one");
+    assert.equal(objectiveRootId(firstResult.details), "root-session-one");
     await shutdown({}, first);
 
     const second = context(directory, "session-two");
     await start({}, second);
-    const secondResult = await taskTool.execute(
+    const secondResult = await objectiveTool.execute(
       "call-2",
       { action: "tree" },
       new AbortController().signal,
     );
-    assert.equal(rootId(secondResult.details), "root-session-two");
+    assert.deepEqual(objectiveRoots(secondResult.details), []);
     await shutdown({}, second);
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -104,6 +106,10 @@ function context(cwd: string, sessionId: string): ExtensionContext {
   } as unknown as ExtensionContext;
 }
 
-function rootId(details: unknown): string | undefined {
-  return (details as { root?: { runId?: string } } | undefined)?.root?.runId;
+function objectiveRootId(details: unknown): string | undefined {
+  return (details as { rootRunId?: string } | undefined)?.rootRunId;
+}
+
+function objectiveRoots(details: unknown): readonly unknown[] | undefined {
+  return (details as { roots?: readonly unknown[] } | undefined)?.roots;
 }
