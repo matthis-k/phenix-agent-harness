@@ -79,7 +79,9 @@ export class TranscriptSelectionSurface {
   }
 
   async copy(): Promise<boolean> {
-    const text = this.selectedText();
+    const selected = this.selectedText();
+    const fullTranscript = this.frameValue?.lines.join("\n").trimEnd();
+    const text = selected || fullTranscript;
     if (!text) return false;
     await copyToClipboard(text);
     return true;
