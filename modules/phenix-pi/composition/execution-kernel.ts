@@ -9,10 +9,7 @@ import { ExecutionFacadeImpl } from "../application/execution-facade.ts";
 import type { ExecutionStore } from "../application/execution-store.ts";
 import { SessionInvocationPolicy } from "../application/invocation-policy.ts";
 import { ModelExecutionFacade } from "../application/model-execution-facade.ts";
-import {
-  FilteredAgentToolFactory,
-  ObjectiveAgentToolFactory,
-} from "../application/objective-agent-tools.ts";
+import { ObjectiveAgentToolFactory } from "../application/objective-agent-tools.ts";
 import { ObjectiveFacadeImpl } from "../application/objective-facade.ts";
 import {
   CompositeAgentToolFactory,
@@ -134,17 +131,13 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
     store,
     invocationPolicy,
   });
-  const executionTools = new FilteredAgentToolFactory(
-    new FacadeAgentToolFactory({
-      execution: modelExecution,
-      dispatch,
-      tasks: localTasks,
-      catalog,
-      store,
-      invocationPolicy,
-    }),
-    ["phenix_tasks"],
-  );
+  const executionTools = new FacadeAgentToolFactory({
+    execution: modelExecution,
+    dispatch,
+    catalog,
+    store,
+    invocationPolicy,
+  });
   const tools = new CompositeAgentToolFactory([
     executionTools,
     new ObjectiveAgentToolFactory({ objectives, store }),
