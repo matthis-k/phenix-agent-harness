@@ -1,82 +1,57 @@
-import type { RunFact } from "../../../domain/run/observability.ts";
+import type { ProjectAttention } from "../project-attention.ts";
+import type { FileChangeEntry } from "../../file-changes.ts";
+import type { ObjectiveTree } from "../../../domain/objective/projection.ts";
 import type { RunId } from "../../../domain/shared.ts";
 import type { TaskTree } from "../../../domain/task/projection.ts";
-import type { PaneId } from "../../../domain/workspace/state.ts";
-import { workspaceSurface } from "../../../domain/workspace/surfaces.ts";
-import type { RunTree } from "../../interfaces.ts";
-import type { WorkspaceRowPresentation } from "../presentation.ts";
+import type { WorkspaceSurfaceId } from "../../../domain/workspace/surfaces.ts";
+import type { PhenixUiSnapshot } from "../../../extension/phenix-ui.ts";
 
-export const WORKSPACE_VIEW_IDS = ["runs", "tasks", "files", "facts"] as const;
-
+export const WORKSPACE_VIEW_IDS = ["runs", "objectives", "files", "facts"] as const;
 export type WorkspaceViewId = (typeof WORKSPACE_VIEW_IDS)[number];
-export type WorkspaceViewPaneId = Extract<PaneId, WorkspaceViewId>;
-
-export interface WorkspaceRunAttention {
-  readonly kind: "input-required";
-  readonly count: number;
-  readonly urgent: boolean;
-}
 
 export interface WorkspaceViewSnapshot {
-  readonly ui: {
-    readonly tree: RunTree;
-    readonly facts: readonly RunFact[];
-  };
-  readonly tasks: TaskTree;
-  readonly attentionByRun?: Readonly<Record<string, WorkspaceRunAttention>>;
+  readonly ui: PhenixUiSnapshot;
+  readonly objectives: ObjectiveTree;
+  /** Internal execution telemetry, excluded from user-facing workspace views. */
+  readonly localTasks?: TaskTree;
+  readonly filesByRun: Readonly<Record<string, readonly FileChangeEntry[]>>;
+  readonly attentionByRun: Readonly<Record<string, ProjectAttention>>;
 }
 
-export interface WorkspaceViewContext {
-  readonly selectedRunId?: RunId;
-}
-
-export interface WorkspaceViewPresentationContext {
-  readonly width: number;
-  readonly activeRunId: RunId;
-  readonly expanded: boolean;
-}
-
-export type WorkspaceViewActivation =
-  | { readonly kind: "transcript"; readonly runId: RunId }
-  | { readonly kind: "inspector"; readonly view: "facts" };
-
-export interface WorkspaceViewLayout {
-  readonly weight: number;
-  readonly minRows: number;
-  readonly headerRows: number;
-  readonly collapsePriority: number;
-}
-
-export interface WorkspaceViewRow<TValue = unknown> {
+export interface WorkspaceViewRow {
   readonly id: string;
-  readonly value: TValue;
-  readonly activation?: WorkspaceViewActivation;
-  readonly expandable?: boolean;
-  present(context: WorkspaceViewPresentationContext): WorkspaceRowPresentation;
+  readonly depth: number;
+  readonly marker: string;
+  readonly state: string;
+  readonly stateTone: WorkspaceViewTone;
+  readonly label: string;
+  readonly detail?: string;
+  readonly expanded: boolean;
+  readonly expandable: boolean;
+  readonly attention?: boolean;
+  readonly active?: boolean;
 }
 
-export interface WorkspaceViewRegistration<TValue = unknown> {
-  readonly id: WorkspaceViewPaneId;
+export type WorkspaceViewTone = "success" | "error" | "warning" | "muted" | "accent" | "text";
+
+export type WorkspaceViewAction =
+  | { readonly kind: "select-run"; readonly runId: RunId }
+  | { readonly kind: "inspect-run"; readonly runId: RunId }
+  | { readonly kind: "none" };
+
+export interface WorkspaceViewRegistration {
+  readonly id: WorkspaceViewId;
+  readonly surfaceId: WorkspaceSurfaceId;
   readonly title: string;
-  readonly layout: WorkspaceViewLayout;
-  project(
+  readonly defaultFraction: number;
+  readonly minSize: number;
+  readonly collapsible: boolean;
+  rows(
     snapshot: WorkspaceViewSnapshot,
-    context?: WorkspaceViewContext,
-  ): readonly WorkspaceViewRow<TValue>[];
-}
-
-export function defineWorkspaceView<TValue>(
-  registration: WorkspaceViewRegistration<TValue>,
-): WorkspaceViewRegistration<TValue> {
-  return registration;
-}
-
-export function workspaceViewLayout(id: WorkspaceViewPaneId, headerRows = 2): WorkspaceViewLayout {
-  const constraints = workspaceSurface(id).constraints;
-  return {
-    weight: constraints.grow,
-    minRows: constraints.minHeight,
-    headerRows,
-    collapsePriority: constraints.collapsePriority ?? 0,
-  };
+    input: {
+      readonly expandedIds: ReadonlySet<string>;
+      readonly activeRunId?: RunId;
+    },
+  ): readonly WorkspaceViewRow[];
+  activate(row: WorkspaceViewRow, snapshot: WorkspaceViewSnapshot): WorkspaceViewAction;
 }
