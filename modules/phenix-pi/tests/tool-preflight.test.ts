@@ -11,7 +11,7 @@ export const TEST_CUSTOM_TOOLS = [
   "phenix_run",
   "phenix_handle",
   "phenix_present",
-  "phenix_tasks",
+  "phenix_objectives",
   "phenix_project",
   "phenix_userform",
   "phenix_visualize",
