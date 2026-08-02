@@ -3,18 +3,29 @@ import test from "node:test";
 
 import { formatWorkspaceGenericStatus } from "../extension/workspace-status-extension.ts";
 
-test("renders only the selected model in the global workspace status", () => {
-  assert.equal(
-    formatWorkspaceGenericStatus({
-      model: { provider: "openai", id: "gpt-5.6" },
-    }),
-    "model openai/gpt-5.6",
-  );
+test("direct models show provider, model, and thinking mode only", () => {
+  const status = formatWorkspaceGenericStatus({
+    model: { provider: "openai", id: "gpt-5.6" },
+    thinking: "high",
+  });
+
+  assert.equal(status, "openai/gpt-5.6 · thinking high");
+  assert.doesNotMatch(status, /phenix\/router|budget/);
 });
 
-test("uses one model fallback without projecting sidebar health", () => {
-  const status = formatWorkspaceGenericStatus({});
+test("Phenix-routed models show router and budget mode only", () => {
+  const status = formatWorkspaceGenericStatus({
+    model: { provider: "phenix", id: "mixed" },
+    thinking: "xhigh",
+  });
 
-  assert.equal(status, "model none");
-  assert.doesNotMatch(status, /phenix|healthy|degraded|error|starting/);
+  assert.equal(status, "phenix/router · budget xhigh");
+  assert.doesNotMatch(status, /mixed|thinking/);
+});
+
+test("uses one direct-model fallback without projecting sidebar health", () => {
+  const status = formatWorkspaceGenericStatus({ thinking: "off" });
+
+  assert.equal(status, "model none · thinking off");
+  assert.doesNotMatch(status, /phenix|healthy|degraded|error|starting|budget/);
 });
