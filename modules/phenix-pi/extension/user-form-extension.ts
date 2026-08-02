@@ -1,13 +1,9 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Text, type Component } from "@earendil-works/pi-tui";
+import { type Component, Text } from "@earendil-works/pi-tui";
 
 import type { UserFormFacade } from "../application/user-form-service.ts";
 import type { RunId } from "../domain/shared.ts";
-import type {
-  UserFormCounts,
-  UserFormId,
-  UserFormRequest,
-} from "../domain/user-form/model.ts";
+import type { UserFormCounts, UserFormId, UserFormRequest } from "../domain/user-form/model.ts";
 import { heading, type ObservabilityTheme } from "./observability-theme.ts";
 import {
   InlineUserFormSession,
@@ -250,10 +246,7 @@ function publishCancelledUserForm(
   });
 }
 
-function appendUserFormEntry(
-  pi: Pick<ExtensionAPI, "appendEntry">,
-  data: UserFormEntryData,
-): void {
+function appendUserFormEntry(pi: Pick<ExtensionAPI, "appendEntry">, data: UserFormEntryData): void {
   pi.appendEntry(USER_FORM_ENTRY_TYPE, data);
 }
 
