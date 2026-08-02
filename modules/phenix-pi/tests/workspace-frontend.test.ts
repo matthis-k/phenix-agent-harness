@@ -155,7 +155,7 @@ function snapshot(
     transcript: [],
     editor: [],
     runs: runs.map(String),
-    tasks: [],
+    objectives: [],
     files: [],
     facts: [],
   };
