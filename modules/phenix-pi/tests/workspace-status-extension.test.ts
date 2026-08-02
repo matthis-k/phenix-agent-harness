@@ -48,17 +48,19 @@ test("direct models show provider, model, and thinking mode only", () => {
   });
 
   assert.equal(status, "openai/gpt-5.6 · thinking high");
-  assert.doesNotMatch(status, /phenix\/router|budget/);
+  assert.doesNotMatch(status, /phenix|budget/);
 });
 
-test("Phenix-routed models show router and budget mode only", () => {
-  const status = formatWorkspaceGenericStatus({
-    model: { provider: "phenix", id: "mixed" },
-    thinking: "xhigh",
-  });
+test("Phenix-routed models show the selected virtual routing model and budget only", () => {
+  for (const model of ["free", "mixed"] as const) {
+    const status = formatWorkspaceGenericStatus({
+      model: { provider: "phenix", id: model },
+      thinking: "xhigh",
+    });
 
-  assert.equal(status, "phenix/router · budget xhigh");
-  assert.doesNotMatch(status, /mixed|thinking/);
+    assert.equal(status, `phenix/${model} · budget xhigh`);
+    assert.doesNotMatch(status, /router|thinking/);
+  }
 });
 
 test("uses one direct-model fallback without projecting sidebar health", () => {
