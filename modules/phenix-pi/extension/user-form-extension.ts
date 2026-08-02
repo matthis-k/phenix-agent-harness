@@ -1,13 +1,13 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 
+import type { UserFormFacade } from "../application/user-form-service.ts";
+import type { RunId } from "../domain/shared.ts";
 import type {
   UserFormCounts,
   UserFormId,
   UserFormRequest,
 } from "../domain/user-form/model.ts";
-import type { RunId } from "../domain/shared.ts";
-import type { UserFormFacade } from "../application/user-form-service.ts";
 import {
   InlineUserFormSession,
   type InlineUserFormSnapshot,
@@ -19,8 +19,17 @@ import {
 } from "./workspace-runtime-binding.ts";
 
 const STATUS_KEY = "01-userforms";
-const MESSAGE_TYPE = "phenix:userform";
+const ENTRY_TYPE = "phenix:userform";
 const sessions = new WeakMap<UserFormFacade, Map<RunId, InlineUserFormSession>>();
+
+type UserFormEntryPhase = "requested" | "answered" | "completed" | "cancelled";
+
+interface UserFormEntryData {
+  readonly content: string;
+  readonly formId: UserFormId;
+  readonly requestedByRunId: RunId;
+  readonly phase: UserFormEntryPhase;
+}
 
 export default function registerUserForms(pi: ExtensionAPI): void {
   let context: ExtensionContext | undefined;
@@ -28,16 +37,11 @@ export default function registerUserForms(pi: ExtensionAPI): void {
   let disposeForms: (() => void) | undefined;
   const announced = new Set<UserFormId>();
 
-  pi.registerMessageRenderer(MESSAGE_TYPE, (message, _options, theme) => {
-    const content = typeof message.content === "string" ? message.content : String(message.content);
+  pi.registerEntryRenderer(ENTRY_TYPE, (entry, _options, theme) => {
+    const data = entry.data as Partial<UserFormEntryData> | undefined;
+    const content = typeof data?.content === "string" ? data.content : "User form";
     const [title = "User form", ...body] = content.split("\n");
-    return new Text(
-      [theme.fg("accent", theme.bold(title)), ...body.map((line) => theme.fg("text", line))].join(
-        "\n",
-      ),
-      0,
-      0,
-    );
+    return new Text([theme.fg("accent", theme.bold(title)), ...body].join("\n"), 0, 0);
   });
 
   const refresh = (): void => {
@@ -122,7 +126,7 @@ export default function registerUserForms(pi: ExtensionAPI): void {
 }
 
 export function routeUserFormInput(
-  pi: Pick<ExtensionAPI, "sendMessage">,
+  pi: Pick<ExtensionAPI, "appendEntry">,
   binding: WorkspaceRuntimeBinding,
   text: string,
 ): boolean {
@@ -187,43 +191,40 @@ function initialSnapshot(request: UserFormRequest): InlineUserFormSnapshot {
 }
 
 function publishUserForm(
-  pi: Pick<ExtensionAPI, "sendMessage">,
+  pi: Pick<ExtensionAPI, "appendEntry">,
   snapshot: InlineUserFormSnapshot,
-  phase: "requested" | "answered" | "completed",
+  phase: Exclude<UserFormEntryPhase, "cancelled">,
 ): void {
-  pi.sendMessage(
-    {
-      customType: MESSAGE_TYPE,
-      content: formatInlineUserForm(snapshot, phase),
-      display: true,
-      details: {
-        formId: snapshot.request.id,
-        requestedByRunId: snapshot.request.requestedByRunId,
-        phase,
-      },
-    },
-    { deliverAs: "nextTurn" },
-  );
+  appendUserFormEntry(pi, {
+    content: formatInlineUserForm(snapshot, phase),
+    formId: snapshot.request.id,
+    requestedByRunId: snapshot.request.requestedByRunId,
+    phase,
+  });
 }
 
 function publishCancelledUserForm(
-  pi: Pick<ExtensionAPI, "sendMessage">,
+  pi: Pick<ExtensionAPI, "appendEntry">,
   request: UserFormRequest,
 ): void {
-  pi.sendMessage(
-    {
-      customType: MESSAGE_TYPE,
-      content: `User form from ${request.requestedByRunId}\n${request.form.title}\nCancelled by user.`,
-      display: true,
-      details: { formId: request.id, requestedByRunId: request.requestedByRunId, phase: "cancelled" },
-    },
-    { deliverAs: "nextTurn" },
-  );
+  appendUserFormEntry(pi, {
+    content: `User form from ${request.requestedByRunId}\n${request.form.title}\nCancelled by user.`,
+    formId: request.id,
+    requestedByRunId: request.requestedByRunId,
+    phase: "cancelled",
+  });
+}
+
+function appendUserFormEntry(
+  pi: Pick<ExtensionAPI, "appendEntry">,
+  data: UserFormEntryData,
+): void {
+  pi.appendEntry(ENTRY_TYPE, data);
 }
 
 function formatInlineUserForm(
   snapshot: InlineUserFormSnapshot,
-  phase: "requested" | "answered" | "completed",
+  phase: Exclude<UserFormEntryPhase, "cancelled">,
 ): string {
   const request = snapshot.request;
   const lines = [
