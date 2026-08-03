@@ -29,8 +29,38 @@ jobs:
 
           source = Path('.github/workflows/apply-workspace-input-fix.yml').read_text()
           marker = "python3 - <<'PY'\n"
-          script = source.split(marker, 1)[1].split('\n          PY\n', 1)[0]
-          exec(compile(dedent(script), 'workspace-input-fix.py', 'exec'))
+          script = dedent(source.split(marker, 1)[1].split('\n          PY\n', 1)[0])
+          helper_start = script.index('def replace(')
+          helper_end = script.index('\n\nreplace(', helper_start)
+          robust_helper = r'''def replace(path: str, old: str, new: str) -> None:
+              import re
+
+              if old == new:
+                  return
+              target = Path(path)
+              source = target.read_text()
+              if old in source:
+                  target.write_text(source.replace(old, new, 1))
+                  return
+
+              old_lines = old.splitlines()
+              pattern_lines = []
+              for line in old_lines:
+                  stripped = line.lstrip().rstrip()
+                  pattern_lines.append(r"[ \t]*" + re.escape(stripped) if stripped else r"[ \t]*")
+              match = re.search(r"\n".join(pattern_lines), source)
+              if not match:
+                  raise SystemExit(f"expected source block not found in {path}:\n{old}")
+
+              base = re.match(r"[ \t]*", match.group(0)).group(0)
+              replacement = "\n".join(
+                  base + line.lstrip() if line.strip() else "" for line in new.splitlines()
+              )
+              if new.endswith("\n"):
+                  replacement += "\n"
+              target.write_text(source[: match.start()] + replacement + source[match.end() :])'''
+          script = script[:helper_start] + robust_helper + script[helper_end:]
+          exec(compile(script, 'workspace-input-fix.py', 'exec'))
           PY
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
         with:
