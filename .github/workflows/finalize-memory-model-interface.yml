@@ -1,0 +1,125 @@
+name: Finalize memory model interface
+
+on:
+  push:
+    branches: [feature/phenix-memory]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-memory-interface-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with: { fetch-depth: 0 }
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+      - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
+        with: { name: devenv }
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
+      - name: Expose memory contract to every model
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path("modules/phenix-pi/adapters/pi-sdk/memory-session-extension.ts")
+          text = source.read_text()
+
+          constant_marker = "const RECENT_MESSAGE_TAIL = 10;\n"
+          contract = '''
+
+export const MEMORY_MODEL_INSTRUCTIONS = [
+  "Phenix memory interface:",
+  "- `phenix_memory` is the model-facing interface to the current run's reversible memory projection.",
+  "- Use `action=search` before repeating prior investigation or when earlier requirements, decisions, findings, errors, tests, changes, preferences, procedures, project facts, or outcomes may matter.",
+  "- Search results and injected memory are compact indexes, not authoritative detail. Use `action=read` with an evidence ID before relying on omitted specifics or quoting exact output.",
+  "- Tool results and run outcomes are captured automatically. Do not create duplicate notes for routine execution output.",
+  "- Use `action=note` for durable knowledge that automatic capture cannot infer safely, and attach evidence IDs whenever available.",
+  "- Use `action=set_status` when a note becomes uncertain, superseded, invalidated, or active again; never silently preserve contradictory memory as current truth.",
+  "- Current user instructions and current repository state outrank recalled notes. Resolve conflicts explicitly and update memory validity when appropriate.",
+  "- Objective scope improves retrieval relevance but does not make objectives the canonical memory representation.",
+].join("\\n");
+
+export function appendMemoryModelInstructions(systemPrompt: string): string {
+  if (systemPrompt.includes(MEMORY_MODEL_INSTRUCTIONS)) return systemPrompt;
+  return `${systemPrompt.trimEnd()}\\n\\n${MEMORY_MODEL_INSTRUCTIONS}`;
+}
+'''
+          if "export const MEMORY_MODEL_INSTRUCTIONS" not in text:
+              if constant_marker not in text:
+                  raise SystemExit("memory constant marker not found")
+              text = text.replace(constant_marker, constant_marker + contract, 1)
+
+          hook_marker = "  registerMemoryTool(pi, resolve);\n\n"
+          hook = '''  pi.on("before_agent_start", (event) => ({
+    systemPrompt: appendMemoryModelInstructions(event.systemPrompt),
+  }));
+
+'''
+          if "appendMemoryModelInstructions(event.systemPrompt)" not in text:
+              if hook_marker not in text:
+                  raise SystemExit("memory hook marker not found")
+              text = text.replace(hook_marker, hook_marker + hook, 1)
+
+          old_snippet = '''    promptSnippet:
+      "Treat injected Phenix memory as a compact index, not source truth. Reopen exact evidence with phenix_memory action=read before relying on details omitted by a note. Record only durable knowledge with action=note; routine execution output is captured automatically.",
+'''
+          if old_snippet in text:
+              text = text.replace(old_snippet, "    promptSnippet: MEMORY_MODEL_INSTRUCTIONS,\n", 1)
+          elif "promptSnippet: MEMORY_MODEL_INSTRUCTIONS" not in text:
+              raise SystemExit("memory prompt snippet marker not found")
+
+          source.write_text(text)
+
+          test = Path("modules/phenix-pi/tests/memory-model-instructions.test.ts")
+          test.write_text('''import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  appendMemoryModelInstructions,
+  MEMORY_MODEL_INSTRUCTIONS,
+} from "../adapters/pi-sdk/memory-session-extension.ts";
+
+test("exposes the reversible memory contract to models exactly once", () => {
+  const prompt = appendMemoryModelInstructions("Base agent instructions");
+
+  assert.match(prompt, /phenix_memory/);
+  assert.match(prompt, /action=search/);
+  assert.match(prompt, /action=read/);
+  assert.match(prompt, /action=note/);
+  assert.match(prompt, /action=set_status/);
+  assert.match(prompt, /captured automatically/);
+  assert.match(prompt, /Current user instructions.*outrank recalled notes/);
+  assert.ok(prompt.endsWith(MEMORY_MODEL_INSTRUCTIONS));
+  assert.equal(appendMemoryModelInstructions(prompt), prompt);
+});
+''')
+          PY
+      - name: Apply repository maintenance fixes
+        run: devenv tasks run maintenance:fix
+      - name: Preserve repository lock pins
+        run: git checkout -- devenv.lock
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/finalize-memory-model-interface.yml
+      - name: Commit model interface
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add --all
+          git commit -m "feat(memory): expose memory contract to all models"
+          git push origin HEAD:feature/phenix-memory
