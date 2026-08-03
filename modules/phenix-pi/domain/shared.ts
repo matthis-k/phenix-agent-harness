@@ -1,27 +1,40 @@
-export type RunId = string & { readonly __brand: "RunId" };
-export type DefinitionId = string & { readonly __brand: "DefinitionId" };
-export type ObjectiveId = string & { readonly __brand: "ObjectiveId" };
-export type LocalTaskId = string & { readonly __brand: "LocalTaskId" };
+declare const runIdBrand: unique symbol;
+declare const definitionIdBrand: unique symbol;
+declare const objectiveIdBrand: unique symbol;
+declare const localTaskIdBrand: unique symbol;
+
+export type RunId<TValue extends string = string> = TValue & {
+  readonly [runIdBrand]: "RunId";
+};
+export type DefinitionId<TValue extends string = string> = TValue & {
+  readonly [definitionIdBrand]: "DefinitionId";
+};
+export type ObjectiveId<TValue extends string = string> = TValue & {
+  readonly [objectiveIdBrand]: "ObjectiveId";
+};
+export type LocalTaskId<TValue extends string = string> = TValue & {
+  readonly [localTaskIdBrand]: "LocalTaskId";
+};
 export type TaskId = `run:${RunId}` | LocalTaskId;
 
 const MAX_ID_LENGTH = 160;
 const GENERAL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const DEFINITION_ID = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
 
-export function runId(value: string): RunId {
-  return validateId("run ID", value, GENERAL_ID) as RunId;
+export function runId<const TValue extends string>(value: TValue): RunId<TValue> {
+  return validateId("run ID", value, GENERAL_ID) as RunId<TValue>;
 }
 
-export function definitionId(value: string): DefinitionId {
-  return validateId("definition ID", value, DEFINITION_ID) as DefinitionId;
+export function definitionId<const TValue extends string>(value: TValue): DefinitionId<TValue> {
+  return validateId("definition ID", value, DEFINITION_ID) as DefinitionId<TValue>;
 }
 
-export function objectiveId(value: string): ObjectiveId {
-  return validateId("objective ID", value, GENERAL_ID) as ObjectiveId;
+export function objectiveId<const TValue extends string>(value: TValue): ObjectiveId<TValue> {
+  return validateId("objective ID", value, GENERAL_ID) as ObjectiveId<TValue>;
 }
 
-export function localTaskId(value: string): LocalTaskId {
-  return validateId("local task ID", value, GENERAL_ID) as LocalTaskId;
+export function localTaskId<const TValue extends string>(value: TValue): LocalTaskId<TValue> {
+  return validateId("local task ID", value, GENERAL_ID) as LocalTaskId<TValue>;
 }
 
 function validateId(name: string, value: string, pattern: RegExp): string {
@@ -105,15 +118,19 @@ export type Outcome<O> =
   | { readonly status: "failure"; readonly failure: Failure }
   | { readonly status: "cancelled"; readonly reason: string };
 
-export function success<O>(value: O): Outcome<O> {
+export type SuccessfulOutcome<O> = Extract<Outcome<O>, { readonly status: "success" }>;
+export type FailedOutcome = Extract<Outcome<never>, { readonly status: "failure" }>;
+export type CancelledOutcome = Extract<Outcome<never>, { readonly status: "cancelled" }>;
+
+export function success<O>(value: O): SuccessfulOutcome<O> {
   return { status: "success", value };
 }
 
-export function failed<O = never>(failure: Failure): Outcome<O> {
+export function failed<O = never>(failure: Failure): FailedOutcome {
   return { status: "failure", failure };
 }
 
-export function cancelled<O = never>(reason: string): Outcome<O> {
+export function cancelled<O = never>(reason: string): CancelledOutcome {
   return { status: "cancelled", reason };
 }
 
