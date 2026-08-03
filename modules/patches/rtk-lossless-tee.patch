@@ -1,0 +1,37 @@
+diff --git a/src/core/tee.rs b/src/core/tee.rs
+index e366a31..e6af712 100644
+--- a/src/core/tee.rs
++++ b/src/core/tee.rs
+@@ -42,6 +42,10 @@ fn cleanup_old_files(dir: &std::path::Path, max_files: usize) {
+     }
+ }
+ 
++fn phenix_lossless() -> bool {
++    std::env::var("PHENIX_RTK_LOSSLESS").ok().as_deref() == Some("1")
++}
++
+ /// Check if tee should be skipped based on config, mode, exit code, and size.
+ /// Returns None if should skip, Some(tee_dir) if should proceed.
+ fn should_tee(
+@@ -51,6 +55,10 @@ fn should_tee(
+     exit_code: i32,
+     tee_dir: Option<PathBuf>,
+ ) -> Option<PathBuf> {
++    if phenix_lossless() {
++        return tee_dir;
++    }
++
+     if !config.enabled {
+         return None;
+     }
+@@ -88,7 +96,9 @@ fn write_tee_file(
+     let filepath = tee_dir.join(filename);
+ 
+     // Truncate at max_file_size (find a safe UTF-8 char boundary)
+-    let content = if raw.len() > max_file_size {
++    let content = if phenix_lossless() {
++        raw.to_string()
++    } else if raw.len() > max_file_size {
+         let boundary = raw
+             .char_indices()
+             .take_while(|(i, _)| *i < max_file_size)
