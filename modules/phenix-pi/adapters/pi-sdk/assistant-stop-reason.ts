@@ -7,12 +7,13 @@ export function assistantFailureObservation(
 ): AgentSessionBackendFailureObservation | undefined {
   if (message.role !== "assistant") return undefined;
 
-  switch (message.stopReason) {
+  const stopReason = message.stopReason;
+  switch (stopReason) {
     case "error":
       return {
         type: "backend.failed",
         kind: "provider_error",
-        stopReason: "error",
+        stopReason,
         message: message.errorMessage ?? "Pi provider failed",
         retryable: true,
         providerMessage: message.errorMessage ?? null,
@@ -21,7 +22,7 @@ export function assistantFailureObservation(
       return {
         type: "backend.failed",
         kind: "unexpected_abort",
-        stopReason: "aborted",
+        stopReason,
         message: "Pi assistant turn ended with stopReason=aborted",
         retryable: true,
       };
@@ -30,7 +31,7 @@ export function assistantFailureObservation(
     case "toolUse":
       return undefined;
     default:
-      return assertNever(message.stopReason);
+      return assertNever(stopReason);
   }
 }
 
