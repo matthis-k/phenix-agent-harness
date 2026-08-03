@@ -9,14 +9,18 @@ import type { UnsequencedDomainEvent } from "../domain/run/events.ts";
 import type { RunId } from "../domain/shared.ts";
 import { LedgerConflictError } from "../ports/run-ledger.ts";
 
-function event(rootRunId: RunId, eventId: string, revision: number): UnsequencedDomainEvent {
+function event(
+  rootRunId: RunId,
+  eventId: string,
+  revision: number,
+): UnsequencedDomainEvent<"run.turn.ended"> {
   return {
     eventId,
     rootRunId,
     runId: rootRunId,
     revision,
     timestamp: "2026-01-01T00:00:00.000Z",
-    type: "run.created",
+    type: "run.turn.ended",
     data: {},
   };
 }
