@@ -100,20 +100,32 @@ export interface Failure {
   readonly details?: unknown;
 }
 
-export type Outcome<O> =
-  | { readonly status: "success"; readonly value: O }
-  | { readonly status: "failure"; readonly failure: Failure }
-  | { readonly status: "cancelled"; readonly reason: string };
+export interface SuccessOutcome<O> {
+  readonly status: "success";
+  readonly value: O;
+}
 
-export function success<O>(value: O): Outcome<O> {
+export interface FailureOutcome {
+  readonly status: "failure";
+  readonly failure: Failure;
+}
+
+export interface CancelledOutcome {
+  readonly status: "cancelled";
+  readonly reason: string;
+}
+
+export type Outcome<O> = SuccessOutcome<O> | FailureOutcome | CancelledOutcome;
+
+export function success<O>(value: O): SuccessOutcome<O> {
   return { status: "success", value };
 }
 
-export function failed<O = never>(failure: Failure): Outcome<O> {
+export function failed(failure: Failure): FailureOutcome {
   return { status: "failure", failure };
 }
 
-export function cancelled<O = never>(reason: string): Outcome<O> {
+export function cancelled(reason: string): CancelledOutcome {
   return { status: "cancelled", reason };
 }
 
