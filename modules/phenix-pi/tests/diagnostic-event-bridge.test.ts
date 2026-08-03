@@ -8,11 +8,7 @@ import type {
   DiagnosticSummary,
   DiagnosticWrite,
 } from "../domain/diagnostics.ts";
-import type {
-  DomainEvent,
-  DomainEventData,
-  DomainEventType,
-} from "../domain/run/events.ts";
+import type { DomainEvent, DomainEventData, DomainEventType } from "../domain/run/events.ts";
 import { runId } from "../domain/shared.ts";
 import type { DiagnosticLog, DiagnosticLogListener } from "../ports/diagnostic-log.ts";
 
