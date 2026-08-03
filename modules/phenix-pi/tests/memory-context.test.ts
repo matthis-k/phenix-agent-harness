@@ -58,7 +58,7 @@ const WORKING_SET: WorkingMemoryProjection = {
   recentEvidence: [EVIDENCE],
 };
 
-test("folds old tool results into stable evidence references while retaining recent turns", async () => {
+test("folds old tool results into stable evidence references while retaining conversation", async () => {
   const memory = memoryStub();
   const messages = [
     user("Initial task", 1),
@@ -99,6 +99,14 @@ test("folds old tool results into stable evidence references while retaining rec
   );
   assert.match(typeof injection.content === "string" ? injection.content : "", /memory-call-1/);
   assert.equal(textContent(assembled.at(-1) as AgentMessage), "Latest request");
+  assert.equal(
+    assembled.filter((message) => message.role === "user").length,
+    messages.filter((message) => message.role === "user").length,
+  );
+  assert.equal(
+    assembled.filter((message) => message.role === "assistant").length,
+    messages.filter((message) => message.role === "assistant").length,
+  );
 });
 
 test("does not replace tool results below the folding threshold", async () => {
