@@ -16,6 +16,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 
+import type { MemoryService } from "../../application/memory-service.ts";
 import { STOCK_SESSION_PROMPT_SENTINEL } from "../../definitions/stock-session.ts";
 import type { AgentPromptMode } from "../../domain/definition/definition.ts";
 import type { ConcreteModelRef } from "../../domain/definition/model.ts";
@@ -31,6 +32,7 @@ import type {
 import type { LiveAgentTranscriptWriter } from "../../ports/live-agent-transcripts.ts";
 import { BoundedAgentSessionPort } from "./bounded-agent-session-port.ts";
 import { freeModelSessionExtensions } from "./free-model-guard.ts";
+import { createMemorySessionExtension } from "./memory-session-extension.ts";
 import { createNixShellTool } from "./nix-shell-tool.ts";
 import { composeManagedPrompt } from "./prompt-composition.ts";
 
@@ -47,17 +49,20 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
   private readonly eventBus?: EventBus;
   private readonly promptModeForRun: (runId: RunId) => AgentPromptMode | undefined;
   private readonly transcripts: LiveAgentTranscriptWriter;
+  private readonly memory: MemoryService;
 
   constructor(input: {
     readonly modelRegistry: ModelRegistry;
     readonly agentDir: string;
     readonly transcripts: LiveAgentTranscriptWriter;
+    readonly memory: MemoryService;
     readonly eventBus?: EventBus;
     readonly promptModeForRun?: (runId: RunId) => AgentPromptMode | undefined;
   }) {
     this.modelRegistry = input.modelRegistry;
     this.agentDir = input.agentDir;
     this.transcripts = input.transcripts;
+    this.memory = input.memory;
     this.eventBus = input.eventBus;
     this.promptModeForRun = input.promptModeForRun ?? (() => undefined);
   }
@@ -103,7 +108,10 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
       settingsManager,
       ...(this.eventBus ? { eventBus: this.eventBus } : {}),
       noExtensions: true,
-      extensionFactories: [...freeModelSessionExtensions(isFreeTierModel(spec.model))],
+      extensionFactories: [
+        createMemorySessionExtension(this.memory, spec.runId),
+        ...freeModelSessionExtensions(isFreeTierModel(spec.model)),
+      ],
       ...(stock
         ? {}
         : {
@@ -131,7 +139,9 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
     await resourceLoader.reload();
     const modelRuntime = await this.createModelRuntime();
     const customTools = [
-      ...spec.customTools.filter((tool) => !stock || tool.name !== "phenix_progress").map(toPiTool),
+      ...spec.customTools
+        .filter((tool) => !stock || tool.name !== "phenix_progress")
+        .map(toPiTool),
       ...(!stock && spec.tools.includes("nix_shell") ? [createNixShellTool(spec.cwd)] : []),
     ] as ToolDefinition[];
     const { session } = await createAgentSession({
@@ -140,7 +150,7 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
       model,
       modelRuntime,
       thinkingLevel: spec.thinking,
-      ...(stock ? {} : { tools: [...spec.tools] }),
+      ...(stock ? {} : { tools: [...new Set([...spec.tools, "phenix_memory"])] }),
       customTools,
       resourceLoader,
       sessionManager,
@@ -210,7 +220,7 @@ class PiAgentSessionPort implements AgentSessionPort {
       preflightResult: (success) => {
         preflightSeen = true;
         if (success) accept();
-        else reject(new Error(`Pi rejected the child prompt before execution`));
+        else reject(new Error("Pi rejected the child prompt before execution"));
       },
     });
     void fullRun.then(
