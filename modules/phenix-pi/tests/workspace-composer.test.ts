@@ -26,7 +26,7 @@ test("renders a focused input surface without persistent key hints", () => {
     theme: THEME,
   });
 
-  assert.equal(lines.length, 4);
+  assert.equal(lines.length, 3);
   assert.ok(lines.every((line) => visibleWidth(line) === 72));
   const plain = lines.map(stripTranscriptAnsi).join("\n");
   assert.match(plain, /hello/);
