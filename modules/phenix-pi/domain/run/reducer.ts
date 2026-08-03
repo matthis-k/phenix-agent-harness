@@ -1,14 +1,17 @@
 import type { Objective } from "../objective/model.ts";
-import type { LocalTaskId, ObjectiveId, Outcome, RunId } from "../shared.ts";
+import type {
+  CancelledOutcome,
+  FailedOutcome,
+  LocalTaskId,
+  ObjectiveId,
+  Outcome,
+  RunId,
+  SuccessfulOutcome,
+} from "../shared.ts";
 import type { LocalTask } from "../task/local-task.ts";
 import type { DomainEvent } from "./events.ts";
 import { activeAttachedChildren, assertRunTransition, isTerminalRunState } from "./invariants.ts";
-import {
-  normalizeSessionProfile,
-  type PersistedSessionProfile,
-  type RunRecord,
-  type RunState,
-} from "./model.ts";
+import { normalizeSessionProfile, type RunRecord } from "./model.ts";
 import {
   defaultActivity,
   type RunActivity,
@@ -22,6 +25,15 @@ interface CycleProjection {
   readonly number: number;
   readonly state: "active" | "idle";
 }
+
+type ExistingDomainEvent = Exclude<DomainEvent, { readonly type: "run.created" }>;
+type TerminalState = "completed" | "failed" | "cancelled" | "orphaned";
+type TerminalOutcomeByState = {
+  readonly completed: SuccessfulOutcome<unknown>;
+  readonly failed: FailedOutcome;
+  readonly cancelled: CancelledOutcome;
+  readonly orphaned: FailedOutcome;
+};
 
 export class RunProjection {
   readonly runs = new Map<RunId, RunRecord>();
@@ -102,12 +114,11 @@ export class RunProjection {
     return run;
   }
 
-  private applyCreated(event: DomainEvent): void {
+  private applyCreated(event: DomainEvent<"run.created">): void {
     if (this.runs.has(event.runId)) throw new Error(`Run already exists: ${event.runId}`);
     if (event.revision !== 1) throw new Error(`A new run must start at revision 1`);
 
-    const data = event.data as { readonly record: Omit<RunRecord, "revision" | "state"> };
-    const record = data.record;
+    const record = event.data.record;
     if (record.id !== event.runId) throw new Error(`run.created identity mismatch`);
     if (record.parentId !== event.parentRunId) throw new Error(`run.created parent mismatch`);
 
@@ -126,7 +137,7 @@ export class RunProjection {
     this.runs.set(record.id, { ...record, state: "created", revision: event.revision });
   }
 
-  private applyExisting(event: DomainEvent, current: RunRecord): void {
+  private applyExisting(event: ExistingDomainEvent, current: RunRecord): void {
     if (
       isTerminalRunState(current.state) &&
       !event.type.startsWith("task.") &&
@@ -138,50 +149,34 @@ export class RunProjection {
 
     switch (event.type) {
       case "run.state.changed": {
-        const data = event.data as { readonly from: RunState; readonly to: RunState };
-        if (data.from !== current.state) {
+        if (event.data.from !== current.state) {
           throw new Error(
-            `Stale transition for ${current.id}: expected ${current.state}, got ${data.from}`,
+            `Stale transition for ${current.id}: expected ${current.state}, got ${event.data.from}`,
           );
         }
-        assertRunTransition(current.state, data.to);
-        next = { ...next, state: data.to };
+        assertRunTransition(current.state, event.data.to);
+        next = { ...next, state: event.data.to };
         break;
       }
-      case "run.profile.selected": {
+      case "run.profile.selected":
         if (current.kind !== "root") throw new Error(`Only root sessions own selectable profiles`);
-        const data = event.data as { readonly profile: PersistedSessionProfile };
-        next = { ...next, profile: normalizeSessionProfile(data.profile) };
+        next = { ...next, profile: normalizeSessionProfile(event.data.profile) };
         break;
-      }
       case "run.model.resolved":
-        next = {
-          ...next,
-          resolvedModel: (event.data as { readonly resolved: RunRecord["resolvedModel"] }).resolved,
-        };
+        next = { ...next, resolvedModel: event.data.resolved };
         break;
       case "run.model.observed":
-        next = {
-          ...next,
-          observedModel: (event.data as { readonly model: RunRecord["observedModel"] }).model,
-        };
+        next = { ...next, observedModel: event.data.model };
         break;
       case "run.pi.bound":
-        next = {
-          ...next,
-          pi: (event.data as { readonly pi: NonNullable<RunRecord["pi"]> }).pi,
-        };
+        next = { ...next, pi: event.data.pi };
         break;
-      case "run.cycle.started": {
-        const number = (event.data as { readonly number: number }).number;
-        this.cycles.set(current.id, { number, state: "active" });
+      case "run.cycle.started":
+        this.cycles.set(current.id, { number: event.data.number, state: "active" });
         break;
-      }
-      case "run.cycle.settled": {
-        const number = (event.data as { readonly number: number }).number;
-        this.cycles.set(current.id, { number, state: "idle" });
+      case "run.cycle.settled":
+        this.cycles.set(current.id, { number: event.data.number, state: "idle" });
         break;
-      }
       case "run.turn.ended":
         this.turnCounts.set(current.id, (this.turnCounts.get(current.id) ?? 0) + 1);
         break;
@@ -189,81 +184,67 @@ export class RunProjection {
         this.toolCallCounts.set(current.id, (this.toolCallCounts.get(current.id) ?? 0) + 1);
         break;
       case "run.output.submitted":
-        this.submittedOutputs.set(current.id, (event.data as { readonly output: unknown }).output);
+        this.submittedOutputs.set(current.id, event.data.output);
         break;
       case "run.completed":
-        next = this.terminal(
-          current,
-          next,
-          "completed",
-          event.data as { outcome: Outcome<unknown> },
-        );
+        next = this.terminal(current, next, "completed", event.data.outcome);
         break;
       case "run.failed":
-        next = this.terminal(current, next, "failed", event.data as { outcome: Outcome<unknown> });
+        next = this.terminal(current, next, "failed", event.data.outcome);
         break;
       case "run.cancelled":
-        next = this.terminal(
-          current,
-          next,
-          "cancelled",
-          event.data as { outcome: Outcome<unknown> },
-        );
+        next = this.terminal(current, next, "cancelled", event.data.outcome);
         break;
       case "run.orphaned":
-        next = this.terminal(
-          current,
-          next,
-          "orphaned",
-          event.data as { outcome: Outcome<unknown> },
-        );
+        next = this.terminal(current, next, "orphaned", event.data.outcome);
         break;
       case "run.reparented": {
-        const data = event.data as {
-          readonly previousParentId: RunId;
-          readonly newParentId: RunId;
-          readonly ownership: "attached" | "detached";
-        };
-        if (current.parentId !== data.previousParentId)
+        if (current.parentId !== event.data.previousParentId) {
           throw new Error(`Stale parent for ${current.id}`);
-        const newParent = this.requireRun(data.newParentId);
+        }
+        const newParent = this.requireRun(event.data.newParentId);
         if (isTerminalRunState(newParent.state)) throw new Error(`Cannot reparent to terminal run`);
         let ancestor: RunRecord | undefined = newParent;
         while (ancestor) {
-          if (ancestor.id === current.id)
+          if (ancestor.id === current.id) {
             throw new Error(`Reparenting would create an ancestry cycle`);
+          }
           ancestor = ancestor.parentId ? this.requireRun(ancestor.parentId) : undefined;
         }
-        next = { ...next, parentId: data.newParentId, ownership: data.ownership };
+        next = {
+          ...next,
+          parentId: event.data.newParentId,
+          ownership: event.data.ownership,
+        };
         break;
       }
       case "task.local.created": {
-        const task = (event.data as { readonly task: LocalTask }).task;
+        const { task } = event.data;
         if (task.ownerRunId !== current.id) throw new Error(`Local task owner mismatch`);
         if (this.localTasks.has(task.id)) throw new Error(`Local task already exists: ${task.id}`);
         this.localTasks.set(task.id, task);
         break;
       }
       case "task.local.state.changed": {
-        const data = event.data as {
-          readonly taskId: LocalTaskId;
-          readonly state: LocalTask["state"];
-          readonly updatedAt: string;
-        };
-        const task = this.localTasks.get(data.taskId);
+        const task = this.localTasks.get(event.data.taskId);
         if (!task || task.ownerRunId !== current.id) {
-          throw new Error(`Unknown local task ${data.taskId}`);
+          throw new Error(`Unknown local task ${event.data.taskId}`);
         }
-        this.localTasks.set(task.id, { ...task, state: data.state, updatedAt: data.updatedAt });
+        this.localTasks.set(task.id, {
+          ...task,
+          state: event.data.state,
+          updatedAt: event.data.updatedAt,
+        });
         break;
       }
-      case "task.progress.appended": {
-        const data = event.data as { readonly taskId: string; readonly message: string };
-        this.progress.set(data.taskId, [...(this.progress.get(data.taskId) ?? []), data.message]);
+      case "task.progress.appended":
+        this.progress.set(event.data.taskId, [
+          ...(this.progress.get(event.data.taskId) ?? []),
+          event.data.message,
+        ]);
         break;
-      }
       case "objective.created": {
-        const objective = (event.data as { readonly objective: Objective }).objective;
+        const { objective } = event.data;
         if (objective.rootRunId !== event.rootRunId) throw new Error(`Objective root mismatch`);
         if (objective.createdByRunId !== current.id) throw new Error(`Objective creator mismatch`);
         if (this.objectives.has(objective.id)) {
@@ -279,45 +260,55 @@ export class RunProjection {
         break;
       }
       case "objective.state.changed": {
-        const data = event.data as {
-          readonly objectiveId: ObjectiveId;
-          readonly state: Objective["state"];
-          readonly updatedAt: string;
-        };
-        const objective = this.objectives.get(data.objectiveId);
+        const objective = this.objectives.get(event.data.objectiveId);
         if (!objective || objective.rootRunId !== event.rootRunId) {
-          throw new Error(`Unknown objective ${data.objectiveId}`);
+          throw new Error(`Unknown objective ${event.data.objectiveId}`);
         }
         this.objectives.set(objective.id, {
           ...objective,
-          state: data.state,
-          updatedAt: data.updatedAt,
+          state: event.data.state,
+          updatedAt: event.data.updatedAt,
         });
         break;
       }
       case "objective.focus.changed": {
-        const objectiveId = (event.data as { readonly objectiveId: ObjectiveId }).objectiveId;
-        const objective = this.objectives.get(objectiveId);
+        const objective = this.objectives.get(event.data.objectiveId);
         if (!objective || objective.rootRunId !== event.rootRunId) {
-          throw new Error(`Unknown objective ${objectiveId}`);
+          throw new Error(`Unknown objective ${event.data.objectiveId}`);
         }
-        this.objectiveFocuses.set(current.id, objectiveId);
+        this.objectiveFocuses.set(current.id, event.data.objectiveId);
         break;
       }
       case "objective.progress.appended": {
-        const data = event.data as { readonly objectiveId: ObjectiveId; readonly message: string };
-        const objective = this.objectives.get(data.objectiveId);
+        const objective = this.objectives.get(event.data.objectiveId);
         if (!objective || objective.rootRunId !== event.rootRunId) {
-          throw new Error(`Unknown objective ${data.objectiveId}`);
+          throw new Error(`Unknown objective ${event.data.objectiveId}`);
         }
-        this.objectiveProgress.set(data.objectiveId, [
-          ...(this.objectiveProgress.get(data.objectiveId) ?? []),
-          data.message,
+        this.objectiveProgress.set(event.data.objectiveId, [
+          ...(this.objectiveProgress.get(event.data.objectiveId) ?? []),
+          event.data.message,
         ]);
         break;
       }
-      default:
+      case "run.activity.changed":
+      case "run.fact.recorded":
+      case "run.input.amended":
+      case "run.output.rejected":
+      case "run.budget.suspended":
+      case "run.budget.resumed":
+      case "attention.received":
+      case "attention.routed":
+      case "attention.routing.failed":
+      case "attention.delivery.deferred":
+      case "attention.delivered":
+      case "attention.delivery.failed":
+      case "workflow.node.entered":
+      case "workflow.node.completed":
+      case "workflow.transition.taken":
+      case "workflow.checkpoint.saved":
         break;
+      default:
+        return assertNever(event);
     }
 
     this.runs.set(current.id, next);
@@ -327,16 +318,15 @@ export class RunProjection {
     const run = this.requireRun(event.runId);
 
     if (event.type === "run.activity.changed") {
-      this.setActivity(event, event.data as RunActivityChangedData);
+      this.setActivity(event, event.data);
     } else if (event.type === "run.created" || event.type === "run.state.changed") {
       this.setActivity(event, defaultActivity(run));
     } else if (event.type === "workflow.node.entered") {
-      const data = event.data as { readonly nodeId: string };
-      this.setActivity(event, workflowNodeActivity(data.nodeId));
+      this.setActivity(event, workflowNodeActivity(event.data.nodeId));
     }
 
     if (event.type === "run.fact.recorded") {
-      this.appendFact(event, event.data as RunFactRecordedData);
+      this.appendFact(event, event.data);
       return;
     }
 
@@ -374,20 +364,13 @@ export class RunProjection {
     });
   }
 
-  private terminal(
+  private terminal<TState extends TerminalState>(
     current: RunRecord,
     next: RunRecord,
-    state: "completed" | "failed" | "cancelled" | "orphaned",
-    data: { readonly outcome: Outcome<unknown> },
+    state: TState,
+    outcome: TerminalOutcomeByState[TState],
   ): RunRecord {
     assertRunTransition(current.state, state);
-    const expectedStatus =
-      state === "completed" ? "success" : state === "cancelled" ? "cancelled" : "failure";
-    if (data.outcome.status !== expectedStatus) {
-      throw new Error(
-        `Terminal outcome mismatch for ${current.id}: ${state} requires ${expectedStatus}`,
-      );
-    }
     const active = activeAttachedChildren(this.runs, current.id);
     if (active.length > 0) {
       throw new Error(
@@ -396,7 +379,7 @@ export class RunProjection {
           .join(", ")}`,
       );
     }
-    return { ...next, state, outcome: data.outcome };
+    return { ...next, state, outcome };
   }
 
   private fork(): RunProjection {
@@ -433,26 +416,22 @@ function derivedFact(event: DomainEvent, run: RunRecord): RunFactRecordedData | 
         ...(run.parentId ? { provenance: { childRunId: run.id } } : {}),
         reliability: "observed",
       };
-    case "workflow.node.entered": {
-      const data = event.data as { readonly nodeId: string };
+    case "workflow.node.entered":
       return {
         kind: "workflow-transition",
         source: "workflow",
-        summary: `Entered workflow node ${data.nodeId}`,
-        subject: data.nodeId,
+        summary: `Entered workflow node ${event.data.nodeId}`,
+        subject: event.data.nodeId,
         reliability: "observed",
       };
-    }
-    case "workflow.transition.taken": {
-      const data = event.data as { readonly from: string; readonly to: string };
+    case "workflow.transition.taken":
       return {
         kind: "workflow-transition",
         source: "workflow",
-        summary: `Transitioned ${data.from} → ${data.to}`,
-        subject: data.to,
+        summary: `Transitioned ${event.data.from} → ${event.data.to}`,
+        subject: event.data.to,
         reliability: "observed",
       };
-    }
     case "run.completed":
       return terminalFact(run, "Completed", false);
     case "run.failed":
@@ -461,8 +440,41 @@ function derivedFact(event: DomainEvent, run: RunRecord): RunFactRecordedData | 
       return terminalFact(run, "Cancelled", true);
     case "run.orphaned":
       return terminalFact(run, "Orphaned", true);
-    default:
+    case "run.state.changed":
+    case "run.profile.selected":
+    case "run.model.resolved":
+    case "run.model.observed":
+    case "run.pi.bound":
+    case "run.cycle.started":
+    case "run.cycle.settled":
+    case "run.turn.ended":
+    case "run.tool.started":
+    case "run.activity.changed":
+    case "run.fact.recorded":
+    case "run.input.amended":
+    case "run.output.submitted":
+    case "run.output.rejected":
+    case "run.budget.suspended":
+    case "run.budget.resumed":
+    case "run.reparented":
+    case "attention.received":
+    case "attention.routed":
+    case "attention.routing.failed":
+    case "attention.delivery.deferred":
+    case "attention.delivered":
+    case "attention.delivery.failed":
+    case "workflow.node.completed":
+    case "workflow.checkpoint.saved":
+    case "task.local.created":
+    case "task.local.state.changed":
+    case "task.progress.appended":
+    case "objective.created":
+    case "objective.state.changed":
+    case "objective.focus.changed":
+    case "objective.progress.appended":
       return undefined;
+    default:
+      return assertNever(event);
   }
 }
 
@@ -479,4 +491,8 @@ function terminalFact(run: RunRecord, summary: string, error: boolean): RunFactR
 function outcomeMessage(outcome: Outcome<unknown> | undefined): string | undefined {
   if (outcome?.status !== "failure") return undefined;
   return outcome.failure.message;
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled domain event: ${JSON.stringify(value)}`);
 }
