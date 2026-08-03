@@ -72,6 +72,9 @@ export class ProcessRtkTokenReductionBackend implements TokenReductionBackend {
       return { kind: "passthrough", backend: this.id, reason: "disabled" };
     }
     if (!command) return { kind: "passthrough", backend: this.id, reason: "empty-command" };
+    if (/\bRTK_TEE=0\b/.test(command)) {
+      return { kind: "passthrough", backend: this.id, reason: "disabled" };
+    }
     if (/^(?:env\s+[^\n]*\s+)?rtk\b/.test(command) || command.includes(LOSSLESS_MARKER)) {
       return { kind: "passthrough", backend: this.id, reason: "already-reduced" };
     }
@@ -107,6 +110,7 @@ export class ProcessRtkTokenReductionBackend implements TokenReductionBackend {
     const commandWithRecovery = [
       "env",
       LOSSLESS_MARKER,
+      "RTK_TEE=1",
       `RTK_TEE_DIR=${shellQuote(teeDirectory)}`,
       `XDG_CONFIG_HOME=${shellQuote(this.configDirectory())}`,
       rewritten,
@@ -171,7 +175,7 @@ export class ProcessRtkTokenReductionBackend implements TokenReductionBackend {
             "[tee]",
             "enabled = true",
             'mode = "always"',
-            "max_files = 8",
+            "max_files = 64",
             "max_file_size = 1073741824",
             "",
             "[tracking]",
