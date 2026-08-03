@@ -1,0 +1,55 @@
+name: Run workspace input fix
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: run-workspace-input-fix-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    if: github.head_ref == 'fix/workspace-selection-thinking-spacing' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 0
+          ref: fix/workspace-selection-thinking-spacing
+      - name: Apply staged typed workspace changes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from textwrap import dedent
+
+          source = Path('.github/workflows/apply-workspace-input-fix.yml').read_text()
+          marker = "python3 - <<'PY'\n"
+          script = source.split(marker, 1)[1].split('\n          PY\n', 1)[0]
+          exec(compile(dedent(script), 'workspace-input-fix.py', 'exec'))
+          PY
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+      - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71
+        with:
+          name: devenv
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
+      - name: Format repository changes
+        run: devenv tasks run maintenance:fix:format
+      - name: Commit implementation
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add modules
+          git commit -m "fix(workspace): refine selection and transcript controls"
+          git push origin HEAD:fix/workspace-selection-thinking-spacing
