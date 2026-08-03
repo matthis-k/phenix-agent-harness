@@ -86,9 +86,8 @@ export class TokenReductionService {
         estimatedTokensSaved: Math.ceil(savedBytes / 4),
         lossless: recovered.complete,
       };
-      let evidence;
-      try {
-        evidence = await this.evidence.captureToolResult({
+      const evidence = await this.evidence
+        .captureToolResult({
           runId: this.runId,
           toolName: input.toolName,
           toolCallId: input.toolCallId,
@@ -96,10 +95,10 @@ export class TokenReductionService {
           content: [{ type: "text" as const, text: recovered.content }],
           details: mergeDetails(input.details, reductionMetrics),
           isError: input.isError,
-        });
-      } catch {
-        return nonLosslessResult(input.details, preparation.backend, reducedContent);
-      }
+        })
+        .catch(() => undefined);
+      if (!evidence) return nonLosslessResult(input.details, preparation.backend, reducedContent);
+
       const metrics: TokenReductionMetrics = {
         ...reductionMetrics,
         evidenceId: evidence.id,
