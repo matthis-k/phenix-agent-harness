@@ -1,6 +1,13 @@
 import type { RunId } from "../shared.ts";
 
-export type PaneId = "transcript" | "editor" | "runs" | "objectives" | "files" | "facts";
+export type PaneId =
+  | "transcript"
+  | "editor"
+  | "runs"
+  | "objectives"
+  | "memory"
+  | "files"
+  | "facts";
 export type EffectId = string & { readonly __brand: "WorkspaceEffectId" };
 export type ViewId = string & { readonly __brand: "WorkspaceViewId" };
 
@@ -67,6 +74,7 @@ export function createInitialWorkspaceState(rootRunId: RunId): WorkspaceState {
       editor: paneState({ mode: "fixed", offset: 0 }),
       runs: paneState({ mode: "fixed", offset: 0 }, rootRunId),
       objectives: paneState({ mode: "fixed", offset: 0 }),
+      memory: paneState({ mode: "fixed", offset: 0 }),
       files: paneState({ mode: "fixed", offset: 0 }),
       facts: paneState({ mode: "fixed", offset: 0 }),
     },
