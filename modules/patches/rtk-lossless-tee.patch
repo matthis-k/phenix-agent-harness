@@ -6,7 +6,7 @@ index e366a31..e6af712 100644
      }
  }
  
-+fn phenix_lossless() -> bool {
++pub(crate) fn phenix_lossless() -> bool {
 +    std::env::var("PHENIX_RTK_LOSSLESS").ok().as_deref() == Some("1")
 +}
 +
@@ -35,3 +35,40 @@ index e366a31..e6af712 100644
          let boundary = raw
              .char_indices()
              .take_while(|(i, _)| *i < max_file_size)
+diff --git a/src/core/runner.rs b/src/core/runner.rs
+index e2a3ad5..db7c96e 100644
+--- a/src/core/runner.rs
++++ b/src/core/runner.rs
+@@ -106,6 +106,10 @@ where
+     let raw = &result.raw;
+     let raw_stdout = &result.raw_stdout;
+ 
++    if crate::core::tee::phenix_lossless() {
++        let _ = crate::core::tee::tee_raw(raw, cmd_label, exit_code);
++    }
++
+     if opts.skip_filter_on_failure && exit_code != 0 {
+         if !result.raw_stdout.trim().is_empty() {
+             print!("{}", result.raw_stdout);
+@@ -188,6 +192,10 @@ pub fn run(
+                 stream::run_streaming(&mut cmd, StdinMode::Null, FilterMode::Streaming(filter))
+                     .with_context(|| format!("Failed to run {}", tool_name))?;
+ 
++            if crate::core::tee::phenix_lossless() {
++                let _ = crate::core::tee::tee_raw(&result.raw, &cmd_label, result.exit_code);
++            }
++
+             if let Some(label) = opts.tee_label {
+                 if let Some(hint) =
+                     crate::core::tee::tee_and_hint(&result.raw, label, result.exit_code)
+@@ -210,6 +218,10 @@ pub fn run(
+                 stream::run_streaming(&mut cmd, StdinMode::Inherit, FilterMode::Passthrough)
+                     .with_context(|| format!("Failed to run {}", tool_name))?;
+ 
++            if crate::core::tee::phenix_lossless() {
++                let _ = crate::core::tee::tee_raw(&result.raw, &cmd_label, result.exit_code);
++            }
++
+             timer.track_passthrough(&cmd_label, &format!("rtk {} (passthrough)", cmd_label));
+             Ok(result.exit_code)
+         }
