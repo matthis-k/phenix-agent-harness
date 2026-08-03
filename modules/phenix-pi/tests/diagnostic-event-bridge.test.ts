@@ -8,7 +8,11 @@ import type {
   DiagnosticSummary,
   DiagnosticWrite,
 } from "../domain/diagnostics.ts";
-import type { DomainEvent } from "../domain/run/events.ts";
+import type {
+  DomainEvent,
+  DomainEventData,
+  DomainEventType,
+} from "../domain/run/events.ts";
 import { runId } from "../domain/shared.ts";
 import type { DiagnosticLog, DiagnosticLogListener } from "../ports/diagnostic-log.ts";
 
@@ -86,7 +90,13 @@ test("domain events map to stable model, workflow, and failure diagnostics", asy
       },
     }),
   );
-  await logDomainEvent(log, event("workflow.node.entered", { nodeId: "implement" }));
+  await logDomainEvent(
+    log,
+    event("workflow.node.entered", {
+      activationId: "activation-1",
+      nodeId: "implement",
+    }),
+  );
   await logDomainEvent(
     log,
     event("run.failed", {
@@ -122,7 +132,10 @@ test("domain events map to stable model, workflow, and failure diagnostics", asy
   assert.equal(log.writes[2]?.rootRunId, ROOT);
 });
 
-function event(type: DomainEvent["type"], data: unknown): DomainEvent {
+function event<TType extends DomainEventType>(
+  type: TType,
+  data: DomainEventData<TType>,
+): DomainEvent<TType> {
   return {
     eventId: `event-${type}`,
     rootRunId: ROOT,
@@ -133,5 +146,5 @@ function event(type: DomainEvent["type"], data: unknown): DomainEvent {
     timestamp: "2026-07-24T00:00:00.000Z",
     type,
     data,
-  };
+  } as DomainEvent<TType>;
 }
