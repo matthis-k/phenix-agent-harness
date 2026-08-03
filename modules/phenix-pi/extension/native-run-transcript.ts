@@ -66,6 +66,15 @@ export class NativeTranscriptComponent extends Container {
     return this.chunkValues;
   }
 
+  setThinkingVisible(visible: boolean): void {
+    for (const chunk of this.chunkValues) {
+      if (chunk.kind !== "assistant") continue;
+      if (chunk.component instanceof AssistantMessageComponent) {
+        chunk.component.setHideThinkingBlock(!visible);
+      }
+    }
+  }
+
   addChunk(chunk: NativeTranscriptChunk, spacer = false): void {
     if (spacer && this.chunkValues.length > 0) this.addChild(new Spacer(1));
     this.chunkValues.push(chunk);
@@ -76,7 +85,9 @@ export class NativeTranscriptComponent extends Container {
 export interface NativeRunTranscript {
   readonly component: Container & {
     readonly chunks?: readonly NativeTranscriptChunk[];
+    setThinkingVisible?(visible: boolean): void;
   };
+
   readonly sessionId: string;
   readonly sessionFile?: string;
 }

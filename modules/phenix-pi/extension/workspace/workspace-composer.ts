@@ -5,7 +5,7 @@ import { stripTranscriptAnsi } from "./transcript-selection.ts";
 
 const MINIMUM_EDITOR_ROWS = 1;
 const TRANSCRIPT_GAP_ROWS = 1;
-const STATUS_GAP_ROWS = 2;
+const STATUS_GAP_ROWS = 1;
 
 export interface WorkspaceComposerInput {
   readonly lines: readonly string[];
