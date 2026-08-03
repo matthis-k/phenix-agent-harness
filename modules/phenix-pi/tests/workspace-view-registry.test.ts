@@ -7,6 +7,7 @@ import type { RunSnapshot } from "../domain/run/model.ts";
 import type { ObservabilityTheme } from "../extension/observability-theme.ts";
 import { factsWorkspaceView } from "../extension/workspace/views/facts-view.ts";
 import { filesWorkspaceView } from "../extension/workspace/views/files-view.ts";
+import { memoryWorkspaceView } from "../extension/workspace/views/memory-view.ts";
 import { objectivesWorkspaceView } from "../extension/workspace/views/objectives-view.ts";
 import { runsWorkspaceView } from "../extension/workspace/views/runs-view.ts";
 import { WORKSPACE_VIEW_IDS } from "../extension/workspace/views/workspace-view.ts";
@@ -34,6 +35,7 @@ test("registers every independent workspace view in stable order", () => {
   );
   assert.equal(workspaceViewRegistry.get("runs"), runsWorkspaceView);
   assert.equal(workspaceViewRegistry.get("objectives"), objectivesWorkspaceView);
+  assert.equal(workspaceViewRegistry.get("memory"), memoryWorkspaceView);
   assert.equal(workspaceViewRegistry.get("files"), filesWorkspaceView);
   assert.equal(workspaceViewRegistry.get("facts"), factsWorkspaceView);
 });
@@ -45,6 +47,7 @@ test("rejects duplicate and incomplete workspace registries", () => {
         runsWorkspaceView,
         runsWorkspaceView,
         objectivesWorkspaceView,
+        memoryWorkspaceView,
         filesWorkspaceView,
         factsWorkspaceView,
       ]),
@@ -52,7 +55,12 @@ test("rejects duplicate and incomplete workspace registries", () => {
   );
   assert.throws(
     () =>
-      createWorkspaceViewRegistry([runsWorkspaceView, objectivesWorkspaceView, filesWorkspaceView]),
+      createWorkspaceViewRegistry([
+        runsWorkspaceView,
+        objectivesWorkspaceView,
+        memoryWorkspaceView,
+        filesWorkspaceView,
+      ]),
     /missing: facts/,
   );
 });
@@ -229,6 +237,27 @@ test("derives pane identity and row behavior exclusively from registered project
         },
       ],
     },
+    memory: {
+      rootRunId: "root",
+      evidence: [],
+      notes: [
+        {
+          id: "memory-new",
+          rootRunId: "root",
+          runId: "child",
+          objectiveIds: [],
+          kind: "decision",
+          status: "active",
+          retention: "must-retain",
+          reliability: "reported",
+          summary: "Use reversible evidence",
+          evidenceIds: [],
+          createdAt: "2026-07-28T11:30:00Z",
+          updatedAt: "2026-07-28T11:30:00Z",
+        },
+      ],
+      stats: { evidenceCount: 0, activeNoteCount: 1, storedBytes: 0 },
+    },
     rootTranscript: {},
   } as unknown as PhenixWorkspaceSnapshot;
 
@@ -237,6 +266,7 @@ test("derives pane identity and row behavior exclusively from registered project
     editor: [],
     runs: ["root", "child"],
     objectives: ["objective-main", "objective-child"],
+    memory: ["memory-new"],
     files: ["README.md"],
     facts: ["fact-new", "fact-file", "fact-old"],
   });
