@@ -12,6 +12,7 @@ import type { CaptureReducedToolEvidenceInput } from "../ports/token-reduction-e
 class FakeBackend implements TokenReductionBackend {
   readonly id = "fake";
   recovered = "complete raw output";
+  recoveryError = false;
   prepared?: PrepareTokenReductionInput;
   cleaned: string[] = [];
 
@@ -27,6 +28,7 @@ class FakeBackend implements TokenReductionBackend {
   }
 
   async recover() {
+    if (this.recoveryError) throw new Error("recovery unavailable");
     return this.recovered ? { content: this.recovered, complete: true } : undefined;
   }
 
@@ -107,6 +109,63 @@ test("fails open and marks a reduced result non-lossless when recovery is absent
   assert.equal(result.metrics.lossless, false);
   assert.equal(result.metrics.evidenceId, undefined);
   assert.match(JSON.stringify(result.details), /phenixTokenReduction/);
+  assert.deepEqual(backend.cleaned, ["call-2"]);
+});
+
+test("fails open when raw evidence persistence fails", async () => {
+  const backend = new FakeBackend();
+  const service = new TokenReductionService({
+    runId: runId("run-root"),
+    cwd: "/workspace",
+    backend,
+    evidence: {
+      async captureToolResult() {
+        throw new Error("memory unavailable");
+      },
+    },
+  });
+
+  await service.prepareBash("call-3", "git diff");
+  const result = await service.complete({
+    toolName: "bash",
+    toolCallId: "call-3",
+    input: { command: "fake git diff" },
+    content: [{ type: "text", text: "compact diff" }],
+    isError: false,
+  });
+
+  assert.ok(result);
+  assert.equal(result.metrics.lossless, false);
+  assert.equal(result.metrics.evidenceId, undefined);
+  assert.deepEqual(backend.cleaned, ["call-3"]);
+});
+
+test("fails open when backend recovery throws", async () => {
+  const backend = new FakeBackend();
+  backend.recoveryError = true;
+  const service = new TokenReductionService({
+    runId: runId("run-root"),
+    cwd: "/workspace",
+    backend,
+    evidence: {
+      async captureToolResult() {
+        throw new Error("must not capture");
+      },
+    },
+  });
+
+  await service.prepareBash("call-4", "cargo test");
+  const result = await service.complete({
+    toolName: "bash",
+    toolCallId: "call-4",
+    input: { command: "fake cargo test" },
+    content: [{ type: "text", text: "compact tests" }],
+    isError: false,
+  });
+
+  assert.ok(result);
+  assert.equal(result.metrics.lossless, false);
+  assert.deepEqual(backend.cleaned, ["call-4"]);
 });
 
 test("does nothing when no backend is configured", async () => {
@@ -120,14 +179,14 @@ test("does nothing when no backend is configured", async () => {
     },
   });
 
-  assert.deepEqual(await service.prepareBash("call-3", "git status"), {
+  assert.deepEqual(await service.prepareBash("call-5", "git status"), {
     kind: "passthrough",
     reason: "disabled",
   });
   assert.equal(
     await service.complete({
       toolName: "bash",
-      toolCallId: "call-3",
+      toolCallId: "call-5",
       input: {},
       content: [],
       isError: false,
