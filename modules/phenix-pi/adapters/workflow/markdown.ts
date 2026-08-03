@@ -120,7 +120,7 @@ export function compileWorkflowMarkdown(
     input,
     output,
     limits: {
-      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      timeoutMs: timeoutMs ?? 0,
       maxNodeRuns: markdownInteger(fields, "max-node-runs", "workflow", 1),
       maxParallelism: markdownInteger(fields, "max-parallelism", "workflow", 1),
     },
