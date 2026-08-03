@@ -25,6 +25,23 @@ const FOLD_RATIO = 0.5;
 const AGGRESSIVE_RATIO = 0.85;
 const RECENT_MESSAGE_TAIL = 10;
 
+export const MEMORY_MODEL_INSTRUCTIONS = [
+  "Phenix memory interface:",
+  "- `phenix_memory` is the model-facing interface to the current run's reversible memory projection.",
+  "- Use `action=search` before repeating prior investigation or when earlier requirements, decisions, findings, errors, tests, changes, preferences, procedures, project facts, or outcomes may matter.",
+  "- Search results and injected memory are compact indexes, not authoritative detail. Use `action=read` with an evidence ID before relying on omitted specifics or quoting exact output.",
+  "- Tool results and run outcomes are captured automatically. Do not create duplicate notes for routine execution output.",
+  "- Use `action=note` for durable knowledge that automatic capture cannot infer safely, and attach evidence IDs whenever available.",
+  "- Use `action=set_status` when a note becomes uncertain, superseded, invalidated, or active again; never silently preserve contradictory memory as current truth.",
+  "- Current user instructions and current repository state outrank recalled notes. Resolve conflicts explicitly and update memory validity when appropriate.",
+  "- Objective scope improves retrieval relevance but does not make objectives the canonical memory representation.",
+].join("\n");
+
+export function appendMemoryModelInstructions(systemPrompt: string): string {
+  if (systemPrompt.includes(MEMORY_MODEL_INSTRUCTIONS)) return systemPrompt;
+  return `${systemPrompt.trimEnd()}\n\n${MEMORY_MODEL_INSTRUCTIONS}`;
+}
+
 export interface MemorySessionBinding {
   readonly memory: MemoryService;
   readonly runId: RunId;
@@ -42,6 +59,10 @@ export function registerMemoryHooks(
   resolve: () => MemorySessionBinding | undefined,
 ): void {
   registerMemoryTool(pi, resolve);
+
+  pi.on("before_agent_start", (event) => ({
+    systemPrompt: appendMemoryModelInstructions(event.systemPrompt),
+  }));
 
   pi.on("tool_result", async (event) => {
     const binding = resolve();
@@ -81,8 +102,7 @@ function registerMemoryTool(
     label: "Phenix Memory",
     description:
       "Search compact typed memory, reopen exact immutable evidence, or record durable requirements, constraints, decisions, findings, preferences, procedures, and project facts. Tool results and execution outcomes are captured automatically. Use read when a compact note is insufficient; use set_status when knowledge is superseded, invalidated, uncertain, or active again.",
-    promptSnippet:
-      "Treat injected Phenix memory as a compact index, not source truth. Reopen exact evidence with phenix_memory action=read before relying on details omitted by a note. Record only durable knowledge with action=note; routine execution output is captured automatically.",
+    promptSnippet: MEMORY_MODEL_INSTRUCTIONS,
     parameters: Type.Object(
       {
         action: Type.Union([
