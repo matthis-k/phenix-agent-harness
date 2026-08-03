@@ -71,16 +71,11 @@ export class TokenReductionService {
     this.pending.delete(input.toolCallId);
 
     const reducedContent = sanitizeRecoveryHints(input.content);
-    const reducedBytes = encodedBytes(reducedContent);
     try {
-      let recovered;
-      try {
-        recovered = await backend.recover(preparation);
-      } catch {
-        recovered = undefined;
-      }
+      const recovered = await backend.recover(preparation).catch(() => undefined);
       if (!recovered) return nonLosslessResult(input.details, preparation.backend, reducedContent);
 
+      const reducedBytes = encodedBytes(reducedContent);
       const originalBytes = Buffer.byteLength(recovered.content, "utf8");
       const savedBytes = Math.max(0, originalBytes - reducedBytes);
       const reductionMetrics: TokenReductionMetrics = {
