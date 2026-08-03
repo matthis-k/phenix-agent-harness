@@ -17,19 +17,19 @@ test("domain events preserve their discriminator-specific payload", () => {
   assert.deepEqual(event.data.outcome.value, { accepted: true });
 });
 
-// @ts-expect-error A failed outcome cannot be paired with run.completed.
 const invalidCompletedEvent: PendingDomainEvent<"run.completed"> = {
   runId: RUN_ID,
   type: "run.completed",
   data: {
+    // @ts-expect-error A failed outcome cannot be paired with run.completed.
     outcome: failed({ code: "provider_failed", message: "lost", retryable: true }),
   },
 };
 
-// @ts-expect-error The discriminator determines the exact payload fields.
 const invalidToolEvent: PendingDomainEvent<"run.tool.started"> = {
   runId: RUN_ID,
   type: "run.tool.started",
+  // @ts-expect-error The discriminator determines the exact payload fields.
   data: { number: 1 },
 };
 
