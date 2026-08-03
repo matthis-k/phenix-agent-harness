@@ -149,6 +149,27 @@ function describe(event: DomainEvent): Description {
         message: "Typed run output rejected",
         fields: event.data as Readonly<Record<string, unknown>>,
       };
+    case "run.budget.suspended": {
+      const data = event.data as {
+        readonly failure?: { readonly code?: unknown; readonly message?: unknown };
+      } & Readonly<Record<string, unknown>>;
+      const code = typeof data.failure?.code === "string" ? data.failure.code : "budget_limit";
+      const reason =
+        typeof data.failure?.message === "string" ? `: ${data.failure.message}` : "";
+      return {
+        severity: "warning",
+        scope: "agent.budget.suspended",
+        message: `Agent session budget-suspended [${code}]${reason}`,
+        fields: data,
+      };
+    }
+    case "run.budget.resumed":
+      return {
+        severity: "info",
+        scope: "agent.budget.resumed",
+        message: "Agent session resumed with increased limits",
+        fields: event.data as Readonly<Record<string, unknown>>,
+      };
     case "run.completed":
       return terminalDescription("info", "run.lifecycle.completed", "Run completed", event.data);
     case "run.failed":
