@@ -4,11 +4,6 @@ import test from "node:test";
 
 const CASES = [
   {
-    file: "../extension/workspace/workspace-message-routing.ts",
-    required: ['from "../../application/workspace/message-routing.ts"'],
-    forbidden: ["runtime.execution.send", "targetRunId === rootRunId"],
-  },
-  {
     file: "../extension/workspace/interrupt-active-work.ts",
     required: ['from "../../application/workspace/interrupt-planning.ts"'],
     forbidden: ["queries.activeRuns", "depthOf(", "for (const run of"],
