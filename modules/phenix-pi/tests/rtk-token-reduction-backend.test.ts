@@ -43,7 +43,8 @@ test("accepts RTK advisory rewrites and scopes lossless recovery per tool call",
     preparation.recoveryKey,
   );
   await mkdir(directory, { recursive: true });
-  await writeFile(path.join(directory, "001.log"), "complete command output");
+  await writeFile(path.join(directory, "001-complete.log"), "complete command output");
+  await writeFile(path.join(directory, "999-partial.log"), "partial");
   assert.deepEqual(await backend.recover(preparation), {
     content: "complete command output",
     complete: true,
