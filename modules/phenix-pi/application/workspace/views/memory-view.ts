@@ -1,5 +1,9 @@
 import type { MemoryNote, MemoryStatus } from "../../../domain/memory/model.ts";
-import { textSpan, type WorkspaceRowPresentation, type WorkspaceTextTone } from "../presentation.ts";
+import {
+  textSpan,
+  type WorkspaceRowPresentation,
+  type WorkspaceTextTone,
+} from "../presentation.ts";
 import {
   defineWorkspaceView,
   type WorkspaceViewSnapshot,
@@ -41,7 +45,9 @@ export const memoryWorkspaceView = defineWorkspaceView<MemoryNote>({
               value.objectiveIds.length > 0
                 ? `objectives ${value.objectiveIds.length}`
                 : undefined,
-              value.evidenceIds.length > 0 ? `evidence ${value.evidenceIds.join(",")}` : undefined,
+              value.evidenceIds.length > 0
+                ? `evidence ${value.evidenceIds.join(",")}`
+                : undefined,
               `id ${value.id}`,
             ]
               .filter((item): item is string => Boolean(item))
@@ -54,8 +60,16 @@ export const memoryWorkspaceView = defineWorkspaceView<MemoryNote>({
             textSpan(value.status, { tone: memoryStatusTone(value.status), strong: true }),
             textSpan(" "),
             textSpan(
-              truncateWorkspaceText(detail, Math.max(8, width - prefix.length - value.status.length - 3)),
-              { tone: value.status === "invalidated" || value.status === "superseded" ? "muted" : "text" },
+              truncateWorkspaceText(
+                detail,
+                Math.max(8, width - prefix.length - value.status.length - 3),
+              ),
+              {
+                tone:
+                  value.status === "invalidated" || value.status === "superseded"
+                    ? "muted"
+                    : "text",
+              },
             ),
           ],
           muted: value.status === "invalidated" || value.status === "superseded",
