@@ -34,6 +34,7 @@ const EMPTY_ITEM_INDEX: WorkspaceItemIndex = {
   editor: [],
   runs: [],
   objectives: [],
+  memory: [],
   files: [],
   facts: [],
 };
