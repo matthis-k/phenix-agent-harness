@@ -1,8 +1,23 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionFactory,
+  ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 
-import type { RunId } from "../../domain/shared.ts";
 import type { MemoryService } from "../../application/memory-service.ts";
+import {
+  evidenceId,
+  MEMORY_KINDS,
+  memoryNoteId,
+  type MemoryKind,
+  type MemoryReliability,
+  type MemoryRetention,
+  type MemoryStatus,
+  type WorkingMemoryProjection,
+} from "../../domain/memory/model.ts";
+import type { RunId } from "../../domain/shared.ts";
 
 const MEMORY_CONTEXT_TYPE = "phenix:memory-context";
 const DEFAULT_CONTEXT_WINDOW = 128_000;
@@ -27,9 +42,11 @@ export function registerMemoryHooks(
   pi: ExtensionAPI,
   resolve: () => MemorySessionBinding | undefined,
 ): void {
+  registerMemoryTool(pi, resolve);
+
   pi.on("tool_result", async (event) => {
     const binding = resolve();
-    if (!binding) return;
+    if (!binding || event.toolName === "phenix_memory") return;
     await binding.memory.captureToolResult({
       runId: binding.runId,
       toolName: event.toolName,
@@ -56,6 +73,161 @@ export function registerMemoryHooks(
   });
 }
 
+function registerMemoryTool(
+  pi: ExtensionAPI,
+  resolve: () => MemorySessionBinding | undefined,
+): void {
+  pi.registerTool({
+    name: "phenix_memory",
+    label: "Phenix Memory",
+    description:
+      "Search compact typed memory, reopen exact immutable evidence, or record durable requirements, constraints, decisions, findings, preferences, procedures, and project facts. Tool results and execution outcomes are captured automatically. Use read when a compact note is insufficient; use set_status when knowledge is superseded, invalidated, uncertain, or active again.",
+    promptSnippet:
+      "Treat injected Phenix memory as a compact index, not source truth. Reopen exact evidence with phenix_memory action=read before relying on details omitted by a note. Record only durable knowledge with action=note; routine execution output is captured automatically.",
+    parameters: Type.Object(
+      {
+        action: Type.Union([
+          Type.Literal("snapshot"),
+          Type.Literal("search"),
+          Type.Literal("read"),
+          Type.Literal("note"),
+          Type.Literal("set_status"),
+        ]),
+        evidenceId: Type.Optional(Type.String()),
+        noteId: Type.Optional(Type.String()),
+        query: Type.Optional(Type.String()),
+        kind: Type.Optional(Type.Union(MEMORY_KINDS.map((kind) => Type.Literal(kind)))),
+        status: Type.Optional(
+          Type.Union([
+            Type.Literal("active"),
+            Type.Literal("superseded"),
+            Type.Literal("invalidated"),
+            Type.Literal("uncertain"),
+          ]),
+        ),
+        summary: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000 })),
+        subject: Type.Optional(Type.String({ maxLength: 500 })),
+        evidenceIds: Type.Optional(Type.Array(Type.String(), { maxItems: 32 })),
+        retention: Type.Optional(
+          Type.Union([
+            Type.Literal("must-retain"),
+            Type.Literal("structured-lossless"),
+            Type.Literal("summary-sufficient"),
+            Type.Literal("ephemeral"),
+          ]),
+        ),
+        reliability: Type.Optional(
+          Type.Union([
+            Type.Literal("observed"),
+            Type.Literal("derived"),
+            Type.Literal("reported"),
+          ]),
+        ),
+        supersedes: Type.Optional(Type.Array(Type.String(), { maxItems: 32 })),
+        offset: Type.Optional(Type.Integer({ minimum: 0 })),
+        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100_000 })),
+      },
+      { additionalProperties: false },
+    ),
+    async execute(_toolCallId: string, raw: unknown) {
+      const binding = resolve();
+      if (!binding) throw new Error("Phenix memory is not bound to this session");
+      const params = raw as {
+        readonly action: "snapshot" | "search" | "read" | "note" | "set_status";
+        readonly evidenceId?: string;
+        readonly noteId?: string;
+        readonly query?: string;
+        readonly kind?: MemoryKind;
+        readonly status?: MemoryStatus;
+        readonly summary?: string;
+        readonly subject?: string;
+        readonly evidenceIds?: string[];
+        readonly retention?: MemoryRetention;
+        readonly reliability?: MemoryReliability;
+        readonly supersedes?: string[];
+        readonly offset?: number;
+        readonly limit?: number;
+      };
+      const value = await executeMemoryAction(binding, params);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(value) }],
+        details: value,
+      };
+    },
+  } as unknown as ToolDefinition);
+}
+
+async function executeMemoryAction(
+  binding: MemorySessionBinding,
+  params: {
+    readonly action: "snapshot" | "search" | "read" | "note" | "set_status";
+    readonly evidenceId?: string;
+    readonly noteId?: string;
+    readonly query?: string;
+    readonly kind?: MemoryKind;
+    readonly status?: MemoryStatus;
+    readonly summary?: string;
+    readonly subject?: string;
+    readonly evidenceIds?: string[];
+    readonly retention?: MemoryRetention;
+    readonly reliability?: MemoryReliability;
+    readonly supersedes?: string[];
+    readonly offset?: number;
+    readonly limit?: number;
+  },
+): Promise<unknown> {
+  const { memory, runId } = binding;
+  switch (params.action) {
+    case "snapshot":
+      return memory.snapshot((await memory.workingSet(runId, 1)).rootRunId);
+    case "search":
+      return memory.search({
+        runId,
+        ...(params.query ? { query: params.query } : {}),
+        ...(params.kind ? { kind: params.kind } : {}),
+        ...(params.status ? { status: params.status } : {}),
+        ...(params.limit ? { limit: Math.min(100, params.limit) } : {}),
+      });
+    case "read": {
+      if (!params.evidenceId) throw new Error("read requires evidenceId");
+      const value = await memory.read(runId, evidenceId(params.evidenceId));
+      const offset = params.offset ?? 0;
+      const limit = params.limit ?? 20_000;
+      const content = value.content.slice(offset, offset + limit);
+      return {
+        evidence: value.evidence,
+        content,
+        offset,
+        returnedBytes: Buffer.byteLength(content, "utf8"),
+        totalBytes: Buffer.byteLength(value.content, "utf8"),
+        truncated: offset + content.length < value.content.length,
+      };
+    }
+    case "note":
+      if (!params.kind) throw new Error("note requires kind");
+      if (!params.summary?.trim()) throw new Error("note requires summary");
+      return memory.recordNote({
+        runId,
+        kind: params.kind,
+        summary: params.summary,
+        ...(params.subject ? { subject: params.subject } : {}),
+        ...(params.evidenceIds
+          ? { evidenceIds: params.evidenceIds.map((id) => evidenceId(id)) }
+          : {}),
+        ...(params.retention ? { retention: params.retention } : {}),
+        ...(params.reliability ? { reliability: params.reliability } : {}),
+        ...(params.status ? { status: params.status } : {}),
+        ...(params.supersedes
+          ? { supersedes: params.supersedes.map((id) => memoryNoteId(id)) }
+          : {}),
+      });
+    case "set_status":
+      if (!params.noteId) throw new Error("set_status requires noteId");
+      if (!params.status) throw new Error("set_status requires status");
+      return memory.setStatus(runId, memoryNoteId(params.noteId), params.status);
+  }
+}
+
 export async function assembleMemoryContext(
   memory: MemoryService,
   runId: RunId,
@@ -73,8 +245,14 @@ export async function assembleMemoryContext(
     transformed = await foldToolResults(memory, runId, transformed, ratio >= AGGRESSIVE_RATIO);
   }
 
-  if (ratio >= AGGRESSIVE_RATIO && estimateMessages(transformed) > contextWindow * AGGRESSIVE_RATIO) {
-    transformed = pruneOldTurns(transformed, Math.floor(contextWindow * AGGRESSIVE_TARGET_RATIO));
+  if (
+    ratio >= AGGRESSIVE_RATIO &&
+    estimateMessages(transformed) > contextWindow * AGGRESSIVE_RATIO
+  ) {
+    transformed = pruneOldTurns(
+      transformed,
+      Math.floor(contextWindow * AGGRESSIVE_TARGET_RATIO),
+    );
   }
 
   if (!canvas) return transformed;
@@ -140,9 +318,7 @@ function pruneOldTurns(messages: readonly AgentMessage[], targetTokens: number):
   return dedupeMessageIdentity(firstUser ? [firstUser, ...tail] : tail);
 }
 
-function renderWorkingMemory(
-  workingSet: Awaited<ReturnType<MemoryService["workingSet"]>>,
-): string | undefined {
+function renderWorkingMemory(workingSet: WorkingMemoryProjection): string | undefined {
   if (workingSet.objectivePath.length === 0 && workingSet.notes.length === 0) return undefined;
   const lines = [
     "<phenix-memory>",
@@ -188,7 +364,10 @@ function latestUserMessageIndex(messages: readonly AgentMessage[]): number {
 function isToolResultMessage(
   message: AgentMessage,
 ): message is AgentMessage & { readonly role: "toolResult"; readonly toolCallId: string } {
-  return message.role === "toolResult" && typeof (message as { toolCallId?: unknown }).toolCallId === "string";
+  return (
+    message.role === "toolResult" &&
+    typeof (message as { toolCallId?: unknown }).toolCallId === "string"
+  );
 }
 
 function isMemoryContextMessage(message: AgentMessage): boolean {
