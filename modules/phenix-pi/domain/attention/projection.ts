@@ -1,9 +1,6 @@
 import type { DomainEvent } from "../run/events.ts";
 import type { RunId } from "../shared.ts";
 import type {
-  AttentionDeliveredData,
-  AttentionDeliveryDeferredData,
-  AttentionDeliveryFailedData,
   AttentionEnvelope,
   AttentionId,
   AttentionRoutedData,
@@ -42,10 +39,22 @@ export interface PendingAttentionDelivery {
   readonly target: AttentionTarget;
 }
 
+type AttentionEvent = Extract<DomainEvent, { readonly type: `attention.${string}` }>;
+
+const ATTENTION_EVENT_TYPES = {
+  "attention.received": true,
+  "attention.routed": true,
+  "attention.routing.failed": true,
+  "attention.delivery.deferred": true,
+  "attention.delivered": true,
+  "attention.delivery.failed": true,
+} as const satisfies Record<AttentionEvent["type"], true>;
+
 export class AttentionProjection {
   readonly records = new Map<AttentionId, AttentionRecord>();
 
   apply(event: DomainEvent): void {
+    if (!isAttentionEvent(event)) return;
     switch (event.type) {
       case "attention.received":
         this.applyReceived(event);
@@ -66,7 +75,7 @@ export class AttentionProjection {
         this.applyDeliveryFailed(event);
         return;
       default:
-        return;
+        return assertNever(event);
     }
   }
 
@@ -92,8 +101,8 @@ export class AttentionProjection {
     return pending;
   }
 
-  private applyReceived(event: DomainEvent): void {
-    const envelope = (event.data as { readonly envelope: AttentionEnvelope }).envelope;
+  private applyReceived(event: DomainEvent<"attention.received">): void {
+    const { envelope } = event.data;
     if (event.runId !== event.rootRunId || envelope.rootRunId !== event.rootRunId) {
       throw new Error(`Attention ${envelope.id} must be recorded on its root run`);
     }
@@ -103,8 +112,8 @@ export class AttentionProjection {
     this.records.set(envelope.id, { envelope, deliveries: new Map() });
   }
 
-  private applyRouted(event: DomainEvent): void {
-    const data = event.data as AttentionRoutedData;
+  private applyRouted(event: DomainEvent<"attention.routed">): void {
+    const data = event.data;
     const record = this.require(data.attentionId, event.rootRunId);
     if (record.route || record.routingFailure) {
       throw new Error(`Attention ${data.attentionId} already has a routing outcome`);
@@ -119,8 +128,8 @@ export class AttentionProjection {
     this.records.set(data.attentionId, { ...record, route: data });
   }
 
-  private applyRoutingFailed(event: DomainEvent): void {
-    const data = event.data as AttentionRoutingFailedData;
+  private applyRoutingFailed(event: DomainEvent<"attention.routing.failed">): void {
+    const data = event.data;
     const record = this.require(data.attentionId, event.rootRunId);
     if (record.route || record.routingFailure) {
       throw new Error(`Attention ${data.attentionId} already has a routing outcome`);
@@ -128,8 +137,8 @@ export class AttentionProjection {
     this.records.set(data.attentionId, { ...record, routingFailure: data });
   }
 
-  private applyDeferred(event: DomainEvent): void {
-    const data = event.data as AttentionDeliveryDeferredData;
+  private applyDeferred(event: DomainEvent<"attention.delivery.deferred">): void {
+    const data = event.data;
     const record = this.requireRoutedTarget(data.attentionId, event.rootRunId, data.target);
     this.assertDeliveryOpen(data.attentionId, record, data.target.runId);
     const deliveries = new Map(record.deliveries);
@@ -141,8 +150,8 @@ export class AttentionProjection {
     this.records.set(data.attentionId, { ...record, deliveries });
   }
 
-  private applyDelivered(event: DomainEvent): void {
-    const data = event.data as AttentionDeliveredData;
+  private applyDelivered(event: DomainEvent<"attention.delivered">): void {
+    const data = event.data;
     const record = this.requireRoutedTarget(data.attentionId, event.rootRunId, data.target);
     this.assertDeliveryOpen(data.attentionId, record, data.target.runId);
     const deliveries = new Map(record.deliveries);
@@ -154,8 +163,8 @@ export class AttentionProjection {
     this.records.set(data.attentionId, { ...record, deliveries });
   }
 
-  private applyDeliveryFailed(event: DomainEvent): void {
-    const data = event.data as AttentionDeliveryFailedData;
+  private applyDeliveryFailed(event: DomainEvent<"attention.delivery.failed">): void {
+    const data = event.data;
     const record = this.requireRoutedTarget(data.attentionId, event.rootRunId, data.target);
     this.assertDeliveryOpen(data.attentionId, record, data.target.runId);
     const deliveries = new Map(record.deliveries);
@@ -212,4 +221,12 @@ export class AttentionProjection {
     }
     return projection;
   }
+}
+
+function isAttentionEvent(event: DomainEvent): event is AttentionEvent {
+  return event.type in ATTENTION_EVENT_TYPES;
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled attention event: ${JSON.stringify(value)}`);
 }
