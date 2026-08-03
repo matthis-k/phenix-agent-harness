@@ -7,8 +7,8 @@ import test from "node:test";
 import { JsonlMemoryRepository } from "../adapters/persistence/jsonl-memory-repository.ts";
 import {
   type EvidenceRecord,
-  type MemoryNote,
   evidenceId,
+  type MemoryNote,
   memoryNoteId,
 } from "../domain/memory/model.ts";
 import type { RunId } from "../domain/shared.ts";

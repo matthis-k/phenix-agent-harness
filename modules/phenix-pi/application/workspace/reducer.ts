@@ -28,13 +28,7 @@ const PANE_IDS: readonly PaneId[] = [
   "files",
   "facts",
 ];
-const COLLAPSIBLE_PANES = new Set<PaneId>([
-  "runs",
-  "objectives",
-  "memory",
-  "files",
-  "facts",
-]);
+const COLLAPSIBLE_PANES = new Set<PaneId>(["runs", "objectives", "memory", "files", "facts"]);
 
 export function reduceWorkspace<TSnapshot>(
   state: WorkspaceState,

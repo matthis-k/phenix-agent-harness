@@ -42,12 +42,8 @@ export const memoryWorkspaceView = defineWorkspaceView<MemoryNote>({
         const detail = expanded
           ? [
               value.subject ? `subject ${value.subject}` : undefined,
-              value.objectiveIds.length > 0
-                ? `objectives ${value.objectiveIds.length}`
-                : undefined,
-              value.evidenceIds.length > 0
-                ? `evidence ${value.evidenceIds.join(",")}`
-                : undefined,
+              value.objectiveIds.length > 0 ? `objectives ${value.objectiveIds.length}` : undefined,
+              value.evidenceIds.length > 0 ? `evidence ${value.evidenceIds.join(",")}` : undefined,
               `id ${value.id}`,
             ]
               .filter((item): item is string => Boolean(item))

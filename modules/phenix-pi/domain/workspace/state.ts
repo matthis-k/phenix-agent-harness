@@ -1,13 +1,6 @@
 import type { RunId } from "../shared.ts";
 
-export type PaneId =
-  | "transcript"
-  | "editor"
-  | "runs"
-  | "objectives"
-  | "memory"
-  | "files"
-  | "facts";
+export type PaneId = "transcript" | "editor" | "runs" | "objectives" | "memory" | "files" | "facts";
 export type EffectId = string & { readonly __brand: "WorkspaceEffectId" };
 export type ViewId = string & { readonly __brand: "WorkspaceViewId" };
 

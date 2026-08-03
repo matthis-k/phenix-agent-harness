@@ -1,14 +1,14 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 import { assembleMemoryContext } from "../adapters/pi-sdk/memory-session-extension.ts";
 import type { MemoryService } from "../application/memory-service.ts";
 import {
   type EvidenceRecord,
-  type WorkingMemoryProjection,
   evidenceId,
   memoryNoteId,
+  type WorkingMemoryProjection,
 } from "../domain/memory/model.ts";
 import type { RunId } from "../domain/shared.ts";
 

@@ -1,18 +1,18 @@
 import { createHash } from "node:crypto";
 
 import {
-  evidenceId,
   type EvidenceId,
   type EvidenceRecord,
   type EvidenceSource,
+  evidenceId,
   type MemoryKind,
   type MemoryNote,
-  memoryNoteId,
   type MemoryNoteId,
   type MemoryReliability,
   type MemoryRetention,
   type MemorySnapshot,
   type MemoryStatus,
+  memoryNoteId,
   type WorkingMemoryProjection,
 } from "../domain/memory/model.ts";
 import { focusedObjectiveId } from "../domain/objective/projection.ts";
@@ -471,9 +471,11 @@ function classifyToolResult(input: CaptureToolResultInput): {
   if (input.toolName === "bash" || input.toolName === "nix_shell") {
     const command = stringField(record, "command");
     return {
-      kind: command && /(?:^|\s)(?:test|check|pytest|vitest|jest|cargo test|flake check)(?:\s|$)/i.test(command)
-        ? "test-result"
-        : "observation",
+      kind:
+        command &&
+        /(?:^|\s)(?:test|check|pytest|vitest|jest|cargo test|flake check)(?:\s|$)/i.test(command)
+          ? "test-result"
+          : "observation",
       retention: "structured-lossless",
       subject: command,
     };

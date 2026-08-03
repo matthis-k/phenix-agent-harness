@@ -5,13 +5,13 @@ import { evidenceId, type MemoryNote } from "../domain/memory/model.ts";
 import { MemoryInspector } from "./memory-inspector.ts";
 import type { ObservabilityTheme } from "./observability-theme.ts";
 import {
-  subscribeWorkspaceRuntime,
-  type WorkspaceRuntimeBinding,
-} from "./workspace-runtime-binding.ts";
-import {
   WorkspaceSelectDialog,
   type WorkspaceSelectDialogItem,
 } from "./workspace/workspace-select-dialog.ts";
+import {
+  subscribeWorkspaceRuntime,
+  type WorkspaceRuntimeBinding,
+} from "./workspace-runtime-binding.ts";
 
 export default function registerMemoryExtension(pi: ExtensionAPI): void {
   let binding: WorkspaceRuntimeBinding | undefined;
@@ -161,9 +161,7 @@ async function formatMemoryNote(
 }
 
 function formatEvidence(
-  evidence: Awaited<
-    ReturnType<WorkspaceRuntimeBinding["runtime"]["memory"]["read"]>
-  >["evidence"],
+  evidence: Awaited<ReturnType<WorkspaceRuntimeBinding["runtime"]["memory"]["read"]>>["evidence"],
   content: string,
 ): string {
   return [

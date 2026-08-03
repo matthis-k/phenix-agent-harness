@@ -139,9 +139,7 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
     await resourceLoader.reload();
     const modelRuntime = await this.createModelRuntime();
     const customTools = [
-      ...spec.customTools
-        .filter((tool) => !stock || tool.name !== "phenix_progress")
-        .map(toPiTool),
+      ...spec.customTools.filter((tool) => !stock || tool.name !== "phenix_progress").map(toPiTool),
       ...(!stock && spec.tools.includes("nix_shell") ? [createNixShellTool(spec.cwd)] : []),
     ] as ToolDefinition[];
     const { session } = await createAgentSession({

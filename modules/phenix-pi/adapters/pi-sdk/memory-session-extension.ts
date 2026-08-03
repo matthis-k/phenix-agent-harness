@@ -10,11 +10,11 @@ import type { MemoryService } from "../../application/memory-service.ts";
 import {
   evidenceId,
   MEMORY_KINDS,
-  memoryNoteId,
   type MemoryKind,
   type MemoryReliability,
   type MemoryRetention,
   type MemoryStatus,
+  memoryNoteId,
   type WorkingMemoryProjection,
 } from "../../domain/memory/model.ts";
 import type { RunId } from "../../domain/shared.ts";
@@ -116,11 +116,7 @@ function registerMemoryTool(
           ]),
         ),
         reliability: Type.Optional(
-          Type.Union([
-            Type.Literal("observed"),
-            Type.Literal("derived"),
-            Type.Literal("reported"),
-          ]),
+          Type.Union([Type.Literal("observed"), Type.Literal("derived"), Type.Literal("reported")]),
         ),
         supersedes: Type.Optional(Type.Array(Type.String(), { maxItems: 32 })),
         offset: Type.Optional(Type.Integer({ minimum: 0 })),
@@ -307,7 +303,8 @@ function renderWorkingMemory(workingSet: WorkingMemoryProjection): string | unde
   if (workingSet.notes.length > 0) {
     lines.push("Active memory:");
     for (const note of workingSet.notes) {
-      const references = note.evidenceIds.length > 0 ? ` evidence=${note.evidenceIds.join(",")}` : "";
+      const references =
+        note.evidenceIds.length > 0 ? ` evidence=${note.evidenceIds.join(",")}` : "";
       lines.push(
         `- ${note.id} [${note.kind}/${note.status}/${note.reliability}] ${note.summary}${references}`,
       );
