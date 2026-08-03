@@ -63,12 +63,12 @@ export class MemoryInspector implements Component, Focusable {
       this.tui.requestRender();
       return;
     }
-    if (this.keybindings.matches(data, "tui.select.pageUp") || matchesKey(data, "pageup")) {
+    if (this.keybindings.matches(data, "tui.select.pageUp")) {
       this.offset = Math.max(0, this.offset - page);
       this.tui.requestRender();
       return;
     }
-    if (this.keybindings.matches(data, "tui.select.pageDown") || matchesKey(data, "pagedown")) {
+    if (this.keybindings.matches(data, "tui.select.pageDown")) {
       this.offset += page;
       this.tui.requestRender();
       return;
@@ -91,27 +91,31 @@ export class MemoryInspector implements Component, Focusable {
     const maxOffset = Math.max(0, wrapped.length - viewport);
     const offset = Math.min(this.offset, maxOffset);
     this.offset = offset;
-    const visible = wrapped.slice(offset, offset + viewport).map((line) => truncateToWidth(line, innerWidth));
+    const visible = wrapped
+      .slice(offset, offset + viewport)
+      .map((line) => truncateToWidth(line, innerWidth));
     while (visible.length < viewport) visible.push("");
     const status = `${offset + 1}-${Math.min(wrapped.length, offset + viewport)}/${Math.max(1, wrapped.length)}`;
-    return renderPanel({
-      lines: [
-        ...visible,
-        `${color(this.theme, "dim", "↑↓/PgUp/PgDn scroll · Enter/Esc/q close")} ${color(
-          this.theme,
-          "muted",
-          status,
-        )}`,
-      ],
-      width,
-      height: viewport + 2,
-      title: ` ${strong(this.theme, this.title)}`,
-      paddingX: 1,
-      style: {
-        surface: (line) => surface(this.theme, "customMessageBg", line),
-        title: (line) => surface(this.theme, "selectedBg", line),
-      },
-    }).lines;
+    return [
+      ...renderPanel({
+        lines: [
+          ...visible,
+          `${color(this.theme, "dim", "↑↓/PgUp/PgDn scroll · Enter/Esc/q close")} ${color(
+            this.theme,
+            "muted",
+            status,
+          )}`,
+        ],
+        width,
+        height: viewport + 2,
+        title: ` ${strong(this.theme, this.title)}`,
+        paddingX: 1,
+        style: {
+          surface: (line) => surface(this.theme, "customMessageBg", line),
+          title: (line) => surface(this.theme, "selectedBg", line),
+        },
+      }).lines,
+    ];
   }
 
   private viewportHeight(): number {
