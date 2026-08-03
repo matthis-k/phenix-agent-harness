@@ -9,9 +9,6 @@
       phenixRtk = pkgs.rtk.overrideAttrs (oldAttrs: {
         pname = "phenix-rtk";
         patches = (oldAttrs.patches or [ ]) ++ [ ./patches/rtk-lossless-tee.patch ];
-        # The patch intentionally changes the upstream small-output and
-        # truncation semantics. Phenix owns focused integration tests instead.
-        doCheck = false;
         meta = oldAttrs.meta // {
           description = "RTK backend with lossless Phenix evidence capture";
         };
