@@ -68,26 +68,21 @@ export class ExecutionStore {
         const revision = currentRevision + 1;
         revisions.set(candidate.runId, revision);
         const existing = this.projection.runs.get(candidate.runId);
-        unsequenced.push({
-          eventId,
-          rootRunId,
-          runId: candidate.runId,
-          ...((candidate.parentRunId ?? existing?.parentId)
-            ? { parentRunId: candidate.parentRunId ?? existing?.parentId }
-            : {}),
-          revision,
-          timestamp: this.clock.now(),
-          type: candidate.type,
-          data: candidate.data,
-        });
+        const parentRunId = candidate.parentRunId ?? existing?.parentId;
+        unsequenced.push(
+          unsequence(candidate, {
+            eventId,
+            rootRunId,
+            revision,
+            timestamp: this.clock.now(),
+            ...(parentRunId ? { parentRunId } : {}),
+          }),
+        );
       }
 
       if (unsequenced.length === 0) return [];
       const expected = this.projection.rootSequences.get(rootRunId) ?? 0;
-      const staged = unsequenced.map((event, index) => ({
-        ...event,
-        sequence: expected + index + 1,
-      }));
+      const staged = unsequenced.map((event, index) => sequence(event, expected + index + 1));
       this.projection.assertApplicable(staged);
       this.attention.assertApplicable(staged);
       const events = await this.ledger.append(rootRunId, expected, unsequenced);
@@ -113,4 +108,24 @@ export class ExecutionStore {
     this.projection.apply(event);
     this.attention.apply(event);
   }
+}
+
+function unsequence(
+  event: PendingDomainEvent,
+  metadata: {
+    readonly eventId: string;
+    readonly rootRunId: RunId;
+    readonly parentRunId?: RunId;
+    readonly revision: number;
+    readonly timestamp: string;
+  },
+): UnsequencedDomainEvent {
+  return {
+    ...event,
+    ...metadata,
+  };
+}
+
+function sequence(event: UnsequencedDomainEvent, sequence: number): DomainEvent {
+  return { ...event, sequence };
 }
