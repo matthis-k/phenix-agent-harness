@@ -11,10 +11,7 @@ import type {
 } from "../domain/memory/model.ts";
 import type { RunId } from "../domain/shared.ts";
 import type { Clock, IdGenerator } from "../ports/clock.ts";
-import type {
-  MemoryRepository,
-  PersistedMemoryState,
-} from "../ports/memory-repository.ts";
+import type { MemoryRepository, PersistedMemoryState } from "../ports/memory-repository.ts";
 
 const ROOT = "root-memory-service" as RunId;
 const RUN_A = "run-a" as RunId;

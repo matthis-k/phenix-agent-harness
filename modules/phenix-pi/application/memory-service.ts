@@ -104,7 +104,7 @@ export class MemoryService {
     const rootRunId = this.store.projection.rootOf(input.runId);
     return this.serial.run(rootRunId, async () => {
       const state = await this.ensureLoaded(rootRunId);
-      const existingId = state.evidenceByToolCall.get(input.toolCallId);
+      const existingId = state.evidenceByToolCall.get(toolCallKey(input.runId, input.toolCallId));
       const existing = existingId ? state.evidence.get(existingId) : undefined;
       if (existing) return existing;
 
@@ -129,7 +129,7 @@ export class MemoryService {
         mediaType: "application/json",
         preview: summary,
       });
-      state.evidenceByToolCall.set(input.toolCallId, evidence.id);
+      state.evidenceByToolCall.set(toolCallKey(input.runId, input.toolCallId), evidence.id);
 
       if (input.toolName !== "phenix_progress") {
         const classification = classifyToolResult(input);
@@ -273,7 +273,7 @@ export class MemoryService {
   async evidenceForToolCall(runId: RunId, toolCallId: string): Promise<EvidenceRecord | undefined> {
     const rootRunId = this.store.projection.rootOf(runId);
     const state = await this.ensureLoaded(rootRunId);
-    const id = state.evidenceByToolCall.get(toolCallId);
+    const id = state.evidenceByToolCall.get(toolCallKey(runId, toolCallId));
     return id ? state.evidence.get(id) : undefined;
   }
 
@@ -292,7 +292,9 @@ export class MemoryService {
       notes: new Map(persisted.notes.map((item) => [item.id, item])),
       evidenceByToolCall: new Map(
         persisted.evidence.flatMap((item) =>
-          item.source.kind === "tool-result" ? [[item.source.toolCallId, item.id] as const] : [],
+          item.source.kind === "tool-result"
+            ? [[toolCallKey(item.runId, item.source.toolCallId), item.id] as const]
+            : [],
         ),
       ),
     };
@@ -455,6 +457,10 @@ export class MemoryService {
   private emit(): void {
     for (const listener of this.listeners) listener();
   }
+}
+
+function toolCallKey(runId: RunId, toolCallId: string): string {
+  return `${runId}:${toolCallId}`;
 }
 
 function classifyToolResult(input: CaptureToolResultInput): {
