@@ -23,7 +23,6 @@ const MEMORY_CONTEXT_TYPE = "phenix:memory-context";
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const FOLD_RATIO = 0.5;
 const AGGRESSIVE_RATIO = 0.85;
-const AGGRESSIVE_TARGET_RATIO = 0.65;
 const RECENT_MESSAGE_TAIL = 10;
 
 export interface MemorySessionBinding {
@@ -239,21 +238,10 @@ export async function assembleMemoryContext(
   const ratio = initialTokens / Math.max(1, contextWindow);
   const workingSet = await memory.workingSet(runId, ratio >= FOLD_RATIO ? 24 : 10);
   const canvas = renderWorkingMemory(workingSet);
-
-  let transformed = [...messages];
-  if (ratio >= FOLD_RATIO) {
-    transformed = await foldToolResults(memory, runId, transformed, ratio >= AGGRESSIVE_RATIO);
-  }
-
-  if (
-    ratio >= AGGRESSIVE_RATIO &&
-    estimateMessages(transformed) > contextWindow * AGGRESSIVE_RATIO
-  ) {
-    transformed = pruneOldTurns(
-      transformed,
-      Math.floor(contextWindow * AGGRESSIVE_TARGET_RATIO),
-    );
-  }
+  const transformed =
+    ratio >= FOLD_RATIO
+      ? await foldToolResults(memory, runId, messages, ratio >= AGGRESSIVE_RATIO)
+      : [...messages];
 
   if (!canvas) return transformed;
   const injection = {
@@ -301,21 +289,6 @@ async function foldToolResults(
       } as AgentMessage;
     }),
   );
-}
-
-function pruneOldTurns(messages: readonly AgentMessage[], targetTokens: number): AgentMessage[] {
-  if (estimateMessages(messages) <= targetTokens) return [...messages];
-  const firstUser = messages.find((message) => message.role === "user");
-  const userBoundaries = messages
-    .map((message, index) => (message.role === "user" ? index : -1))
-    .filter((index) => index > 0);
-  for (const boundary of userBoundaries) {
-    const tail = messages.slice(boundary);
-    const candidate = firstUser ? [firstUser, ...tail] : tail;
-    if (estimateMessages(candidate) <= targetTokens) return dedupeMessageIdentity(candidate);
-  }
-  const tail = messages.slice(-RECENT_MESSAGE_TAIL);
-  return dedupeMessageIdentity(firstUser ? [firstUser, ...tail] : tail);
 }
 
 function renderWorkingMemory(workingSet: WorkingMemoryProjection): string | undefined {
@@ -375,15 +348,6 @@ function isMemoryContextMessage(message: AgentMessage): boolean {
     message.role === "custom" &&
     (message as { customType?: unknown }).customType === MEMORY_CONTEXT_TYPE
   );
-}
-
-function dedupeMessageIdentity(messages: readonly AgentMessage[]): AgentMessage[] {
-  const seen = new Set<AgentMessage>();
-  return messages.filter((message) => {
-    if (seen.has(message)) return false;
-    seen.add(message);
-    return true;
-  });
 }
 
 function modelContextWindow(model: unknown): number | undefined {
