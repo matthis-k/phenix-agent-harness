@@ -30,6 +30,7 @@ import type {
   CreateAgentSessionSpec,
 } from "../../ports/agent-session-backend.ts";
 import type { LiveAgentTranscriptWriter } from "../../ports/live-agent-transcripts.ts";
+import { assistantFailureObservation } from "./assistant-stop-reason.ts";
 import { BoundedAgentSessionPort } from "./bounded-agent-session-port.ts";
 import { freeModelSessionExtensions } from "./free-model-guard.ts";
 import { createMemorySessionExtension } from "./memory-session-extension.ts";
@@ -227,10 +228,14 @@ class PiAgentSessionPort implements AgentSessionPort {
       },
       (error: unknown) => {
         if (!preflightSeen) reject(error);
+        const providerMessage = error instanceof Error ? error.message : String(error);
         this.emit({
           type: "backend.failed",
-          message: error instanceof Error ? error.message : String(error),
+          kind: "provider_error",
+          stopReason: "error",
+          message: providerMessage,
           retryable: true,
+          providerMessage,
         });
       },
     );
@@ -283,13 +288,8 @@ class PiAgentSessionPort implements AgentSessionPort {
       this.completedMessages.push(event.message);
       if (event.message.role === "assistant") this.streamingMessage = undefined;
       this.publishTranscript();
-      if (event.message.role === "assistant" && event.message.stopReason === "error") {
-        this.emit({
-          type: "backend.failed",
-          message: event.message.errorMessage ?? "Pi provider failed",
-          retryable: true,
-        });
-      }
+      const failure = assistantFailureObservation(event.message);
+      if (failure) this.emit(failure);
       return;
     }
     if (event.type === "agent_settled") {

@@ -17,6 +17,25 @@ export interface AgentTool {
   execute(input: unknown, signal?: AbortSignal): Promise<AgentToolResult>;
 }
 
+export type AgentBackendFailure =
+  | {
+      readonly kind: "provider_error";
+      readonly stopReason: "error";
+      readonly message: string;
+      readonly retryable: true;
+      readonly providerMessage: string | null;
+    }
+  | {
+      readonly kind: "unexpected_abort";
+      readonly stopReason: "aborted";
+      readonly message: string;
+      readonly retryable: true;
+    };
+
+export type AgentSessionBackendFailureObservation = Readonly<
+  { readonly type: "backend.failed" } & AgentBackendFailure
+>;
+
 export type AgentSessionObservation =
   | { readonly type: "cycle.settled" }
   | { readonly type: "turn.ended" }
@@ -32,7 +51,7 @@ export type AgentSessionObservation =
       readonly toolCallId?: string;
       readonly isError: boolean;
     }
-  | { readonly type: "backend.failed"; readonly message: string; readonly retryable: boolean };
+  | AgentSessionBackendFailureObservation;
 
 export interface AgentSessionReference {
   readonly sessionId: string;

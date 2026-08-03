@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 
-import { defineSchema } from "../domain/definition/schema.ts";
+import { defineSchema, type Schema } from "../domain/definition/schema.ts";
+import type { ValidationResult } from "../domain/shared.ts";
 
 export type DynamicValueBinding =
   | {
@@ -73,11 +74,21 @@ export interface DynamicWorkflowProposal {
   readonly nodes: readonly DynamicWorkflowNodeProposal[];
   readonly edges: readonly DynamicWorkflowEdgeProposal[];
   readonly limits: {
+    /** Canonical internal value: 0 means no workflow wall-clock deadline. */
     readonly timeoutMs: number;
     readonly maxNodeRuns: number;
     readonly maxParallelism: number;
   };
 }
+
+type DynamicWorkflowProposalInput = Omit<DynamicWorkflowProposal, "limits"> & {
+  readonly limits: {
+    /** Optional authoring field. Omission is normalized to the unbounded value 0. */
+    readonly timeoutMs?: number;
+    readonly maxNodeRuns: number;
+    readonly maxParallelism: number;
+  };
+};
 
 export interface DynamicWorkflowCandidate {
   readonly definitionId: string;
@@ -212,7 +223,7 @@ export const DynamicWorkflowCompositionRequestSchema =
     ),
   );
 
-export const DynamicWorkflowProposalSchema = defineSchema<DynamicWorkflowProposal>(
+const DynamicWorkflowProposalInputSchema = defineSchema<DynamicWorkflowProposalInput>(
   "request.dynamic-workflow-proposal",
   Type.Object(
     {
@@ -238,7 +249,7 @@ export const DynamicWorkflowProposalSchema = defineSchema<DynamicWorkflowProposa
       ),
       limits: Type.Object(
         {
-          timeoutMs: Type.Integer({ minimum: 1, maximum: 3_600_000 }),
+          timeoutMs: Type.Optional(Type.Integer({ minimum: 0, maximum: 3_600_000 })),
           maxNodeRuns: Type.Integer({ minimum: 2, maximum: 128 }),
           maxParallelism: Type.Integer({ minimum: 1, maximum: 8 }),
         },
@@ -248,3 +259,23 @@ export const DynamicWorkflowProposalSchema = defineSchema<DynamicWorkflowProposa
     { additionalProperties: false },
   ),
 );
+
+export const DynamicWorkflowProposalSchema: Schema<DynamicWorkflowProposal> = Object.freeze({
+  id: DynamicWorkflowProposalInputSchema.id,
+  jsonSchema: DynamicWorkflowProposalInputSchema.jsonSchema,
+  validate(value: unknown): ValidationResult<DynamicWorkflowProposal> {
+    const validated = DynamicWorkflowProposalInputSchema.validate(value);
+    if (!validated.ok) return validated;
+    return {
+      ok: true,
+      value: {
+        ...validated.value,
+        limits: {
+          timeoutMs: validated.value.limits.timeoutMs ?? 0,
+          maxNodeRuns: validated.value.limits.maxNodeRuns,
+          maxParallelism: validated.value.limits.maxParallelism,
+        },
+      },
+    };
+  },
+});

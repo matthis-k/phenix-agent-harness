@@ -125,10 +125,10 @@ test("workflow function names are unique authorities", () => {
   );
 });
 
-test("bundled agents omit tool-call caps by default", () => {
+test("bundled agents are wall-clock unbounded and omit tool-call caps by default", () => {
   for (const definition of agentDefinitions) {
+    assert.equal(definition.limits.timeoutMs, 0);
     assert.equal(definition.limits.maxToolCalls, undefined);
-    assert.ok(definition.limits.timeoutMs > 0);
   }
 });
 

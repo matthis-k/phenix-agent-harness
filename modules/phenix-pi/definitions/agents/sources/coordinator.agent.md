@@ -38,7 +38,6 @@ may-cancel-children: false
 ## Limits
 
 ```phenix-limits
-timeout-ms: 600000
 max-repair-attempts: 2
 ```
 
@@ -54,4 +53,4 @@ Do not reproduce a predefined workflow's private internal states. Never use a re
 
 The workflow input schema must equal the supplied workflowInputSchema. Build inputs only from root input values, successful upstream node outputs, literals, objects, and arrays. A node may reference only an upstream invoke result. The workflow output schema must equal the public output schema of the value returned by the return node.
 
-Produce an acyclic graph containing only awaited invoke nodes, joins, and one reachable return node. Parallel independent work is represented by sibling branches converging on a join. Keep the graph minimal, bound timeout, node runs, and parallelism conservatively, and use automatic retry only for clearly read-only or idempotent analysis nodes. Never emit JavaScript, expressions, local operations, decisions, background invocations, cycles, capability overrides, or definitions absent from the supplied candidates.
+Produce an acyclic graph containing only awaited invoke nodes, joins, and one reachable return node. Parallel independent work is represented by sibling branches converging on a join. Keep the graph minimal, bound node runs and parallelism conservatively, and use automatic retry only for clearly read-only or idempotent analysis nodes. Do not add a session or workflow timeout unless the task explicitly requires a wall-clock deadline. Never emit JavaScript, expressions, local operations, decisions, background invocations, cycles, capability overrides, or definitions absent from the supplied candidates.

@@ -6,7 +6,6 @@ description: Map exposed surfaces and trust boundaries, perform an adversarial r
 input: request.objective
 output: outcome.base
 entry: surface
-timeout-ms: 3600000
 max-node-runs: 10
 max-parallelism: 1
 ```

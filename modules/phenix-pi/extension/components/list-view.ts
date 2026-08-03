@@ -95,26 +95,27 @@ export class ListView<T> {
   }
 
   dispatch(intent: ListViewIntent, viewportHeight: number): ListViewEvent<T> | undefined {
-    if (intent.kind === "activate") {
-      const item = this.selectedItem;
-      if (!item) return undefined;
-      return { kind: "activate", id: this.adapter.id(item), item };
-    }
-
-    if (this.items.length === 0) return undefined;
     const current = this.selectedIndex();
     let next = current;
     switch (intent.kind) {
+      case "activate": {
+        const item = this.selectedItem;
+        if (!item) return undefined;
+        return { kind: "activate", id: this.adapter.id(item), item };
+      }
       case "move":
+        if (this.items.length === 0) return undefined;
         next = this.moveIndex(current, intent.direction);
         break;
       case "page":
+        if (this.items.length === 0) return undefined;
         next = clampIndex(
           current + intent.direction * Math.max(1, viewportHeight),
           this.items.length,
         );
         break;
       case "edge":
+        if (this.items.length === 0) return undefined;
         next = intent.edge === "first" ? 0 : this.items.length - 1;
         break;
       case "select": {
@@ -188,5 +189,5 @@ export class ListView<T> {
 }
 
 function clampIndex(index: number, length: number): number {
-  return Math.min(Math.max(0, index), Math.max(0, length - 1));
+  return Math.max(0, Math.min(length - 1, index));
 }

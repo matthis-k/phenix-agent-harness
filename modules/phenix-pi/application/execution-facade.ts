@@ -27,6 +27,7 @@ import {
   type Outcome,
   type RunId,
   success,
+  type ValidationIssue,
 } from "../domain/shared.ts";
 import type { BudgetPolicy } from "../ports/budget-policy.ts";
 import type { Clock, IdGenerator } from "../ports/clock.ts";
@@ -75,7 +76,7 @@ export interface RunController {
   turnEnded(runId: RunId): Promise<number>;
   toolStarted(runId: RunId, toolName: string): Promise<number>;
   submitOutput(runId: RunId, output: unknown): Promise<void>;
-  rejectOutput(runId: RunId, issues: unknown): Promise<void>;
+  rejectOutput(runId: RunId, issues: readonly ValidationIssue[]): Promise<void>;
   complete(runId: RunId, output: unknown): Promise<void>;
   fail(runId: RunId, failure: Failure): Promise<void>;
   orphan(runId: RunId, reason: string): Promise<void>;
@@ -355,7 +356,7 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
               parentRunId: currentParent.id,
               type: "run.model.resolved",
               data: { resolved: resolvedModel },
-            },
+            } satisfies PendingDomainEvent<"run.model.resolved">,
           ]
         : []),
     ];
@@ -609,7 +610,7 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
     ]);
   }
 
-  async rejectOutput(runId: RunId, issues: unknown): Promise<void> {
+  async rejectOutput(runId: RunId, issues: readonly ValidationIssue[]): Promise<void> {
     const run = this.store.projection.requireRun(runId);
     if (isTerminalRunState(run.state) || this.terminating.has(runId)) return;
     const root = this.store.projection.rootOf(runId);

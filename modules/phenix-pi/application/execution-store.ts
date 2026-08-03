@@ -1,6 +1,7 @@
 import { AttentionProjection } from "../domain/attention/projection.ts";
 import type {
   DomainEvent,
+  DomainEventType,
   PendingDomainEvent,
   UnsequencedDomainEvent,
 } from "../domain/run/events.ts";
@@ -47,14 +48,14 @@ export class ExecutionStore {
     });
   }
 
-  async commit(
+  async commit<TType extends DomainEventType>(
     rootRunId: RunId,
-    pending: readonly PendingDomainEvent[],
+    pending: readonly PendingDomainEvent<TType>[],
   ): Promise<readonly DomainEvent[]> {
     return this.executor.run(rootRunId, async () => {
       if (!this.loadedRoots.has(rootRunId)) await this.loadUnlocked(rootRunId);
       const revisions = new Map<RunId, number>();
-      const unsequenced: UnsequencedDomainEvent[] = [];
+      const unsequenced: UnsequencedDomainEvent<TType>[] = [];
       const pendingIds = new Set<string>();
 
       for (const candidate of pending) {
@@ -68,29 +69,28 @@ export class ExecutionStore {
         const revision = currentRevision + 1;
         revisions.set(candidate.runId, revision);
         const existing = this.projection.runs.get(candidate.runId);
-        unsequenced.push({
-          eventId,
-          rootRunId,
-          runId: candidate.runId,
-          ...((candidate.parentRunId ?? existing?.parentId)
-            ? { parentRunId: candidate.parentRunId ?? existing?.parentId }
-            : {}),
-          revision,
-          timestamp: this.clock.now(),
-          type: candidate.type,
-          data: candidate.data,
-        });
+        const parentRunId = candidate.parentRunId ?? existing?.parentId;
+        unsequenced.push(
+          withEventMetadata(candidate, {
+            eventId,
+            rootRunId,
+            ...(parentRunId ? { parentRunId } : {}),
+            revision,
+            timestamp: this.clock.now(),
+          }),
+        );
       }
 
       if (unsequenced.length === 0) return [];
+      const correlated = widenUnsequencedEvents(unsequenced);
       const expected = this.projection.rootSequences.get(rootRunId) ?? 0;
-      const staged = unsequenced.map((event, index) => ({
+      const staged: DomainEvent[] = correlated.map((event, index) => ({
         ...event,
         sequence: expected + index + 1,
       }));
       this.projection.assertApplicable(staged);
       this.attention.assertApplicable(staged);
-      const events = await this.ledger.append(rootRunId, expected, unsequenced);
+      const events = await this.ledger.append(rootRunId, expected, correlated);
       for (const event of events) this.apply(event);
       this.events.publish(events);
       return events;
@@ -113,4 +113,25 @@ export class ExecutionStore {
     this.projection.apply(event);
     this.attention.apply(event);
   }
+}
+
+interface EventMetadata {
+  readonly eventId: string;
+  readonly rootRunId: RunId;
+  readonly parentRunId?: RunId;
+  readonly revision: number;
+  readonly timestamp: string;
+}
+
+function withEventMetadata<TType extends DomainEventType>(
+  event: PendingDomainEvent<TType>,
+  metadata: EventMetadata,
+): UnsequencedDomainEvent<TType> {
+  return { ...event, ...metadata } as UnsequencedDomainEvent<TType>;
+}
+
+function widenUnsequencedEvents<TType extends DomainEventType>(
+  events: readonly UnsequencedDomainEvent<TType>[],
+): readonly UnsequencedDomainEvent[] {
+  return events as unknown as readonly UnsequencedDomainEvent[];
 }

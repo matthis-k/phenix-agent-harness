@@ -6,7 +6,6 @@ description: Run deterministic project checks and independent repository, archit
 input: request.objective
 output: outcome.qa-report
 entry: checks
-timeout-ms: 2400000
 max-node-runs: 20
 max-parallelism: 4
 ```

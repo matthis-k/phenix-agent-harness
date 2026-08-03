@@ -46,6 +46,27 @@ test("routes standard built-ins to the Phenix executor", async () => {
   assert.deepEqual(sent, []);
 });
 
+test("routes session copy to the complete manifest executor", async () => {
+  const { pi, sent } = testPi();
+  const builtins: string[] = [];
+  const manifests: string[] = [];
+  const workspacePi = withWorkspaceStandardBuiltins(
+    pi,
+    async (commandText) => {
+      builtins.push(commandText);
+    },
+    async (commandText) => {
+      manifests.push(commandText);
+    },
+  );
+
+  await Promise.resolve(workspacePi.sendUserMessage("/session copy --file debug.json"));
+
+  assert.deepEqual(manifests, ["/session copy --file debug.json"]);
+  assert.deepEqual(builtins, []);
+  assert.deepEqual(sent, []);
+});
+
 test("keeps ordinary input on Pi's message path", () => {
   const { pi, sent } = testPi();
   const workspacePi = withWorkspaceStandardBuiltins(pi, async () => {});

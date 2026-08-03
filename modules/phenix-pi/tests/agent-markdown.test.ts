@@ -60,6 +60,18 @@ test("every bundled agent is loaded from its Markdown source", () => {
   }
 });
 
+test("bundled agent sessions are unbounded while explicit timeouts remain supported", () => {
+  for (const definition of agentDefinitions) {
+    assert.equal(definition.limits.timeoutMs, 0, definition.id);
+  }
+
+  const optedIn = compileAgentMarkdown(
+    source("scout").replace("max-repair-attempts: 1", "timeout-ms: 12345\nmax-repair-attempts: 1"),
+    { resolveSchema: resolveDefinitionSchema },
+  );
+  assert.equal(optedIn.limits.timeoutMs, 12_345);
+});
+
 test("agent contracts, routes, and effective permissions are explicit", () => {
   const byId = new Map(
     agentDefinitions.map((definition) => [String(definition.id), definition] as const),
@@ -128,7 +140,7 @@ test("agent contracts, routes, and effective permissions are explicit", () => {
   assert.equal(coordinator.output.id, "request.dynamic-workflow-proposal");
   assert.deepEqual(coordinator.tools.allow, []);
   assert.equal(coordinator.context.projectFiles, "none");
-  assert.equal(coordinator.limits.timeoutMs, 600_000);
+  assert.equal(coordinator.limits.timeoutMs, 0);
   assert.equal(coordinator.limits.maxTurns, undefined);
   assert.equal(coordinator.limits.maxToolCalls, undefined);
   assert.equal(coordinator.promptMode, undefined);

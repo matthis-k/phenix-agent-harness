@@ -6,7 +6,6 @@ description: Estimate difficulty, use a trivial fast path when safe, otherwise p
 input: request.implementation
 output: outcome.implementation-result
 entry: estimate
-timeout-ms: 2400000
 max-node-runs: 24
 max-parallelism: 1
 ```

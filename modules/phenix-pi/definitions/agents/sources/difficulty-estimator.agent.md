@@ -47,7 +47,6 @@ may-cancel-children: false
 ## Limits
 
 ```phenix-limits
-timeout-ms: 60000
 max-turns: 2
 max-repair-attempts: 1
 ```
@@ -76,7 +75,7 @@ Use these definitions:
 
 Rules:
 
-1. Classify by risk and reasoning complexity, not by estimated line count.
+1. Classify by risk and reasoning complexity, not by estimated line count or wall-clock duration.
 2. Use the highest applicable level.
 3. When evidence is missing, escalate only when the missing information could materially change architecture, safety, compatibility, or rollback risk.
 4. Keep `summary` to one sentence and list the decisive observations in `signals`.

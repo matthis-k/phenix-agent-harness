@@ -6,7 +6,6 @@ description: Inspect the existing system, develop an executable design, challeng
 input: request.objective
 output: outcome.base
 entry: inspect
-timeout-ms: 3600000
 max-node-runs: 12
 max-parallelism: 1
 ```

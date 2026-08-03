@@ -6,7 +6,6 @@ description: Reproduce an uncertain failure, diagnose its root cause, apply a bo
 input: request.objective
 output: outcome.base
 entry: reproduce
-timeout-ms: 4800000
 max-node-runs: 12
 max-parallelism: 1
 ```

@@ -247,6 +247,23 @@ test("dynamic workflow compiler seals deterministic typed graphs", () => {
   );
 });
 
+test("dynamic workflow timeout is optional and normalizes to unbounded", () => {
+  const bounded = proposal();
+  const { timeoutMs: _timeoutMs, ...unboundedLimits } = bounded.limits;
+  const unbounded = compiler().compile(
+    { ...bounded, limits: unboundedLimits },
+    { allowedDefinitionIds: [SCOUT, FINALIZER] },
+  );
+
+  assert.equal(unbounded.definition.limits.timeoutMs, 0);
+  assert.equal(unbounded.proposal.limits.timeoutMs, 0);
+  assert.equal(
+    compiler().compile(bounded, { allowedDefinitionIds: [SCOUT, FINALIZER] }).definition.limits
+      .timeoutMs,
+    300_000,
+  );
+});
+
 test("dynamic workflow compiler binds stock session result schemas", () => {
   const compiled = compiler().compile(stockProposal(), { allowedDefinitionIds: [STOCK] });
   const stock = compiled.definition.graph.nodes.find((node) => node.id === "stock");
