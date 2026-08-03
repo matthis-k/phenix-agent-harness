@@ -5,6 +5,7 @@ export const WORKSPACE_SURFACE_IDS = [
   "editor",
   "runs",
   "objectives",
+  "memory",
   "files",
   "facts",
 ] as const satisfies readonly PaneId[];
@@ -60,7 +61,7 @@ export const WORKSPACE_SURFACES = [
     overflow: "collapse",
     collapsePriority: 20,
   }),
-  defineSurface("files", "collection", {
+  defineSurface("memory", "collection", {
     minWidth: 24,
     minHeight: 2,
     grow: 3,
@@ -68,13 +69,21 @@ export const WORKSPACE_SURFACES = [
     overflow: "collapse",
     collapsePriority: 30,
   }),
-  defineSurface("facts", "collection", {
+  defineSurface("files", "collection", {
     minWidth: 24,
     minHeight: 2,
     grow: 3,
     shrink: 1,
     overflow: "collapse",
     collapsePriority: 40,
+  }),
+  defineSurface("facts", "collection", {
+    minWidth: 24,
+    minHeight: 2,
+    grow: 3,
+    shrink: 1,
+    overflow: "collapse",
+    collapsePriority: 50,
   }),
 ] as const satisfies readonly WorkspaceSurfaceDefinition[];
 
