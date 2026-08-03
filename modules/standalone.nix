@@ -102,7 +102,10 @@
       phenixRtkSmoke =
         pkgs.runCommand "phenix-rtk-smoke"
           {
-            nativeBuildInputs = [ self'.packages.phenix-rtk ];
+            nativeBuildInputs = [
+              self'.packages.phenix-rtk
+              pkgs.gitMinimal
+            ];
           }
           ''
             rtk --version
@@ -112,6 +115,41 @@
             set -e
             test "$code" -eq 0 -o "$code" -eq 3
             test "$rewritten" = "rtk git status"
+
+            mkdir -p "$TMPDIR/config/rtk" "$TMPDIR/repository" "$TMPDIR/tee"
+            cat > "$TMPDIR/config/rtk/config.toml" <<'EOF'
+            [tee]
+            enabled = true
+            mode = "always"
+            max_files = 64
+            max_file_size = 1073741824
+
+            [tracking]
+            enabled = false
+            history_days = 0
+
+            [telemetry]
+            enabled = false
+            EOF
+
+            cd "$TMPDIR/repository"
+            git init --quiet
+            git config user.email phenix@example.invalid
+            git config user.name Phenix
+            touch tracked.txt
+            git add tracked.txt
+            git commit --quiet -m initial
+            echo changed > tracked.txt
+
+            PHENIX_RTK_LOSSLESS=1 \
+              RTK_TEE=1 \
+              RTK_TEE_DIR="$TMPDIR/tee" \
+              XDG_CONFIG_HOME="$TMPDIR/config" \
+              rtk git status > "$TMPDIR/compact-status.txt"
+
+            tee_file="$(find "$TMPDIR/tee" -type f -name '*.log' -print -quit)"
+            test -n "$tee_file"
+            grep -q tracked.txt "$tee_file"
             touch "$out"
           '';
     in
