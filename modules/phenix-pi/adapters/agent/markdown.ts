@@ -141,7 +141,7 @@ export function compileAgentMarkdown(
       mayCancelChildren: markdownBoolean(childFields, "may-cancel-children", "agent children"),
     },
     limits: {
-      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      timeoutMs: timeoutMs ?? 0,
       ...(maxTurns === undefined ? {} : { maxTurns }),
       ...(maxToolCalls === undefined ? {} : { maxToolCalls }),
       maxRepairAttempts: markdownInteger(limitFields, "max-repair-attempts", "agent limits", 0),
