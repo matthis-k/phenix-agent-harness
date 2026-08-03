@@ -50,7 +50,7 @@ import type {
   WorkspaceViewRow,
 } from "./workspace/views/workspace-view.ts";
 import { workspaceViewRegistry } from "./workspace/views/workspace-view-registry.ts";
-import { renderWorkspaceComposer } from "./workspace/workspace-composer.ts";
+import { editorBody, renderWorkspaceComposer } from "./workspace/workspace-composer.ts";
 import { WorkspaceControllerAdapter } from "./workspace/workspace-controller-adapter.ts";
 import { nextWorkspaceSection, resolveWorkspaceInput } from "./workspace/workspace-interaction.ts";
 import {
@@ -178,6 +178,7 @@ export class PhenixWorkspace implements Component, Focusable {
   private readonly editor: CustomEditor;
   private readonly controller: WorkspaceControllerAdapter;
   private readonly transcriptSelection = new TranscriptSelectionSurface();
+  private readonly inputSelection = new TranscriptSelectionSurface();
   private readonly transcriptView = new TerminalView();
   private readonly sectionViews: ReadonlyMap<WorkspaceSection, ListView<WorkspaceViewRow>>;
   private readonly expandedRowIds = new Set<string>();
@@ -216,6 +217,11 @@ export class PhenixWorkspace implements Component, Focusable {
     this.editor.onSubmit = (text) => {
       void this.handleSubmit(text);
     };
+    this.editor.onChange = () => {
+      if (!this.inputSelection.selectedText()) return;
+      this.inputSelection.clear();
+      this.requestRender();
+    };
     this.controller = new WorkspaceControllerAdapter({
       snapshot: options.snapshot,
       load: options.load,
@@ -226,8 +232,11 @@ export class PhenixWorkspace implements Component, Focusable {
     this.tui.terminal.write(MOUSE_ENABLE);
   }
 
-  get hasTranscriptSelection(): boolean {
-    return this.transcriptSelection.selection !== undefined;
+  get hasTextSelection(): boolean {
+    return (
+      this.inputSelection.selectedText() !== undefined ||
+      this.transcriptSelection.selectedText() !== undefined
+    );
   }
 
   setStreamingMessage(message: AssistantMessage | undefined): void {
@@ -267,13 +276,14 @@ export class PhenixWorkspace implements Component, Focusable {
     const intent = resolveWorkspaceInput(
       data,
       focus === "main" ? "main" : "sidebar",
-      this.transcriptSelection.selection !== undefined,
+      this.hasTextSelection,
     );
     switch (intent.kind) {
       case "copy-selection":
         void this.copyTranscript();
         return;
       case "clear-selection":
+        this.inputSelection.clear();
         this.transcriptSelection.clear();
         this.requestRender();
         return;
@@ -343,16 +353,22 @@ export class PhenixWorkspace implements Component, Focusable {
 
     const focus = effectiveFocus(this.controller.state.focusedPaneId, dimensions.sidebarVisible);
     this.editor.focused = this.focused && focus === "main";
+    const rawEditorLines = this.editor.render(Math.max(1, dimensions.mainWidth - 3));
+    const inputLines = editorBody(rawEditorLines).map((line) =>
+      stripTranscriptAnsi(line).replaceAll(CURSOR_MARKER, ""),
+    );
     const editorLines = this.renderPaneSafely(
       "Editor",
       dimensions.mainWidth,
       Math.max(1, height - 1),
       () =>
         renderWorkspaceComposer({
-          lines: this.editor.render(Math.max(1, dimensions.mainWidth - 3)),
+          lines: rawEditorLines,
           width: dimensions.mainWidth,
           active: focus === "main",
           theme: this.theme,
+          decorateBodyLine: (line, row, lineWidth) =>
+            this.inputSelection.renderLine(line, row, lineWidth, this.theme),
         }),
       false,
     );
@@ -394,6 +410,16 @@ export class PhenixWorkspace implements Component, Focusable {
       bounds: transcriptBounds,
       offset: transcript.offset,
       lines: transcript.plainLines,
+    });
+    this.inputSelection.setFrame({
+      bounds: {
+        x: editorBounds.x + 2,
+        y: editorBounds.y,
+        width: Math.max(0, editorBounds.width - 3),
+        height: inputLines.length + 1,
+      },
+      offset: 0,
+      lines: inputLines,
     });
     const selectedTranscriptLines = transcript.lines.map((line, row) =>
       row === 0
@@ -444,17 +470,27 @@ export class PhenixWorkspace implements Component, Focusable {
   }
 
   private async copyTranscript(): Promise<void> {
-    const selected = this.transcriptSelection.selectedText();
+    const inputSelected = this.inputSelection.selectedText();
+    const transcriptSelected = this.transcriptSelection.selectedText();
     try {
-      const copied = await this.transcriptSelection.copy();
+      const copied = inputSelected
+        ? await this.inputSelection.copy()
+        : await this.transcriptSelection.copy();
       if (!copied) {
-        this.notify("Nothing to copy from the transcript.", "warning");
+        this.notify("Nothing to copy.", "warning");
         return;
       }
-      this.notify(selected ? "Copied transcript selection." : "Copied transcript.", "info");
+      this.notify(
+        inputSelected
+          ? "Copied input selection."
+          : transcriptSelected
+            ? "Copied transcript selection."
+            : "Copied transcript.",
+        "info",
+      );
     } catch (error) {
       this.notify(
-        `Unable to copy transcript: ${error instanceof Error ? error.message : String(error)}`,
+        `Unable to copy text: ${error instanceof Error ? error.message : String(error)}`,
         "warning",
       );
     }
@@ -789,6 +825,7 @@ export class PhenixWorkspace implements Component, Focusable {
   }
 
   private selectTranscript(node: RunTreeNode): void {
+    this.inputSelection.clear();
     this.transcriptSelection.clear();
     this.controller.selectTranscript(node.run.id);
   }
@@ -834,6 +871,13 @@ export class PhenixWorkspace implements Component, Focusable {
 
   private handleMouse(event: MouseEvent): void {
     if (!this.frame) return;
+    if (this.inputSelection.dragging) {
+      const changed = event.release
+        ? this.inputSelection.end(event)
+        : this.inputSelection.update(event);
+      if (changed) this.requestRender();
+      return;
+    }
     if (this.transcriptSelection.dragging) {
       const changed = event.release
         ? this.transcriptSelection.end(event)
@@ -843,7 +887,14 @@ export class PhenixWorkspace implements Component, Focusable {
     }
 
     if (event.release) return;
+    if (event.button === 0 && this.inputSelection.begin(event)) {
+      this.transcriptSelection.clear();
+      this.focusMain();
+      this.requestRender();
+      return;
+    }
     if (event.button === 0 && this.transcriptSelection.begin(event)) {
+      this.inputSelection.clear();
       this.focusMain();
       this.requestRender();
       return;
@@ -863,6 +914,7 @@ export class PhenixWorkspace implements Component, Focusable {
       return;
     }
 
+    this.inputSelection.clear();
     this.transcriptSelection.clear();
     const section = this.frame.sections.find(
       (candidate) =>
