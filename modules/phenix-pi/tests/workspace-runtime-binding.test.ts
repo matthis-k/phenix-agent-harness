@@ -85,6 +85,7 @@ test("workspace subscriptions distinguish snapshot and transcript changes", () =
     transcripts: transcriptSource,
     projects: snapshotSource,
     userForms: snapshotSource,
+    memory: snapshotSource,
   } as unknown as WorkspaceRuntimeBinding["runtime"];
   const changes: WorkspaceSourceChange[] = [];
 
@@ -100,7 +101,8 @@ test("workspace subscriptions distinguish snapshot and transcript changes", () =
     { kind: "snapshot" },
     { kind: "snapshot" },
     { kind: "snapshot" },
+    { kind: "snapshot" },
     { kind: "transcript", runId: runId("child") },
   ]);
-  assert.equal(disposals, 5);
+  assert.equal(disposals, 6);
 });
