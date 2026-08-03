@@ -18,7 +18,15 @@ interface TranscriptValue {
   readonly text: string;
 }
 
-const PANES = ["transcript", "editor", "runs", "objectives", "files", "facts"] as const;
+const PANES = [
+  "transcript",
+  "editor",
+  "runs",
+  "objectives",
+  "memory",
+  "files",
+  "facts",
+] as const;
 
 test("uses an already-loaded transcript without scheduling an effect", () => {
   const root = runId("root");
