@@ -6,12 +6,16 @@ import type { WorkflowFunctionRegistrar } from "../domain/workflow/functions.ts"
 import type { BudgetPolicy } from "../ports/budget-policy.ts";
 import type { ModelInventory, ModelResolver } from "../ports/model-resolver.ts";
 
-export interface RuntimeCatalogConfiguration {
+export interface RuntimeCatalogConfiguration<
+  TDefinitionId extends DefinitionId = DefinitionId,
+> {
+  /** Closed set of definitions owned by this in-repository runtime configuration. */
+  readonly definitionIds: readonly TDefinitionId[];
   readonly definitions: readonly AnyDefinition[];
   registerWorkflowFunctions(registry: WorkflowFunctionRegistrar): void;
   resolveDefinitionSchema(id: string): Schema<unknown>;
-  readonly rootInvokableDefinitions: readonly DefinitionId[];
-  readonly hiddenDefinitions: readonly DefinitionId[];
+  readonly rootInvokableDefinitions: readonly TDefinitionId[];
+  readonly hiddenDefinitions: readonly TDefinitionId[];
 }
 
 export interface RuntimeResolverDependencies {
@@ -19,32 +23,43 @@ export interface RuntimeResolverDependencies {
   readonly currentProfile: () => Promise<SessionProfile>;
 }
 
-export interface RuntimeConfiguration {
-  readonly catalog: RuntimeCatalogConfiguration;
+export interface RuntimeConfiguration<TDefinitionId extends DefinitionId = DefinitionId> {
+  readonly catalog: RuntimeCatalogConfiguration<TDefinitionId>;
   readonly budgetPolicy: BudgetPolicy;
   createModelResolver(dependencies: RuntimeResolverDependencies): ModelResolver;
 }
 
-export function defineRuntimeConfiguration(
-  configuration: RuntimeConfiguration,
-): RuntimeConfiguration {
+export function defineRuntimeConfiguration<const TDefinitionId extends DefinitionId>(
+  configuration: RuntimeConfiguration<TDefinitionId>,
+): RuntimeConfiguration<TDefinitionId> {
+  const definitionIds = [...configuration.catalog.definitionIds];
   const definitions = [...configuration.catalog.definitions];
   const rootInvokableDefinitions = [...configuration.catalog.rootInvokableDefinitions];
   const hiddenDefinitions = [...configuration.catalog.hiddenDefinitions];
-  const known = new Set<string>();
+  const declared = uniqueIds("runtime definition declaration", definitionIds);
+  const declaredIds = new Set<DefinitionId>(declared);
+  const compiled = new Map<DefinitionId, AnyDefinition>();
 
   for (const definition of definitions) {
-    if (known.has(definition.id)) {
-      throw new Error(`Duplicate runtime definition: ${definition.id}`);
+    if (compiled.has(definition.id)) {
+      throw new Error(`Duplicate compiled runtime definition: ${definition.id}`);
     }
-    known.add(definition.id);
+    compiled.set(definition.id, definition);
+    if (!declaredIds.has(definition.id)) {
+      throw new Error(`Compiled runtime definition is not declared: ${definition.id}`);
+    }
   }
-  for (const id of rootInvokableDefinitions) {
-    if (!known.has(id)) throw new Error(`Unknown root-invokable definition: ${id}`);
+  for (const id of definitionIds) {
+    if (!compiled.has(id)) throw new Error(`Declared runtime definition was not compiled: ${id}`);
   }
-  const rootVisible = new Set<string>(rootInvokableDefinitions);
-  for (const id of hiddenDefinitions) {
-    if (!known.has(id)) throw new Error(`Unknown hidden definition: ${id}`);
+
+  const rootVisible = uniqueIds("root-invokable definition", rootInvokableDefinitions);
+  for (const id of rootVisible) {
+    if (!declared.has(id)) throw new Error(`Unknown root-invokable definition: ${id}`);
+  }
+  const hidden = uniqueIds("hidden definition", hiddenDefinitions);
+  for (const id of hidden) {
+    if (!declared.has(id)) throw new Error(`Unknown hidden definition: ${id}`);
     if (!rootVisible.has(id)) {
       throw new Error(`Hidden definition must also be root-invokable: ${id}`);
     }
@@ -52,6 +67,7 @@ export function defineRuntimeConfiguration(
 
   return Object.freeze({
     catalog: Object.freeze({
+      definitionIds: Object.freeze(definitionIds),
       definitions: Object.freeze(definitions),
       registerWorkflowFunctions: configuration.catalog.registerWorkflowFunctions,
       resolveDefinitionSchema: configuration.catalog.resolveDefinitionSchema,
@@ -61,4 +77,13 @@ export function defineRuntimeConfiguration(
     budgetPolicy: configuration.budgetPolicy,
     createModelResolver: configuration.createModelResolver,
   });
+}
+
+function uniqueIds<TId extends DefinitionId>(name: string, ids: readonly TId[]): ReadonlySet<TId> {
+  const unique = new Set<TId>();
+  for (const id of ids) {
+    if (unique.has(id)) throw new Error(`Duplicate ${name}: ${id}`);
+    unique.add(id);
+  }
+  return unique;
 }
