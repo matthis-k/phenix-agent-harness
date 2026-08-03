@@ -14,6 +14,7 @@
       phenixPiPackage = self'.packages.phenix-pi-package;
       mcpConfig = ./phenix-pi/config/mcp.json;
       piRuntimeInputs = tooling.harnessRuntime ++ [
+        self'.packages.phenix-rtk
         pkgs.mcp-nixos
         self'.packages.stitch
         self'.packages.stitch-mcp
@@ -38,6 +39,8 @@
         export PI_CODING_AGENT_DIR="$agent_dir"
         export PI_SKIP_VERSION_CHECK=1
         export PI_TELEMETRY=0
+        export PHENIX_RTK_BIN="${self'.packages.phenix-rtk}/bin/rtk"
+        export PHENIX_TOKEN_REDUCTION_BACKEND="''${PHENIX_TOKEN_REDUCTION_BACKEND:-rtk}"
         export HYPA_PI_MODE="''${HYPA_PI_MODE:-replace}"
         export HYPA_PI_ENABLE_MCP_PROXY="''${HYPA_PI_ENABLE_MCP_PROXY:-0}"
         export HYPA_PI_ASK_NON_INTERACTIVE="''${HYPA_PI_ASK_NON_INTERACTIVE:-allow}"
@@ -95,6 +98,22 @@
             test -x ${pkgs.mcp-nixos}/bin/mcp-nixos
             touch "$out"
           '';
+
+      phenixRtkSmoke =
+        pkgs.runCommand "phenix-rtk-smoke"
+          {
+            nativeBuildInputs = [ self'.packages.phenix-rtk ];
+          }
+          ''
+            rtk --version
+            set +e
+            rewritten="$(rtk rewrite 'git status')"
+            code=$?
+            set -e
+            test "$code" -eq 0 -o "$code" -eq 3
+            test "$rewritten" = "rtk git status"
+            touch "$out"
+          '';
     in
     {
       packages = {
@@ -107,6 +126,7 @@
       checks = {
         local-operation-runtime = localOperationRuntimeSmoke;
         mcp-defaults = mcpDefaultsSmoke;
+        phenix-rtk = phenixRtkSmoke;
         inherit pi;
         pi-store = piStore;
         pi-dev = piDev;
