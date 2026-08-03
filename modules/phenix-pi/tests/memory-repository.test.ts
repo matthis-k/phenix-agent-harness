@@ -6,10 +6,10 @@ import test from "node:test";
 
 import { JsonlMemoryRepository } from "../adapters/persistence/jsonl-memory-repository.ts";
 import {
-  evidenceId,
-  memoryNoteId,
   type EvidenceRecord,
   type MemoryNote,
+  evidenceId,
+  memoryNoteId,
 } from "../domain/memory/model.ts";
 import type { RunId } from "../domain/shared.ts";
 
