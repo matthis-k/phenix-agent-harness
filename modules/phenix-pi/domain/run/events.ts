@@ -6,6 +6,7 @@ import type {
   AttentionRoutedData,
   AttentionRoutingFailedData,
 } from "../attention/model.ts";
+import type { WorkflowTransitionOutcome } from "../definition/definition.ts";
 import type { ResolvedModel } from "../definition/model.ts";
 import type { Objective } from "../objective/model.ts";
 import type {
@@ -86,6 +87,7 @@ export interface WorkflowTransitionTakenData {
   readonly from: string;
   readonly to: string;
   readonly traversal: number;
+  readonly outcome: WorkflowTransitionOutcome;
 }
 
 export type WorkflowCheckpointData = WorkflowCheckpointSavedData;
@@ -218,6 +220,20 @@ export type PendingDomainEvent<TType extends DomainEventType = DomainEventType> 
     readonly data: DomainEventDataMap[Type];
   };
 }[TType];
+
+export function pendingDomainEvent<TType extends DomainEventType>(
+  runId: RunId,
+  type: TType,
+  data: DomainEventData<TType>,
+  parentRunId?: RunId,
+): PendingDomainEvent<TType> {
+  return {
+    runId,
+    ...(parentRunId ? { parentRunId } : {}),
+    type,
+    data,
+  } as PendingDomainEvent<TType>;
+}
 
 export const DOMAIN_EVENT_TYPES = Object.freeze({
   "run.created": true,
