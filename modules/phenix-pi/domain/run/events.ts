@@ -6,6 +6,7 @@ import type {
   AttentionRoutedData,
   AttentionRoutingFailedData,
 } from "../attention/model.ts";
+import type { WorkflowTransitionOutcome } from "../definition/definition.ts";
 import type { ConcreteModelRef, ResolvedModel } from "../definition/model.ts";
 import type { Objective } from "../objective/model.ts";
 import type {
@@ -83,6 +84,7 @@ export interface WorkflowTransitionTakenData {
   readonly activationId: string;
   readonly from: string;
   readonly to: string;
+  readonly outcome: WorkflowTransitionOutcome;
   readonly traversal: number;
 }
 
