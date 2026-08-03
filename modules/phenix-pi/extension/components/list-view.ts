@@ -123,8 +123,6 @@ export class ListView<T> {
         next = index;
         break;
       }
-      case "activate":
-        return undefined;
     }
 
     const item = this.items[next];
@@ -190,5 +188,5 @@ export class ListView<T> {
 }
 
 function clampIndex(index: number, length: number): number {
-  return Math.min(Math.max(0, index), Math.max(0, length - 1));
+  return Math.max(0, Math.min(length - 1, index));
 }
