@@ -10,6 +10,8 @@ export type WorkspaceInputIntent =
   | { readonly kind: "editor" }
   | { readonly kind: "clear-or-exit" }
   | { readonly kind: "copy-selection" }
+  | { readonly kind: "clear-selection" }
+  | { readonly kind: "thinking-toggle" }
   | { readonly kind: "native-ui" }
   | { readonly kind: "sidebar-toggle" }
   | { readonly kind: "focus-toggle" }
@@ -58,7 +60,10 @@ const NATIVE_MODAL_ACTIONS = new Set<AppKeybinding>([
 export function resolveNativeInputDelegation(
   data: string,
   keybindings: Pick<KeybindingsManager, "matches">,
+  hasTranscriptSelection = false,
 ): NativeInputDelegation | undefined {
+  if (matchesKey(data, "ctrl+o")) return undefined;
+  if (hasTranscriptSelection && matchesKey(data, "escape")) return undefined;
   for (const action of NATIVE_HANDOFF_ACTIONS) {
     if (!keybindings.matches(data, action)) continue;
     return {
@@ -72,13 +77,18 @@ export function resolveNativeInputDelegation(
 export function resolveWorkspaceInput(
   data: string,
   group: WorkspaceInputGroup,
-  _hasTranscriptSelection = false,
+  hasTranscriptSelection = false,
 ): WorkspaceInputIntent {
   if (data === WORKSPACE_NATIVE_HANDOFF) return { kind: "native-ui" };
   if (data === WORKSPACE_COPY_TRANSCRIPT || matchesKey(data, "ctrl+shift+c")) {
     return { kind: "copy-selection" };
   }
+  if (hasTranscriptSelection && matchesKey(data, "escape")) {
+    return { kind: "clear-selection" };
+  }
+  if (matchesKey(data, "ctrl+o")) return { kind: "thinking-toggle" };
   if (matchesKey(data, "ctrl+c")) return { kind: "clear-or-exit" };
+
   if (matchesKey(data, "tab")) return { kind: "focus-toggle" };
 
   if (group === "main") {

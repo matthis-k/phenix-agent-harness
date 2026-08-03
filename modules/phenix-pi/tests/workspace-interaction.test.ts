@@ -67,13 +67,10 @@ test("sidebar input uses hjkl and actions while routing other typing to the edit
   assert.deepEqual(resolveWorkspaceInput("x", "sidebar"), { kind: "editor" });
 });
 
-test("native application shortcuts are not shadowed by workspace controls", () => {
-  assert.deepEqual(resolveWorkspaceInput("\x0f", "main"), { kind: "editor" });
+test("workspace owns Ctrl+O while other native shortcuts remain delegated", () => {
+  assert.deepEqual(resolveWorkspaceInput("\x0f", "main"), { kind: "thinking-toggle" });
   assert.deepEqual(resolveWorkspaceInput("\x02", "main"), { kind: "editor" });
-  assert.deepEqual(resolveNativeInputDelegation("\x0f", KEYBINDINGS), {
-    action: "app.tools.expand",
-    reopenWorkspace: true,
-  });
+  assert.equal(resolveNativeInputDelegation("\x0f", KEYBINDINGS), undefined);
   assert.deepEqual(resolveNativeInputDelegation("\x07", KEYBINDINGS), {
     action: "app.editor.external",
     reopenWorkspace: true,
@@ -84,7 +81,14 @@ test("native application shortcuts are not shadowed by workspace controls", () =
   });
 });
 
-test("interrupt and message queue actions retain Pi semantics", () => {
+test("Escape clears transcript selection before retaining Pi interrupt semantics", () => {
+  assert.equal(resolveNativeInputDelegation("\x1b", KEYBINDINGS, true), undefined);
+  assert.deepEqual(resolveWorkspaceInput("\x1b", "main", true), {
+    kind: "clear-selection",
+  });
+  assert.deepEqual(resolveWorkspaceInput("\x1b", "sidebar", true), {
+    kind: "clear-selection",
+  });
   assert.deepEqual(resolveNativeInputDelegation("\x1b", KEYBINDINGS), {
     action: "app.interrupt",
     reopenWorkspace: true,
@@ -122,7 +126,7 @@ test("private handoff inputs do not occupy user shortcuts", () => {
   });
 });
 
-test("Ctrl+C clears or exits and Ctrl+Shift+C copies the transcript", () => {
+test("raw Ctrl+C stays clear-or-exit while modifier-preserving Ctrl+Shift+C copies", () => {
   assert.deepEqual(resolveWorkspaceInput("\x03", "main", true), { kind: "clear-or-exit" });
   assert.deepEqual(resolveWorkspaceInput("\x03", "main", false), { kind: "clear-or-exit" });
   assert.deepEqual(resolveWorkspaceInput("\x1b[99;6u", "main"), { kind: "copy-selection" });

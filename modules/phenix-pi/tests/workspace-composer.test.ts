@@ -26,7 +26,7 @@ test("renders a focused input surface without persistent key hints", () => {
     theme: THEME,
   });
 
-  assert.equal(lines.length, 4);
+  assert.equal(lines.length, 3);
   assert.ok(lines.every((line) => visibleWidth(line) === 72));
   const plain = lines.map(stripTranscriptAnsi).join("\n");
   assert.match(plain, /hello/);
@@ -35,7 +35,7 @@ test("renders a focused input surface without persistent key hints", () => {
   assert.doesNotMatch(plain, /────────/);
 });
 
-test("grows on the first newline and keeps a larger gap above the status row", () => {
+test("grows on the first newline and keeps one row on both sides of input", () => {
   const singleLine = renderWorkspaceComposer({
     lines: ["────────", "first", "────────"],
     width: 40,
@@ -49,11 +49,11 @@ test("grows on the first newline and keeps a larger gap above the status row", (
     theme: THEME,
   });
 
-  assert.equal(singleLine.length, 4);
-  assert.equal(twoLines.length, 5);
+  assert.equal(singleLine.length, 3);
+  assert.equal(twoLines.length, 4);
   assert.match(stripTranscriptAnsi(twoLines[1] ?? ""), /first/);
   assert.match(stripTranscriptAnsi(twoLines[2] ?? ""), /second/);
-  assert.ok(twoLines.slice(-2).every(isBlankComposerRow));
+  assert.ok(isBlankComposerRow(twoLines.at(-1) ?? ""));
 });
 
 function isBlankComposerRow(line: string): boolean {

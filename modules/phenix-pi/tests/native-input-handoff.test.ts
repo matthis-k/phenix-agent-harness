@@ -9,6 +9,8 @@ import type { NativeInputDelegation } from "../extension/workspace/workspace-int
 const KEY_ACTIONS: Readonly<Record<string, AppKeybinding>> = {
   "\x07": "app.editor.external",
   "\x0c": "app.model.select",
+  "\x0f": "app.tools.expand",
+  "\x1b": "app.interrupt",
 };
 const KEYBINDINGS = {
   matches: (data: string, action: AppKeybinding) => KEY_ACTIONS[data] === action,
@@ -48,6 +50,27 @@ test("consumes a native action handled by a Phenix dialog", () => {
     reopenWorkspace: false,
   });
   assert.deepEqual(result, { consume: true });
+});
+
+test("keeps selected Escape and Ctrl+O in the focused workspace", () => {
+  for (const [data, hasTranscriptSelection] of [
+    ["\x1b", true],
+    ["\x0f", false],
+  ] as const) {
+    let touched = false;
+    const result = handoffNativeWorkspaceInput({
+      data,
+      keybindings: KEYBINDINGS,
+      hasTranscriptSelection,
+      handoff: () => {
+        touched = true;
+        return "forward";
+      },
+    });
+
+    assert.equal(result, undefined);
+    assert.equal(touched, false);
+  }
 });
 
 test("leaves unrelated input in the focused workspace", () => {

@@ -210,6 +210,7 @@ async function openWorkspace(
     return handoffNativeWorkspaceInput({
       data,
       keybindings: activeKeybindings,
+      hasTranscriptSelection: activeWorkspace.hasTranscriptSelection,
       handoff: (delegation) => {
         if (delegation.action === "app.model.select") {
           void showModelDialog().catch((error) => {
@@ -312,6 +313,7 @@ async function openWorkspace(
               ctx.cwd,
             ),
           subscribe: (listener) => subscribeWorkspaceChanges(binding.runtime, listener),
+          notify: (message, level) => ctx.ui.notify(message, level),
           submit: async (text) => {
             if (routeUserFormInput(pi, binding, text)) {
               activeWorkspace?.refreshRootTranscript();

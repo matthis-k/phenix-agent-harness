@@ -94,6 +94,7 @@ export interface PhenixWorkspaceOptions {
     node: RunTreeNode,
   ) => Promise<LoadedWorkspaceTranscript<NativeRunTranscript>>;
   readonly subscribe: (listener: () => void) => () => void;
+  readonly notify?: (message: string, level: "info" | "warning" | "error") => void;
   readonly submit: (text: string) => Promise<void>;
   readonly onAction: (action: PhenixWorkspaceAction) => void;
 }
@@ -173,6 +174,7 @@ export class PhenixWorkspace implements Component, Focusable {
   private readonly theme: ObservabilityTheme;
   private readonly submit: (text: string) => Promise<void>;
   private readonly onAction: (action: PhenixWorkspaceAction) => void;
+  private readonly notify: NonNullable<PhenixWorkspaceOptions["notify"]>;
   private readonly editor: CustomEditor;
   private readonly controller: WorkspaceControllerAdapter;
   private readonly transcriptSelection = new TranscriptSelectionSurface();
@@ -186,12 +188,14 @@ export class PhenixWorkspace implements Component, Focusable {
   private renderRevision = 0;
   private frame: RenderFrame | undefined;
   private lastSidebarSection: WorkspaceSection = "runs";
+  private thinkingStepsVisible = false;
 
   constructor(options: PhenixWorkspaceOptions) {
     this.tui = options.tui;
     this.theme = options.theme;
     this.submit = options.submit;
     this.onAction = options.onAction;
+    this.notify = options.notify ?? (() => undefined);
     this.sectionViews = new Map(
       workspaceViewRegistry.ordered.map((view) => [view.id, this.createSectionView(view.id)]),
     );
@@ -220,6 +224,10 @@ export class PhenixWorkspace implements Component, Focusable {
       onChange: () => this.requestRender(),
     });
     this.tui.terminal.write(MOUSE_ENABLE);
+  }
+
+  get hasTranscriptSelection(): boolean {
+    return this.transcriptSelection.selection !== undefined;
   }
 
   setStreamingMessage(message: AssistantMessage | undefined): void {
@@ -263,7 +271,16 @@ export class PhenixWorkspace implements Component, Focusable {
     );
     switch (intent.kind) {
       case "copy-selection":
-        void this.transcriptSelection.copy().catch(() => undefined);
+        void this.copyTranscript();
+        return;
+      case "clear-selection":
+        this.transcriptSelection.clear();
+        this.requestRender();
+        return;
+      case "thinking-toggle":
+        this.thinkingStepsVisible = !this.thinkingStepsVisible;
+        this.notify(`Thinking steps ${this.thinkingStepsVisible ? "shown" : "collapsed"}.`, "info");
+        this.requestRender();
         return;
       case "clear-or-exit":
         if (this.editor.getText().length > 0) {
@@ -426,6 +443,23 @@ export class PhenixWorkspace implements Component, Focusable {
     return [...lines];
   }
 
+  private async copyTranscript(): Promise<void> {
+    const selected = this.transcriptSelection.selectedText();
+    try {
+      const copied = await this.transcriptSelection.copy();
+      if (!copied) {
+        this.notify("Nothing to copy from the transcript.", "warning");
+        return;
+      }
+      this.notify(selected ? "Copied transcript selection." : "Copied transcript.", "info");
+    } catch (error) {
+      this.notify(
+        `Unable to copy transcript: ${error instanceof Error ? error.message : String(error)}`,
+        "warning",
+      );
+    }
+  }
+
   private async handleSubmit(raw: string): Promise<void> {
     const text = raw.trim();
     if (!text) return;
@@ -481,6 +515,7 @@ export class PhenixWorkspace implements Component, Focusable {
     const transcript = this.controller.transcript;
     const body: string[] = [];
     if (transcript) {
+      transcript.component.setThinkingVisible?.(this.thinkingStepsVisible);
       body.push(...transcript.component.render(width).map((line) => sliceViewLine(line, 0, width)));
     } else {
       const unavailable = transcriptAvailabilityMessage(
@@ -491,8 +526,9 @@ export class PhenixWorkspace implements Component, Focusable {
     if (selected?.run.kind === "root" && this.streamingMessage) {
       const streaming = new AssistantMessageComponent(
         this.streamingMessage,
-        true,
+        !this.thinkingStepsVisible,
         getMarkdownTheme(),
+
         "Thinking...",
         1,
       );

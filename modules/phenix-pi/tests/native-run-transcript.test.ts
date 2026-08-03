@@ -37,6 +37,12 @@ test("loads a Pi session read-only as ordered native and custom-rendered chunks"
     const rendered = loaded.value.component.render(100).join("\n");
     assert.match(rendered, /QA Report/);
     assert.match(rendered, /Repository checks passed/);
+    assert.doesNotMatch(rendered, /Inspecting definitions before the tool call/);
+    loaded.value.component.setThinkingVisible?.(true);
+    assert.match(
+      loaded.value.component.render(100).join("\n"),
+      /Inspecting definitions before the tool call/,
+    );
     assert.equal(await readFile(sessionFile, "utf8"), source);
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -153,7 +159,12 @@ function fixtureSession(cwd: string): string {
       message: {
         role: "assistant",
         content: [
+          {
+            type: "thinking",
+            thinking: "Inspecting definitions before the tool call",
+          },
           { type: "text", text: "I will inspect the definitions." },
+
           {
             type: "toolCall",
             id: "tool-1",
