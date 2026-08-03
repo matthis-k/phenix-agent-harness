@@ -1,5 +1,6 @@
 import { factsWorkspaceView } from "./facts-view.ts";
 import { filesWorkspaceView } from "./files-view.ts";
+import { memoryWorkspaceView } from "./memory-view.ts";
 import { objectivesWorkspaceView } from "./objectives-view.ts";
 import { runsWorkspaceView } from "./runs-view.ts";
 import {
@@ -43,6 +44,7 @@ export function createWorkspaceViewRegistry(
 export const workspaceViewRegistry = createWorkspaceViewRegistry([
   runsWorkspaceView,
   objectivesWorkspaceView,
+  memoryWorkspaceView,
   filesWorkspaceView,
   factsWorkspaceView,
 ]);

@@ -13,6 +13,7 @@ import {
 const EXPANDED_SECTIONS = {
   runs: false,
   objectives: false,
+  memory: false,
   files: false,
   facts: false,
 } as const;
@@ -36,20 +37,29 @@ test("gives the conversation most of the terminal while keeping an OpenCode-like
 
 test("allocates every registered view as an independent scroll region", () => {
   assert.deepEqual(allocateWorkspaceSections(30, EXPANDED_SECTIONS), {
-    runs: 11,
+    runs: 9,
     objectives: 5,
-    files: 7,
-    facts: 7,
+    memory: 6,
+    files: 5,
+    facts: 5,
   });
   assert.deepEqual(allocateWorkspaceSections(30, { ...EXPANDED_SECTIONS, objectives: true }), {
-    runs: 12,
+    runs: 10,
     objectives: 2,
-    files: 8,
-    facts: 8,
+    memory: 6,
+    files: 6,
+    facts: 6,
   });
   for (let height = 0; height <= 10; height += 1) {
     const allocated = allocateWorkspaceSections(height, EXPANDED_SECTIONS);
-    assert.ok(allocated.runs + allocated.objectives + allocated.files + allocated.facts <= height);
+    assert.ok(
+      allocated.runs +
+        allocated.objectives +
+        allocated.memory +
+        allocated.files +
+        allocated.facts <=
+        height,
+    );
   }
 });
 

@@ -135,10 +135,11 @@ test("surface registry exposes one constrained component contract per pane", () 
     WORKSPACE_SURFACES.map((surface) => surface.id),
     WORKSPACE_SURFACE_IDS,
   );
-  assert.equal(new Set(WORKSPACE_SURFACES.map((surface) => surface.id)).size, 6);
+  assert.equal(new Set(WORKSPACE_SURFACES.map((surface) => surface.id)).size, 7);
   assert.equal(workspaceSurface("transcript").constraints.overflow, "scroll");
   assert.equal(workspaceSurface("editor").role, "input");
-  assert.equal(workspaceSurface("facts").constraints.collapsePriority, 40);
+  assert.equal(workspaceSurface("memory").constraints.collapsePriority, 30);
+  assert.equal(workspaceSurface("facts").constraints.collapsePriority, 50);
 });
 
 function lastChange(changes: readonly WorkspaceFrontendChange[]): WorkspaceFrontendChange {
@@ -156,6 +157,7 @@ function snapshot(
     editor: [],
     runs: runs.map(String),
     objectives: [],
+    memory: [],
     files: [],
     facts: [],
   };

@@ -7,7 +7,15 @@ import type { EffectId, PaneId } from "../domain/workspace/state.ts";
 import { createInitialWorkspaceState } from "../domain/workspace/state.ts";
 
 const effectId = (value: string): EffectId => value as EffectId;
-const PANES: readonly PaneId[] = ["transcript", "editor", "runs", "objectives", "files", "facts"];
+const PANES: readonly PaneId[] = [
+  "transcript",
+  "editor",
+  "runs",
+  "objectives",
+  "memory",
+  "files",
+  "facts",
+];
 
 test("stable selection survives insertions and reordering", () => {
   assert.equal(reconcileSelection("b", ["a", "b", "c"], ["c", "x", "b", "a"]), "b");
@@ -28,6 +36,11 @@ test("snapshot completion reconciles every pane by stable ID", () => {
     paneId: "objectives",
     itemId: "objective-b",
   }).state;
+  state = reduceWorkspace(state, {
+    type: "selection.set",
+    paneId: "memory",
+    itemId: "memory-b",
+  }).state;
   const requestId = effectId("snapshot-1");
   state = reduceWorkspace(state, { type: "snapshot.requested", requestId }).state;
 
@@ -36,15 +49,18 @@ test("snapshot completion reconciles every pane by stable ID", () => {
     requestId,
     previousItemIds: itemIndex({
       objectives: ["objective-a", "objective-b", "objective-c"],
+      memory: ["memory-a", "memory-b", "memory-c"],
       runs: ["root"],
     }),
     snapshot: snapshot(1, root, {
       objectives: ["objective-c", "objective-b", "objective-a"],
+      memory: ["memory-c", "memory-b", "memory-a"],
       runs: ["root"],
     }),
   });
 
   assert.equal(received.state.panes.objectives.selectedItemId, "objective-b");
+  assert.equal(received.state.panes.memory.selectedItemId, "memory-b");
   assert.equal(received.state.snapshotRevision, 1);
   assert.equal(received.state.pendingEffects.size, 0);
   assert.deepEqual(received.effects, []);

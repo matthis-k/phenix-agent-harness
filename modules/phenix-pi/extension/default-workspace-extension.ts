@@ -452,10 +452,11 @@ async function loadWorkspaceSnapshot(
   tui: Parameters<typeof renderNativeTranscript>[1],
   theme: ObservabilityTheme,
 ): Promise<PhenixWorkspaceSnapshot> {
-  const [ui, objectives, projects] = await Promise.all([
+  const [ui, objectives, projects, memory] = await Promise.all([
     loadPhenixUiSnapshot(binding.runtime, binding.rootRunId, binding.integrations),
     binding.runtime.objectives.tree(binding.rootRunId),
     binding.runtime.projects.list(),
+    binding.runtime.memory.snapshot(binding.rootRunId),
   ]);
   const entries = buildContextEntries([...ctx.sessionManager.getBranch()]);
   const sessionId = ctx.sessionManager.getSessionId();
@@ -463,6 +464,7 @@ async function loadWorkspaceSnapshot(
   return {
     ui,
     objectives,
+    memory,
     attentionByRun: projectWorkspaceAttention(projects),
     rootTranscript: readyNativeRunTranscript({
       component: renderNativeTranscript(entries, tui, ctx.cwd, theme),

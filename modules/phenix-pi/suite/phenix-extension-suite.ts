@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import registerWorkspace from "../extension/default-workspace-extension.ts";
+import registerMemory from "../extension/memory-extension.ts";
 import registerResultDisplay from "../extension/result-display.ts";
 import registerRuntime from "../extension/root-extension.ts";
 import registerTheme from "../extension/theme-extension.ts";
@@ -20,6 +21,7 @@ export interface PhenixExtensionConfiguration {
   readonly theme: ExtensionRegistrar;
   readonly userForms: ExtensionRegistrar;
   readonly runtime: ExtensionRegistrar;
+  readonly memory: ExtensionRegistrar;
   readonly workspaceStatus: ExtensionRegistrar;
   readonly workspace: ExtensionRegistrar;
   readonly resultDisplay: ExtensionRegistrar;
@@ -30,6 +32,7 @@ const defaultConfiguration: PhenixExtensionConfiguration = Object.freeze({
   theme: registerTheme,
   userForms: registerUserForms,
   runtime: registerRuntime,
+  memory: registerMemory,
   workspaceStatus: registerWorkspaceStatus,
   workspace: (pi: ExtensionAPI) => registerWorkspace(withWorkspaceStandardBuiltins(pi)),
   resultDisplay: registerResultDisplay,
@@ -53,6 +56,7 @@ export async function installPhenixExtensionSuite(
   await configuration.theme(pi);
   await configuration.userForms(pi);
   await configuration.runtime(pi);
+  await configuration.memory(pi);
   await configuration.workspaceStatus(pi);
   await configuration.workspace(pi);
   await configuration.resultDisplay(pi);
