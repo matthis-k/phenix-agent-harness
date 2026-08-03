@@ -6,7 +6,6 @@ description: Investigate repository evidence, ecosystem evidence, and constraint
 input: request.objective
 output: outcome.base
 entry: fanout
-timeout-ms: 3600000
 max-node-runs: 12
 max-parallelism: 3
 ```
