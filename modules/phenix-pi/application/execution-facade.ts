@@ -348,17 +348,15 @@ export class ExecutionFacadeImpl implements ExecutionFacade, RunController {
         type: "run.created",
         data: { record },
       },
-      ...(resolvedModel
-        ? [
-            {
-              runId: id,
-              parentRunId: currentParent.id,
-              type: "run.model.resolved",
-              data: { resolved: resolvedModel },
-            },
-          ]
-        : []),
     ];
+    if (resolvedModel) {
+      createEvents.push({
+        runId: id,
+        parentRunId: currentParent.id,
+        type: "run.model.resolved",
+        data: { resolved: resolvedModel },
+      });
+    }
     await this.store.commit(rootRunId, createEvents);
 
     if (modelFailure) {
