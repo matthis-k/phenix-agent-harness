@@ -112,6 +112,13 @@ test("bundled Markdown workflows are the production definitions", () => {
   );
 });
 
+test("bundled workflows are unbounded while explicit timeouts remain supported", () => {
+  for (const definition of workflowDefinitions) {
+    assert.equal(definition.limits.timeoutMs, 0, definition.id);
+  }
+  assert.equal(compileWorkflowMarkdown(stockWorkflowSource(), bindings).limits.timeoutMs, 120_000);
+});
+
 test("implementation workflow binds routes to its estimator result", () => {
   const compiled = compileWorkflowMarkdown(productionSource("implement"), bindings);
   const invocations = compiled.graph.nodes.filter((node) => node.kind === "invoke");
