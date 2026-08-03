@@ -105,6 +105,7 @@ export class ExecutionStore {
   }
 
   private apply(event: DomainEvent): void {
+    assertTerminalOutcomeMatches(event);
     this.projection.apply(event);
     this.attention.apply(event);
   }
@@ -128,4 +129,31 @@ function unsequence(
 
 function sequence(event: UnsequencedDomainEvent, sequence: number): DomainEvent {
   return { ...event, sequence };
+}
+
+function assertTerminalOutcomeMatches(event: DomainEvent): void {
+  switch (event.type) {
+    case "run.completed":
+      assertOutcomeStatus(event.type, event.data.outcome.status, "success");
+      return;
+    case "run.failed":
+    case "run.orphaned":
+      assertOutcomeStatus(event.type, event.data.outcome.status, "failure");
+      return;
+    case "run.cancelled":
+      assertOutcomeStatus(event.type, event.data.outcome.status, "cancelled");
+      return;
+    default:
+      return;
+  }
+}
+
+function assertOutcomeStatus(
+  eventType: string,
+  actual: string,
+  expected: "success" | "failure" | "cancelled",
+): void {
+  if (actual !== expected) {
+    throw new Error(`${eventType} requires ${expected} outcome, got ${actual}`);
+  }
 }
