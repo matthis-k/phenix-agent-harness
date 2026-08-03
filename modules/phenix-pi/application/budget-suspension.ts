@@ -1,11 +1,16 @@
-import type { DomainEvent, PendingDomainEvent } from "../domain/run/events.ts";
+import type {
+  DomainEvent,
+  PendingDomainEvent,
+  RunBudgetResumedData,
+  RunBudgetSuspendedData,
+} from "../domain/run/events.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
 import type { RunLimits, RunRetryLimitOverrides } from "../domain/run/model.ts";
 import type { Failure, Outcome, RunId } from "../domain/shared.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 
-export const BUDGET_SUSPENDED_EVENT = "run.budget.suspended";
-export const BUDGET_RESUMED_EVENT = "run.budget.resumed";
+export const BUDGET_SUSPENDED_EVENT = "run.budget.suspended" as const;
+export const BUDGET_RESUMED_EVENT = "run.budget.resumed" as const;
 const RESUME_CONTROL_PREFIX = "phenix:budget-resume:";
 
 export interface BudgetSuspension {
@@ -29,25 +34,17 @@ export type AwaitedRun<O> =
   | { readonly status: "completed"; readonly outcome: Outcome<O> }
   | { readonly status: "suspended"; readonly suspension: BudgetSuspension };
 
-interface BudgetSuspendedData {
-  readonly failure: Failure;
-  readonly currentLimits: RunLimits;
-  readonly suggestedLimits: RunRetryLimitOverrides;
-  readonly timeoutRemainingMs?: number;
-  readonly turnCount: number;
-  readonly toolCallCount: number;
-}
-
-interface BudgetResumedData {
-  readonly limits: RunLimits;
-  readonly timeoutRemainingMs?: number;
-}
-
-export function budgetSuspendedEvent(runId: RunId, data: BudgetSuspendedData): PendingDomainEvent {
+export function budgetSuspendedEvent(
+  runId: RunId,
+  data: RunBudgetSuspendedData,
+): PendingDomainEvent<typeof BUDGET_SUSPENDED_EVENT> {
   return { runId, type: BUDGET_SUSPENDED_EVENT, data };
 }
 
-export function budgetResumedEvent(runId: RunId, data: BudgetResumedData): PendingDomainEvent {
+export function budgetResumedEvent(
+  runId: RunId,
+  data: RunBudgetResumedData,
+): PendingDomainEvent<typeof BUDGET_RESUMED_EVENT> {
   return { runId, type: BUDGET_RESUMED_EVENT, data };
 }
 
@@ -61,15 +58,16 @@ export function pendingBudgetSuspension(
     if (!event) continue;
     if (event.type === BUDGET_RESUMED_EVENT) return undefined;
     if (event.type !== BUDGET_SUSPENDED_EVENT) continue;
-    const data = event.data as BudgetSuspendedData;
     return {
       runId,
-      failure: data.failure,
-      currentLimits: data.currentLimits,
-      suggestedLimits: data.suggestedLimits,
-      timeoutRemainingMs: data.timeoutRemainingMs,
-      turnCount: data.turnCount,
-      toolCallCount: data.toolCallCount,
+      failure: event.data.failure,
+      currentLimits: event.data.currentLimits,
+      suggestedLimits: event.data.suggestedLimits,
+      ...(event.data.timeoutRemainingMs === undefined
+        ? {}
+        : { timeoutRemainingMs: event.data.timeoutRemainingMs }),
+      turnCount: event.data.turnCount,
+      toolCallCount: event.data.toolCallCount,
       timestamp: event.timestamp,
       sequence: event.sequence,
     };
@@ -86,15 +84,21 @@ export function latestBudgetState(
   if (pending) {
     return {
       limits: pending.currentLimits,
-      timeoutRemainingMs: pending.timeoutRemainingMs,
+      ...(pending.timeoutRemainingMs === undefined
+        ? {}
+        : { timeoutRemainingMs: pending.timeoutRemainingMs }),
     };
   }
   const events = store.projection.eventsFor(runId);
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
     if (!event || event.type !== BUDGET_RESUMED_EVENT) continue;
-    const data = event.data as BudgetResumedData;
-    return { limits: data.limits, timeoutRemainingMs: data.timeoutRemainingMs };
+    return {
+      limits: event.data.limits,
+      ...(event.data.timeoutRemainingMs === undefined
+        ? {}
+        : { timeoutRemainingMs: event.data.timeoutRemainingMs }),
+    };
   }
   return { limits: run.compiled.limits };
 }
