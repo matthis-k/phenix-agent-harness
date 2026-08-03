@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -14,6 +14,8 @@ import type {
 
 const REWRITE_TIMEOUT_MS = 2_000;
 const LOSSLESS_MARKER = "PHENIX_RTK_LOSSLESS=1";
+const PHENIX_RAW_FILE = "phenix-raw.log";
+const SHELL_COMPOSITION = /[|;&<>`$()\r\n]/;
 
 interface RtkExecutionResult {
   readonly stdout: string | Buffer;
@@ -78,6 +80,9 @@ export class ProcessRtkTokenReductionBackend implements TokenReductionBackend {
     if (/^(?:env\s+[^\n]*\s+)?rtk\b/.test(command) || command.includes(LOSSLESS_MARKER)) {
       return { kind: "passthrough", backend: this.id, reason: "already-reduced" };
     }
+    if (SHELL_COMPOSITION.test(command)) {
+      return { kind: "passthrough", backend: this.id, reason: "not-reducible" };
+    }
 
     await this.ensureConfig();
     let result: RtkExecutionResult;
@@ -99,7 +104,7 @@ export class ProcessRtkTokenReductionBackend implements TokenReductionBackend {
     if (!rewritten || rewritten === command) {
       return { kind: "passthrough", backend: this.id, reason: "not-reducible" };
     }
-    if (rewritten.includes("\0") || rewritten.includes("\n") || rewritten.includes("\r")) {
+    if (rewritten.includes("\0") || SHELL_COMPOSITION.test(rewritten)) {
       return { kind: "passthrough", backend: this.id, reason: "unsafe-rewrite" };
     }
 
@@ -110,7 +115,7 @@ export class ProcessRtkTokenReductionBackend implements TokenReductionBackend {
     const commandWithRecovery = [
       "env",
       LOSSLESS_MARKER,
-      "RTK_TEE=1",
+      "RTK_TEE=0",
       `RTK_TEE_DIR=${shellQuote(teeDirectory)}`,
       `XDG_CONFIG_HOME=${shellQuote(this.configDirectory())}`,
       rewritten,
@@ -125,36 +130,15 @@ export class ProcessRtkTokenReductionBackend implements TokenReductionBackend {
   }
 
   async recover(preparation: TokenReductionRewrite): Promise<RecoveredTokenReductionOutput | undefined> {
-    const directory = path.join(this.directory, "pending", preparation.recoveryKey);
-    let entries: string[];
     try {
-      entries = (await readdir(directory)).filter((entry) => entry.endsWith(".log"));
+      const content = await readFile(
+        path.join(this.directory, "pending", preparation.recoveryKey, PHENIX_RAW_FILE),
+        "utf8",
+      );
+      return { content, complete: true };
     } catch {
       return undefined;
     }
-    const candidates = await Promise.all(
-      entries.map(async (entry) => {
-        try {
-          const content = await readFile(path.join(directory, entry), "utf8");
-          return {
-            content,
-            bytes: Buffer.byteLength(content, "utf8"),
-          };
-        } catch {
-          return undefined;
-        }
-      }),
-    );
-    const recovered = candidates
-      .filter((candidate): candidate is { readonly content: string; readonly bytes: number } =>
-        Boolean(candidate),
-      )
-      .sort((left, right) => right.bytes - left.bytes)[0];
-    if (!recovered) return undefined;
-    return {
-      content: recovered.content,
-      complete: !recovered.content.includes("--- truncated at "),
-    };
   }
 
   async cleanup(preparation: TokenReductionRewrite): Promise<void> {
@@ -173,10 +157,10 @@ export class ProcessRtkTokenReductionBackend implements TokenReductionBackend {
           path.join(directory, "config.toml"),
           [
             "[tee]",
-            "enabled = true",
-            'mode = "always"',
-            "max_files = 64",
-            "max_file_size = 1073741824",
+            "enabled = false",
+            'mode = "never"',
+            "max_files = 1",
+            "max_file_size = 1",
             "",
             "[tracking]",
             "enabled = false",
