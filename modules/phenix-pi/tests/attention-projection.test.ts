@@ -3,7 +3,11 @@ import test from "node:test";
 
 import type { AttentionEnvelope, AttentionId, AttentionTarget } from "../domain/attention/model.ts";
 import { AttentionProjection } from "../domain/attention/projection.ts";
-import type { DomainEvent } from "../domain/run/events.ts";
+import type {
+  DomainEvent,
+  DomainEventData,
+  DomainEventType,
+} from "../domain/run/events.ts";
 import type { RunId } from "../domain/shared.ts";
 
 const rootRunId = "root-attention" as RunId;
@@ -89,7 +93,10 @@ test("attention projection rejects a second terminal delivery outcome", () => {
 });
 
 let sequence = 0;
-function event(type: string, data: unknown): DomainEvent {
+function event<TType extends DomainEventType>(
+  type: TType,
+  data: DomainEventData<TType>,
+): DomainEvent<TType> {
   sequence += 1;
   return {
     eventId: `event-${sequence}`,
@@ -100,5 +107,5 @@ function event(type: string, data: unknown): DomainEvent {
     timestamp: "2026-07-24T12:00:00.000Z",
     type,
     data,
-  };
+  } as DomainEvent<TType>;
 }
