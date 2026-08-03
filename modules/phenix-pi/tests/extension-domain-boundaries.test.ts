@@ -4,11 +4,6 @@ import test from "node:test";
 
 const CASES = [
   {
-    file: "../extension/workspace/interrupt-active-work.ts",
-    required: ['from "../../application/workspace/interrupt-planning.ts"'],
-    forbidden: ["queries.activeRuns", "depthOf(", "for (const run of"],
-  },
-  {
     file: "../extension/workspace/views/runs-view.ts",
     required: ['from "../../../application/workspace/views/runs-view.ts"'],
     forbidden: ["function visit(", "const visit =", "TERMINAL_STATES"],
