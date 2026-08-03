@@ -128,7 +128,7 @@ export interface ObjectiveProgressAppendedData {
  * Closed internal event protocol. New Phenix capabilities extend this map in-repository;
  * consumers then receive compile errors until the new variant is handled deliberately.
  */
-export interface DomainEventDataMap {
+export type DomainEventDataMap = {
   readonly "run.created": RunCreatedData;
   readonly "run.state.changed": RunStateChangedData;
   readonly "run.profile.selected": RunProfileSelectedData;
@@ -168,7 +168,7 @@ export interface DomainEventDataMap {
   readonly "objective.state.changed": ObjectiveStateChangedData;
   readonly "objective.focus.changed": ObjectiveFocusChangedData;
   readonly "objective.progress.appended": ObjectiveProgressAppendedData;
-}
+};
 
 export type DomainEventType = keyof DomainEventDataMap;
 export type DomainEventData<TType extends DomainEventType> = DomainEventDataMap[TType];
