@@ -9,6 +9,8 @@ import { ExecutionFacadeImpl } from "../application/execution-facade.ts";
 import type { ExecutionStore } from "../application/execution-store.ts";
 import { SessionInvocationPolicy } from "../application/invocation-policy.ts";
 import { ModelExecutionFacade } from "../application/model-execution-facade.ts";
+import { ObjectiveAgentToolFactory } from "../application/objective-agent-tools.ts";
+import { ObjectiveFacadeImpl } from "../application/objective-facade.ts";
 import {
   CompositeAgentToolFactory,
   ProjectAgentToolFactory,
@@ -84,7 +86,8 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
   });
   const visibility = { hiddenDefinitions: input.hiddenDefinitions ?? [] };
   const modelExecution = new ModelExecutionFacade({ execution, store, ...visibility });
-  const tasks = new TaskFacadeImpl({ store, catalog: definitions, clock, ids });
+  const objectives = new ObjectiveFacadeImpl({ store, clock, ids });
+  const localTasks = new TaskFacadeImpl({ store, catalog: definitions, clock, ids });
   const catalog = new CatalogFacadeImpl(definitions, store, visibility);
   const invocationPolicy = new SessionInvocationPolicy({ store, catalog: definitions });
   const workflows = new WorkflowProcessManager({
@@ -94,7 +97,7 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
     store,
     catalog: definitions,
     functions,
-    tasks,
+    tasks: localTasks,
     ids,
     cwd,
     clock,
@@ -131,13 +134,13 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
   const executionTools = new FacadeAgentToolFactory({
     execution: modelExecution,
     dispatch,
-    tasks,
     catalog,
     store,
     invocationPolicy,
   });
   const tools = new CompositeAgentToolFactory([
     executionTools,
+    new ObjectiveAgentToolFactory({ objectives, store }),
     new ProjectAgentToolFactory(projects ?? unavailableProjects, store),
     new UserFormAgentToolFactory(userForms ?? unavailableUserForms, store),
   ]);
@@ -145,7 +148,7 @@ export function createExecutionKernel(input: ExecutionKernelDependencies) {
   return {
     execution,
     dynamicWorkflows,
-    tasks,
+    objectives,
     catalog,
     queries: new QueryFacadeImpl(store),
     tools,

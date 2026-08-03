@@ -4,7 +4,7 @@ export const PHENIX_SUBCOMMANDS = [
   { value: "health", label: "health — Inspect runtime and configuration health" },
   { value: "logs", label: "logs — Inspect or export structured diagnostics" },
   { value: "facts", label: "facts — Print or export the complete fact history" },
-  { value: "tasks", label: "tasks — Show the task projection" },
+  { value: "objectives", label: "objectives — Show the objective and sub-objective tree" },
   { value: "integrations", label: "integrations — Show integration health" },
 ] as const;
 

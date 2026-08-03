@@ -4,7 +4,7 @@ export const WORKSPACE_SURFACE_IDS = [
   "transcript",
   "editor",
   "runs",
-  "tasks",
+  "objectives",
   "files",
   "facts",
 ] as const satisfies readonly PaneId[];
@@ -52,7 +52,7 @@ export const WORKSPACE_SURFACES = [
     overflow: "collapse",
     collapsePriority: 0,
   }),
-  defineSurface("tasks", "collection", {
+  defineSurface("objectives", "collection", {
     minWidth: 24,
     minHeight: 2,
     grow: 2,

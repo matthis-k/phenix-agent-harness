@@ -294,7 +294,7 @@ function changedSurfaces<TSnapshot, TTranscript>(
   if (previous.state.activeRunId !== next.state.activeRunId) {
     dirty.add("transcript");
     dirty.add("runs");
-    dirty.add("tasks");
+    dirty.add("objectives");
     dirty.add("files");
   }
   if (previous.state.focusedPaneId !== next.state.focusedPaneId) {

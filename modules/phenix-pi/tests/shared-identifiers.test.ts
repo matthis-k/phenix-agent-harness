@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { definitionId, localTaskId, runId } from "../domain/shared.ts";
+import { definitionId, localTaskId, objectiveId, runId } from "../domain/shared.ts";
 
 test("runtime identifiers reject path, control, and shell metacharacters", () => {
   for (const value of ["../escape", "run/name", "run\0name", "run name", "run;name", "run$(id)"]) {
     assert.throws(() => runId(value), /unsupported characters/);
     assert.throws(() => localTaskId(value), /unsupported characters/);
+    assert.throws(() => objectiveId(value), /unsupported characters/);
   }
 });
 
@@ -20,4 +21,5 @@ test("definition identifiers use the catalog namespace grammar", () => {
 
 test("identifiers are bounded", () => {
   assert.throws(() => runId("r".repeat(161)), /must not exceed 160/);
+  assert.throws(() => objectiveId("o".repeat(161)), /must not exceed 160/);
 });

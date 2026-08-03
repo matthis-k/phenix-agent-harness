@@ -20,7 +20,7 @@ test("phenix command completion lists and filters subcommands", () => {
   );
   assert.deepEqual(
     PHENIX_SUBCOMMANDS.map((item) => item.value),
-    ["ui", "status", "health", "logs", "facts", "tasks", "integrations"],
+    ["ui", "status", "health", "logs", "facts", "objectives", "integrations"],
   );
   assert.deepEqual(completePhenixSubcommands("h"), [
     { value: "health", label: "health — Inspect runtime and configuration health" },
@@ -31,11 +31,14 @@ test("phenix command completion lists and filters subcommands", () => {
   assert.deepEqual(completePhenixSubcommands("l"), [
     { value: "logs", label: "logs — Inspect or export structured diagnostics" },
   ]);
+  assert.deepEqual(completePhenixSubcommands("o"), [
+    { value: "objectives", label: "objectives — Show the objective and sub-objective tree" },
+  ]);
   assert.equal(completePhenixSubcommands("c"), null);
   assert.equal(completePhenixSubcommands("r"), null);
   assert.equal(completePhenixSubcommands("unknown"), null);
   assert.equal(completePhenixSubcommands("status extra"), null);
-  assert.equal(PHENIX_USAGE, "/phenix [ui|status|health|logs|facts|tasks|integrations]");
+  assert.equal(PHENIX_USAGE, "/phenix [ui|status|health|logs|facts|objectives|integrations]");
   assert.equal(PHENIX_UI_USAGE, "/phenix ui [status|runs [run-id]|facts|catalog [definition-id]]");
   assert.equal(PHENIX_STATUS_USAGE, "/phenix status [--json|--expanded]");
   assert.equal(

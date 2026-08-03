@@ -74,7 +74,7 @@ export interface TestRuntime {
   readonly checkpoints: ExecutionKernel["checkpoints"];
   readonly controller: RunController;
   readonly store: ExecutionStore;
-  readonly tasks: ExecutionKernel["tasks"];
+  readonly objectives: ExecutionKernel["objectives"];
   readonly queries: ExecutionKernel["queries"];
   readonly rootRunId: RunId;
 }
@@ -127,7 +127,8 @@ export async function createTestRuntime(
     resolveSchema: resolveDefinitionSchema,
     rootInvokableDefinitions: options.rootInvokableDefinitions,
   });
-  const { execution, workflows, checkpoints, dynamicWorkflows, dispatch, tasks, queries } = kernel;
+  const { execution, workflows, checkpoints, dynamicWorkflows, dispatch, objectives, queries } =
+    kernel;
   execution.registerImplementation(
     "agent",
     agentImplementation ??
@@ -148,7 +149,7 @@ export async function createTestRuntime(
     checkpoints,
     controller: execution,
     store,
-    tasks,
+    objectives,
     queries,
     rootRunId,
   };

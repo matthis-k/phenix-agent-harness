@@ -1,5 +1,6 @@
 import type { ResolvedModel } from "../definition/model.ts";
-import type { Failure, LocalTaskId, Outcome, RunId } from "../shared.ts";
+import type { Objective } from "../objective/model.ts";
+import type { Failure, LocalTaskId, ObjectiveId, Outcome, RunId } from "../shared.ts";
 import type { WorkflowCheckpointSavedData } from "../workflow/checkpoint.ts";
 import type { RunRecord, RunState, SessionProfile } from "./model.ts";
 import type { RunActivityChangedData, RunFactRecordedData } from "./observability.ts";
@@ -82,6 +83,25 @@ export interface LocalTaskCreatedData {
   };
 }
 
+export interface ObjectiveCreatedData {
+  readonly objective: Objective;
+}
+
+export interface ObjectiveStateChangedData {
+  readonly objectiveId: ObjectiveId;
+  readonly state: Objective["state"];
+  readonly updatedAt: string;
+}
+
+export interface ObjectiveFocusChangedData {
+  readonly objectiveId: ObjectiveId;
+}
+
+export interface ObjectiveProgressAppendedData {
+  readonly objectiveId: ObjectiveId;
+  readonly message: string;
+}
+
 export type DomainEventType =
   | "run.created"
   | "run.started"
@@ -118,7 +138,11 @@ export type DomainEventType =
   | "workflow.checkpoint.saved"
   | "task.local.created"
   | "task.local.state.changed"
-  | "task.progress.appended";
+  | "task.progress.appended"
+  | "objective.created"
+  | "objective.state.changed"
+  | "objective.focus.changed"
+  | "objective.progress.appended";
 
 export type RunActivityChangedEvent = DomainEvent<"run.activity.changed", RunActivityChangedData>;
 export type RunFactRecordedEvent = DomainEvent<"run.fact.recorded", RunFactRecordedData>;

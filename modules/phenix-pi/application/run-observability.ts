@@ -95,13 +95,13 @@ export function describeToolCall(
         "decision-reported",
         "Inspected child run",
       );
-    case "phenix_tasks":
+    case "phenix_objectives":
       return description(
         "planning",
-        "Updating task state",
-        undefined,
+        "Updating objective state",
+        compact(stringField(values, "objectiveId", "parentObjectiveId", "title"), 96),
         "decision-reported",
-        "Updated tasks",
+        "Updated objectives",
       );
     case "phenix_return":
       return description(

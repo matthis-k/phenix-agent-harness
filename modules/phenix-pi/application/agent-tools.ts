@@ -2,14 +2,7 @@ import { Type } from "typebox";
 
 import { type AnyDefinition, definitionRef } from "../domain/definition/definition.ts";
 import { defineSchema, type Schema } from "../domain/definition/schema.ts";
-import {
-  definitionId,
-  localTaskId,
-  type Outcome,
-  type RunId,
-  runId,
-  type TaskId,
-} from "../domain/shared.ts";
+import { definitionId, type Outcome, type RunId, runId } from "../domain/shared.ts";
 import type { AgentTool, AgentToolResult } from "../ports/agent-session-backend.ts";
 import {
   awaitOutcomeOrBudget,
@@ -20,7 +13,7 @@ import {
 } from "./budget-suspension.ts";
 import type { DispatchService } from "./dispatch-service.ts";
 import type { ExecutionStore } from "./execution-store.ts";
-import type { CatalogFacade, ExecutionFacade, TaskFacade } from "./interfaces.ts";
+import type { CatalogFacade, ExecutionFacade } from "./interfaces.ts";
 import { allowAllInvocations, type InvocationPolicy } from "./invocation-policy.ts";
 import { PresentationRequestSchema, presentationFact } from "./presentation.ts";
 import {
@@ -129,29 +122,9 @@ const handleParameters = defineSchema<{
   }),
 );
 
-const taskParameters = defineSchema<{
-  action: "tree" | "list" | "add" | "set" | "progress";
-  taskId?: string;
-  title?: string;
-  description?: string;
-  state?: "not_started" | "wip" | "done" | "failed";
-  message?: string;
-}>(
-  "tool.phenix-tasks",
-  Type.Object({
-    action: Type.Enum(["tree", "list", "add", "set", "progress"]),
-    taskId: Type.Optional(Type.String()),
-    title: Type.Optional(Type.String()),
-    description: Type.Optional(Type.String()),
-    state: Type.Optional(Type.Enum(["not_started", "wip", "done", "failed"])),
-    message: Type.Optional(Type.String()),
-  }),
-);
-
 export class FacadeAgentToolFactory implements AgentToolFactory {
   private readonly execution: ExecutionFacade;
   private readonly dispatch?: DispatchService;
-  private readonly tasks: TaskFacade;
   private readonly catalog: CatalogFacade;
   private readonly store: ExecutionStore;
   private readonly invocationPolicy: InvocationPolicy;
@@ -159,14 +132,12 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
   constructor(input: {
     readonly execution: ExecutionFacade;
     readonly dispatch?: DispatchService;
-    readonly tasks: TaskFacade;
     readonly catalog: CatalogFacade;
     readonly store: ExecutionStore;
     readonly invocationPolicy?: InvocationPolicy;
   }) {
     this.execution = input.execution;
     this.dispatch = input.dispatch;
-    this.tasks = input.tasks;
     this.catalog = input.catalog;
     this.store = input.store;
     this.invocationPolicy = input.invocationPolicy ?? allowAllInvocations;
@@ -433,54 +404,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       },
     };
 
-    const taskTool: AgentTool = {
-      name: "phenix_tasks",
-      label: "Phenix Tasks",
-      description:
-        "Read the derived task tree or manage local task leaves owned by this run. Execution task anchors are read-only.",
-      parameters: taskParameters,
-      execute: async (raw) => {
-        const params = requireValid(taskParameters, raw);
-        const root = this.store.projection.rootOf(parentId);
-        if (params.action === "tree") {
-          const tree = await this.tasks.tree(root);
-          return { text: JSON.stringify(tree), details: tree };
-        }
-        if (params.action === "list") {
-          const tasks = await this.tasks.tasksFor(parentId);
-          return { text: JSON.stringify(tasks), details: tasks };
-        }
-        if (params.action === "add") {
-          if (!params.title?.trim()) throw new Error(`add requires title`);
-          const task = await this.tasks.addLocal({
-            ownerRunId: parentId,
-            title: params.title,
-            ...(params.description ? { description: params.description } : {}),
-          });
-          return { text: JSON.stringify(task), details: task };
-        }
-        if (!params.taskId) throw new Error(`${params.action} requires taskId`);
-        const task = this.store.projection.localTasks.get(localTaskId(params.taskId));
-        if (task && task.ownerRunId !== parentId) {
-          throw new Error(`Agents may mutate only their own local task leaves`);
-        }
-        if (params.action === "progress" && !task && params.taskId !== `run:${parentId}`) {
-          throw new Error(`Agents may append progress only to their own execution anchor`);
-        }
-        if (params.action === "set") {
-          if (!params.state) throw new Error(`set requires state`);
-          const updated = await this.tasks.setLocalState(localTaskId(params.taskId), params.state);
-          return { text: JSON.stringify(updated), details: updated };
-        }
-        if (!params.message?.trim()) throw new Error(`progress requires message`);
-        await this.tasks.appendProgress(params.taskId as TaskId, params.message);
-        return { text: `Progress appended to ${params.taskId}.` };
-      },
-    };
-
-    return parent.kind === "root"
-      ? [dispatchTool, handleTool, taskTool]
-      : [runTool, handleTool, presentTool, taskTool];
+    return parent.kind === "root" ? [dispatchTool, handleTool] : [runTool, handleTool, presentTool];
   }
 
   private assertAccessible(callerId: RunId, targetId: RunId): void {
@@ -491,7 +415,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       if (target.parentId === caller.id) return;
       target = this.store.projection.requireRun(target.parentId);
     }
-    throw new Error(`Run ${targetId} is outside caller ${callerId}'s task scope`);
+    throw new Error(`Run ${targetId} is outside caller ${callerId}'s run scope`);
   }
 }
 

@@ -1,12 +1,12 @@
+import type { ObjectiveTree } from "../../../domain/objective/projection.ts";
 import type { RunFact } from "../../../domain/run/observability.ts";
 import type { RunId } from "../../../domain/shared.ts";
-import type { TaskTree } from "../../../domain/task/projection.ts";
 import type { PaneId } from "../../../domain/workspace/state.ts";
 import { workspaceSurface } from "../../../domain/workspace/surfaces.ts";
 import type { RunTree } from "../../interfaces.ts";
 import type { WorkspaceRowPresentation } from "../presentation.ts";
 
-export const WORKSPACE_VIEW_IDS = ["runs", "tasks", "files", "facts"] as const;
+export const WORKSPACE_VIEW_IDS = ["runs", "objectives", "files", "facts"] as const;
 
 export type WorkspaceViewId = (typeof WORKSPACE_VIEW_IDS)[number];
 export type WorkspaceViewPaneId = Extract<PaneId, WorkspaceViewId>;
@@ -22,7 +22,7 @@ export interface WorkspaceViewSnapshot {
     readonly tree: RunTree;
     readonly facts: readonly RunFact[];
   };
-  readonly tasks: TaskTree;
+  readonly objectives?: ObjectiveTree;
   readonly attentionByRun?: Readonly<Record<string, WorkspaceRunAttention>>;
 }
 

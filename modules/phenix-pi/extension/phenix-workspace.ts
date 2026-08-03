@@ -64,8 +64,8 @@ import {
 import {
   findWorkspaceRun,
   type PhenixWorkspaceSnapshot,
+  projectWorkspaceObjectives,
   projectWorkspaceRuns,
-  projectWorkspaceTasks,
 } from "./workspace/workspace-model.ts";
 
 export type { PhenixWorkspaceSnapshot } from "./workspace/workspace-model.ts";
@@ -166,7 +166,7 @@ export function allocateWorkspaceSections(
 }
 
 export const flattenWorkspaceRuns = projectWorkspaceRuns;
-export const flattenWorkspaceTasks = projectWorkspaceTasks;
+export const flattenWorkspaceObjectives = projectWorkspaceObjectives;
 
 export class PhenixWorkspace implements Component, Focusable {
   private readonly tui: TUI;
@@ -1024,7 +1024,7 @@ function countActive(node: RunTreeNode): number {
 }
 
 function sectionTone(section: WorkspaceSection): ObservabilityTone {
-  if (section === "tasks" || section === "files") return "warning";
+  if (section === "objectives" || section === "files") return "warning";
   if (section === "facts") return "success";
   return "accent";
 }

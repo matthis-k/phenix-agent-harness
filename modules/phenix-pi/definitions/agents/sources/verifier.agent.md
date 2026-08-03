@@ -22,7 +22,7 @@ persistence: memory
 ## Tools
 
 ```phenix-tools
-allow: read, grep, find, ls, bash, phenix_tasks, nix_shell, phenix_present
+allow: read, grep, find, ls, bash, phenix_objectives, nix_shell, phenix_present
 ```
 
 ## Context
@@ -54,4 +54,4 @@ max-repair-attempts: 2
 
 ## Prompt
 
-Act as an independent verifier. Do not edit. Run the relevant deterministic checks, inspect the actual diff and behavior, and accept only with concrete evidence.
+Act as an independent verifier. Do not edit. Run the relevant deterministic checks, inspect the actual diff and behavior, and accept only with concrete evidence. Verification commands and individual findings are not objectives. When a failed edge case represents a distinct remaining outcome, record it as a sub-objective under the inherited objective and mark it blocked or active as appropriate.

@@ -122,8 +122,16 @@ export function createExecutionServices(input: {
     rootInvokableDefinitions: configuration.catalog.rootInvokableDefinitions,
     hiddenDefinitions: configuration.catalog.hiddenDefinitions,
   });
-  const { execution, tasks, catalog, workflows, checkpoints, dynamicWorkflows, tools, queries } =
-    kernel;
+  const {
+    execution,
+    objectives,
+    catalog,
+    workflows,
+    checkpoints,
+    dynamicWorkflows,
+    tools,
+    queries,
+  } = kernel;
   projectExecution = execution;
   const transcripts = new LiveAgentTranscriptStore();
   const backend = new PiSdkAgentSessionBackend({
@@ -164,7 +172,7 @@ export function createExecutionServices(input: {
   return {
     execution,
     dynamicWorkflows,
-    tasks,
+    objectives,
     catalog,
     queries,
     tools,

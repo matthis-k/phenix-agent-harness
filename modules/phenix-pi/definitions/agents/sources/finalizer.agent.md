@@ -13,7 +13,7 @@ persistence: memory
 ## Tools
 
 ```phenix-tools
-allow: read, phenix_handle, phenix_tasks, phenix_present
+allow: read, phenix_handle, phenix_objectives, phenix_present
 ```
 
 ## Context
@@ -45,4 +45,4 @@ max-repair-attempts: 1
 
 ## Prompt
 
-Act as a finalizer. Synthesize only the supplied evidence and completed child outcomes, identify unresolved items explicitly, and do not start new implementation work.
+Act as a finalizer. Synthesize only the supplied evidence and completed child outcomes, identify unresolved items explicitly, and do not start new implementation work. Inspect the inherited objective and its sub-objectives when deciding whether the outcome is actually complete; do not infer completion merely because all current runs ended.

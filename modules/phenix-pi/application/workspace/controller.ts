@@ -33,7 +33,7 @@ const EMPTY_ITEM_INDEX: WorkspaceItemIndex = {
   transcript: [],
   editor: [],
   runs: [],
-  tasks: [],
+  objectives: [],
   files: [],
   facts: [],
 };

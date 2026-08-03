@@ -15,7 +15,7 @@ const HOST_NEUTRAL_MODULES = [
   "../application/workspace/views/facts-view.ts",
   "../application/workspace/views/files-view.ts",
   "../application/workspace/views/runs-view.ts",
-  "../application/workspace/views/tasks-view.ts",
+  "../application/workspace/views/objectives-view.ts",
   "../application/workspace/views/workspace-view-format.ts",
   "../application/workspace/views/workspace-view-registry.ts",
   "../application/workspace/views/workspace-view.ts",
@@ -34,19 +34,8 @@ test("registered rows expose host-neutral semantic presentations", () => {
   const root = runNode("root", "running", "root");
   const snapshot = {
     ui: { tree: { root }, facts: [] },
-    tasks: {
-      root: {
-        kind: "execution",
-        id: "root-task",
-        runId: root.run.id,
-        title: "Root task",
-        ownState: "wip",
-        effectiveState: "wip",
-        progress: [],
-        children: [],
-      },
-    },
-  } as unknown as WorkspaceViewSnapshot;
+    objectives: { roots: [], focusByRun: {} },
+  } as WorkspaceViewSnapshot;
   const row = runsWorkspaceView.project(snapshot)[0];
   assert.ok(row);
 

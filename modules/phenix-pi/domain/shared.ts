@@ -1,5 +1,6 @@
 export type RunId = string & { readonly __brand: "RunId" };
 export type DefinitionId = string & { readonly __brand: "DefinitionId" };
+export type ObjectiveId = string & { readonly __brand: "ObjectiveId" };
 export type LocalTaskId = string & { readonly __brand: "LocalTaskId" };
 export type TaskId = `run:${RunId}` | LocalTaskId;
 
@@ -13,6 +14,10 @@ export function runId(value: string): RunId {
 
 export function definitionId(value: string): DefinitionId {
   return validateId("definition ID", value, DEFINITION_ID) as DefinitionId;
+}
+
+export function objectiveId(value: string): ObjectiveId {
+  return validateId("objective ID", value, GENERAL_ID) as ObjectiveId;
 }
 
 export function localTaskId(value: string): LocalTaskId {
@@ -113,6 +118,7 @@ export function cancelled<O = never>(reason: string): Outcome<O> {
 }
 
 export type TaskState = "not_started" | "wip" | "done" | "failed";
+export type ObjectiveState = "not_started" | "wip" | "done" | "blocked";
 
 export interface ValidationIssue {
   readonly path: string;

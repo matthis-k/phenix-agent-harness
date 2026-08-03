@@ -6,9 +6,9 @@ import type {
   AttentionFacade,
   CatalogFacade,
   ExecutionFacade,
+  ObjectiveFacade,
   QueryFacade,
   SessionProfileFacade,
-  TaskFacade,
 } from "../application/interfaces.ts";
 import type { ProjectPlannerFacade } from "../application/project-planner.ts";
 import type { UserFormFacade } from "../application/user-form-service.ts";
@@ -36,7 +36,7 @@ export interface PhenixRuntime {
   readonly projects: ProjectPlannerFacade;
   readonly userForms: UserFormFacade;
   readonly profiles: SessionProfileFacade;
-  readonly tasks: TaskFacade;
+  readonly objectives: ObjectiveFacade;
   readonly catalog: CatalogFacade;
   readonly queries: QueryFacade;
   readonly transcripts: LiveAgentTranscriptReader;
@@ -83,7 +83,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     projects: services.projects,
     userForms: services.userForms,
     profiles: infrastructure.profiles,
-    tasks: services.tasks,
+    objectives: services.objectives,
     catalog: services.catalog,
     queries: services.queries,
     transcripts: services.transcripts,
