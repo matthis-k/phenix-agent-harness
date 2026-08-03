@@ -228,10 +228,14 @@ class PiAgentSessionPort implements AgentSessionPort {
       },
       (error: unknown) => {
         if (!preflightSeen) reject(error);
+        const providerMessage = error instanceof Error ? error.message : String(error);
         this.emit({
           type: "backend.failed",
-          message: error instanceof Error ? error.message : String(error),
+          kind: "provider_error",
+          stopReason: "error",
+          message: providerMessage,
           retryable: true,
+          providerMessage,
         });
       },
     );
