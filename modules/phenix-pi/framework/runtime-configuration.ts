@@ -6,9 +6,7 @@ import type { WorkflowFunctionRegistrar } from "../domain/workflow/functions.ts"
 import type { BudgetPolicy } from "../ports/budget-policy.ts";
 import type { ModelInventory, ModelResolver } from "../ports/model-resolver.ts";
 
-export interface RuntimeCatalogConfiguration<
-  TDefinitionId extends DefinitionId = DefinitionId,
-> {
+export interface RuntimeCatalogConfiguration<TDefinitionId extends DefinitionId = DefinitionId> {
   /** Closed set of definitions owned by this in-repository runtime configuration. */
   readonly definitionIds: readonly TDefinitionId[];
   readonly definitions: readonly AnyDefinition[];
