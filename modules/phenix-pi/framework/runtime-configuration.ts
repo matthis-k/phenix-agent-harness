@@ -40,14 +40,15 @@ export function defineRuntimeConfiguration<const TDefinitionId extends Definitio
   const rootInvokableDefinitions = [...configuration.catalog.rootInvokableDefinitions];
   const hiddenDefinitions = [...configuration.catalog.hiddenDefinitions];
   const declared = uniqueIds("runtime definition declaration", definitionIds);
-  const compiled = new Map<string, AnyDefinition>();
+  const declaredIds = new Set<DefinitionId>(declared);
+  const compiled = new Map<DefinitionId, AnyDefinition>();
 
   for (const definition of definitions) {
     if (compiled.has(definition.id)) {
       throw new Error(`Duplicate compiled runtime definition: ${definition.id}`);
     }
     compiled.set(definition.id, definition);
-    if (!declared.has(definition.id)) {
+    if (!declaredIds.has(definition.id)) {
       throw new Error(`Compiled runtime definition is not declared by the configuration: ${definition.id}`);
     }
   }
