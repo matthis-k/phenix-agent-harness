@@ -16,6 +16,7 @@ test("exposes the reversible memory contract to models exactly once", () => {
   assert.match(prompt, /action=set_status/);
   assert.match(prompt, /captured automatically/);
   assert.match(prompt, /Current user instructions.*outrank recalled notes/);
+  assert.match(prompt, /Objective scope improves retrieval relevance/);
   assert.ok(prompt.endsWith(MEMORY_MODEL_INSTRUCTIONS));
   assert.equal(appendMemoryModelInstructions(prompt), prompt);
 });
