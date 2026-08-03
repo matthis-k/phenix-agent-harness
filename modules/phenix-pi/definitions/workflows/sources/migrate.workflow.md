@@ -6,7 +6,6 @@ description: Inventory providers and consumers, plan dependency order, execute t
 input: request.objective
 output: outcome.base
 entry: inventory
-timeout-ms: 7200000
 max-node-runs: 14
 max-parallelism: 1
 ```
