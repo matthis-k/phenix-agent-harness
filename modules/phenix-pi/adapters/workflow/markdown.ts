@@ -16,6 +16,7 @@ import {
   assertMarkdownFields,
   markdownInteger,
   markdownTitle,
+  optionalMarkdownInteger,
   optionalMarkdownSubsection,
   parseMarkdownFields,
   parseMarkdownTable,
@@ -95,6 +96,7 @@ export function compileWorkflowMarkdown(
   assertMarkdownFields(fields, WORKFLOW_FIELDS, "workflow");
   const input = bindings.resolveSchema(requiredMarkdownField(fields, "input", "workflow"));
   const output = bindings.resolveSchema(requiredMarkdownField(fields, "output", "workflow"));
+  const timeoutMs = optionalMarkdownInteger(fields, "timeout-ms", "workflow", 1);
   const nodes = authored.states.map((state) => compileState(state, bindings, output));
   const nodeIds = new Set(nodes.map((node) => node.id));
   for (const node of nodes) {
@@ -118,7 +120,7 @@ export function compileWorkflowMarkdown(
     input,
     output,
     limits: {
-      timeoutMs: markdownInteger(fields, "timeout-ms", "workflow", 0),
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
       maxNodeRuns: markdownInteger(fields, "max-node-runs", "workflow", 1),
       maxParallelism: markdownInteger(fields, "max-parallelism", "workflow", 1),
     },
