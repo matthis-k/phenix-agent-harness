@@ -68,17 +68,14 @@ export class ExecutionStore {
         const revision = currentRevision + 1;
         revisions.set(candidate.runId, revision);
         const existing = this.projection.runs.get(candidate.runId);
+        const parentRunId = candidate.parentRunId ?? existing?.parentId;
         unsequenced.push({
+          ...candidate,
           eventId,
           rootRunId,
-          runId: candidate.runId,
-          ...((candidate.parentRunId ?? existing?.parentId)
-            ? { parentRunId: candidate.parentRunId ?? existing?.parentId }
-            : {}),
+          ...(parentRunId ? { parentRunId } : {}),
           revision,
           timestamp: this.clock.now(),
-          type: candidate.type,
-          data: candidate.data,
         });
       }
 
