@@ -48,7 +48,6 @@ may-cancel-children: false
 ## Limits
 
 ```phenix-limits
-timeout-ms: 1200000
 max-turns: 40
 max-repair-attempts: 2
 ```
