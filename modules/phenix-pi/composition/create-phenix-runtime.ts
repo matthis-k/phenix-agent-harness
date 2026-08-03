@@ -10,6 +10,7 @@ import type {
   QueryFacade,
   SessionProfileFacade,
 } from "../application/interfaces.ts";
+import type { MemoryService } from "../application/memory-service.ts";
 import type { ProjectPlannerFacade } from "../application/project-planner.ts";
 import type { UserFormFacade } from "../application/user-form-service.ts";
 import type { ConcreteModelRef } from "../domain/definition/model.ts";
@@ -37,6 +38,7 @@ export interface PhenixRuntime {
   readonly userForms: UserFormFacade;
   readonly profiles: SessionProfileFacade;
   readonly objectives: ObjectiveFacade;
+  readonly memory: MemoryService;
   readonly catalog: CatalogFacade;
   readonly queries: QueryFacade;
   readonly transcripts: LiveAgentTranscriptReader;
@@ -84,6 +86,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     userForms: services.userForms,
     profiles: infrastructure.profiles,
     objectives: services.objectives,
+    memory: services.memory,
     catalog: services.catalog,
     queries: services.queries,
     transcripts: services.transcripts,
@@ -91,6 +94,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
     diagnostics,
     async startRoot(input) {
       activeRootRunId = input.id;
+      await services.memory.initializeRoot(input.id);
       await infrastructure.diagnostics.record({
         rootRunId: input.id,
         runId: input.id,
@@ -144,6 +148,7 @@ export async function createPhenixRuntime(host: PhenixHostServices): Promise<Phe
       await services.workflows.shutdown();
       await services.agents.shutdown();
       await infrastructure.events.drain();
+      services.memory.shutdown();
       await services.checkpoints.shutdown();
       services.supervision.shutdown();
       services.transcripts.clear();
