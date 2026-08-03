@@ -66,55 +66,48 @@ export class TokenReductionService {
 
   async complete(input: CompleteReducedToolResultInput): Promise<TokenReductionResult | undefined> {
     const preparation = this.pending.get(input.toolCallId);
-    if (!preparation || !this.backend) return undefined;
+    const backend = this.backend;
+    if (!preparation || !backend) return undefined;
     this.pending.delete(input.toolCallId);
 
+    const reducedContent = sanitizeRecoveryHints(input.content);
+    const reducedBytes = encodedBytes(reducedContent);
     try {
-      const recovered = await this.backend.recover(preparation);
-      const reducedContent = sanitizeRecoveryHints(input.content);
-      const reducedBytes = encodedBytes(reducedContent);
-      if (!recovered) {
-        const metrics: TokenReductionMetrics = {
-          backend: preparation.backend,
-          reducedBytes,
-          savedBytes: 0,
-          estimatedTokensSaved: 0,
-          lossless: false,
-        };
-        return {
-          content: reducedContent,
-          details: mergeDetails(input.details, metrics),
-          metrics,
-        };
+      let recovered;
+      try {
+        recovered = await backend.recover(preparation);
+      } catch {
+        recovered = undefined;
       }
+      if (!recovered) return nonLosslessResult(input.details, preparation.backend, reducedContent);
 
-      const rawContent = [{ type: "text" as const, text: recovered.content }];
       const originalBytes = Buffer.byteLength(recovered.content, "utf8");
       const savedBytes = Math.max(0, originalBytes - reducedBytes);
-      const evidence = await this.evidence.captureToolResult({
-        runId: this.runId,
-        toolName: input.toolName,
-        toolCallId: input.toolCallId,
-        input: restoreOriginalCommand(input.input, preparation.originalCommand),
-        content: rawContent,
-        details: mergeDetails(input.details, {
-          backend: preparation.backend,
-          originalBytes,
-          reducedBytes,
-          savedBytes,
-          estimatedTokensSaved: Math.ceil(savedBytes / 4),
-          lossless: recovered.complete,
-        }),
-        isError: input.isError,
-      });
-      const metrics: TokenReductionMetrics = {
+      const reductionMetrics: TokenReductionMetrics = {
         backend: preparation.backend,
-        evidenceId: evidence.id,
         originalBytes,
         reducedBytes,
         savedBytes,
         estimatedTokensSaved: Math.ceil(savedBytes / 4),
         lossless: recovered.complete,
+      };
+      let evidence;
+      try {
+        evidence = await this.evidence.captureToolResult({
+          runId: this.runId,
+          toolName: input.toolName,
+          toolCallId: input.toolCallId,
+          input: restoreOriginalCommand(input.input, preparation.originalCommand),
+          content: [{ type: "text" as const, text: recovered.content }],
+          details: mergeDetails(input.details, reductionMetrics),
+          isError: input.isError,
+        });
+      } catch {
+        return nonLosslessResult(input.details, preparation.backend, reducedContent);
+      }
+      const metrics: TokenReductionMetrics = {
+        ...reductionMetrics,
+        evidenceId: evidence.id,
       };
       return {
         content: appendEvidenceReceipt(reducedContent, metrics),
@@ -122,16 +115,36 @@ export class TokenReductionService {
         metrics,
       };
     } finally {
-      await this.backend.cleanup(preparation).catch(() => undefined);
+      await backend.cleanup(preparation).catch(() => undefined);
     }
   }
 
   async shutdown(): Promise<void> {
     const pending = [...this.pending.values()];
     this.pending.clear();
-    if (!this.backend) return;
-    await Promise.all(pending.map((item) => this.backend?.cleanup(item).catch(() => undefined)));
+    const backend = this.backend;
+    if (!backend) return;
+    await Promise.all(pending.map((item) => backend.cleanup(item).catch(() => undefined)));
   }
+}
+
+function nonLosslessResult(
+  details: unknown,
+  backend: string,
+  content: readonly unknown[],
+): TokenReductionResult {
+  const metrics: TokenReductionMetrics = {
+    backend,
+    reducedBytes: encodedBytes(content),
+    savedBytes: 0,
+    estimatedTokensSaved: 0,
+    lossless: false,
+  };
+  return {
+    content,
+    details: mergeDetails(details, metrics),
+    metrics,
+  };
 }
 
 function restoreOriginalCommand(input: unknown, originalCommand: string): unknown {
