@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, open, readFile } from "node:fs/promises";
 import path from "node:path";
 
+import { parsePersistedDomainEvent } from "../../domain/run/event-codec.ts";
 import type { DomainEvent, UnsequencedDomainEvent } from "../../domain/run/events.ts";
 import type { RunId } from "../../domain/shared.ts";
 import { LedgerConflictError, type RunLedger } from "../../ports/run-ledger.ts";
@@ -81,10 +82,15 @@ export class JsonlRunLedger implements RunLedger {
       .filter((line) => line.trim().length > 0)
       .map((line, index) => {
         try {
-          return JSON.parse(line) as DomainEvent;
+          const decoded: unknown = JSON.parse(line);
+          const event = parsePersistedDomainEvent(decoded);
+          if (event.rootRunId !== rootRunId) {
+            throw new Error(`event belongs to root ${event.rootRunId}`);
+          }
+          return event;
         } catch (error) {
           throw new Error(
-            `Invalid Phenix ledger JSON at ${file}:${index + 1}: ${error instanceof Error ? error.message : String(error)}`,
+            `Invalid Phenix ledger event at ${file}:${index + 1}: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
       });
