@@ -26,6 +26,8 @@ RTK's normal tee is disabled for managed calls. The patched Phenix sink writes o
 
 Only a single shell command is eligible. Commands containing pipelines, chaining, redirection, command substitution, subshells, backgrounding, or newlines pass through unchanged. This restriction avoids pretending that separate RTK subprocess outputs can reconstruct the exact combined shell result.
 
+Command-local assignments for the integration-owned environment variables also pass through unchanged: `PHENIX_RTK_LOSSLESS`, `RTK_DISABLED`, `RTK_TEE`, `RTK_TEE_DIR`, and `XDG_CONFIG_HOME`. This prevents an RTK-preserved environment prefix from redirecting or disabling the private evidence sink.
+
 RTK remains responsible for deciding whether an eligible single command has a useful rewrite. Exit codes `0` and `3` admit a rewrite; unsupported, denied, unchanged, or ambiguous output passes through.
 
 ## Failure semantics
@@ -34,11 +36,12 @@ Reduction fails open:
 
 - no configured backend: execute the original command;
 - compound or shell-composed command: execute the original command;
+- reserved integration environment assignment: execute the original command;
 - unsupported or unchanged rewrite: execute the original command;
 - missing RTK binary or rewrite failure: execute the original command;
 - ambiguous multiline rewrite: reject the rewrite and execute the original command;
 - missing recovery file or failed evidence persistence: keep the compact result and mark it non-lossless;
-- explicit `PHENIX_TOKEN_REDUCTION_BACKEND=none`, `RTK_DISABLED=1`, or command-local `RTK_TEE=0`: bypass reduction.
+- explicit `PHENIX_TOKEN_REDUCTION_BACKEND=none` or process-level `RTK_DISABLED=1`: bypass reduction.
 
 A result is marked lossless only after complete raw output has been imported into Phenix memory. Temporary RTK recovery directories are deleted after ingestion or session shutdown.
 
