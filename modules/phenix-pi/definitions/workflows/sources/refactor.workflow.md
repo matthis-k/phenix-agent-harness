@@ -6,7 +6,6 @@ description: Capture behavioral invariants, assess the target architecture, perf
 input: request.objective
 output: outcome.base
 entry: characterize
-timeout-ms: 4800000
 max-node-runs: 12
 max-parallelism: 1
 ```
