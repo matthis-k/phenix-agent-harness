@@ -66,10 +66,7 @@ test("bundled agent sessions are unbounded while explicit timeouts remain suppor
   }
 
   const optedIn = compileAgentMarkdown(
-    source("scout").replace(
-      "max-repair-attempts: 1",
-      "timeout-ms: 12345\nmax-repair-attempts: 1",
-    ),
+    source("scout").replace("max-repair-attempts: 1", "timeout-ms: 12345\nmax-repair-attempts: 1"),
     { resolveSchema: resolveDefinitionSchema },
   );
   assert.equal(optedIn.limits.timeoutMs, 12_345);
