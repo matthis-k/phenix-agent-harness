@@ -3,11 +3,7 @@ import test from "node:test";
 
 import type { AttentionEnvelope, AttentionId, AttentionTarget } from "../domain/attention/model.ts";
 import { AttentionProjection } from "../domain/attention/projection.ts";
-import type {
-  DomainEvent,
-  DomainEventData,
-  DomainEventType,
-} from "../domain/run/events.ts";
+import type { DomainEvent, DomainEventData, DomainEventType } from "../domain/run/events.ts";
 import type { RunId } from "../domain/shared.ts";
 
 const rootRunId = "root-attention" as RunId;
