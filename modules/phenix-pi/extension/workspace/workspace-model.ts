@@ -8,6 +8,7 @@ import { workspaceViewRegistry } from "./views/workspace-view-registry.ts";
 
 export type { WorkspaceFileRow } from "./views/files-view.ts";
 export { projectWorkspaceFiles } from "./views/files-view.ts";
+export { projectWorkspaceMemory } from "./views/memory-view.ts";
 export type { WorkspaceObjectiveRow } from "./views/objectives-view.ts";
 export { projectWorkspaceObjectives } from "./views/objectives-view.ts";
 export type { WorkspaceRunRow } from "./views/runs-view.ts";
@@ -24,6 +25,7 @@ export function workspaceItemIndex(snapshot: PhenixWorkspaceSnapshot): Workspace
     editor: [],
     runs: [],
     objectives: [],
+    memory: [],
     files: [],
     facts: [],
   };
