@@ -123,6 +123,8 @@ export class ListView<T> {
         next = index;
         break;
       }
+      case "activate":
+        return undefined;
     }
 
     const item = this.items[next];
