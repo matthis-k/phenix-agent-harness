@@ -6,7 +6,6 @@ description: Run the invariant read-only review and deterministic evidence pipel
 input: request.objective
 output: outcome.qa-report
 entry: review
-timeout-ms: 3000000
 max-node-runs: 4
 max-parallelism: 1
 ```
