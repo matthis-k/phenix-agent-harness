@@ -49,9 +49,7 @@ test("allocates every registered view as an independent scroll region", () => {
   });
   for (let height = 0; height <= 10; height += 1) {
     const allocated = allocateWorkspaceSections(height, EXPANDED_SECTIONS);
-    assert.ok(
-      allocated.runs + allocated.objectives + allocated.files + allocated.facts <= height,
-    );
+    assert.ok(allocated.runs + allocated.objectives + allocated.files + allocated.facts <= height);
   }
 });
 

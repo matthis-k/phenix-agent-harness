@@ -7,14 +7,7 @@ import type { EffectId, PaneId } from "../domain/workspace/state.ts";
 import { createInitialWorkspaceState } from "../domain/workspace/state.ts";
 
 const effectId = (value: string): EffectId => value as EffectId;
-const PANES: readonly PaneId[] = [
-  "transcript",
-  "editor",
-  "runs",
-  "objectives",
-  "files",
-  "facts",
-];
+const PANES: readonly PaneId[] = ["transcript", "editor", "runs", "objectives", "files", "facts"];
 
 test("stable selection survives insertions and reordering", () => {
   assert.equal(reconcileSelection("b", ["a", "b", "c"], ["c", "x", "b", "a"]), "b");

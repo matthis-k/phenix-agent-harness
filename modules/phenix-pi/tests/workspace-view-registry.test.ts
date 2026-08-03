@@ -51,7 +51,8 @@ test("rejects duplicate and incomplete workspace registries", () => {
     /runs is registered more than once/,
   );
   assert.throws(
-    () => createWorkspaceViewRegistry([runsWorkspaceView, objectivesWorkspaceView, filesWorkspaceView]),
+    () =>
+      createWorkspaceViewRegistry([runsWorkspaceView, objectivesWorkspaceView, filesWorkspaceView]),
     /missing: facts/,
   );
 });
@@ -127,9 +128,12 @@ test("agent session rows show their own difficulty and focused objective while c
     } as unknown as RunSnapshot,
   } satisfies RunTreeNode;
   const root = runNode("root", "running", [child], "root");
-  const objective = objectiveNode("objective-main", "wip", [], [
-    { runId: child.run.id, model: "phenix/mixed" },
-  ]);
+  const objective = objectiveNode(
+    "objective-main",
+    "wip",
+    [],
+    [{ runId: child.run.id, model: "phenix/mixed" }],
+  );
   const snapshot = workspaceSnapshot(root, [objective], {
     child: {
       id: objective.id,

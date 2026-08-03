@@ -1,15 +1,15 @@
 import type { Objective } from "../domain/objective/model.ts";
 import {
   focusedObjectiveId,
-  objectiveContains,
-  projectObjectiveTree,
   type ObjectiveNode,
   type ObjectiveTree,
+  objectiveContains,
+  projectObjectiveTree,
 } from "../domain/objective/projection.ts";
 import {
   type ObjectiveId,
-  objectiveId,
   type ObjectiveState,
+  objectiveId,
   type RunId,
 } from "../domain/shared.ts";
 import type { Clock, IdGenerator } from "../ports/clock.ts";
@@ -21,7 +21,11 @@ export class ObjectiveFacadeImpl implements ObjectiveFacade {
   private readonly clock: Clock;
   private readonly ids: IdGenerator;
 
-  constructor(input: { readonly store: ExecutionStore; readonly clock: Clock; readonly ids: IdGenerator }) {
+  constructor(input: {
+    readonly store: ExecutionStore;
+    readonly clock: Clock;
+    readonly ids: IdGenerator;
+  }) {
     this.store = input.store;
     this.clock = input.clock;
     this.ids = input.ids;
@@ -73,7 +77,13 @@ export class ObjectiveFacadeImpl implements ObjectiveFacade {
       { runId: actor.id, type: "objective.created", data: { objective } },
       ...(input.focus === false
         ? []
-        : [{ runId: actor.id, type: "objective.focus.changed", data: { objectiveId: objective.id } }]),
+        : [
+            {
+              runId: actor.id,
+              type: "objective.focus.changed",
+              data: { objectiveId: objective.id },
+            },
+          ]),
     ]);
     return this.requireObjective(objective.id);
   }

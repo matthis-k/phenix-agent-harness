@@ -34,9 +34,7 @@ export const objectivesWorkspaceView = defineWorkspaceView<WorkspaceObjectiveRow
     projectWorkspaceObjectives(snapshot.objectives?.roots ?? []).map((value) => {
       const node = value.node;
       const models = [...new Set(node.workers.map((worker) => worker.model))];
-      const expandable = Boolean(
-        node.description || node.progress.length > 0 || models.length > 0,
-      );
+      const expandable = Boolean(node.description || node.progress.length > 0 || models.length > 0);
       const present = ({
         width,
         expanded,
@@ -61,10 +59,9 @@ export const objectivesWorkspaceView = defineWorkspaceView<WorkspaceObjectiveRow
               { tone: objectiveStateTone(node.effectiveState) },
             ),
             textSpan(" "),
-            textSpan(
-              truncateWorkspaceText(node.title, Math.max(8, width - 18 - value.depth * 2)),
-              { strong: true },
-            ),
+            textSpan(truncateWorkspaceText(node.title, Math.max(8, width - 18 - value.depth * 2)), {
+              strong: true,
+            }),
             ...(details.length > 0
               ? [textSpan(` · ${details.join(" · ")}`, { tone: "dim" as const })]
               : []),

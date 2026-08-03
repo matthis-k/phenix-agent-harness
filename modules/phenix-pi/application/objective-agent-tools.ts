@@ -2,7 +2,7 @@ import { Type } from "typebox";
 
 import { defineSchema } from "../domain/definition/schema.ts";
 import type { ObjectiveNode } from "../domain/objective/projection.ts";
-import { objectiveId, type ObjectiveId, type RunId } from "../domain/shared.ts";
+import { type ObjectiveId, objectiveId, type RunId } from "../domain/shared.ts";
 import type { AgentTool } from "../ports/agent-session-backend.ts";
 import type { AgentToolFactory } from "./agent-tools.ts";
 import type { ExecutionStore } from "./execution-store.ts";
@@ -62,7 +62,9 @@ export class ObjectiveAgentToolFactory implements AgentToolFactory {
               ? undefined
               : current?.id;
           if (run.kind !== "root" && !parentObjectiveId) {
-            throw new Error(`A child run must already focus an objective before adding a sub-objective`);
+            throw new Error(
+              `A child run must already focus an objective before adding a sub-objective`,
+            );
           }
           return result(
             await this.objectives.add({
@@ -105,10 +107,7 @@ export class FilteredAgentToolFactory implements AgentToolFactory {
   }
 }
 
-function resolveTarget(
-  rawId: string | undefined,
-  current: ObjectiveNode | undefined,
-): ObjectiveId {
+function resolveTarget(rawId: string | undefined, current: ObjectiveNode | undefined): ObjectiveId {
   if (rawId) return objectiveId(rawId);
   if (current) return current.id;
   throw new Error(`No objectiveId was supplied and this run has no current objective`);

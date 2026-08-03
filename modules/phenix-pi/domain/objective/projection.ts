@@ -164,5 +164,7 @@ function runModelLabel(run: RunRecord): string {
 }
 
 function byCreation(left: Objective, right: Objective): number {
-  return left.createdAt.localeCompare(right.createdAt) || String(left.id).localeCompare(String(right.id));
+  return (
+    left.createdAt.localeCompare(right.createdAt) || String(left.id).localeCompare(String(right.id))
+  );
 }

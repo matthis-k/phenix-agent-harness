@@ -404,9 +404,7 @@ export class FacadeAgentToolFactory implements AgentToolFactory {
       },
     };
 
-    return parent.kind === "root"
-      ? [dispatchTool, handleTool]
-      : [runTool, handleTool, presentTool];
+    return parent.kind === "root" ? [dispatchTool, handleTool] : [runTool, handleTool, presentTool];
   }
 
   private assertAccessible(callerId: RunId, targetId: RunId): void {

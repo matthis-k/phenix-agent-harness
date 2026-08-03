@@ -127,7 +127,8 @@ export async function createTestRuntime(
     resolveSchema: resolveDefinitionSchema,
     rootInvokableDefinitions: options.rootInvokableDefinitions,
   });
-  const { execution, workflows, checkpoints, dynamicWorkflows, dispatch, objectives, queries } = kernel;
+  const { execution, workflows, checkpoints, dynamicWorkflows, dispatch, objectives, queries } =
+    kernel;
   execution.registerImplementation(
     "agent",
     agentImplementation ??

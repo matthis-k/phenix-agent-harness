@@ -1,5 +1,5 @@
-import type { ObjectiveState } from "../../../domain/shared.ts";
 import type { RunSnapshot } from "../../../domain/run/model.ts";
+import type { ObjectiveState } from "../../../domain/shared.ts";
 import type { WorkspaceTextTone } from "../presentation.ts";
 
 export function definitionLabel(value: string): string {
