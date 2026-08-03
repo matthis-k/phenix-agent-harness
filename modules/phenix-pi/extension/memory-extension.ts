@@ -45,7 +45,11 @@ export default function registerMemoryExtension(pi: ExtensionAPI): void {
           return;
         }
         const result = await active.runtime.memory.read(active.rootRunId, evidenceId(id));
-        await openMemoryDetail(ctx, `Evidence ${id}`, formatEvidence(result.evidence, result.content));
+        await openMemoryDetail(
+          ctx,
+          `Evidence ${id}`,
+          formatEvidence(result.evidence, result.content),
+        );
         return;
       }
 
@@ -55,7 +59,10 @@ export default function registerMemoryExtension(pi: ExtensionAPI): void {
         limit: 100,
       });
       if (notes.length === 0) {
-        ctx.ui.notify(request ? `No memory matched “${request}”.` : "No Phenix memory recorded yet.", "info");
+        ctx.ui.notify(
+          request ? `No memory matched “${request}”.` : "No Phenix memory recorded yet.",
+          "info",
+        );
         return;
       }
       const selected = await selectMemoryNote(ctx, notes);
@@ -123,7 +130,9 @@ async function formatMemoryNote(
     "",
     note.summary,
   ];
-  if (note.supersedes?.length) lines.push("", `Supersedes: ${note.supersedes.join(", ")}`);
+  if (note.supersedes?.length) {
+    lines.push("", `Supersedes: ${note.supersedes.join(", ")}`);
+  }
   if (note.invalidatedBy) lines.push("", `Invalidated by: ${note.invalidatedBy}`);
   if (note.evidenceIds.length === 0) return lines.join("\n");
 
@@ -136,7 +145,9 @@ async function formatMemoryNote(
       remaining -= content.length;
       lines.push("", formatEvidence(result.evidence, content));
       if (content.length < result.content.length) {
-        lines.push(`[Evidence truncated in UI: ${content.length}/${result.content.length} characters]`);
+        lines.push(
+          `[Evidence truncated in UI: ${content.length}/${result.content.length} characters]`,
+        );
       }
       if (remaining <= 0) {
         lines.push("", "[Additional evidence omitted from the UI budget]");
@@ -150,7 +161,9 @@ async function formatMemoryNote(
 }
 
 function formatEvidence(
-  evidence: Awaited<ReturnType<WorkspaceRuntimeBinding["runtime"]["memory"]["read"]>>["evidence"],
+  evidence: Awaited<
+    ReturnType<WorkspaceRuntimeBinding["runtime"]["memory"]["read"]>
+  >["evidence"],
   content: string,
 ): string {
   return [
