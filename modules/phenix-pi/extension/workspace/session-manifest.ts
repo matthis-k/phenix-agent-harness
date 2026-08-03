@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 import {
@@ -38,10 +38,11 @@ export async function copySessionManifest(
   if (!command) throw new Error(`Invalid session-copy command: ${commandText}`);
 
   const manifest = await buildSessionManifest(ctx, binding);
-  const text = `${JSON.stringify(manifest, null, 2)}\n`;
+  const text = `${stringifyManifest(manifest)}\n`;
   const file = manifestFile(ctx.cwd, binding, command.file);
   await mkdir(dirname(file), { recursive: true, mode: 0o700 });
   await writeFile(file, text, { encoding: "utf8", mode: 0o600 });
+  await chmod(file, 0o600);
 
   try {
     await copyToClipboard(text);
@@ -83,7 +84,11 @@ export async function buildSessionManifest(
   const nodes = flattenRunTree(runTree.root);
   const ledgerPath = runtime.ledgerPath(rootRunId);
   const diagnosticPath = runtime.diagnostics.pathFor(rootRunId);
-  const diagnosticArtifacts = await resolveDiagnosticArtifacts(runtime.diagnostics, rootRunId, diagnostics);
+  const diagnosticArtifacts = await resolveDiagnosticArtifacts(
+    runtime.diagnostics,
+    rootRunId,
+    diagnostics,
+  );
   const childSessions = await Promise.all(
     nodes
       .filter((node) => node.run.kind === "agent" && node.run.pi !== undefined)
@@ -248,10 +253,27 @@ function manifestFile(
 ): string {
   if (requested) return resolve(cwd, requested);
   const timestamp = new Date().toISOString().replaceAll(":", "-");
-  const directory =
-    binding.runtime.diagnostics.artifactDirectoryFor(binding.rootRunId) ??
-    resolve(cwd, ".phenix-agent-state", "session-manifests");
+  const diagnosticPath = binding.runtime.diagnostics.pathFor(binding.rootRunId);
+  const directory = diagnosticPath
+    ? join(dirname(diagnosticPath), "session-manifests")
+    : resolve(cwd, ".phenix-agent-state", "session-manifests");
   return join(directory, `session-${safeName(binding.rootRunId)}-${timestamp}.json`);
+}
+
+function stringifyManifest(value: unknown): string {
+  const seen = new WeakSet<object>();
+  return JSON.stringify(
+    value,
+    (_key, nested) => {
+      if (typeof nested === "bigint") return String(nested);
+      if (nested && typeof nested === "object") {
+        if (seen.has(nested)) return "[circular]";
+        seen.add(nested);
+      }
+      return nested;
+    },
+    2,
+  );
 }
 
 function safeName(value: string): string {
