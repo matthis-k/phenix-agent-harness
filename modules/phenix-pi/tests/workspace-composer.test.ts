@@ -35,6 +35,22 @@ test("renders a focused input surface without persistent key hints", () => {
   assert.doesNotMatch(plain, /────────/);
 });
 
+test("decorates input body rows without affecting composer spacing", () => {
+  const decorated: number[] = [];
+  const lines = renderWorkspaceComposer({
+    lines: ["────────", "first", "second", "────────"],
+    width: 40,
+    active: true,
+    theme: THEME,
+    decorateBodyLine: (line, row) => {
+      decorated.push(row);
+      return line;
+    },
+  });
+  assert.deepEqual(decorated, [0, 1]);
+  assert.equal(lines.length, 4);
+});
+
 test("grows on the first newline and keeps one row on both sides of input", () => {
   const singleLine = renderWorkspaceComposer({
     lines: ["────────", "first", "────────"],

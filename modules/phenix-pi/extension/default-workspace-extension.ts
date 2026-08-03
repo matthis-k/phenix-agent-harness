@@ -27,7 +27,7 @@ import { handoffNativeWorkspaceInput } from "./workspace/native-input-handoff.ts
 import { selectedWorkspaceInputTarget } from "./workspace/workspace-controller-adapter.ts";
 import {
   type NativeInputDelegation,
-  WORKSPACE_COPY_TRANSCRIPT,
+  WORKSPACE_COPY_TEXT,
   WORKSPACE_NATIVE_HANDOFF,
 } from "./workspace/workspace-interaction.ts";
 import { routeWorkspaceMessage } from "./workspace/workspace-message-routing.ts";
@@ -210,7 +210,7 @@ async function openWorkspace(
     return handoffNativeWorkspaceInput({
       data,
       keybindings: activeKeybindings,
-      hasTranscriptSelection: activeWorkspace.hasTranscriptSelection,
+      hasTextSelection: activeWorkspace.hasTextSelection,
       handoff: (delegation) => {
         if (delegation.action === "app.model.select") {
           void showModelDialog().catch((error) => {
@@ -271,7 +271,7 @@ async function openWorkspace(
             return;
           }
           if (action.kind === "native" && slashCommandName(action.text) === "copy") {
-            activeWorkspace?.handleInput(WORKSPACE_COPY_TRANSCRIPT);
+            activeWorkspace?.handleInput(WORKSPACE_COPY_TEXT);
             return;
           }
           if (action.kind === "native" && isRegisteredWorkspaceCommand(action.text, commands)) {

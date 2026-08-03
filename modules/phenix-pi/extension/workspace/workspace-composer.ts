@@ -12,12 +12,15 @@ export interface WorkspaceComposerInput {
   readonly width: number;
   readonly active: boolean;
   readonly theme: ObservabilityTheme;
+  readonly decorateBodyLine?: (line: string, row: number, width: number) => string;
 }
 
 export function renderWorkspaceComposer(input: WorkspaceComposerInput): readonly string[] {
   const width = Math.max(1, input.width);
   const innerWidth = Math.max(0, width - 3);
-  const body = editorBody(input.lines);
+  const body = editorBody(input.lines).map(
+    (line, row) => input.decorateBodyLine?.(line, row, innerWidth) ?? line,
+  );
   const rows = [
     ...blankRows(TRANSCRIPT_GAP_ROWS),
     ...Array.from({ length: Math.max(MINIMUM_EDITOR_ROWS, body.length) }, (_, index) =>
