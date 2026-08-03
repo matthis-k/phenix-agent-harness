@@ -47,9 +47,9 @@ export class ExecutionStore {
     });
   }
 
-  async commit(
+  async commit<const TPending extends readonly PendingDomainEvent[]>(
     rootRunId: RunId,
-    pending: readonly PendingDomainEvent[],
+    pending: TPending,
   ): Promise<readonly DomainEvent[]> {
     return this.executor.run(rootRunId, async () => {
       if (!this.loadedRoots.has(rootRunId)) await this.loadUnlocked(rootRunId);
