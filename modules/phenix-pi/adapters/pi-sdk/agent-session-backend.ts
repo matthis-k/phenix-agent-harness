@@ -283,10 +283,17 @@ class PiAgentSessionPort implements AgentSessionPort {
       this.completedMessages.push(event.message);
       if (event.message.role === "assistant") this.streamingMessage = undefined;
       this.publishTranscript();
-      if (event.message.role === "assistant" && event.message.stopReason === "error") {
+      if (
+        event.message.role === "assistant" &&
+        (event.message.stopReason === "error" || event.message.stopReason === "aborted")
+      ) {
         this.emit({
           type: "backend.failed",
-          message: event.message.errorMessage ?? "Pi provider failed",
+          message:
+            event.message.errorMessage ??
+            (event.message.stopReason === "aborted"
+              ? "Pi assistant turn ended with stopReason=aborted"
+              : "Pi provider failed"),
           retryable: true,
         });
       }
