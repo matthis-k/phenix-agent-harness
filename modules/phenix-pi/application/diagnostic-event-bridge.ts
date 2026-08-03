@@ -1,7 +1,6 @@
 import type { DiagnosticSeverity } from "../domain/diagnostics.ts";
 import type { DomainEvent } from "../domain/run/events.ts";
 import type { RunFactRecordedData } from "../domain/run/observability.ts";
-import type { WorkflowCheckpointSavedData } from "../domain/workflow/checkpoint.ts";
 import type { DiagnosticLog } from "../ports/diagnostic-log.ts";
 
 export async function logDomainEvent(log: DiagnosticLog, event: DomainEvent): Promise<void> {
@@ -28,7 +27,7 @@ interface Description {
 function describe(event: DomainEvent): Description {
   switch (event.type) {
     case "run.created": {
-      const record = (event.data as { readonly record: Record<string, unknown> }).record;
+      const { record } = event.data;
       return {
         severity: "info",
         scope: "run.lifecycle.created",
@@ -43,32 +42,30 @@ function describe(event: DomainEvent): Description {
         },
       };
     }
-    case "run.state.changed": {
-      const data = event.data as { readonly from: string; readonly to: string };
+    case "run.state.changed":
       return {
-        severity: data.to === "failed" || data.to === "orphaned" ? "error" : "trace",
+        severity:
+          event.data.to === "failed" || event.data.to === "orphaned" ? "error" : "trace",
         scope: "run.lifecycle.state_changed",
-        message: `Run state changed ${data.from} -> ${data.to}`,
-        fields: data,
+        message: `Run state changed ${event.data.from} -> ${event.data.to}`,
+        fields: diagnosticFields(event.data),
       };
-    }
     case "run.profile.selected":
       return {
         severity: "info",
         scope: "runtime.profile.selected",
         message: "Session profile selected",
-        fields: event.data as Readonly<Record<string, unknown>>,
+        fields: diagnosticFields(event.data),
       };
     case "run.model.resolved": {
-      const resolved = (event.data as { readonly resolved: Record<string, unknown> }).resolved;
-      const concrete = resolved.concrete as Record<string, unknown> | undefined;
+      const { resolved } = event.data;
       return {
         severity: "info",
         scope: "model.routing.resolved",
         message: "Concrete model resolved for run",
         fields: {
-          provider: concrete?.provider,
-          model: concrete?.model,
+          provider: resolved.concrete.provider,
+          model: resolved.concrete.model,
           thinking: resolved.thinking,
           capability: resolved.capability,
           pool: resolved.pool,
@@ -82,92 +79,85 @@ function describe(event: DomainEvent): Description {
         severity: "info",
         scope: "model.root.observed",
         message: "Root model selection observed",
-        fields: event.data as Readonly<Record<string, unknown>>,
+        fields: diagnosticFields(event.data),
       };
     case "run.pi.bound":
       return {
         severity: "info",
         scope: "agent.session.bound",
         message: "Pi session bound to run",
-        fields: event.data as Readonly<Record<string, unknown>>,
+        fields: diagnosticFields(event.data),
       };
     case "run.cycle.started":
       return {
         severity: "trace",
         scope: "agent.cycle.started",
         message: "Agent cycle started",
-        fields: event.data as Readonly<Record<string, unknown>>,
+        fields: diagnosticFields(event.data),
       };
     case "run.cycle.settled":
       return {
         severity: "trace",
         scope: "agent.cycle.settled",
         message: "Agent cycle settled",
-        fields: event.data as Readonly<Record<string, unknown>>,
+        fields: diagnosticFields(event.data),
       };
     case "run.turn.ended":
       return {
         severity: "trace",
         scope: "agent.turn.ended",
         message: "Agent turn ended",
-        fields: event.data as Readonly<Record<string, unknown>>,
       };
     case "run.tool.started":
       return {
         severity: "trace",
         scope: "tool.execution.started",
         message: "Tool execution started",
-        fields: event.data as Readonly<Record<string, unknown>>,
+        fields: diagnosticFields(event.data),
       };
     case "run.activity.changed":
       return {
         severity: "trace",
         scope: "run.activity.changed",
         message: "Run activity changed",
-        fields: event.data as Readonly<Record<string, unknown>>,
+        fields: diagnosticFields(event.data),
       };
     case "run.fact.recorded":
-      return factDescription(event.data as RunFactRecordedData);
+      return factDescription(event.data);
     case "run.input.amended":
       return {
         severity: "trace",
         scope: "runtime.input.amended",
         message: "Root input amended",
-        fields: event.data as Readonly<Record<string, unknown>>,
+        fields: diagnosticFields(event.data),
       };
     case "run.output.submitted":
       return {
         severity: "info",
         scope: "run.output.submitted",
         message: "Typed run output submitted",
-        fields: event.data as Readonly<Record<string, unknown>>,
+        fields: { output: event.data.output },
       };
     case "run.output.rejected":
       return {
         severity: "warning",
         scope: "run.output.rejected",
         message: "Typed run output rejected",
-        fields: event.data as Readonly<Record<string, unknown>>,
+        fields: { issues: event.data.issues },
       };
-    case "run.budget.suspended": {
-      const data = event.data as {
-        readonly failure?: { readonly code?: unknown; readonly message?: unknown };
-      } & Readonly<Record<string, unknown>>;
-      const code = typeof data.failure?.code === "string" ? data.failure.code : "budget_limit";
-      const reason = typeof data.failure?.message === "string" ? `: ${data.failure.message}` : "";
+    case "run.budget.suspended":
       return {
         severity: "warning",
         scope: "agent.budget.suspended",
-        message: `Agent session budget-suspended [${code}]${reason}`,
-        fields: data,
+        message: `Agent session budget-suspended [${event.data.failure.code}]: ${event.data.failure.message}`,
+        fields: diagnosticFields(event.data),
       };
-    }
     case "run.budget.resumed":
       return {
         severity: "info",
         scope: "agent.budget.resumed",
         message: "Agent session resumed with increased limits",
-        fields: event.data as Readonly<Record<string, unknown>>,
+        fields: diagnosticFields(event.data),
       };
     case "run.completed":
       return terminalDescription("info", "run.lifecycle.completed", "Run completed", event.data);
@@ -182,116 +172,137 @@ function describe(event: DomainEvent): Description {
         severity: "info",
         scope: "run.lifecycle.reparented",
         message: "Run ownership changed",
-        fields: event.data as Readonly<Record<string, unknown>>,
+        fields: diagnosticFields(event.data),
       };
     case "attention.received":
-      return attentionDescription(
+      return eventDescription(
         "trace",
         "attention.received",
         "Follow-up attention received",
         event.data,
       );
     case "attention.routed":
-      return attentionDescription(
+      return eventDescription(
         "info",
         "attention.routed",
         "Follow-up attention routed",
         event.data,
       );
     case "attention.routing.failed":
-      return attentionDescription(
+      return eventDescription(
         "warning",
         "attention.routing.failed",
         "Follow-up attention routing failed",
         event.data,
       );
     case "attention.delivery.deferred":
-      return attentionDescription(
+      return eventDescription(
         "info",
         "attention.delivery.deferred",
         "Attention delivery deferred until the target session is ready",
         event.data,
       );
     case "attention.delivered":
-      return attentionDescription(
+      return eventDescription(
         "info",
         "attention.delivery.delivered",
         "Attention delivered to active agent",
         event.data,
       );
     case "attention.delivery.failed":
-      return attentionDescription(
+      return eventDescription(
         "warning",
         "attention.delivery.failed",
         "Attention delivery failed",
         event.data,
       );
     case "workflow.node.entered":
-      return {
-        severity: "info",
-        scope: "workflow.node.entered",
-        message: "Workflow node entered",
-        fields: event.data as Readonly<Record<string, unknown>>,
-      };
+      return eventDescription(
+        "info",
+        "workflow.node.entered",
+        "Workflow node entered",
+        event.data,
+      );
     case "workflow.node.completed":
-      return {
-        severity: "info",
-        scope: "workflow.node.completed",
-        message: "Workflow node completed",
-        fields: event.data as Readonly<Record<string, unknown>>,
-      };
+      return eventDescription(
+        "info",
+        "workflow.node.completed",
+        "Workflow node completed",
+        event.data,
+      );
     case "workflow.transition.taken":
-      return {
-        severity: "info",
-        scope: "workflow.transition.taken",
-        message: "Workflow transition taken",
-        fields: event.data as Readonly<Record<string, unknown>>,
-      };
-    case "workflow.checkpoint.saved": {
-      const data = event.data as WorkflowCheckpointSavedData;
+      return eventDescription(
+        "info",
+        "workflow.transition.taken",
+        "Workflow transition taken",
+        event.data,
+      );
+    case "workflow.checkpoint.saved":
       return {
         severity: "trace",
         scope: "workflow.checkpoint.saved",
         message: "Workflow replay checkpoint saved",
         fields: {
-          definitionId: data.definitionId,
-          definitionFingerprint: data.definitionFingerprint,
-          throughSequence: data.throughSequence,
-          snapshotFingerprint: data.snapshotFingerprint,
-          activations: data.snapshot.activations.length,
-          resultNodes: data.snapshot.results.length,
-          transitions: data.snapshot.transitionCounts.length,
+          definitionId: event.data.definitionId,
+          definitionFingerprint: event.data.definitionFingerprint,
+          throughSequence: event.data.throughSequence,
+          snapshotFingerprint: event.data.snapshotFingerprint,
+          activations: event.data.snapshot.activations.length,
+          resultNodes: event.data.snapshot.results.length,
+          transitions: event.data.snapshot.transitionCounts.length,
         },
       };
-    }
     case "task.local.created":
-      return {
-        severity: "trace",
-        scope: "task.local.created",
-        message: "Local task created",
-        fields: event.data as Readonly<Record<string, unknown>>,
-      };
+      return eventDescription(
+        "trace",
+        "task.local.created",
+        "Local task created",
+        event.data,
+      );
     case "task.local.state.changed":
-      return {
-        severity: "trace",
-        scope: "task.local.state_changed",
-        message: "Local task state changed",
-        fields: event.data as Readonly<Record<string, unknown>>,
-      };
+      return eventDescription(
+        "trace",
+        "task.local.state_changed",
+        "Local task state changed",
+        event.data,
+      );
     case "task.progress.appended":
-      return {
-        severity: "trace",
-        scope: "task.progress.appended",
-        message: "Task progress appended",
-        fields: event.data as Readonly<Record<string, unknown>>,
-      };
+      return eventDescription(
+        "trace",
+        "task.progress.appended",
+        "Task progress appended",
+        event.data,
+      );
+    case "objective.created":
+      return eventDescription(
+        "info",
+        "objective.created",
+        "Objective created",
+        event.data,
+      );
+    case "objective.state.changed":
+      return eventDescription(
+        "info",
+        "objective.state_changed",
+        "Objective state changed",
+        event.data,
+      );
+    case "objective.focus.changed":
+      return eventDescription(
+        "trace",
+        "objective.focus_changed",
+        "Objective focus changed",
+        event.data,
+      );
+    case "objective.progress.appended":
+      return eventDescription(
+        "trace",
+        "objective.progress_appended",
+        "Objective progress appended",
+        event.data,
+      );
     default:
-      return {
-        severity: "trace",
-        scope: "runtime.event.observed",
-        message: `Observed ${event.type}`,
-        fields: { type: event.type, data: event.data },
-      };
+      return assertNever(event);
   }
 }
 
@@ -317,20 +328,30 @@ function factDescription(data: RunFactRecordedData): Description {
   };
 }
 
-function attentionDescription(
+function eventDescription<TData extends object>(
   severity: DiagnosticSeverity,
   scope: string,
   message: string,
-  data: unknown,
+  data: TData,
 ): Description {
-  return { severity, scope, message, fields: data as Readonly<Record<string, unknown>> };
+  return { severity, scope, message, fields: diagnosticFields(data) };
 }
 
-function terminalDescription(
+function terminalDescription<TData extends object>(
   severity: DiagnosticSeverity,
   scope: string,
   message: string,
-  data: unknown,
+  data: TData,
 ): Description {
   return { severity, scope, message, fields: { terminal: data } };
+}
+
+function diagnosticFields<TData extends object>(
+  data: TData,
+): Readonly<Record<string, unknown>> {
+  return { ...data };
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled diagnostic event: ${JSON.stringify(value)}`);
 }
