@@ -16,6 +16,7 @@ function recordingConfiguration(installed: string[]): PhenixExtensionConfigurati
     theme: registrar("theme"),
     userForms: registrar("user-forms"),
     runtime: registrar("runtime"),
+    memory: registrar("memory"),
     workspaceStatus: registrar("workspace-status"),
     workspace: registrar("workspace"),
     resultDisplay: registrar("result-display"),
@@ -30,6 +31,7 @@ test("installs input interception before runtime input accounting", async () => 
     "theme",
     "user-forms",
     "runtime",
+    "memory",
     "workspace-status",
     "workspace",
     "result-display",
@@ -51,6 +53,7 @@ test("keeps complex integration configuration injectable", async () => {
     runtime: () => {
       if (integration.enabled.has("runtime")) installed.push(`${integration.prefix}:runtime`);
     },
+    memory: () => undefined,
     workspaceStatus: () => undefined,
     workspace: () => undefined,
     resultDisplay: () => undefined,
