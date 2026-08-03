@@ -115,6 +115,7 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
       ...(this.eventBus ? { eventBus: this.eventBus } : {}),
       noExtensions: true,
       extensionFactories: [
+        ...freeModelSessionExtensions(isFreeTierModel(spec.model)),
         ...(this.tokenReduction
           ? [
               createTokenReductionSessionExtension(
@@ -128,7 +129,6 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
             ]
           : []),
         createMemorySessionExtension(this.memory, spec.runId),
-        ...freeModelSessionExtensions(isFreeTierModel(spec.model)),
       ],
       ...(stock
         ? {}
