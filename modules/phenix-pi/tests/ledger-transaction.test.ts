@@ -46,6 +46,9 @@ test("terminal event type and typed outcome must agree", async () => {
   await assert.rejects(
     () =>
       runtime.store.commit(runtime.rootRunId, [
+        // The domain type rejects this combination; the runtime assertion protects persisted or
+        // otherwise untrusted event data that bypasses normal TypeScript construction.
+        // @ts-expect-error run.failed requires a failure outcome
         {
           runId: runtime.rootRunId,
           type: "run.failed",
