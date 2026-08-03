@@ -2,17 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { RunTreeNode } from "../application/interfaces.ts";
-import type { TaskNode } from "../domain/task/projection.ts";
+import type { ObjectiveNode } from "../domain/objective/projection.ts";
 import {
   allocateWorkspaceSections,
   computeWorkspaceLayout,
+  flattenWorkspaceObjectives,
   flattenWorkspaceRuns,
-  flattenWorkspaceTasks,
 } from "../extension/phenix-workspace.ts";
 
 const EXPANDED_SECTIONS = {
   runs: false,
-  tasks: false,
+  objectives: false,
   files: false,
   facts: false,
 } as const;
@@ -37,19 +37,21 @@ test("gives the conversation most of the terminal while keeping an OpenCode-like
 test("allocates every registered view as an independent scroll region", () => {
   assert.deepEqual(allocateWorkspaceSections(30, EXPANDED_SECTIONS), {
     runs: 11,
-    tasks: 5,
+    objectives: 5,
     files: 7,
     facts: 7,
   });
-  assert.deepEqual(allocateWorkspaceSections(30, { ...EXPANDED_SECTIONS, tasks: true }), {
+  assert.deepEqual(allocateWorkspaceSections(30, { ...EXPANDED_SECTIONS, objectives: true }), {
     runs: 12,
-    tasks: 2,
+    objectives: 2,
     files: 8,
     facts: 8,
   });
   for (let height = 0; height <= 10; height += 1) {
     const allocated = allocateWorkspaceSections(height, EXPANDED_SECTIONS);
-    assert.ok(allocated.runs + allocated.tasks + allocated.files + allocated.facts <= height);
+    assert.ok(
+      allocated.runs + allocated.objectives + allocated.files + allocated.facts <= height,
+    );
   }
 });
 
@@ -82,22 +84,24 @@ test("keeps active run detail while collapsing completed subtrees", () => {
   );
 });
 
-test("keeps active task detail while collapsing completed task subtrees", () => {
-  const root = taskNode("run:root", "wip", [
-    taskNode("run:active", "wip", [taskNode("local:active-leaf", "not_started")]),
-    taskNode("run:done", "done", [taskNode("local:done-leaf", "done")]),
-  ]);
+test("keeps active objective detail while collapsing completed objective subtrees", () => {
+  const roots = [
+    objectiveNode("objective-active", "wip", [
+      objectiveNode("objective-active-leaf", "not_started"),
+    ]),
+    objectiveNode("objective-done", "done", [objectiveNode("objective-done-leaf", "done")]),
+  ];
 
-  const flattened = flattenWorkspaceTasks(root) as ReadonlyArray<{
-    readonly node: TaskNode;
+  const flattened = flattenWorkspaceObjectives(roots) as ReadonlyArray<{
+    readonly node: ObjectiveNode;
     readonly depth: number;
   }>;
   assert.deepEqual(
     flattened.map((item) => [item.node.id, item.depth]),
     [
-      ["run:active", 0],
-      ["local:active-leaf", 1],
-      ["run:done", 0],
+      ["objective-active", 0],
+      ["objective-active-leaf", 1],
+      ["objective-done", 0],
     ],
   );
 });
@@ -121,19 +125,23 @@ function runNode(
   } as unknown as RunTreeNode;
 }
 
-function taskNode(
+function objectiveNode(
   id: string,
-  effectiveState: "not_started" | "wip" | "done" | "failed",
-  children: readonly TaskNode[] = [],
-): TaskNode {
+  effectiveState: "not_started" | "wip" | "done" | "blocked",
+  children: readonly ObjectiveNode[] = [],
+): ObjectiveNode {
   return {
-    kind: "execution",
     id,
-    runId: id.replace(/^run:/, ""),
+    rootRunId: "root-session",
+    createdByRunId: "root-session",
     title: id,
-    ownState: effectiveState,
+    source: "user",
+    state: effectiveState,
     effectiveState,
     progress: [],
+    workers: [],
     children,
-  } as unknown as TaskNode;
+    createdAt: "2026-07-28T00:00:00.000Z",
+    updatedAt: "2026-07-28T00:00:00.000Z",
+  } as unknown as ObjectiveNode;
 }
