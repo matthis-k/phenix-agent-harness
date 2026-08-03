@@ -87,6 +87,7 @@ export function compileAgentMarkdown(
   assertMarkdownFields(childFields, CHILD_FIELDS, "agent children");
   assertMarkdownFields(limitFields, LIMIT_FIELDS, "agent limits");
 
+  const timeoutMs = optionalMarkdownInteger(limitFields, "timeout-ms", "agent limits", 1);
   const maxTurns = optionalMarkdownInteger(limitFields, "max-turns", "agent limits", 1);
   const maxToolCalls = optionalMarkdownInteger(limitFields, "max-tool-calls", "agent limits", 1);
   const prompt = requiredMarkdownSection(source, "Prompt").trim();
@@ -140,7 +141,7 @@ export function compileAgentMarkdown(
       mayCancelChildren: markdownBoolean(childFields, "may-cancel-children", "agent children"),
     },
     limits: {
-      timeoutMs: markdownInteger(limitFields, "timeout-ms", "agent limits", 1),
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
       ...(maxTurns === undefined ? {} : { maxTurns }),
       ...(maxToolCalls === undefined ? {} : { maxToolCalls }),
       maxRepairAttempts: markdownInteger(limitFields, "max-repair-attempts", "agent limits", 0),
