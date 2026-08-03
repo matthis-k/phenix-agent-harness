@@ -154,8 +154,7 @@ function describe(event: DomainEvent): Description {
         readonly failure?: { readonly code?: unknown; readonly message?: unknown };
       } & Readonly<Record<string, unknown>>;
       const code = typeof data.failure?.code === "string" ? data.failure.code : "budget_limit";
-      const reason =
-        typeof data.failure?.message === "string" ? `: ${data.failure.message}` : "";
+      const reason = typeof data.failure?.message === "string" ? `: ${data.failure.message}` : "";
       return {
         severity: "warning",
         scope: "agent.budget.suspended",
