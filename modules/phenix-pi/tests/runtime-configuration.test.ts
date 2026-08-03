@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { AnyDefinition } from "../domain/definition/definition.ts";
-import { definitionId, type DefinitionId } from "../domain/shared.ts";
+import { type DefinitionId, definitionId } from "../domain/shared.ts";
 import { defineRuntimeConfiguration } from "../framework/runtime-configuration.ts";
 import { passthroughBudgetPolicy } from "../ports/budget-policy.ts";
 import { phenixRuntimeConfiguration } from "../suite/phenix-runtime-configuration.ts";
