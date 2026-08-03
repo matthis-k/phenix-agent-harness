@@ -13,7 +13,6 @@ import { CatalogFacadeImpl } from "../application/catalog-facade.ts";
 import { OrderedDomainEventBus } from "../application/domain-event-bus.ts";
 import { ExecutionFacadeImpl } from "../application/execution-facade.ts";
 import { ExecutionStore } from "../application/execution-store.ts";
-import { TaskFacadeImpl } from "../application/task-facade.ts";
 import { agentDefinitions } from "../definitions/agents.ts";
 import { AGENT_BASE } from "../definitions/ids.ts";
 import { registerWorkflowFunctions } from "../definitions/workflows/functions.ts";
@@ -120,18 +119,12 @@ test("resource-limit reports suspend and resume the original child session", asy
     ids,
     clock: { now: () => "2026-07-25T00:00:00.000Z" },
   });
-  const tasks = new TaskFacadeImpl({
-    store,
-    catalog: definitions,
-    clock: { now: () => "2026-07-25T00:00:00.000Z" },
-    ids,
-  });
   const catalog = new CatalogFacadeImpl(definitions, store);
   const backend = new FakeBackend();
   const agents = new AgentExecutor({
     backend,
     controller: execution,
-    tools: new FacadeAgentToolFactory({ execution, tasks, catalog, store }),
+    tools: new FacadeAgentToolFactory({ execution, catalog, store }),
     store,
     cwd: process.cwd(),
     clock: { now: () => "2026-07-25T00:00:00.000Z" },
