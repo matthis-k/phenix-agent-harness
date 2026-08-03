@@ -262,7 +262,7 @@ function manifestFile(
 
 function stringifyManifest(value: unknown): string {
   const seen = new WeakSet<object>();
-  return JSON.stringify(
+  const text = JSON.stringify(
     value,
     (_key, nested) => {
       if (typeof nested === "bigint") return String(nested);
@@ -274,6 +274,7 @@ function stringifyManifest(value: unknown): string {
     },
     2,
   );
+  return text ?? "null";
 }
 
 function safeName(value: string): string {
