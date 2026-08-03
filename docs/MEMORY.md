@@ -24,13 +24,15 @@ The Pi `context` hook runs before every provider request:
 
 - Below 50% estimated context use, Phenix retains the native transcript and injects a small
   working-memory index when useful.
-- At 50%, old tool-result bodies outside the recent tail are replaced by compact descriptions
-  with stable evidence IDs.
-- At 85%, Phenix additionally prunes old conversational turns toward 65% of the model context
-  window while retaining the first user request and a recent verbatim tail.
+- At 50%, old tool-result bodies outside the ten-message recent tail are replaced by compact
+  descriptions with stable evidence IDs.
+- At 85%, the protected tail narrows to four messages so that more complete tool-result bodies
+  can be folded. User and assistant conversation turns are not deleted by this extension.
 
 These transformations affect only provider context. Pi session JSONL and Phenix evidence remain
-complete and inspectable.
+complete and inspectable. Native Pi compaction remains responsible for conversational history
+until Phenix can archive and retrieve conversation segments with the same lossless guarantees as
+tool evidence; the lean implementation deliberately avoids a lossy fallback.
 
 ## Agent interface
 
@@ -46,6 +48,9 @@ Routine tool results and child outcomes are captured automatically. Agents shoul
 those records manually.
 
 ## User interface
+
+The default Phenix workspace includes a dedicated **Memory** pane beside Runs, Objectives, Files,
+and Facts. It shows typed notes, validity, reliability, objective scope, and evidence IDs.
 
 `/memory` opens a searchable terminal browser. Selecting a note displays its metadata and linked
 evidence. `/memory <terms>` prefilters notes and `/memory read <evidence-id>` opens exact evidence
