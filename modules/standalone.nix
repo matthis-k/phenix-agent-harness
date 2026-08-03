@@ -119,10 +119,10 @@
             mkdir -p "$TMPDIR/config/rtk" "$TMPDIR/repository" "$TMPDIR/tee"
             cat > "$TMPDIR/config/rtk/config.toml" <<'EOF'
             [tee]
-            enabled = true
-            mode = "always"
-            max_files = 64
-            max_file_size = 1073741824
+            enabled = false
+            mode = "never"
+            max_files = 1
+            max_file_size = 1
 
             [tracking]
             enabled = false
@@ -142,13 +142,13 @@
             echo changed > tracked.txt
 
             PHENIX_RTK_LOSSLESS=1 \
-              RTK_TEE=1 \
+              RTK_TEE=0 \
               RTK_TEE_DIR="$TMPDIR/tee" \
               XDG_CONFIG_HOME="$TMPDIR/config" \
               rtk git status > "$TMPDIR/compact-status.txt"
 
-            tee_file="$(find "$TMPDIR/tee" -type f -name '*.log' -print -quit)"
-            test -n "$tee_file"
+            tee_file="$TMPDIR/tee/phenix-raw.log"
+            test -f "$tee_file"
             grep -q tracked.txt "$tee_file"
             touch "$out"
           '';
