@@ -1,5 +1,5 @@
-import { isDomainEventType, type DomainEvent } from "./events.ts";
 import { runId } from "../shared.ts";
+import { type DomainEvent, isDomainEventType } from "./events.ts";
 
 /**
  * Decode the persisted event envelope before it enters the typed domain.
