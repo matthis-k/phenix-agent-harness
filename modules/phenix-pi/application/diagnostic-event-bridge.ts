@@ -349,7 +349,7 @@ function terminalDescription<TData extends object>(
 function diagnosticFields<TData extends object>(
   data: TData,
 ): Readonly<Record<string, unknown>> {
-  return { ...data };
+  return Object.fromEntries(Object.entries(data));
 }
 
 function assertNever(value: never): never {
