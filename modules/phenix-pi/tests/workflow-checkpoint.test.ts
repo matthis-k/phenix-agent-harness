@@ -6,10 +6,7 @@ import { workflowDefinitions } from "../definitions/workflows/index.ts";
 import { definitionRef, type WorkflowDefinition } from "../domain/definition/definition.ts";
 import type { DomainEvent } from "../domain/run/events.ts";
 import type { RunRecord } from "../domain/run/model.ts";
-import {
-  latestCompatibleWorkflowCheckpoint,
-  type WorkflowCheckpointSavedData,
-} from "../domain/workflow/checkpoint.ts";
+import { latestCompatibleWorkflowCheckpoint } from "../domain/workflow/checkpoint.ts";
 import {
   buildWorkflowGraphState,
   workflowCheckpointSnapshot,
@@ -42,7 +39,7 @@ test("live workflows persist one compatible replay checkpoint per state boundary
 
   const latest = checkpoints.at(-1);
   assert.ok(latest);
-  const data = latest.data as WorkflowCheckpointSavedData;
+  const data = latest.data;
   assert.deepEqual(Object.keys(data).sort(), [
     "definitionFingerprint",
     "definitionId",
@@ -102,13 +99,13 @@ test("checkpoint restoration equals full replay and ignores corrupt or incompati
 
   const validCheckpoint = checkpointEvents(events).at(-1);
   assert.ok(validCheckpoint);
-  const corruptCheckpoint: DomainEvent = {
+  const corruptCheckpoint: DomainEvent<"workflow.checkpoint.saved"> = {
     ...validCheckpoint,
     eventId: "event-corrupt-checkpoint",
     sequence: validCheckpoint.sequence + 1,
     revision: validCheckpoint.revision + 1,
     data: {
-      ...(validCheckpoint.data as WorkflowCheckpointSavedData),
+      ...validCheckpoint.data,
       snapshotFingerprint: "0".repeat(64),
     },
   };
@@ -144,8 +141,13 @@ test("checkpoint restoration equals full replay and ignores corrupt or incompati
   await runtime.checkpoints.shutdown();
 });
 
-function checkpointEvents(events: readonly DomainEvent[]): readonly DomainEvent[] {
-  return events.filter((event) => event.type === "workflow.checkpoint.saved");
+function checkpointEvents(
+  events: readonly DomainEvent[],
+): readonly DomainEvent<"workflow.checkpoint.saved">[] {
+  return events.filter(
+    (event): event is DomainEvent<"workflow.checkpoint.saved"> =>
+      event.type === "workflow.checkpoint.saved",
+  );
 }
 
 function requireImplementationWorkflow(): WorkflowDefinition<unknown, unknown> {
