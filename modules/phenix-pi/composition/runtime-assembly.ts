@@ -4,6 +4,7 @@ import path from "node:path";
 import type { EventBus, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { GhProjectTracker } from "../adapters/github/gh-project-tracker.ts";
 import { JsonlDiagnosticLog } from "../adapters/persistence/jsonl-diagnostic-log.ts";
+import { JsonlMemoryRepository } from "../adapters/persistence/jsonl-memory-repository.ts";
 import { JsonlProjectLedger } from "../adapters/persistence/jsonl-project-ledger.ts";
 import { JsonlRunLedger } from "../adapters/persistence/jsonl-run-ledger.ts";
 import { PiSdkAgentSessionBackend } from "../adapters/pi-sdk/agent-session-backend.ts";
@@ -17,6 +18,7 @@ import { logDomainEvent } from "../application/diagnostic-event-bridge.ts";
 import { OrderedDomainEventBus } from "../application/domain-event-bus.ts";
 import { ExecutionStore } from "../application/execution-store.ts";
 import type { ExecutionFacade } from "../application/interfaces.ts";
+import { MemoryService } from "../application/memory-service.ts";
 import { ProjectPlannerService } from "../application/project-planner.ts";
 import { PublishedProjectTracker } from "../application/published-project-tracker.ts";
 import { SessionProfileFacadeImpl } from "../application/session-profile-facade.ts";
@@ -106,6 +108,12 @@ export function createExecutionServices(input: {
     },
   );
   const userForms = new UserFormService(ids, systemClock);
+  const memory = new MemoryService({
+    repository: new JsonlMemoryRepository(stateDir),
+    store,
+    ids,
+    clock: systemClock,
+  });
   const kernel = createExecutionKernel({
     definitions,
     functions,
@@ -138,6 +146,7 @@ export function createExecutionServices(input: {
     modelRegistry: host.modelRegistry,
     agentDir: host.agentDir,
     transcripts,
+    memory,
     eventBus: host.piEventBus,
     promptModeForRun: (runId) => {
       const run = store.projection.requireRun(runId);
@@ -184,6 +193,7 @@ export function createExecutionServices(input: {
     supervision,
     projects,
     userForms,
+    memory,
   };
 }
 
