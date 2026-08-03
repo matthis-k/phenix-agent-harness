@@ -6,6 +6,7 @@ import {
   objectiveContains,
   projectObjectiveTree,
 } from "../domain/objective/projection.ts";
+import type { PendingDomainEvent } from "../domain/run/events.ts";
 import {
   type ObjectiveId,
   type ObjectiveState,
@@ -73,18 +74,17 @@ export class ObjectiveFacadeImpl implements ObjectiveFacade {
       createdAt: now,
       updatedAt: now,
     };
-    await this.store.commit(rootRunId, [
+    const events: PendingDomainEvent[] = [
       { runId: actor.id, type: "objective.created", data: { objective } },
-      ...(input.focus === false
-        ? []
-        : [
-            {
-              runId: actor.id,
-              type: "objective.focus.changed",
-              data: { objectiveId: objective.id },
-            },
-          ]),
-    ]);
+    ];
+    if (input.focus !== false) {
+      events.push({
+        runId: actor.id,
+        type: "objective.focus.changed",
+        data: { objectiveId: objective.id },
+      });
+    }
+    await this.store.commit(rootRunId, events);
     return this.requireObjective(objective.id);
   }
 
