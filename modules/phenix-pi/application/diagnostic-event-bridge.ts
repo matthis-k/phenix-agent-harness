@@ -44,8 +44,7 @@ function describe(event: DomainEvent): Description {
     }
     case "run.state.changed":
       return {
-        severity:
-          event.data.to === "failed" || event.data.to === "orphaned" ? "error" : "trace",
+        severity: event.data.to === "failed" || event.data.to === "orphaned" ? "error" : "trace",
         scope: "run.lifecycle.state_changed",
         message: `Run state changed ${event.data.from} -> ${event.data.to}`,
         fields: { ...event.data },
@@ -254,12 +253,7 @@ function describe(event: DomainEvent): Description {
         },
       };
     case "task.local.created":
-      return structuredDescription(
-        "trace",
-        "task.local.created",
-        "Local task created",
-        event.data,
-      );
+      return structuredDescription("trace", "task.local.created", "Local task created", event.data);
     case "task.local.state.changed":
       return structuredDescription(
         "trace",
@@ -275,12 +269,7 @@ function describe(event: DomainEvent): Description {
         event.data,
       );
     case "objective.created":
-      return structuredDescription(
-        "info",
-        "objective.created",
-        "Objective created",
-        event.data,
-      );
+      return structuredDescription("info", "objective.created", "Objective created", event.data);
     case "objective.state.changed":
       return structuredDescription(
         "info",
