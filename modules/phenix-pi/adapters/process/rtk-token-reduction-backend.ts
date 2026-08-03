@@ -16,6 +16,8 @@ const REWRITE_TIMEOUT_MS = 2_000;
 const LOSSLESS_MARKER = "PHENIX_RTK_LOSSLESS=1";
 const PHENIX_RAW_FILE = "phenix-raw.log";
 const SHELL_COMPOSITION = /[|;&<>`$()\r\n]/;
+const RESERVED_ENVIRONMENT =
+  /(?:^|\s)(?:PHENIX_RTK_LOSSLESS|RTK_DISABLED|RTK_TEE|RTK_TEE_DIR|XDG_CONFIG_HOME)=/;
 
 interface RtkExecutionResult {
   readonly stdout: string | Buffer;
@@ -74,7 +76,7 @@ export class ProcessRtkTokenReductionBackend implements TokenReductionBackend {
       return { kind: "passthrough", backend: this.id, reason: "disabled" };
     }
     if (!command) return { kind: "passthrough", backend: this.id, reason: "empty-command" };
-    if (/\bRTK_TEE=0\b/.test(command)) {
+    if (RESERVED_ENVIRONMENT.test(command)) {
       return { kind: "passthrough", backend: this.id, reason: "disabled" };
     }
     if (/^(?:env\s+[^\n]*\s+)?rtk\b/.test(command) || command.includes(LOSSLESS_MARKER)) {
