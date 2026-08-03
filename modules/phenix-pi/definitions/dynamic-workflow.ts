@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 
 import { defineSchema, type Schema } from "../domain/definition/schema.ts";
+import type { ValidationResult } from "../domain/shared.ts";
 
 export type DynamicValueBinding =
   | {
@@ -262,7 +263,7 @@ const DynamicWorkflowProposalInputSchema = defineSchema<DynamicWorkflowProposalI
 export const DynamicWorkflowProposalSchema: Schema<DynamicWorkflowProposal> = Object.freeze({
   id: DynamicWorkflowProposalInputSchema.id,
   jsonSchema: DynamicWorkflowProposalInputSchema.jsonSchema,
-  validate(value: unknown) {
+  validate(value: unknown): ValidationResult<DynamicWorkflowProposal> {
     const validated = DynamicWorkflowProposalInputSchema.validate(value);
     if (!validated.ok) return { ok: false, issues: validated.issues };
     return {
