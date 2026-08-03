@@ -72,7 +72,11 @@ test("folds old tool results into stable evidence references while retaining rec
     assistant("More", 9),
     user("Again", 10),
     assistant("Again", 11),
-    user("Latest request", 12),
+    user("Additional", 12),
+    assistant("Additional", 13),
+    user("Penultimate", 14),
+    assistant("Penultimate", 15),
+    user("Latest request", 16),
   ];
 
   const assembled = await assembleMemoryContext(memory, RUN, messages, 4_000);
@@ -89,7 +93,10 @@ test("folds old tool results into stable evidence references while retaining rec
     (message) => message.role === "custom" && message.customType === "phenix:memory-context",
   );
   assert.ok(injection && injection.role === "custom");
-  assert.match(typeof injection.content === "string" ? injection.content : "", /reversible working-memory/);
+  assert.match(
+    typeof injection.content === "string" ? injection.content : "",
+    /reversible working-memory/,
+  );
   assert.match(typeof injection.content === "string" ? injection.content : "", /memory-call-1/);
   assert.equal(textContent(assembled.at(-1) as AgentMessage), "Latest request");
 });
