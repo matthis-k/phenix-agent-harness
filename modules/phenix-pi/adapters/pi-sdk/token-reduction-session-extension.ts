@@ -9,11 +9,11 @@ export function createTokenReductionSessionExtension(
   reduction: TokenReductionService,
 ): ExtensionFactory {
   return (pi) => {
-    pi.on("tool_call", async (event, ctx) => {
+    pi.on("tool_call", async (event) => {
       if (!isToolCallEventType("bash", event)) return;
       const command = event.input.command;
       if (typeof command !== "string") return;
-      const preparation = await reduction.prepareBash(event.toolCallId, command, ctx.signal);
+      const preparation = await reduction.prepareBash(event.toolCallId, command);
       if (preparation.kind === "rewrite") event.input.command = preparation.command;
     });
 
@@ -28,7 +28,10 @@ export function createTokenReductionSessionExtension(
         isError: event.isError,
       });
       if (!result) return;
-      return { content: result.content, details: result.details };
+      return {
+        content: result.content as typeof event.content,
+        details: result.details,
+      };
     });
 
     pi.on("session_shutdown", async () => reduction.shutdown());
