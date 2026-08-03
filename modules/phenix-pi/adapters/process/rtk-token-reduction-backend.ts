@@ -131,7 +131,9 @@ export class ProcessRtkTokenReductionBackend implements TokenReductionBackend {
     };
   }
 
-  async recover(preparation: TokenReductionRewrite): Promise<RecoveredTokenReductionOutput | undefined> {
+  async recover(
+    preparation: TokenReductionRewrite,
+  ): Promise<RecoveredTokenReductionOutput | undefined> {
     try {
       const content = await readFile(
         path.join(this.directory, "pending", preparation.recoveryKey, PHENIX_RAW_FILE),
