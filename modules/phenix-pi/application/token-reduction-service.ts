@@ -129,6 +129,7 @@ export class TokenReductionService {
   async shutdown(): Promise<void> {
     const pending = [...this.pending.values()];
     this.pending.clear();
+    if (!this.backend) return;
     await Promise.all(pending.map((item) => this.backend?.cleanup(item).catch(() => undefined)));
   }
 }
