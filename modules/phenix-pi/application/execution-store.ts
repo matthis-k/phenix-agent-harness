@@ -70,14 +70,15 @@ export class ExecutionStore {
         revisions.set(candidate.runId, revision);
         const existing = this.projection.runs.get(candidate.runId);
         const parentRunId = candidate.parentRunId ?? existing?.parentId;
-        unsequenced.push({
-          ...candidate,
-          eventId,
-          rootRunId,
-          ...(parentRunId ? { parentRunId } : {}),
-          revision,
-          timestamp: this.clock.now(),
-        });
+        unsequenced.push(
+          withEventMetadata(candidate, {
+            eventId,
+            rootRunId,
+            ...(parentRunId ? { parentRunId } : {}),
+            revision,
+            timestamp: this.clock.now(),
+          }),
+        );
       }
 
       if (unsequenced.length === 0) return [];
@@ -112,6 +113,21 @@ export class ExecutionStore {
     this.projection.apply(event);
     this.attention.apply(event);
   }
+}
+
+interface EventMetadata {
+  readonly eventId: string;
+  readonly rootRunId: RunId;
+  readonly parentRunId?: RunId;
+  readonly revision: number;
+  readonly timestamp: string;
+}
+
+function withEventMetadata<TType extends DomainEventType>(
+  event: PendingDomainEvent<TType>,
+  metadata: EventMetadata,
+): UnsequencedDomainEvent<TType> {
+  return { ...event, ...metadata } as UnsequencedDomainEvent<TType>;
 }
 
 function widenUnsequencedEvents<TType extends DomainEventType>(
