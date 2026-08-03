@@ -257,7 +257,11 @@ test("dynamic workflow timeout is optional and normalizes to unbounded", () => {
 
   assert.equal(unbounded.definition.limits.timeoutMs, 0);
   assert.equal(unbounded.proposal.limits.timeoutMs, 0);
-  assert.equal(compiler().compile(bounded, { allowedDefinitionIds: [SCOUT, FINALIZER] }).definition.limits.timeoutMs, 300_000);
+  assert.equal(
+    compiler().compile(bounded, { allowedDefinitionIds: [SCOUT, FINALIZER] }).definition.limits
+      .timeoutMs,
+    300_000,
+  );
 });
 
 test("dynamic workflow compiler binds stock session result schemas", () => {
