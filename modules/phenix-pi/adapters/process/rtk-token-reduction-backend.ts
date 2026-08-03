@@ -124,18 +124,33 @@ export class ProcessRtkTokenReductionBackend implements TokenReductionBackend {
     const directory = path.join(this.directory, "pending", preparation.recoveryKey);
     let entries: string[];
     try {
-      entries = (await readdir(directory)).filter((entry) => entry.endsWith(".log")).sort();
+      entries = (await readdir(directory)).filter((entry) => entry.endsWith(".log"));
     } catch {
       return undefined;
     }
-    const latest = entries.at(-1);
-    if (!latest) return undefined;
-    try {
-      const content = await readFile(path.join(directory, latest), "utf8");
-      return { content, complete: !content.includes("--- truncated at ") };
-    } catch {
-      return undefined;
-    }
+    const candidates = await Promise.all(
+      entries.map(async (entry) => {
+        try {
+          const content = await readFile(path.join(directory, entry), "utf8");
+          return {
+            content,
+            bytes: Buffer.byteLength(content, "utf8"),
+          };
+        } catch {
+          return undefined;
+        }
+      }),
+    );
+    const recovered = candidates
+      .filter((candidate): candidate is { readonly content: string; readonly bytes: number } =>
+        Boolean(candidate),
+      )
+      .sort((left, right) => right.bytes - left.bytes)[0];
+    if (!recovered) return undefined;
+    return {
+      content: recovered.content,
+      complete: !recovered.content.includes("--- truncated at "),
+    };
   }
 
   async cleanup(preparation: TokenReductionRewrite): Promise<void> {
