@@ -1,6 +1,7 @@
 import { AttentionProjection } from "../domain/attention/projection.ts";
 import type {
   DomainEvent,
+  DomainEventType,
   PendingDomainEvent,
   UnsequencedDomainEvent,
 } from "../domain/run/events.ts";
@@ -47,9 +48,9 @@ export class ExecutionStore {
     });
   }
 
-  async commit(
+  async commit<TType extends DomainEventType>(
     rootRunId: RunId,
-    pending: readonly PendingDomainEvent[],
+    pending: readonly PendingDomainEvent<TType>[],
   ): Promise<readonly DomainEvent[]> {
     return this.executor.run(rootRunId, async () => {
       if (!this.loadedRoots.has(rootRunId)) await this.loadUnlocked(rootRunId);
