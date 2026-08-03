@@ -12,7 +12,9 @@ Markdown is the authoring surface. Compiled definitions, schemas, graph validati
 4. Workflow states invoke public agent or workflow definitions through typed boundaries.
 5. Transition tables are authoritative; Mermaid diagrams are for readers.
 6. Difficulty is run-scoped data. It is never inferred inside provider adapters or stored as mutable workflow-global state.
-7. Arbitrary expressions, JavaScript, shell expansion, and prompt-granted permissions are not supported.
+7. Difficulty describes architectural risk and reasoning complexity, not expected wall-clock duration.
+8. Session and workflow timeouts are opt-in. Bundled Phenix definitions omit them by default.
+9. Arbitrary expressions, JavaScript, shell expansion, and prompt-granted permissions are not supported.
 
 ## Agent format
 
@@ -66,7 +68,6 @@ may-cancel-children: false
 ## Limits
 
 ```phenix-limits
-timeout-ms: 300000
 max-repair-attempts: 1
 ```
 
@@ -96,6 +97,23 @@ The compiler resolves both schema IDs, validates every field and enum, and produ
 
 The execution application layer selects one row. The provider resolver receives only the selected model, capability, thinking level, and difficulty. It does not inspect workflow graphs or Markdown.
 
+### Limits and timeouts
+
+`timeout-ms` is optional for both agents and workflows. Omitting it means the session or workflow has no wall-clock deadline; the compiler represents this as the canonical unbounded value `timeoutMs: 0`.
+
+Bundled Phenix routing, agents, stock sessions, and workflows omit `timeout-ms`. Difficulty estimation must not manufacture a deadline: a build, dependency fetch, provider response, or other legitimate operation may take longer than expected without making the enclosing session invalid.
+
+A definition may still opt in when a real wall-clock requirement exists:
+
+```phenix-limits
+timeout-ms: 300000
+max-repair-attempts: 1
+```
+
+This deadline covers the enclosing agent or workflow and should therefore be used deliberately. Prefer operation-specific or tool-specific timeouts for commands and external effects. For example, `nix_shell` accepts its own bounded `timeoutMs` and `indexTimeoutMs` values independently of the session lifetime.
+
+Turn, tool-call, repair, node-run, retry, and parallelism limits remain available independently of wall-clock duration. They constrain execution shape without assuming how long valid work should take.
+
 ### Lists
 
 Tool names, artifacts, and invokable child definitions use comma-separated values. An empty value declares an empty list.
@@ -112,7 +130,7 @@ Difficulty estimation is implemented as an ordinary typed agent. Its Markdown pr
 }
 ```
 
-The estimator has no repository tools and does not solve the task. Workflows decide whether to invoke it and how to consume its result. A workflow such as QA may instead pin strong routes directly.
+The estimator has no repository tools and does not solve the task. Workflows decide whether to invoke it and how to consume its result. A workflow such as QA may instead pin strong routes directly. The estimate captures risk and reasoning complexity, not expected execution time.
 
 ## Workflow format
 
@@ -124,7 +142,6 @@ id: workflow.example
 input: request.implementation
 output: outcome.implementation-result
 entry: estimate
-timeout-ms: 600000
 max-node-runs: 12
 max-parallelism: 1
 ```
@@ -247,7 +264,7 @@ Recovery belongs to the original workflow activation:
 - completed sibling states and their typed results remain authoritative;
 - the failed attempt remains immutable and the replacement records `retryOf`;
 - the replacement retains the original workflow node and activation causation;
-- validated `suggestedLimits` from a failure may adjust the replacement's bounded agent limits;
+- validated `suggestedLimits` from a failure may adjust the replacement's explicitly bounded agent limits;
 - the state completes only after the final successful or exhausted attempt;
 - joins evaluate the activation's final outcome rather than every historical attempt.
 
@@ -273,7 +290,7 @@ input-schema: request.qa-checks
 output-schema: outcome.check-results
 ```
 
-Local operation implementations remain separately registered runtime authorities.
+Local operation implementations remain separately registered runtime authorities. Their command or effect deadlines belong to the operation implementation rather than being inferred from the enclosing workflow's difficulty.
 
 ### `decision`
 
@@ -296,7 +313,7 @@ A return declares the workflow's public output schema. A fail resolves its reaso
 
 A workflow may invoke another workflow through the same `invoke` node used for agents. Callers cannot jump into another workflow's private state. This preserves independent entry points, schemas, limits, failure handling, cancellation ownership, and implementation freedom.
 
-A nested workflow inherits the invoking run's difficulty unless the invocation pins another value. The nested workflow may also run its own estimator and bind subsequent states to that result.
+A nested workflow inherits the invoking run's difficulty unless the invocation pins another value. The nested workflow may also run its own estimator and bind subsequent states to that result. It does not inherit or derive a wall-clock deadline unless its own definition explicitly opts in.
 
 ## Conditions and bounded cycles
 
@@ -320,4 +337,4 @@ A state may reserve an optional prompt body, but compilation currently rejects i
 - `modules/phenix-pi/adapters/agent/markdown.ts`
 - `modules/phenix-pi/adapters/workflow/markdown.ts`
 
-The bundled registries load these Markdown files directly. Tests verify source compilation, route-table completeness, graph validation, step contracts, difficulty-dependent execution, pinned QA routes, activation-scoped recovery, and nested workflow behavior.
+The bundled registries load these Markdown files directly. Tests verify source compilation, route-table completeness, graph validation, step contracts, difficulty-dependent execution, pinned QA routes, activation-scoped recovery, nested workflow behavior, unbounded bundled definitions, and explicit timeout opt-in.
