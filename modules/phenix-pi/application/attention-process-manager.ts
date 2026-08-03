@@ -16,7 +16,12 @@ import type {
   AttentionTarget,
 } from "../domain/attention/model.ts";
 import { definitionRef } from "../domain/definition/definition.ts";
-import type { DomainEvent, PendingDomainEvent } from "../domain/run/events.ts";
+import type {
+  DomainEvent,
+  DomainEventData,
+  DomainEventType,
+  PendingDomainEvent,
+} from "../domain/run/events.ts";
 import { isTerminalRunState } from "../domain/run/invariants.ts";
 import type { RunRecord } from "../domain/run/model.ts";
 import type { RunId } from "../domain/shared.ts";
@@ -29,6 +34,15 @@ const MAX_MESSAGE_LENGTH = 4_000;
 const MAX_ROUTING_CANDIDATES = 32;
 const MAX_TARGETS = 8;
 const MUTATION_TOOLS = new Set(["edit", "write", "bash", "nix_shell"]);
+const TERMINAL_EVENT_TYPES = [
+  "run.completed",
+  "run.failed",
+  "run.cancelled",
+  "run.orphaned",
+] as const satisfies readonly DomainEventType[];
+
+type AttentionDomainEventType = Extract<DomainEventType, `attention.${string}`>;
+type TerminalEventType = (typeof TERMINAL_EVENT_TYPES)[number];
 
 export interface AttentionRouterResult {
   readonly decision: AttentionRoutingDecision;
@@ -405,12 +419,11 @@ export class AttentionProcessManager implements AttentionFacade {
   private onDomainEvent(event: DomainEvent): void {
     if (this.closed) return;
     if (event.type === "run.input.amended") {
-      const text = (event.data as { readonly text?: unknown }).text;
-      if (typeof text !== "string" || !this.hasActiveTargets(event.rootRunId)) return;
+      if (!this.hasActiveTargets(event.rootRunId)) return;
       this.launch(
         this.submit({
           rootRunId: event.rootRunId,
-          message: text,
+          message: event.data.text,
           source: { kind: "user" },
         }),
       );
@@ -467,8 +480,12 @@ export class AttentionProcessManager implements AttentionFacade {
     );
   }
 
-  private commit(rootRunId: RunId, type: string, data: unknown): Promise<readonly DomainEvent[]> {
-    const event: PendingDomainEvent = { runId: rootRunId, type, data };
+  private commit<TType extends AttentionDomainEventType>(
+    rootRunId: RunId,
+    type: TType,
+    data: DomainEventData<TType>,
+  ): Promise<readonly DomainEvent[]> {
+    const event: PendingDomainEvent<TType> = { runId: rootRunId, type, data };
     return this.store.commit(rootRunId, [event]);
   }
 }
@@ -505,8 +522,8 @@ function formatRoutingNotice(
     .join(", ")}.`;
 }
 
-function isTerminalEvent(type: string): boolean {
-  return ["run.completed", "run.failed", "run.cancelled", "run.orphaned"].includes(type);
+function isTerminalEvent(type: DomainEventType): type is TerminalEventType {
+  return (TERMINAL_EVENT_TYPES as readonly DomainEventType[]).includes(type);
 }
 
 function errorMessage(error: unknown): string {
