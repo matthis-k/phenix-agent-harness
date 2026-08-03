@@ -34,7 +34,11 @@ export type SettledTranscriptAvailability =
 
 export type TranscriptAvailability =
   | SettledTranscriptAvailability
-  | { readonly kind: "pending"; readonly requestId: EffectId; readonly runId: RunId }
+  | {
+      readonly kind: "pending";
+      readonly requestId: EffectId;
+      readonly runId: RunId;
+    }
   | { readonly kind: "invariant-violation"; readonly reason: string };
 
 export interface TranscriptState {
