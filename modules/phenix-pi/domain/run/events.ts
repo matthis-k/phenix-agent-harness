@@ -11,12 +11,12 @@ import type { Objective } from "../objective/model.ts";
 import type {
   CancelledOutcome,
   FailedOutcome,
+  Failure,
   LocalTaskId,
   ObjectiveId,
   RunId,
   SuccessfulOutcome,
   TaskId,
-  ValidationIssue,
 } from "../shared.ts";
 import type { LocalTask } from "../task/local-task.ts";
 import type { WorkflowCheckpointSavedData } from "../workflow/checkpoint.ts";
@@ -45,9 +45,9 @@ export type RunCycleData = { readonly number: number };
 export type RunToolStartedData = { readonly toolName: string };
 export type RunInputAmendedData = { readonly text: string };
 export type RunOutputSubmittedData = { readonly output: unknown };
-export type RunOutputRejectedData = { readonly issues: readonly ValidationIssue[] };
+export type RunOutputRejectedData = { readonly issues: unknown };
 export type RunBudgetSuspendedData = {
-  readonly failure: import("../shared.ts").Failure;
+  readonly failure: Failure;
   readonly currentLimits: RunLimits;
   readonly suggestedLimits: RunRetryLimitOverrides;
   readonly timeoutRemainingMs?: number;
