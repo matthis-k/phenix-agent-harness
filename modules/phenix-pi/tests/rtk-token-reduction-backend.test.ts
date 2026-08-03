@@ -31,6 +31,7 @@ test("accepts RTK advisory rewrites and scopes lossless recovery per tool call",
   assert.equal(preparation.kind, "rewrite");
   if (preparation.kind !== "rewrite") return;
   assert.match(preparation.command, /^env PHENIX_RTK_LOSSLESS=1 /);
+  assert.match(preparation.command, /RTK_TEE=1/);
   assert.match(preparation.command, /RTK_TEE_DIR=/);
   assert.match(preparation.command, /XDG_CONFIG_HOME=/);
   assert.match(preparation.command, /rtk git status$/);
@@ -72,6 +73,24 @@ test("treats RTK exit code one as a normal passthrough", async () => {
   );
 });
 
+test("bypasses reduction when the command disables RTK tee recovery", async () => {
+  const backend = new ProcessRtkTokenReductionBackend({
+    executable: "rtk",
+    stateDirectory: await mkdtemp(path.join(os.tmpdir(), "phenix-rtk-")),
+    execute: executor(0, "rtk git status"),
+  });
+
+  assert.deepEqual(
+    await backend.prepare({
+      runId: runId("run-root"),
+      toolCallId: "call-3",
+      cwd: "/workspace",
+      command: "RTK_TEE=0 git status",
+    }),
+    { kind: "passthrough", backend: "rtk", reason: "disabled" },
+  );
+});
+
 test("rejects multiline backend output instead of executing an ambiguous rewrite", async () => {
   const backend = new ProcessRtkTokenReductionBackend({
     executable: "rtk",
@@ -82,7 +101,7 @@ test("rejects multiline backend output instead of executing an ambiguous rewrite
   assert.deepEqual(
     await backend.prepare({
       runId: runId("run-root"),
-      toolCallId: "call-3",
+      toolCallId: "call-4",
       cwd: "/workspace",
       command: "git status",
     }),
