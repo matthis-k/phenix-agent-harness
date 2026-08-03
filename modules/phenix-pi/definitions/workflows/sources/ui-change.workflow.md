@@ -6,7 +6,6 @@ description: Specify interaction invariants, assess state and layout ownership, 
 input: request.objective
 output: outcome.base
 entry: inspect
-timeout-ms: 6000000
 max-node-runs: 14
 max-parallelism: 1
 ```
