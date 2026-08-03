@@ -1,19 +1,15 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-import {
-  copySessionManifest,
-  isSessionManifestCommand,
-} from "./session-manifest.ts";
-import {
-  isStandardBuiltinCommand,
-  runWorkspaceBuiltin,
-  standardBuiltinCommandInfo,
-} from "./workspace-standard-builtins.ts";
 import {
   subscribeWorkspaceRuntime,
   type WorkspaceRuntimeBinding,
   type WorkspaceRuntimeEventBus,
 } from "../workspace-runtime-binding.ts";
+import { copySessionManifest, isSessionManifestCommand } from "./session-manifest.ts";
+import {
+  isStandardBuiltinCommand,
+  runWorkspaceBuiltin,
+  standardBuiltinCommandInfo,
+} from "./workspace-standard-builtins.ts";
 
 export type WorkspaceBuiltinExecutor = (commandText: string) => Promise<void>;
 
