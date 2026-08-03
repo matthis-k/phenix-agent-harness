@@ -7,7 +7,7 @@ import {
   nextWorkspaceSection,
   resolveNativeInputDelegation,
   resolveWorkspaceInput,
-  WORKSPACE_COPY_TRANSCRIPT,
+  WORKSPACE_COPY_TEXT,
   WORKSPACE_NATIVE_HANDOFF,
 } from "../extension/workspace/workspace-interaction.ts";
 
@@ -121,7 +121,7 @@ test("private handoff inputs do not occupy user shortcuts", () => {
   assert.deepEqual(resolveWorkspaceInput(WORKSPACE_NATIVE_HANDOFF, "main"), {
     kind: "native-ui",
   });
-  assert.deepEqual(resolveWorkspaceInput(WORKSPACE_COPY_TRANSCRIPT, "main"), {
+  assert.deepEqual(resolveWorkspaceInput(WORKSPACE_COPY_TEXT, "main"), {
     kind: "copy-selection",
   });
 });

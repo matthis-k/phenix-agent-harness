@@ -53,7 +53,7 @@ test("consumes a native action handled by a Phenix dialog", () => {
 });
 
 test("keeps selected Escape and Ctrl+O in the focused workspace", () => {
-  for (const [data, hasTranscriptSelection] of [
+  for (const [data, hasTextSelection] of [
     ["\x1b", true],
     ["\x0f", false],
   ] as const) {
@@ -61,7 +61,7 @@ test("keeps selected Escape and Ctrl+O in the focused workspace", () => {
     const result = handoffNativeWorkspaceInput({
       data,
       keybindings: KEYBINDINGS,
-      hasTranscriptSelection,
+      hasTextSelection,
       handoff: () => {
         touched = true;
         return "forward";

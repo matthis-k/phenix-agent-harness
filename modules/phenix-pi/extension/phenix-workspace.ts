@@ -280,7 +280,7 @@ export class PhenixWorkspace implements Component, Focusable {
     );
     switch (intent.kind) {
       case "copy-selection":
-        void this.copyTranscript();
+        void this.copyWorkspaceText();
         return;
       case "clear-selection":
         this.inputSelection.clear();
@@ -469,7 +469,7 @@ export class PhenixWorkspace implements Component, Focusable {
     return [...lines];
   }
 
-  private async copyTranscript(): Promise<void> {
+  private async copyWorkspaceText(): Promise<void> {
     const inputSelected = this.inputSelection.selectedText();
     const transcriptSelected = this.transcriptSelection.selectedText();
     try {

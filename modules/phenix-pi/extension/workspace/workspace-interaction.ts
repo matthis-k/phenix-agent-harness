@@ -2,7 +2,7 @@ import type { AppKeybinding, KeybindingsManager } from "@earendil-works/pi-codin
 import { matchesKey } from "@earendil-works/pi-tui";
 
 export const WORKSPACE_NATIVE_HANDOFF = "\x1b]phenix-native\x07";
-export const WORKSPACE_COPY_TRANSCRIPT = "\x1b]phenix-copy-transcript\x07";
+export const WORKSPACE_COPY_TEXT = "\x1b]phenix-copy-transcript\x07";
 
 export type WorkspaceInputGroup = "main" | "sidebar";
 
@@ -60,10 +60,10 @@ const NATIVE_MODAL_ACTIONS = new Set<AppKeybinding>([
 export function resolveNativeInputDelegation(
   data: string,
   keybindings: Pick<KeybindingsManager, "matches">,
-  hasTranscriptSelection = false,
+  hasTextSelection = false,
 ): NativeInputDelegation | undefined {
   if (matchesKey(data, "ctrl+o")) return undefined;
-  if (hasTranscriptSelection && matchesKey(data, "escape")) return undefined;
+  if (hasTextSelection && matchesKey(data, "escape")) return undefined;
   for (const action of NATIVE_HANDOFF_ACTIONS) {
     if (!keybindings.matches(data, action)) continue;
     return {
@@ -77,13 +77,13 @@ export function resolveNativeInputDelegation(
 export function resolveWorkspaceInput(
   data: string,
   group: WorkspaceInputGroup,
-  hasTranscriptSelection = false,
+  hasTextSelection = false,
 ): WorkspaceInputIntent {
   if (data === WORKSPACE_NATIVE_HANDOFF) return { kind: "native-ui" };
-  if (data === WORKSPACE_COPY_TRANSCRIPT || matchesKey(data, "ctrl+shift+c")) {
+  if (data === WORKSPACE_COPY_TEXT || matchesKey(data, "ctrl+shift+c")) {
     return { kind: "copy-selection" };
   }
-  if (hasTranscriptSelection && matchesKey(data, "escape")) {
+  if (hasTextSelection && matchesKey(data, "escape")) {
     return { kind: "clear-selection" };
   }
   if (matchesKey(data, "ctrl+o")) return { kind: "thinking-toggle" };

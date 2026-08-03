@@ -8,7 +8,7 @@ import {
 export interface NativeWorkspaceHandoffOptions {
   readonly data: string;
   readonly keybindings: Pick<KeybindingsManager, "matches">;
-  readonly hasTranscriptSelection?: boolean;
+  readonly hasTextSelection?: boolean;
   readonly handoff: (delegation: NativeInputDelegation) => "consume" | "forward";
 }
 
@@ -18,7 +18,7 @@ export function handoffNativeWorkspaceInput(
   const delegation = resolveNativeInputDelegation(
     options.data,
     options.keybindings,
-    options.hasTranscriptSelection,
+    options.hasTextSelection,
   );
   if (!delegation) return undefined;
 
