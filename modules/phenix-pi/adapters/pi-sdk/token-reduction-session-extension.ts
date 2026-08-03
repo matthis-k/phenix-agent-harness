@@ -9,11 +9,11 @@ export function createTokenReductionSessionExtension(
   reduction: TokenReductionService,
 ): ExtensionFactory {
   return (pi) => {
-    pi.on("tool_call", async (event) => {
+    pi.on("tool_call", async (event, ctx) => {
       if (!isToolCallEventType("bash", event)) return;
       const command = event.input.command;
       if (typeof command !== "string") return;
-      const preparation = await reduction.prepareBash(event.toolCallId, command);
+      const preparation = await reduction.prepareBash(event.toolCallId, command, ctx.signal);
       if (preparation.kind === "rewrite") event.input.command = preparation.command;
     });
 
