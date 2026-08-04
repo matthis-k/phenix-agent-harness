@@ -206,6 +206,7 @@ mod tests {
     use super::*;
     use crate::{AcpMethod, SessionTreeId};
     use serde::{Deserialize, Serialize};
+    use serde_json::json;
     use std::collections::VecDeque;
     use std::io;
 
@@ -233,9 +234,11 @@ mod tests {
     }
 
     impl ScriptedTransport {
-        fn new(response: &[u8]) -> Self {
+        fn new(response: Value) -> Self {
             Self {
-                responses: VecDeque::from([Ok(response.to_vec())]),
+                responses: VecDeque::from([Ok(
+                    serde_json::to_vec(&response).expect("scripted response JSON"),
+                )]),
                 requests: Vec::new(),
             }
         }
@@ -254,8 +257,11 @@ mod tests {
 
     #[test]
     fn method_type_links_params_to_the_only_valid_result_type() {
-        let transport =
-            ScriptedTransport::new(br#"{"jsonrpc":"2.0","id":"1","result":{"tree_id":"tree-1"}}"#);
+        let transport = ScriptedTransport::new(json!({
+            "jsonrpc": "2.0",
+            "id": "1",
+            "result": { "tree_id": "tree-1" }
+        }));
         let mut client = AcpClient::new(transport);
         let result = client
             .call::<EchoMethod>(&EchoParams {
@@ -272,8 +278,11 @@ mod tests {
 
     #[test]
     fn malformed_result_is_not_collapsed_into_a_transport_or_remote_error() {
-        let transport =
-            ScriptedTransport::new(br#"{"jsonrpc":"2.0","id":"1","result":{"tree_id":7}}"#);
+        let transport = ScriptedTransport::new(json!({
+            "jsonrpc": "2.0",
+            "id": "1",
+            "result": { "tree_id": 7 }
+        }));
         let mut client = AcpClient::new(transport);
         assert!(matches!(
             client.call::<EchoMethod>(&EchoParams {
@@ -285,9 +294,11 @@ mod tests {
 
     #[test]
     fn remote_errors_and_correlation_errors_remain_distinct() {
-        let transport = ScriptedTransport::new(
-            br#"{"jsonrpc":"2.0","id":"1","error":{"code":-32601,"message":"missing"}}"#,
-        );
+        let transport = ScriptedTransport::new(json!({
+            "jsonrpc": "2.0",
+            "id": "1",
+            "error": { "code": -32601, "message": "missing" }
+        }));
         let mut client = AcpClient::new(transport);
         assert!(matches!(
             client.call::<EchoMethod>(&EchoParams {
@@ -296,9 +307,11 @@ mod tests {
             Err(CallError::Remote(RemoteError { code: -32601, .. }))
         ));
 
-        let transport = ScriptedTransport::new(
-            br#"{"jsonrpc":"2.0","id":"other","result":{"tree_id":"tree-1"}}"#,
-        );
+        let transport = ScriptedTransport::new(json!({
+            "jsonrpc": "2.0",
+            "id": "other",
+            "result": { "tree_id": "tree-1" }
+        }));
         let mut client = AcpClient::new(transport);
         assert!(matches!(
             client.call::<EchoMethod>(&EchoParams {
