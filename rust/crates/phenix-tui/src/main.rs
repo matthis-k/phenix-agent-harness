@@ -1,8 +1,12 @@
+mod keymap;
+
+use clap::Parser;
+use keymap::{Keymap, KeymapInputController};
 use phenix_process_backend::{ProcessAgentBackend, ProcessBackendConfig};
 use phenix_runtime_api::{
     BackendCommand, BackendOutput, BackendReply, BackendRuntime, ClientInformation, RequestId,
 };
-use phenix_tui::{PhenixInputController, RatatuiRenderer};
+use phenix_tui::RatatuiRenderer;
 use phenix_ui_core::{
     AppState, KeyCode, KeyInput, KeyModifiers, MouseAction, MouseButton, MouseInput, UiInput,
 };
@@ -16,7 +20,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::error::Error;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
@@ -25,14 +29,64 @@ const CHANNEL_CAPACITY: usize = 1_024;
 const INPUT_POLL_PERIOD: Duration = Duration::from_millis(100);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 
-fn main() -> Result<(), Box<dyn Error>> {
-    if env::args().nth(1).as_deref() == Some("--check") {
-        return run_handshake_check();
-    }
-    run_tui()
+#[derive(Debug, Parser)]
+#[command(
+    name = "phenix",
+    version,
+    about = "Native Phenix terminal frontend",
+    args_override_self = true
+)]
+struct Arguments {
+    /// Read configuration from this path instead of XDG_CONFIG_HOME/phenix/config.toml.
+    #[arg(long, value_name = "PATH")]
+    config: Option<PathBuf>,
+
+    /// Verify the packaged Rust-to-Pi runtime handshake without opening the terminal UI.
+    #[arg(long)]
+    check: bool,
+
+    /// Print the built-in keymap configuration and exit.
+    #[arg(long)]
+    print_default_config: bool,
 }
 
-fn run_tui() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
+    let arguments = Arguments::parse();
+    if arguments.print_default_config {
+        print!("{}", Keymap::default_toml());
+        return Ok(());
+    }
+
+    let keymap = load_keymap(arguments.config.as_deref())?;
+    if arguments.check {
+        return run_handshake_check();
+    }
+    run_tui(keymap)
+}
+
+fn load_keymap(explicit_path: Option<&Path>) -> Result<Keymap, Box<dyn Error>> {
+    if let Some(path) = explicit_path {
+        return Ok(Keymap::load(Some(path))?);
+    }
+    if let Some(path) = env::var_os("PHENIX_CONFIG").map(PathBuf::from) {
+        return Ok(Keymap::load(Some(&path))?);
+    }
+    let Some(path) = default_config_path() else {
+        return Ok(Keymap::default());
+    };
+    Ok(Keymap::load_optional(&path)?)
+}
+
+fn default_config_path() -> Option<PathBuf> {
+    if let Some(root) = env::var_os("XDG_CONFIG_HOME") {
+        return Some(PathBuf::from(root).join("phenix/config.toml"));
+    }
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|home| home.join(".config/phenix/config.toml"))
+}
+
+fn run_tui(keymap: Keymap) -> Result<(), Box<dyn Error>> {
     let backend = spawn_backend()?;
     backend.client.submit(BackendCommand::Initialize {
         client: client_information(),
@@ -43,7 +97,7 @@ fn run_tui() -> Result<(), Box<dyn Error>> {
         AppState::default(),
         backend,
         renderer,
-        PhenixInputController::default(),
+        KeymapInputController::new(keymap),
         CHANNEL_CAPACITY,
     )?;
     let mailbox = runtime.mailbox();
@@ -288,6 +342,22 @@ fn convert_modifiers(modifiers: CrosstermModifiers) -> KeyModifiers {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_config_path_takes_priority() {
+        let path = PathBuf::from("/tmp/custom-phenix.toml");
+        assert_eq!(Some(path.as_path()), Some(path.as_path()));
+    }
+
+    #[test]
+    fn xdg_config_path_is_namespaced_under_phenix() {
+        env::set_var("XDG_CONFIG_HOME", "/tmp/xdg-config");
+        assert_eq!(
+            default_config_path(),
+            Some(PathBuf::from("/tmp/xdg-config/phenix/config.toml"))
+        );
+        env::remove_var("XDG_CONFIG_HOME");
+    }
 
     #[test]
     fn headless_environment_overrides_exclude_unrelated_values() {
