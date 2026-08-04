@@ -5,8 +5,8 @@ use phenix_acp::acp::schema::v1::{
     ToolCallUpdate,
 };
 use phenix_runtime_api::{
-    BackendError, BackendEvent, BackendOutputSender, NotificationLevel, RunOutcome, RunState,
-    ToolCallId, TranscriptBlock, TranscriptRole,
+    BackendError, BackendEvent, BackendOutputSender, RunOutcome, RunState, ToolCallId,
+    ToolExecutionOutcome, TranscriptBlock, TranscriptRole,
 };
 
 pub(crate) fn apply_session_notification(
@@ -107,7 +107,7 @@ pub(crate) fn apply_terminal_event(
         } => {
             outputs.event(BackendEvent::StatusChanged {
                 key: format!("terminal.{terminal_id}"),
-                text: Some(format!("exited with {:?}", exit_code)),
+                text: Some(format!("exited with {exit_code:?}")),
             })?;
         }
     }
@@ -228,7 +228,6 @@ fn apply_tool_call(
 ) -> Result<(), BackendError> {
     let id = ToolCallId::parse(tool.tool_call_id.to_string())
         .map_err(|error| BackendError::Protocol(error.to_string()))?;
-    let tool_name = tool.name.clone().unwrap_or_else(|| tool.title.clone());
     let input = tool
         .raw_input
         .as_ref()
@@ -238,9 +237,9 @@ fn apply_tool_call(
         .insert(tool.tool_call_id.to_string(), tool.clone());
     outputs.event(BackendEvent::ToolStarted {
         run_id: session.run.id.clone(),
-        call_id: id.clone(),
-        tool: tool_name,
-        input,
+        tool_call_id: id.clone(),
+        tool_name: tool.title.clone(),
+        input_summary: input,
     })?;
     emit_tool_state(session, id, &tool, outputs)
 }
@@ -272,21 +271,21 @@ fn emit_tool_state(
     match tool.status {
         ToolCallStatus::Completed => outputs.event(BackendEvent::ToolFinished {
             run_id: session.run.id.clone(),
-            call_id: id,
-            success: true,
-            output: tool_output(tool),
+            tool_call_id: id,
+            outcome: ToolExecutionOutcome::Succeeded,
+            output_summary: tool_output(tool),
         }),
         ToolCallStatus::Failed => outputs.event(BackendEvent::ToolFinished {
             run_id: session.run.id.clone(),
-            call_id: id,
-            success: false,
-            output: tool_output(tool),
+            tool_call_id: id,
+            outcome: ToolExecutionOutcome::Failed,
+            output_summary: tool_output(tool),
         }),
         ToolCallStatus::Pending | ToolCallStatus::InProgress => {
             outputs.event(BackendEvent::ToolUpdated {
                 run_id: session.run.id.clone(),
-                call_id: id,
-                update: format!("{} · {:?}", tool.title, tool.status),
+                tool_call_id: id,
+                output: format!("{} · {:?}", tool.title, tool.status),
             })
         }
         _ => Ok(()),
@@ -318,14 +317,4 @@ fn apply_session_info(
         session.summary.updated_at = updated_at.as_str().map(str::to_owned);
     }
     Ok(())
-}
-
-pub(crate) fn notify_unsupported_update(
-    outputs: &BackendOutputSender,
-    message: impl Into<String>,
-) -> Result<(), BackendError> {
-    outputs.event(BackendEvent::Notification {
-        level: NotificationLevel::Warning,
-        message: message.into(),
-    })
 }
