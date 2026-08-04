@@ -1,8 +1,6 @@
 #![forbid(unsafe_code)]
 
-use phenix_runtime_api::{
-    BackendClient, BackendOutput, BackendRuntime, BackendWorker,
-};
+use phenix_runtime_api::{BackendClient, BackendOutput, BackendRuntime, BackendWorker};
 use phenix_ui_core::{reduce, AppEffect, AppEvent, AppState, UserIntent};
 use std::collections::VecDeque;
 use std::error::Error;
@@ -93,6 +91,13 @@ pub struct UiRuntime<R> {
     backend_forwarder: Option<JoinHandle<()>>,
     backend_worker: Option<BackendWorker>,
     drain_limit: usize,
+}
+
+impl<R> UiRuntime<R> {
+    fn detach_workers(&mut self) {
+        let _ = self.backend_forwarder.take();
+        let _ = self.backend_worker.take();
+    }
 }
 
 impl<R: UiRenderer> UiRuntime<R> {
@@ -237,11 +242,6 @@ impl<R: UiRenderer> UiRuntime<R> {
         }
         dirty
     }
-
-    fn detach_workers(&mut self) {
-        let _ = self.backend_forwarder.take();
-        let _ = self.backend_worker.take();
-    }
 }
 
 impl<R> Drop for UiRuntime<R> {
@@ -290,7 +290,10 @@ mod tests {
             outputs: BackendOutputSender,
         ) -> Result<(), BackendError> {
             for request in requests {
-                let shutdown = matches!(request.command, phenix_runtime_api::BackendCommand::Shutdown);
+                let shutdown = matches!(
+                    request.command,
+                    phenix_runtime_api::BackendCommand::Shutdown
+                );
                 outputs.reply(request.id, Ok(BackendReply::Accepted))?;
                 if shutdown {
                     return Ok(());
@@ -375,6 +378,9 @@ mod tests {
         let error = UiRuntime::from_backend(AppState::default(), backend, renderer, 0)
             .err()
             .expect("invalid capacity");
-        assert!(matches!(error, UiRuntimeError::InvalidConfiguration(_)));
+        assert!(matches!(
+            error,
+            UiRuntimeError::InvalidConfiguration(_)
+        ));
     }
 }
