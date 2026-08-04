@@ -7,7 +7,7 @@ use std::sync::mpsc::{SyncSender, TrySendError};
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum UiMessage {
-    Content(EventEnvelope<ContentEvent>),
+    Content(Box<EventEnvelope<ContentEvent>>),
     Ui(EventEnvelope<UiEvent>),
     App(AppEvent),
 }
@@ -27,7 +27,7 @@ impl UiMailbox {
     }
 
     pub fn send_content(&self, event: EventEnvelope<ContentEvent>) -> Result<(), UiIngressError> {
-        self.send_lossless(UiMessage::Content(event))
+        self.send_lossless(UiMessage::Content(Box::new(event)))
     }
 
     pub fn send_user(&self, intent: UserIntent) -> Result<(), UiIngressError> {
@@ -35,19 +35,21 @@ impl UiMailbox {
     }
 
     pub fn send_backend(&self, output: BackendOutput) -> Result<(), UiIngressError> {
-        self.send_content(EventEnvelope::broadcast(ContentEvent::Backend(output)))
+        self.send_content(EventEnvelope::broadcast(ContentEvent::Backend(Box::new(
+            output,
+        ))))
     }
 
     pub fn request_refresh(&self) -> Result<(), UiIngressError> {
-        self.try_send_coalescible(UiMessage::Content(EventEnvelope::broadcast(
+        self.try_send_coalescible(UiMessage::Content(Box::new(EventEnvelope::broadcast(
             ContentEvent::RefreshRequested,
-        )))
+        ))))
     }
 
     pub fn tick(&self) -> Result<(), UiIngressError> {
-        self.try_send_coalescible(UiMessage::Content(EventEnvelope::broadcast(
+        self.try_send_coalescible(UiMessage::Content(Box::new(EventEnvelope::broadcast(
             ContentEvent::ClockTick,
-        )))
+        ))))
     }
 
     pub fn shutdown(&self) -> Result<(), UiIngressError> {

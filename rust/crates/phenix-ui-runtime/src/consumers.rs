@@ -27,9 +27,9 @@ impl EventConsumer for RootContentConsumer {
         envelope: &EventEnvelope<ContentEvent>,
     ) -> ReactionBatch {
         match &envelope.event {
-            ContentEvent::Backend(output) => ReactionBatch::one(BusReaction::App(
-                AppEvent::Backend(Box::new(output.clone())),
-            )),
+            ContentEvent::Backend(output) => {
+                ReactionBatch::one(BusReaction::App(AppEvent::Backend(output.clone())))
+            }
             ContentEvent::ClockTick | ContentEvent::RefreshRequested => {
                 ReactionBatch::one(BusReaction::Render)
             }

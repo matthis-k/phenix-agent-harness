@@ -147,18 +147,10 @@ impl FrontendConfigProvider for LuaFrontendProvider {
     }
 }
 
+#[derive(Default)]
 pub(crate) struct LuaState {
     pub config: FrontendConfig,
     pub bindings: Vec<LuaBinding>,
-}
-
-impl Default for LuaState {
-    fn default() -> Self {
-        Self {
-            config: FrontendConfig::default(),
-            bindings: Vec::new(),
-        }
-    }
 }
 
 impl LuaState {

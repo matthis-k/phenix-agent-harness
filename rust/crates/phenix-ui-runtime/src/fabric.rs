@@ -9,7 +9,7 @@ use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ContentEvent {
-    Backend(BackendOutput),
+    Backend(Box<BackendOutput>),
     ClockTick,
     RefreshRequested,
 }
@@ -72,7 +72,7 @@ pub enum ViewMutation {
 #[derive(Debug, Eq, PartialEq)]
 pub enum BusReaction {
     App(AppEvent),
-    Content(EventEnvelope<ContentEvent>),
+    Content(Box<EventEnvelope<ContentEvent>>),
     Ui(EventEnvelope<UiEvent>),
     View(ViewMutation),
     Render,
@@ -132,6 +132,7 @@ struct ElementNode {
     parent: Option<ElementId>,
 }
 
+#[derive(Default)]
 pub struct EventRouter {
     nodes: BTreeMap<ElementId, ElementNode>,
     order: Vec<ElementId>,
@@ -236,11 +237,13 @@ impl EventRouter {
         match target {
             RouteTarget::Broadcast => self.order.clone(),
             RouteTarget::Focused => self.bubble_path(&state.view.focus.element_id()),
-            RouteTarget::Element(element) => self
-                .nodes
-                .contains_key(element)
-                .then(|| vec![element.clone()])
-                .unwrap_or_default(),
+            RouteTarget::Element(element) => {
+                if self.nodes.contains_key(element) {
+                    vec![element.clone()]
+                } else {
+                    Vec::new()
+                }
+            }
             RouteTarget::Subtree(root) => self
                 .order
                 .iter()
@@ -276,16 +279,6 @@ impl EventRouter {
                 .and_then(|node| node.parent.clone());
         }
         false
-    }
-}
-
-impl Default for EventRouter {
-    fn default() -> Self {
-        Self {
-            nodes: BTreeMap::new(),
-            order: Vec::new(),
-            consumers: BTreeMap::new(),
-        }
     }
 }
 
