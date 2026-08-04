@@ -254,9 +254,8 @@ mod tests {
 
     #[test]
     fn method_type_links_params_to_the_only_valid_result_type() {
-        let transport = ScriptedTransport::new(
-            br#"{"jsonrpc":"2.0","id":"1","result":{"tree_id":"tree-1"}}"#,
-        );
+        let transport =
+            ScriptedTransport::new(br#"{"jsonrpc":"2.0","id":"1","result":{"tree_id":"tree-1"}}"#);
         let mut client = AcpClient::new(transport);
         let result = client
             .call::<EchoMethod>(&EchoParams {
@@ -273,9 +272,8 @@ mod tests {
 
     #[test]
     fn malformed_result_is_not_collapsed_into_a_transport_or_remote_error() {
-        let transport = ScriptedTransport::new(
-            br#"{"jsonrpc":"2.0","id":"1","result":{"tree_id":7}}"#,
-        );
+        let transport =
+            ScriptedTransport::new(br#"{"jsonrpc":"2.0","id":"1","result":{"tree_id":7}}"#);
         let mut client = AcpClient::new(transport);
         assert!(matches!(
             client.call::<EchoMethod>(&EchoParams {
