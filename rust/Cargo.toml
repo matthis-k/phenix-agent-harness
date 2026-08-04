@@ -1,7 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
+  "crates/phenix-process-backend",
   "crates/phenix-runtime-api",
+  "crates/phenix-tui",
   "crates/phenix-ui-core",
   "crates/phenix-ui-runtime",
 ]
+
+[workspace.dependencies]
+ratatui = "0.30.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
