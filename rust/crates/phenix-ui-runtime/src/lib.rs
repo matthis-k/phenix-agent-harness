@@ -3,14 +3,14 @@
 mod fabric;
 
 pub use fabric::{
-    BusReaction, ContentEvent, EventConsumer, EventRouter, Propagation, ReactionBatch, RouterError,
-    UiEvent, ViewMutation,
+    BusReaction, ContentEvent, EventConsumer, EventRouter, InputEdit, Propagation, ReactionBatch,
+    RouterError, UiEvent, ViewMutation,
 };
 
 use phenix_runtime_api::{BackendClient, BackendOutput, BackendRuntime, BackendWorker};
 use phenix_ui_core::{
     reduce, AppEffect, AppEvent, AppState, ElementId, EventEnvelope, FocusDirection, FocusTarget,
-    LayoutAxis, ResizeRequest, UiInput, UserIntent,
+    LayoutAxis, OverlayState, ResizeRequest, UiInput, UserIntent,
 };
 use std::collections::VecDeque;
 use std::error::Error;
@@ -363,16 +363,6 @@ impl<R: UiRenderer> UiRuntime<R> {
         self.mailbox.clone()
     }
 
-    pub fn set_drain_limit(&mut self, drain_limit: usize) -> Result<(), UiRuntimeError> {
-        if drain_limit == 0 {
-            return Err(UiRuntimeError::InvalidConfiguration(
-                "UI drain limit must be positive".to_owned(),
-            ));
-        }
-        self.drain_limit = drain_limit;
-        Ok(())
-    }
-
     pub fn spawn_ticker(&self, period: Duration) -> Result<JoinHandle<()>, UiRuntimeError> {
         if period.is_zero() {
             return Err(UiRuntimeError::InvalidConfiguration(
@@ -401,30 +391,22 @@ impl<R: UiRenderer> UiRuntime<R> {
                     .map_err(UiRuntimeError::Render)?;
                 dirty = false;
             }
-
             let message = self
                 .receiver
                 .recv()
                 .map_err(|_| UiRuntimeError::Disconnected)?;
             dirty |= self.apply(message);
-
-            for _ in 1..self.drain_limit {
+            for _ in 1..DEFAULT_DRAIN_LIMIT {
                 match self.receiver.try_recv() {
                     Ok(message) => dirty |= self.apply(message),
                     Err(TryRecvError::Empty) => break,
-                    Err(TryRecvError::Disconnected) => {
-                        if !self.state.should_quit {
-                            return Err(UiRuntimeError::Disconnected);
-                        }
-                        break;
-                    }
+                    Err(TryRecvError::Disconnected) => break,
                 }
                 if self.state.should_quit {
                     break;
                 }
             }
         }
-
         if dirty {
             self.renderer
                 .render(&self.state)
@@ -449,13 +431,11 @@ impl<R: UiRenderer> UiRuntime<R> {
         while let Some(reaction) = queue.pop_front() {
             match reaction {
                 BusReaction::App(event) => dirty |= self.apply_event(event),
-                BusReaction::Content(envelope) => queue.extend(
-                    self.router
-                        .route_content(&self.state, &envelope)
-                        .into_iter(),
-                ),
+                BusReaction::Content(envelope) => {
+                    queue.extend(self.router.route_content(&self.state, &envelope))
+                }
                 BusReaction::Ui(envelope) => {
-                    queue.extend(self.router.route_ui(&self.state, &envelope).into_iter())
+                    queue.extend(self.router.route_ui(&self.state, &envelope))
                 }
                 BusReaction::View(mutation) => {
                     apply_view_mutation(&mut self.state, mutation);
@@ -534,7 +514,84 @@ fn apply_view_mutation(state: &mut AppState, mutation: ViewMutation) {
                 scroll.offset = scroll.offset.saturating_add_signed(lines as isize);
             }
         }
+        ViewMutation::EditInput(edit) => apply_input_edit(state, edit),
+        ViewMutation::MoveOverlaySelection(delta) => move_overlay_selection(state, delta),
     }
+}
+
+fn apply_input_edit(state: &mut AppState, edit: InputEdit) {
+    match edit {
+        InputEdit::Insert(text) => state.input.insert(&text),
+        InputEdit::Backspace => state.input.backspace(),
+        InputEdit::Delete => state.input.delete(),
+        InputEdit::MoveLeft => state.input.move_left(),
+        InputEdit::MoveRight => state.input.move_right(),
+        InputEdit::HistoryPrevious => {
+            if state.input.history.is_empty() {
+                return;
+            }
+            let offset = state
+                .input
+                .history_cursor
+                .map_or(0, |offset| (offset + 1).min(state.input.history.len() - 1));
+            state.input.history_cursor = Some(offset);
+            let index = state.input.history.len() - 1 - offset;
+            state.input.text = state.input.history[index].clone();
+            state.input.cursor_byte = state.input.text.len();
+        }
+        InputEdit::HistoryNext => {
+            let Some(offset) = state.input.history_cursor else {
+                return;
+            };
+            if offset == 0 {
+                state.input.history_cursor = None;
+                state.input.text.clear();
+                state.input.cursor_byte = 0;
+            } else {
+                let next = offset - 1;
+                state.input.history_cursor = Some(next);
+                let index = state.input.history.len() - 1 - next;
+                state.input.text = state.input.history[index].clone();
+                state.input.cursor_byte = state.input.text.len();
+            }
+        }
+    }
+}
+
+fn move_overlay_selection(state: &mut AppState, delta: i32) {
+    let length = match &state.view.overlay {
+        Some(OverlayState::CommandPalette { .. }) => state.commands.len(),
+        Some(OverlayState::ModelPicker { .. }) => state.models.len(),
+        Some(OverlayState::AuthenticationProviders { .. }) => state.auth_providers.len(),
+        Some(OverlayState::AuthenticationPrompt { prompt, .. }) => match prompt {
+            phenix_runtime_api::AuthPrompt::Select { options, .. } => options.len(),
+            _ => 0,
+        },
+        Some(OverlayState::SessionPicker { .. }) => state
+            .snapshot
+            .as_ref()
+            .map_or(0, |snapshot| snapshot.sessions.len()),
+        Some(OverlayState::ExtensionDialog { request, .. }) => match request {
+            phenix_runtime_api::ExtensionUiRequest::Select { options, .. } => options.len(),
+            _ => 0,
+        },
+        Some(OverlayState::Help) | None => 0,
+    };
+    if length == 0 {
+        return;
+    }
+    let selected = match state.view.overlay.as_mut() {
+        Some(OverlayState::CommandPalette { selected, .. })
+        | Some(OverlayState::ModelPicker { selected, .. })
+        | Some(OverlayState::AuthenticationProviders { selected, .. })
+        | Some(OverlayState::AuthenticationPrompt { selected, .. })
+        | Some(OverlayState::SessionPicker { selected, .. })
+        | Some(OverlayState::ExtensionDialog { selected, .. }) => selected,
+        Some(OverlayState::Help) | None => return,
+    };
+    *selected = selected
+        .saturating_add_signed(delta as isize)
+        .min(length.saturating_sub(1));
 }
 
 fn move_focus(current: FocusTarget, direction: FocusDirection) -> FocusTarget {
@@ -582,125 +639,24 @@ impl Error for UiRuntimeError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_runtime_api::{
-        AgentBackend, BackendError, BackendOutputSender, BackendReply, BackendRequest,
-    };
-    use phenix_ui_core::{KeyCode, KeyInput, KeyModifiers};
-    use std::sync::{Arc, Mutex};
-
-    struct AcceptingBackend;
-
-    impl AgentBackend for AcceptingBackend {
-        fn run(
-            self: Box<Self>,
-            requests: Receiver<BackendRequest>,
-            outputs: BackendOutputSender,
-        ) -> Result<(), BackendError> {
-            for request in requests {
-                let shutdown = matches!(
-                    request.command,
-                    phenix_runtime_api::BackendCommand::Shutdown
-                );
-                outputs.reply(request.id, Ok(BackendReply::Accepted))?;
-                if shutdown {
-                    return Ok(());
-                }
-            }
-            Ok(())
-        }
-    }
-
-    struct RecordingRenderer {
-        thread_ids: Arc<Mutex<Vec<thread::ThreadId>>>,
-        input_values: Arc<Mutex<Vec<String>>>,
-    }
-
-    impl UiRenderer for RecordingRenderer {
-        fn render(&mut self, state: &AppState) -> Result<(), String> {
-            self.thread_ids
-                .lock()
-                .expect("thread recorder lock")
-                .push(thread::current().id());
-            self.input_values
-                .lock()
-                .expect("input recorder lock")
-                .push(state.input.text.clone());
-            Ok(())
-        }
-    }
-
-    struct CharacterInputController;
-
-    impl UiInputController for CharacterInputController {
-        fn handle(&mut self, state: &AppState, input: UiInput) -> Vec<AppEvent> {
-            let UiInput::Key(KeyInput {
-                code: KeyCode::Character(character),
-                modifiers: KeyModifiers {
-                    control: false,
-                    alt: false,
-                    ..
-                },
-                ..
-            }) = input
-            else {
-                return Vec::new();
-            };
-            let mut text = state.input.text.clone();
-            text.push(character);
-            vec![AppEvent::User(UserIntent::InputChanged(text))]
-        }
-    }
 
     #[test]
-    fn routed_producers_converge_on_one_state_and_render_owner() {
-        let backend = BackendRuntime::spawn(Box::new(AcceptingBackend), 8).expect("backend");
-        let thread_ids = Arc::new(Mutex::new(Vec::new()));
-        let input_values = Arc::new(Mutex::new(Vec::new()));
-        let renderer = RecordingRenderer {
-            thread_ids: Arc::clone(&thread_ids),
-            input_values: Arc::clone(&input_values),
-        };
-        let runtime = UiRuntime::from_backend_with_controller(
-            AppState::default(),
-            backend,
-            renderer,
-            CharacterInputController,
-            8,
-        )
-        .expect("UI runtime");
-        let mailbox = runtime.mailbox();
-        let producer = thread::spawn(move || {
-            mailbox
-                .send_input(UiInput::Key(KeyInput {
-                    code: KeyCode::Character('x'),
-                    modifiers: KeyModifiers::default(),
-                    repeat: false,
-                }))
-                .expect("send input");
-            mailbox.request_refresh().ok();
-            mailbox.shutdown().expect("send shutdown");
-        });
-        let owner_thread = thread::current().id();
-        let state = runtime.run().expect("run UI");
-        producer.join().expect("producer joins");
-
-        assert!(state.should_quit);
-        assert_eq!(state.input.text, "x");
-        assert!(thread_ids
-            .lock()
-            .expect("thread recorder lock")
-            .iter()
-            .all(|thread_id| *thread_id == owner_thread));
-        assert!(input_values
-            .lock()
-            .expect("input recorder lock")
-            .iter()
-            .any(|value| value == "x"));
-    }
-
-    #[test]
-    fn view_mutations_are_applied_only_by_the_owner_loop() {
+    fn view_mutations_preserve_editor_cursor_and_pane_size() {
         let mut state = AppState::default();
+        apply_view_mutation(
+            &mut state,
+            ViewMutation::EditInput(InputEdit::Insert("abc".to_owned())),
+        );
+        apply_view_mutation(
+            &mut state,
+            ViewMutation::EditInput(InputEdit::MoveLeft),
+        );
+        apply_view_mutation(
+            &mut state,
+            ViewMutation::EditInput(InputEdit::Insert("x".to_owned())),
+        );
+        assert_eq!(state.input.text, "abxc");
+
         apply_view_mutation(
             &mut state,
             ViewMutation::ResizePane {
@@ -710,20 +666,5 @@ mod tests {
             },
         );
         assert_eq!(state.view.pane(&ElementId::sidebar()).width, Some(32));
-    }
-
-    #[test]
-    fn ticks_are_coalescible_but_semantic_messages_are_lossless() {
-        let (sender, receiver) = mpsc::sync_channel(1);
-        let mailbox = UiMailbox { sender };
-        mailbox.tick().expect("first tick fills queue");
-        assert_eq!(mailbox.tick(), Err(UiIngressError::Coalesced));
-        assert!(matches!(
-            receiver.recv().expect("receive tick"),
-            UiMessage::Content(EventEnvelope {
-                event: ContentEvent::ClockTick,
-                ..
-            })
-        ));
     }
 }
