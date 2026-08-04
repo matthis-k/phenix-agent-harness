@@ -34,7 +34,10 @@ impl Display for ExtensionCodecError {
                 )
             }
             Self::DecodeResult(error) => {
-                write!(formatter, "failed to decode typed Phenix ACP result: {error}")
+                write!(
+                    formatter,
+                    "failed to decode typed Phenix ACP result: {error}"
+                )
             }
         }
     }
@@ -125,8 +128,7 @@ mod tests {
 
     #[test]
     fn official_acp_extension_response_is_decoded_to_the_linked_result_type() {
-        let raw = to_raw_value(&serde_json::json!({ "tree_id": "tree-1" }))
-            .expect("response JSON");
+        let raw = to_raw_value(&serde_json::json!({ "tree_id": "tree-1" })).expect("response JSON");
         let result = decode_extension_response::<EchoMethod>(ExtResponse::new(Arc::from(raw)))
             .expect("typed response");
         assert_eq!(result.tree_id.as_str(), "tree-1");
