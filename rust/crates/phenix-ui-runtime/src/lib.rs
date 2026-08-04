@@ -5,6 +5,7 @@ mod fabric;
 mod frontend;
 mod mailbox;
 mod runtime;
+pub mod testing;
 
 pub use consumers::install_core_consumers;
 pub use fabric::{
