@@ -121,6 +121,17 @@ export type MemoryIntegrityIssue =
       readonly referencedNoteId: MemoryNoteId;
     }
   | {
+      readonly kind: "note-reference-invalid";
+      readonly noteId: MemoryNoteId;
+      readonly relation: "supersedes" | "invalidatedBy";
+      readonly referencedNoteId: MemoryNoteId;
+      readonly reason: "self-reference";
+    }
+  | {
+      readonly kind: "note-supersession-cycle";
+      readonly noteIds: readonly MemoryNoteId[];
+    }
+  | {
       readonly kind: "evidence-missing";
       readonly evidenceId: EvidenceId;
       readonly contentHash: string;
