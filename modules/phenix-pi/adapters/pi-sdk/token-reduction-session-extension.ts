@@ -1,4 +1,4 @@
-import { isToolCallEventType, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { type ExtensionFactory, isToolCallEventType } from "@earendil-works/pi-coding-agent";
 
 import type { TokenReductionService } from "../../application/token-reduction-service.ts";
 
