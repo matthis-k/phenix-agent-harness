@@ -3,12 +3,8 @@ import {
   type EvidenceSource,
   evidenceId,
   MEMORY_KINDS,
-  type MemoryKind,
   type MemoryNote,
   memoryNoteId,
-  type MemoryReliability,
-  type MemoryRetention,
-  type MemoryStatus,
 } from "./model.ts";
 import { objectiveId, runId } from "../shared.ts";
 
@@ -105,39 +101,43 @@ export function parseMemoryNote(value: unknown): MemoryNote {
   const supersedes = optionalStringArray(record.supersedes, "memory note supersedes")?.map((id) =>
     memoryNoteId(id),
   );
+  const status = parseEnum(record.status, MEMORY_STATUSES, "memory note status");
   const invalidatedBy =
     record.invalidatedBy === undefined
       ? undefined
       : memoryNoteId(requireString(record.invalidatedBy, "memory note invalidatedBy"));
-  return {
+  if (status !== "invalidated" && invalidatedBy !== undefined) {
+    throw new Error("memory note invalidatedBy is only valid for invalidated notes");
+  }
+
+  const base = {
     id: memoryNoteId(requireString(record.id, "memory note id")),
     rootRunId: runId(requireString(record.rootRunId, "memory note rootRunId")),
     runId: runId(requireString(record.runId, "memory note runId")),
     objectiveIds: parseStringArray(record.objectiveIds, "memory note objectiveIds").map((id) =>
       objectiveId(id),
     ),
-    kind: parseEnum(record.kind, MEMORY_KINDS, "memory note kind") as MemoryKind,
-    status: parseEnum(record.status, MEMORY_STATUSES, "memory note status") as MemoryStatus,
-    retention: parseEnum(
-      record.retention,
-      MEMORY_RETENTIONS,
-      "memory note retention",
-    ) as MemoryRetention,
-    reliability: parseEnum(
-      record.reliability,
-      MEMORY_RELIABILITIES,
-      "memory note reliability",
-    ) as MemoryReliability,
+    kind: parseEnum(record.kind, MEMORY_KINDS, "memory note kind"),
+    retention: parseEnum(record.retention, MEMORY_RETENTIONS, "memory note retention"),
+    reliability: parseEnum(record.reliability, MEMORY_RELIABILITIES, "memory note reliability"),
     summary: requireBoundedString(record.summary, "memory note summary", 2_000),
     ...(subject === undefined ? {} : { subject }),
     evidenceIds: parseStringArray(record.evidenceIds, "memory note evidenceIds").map((id) =>
       evidenceId(id),
     ),
     ...(supersedes === undefined ? {} : { supersedes }),
-    ...(invalidatedBy === undefined ? {} : { invalidatedBy }),
     createdAt: requireTimestamp(record.createdAt, "memory note createdAt"),
     updatedAt: requireTimestamp(record.updatedAt, "memory note updatedAt"),
   };
+
+  if (status === "invalidated") {
+    return {
+      ...base,
+      status,
+      ...(invalidatedBy === undefined ? {} : { invalidatedBy }),
+    };
+  }
+  return { ...base, status };
 }
 
 function parseEvidenceSource(value: unknown): EvidenceSource {
