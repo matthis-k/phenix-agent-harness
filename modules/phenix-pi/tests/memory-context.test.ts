@@ -10,10 +10,11 @@ import {
   memoryNoteId,
   type WorkingMemoryProjection,
 } from "../domain/memory/model.ts";
-import type { RunId } from "../domain/shared.ts";
+import { defaultMemoryPolicy } from "../domain/memory/policy.ts";
+import { objectiveId, runId, type RunId } from "../domain/shared.ts";
 
-const ROOT = "root-memory-context" as RunId;
-const RUN = "run-memory-context" as RunId;
+const ROOT = runId("root-memory-context");
+const RUN = runId("run-memory-context");
 
 const EVIDENCE: EvidenceRecord = {
   id: evidenceId("evidence-call-1"),
@@ -33,7 +34,7 @@ const WORKING_SET: WorkingMemoryProjection = {
   runId: RUN,
   objectivePath: [
     {
-      id: "objective-memory" as never,
+      id: objectiveId("objective-memory"),
       title: "Implement reversible memory",
       state: "wip",
     },
@@ -108,7 +109,7 @@ test("folds old tool results into stable evidence references while retaining con
   );
 });
 
-test("does not replace tool results below the folding threshold", async () => {
+test("does not replace tool results below the configured folding threshold", async () => {
   const messages = [user("Inspect", 1), toolResult("call-1", "small result", 2)];
   const assembled = await assembleMemoryContext(memoryStub(), RUN, messages, 100_000);
   const result = assembled.find((message) => message.role === "toolResult");
@@ -118,8 +119,9 @@ test("does not replace tool results below the folding threshold", async () => {
 
 function memoryStub(): MemoryService {
   return {
+    policy: defaultMemoryPolicy,
     workingSet: async () => WORKING_SET,
-    evidenceForToolCall: async (_runId: RunId, toolCallId: string) =>
+    evidenceForToolCall: async (_owner: RunId, toolCallId: string) =>
       toolCallId === "call-1" ? EVIDENCE : undefined,
   } as unknown as MemoryService;
 }
