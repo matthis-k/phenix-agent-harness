@@ -250,45 +250,6 @@ fn submit_command(state: &mut AppState, text: &str) -> Vec<AppEffect> {
                 })]
             }
         }
-        "mode" => {
-            let Some(run_id) = state.input_target().cloned() else {
-                return no_run_notification(state);
-            };
-            if arguments.is_empty() {
-                vec![AppEffect::Send(BackendCommand::SessionModes { run_id })]
-            } else {
-                vec![AppEffect::Send(BackendCommand::SessionModeSelect {
-                    run_id,
-                    mode_id: arguments.to_owned(),
-                })]
-            }
-        }
-        "mode" => {
-            let Some(run_id) = state.input_target().cloned() else {
-                return no_run_notification(state);
-            };
-            if arguments.is_empty() {
-                vec![AppEffect::Send(BackendCommand::SessionModes { run_id })]
-            } else {
-                vec![AppEffect::Send(BackendCommand::SessionModeSelect {
-                    run_id,
-                    mode_id: arguments.to_owned(),
-                })]
-            }
-        }
-        "mode" => {
-            let Some(run_id) = state.input_target().cloned() else {
-                return no_run_notification(state);
-            };
-            if arguments.is_empty() {
-                vec![AppEffect::Send(BackendCommand::SessionModes { run_id })]
-            } else {
-                vec![AppEffect::Send(BackendCommand::SessionModeSelect {
-                    run_id,
-                    mode_id: arguments.to_owned(),
-                })]
-            }
-        }
         "thinking" => {
             let Some(run_id) = state.input_target().cloned() else {
                 return no_run_notification(state);
@@ -405,24 +366,6 @@ fn reduce_backend_output(state: &mut AppState, output: BackendOutput) -> Vec<App
                 AppEffect::Render,
             ];
         }
-        BackendOutput::Event(BackendEvent::ExternalCommandRequested { flow_id, command }) => {
-            return vec![
-                AppEffect::RunExternal { flow_id, command },
-                AppEffect::Render,
-            ];
-        }
-        BackendOutput::Event(BackendEvent::ExternalCommandRequested { flow_id, command }) => {
-            return vec![
-                AppEffect::RunExternal { flow_id, command },
-                AppEffect::Render,
-            ];
-        }
-        BackendOutput::Event(BackendEvent::ExternalCommandRequested { flow_id, command }) => {
-            return vec![
-                AppEffect::RunExternal { flow_id, command },
-                AppEffect::Render,
-            ];
-        }
         BackendOutput::Event(event) => reduce_backend_event(state, event),
         BackendOutput::Stopped { result } => {
             state.connection = match result {
@@ -451,27 +394,6 @@ fn reduce_backend_reply(state: &mut AppState, reply: BackendReply) {
                 snapshot.runs = runs;
             }
         }
-        BackendReply::SessionModes(modes) => state.notifications.push_back(
-            modes
-                .into_iter()
-                .map(|mode| format!("{}{}", if mode.selected { "* " } else { "  " }, mode.id))
-                .collect::<Vec<_>>()
-                .join(" · "),
-        ),
-        BackendReply::SessionModes(modes) => state.notifications.push_back(
-            modes
-                .into_iter()
-                .map(|mode| format!("{}{}", if mode.selected { "* " } else { "  " }, mode.id))
-                .collect::<Vec<_>>()
-                .join(" · "),
-        ),
-        BackendReply::SessionModes(modes) => state.notifications.push_back(
-            modes
-                .into_iter()
-                .map(|mode| format!("{}{}", if mode.selected { "* " } else { "  " }, mode.id))
-                .collect::<Vec<_>>()
-                .join(" · "),
-        ),
         BackendReply::SessionModes(modes) => state.notifications.push_back(
             modes
                 .into_iter()
@@ -513,15 +435,6 @@ fn reduce_backend_event(state: &mut AppState, event: BackendEvent) {
         }
         BackendEvent::TranscriptUpdated(block) => {
             state.transcript_mut(block.run_id.clone()).update(block);
-        }
-        BackendEvent::ExternalCommandRequested { .. } => {
-            unreachable!("handled before reducer projection")
-        }
-        BackendEvent::ExternalCommandRequested { .. } => {
-            unreachable!("handled before reducer projection")
-        }
-        BackendEvent::ExternalCommandRequested { .. } => {
-            unreachable!("handled before reducer projection")
         }
         BackendEvent::ExternalCommandRequested { .. } => {
             unreachable!("handled before reducer projection")
