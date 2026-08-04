@@ -236,15 +236,16 @@ mod tests {
     fn server(name: &str) -> McpServerDefinition {
         McpServerDefinition::new(
             McpServerName::parse(name).expect("server name"),
-            McpServerTransport::stdio("server", Vec::new(), BTreeMap::new())
-                .expect("transport"),
+            McpServerTransport::stdio("server", Vec::new(), BTreeMap::new()).expect("transport"),
         )
     }
 
     #[test]
     fn mcp_server_names_are_unique_within_one_tree_configuration() {
         let mut tools = ToolConfiguration::new();
-        tools.insert_mcp_server(server("memory")).expect("first server");
+        tools
+            .insert_mcp_server(server("memory"))
+            .expect("first server");
         assert!(matches!(
             tools.insert_mcp_server(server("memory")),
             Err(ToolConfigError::DuplicateMcpServer(_))
@@ -253,10 +254,9 @@ mod tests {
 
     #[test]
     fn wire_deserialization_cannot_create_an_empty_stdio_command() {
-        let error = serde_json::from_str::<McpServerTransport>(
-            r#"{"transport":"stdio","command":""}"#,
-        )
-        .expect_err("empty command must fail");
+        let error =
+            serde_json::from_str::<McpServerTransport>(r#"{"transport":"stdio","command":""}"#)
+                .expect_err("empty command must fail");
         assert!(error.to_string().contains("must not be empty"));
     }
 }

@@ -14,7 +14,10 @@ impl Display for IdError {
         match self {
             Self::Empty => formatter.write_str("identifier must not be empty"),
             Self::TooLong { length, maximum } => {
-                write!(formatter, "identifier length {length} exceeds maximum {maximum}")
+                write!(
+                    formatter,
+                    "identifier length {length} exceeds maximum {maximum}"
+                )
             }
             Self::ControlCharacter => {
                 formatter.write_str("identifier must not contain control characters")
@@ -59,7 +62,10 @@ macro_rules! define_id {
 
         impl Debug for $name {
             fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-                formatter.debug_tuple(stringify!($name)).field(&self.0).finish()
+                formatter
+                    .debug_tuple(stringify!($name))
+                    .field(&self.0)
+                    .finish()
             }
         }
 

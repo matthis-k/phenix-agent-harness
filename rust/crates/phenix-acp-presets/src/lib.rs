@@ -31,17 +31,13 @@ pub fn standard() -> Result<SessionTreeDefinition, DefinitionError> {
     standard_builder()?.build()
 }
 
-pub fn local_only(
-    backend: BackendDefinition,
-) -> Result<SessionTreeDefinition, DefinitionError> {
+pub fn local_only(backend: BackendDefinition) -> Result<SessionTreeDefinition, DefinitionError> {
     SessionTreeDefinition::builder(
         DefinitionId::parse("phenix.local-only").expect("static definition ID is valid"),
         RouterId::parse("phenix.single-backend").expect("static router ID is valid"),
     )
     .backend(backend)?
-    .workflow(
-        WorkflowId::parse("phenix.direct").expect("static workflow ID is valid"),
-    )?
+    .workflow(WorkflowId::parse("phenix.direct").expect("static workflow ID is valid"))?
     .build()
 }
 

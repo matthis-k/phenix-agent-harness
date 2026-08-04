@@ -94,9 +94,7 @@ fn decode_response<R: serde::de::DeserializeOwned, E>(
         }));
     }
     match (response.result, response.error) {
-        (Some(result), None) => {
-            serde_json::from_value(result).map_err(CallError::DecodeResult)
-        }
+        (Some(result), None) => serde_json::from_value(result).map_err(CallError::DecodeResult),
         (None, Some(error)) => Err(CallError::Remote(error)),
         (Some(_), Some(_)) => Err(CallError::InvalidEnvelope(
             EnvelopeError::ResultAndErrorPresent,
@@ -131,7 +129,10 @@ impl Display for EnvelopeError {
                 write!(formatter, "unsupported JSON-RPC version {version}")
             }
             Self::MismatchedId { expected, actual } => {
-                write!(formatter, "response ID {actual} does not match request ID {expected}")
+                write!(
+                    formatter,
+                    "response ID {actual} does not match request ID {expected}"
+                )
             }
             Self::ResultAndErrorPresent => {
                 formatter.write_str("JSON-RPC response contains both result and error")
@@ -164,7 +165,9 @@ impl<E: Display> Display for CallError<E> {
             Self::InvalidGeneratedRequestId(message) => {
                 write!(formatter, "generated invalid ACP request ID: {message}")
             }
-            Self::EncodeRequest(error) => write!(formatter, "failed to encode ACP request: {error}"),
+            Self::EncodeRequest(error) => {
+                write!(formatter, "failed to encode ACP request: {error}")
+            }
             Self::Transport(error) => write!(formatter, "ACP transport failed: {error}"),
             Self::DecodeEnvelope(error) => {
                 write!(formatter, "failed to decode ACP response envelope: {error}")
@@ -193,9 +196,7 @@ where
             | Self::DecodeResult(error) => Some(error),
             Self::Transport(error) => Some(error),
             Self::InvalidEnvelope(error) => Some(error),
-            Self::RequestIdExhausted
-            | Self::InvalidGeneratedRequestId(_)
-            | Self::Remote(_) => None,
+            Self::RequestIdExhausted | Self::InvalidGeneratedRequestId(_) | Self::Remote(_) => None,
         }
     }
 }
@@ -259,9 +260,8 @@ mod tests {
 
     #[test]
     fn method_type_links_params_to_the_only_valid_result_type() {
-        let transport = ScriptedTransport::new(
-            br#"{"jsonrpc":"2.0","id":"1","result":{"tree_id":"tree-1"}}"#,
-        );
+        let transport =
+            ScriptedTransport::new(br#"{"jsonrpc":"2.0","id":"1","result":{"tree_id":"tree-1"}}"#);
         let mut client = AcpClient::new(transport);
         let result = client
             .call::<EchoMethod>(&EchoParams {
@@ -278,9 +278,8 @@ mod tests {
 
     #[test]
     fn malformed_result_is_not_collapsed_into_a_transport_or_remote_error() {
-        let transport = ScriptedTransport::new(
-            br#"{"jsonrpc":"2.0","id":"1","result":{"tree_id":7}}"#,
-        );
+        let transport =
+            ScriptedTransport::new(br#"{"jsonrpc":"2.0","id":"1","result":{"tree_id":7}}"#);
         let mut client = AcpClient::new(transport);
         assert!(matches!(
             client.call::<EchoMethod>(&EchoParams {
@@ -311,7 +310,9 @@ mod tests {
             client.call::<EchoMethod>(&EchoParams {
                 value: "hello".to_owned(),
             }),
-            Err(CallError::InvalidEnvelope(EnvelopeError::MismatchedId { .. }))
+            Err(CallError::InvalidEnvelope(
+                EnvelopeError::MismatchedId { .. }
+            ))
         ));
     }
 }

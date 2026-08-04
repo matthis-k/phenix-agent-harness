@@ -113,10 +113,7 @@ pub struct SessionTreeDefinition {
 }
 
 impl SessionTreeDefinition {
-    pub fn builder(
-        definition_id: DefinitionId,
-        router: RouterId,
-    ) -> SessionTreeDefinitionBuilder {
+    pub fn builder(definition_id: DefinitionId, router: RouterId) -> SessionTreeDefinitionBuilder {
         SessionTreeDefinitionBuilder {
             definition_id,
             router,
@@ -171,9 +168,7 @@ impl<'de> Deserialize<'de> for SessionTreeDefinition {
                 .map_err(serde::de::Error::custom)?;
         }
         for backend in wire.backends {
-            builder = builder
-                .backend(backend)
-                .map_err(serde::de::Error::custom)?;
+            builder = builder.backend(backend).map_err(serde::de::Error::custom)?;
         }
         builder.build().map_err(serde::de::Error::custom)
     }
@@ -248,7 +243,9 @@ impl From<ToolConfigError> for DefinitionError {
 impl Display for DefinitionError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MissingBackend => formatter.write_str("session tree requires at least one backend"),
+            Self::MissingBackend => {
+                formatter.write_str("session tree requires at least one backend")
+            }
             Self::DuplicateBackend(id) => write!(formatter, "duplicate backend {id}"),
             Self::DuplicateWorkflow(id) => write!(formatter, "duplicate workflow {id}"),
             Self::EmptyBackendProgram => {
@@ -312,10 +309,8 @@ mod tests {
 
     #[test]
     fn wire_deserialization_cannot_create_an_empty_backend_program() {
-        let error = serde_json::from_str::<AcpEndpoint>(
-            r#"{"transport":"stdio","program":""}"#,
-        )
-        .expect_err("empty program must fail");
+        let error = serde_json::from_str::<AcpEndpoint>(r#"{"transport":"stdio","program":""}"#)
+            .expect_err("empty program must fail");
         assert!(error.to_string().contains("must not be empty"));
     }
 }
