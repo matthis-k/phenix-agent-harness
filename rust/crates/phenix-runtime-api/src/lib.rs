@@ -5,7 +5,11 @@ pub mod id;
 pub mod protocol;
 
 pub use backend::{
-    AgentBackend, BackendClient, BackendError, BackendRequest, BackendRuntime, DynAgentBackend,
+    AgentBackend, BackendClient, BackendError, BackendOutput, BackendOutputSender, BackendRequest,
+    BackendRuntime, DynAgentBackend,
 };
-pub use id::{AuthFlowId, DialogId, InvalidId, RequestId, RunId, SessionId, ToolCallId};
+pub use id::{
+    AuthFlowId, DialogId, InvalidId, ObjectiveId, RequestId, RunId, SessionEntryId, SessionId,
+    ToolCallId,
+};
 pub use protocol::*;
