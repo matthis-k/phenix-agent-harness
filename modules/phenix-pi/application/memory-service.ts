@@ -5,30 +5,46 @@ import {
   type EvidenceRecord,
   type EvidenceSource,
   evidenceId,
+  type MemoryHealthSnapshot,
+  type MemoryIntegrityIssue,
   type MemoryKind,
+  type MemoryMaintenanceResult,
   type MemoryNote,
   type MemoryNoteId,
   type MemoryReliability,
+  type MemoryRepairResult,
   type MemoryRetention,
   type MemorySnapshot,
   type MemoryStatus,
   memoryNoteId,
   type WorkingMemoryProjection,
 } from "../domain/memory/model.ts";
+import type { MemoryPolicy } from "../domain/memory/policy.ts";
 import { focusedObjectiveId } from "../domain/objective/projection.ts";
 import type { DomainEvent } from "../domain/run/events.ts";
 import type { RunFactRecordedData } from "../domain/run/observability.ts";
 import type { ObjectiveId, RunId } from "../domain/shared.ts";
 import type { Clock, IdGenerator } from "../ports/clock.ts";
-import type { MemoryRepository } from "../ports/memory-repository.ts";
+import type { DiagnosticLog } from "../ports/diagnostic-log.ts";
+import type { MemoryRepository, PersistedMemoryState } from "../ports/memory-repository.ts";
 import type { ExecutionStore } from "./execution-store.ts";
 import { KeyedSerialExecutor } from "./keyed-serial-executor.ts";
 
-interface RootMemoryState {
+interface AvailableRootMemoryState {
+  readonly kind: "available";
   readonly evidence: Map<EvidenceId, EvidenceRecord>;
   readonly notes: Map<MemoryNoteId, MemoryNote>;
   readonly evidenceByToolCall: Map<string, EvidenceId>;
+  readonly issues: readonly MemoryIntegrityIssue[];
+  readonly ledgerBytes: number;
 }
+
+interface UnavailableRootMemoryState {
+  readonly kind: "unavailable";
+  readonly health: MemoryHealthSnapshot;
+}
+
+type RootMemoryState = AvailableRootMemoryState | UnavailableRootMemoryState;
 
 export interface CaptureToolResultInput {
   readonly runId: RunId;
@@ -67,12 +83,38 @@ export interface MemoryReadResult {
 }
 
 export type MemoryListener = () => void;
+export type MemoryOperation =
+  | "initialize"
+  | "capture-tool-result"
+  | "capture-domain-event"
+  | "assemble-context"
+  | "snapshot"
+  | "health"
+  | "search"
+  | "read"
+  | "note"
+  | "set-status"
+  | "repair"
+  | "maintain";
+
+export class MemoryUnavailableError extends Error {
+  readonly health: MemoryHealthSnapshot;
+
+  constructor(health: MemoryHealthSnapshot) {
+    super(`Phenix memory is ${health.state}: ${formatIssues(health.issues)}`);
+    this.name = "MemoryUnavailableError";
+    this.health = health;
+  }
+}
 
 export class MemoryService {
+  readonly policy: MemoryPolicy;
+
   private readonly repository: MemoryRepository;
   private readonly store: ExecutionStore;
   private readonly ids: IdGenerator;
   private readonly clock: Clock;
+  private readonly diagnostics: DiagnosticLog;
   private readonly roots = new Map<RunId, RootMemoryState>();
   private readonly serial = new KeyedSerialExecutor<RunId>();
   private readonly listeners = new Set<MemoryListener>();
@@ -83,16 +125,44 @@ export class MemoryService {
     readonly store: ExecutionStore;
     readonly ids: IdGenerator;
     readonly clock: Clock;
+    readonly diagnostics: DiagnosticLog;
+    readonly policy: MemoryPolicy;
   }) {
     this.repository = input.repository;
     this.store = input.store;
     this.ids = input.ids;
     this.clock = input.clock;
-    this.unsubscribeEvents = this.store.events.subscribe((event) => this.observeDomainEvent(event));
+    this.diagnostics = input.diagnostics;
+    this.policy = input.policy;
+    this.unsubscribeEvents = this.store.events.subscribe(async (event) => {
+      try {
+        await this.observeDomainEvent(event);
+      } catch (error) {
+        await this.reportFailure(event.runId, "capture-domain-event", error);
+        if (this.policy.captureFailureMode === "strict") throw error;
+      }
+    });
   }
 
   async initializeRoot(rootRunId: RunId): Promise<void> {
-    await this.serial.run(rootRunId, () => this.ensureLoaded(rootRunId));
+    await this.serial.run(rootRunId, async () => {
+      const state = await this.loadRoot(rootRunId);
+      if (state.kind === "unavailable") {
+        await this.recordHealthDiagnostic(state.health);
+        if (this.policy.captureFailureMode === "strict") {
+          throw new MemoryUnavailableError(state.health);
+        }
+        return;
+      }
+      if (state.issues.length > 0) await this.recordHealthDiagnostic(healthFromAvailable(rootRunId, state));
+      if (
+        this.policy.storage.automaticMaintenance &&
+        state.issues.length === 0 &&
+        state.ledgerBytes >= this.policy.storage.maintenanceLedgerBytes
+      ) {
+        await this.maintainAvailable(rootRunId, state);
+      }
+    });
   }
 
   subscribe(listener: MemoryListener): () => void {
@@ -101,10 +171,11 @@ export class MemoryService {
   }
 
   async captureToolResult(input: CaptureToolResultInput): Promise<EvidenceRecord> {
-    const rootRunId = this.store.projection.rootOf(input.runId);
+    const rootRunId = this.rootFor(input.runId);
     return this.serial.run(rootRunId, async () => {
-      const state = await this.ensureLoaded(rootRunId);
-      const existingId = state.evidenceByToolCall.get(toolCallKey(input.runId, input.toolCallId));
+      const state = await this.requireAvailable(rootRunId);
+      const key = toolCallKey(input.runId, input.toolCallId);
+      const existingId = state.evidenceByToolCall.get(key);
       const existing = existingId ? state.evidence.get(existingId) : undefined;
       if (existing) return existing;
 
@@ -129,11 +200,11 @@ export class MemoryService {
         mediaType: "application/json",
         preview: summary,
       });
-      state.evidenceByToolCall.set(toolCallKey(input.runId, input.toolCallId), evidence.id);
+      state.evidenceByToolCall.set(key, evidence.id);
 
       if (input.toolName !== "phenix_progress") {
         const classification = classifyToolResult(input);
-        await this.persistNote(state, {
+        const note = this.createNote({
           runId: input.runId,
           kind: classification.kind,
           summary,
@@ -143,6 +214,7 @@ export class MemoryService {
           reliability: "observed",
           status: input.isError ? "uncertain" : "active",
         });
+        await this.persistNotes(state, [note]);
       }
       this.emit();
       return evidence;
@@ -150,21 +222,27 @@ export class MemoryService {
   }
 
   async recordNote(input: RecordMemoryNoteInput): Promise<MemoryNote> {
-    const rootRunId = this.store.projection.rootOf(input.runId);
+    const rootRunId = this.rootFor(input.runId);
     return this.serial.run(rootRunId, async () => {
-      const state = await this.ensureLoaded(rootRunId);
-      const note = await this.persistNote(state, input);
-      if (input.supersedes) {
-        for (const previousId of input.supersedes) {
-          const previous = state.notes.get(previousId);
-          if (!previous || previous.status === "superseded") continue;
-          await this.persistNoteValue(state, {
-            ...previous,
-            status: "superseded",
-            updatedAt: this.clock.now(),
-          });
-        }
+      const state = await this.requireAvailable(rootRunId);
+      validateUniqueIds(input.evidenceIds ?? [], "memory evidence references");
+      validateUniqueIds(input.supersedes ?? [], "memory supersedes references");
+      for (const id of input.evidenceIds ?? []) {
+        if (!state.evidence.has(id)) throw new Error(`Unknown memory evidence: ${id}`);
       }
+      for (const id of input.supersedes ?? []) {
+        if (!state.notes.has(id)) throw new Error(`Unknown superseded memory note: ${id}`);
+      }
+
+      const note = this.createNote(input);
+      const now = this.clock.now();
+      const updates: MemoryNote[] = [note];
+      for (const previousId of input.supersedes ?? []) {
+        const previous = state.notes.get(previousId);
+        if (!previous || previous.status === "superseded") continue;
+        updates.push(transitionNote(previous, "superseded", now));
+      }
+      await this.persistNotes(state, updates);
       this.emit();
       return note;
     });
@@ -176,38 +254,45 @@ export class MemoryService {
     status: MemoryStatus,
     invalidatedBy?: MemoryNoteId,
   ): Promise<MemoryNote> {
-    const rootRunId = this.store.projection.rootOf(actorRunId);
+    const rootRunId = this.rootFor(actorRunId);
     return this.serial.run(rootRunId, async () => {
-      const state = await this.ensureLoaded(rootRunId);
+      const state = await this.requireAvailable(rootRunId);
       const current = state.notes.get(id);
       if (!current) throw new Error(`Unknown memory note: ${id}`);
-      const updated: MemoryNote = {
-        ...current,
-        status,
-        ...(invalidatedBy ? { invalidatedBy } : {}),
-        updatedAt: this.clock.now(),
-      };
-      await this.persistNoteValue(state, updated);
+      if (status !== "invalidated" && invalidatedBy !== undefined) {
+        throw new Error("invalidatedBy is only valid when status is invalidated");
+      }
+      if (invalidatedBy !== undefined) {
+        if (invalidatedBy === id) throw new Error("A memory note cannot invalidate itself");
+        if (!state.notes.has(invalidatedBy)) {
+          throw new Error(`Unknown invalidating memory note: ${invalidatedBy}`);
+        }
+      }
+      const updated = transitionNote(current, status, this.clock.now(), invalidatedBy);
+      await this.persistNotes(state, [updated]);
       this.emit();
       return updated;
     });
   }
 
   async read(runId: RunId, id: EvidenceId): Promise<MemoryReadResult> {
-    const rootRunId = this.store.projection.rootOf(runId);
-    const state = await this.ensureLoaded(rootRunId);
+    const rootRunId = this.rootFor(runId);
+    const state = await this.requireAvailable(rootRunId);
     const evidence = state.evidence.get(id);
     if (!evidence) throw new Error(`Unknown evidence: ${id}`);
-    const content = await this.repository.readEvidence(rootRunId, id);
+    const content = await this.repository.readEvidence(evidence);
     if (content === undefined) throw new Error(`Evidence payload is unavailable: ${id}`);
     return { evidence, content };
   }
 
   async search(input: SearchMemoryInput): Promise<readonly MemoryNote[]> {
-    const rootRunId = this.store.projection.rootOf(input.runId);
-    const state = await this.ensureLoaded(rootRunId);
+    const rootRunId = this.rootFor(input.runId);
+    const state = await this.requireAvailable(rootRunId);
     const queryTerms = normalizeTerms(input.query);
-    const limit = Math.max(1, Math.min(100, input.limit ?? 20));
+    const limit = Math.max(
+      1,
+      Math.min(this.policy.storage.maximumSearchResults, input.limit ?? 20),
+    );
     return [...state.notes.values()]
       .filter((note) => !input.kind || note.kind === input.kind)
       .filter((note) => !input.status || note.status === input.status)
@@ -225,7 +310,8 @@ export class MemoryService {
   }
 
   async snapshot(rootRunId: RunId): Promise<MemorySnapshot> {
-    const state = await this.ensureLoaded(rootRunId);
+    const state = await this.ensureState(rootRunId);
+    if (state.kind === "unavailable") return emptySnapshot(rootRunId, state.health);
     const evidence = [...state.evidence.values()].sort((left, right) =>
       right.createdAt.localeCompare(left.createdAt),
     );
@@ -234,6 +320,7 @@ export class MemoryService {
     );
     return {
       rootRunId,
+      health: healthFromAvailable(rootRunId, state),
       evidence,
       notes,
       stats: {
@@ -244,10 +331,66 @@ export class MemoryService {
     };
   }
 
+  async health(rootRunId: RunId, verifyEvidence = false): Promise<MemoryHealthSnapshot> {
+    return this.serial.run(rootRunId, async () => {
+      const current = await this.ensureState(rootRunId);
+      if (!verifyEvidence) {
+        return current.kind === "available"
+          ? healthFromAvailable(rootRunId, current)
+          : current.health;
+      }
+      const inspected = await this.repository.inspect(rootRunId, true);
+      if (!inspected.writable) {
+        this.roots.set(rootRunId, { kind: "unavailable", health: inspected });
+        this.emit();
+        return inspected;
+      }
+      this.roots.delete(rootRunId);
+      const reloaded = await this.loadRoot(rootRunId);
+      if (reloaded.kind === "unavailable") return reloaded.health;
+      return {
+        ...healthFromAvailable(rootRunId, reloaded),
+        verifiedEvidenceCount: inspected.verifiedEvidenceCount,
+      };
+    });
+  }
+
+  async repair(rootRunId: RunId): Promise<MemoryRepairResult> {
+    return this.serial.run(rootRunId, async () => {
+      const result = await this.repository.repair(rootRunId);
+      this.roots.delete(rootRunId);
+      const state = await this.loadRoot(rootRunId);
+      const health =
+        state.kind === "available" ? healthFromAvailable(rootRunId, state) : state.health;
+      if (result.repaired) {
+        await this.diagnostics.record({
+          rootRunId,
+          runId: rootRunId,
+          severity: health.writable ? "warning" : "error",
+          scope: "memory.persistence.repaired",
+          message: "Phenix memory repair completed",
+          fields: { result, health },
+        });
+        this.emit();
+      }
+      return { ...result, remainingIssues: health.issues };
+    });
+  }
+
+  async maintain(rootRunId: RunId): Promise<MemoryMaintenanceResult> {
+    return this.serial.run(rootRunId, async () => {
+      const state = await this.requireAvailable(rootRunId);
+      return this.maintainAvailable(rootRunId, state);
+    });
+  }
+
   async workingSet(runId: RunId, limit = 24): Promise<WorkingMemoryProjection> {
-    const rootRunId = this.store.projection.rootOf(runId);
-    const state = await this.ensureLoaded(rootRunId);
+    const rootRunId = this.rootFor(runId);
+    const state = await this.ensureState(rootRunId);
     const objectivePath = this.objectivePath(runId);
+    if (state.kind === "unavailable") {
+      return { rootRunId, runId, objectivePath, notes: [], recentEvidence: [] };
+    }
     const objectiveIds = new Set(objectivePath.map((objective) => objective.id));
     const notes = [...state.notes.values()]
       .filter((note) => note.status === "active" || note.status === "uncertain")
@@ -271,10 +414,30 @@ export class MemoryService {
   }
 
   async evidenceForToolCall(runId: RunId, toolCallId: string): Promise<EvidenceRecord | undefined> {
-    const rootRunId = this.store.projection.rootOf(runId);
-    const state = await this.ensureLoaded(rootRunId);
+    const rootRunId = this.rootFor(runId);
+    const state = await this.ensureState(rootRunId);
+    if (state.kind === "unavailable") return undefined;
     const id = state.evidenceByToolCall.get(toolCallKey(runId, toolCallId));
     return id ? state.evidence.get(id) : undefined;
+  }
+
+  async reportFailure(runId: RunId, operation: MemoryOperation, error: unknown): Promise<void> {
+    const rootRunId = this.rootFor(runId);
+    try {
+      await this.diagnostics.record({
+        rootRunId,
+        runId,
+        severity: "error",
+        scope: `memory.operation.${operation}.failed`,
+        message: `Phenix memory ${operation} failed`,
+        fields: { error },
+      });
+    } catch (diagnosticError) {
+      console.error(
+        `[phenix] memory ${operation} failed and could not be diagnosed:`,
+        diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError),
+      );
+    }
   }
 
   shutdown(): void {
@@ -283,27 +446,93 @@ export class MemoryService {
     this.roots.clear();
   }
 
-  private async ensureLoaded(rootRunId: RunId): Promise<RootMemoryState> {
+  private async ensureState(rootRunId: RunId): Promise<RootMemoryState> {
     const existing = this.roots.get(rootRunId);
-    if (existing) return existing;
-    const persisted = await this.repository.load(rootRunId);
-    const state: RootMemoryState = {
-      evidence: new Map(persisted.evidence.map((item) => [item.id, item])),
-      notes: new Map(persisted.notes.map((item) => [item.id, item])),
-      evidenceByToolCall: new Map(
-        persisted.evidence.flatMap((item) =>
-          item.source.kind === "tool-result"
-            ? [[toolCallKey(item.runId, item.source.toolCallId), item.id] as const]
-            : [],
-        ),
-      ),
-    };
-    this.roots.set(rootRunId, state);
+    return existing ?? this.loadRoot(rootRunId);
+  }
+
+  private async requireAvailable(rootRunId: RunId): Promise<AvailableRootMemoryState> {
+    const state = await this.ensureState(rootRunId);
+    if (state.kind === "unavailable") throw new MemoryUnavailableError(state.health);
     return state;
   }
 
+  private async loadRoot(rootRunId: RunId): Promise<RootMemoryState> {
+    try {
+      const inspected = await this.repository.inspect(rootRunId, false);
+      if (!inspected.writable) {
+        const unavailable: UnavailableRootMemoryState = { kind: "unavailable", health: inspected };
+        this.roots.set(rootRunId, unavailable);
+        return unavailable;
+      }
+      const persisted = await this.repository.load(rootRunId);
+      const semanticIssues = semanticMemoryIssues(persisted);
+      if (semanticIssues.length > 0) {
+        const health: MemoryHealthSnapshot = {
+          rootRunId,
+          state: "corrupt",
+          writable: false,
+          issues: [...persisted.issues, ...semanticIssues],
+          evidenceCount: persisted.evidence.length,
+          noteCount: persisted.notes.length,
+          activeNoteCount: persisted.notes.filter((note) => note.status === "active").length,
+          storedBytes: persisted.evidence.reduce((total, item) => total + item.sizeBytes, 0),
+          ledgerBytes: persisted.ledgerBytes,
+          verifiedEvidenceCount: 0,
+        };
+        const unavailable: UnavailableRootMemoryState = { kind: "unavailable", health };
+        this.roots.set(rootRunId, unavailable);
+        return unavailable;
+      }
+      const available: AvailableRootMemoryState = {
+        kind: "available",
+        evidence: new Map(persisted.evidence.map((item) => [item.id, item])),
+        notes: new Map(persisted.notes.map((item) => [item.id, item])),
+        evidenceByToolCall: new Map(
+          persisted.evidence.flatMap((item) =>
+            item.source.kind === "tool-result"
+              ? [[toolCallKey(item.runId, item.source.toolCallId), item.id] as const]
+              : [],
+          ),
+        ),
+        issues: persisted.issues,
+        ledgerBytes: persisted.ledgerBytes,
+      };
+      this.roots.set(rootRunId, available);
+      return available;
+    } catch (error) {
+      const health = unavailableHealth(rootRunId, error);
+      const unavailable: UnavailableRootMemoryState = { kind: "unavailable", health };
+      this.roots.set(rootRunId, unavailable);
+      return unavailable;
+    }
+  }
+
+  private async maintainAvailable(
+    rootRunId: RunId,
+    state: AvailableRootMemoryState,
+  ): Promise<MemoryMaintenanceResult> {
+    if (state.issues.length > 0) {
+      throw new Error("Memory maintenance requires a clean ledger; run repair first");
+    }
+    const result = await this.repository.maintain(rootRunId, this.clock.now());
+    this.roots.delete(rootRunId);
+    const reloaded = await this.loadRoot(rootRunId);
+    if (reloaded.kind === "unavailable") throw new MemoryUnavailableError(reloaded.health);
+    await this.diagnostics.record({
+      rootRunId,
+      runId: rootRunId,
+      severity: "info",
+      scope: "memory.persistence.maintained",
+      message: "Phenix memory retention and compaction completed",
+      fields: result,
+    });
+    this.emit();
+    return result;
+  }
+
   private async persistEvidence(
-    state: RootMemoryState,
+    state: AvailableRootMemoryState,
     input: {
       readonly rootRunId: RunId;
       readonly runId: RunId;
@@ -331,71 +560,78 @@ export class MemoryService {
     return record;
   }
 
-  private async persistNote(
-    state: RootMemoryState,
-    input: RecordMemoryNoteInput,
-  ): Promise<MemoryNote> {
+  private createNote(input: RecordMemoryNoteInput): MemoryNote {
     const now = this.clock.now();
-    const rootRunId = this.store.projection.rootOf(input.runId);
-    const note: MemoryNote = {
+    const base = {
       id: memoryNoteId(this.ids.next("memory")),
-      rootRunId,
+      rootRunId: this.rootFor(input.runId),
       runId: input.runId,
       objectiveIds: this.objectiveScope(input.runId),
       kind: input.kind,
-      status: input.status ?? "active",
       retention: input.retention ?? "summary-sufficient",
       reliability: input.reliability ?? "reported",
       summary: requireText(input.summary, "Memory summary"),
       ...(input.subject?.trim() ? { subject: input.subject.trim() } : {}),
       evidenceIds: input.evidenceIds ?? [],
-      ...(input.supersedes ? { supersedes: input.supersedes } : {}),
+      ...(input.supersedes && input.supersedes.length > 0
+        ? { supersedes: input.supersedes }
+        : {}),
       createdAt: now,
       updatedAt: now,
     };
-    await this.persistNoteValue(state, note);
-    return note;
+    const status = input.status ?? "active";
+    return status === "invalidated" ? { ...base, status } : { ...base, status };
   }
 
-  private async persistNoteValue(state: RootMemoryState, note: MemoryNote): Promise<void> {
-    await this.repository.appendNote(note);
-    state.notes.set(note.id, note);
+  private async persistNotes(
+    state: AvailableRootMemoryState,
+    notes: readonly MemoryNote[],
+  ): Promise<void> {
+    await this.repository.appendNotes(notes);
+    for (const note of notes) state.notes.set(note.id, note);
   }
 
   private async observeDomainEvent(event: DomainEvent): Promise<void> {
-    if (event.type === "run.fact.recorded") {
-      const fact = event.data as RunFactRecordedData;
-      const classification = classifyFact(fact);
-      if (!classification) return;
-      await this.captureDomainMemory({
-        event,
-        kind: classification.kind,
-        summary: fact.summary,
-        subject: fact.subject,
-        reliability: fact.reliability,
-        retention: classification.retention,
-      });
-      return;
+    switch (event.type) {
+      case "run.fact.recorded": {
+        const fact: RunFactRecordedData = event.data;
+        const classification = classifyFact(fact);
+        if (!classification) return;
+        await this.captureDomainMemory({
+          event,
+          kind: classification.kind,
+          summary: fact.summary,
+          subject: fact.subject,
+          reliability: fact.reliability,
+          retention: classification.retention,
+        });
+        return;
+      }
+      case "run.completed":
+      case "run.failed":
+      case "run.cancelled":
+      case "run.orphaned": {
+        const run = this.store.projection.runs.get(event.runId);
+        if (!run || run.kind === "root") return;
+        const outcome = run.outcome ?? event.data;
+        await this.captureDomainMemory({
+          event,
+          kind: event.type === "run.completed" ? "run-outcome" : "error",
+          summary:
+            event.type === "run.completed"
+              ? `Run ${run.definitionId} completed`
+              : `Run ${run.definitionId} ended with ${event.type.slice("run.".length)}`,
+          subject: String(run.definitionId),
+          reliability: "observed",
+          retention: "structured-lossless",
+          payload: outcome,
+          source: { kind: "run-outcome", childRunId: event.runId },
+        });
+        return;
+      }
+      default:
+        return;
     }
-    if (!["run.completed", "run.failed", "run.cancelled", "run.orphaned"].includes(event.type)) {
-      return;
-    }
-    const run = this.store.projection.runs.get(event.runId);
-    if (!run || run.kind === "root") return;
-    const outcome = run.outcome ?? event.data;
-    await this.captureDomainMemory({
-      event,
-      kind: event.type === "run.completed" ? "run-outcome" : "error",
-      summary:
-        event.type === "run.completed"
-          ? `Run ${run.definitionId} completed`
-          : `Run ${run.definitionId} ended with ${event.type.slice("run.".length)}`,
-      subject: String(run.definitionId),
-      reliability: "observed",
-      retention: "structured-lossless",
-      payload: outcome,
-      source: { kind: "run-outcome", childRunId: event.runId },
-    });
   }
 
   private async captureDomainMemory(input: {
@@ -410,7 +646,7 @@ export class MemoryService {
   }): Promise<void> {
     const rootRunId = input.event.rootRunId;
     await this.serial.run(rootRunId, async () => {
-      const state = await this.ensureLoaded(rootRunId);
+      const state = await this.requireAvailable(rootRunId);
       const content = safeSerialize(input.payload ?? input.event.data);
       const evidence = await this.persistEvidence(state, {
         rootRunId,
@@ -420,7 +656,7 @@ export class MemoryService {
         mediaType: "application/json",
         preview: input.summary,
       });
-      await this.persistNote(state, {
+      const note = this.createNote({
         runId: input.event.runId,
         kind: input.kind,
         summary: input.summary,
@@ -429,6 +665,7 @@ export class MemoryService {
         reliability: input.reliability,
         retention: input.retention,
       });
+      await this.persistNotes(state, [note]);
       this.emit();
     });
   }
@@ -454,9 +691,199 @@ export class MemoryService {
     return result.reverse();
   }
 
+  private rootFor(runId: RunId): RunId {
+    try {
+      return this.store.projection.rootOf(runId);
+    } catch {
+      return runId;
+    }
+  }
+
+  private async recordHealthDiagnostic(health: MemoryHealthSnapshot): Promise<void> {
+    if (health.state === "healthy") return;
+    await this.diagnostics.record({
+      rootRunId: health.rootRunId,
+      runId: health.rootRunId,
+      severity: health.state === "degraded" ? "warning" : "error",
+      scope: `memory.health.${health.state}`,
+      message: `Phenix memory is ${health.state}`,
+      fields: health,
+    });
+  }
+
   private emit(): void {
     for (const listener of this.listeners) listener();
   }
+}
+
+function transitionNote(
+  note: MemoryNote,
+  status: MemoryStatus,
+  updatedAt: string,
+  invalidatedBy?: MemoryNoteId,
+): MemoryNote {
+  const base = {
+    id: note.id,
+    rootRunId: note.rootRunId,
+    runId: note.runId,
+    objectiveIds: note.objectiveIds,
+    kind: note.kind,
+    retention: note.retention,
+    reliability: note.reliability,
+    summary: note.summary,
+    ...(note.subject === undefined ? {} : { subject: note.subject }),
+    evidenceIds: note.evidenceIds,
+    ...(note.supersedes === undefined ? {} : { supersedes: note.supersedes }),
+    createdAt: note.createdAt,
+    updatedAt,
+  };
+  if (status === "invalidated") {
+    return {
+      ...base,
+      status,
+      ...(invalidatedBy === undefined ? {} : { invalidatedBy }),
+    };
+  }
+  return { ...base, status };
+}
+
+function semanticMemoryIssues(state: PersistedMemoryState): readonly MemoryIntegrityIssue[] {
+  const evidence = new Set(state.evidence.map((item) => item.id));
+  const notes = new Map(state.notes.map((item) => [item.id, item]));
+  const issues: MemoryIntegrityIssue[] = [];
+  for (const note of state.notes) {
+    for (const id of note.evidenceIds) {
+      if (!evidence.has(id)) issues.push({ kind: "note-evidence-missing", noteId: note.id, evidenceId: id });
+    }
+    for (const id of note.supersedes ?? []) {
+      if (id === note.id) {
+        issues.push({
+          kind: "note-reference-invalid",
+          noteId: note.id,
+          relation: "supersedes",
+          referencedNoteId: id,
+          reason: "self-reference",
+        });
+      } else if (!notes.has(id)) {
+        issues.push({
+          kind: "note-reference-missing",
+          noteId: note.id,
+          relation: "supersedes",
+          referencedNoteId: id,
+        });
+      }
+    }
+    if (note.status === "invalidated" && note.invalidatedBy !== undefined) {
+      if (note.invalidatedBy === note.id) {
+        issues.push({
+          kind: "note-reference-invalid",
+          noteId: note.id,
+          relation: "invalidatedBy",
+          referencedNoteId: note.invalidatedBy,
+          reason: "self-reference",
+        });
+      } else if (!notes.has(note.invalidatedBy)) {
+        issues.push({
+          kind: "note-reference-missing",
+          noteId: note.id,
+          relation: "invalidatedBy",
+          referencedNoteId: note.invalidatedBy,
+        });
+      }
+    }
+  }
+  const cycle = findSupersessionCycle(notes);
+  if (cycle) issues.push({ kind: "note-supersession-cycle", noteIds: cycle });
+  return issues;
+}
+
+function findSupersessionCycle(
+  notes: ReadonlyMap<MemoryNoteId, MemoryNote>,
+): readonly MemoryNoteId[] | undefined {
+  const completed = new Set<MemoryNoteId>();
+  for (const start of [...notes.keys()].sort()) {
+    if (completed.has(start)) continue;
+    const path: MemoryNoteId[] = [];
+    const positions = new Map<MemoryNoteId, number>();
+    const stack: Array<{ readonly id: MemoryNoteId; index: number }> = [{ id: start, index: 0 }];
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      if (!frame) break;
+      if (!positions.has(frame.id)) {
+        positions.set(frame.id, path.length);
+        path.push(frame.id);
+      }
+      const edges = notes.get(frame.id)?.supersedes ?? [];
+      const next = edges[frame.index];
+      if (next === undefined) {
+        completed.add(frame.id);
+        positions.delete(frame.id);
+        path.pop();
+        stack.pop();
+        continue;
+      }
+      frame.index += 1;
+      const cycleAt = positions.get(next);
+      if (cycleAt !== undefined) return [...path.slice(cycleAt), next];
+      if (!completed.has(next) && notes.has(next)) stack.push({ id: next, index: 0 });
+    }
+  }
+  return undefined;
+}
+
+function healthFromAvailable(
+  rootRunId: RunId,
+  state: AvailableRootMemoryState,
+): MemoryHealthSnapshot {
+  const status = healthState(state.issues);
+  return {
+    rootRunId,
+    state: status,
+    writable: status === "healthy" || status === "degraded",
+    issues: state.issues,
+    evidenceCount: state.evidence.size,
+    noteCount: state.notes.size,
+    activeNoteCount: [...state.notes.values()].filter((note) => note.status === "active").length,
+    storedBytes: [...state.evidence.values()].reduce((total, item) => total + item.sizeBytes, 0),
+    ledgerBytes: state.ledgerBytes,
+    verifiedEvidenceCount: 0,
+  };
+}
+
+function unavailableHealth(rootRunId: RunId, error: unknown): MemoryHealthSnapshot {
+  return {
+    rootRunId,
+    state: "unavailable",
+    writable: false,
+    issues: [
+      {
+        kind: "repository-unavailable",
+        message: error instanceof Error ? error.message : String(error),
+      },
+    ],
+    evidenceCount: 0,
+    noteCount: 0,
+    activeNoteCount: 0,
+    storedBytes: 0,
+    ledgerBytes: 0,
+    verifiedEvidenceCount: 0,
+  };
+}
+
+function emptySnapshot(rootRunId: RunId, health: MemoryHealthSnapshot): MemorySnapshot {
+  return {
+    rootRunId,
+    health,
+    evidence: [],
+    notes: [],
+    stats: { evidenceCount: 0, activeNoteCount: 0, storedBytes: 0 },
+  };
+}
+
+function healthState(issues: readonly MemoryIntegrityIssue[]): MemoryHealthSnapshot["state"] {
+  if (issues.some((issue) => issue.kind === "repository-unavailable")) return "unavailable";
+  if (issues.some((issue) => issue.kind !== "ledger-tail-truncated")) return "corrupt";
+  return issues.length > 0 ? "degraded" : "healthy";
 }
 
 function toolCallKey(runId: RunId, toolCallId: string): string {
@@ -509,7 +936,14 @@ function classifyFact(
       return { kind: "test-result", retention: "structured-lossless" };
     case "file-changed":
       return { kind: "change", retention: "structured-lossless" };
-    default:
+    case "run-started":
+    case "run-state-changed":
+    case "file-read":
+    case "search-performed":
+    case "command-finished":
+    case "child-started":
+    case "child-finished":
+    case "workflow-transition":
       return undefined;
   }
 }
@@ -572,8 +1006,7 @@ function extractText(value: unknown): string {
   }
   if (isRecord(value)) {
     for (const field of ["output", "stdout", "stderr", "text", "content", "message"]) {
-      const candidate = value[field];
-      const extracted = extractText(candidate);
+      const extracted = extractText(value[field]);
       if (extracted) return extracted;
     }
   }
@@ -583,16 +1016,18 @@ function extractText(value: unknown): string {
 function safeSerialize(value: unknown): string {
   const seen = new WeakSet<object>();
   try {
-    return JSON.stringify(
-      value,
-      (_key, candidate: unknown) => {
-        if (typeof candidate === "bigint") return candidate.toString();
-        if (typeof candidate !== "object" || candidate === null) return candidate;
-        if (seen.has(candidate)) return "[Circular]";
-        seen.add(candidate);
-        return candidate;
-      },
-      2,
+    return (
+      JSON.stringify(
+        value,
+        (_key, candidate: unknown) => {
+          if (typeof candidate === "bigint") return candidate.toString();
+          if (typeof candidate !== "object" || candidate === null) return candidate;
+          if (seen.has(candidate)) return "[Circular]";
+          seen.add(candidate);
+          return candidate;
+        },
+        2,
+      ) ?? String(value)
     );
   } catch {
     return String(value);
@@ -611,6 +1046,14 @@ function compact(value: string): string {
 
 function truncate(value: string, length: number): string {
   return value.length <= length ? value : `${value.slice(0, Math.max(0, length - 1))}…`;
+}
+
+function validateUniqueIds(values: readonly string[], name: string): void {
+  if (new Set(values).size !== values.length) throw new Error(`${name} must be unique`);
+}
+
+function formatIssues(issues: readonly MemoryIntegrityIssue[]): string {
+  return issues.length === 0 ? "no details" : issues.map((issue) => issue.kind).join(", ");
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
