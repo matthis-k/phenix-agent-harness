@@ -1,4 +1,4 @@
-use phenix_runtime_api::{AuthFlowId, AuthPrompt, RunId};
+use phenix_runtime_api::{AuthFlowId, AuthPrompt, DialogId, ExtensionUiRequest, RunId};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum FocusTarget {
@@ -40,6 +40,12 @@ pub enum OverlayState {
     },
     SessionPicker {
         query: String,
+        selected: usize,
+    },
+    ExtensionDialog {
+        dialog_id: DialogId,
+        request: ExtensionUiRequest,
+        input: String,
         selected: usize,
     },
     Help,
