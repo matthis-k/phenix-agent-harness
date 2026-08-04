@@ -940,6 +940,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "phenix-acp"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "phenix-acp-presets"
+version = "0.1.0"
+dependencies = [
+ "phenix-acp",
+]
+
+[[package]]
 name = "phenix-frontend-config"
 version = "0.1.0"
 dependencies = [
