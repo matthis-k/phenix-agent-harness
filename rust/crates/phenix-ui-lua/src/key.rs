@@ -14,6 +14,12 @@ impl KeyChord {
         if value.is_empty() {
             return Err(KeyParseError::InvalidChord(value.to_owned()));
         }
+        if normalize(value) == "<s-tab>" || normalize(value) == "shift+tab" {
+            return Ok(Self {
+                code: KeyCode::BackTab,
+                modifiers: KeyModifiers::default(),
+            });
+        }
         let tokens = if value.starts_with('<') && value.ends_with('>') {
             value[1..value.len() - 1]
                 .split('-')
