@@ -8,6 +8,7 @@ import {
 import { resolveDefinitionSchema } from "../definitions/schema-registry.ts";
 import { registerWorkflowFunctions } from "../definitions/workflows/functions.ts";
 import { workflowDefinitions } from "../definitions/workflows/index.ts";
+import { defaultMemoryPolicy } from "../domain/memory/policy.ts";
 import { PolicyModelResolver } from "../framework/routing/policy-model-resolver.ts";
 import { defineRuntimeConfiguration } from "../framework/runtime-configuration.ts";
 import { phenixBudgetPolicy } from "./phenix-budget-policy.ts";
@@ -15,6 +16,7 @@ import { defaultRoutingPolicy } from "./phenix-routing-policy.ts";
 
 export const phenixRuntimeConfiguration = defineRuntimeConfiguration({
   budgetPolicy: phenixBudgetPolicy,
+  memoryPolicy: defaultMemoryPolicy,
   catalog: {
     definitionIds: ALL_DEFINITION_IDS,
     definitions: [...agentDefinitions, ...workflowDefinitions],
