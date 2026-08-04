@@ -71,6 +71,29 @@ impl Display for InvalidElementId {
 
 impl Error for InvalidElementId {}
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FocusDirection {
+    Next,
+    Previous,
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LayoutAxis {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResizeRequest {
+    Grow(u16),
+    Shrink(u16),
+    Set(u16),
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RouteTarget {
     Broadcast,
