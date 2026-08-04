@@ -26,15 +26,14 @@ diff --git a/src/core/tee.rs b/src/core/tee.rs
  /// Check if tee should be skipped based on config, mode, exit code, and size.
  /// Returns None if should skip, Some(tee_dir) if should proceed.
  fn should_tee(
-diff --git a/src/core/stream.rs b/src/core/stream.rs
---- a/src/core/stream.rs
-+++ b/src/core/stream.rs
-@@ -486,6 +486,8 @@
-     let exit_code = status_to_exit_code(status);
-     let raw = format!("{}{}", raw_stdout, raw_stderr);
- 
-+    crate::core::tee::phenix_tee_raw(&raw);
+diff --git a/src/core/tracking.rs b/src/core/tracking.rs
+--- a/src/core/tracking.rs
++++ b/src/core/tracking.rs
+@@ -1356,6 +1356,8 @@ impl TimedExecution {
+     /// ```
+     pub fn track(&self, original_cmd: &str, rtk_cmd: &str, input: &str, output: &str) {
++        crate::core::tee::phenix_tee_raw(input);
 +
-     if let Some(mut f) = saved_filter {
-         if let Some(post) = f.on_exit(exit_code, &raw) {
-             filtered.push_str(&post);
+         let elapsed_ms = self.start.elapsed().as_millis() as u64;
+         let input_tokens = estimate_tokens(input);
+         let output_tokens = estimate_tokens(output);
