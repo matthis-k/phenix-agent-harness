@@ -26,147 +26,108 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
-          def replace_required(path: Path, old: str, new: str) -> None:
-              content = path.read_text()
-              if old in content:
-                  path.write_text(content.replace(old, new))
-              elif new not in content:
-                  raise SystemExit(f"expected pattern missing in {path}: {old}")
+          def edit(path_name: str, transform) -> None:
+              path = Path(path_name)
+              before = path.read_text()
+              after = transform(before)
+              if before == after:
+                  raise SystemExit(f"no migration applied to {path}")
+              path.write_text(after)
 
-          def derive_default(path: Path, struct_marker: str, impl_marker: str) -> None:
-              content = path.read_text()
-              struct_start = content.index(struct_marker)
-              derive_start = content.rfind("#[derive(", 0, struct_start)
-              if derive_start >= 0 and content.rfind("\n\n", 0, struct_start) < derive_start:
-                  derive_end = content.index(")]", derive_start) + 2
-                  derive = content[derive_start:derive_end]
-                  if "Default" not in derive:
-                      parts = derive.removeprefix("#[derive(").removesuffix(")]" ).split(", ")
-                      parts.insert(0, "Default")
-                      content = content[:derive_start] + "#[derive(" + ", ".join(parts) + ")]" + content[derive_end:]
-              else:
-                  content = content[:struct_start] + "#[derive(Default)]\n" + content[struct_start:]
-
-              if impl_marker in content:
-                  impl_start = content.index(impl_marker)
-                  line_start = content.rfind("\n", 0, impl_start) + 1
-                  depth = 0
-                  index = content.index("{", impl_start)
-                  while index < len(content):
-                      if content[index] == "{":
-                          depth += 1
-                      elif content[index] == "}":
-                          depth -= 1
-                          if depth == 0:
-                              impl_end = index + 1
-                              break
-                      index += 1
-                  else:
-                      raise SystemExit(f"unbalanced impl in {path}")
-                  while impl_end < len(content) and content[impl_end] == "\n":
-                      impl_end += 1
-                  content = content[:line_start] + content[impl_end:]
-
-              path.write_text(content)
-
-          derive_default(
-              Path("rust/crates/phenix-ui-lua/src/provider.rs"),
-              "pub(crate) struct LuaState {",
-              "impl Default for LuaState {",
-          )
-          derive_default(
-              Path("rust/crates/phenix-ui-runtime/src/fabric.rs"),
-              "pub struct EventRouter {",
-              "impl Default for EventRouter {",
-          )
-
-          fabric = Path("rust/crates/phenix-ui-runtime/src/fabric.rs")
-          replace_required(fabric, "    Backend(BackendOutput),", "    Backend(Box<BackendOutput>),")
-          replace_required(
-              fabric,
-              "    Content(EventEnvelope<ContentEvent>),",
-              "    Content(Box<EventEnvelope<ContentEvent>>),",
-          )
-          replace_required(
-              fabric,
-              '''            RouteTarget::Element(element) => self
-                  .nodes
-                  .contains_key(element)
-                  .then(|| vec![element.clone()])
-                  .unwrap_or_default(),''',
-              '''            RouteTarget::Element(element) => {
-                  if self.nodes.contains_key(element) {
-                      vec![element.clone()]
-                  } else {
-                      Vec::new()
-                  }
-              }''',
-          )
-
-          mailbox = Path("rust/crates/phenix-ui-runtime/src/mailbox.rs")
-          replace_required(
-              mailbox,
-              "    Content(EventEnvelope<ContentEvent>),",
-              "    Content(Box<EventEnvelope<ContentEvent>>),",
-          )
-          replace_required(
-              mailbox,
-              "        self.send_lossless(UiMessage::Content(event))",
-              "        self.send_lossless(UiMessage::Content(Box::new(event)))",
-          )
-          replace_required(
-              mailbox,
-              "        self.send_content(EventEnvelope::broadcast(ContentEvent::Backend(output)))",
-              "        self.send_content(EventEnvelope::broadcast(ContentEvent::Backend(Box::new(output))))",
-          )
-          replace_required(
-              mailbox,
-              '''        self.try_send_coalescible(UiMessage::Content(EventEnvelope::broadcast(
-              ContentEvent::RefreshRequested,
-          )))''',
-              '''        self.try_send_coalescible(UiMessage::Content(Box::new(
-              EventEnvelope::broadcast(ContentEvent::RefreshRequested),
-          )))''',
-          )
-          replace_required(
-              mailbox,
-              '''        self.try_send_coalescible(UiMessage::Content(EventEnvelope::broadcast(
-              ContentEvent::ClockTick,
-          )))''',
-              '''        self.try_send_coalescible(UiMessage::Content(Box::new(
-              EventEnvelope::broadcast(ContentEvent::ClockTick),
-          )))''',
-          )
-
-          consumers = Path("rust/crates/phenix-ui-runtime/src/consumers.rs")
-          replace_required(
-              consumers,
-              "AppEvent::Backend(Box::new(output.clone()))",
-              "AppEvent::Backend(output.clone())",
-          )
-
-          for path in Path("rust/crates").rglob("*.rs"):
-              content = path.read_text()
+          def lua_state(content: str) -> str:
               content = content.replace(
-                  "BusReaction::Content(EventEnvelope::",
-                  "BusReaction::Content(Box::new(EventEnvelope::",
+                  "pub(crate) struct LuaState {",
+                  "#[derive(Default)]\npub(crate) struct LuaState {",
+                  1,
               )
-              if "BusReaction::Content(Box::new(EventEnvelope::" in content:
-                  lines = content.splitlines()
-                  for index, line in enumerate(lines):
-                      if "BusReaction::Content(Box::new(EventEnvelope::" in line:
-                          depth = line.count("(") - line.count(")")
-                          cursor = index + 1
-                          while depth > 0 and cursor < len(lines):
-                              depth += lines[cursor].count("(") - lines[cursor].count(")")
-                              cursor += 1
-                          if depth == 0 and cursor > index + 1:
-                              terminal = cursor - 1
-                              if lines[terminal].rstrip().endswith(")") and not lines[terminal].rstrip().endswith("))"):
-                                  lines[terminal] = lines[terminal] + ")"
-                  content = "\n".join(lines) + ("\n" if path.read_text().endswith("\n") else "")
-              path.write_text(content)
+              return re.sub(
+                  r"\nimpl Default for LuaState \{.*?\n\}\n",
+                  "\n",
+                  content,
+                  count=1,
+                  flags=re.S,
+              )
+
+          def fabric(content: str) -> str:
+              content = content.replace(
+                  "    Backend(BackendOutput),",
+                  "    Backend(Box<BackendOutput>),",
+                  1,
+              )
+              content = content.replace(
+                  "    Content(EventEnvelope<ContentEvent>),",
+                  "    Content(Box<EventEnvelope<ContentEvent>>),",
+                  1,
+              )
+              content = content.replace(
+                  "pub struct EventRouter {",
+                  "#[derive(Default)]\npub struct EventRouter {",
+                  1,
+              )
+              content = re.sub(
+                  r"\nimpl Default for EventRouter \{.*?\n\}\n",
+                  "\n",
+                  content,
+                  count=1,
+                  flags=re.S,
+              )
+              content, count = re.subn(
+                  r"RouteTarget::Element\(element\) => self\s*\.nodes\s*\.contains_key\(element\)\s*\.then\(\|\| vec!\[element\.clone\(\)\]\)\s*\.unwrap_or_default\(\),",
+                  """RouteTarget::Element(element) => {
+                if self.nodes.contains_key(element) {
+                    vec![element.clone()]
+                } else {
+                    Vec::new()
+                }
+            }""",
+                  content,
+                  count=1,
+              )
+              if count != 1:
+                  raise SystemExit("RouteTarget::Element migration did not match")
+              return content
+
+          def mailbox(content: str) -> str:
+              content = content.replace(
+                  "    Content(EventEnvelope<ContentEvent>),",
+                  "    Content(Box<EventEnvelope<ContentEvent>>),",
+                  1,
+              )
+              content = content.replace(
+                  "self.send_lossless(UiMessage::Content(event))",
+                  "self.send_lossless(UiMessage::Content(Box::new(event)))",
+                  1,
+              )
+              content = content.replace(
+                  "ContentEvent::Backend(output)",
+                  "ContentEvent::Backend(Box::new(output))",
+                  1,
+              )
+              content = content.replace(
+                  "UiMessage::Content(EventEnvelope::broadcast(\n            ContentEvent::RefreshRequested,\n        ))",
+                  "UiMessage::Content(Box::new(EventEnvelope::broadcast(\n            ContentEvent::RefreshRequested,\n        )))",
+                  1,
+              )
+              content = content.replace(
+                  "UiMessage::Content(EventEnvelope::broadcast(\n            ContentEvent::ClockTick,\n        ))",
+                  "UiMessage::Content(Box::new(EventEnvelope::broadcast(\n            ContentEvent::ClockTick,\n        )))",
+                  1,
+              )
+              return content
+
+          def consumers(content: str) -> str:
+              return content.replace(
+                  "AppEvent::Backend(Box::new(output.clone()))",
+                  "AppEvent::Backend(output.clone())",
+                  1,
+              )
+
+          edit("rust/crates/phenix-ui-lua/src/provider.rs", lua_state)
+          edit("rust/crates/phenix-ui-runtime/src/fabric.rs", fabric)
+          edit("rust/crates/phenix-ui-runtime/src/mailbox.rs", mailbox)
+          edit("rust/crates/phenix-ui-runtime/src/consumers.rs", consumers)
           PY
           cargo generate-lockfile --manifest-path rust/Cargo.toml
           cargo fmt --manifest-path rust/Cargo.toml --all
