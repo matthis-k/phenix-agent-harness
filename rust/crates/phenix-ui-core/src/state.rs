@@ -166,6 +166,7 @@ pub struct AppState {
     pub statuses: BTreeMap<String, String>,
     pub notifications: VecDeque<String>,
     pub view: ViewState,
+    pub exit_requested: bool,
     pub should_quit: bool,
 }
 
@@ -227,6 +228,7 @@ impl Default for AppState {
             statuses: BTreeMap::new(),
             notifications: VecDeque::new(),
             view: ViewState::default(),
+            exit_requested: false,
             should_quit: false,
         }
     }
