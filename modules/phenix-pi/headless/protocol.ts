@@ -64,25 +64,25 @@ export type HeadlessCommand =
   | { readonly type: "snapshot.request" }
   | {
       readonly type: "prompt.submit";
-      readonly sessionId: string;
+      readonly runId: string;
       readonly text: string;
       readonly images: readonly HeadlessImage[];
       readonly streamingBehavior?: HeadlessStreamingBehavior;
     }
   | {
       readonly type: "prompt.steer";
-      readonly sessionId: string;
+      readonly runId: string;
       readonly text: string;
       readonly images: readonly HeadlessImage[];
     }
   | {
       readonly type: "prompt.follow_up";
-      readonly sessionId: string;
+      readonly runId: string;
       readonly text: string;
       readonly images: readonly HeadlessImage[];
     }
   | { readonly type: "execution.abort"; readonly runId?: string }
-  | { readonly type: "session.create"; readonly parent?: string }
+  | { readonly type: "session.create"; readonly parentSession?: string }
   | { readonly type: "session.switch"; readonly sessionId: string }
   | {
       readonly type: "session.fork";
@@ -105,13 +105,13 @@ export type HeadlessCommand =
   | { readonly type: "model.list" }
   | {
       readonly type: "model.select";
-      readonly sessionId: string;
+      readonly runId: string;
       readonly model: HeadlessModelRef;
     }
-  | { readonly type: "thinking.levels"; readonly sessionId: string }
+  | { readonly type: "thinking.levels"; readonly runId: string }
   | {
       readonly type: "thinking.select";
-      readonly sessionId: string;
+      readonly runId: string;
       readonly level: HeadlessThinkingLevel;
     }
   | { readonly type: "auth.providers" }
@@ -129,20 +129,20 @@ export type HeadlessCommand =
   | { readonly type: "auth.logout"; readonly providerId: string }
   | {
       readonly type: "compaction.start";
-      readonly sessionId: string;
+      readonly runId: string;
       readonly instructions?: string;
     }
-  | { readonly type: "compaction.abort"; readonly sessionId: string }
+  | { readonly type: "compaction.abort"; readonly runId: string }
   | {
       readonly type: "retry.configure";
-      readonly sessionId: string;
+      readonly runId: string;
       readonly enabled: boolean;
     }
-  | { readonly type: "retry.abort"; readonly sessionId: string }
+  | { readonly type: "retry.abort"; readonly runId: string }
   | { readonly type: "command.list" }
   | {
       readonly type: "command.invoke";
-      readonly sessionId: string;
+      readonly runId: string;
       readonly name: string;
       readonly arguments: string;
     }
@@ -241,23 +241,23 @@ export const HeadlessCommandSchema = defineSchema<HeadlessCommand>(
     }),
     command("snapshot.request", {}),
     command("prompt.submit", {
-      sessionId: IdType,
+      runId: IdType,
       text: Type.String(),
       images: Type.Array(ImageType),
       streamingBehavior: Type.Optional(StreamingBehaviorType),
     }),
     command("prompt.steer", {
-      sessionId: IdType,
+      runId: IdType,
       text: Type.String(),
       images: Type.Array(ImageType),
     }),
     command("prompt.follow_up", {
-      sessionId: IdType,
+      runId: IdType,
       text: Type.String(),
       images: Type.Array(ImageType),
     }),
     command("execution.abort", { runId: Type.Optional(IdType) }),
-    command("session.create", { parent: Type.Optional(IdType) }),
+    command("session.create", { parentSession: Type.Optional(IdType) }),
     command("session.switch", { sessionId: IdType }),
     command("session.fork", {
       sessionId: IdType,
@@ -276,12 +276,12 @@ export const HeadlessCommandSchema = defineSchema<HeadlessCommand>(
     }),
     command("model.list", {}),
     command("model.select", {
-      sessionId: IdType,
+      runId: IdType,
       model: ModelRefType,
     }),
-    command("thinking.levels", { sessionId: IdType }),
+    command("thinking.levels", { runId: IdType }),
     command("thinking.select", {
-      sessionId: IdType,
+      runId: IdType,
       level: ThinkingLevelType,
     }),
     command("auth.providers", {}),
@@ -296,18 +296,18 @@ export const HeadlessCommandSchema = defineSchema<HeadlessCommand>(
     command("auth.login.cancel", { flowId: IdType }),
     command("auth.logout", { providerId: NonEmptyStringType }),
     command("compaction.start", {
-      sessionId: IdType,
+      runId: IdType,
       instructions: Type.Optional(Type.String()),
     }),
-    command("compaction.abort", { sessionId: IdType }),
+    command("compaction.abort", { runId: IdType }),
     command("retry.configure", {
-      sessionId: IdType,
+      runId: IdType,
       enabled: Type.Boolean(),
     }),
-    command("retry.abort", { sessionId: IdType }),
+    command("retry.abort", { runId: IdType }),
     command("command.list", {}),
     command("command.invoke", {
-      sessionId: IdType,
+      runId: IdType,
       name: NonEmptyStringType,
       arguments: Type.String(),
     }),
