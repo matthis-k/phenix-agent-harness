@@ -116,7 +116,7 @@ struct ElementNode {
 pub struct EventRouter {
     nodes: BTreeMap<ElementId, ElementNode>,
     order: Vec<ElementId>,
-    consumers: BTreeMap<ElementId, Box<dyn EventConsumer>>,
+    consumers: BTreeMap<ElementId, Vec<Box<dyn EventConsumer>>>,
 }
 
 impl EventRouter {
@@ -170,9 +170,7 @@ impl EventRouter {
         if !self.nodes.contains_key(&element) {
             return Err(RouterError::UnknownElement(element));
         }
-        if self.consumers.insert(element.clone(), consumer).is_some() {
-            return Err(RouterError::DuplicateConsumer(element));
-        }
+        self.consumers.entry(element).or_default().push(consumer);
         Ok(())
     }
 
@@ -201,13 +199,15 @@ impl EventRouter {
     ) -> Vec<BusReaction> {
         let mut reactions = Vec::new();
         for element in route {
-            let Some(consumer) = self.consumers.get_mut(&element) else {
+            let Some(consumers) = self.consumers.get_mut(&element) else {
                 continue;
             };
-            let batch = react(consumer.as_mut());
-            reactions.extend(batch.reactions);
-            if batch.propagation == Propagation::Stop {
-                break;
+            for consumer in consumers {
+                let batch = react(consumer.as_mut());
+                reactions.extend(batch.reactions);
+                if batch.propagation == Propagation::Stop {
+                    return reactions;
+                }
             }
         }
         reactions
@@ -272,7 +272,6 @@ pub enum RouterError {
     DuplicateElement(ElementId),
     MissingParent(ElementId),
     UnknownElement(ElementId),
-    DuplicateConsumer(ElementId),
 }
 
 impl Display for RouterError {
@@ -281,9 +280,6 @@ impl Display for RouterError {
             Self::DuplicateElement(element) => write!(formatter, "duplicate UI element: {element}"),
             Self::MissingParent(element) => write!(formatter, "missing UI parent: {element}"),
             Self::UnknownElement(element) => write!(formatter, "unknown UI element: {element}"),
-            Self::DuplicateConsumer(element) => {
-                write!(formatter, "duplicate UI consumer: {element}")
-            }
         }
     }
 }
@@ -307,7 +303,8 @@ mod tests {
 
     struct RecordingConsumer {
         id: ElementId,
-        calls: Arc<Mutex<Vec<ElementId>>>,
+        label: &'static str,
+        calls: Arc<Mutex<Vec<String>>>,
         stop: bool,
         reaction: Option<fn() -> BusReaction>,
     }
@@ -322,7 +319,10 @@ mod tests {
             _state: &AppState,
             _envelope: &EventEnvelope<UiEvent>,
         ) -> ReactionBatch {
-            self.calls.lock().expect("calls lock").push(self.id.clone());
+            self.calls
+                .lock()
+                .expect("calls lock")
+                .push(self.label.to_owned());
             let reactions = self.reaction.map_or_else(Vec::new, |reaction| vec![reaction()]);
             if self.stop {
                 ReactionBatch::stop(reactions)
@@ -347,10 +347,7 @@ mod tests {
             },
         );
         router.route_ui(&AppState::default(), &envelope);
-        assert_eq!(
-            *calls.lock().expect("calls lock"),
-            vec![ElementId::sidebar()]
-        );
+        assert_eq!(*calls.lock().expect("calls lock"), vec!["sidebar"]);
     }
 
     #[test]
@@ -365,7 +362,32 @@ mod tests {
         router.route_ui(&AppState::default(), &envelope);
         assert_eq!(
             *calls.lock().expect("calls lock"),
-            vec![ElementId::input(), ElementId::layout(), ElementId::root()]
+            vec!["input", "layout", "root"]
+        );
+    }
+
+    #[test]
+    fn multiple_reactors_at_one_address_run_in_registration_order() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mut router = EventRouter::standard();
+        for label in ["root.content", "root.shortcuts"] {
+            router
+                .register_consumer(Box::new(RecordingConsumer {
+                    id: ElementId::root(),
+                    label,
+                    calls: Arc::clone(&calls),
+                    stop: false,
+                    reaction: None,
+                }))
+                .expect("root consumer");
+        }
+        router.route_ui(
+            &AppState::default(),
+            &EventEnvelope::to(ElementId::root(), UiEvent::Invalidate),
+        );
+        assert_eq!(
+            *calls.lock().expect("calls lock"),
+            vec!["root.content", "root.shortcuts"]
         );
     }
 
@@ -376,6 +398,7 @@ mod tests {
         router
             .register_consumer(Box::new(RecordingConsumer {
                 id: ElementId::input(),
+                label: "input",
                 calls: Arc::clone(&calls),
                 stop: true,
                 reaction: None,
@@ -384,6 +407,7 @@ mod tests {
         router
             .register_consumer(Box::new(RecordingConsumer {
                 id: ElementId::root(),
+                label: "root",
                 calls: Arc::clone(&calls),
                 stop: false,
                 reaction: None,
@@ -393,10 +417,7 @@ mod tests {
             &AppState::default(),
             &EventEnvelope::focused(UiEvent::Invalidate),
         );
-        assert_eq!(
-            *calls.lock().expect("calls lock"),
-            vec![ElementId::input()]
-        );
+        assert_eq!(*calls.lock().expect("calls lock"), vec!["input"]);
     }
 
     #[test]
@@ -406,6 +427,7 @@ mod tests {
         router
             .register_consumer(Box::new(RecordingConsumer {
                 id: ElementId::sidebar(),
+                label: "sidebar",
                 calls: Arc::clone(&calls),
                 stop: false,
                 reaction: Some(|| {
@@ -439,17 +461,18 @@ mod tests {
         ));
     }
 
-    fn router_with_recorders(calls: Arc<Mutex<Vec<ElementId>>>) -> EventRouter {
+    fn router_with_recorders(calls: Arc<Mutex<Vec<String>>>) -> EventRouter {
         let mut router = EventRouter::standard();
-        for id in [
-            ElementId::root(),
-            ElementId::layout(),
-            ElementId::sidebar(),
-            ElementId::input(),
+        for (id, label) in [
+            (ElementId::root(), "root"),
+            (ElementId::layout(), "layout"),
+            (ElementId::sidebar(), "sidebar"),
+            (ElementId::input(), "input"),
         ] {
             router
                 .register_consumer(Box::new(RecordingConsumer {
                     id,
+                    label,
                     calls: Arc::clone(&calls),
                     stop: false,
                     reaction: None,
