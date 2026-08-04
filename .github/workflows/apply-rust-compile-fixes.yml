@@ -1,0 +1,75 @@
+name: Apply Rust compile fixes
+
+on:
+  push:
+    branches:
+      - feature/rust-ratatui-frontend
+    paths:
+      - .github/workflows/apply-rust-compile-fixes.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: feature/rust-ratatui-frontend
+      - name: Apply compile fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new):
+              file = Path(path)
+              text = file.read_text()
+              if old not in text:
+                  raise SystemExit(f"expected text missing in {path}: {old[:80]!r}")
+              file.write_text(text.replace(old, new, 1))
+
+          replace(
+              "rust/crates/phenix-ui-runtime/src/consumers.rs",
+              "matches!(envelope.event, UiEvent::ShutdownRequested)",
+              "matches!(&envelope.event, UiEvent::ShutdownRequested)",
+          )
+          replace(
+              "rust/crates/phenix-ui-runtime/src/runtime.rs",
+              """        self.detach_workers();\n        Ok(self.state)""",
+              """        self.detach_workers();\n        Ok(std::mem::take(&mut self.state))""",
+          )
+          replace(
+              "rust/crates/phenix-ui-runtime/src/testing.rs",
+              """        assert!(matches!(\n            config.layout.root,\n            phenix_frontend_config::LayoutNode::Split(_)\n        ));""",
+              """        assert!(matches!(\n            &config.layout.root,\n            phenix_frontend_config::LayoutNode::Split(_)\n        ));""",
+          )
+          replace(
+              "rust/crates/phenix-ui-lua/src/api.rs",
+              "parse_focus_direction(&direction).map_err(mlua::Error::external)?",
+              "parse_focus_direction(&direction)?",
+          )
+          replace(
+              "rust/crates/phenix-ui-lua/src/api.rs",
+              "parse_axis(&axis).map_err(mlua::Error::external)?",
+              "parse_axis(&axis)?",
+          )
+          replace(
+              "rust/crates/phenix-ui-lua/src/api.rs",
+              "parse_axis(&axis).map_err(mlua::Error::external)?",
+              "parse_axis(&axis)?",
+          )
+          replace(
+              "rust/crates/phenix-ui-lua/src/api.rs",
+              """fn parse_focus_direction(value: &str) -> Result<FocusDirection, &'static str> {\n    match value.trim().to_ascii_lowercase().as_str() {\n        \"next\" => Ok(FocusDirection::Next),\n        \"previous\" | \"prev\" => Ok(FocusDirection::Previous),\n        \"left\" => Ok(FocusDirection::Left),\n        \"right\" => Ok(FocusDirection::Right),\n        \"up\" => Ok(FocusDirection::Up),\n        \"down\" => Ok(FocusDirection::Down),\n        _ => Err(\"focus direction must be next, previous, left, right, up, or down\"),\n    }\n}\n\nfn parse_axis(value: &str) -> Result<LayoutAxis, &'static str> {\n    match value.trim().to_ascii_lowercase().as_str() {\n        \"horizontal\" | \"width\" | \"x\" => Ok(LayoutAxis::Horizontal),\n        \"vertical\" | \"height\" | \"y\" => Ok(LayoutAxis::Vertical),\n        _ => Err(\"axis must be horizontal/width/x or vertical/height/y\"),\n    }\n}""",
+              """fn parse_focus_direction(value: &str) -> mlua::Result<FocusDirection> {\n    match value.trim().to_ascii_lowercase().as_str() {\n        \"next\" => Ok(FocusDirection::Next),\n        \"previous\" | \"prev\" => Ok(FocusDirection::Previous),\n        \"left\" => Ok(FocusDirection::Left),\n        \"right\" => Ok(FocusDirection::Right),\n        \"up\" => Ok(FocusDirection::Up),\n        \"down\" => Ok(FocusDirection::Down),\n        _ => Err(mlua::Error::external(\n            \"focus direction must be next, previous, left, right, up, or down\",\n        )),\n    }\n}\n\nfn parse_axis(value: &str) -> mlua::Result<LayoutAxis> {\n    match value.trim().to_ascii_lowercase().as_str() {\n        \"horizontal\" | \"width\" | \"x\" => Ok(LayoutAxis::Horizontal),\n        \"vertical\" | \"height\" | \"y\" => Ok(LayoutAxis::Vertical),\n        _ => Err(mlua::Error::external(\n            \"axis must be horizontal/width/x or vertical/height/y\",\n        )),\n    }\n}""",
+          )
+          PY
+      - name: Format and commit
+        run: |
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add rust/crates
+          git commit -m 'fix(rust): resolve frontend provider compile defects'
+          git push origin HEAD:feature/rust-ratatui-frontend
