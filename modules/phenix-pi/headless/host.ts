@@ -160,7 +160,10 @@ export async function createHeadlessPiHost(options: HeadlessPiHostOptions): Prom
     workspace,
     auth,
     extensionUi,
-    rebindSession: rebind,
+    // AgentSessionRuntime invokes the canonical rebind hook after every
+    // replacement, including replacements initiated from an extension. The
+    // legacy adapter callback therefore intentionally does nothing.
+    rebindSession: async () => undefined,
     publish,
     requestShutdown: signalShutdown,
   });
