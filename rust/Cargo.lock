@@ -1383,6 +1383,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "phenix-acp-backend"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "futures",
+ "phenix-runtime-api",
+]
+
+[[package]]
 name = "phenix-acp-presets"
 version = "0.1.0"
 dependencies = [

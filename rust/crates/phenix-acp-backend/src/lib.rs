@@ -94,9 +94,7 @@ impl AgentBackend for AcpAgentBackend {
             request_rx,
             outputs,
         ));
-        relay
-            .join()
-            .map_err(|_| BackendError::Panicked)?;
+        relay.join().map_err(|_| BackendError::Panicked)?;
         result
     }
 }
@@ -114,11 +112,7 @@ async fn run_connection(
             cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
                 .block_task()
                 .await?;
-            let session = cx
-                .build_session(cwd)
-                .block_task()
-                .start_session()
-                .await?;
+            let session = cx.build_session(cwd).block_task().start_session().await?;
             run_session(session, requests, outputs)
                 .await
                 .map_err(to_acp_error)
@@ -166,7 +160,9 @@ where
                 }
             }
             Next::Request(None) => return Ok(()),
-            Next::Update(Ok(update)) => handle_session_message(&mut state, update, &outputs).await?,
+            Next::Update(Ok(update)) => {
+                handle_session_message(&mut state, update, &outputs).await?
+            }
             Next::Update(Err(error)) => return Err(BackendError::Protocol(error.to_string())),
         }
     }
@@ -227,9 +223,7 @@ where
             if state.prompt_active {
                 session
                     .connection()
-                    .send_notification(CancelNotification::new(
-                        session.session_id().clone(),
-                    ))
+                    .send_notification(CancelNotification::new(session.session_id().clone()))
                     .map_err(|error| BackendError::Protocol(error.to_string()))?;
             }
             Ok(BackendReply::Accepted)
@@ -502,6 +496,9 @@ mod tests {
     #[test]
     fn unsupported_commands_have_stable_semantic_names() {
         assert_eq!(command_name(&BackendCommand::ModelList), "model.list");
-        assert_eq!(command_name(&BackendCommand::AuthProviders), "auth.providers");
+        assert_eq!(
+            command_name(&BackendCommand::AuthProviders),
+            "auth.providers"
+        );
     }
 }
