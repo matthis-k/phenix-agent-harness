@@ -56,7 +56,6 @@ export interface HeadlessThemeAccess {
 
 interface PendingDialog {
   readonly resolve: (response: HeadlessExtensionUiResponse) => void;
-  readonly cleanup: () => void;
 }
 
 export class HeadlessExtensionUi {
@@ -64,6 +63,7 @@ export class HeadlessExtensionUi {
   readonly #themes: HeadlessThemeAccess;
   readonly #createId: () => string;
   readonly #pending = new Map<string, PendingDialog>();
+  readonly context: ExtensionUIContext;
   #editorText = "";
   #toolsExpanded = false;
 
@@ -75,120 +75,119 @@ export class HeadlessExtensionUi {
     this.#publish = input.publish;
     this.#themes = input.themes;
     this.#createId = input.createId ?? randomUUID;
-  }
-
-  readonly context: ExtensionUIContext = {
-    select: (title, options, opts) =>
-      this.requestDialog(
-        { kind: "select", title, options },
-        opts,
-        (response) => (response.kind === "selected" ? response.value : undefined),
-      ),
-    confirm: (title, message, opts) =>
-      this.requestDialog(
-        { kind: "confirm", title, message },
-        opts,
-        (response) => (response.kind === "confirmed" ? response.value : false),
-      ),
-    input: (title, placeholder, opts) =>
-      this.requestDialog(
-        {
-          kind: "input",
-          title,
-          ...(placeholder ? { placeholder } : {}),
-        },
-        opts,
-        (response) => (response.kind === "text" ? response.value : undefined),
-      ),
-    notify: (message, type = "info") => {
-      this.#publish({ type: "notification", level: type, message });
-    },
-    onTerminalInput: () => {
-      this.unsupported("raw terminal input listener");
-      return () => undefined;
-    },
-    setStatus: (key, text) => {
-      this.#publish({
-        type: "status.changed",
-        key,
-        ...(text === undefined ? {} : { text }),
-      });
-    },
-    setWorkingMessage: (message) => {
-      this.#publish({
-        type: "working.message",
-        ...(message === undefined ? {} : { message }),
-      });
-    },
-    setWorkingVisible: (visible) => {
-      this.#publish({ type: "working.visibility", visible });
-    },
-    setWorkingIndicator: (options) => {
-      this.#publish({
-        type: "working.indicator",
-        ...(options?.frames === undefined ? {} : { frames: options.frames }),
-        ...(options?.intervalMs === undefined ? {} : { intervalMs: options.intervalMs }),
-      });
-    },
-    setHiddenThinkingLabel: (label) => {
-      this.#publish({
-        type: "thinking.hidden_label",
-        ...(label === undefined ? {} : { label }),
-      });
-    },
-    setWidget: (key: string, content: unknown, options?: ExtensionWidgetOptions) => {
-      if (content === undefined || isStringArray(content)) {
+    this.context = {
+      select: (title, options, opts) =>
+        this.requestDialog(
+          { kind: "select", title, options },
+          opts,
+          (response) => (response.kind === "selected" ? response.value : undefined),
+        ),
+      confirm: (title, message, opts) =>
+        this.requestDialog(
+          { kind: "confirm", title, message },
+          opts,
+          (response) => (response.kind === "confirmed" ? response.value : false),
+        ),
+      input: (title, placeholder, opts) =>
+        this.requestDialog(
+          {
+            kind: "input",
+            title,
+            ...(placeholder ? { placeholder } : {}),
+          },
+          opts,
+          (response) => (response.kind === "text" ? response.value : undefined),
+        ),
+      notify: (message, type = "info") => {
+        this.#publish({ type: "notification", level: type, message });
+      },
+      onTerminalInput: () => {
+        this.unsupported("raw terminal input listener");
+        return () => undefined;
+      },
+      setStatus: (key, text) => {
         this.#publish({
-          type: "widget.changed",
+          type: "status.changed",
           key,
-          ...(content === undefined ? {} : { lines: content }),
-          ...(options?.placement === undefined ? {} : { placement: options.placement }),
+          ...(text === undefined ? {} : { text }),
         });
-        return;
-      }
-      this.unsupported(`component widget ${key}`);
-    },
-    setFooter: () => this.unsupported("custom footer component"),
-    setHeader: () => this.unsupported("custom header component"),
-    setTitle: (title) => this.#publish({ type: "terminal.title", title }),
-    custom: async () => {
-      this.unsupported("custom focused component");
-      throw new Error(`Custom Pi components are unavailable in the headless runtime`);
-    },
-    pasteToEditor: (text) => {
-      this.#editorText += text;
-      this.#publish({ type: "editor.paste", text });
-    },
-    setEditorText: (text) => {
-      this.#editorText = text;
-      this.#publish({ type: "editor.replace", text });
-    },
-    getEditorText: () => this.#editorText,
-    editor: (title, prefill) =>
-      this.requestDialog(
-        {
-          kind: "editor",
-          title,
-          ...(prefill === undefined ? {} : { prefill }),
-        },
-        undefined,
-        (response) => (response.kind === "text" ? response.value : undefined),
-      ),
-    addAutocompleteProvider: () => this.unsupported("Pi autocomplete provider"),
-    setEditorComponent: () => this.unsupported("custom Pi editor component"),
-    getEditorComponent: () => undefined,
-    get theme() {
-      return thisOwner.#themes.current;
-    },
-    getAllThemes: () => this.#themes.list(),
-    getTheme: (name) => this.#themes.get(name),
-    setTheme: (theme) => this.#themes.set(theme),
-    getToolsExpanded: () => this.#toolsExpanded,
-    setToolsExpanded: (expanded) => {
-      this.#toolsExpanded = expanded;
-      this.#publish({ type: "tools.expanded", expanded });
-    },
-  };
+      },
+      setWorkingMessage: (message) => {
+        this.#publish({
+          type: "working.message",
+          ...(message === undefined ? {} : { message }),
+        });
+      },
+      setWorkingVisible: (visible) => {
+        this.#publish({ type: "working.visibility", visible });
+      },
+      setWorkingIndicator: (options) => {
+        this.#publish({
+          type: "working.indicator",
+          ...(options?.frames === undefined ? {} : { frames: options.frames }),
+          ...(options?.intervalMs === undefined ? {} : { intervalMs: options.intervalMs }),
+        });
+      },
+      setHiddenThinkingLabel: (label) => {
+        this.#publish({
+          type: "thinking.hidden_label",
+          ...(label === undefined ? {} : { label }),
+        });
+      },
+      setWidget: (key: string, content: unknown, options?: ExtensionWidgetOptions) => {
+        if (content === undefined || isStringArray(content)) {
+          this.#publish({
+            type: "widget.changed",
+            key,
+            ...(content === undefined ? {} : { lines: content }),
+            ...(options?.placement === undefined ? {} : { placement: options.placement }),
+          });
+          return;
+        }
+        this.unsupported(`component widget ${key}`);
+      },
+      setFooter: () => this.unsupported("custom footer component"),
+      setHeader: () => this.unsupported("custom header component"),
+      setTitle: (title) => this.#publish({ type: "terminal.title", title }),
+      custom: async () => {
+        this.unsupported("custom focused component");
+        throw new Error(`Custom Pi components are unavailable in the headless runtime`);
+      },
+      pasteToEditor: (text) => {
+        this.#editorText += text;
+        this.#publish({ type: "editor.paste", text });
+      },
+      setEditorText: (text) => {
+        this.#editorText = text;
+        this.#publish({ type: "editor.replace", text });
+      },
+      getEditorText: () => this.#editorText,
+      editor: (title, prefill) =>
+        this.requestDialog(
+          {
+            kind: "editor",
+            title,
+            ...(prefill === undefined ? {} : { prefill }),
+          },
+          undefined,
+          (response) => (response.kind === "text" ? response.value : undefined),
+        ),
+      addAutocompleteProvider: () => this.unsupported("Pi autocomplete provider"),
+      setEditorComponent: () => this.unsupported("custom Pi editor component"),
+      getEditorComponent: () => undefined,
+      get theme() {
+        return input.themes.current;
+      },
+      getAllThemes: () => this.#themes.list(),
+      getTheme: (name) => this.#themes.get(name),
+      setTheme: (theme) => this.#themes.set(theme),
+      getToolsExpanded: () => this.#toolsExpanded,
+      setToolsExpanded: (expanded) => {
+        this.#toolsExpanded = expanded;
+        this.#publish({ type: "tools.expanded", expanded });
+      },
+    };
+  }
 
   respond(dialogId: string, response: HeadlessExtensionUiResponse): void {
     const pending = this.#pending.get(dialogId);
@@ -234,7 +233,7 @@ export class HeadlessExtensionUi {
       if (options?.timeout !== undefined) {
         timeout = setTimeout(onAbort, options.timeout);
       }
-      this.#pending.set(dialogId, { resolve: finish, cleanup });
+      this.#pending.set(dialogId, { resolve: finish });
       this.#publish({ type: "extension_ui.requested", dialogId, request });
     });
   }
@@ -243,8 +242,6 @@ export class HeadlessExtensionUi {
     this.#publish({ type: "extension_ui.unsupported", feature });
   }
 }
-
-const thisOwner: { #themes: HeadlessThemeAccess } = undefined as never;
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string");
