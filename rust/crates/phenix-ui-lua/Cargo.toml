@@ -1,0 +1,11 @@
+[package]
+name = "phenix-ui-lua"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+mlua = { workspace = true }
+phenix-runtime-api = { path = "../phenix-runtime-api" }
+phenix-ui-core = { path = "../phenix-ui-core" }
+phenix-ui-runtime = { path = "../phenix-ui-runtime" }
