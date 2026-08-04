@@ -29,34 +29,38 @@ jobs:
 
           path = Path("rust/crates/phenix-frontend-config/src/lib.rs")
           content = path.read_text()
-          old = '''#[derive(Clone, Debug, Eq, PartialEq)]
-          pub struct FrontendConfig {
-              pub theme: ThemeConfig,
-              pub layout: LayoutConfig,
-              pub keymaps: Vec<KeymapDescription>,
-          }
+          struct_marker = "pub struct FrontendConfig {"
+          struct_start = content.index(struct_marker)
+          derive_start = content.rfind("#[derive(", 0, struct_start)
+          derive_end = content.index(")]", derive_start) + 2
+          derive = content[derive_start:derive_end]
+          if "Default" not in derive:
+              parts = derive.removeprefix("#[derive(").removesuffix(")]" ).split(", ")
+              parts.insert(2, "Default")
+              content = content[:derive_start] + "#[derive(" + ", ".join(parts) + ")]" + content[derive_end:]
 
-          impl Default for FrontendConfig {
-              fn default() -> Self {
-                  Self {
-                      theme: ThemeConfig::default(),
-                      layout: LayoutConfig::default(),
-                      keymaps: Vec::new(),
-                  }
-              }
-          }
-          '''.replace("          ", "")
-          new = '''#[derive(Clone, Debug, Default, Eq, PartialEq)]
-          pub struct FrontendConfig {
-              pub theme: ThemeConfig,
-              pub layout: LayoutConfig,
-              pub keymaps: Vec<KeymapDescription>,
-          }
-          '''.replace("          ", "")
-          if old in content:
-              path.write_text(content.replace(old, new))
-          elif new not in content:
-              raise SystemExit("expected FrontendConfig Default implementation missing")
+          impl_marker = "impl Default for FrontendConfig {"
+          if impl_marker in content:
+              impl_start = content.index(impl_marker)
+              line_start = content.rfind("\n", 0, impl_start) + 1
+              depth = 0
+              index = content.index("{", impl_start)
+              while index < len(content):
+                  if content[index] == "{":
+                      depth += 1
+                  elif content[index] == "}":
+                      depth -= 1
+                      if depth == 0:
+                          impl_end = index + 1
+                          break
+                  index += 1
+              else:
+                  raise SystemExit("unbalanced FrontendConfig Default impl")
+              while impl_end < len(content) and content[impl_end] == "\n":
+                  impl_end += 1
+              content = content[:line_start] + content[impl_end:]
+
+          path.write_text(content)
           PY
           cargo generate-lockfile --manifest-path rust/Cargo.toml
           cargo fmt --manifest-path rust/Cargo.toml --all
