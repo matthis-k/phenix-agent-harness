@@ -1,9 +1,9 @@
 name: Frontend Rust check
 
 on:
-  push:
+  pull_request:
     branches:
-      - feature/rust-ratatui-frontend
+      - main
     paths:
       - .github/workflows/frontend-rust-check.yml
       - rust/**
