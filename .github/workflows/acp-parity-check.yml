@@ -5,8 +5,6 @@ on:
     branches: [main]
     paths:
       - .github/workflows/acp-parity-check.yml
-      - scripts/cleanup-acp-parity.py
-      - scripts/fix-acp-backend-schema.py
       - scripts/fix-acp-backend-borrows.py
       - rust/**
 
@@ -24,10 +22,8 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
-      - name: Normalize and align ACP integration
+      - name: Finish ACP integration
         run: |
-          python scripts/cleanup-acp-parity.py
-          python scripts/fix-acp-backend-schema.py
           python scripts/fix-acp-backend-borrows.py
           cargo generate-lockfile --manifest-path rust/Cargo.toml
           cargo fmt --manifest-path rust/Cargo.toml --all
