@@ -182,7 +182,6 @@ export interface MemoryRuntimeTelemetry {
 export interface MemorySnapshot {
   readonly rootRunId: RunId;
   readonly health: MemoryHealthSnapshot;
-  readonly telemetry: MemoryRuntimeTelemetry;
   readonly evidence: readonly EvidenceRecord[];
   readonly notes: readonly MemoryNote[];
   readonly stats: {
