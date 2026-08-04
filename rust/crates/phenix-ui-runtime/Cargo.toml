@@ -1,0 +1,12 @@
+[package]
+name = "phenix-ui-runtime"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+phenix-runtime-api = { path = "../phenix-runtime-api" }
+phenix-ui-core = { path = "../phenix-ui-core" }
+
+[lib]
+path = "src/lib.rs"
