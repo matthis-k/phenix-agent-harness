@@ -9,17 +9,30 @@ on:
       - rust/**
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: ${{ github.head_ref }}
       - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2
         with:
           toolchain: stable
           components: rustfmt, clippy
+      - name: Refresh lockfile
+        run: cargo generate-lockfile --manifest-path rust/Cargo.toml
+      - name: Commit refreshed lockfile
+        run: |
+          if ! git diff --quiet -- rust/Cargo.lock; then
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add rust/Cargo.lock
+            git commit -m "refresh Rust lockfile"
+            git push origin HEAD:${GITHUB_HEAD_REF}
+          fi
       - name: Format
         run: cargo fmt --manifest-path rust/Cargo.toml --all --check
       - name: Check
