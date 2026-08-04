@@ -536,10 +536,11 @@ async fn handle_request(
             Ok(BackendReply::Accepted)
         }
         BackendCommand::ModelList => {
+            let supports_images = runtime.adapter.capabilities.prompting.images;
             let models = runtime
                 .adapter
                 .active_session_mut()?
-                .models(runtime.adapter.capabilities.prompting.images);
+                .models(supports_images);
             Ok(BackendReply::Models(models))
         }
         BackendCommand::ModelSelect { run_id, model } => {
@@ -887,16 +888,17 @@ fn start_prompt(
     internal_tx: &mpsc::UnboundedSender<InternalEvent>,
     outputs: &BackendOutputSender,
 ) -> Result<(), BackendError> {
+    let supports_images = runtime.adapter.capabilities.prompting.images;
+    if !prompt.images.is_empty() && !supports_images {
+        return Err(BackendError::Unsupported(
+            "the ACP agent does not accept image prompt blocks".to_owned(),
+        ));
+    }
     let session = runtime.adapter.session_for_run_mut(&run_id)?;
     if session.prompt_active {
         return Err(BackendError::InvalidConfiguration(format!(
             "run {run_id} already has an active ACP prompt"
         )));
-    }
-    if !prompt.images.is_empty() && !runtime.adapter.capabilities.prompting.images {
-        return Err(BackendError::Unsupported(
-            "the ACP agent does not accept image prompt blocks".to_owned(),
-        ));
     }
     let mut content: Vec<ContentBlock> =
         vec![ContentBlock::Text(TextContent::new(prompt.text.clone()))];
