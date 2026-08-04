@@ -286,21 +286,11 @@ pub struct KeymapDescription {
     pub description: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct FrontendConfig {
     pub theme: ThemeConfig,
     pub layout: LayoutConfig,
     pub keymaps: Vec<KeymapDescription>,
-}
-
-impl Default for FrontendConfig {
-    fn default() -> Self {
-        Self {
-            theme: ThemeConfig::default(),
-            layout: LayoutConfig::default(),
-            keymaps: Vec::new(),
-        }
-    }
 }
 
 pub trait FrontendConfigProvider {
