@@ -31,7 +31,10 @@ fn process_backend_correlates_initialization_and_orderly_shutdown() {
         .client
         .submit(BackendCommand::Shutdown)
         .expect("shutdown request");
-    assert_eq!(receive_reply(&runtime, shutdown.as_str()), BackendReply::Completed);
+    assert_eq!(
+        receive_reply(&runtime, shutdown.as_str()),
+        BackendReply::Completed
+    );
     runtime.join().expect("backend joins");
 
     fs::remove_file(script).ok();

@@ -152,10 +152,9 @@ fn receive_reply(
 ) -> Result<BackendReply, Box<dyn Error>> {
     loop {
         match outputs.recv_timeout(HANDSHAKE_TIMEOUT) {
-            Ok(BackendOutput::Reply {
-                request_id,
-                result,
-            }) if &request_id == expected => return Ok(result?),
+            Ok(BackendOutput::Reply { request_id, result }) if &request_id == expected => {
+                return Ok(result?)
+            }
             Ok(BackendOutput::Stopped { result }) => {
                 result?;
                 return Err(io::Error::new(
@@ -272,7 +271,9 @@ fn spawn_terminal_input(
 
 fn convert_event(event: Event) -> Option<UiInput> {
     match event {
-        Event::Key(key) if key.kind != KeyEventKind::Release => Some(UiInput::Key(convert_key(key))),
+        Event::Key(key) if key.kind != KeyEventKind::Release => {
+            Some(UiInput::Key(convert_key(key)))
+        }
         Event::Paste(text) => Some(UiInput::Paste(text)),
         Event::Resize(width, height) => Some(UiInput::Resize { width, height }),
         Event::Mouse(mouse) => Some(UiInput::Mouse(convert_mouse(mouse))),

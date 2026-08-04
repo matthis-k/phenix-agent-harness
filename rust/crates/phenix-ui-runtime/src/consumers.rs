@@ -52,11 +52,7 @@ impl EventConsumer for UiStateConsumer {
         &self.id
     }
 
-    fn on_ui(
-        &mut self,
-        _state: &AppState,
-        envelope: &EventEnvelope<UiEvent>,
-    ) -> ReactionBatch {
+    fn on_ui(&mut self, _state: &AppState, envelope: &EventEnvelope<UiEvent>) -> ReactionBatch {
         let mutation = match &envelope.event {
             UiEvent::FocusRequested(element) => {
                 FocusTarget::from_element(element).map(ViewMutation::SetFocus)
@@ -107,12 +103,8 @@ impl EventConsumer for ShutdownConsumer {
         &self.id
     }
 
-    fn on_ui(
-        &mut self,
-        _state: &AppState,
-        envelope: &EventEnvelope<UiEvent>,
-    ) -> ReactionBatch {
-        if matches!(envelope.event, UiEvent::ShutdownRequested) {
+    fn on_ui(&mut self, _state: &AppState, envelope: &EventEnvelope<UiEvent>) -> ReactionBatch {
+        if matches!(&envelope.event, UiEvent::ShutdownRequested) {
             ReactionBatch {
                 reactions: vec![BusReaction::App(AppEvent::User(UserIntent::Quit))],
                 propagation: Propagation::Stop,

@@ -180,7 +180,7 @@ impl<R: UiRenderer> UiRuntime<R> {
                 .map_err(UiRuntimeError::Render)?;
         }
         self.detach_workers();
-        Ok(self.state)
+        Ok(std::mem::take(&mut self.state))
     }
 
     fn apply(&mut self, message: UiMessage) -> bool {
@@ -415,10 +415,7 @@ mod tests {
             &mut state,
             ViewMutation::EditInput(InputEdit::Insert("abc".to_owned())),
         );
-        apply_view_mutation(
-            &mut state,
-            ViewMutation::EditInput(InputEdit::MoveLeft),
-        );
+        apply_view_mutation(&mut state, ViewMutation::EditInput(InputEdit::MoveLeft));
         apply_view_mutation(
             &mut state,
             ViewMutation::EditInput(InputEdit::Insert("x".to_owned())),

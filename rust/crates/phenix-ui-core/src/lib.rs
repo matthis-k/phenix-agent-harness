@@ -6,9 +6,7 @@ mod routing;
 mod state;
 mod view;
 
-pub use input::{
-    KeyCode, KeyInput, KeyModifiers, MouseAction, MouseButton, MouseInput, UiInput,
-};
+pub use input::{KeyCode, KeyInput, KeyModifiers, MouseAction, MouseButton, MouseInput, UiInput};
 pub use reducer::{reduce, AppEffect, AppEvent, UserIntent};
 pub use routing::{
     ElementId, EventEnvelope, FocusDirection, InvalidElementId, LayoutAxis, ResizeRequest,

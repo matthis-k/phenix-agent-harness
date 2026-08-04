@@ -69,9 +69,8 @@ fn authentication_flow_is_semantic_and_secret_responses_remain_redacted() {
         },
     );
 
-    let response = AuthPromptResponse::Secret(phenix_runtime_api::SecretValue::from_utf8(
-        "secret-value",
-    ));
+    let response =
+        AuthPromptResponse::Secret(phenix_runtime_api::SecretValue::from_utf8("secret-value"));
     assert!(!format!("{response:?}").contains("secret-value"));
     let effects = reduce(
         &mut state,

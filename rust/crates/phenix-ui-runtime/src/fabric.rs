@@ -122,11 +122,7 @@ pub trait EventConsumer {
         ReactionBatch::none()
     }
 
-    fn on_ui(
-        &mut self,
-        _state: &AppState,
-        _envelope: &EventEnvelope<UiEvent>,
-    ) -> ReactionBatch {
+    fn on_ui(&mut self, _state: &AppState, _envelope: &EventEnvelope<UiEvent>) -> ReactionBatch {
         ReactionBatch::none()
     }
 }
@@ -274,7 +270,10 @@ impl EventRouter {
             if &element == root {
                 return true;
             }
-            current = self.nodes.get(&element).and_then(|node| node.parent.clone());
+            current = self
+                .nodes
+                .get(&element)
+                .and_then(|node| node.parent.clone());
         }
         false
     }

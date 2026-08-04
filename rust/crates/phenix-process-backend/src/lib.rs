@@ -281,7 +281,10 @@ fn read_limited_line(
     }
 }
 
-fn spawn_stderr_reader(stderr: ChildStderr, sender: Sender<DriverInput>) -> Result<(), BackendError> {
+fn spawn_stderr_reader(
+    stderr: ChildStderr,
+    sender: Sender<DriverInput>,
+) -> Result<(), BackendError> {
     thread::Builder::new()
         .name("phenix-process-stderr".to_owned())
         .spawn(move || {

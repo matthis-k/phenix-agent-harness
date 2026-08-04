@@ -1,6 +1,4 @@
-use crate::id::{
-    AuthFlowId, DialogId, ObjectiveId, RunId, SessionEntryId, SessionId, ToolCallId,
-};
+use crate::id::{AuthFlowId, DialogId, ObjectiveId, RunId, SessionEntryId, SessionId, ToolCallId};
 use std::fmt::{self, Debug, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq)]

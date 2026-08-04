@@ -1,8 +1,6 @@
 #![forbid(unsafe_code)]
 
-use phenix_ui_core::{
-    ElementId, FocusDirection, KeyInput, LayoutAxis, ResizeRequest,
-};
+use phenix_ui_core::{ElementId, FocusDirection, KeyInput, LayoutAxis, ResizeRequest};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -404,7 +402,9 @@ mod tests {
     #[test]
     fn default_theme_uses_semantic_highlight_groups() {
         assert!(ThemeConfig::default().highlights.contains_key("Normal"));
-        assert!(ThemeConfig::default().highlights.contains_key("BorderFocused"));
+        assert!(ThemeConfig::default()
+            .highlights
+            .contains_key("BorderFocused"));
     }
 
     #[test]

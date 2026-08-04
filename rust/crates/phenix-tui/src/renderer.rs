@@ -47,7 +47,10 @@ impl Drop for RatatuiRenderer {
 
 fn render_application(frame: &mut Frame<'_>, state: &AppState, config: &FrontendConfig) {
     let area = frame.area();
-    frame.render_widget(Block::new().style(theme_style(&config.theme, "Normal")), area);
+    frame.render_widget(
+        Block::new().style(theme_style(&config.theme, "Normal")),
+        area,
+    );
 
     let mut panes = BTreeMap::new();
     collect_layout(&config.layout.root, area, state, &mut panes);
@@ -105,7 +108,12 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme:
         .input_target()
         .and_then(|run_id| state.transcript(run_id))
         .map_or_else(
-            || vec![Line::styled("No transcript yet.", theme_style(theme, "Muted"))],
+            || {
+                vec![Line::styled(
+                    "No transcript yet.",
+                    theme_style(theme, "Muted"),
+                )]
+            },
             |transcript| {
                 transcript
                     .blocks
@@ -115,12 +123,10 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme:
             },
         );
     frame.render_widget(
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
-            .scroll((
-                state.view.transcript_scroll.offset.min(u16::MAX as usize) as u16,
-                0,
-            )),
+        Paragraph::new(lines).wrap(Wrap { trim: false }).scroll((
+            state.view.transcript_scroll.offset.min(u16::MAX as usize) as u16,
+            0,
+        )),
         inner,
     );
 }
@@ -184,8 +190,12 @@ fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &The
         let prefix = &state.input.text[..cursor];
         let (column, row) = cursor_position(prefix, inner.width.max(1));
         frame.set_cursor_position((
-            inner.x.saturating_add(column.min(inner.width.saturating_sub(1))),
-            inner.y.saturating_add(row.min(inner.height.saturating_sub(1))),
+            inner
+                .x
+                .saturating_add(column.min(inner.width.saturating_sub(1))),
+            inner
+                .y
+                .saturating_add(row.min(inner.height.saturating_sub(1))),
         ));
     }
 }
@@ -275,7 +285,11 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
                     format!(
                         "{}  ({})",
                         provider.display_name,
-                        if provider.configured { "configured" } else { "login" }
+                        if provider.configured {
+                            "configured"
+                        } else {
+                            "login"
+                        }
                     )
                 })
                 .collect(),
@@ -316,14 +330,7 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
         ),
         OverlayState::ExtensionDialog {
             request, selected, ..
-        } => render_extension_dialog(
-            frame,
-            overlay_area,
-            request,
-            *selected,
-            state,
-            theme,
-        ),
+        } => render_extension_dialog(frame, overlay_area, request, *selected, state, theme),
         OverlayState::CommandPalette { selected, .. } => render_picker(
             frame,
             overlay_area,
@@ -371,12 +378,15 @@ fn render_picker(
             .into_iter()
             .enumerate()
             .map(|(index, value)| {
-                ListItem::new(format!("{} {value}", if index == selected { "▸" } else { " " }))
-                    .style(if index == selected {
-                        theme_style(theme, "Accent")
-                    } else {
-                        theme_style(theme, "Normal")
-                    })
+                ListItem::new(format!(
+                    "{} {value}",
+                    if index == selected { "▸" } else { " " }
+                ))
+                .style(if index == selected {
+                    theme_style(theme, "Accent")
+                } else {
+                    theme_style(theme, "Normal")
+                })
             })
             .collect()
     };
@@ -401,18 +411,22 @@ fn render_auth_prompt(
         theme_style(theme, "Normal"),
     )];
     match prompt {
-        AuthPrompt::Select { options, .. } => lines.extend(options.iter().enumerate().map(
-            |(index, option)| {
+        AuthPrompt::Select { options, .. } => {
+            lines.extend(options.iter().enumerate().map(|(index, option)| {
                 Line::styled(
-                    format!("{} {}", if index == selected { "▸" } else { " " }, option.label),
+                    format!(
+                        "{} {}",
+                        if index == selected { "▸" } else { " " },
+                        option.label
+                    ),
                     if index == selected {
                         theme_style(theme, "Accent")
                     } else {
                         theme_style(theme, "Normal")
                     },
                 )
-            },
-        )),
+            }))
+        }
         AuthPrompt::Secret { .. } => lines.push(Line::styled(
             "•".repeat(state.input.text.chars().count()),
             theme_style(theme, "Accent"),

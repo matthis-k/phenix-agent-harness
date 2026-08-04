@@ -339,7 +339,8 @@ pub(crate) fn decode_reply(kind: PendingReply, value: Value) -> Result<BackendRe
     match kind {
         PendingReply::Initialize => {
             let object = object(&value, "initialize reply")?;
-            let capabilities = decode_capabilities(object.get("capabilities").unwrap_or(&Value::Null));
+            let capabilities =
+                decode_capabilities(object.get("capabilities").unwrap_or(&Value::Null));
             let mut snapshot = decode_snapshot(object.get("snapshot").unwrap_or(&Value::Null))?;
             snapshot.capabilities = capabilities.clone();
             Ok(BackendReply::Initialized {
@@ -351,9 +352,9 @@ pub(crate) fn decode_reply(kind: PendingReply, value: Value) -> Result<BackendRe
         PendingReply::Sessions => Ok(BackendReply::Sessions(decode_sessions(&value)?)),
         PendingReply::SessionTree => Ok(BackendReply::SessionTree(decode_session_tree(&value)?)),
         PendingReply::Models => Ok(BackendReply::Models(decode_models(&value)?)),
-        PendingReply::ThinkingLevels => {
-            Ok(BackendReply::ThinkingLevels(decode_thinking_levels(&value)?))
-        }
+        PendingReply::ThinkingLevels => Ok(BackendReply::ThinkingLevels(decode_thinking_levels(
+            &value,
+        )?)),
         PendingReply::AuthProviders => {
             Ok(BackendReply::AuthProviders(decode_auth_providers(&value)?))
         }
@@ -379,7 +380,10 @@ fn decode_snapshot(value: &Value) -> Result<phenix_runtime_api::RuntimeSnapshot,
         .get("sessions")
         .map_or_else(|| Ok(Vec::new()), decode_sessions)?;
     if sessions.is_empty() {
-        if let Some(active) = object.get("activeSession").filter(|value| value.is_object()) {
+        if let Some(active) = object
+            .get("activeSession")
+            .filter(|value| value.is_object())
+        {
             sessions.push(decode_session(active)?);
         }
     }
@@ -473,7 +477,10 @@ fn decode_health(object: &Map<String, Value>) -> BackendHealth {
 }
 
 fn decode_sessions(value: &Value) -> Result<Vec<PersistedSessionSummary>, BackendError> {
-    array(value, "sessions")?.iter().map(decode_session).collect()
+    array(value, "sessions")?
+        .iter()
+        .map(decode_session)
+        .collect()
 }
 
 fn decode_session(value: &Value) -> Result<PersistedSessionSummary, BackendError> {
@@ -580,7 +587,9 @@ fn decode_outcome(value: Option<&Value>) -> Option<RunOutcome> {
     match object.get("kind").and_then(Value::as_str)? {
         "success" => Some(RunOutcome::Success),
         "failure" => Some(RunOutcome::Failure {
-            code: nested_string(object, &["error", "code"]).unwrap_or("failure").to_owned(),
+            code: nested_string(object, &["error", "code"])
+                .unwrap_or("failure")
+                .to_owned(),
             message: nested_string(object, &["error", "message"])
                 .unwrap_or("Run failed")
                 .to_owned(),
@@ -738,19 +747,20 @@ fn decode_auth_providers(value: &Value) -> Result<Vec<AuthProviderSummary>, Back
         .iter()
         .map(|value| {
             let object = object(value, "authentication provider")?;
-            let methods = object
-                .get("methods")
-                .and_then(Value::as_array)
-                .map_or_else(Vec::new, |values| {
-                    values
-                        .iter()
-                        .filter_map(|value| match value.as_str() {
-                            Some("oauth") => Some(AuthMethod::OAuth),
-                            Some("api_key") => Some(AuthMethod::ApiKey),
-                            _ => None,
-                        })
-                        .collect()
-                });
+            let methods =
+                object
+                    .get("methods")
+                    .and_then(Value::as_array)
+                    .map_or_else(Vec::new, |values| {
+                        values
+                            .iter()
+                            .filter_map(|value| match value.as_str() {
+                                Some("oauth") => Some(AuthMethod::OAuth),
+                                Some("api_key") => Some(AuthMethod::ApiKey),
+                                _ => None,
+                            })
+                            .collect()
+                    });
             Ok(AuthProviderSummary {
                 id: string_field(object, "id")?.to_owned(),
                 display_name: object
@@ -931,10 +941,9 @@ fn decode_auth_prompt(value: &Value) -> Result<AuthPrompt, BackendError> {
         }),
         "select" => Ok(AuthPrompt::Select {
             message,
-            options: object
-                .get("options")
-                .and_then(Value::as_array)
-                .map_or_else(Vec::new, |values| {
+            options: object.get("options").and_then(Value::as_array).map_or_else(
+                Vec::new,
+                |values| {
                     values
                         .iter()
                         .filter_map(|value| {
@@ -946,7 +955,8 @@ fn decode_auth_prompt(value: &Value) -> Result<AuthPrompt, BackendError> {
                             })
                         })
                         .collect()
-                }),
+                },
+            ),
         }),
         kind => Err(BackendError::Protocol(format!(
             "unknown authentication prompt kind {kind}"
@@ -1104,10 +1114,7 @@ fn session_id_from_value(value: &Value) -> Option<Result<SessionId, BackendError
 }
 
 fn optional_run_id(value: Option<&Value>) -> Result<Option<RunId>, BackendError> {
-    value
-        .and_then(Value::as_str)
-        .map(parse_run_id)
-        .transpose()
+    value.and_then(Value::as_str).map(parse_run_id).transpose()
 }
 
 fn optional_session_entry_id(
@@ -1206,8 +1213,7 @@ fn non_empty_or(value: String, fallback: &str) -> String {
 }
 
 fn encode_base64(bytes: &[u8]) -> String {
-    const TABLE: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
         let first = chunk[0];

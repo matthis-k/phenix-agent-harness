@@ -39,11 +39,7 @@ pub(crate) fn collect_layout(
     }
 }
 
-fn child_constraint(
-    node: &LayoutNode,
-    direction: SplitDirection,
-    state: &AppState,
-) -> Constraint {
+fn child_constraint(node: &LayoutNode, direction: SplitDirection, state: &AppState) -> Constraint {
     match node {
         LayoutNode::Pane(pane) => {
             let view = state.view.pane(&pane.element);
@@ -54,10 +50,7 @@ fn child_constraint(
                 SplitDirection::Horizontal => view.width,
                 SplitDirection::Vertical => view.height,
             };
-            explicit.map_or_else(
-                || Constraint::Fill(pane.weight.max(1)),
-                Constraint::Length,
-            )
+            explicit.map_or_else(|| Constraint::Fill(pane.weight.max(1)), Constraint::Length)
         }
         LayoutNode::Split(split) => Constraint::Fill(layout_weight(&split.children).max(1)),
     }

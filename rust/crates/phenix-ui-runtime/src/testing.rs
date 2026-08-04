@@ -94,18 +94,24 @@ impl FrontendScenario {
             })
             .map_err(|error| FrontendScenarioError::Producer(error.to_string()))?;
         let state = runtime.run().map_err(FrontendScenarioError::Runtime)?;
-        producer
-            .join()
-            .map_err(|_| FrontendScenarioError::Producer("scenario producer panicked".to_owned()))?;
+        producer.join().map_err(|_| {
+            FrontendScenarioError::Producer("scenario producer panicked".to_owned())
+        })?;
 
         let commands = Arc::try_unwrap(commands)
-            .map_err(|_| FrontendScenarioError::Capture("backend command recorder is shared".to_owned()))?
+            .map_err(|_| {
+                FrontendScenarioError::Capture("backend command recorder is shared".to_owned())
+            })?
             .into_inner()
-            .map_err(|_| FrontendScenarioError::Capture("backend command recorder is poisoned".to_owned()))?;
+            .map_err(|_| {
+                FrontendScenarioError::Capture("backend command recorder is poisoned".to_owned())
+            })?;
         let rendered_states = Arc::try_unwrap(rendered_states)
             .map_err(|_| FrontendScenarioError::Capture("renderer recorder is shared".to_owned()))?
             .into_inner()
-            .map_err(|_| FrontendScenarioError::Capture("renderer recorder is poisoned".to_owned()))?;
+            .map_err(|_| {
+                FrontendScenarioError::Capture("renderer recorder is poisoned".to_owned())
+            })?;
 
         Ok(FrontendScenarioResult {
             state,
@@ -141,7 +147,9 @@ impl AgentBackend for RecordingBackend {
             let shutdown = matches!(&request.command, BackendCommand::Shutdown);
             self.commands
                 .lock()
-                .map_err(|_| BackendError::Protocol("scenario command recorder is poisoned".to_owned()))?
+                .map_err(|_| {
+                    BackendError::Protocol("scenario command recorder is poisoned".to_owned())
+                })?
                 .push(request.command);
             outputs.reply(
                 request.id,
@@ -213,7 +221,10 @@ mod tests {
             .input(key('>', false, false, false))
             .run()
             .expect("scenario");
-        assert_eq!(result.state.view.pane(&ElementId::sidebar()).width, Some(30));
+        assert_eq!(
+            result.state.view.pane(&ElementId::sidebar()).width,
+            Some(30)
+        );
         assert!(result.rendered_states.len() >= 2);
     }
 
@@ -231,13 +242,13 @@ mod tests {
 
     #[test]
     fn provider_snapshot_contains_theme_layout_and_keymaps_without_a_renderer() {
-        let provider = LuaFrontendProvider::new(LuaFrontendOptions::default())
-            .expect("Lua provider");
+        let provider =
+            LuaFrontendProvider::new(LuaFrontendOptions::default()).expect("Lua provider");
         let config = provider.config();
         assert!(config.theme.highlights.contains_key("Accent"));
         assert!(!config.keymaps.is_empty());
         assert!(matches!(
-            config.layout.root,
+            &config.layout.root,
             phenix_frontend_config::LayoutNode::Split(_)
         ));
     }

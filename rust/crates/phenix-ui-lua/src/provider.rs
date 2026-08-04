@@ -70,11 +70,9 @@ impl LuaFrontendProvider {
             .rev()
             .find(|binding| binding.pane == context.pane_type && binding.chord.matches(input))
             .or_else(|| {
-                state
-                    .bindings
-                    .iter()
-                    .rev()
-                    .find(|binding| binding.pane == PaneType::Global && binding.chord.matches(input))
+                state.bindings.iter().rev().find(|binding| {
+                    binding.pane == PaneType::Global && binding.chord.matches(input)
+                })
             });
         binding
             .map(|binding| {
@@ -278,8 +276,8 @@ end)
 
     #[test]
     fn defaults_are_regular_lua_callbacks() {
-        let mut provider = LuaFrontendProvider::new(LuaFrontendOptions::default())
-            .expect("Lua provider");
+        let mut provider =
+            LuaFrontendProvider::new(LuaFrontendOptions::default()).expect("Lua provider");
         let commands = provider
             .handle_key(
                 &context(PaneType::Global),

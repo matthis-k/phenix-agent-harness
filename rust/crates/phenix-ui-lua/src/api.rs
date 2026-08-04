@@ -46,32 +46,39 @@ fn keymap_api(lua: &Lua, state: Rc<RefCell<LuaState>>) -> Result<Table, Frontend
     let set_state = Rc::clone(&state);
     api.set(
         "set",
-        lua.create_function(
-            move |lua, (pane, source, callback, options): (String, String, Function, Option<Table>)| {
-                let pane = PaneType::parse(&pane).map_err(mlua::Error::external)?;
-                let chord = KeyChord::parse(&source).map_err(mlua::Error::external)?;
-                let description = options
-                    .as_ref()
-                    .map(|table| table.get::<Option<String>>("desc"))
-                    .transpose()?
-                    .flatten();
-                let callback = lua.create_registry_value(callback)?;
-                let mut state = set_state.borrow_mut();
-                state
-                    .bindings
-                    .retain(|binding| !(binding.pane == pane && binding.chord == chord));
-                state.bindings.push(LuaBinding {
-                    pane,
-                    chord,
-                    source,
-                    description,
-                    callback,
-                });
-                state.refresh_keymap_descriptions();
-                Ok(())
-            },
-        )
-        .map_err(runtime_error)?,
+        lua
+            .create_function(
+                move |lua,
+                      (pane, source, callback, options): (
+                    String,
+                    String,
+                    Function,
+                    Option<Table>,
+                )| {
+                    let pane = PaneType::parse(&pane).map_err(mlua::Error::external)?;
+                    let chord = KeyChord::parse(&source).map_err(mlua::Error::external)?;
+                    let description = options
+                        .as_ref()
+                        .map(|table| table.get::<Option<String>>("desc"))
+                        .transpose()?
+                        .flatten();
+                    let callback = lua.create_registry_value(callback)?;
+                    let mut state = set_state.borrow_mut();
+                    state
+                        .bindings
+                        .retain(|binding| !(binding.pane == pane && binding.chord == chord));
+                    state.bindings.push(LuaBinding {
+                        pane,
+                        chord,
+                        source,
+                        description,
+                        callback,
+                    });
+                    state.refresh_keymap_descriptions();
+                    Ok(())
+                },
+            )
+            .map_err(runtime_error)?,
     )
     .map_err(runtime_error)?;
 
@@ -173,7 +180,7 @@ fn ui_api(
                 move_commands
                     .borrow_mut()
                     .push(FrontendCommand::Ui(UiCommand::FocusMove(
-                        parse_focus_direction(&direction).map_err(mlua::Error::external)?,
+                        parse_focus_direction(&direction)?,
                     )));
                 Ok(())
             })
@@ -197,7 +204,7 @@ fn ui_api(
                 .borrow_mut()
                 .push(FrontendCommand::Ui(UiCommand::PaneResize {
                     element: ElementId::parse(element).map_err(mlua::Error::external)?,
-                    axis: parse_axis(&axis).map_err(mlua::Error::external)?,
+                    axis: parse_axis(&axis)?,
                     request,
                 }));
             Ok(())
@@ -214,7 +221,7 @@ fn ui_api(
                 .borrow_mut()
                 .push(FrontendCommand::Ui(UiCommand::PaneResize {
                     element: ElementId::parse(element).map_err(mlua::Error::external)?,
-                    axis: parse_axis(&axis).map_err(mlua::Error::external)?,
+                    axis: parse_axis(&axis)?,
                     request: ResizeRequest::Set(size),
                 }));
             Ok(())
@@ -228,12 +235,12 @@ fn ui_api(
         pane.set(
             name,
             lua.create_function(move |_, element: String| {
-                visibility_commands
-                    .borrow_mut()
-                    .push(FrontendCommand::Ui(UiCommand::PaneVisibility {
+                visibility_commands.borrow_mut().push(FrontendCommand::Ui(
+                    UiCommand::PaneVisibility {
                         element: ElementId::parse(element).map_err(mlua::Error::external)?,
                         visible,
-                    }));
+                    },
+                ));
                 Ok(())
             })
             .map_err(runtime_error)?,
@@ -275,11 +282,7 @@ fn ui_api(
 
     api.set(
         "invalidate",
-        command_function(
-            lua,
-            commands,
-            FrontendCommand::Ui(UiCommand::Invalidate),
-        )?,
+        command_function(lua, commands, FrontendCommand::Ui(UiCommand::Invalidate))?,
     )
     .map_err(runtime_error)?;
     Ok(api)
@@ -312,11 +315,7 @@ fn input_api(
     ] {
         api.set(
             name,
-            command_function(
-                lua,
-                Rc::clone(&commands),
-                FrontendCommand::Input(command),
-            )?,
+            command_function(lua, Rc::clone(&commands), FrontendCommand::Input(command))?,
         )
         .map_err(runtime_error)?;
     }
@@ -336,11 +335,7 @@ fn overlay_api(
     ] {
         api.set(
             name,
-            command_function(
-                lua,
-                Rc::clone(&commands),
-                FrontendCommand::Overlay(command),
-            )?,
+            command_function(lua, Rc::clone(&commands), FrontendCommand::Overlay(command))?,
         )
         .map_err(runtime_error)?;
     }
@@ -488,7 +483,9 @@ fn parse_optional_color(value: Value) -> mlua::Result<Option<ColorSpec>> {
             green: table.get("g")?,
             blue: table.get("b")?,
         })),
-        _ => Err(mlua::Error::external("color must be a name, #RRGGBB, index, or {r,g,b}")),
+        _ => Err(mlua::Error::external(
+            "color must be a name, #RRGGBB, index, or {r,g,b}",
+        )),
     }
 }
 
@@ -521,8 +518,8 @@ fn parse_color_name(value: &str) -> mlua::Result<ColorSpec> {
 fn parse_layout_node(table: Table) -> mlua::Result<LayoutNode> {
     match table.get::<String>("kind")?.as_str() {
         "pane" => {
-            let element = ElementId::parse(table.get::<String>("element")?)
-                .map_err(mlua::Error::external)?;
+            let element =
+                ElementId::parse(table.get::<String>("element")?).map_err(mlua::Error::external)?;
             let pane_type = table
                 .get::<Option<String>>("pane_type")?
                 .map(|value| PaneType::parse(&value).map_err(mlua::Error::external))
@@ -559,7 +556,10 @@ fn parse_layout_node(table: Table) -> mlua::Result<LayoutNode> {
             if children.is_empty() {
                 return Err(mlua::Error::external("layout split must contain children"));
             }
-            Ok(LayoutNode::Split(SplitLayout { direction, children }))
+            Ok(LayoutNode::Split(SplitLayout {
+                direction,
+                children,
+            }))
         }
         value => Err(mlua::Error::external(format!(
             "unknown layout node kind: {value}"
@@ -567,7 +567,7 @@ fn parse_layout_node(table: Table) -> mlua::Result<LayoutNode> {
     }
 }
 
-fn parse_focus_direction(value: &str) -> Result<FocusDirection, &'static str> {
+fn parse_focus_direction(value: &str) -> mlua::Result<FocusDirection> {
     match value.trim().to_ascii_lowercase().as_str() {
         "next" => Ok(FocusDirection::Next),
         "previous" | "prev" => Ok(FocusDirection::Previous),
@@ -575,15 +575,19 @@ fn parse_focus_direction(value: &str) -> Result<FocusDirection, &'static str> {
         "right" => Ok(FocusDirection::Right),
         "up" => Ok(FocusDirection::Up),
         "down" => Ok(FocusDirection::Down),
-        _ => Err("focus direction must be next, previous, left, right, up, or down"),
+        _ => Err(mlua::Error::external(
+            "focus direction must be next, previous, left, right, up, or down",
+        )),
     }
 }
 
-fn parse_axis(value: &str) -> Result<LayoutAxis, &'static str> {
+fn parse_axis(value: &str) -> mlua::Result<LayoutAxis> {
     match value.trim().to_ascii_lowercase().as_str() {
         "horizontal" | "width" | "x" => Ok(LayoutAxis::Horizontal),
         "vertical" | "height" | "y" => Ok(LayoutAxis::Vertical),
-        _ => Err("axis must be horizontal/width/x or vertical/height/y"),
+        _ => Err(mlua::Error::external(
+            "axis must be horizontal/width/x or vertical/height/y",
+        )),
     }
 }
 

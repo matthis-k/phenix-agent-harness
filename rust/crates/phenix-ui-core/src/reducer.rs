@@ -126,9 +126,9 @@ fn reduce_user_intent(state: &mut AppState, intent: UserIntent) -> Vec<AppEffect
                 AppEffect::Render,
             ]
         }
-        UserIntent::Logout(provider_id) => vec![AppEffect::Send(BackendCommand::AuthLogout {
-            provider_id,
-        })],
+        UserIntent::Logout(provider_id) => {
+            vec![AppEffect::Send(BackendCommand::AuthLogout { provider_id })]
+        }
         UserIntent::OpenSessionPicker => open_session_picker(state),
         UserIntent::SelectThinking(level) => {
             let Some(run_id) = state.input_target().cloned() else {
@@ -481,7 +481,10 @@ fn reduce_backend_event(state: &mut AppState, event: BackendEvent) {
 
 fn upsert_by<T, K: PartialEq>(items: &mut Vec<T>, item: T, key: impl Fn(&T) -> K) {
     let item_key = key(&item);
-    if let Some(existing) = items.iter_mut().find(|candidate| key(candidate) == item_key) {
+    if let Some(existing) = items
+        .iter_mut()
+        .find(|candidate| key(candidate) == item_key)
+    {
         *existing = item;
     } else {
         items.push(item);

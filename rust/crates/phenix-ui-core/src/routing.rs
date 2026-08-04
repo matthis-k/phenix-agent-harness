@@ -171,8 +171,7 @@ mod tests {
 
     #[test]
     fn envelopes_keep_source_and_routing_separate_from_payload() {
-        let envelope = EventEnvelope::to(ElementId::layout(), "grow")
-            .from(ElementId::sidebar());
+        let envelope = EventEnvelope::to(ElementId::layout(), "grow").from(ElementId::sidebar());
         assert_eq!(envelope.source, Some(ElementId::sidebar()));
         assert_eq!(envelope.target, RouteTarget::Element(ElementId::layout()));
         assert_eq!(envelope.event, "grow");

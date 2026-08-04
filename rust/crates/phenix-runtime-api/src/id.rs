@@ -99,9 +99,7 @@ mod tests {
         assert!(SessionId::parse("").is_err());
         assert!(SessionId::parse("session\nother").is_err());
         assert_eq!(
-            RunId::parse("run:child-1")
-                .expect("valid ID")
-                .as_str(),
+            RunId::parse("run:child-1").expect("valid ID").as_str(),
             "run:child-1"
         );
     }

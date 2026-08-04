@@ -31,15 +31,11 @@ impl EventConsumer for FrontendProviderConsumer {
         &self.id
     }
 
-    fn on_ui(
-        &mut self,
-        state: &AppState,
-        envelope: &EventEnvelope<UiEvent>,
-    ) -> ReactionBatch {
+    fn on_ui(&mut self, state: &AppState, envelope: &EventEnvelope<UiEvent>) -> ReactionBatch {
         match &envelope.event {
-            UiEvent::Input(UiInput::Paste(text)) => ReactionBatch::stop(vec![
-                BusReaction::View(ViewMutation::EditInput(InputEdit::Insert(text.clone()))),
-            ]),
+            UiEvent::Input(UiInput::Paste(text)) => ReactionBatch::stop(vec![BusReaction::View(
+                ViewMutation::EditInput(InputEdit::Insert(text.clone())),
+            )]),
             UiEvent::Input(UiInput::Key(key)) => {
                 let context = frontend_context(state);
                 match self.provider.borrow_mut().handle_key(&context, *key) {
@@ -51,9 +47,7 @@ impl EventConsumer for FrontendProviderConsumer {
                     ),
                     Ok(_) => fallback_key(*key),
                     Err(error) => ReactionBatch::stop(vec![BusReaction::View(
-                        ViewMutation::Notify(format!(
-                            "frontend configuration error: {error}"
-                        )),
+                        ViewMutation::Notify(format!("frontend configuration error: {error}")),
                     )]),
                 }
             }
@@ -102,8 +96,8 @@ fn command_reactions(state: &AppState, command: FrontendCommand) -> Vec<BusReact
     match command {
         FrontendCommand::Application(command) => application_reactions(command),
         FrontendCommand::Ui(command) => ui_reactions(state, command),
-        FrontendCommand::Input(command) => vec![BusReaction::View(ViewMutation::EditInput(
-            match command {
+        FrontendCommand::Input(command) => {
+            vec![BusReaction::View(ViewMutation::EditInput(match command {
                 InputCommand::Insert(text) => InputEdit::Insert(text),
                 InputCommand::Backspace => InputEdit::Backspace,
                 InputCommand::Delete => InputEdit::Delete,
@@ -111,8 +105,8 @@ fn command_reactions(state: &AppState, command: FrontendCommand) -> Vec<BusReact
                 InputCommand::MoveRight => InputEdit::MoveRight,
                 InputCommand::HistoryPrevious => InputEdit::HistoryPrevious,
                 InputCommand::HistoryNext => InputEdit::HistoryNext,
-            },
-        ))],
+            }))]
+        }
         FrontendCommand::Overlay(command) => overlay_reactions(state, command),
         FrontendCommand::Handled => Vec::new(),
     }
@@ -156,12 +150,10 @@ fn ui_reactions(state: &AppState, command: UiCommand) -> Vec<BusReaction> {
                 request,
             },
         ))],
-        UiCommand::PaneVisibility { element, visible } => vec![BusReaction::Ui(
-            EventEnvelope::to(
-                ElementId::layout(),
-                UiEvent::VisibilityRequested { element, visible },
-            ),
-        )],
+        UiCommand::PaneVisibility { element, visible } => vec![BusReaction::Ui(EventEnvelope::to(
+            ElementId::layout(),
+            UiEvent::VisibilityRequested { element, visible },
+        ))],
         UiCommand::PaneToggle(element) => {
             let visible = !state.view.pane(&element).visible;
             vec![BusReaction::Ui(EventEnvelope::to(
@@ -195,7 +187,10 @@ fn accept_overlay(state: &AppState) -> Vec<BusReaction> {
                 .get(selected)
                 .or_else(|| options.first())
                 .cloned()
-                .map_or(ExtensionUiResponse::Cancelled, ExtensionUiResponse::Selected),
+                .map_or(
+                    ExtensionUiResponse::Cancelled,
+                    ExtensionUiResponse::Selected,
+                ),
             ExtensionUiRequest::Confirm { .. } => ExtensionUiResponse::Confirmed(true),
             ExtensionUiRequest::Input { .. } | ExtensionUiRequest::Editor { .. } => {
                 ExtensionUiResponse::Text(state.input.text.clone())
@@ -264,9 +259,9 @@ fn accept_overlay(state: &AppState) -> Vec<BusReaction> {
 
 fn cancel_overlay(state: &AppState) -> Vec<BusReaction> {
     if !state.dialogs.is_empty() {
-        return vec![BusReaction::App(AppEvent::User(UserIntent::RespondToDialog(
-            ExtensionUiResponse::Cancelled,
-        )))];
+        return vec![BusReaction::App(AppEvent::User(
+            UserIntent::RespondToDialog(ExtensionUiResponse::Cancelled),
+        ))];
     }
     if let Some(OverlayState::AuthenticationPrompt { flow_id, .. }) = &state.view.overlay {
         return vec![BusReaction::App(AppEvent::User(
@@ -279,9 +274,7 @@ fn cancel_overlay(state: &AppState) -> Vec<BusReaction> {
 fn auth_response(prompt: &AuthPrompt, text: &str, selected: usize) -> AuthPromptResponse {
     match prompt {
         AuthPrompt::Text { .. } => AuthPromptResponse::Text(text.to_owned()),
-        AuthPrompt::Secret { .. } => {
-            AuthPromptResponse::Secret(SecretValue::from_utf8(text))
-        }
+        AuthPrompt::Secret { .. } => AuthPromptResponse::Secret(SecretValue::from_utf8(text)),
         AuthPrompt::ManualCode { .. } => AuthPromptResponse::ManualCode(text.to_owned()),
         AuthPrompt::Select { options, .. } => options
             .get(selected)
@@ -341,7 +334,9 @@ mod tests {
             input: KeyInput,
         ) -> Result<Vec<FrontendCommand>, FrontendProviderError> {
             Ok((input.code == KeyCode::Character('x'))
-                .then_some(FrontendCommand::Ui(UiCommand::FocusSet(ElementId::sidebar())))
+                .then_some(FrontendCommand::Ui(UiCommand::FocusSet(
+                    ElementId::sidebar(),
+                )))
                 .into_iter()
                 .collect())
         }
