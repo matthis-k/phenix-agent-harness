@@ -50,8 +50,8 @@ impl EventConsumer for FrontendProviderConsumer {
                             .collect(),
                     ),
                     Ok(_) => fallback_key(*key),
-                    Err(error) => ReactionBatch::stop(vec![BusReaction::App(
-                        AppEvent::BackendSubmitFailed(format!(
+                    Err(error) => ReactionBatch::stop(vec![BusReaction::View(
+                        ViewMutation::Notify(format!(
                             "frontend configuration error: {error}"
                         )),
                     )]),
@@ -114,6 +114,7 @@ fn command_reactions(state: &AppState, command: FrontendCommand) -> Vec<BusReact
             },
         ))],
         FrontendCommand::Overlay(command) => overlay_reactions(state, command),
+        FrontendCommand::Handled => Vec::new(),
     }
 }
 

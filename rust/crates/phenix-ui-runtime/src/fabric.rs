@@ -66,6 +66,7 @@ pub enum ViewMutation {
     },
     EditInput(InputEdit),
     MoveOverlaySelection(i32),
+    Notify(String),
 }
 
 #[derive(Debug, Eq, PartialEq)]

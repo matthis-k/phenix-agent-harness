@@ -283,6 +283,7 @@ fn apply_view_mutation(state: &mut AppState, mutation: ViewMutation) {
         }
         ViewMutation::EditInput(edit) => apply_input_edit(state, edit),
         ViewMutation::MoveOverlaySelection(delta) => move_overlay_selection(state, delta),
+        ViewMutation::Notify(message) => state.notifications.push_back(message),
     }
 }
 

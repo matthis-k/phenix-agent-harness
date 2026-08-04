@@ -335,17 +335,12 @@ fn no_run_notification(state: &mut AppState) -> Vec<AppEffect> {
 }
 
 fn reduce_backend_output(state: &mut AppState, output: BackendOutput) -> Vec<AppEffect> {
-    let mut quit = false;
     match output {
         BackendOutput::Reply { result, .. } => match result {
-            Ok(reply) => {
-                quit = matches!(reply, BackendReply::Completed) && state.exit_requested;
-                reduce_backend_reply(state, reply);
-            }
+            Ok(reply) => reduce_backend_reply(state, reply),
             Err(error) => {
                 state.notifications.push_back(error.to_string());
                 state.connection = RuntimeConnectionState::Degraded(error.to_string());
-                quit = state.exit_requested;
             }
         },
         BackendOutput::Event(event) => reduce_backend_event(state, event),
@@ -354,15 +349,11 @@ fn reduce_backend_output(state: &mut AppState, output: BackendOutput) -> Vec<App
                 Ok(()) => RuntimeConnectionState::Stopped,
                 Err(error) => RuntimeConnectionState::Failed(error.to_string()),
             };
-            quit = true;
+            state.should_quit = true;
+            return vec![AppEffect::Render, AppEffect::Quit];
         }
     }
-    if quit {
-        state.should_quit = true;
-        vec![AppEffect::Render, AppEffect::Quit]
-    } else {
-        vec![AppEffect::Render]
-    }
+    vec![AppEffect::Render]
 }
 
 fn reduce_backend_reply(state: &mut AppState, reply: BackendReply) {
@@ -579,18 +570,26 @@ mod tests {
     }
 
     #[test]
-    fn quit_waits_for_runtime_completion() {
+    fn quit_waits_for_backend_termination() {
         let mut state = AppState::default();
         let effects = reduce(&mut state, AppEvent::User(UserIntent::Quit));
         assert!(state.exit_requested);
         assert!(!state.should_quit);
         assert!(effects.contains(&AppEffect::Send(BackendCommand::Shutdown)));
+
         let effects = reduce(
             &mut state,
             AppEvent::Backend(BackendOutput::Reply {
                 request_id: phenix_runtime_api::RequestId::parse("shutdown").expect("request ID"),
                 result: Ok(BackendReply::Completed),
             }),
+        );
+        assert!(!state.should_quit);
+        assert!(!effects.contains(&AppEffect::Quit));
+
+        let effects = reduce(
+            &mut state,
+            AppEvent::Backend(BackendOutput::Stopped { result: Ok(()) }),
         );
         assert!(state.should_quit);
         assert!(effects.contains(&AppEffect::Quit));

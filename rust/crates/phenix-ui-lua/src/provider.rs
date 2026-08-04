@@ -127,7 +127,12 @@ impl FrontendConfigProvider for LuaFrontendProvider {
             .call::<()>(self.context_table(context)?)
             .map_err(lua_runtime_error)?;
         self.sync_config();
-        Ok(self.commands.borrow_mut().drain(..).collect())
+        let mut commands = self.commands.borrow_mut();
+        if commands.is_empty() {
+            Ok(vec![FrontendCommand::Handled])
+        } else {
+            Ok(commands.drain(..).collect())
+        }
     }
 
     fn reload(&mut self) -> Result<(), FrontendProviderError> {

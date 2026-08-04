@@ -93,6 +93,7 @@ pub enum FrontendCommand {
     Ui(UiCommand),
     Input(InputCommand),
     Overlay(OverlayCommand),
+    Handled,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
