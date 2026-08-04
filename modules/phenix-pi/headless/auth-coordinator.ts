@@ -1,10 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type {
-  AuthEvent,
-  AuthInteraction,
-  AuthPrompt,
-  AuthType,
-} from "@earendil-works/pi-ai";
+import type { AuthEvent, AuthInteraction, AuthPrompt, AuthType } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 import type { HeadlessAuthMethod, HeadlessAuthResponse } from "./protocol.ts";
@@ -225,7 +220,9 @@ export class HeadlessAuthCoordinator {
 
   private requestPrompt(flow: AuthFlow, prompt: AuthPrompt): Promise<string> {
     if (flow.pending) {
-      return Promise.reject(new Error(`Authentication flow ${flow.id} already has a pending prompt`));
+      return Promise.reject(
+        new Error(`Authentication flow ${flow.id} already has a pending prompt`),
+      );
     }
     if (flow.controller.signal.aborted || prompt.signal?.aborted) {
       return Promise.reject(abortError(`Authentication flow cancelled`));
@@ -239,7 +236,8 @@ export class HeadlessAuthCoordinator {
         cleanup();
         action();
       };
-      const onFlowAbort = (): void => settle(() => reject(abortError(`Authentication flow cancelled`)));
+      const onFlowAbort = (): void =>
+        settle(() => reject(abortError(`Authentication flow cancelled`)));
       const onPromptAbort = (): void => {
         this.#publish({ type: "auth.prompt.cancelled", flowId: flow.id });
         settle(() => reject(abortError(`Authentication prompt cancelled`)));
@@ -326,9 +324,7 @@ function authNotice(event: AuthEvent): HeadlessAuthNotice {
         kind: "device_code",
         userCode: event.userCode,
         verificationUri: event.verificationUri,
-        ...(event.intervalSeconds !== undefined
-          ? { intervalSeconds: event.intervalSeconds }
-          : {}),
+        ...(event.intervalSeconds !== undefined ? { intervalSeconds: event.intervalSeconds } : {}),
         ...(event.expiresInSeconds !== undefined
           ? { expiresInSeconds: event.expiresInSeconds }
           : {}),
@@ -338,7 +334,10 @@ function authNotice(event: AuthEvent): HeadlessAuthNotice {
   }
 }
 
-function responseValue(prompt: AuthPrompt, response: Exclude<HeadlessAuthResponse, { kind: "cancelled" }>): string {
+function responseValue(
+  prompt: AuthPrompt,
+  response: Exclude<HeadlessAuthResponse, { kind: "cancelled" }>,
+): string {
   switch (prompt.type) {
     case "text":
       if (response.kind === "text") return response.value;
