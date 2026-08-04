@@ -1,4 +1,6 @@
-use crate::id::{AuthFlowId, DialogId, RunId, SessionId, ToolCallId};
+use crate::id::{
+    AuthFlowId, DialogId, ObjectiveId, RunId, SessionEntryId, SessionId, ToolCallId,
+};
 use std::fmt::{self, Debug, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -126,7 +128,7 @@ pub struct AuthProviderSummary {
     pub source: Option<String>,
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Eq, PartialEq)]
 pub struct SecretValue(Vec<u8>);
 
 impl SecretValue {
@@ -151,7 +153,7 @@ impl Drop for SecretValue {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum AuthPromptResponse {
     Text(String),
     Secret(SecretValue),
@@ -160,7 +162,7 @@ pub enum AuthPromptResponse {
     Cancelled,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum ExtensionUiResponse {
     Selected(String),
     Confirmed(bool),
@@ -168,25 +170,25 @@ pub enum ExtensionUiResponse {
     Cancelled,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum BackendCommand {
     Initialize {
         client: ClientInformation,
     },
     SnapshotRequest,
     PromptSubmit {
-        session_id: SessionId,
+        run_id: RunId,
         text: String,
         images: Vec<ImageInput>,
         streaming_behavior: Option<StreamingBehavior>,
     },
     PromptSteer {
-        session_id: SessionId,
+        run_id: RunId,
         text: String,
         images: Vec<ImageInput>,
     },
     PromptFollowUp {
-        session_id: SessionId,
+        run_id: RunId,
         text: String,
         images: Vec<ImageInput>,
     },
@@ -194,14 +196,14 @@ pub enum BackendCommand {
         run_id: Option<RunId>,
     },
     SessionCreate {
-        parent: Option<SessionId>,
+        parent_session: Option<SessionId>,
     },
     SessionSwitch {
         session_id: SessionId,
     },
     SessionFork {
         session_id: SessionId,
-        entry_id: String,
+        entry_id: SessionEntryId,
     },
     SessionClone {
         session_id: SessionId,
@@ -220,14 +222,14 @@ pub enum BackendCommand {
     },
     ModelList,
     ModelSelect {
-        session_id: SessionId,
+        run_id: RunId,
         model: ModelRef,
     },
     ThinkingLevels {
-        session_id: SessionId,
+        run_id: RunId,
     },
     ThinkingSelect {
-        session_id: SessionId,
+        run_id: RunId,
         level: ThinkingLevel,
     },
     AuthProviders,
@@ -246,22 +248,22 @@ pub enum BackendCommand {
         provider_id: String,
     },
     CompactionStart {
-        session_id: SessionId,
+        run_id: RunId,
         instructions: Option<String>,
     },
     CompactionAbort {
-        session_id: SessionId,
+        run_id: RunId,
     },
     RetryConfigure {
-        session_id: SessionId,
+        run_id: RunId,
         enabled: bool,
     },
     RetryAbort {
-        session_id: SessionId,
+        run_id: RunId,
     },
     CommandList,
     CommandInvoke {
-        session_id: SessionId,
+        run_id: RunId,
         name: String,
         arguments: String,
     },
@@ -281,8 +283,9 @@ pub enum BackendReply {
         snapshot: RuntimeSnapshot,
     },
     Snapshot(RuntimeSnapshot),
-    Sessions(Vec<SessionSummary>),
-    SessionTree(SessionTreeSnapshot),
+    Sessions(Vec<PersistedSessionSummary>),
+    Runs(Vec<RunSummary>),
+    SessionTree(PersistedSessionTreeSnapshot),
     Models(Vec<ModelSummary>),
     ThinkingLevels(Vec<ThinkingLevel>),
     AuthProviders(Vec<AuthProviderSummary>),
@@ -298,7 +301,11 @@ pub struct RuntimeSnapshot {
     pub capabilities: BackendCapabilities,
     pub health: BackendHealth,
     pub active_session: Option<SessionId>,
-    pub sessions: Vec<SessionSummary>,
+    pub root_run: Option<RunId>,
+    pub selected_run: Option<RunId>,
+    pub sessions: Vec<PersistedSessionSummary>,
+    pub runs: Vec<RunSummary>,
+    pub objectives: Vec<ObjectiveSummary>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -311,20 +318,116 @@ pub enum BackendHealth {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SessionSummary {
+pub struct PersistedSessionSummary {
     pub id: SessionId,
-    pub parent: Option<SessionId>,
     pub name: Option<String>,
-    pub model: Option<ModelRef>,
-    pub thinking_level: ThinkingLevel,
-    pub is_streaming: bool,
-    pub pending_messages: usize,
+    pub session_file: Option<String>,
+    pub cwd: Option<String>,
+    pub root_run_id: Option<RunId>,
+    pub updated_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SessionTreeSnapshot {
-    pub root: SessionId,
-    pub nodes: Vec<SessionSummary>,
+pub enum SessionEntryKind {
+    User,
+    Assistant,
+    Tool,
+    Compaction,
+    ModelChange,
+    ThinkingChange,
+    Other,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionEntrySummary {
+    pub id: SessionEntryId,
+    pub parent: Option<SessionEntryId>,
+    pub kind: SessionEntryKind,
+    pub label: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PersistedSessionTreeSnapshot {
+    pub session_id: SessionId,
+    pub leaf_entry: Option<SessionEntryId>,
+    pub entries: Vec<SessionEntrySummary>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RunKind {
+    Root,
+    Agent,
+    Workflow,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RunState {
+    Created,
+    Starting,
+    Running,
+    Waiting,
+    Completing,
+    Completed,
+    Failed,
+    Cancelled,
+    Orphaned,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RunOutcome {
+    Success,
+    Failure {
+        code: String,
+        message: String,
+        retryable: bool,
+    },
+    Cancelled {
+        reason: String,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunSummary {
+    pub id: RunId,
+    pub parent: Option<RunId>,
+    pub kind: RunKind,
+    pub definition_id: String,
+    pub display_name: String,
+    pub state: RunState,
+    pub persisted_session: Option<SessionId>,
+    pub session_file: Option<String>,
+    pub model: Option<ModelRef>,
+    pub thinking_level: Option<ThinkingLevel>,
+    pub difficulty: Option<String>,
+    pub budget: Option<String>,
+    pub pending_messages: usize,
+    pub outcome: Option<RunOutcome>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ObjectiveSource {
+    User,
+    Discovered,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ObjectiveState {
+    NotStarted,
+    WorkInProgress,
+    Done,
+    Blocked,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObjectiveSummary {
+    pub id: ObjectiveId,
+    pub root_run_id: RunId,
+    pub parent: Option<ObjectiveId>,
+    pub created_by_run_id: RunId,
+    pub title: String,
+    pub description: Option<String>,
+    pub source: ObjectiveSource,
+    pub state: ObjectiveState,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -354,7 +457,7 @@ pub enum TranscriptRole {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TranscriptBlock {
     pub id: String,
-    pub session_id: SessionId,
+    pub run_id: RunId,
     pub role: TranscriptRole,
     pub text: String,
     pub complete: bool,
@@ -451,26 +554,30 @@ pub enum NotificationLevel {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BackendEvent {
     SnapshotChanged(RuntimeSnapshot),
-    SessionChanged(SessionSummary),
+    PersistedSessionChanged(PersistedSessionSummary),
+    RunChanged(RunSummary),
+    ObjectiveChanged(ObjectiveSummary),
     TranscriptAppended(TranscriptBlock),
     TranscriptUpdated(TranscriptBlock),
     ToolStarted {
-        session_id: SessionId,
+        run_id: RunId,
         tool_call_id: ToolCallId,
         tool_name: String,
         input_summary: String,
     },
     ToolUpdated {
+        run_id: RunId,
         tool_call_id: ToolCallId,
         output: String,
     },
     ToolFinished {
+        run_id: RunId,
         tool_call_id: ToolCallId,
         outcome: ToolExecutionOutcome,
         output_summary: String,
     },
     QueueChanged {
-        session_id: SessionId,
+        run_id: RunId,
         steering: Vec<String>,
         follow_ups: Vec<String>,
     },
@@ -500,9 +607,6 @@ pub enum BackendEvent {
         text: Option<String>,
     },
     HealthChanged(BackendHealth),
-    Stopped {
-        result: Result<(), String>,
-    },
 }
 
 #[cfg(test)]
@@ -529,5 +633,23 @@ mod tests {
         assert!(capabilities.authentication.oauth);
         assert!(capabilities.authentication.api_keys);
         assert!(!capabilities.sessions.branching);
+    }
+
+    #[test]
+    fn run_and_persisted_session_state_are_not_collapsed() {
+        let snapshot = RuntimeSnapshot {
+            capabilities: BackendCapabilities::default(),
+            health: BackendHealth::Ready,
+            active_session: Some(SessionId::parse("session-1").expect("valid session")),
+            root_run: Some(RunId::parse("run-root").expect("valid run")),
+            selected_run: Some(RunId::parse("run-child").expect("valid run")),
+            sessions: Vec::new(),
+            runs: Vec::new(),
+            objectives: Vec::new(),
+        };
+        assert_ne!(
+            snapshot.active_session.expect("session").as_str(),
+            snapshot.selected_run.expect("run").as_str()
+        );
     }
 }
