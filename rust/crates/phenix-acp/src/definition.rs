@@ -262,6 +262,7 @@ impl Error for DefinitionError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn builder() -> SessionTreeDefinitionBuilder {
         SessionTreeDefinition::builder(
@@ -300,17 +301,22 @@ mod tests {
 
     #[test]
     fn deserialization_cannot_bypass_definition_validation() {
-        let error = serde_json::from_str::<SessionTreeDefinition>(
-            r#"{"definition_id":"standard","router":"router","backends":[]}"#,
-        )
+        let error = serde_json::from_value::<SessionTreeDefinition>(json!({
+            "definition_id": "standard",
+            "router": "router",
+            "backends": []
+        }))
         .expect_err("wire definition without backend must fail");
         assert!(error.to_string().contains("at least one backend"));
     }
 
     #[test]
     fn wire_deserialization_cannot_create_an_empty_backend_program() {
-        let error = serde_json::from_str::<AcpEndpoint>(r#"{"transport":"stdio","program":""}"#)
-            .expect_err("empty program must fail");
+        let error = serde_json::from_value::<AcpEndpoint>(json!({
+            "transport": "stdio",
+            "program": ""
+        }))
+        .expect_err("empty program must fail");
         assert!(error.to_string().contains("must not be empty"));
     }
 }
