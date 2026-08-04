@@ -537,13 +537,15 @@ mod tests {
         let mut state = AppState::default();
         reduce(
             &mut state,
-            AppEvent::Backend(BackendOutput::Event(BackendEvent::AuthPromptRequested {
-                flow_id: flow_id.clone(),
-                prompt: AuthPrompt::Secret {
-                    message: "API key".to_owned(),
-                    placeholder: None,
+            AppEvent::Backend(Box::new(BackendOutput::Event(
+                BackendEvent::AuthPromptRequested {
+                    flow_id: flow_id.clone(),
+                    prompt: AuthPrompt::Secret {
+                        message: "API key".to_owned(),
+                        placeholder: None,
+                    },
                 },
-            })),
+            ))),
         );
         assert!(state.auth_flows.contains_key(&flow_id));
         assert!(matches!(
@@ -557,13 +559,15 @@ mod tests {
         let mut state = AppState::default();
         reduce(
             &mut state,
-            AppEvent::Backend(BackendOutput::Event(BackendEvent::ExtensionUiRequested {
-                dialog_id: DialogId::parse("dialog-1").expect("dialog ID"),
-                request: ExtensionUiRequest::Confirm {
-                    title: "Apply?".to_owned(),
-                    message: "Mutate repository".to_owned(),
+            AppEvent::Backend(Box::new(BackendOutput::Event(
+                BackendEvent::ExtensionUiRequested {
+                    dialog_id: DialogId::parse("dialog-1").expect("dialog ID"),
+                    request: ExtensionUiRequest::Confirm {
+                        title: "Apply?".to_owned(),
+                        message: "Mutate repository".to_owned(),
+                    },
                 },
-            })),
+            ))),
         );
         assert_eq!(state.dialogs.len(), 1);
         assert!(matches!(
@@ -582,17 +586,17 @@ mod tests {
 
         let effects = reduce(
             &mut state,
-            AppEvent::Backend(BackendOutput::Reply {
+            AppEvent::Backend(Box::new(BackendOutput::Reply {
                 request_id: phenix_runtime_api::RequestId::parse("shutdown").expect("request ID"),
                 result: Ok(BackendReply::Completed),
-            }),
+            })),
         );
         assert!(!state.should_quit);
         assert!(!effects.contains(&AppEffect::Quit));
 
         let effects = reduce(
             &mut state,
-            AppEvent::Backend(BackendOutput::Stopped { result: Ok(()) }),
+            AppEvent::Backend(Box::new(BackendOutput::Stopped { result: Ok(()) })),
         );
         assert!(state.should_quit);
         assert!(effects.contains(&AppEffect::Quit));
@@ -611,18 +615,18 @@ mod tests {
         };
         reduce(
             &mut state,
-            AppEvent::Backend(BackendOutput::Event(BackendEvent::TranscriptAppended(
-                block.clone(),
+            AppEvent::Backend(Box::new(BackendOutput::Event(
+                BackendEvent::TranscriptAppended(block.clone()),
             ))),
         );
         reduce(
             &mut state,
-            AppEvent::Backend(BackendOutput::Event(BackendEvent::TranscriptUpdated(
-                TranscriptBlock {
+            AppEvent::Backend(Box::new(BackendOutput::Event(
+                BackendEvent::TranscriptUpdated(TranscriptBlock {
                     text: "complete".to_owned(),
                     complete: true,
                     ..block
-                },
+                }),
             ))),
         );
         let transcript = state.transcript(&run).expect("transcript");
