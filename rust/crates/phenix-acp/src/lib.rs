@@ -6,7 +6,9 @@ mod id;
 mod protocol;
 mod tools;
 
-pub use client::{AcpClient, AcpTransport, CallError, EnvelopeError, RemoteError};
+pub use client::{
+    decode_extension_response, encode_extension_request, ExtensionCodecError, PhenixAcpCallError,
+};
 pub use definition::{
     AcpEndpoint, BackendDefinition, DefinitionError, SessionTreeDefinition,
     SessionTreeDefinitionBuilder,
