@@ -12,3 +12,4 @@ futures.workspace = true
 phenix-acp = { path = "../phenix-acp" }
 phenix-runtime-api = { path = "../phenix-runtime-api" }
 serde_json.workspace = true
+shell-words.workspace = true
