@@ -3,4 +3,5 @@ resolver = "2"
 members = [
   "crates/phenix-runtime-api",
   "crates/phenix-ui-core",
+  "crates/phenix-ui-runtime",
 ]
