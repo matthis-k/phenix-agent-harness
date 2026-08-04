@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type {
-  AuthInteraction,
-  Credential,
-  Provider,
-} from "@earendil-works/pi-ai";
+import type { AuthInteraction, Credential, Provider } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 import {
@@ -95,10 +91,7 @@ test("prompt-local abort is propagated without cancelling the complete coordinat
 test("provider listing excludes ambient-only providers with no interactive setup", () => {
   const coordinator = new HeadlessAuthCoordinator({
     runtime: fakeRuntime({
-      providers: [
-        provider("example", true, true),
-        provider("ambient", false, false),
-      ],
+      providers: [provider("example", true, true), provider("ambient", false, false)],
     }),
     publish: () => undefined,
   });
@@ -121,9 +114,7 @@ function fakeRuntime(input: {
   return {
     getProviders: () => providers,
     getProviderAuthStatus: () => ({ configured: false }),
-    login:
-      input.login ??
-      (async (): Promise<Credential> => ({ type: "api_key", key: "unused" })),
+    login: input.login ?? (async (): Promise<Credential> => ({ type: "api_key", key: "unused" })),
     logout: async () => undefined,
   };
 }
