@@ -87,17 +87,22 @@ impl AppState {
     }
 
     pub fn transcript_mut(&mut self, run_id: RunId) -> &mut TranscriptState {
-        self.transcripts.entry(run_id).or_insert_with(|| TranscriptState {
-            follow_end: true,
-            ..TranscriptState::default()
-        })
+        self.transcripts
+            .entry(run_id)
+            .or_insert_with(|| TranscriptState {
+                follow_end: true,
+                ..TranscriptState::default()
+            })
     }
 
     pub fn apply_snapshot(&mut self, snapshot: RuntimeSnapshot) {
         self.connection = RuntimeConnectionState::from(&snapshot.health);
         self.active_session = snapshot.active_session.clone();
         self.root_run = snapshot.root_run.clone();
-        self.selected_run = snapshot.selected_run.clone().or_else(|| snapshot.root_run.clone());
+        self.selected_run = snapshot
+            .selected_run
+            .clone()
+            .or_else(|| snapshot.root_run.clone());
         self.capabilities = snapshot.capabilities.clone();
         self.snapshot = Some(snapshot);
     }
