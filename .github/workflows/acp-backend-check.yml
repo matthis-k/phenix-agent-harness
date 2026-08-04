@@ -25,49 +25,47 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re
 
           path = Path("rust/crates/phenix-acp-backend/src/lib.rs")
           content = path.read_text()
+
           replacements = [
               (
                   ".connect_with(agent, move |cx| async move {",
                   ".connect_with(agent, move |cx: ConnectTo<Agent>| async move {",
               ),
               (
-                  "async fn run_session<Link>(\n    mut session: agent_client_protocol::ActiveSession<'static, Link>,",
-                  "async fn run_session<'a>(\n    mut session: agent_client_protocol::ActiveSession<'a, ConnectTo<Agent>>,
-",
+                  "async fn run_session<Link>(",
+                  "async fn run_session<'a>(",
+              ),
+              (
+                  "agent_client_protocol::ActiveSession<'static, Link>",
+                  "agent_client_protocol::ActiveSession<'a, ConnectTo<Agent>>",
+              ),
+              (
+                  "fn handle_request<Link>(",
+                  "fn handle_request<'a>(",
               ),
               (
                   ") -> Result<(), BackendError>\nwhere\n    Link: agent_client_protocol::role::HasPeer<Agent>,\n{",
                   ") -> Result<(), BackendError> {",
               ),
               (
-                  "fn handle_request<Link>(\n    session: &mut agent_client_protocol::ActiveSession<'static, Link>,",
-                  "fn handle_request<'a>(\n    session: &mut agent_client_protocol::ActiveSession<'a, ConnectTo<Agent>>,
-",
+                  ") -> Result<bool, BackendError>\nwhere\n    Link: agent_client_protocol::role::HasPeer<Agent>,\n{",
+                  ") -> Result<bool, BackendError> {",
+              ),
+              (
+                  "state.append_assistant_text(&text.text, outputs)?;",
+                  "state\n                            .append_assistant_text(&text.text, outputs)\n                            .map_err(to_acp_error)?;",
               ),
           ]
+
           for old, new in replacements:
-              if old not in content:
+              if old in content:
+                  content = content.replace(old, new, 1)
+              elif new not in content:
                   raise SystemExit(f"missing replacement anchor: {old}")
-              content = content.replace(old, new, 1)
 
-          content, count = re.subn(
-              r"\) -> Result<bool, BackendError>\nwhere\n    Link: agent_client_protocol::role::HasPeer<Agent>,\n\{",
-              ") -> Result<bool, BackendError> {",
-              content,
-              count=1,
-          )
-          if count != 1:
-              raise SystemExit("handle_request bound replacement failed")
-
-          old = "state.append_assistant_text(&text.text, outputs)?;"
-          new = "state\n                            .append_assistant_text(&text.text, outputs)\n                            .map_err(to_acp_error)?;"
-          if old not in content:
-              raise SystemExit("notification error mapping anchor missing")
-          content = content.replace(old, new, 1)
           path.write_text(content)
           PY
           cargo generate-lockfile --manifest-path rust/Cargo.toml
