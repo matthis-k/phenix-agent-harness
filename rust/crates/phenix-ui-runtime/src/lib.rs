@@ -1,7 +1,16 @@
 #![forbid(unsafe_code)]
 
+mod fabric;
+
+pub use fabric::{
+    BusReaction, ContentEvent, EventConsumer, EventRouter, LayoutAxis, Propagation, ReactionBatch,
+    ResizeRequest, RouterError, UiEvent,
+};
+
 use phenix_runtime_api::{BackendClient, BackendOutput, BackendRuntime, BackendWorker};
-use phenix_ui_core::{reduce, AppEffect, AppEvent, AppState, UiInput, UserIntent};
+use phenix_ui_core::{
+    reduce, AppEffect, AppEvent, AppState, ElementId, EventEnvelope, UiInput, UserIntent,
+};
 use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -13,12 +22,9 @@ const DEFAULT_DRAIN_LIMIT: usize = 256;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum UiMessage {
-    Input(UiInput),
-    User(UserIntent),
-    Backend(BackendOutput),
-    Tick,
-    Refresh,
-    Shutdown,
+    Content(EventEnvelope<ContentEvent>),
+    Ui(EventEnvelope<UiEvent>),
+    App(AppEvent),
 }
 
 #[derive(Clone)]
@@ -28,27 +34,42 @@ pub struct UiMailbox {
 
 impl UiMailbox {
     pub fn send_input(&self, input: UiInput) -> Result<(), UiIngressError> {
-        self.send_lossless(UiMessage::Input(input))
+        self.send_ui(EventEnvelope::focused(UiEvent::Input(input)))
+    }
+
+    pub fn send_ui(&self, event: EventEnvelope<UiEvent>) -> Result<(), UiIngressError> {
+        self.send_lossless(UiMessage::Ui(event))
+    }
+
+    pub fn send_content(&self, event: EventEnvelope<ContentEvent>) -> Result<(), UiIngressError> {
+        self.send_lossless(UiMessage::Content(event))
     }
 
     pub fn send_user(&self, intent: UserIntent) -> Result<(), UiIngressError> {
-        self.send_lossless(UiMessage::User(intent))
+        self.send_lossless(UiMessage::App(AppEvent::User(intent)))
     }
 
     pub fn send_backend(&self, output: BackendOutput) -> Result<(), UiIngressError> {
-        self.send_lossless(UiMessage::Backend(output))
+        self.send_content(EventEnvelope::broadcast(ContentEvent::Backend(output)))
     }
 
     pub fn request_refresh(&self) -> Result<(), UiIngressError> {
-        self.try_send_coalescible(UiMessage::Refresh)
+        self.try_send_coalescible(UiMessage::Content(EventEnvelope::broadcast(
+            ContentEvent::RefreshRequested,
+        )))
     }
 
     pub fn tick(&self) -> Result<(), UiIngressError> {
-        self.try_send_coalescible(UiMessage::Tick)
+        self.try_send_coalescible(UiMessage::Content(EventEnvelope::broadcast(
+            ContentEvent::ClockTick,
+        )))
     }
 
     pub fn shutdown(&self) -> Result<(), UiIngressError> {
-        self.send_lossless(UiMessage::Shutdown)
+        self.send_ui(EventEnvelope::to(
+            ElementId::root(),
+            UiEvent::ShutdownRequested,
+        ))
     }
 
     fn send_lossless(&self, message: UiMessage) -> Result<(), UiIngressError> {
@@ -87,7 +108,7 @@ pub trait UiRenderer {
     fn render(&mut self, state: &AppState) -> Result<(), String>;
 }
 
-pub trait UiInputController {
+pub trait UiInputController: Send {
     fn handle(&mut self, state: &AppState, input: UiInput) -> Vec<AppEvent>;
 }
 
@@ -100,11 +121,90 @@ impl UiInputController for NoopInputController {
     }
 }
 
-pub struct UiRuntime<R, C = NoopInputController> {
+struct RootContentConsumer {
+    id: ElementId,
+}
+
+impl RootContentConsumer {
+    fn new() -> Self {
+        Self {
+            id: ElementId::root(),
+        }
+    }
+}
+
+impl EventConsumer for RootContentConsumer {
+    fn element_id(&self) -> &ElementId {
+        &self.id
+    }
+
+    fn on_content(
+        &mut self,
+        _state: &AppState,
+        envelope: &EventEnvelope<ContentEvent>,
+    ) -> ReactionBatch {
+        match &envelope.event {
+            ContentEvent::Backend(output) => {
+                ReactionBatch::one(BusReaction::App(AppEvent::Backend(output.clone())))
+            }
+            ContentEvent::ClockTick | ContentEvent::RefreshRequested => {
+                ReactionBatch::one(BusReaction::Render)
+            }
+        }
+    }
+}
+
+struct RootInputConsumer<C> {
+    id: ElementId,
+    controller: C,
+}
+
+impl<C> RootInputConsumer<C> {
+    fn new(controller: C) -> Self {
+        Self {
+            id: ElementId::root(),
+            controller,
+        }
+    }
+}
+
+impl<C: UiInputController> EventConsumer for RootInputConsumer<C> {
+    fn element_id(&self) -> &ElementId {
+        &self.id
+    }
+
+    fn on_ui(
+        &mut self,
+        state: &AppState,
+        envelope: &EventEnvelope<UiEvent>,
+    ) -> ReactionBatch {
+        match &envelope.event {
+            UiEvent::Input(input) => ReactionBatch {
+                reactions: self
+                    .controller
+                    .handle(state, input.clone())
+                    .into_iter()
+                    .map(BusReaction::App)
+                    .collect(),
+                propagation: Propagation::Continue,
+            },
+            UiEvent::ShutdownRequested => {
+                ReactionBatch::one(BusReaction::App(AppEvent::User(UserIntent::Quit)))
+            }
+            UiEvent::FocusRequested(_)
+            | UiEvent::ResizeRequested { .. }
+            | UiEvent::VisibilityRequested { .. }
+            | UiEvent::ScrollRequested { .. }
+            | UiEvent::Invalidate => ReactionBatch::none(),
+        }
+    }
+}
+
+pub struct UiRuntime<R> {
     state: AppState,
     backend: BackendClient,
     renderer: R,
-    input_controller: C,
+    router: EventRouter,
     receiver: Receiver<UiMessage>,
     mailbox: UiMailbox,
     backend_forwarder: Option<JoinHandle<()>>,
@@ -112,14 +212,14 @@ pub struct UiRuntime<R, C = NoopInputController> {
     drain_limit: usize,
 }
 
-impl<R, C> UiRuntime<R, C> {
+impl<R> UiRuntime<R> {
     fn detach_workers(&mut self) {
         let _ = self.backend_forwarder.take();
         let _ = self.backend_worker.take();
     }
 }
 
-impl<R: UiRenderer> UiRuntime<R, NoopInputController> {
+impl<R: UiRenderer> UiRuntime<R> {
     pub fn from_backend(
         state: AppState,
         backend: BackendRuntime,
@@ -134,14 +234,29 @@ impl<R: UiRenderer> UiRuntime<R, NoopInputController> {
             channel_capacity,
         )
     }
-}
 
-impl<R: UiRenderer, C: UiInputController> UiRuntime<R, C> {
-    pub fn from_backend_with_controller(
+    pub fn from_backend_with_controller<C: UiInputController>(
         state: AppState,
         backend: BackendRuntime,
         renderer: R,
         input_controller: C,
+        channel_capacity: usize,
+    ) -> Result<Self, UiRuntimeError> {
+        let mut router = EventRouter::standard();
+        router
+            .register_consumer(Box::new(RootContentConsumer::new()))
+            .map_err(|error| UiRuntimeError::InvalidConfiguration(error.to_string()))?;
+        router
+            .register_consumer(Box::new(RootInputConsumer::new(input_controller)))
+            .map_err(|error| UiRuntimeError::InvalidConfiguration(error.to_string()))?;
+        Self::from_backend_with_router(state, backend, renderer, router, channel_capacity)
+    }
+
+    pub fn from_backend_with_router(
+        state: AppState,
+        backend: BackendRuntime,
+        renderer: R,
+        router: EventRouter,
         channel_capacity: usize,
     ) -> Result<Self, UiRuntimeError> {
         if channel_capacity == 0 {
@@ -168,7 +283,7 @@ impl<R: UiRenderer, C: UiInputController> UiRuntime<R, C> {
             state,
             backend,
             renderer,
-            input_controller,
+            router,
             receiver,
             mailbox,
             backend_forwarder: Some(backend_forwarder),
@@ -253,22 +368,32 @@ impl<R: UiRenderer, C: UiInputController> UiRuntime<R, C> {
     }
 
     fn apply(&mut self, message: UiMessage) -> bool {
-        match message {
-            UiMessage::Input(input) => {
-                let events = self.input_controller.handle(&self.state, input);
-                self.apply_events(events)
-            }
-            UiMessage::User(intent) => self.apply_event(AppEvent::User(intent)),
-            UiMessage::Backend(output) => self.apply_event(AppEvent::Backend(output)),
-            UiMessage::Tick | UiMessage::Refresh => true,
-            UiMessage::Shutdown => self.apply_event(AppEvent::User(UserIntent::Quit)),
-        }
+        let reactions = match message {
+            UiMessage::Content(envelope) => self.router.route_content(&self.state, &envelope),
+            UiMessage::Ui(envelope) => self.router.route_ui(&self.state, &envelope),
+            UiMessage::App(event) => vec![BusReaction::App(event)],
+        };
+        self.apply_reactions(reactions)
     }
 
-    fn apply_events(&mut self, events: impl IntoIterator<Item = AppEvent>) -> bool {
-        events
-            .into_iter()
-            .fold(false, |dirty, event| self.apply_event(event) || dirty)
+    fn apply_reactions(&mut self, reactions: impl IntoIterator<Item = BusReaction>) -> bool {
+        let mut queue = VecDeque::from_iter(reactions);
+        let mut dirty = false;
+        while let Some(reaction) = queue.pop_front() {
+            match reaction {
+                BusReaction::App(event) => dirty |= self.apply_event(event),
+                BusReaction::Content(envelope) => queue.extend(
+                    self.router
+                        .route_content(&self.state, &envelope)
+                        .into_iter(),
+                ),
+                BusReaction::Ui(envelope) => {
+                    queue.extend(self.router.route_ui(&self.state, &envelope).into_iter())
+                }
+                BusReaction::Render => dirty = true,
+            }
+        }
+        dirty
     }
 
     fn apply_event(&mut self, event: AppEvent) -> bool {
@@ -292,7 +417,7 @@ impl<R: UiRenderer, C: UiInputController> UiRuntime<R, C> {
     }
 }
 
-impl<R, C> Drop for UiRuntime<R, C> {
+impl<R> Drop for UiRuntime<R> {
     fn drop(&mut self) {
         self.detach_workers();
     }
@@ -394,7 +519,7 @@ mod tests {
     }
 
     #[test]
-    fn all_producers_converge_on_one_state_and_render_owner() {
+    fn routed_producers_converge_on_one_state_and_render_owner() {
         let backend = BackendRuntime::spawn(Box::new(AcceptingBackend), 8).expect("backend");
         let thread_ids = Arc::new(Mutex::new(Vec::new()));
         let input_values = Arc::new(Mutex::new(Vec::new()));
@@ -446,7 +571,13 @@ mod tests {
         let mailbox = UiMailbox { sender };
         mailbox.tick().expect("first tick fills queue");
         assert_eq!(mailbox.tick(), Err(UiIngressError::Coalesced));
-        assert_eq!(receiver.recv().expect("receive tick"), UiMessage::Tick);
+        assert!(matches!(
+            receiver.recv().expect("receive tick"),
+            UiMessage::Content(EventEnvelope {
+                event: ContentEvent::ClockTick,
+                ..
+            })
+        ));
     }
 
     #[test]
