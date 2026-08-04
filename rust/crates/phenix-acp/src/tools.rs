@@ -232,6 +232,7 @@ impl Error for ToolConfigError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn server(name: &str) -> McpServerDefinition {
         McpServerDefinition::new(
@@ -254,9 +255,11 @@ mod tests {
 
     #[test]
     fn wire_deserialization_cannot_create_an_empty_stdio_command() {
-        let error =
-            serde_json::from_str::<McpServerTransport>(r#"{"transport":"stdio","command":""}"#)
-                .expect_err("empty command must fail");
+        let error = serde_json::from_value::<McpServerTransport>(json!({
+            "transport": "stdio",
+            "command": ""
+        }))
+        .expect_err("empty command must fail");
         assert!(error.to_string().contains("must not be empty"));
     }
 }
