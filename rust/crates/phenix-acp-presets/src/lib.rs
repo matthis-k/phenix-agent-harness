@@ -7,18 +7,15 @@ use phenix_acp::{
 use std::collections::BTreeMap;
 
 pub fn standard_builder() -> Result<SessionTreeDefinitionBuilder, DefinitionError> {
+    let pi_endpoint = AcpEndpoint::stdio("pi-acp", Vec::new(), BTreeMap::new())?;
     let builder = SessionTreeDefinition::builder(
         DefinitionId::parse("phenix.standard").expect("static definition ID is valid"),
         RouterId::parse("phenix.capability-budget").expect("static router ID is valid"),
     )
     .backend(BackendDefinition::new(
         BackendId::parse("pi").expect("static backend ID is valid"),
-        AcpEndpoint::Stdio {
-            program: "pi-acp".to_owned(),
-            arguments: Vec::new(),
-            environment: BTreeMap::new(),
-        },
-    )?)?;
+        pi_endpoint,
+    ))?;
 
     ["implement", "qa", "qa-fix", "dynamic"]
         .into_iter()
