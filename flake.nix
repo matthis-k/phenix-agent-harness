@@ -33,6 +33,7 @@
 
       imports = [
         ./modules/pi-packages.nix
+        ./modules/rust-core.nix
         ./modules/standalone.nix
         ./modules/development.nix
         ./modules/stitch.nix
