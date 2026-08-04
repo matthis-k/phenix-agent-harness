@@ -125,8 +125,16 @@ impl EventConsumer for ShutdownConsumer {
 
 pub fn install_core_consumers(router: &mut EventRouter) -> Result<(), RouterError> {
     router.register_consumer(Box::new(RootContentConsumer::new()))?;
-    router.register_consumer(Box::new(UiStateConsumer::new(ElementId::root())))?;
-    router.register_consumer(Box::new(UiStateConsumer::new(ElementId::layout())))?;
+    for element in [
+        ElementId::root(),
+        ElementId::layout(),
+        ElementId::sidebar(),
+        ElementId::transcript(),
+        ElementId::input(),
+        ElementId::status(),
+    ] {
+        router.register_consumer(Box::new(UiStateConsumer::new(element)))?;
+    }
     router.register_consumer(Box::new(ShutdownConsumer::new()))?;
     Ok(())
 }
