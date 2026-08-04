@@ -1,10 +1,10 @@
+import type { RunId } from "../domain/shared.ts";
 import type {
   RecoveredTokenReductionOutput,
   TokenReductionBackendId,
   TokenReductionPreparation,
   TokenReductionRewrite,
 } from "../domain/token-reduction.ts";
-import type { RunId } from "../domain/shared.ts";
 
 export interface PrepareTokenReductionInput {
   readonly runId: RunId;
