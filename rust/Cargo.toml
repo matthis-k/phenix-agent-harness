@@ -14,7 +14,15 @@ members = [
 ]
 
 [workspace.dependencies]
-agent-client-protocol = "2.0.0"
+agent-client-protocol = { version = "2.0.0", features = [
+  "unstable_auth_methods",
+  "unstable_elicitation",
+  "unstable_end_turn_token_usage",
+  "unstable_session_fork",
+  "unstable_tool_call_name",
+] }
+base64 = "0.22"
+blocking = "1.6"
 clap = { version = "4.5.47", default-features = false, features = ["derive", "error-context", "help", "std", "usage"] }
 futures = "0.3"
 mlua = { version = "0.12.0", features = ["lua54", "vendored"] }
