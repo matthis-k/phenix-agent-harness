@@ -483,7 +483,7 @@ fn parse_optional_color(value: Value) -> mlua::Result<Option<ColorSpec>> {
             green: table.get("g")?,
             blue: table.get("b")?,
         })),
-        _ => Err(mlua::Error::external(
+        _ => Err(mlua::Error::runtime(
             "color must be a name, #RRGGBB, index, or {r,g,b}",
         )),
     }
@@ -510,7 +510,7 @@ fn parse_color_name(value: &str) -> mlua::Result<ColorSpec> {
         "white" => NamedColor::White,
         "gray" | "grey" => NamedColor::Gray,
         "dark-gray" | "dark-grey" => NamedColor::DarkGray,
-        _ => return Err(mlua::Error::external(format!("unknown color: {value}"))),
+        _ => return Err(mlua::Error::runtime(format!("unknown color: {value}"))),
     };
     Ok(ColorSpec::Named(named))
 }
@@ -543,7 +543,7 @@ fn parse_layout_node(table: Table) -> mlua::Result<LayoutNode> {
                 "horizontal" | "h" => SplitDirection::Horizontal,
                 "vertical" | "v" => SplitDirection::Vertical,
                 value => {
-                    return Err(mlua::Error::external(format!(
+                    return Err(mlua::Error::runtime(format!(
                         "unknown split direction: {value}"
                     )))
                 }
@@ -554,14 +554,14 @@ fn parse_layout_node(table: Table) -> mlua::Result<LayoutNode> {
                 .map(|value| value.and_then(parse_layout_node))
                 .collect::<mlua::Result<Vec<_>>>()?;
             if children.is_empty() {
-                return Err(mlua::Error::external("layout split must contain children"));
+                return Err(mlua::Error::runtime("layout split must contain children"));
             }
             Ok(LayoutNode::Split(SplitLayout {
                 direction,
                 children,
             }))
         }
-        value => Err(mlua::Error::external(format!(
+        value => Err(mlua::Error::runtime(format!(
             "unknown layout node kind: {value}"
         ))),
     }
@@ -575,7 +575,7 @@ fn parse_focus_direction(value: &str) -> mlua::Result<FocusDirection> {
         "right" => Ok(FocusDirection::Right),
         "up" => Ok(FocusDirection::Up),
         "down" => Ok(FocusDirection::Down),
-        _ => Err(mlua::Error::external(
+        _ => Err(mlua::Error::runtime(
             "focus direction must be next, previous, left, right, up, or down",
         )),
     }
@@ -585,7 +585,7 @@ fn parse_axis(value: &str) -> mlua::Result<LayoutAxis> {
     match value.trim().to_ascii_lowercase().as_str() {
         "horizontal" | "width" | "x" => Ok(LayoutAxis::Horizontal),
         "vertical" | "height" | "y" => Ok(LayoutAxis::Vertical),
-        _ => Err(mlua::Error::external(
+        _ => Err(mlua::Error::runtime(
             "axis must be horizontal/width/x or vertical/height/y",
         )),
     }
