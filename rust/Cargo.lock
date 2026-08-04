@@ -12,3 +12,11 @@ version = "0.1.0"
 dependencies = [
  "phenix-runtime-api",
 ]
+
+[[package]]
+name = "phenix-ui-runtime"
+version = "0.1.0"
+dependencies = [
+ "phenix-runtime-api",
+ "phenix-ui-core",
+]
