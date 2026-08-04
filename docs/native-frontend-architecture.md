@@ -1,33 +1,41 @@
 # Native frontend architecture
 
-Phenix owns the terminal user experience. Pi remains an internal agent runtime behind a semantic process protocol.
-
-## Ownership model
-
-The Rust frontend has many producers and addressable reactors, but one authoritative state and render owner.
+Phenix owns the terminal user experience through the existing Rust/Ratatui frontend. Agent harnesses are reached through standard ACP behind a Phenix ACP gateway rather than through frontend-specific backend integrations.
 
 ```text
 terminal input ─┐
-backend output ─┼─ bounded transport ─ routed event fabric ─ reactions ─ owner loop ─ render
+backend events ─┼─ bounded transport ─ routed event fabric ─ reducer/effects ─ render
 clock/refresh ──┘
+
+Ratatui frontend
+  -> phenix-ui-core
+  -> typed Phenix ACP client
+  -> Phenix ACP gateway
+  -> standard ACP
+  -> Pi / Codex / other ACP agents
 ```
 
-Only the owner loop may mutate `AppState` or invoke the renderer. Producer threads may perform blocking I/O, but they may only send immutable value messages to the event fabric.
+The custom Pi JSONL backend remains a transitional adapter while the standard ACP gateway reaches feature parity. New frontend behavior must target the typed ACP/Phenix interface rather than adding more Pi-specific wire operations.
 
-Semantic messages are lossless. Refresh and clock messages are explicitly coalescible. Queue saturation must never silently discard user input, backend events, dialog responses, or lifecycle transitions.
+## Ownership model
+
+The frontend has many producers and addressable reactors, but one authoritative state and render owner. Only the owner loop may mutate `AppState` or invoke the renderer. Producer threads may perform blocking I/O, but they may only send immutable value messages to the event fabric.
+
+Semantic messages are lossless. Refresh and clock messages are explicitly coalescible. Queue saturation must never silently discard user input, ACP events, dialog responses, or lifecycle transitions.
 
 ## Two event planes
 
-The frontend deliberately separates what is represented from how it is presented.
+The frontend separates represented content from presentation behavior.
 
 ### Content event bus
 
-The content bus carries facts and lifecycle changes about the represented system:
+The content bus carries facts and lifecycle changes:
 
-- runtime replies and failures;
-- transcript, tool, queue, run, objective, and session changes;
-- authentication and extension-dialog lifecycle;
-- clock and refresh events that may affect projections.
+- ACP replies, notifications, and typed failures;
+- transcript, tool, queue, session, objective, and session-tree changes;
+- authentication and elicitation lifecycle;
+- workflow and routing state exposed by Phenix ACP;
+- clock and refresh events that affect projections.
 
 Content events must not contain terminal geometry, Ratatui widgets, pane sizes, focus transitions, or presentation-specific component references.
 
@@ -37,13 +45,12 @@ The UI bus carries presentation requests and interaction semantics:
 
 - raw input routed to the focused element;
 - focus requests;
-- pane resize requests;
-- visibility changes;
+- pane resize and visibility requests;
 - scrolling;
 - overlay and invalidation requests;
 - orderly UI shutdown requests.
 
-A pane may react to a content event and emit a UI event. For example, the sidebar reactor may observe content growth and emit a resize request addressed to the layout element. The pane does not resize itself and does not render.
+A pane may react to a content event and emit a UI event. It does not resize itself, mutate application state, or render directly.
 
 ### Routed envelopes
 
@@ -55,134 +62,131 @@ route: broadcast | focused | exact element | subtree | bubble
 payload: ContentEvent or UiEvent
 ```
 
-`ElementId` is a validated stable identity. Standard addresses include the root, layout, sidebar, transcript, input, status, and overlay elements. Extensions may register additional elements without changing the transport.
+`ElementId` is a validated stable identity. Extensions may register additional elements without changing the transport. Reactors receive immutable state and return reactions. The owner loop drains reactions, applies reducers, batches invalidation, and renders once after the resulting transition set.
 
-A route may be:
+## Backend and protocol boundary
 
-- **broadcast** — deliver in deterministic registration order;
-- **focused** — begin at the focused element and bubble through its ancestors;
-- **exact** — deliver only to one element address;
-- **subtree** — deliver to an element and its descendants;
-- **bubble** — deliver from an explicit element toward the root.
+The frontend depends on a typed client port. It does not depend on Pi, Codex, OpenCode, ACP process details, or backend implementation classes.
 
-Multiple reactors may be registered at one address. They run in registration order and may stop propagation after handling an event.
-
-Reactors receive immutable state and an event envelope. They return reactions. They never mutate `AppState`, hold renderer references, or own terminal state.
-
-Reactions may:
-
-- produce an application-state event;
-- emit another routed content event;
-- emit another routed UI event;
-- request a render.
-
-The owner loop drains the reaction queue, applies reducers, batches invalidation, and renders once after the resulting state transition set.
-
-## Testability
-
-Routing and UI wiring are tested independently of Pi.
-
-Pure tests construct:
-
-- an `AppState`;
-- an in-memory `EventRouter`;
-- fake addressable reactors;
-- a recording renderer or command sink.
-
-Tests can then assert:
-
-- exact, broadcast, subtree, focused, and bubbling delivery;
-- propagation stopping;
-- deterministic ordering of multiple reactors;
-- pane-to-layout resize requests;
-- focus-sensitive input handling;
-- resulting state mutations and render invalidation;
-- generated backend commands without launching a backend process.
-
-Pi and the process protocol are covered separately by adapter and end-to-end handshake tests. UI interaction tests must not require Pi, provider credentials, models, or a Node subprocess.
-
-## Backend dependency injection
-
-The composition root injects a `Box<dyn AgentBackend>`. The box is moved into one backend worker; it is not shared through `Arc<Mutex<_>>`.
-
-A backend implementation owns its transport and publishes correlated replies and semantic events. The UI does not branch on backend identity. Optional behavior is described by `BackendCapabilities`.
-
-The Pi implementation is a subprocess adapter:
+The production boundary is:
 
 ```text
-Ratatui frontend
-  -> phenix-runtime-api
-  -> phenix-process-backend
-  -> JSONL stdin/stdout
-  -> TypeScript headless host
-  -> AgentSessionRuntime + Phenix domain runtime
+frontend command
+  -> typed ACP or _phenix/* method parameters
+  -> serialization
+  -> ACP transport
+  -> validated response envelope
+  -> remote error or typed result decoding
+  -> frontend event/reducer
 ```
 
-The process driver alone owns child stdin, child lifecycle, and the pending-request table. Reader and request-forwarder threads feed that driver through an internal channel.
+Each expected failure stage has a distinct error variant. Serialization, transport, malformed envelopes, correlation failures, remote ACP errors, unsupported capabilities, and result-schema failures must not be collapsed into generic strings.
+
+Standard ACP operations retain their standard request and event types. Phenix-specific orchestration is exposed through negotiated `_phenix/*` methods and notifications. The gateway may aggregate multiple downstream ACP agents while presenting one ACP-compatible endpoint upstream.
+
+## Immutable session-tree configuration
+
+A session tree is an independently configured orchestration domain containing one logical root and all sessions delegated from it. Every session and objective belongs to exactly one tree.
+
+The tree definition is validated and immutable for its lifetime. It selects:
+
+- available ACP backends;
+- routing policy;
+- workflow registry;
+- context and recovery policy;
+- MCP servers;
+- built-in tool policy.
+
+Operational state remains mutable. A host may run multiple trees with different definitions concurrently. Changing routing, workflows, backends, or tools creates a new tree rather than mutating a running tree.
+
+The frontend may be the composition root that asks the host to create a tree, but it does not execute routing or workflow transitions. Once created, it interacts with the tree through typed ACP and Phenix ACP requests.
+
+## Tool configuration
+
+Client-provided MCP servers are part of immutable tree configuration and are forwarded during downstream ACP session setup. Backend-built-in tool policy is modeled separately because base ACP does not prescribe a universal built-in-tool allow/deny API.
+
+Adapters must either enforce the requested built-in tool policy through advertised ACP configuration or report a typed unsupported-capability error. Silent fallback is forbidden.
 
 ## Identity model
 
-The following identities are intentionally nominal and must not be interchanged:
+Nominal identities must not be interchanged:
 
-- `RunId`: live Phenix execution identity
-- `ObjectiveId`: user or discovered objective identity
-- `SessionId`: persisted Pi session identity
-- `SessionEntryId`: persisted conversation-tree entry
+- `SessionTreeId`: immutable orchestration-domain identity
+- `SessionNodeId`: logical node in a Phenix session graph
+- ACP session ID: downstream conversation identity
+- `ObjectiveId`: objective graph identity
+- `WorkflowId`: workflow definition identity
+- `BackendId`: configured downstream ACP endpoint
+- `RequestId`: protocol correlation identity
 - `ToolCallId`: tool execution identity
-- `DialogId`: extension UI request identity
-- `AuthFlowId`: authentication flow identity
-- `RequestId`: transport correlation identity
-- `ElementId`: routed UI element identity
+- `DialogId`: elicitation or extension-dialog identity
+- `AuthFlowId`: authentication-flow identity
+- `ElementId`: routed UI identity
 
-Prompts, transcripts, tools, queues, models, and cancellation target runs. Resume, switch, fork, clone, rename, tree, and export operations target persisted sessions. Presentation routing targets elements.
+Backend session IDs are references owned by node bindings; they are not Phenix node IDs or objective IDs.
 
 ## Presentation boundary
 
-The TypeScript host may emit semantic presentation requests only:
+The Ratatui frontend owns:
 
-- selection
-- confirmation
-- text or secret input
-- editor input
-- notifications
-- status values
-- string widgets
-- working-state metadata
+- layout and theme projection;
+- pane visibility and sizing;
+- focus and input editing;
+- transcript and tree rendering;
+- overlays, pickers, and dialogs;
+- frontend keymaps through the Lua provider.
 
-Pi component factories, terminal listeners, custom Pi headers, custom Pi footers, and custom Pi editor implementations do not cross the process boundary. Rust implements equivalent experiences when they are useful.
+The gateway owns:
 
-Theme access in the headless process is render-neutral. Terminal styling and layout are exclusively Rust responsibilities.
+- session-tree authority;
+- objective and workflow state;
+- backend-agnostic routing;
+- downstream ACP session bindings;
+- cross-session recovery and health;
+- context construction policy.
+
+Downstream ACP agents own their native conversation state, model execution, transcript production, tool execution, authentication, and agent-specific capabilities.
+
+## Testability
+
+Testing is layered:
+
+1. Pure router/reducer tests without ACP, Pi, terminal, or Ratatui.
+2. Typed ACP codec tests that distinguish encode, transport, envelope, remote, and result errors.
+3. Gateway conformance tests against fake ACP agents.
+4. Backend adapter tests against Pi and other agents.
+5. Recording-renderer and terminal interaction tests for the Ratatui projection.
+6. Packaged end-to-end checks through the gateway.
+
+A frontend interaction test must not require provider credentials or a live model unless explicitly classified as an end-to-end test.
 
 ## Extension rules
 
-A new backend operation requires:
+A new backend-facing operation requires:
 
-1. A nominally typed command, reply, or event in `phenix-runtime-api`.
-2. An explicit capability when support is optional.
-3. Exhaustive TypeScript command routing through an injected port.
-4. Wire encoding and decoding tests.
-5. Reducer coverage for resulting state transitions.
-6. A native interaction or a deliberate non-visual API-only classification.
+1. A standard ACP operation or a namespaced typed Phenix method.
+2. Nominal request and response identities where applicable.
+3. An explicit capability when support is optional.
+4. Exhaustive adapter translation.
+5. Separate typed failure modes.
+6. Reducer coverage and a deliberate frontend projection.
 
-A new UI producer sends a value-type content or UI envelope. It may not receive mutable state, renderer access, or widget references.
-
-A new reactor registers an `ElementId`, consumes one or both event planes, and emits reactions. It must not apply state changes directly.
-
-A new view stores durable interaction state in `AppState` or `ViewState`. Ratatui widgets remain borrowed projections and must not become hidden controllers.
+A new UI producer sends a value-type content or UI envelope. It may not receive mutable state, renderer access, backend objects, or widget references.
 
 ## Shutdown
 
-`Quit` requests backend shutdown but does not immediately terminate the owner loop. The frontend exits only after the backend worker publishes `Stopped`. This preserves response flushing, extension cleanup, Pi session disposal, and terminal restoration.
+Frontend quit requests orderly gateway/session shutdown but does not immediately terminate the owner loop. The frontend exits only after the backend worker or ACP connection publishes its stopped state, preserving response flushing, session persistence, extension cleanup, and terminal restoration.
 
 ## Completion gates
 
-The native frontend is releasable only when all of these pass:
+The migration is releasable only when all of these pass:
 
-- Rust formatting, Clippy, and workspace tests
-- strict TypeScript type checking and headless tests
-- routed content/UI bus tests without Pi
-- subprocess correlation integration test
-- Nix package build with locked Rust dependencies
-- packaged Rust-to-Pi initialization and shutdown handshake
-- prompt, steering, follow-up, abort, session, model, thinking, authentication, resource, compaction, retry, transcript, tool, and extension-dialog parity checks
-- no default invocation of Pi's interactive TUI
+- Rust formatting, Clippy, workspace tests, and locked Nix build;
+- typed ACP and Phenix extension conformance tests;
+- routed content/UI bus tests without Pi;
+- immutable tree-definition validation and recovery tests;
+- standard ACP authentication, sessions, prompts, cancellation, config options, MCP servers, transcript, tool, permission, and elicitation parity;
+- Phenix session-tree, objective, routing, workflow, and health extension tests;
+- packaged Ratatui-to-gateway-to-Pi initialization and shutdown checks;
+- no default invocation of Pi's interactive TUI;
+- removal of the transitional custom JSONL protocol after parity.
