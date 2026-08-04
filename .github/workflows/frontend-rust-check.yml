@@ -22,8 +22,36 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
-      - name: Refresh generated Rust files
+      - name: Apply event envelope migration
         run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          replacements = {
+              Path("rust/crates/phenix-ui-core/src/reducer.rs"): [
+                  ("    Backend(BackendOutput),", "    Backend(Box<BackendOutput>),"),
+                  (
+                      "        AppEvent::Backend(output) => reduce_backend_output(state, output),",
+                      "        AppEvent::Backend(output) => reduce_backend_output(state, *output),",
+                  ),
+              ],
+              Path("rust/crates/phenix-ui-runtime/src/consumers.rs"): [
+                  (
+                      "BusReaction::App(AppEvent::Backend(output.clone()))",
+                      "BusReaction::App(AppEvent::Backend(Box::new(output.clone())))",
+                  ),
+              ],
+          }
+
+          for path, edits in replacements.items():
+              content = path.read_text()
+              for old, new in edits:
+                  if old in content:
+                      content = content.replace(old, new)
+                  elif new not in content:
+                      raise SystemExit(f"expected migration pattern missing in {path}: {old}")
+              path.write_text(content)
+          PY
           cargo generate-lockfile --manifest-path rust/Cargo.toml
           cargo fmt --manifest-path rust/Cargo.toml --all
       - name: Commit generated Rust files
@@ -32,7 +60,7 @@ jobs:
             git config user.name github-actions[bot]
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
             git add rust
-            git commit -m "refresh generated Rust files"
+            git commit -m "compact backend event envelopes"
             git push origin HEAD:${GITHUB_HEAD_REF}
           fi
       - name: Format
