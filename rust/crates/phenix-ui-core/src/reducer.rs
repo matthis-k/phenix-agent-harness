@@ -1,29 +1,30 @@
 use crate::state::{AppState, DialogState, RuntimeConnectionState};
 use phenix_runtime_api::{
-    BackendCommand, BackendEvent, BackendReply, ExtensionUiResponse, SessionId, StreamingBehavior,
+    BackendCommand, BackendEvent, BackendOutput, BackendReply, ExtensionUiResponse, RunId, SessionId,
+    StreamingBehavior,
 };
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum UserIntent {
     InputChanged(String),
     SubmitPrompt,
     SteerPrompt,
     FollowUpPrompt,
     Abort,
-    SelectSession(SessionId),
+    SelectRun(RunId),
+    SwitchSession(SessionId),
     RespondToDialog(ExtensionUiResponse),
     Quit,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum AppEvent {
     User(UserIntent),
-    Backend(BackendEvent),
-    BackendReply(BackendReply),
-    BackendRequestFailed(String),
+    Backend(BackendOutput),
+    BackendSubmitFailed(String),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum AppEffect {
     Send(BackendCommand),
     Render,
@@ -33,12 +34,8 @@ pub enum AppEffect {
 pub fn reduce(state: &mut AppState, event: AppEvent) -> Vec<AppEffect> {
     match event {
         AppEvent::User(intent) => reduce_user_intent(state, intent),
-        AppEvent::Backend(event) => reduce_backend_event(state, event),
-        AppEvent::BackendReply(reply) => {
-            reduce_backend_reply(state, reply);
-            vec![AppEffect::Render]
-        }
-        AppEvent::BackendRequestFailed(message) => {
+        AppEvent::Backend(output) => reduce_backend_output(state, output),
+        AppEvent::BackendSubmitFailed(message) => {
             state.connection = RuntimeConnectionState::Degraded(message.clone());
             state.notifications.push_back(message);
             vec![AppEffect::Render]
@@ -57,15 +54,15 @@ fn reduce_user_intent(state: &mut AppState, intent: UserIntent) -> Vec<AppEffect
         UserIntent::SteerPrompt => submit_prompt(state, Some(StreamingBehavior::Steer)),
         UserIntent::FollowUpPrompt => submit_prompt(state, Some(StreamingBehavior::FollowUp)),
         UserIntent::Abort => vec![AppEffect::Send(BackendCommand::ExecutionAbort {
-            run_id: None,
+            run_id: state.input_target().cloned(),
         })],
-        UserIntent::SelectSession(session_id) => {
-            state.active_session = Some(session_id.clone());
-            vec![
-                AppEffect::Send(BackendCommand::SessionSwitch { session_id }),
-                AppEffect::Render,
-            ]
+        UserIntent::SelectRun(run_id) => {
+            state.selected_run = Some(run_id);
+            vec![AppEffect::Render]
         }
+        UserIntent::SwitchSession(session_id) => vec![AppEffect::Send(
+            BackendCommand::SessionSwitch { session_id },
+        )],
         UserIntent::RespondToDialog(response) => {
             let Some(dialog) = state.dialogs.pop_front() else {
                 return Vec::new();
@@ -89,10 +86,10 @@ fn submit_prompt(
     state: &mut AppState,
     streaming_behavior: Option<StreamingBehavior>,
 ) -> Vec<AppEffect> {
-    let Some(session_id) = state.active_session.clone() else {
+    let Some(run_id) = state.input_target().cloned() else {
         state
             .notifications
-            .push_back("No active session is available.".to_owned());
+            .push_back("No run is available for input.".to_owned());
         return vec![AppEffect::Render];
     };
     let text = std::mem::take(&mut state.input.text);
@@ -103,7 +100,7 @@ fn submit_prompt(
     state.input.history.push_back(text.clone());
     vec![
         AppEffect::Send(BackendCommand::PromptSubmit {
-            session_id,
+            run_id,
             text,
             images: Vec::new(),
             streaming_behavior,
@@ -112,26 +109,39 @@ fn submit_prompt(
     ]
 }
 
+fn reduce_backend_output(state: &mut AppState, output: BackendOutput) -> Vec<AppEffect> {
+    match output {
+        BackendOutput::Reply { result, .. } => match result {
+            Ok(reply) => reduce_backend_reply(state, reply),
+            Err(error) => {
+                state.notifications.push_back(error.to_string());
+                state.connection = RuntimeConnectionState::Degraded(error.to_string());
+            }
+        },
+        BackendOutput::Event(event) => reduce_backend_event(state, event),
+        BackendOutput::Stopped { result } => {
+            state.connection = match result {
+                Ok(()) => RuntimeConnectionState::Stopped,
+                Err(error) => RuntimeConnectionState::Failed(error.to_string()),
+            };
+        }
+    }
+    vec![AppEffect::Render]
+}
+
 fn reduce_backend_reply(state: &mut AppState, reply: BackendReply) {
     match reply {
-        BackendReply::Initialized {
-            capabilities,
-            snapshot,
-        } => {
-            state.connection = RuntimeConnectionState::from(&snapshot.health);
-            state.active_session = snapshot.active_session.clone();
-            state.capabilities = capabilities;
-            state.snapshot = Some(snapshot);
-        }
-        BackendReply::Snapshot(snapshot) => {
-            state.connection = RuntimeConnectionState::from(&snapshot.health);
-            state.active_session = snapshot.active_session.clone();
-            state.capabilities = snapshot.capabilities.clone();
-            state.snapshot = Some(snapshot);
+        BackendReply::Initialized { snapshot, .. } | BackendReply::Snapshot(snapshot) => {
+            state.apply_snapshot(snapshot);
         }
         BackendReply::Sessions(sessions) => {
             if let Some(snapshot) = &mut state.snapshot {
                 snapshot.sessions = sessions;
+            }
+        }
+        BackendReply::Runs(runs) => {
+            if let Some(snapshot) = &mut state.snapshot {
+                snapshot.runs = runs;
             }
         }
         BackendReply::Accepted
@@ -145,18 +155,10 @@ fn reduce_backend_reply(state: &mut AppState, reply: BackendReply) {
     }
 }
 
-fn reduce_backend_event(state: &mut AppState, event: BackendEvent) -> Vec<AppEffect> {
+fn reduce_backend_event(state: &mut AppState, event: BackendEvent) {
     match event {
-        BackendEvent::SnapshotChanged(snapshot) => {
-            state.connection = RuntimeConnectionState::from(&snapshot.health);
-            state.active_session = snapshot.active_session.clone();
-            state.capabilities = snapshot.capabilities.clone();
-            state.snapshot = Some(snapshot);
-        }
-        BackendEvent::SessionChanged(session) => {
-            if state.active_session.as_ref() == Some(&session.id) {
-                state.active_session = Some(session.id.clone());
-            }
+        BackendEvent::SnapshotChanged(snapshot) => state.apply_snapshot(snapshot),
+        BackendEvent::PersistedSessionChanged(session) => {
             if let Some(snapshot) = &mut state.snapshot {
                 if let Some(existing) = snapshot
                     .sessions
@@ -169,8 +171,38 @@ fn reduce_backend_event(state: &mut AppState, event: BackendEvent) -> Vec<AppEff
                 }
             }
         }
-        BackendEvent::TranscriptAppended(block) => state.transcript.append(block),
-        BackendEvent::TranscriptUpdated(block) => state.transcript.update(block),
+        BackendEvent::RunChanged(run) => {
+            if let Some(snapshot) = &mut state.snapshot {
+                if let Some(existing) = snapshot
+                    .runs
+                    .iter_mut()
+                    .find(|candidate| candidate.id == run.id)
+                {
+                    *existing = run;
+                } else {
+                    snapshot.runs.push(run);
+                }
+            }
+        }
+        BackendEvent::ObjectiveChanged(objective) => {
+            if let Some(snapshot) = &mut state.snapshot {
+                if let Some(existing) = snapshot
+                    .objectives
+                    .iter_mut()
+                    .find(|candidate| candidate.id == objective.id)
+                {
+                    *existing = objective;
+                } else {
+                    snapshot.objectives.push(objective);
+                }
+            }
+        }
+        BackendEvent::TranscriptAppended(block) => {
+            state.transcript_mut(block.run_id.clone()).append(block);
+        }
+        BackendEvent::TranscriptUpdated(block) => {
+            state.transcript_mut(block.run_id.clone()).update(block);
+        }
         BackendEvent::ExtensionUiRequested { dialog_id, request } => {
             state.dialogs.push_back(DialogState {
                 id: dialog_id,
@@ -190,12 +222,6 @@ fn reduce_backend_event(state: &mut AppState, event: BackendEvent) -> Vec<AppEff
         BackendEvent::HealthChanged(health) => {
             state.connection = RuntimeConnectionState::from(&health);
         }
-        BackendEvent::Stopped { result } => {
-            state.connection = match result {
-                Ok(()) => RuntimeConnectionState::Stopped,
-                Err(message) => RuntimeConnectionState::Failed(message),
-            };
-        }
         BackendEvent::ToolStarted { .. }
         | BackendEvent::ToolUpdated { .. }
         | BackendEvent::ToolFinished { .. }
@@ -204,21 +230,22 @@ fn reduce_backend_event(state: &mut AppState, event: BackendEvent) -> Vec<AppEff
         | BackendEvent::AuthNotice { .. }
         | BackendEvent::AuthFinished { .. } => {}
     }
-    vec![AppEffect::Render]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use phenix_runtime_api::{
-        BackendEvent, DialogId, ExtensionUiRequest, SessionId, TranscriptBlock, TranscriptRole,
+        BackendEvent, BackendOutput, DialogId, ExtensionUiRequest, RunId, TranscriptBlock,
+        TranscriptRole,
     };
 
     #[test]
-    fn prompt_submission_moves_owned_text_into_a_backend_effect() {
-        let session = SessionId::parse("root").expect("valid session");
+    fn prompt_submission_moves_owned_text_into_a_run_targeted_backend_effect() {
+        let run = RunId::parse("root-run").expect("valid run");
         let mut state = AppState {
-            active_session: Some(session.clone()),
+            root_run: Some(run.clone()),
+            selected_run: Some(run.clone()),
             ..AppState::default()
         };
         reduce(
@@ -230,39 +257,60 @@ mod tests {
         assert!(matches!(
             effects.first(),
             Some(AppEffect::Send(BackendCommand::PromptSubmit {
-                session_id,
+                run_id,
                 text,
                 ..
-            })) if session_id == &session && text == "inspect repository"
+            })) if run_id == &run && text == "inspect repository"
         ));
     }
 
     #[test]
-    fn transcript_updates_replace_by_stable_block_identity() {
-        let session = SessionId::parse("root").expect("valid session");
+    fn selecting_a_child_run_changes_input_target_without_switching_persistence() {
+        let root = RunId::parse("root-run").expect("valid root");
+        let child = RunId::parse("child-run").expect("valid child");
+        let mut state = AppState {
+            root_run: Some(root),
+            ..AppState::default()
+        };
+        let effects = reduce(
+            &mut state,
+            AppEvent::User(UserIntent::SelectRun(child.clone())),
+        );
+        assert_eq!(state.selected_run, Some(child));
+        assert_eq!(effects, vec![AppEffect::Render]);
+    }
+
+    #[test]
+    fn transcript_updates_replace_by_stable_identity_within_each_run() {
+        let run = RunId::parse("root-run").expect("valid run");
         let mut state = AppState::default();
         let block = TranscriptBlock {
             id: "assistant-1".to_owned(),
-            session_id: session,
+            run_id: run.clone(),
             role: TranscriptRole::Assistant,
             text: "partial".to_owned(),
             complete: false,
         };
         reduce(
             &mut state,
-            AppEvent::Backend(BackendEvent::TranscriptAppended(block.clone())),
+            AppEvent::Backend(BackendOutput::Event(BackendEvent::TranscriptAppended(
+                block.clone(),
+            ))),
         );
         reduce(
             &mut state,
-            AppEvent::Backend(BackendEvent::TranscriptUpdated(TranscriptBlock {
-                text: "complete".to_owned(),
-                complete: true,
-                ..block
-            })),
+            AppEvent::Backend(BackendOutput::Event(BackendEvent::TranscriptUpdated(
+                TranscriptBlock {
+                    text: "complete".to_owned(),
+                    complete: true,
+                    ..block
+                },
+            ))),
         );
-        assert_eq!(state.transcript.blocks.len(), 1);
-        assert_eq!(state.transcript.blocks[0].text, "complete");
-        assert!(state.transcript.blocks[0].complete);
+        let transcript = state.transcript(&run).expect("run transcript");
+        assert_eq!(transcript.blocks.len(), 1);
+        assert_eq!(transcript.blocks[0].text, "complete");
+        assert!(transcript.blocks[0].complete);
     }
 
     #[test]
@@ -270,13 +318,13 @@ mod tests {
         let mut state = AppState::default();
         reduce(
             &mut state,
-            AppEvent::Backend(BackendEvent::ExtensionUiRequested {
+            AppEvent::Backend(BackendOutput::Event(BackendEvent::ExtensionUiRequested {
                 dialog_id: DialogId::parse("dialog-1").expect("valid dialog"),
                 request: ExtensionUiRequest::Confirm {
                     title: "Apply change?".to_owned(),
                     message: "This mutates the repository.".to_owned(),
                 },
-            }),
+            })),
         );
         assert_eq!(state.dialogs.len(), 1);
     }
