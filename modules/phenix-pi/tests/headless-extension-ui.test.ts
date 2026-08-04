@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 
 import {
   HeadlessExtensionUi,
   type HeadlessExtensionUiEvent,
 } from "../headless/extension-ui.ts";
+
+type ExtensionTheme = ExtensionUIContext["theme"];
 
 test("extension selector is rendered externally and resolved by dialog identity", async () => {
   const events: HeadlessExtensionUiEvent[] = [];
@@ -74,7 +76,7 @@ test("Pi component factories are reported as unsupported instead of crossing the
 
 function createUi(events: HeadlessExtensionUiEvent[]): HeadlessExtensionUi {
   let nextId = 1;
-  const theme = {} as Theme;
+  const theme = {} as ExtensionTheme;
   return new HeadlessExtensionUi({
     publish: (event) => events.push(event),
     createId: () => `dialog-${nextId++}`,
