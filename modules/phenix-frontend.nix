@@ -74,7 +74,7 @@
         configText = ''
           phenix.keymap.del("global", "<C-q>")
           phenix.theme.set("Accent", { fg = "#ffffff", bold = true })
-          phenix.ui.pane -- Keep the namespace reachable during config evaluation.
+          assert(type(phenix.ui.pane.resize) == "function")
         '';
       };
 
