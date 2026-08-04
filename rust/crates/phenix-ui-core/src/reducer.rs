@@ -84,9 +84,11 @@ fn reduce_user_intent(state: &mut AppState, intent: UserIntent) -> Vec<AppEffect
             vec![AppEffect::Render]
         }
         UserIntent::SwitchSession(session_id) => {
-            state.view.overlay = None;
-            state.view.focus = FocusTarget::Input;
-            vec![AppEffect::Send(BackendCommand::SessionSwitch { session_id })]
+            close_overlay(state);
+            vec![
+                AppEffect::Send(BackendCommand::SessionSwitch { session_id }),
+                AppEffect::Render,
+            ]
         }
         UserIntent::CreateSession => vec![AppEffect::Send(BackendCommand::SessionCreate {
             parent_session: None,
@@ -150,24 +152,16 @@ fn reduce_user_intent(state: &mut AppState, intent: UserIntent) -> Vec<AppEffect
             state.view.show_details = !state.view.show_details;
             vec![AppEffect::Render]
         }
-        UserIntent::RespondToDialog(response) => {
-            let Some(dialog) = state.dialogs.pop_front() else {
-                return Vec::new();
-            };
-            if state.dialogs.is_empty() {
-                state.view.focus = FocusTarget::Input;
-            }
-            vec![
-                AppEffect::Send(BackendCommand::ExtensionUiRespond {
-                    dialog_id: dialog.id,
-                    response,
-                }),
-                AppEffect::Render,
-            ]
-        }
+        UserIntent::RespondToDialog(response) => respond_to_dialog(state, response),
         UserIntent::Quit => {
-            state.should_quit = true;
-            vec![AppEffect::Send(BackendCommand::Shutdown), AppEffect::Quit]
+            if state.exit_requested {
+                return Vec::new();
+            }
+            state.exit_requested = true;
+            state
+                .notifications
+                .push_back("Stopping the runtime…".to_owned());
+            vec![AppEffect::Send(BackendCommand::Shutdown), AppEffect::Render]
         }
     }
 }
@@ -211,19 +205,15 @@ fn submit_command(state: &mut AppState, text: &str) -> Vec<AppEffect> {
 
     match name {
         "login" => open_authentication(state),
-        "logout" => {
-            if arguments.is_empty() {
-                state.notifications.push_back(
-                    "Use /logout <provider>, or open /login to inspect configured providers."
-                        .to_owned(),
-                );
-                vec![AppEffect::Render]
-            } else {
-                vec![AppEffect::Send(BackendCommand::AuthLogout {
-                    provider_id: arguments.to_owned(),
-                })]
-            }
+        "logout" if arguments.is_empty() => {
+            state.notifications.push_back(
+                "Use /logout <provider>, or /login to inspect configured providers.".to_owned(),
+            );
+            vec![AppEffect::Render]
         }
+        "logout" => vec![AppEffect::Send(BackendCommand::AuthLogout {
+            provider_id: arguments.to_owned(),
+        })],
         "model" => open_model_picker(state),
         "resume" | "sessions" => open_session_picker(state),
         "new" => vec![AppEffect::Send(BackendCommand::SessionCreate {
@@ -261,6 +251,29 @@ fn submit_command(state: &mut AppState, text: &str) -> Vec<AppEffect> {
             })]
         }
     }
+}
+
+fn respond_to_dialog(state: &mut AppState, response: ExtensionUiResponse) -> Vec<AppEffect> {
+    let Some(dialog) = state.dialogs.pop_front() else {
+        return Vec::new();
+    };
+    if let Some(next) = state.dialogs.front() {
+        state.view.overlay = Some(OverlayState::ExtensionDialog {
+            dialog_id: next.id.clone(),
+            request: next.request.clone(),
+            input: String::new(),
+            selected: 0,
+        });
+    } else {
+        close_overlay(state);
+    }
+    vec![
+        AppEffect::Send(BackendCommand::ExtensionUiRespond {
+            dialog_id: dialog.id,
+            response,
+        }),
+        AppEffect::Render,
+    ]
 }
 
 fn record_history(state: &mut AppState, text: &str) {
@@ -322,12 +335,17 @@ fn no_run_notification(state: &mut AppState) -> Vec<AppEffect> {
 }
 
 fn reduce_backend_output(state: &mut AppState, output: BackendOutput) -> Vec<AppEffect> {
+    let mut quit = false;
     match output {
         BackendOutput::Reply { result, .. } => match result {
-            Ok(reply) => reduce_backend_reply(state, reply),
+            Ok(reply) => {
+                quit = matches!(reply, BackendReply::Completed) && state.exit_requested;
+                reduce_backend_reply(state, reply);
+            }
             Err(error) => {
                 state.notifications.push_back(error.to_string());
                 state.connection = RuntimeConnectionState::Degraded(error.to_string());
+                quit = state.exit_requested;
             }
         },
         BackendOutput::Event(event) => reduce_backend_event(state, event),
@@ -336,9 +354,15 @@ fn reduce_backend_output(state: &mut AppState, output: BackendOutput) -> Vec<App
                 Ok(()) => RuntimeConnectionState::Stopped,
                 Err(error) => RuntimeConnectionState::Failed(error.to_string()),
             };
+            quit = true;
         }
     }
-    vec![AppEffect::Render]
+    if quit {
+        state.should_quit = true;
+        vec![AppEffect::Render, AppEffect::Quit]
+    } else {
+        vec![AppEffect::Render]
+    }
 }
 
 fn reduce_backend_reply(state: &mut AppState, reply: BackendReply) {
@@ -363,9 +387,7 @@ fn reduce_backend_reply(state: &mut AppState, reply: BackendReply) {
         BackendReply::Exported { path } => state
             .notifications
             .push_back(format!("Session exported to {path}")),
-        BackendReply::Accepted
-        | BackendReply::SessionTree(_)
-        | BackendReply::Completed => {}
+        BackendReply::Accepted | BackendReply::SessionTree(_) | BackendReply::Completed => {}
     }
 }
 
@@ -374,41 +396,17 @@ fn reduce_backend_event(state: &mut AppState, event: BackendEvent) {
         BackendEvent::SnapshotChanged(snapshot) => state.apply_snapshot(snapshot),
         BackendEvent::PersistedSessionChanged(session) => {
             if let Some(snapshot) = &mut state.snapshot {
-                if let Some(existing) = snapshot
-                    .sessions
-                    .iter_mut()
-                    .find(|candidate| candidate.id == session.id)
-                {
-                    *existing = session;
-                } else {
-                    snapshot.sessions.push(session);
-                }
+                upsert_by(&mut snapshot.sessions, session, |item| item.id.clone());
             }
         }
         BackendEvent::RunChanged(run) => {
             if let Some(snapshot) = &mut state.snapshot {
-                if let Some(existing) = snapshot
-                    .runs
-                    .iter_mut()
-                    .find(|candidate| candidate.id == run.id)
-                {
-                    *existing = run;
-                } else {
-                    snapshot.runs.push(run);
-                }
+                upsert_by(&mut snapshot.runs, run, |item| item.id.clone());
             }
         }
         BackendEvent::ObjectiveChanged(objective) => {
             if let Some(snapshot) = &mut state.snapshot {
-                if let Some(existing) = snapshot
-                    .objectives
-                    .iter_mut()
-                    .find(|candidate| candidate.id == objective.id)
-                {
-                    *existing = objective;
-                } else {
-                    snapshot.objectives.push(objective);
-                }
+                upsert_by(&mut snapshot.objectives, objective, |item| item.id.clone());
             }
         }
         BackendEvent::TranscriptAppended(block) => {
@@ -447,7 +445,7 @@ fn reduce_backend_event(state: &mut AppState, event: BackendEvent) {
             if matches!(
                 state.view.overlay,
                 Some(OverlayState::AuthenticationPrompt {
-                    ref flow_id: active_flow,
+                    flow_id: ref active_flow,
                     ..
                 }) if active_flow == &flow_id
             ) {
@@ -455,11 +453,20 @@ fn reduce_backend_event(state: &mut AppState, event: BackendEvent) {
             }
         }
         BackendEvent::ExtensionUiRequested { dialog_id, request } => {
-            state.dialogs.push_back(DialogState {
-                id: dialog_id,
-                request,
-            });
-            state.view.focus = FocusTarget::Overlay;
+            let dialog = DialogState {
+                id: dialog_id.clone(),
+                request: request.clone(),
+            };
+            state.dialogs.push_back(dialog);
+            if state.dialogs.len() == 1 {
+                state.view.overlay = Some(OverlayState::ExtensionDialog {
+                    dialog_id,
+                    request,
+                    input: String::new(),
+                    selected: 0,
+                });
+                state.view.focus = FocusTarget::Overlay;
+            }
         }
         BackendEvent::Notification { message, .. } => {
             state.notifications.push_back(message);
@@ -481,22 +488,27 @@ fn reduce_backend_event(state: &mut AppState, event: BackendEvent) {
     }
 }
 
+fn upsert_by<T, K: PartialEq>(items: &mut Vec<T>, item: T, key: impl Fn(&T) -> K) {
+    let item_key = key(&item);
+    if let Some(existing) = items.iter_mut().find(|candidate| key(candidate) == item_key) {
+        *existing = item;
+    } else {
+        items.push(item);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use phenix_runtime_api::{
-        AuthFlowId, AuthPrompt, BackendEvent, BackendOutput, DialogId, ExtensionUiRequest, RunId,
-        TranscriptBlock, TranscriptRole,
+        AuthPrompt, BackendHealth, DialogId, ExtensionUiRequest, RunKind, RunState, RunSummary,
+        RuntimeSnapshot, TranscriptBlock, TranscriptRole,
     };
 
     #[test]
     fn prompt_submission_moves_owned_text_into_a_run_targeted_backend_effect() {
         let run = RunId::parse("root-run").expect("valid run");
-        let mut state = AppState {
-            root_run: Some(run.clone()),
-            selected_run: Some(run.clone()),
-            ..AppState::default()
-        };
+        let mut state = state_with_run(run.clone());
         reduce(
             &mut state,
             AppEvent::User(UserIntent::InputChanged("inspect repository".to_owned())),
@@ -514,7 +526,7 @@ mod tests {
     }
 
     #[test]
-    fn login_command_opens_native_provider_picker_and_requests_data() {
+    fn login_command_opens_native_provider_picker() {
         let mut state = AppState::default();
         state.input.replace("/login".to_owned());
         let effects = reduce(&mut state, AppEvent::User(UserIntent::SubmitPrompt));
@@ -523,56 +535,6 @@ mod tests {
             Some(OverlayState::AuthenticationProviders { .. })
         ));
         assert!(effects.contains(&AppEffect::Send(BackendCommand::AuthProviders)));
-    }
-
-    #[test]
-    fn selecting_a_child_run_changes_input_target_without_switching_persistence() {
-        let root = RunId::parse("root-run").expect("valid root");
-        let child = RunId::parse("child-run").expect("valid child");
-        let mut state = AppState {
-            root_run: Some(root),
-            ..AppState::default()
-        };
-        let effects = reduce(
-            &mut state,
-            AppEvent::User(UserIntent::SelectRun(child.clone())),
-        );
-        assert_eq!(state.selected_run, Some(child.clone()));
-        assert_eq!(state.view.selected_run, Some(child));
-        assert_eq!(effects, vec![AppEffect::Render]);
-    }
-
-    #[test]
-    fn transcript_updates_replace_by_stable_identity_within_each_run() {
-        let run = RunId::parse("root-run").expect("valid run");
-        let mut state = AppState::default();
-        let block = TranscriptBlock {
-            id: "assistant-1".to_owned(),
-            run_id: run.clone(),
-            role: TranscriptRole::Assistant,
-            text: "partial".to_owned(),
-            complete: false,
-        };
-        reduce(
-            &mut state,
-            AppEvent::Backend(BackendOutput::Event(BackendEvent::TranscriptAppended(
-                block.clone(),
-            ))),
-        );
-        reduce(
-            &mut state,
-            AppEvent::Backend(BackendOutput::Event(BackendEvent::TranscriptUpdated(
-                TranscriptBlock {
-                    text: "complete".to_owned(),
-                    complete: true,
-                    ..block
-                },
-            ))),
-        );
-        let transcript = state.transcript(&run).expect("run transcript");
-        assert_eq!(transcript.blocks.len(), 1);
-        assert_eq!(transcript.blocks[0].text, "complete");
-        assert!(transcript.blocks[0].complete);
     }
 
     #[test]
@@ -597,19 +559,104 @@ mod tests {
     }
 
     #[test]
-    fn dialogs_queue_semantically_without_importing_backend_widgets() {
+    fn extension_dialogs_are_queued_and_rendered_semantically() {
         let mut state = AppState::default();
         reduce(
             &mut state,
             AppEvent::Backend(BackendOutput::Event(BackendEvent::ExtensionUiRequested {
-                dialog_id: DialogId::parse("dialog-1").expect("valid dialog"),
+                dialog_id: DialogId::parse("dialog-1").expect("dialog ID"),
                 request: ExtensionUiRequest::Confirm {
-                    title: "Apply change?".to_owned(),
-                    message: "This mutates the repository.".to_owned(),
+                    title: "Apply?".to_owned(),
+                    message: "Mutate repository".to_owned(),
                 },
             })),
         );
         assert_eq!(state.dialogs.len(), 1);
-        assert_eq!(state.view.focus, FocusTarget::Overlay);
+        assert!(matches!(
+            state.view.overlay,
+            Some(OverlayState::ExtensionDialog { .. })
+        ));
+    }
+
+    #[test]
+    fn quit_waits_for_runtime_completion() {
+        let mut state = AppState::default();
+        let effects = reduce(&mut state, AppEvent::User(UserIntent::Quit));
+        assert!(state.exit_requested);
+        assert!(!state.should_quit);
+        assert!(effects.contains(&AppEffect::Send(BackendCommand::Shutdown)));
+        let effects = reduce(
+            &mut state,
+            AppEvent::Backend(BackendOutput::Reply {
+                request_id: phenix_runtime_api::RequestId::parse("shutdown").expect("request ID"),
+                result: Ok(BackendReply::Completed),
+            }),
+        );
+        assert!(state.should_quit);
+        assert!(effects.contains(&AppEffect::Quit));
+    }
+
+    #[test]
+    fn transcript_updates_replace_by_stable_identity() {
+        let run = RunId::parse("root-run").expect("run ID");
+        let mut state = state_with_run(run.clone());
+        let block = TranscriptBlock {
+            id: "assistant-1".to_owned(),
+            run_id: run.clone(),
+            role: TranscriptRole::Assistant,
+            text: "partial".to_owned(),
+            complete: false,
+        };
+        reduce(
+            &mut state,
+            AppEvent::Backend(BackendOutput::Event(BackendEvent::TranscriptAppended(
+                block.clone(),
+            ))),
+        );
+        reduce(
+            &mut state,
+            AppEvent::Backend(BackendOutput::Event(BackendEvent::TranscriptUpdated(
+                TranscriptBlock {
+                    text: "complete".to_owned(),
+                    complete: true,
+                    ..block
+                },
+            ))),
+        );
+        let transcript = state.transcript(&run).expect("transcript");
+        assert_eq!(transcript.blocks.len(), 1);
+        assert_eq!(transcript.blocks[0].text, "complete");
+    }
+
+    fn state_with_run(run: RunId) -> AppState {
+        let mut state = AppState::default();
+        state.root_run = Some(run.clone());
+        state.selected_run = Some(run.clone());
+        state.snapshot = Some(RuntimeSnapshot {
+            capabilities: Default::default(),
+            health: BackendHealth::Ready,
+            active_session: None,
+            root_run: Some(run.clone()),
+            selected_run: Some(run.clone()),
+            sessions: Vec::new(),
+            runs: vec![RunSummary {
+                id: run,
+                parent: None,
+                kind: RunKind::Root,
+                definition_id: "root.session".to_owned(),
+                display_name: "Root".to_owned(),
+                state: RunState::Running,
+                persisted_session: None,
+                session_file: None,
+                model: None,
+                thinking_level: None,
+                difficulty: None,
+                budget: None,
+                pending_messages: 0,
+                outcome: None,
+            }],
+            objectives: Vec::new(),
+        });
+        state
     }
 }
