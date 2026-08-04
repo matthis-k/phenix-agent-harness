@@ -10,7 +10,7 @@ import { objectiveId, runId } from "../shared.ts";
 
 export type MemoryLedgerEntry =
   | { readonly type: "evidence.recorded"; readonly value: EvidenceRecord }
-  | { readonly type: "note.recorded"; readonly value: MemoryNote };
+  | { readonly type: "notes.recorded"; readonly value: readonly MemoryNote[] };
 
 const MEMORY_STATUSES = ["active", "superseded", "invalidated", "uncertain"] as const;
 const MEMORY_RELIABILITIES = ["observed", "derived", "reported"] as const;
@@ -29,8 +29,8 @@ export function parseMemoryLedgerEntry(value: unknown): MemoryLedgerEntry {
   switch (type) {
     case "evidence.recorded":
       return { type, value: parseEvidenceRecord(record.value) };
-    case "note.recorded":
-      return { type, value: parseMemoryNote(record.value) };
+    case "notes.recorded":
+      return { type, value: parseMemoryNoteBatch(record.value) };
     default:
       throw new Error(`Unsupported memory ledger entry type: ${type}`);
   }
@@ -140,6 +140,52 @@ export function parseMemoryNote(value: unknown): MemoryNote {
   return { ...base, status };
 }
 
+export function assertValidMemoryNoteTransition(
+  previous: MemoryNote,
+  next: MemoryNote,
+): void {
+  const immutableFields = [
+    "rootRunId",
+    "runId",
+    "kind",
+    "retention",
+    "reliability",
+    "summary",
+    "subject",
+    "createdAt",
+  ] as const;
+  for (const field of immutableFields) {
+    if (previous[field] !== next[field]) {
+      throw new Error(`Memory note ${next.id} changed immutable field ${field}`);
+    }
+  }
+  if (!sameArray(previous.objectiveIds, next.objectiveIds)) {
+    throw new Error(`Memory note ${next.id} changed immutable objective scope`);
+  }
+  if (!sameArray(previous.evidenceIds, next.evidenceIds)) {
+    throw new Error(`Memory note ${next.id} changed immutable evidence references`);
+  }
+  if (!sameArray(previous.supersedes ?? [], next.supersedes ?? [])) {
+    throw new Error(`Memory note ${next.id} changed immutable supersedes references`);
+  }
+  if (Date.parse(next.updatedAt) < Date.parse(previous.updatedAt)) {
+    throw new Error(`Memory note ${next.id} moved updatedAt backwards`);
+  }
+}
+
+function parseMemoryNoteBatch(value: unknown): readonly MemoryNote[] {
+  if (!Array.isArray(value)) throw new Error("memory note batch must be an array");
+  if (value.length === 0) throw new Error("memory note batch must not be empty");
+  if (value.length > 128) throw new Error("memory note batch must not exceed 128 entries");
+  const notes = value.map((item) => parseMemoryNote(item));
+  const ids = new Set<string>();
+  for (const note of notes) {
+    if (ids.has(note.id)) throw new Error(`Duplicate memory note in batch: ${note.id}`);
+    ids.add(note.id);
+  }
+  return notes;
+}
+
 function parseEvidenceSource(value: unknown): EvidenceSource {
   const record = requireRecord(value, "evidence source");
   const kind = requireString(record.kind, "evidence source kind");
@@ -231,4 +277,8 @@ function parseEnum<const TValue extends string>(
     throw new Error(`${name} must be one of: ${values.join(", ")}`);
   }
   return text as TValue;
+}
+
+function sameArray(left: readonly unknown[], right: readonly unknown[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
