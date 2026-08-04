@@ -1,6 +1,8 @@
+use crate::view::ViewState;
 use phenix_runtime_api::{
-    BackendCapabilities, BackendHealth, DialogId, ExtensionUiRequest, RunId, RuntimeSnapshot,
-    SessionId, TranscriptBlock,
+    AuthFlowId, AuthNotice, AuthPrompt, AuthProviderSummary, BackendCapabilities, BackendHealth,
+    CommandSummary, DialogId, ExtensionUiRequest, ModelSummary, RunId, RuntimeSnapshot, SessionId,
+    ThinkingLevel, TranscriptBlock,
 };
 use std::collections::{BTreeMap, VecDeque};
 
@@ -30,6 +32,71 @@ pub struct InputState {
     pub text: String,
     pub cursor_byte: usize,
     pub history: VecDeque<String>,
+    pub history_cursor: Option<usize>,
+}
+
+impl InputState {
+    pub fn replace(&mut self, text: String) {
+        self.cursor_byte = text.len();
+        self.text = text;
+        self.history_cursor = None;
+    }
+
+    pub fn insert(&mut self, text: &str) {
+        self.cursor_byte = self.cursor_byte.min(self.text.len());
+        while !self.text.is_char_boundary(self.cursor_byte) {
+            self.cursor_byte = self.cursor_byte.saturating_sub(1);
+        }
+        self.text.insert_str(self.cursor_byte, text);
+        self.cursor_byte += text.len();
+        self.history_cursor = None;
+    }
+
+    pub fn move_left(&mut self) {
+        if self.cursor_byte == 0 {
+            return;
+        }
+        self.cursor_byte = self.text[..self.cursor_byte]
+            .char_indices()
+            .next_back()
+            .map_or(0, |(index, _)| index);
+    }
+
+    pub fn move_right(&mut self) {
+        if self.cursor_byte >= self.text.len() {
+            return;
+        }
+        let width = self.text[self.cursor_byte..]
+            .chars()
+            .next()
+            .map_or(0, char::len_utf8);
+        self.cursor_byte += width;
+    }
+
+    pub fn backspace(&mut self) {
+        if self.cursor_byte == 0 {
+            return;
+        }
+        let previous = self.text[..self.cursor_byte]
+            .char_indices()
+            .next_back()
+            .map_or(0, |(index, _)| index);
+        self.text.drain(previous..self.cursor_byte);
+        self.cursor_byte = previous;
+        self.history_cursor = None;
+    }
+
+    pub fn delete(&mut self) {
+        if self.cursor_byte >= self.text.len() {
+            return;
+        }
+        let width = self.text[self.cursor_byte..]
+            .chars()
+            .next()
+            .map_or(0, char::len_utf8);
+        self.text.drain(self.cursor_byte..self.cursor_byte + width);
+        self.history_cursor = None;
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -62,6 +129,25 @@ pub struct DialogState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuthFlowState {
+    pub id: AuthFlowId,
+    pub provider_id: Option<String>,
+    pub prompt: Option<AuthPrompt>,
+    pub notices: VecDeque<AuthNotice>,
+}
+
+impl AuthFlowState {
+    pub fn new(id: AuthFlowId) -> Self {
+        Self {
+            id,
+            provider_id: None,
+            prompt: None,
+            notices: VecDeque::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppState {
     pub connection: RuntimeConnectionState,
     pub capabilities: BackendCapabilities,
@@ -71,9 +157,15 @@ pub struct AppState {
     pub selected_run: Option<RunId>,
     pub input: InputState,
     pub transcripts: BTreeMap<RunId, TranscriptState>,
+    pub models: Vec<ModelSummary>,
+    pub thinking_levels: Vec<ThinkingLevel>,
+    pub auth_providers: Vec<AuthProviderSummary>,
+    pub auth_flows: BTreeMap<AuthFlowId, AuthFlowState>,
+    pub commands: Vec<CommandSummary>,
     pub dialogs: VecDeque<DialogState>,
     pub statuses: BTreeMap<String, String>,
     pub notifications: VecDeque<String>,
+    pub view: ViewState,
     pub should_quit: bool,
 }
 
@@ -103,8 +195,15 @@ impl AppState {
             .selected_run
             .clone()
             .or_else(|| snapshot.root_run.clone());
+        self.view.selected_run = self.selected_run.clone();
         self.capabilities = snapshot.capabilities.clone();
         self.snapshot = Some(snapshot);
+    }
+
+    pub fn auth_flow_mut(&mut self, flow_id: AuthFlowId) -> &mut AuthFlowState {
+        self.auth_flows
+            .entry(flow_id.clone())
+            .or_insert_with(|| AuthFlowState::new(flow_id))
     }
 }
 
@@ -119,10 +218,33 @@ impl Default for AppState {
             selected_run: None,
             input: InputState::default(),
             transcripts: BTreeMap::new(),
+            models: Vec::new(),
+            thinking_levels: Vec::new(),
+            auth_providers: Vec::new(),
+            auth_flows: BTreeMap::new(),
+            commands: Vec::new(),
             dialogs: VecDeque::new(),
             statuses: BTreeMap::new(),
             notifications: VecDeque::new(),
+            view: ViewState::default(),
             should_quit: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn editor_operations_preserve_utf8_boundaries() {
+        let mut input = InputState::default();
+        input.insert("größer");
+        input.move_left();
+        input.backspace();
+        assert_eq!(input.text, "gröer");
+        assert!(input.text.is_char_boundary(input.cursor_byte));
+        input.delete();
+        assert_eq!(input.text, "gröe");
     }
 }
