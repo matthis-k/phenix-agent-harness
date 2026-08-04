@@ -40,7 +40,7 @@
       mkPhenixWrapper =
         {
           name ? "phenix",
-          configText ? "-- Configured by Nix. Built-in defaults remain enabled.\n",
+          configText ? null,
           configFile ? null,
           loadDefaults ? true,
           extraArgs ? [ ],
@@ -49,8 +49,13 @@
           frontendConfig =
             if configFile != null then
               configFile
+            else if configText != null then
+              pkgs.writeText "${name}-init.lua" configText
             else
-              pkgs.writeText "${name}-init.lua" configText;
+              null;
+          configExport = pkgs.lib.optionalString (frontendConfig != null) ''
+            export PHENIX_CONFIG="${frontendConfig}"
+          '';
           wrapperArguments =
             (pkgs.lib.optional (!loadDefaults) "--no-default-config")
             ++ extraArgs;
@@ -62,7 +67,7 @@
             export PHENIX_HEADLESS_PROGRAM="${pkgs.nodejs}/bin/node"
             export PHENIX_HEADLESS_ENTRY="${config.packages.phenix-pi}/headless/main.ts"
             export PHENIX_SOURCE_ROOT="${config.packages.phenix-pi}"
-            export PHENIX_CONFIG="${frontendConfig}"
+            ${configExport}
             exec "${phenixTui}/bin/phenix" ${pkgs.lib.escapeShellArgs wrapperArguments} "$@"
           '';
         };
@@ -92,7 +97,12 @@
           export XDG_STATE_HOME="$HOME/.local/state"
           export XDG_CACHE_HOME="$HOME/.cache"
           export PI_SKIP_VERSION_CHECK=1
-          mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
+          mkdir -p "$XDG_CONFIG_HOME/phenix" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
+
+          cat > "$XDG_CONFIG_HOME/phenix/init.lua" <<'EOF'
+          phenix.keymap.del("global", "<C-q>")
+          assert(type(phenix.layout.set) == "function")
+          EOF
 
           phenix --print-default-config | grep -q 'phenix.layout.set'
           phenix --check
@@ -103,7 +113,7 @@
     {
       packages.phenix-tui = phenixTui;
       packages.phenix = phenix;
-      packages.default = phenix;
+      packages.default = pkgs.lib.mkForce phenix;
 
       legacyPackages.phenixFrontend = {
         inherit mkPhenixWrapper;
