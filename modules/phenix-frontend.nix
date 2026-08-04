@@ -47,11 +47,31 @@
           exec "${phenixTui}/bin/phenix" "$@"
         '';
       };
+
+      phenixSmoke = pkgs.runCommand "phenix-frontend-smoke"
+        {
+          nativeBuildInputs = [ phenix ];
+        }
+        ''
+          export HOME="$TMPDIR/home"
+          export XDG_CONFIG_HOME="$HOME/.config"
+          export XDG_DATA_HOME="$HOME/.local/share"
+          export XDG_STATE_HOME="$HOME/.local/state"
+          export XDG_CACHE_HOME="$HOME/.cache"
+          export PI_SKIP_VERSION_CHECK=1
+          mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
+          phenix --check
+          touch "$out"
+        '';
     in
     {
       packages.phenix-tui = phenixTui;
       packages.phenix = phenix;
+      packages.default = phenix;
+
       apps.phenix.program = pkgs.lib.getExe phenix;
-      checks.phenix-frontend = phenixTui;
+      apps.default.program = pkgs.lib.getExe phenix;
+
+      checks.phenix-frontend = phenixSmoke;
     };
 }
