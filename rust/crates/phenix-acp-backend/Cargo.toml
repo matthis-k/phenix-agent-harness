@@ -3,6 +3,7 @@ name = "phenix-acp-backend"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+publish = false
 
 [dependencies]
 agent-client-protocol.workspace = true
