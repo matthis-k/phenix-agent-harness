@@ -86,21 +86,19 @@ export interface MemoryNote {
   readonly updatedAt: string;
 }
 
-export interface MemorySnapshot {
-  readonly rootRunId: RunId;
-  readonly evidence: readonly EvidenceRecord[];
-  readonly notes: readonly MemoryNote[];
-  readonly stats: {
-    readonly evidenceCount: number;
-    readonly activeNoteCount: number;
-    readonly storedBytes: number;
-  };
-}
-
 export type MemoryIntegrityIssue =
   | {
       readonly kind: "ledger-tail-truncated";
       readonly line: number;
+      readonly message: string;
+    }
+  | {
+      readonly kind: "ledger-entry-corrupt";
+      readonly line: number;
+      readonly message: string;
+    }
+  | {
+      readonly kind: "repository-unavailable";
       readonly message: string;
     }
   | {
@@ -121,11 +119,12 @@ export type MemoryIntegrityIssue =
       readonly actualHash: string;
     };
 
-export type MemoryHealthState = "healthy" | "degraded" | "corrupt";
+export type MemoryHealthState = "healthy" | "degraded" | "corrupt" | "unavailable";
 
 export interface MemoryHealthSnapshot {
   readonly rootRunId: RunId;
   readonly state: MemoryHealthState;
+  readonly writable: boolean;
   readonly issues: readonly MemoryIntegrityIssue[];
   readonly evidenceCount: number;
   readonly noteCount: number;
@@ -133,6 +132,18 @@ export interface MemoryHealthSnapshot {
   readonly storedBytes: number;
   readonly ledgerBytes: number;
   readonly verifiedEvidenceCount: number;
+}
+
+export interface MemorySnapshot {
+  readonly rootRunId: RunId;
+  readonly health: MemoryHealthSnapshot;
+  readonly evidence: readonly EvidenceRecord[];
+  readonly notes: readonly MemoryNote[];
+  readonly stats: {
+    readonly evidenceCount: number;
+    readonly activeNoteCount: number;
+    readonly storedBytes: number;
+  };
 }
 
 export interface MemoryRepairResult {
