@@ -63,6 +63,7 @@ impl PendingReply {
             BackendCommand::SessionTree { .. } => Self::SessionTree,
             BackendCommand::ModelList => Self::Models,
             BackendCommand::ThinkingLevels { .. } => Self::ThinkingLevels,
+            BackendCommand::SessionModes { .. } => Self::Accepted,
             BackendCommand::AuthProviders => Self::AuthProviders,
             BackendCommand::CommandList => Self::Commands,
             BackendCommand::SessionExport { .. } => Self::Export,
@@ -80,11 +81,13 @@ impl PendingReply {
             | BackendCommand::SessionFork { .. }
             | BackendCommand::SessionClone { .. }
             | BackendCommand::SessionRename { .. }
+            | BackendCommand::SessionModeSelect { .. }
             | BackendCommand::ModelSelect { .. }
             | BackendCommand::ThinkingSelect { .. }
             | BackendCommand::AuthLoginStart { .. }
             | BackendCommand::AuthLoginRespond { .. }
             | BackendCommand::AuthLoginCancel { .. }
+            | BackendCommand::AuthTerminalFinished { .. }
             | BackendCommand::CompactionStart { .. }
             | BackendCommand::RetryConfigure { .. }
             | BackendCommand::CommandInvoke { .. }
@@ -174,6 +177,13 @@ fn encode_command(command: &BackendCommand) -> Result<Value, BackendError> {
             "type": "session.tree",
             "sessionId": session_id.as_str(),
         }),
+        BackendCommand::SessionModes { .. }
+        | BackendCommand::SessionModeSelect { .. }
+        | BackendCommand::AuthTerminalFinished { .. } => {
+            return Err(BackendError::Unsupported(
+                "the transitional process backend does not support ACP-only commands".to_owned(),
+            ));
+        }
         BackendCommand::SessionExport { session_id, path } => json!({
             "type": "session.export",
             "sessionId": session_id.as_str(),
@@ -300,6 +310,7 @@ fn encode_auth_method(method: &AuthMethod) -> &'static str {
     match method {
         AuthMethod::OAuth => "oauth",
         AuthMethod::ApiKey => "api_key",
+        AuthMethod::Terminal => "terminal",
     }
 }
 
@@ -432,6 +443,7 @@ fn decode_capabilities(value: &Value) -> BackendCapabilities {
             provider_listing: bool_path(value, &["authentication", "providerListing"]),
             oauth: bool_path(value, &["authentication", "oauth"]),
             api_keys: bool_path(value, &["authentication", "apiKeys"]),
+            terminal: false,
             device_code: bool_path(value, &["authentication", "deviceCode"]),
             browser_callback: bool_path(value, &["authentication", "browserCallback"]),
             logout: bool_path(value, &["authentication", "logout"]),

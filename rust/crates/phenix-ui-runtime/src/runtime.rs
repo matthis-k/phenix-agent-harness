@@ -15,9 +15,12 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::process::Command;
 use std::process::Command;
+use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::Arc;
 use std::sync::Arc;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -128,6 +131,10 @@ impl<R: UiRenderer> UiRuntime<R> {
 
     pub fn mailbox(&self) -> UiMailbox {
         self.mailbox.clone()
+    }
+
+    pub fn set_external_io_pause(&mut self, pause: Arc<AtomicBool>) {
+        self.external_io_pause = Some(pause);
     }
 
     pub fn set_external_io_pause(&mut self, pause: Arc<AtomicBool>) {
@@ -252,6 +259,49 @@ impl<R: UiRenderer> UiRuntime<R> {
                             AppEvent::BackendSubmitFailed(error.to_string()),
                         ));
                     }
+                }
+                AppEffect::RunExternal { flow_id, command } => {
+                    if let Some(pause) = &self.external_io_pause {
+                        pause.store(true, Ordering::Release);
+                    }
+                    let result = (|| {
+                        self.renderer.suspend().map_err(UiRuntimeError::Render)?;
+                        let status = Command::new(&command.program)
+                            .args(&command.arguments)
+                            .envs(&command.environment)
+                            .status()
+                            .map_err(|error| UiRuntimeError::Start(error.to_string()));
+                        let resume = self.renderer.resume().map_err(UiRuntimeError::Render);
+                        match (status, resume) {
+                            (Ok(status), Ok(())) => Ok((
+                                status.success(),
+                                status.code().map(|code| format!("exit code {code}")),
+                            )),
+                            (Err(error), Ok(())) | (_, Err(error)) => Err(error),
+                        }
+                    })();
+                    if let Some(pause) = &self.external_io_pause {
+                        pause.store(false, Ordering::Release);
+                    }
+                    let command = match result {
+                        Ok((success, message)) => BackendCommand::AuthTerminalFinished {
+                            flow_id,
+                            success,
+                            message,
+                        },
+                        Err(error) => BackendCommand::AuthTerminalFinished {
+                            flow_id,
+                            success: false,
+                            message: Some(error.to_string()),
+                        },
+                    };
+                    if let Err(error) = self.backend.submit(command) {
+                        effects.extend(reduce(
+                            &mut self.state,
+                            AppEvent::BackendSubmitFailed(error.to_string()),
+                        ));
+                    }
+                    dirty = true;
                 }
                 AppEffect::RunExternal { flow_id, command } => {
                     if let Some(pause) = &self.external_io_pause {
