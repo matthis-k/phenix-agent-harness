@@ -6,7 +6,7 @@ pub mod protocol;
 
 pub use backend::{
     AgentBackend, BackendClient, BackendError, BackendOutput, BackendOutputSender, BackendRequest,
-    BackendRuntime, DynAgentBackend,
+    BackendRuntime, BackendWorker, DynAgentBackend,
 };
 pub use id::{
     AuthFlowId, DialogId, InvalidId, ObjectiveId, RequestId, RunId, SessionEntryId, SessionId,
