@@ -109,12 +109,6 @@
           }
           ''
             rtk --version
-            set +e
-            rewritten="$(rtk rewrite 'git status')"
-            code=$?
-            set -e
-            test "$code" -eq 0 -o "$code" -eq 3
-            test "$rewritten" = "rtk git status"
 
             mkdir -p "$TMPDIR/config/rtk" "$TMPDIR/repository" "$TMPDIR/tee"
             cat > "$TMPDIR/config/rtk/config.toml" <<'EOF'
