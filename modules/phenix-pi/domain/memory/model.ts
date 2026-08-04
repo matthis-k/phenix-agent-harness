@@ -164,9 +164,25 @@ export interface MemoryHealthSnapshot {
   readonly verifiedEvidenceCount: number;
 }
 
+export interface MemoryRuntimeTelemetry {
+  readonly toolResultsCaptured: number;
+  readonly domainEventsCaptured: number;
+  readonly contextAssemblies: number;
+  readonly foldedContexts: number;
+  readonly aggressiveContexts: number;
+  readonly foldedToolResults: number;
+  readonly searchRequests: number;
+  readonly evidenceReads: number;
+  readonly evidenceReadBytes: number;
+  readonly operationFailures: number;
+  readonly repairRuns: number;
+  readonly maintenanceRuns: number;
+}
+
 export interface MemorySnapshot {
   readonly rootRunId: RunId;
   readonly health: MemoryHealthSnapshot;
+  readonly telemetry: MemoryRuntimeTelemetry;
   readonly evidence: readonly EvidenceRecord[];
   readonly notes: readonly MemoryNote[];
   readonly stats: {
