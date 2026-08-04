@@ -6,6 +6,14 @@
     let
       piVersion = "0.80.10";
 
+      phenixRtk = pkgs.rtk.overrideAttrs (oldAttrs: {
+        pname = "phenix-rtk";
+        patches = (oldAttrs.patches or [ ]) ++ [ ./patches/rtk-lossless-tee.patch ];
+        meta = oldAttrs.meta // {
+          description = "RTK backend with lossless Phenix evidence capture";
+        };
+      });
+
       # Pi is pinned independently from Nixpkgs. The harness needs both the
       # executable and public SDK packages, so binary-only flakes are not enough.
       piCodingAgent = pkgs.buildNpmPackage {
@@ -136,6 +144,7 @@
     in
     {
       packages = {
+        phenix-rtk = phenixRtk;
         pi-coding-agent = piCodingAgent;
         phenix-pi-package = phenixPiPackage;
         phenix-pi-npm-packages = piNpmPackages;
