@@ -4,6 +4,4 @@ mod reducer;
 mod state;
 
 pub use reducer::{reduce, AppEffect, AppEvent, UserIntent};
-pub use state::{
-    AppState, DialogState, InputState, RuntimeConnectionState, TranscriptState,
-};
+pub use state::{AppState, DialogState, InputState, RuntimeConnectionState, TranscriptState};
