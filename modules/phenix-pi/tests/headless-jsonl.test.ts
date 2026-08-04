@@ -32,6 +32,11 @@ test("frames are bounded before a delimiter arrives", () => {
   assert.throws(() => decoder.push(`{"message":"too large"}`), /exceeds 8 bytes/);
 });
 
+test("aggregate chunks may contain multiple individually bounded frames", () => {
+  const decoder = new JsonlDecoder(8);
+  assert.deepEqual(decoder.push(`{"a":1}\n{"b":2}\n`), [{ a: 1 }, { b: 2 }]);
+});
+
 test("serializer emits exactly one LF-delimited JSON record", () => {
   assert.equal(serializeJsonLine({ text: "a\nb" }), `{"text":"a\\nb"}\n`);
   assert.throws(() => serializeJsonLine(undefined), JsonlDecodeError);
