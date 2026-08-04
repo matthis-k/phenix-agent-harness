@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  JsonlDecodeError,
-  JsonlDecoder,
-  serializeJsonLine,
-} from "../headless/jsonl.ts";
+import { JsonlDecodeError, JsonlDecoder, serializeJsonLine } from "../headless/jsonl.ts";
 
 test("JSONL decoder preserves UTF-8 characters split across chunks", () => {
   const decoder = new JsonlDecoder();
