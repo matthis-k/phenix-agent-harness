@@ -242,9 +242,9 @@ mod tests {
         input.insert("größer");
         input.move_left();
         input.backspace();
-        assert_eq!(input.text, "gröer");
+        assert_eq!(input.text, "größr");
         assert!(input.text.is_char_boundary(input.cursor_byte));
         input.delete();
-        assert_eq!(input.text, "gröe");
+        assert_eq!(input.text, "größ");
     }
 }
