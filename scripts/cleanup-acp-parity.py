@@ -1,25 +1,24 @@
 from pathlib import Path
+import re
 
 
 path = Path("rust/crates/phenix-runtime-api/src/protocol.rs")
 text = path.read_text()
 
 
-def collapse(block: str) -> None:
+def collapse_exact(block: str) -> None:
     global text
-    duplicate = f"{block}\n\n{block}"
-    while duplicate in text:
-        text = text.replace(duplicate, block, 1)
+    pattern = re.compile(rf"(?:{re.escape(block)}\n?)+")
+    text = pattern.sub(block, text)
 
 
-while "use std::collections::BTreeMap;\nuse std::collections::BTreeMap;" in text:
-    text = text.replace(
-        "use std::collections::BTreeMap;\nuse std::collections::BTreeMap;",
-        "use std::collections::BTreeMap;",
-        1,
-    )
+text = re.sub(
+    r"(?:use std::collections::BTreeMap;\n)+",
+    "use std::collections::BTreeMap;\n",
+    text,
+)
 
-collapse(
+collapse_exact(
     "#[derive(Clone, Debug, Eq, PartialEq)]\n"
     "pub struct SessionModeSummary {\n"
     "    pub id: String,\n"
@@ -28,7 +27,7 @@ collapse(
     "    pub selected: bool,\n"
     "}"
 )
-collapse(
+collapse_exact(
     "#[derive(Clone, Debug, Eq, PartialEq)]\n"
     "pub struct ExternalCommand {\n"
     "    pub program: String,\n"
@@ -36,7 +35,7 @@ collapse(
     "    pub environment: BTreeMap<String, String>,\n"
     "}"
 )
-collapse(
+collapse_exact(
     "    ExternalCommandRequested {\n"
     "        flow_id: AuthFlowId,\n"
     "        command: ExternalCommand,\n"
