@@ -9,5 +9,8 @@ phenix-frontend-config = { path = "../phenix-frontend-config" }
 phenix-runtime-api = { path = "../phenix-runtime-api" }
 phenix-ui-core = { path = "../phenix-ui-core" }
 
+[dev-dependencies]
+phenix-ui-lua = { path = "../phenix-ui-lua" }
+
 [lib]
 path = "src/lib.rs"
