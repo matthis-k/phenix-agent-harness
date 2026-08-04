@@ -6,7 +6,7 @@ use agent_client_protocol::schema::v1::{
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::util::MatchDispatch;
-use agent_client_protocol::{AcpAgent, Agent, Client, ConnectTo, SessionMessage};
+use agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo, SessionMessage};
 use futures::channel::mpsc;
 use futures::future::{self, Either, FutureExt};
 use futures::stream::StreamExt;
@@ -108,7 +108,7 @@ async fn run_connection(
     Client
         .builder()
         .name("phenix-acp")
-        .connect_with(agent, move |cx: ConnectTo<Agent>| async move {
+        .connect_with(agent, move |cx: ConnectionTo<Agent>| async move {
             cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
                 .block_task()
                 .await?;
@@ -122,7 +122,7 @@ async fn run_connection(
 }
 
 async fn run_session<'a>(
-    mut session: agent_client_protocol::ActiveSession<'a, ConnectTo<Agent>>,
+    mut session: agent_client_protocol::ActiveSession<'a, ConnectionTo<Agent>>,
     mut requests: mpsc::UnboundedReceiver<BackendRequest>,
     outputs: BackendOutputSender,
 ) -> Result<(), BackendError> {
@@ -171,7 +171,7 @@ enum Next {
 }
 
 fn handle_request<'a>(
-    session: &mut agent_client_protocol::ActiveSession<'static, Link>,
+    session: &mut agent_client_protocol::ActiveSession<'a, ConnectionTo<Agent>>,
     state: &mut AdapterState,
     request: BackendRequest,
     outputs: &BackendOutputSender,
