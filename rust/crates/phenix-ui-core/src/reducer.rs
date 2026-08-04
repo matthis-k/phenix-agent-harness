@@ -43,7 +43,7 @@ pub enum UserIntent {
 #[derive(Debug, Eq, PartialEq)]
 pub enum AppEvent {
     User(UserIntent),
-    Backend(BackendOutput),
+    Backend(Box<BackendOutput>),
     BackendSubmitFailed(String),
 }
 
@@ -57,7 +57,7 @@ pub enum AppEffect {
 pub fn reduce(state: &mut AppState, event: AppEvent) -> Vec<AppEffect> {
     match event {
         AppEvent::User(intent) => reduce_user_intent(state, intent),
-        AppEvent::Backend(output) => reduce_backend_output(state, output),
+        AppEvent::Backend(output) => reduce_backend_output(state, *output),
         AppEvent::BackendSubmitFailed(message) => {
             state.connection = RuntimeConnectionState::Degraded(message.clone());
             state.notifications.push_back(message);
