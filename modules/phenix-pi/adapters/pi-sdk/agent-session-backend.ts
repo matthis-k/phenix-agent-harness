@@ -17,6 +17,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import type { MemoryService } from "../../application/memory-service.ts";
+import { TokenReductionService } from "../../application/token-reduction-service.ts";
 import { STOCK_SESSION_PROMPT_SENTINEL } from "../../definitions/stock-session.ts";
 import type { AgentPromptMode } from "../../domain/definition/definition.ts";
 import type { ConcreteModelRef } from "../../domain/definition/model.ts";
@@ -30,12 +31,14 @@ import type {
   CreateAgentSessionSpec,
 } from "../../ports/agent-session-backend.ts";
 import type { LiveAgentTranscriptWriter } from "../../ports/live-agent-transcripts.ts";
+import type { TokenReductionBackend } from "../../ports/token-reduction-backend.ts";
 import { assistantFailureObservation } from "./assistant-stop-reason.ts";
 import { BoundedAgentSessionPort } from "./bounded-agent-session-port.ts";
 import { freeModelSessionExtensions } from "./free-model-guard.ts";
 import { createMemorySessionExtension } from "./memory-session-extension.ts";
 import { createNixShellTool } from "./nix-shell-tool.ts";
 import { composeManagedPrompt } from "./prompt-composition.ts";
+import { createTokenReductionSessionExtension } from "./token-reduction-session-extension.ts";
 
 export function createObservableChildSessionManager(
   cwd: string,
@@ -51,12 +54,14 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
   private readonly promptModeForRun: (runId: RunId) => AgentPromptMode | undefined;
   private readonly transcripts: LiveAgentTranscriptWriter;
   private readonly memory: MemoryService;
+  private readonly tokenReduction?: TokenReductionBackend;
 
   constructor(input: {
     readonly modelRegistry: ModelRegistry;
     readonly agentDir: string;
     readonly transcripts: LiveAgentTranscriptWriter;
     readonly memory: MemoryService;
+    readonly tokenReduction?: TokenReductionBackend;
     readonly eventBus?: EventBus;
     readonly promptModeForRun?: (runId: RunId) => AgentPromptMode | undefined;
   }) {
@@ -64,6 +69,7 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
     this.agentDir = input.agentDir;
     this.transcripts = input.transcripts;
     this.memory = input.memory;
+    this.tokenReduction = input.tokenReduction;
     this.eventBus = input.eventBus;
     this.promptModeForRun = input.promptModeForRun ?? (() => undefined);
   }
@@ -110,8 +116,20 @@ export class PiSdkAgentSessionBackend implements AgentSessionBackend {
       ...(this.eventBus ? { eventBus: this.eventBus } : {}),
       noExtensions: true,
       extensionFactories: [
-        createMemorySessionExtension(this.memory, spec.runId),
         ...freeModelSessionExtensions(isFreeTierModel(spec.model)),
+        ...(this.tokenReduction
+          ? [
+              createTokenReductionSessionExtension(
+                new TokenReductionService({
+                  runId: spec.runId,
+                  cwd: spec.cwd,
+                  evidence: this.memory,
+                  backend: this.tokenReduction,
+                }),
+              ),
+            ]
+          : []),
+        createMemorySessionExtension(this.memory, spec.runId),
       ],
       ...(stock
         ? {}
