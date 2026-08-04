@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub use agent_client_protocol as acp;
+
 mod client;
 mod definition;
 mod id;
