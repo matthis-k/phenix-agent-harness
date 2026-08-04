@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use phenix_runtime_api::{BackendClient, BackendOutput, BackendRuntime, BackendWorker};
-use phenix_ui_core::{reduce, AppEffect, AppEvent, AppState, UserIntent};
+use phenix_ui_core::{reduce, AppEffect, AppEvent, AppState, UiInput, UserIntent};
 use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -13,6 +13,7 @@ const DEFAULT_DRAIN_LIMIT: usize = 256;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum UiMessage {
+    Input(UiInput),
     User(UserIntent),
     Backend(BackendOutput),
     Tick,
@@ -26,6 +27,10 @@ pub struct UiMailbox {
 }
 
 impl UiMailbox {
+    pub fn send_input(&self, input: UiInput) -> Result<(), UiIngressError> {
+        self.send_lossless(UiMessage::Input(input))
+    }
+
     pub fn send_user(&self, intent: UserIntent) -> Result<(), UiIngressError> {
         self.send_lossless(UiMessage::User(intent))
     }
@@ -82,10 +87,24 @@ pub trait UiRenderer {
     fn render(&mut self, state: &AppState) -> Result<(), String>;
 }
 
-pub struct UiRuntime<R> {
+pub trait UiInputController {
+    fn handle(&mut self, state: &AppState, input: UiInput) -> Vec<AppEvent>;
+}
+
+#[derive(Default)]
+pub struct NoopInputController;
+
+impl UiInputController for NoopInputController {
+    fn handle(&mut self, _state: &AppState, _input: UiInput) -> Vec<AppEvent> {
+        Vec::new()
+    }
+}
+
+pub struct UiRuntime<R, C = NoopInputController> {
     state: AppState,
     backend: BackendClient,
     renderer: R,
+    input_controller: C,
     receiver: Receiver<UiMessage>,
     mailbox: UiMailbox,
     backend_forwarder: Option<JoinHandle<()>>,
@@ -93,18 +112,36 @@ pub struct UiRuntime<R> {
     drain_limit: usize,
 }
 
-impl<R> UiRuntime<R> {
+impl<R, C> UiRuntime<R, C> {
     fn detach_workers(&mut self) {
         let _ = self.backend_forwarder.take();
         let _ = self.backend_worker.take();
     }
 }
 
-impl<R: UiRenderer> UiRuntime<R> {
+impl<R: UiRenderer> UiRuntime<R, NoopInputController> {
     pub fn from_backend(
         state: AppState,
         backend: BackendRuntime,
         renderer: R,
+        channel_capacity: usize,
+    ) -> Result<Self, UiRuntimeError> {
+        Self::from_backend_with_controller(
+            state,
+            backend,
+            renderer,
+            NoopInputController,
+            channel_capacity,
+        )
+    }
+}
+
+impl<R: UiRenderer, C: UiInputController> UiRuntime<R, C> {
+    pub fn from_backend_with_controller(
+        state: AppState,
+        backend: BackendRuntime,
+        renderer: R,
+        input_controller: C,
         channel_capacity: usize,
     ) -> Result<Self, UiRuntimeError> {
         if channel_capacity == 0 {
@@ -131,6 +168,7 @@ impl<R: UiRenderer> UiRuntime<R> {
             state,
             backend,
             renderer,
+            input_controller,
             receiver,
             mailbox,
             backend_forwarder: Some(backend_forwarder),
@@ -216,11 +254,21 @@ impl<R: UiRenderer> UiRuntime<R> {
 
     fn apply(&mut self, message: UiMessage) -> bool {
         match message {
+            UiMessage::Input(input) => {
+                let events = self.input_controller.handle(&self.state, input);
+                self.apply_events(events)
+            }
             UiMessage::User(intent) => self.apply_event(AppEvent::User(intent)),
             UiMessage::Backend(output) => self.apply_event(AppEvent::Backend(output)),
             UiMessage::Tick | UiMessage::Refresh => true,
             UiMessage::Shutdown => self.apply_event(AppEvent::User(UserIntent::Quit)),
         }
+    }
+
+    fn apply_events(&mut self, events: impl IntoIterator<Item = AppEvent>) -> bool {
+        events
+            .into_iter()
+            .fold(false, |dirty, event| self.apply_event(event) || dirty)
     }
 
     fn apply_event(&mut self, event: AppEvent) -> bool {
@@ -244,7 +292,7 @@ impl<R: UiRenderer> UiRuntime<R> {
     }
 }
 
-impl<R> Drop for UiRuntime<R> {
+impl<R, C> Drop for UiRuntime<R, C> {
     fn drop(&mut self) {
         self.detach_workers();
     }
@@ -279,6 +327,7 @@ mod tests {
     use phenix_runtime_api::{
         AgentBackend, BackendError, BackendOutputSender, BackendReply, BackendRequest,
     };
+    use phenix_ui_core::{KeyCode, KeyInput, KeyModifiers};
     use std::sync::{Arc, Mutex};
 
     struct AcceptingBackend;
@@ -322,6 +371,28 @@ mod tests {
         }
     }
 
+    struct CharacterInputController;
+
+    impl UiInputController for CharacterInputController {
+        fn handle(&mut self, state: &AppState, input: UiInput) -> Vec<AppEvent> {
+            let UiInput::Key(KeyInput {
+                code: KeyCode::Character(character),
+                modifiers: KeyModifiers {
+                    control: false,
+                    alt: false,
+                    ..
+                },
+                ..
+            }) = input
+            else {
+                return Vec::new();
+            };
+            let mut text = state.input.text.clone();
+            text.push(character);
+            vec![AppEvent::User(UserIntent::InputChanged(text))]
+        }
+    }
+
     #[test]
     fn all_producers_converge_on_one_state_and_render_owner() {
         let backend = BackendRuntime::spawn(Box::new(AcceptingBackend), 8).expect("backend");
@@ -331,12 +402,22 @@ mod tests {
             thread_ids: Arc::clone(&thread_ids),
             input_values: Arc::clone(&input_values),
         };
-        let runtime = UiRuntime::from_backend(AppState::default(), backend, renderer, 8)
-            .expect("UI runtime");
+        let runtime = UiRuntime::from_backend_with_controller(
+            AppState::default(),
+            backend,
+            renderer,
+            CharacterInputController,
+            8,
+        )
+        .expect("UI runtime");
         let mailbox = runtime.mailbox();
         let producer = thread::spawn(move || {
             mailbox
-                .send_user(UserIntent::InputChanged("owned by UI loop".to_owned()))
+                .send_input(UiInput::Key(KeyInput {
+                    code: KeyCode::Character('x'),
+                    modifiers: KeyModifiers::default(),
+                    repeat: false,
+                }))
                 .expect("send input");
             mailbox.request_refresh().ok();
             mailbox.shutdown().expect("send shutdown");
@@ -346,7 +427,7 @@ mod tests {
         producer.join().expect("producer joins");
 
         assert!(state.should_quit);
-        assert_eq!(state.input.text, "owned by UI loop");
+        assert_eq!(state.input.text, "x");
         assert!(thread_ids
             .lock()
             .expect("thread recorder lock")
@@ -356,7 +437,7 @@ mod tests {
             .lock()
             .expect("input recorder lock")
             .iter()
-            .any(|value| value == "owned by UI loop"));
+            .any(|value| value == "x"));
     }
 
     #[test]
