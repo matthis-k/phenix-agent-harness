@@ -19,6 +19,7 @@
     "definitions/**/*.ts",
     "domain/**/*.ts",
     "extension/**/*.ts",
+    "headless/**/*.ts",
     "ports/**/*.ts",
     "tests/**/*.ts"
   ],
