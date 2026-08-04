@@ -17,13 +17,15 @@ export interface MemoryStoragePolicy {
   readonly maximumSearchResults: number;
   readonly synchronizeWrites: boolean;
   readonly verifyEvidenceOnRead: boolean;
+  readonly automaticMaintenance: boolean;
+  readonly maintenanceLedgerBytes: number;
   readonly retentionDays: Readonly<Record<MemoryRetention, number | null>>;
 }
 
 export interface MemoryPolicy {
   readonly context: MemoryContextPolicy;
   readonly storage: MemoryStoragePolicy;
-  readonly captureFailureMode: "diagnose-and-continue" | "fail-session-start";
+  readonly captureFailureMode: "diagnose-and-continue" | "strict";
 }
 
 export const defaultMemoryPolicy = defineMemoryPolicy({
@@ -43,6 +45,8 @@ export const defaultMemoryPolicy = defineMemoryPolicy({
     maximumSearchResults: 100,
     synchronizeWrites: true,
     verifyEvidenceOnRead: true,
+    automaticMaintenance: true,
+    maintenanceLedgerBytes: 16 * 1024 * 1024,
     retentionDays: {
       "must-retain": null,
       "structured-lossless": null,
@@ -86,6 +90,10 @@ export function defineMemoryPolicy<const TPolicy extends MemoryPolicy>(policy: T
   requirePositiveInteger(policy.storage.maximumEvidenceBytes, "memory.storage.maximumEvidenceBytes");
   requirePositiveInteger(policy.storage.maximumReadBytes, "memory.storage.maximumReadBytes");
   requirePositiveInteger(policy.storage.maximumSearchResults, "memory.storage.maximumSearchResults");
+  requirePositiveInteger(
+    policy.storage.maintenanceLedgerBytes,
+    "memory.storage.maintenanceLedgerBytes",
+  );
   for (const [retention, days] of Object.entries(policy.storage.retentionDays)) {
     if (days !== null) requirePositiveInteger(days, `memory.storage.retentionDays.${retention}`);
   }
