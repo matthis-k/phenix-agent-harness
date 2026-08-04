@@ -122,7 +122,7 @@ async fn run_connection(
 }
 
 async fn run_session<'a>(
-    mut session: agent_client_protocol::ActiveSession<'a, ConnectionTo<Agent>>,
+    mut session: agent_client_protocol::ActiveSession<'a, Agent>,
     mut requests: mpsc::UnboundedReceiver<BackendRequest>,
     outputs: BackendOutputSender,
 ) -> Result<(), BackendError> {
@@ -171,7 +171,7 @@ enum Next {
 }
 
 fn handle_request<'a>(
-    session: &mut agent_client_protocol::ActiveSession<'a, ConnectionTo<Agent>>,
+    session: &mut agent_client_protocol::ActiveSession<'a, Agent>,
     state: &mut AdapterState,
     request: BackendRequest,
     outputs: &BackendOutputSender,
