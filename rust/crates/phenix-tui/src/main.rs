@@ -1,8 +1,10 @@
 use clap::Parser;
+use phenix_acp_backend::{AcpAgentBackend, AcpBackendConfig};
 use phenix_frontend_config::FrontendProviderRef;
 use phenix_process_backend::{ProcessAgentBackend, ProcessBackendConfig};
 use phenix_runtime_api::{
-    BackendCommand, BackendOutput, BackendReply, BackendRuntime, ClientInformation, RequestId,
+    AgentBackend, BackendCommand, BackendOutput, BackendReply, BackendRuntime, ClientInformation,
+    RequestId,
 };
 use phenix_tui::RatatuiRenderer;
 use phenix_ui_core::{
@@ -29,6 +31,12 @@ use std::time::Duration;
 const CHANNEL_CAPACITY: usize = 1_024;
 const INPUT_POLL_PERIOD: Duration = Duration::from_millis(100);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BackendKind {
+    Process,
+    Acp,
+}
 
 #[derive(Debug, Parser)]
 #[command(
@@ -183,10 +191,29 @@ fn receive_reply(
 }
 
 fn spawn_backend() -> Result<BackendRuntime, Box<dyn Error>> {
-    Ok(BackendRuntime::spawn(
-        Box::new(create_process_backend()?),
-        CHANNEL_CAPACITY,
-    )?)
+    let backend: Box<dyn AgentBackend> =
+        match parse_backend_kind(env::var("PHENIX_BACKEND").ok().as_deref())? {
+            BackendKind::Process => Box::new(create_process_backend()?),
+            BackendKind::Acp => Box::new(create_acp_backend()?),
+        };
+    Ok(BackendRuntime::spawn(backend, CHANNEL_CAPACITY)?)
+}
+
+fn parse_backend_kind(value: Option<&str>) -> Result<BackendKind, io::Error> {
+    match value.map(str::trim) {
+        None | Some("") | Some("process") | Some("pi-jsonl") => Ok(BackendKind::Process),
+        Some("acp") => Ok(BackendKind::Acp),
+        Some(value) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("unsupported PHENIX_BACKEND value: {value}"),
+        )),
+    }
+}
+
+fn create_acp_backend() -> Result<AcpAgentBackend, Box<dyn Error>> {
+    let command = env::var("PHENIX_ACP_COMMAND").unwrap_or_else(|_| "pi-acp".to_owned());
+    let config = AcpBackendConfig::new(command, env::current_dir()?)?;
+    Ok(AcpAgentBackend::new(config))
 }
 
 fn client_information() -> ClientInformation {
@@ -376,5 +403,22 @@ mod tests {
         assert_eq!(key.code, KeyCode::Character('x'));
         assert!(key.modifiers.control);
         assert!(key.modifiers.shift);
+    }
+
+    #[test]
+    fn backend_selection_is_explicit_and_defaults_to_the_transitional_process_adapter() {
+        assert_eq!(
+            parse_backend_kind(None).expect("default"),
+            BackendKind::Process
+        );
+        assert_eq!(
+            parse_backend_kind(Some("process")).expect("process"),
+            BackendKind::Process
+        );
+        assert_eq!(
+            parse_backend_kind(Some("acp")).expect("ACP"),
+            BackendKind::Acp
+        );
+        assert!(parse_backend_kind(Some("unknown")).is_err());
     }
 }
