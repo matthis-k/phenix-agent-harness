@@ -25,7 +25,12 @@ jobs:
         shell: bash
         run: |
           cargo generate-lockfile --manifest-path rust/Cargo.toml
-          cat rust/Cargo.lock
+      - name: Upload resolved Rust lock
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: resolved-rust-lock
+          path: rust/Cargo.lock
+          if-no-files-found: error
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
