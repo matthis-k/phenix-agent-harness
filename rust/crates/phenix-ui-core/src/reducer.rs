@@ -80,10 +80,7 @@ fn reduce_user_intent(state: &mut AppState, intent: UserIntent) -> Vec<AppEffect
         }
         UserIntent::Quit => {
             state.should_quit = true;
-            vec![
-                AppEffect::Send(BackendCommand::Shutdown),
-                AppEffect::Quit,
-            ]
+            vec![AppEffect::Send(BackendCommand::Shutdown), AppEffect::Quit]
         }
     }
 }
