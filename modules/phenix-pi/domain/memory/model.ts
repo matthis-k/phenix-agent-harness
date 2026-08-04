@@ -68,23 +68,31 @@ export interface EvidenceRecord {
   readonly createdAt: string;
 }
 
-export interface MemoryNote {
+interface MemoryNoteBase {
   readonly id: MemoryNoteId;
   readonly rootRunId: RunId;
   readonly runId: RunId;
   readonly objectiveIds: readonly ObjectiveId[];
   readonly kind: MemoryKind;
-  readonly status: MemoryStatus;
   readonly retention: MemoryRetention;
   readonly reliability: MemoryReliability;
   readonly summary: string;
   readonly subject?: string;
   readonly evidenceIds: readonly EvidenceId[];
   readonly supersedes?: readonly MemoryNoteId[];
-  readonly invalidatedBy?: MemoryNoteId;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
+
+export type MemoryNote =
+  | (MemoryNoteBase & {
+      readonly status: "invalidated";
+      readonly invalidatedBy?: MemoryNoteId;
+    })
+  | (MemoryNoteBase & {
+      readonly status: Exclude<MemoryStatus, "invalidated">;
+      readonly invalidatedBy?: never;
+    });
 
 export type MemoryIntegrityIssue =
   | {
