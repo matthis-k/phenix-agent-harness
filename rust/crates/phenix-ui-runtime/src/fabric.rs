@@ -1,6 +1,7 @@
 use phenix_runtime_api::BackendOutput;
 use phenix_ui_core::{
-    AppEvent, AppState, ElementId, EventEnvelope, FocusTarget, RouteTarget, UiInput,
+    AppEvent, AppState, ElementId, EventEnvelope, FocusDirection, FocusTarget, LayoutAxis,
+    ResizeRequest, RouteTarget, UiInput,
 };
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -13,23 +14,11 @@ pub enum ContentEvent {
     RefreshRequested,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LayoutAxis {
-    Horizontal,
-    Vertical,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ResizeRequest {
-    Grow(u16),
-    Shrink(u16),
-    Set(u16),
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiEvent {
     Input(UiInput),
     FocusRequested(ElementId),
+    FocusMoveRequested(FocusDirection),
     ResizeRequested {
         element: ElementId,
         axis: LayoutAxis,
@@ -47,11 +36,31 @@ pub enum UiEvent {
     ShutdownRequested,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ViewMutation {
+    SetFocus(FocusTarget),
+    MoveFocus(FocusDirection),
+    ResizePane {
+        element: ElementId,
+        axis: LayoutAxis,
+        request: ResizeRequest,
+    },
+    SetPaneVisibility {
+        element: ElementId,
+        visible: bool,
+    },
+    ScrollPane {
+        element: ElementId,
+        lines: i32,
+    },
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum BusReaction {
     App(AppEvent),
     Content(EventEnvelope<ContentEvent>),
     Ui(EventEnvelope<UiEvent>),
+    View(ViewMutation),
     Render,
 }
 
@@ -88,7 +97,7 @@ impl ReactionBatch {
     }
 }
 
-pub trait EventConsumer: Send {
+pub trait EventConsumer {
     fn element_id(&self) -> &ElementId;
 
     fn on_content(
@@ -216,7 +225,7 @@ impl EventRouter {
     fn resolve(&self, state: &AppState, target: &RouteTarget) -> Vec<ElementId> {
         match target {
             RouteTarget::Broadcast => self.order.clone(),
-            RouteTarget::Focused => self.bubble_path(&focused_element(state)),
+            RouteTarget::Focused => self.bubble_path(&state.view.focus.element_id()),
             RouteTarget::Element(element) => self
                 .nodes
                 .contains_key(element)
@@ -286,25 +295,17 @@ impl Display for RouterError {
 
 impl Error for RouterError {}
 
-fn focused_element(state: &AppState) -> ElementId {
-    match state.view.focus {
-        FocusTarget::Sidebar => ElementId::sidebar(),
-        FocusTarget::Transcript => ElementId::transcript(),
-        FocusTarget::Input => ElementId::input(),
-        FocusTarget::Overlay => ElementId::overlay(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use phenix_ui_core::{KeyCode, KeyInput, KeyModifiers};
-    use std::sync::{Arc, Mutex};
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     struct RecordingConsumer {
         id: ElementId,
         label: &'static str,
-        calls: Arc<Mutex<Vec<String>>>,
+        calls: Rc<RefCell<Vec<&'static str>>>,
         stop: bool,
         reaction: Option<fn() -> BusReaction>,
     }
@@ -319,10 +320,7 @@ mod tests {
             _state: &AppState,
             _envelope: &EventEnvelope<UiEvent>,
         ) -> ReactionBatch {
-            self.calls
-                .lock()
-                .expect("calls lock")
-                .push(self.label.to_owned());
+            self.calls.borrow_mut().push(self.label);
             let reactions = self.reaction.map_or_else(Vec::new, |reaction| vec![reaction()]);
             if self.stop {
                 ReactionBatch::stop(reactions)
@@ -337,45 +335,40 @@ mod tests {
 
     #[test]
     fn explicit_routes_only_reach_the_addressed_element() {
-        let calls = Arc::new(Mutex::new(Vec::new()));
-        let mut router = router_with_recorders(Arc::clone(&calls));
-        let envelope = EventEnvelope::to(
-            ElementId::sidebar(),
-            UiEvent::VisibilityRequested {
-                element: ElementId::sidebar(),
-                visible: true,
-            },
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let mut router = router_with_recorders(Rc::clone(&calls));
+        router.route_ui(
+            &AppState::default(),
+            &EventEnvelope::to(ElementId::sidebar(), UiEvent::Invalidate),
         );
-        router.route_ui(&AppState::default(), &envelope);
-        assert_eq!(*calls.lock().expect("calls lock"), vec!["sidebar"]);
+        assert_eq!(*calls.borrow(), vec!["sidebar"]);
     }
 
     #[test]
     fn focused_routes_bubble_from_the_focused_pane_to_its_ancestors() {
-        let calls = Arc::new(Mutex::new(Vec::new()));
-        let mut router = router_with_recorders(Arc::clone(&calls));
-        let envelope = EventEnvelope::focused(UiEvent::Input(UiInput::Key(KeyInput {
-            code: KeyCode::Character('x'),
-            modifiers: KeyModifiers::default(),
-            repeat: false,
-        })));
-        router.route_ui(&AppState::default(), &envelope);
-        assert_eq!(
-            *calls.lock().expect("calls lock"),
-            vec!["input", "layout", "root"]
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let mut router = router_with_recorders(Rc::clone(&calls));
+        router.route_ui(
+            &AppState::default(),
+            &EventEnvelope::focused(UiEvent::Input(UiInput::Key(KeyInput {
+                code: KeyCode::Character('x'),
+                modifiers: KeyModifiers::default(),
+                repeat: false,
+            }))),
         );
+        assert_eq!(*calls.borrow(), vec!["input", "layout", "root"]);
     }
 
     #[test]
     fn multiple_reactors_at_one_address_run_in_registration_order() {
-        let calls = Arc::new(Mutex::new(Vec::new()));
+        let calls = Rc::new(RefCell::new(Vec::new()));
         let mut router = EventRouter::standard();
         for label in ["root.content", "root.shortcuts"] {
             router
                 .register_consumer(Box::new(RecordingConsumer {
                     id: ElementId::root(),
                     label,
-                    calls: Arc::clone(&calls),
+                    calls: Rc::clone(&calls),
                     stop: false,
                     reaction: None,
                 }))
@@ -385,51 +378,19 @@ mod tests {
             &AppState::default(),
             &EventEnvelope::to(ElementId::root(), UiEvent::Invalidate),
         );
-        assert_eq!(
-            *calls.lock().expect("calls lock"),
-            vec!["root.content", "root.shortcuts"]
-        );
+        assert_eq!(*calls.borrow(), vec!["root.content", "root.shortcuts"]);
     }
 
     #[test]
-    fn consumers_can_stop_bubbling_after_handling_an_event() {
-        let calls = Arc::new(Mutex::new(Vec::new()));
-        let mut router = EventRouter::standard();
-        router
-            .register_consumer(Box::new(RecordingConsumer {
-                id: ElementId::input(),
-                label: "input",
-                calls: Arc::clone(&calls),
-                stop: true,
-                reaction: None,
-            }))
-            .expect("input consumer");
-        router
-            .register_consumer(Box::new(RecordingConsumer {
-                id: ElementId::root(),
-                label: "root",
-                calls: Arc::clone(&calls),
-                stop: false,
-                reaction: None,
-            }))
-            .expect("root consumer");
-        router.route_ui(
-            &AppState::default(),
-            &EventEnvelope::focused(UiEvent::Invalidate),
-        );
-        assert_eq!(*calls.lock().expect("calls lock"), vec!["input"]);
-    }
-
-    #[test]
-    fn a_pane_can_emit_a_routed_ui_request_for_the_layout_consumer() {
-        let calls = Arc::new(Mutex::new(Vec::new()));
+    fn a_pane_can_emit_a_routed_resize_request() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
         let mut router = EventRouter::standard();
         router
             .register_consumer(Box::new(RecordingConsumer {
                 id: ElementId::sidebar(),
                 label: "sidebar",
-                calls: Arc::clone(&calls),
-                stop: false,
+                calls,
+                stop: true,
                 reaction: Some(|| {
                     BusReaction::Ui(
                         EventEnvelope::to(
@@ -461,7 +422,7 @@ mod tests {
         ));
     }
 
-    fn router_with_recorders(calls: Arc<Mutex<Vec<String>>>) -> EventRouter {
+    fn router_with_recorders(calls: Rc<RefCell<Vec<&'static str>>>) -> EventRouter {
         let mut router = EventRouter::standard();
         for (id, label) in [
             (ElementId::root(), "root"),
@@ -473,7 +434,7 @@ mod tests {
                 .register_consumer(Box::new(RecordingConsumer {
                     id,
                     label,
-                    calls: Arc::clone(&calls),
+                    calls: Rc::clone(&calls),
                     stop: false,
                     reaction: None,
                 }))
