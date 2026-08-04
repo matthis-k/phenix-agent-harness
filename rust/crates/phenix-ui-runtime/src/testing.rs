@@ -13,7 +13,7 @@ use std::thread;
 
 const SCENARIO_CAPACITY: usize = 128;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum FrontendScenarioStep {
     Input(UiInput),
     Ui(EventEnvelope<crate::UiEvent>),
@@ -141,7 +141,7 @@ impl AgentBackend for RecordingBackend {
             let shutdown = matches!(&request.command, BackendCommand::Shutdown);
             self.commands
                 .lock()
-                .map_err(|_| BackendError::Stopped)?
+                .map_err(|_| BackendError::Protocol("scenario command recorder is poisoned".to_owned()))?
                 .push(request.command);
             outputs.reply(
                 request.id,
