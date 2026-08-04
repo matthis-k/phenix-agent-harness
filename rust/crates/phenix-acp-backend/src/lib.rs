@@ -13,21 +13,21 @@ use permission::{PermissionBroker, PermissionRequestEvent};
 use phenix_acp::acp::schema::v1::{
     AuthCapabilities, AuthMethod as AcpAuthMethod, AuthenticateRequest,
     BooleanConfigOptionCapabilities, CancelNotification, ClientCapabilities,
-    ClientSessionCapabilities, CloseSessionRequest, CreateTerminalRequest, ForkSessionRequest,
+    ClientSessionCapabilities, ContentBlock, CreateTerminalRequest, ForkSessionRequest,
     ImageContent, InitializeRequest, KillTerminalRequest, ListSessionsRequest, LoadSessionRequest,
     LogoutRequest, NewSessionRequest, PromptRequest, PromptResponse, ReleaseTerminalRequest,
     RequestPermissionRequest, ResumeSessionRequest, SessionConfigKind, SessionConfigOptionCategory,
     SessionConfigOptionValue, SessionConfigOptionsCapabilities, SessionModeId, SessionNotification,
-    SetSessionConfigOptionRequest, SetSessionModeRequest, TerminalOutputRequest,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, TerminalOutputRequest, TextContent,
     WaitForTerminalExitRequest,
 };
 use phenix_acp::acp::schema::ProtocolVersion;
 use phenix_acp::acp::{AcpAgent, Agent, Client, ConnectionTo};
 use phenix_runtime_api::{
     AgentBackend, AuthFlowId, BackendCommand, BackendError, BackendEvent, BackendOutputSender,
-    BackendReply, BackendRequest, CommandSummary, ExternalCommand, NotificationLevel,
-    PersistedSessionTreeSnapshot, RunId, RunState, SessionEntrySummary, SessionId,
-    StreamingBehavior, TranscriptBlock, TranscriptRole,
+    BackendReply, BackendRequest, CommandSource, CommandSummary, ExternalCommand,
+    NotificationLevel, PersistedSessionTreeSnapshot, RunId, RunState, SessionEntrySummary,
+    SessionId, StreamingBehavior, TranscriptBlock, TranscriptRole,
 };
 use projection::{apply_session_notification, apply_terminal_event, finish_prompt};
 use state::{thinking_level_value, AdapterState, PendingPrompt};
@@ -663,7 +663,7 @@ async fn handle_request(
                 .map(|command| CommandSummary {
                     name: command.name.clone(),
                     description: Some(command.description.clone()),
-                    source: Some("ACP".to_owned()),
+                    source: CommandSource::BuiltIn,
                 })
                 .collect();
             Ok(BackendReply::Commands(commands))
@@ -751,15 +751,10 @@ async fn handle_internal_event(
                         outputs.event(BackendEvent::RunChanged(session.run.clone()))?;
                     }
                 }
+                let next = session.follow_ups.pop_front();
                 session.run.pending_messages = session.follow_ups.len();
-                outputs.event(BackendEvent::MessageQueueChanged {
-                    run_id: session.run.id.clone(),
-                    pending: session.follow_ups.len(),
-                })?;
-                session
-                    .follow_ups
-                    .pop_front()
-                    .map(|prompt| (session.run.id.clone(), prompt))
+                emit_queue_state(session, 0, outputs)?;
+                next.map(|prompt| (session.run.id.clone(), prompt))
             };
             if let Some((run_id, prompt)) = next {
                 start_prompt(connection, runtime, run_id, prompt, internal_tx, outputs)?;
@@ -903,15 +898,13 @@ fn start_prompt(
             "the ACP agent does not accept image prompt blocks".to_owned(),
         ));
     }
-    let mut content = vec![prompt.text.clone().into()];
+    let mut content: Vec<ContentBlock> =
+        vec![ContentBlock::Text(TextContent::new(prompt.text.clone()))];
     for image in prompt.images {
-        content.push(
-            ImageContent::new(
-                base64::engine::general_purpose::STANDARD.encode(image.bytes),
-                image.media_type,
-            )
-            .into(),
-        );
+        content.push(ContentBlock::Image(ImageContent::new(
+            base64::engine::general_purpose::STANDARD.encode(image.bytes),
+            image.media_type,
+        )));
     }
     let acp_session_id = session.acp_id.clone();
     let completion_session_id = acp_session_id.clone();
@@ -954,10 +947,7 @@ fn queue_follow_up(
         let session = runtime.adapter.session_for_run_mut(&run_id)?;
         session.follow_ups.push_back(prompt);
         session.run.pending_messages = session.follow_ups.len();
-        outputs.event(BackendEvent::MessageQueueChanged {
-            run_id,
-            pending: session.follow_ups.len(),
-        })
+        emit_queue_state(session, 0, outputs)
     } else {
         start_prompt(connection, runtime, run_id, prompt, internal_tx, outputs)
     }
@@ -982,9 +972,30 @@ fn steer_prompt(
     let session = runtime.adapter.session_for_run_mut(&run_id)?;
     session.follow_ups.push_front(prompt);
     session.run.pending_messages = session.follow_ups.len();
-    outputs.event(BackendEvent::MessageQueueChanged {
-        run_id,
-        pending: session.follow_ups.len(),
+    emit_queue_state(session, 1, outputs)
+}
+
+fn emit_queue_state(
+    session: &state::SessionState,
+    steering_count: usize,
+    outputs: &BackendOutputSender,
+) -> Result<(), BackendError> {
+    let steering = session
+        .follow_ups
+        .iter()
+        .take(steering_count)
+        .map(|prompt| prompt.text.clone())
+        .collect();
+    let follow_ups = session
+        .follow_ups
+        .iter()
+        .skip(steering_count)
+        .map(|prompt| prompt.text.clone())
+        .collect();
+    outputs.event(BackendEvent::QueueChanged {
+        run_id: session.run.id.clone(),
+        steering,
+        follow_ups,
     })
 }
 

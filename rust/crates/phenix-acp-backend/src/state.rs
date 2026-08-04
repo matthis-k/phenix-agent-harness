@@ -1,7 +1,7 @@
 use phenix_acp::acp::schema::v1::{
-    AgentCapabilities, AuthMethod as AcpAuthMethod, AvailableCommand, InitializeResponse,
-    SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
-    SessionConfigSelectOptions, SessionId as AcpSessionId, SessionModeState, ToolCall,
+    AuthMethod as AcpAuthMethod, AvailableCommand, InitializeResponse, SessionConfigKind,
+    SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOptions,
+    SessionId as AcpSessionId, SessionModeState, ToolCall,
 };
 use phenix_runtime_api::{
     AuthMethod as FrontendAuthMethod, AuthProviderSummary, BackendCapabilities, BackendError,
@@ -194,7 +194,7 @@ impl AdapterState {
                 AcpAuthMethod::Terminal(method) => AuthProviderSummary {
                     id: method.id.to_string(),
                     display_name: method.name.clone(),
-                    methods: vec![FrontendAuthMethod::ApiKey],
+                    methods: vec![FrontendAuthMethod::Terminal],
                     configured: false,
                     source: method.description.clone(),
                 },
@@ -396,7 +396,8 @@ fn project_capabilities(initialize: &InitializeResponse) -> BackendCapabilities 
                 .auth_methods
                 .iter()
                 .any(|method| matches!(method, AcpAuthMethod::Agent(_))),
-            api_keys: initialize
+            api_keys: false,
+            terminal: initialize
                 .auth_methods
                 .iter()
                 .any(|method| matches!(method, AcpAuthMethod::Terminal(_))),
@@ -444,10 +445,10 @@ fn root_of(sessions: &BTreeMap<SessionId, SessionState>, run_id: &RunId) -> RunI
 }
 
 fn model_ref(value: String) -> ModelRef {
-    let (provider, model) = value.split_once('/').map_or_else(
-        || ("acp".to_owned(), value),
-        |(provider, model)| (provider.to_owned(), model.to_owned()),
-    );
+    let (provider, model) = match value.split_once('/') {
+        Some((provider, model)) => (provider.to_owned(), model.to_owned()),
+        None => ("acp".to_owned(), value),
+    };
     ModelRef { provider, model }
 }
 
