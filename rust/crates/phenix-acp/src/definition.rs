@@ -2,14 +2,14 @@ use crate::{
     BackendId, DefinitionId, McpServerDefinition, RouterId, ToolConfigError, ToolConfiguration,
     WorkflowId,
 };
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "transport", rename_all = "snake_case")]
-pub enum AcpEndpoint {
+enum AcpEndpointKind {
     Stdio {
         program: String,
         #[serde(default)]
@@ -24,6 +24,65 @@ pub enum AcpEndpoint {
     },
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AcpEndpoint(AcpEndpointKind);
+
+impl AcpEndpoint {
+    pub fn stdio(
+        program: impl Into<String>,
+        arguments: Vec<String>,
+        environment: BTreeMap<String, String>,
+    ) -> Result<Self, DefinitionError> {
+        let program = program.into();
+        if program.is_empty() {
+            return Err(DefinitionError::EmptyBackendProgram);
+        }
+        Ok(Self(AcpEndpointKind::Stdio {
+            program,
+            arguments,
+            environment,
+        }))
+    }
+
+    pub fn remote(
+        url: impl Into<String>,
+        headers: BTreeMap<String, String>,
+    ) -> Result<Self, DefinitionError> {
+        let url = url.into();
+        if url.is_empty() {
+            return Err(DefinitionError::EmptyBackendUrl);
+        }
+        Ok(Self(AcpEndpointKind::Remote { url, headers }))
+    }
+}
+
+impl Serialize for AcpEndpoint {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AcpEndpoint {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let endpoint = AcpEndpointKind::deserialize(deserializer)?;
+        match endpoint {
+            AcpEndpointKind::Stdio {
+                program,
+                arguments,
+                environment,
+            } => Self::stdio(program, arguments, environment),
+            AcpEndpointKind::Remote { url, headers } => Self::remote(url, headers),
+        }
+        .map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BackendDefinition {
     id: BackendId,
@@ -31,9 +90,8 @@ pub struct BackendDefinition {
 }
 
 impl BackendDefinition {
-    pub fn new(id: BackendId, endpoint: AcpEndpoint) -> Result<Self, DefinitionError> {
-        validate_endpoint(&endpoint)?;
-        Ok(Self { id, endpoint })
+    pub fn new(id: BackendId, endpoint: AcpEndpoint) -> Self {
+        Self { id, endpoint }
     }
 
     pub fn id(&self) -> &BackendId {
@@ -45,24 +103,12 @@ impl BackendDefinition {
     }
 }
 
-fn validate_endpoint(endpoint: &AcpEndpoint) -> Result<(), DefinitionError> {
-    match endpoint {
-        AcpEndpoint::Stdio { program, .. } if program.is_empty() => {
-            Err(DefinitionError::EmptyBackendProgram)
-        }
-        AcpEndpoint::Remote { url, .. } if url.is_empty() => {
-            Err(DefinitionError::EmptyBackendUrl)
-        }
-        _ => Ok(()),
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct SessionTreeDefinition {
     definition_id: DefinitionId,
     router: RouterId,
     workflows: BTreeSet<WorkflowId>,
-    backends: BTreeMap<BackendId, BackendDefinition>,
+    backends: Vec<BackendDefinition>,
     tools: ToolConfiguration,
 }
 
@@ -93,7 +139,7 @@ impl SessionTreeDefinition {
     }
 
     pub fn backends(&self) -> impl ExactSizeIterator<Item = &BackendDefinition> {
-        self.backends.values()
+        self.backends.iter()
     }
 
     pub fn tools(&self) -> &ToolConfiguration {
@@ -177,7 +223,7 @@ impl SessionTreeDefinitionBuilder {
             definition_id: self.definition_id,
             router: self.router,
             workflows: self.workflows,
-            backends: self.backends,
+            backends: self.backends.into_values().collect(),
             tools: self.tools,
         })
     }
@@ -230,13 +276,8 @@ mod tests {
     fn backend() -> BackendDefinition {
         BackendDefinition::new(
             BackendId::parse("pi").expect("backend ID"),
-            AcpEndpoint::Stdio {
-                program: "pi-acp".to_owned(),
-                arguments: Vec::new(),
-                environment: BTreeMap::new(),
-            },
+            AcpEndpoint::stdio("pi-acp", Vec::new(), BTreeMap::new()).expect("endpoint"),
         )
-        .expect("backend")
     }
 
     #[test]
@@ -267,5 +308,14 @@ mod tests {
         )
         .expect_err("wire definition without backend must fail");
         assert!(error.to_string().contains("at least one backend"));
+    }
+
+    #[test]
+    fn wire_deserialization_cannot_create_an_empty_backend_program() {
+        let error = serde_json::from_str::<AcpEndpoint>(
+            r#"{"transport":"stdio","program":""}"#,
+        )
+        .expect_err("empty program must fail");
+        assert!(error.to_string().contains("must not be empty"));
     }
 }
