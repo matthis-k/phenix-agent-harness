@@ -40,10 +40,9 @@ jobs:
           python .github/scripts/integrate_memory_index_telemetry.py
           python .github/scripts/fix_memory_static_invariants.py
           python .github/scripts/fix_memory_interface_bounds.py
+          python .github/scripts/repair_memory_ci.py
       - name: Apply repository maintenance fixes
         run: devenv tasks run maintenance:fix
-      - name: Run complete repository tests
-        run: devenv test
       - name: Preserve repository lock pins
         run: git checkout -- devenv.lock
       - name: Remove one-shot integration files
@@ -52,14 +51,18 @@ jobs:
           rm -f .github/workflows/integrate-production-memory-v2.yml
           rm -f .github/workflows/integrate-production-memory-v3.yml
           rm -f .github/workflows/integrate-production-memory-pr.yml
+          rm -f .github/workflows/repair-memory-ci.yml
           rm -f .github/scripts/add_memory_snapshot_telemetry.py
           rm -f .github/scripts/integrate_memory_index_telemetry.py
           rm -f .github/scripts/fix_memory_static_invariants.py
           rm -f .github/scripts/fix_memory_interface_bounds.py
+          rm -f .github/scripts/repair_memory_ci.py
+      - name: Validate exact final tree
+        run: devenv test
       - name: Commit verified integration
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add --all
-          git commit -m "feat(memory): integrate bounded indexed retrieval and telemetry"
+          git commit -m "fix(memory): complete typed production integration"
           git push origin HEAD:feature/production-memory
