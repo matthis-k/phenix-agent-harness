@@ -5,27 +5,35 @@
     { pkgs, ... }:
     let
       source = pkgs.lib.cleanSource ../rust;
-      check = pkgs.runCommand "phenix-rust-core-check"
-        {
-          nativeBuildInputs = [
-            pkgs.cargo
-            pkgs.clippy
-            pkgs.rustc
-            pkgs.rustfmt
-            pkgs.stdenv.cc
-          ];
-        }
-        ''
-          cp -R ${source}/. source
-          chmod -R u+w source
-          cd source
-          export HOME="$TMPDIR/home"
-          export CARGO_HOME="$TMPDIR/cargo"
+      check = pkgs.rustPlatform.buildRustPackage {
+        pname = "phenix-rust-core-check";
+        version = "0";
+        src = source;
+
+        cargoLock.lockFile = ../rust/Cargo.lock;
+        nativeBuildInputs = [
+          pkgs.clippy
+          pkgs.rustfmt
+        ];
+
+        buildPhase = ''
+          runHook preBuild
           cargo fmt --all --check
           cargo clippy --workspace --all-targets --locked --offline -- -D warnings
-          cargo test --workspace --locked --offline
-          touch "$out"
+          runHook postBuild
         '';
+
+        checkPhase = ''
+          runHook preCheck
+          cargo test --workspace --all-targets --locked --offline
+          runHook postCheck
+        '';
+
+        installPhase = ''
+          mkdir -p "$out"
+          touch "$out/passed"
+        '';
+      };
     in
     {
       checks.phenix-rust-core = check;
