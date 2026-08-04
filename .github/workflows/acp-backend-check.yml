@@ -21,40 +21,19 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
-      - name: Apply ACP SDK connection fixes
+      - name: Apply ACP session type fixes
         run: |
           python - <<'PY'
           from pathlib import Path
 
           path = Path("rust/crates/phenix-acp-backend/src/lib.rs")
           content = path.read_text()
-
-          replacements = [
-              (
-                  "use agent_client_protocol::{AcpAgent, Agent, Client, ConnectTo, SessionMessage};",
-                  "use agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo, SessionMessage};",
-              ),
-              (
-                  "move |cx: ConnectTo<Agent>| async move",
-                  "move |cx: ConnectionTo<Agent>| async move",
-              ),
-              (
-                  "agent_client_protocol::ActiveSession<'a, ConnectTo<Agent>>",
-                  "agent_client_protocol::ActiveSession<'a, ConnectionTo<Agent>>",
-              ),
-              (
-                  "agent_client_protocol::ActiveSession<'static, Link>",
-                  "agent_client_protocol::ActiveSession<'a, ConnectionTo<Agent>>",
-              ),
-          ]
-
-          for old, new in replacements:
-              if old in content:
-                  content = content.replace(old, new, 1)
-              elif new not in content:
-                  raise SystemExit(f"missing replacement anchor: {old}")
-
-          path.write_text(content)
+          old = "agent_client_protocol::ActiveSession<'a, ConnectionTo<Agent>>"
+          new = "agent_client_protocol::ActiveSession<'a, Agent>"
+          count = content.count(old)
+          if count != 2:
+              raise SystemExit(f"expected two ACP session type anchors, found {count}")
+          path.write_text(content.replace(old, new))
           PY
           cargo generate-lockfile --manifest-path rust/Cargo.toml
           cargo fmt --manifest-path rust/Cargo.toml --all
@@ -64,7 +43,7 @@ jobs:
             git config user.name github-actions[bot]
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
             git add rust
-            git commit -m "use concrete official ACP connection type"
+            git commit -m "use ACP agent role for active sessions"
             git push origin HEAD:${GITHUB_HEAD_REF}
           fi
       - name: Check
