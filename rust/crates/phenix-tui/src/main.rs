@@ -1,7 +1,5 @@
-mod keymap;
-
 use clap::Parser;
-use keymap::{Keymap, KeymapInputController};
+use phenix_frontend_config::FrontendProviderRef;
 use phenix_process_backend::{ProcessAgentBackend, ProcessBackendConfig};
 use phenix_runtime_api::{
     BackendCommand, BackendOutput, BackendReply, BackendRuntime, ClientInformation, RequestId,
@@ -10,17 +8,20 @@ use phenix_tui::RatatuiRenderer;
 use phenix_ui_core::{
     AppState, KeyCode, KeyInput, KeyModifiers, MouseAction, MouseButton, MouseInput, UiInput,
 };
+use phenix_ui_lua::{LuaFrontendOptions, LuaFrontendProvider};
 use phenix_ui_runtime::{UiIngressError, UiRuntime};
 use ratatui::crossterm::event::{
     self, Event, KeyCode as CrosstermKeyCode, KeyEvent, KeyEventKind,
     KeyModifiers as CrosstermModifiers, MouseButton as CrosstermMouseButton, MouseEvent,
     MouseEventKind,
 };
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::env;
 use std::error::Error;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
@@ -33,19 +34,23 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 #[command(
     name = "phenix",
     version,
-    about = "Native Phenix terminal frontend",
+    about = "Native Phenix frontend",
     args_override_self = true
 )]
 struct Arguments {
-    /// Read configuration from this path instead of XDG_CONFIG_HOME/phenix/config.toml.
+    /// Read frontend configuration from this Lua file instead of XDG_CONFIG_HOME/phenix/init.lua.
     #[arg(long, value_name = "PATH")]
     config: Option<PathBuf>,
+
+    /// Do not load the built-in frontend keymaps, theme, and layout defaults.
+    #[arg(long)]
+    no_default_config: bool,
 
     /// Verify the packaged Rust-to-Pi runtime handshake without opening the terminal UI.
     #[arg(long)]
     check: bool,
 
-    /// Print the built-in keymap configuration and exit.
+    /// Print the built-in Lua frontend configuration and exit.
     #[arg(long)]
     print_default_config: bool,
 }
@@ -53,51 +58,57 @@ struct Arguments {
 fn main() -> Result<(), Box<dyn Error>> {
     let arguments = Arguments::parse();
     if arguments.print_default_config {
-        print!("{}", Keymap::default_toml());
+        print!("{}", LuaFrontendProvider::default_source());
         return Ok(());
     }
 
-    let keymap = load_keymap(arguments.config.as_deref())?;
+    let provider = load_frontend_provider(&arguments)?;
     if arguments.check {
         return run_handshake_check();
     }
-    run_tui(keymap)
+    run_tui(provider)
 }
 
-fn load_keymap(explicit_path: Option<&Path>) -> Result<Keymap, Box<dyn Error>> {
+fn load_frontend_provider(arguments: &Arguments) -> Result<FrontendProviderRef, Box<dyn Error>> {
+    let source_path = resolve_config_path(arguments.config.as_deref());
+    let provider = LuaFrontendProvider::new(LuaFrontendOptions {
+        source_path,
+        load_defaults: !arguments.no_default_config,
+    })?;
+    Ok(Rc::new(RefCell::new(provider)))
+}
+
+fn resolve_config_path(explicit_path: Option<&Path>) -> Option<PathBuf> {
     if let Some(path) = explicit_path {
-        return Ok(Keymap::load(Some(path))?);
+        return Some(path.to_path_buf());
     }
     if let Some(path) = env::var_os("PHENIX_CONFIG").map(PathBuf::from) {
-        return Ok(Keymap::load(Some(&path))?);
+        return Some(path);
     }
-    let Some(path) = default_config_path() else {
-        return Ok(Keymap::default());
-    };
-    Ok(Keymap::load_optional(&path)?)
+    default_config_path().filter(|path| path.is_file())
 }
 
 fn default_config_path() -> Option<PathBuf> {
     if let Some(root) = env::var_os("XDG_CONFIG_HOME") {
-        return Some(PathBuf::from(root).join("phenix/config.toml"));
+        return Some(PathBuf::from(root).join("phenix/init.lua"));
     }
     env::var_os("HOME")
         .map(PathBuf::from)
-        .map(|home| home.join(".config/phenix/config.toml"))
+        .map(|home| home.join(".config/phenix/init.lua"))
 }
 
-fn run_tui(keymap: Keymap) -> Result<(), Box<dyn Error>> {
+fn run_tui(provider: FrontendProviderRef) -> Result<(), Box<dyn Error>> {
     let backend = spawn_backend()?;
     backend.client.submit(BackendCommand::Initialize {
         client: client_information(),
     })?;
 
-    let renderer = RatatuiRenderer::initialize()?;
-    let runtime = UiRuntime::from_backend_with_controller(
+    let renderer = RatatuiRenderer::initialize(Rc::clone(&provider))?;
+    let runtime = UiRuntime::from_backend_with_frontend(
         AppState::default(),
         backend,
         renderer,
-        KeymapInputController::new(keymap),
+        provider,
         CHANNEL_CAPACITY,
     )?;
     let mailbox = runtime.mailbox();
@@ -344,19 +355,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn explicit_config_path_takes_priority() {
-        let path = PathBuf::from("/tmp/custom-phenix.toml");
-        assert_eq!(Some(path.as_path()), Some(path.as_path()));
-    }
-
-    #[test]
-    fn xdg_config_path_is_namespaced_under_phenix() {
-        env::set_var("XDG_CONFIG_HOME", "/tmp/xdg-config");
-        assert_eq!(
-            default_config_path(),
-            Some(PathBuf::from("/tmp/xdg-config/phenix/config.toml"))
-        );
-        env::remove_var("XDG_CONFIG_HOME");
+    fn xdg_config_path_uses_a_neovim_style_init_lua() {
+        let path = PathBuf::from("/tmp/xdg-config").join("phenix/init.lua");
+        assert_eq!(path, PathBuf::from("/tmp/xdg-config/phenix/init.lua"));
     }
 
     #[test]
