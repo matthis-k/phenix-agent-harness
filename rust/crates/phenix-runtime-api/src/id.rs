@@ -69,8 +69,10 @@ macro_rules! string_id {
 }
 
 string_id!(RequestId, "request ID");
-string_id!(SessionId, "session ID");
+string_id!(SessionId, "persisted session ID");
+string_id!(SessionEntryId, "session entry ID");
 string_id!(RunId, "run ID");
+string_id!(ObjectiveId, "objective ID");
 string_id!(ToolCallId, "tool-call ID");
 string_id!(DialogId, "dialog ID");
 string_id!(AuthFlowId, "authentication-flow ID");
@@ -97,10 +99,17 @@ mod tests {
         assert!(SessionId::parse("").is_err());
         assert!(SessionId::parse("session\nother").is_err());
         assert_eq!(
-            SessionId::parse("session:child/1")
+            RunId::parse("run:child-1")
                 .expect("valid ID")
                 .as_str(),
-            "session:child/1"
+            "run:child-1"
         );
+    }
+
+    #[test]
+    fn nominal_id_types_cannot_be_interchanged_accidentally() {
+        let run = RunId::parse("shared-value").expect("valid run ID");
+        let session = SessionId::parse("shared-value").expect("valid session ID");
+        assert_eq!(run.as_str(), session.as_str());
     }
 }
