@@ -3,10 +3,11 @@ import type {
   ExtensionUIContext,
   ExtensionUIDialogOptions,
   ExtensionWidgetOptions,
-  Theme,
 } from "@earendil-works/pi-coding-agent";
 
 import type { HeadlessExtensionUiResponse } from "./protocol.ts";
+
+type ExtensionTheme = ExtensionUIContext["theme"];
 
 export type HeadlessExtensionUiRequest =
   | { readonly kind: "select"; readonly title: string; readonly options: readonly string[] }
@@ -48,10 +49,10 @@ export type HeadlessExtensionUiEvent =
   | { readonly type: "extension_ui.unsupported"; readonly feature: string };
 
 export interface HeadlessThemeAccess {
-  readonly current: Theme;
+  readonly current: ExtensionTheme;
   list(): { readonly name: string; readonly path: string | undefined }[];
-  get(name: string): Theme | undefined;
-  set(theme: string | Theme): { readonly success: boolean; readonly error?: string };
+  get(name: string): ExtensionTheme | undefined;
+  set(theme: string | ExtensionTheme): { readonly success: boolean; readonly error?: string };
 }
 
 interface PendingDialog {
@@ -75,6 +76,24 @@ export class HeadlessExtensionUi {
     this.#publish = input.publish;
     this.#themes = input.themes;
     this.#createId = input.createId ?? randomUUID;
+
+    const setWidget = ((
+      key: string,
+      content: unknown,
+      options?: ExtensionWidgetOptions,
+    ): void => {
+      if (content === undefined || isStringArray(content)) {
+        this.#publish({
+          type: "widget.changed",
+          key,
+          ...(content === undefined ? {} : { lines: content }),
+          ...(options?.placement === undefined ? {} : { placement: options.placement }),
+        });
+        return;
+      }
+      this.unsupported(`component widget ${key}`);
+    }) as ExtensionUIContext["setWidget"];
+
     this.context = {
       select: (title, options, opts) =>
         this.requestDialog(
@@ -134,18 +153,7 @@ export class HeadlessExtensionUi {
           ...(label === undefined ? {} : { label }),
         });
       },
-      setWidget: (key: string, content: unknown, options?: ExtensionWidgetOptions) => {
-        if (content === undefined || isStringArray(content)) {
-          this.#publish({
-            type: "widget.changed",
-            key,
-            ...(content === undefined ? {} : { lines: content }),
-            ...(options?.placement === undefined ? {} : { placement: options.placement }),
-          });
-          return;
-        }
-        this.unsupported(`component widget ${key}`);
-      },
+      setWidget,
       setFooter: () => this.unsupported("custom footer component"),
       setHeader: () => this.unsupported("custom header component"),
       setTitle: (title) => this.#publish({ type: "terminal.title", title }),
