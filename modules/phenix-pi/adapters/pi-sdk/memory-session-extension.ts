@@ -4,32 +4,29 @@ import type {
   ExtensionFactory,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 
-import type { MemoryService } from "../../application/memory-service.ts";
+import type { MemoryService, MemoryOperation } from "../../application/memory-service.ts";
 import {
   evidenceId,
-  MEMORY_KINDS,
-  type MemoryKind,
-  type MemoryReliability,
-  type MemoryRetention,
-  type MemoryStatus,
   memoryNoteId,
   type WorkingMemoryProjection,
 } from "../../domain/memory/model.ts";
+import {
+  MEMORY_TOOL_PARAMETERS,
+  type MemoryToolRequest,
+  parseMemoryToolRequest,
+} from "../../domain/memory/tool-protocol.ts";
 import type { RunId } from "../../domain/shared.ts";
 
 const MEMORY_CONTEXT_TYPE = "phenix:memory-context";
-const DEFAULT_CONTEXT_WINDOW = 128_000;
-const FOLD_RATIO = 0.5;
-const AGGRESSIVE_RATIO = 0.85;
-const RECENT_MESSAGE_TAIL = 10;
 
 export const MEMORY_MODEL_INSTRUCTIONS = [
   "Phenix memory interface:",
-  "- `phenix_memory` is the model-facing interface to the current run's reversible memory projection.",
+  "- `phenix_memory` is the closed model-facing interface to the current run's reversible memory projection.",
+  "- Valid actions are snapshot, health, search, read, note, and set_status. Each action accepts only its declared fields.",
   "- Use `action=search` before repeating prior investigation or when earlier requirements, decisions, findings, errors, tests, changes, preferences, procedures, project facts, or outcomes may matter.",
   "- Search results and injected memory are compact indexes, not authoritative detail. Use `action=read` with an evidence ID before relying on omitted specifics or quoting exact output.",
+  "- Read paging uses UTF-8 byte offsets and returns the next exact byte offset.",
   "- Tool results and run outcomes are captured automatically. Do not create duplicate notes for routine execution output.",
   "- Use `action=note` for durable knowledge that automatic capture cannot infer safely, and attach evidence IDs whenever available.",
   "- Use `action=set_status` when a note becomes uncertain, superseded, invalidated, or active again; never silently preserve contradictory memory as current truth.",
@@ -67,29 +64,39 @@ export function registerMemoryHooks(
   pi.on("tool_result", async (event) => {
     const binding = resolve();
     if (!binding || event.toolName === "phenix_memory") return;
-    await binding.memory.captureToolResult({
-      runId: binding.runId,
-      toolName: event.toolName,
-      toolCallId: event.toolCallId,
-      input: event.input,
-      content: event.content,
-      details: event.details,
-      isError: event.isError,
-    });
+    try {
+      await binding.memory.captureToolResult({
+        runId: binding.runId,
+        toolName: event.toolName,
+        toolCallId: event.toolCallId,
+        input: event.input,
+        content: event.content,
+        details: event.details,
+        isError: event.isError,
+      });
+    } catch (error) {
+      await handleMemoryHookFailure(binding, "capture-tool-result", error);
+    }
   });
 
   pi.on("context", async (event, ctx) => {
     const binding = resolve();
     if (!binding) return;
-    const contextWindow = modelContextWindow(ctx.model) ?? DEFAULT_CONTEXT_WINDOW;
-    return {
-      messages: await assembleMemoryContext(
-        binding.memory,
-        binding.runId,
-        event.messages,
-        contextWindow,
-      ),
-    };
+    try {
+      const contextWindow =
+        modelContextWindow(ctx.model) ?? binding.memory.policy.context.defaultContextWindowTokens;
+      return {
+        messages: await assembleMemoryContext(
+          binding.memory,
+          binding.runId,
+          event.messages,
+          contextWindow,
+        ),
+      };
+    } catch (error) {
+      await handleMemoryHookFailure(binding, "assemble-context", error);
+      return undefined;
+    }
   });
 }
 
@@ -97,149 +104,92 @@ function registerMemoryTool(
   pi: ExtensionAPI,
   resolve: () => MemorySessionBinding | undefined,
 ): void {
-  pi.registerTool({
+  const tool = {
     name: "phenix_memory",
     label: "Phenix Memory",
     description:
-      "Search compact typed memory, reopen exact immutable evidence, or record durable requirements, constraints, decisions, findings, preferences, procedures, and project facts. Tool results and execution outcomes are captured automatically. Use read when a compact note is insufficient; use set_status when knowledge is superseded, invalidated, uncertain, or active again.",
+      "Inspect health, search compact typed memory, reopen exact immutable evidence, or record and update durable knowledge. The action schema is a closed discriminated union; unrelated or missing fields are rejected before execution.",
     promptSnippet: MEMORY_MODEL_INSTRUCTIONS,
-    parameters: Type.Object(
-      {
-        action: Type.Union([
-          Type.Literal("snapshot"),
-          Type.Literal("search"),
-          Type.Literal("read"),
-          Type.Literal("note"),
-          Type.Literal("set_status"),
-        ]),
-        evidenceId: Type.Optional(Type.String()),
-        noteId: Type.Optional(Type.String()),
-        query: Type.Optional(Type.String()),
-        kind: Type.Optional(Type.Union(MEMORY_KINDS.map((kind) => Type.Literal(kind)))),
-        status: Type.Optional(
-          Type.Union([
-            Type.Literal("active"),
-            Type.Literal("superseded"),
-            Type.Literal("invalidated"),
-            Type.Literal("uncertain"),
-          ]),
-        ),
-        summary: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000 })),
-        subject: Type.Optional(Type.String({ maxLength: 500 })),
-        evidenceIds: Type.Optional(Type.Array(Type.String(), { maxItems: 32 })),
-        retention: Type.Optional(
-          Type.Union([
-            Type.Literal("must-retain"),
-            Type.Literal("structured-lossless"),
-            Type.Literal("summary-sufficient"),
-            Type.Literal("ephemeral"),
-          ]),
-        ),
-        reliability: Type.Optional(
-          Type.Union([Type.Literal("observed"), Type.Literal("derived"), Type.Literal("reported")]),
-        ),
-        supersedes: Type.Optional(Type.Array(Type.String(), { maxItems: 32 })),
-        offset: Type.Optional(Type.Integer({ minimum: 0 })),
-        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100_000 })),
-      },
-      { additionalProperties: false },
-    ),
+    parameters: MEMORY_TOOL_PARAMETERS,
     async execute(_toolCallId: string, raw: unknown) {
       const binding = resolve();
       if (!binding) throw new Error("Phenix memory is not bound to this session");
-      const params = raw as {
-        readonly action: "snapshot" | "search" | "read" | "note" | "set_status";
-        readonly evidenceId?: string;
-        readonly noteId?: string;
-        readonly query?: string;
-        readonly kind?: MemoryKind;
-        readonly status?: MemoryStatus;
-        readonly summary?: string;
-        readonly subject?: string;
-        readonly evidenceIds?: string[];
-        readonly retention?: MemoryRetention;
-        readonly reliability?: MemoryReliability;
-        readonly supersedes?: string[];
-        readonly offset?: number;
-        readonly limit?: number;
-      };
-      const value = await executeMemoryAction(binding, params);
+      const request = parseMemoryToolRequest(raw);
+      const value = await executeMemoryAction(binding, request);
       return {
         content: [{ type: "text" as const, text: JSON.stringify(value) }],
         details: value,
       };
     },
-  } as unknown as ToolDefinition);
+  } as unknown as ToolDefinition;
+  pi.registerTool(tool);
 }
 
 async function executeMemoryAction(
   binding: MemorySessionBinding,
-  params: {
-    readonly action: "snapshot" | "search" | "read" | "note" | "set_status";
-    readonly evidenceId?: string;
-    readonly noteId?: string;
-    readonly query?: string;
-    readonly kind?: MemoryKind;
-    readonly status?: MemoryStatus;
-    readonly summary?: string;
-    readonly subject?: string;
-    readonly evidenceIds?: string[];
-    readonly retention?: MemoryRetention;
-    readonly reliability?: MemoryReliability;
-    readonly supersedes?: string[];
-    readonly offset?: number;
-    readonly limit?: number;
-  },
+  request: MemoryToolRequest,
 ): Promise<unknown> {
   const { memory, runId } = binding;
-  switch (params.action) {
-    case "snapshot":
-      return memory.snapshot((await memory.workingSet(runId, 1)).rootRunId);
+  switch (request.action) {
+    case "snapshot": {
+      const workingSet = await memory.workingSet(runId, 1);
+      return memory.snapshot(workingSet.rootRunId);
+    }
+    case "health": {
+      const workingSet = await memory.workingSet(runId, 1);
+      return memory.health(workingSet.rootRunId, request.verifyEvidence ?? false);
+    }
     case "search":
       return memory.search({
         runId,
-        ...(params.query ? { query: params.query } : {}),
-        ...(params.kind ? { kind: params.kind } : {}),
-        ...(params.status ? { status: params.status } : {}),
-        ...(params.limit ? { limit: Math.min(100, params.limit) } : {}),
+        ...(request.query === undefined ? {} : { query: request.query }),
+        ...(request.kind === undefined ? {} : { kind: request.kind }),
+        ...(request.status === undefined ? {} : { status: request.status }),
+        ...(request.limit === undefined ? {} : { limit: request.limit }),
       });
     case "read": {
-      if (!params.evidenceId) throw new Error("read requires evidenceId");
-      const value = await memory.read(runId, evidenceId(params.evidenceId));
-      const offset = params.offset ?? 0;
-      const limit = params.limit ?? 20_000;
-      const content = value.content.slice(offset, offset + limit);
+      const value = await memory.read(runId, evidenceId(request.evidenceId));
+      const requestedLimit = request.limit ?? 20_000;
+      const page = utf8Page(
+        value.content,
+        request.offset ?? 0,
+        Math.min(requestedLimit, memory.policy.storage.maximumReadBytes),
+      );
       return {
         evidence: value.evidence,
-        content,
-        offset,
-        returnedBytes: Buffer.byteLength(content, "utf8"),
-        totalBytes: Buffer.byteLength(value.content, "utf8"),
-        truncated: offset + content.length < value.content.length,
+        content: page.content,
+        offset: page.offset,
+        nextOffset: page.nextOffset,
+        returnedBytes: page.returnedBytes,
+        totalBytes: page.totalBytes,
+        truncated: page.nextOffset < page.totalBytes,
       };
     }
     case "note":
-      if (!params.kind) throw new Error("note requires kind");
-      if (!params.summary?.trim()) throw new Error("note requires summary");
       return memory.recordNote({
         runId,
-        kind: params.kind,
-        summary: params.summary,
-        ...(params.subject ? { subject: params.subject } : {}),
-        ...(params.evidenceIds
-          ? { evidenceIds: params.evidenceIds.map((id) => evidenceId(id)) }
-          : {}),
-        ...(params.retention ? { retention: params.retention } : {}),
-        ...(params.reliability ? { reliability: params.reliability } : {}),
-        ...(params.status ? { status: params.status } : {}),
-        ...(params.supersedes
-          ? { supersedes: params.supersedes.map((id) => memoryNoteId(id)) }
-          : {}),
+        kind: request.kind,
+        summary: request.summary,
+        ...(request.subject === undefined ? {} : { subject: request.subject }),
+        ...(request.evidenceIds === undefined
+          ? {}
+          : { evidenceIds: request.evidenceIds.map((id) => evidenceId(id)) }),
+        ...(request.retention === undefined ? {} : { retention: request.retention }),
+        ...(request.reliability === undefined ? {} : { reliability: request.reliability }),
+        ...(request.status === undefined ? {} : { status: request.status }),
+        ...(request.supersedes === undefined
+          ? {}
+          : { supersedes: request.supersedes.map((id) => memoryNoteId(id)) }),
       });
     case "set_status":
-      if (!params.noteId) throw new Error("set_status requires noteId");
-      if (!params.status) throw new Error("set_status requires status");
-      return memory.setStatus(runId, memoryNoteId(params.noteId), params.status);
+      return memory.setStatus(
+        runId,
+        memoryNoteId(request.noteId),
+        request.status,
+        request.status === "invalidated" && request.invalidatedBy !== undefined
+          ? memoryNoteId(request.invalidatedBy)
+          : undefined,
+      );
   }
 }
 
@@ -249,15 +199,25 @@ export async function assembleMemoryContext(
   inputMessages: readonly AgentMessage[],
   contextWindow: number,
 ): Promise<AgentMessage[]> {
+  const policy = memory.policy.context;
   const messages = inputMessages.filter((message) => !isMemoryContextMessage(message));
   const initialTokens = estimateMessages(messages);
   const ratio = initialTokens / Math.max(1, contextWindow);
-  const workingSet = await memory.workingSet(runId, ratio >= FOLD_RATIO ? 24 : 10);
-  const canvas = renderWorkingMemory(workingSet);
-  const transformed =
-    ratio >= FOLD_RATIO
-      ? await foldToolResults(memory, runId, messages, ratio >= AGGRESSIVE_RATIO)
-      : [...messages];
+  const folded = ratio >= policy.foldAtRatio;
+  const aggressive = ratio >= policy.aggressiveFoldAtRatio;
+  const workingSet = await memory.workingSet(
+    runId,
+    folded ? policy.foldedWorkingSetNotes : policy.normalWorkingSetNotes,
+  );
+  const canvas = renderWorkingMemory(workingSet, policy.maxCanvasCharacters);
+  const transformed = folded
+    ? await foldToolResults(
+        memory,
+        runId,
+        messages,
+        aggressive ? policy.aggressiveMessageTail : policy.recentMessageTail,
+      )
+    : [...messages];
 
   if (!canvas) return transformed;
   const injection = {
@@ -271,7 +231,10 @@ export async function assembleMemoryContext(
       notes: workingSet.notes.map((note) => note.id),
       evidence: workingSet.recentEvidence.map((item) => item.id),
       originalEstimatedTokens: initialTokens,
-      folded: ratio >= FOLD_RATIO,
+      contextWindow,
+      contextRatio: ratio,
+      folded,
+      aggressive,
     },
     timestamp: Date.now(),
   } as AgentMessage;
@@ -284,9 +247,9 @@ async function foldToolResults(
   memory: MemoryService,
   runId: RunId,
   messages: readonly AgentMessage[],
-  aggressive: boolean,
+  protectedTail: number,
 ): Promise<AgentMessage[]> {
-  const tailStart = Math.max(0, messages.length - (aggressive ? 4 : RECENT_MESSAGE_TAIL));
+  const tailStart = Math.max(0, messages.length - protectedTail);
   return Promise.all(
     messages.map(async (message, index) => {
       if (index >= tailStart || !isToolResultMessage(message)) return message;
@@ -307,7 +270,10 @@ async function foldToolResults(
   );
 }
 
-function renderWorkingMemory(workingSet: WorkingMemoryProjection): string | undefined {
+function renderWorkingMemory(
+  workingSet: WorkingMemoryProjection,
+  maximumCharacters: number,
+): string | undefined {
   if (workingSet.objectivePath.length === 0 && workingSet.notes.length === 0) return undefined;
   const lines = [
     "<phenix-memory>",
@@ -335,7 +301,52 @@ function renderWorkingMemory(workingSet: WorkingMemoryProjection): string | unde
     "</phenix-memory>",
   );
   const rendered = lines.join("\n");
-  return rendered.length <= 8_000 ? rendered : `${rendered.slice(0, 7_999)}…`;
+  return rendered.length <= maximumCharacters
+    ? rendered
+    : `${rendered.slice(0, Math.max(0, maximumCharacters - 1))}…`;
+}
+
+async function handleMemoryHookFailure(
+  binding: MemorySessionBinding,
+  operation: MemoryOperation,
+  error: unknown,
+): Promise<void> {
+  await binding.memory.reportFailure(binding.runId, operation, error);
+  if (binding.memory.policy.captureFailureMode === "strict") throw error;
+}
+
+interface Utf8Page {
+  readonly content: string;
+  readonly offset: number;
+  readonly nextOffset: number;
+  readonly returnedBytes: number;
+  readonly totalBytes: number;
+}
+
+function utf8Page(content: string, requestedOffset: number, requestedLimit: number): Utf8Page {
+  const bytes = Buffer.from(content, "utf8");
+  let offset = Math.min(requestedOffset, bytes.length);
+  while (offset < bytes.length && isUtf8Continuation(bytes[offset] ?? 0)) offset += 1;
+
+  let end = Math.min(bytes.length, offset + requestedLimit);
+  while (end > offset && end < bytes.length && isUtf8Continuation(bytes[end] ?? 0)) end -= 1;
+  if (end === offset && offset < bytes.length) {
+    end = Math.min(bytes.length, offset + 1);
+    while (end < bytes.length && isUtf8Continuation(bytes[end] ?? 0)) end += 1;
+  }
+
+  const page = bytes.subarray(offset, end);
+  return {
+    content: page.toString("utf8"),
+    offset,
+    nextOffset: end,
+    returnedBytes: page.length,
+    totalBytes: bytes.length,
+  };
+}
+
+function isUtf8Continuation(byte: number): boolean {
+  return (byte & 0xc0) === 0x80;
 }
 
 function estimateMessages(messages: readonly AgentMessage[]): number {
