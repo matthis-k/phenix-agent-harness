@@ -140,6 +140,13 @@ impl Default for ViewState {
     fn default() -> Self {
         let mut panes = BTreeMap::new();
         panes.insert(
+            ElementId::header(),
+            PaneViewState {
+                height: Some(1),
+                ..PaneViewState::default()
+            },
+        );
+        panes.insert(
             ElementId::sidebar(),
             PaneViewState {
                 width: Some(28),
