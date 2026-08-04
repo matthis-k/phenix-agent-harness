@@ -285,15 +285,15 @@ mod tests {
     #[test]
     fn duplicate_workflows_and_backends_are_rejected_during_construction() {
         let workflow = WorkflowId::parse("implement").expect("workflow ID");
-        let builder = builder().workflow(workflow.clone()).expect("workflow");
+        let workflow_builder = builder().workflow(workflow.clone()).expect("workflow");
         assert!(matches!(
-            builder.clone().workflow(workflow),
+            workflow_builder.workflow(workflow),
             Err(DefinitionError::DuplicateWorkflow(_))
         ));
 
-        let builder = builder().backend(backend()).expect("backend");
+        let backend_builder = builder().backend(backend()).expect("backend");
         assert!(matches!(
-            builder.backend(backend()),
+            backend_builder.backend(backend()),
             Err(DefinitionError::DuplicateBackend(_))
         ));
     }
