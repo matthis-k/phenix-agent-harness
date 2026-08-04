@@ -83,10 +83,7 @@ fn validate_id(kind: &'static str, value: &str) -> Result<(), InvalidId> {
         return Err(InvalidId::new(kind, "is too long"));
     }
     if value.chars().any(char::is_control) {
-        return Err(InvalidId::new(
-            kind,
-            "must not contain control characters",
-        ));
+        return Err(InvalidId::new(kind, "must not contain control characters"));
     }
     Ok(())
 }
