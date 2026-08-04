@@ -14,6 +14,7 @@
       phenixPiPackage = self'.packages.phenix-pi-package;
       mcpConfig = ./phenix-pi/config/mcp.json;
       piRuntimeInputs = tooling.harnessRuntime ++ [
+        self'.packages.phenix-rtk
         pkgs.mcp-nixos
         self'.packages.stitch
         self'.packages.stitch-mcp
@@ -38,6 +39,8 @@
         export PI_CODING_AGENT_DIR="$agent_dir"
         export PI_SKIP_VERSION_CHECK=1
         export PI_TELEMETRY=0
+        export PHENIX_RTK_BIN="${self'.packages.phenix-rtk}/bin/rtk"
+        export PHENIX_TOKEN_REDUCTION_BACKEND="''${PHENIX_TOKEN_REDUCTION_BACKEND:-rtk}"
         export HYPA_PI_MODE="''${HYPA_PI_MODE:-replace}"
         export HYPA_PI_ENABLE_MCP_PROXY="''${HYPA_PI_ENABLE_MCP_PROXY:-0}"
         export HYPA_PI_ASK_NON_INTERACTIVE="''${HYPA_PI_ASK_NON_INTERACTIVE:-allow}"
@@ -95,6 +98,54 @@
             test -x ${pkgs.mcp-nixos}/bin/mcp-nixos
             touch "$out"
           '';
+
+      phenixRtkSmoke =
+        pkgs.runCommand "phenix-rtk-smoke"
+          {
+            nativeBuildInputs = [
+              self'.packages.phenix-rtk
+              pkgs.gitMinimal
+            ];
+          }
+          ''
+            rtk --version
+
+            mkdir -p "$TMPDIR/config/rtk" "$TMPDIR/repository" "$TMPDIR/tee"
+            cat > "$TMPDIR/config/rtk/config.toml" <<'EOF'
+            [tee]
+            enabled = false
+            mode = "never"
+            max_files = 1
+            max_file_size = 1
+
+            [tracking]
+            enabled = false
+            history_days = 0
+
+            [telemetry]
+            enabled = false
+            EOF
+
+            cd "$TMPDIR/repository"
+            git init --quiet
+            git config user.email phenix@example.invalid
+            git config user.name Phenix
+            touch tracked.txt
+            git add tracked.txt
+            git commit --quiet -m initial
+            echo changed > tracked.txt
+
+            PHENIX_RTK_LOSSLESS=1 \
+              RTK_TEE=0 \
+              RTK_TEE_DIR="$TMPDIR/tee" \
+              XDG_CONFIG_HOME="$TMPDIR/config" \
+              rtk git status > "$TMPDIR/compact-status.txt"
+
+            tee_file="$TMPDIR/tee/phenix-raw.log"
+            test -f "$tee_file"
+            grep -q tracked.txt "$tee_file"
+            touch "$out"
+          '';
     in
     {
       packages = {
@@ -107,6 +158,7 @@
       checks = {
         local-operation-runtime = localOperationRuntimeSmoke;
         mcp-defaults = mcpDefaultsSmoke;
+        phenix-rtk = phenixRtkSmoke;
         inherit pi;
         pi-store = piStore;
         pi-dev = piDev;
