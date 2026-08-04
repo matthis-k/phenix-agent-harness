@@ -25,6 +25,28 @@ const MemoryReliabilitySchema = Type.Union([
 
 const MemoryKindSchema = Type.Union(MEMORY_KINDS.map((kind) => Type.Literal(kind)));
 
+const SetStatusSchema = Type.Union([
+  ...(["active", "superseded", "uncertain"] as const).map((status) =>
+    Type.Object(
+      {
+        action: Type.Literal("set_status"),
+        noteId: Type.String({ minLength: 1, maxLength: 160 }),
+        status: Type.Literal(status),
+      },
+      { additionalProperties: false },
+    ),
+  ),
+  Type.Object(
+    {
+      action: Type.Literal("set_status"),
+      noteId: Type.String({ minLength: 1, maxLength: 160 }),
+      status: Type.Literal("invalidated"),
+      invalidatedBy: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
+    },
+    { additionalProperties: false },
+  ),
+]);
+
 export const MEMORY_TOOL_PARAMETERS = Type.Union([
   Type.Object({ action: Type.Literal("snapshot") }, { additionalProperties: false }),
   Type.Object(
@@ -60,26 +82,24 @@ export const MEMORY_TOOL_PARAMETERS = Type.Union([
       summary: Type.String({ minLength: 1, maxLength: 2_000 }),
       subject: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
       evidenceIds: Type.Optional(
-        Type.Array(Type.String({ minLength: 1, maxLength: 160 }), { maxItems: 32 }),
+        Type.Array(Type.String({ minLength: 1, maxLength: 160 }), {
+          maxItems: 32,
+          uniqueItems: true,
+        }),
       ),
       retention: Type.Optional(MemoryRetentionSchema),
       reliability: Type.Optional(MemoryReliabilitySchema),
       status: Type.Optional(MemoryStatusSchema),
       supersedes: Type.Optional(
-        Type.Array(Type.String({ minLength: 1, maxLength: 160 }), { maxItems: 32 }),
+        Type.Array(Type.String({ minLength: 1, maxLength: 160 }), {
+          maxItems: 32,
+          uniqueItems: true,
+        }),
       ),
     },
     { additionalProperties: false },
   ),
-  Type.Object(
-    {
-      action: Type.Literal("set_status"),
-      noteId: Type.String({ minLength: 1, maxLength: 160 }),
-      status: MemoryStatusSchema,
-      invalidatedBy: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
-    },
-    { additionalProperties: false },
-  ),
+  SetStatusSchema,
 ]);
 
 export type MemoryToolRequest = Static<typeof MEMORY_TOOL_PARAMETERS>;
