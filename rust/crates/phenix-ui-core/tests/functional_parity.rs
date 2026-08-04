@@ -139,8 +139,8 @@ fn unknown_slash_commands_are_invoked_through_the_resource_port() {
 
 fn assert_send(effects: Vec<AppEffect>, expected: BackendCommand) {
     assert!(effects
-        .into_iter()
-        .any(|effect| effect == AppEffect::Send(expected)));
+        .iter()
+        .any(|effect| effect == &AppEffect::Send(expected)));
 }
 
 fn state_with_run(run: RunId) -> AppState {
