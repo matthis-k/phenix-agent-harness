@@ -23,10 +23,7 @@ test("request parser accepts a typed authentication response", () => {
 
 test("command schema rejects unknown commands and extra properties", () => {
   assert.equal(HeadlessCommandSchema.validate({ type: "unknown" }).ok, false);
-  assert.equal(
-    HeadlessCommandSchema.validate({ type: "model.list", accidental: true }).ok,
-    false,
-  );
+  assert.equal(HeadlessCommandSchema.validate({ type: "model.list", accidental: true }).ok, false);
 });
 
 test("request schema rejects control characters in durable IDs", () => {
