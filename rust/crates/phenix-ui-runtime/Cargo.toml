@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
+phenix-frontend-config = { path = "../phenix-frontend-config" }
 phenix-runtime-api = { path = "../phenix-runtime-api" }
 phenix-ui-core = { path = "../phenix-ui-core" }
 
