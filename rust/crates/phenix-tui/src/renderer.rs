@@ -36,6 +36,17 @@ impl UiRenderer for RatatuiRenderer {
             .map(|_| ())
             .map_err(|error| error.to_string())
     }
+
+    fn suspend(&mut self) -> Result<(), String> {
+        self.terminal.take();
+        ratatui::restore();
+        Ok(())
+    }
+
+    fn resume(&mut self) -> Result<(), String> {
+        self.terminal = Some(ratatui::try_init().map_err(|error| error.to_string())?);
+        Ok(())
+    }
 }
 
 impl Drop for RatatuiRenderer {

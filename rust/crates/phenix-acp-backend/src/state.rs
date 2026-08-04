@@ -1,13 +1,13 @@
 use phenix_acp::acp::schema::v1::{
     AgentCapabilities, AuthMethod as AcpAuthMethod, AvailableCommand, InitializeResponse,
-    SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOptions,
-    SessionId as AcpSessionId, SessionModeState, ToolCall,
+    SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
+    SessionConfigSelectOptions, SessionId as AcpSessionId, SessionModeState, ToolCall,
 };
 use phenix_runtime_api::{
     AuthMethod as FrontendAuthMethod, AuthProviderSummary, BackendCapabilities, BackendError,
-    BackendHealth, ImageInput, ModelRef, ModelSummary, PersistedSessionSummary,
-    PromptCapabilities, RunId, RunKind, RunState, RunSummary, RuntimeSnapshot, SessionCapabilities,
-    SessionId, ThinkingLevel, TranscriptBlock,
+    BackendHealth, ImageInput, ModelRef, ModelSummary, PersistedSessionSummary, PromptCapabilities,
+    RunId, RunKind, RunState, RunSummary, RuntimeSnapshot, SessionCapabilities, SessionId,
+    ThinkingLevel, TranscriptBlock,
 };
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::PathBuf;
@@ -136,9 +136,10 @@ impl SessionState {
 
     pub fn next_transcript_key(&mut self, prefix: &str) -> Result<String, BackendError> {
         let id = self.next_transcript_id;
-        self.next_transcript_id = self.next_transcript_id.checked_add(1).ok_or_else(|| {
-            BackendError::Protocol("ACP transcript IDs exhausted".to_owned())
-        })?;
+        self.next_transcript_id = self
+            .next_transcript_id
+            .checked_add(1)
+            .ok_or_else(|| BackendError::Protocol("ACP transcript IDs exhausted".to_owned()))?;
         Ok(format!("{prefix}-{id}"))
     }
 }
@@ -443,11 +444,10 @@ fn root_of(sessions: &BTreeMap<SessionId, SessionState>, run_id: &RunId) -> RunI
 }
 
 fn model_ref(value: String) -> ModelRef {
-    let (provider, model) = value
-        .split_once('/')
-        .map_or_else(|| ("acp".to_owned(), value), |(provider, model)| {
-            (provider.to_owned(), model.to_owned())
-        });
+    let (provider, model) = value.split_once('/').map_or_else(
+        || ("acp".to_owned(), value),
+        |(provider, model)| (provider.to_owned(), model.to_owned()),
+    );
     ModelRef { provider, model }
 }
 

@@ -78,9 +78,7 @@ impl OutputBuffer {
 }
 
 impl TerminalManager {
-    pub fn new(
-        event_tx: futures::channel::mpsc::UnboundedSender<TerminalEvent>,
-    ) -> Self {
+    pub fn new(event_tx: futures::channel::mpsc::UnboundedSender<TerminalEvent>) -> Self {
         Self {
             inner: Arc::new(TerminalManagerInner {
                 terminals: Mutex::new(HashMap::new()),
@@ -113,11 +111,7 @@ impl TerminalManager {
             .lock()
             .map_err(|_| internal_error("terminal status lock poisoned"))?
             .clone();
-        Ok(TerminalOutputResponse::new(
-            output.text.clone(),
-            output.truncated,
-        )
-        .exit_status(status))
+        Ok(TerminalOutputResponse::new(output.text.clone(), output.truncated).exit_status(status))
     }
 
     pub async fn wait(
@@ -296,10 +290,13 @@ fn refresh_exit_status(record: &TerminalRecord) -> Result<(), AcpError> {
 }
 
 fn project_exit_status(status: ExitStatus) -> TerminalExitStatus {
-    status.code().and_then(|code| u32::try_from(code).ok()).map_or_else(
-        || TerminalExitStatus::new().signal("terminated by signal"),
-        |code| TerminalExitStatus::new().exit_code(code),
-    )
+    status
+        .code()
+        .and_then(|code| u32::try_from(code).ok())
+        .map_or_else(
+            || TerminalExitStatus::new().signal("terminated by signal"),
+            |code| TerminalExitStatus::new().exit_code(code),
+        )
 }
 
 fn spawn_reader(

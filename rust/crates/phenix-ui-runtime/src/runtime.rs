@@ -13,7 +13,10 @@ use phenix_ui_core::{
 use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
+use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -21,6 +24,14 @@ const DEFAULT_DRAIN_LIMIT: usize = 256;
 
 pub trait UiRenderer {
     fn render(&mut self, state: &AppState) -> Result<(), String>;
+
+    fn suspend(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn resume(&mut self) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 pub struct UiRuntime<R> {
@@ -33,6 +44,7 @@ pub struct UiRuntime<R> {
     backend_forwarder: Option<JoinHandle<()>>,
     backend_worker: Option<BackendWorker>,
     drain_limit: usize,
+    external_io_pause: Option<Arc<AtomicBool>>,
 }
 
 impl<R> UiRuntime<R> {
@@ -107,11 +119,16 @@ impl<R: UiRenderer> UiRuntime<R> {
             backend_forwarder: Some(backend_forwarder),
             backend_worker: Some(backend_worker),
             drain_limit: DEFAULT_DRAIN_LIMIT,
+            external_io_pause: None,
         })
     }
 
     pub fn mailbox(&self) -> UiMailbox {
         self.mailbox.clone()
+    }
+
+    pub fn set_external_io_pause(&mut self, pause: Arc<AtomicBool>) {
+        self.external_io_pause = Some(pause);
     }
 
     pub fn set_drain_limit(&mut self, drain_limit: usize) -> Result<(), UiRuntimeError> {
@@ -228,6 +245,49 @@ impl<R: UiRenderer> UiRuntime<R> {
                             AppEvent::BackendSubmitFailed(error.to_string()),
                         ));
                     }
+                }
+                AppEffect::RunExternal { flow_id, command } => {
+                    if let Some(pause) = &self.external_io_pause {
+                        pause.store(true, Ordering::Release);
+                    }
+                    let result = (|| {
+                        self.renderer.suspend().map_err(UiRuntimeError::Render)?;
+                        let status = Command::new(&command.program)
+                            .args(&command.arguments)
+                            .envs(&command.environment)
+                            .status()
+                            .map_err(|error| UiRuntimeError::Start(error.to_string()));
+                        let resume = self.renderer.resume().map_err(UiRuntimeError::Render);
+                        match (status, resume) {
+                            (Ok(status), Ok(())) => Ok((
+                                status.success(),
+                                status.code().map(|code| format!("exit code {code}")),
+                            )),
+                            (Err(error), Ok(())) | (_, Err(error)) => Err(error),
+                        }
+                    })();
+                    if let Some(pause) = &self.external_io_pause {
+                        pause.store(false, Ordering::Release);
+                    }
+                    let command = match result {
+                        Ok((success, message)) => BackendCommand::AuthTerminalFinished {
+                            flow_id,
+                            success,
+                            message,
+                        },
+                        Err(error) => BackendCommand::AuthTerminalFinished {
+                            flow_id,
+                            success: false,
+                            message: Some(error.to_string()),
+                        },
+                    };
+                    if let Err(error) = self.backend.submit(command) {
+                        effects.extend(reduce(
+                            &mut self.state,
+                            AppEvent::BackendSubmitFailed(error.to_string()),
+                        ));
+                    }
+                    dirty = true;
                 }
                 AppEffect::Render => dirty = true,
                 AppEffect::Quit => self.state.should_quit = true,

@@ -1386,9 +1386,13 @@ dependencies = [
 name = "phenix-acp-backend"
 version = "0.1.0"
 dependencies = [
- "agent-client-protocol",
+ "base64",
+ "blocking",
  "futures",
+ "phenix-acp",
  "phenix-runtime-api",
+ "serde_json",
+ "shell-words",
 ]
 
 [[package]]

@@ -24,7 +24,9 @@ use std::error::Error;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -112,7 +114,7 @@ fn run_tui(provider: FrontendProviderRef) -> Result<(), Box<dyn Error>> {
     })?;
 
     let renderer = RatatuiRenderer::initialize(Rc::clone(&provider))?;
-    let runtime = UiRuntime::from_backend_with_frontend(
+    let mut runtime = UiRuntime::from_backend_with_frontend(
         AppState::default(),
         backend,
         renderer,
@@ -120,8 +122,10 @@ fn run_tui(provider: FrontendProviderRef) -> Result<(), Box<dyn Error>> {
         CHANNEL_CAPACITY,
     )?;
     let mailbox = runtime.mailbox();
+    let external_io_pause = Arc::new(AtomicBool::new(false));
+    runtime.set_external_io_pause(Arc::clone(&external_io_pause));
     let _ticker = runtime.spawn_ticker(Duration::from_millis(250))?;
-    let _input_thread = spawn_terminal_input(mailbox)?;
+    let _input_thread = spawn_terminal_input(mailbox, external_io_pause)?;
     runtime.run()?;
     Ok(())
 }
@@ -266,10 +270,15 @@ fn inherited_headless_environment() -> BTreeMap<String, String> {
 
 fn spawn_terminal_input(
     mailbox: phenix_ui_runtime::UiMailbox,
+    external_io_pause: Arc<AtomicBool>,
 ) -> Result<thread::JoinHandle<()>, Box<dyn Error>> {
     Ok(thread::Builder::new()
         .name("phenix-terminal-input".to_owned())
         .spawn(move || loop {
+            if external_io_pause.load(Ordering::Acquire) {
+                thread::sleep(INPUT_POLL_PERIOD);
+                continue;
+            }
             match event::poll(INPUT_POLL_PERIOD) {
                 Ok(false) => continue,
                 Ok(true) => {}

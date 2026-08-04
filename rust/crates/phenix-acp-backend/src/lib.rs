@@ -117,12 +117,8 @@ impl AgentBackend for AcpAgentBackend {
             })
             .map_err(|error| BackendError::Start(error.to_string()))?;
 
-        let result = futures::executor::block_on(run_connection(
-            agent,
-            self.config,
-            request_rx,
-            outputs,
-        ));
+        let result =
+            futures::executor::block_on(run_connection(agent, self.config, request_rx, outputs));
         stop_relay.store(true, Ordering::Release);
         relay.join().map_err(|_| BackendError::Panicked)?;
         result
@@ -262,10 +258,12 @@ async fn run_connection(
                 ClientCapabilities::new()
                     .terminal(true)
                     .auth(AuthCapabilities::new().terminal(true))
-                    .session(ClientSessionCapabilities::new().config_options(
-                        SessionConfigOptionsCapabilities::new()
-                            .boolean(BooleanConfigOptionCapabilities::new()),
-                    )),
+                    .session(
+                        ClientSessionCapabilities::new().config_options(
+                            SessionConfigOptionsCapabilities::new()
+                                .boolean(BooleanConfigOptionCapabilities::new()),
+                        ),
+                    ),
             );
             let initialize = cx.send_request(initialize).block_task().await?;
             let runtime = RuntimeState::new(AdapterState::new(initialize));
@@ -505,7 +503,9 @@ async fn handle_request(
                         .map_err(|error| BackendError::Protocol(error.to_string()))?,
                     parent: None,
                     kind: phenix_runtime_api::SessionEntryKind::Other,
-                    label: Some("ACP session; run hierarchy is exposed through snapshot.runs".to_owned()),
+                    label: Some(
+                        "ACP session; run hierarchy is exposed through snapshot.runs".to_owned(),
+                    ),
                 }],
             }))
         }
@@ -567,9 +567,9 @@ async fn handle_request(
             .await?;
             Ok(BackendReply::Accepted)
         }
-        BackendCommand::AuthProviders => {
-            Ok(BackendReply::AuthProviders(runtime.adapter.auth_providers()))
-        }
+        BackendCommand::AuthProviders => Ok(BackendReply::AuthProviders(
+            runtime.adapter.auth_providers(),
+        )),
         BackendCommand::AuthLoginStart {
             provider_id,
             method: _,
@@ -596,9 +596,8 @@ async fn handle_request(
                 result: if success {
                     Ok(())
                 } else {
-                    Err(message.unwrap_or_else(|| {
-                        "terminal authentication command failed".to_owned()
-                    }))
+                    Err(message
+                        .unwrap_or_else(|| "terminal authentication command failed".to_owned()))
                 },
             })?;
             Ok(BackendReply::Completed)
@@ -652,11 +651,9 @@ async fn handle_request(
                 .map_err(acp_protocol_error)?;
             Ok(BackendReply::Accepted)
         }
-        BackendCommand::RetryConfigure { .. } | BackendCommand::RetryAbort { .. } => {
-            Err(BackendError::Unsupported(
-                "ACP does not standardize retry control".to_owned(),
-            ))
-        }
+        BackendCommand::RetryConfigure { .. } | BackendCommand::RetryAbort { .. } => Err(
+            BackendError::Unsupported("ACP does not standardize retry control".to_owned()),
+        ),
         BackendCommand::CommandList => {
             let commands = runtime
                 .adapter
@@ -722,14 +719,15 @@ async fn handle_internal_event(
             apply_terminal_event(&runtime.adapter, event, outputs)?;
         }
         InternalEvent::PromptFinished { session_id, result } => {
-            let phenix_session = runtime
-                .adapter
-                .session_id_by_acp(&session_id)
-                .ok_or_else(|| {
-                    BackendError::Protocol(format!(
-                        "prompt completed for unknown ACP session {session_id}"
-                    ))
-                })?;
+            let phenix_session =
+                runtime
+                    .adapter
+                    .session_id_by_acp(&session_id)
+                    .ok_or_else(|| {
+                        BackendError::Protocol(format!(
+                            "prompt completed for unknown ACP session {session_id}"
+                        ))
+                    })?;
             let next = {
                 let session = runtime
                     .adapter
@@ -758,17 +756,13 @@ async fn handle_internal_event(
                     run_id: session.run.id.clone(),
                     pending: session.follow_ups.len(),
                 })?;
-                session.follow_ups.pop_front().map(|prompt| (session.run.id.clone(), prompt))
+                session
+                    .follow_ups
+                    .pop_front()
+                    .map(|prompt| (session.run.id.clone(), prompt))
             };
             if let Some((run_id, prompt)) = next {
-                start_prompt(
-                    connection,
-                    runtime,
-                    run_id,
-                    prompt,
-                    internal_tx,
-                    outputs,
-                )?;
+                start_prompt(connection, runtime, run_id, prompt, internal_tx, outputs)?;
             }
         }
     }
@@ -1130,10 +1124,7 @@ async fn start_authentication(
             runtime
                 .pending_terminal_auth
                 .insert(flow_id.clone(), provider_id.clone());
-            outputs.event(BackendEvent::ExternalCommandRequested {
-                flow_id,
-                command,
-            })?;
+            outputs.event(BackendEvent::ExternalCommandRequested { flow_id, command })?;
         }
         _ => {
             return Err(BackendError::Unsupported(

@@ -1,4 +1,5 @@
 use crate::id::{AuthFlowId, DialogId, ObjectiveId, RunId, SessionEntryId, SessionId, ToolCallId};
+use std::collections::BTreeMap;
 use std::fmt::{self, Debug, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -41,6 +42,7 @@ pub struct AuthenticationCapabilities {
     pub provider_listing: bool,
     pub oauth: bool,
     pub api_keys: bool,
+    pub terminal: bool,
     pub device_code: bool,
     pub browser_callback: bool,
     pub logout: bool,
@@ -101,6 +103,14 @@ pub struct ModelSummary {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionModeSummary {
+    pub id: String,
+    pub display_name: String,
+    pub description: Option<String>,
+    pub selected: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ThinkingLevel {
     Off,
     Minimal,
@@ -115,6 +125,7 @@ pub enum ThinkingLevel {
 pub enum AuthMethod {
     OAuth,
     ApiKey,
+    Terminal,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -124,6 +135,13 @@ pub struct AuthProviderSummary {
     pub methods: Vec<AuthMethod>,
     pub configured: bool,
     pub source: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExternalCommand {
+    pub program: String,
+    pub arguments: Vec<String>,
+    pub environment: BTreeMap<String, String>,
 }
 
 #[derive(Eq, PartialEq)]
@@ -214,6 +232,13 @@ pub enum BackendCommand {
     SessionTree {
         session_id: SessionId,
     },
+    SessionModes {
+        run_id: RunId,
+    },
+    SessionModeSelect {
+        run_id: RunId,
+        mode_id: String,
+    },
     SessionExport {
         session_id: SessionId,
         path: Option<String>,
@@ -241,6 +266,11 @@ pub enum BackendCommand {
     },
     AuthLoginCancel {
         flow_id: AuthFlowId,
+    },
+    AuthTerminalFinished {
+        flow_id: AuthFlowId,
+        success: bool,
+        message: Option<String>,
     },
     AuthLogout {
         provider_id: String,
@@ -284,6 +314,7 @@ pub enum BackendReply {
     Sessions(Vec<PersistedSessionSummary>),
     Runs(Vec<RunSummary>),
     SessionTree(PersistedSessionTreeSnapshot),
+    SessionModes(Vec<SessionModeSummary>),
     Models(Vec<ModelSummary>),
     ThinkingLevels(Vec<ThinkingLevel>),
     AuthProviders(Vec<AuthProviderSummary>),
@@ -578,6 +609,10 @@ pub enum BackendEvent {
         run_id: RunId,
         steering: Vec<String>,
         follow_ups: Vec<String>,
+    },
+    ExternalCommandRequested {
+        flow_id: AuthFlowId,
+        command: ExternalCommand,
     },
     AuthPromptRequested {
         flow_id: AuthFlowId,

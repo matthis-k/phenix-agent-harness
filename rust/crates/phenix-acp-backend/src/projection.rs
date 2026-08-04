@@ -255,8 +255,7 @@ fn apply_tool_update(
         call.update(update.fields);
         call.clone()
     } else {
-        ToolCall::try_from(update)
-            .map_err(|error| BackendError::Protocol(error.to_string()))?
+        ToolCall::try_from(update).map_err(|error| BackendError::Protocol(error.to_string()))?
     };
     session.tools.insert(key, call.clone());
     let id = ToolCallId::parse(call.tool_call_id.to_string())
@@ -305,8 +304,8 @@ fn apply_session_info(
     session: &mut SessionState,
     update: &phenix_acp::acp::schema::v1::SessionInfoUpdate,
 ) -> Result<(), BackendError> {
-    let value = serde_json::to_value(update)
-        .map_err(|error| BackendError::Protocol(error.to_string()))?;
+    let value =
+        serde_json::to_value(update).map_err(|error| BackendError::Protocol(error.to_string()))?;
     if let Some(title) = value.get("title") {
         if let Some(title) = title.as_str() {
             session.summary.name = Some(title.to_owned());
