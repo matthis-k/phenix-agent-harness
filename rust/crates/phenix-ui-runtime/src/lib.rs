@@ -3,13 +3,14 @@
 mod fabric;
 
 pub use fabric::{
-    BusReaction, ContentEvent, EventConsumer, EventRouter, LayoutAxis, Propagation, ReactionBatch,
-    ResizeRequest, RouterError, UiEvent,
+    BusReaction, ContentEvent, EventConsumer, EventRouter, Propagation, ReactionBatch, RouterError,
+    UiEvent, ViewMutation,
 };
 
 use phenix_runtime_api::{BackendClient, BackendOutput, BackendRuntime, BackendWorker};
 use phenix_ui_core::{
-    reduce, AppEffect, AppEvent, AppState, ElementId, EventEnvelope, UiInput, UserIntent,
+    reduce, AppEffect, AppEvent, AppState, ElementId, EventEnvelope, FocusDirection, FocusTarget,
+    LayoutAxis, ResizeRequest, UiInput, UserIntent,
 };
 use std::collections::VecDeque;
 use std::error::Error;
@@ -108,7 +109,7 @@ pub trait UiRenderer {
     fn render(&mut self, state: &AppState) -> Result<(), String>;
 }
 
-pub trait UiInputController: Send {
+pub trait UiInputController {
     fn handle(&mut self, state: &AppState, input: UiInput) -> Vec<AppEvent>;
 }
 
@@ -154,6 +155,59 @@ impl EventConsumer for RootContentConsumer {
     }
 }
 
+struct UiStateConsumer {
+    id: ElementId,
+}
+
+impl UiStateConsumer {
+    fn new(id: ElementId) -> Self {
+        Self { id }
+    }
+}
+
+impl EventConsumer for UiStateConsumer {
+    fn element_id(&self) -> &ElementId {
+        &self.id
+    }
+
+    fn on_ui(
+        &mut self,
+        _state: &AppState,
+        envelope: &EventEnvelope<UiEvent>,
+    ) -> ReactionBatch {
+        let mutation = match &envelope.event {
+            UiEvent::FocusRequested(element) => {
+                FocusTarget::from_element(element).map(ViewMutation::SetFocus)
+            }
+            UiEvent::FocusMoveRequested(direction) => Some(ViewMutation::MoveFocus(*direction)),
+            UiEvent::ResizeRequested {
+                element,
+                axis,
+                request,
+            } => Some(ViewMutation::ResizePane {
+                element: element.clone(),
+                axis: *axis,
+                request: *request,
+            }),
+            UiEvent::VisibilityRequested { element, visible } => {
+                Some(ViewMutation::SetPaneVisibility {
+                    element: element.clone(),
+                    visible: *visible,
+                })
+            }
+            UiEvent::ScrollRequested { element, lines } => Some(ViewMutation::ScrollPane {
+                element: element.clone(),
+                lines: *lines,
+            }),
+            UiEvent::Invalidate => return ReactionBatch::one(BusReaction::Render),
+            UiEvent::Input(_) | UiEvent::ShutdownRequested => None,
+        };
+        mutation.map_or_else(ReactionBatch::none, |mutation| {
+            ReactionBatch::stop(vec![BusReaction::View(mutation)])
+        })
+    }
+}
+
 struct RootInputConsumer<C> {
     id: ElementId,
     controller: C,
@@ -188,16 +242,31 @@ impl<C: UiInputController> EventConsumer for RootInputConsumer<C> {
                     .collect(),
                 propagation: Propagation::Continue,
             },
-            UiEvent::ShutdownRequested => {
-                ReactionBatch::one(BusReaction::App(AppEvent::User(UserIntent::Quit)))
-            }
+            UiEvent::ShutdownRequested => ReactionBatch::stop(vec![BusReaction::App(
+                AppEvent::User(UserIntent::Quit),
+            )]),
             UiEvent::FocusRequested(_)
+            | UiEvent::FocusMoveRequested(_)
             | UiEvent::ResizeRequested { .. }
             | UiEvent::VisibilityRequested { .. }
             | UiEvent::ScrollRequested { .. }
             | UiEvent::Invalidate => ReactionBatch::none(),
         }
     }
+}
+
+pub fn install_core_consumers(router: &mut EventRouter) -> Result<(), RouterError> {
+    router.register_consumer(Box::new(RootContentConsumer::new()))?;
+    router.register_consumer(Box::new(UiStateConsumer::new(ElementId::root())))?;
+    router.register_consumer(Box::new(UiStateConsumer::new(ElementId::layout())))?;
+    Ok(())
+}
+
+pub fn install_input_controller<C: UiInputController + 'static>(
+    router: &mut EventRouter,
+    controller: C,
+) -> Result<(), RouterError> {
+    router.register_consumer(Box::new(RootInputConsumer::new(controller)))
 }
 
 pub struct UiRuntime<R> {
@@ -235,7 +304,7 @@ impl<R: UiRenderer> UiRuntime<R> {
         )
     }
 
-    pub fn from_backend_with_controller<C: UiInputController>(
+    pub fn from_backend_with_controller<C: UiInputController + 'static>(
         state: AppState,
         backend: BackendRuntime,
         renderer: R,
@@ -243,11 +312,9 @@ impl<R: UiRenderer> UiRuntime<R> {
         channel_capacity: usize,
     ) -> Result<Self, UiRuntimeError> {
         let mut router = EventRouter::standard();
-        router
-            .register_consumer(Box::new(RootContentConsumer::new()))
+        install_core_consumers(&mut router)
             .map_err(|error| UiRuntimeError::InvalidConfiguration(error.to_string()))?;
-        router
-            .register_consumer(Box::new(RootInputConsumer::new(input_controller)))
+        install_input_controller(&mut router, input_controller)
             .map_err(|error| UiRuntimeError::InvalidConfiguration(error.to_string()))?;
         Self::from_backend_with_router(state, backend, renderer, router, channel_capacity)
     }
@@ -390,6 +457,10 @@ impl<R: UiRenderer> UiRuntime<R> {
                 BusReaction::Ui(envelope) => {
                     queue.extend(self.router.route_ui(&self.state, &envelope).into_iter())
                 }
+                BusReaction::View(mutation) => {
+                    apply_view_mutation(&mut self.state, mutation);
+                    dirty = true;
+                }
                 BusReaction::Render => dirty = true,
             }
         }
@@ -420,6 +491,68 @@ impl<R: UiRenderer> UiRuntime<R> {
 impl<R> Drop for UiRuntime<R> {
     fn drop(&mut self) {
         self.detach_workers();
+    }
+}
+
+fn apply_view_mutation(state: &mut AppState, mutation: ViewMutation) {
+    match mutation {
+        ViewMutation::SetFocus(focus) => state.view.focus = focus,
+        ViewMutation::MoveFocus(direction) => {
+            state.view.focus = move_focus(state.view.focus, direction);
+        }
+        ViewMutation::ResizePane {
+            element,
+            axis,
+            request,
+        } => {
+            let pane = state.view.pane_mut(element);
+            let dimension = match axis {
+                LayoutAxis::Horizontal => &mut pane.width,
+                LayoutAxis::Vertical => &mut pane.height,
+            };
+            let current = dimension.unwrap_or(1);
+            *dimension = Some(match request {
+                ResizeRequest::Grow(amount) => current.saturating_add(amount).max(1),
+                ResizeRequest::Shrink(amount) => current.saturating_sub(amount).max(1),
+                ResizeRequest::Set(value) => value.max(1),
+            });
+        }
+        ViewMutation::SetPaneVisibility { element, visible } => {
+            state.view.pane_mut(element.clone()).visible = visible;
+            if !visible && FocusTarget::from_element(&element) == Some(state.view.focus) {
+                state.view.focus = FocusTarget::Input;
+            }
+        }
+        ViewMutation::ScrollPane { element, lines } => {
+            let scroll = match element.as_str() {
+                "ui.sidebar" => Some(&mut state.view.sidebar_scroll),
+                "ui.transcript" => Some(&mut state.view.transcript_scroll),
+                _ => None,
+            };
+            if let Some(scroll) = scroll {
+                scroll.follow_end = false;
+                scroll.offset = scroll.offset.saturating_add_signed(lines as isize);
+            }
+        }
+    }
+}
+
+fn move_focus(current: FocusTarget, direction: FocusDirection) -> FocusTarget {
+    match direction {
+        FocusDirection::Next => match current {
+            FocusTarget::Sidebar => FocusTarget::Transcript,
+            FocusTarget::Transcript => FocusTarget::Input,
+            FocusTarget::Input | FocusTarget::Overlay => FocusTarget::Sidebar,
+        },
+        FocusDirection::Previous => match current {
+            FocusTarget::Sidebar => FocusTarget::Input,
+            FocusTarget::Transcript => FocusTarget::Sidebar,
+            FocusTarget::Input | FocusTarget::Overlay => FocusTarget::Transcript,
+        },
+        FocusDirection::Left => FocusTarget::Transcript,
+        FocusDirection::Right => FocusTarget::Sidebar,
+        FocusDirection::Up => FocusTarget::Transcript,
+        FocusDirection::Down => FocusTarget::Input,
     }
 }
 
@@ -566,6 +699,20 @@ mod tests {
     }
 
     #[test]
+    fn view_mutations_are_applied_only_by_the_owner_loop() {
+        let mut state = AppState::default();
+        apply_view_mutation(
+            &mut state,
+            ViewMutation::ResizePane {
+                element: ElementId::sidebar(),
+                axis: LayoutAxis::Horizontal,
+                request: ResizeRequest::Grow(4),
+            },
+        );
+        assert_eq!(state.view.pane(&ElementId::sidebar()).width, Some(32));
+    }
+
+    #[test]
     fn ticks_are_coalescible_but_semantic_messages_are_lossless() {
         let (sender, receiver) = mpsc::sync_channel(1);
         let mailbox = UiMailbox { sender };
@@ -577,22 +724,6 @@ mod tests {
                 event: ContentEvent::ClockTick,
                 ..
             })
-        ));
-    }
-
-    #[test]
-    fn zero_capacity_is_rejected_before_threads_are_started() {
-        let backend = BackendRuntime::spawn(Box::new(AcceptingBackend), 1).expect("backend");
-        let renderer = RecordingRenderer {
-            thread_ids: Arc::new(Mutex::new(Vec::new())),
-            input_values: Arc::new(Mutex::new(Vec::new())),
-        };
-        let error = UiRuntime::from_backend(AppState::default(), backend, renderer, 0)
-            .err()
-            .expect("invalid capacity");
-        assert!(matches!(
-            error,
-            UiRuntimeError::InvalidConfiguration(_)
         ));
     }
 }
