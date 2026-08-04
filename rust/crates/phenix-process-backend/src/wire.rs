@@ -64,6 +64,7 @@ impl PendingReply {
             BackendCommand::ModelList => Self::Models,
             BackendCommand::ThinkingLevels { .. } => Self::ThinkingLevels,
             BackendCommand::SessionModes { .. } => Self::Accepted,
+            BackendCommand::SessionModes { .. } => Self::Accepted,
             BackendCommand::AuthProviders => Self::AuthProviders,
             BackendCommand::CommandList => Self::Commands,
             BackendCommand::SessionExport { .. } => Self::Export,
@@ -177,6 +178,13 @@ fn encode_command(command: &BackendCommand) -> Result<Value, BackendError> {
             "type": "session.tree",
             "sessionId": session_id.as_str(),
         }),
+        BackendCommand::SessionModes { .. }
+        | BackendCommand::SessionModeSelect { .. }
+        | BackendCommand::AuthTerminalFinished { .. } => {
+            return Err(BackendError::Unsupported(
+                "the transitional process backend does not support ACP-only commands".to_owned(),
+            ));
+        }
         BackendCommand::SessionModes { .. }
         | BackendCommand::SessionModeSelect { .. }
         | BackendCommand::AuthTerminalFinished { .. } => {
