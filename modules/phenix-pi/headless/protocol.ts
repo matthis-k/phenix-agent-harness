@@ -1,18 +1,14 @@
-import { Type } from "typebox";
+import { Type, type TProperties } from "typebox";
 
 import { defineSchema } from "../domain/definition/schema.ts";
 
-const IdType = Type.String({ minLength: 1, maxLength: 512, pattern: "^[^\\u0000-\\u001f\\u007f]+$" });
+const IdType = Type.String({
+  minLength: 1,
+  maxLength: 512,
+  pattern: "^[^\\u0000-\\u001f\\u007f]+$",
+});
 const NonEmptyStringType = Type.String({ minLength: 1 });
-const ThinkingLevelType = Type.Enum([
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-]);
+const ThinkingLevelType = Type.Enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const AuthMethodType = Type.Enum(["oauth", "api_key"]);
 const StreamingBehaviorType = Type.Enum(["steer", "follow_up"]);
 const ImageType = Type.Object(
@@ -45,14 +41,7 @@ export interface HeadlessModelRef {
   readonly model: string;
 }
 
-export type HeadlessThinkingLevel =
-  | "off"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | "max";
+export type HeadlessThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export type HeadlessAuthMethod = "oauth" | "api_key";
 export type HeadlessStreamingBehavior = "steer" | "follow_up";
@@ -237,14 +226,8 @@ const ExtensionUiResponseType = Type.Union([
   Type.Object({ kind: Type.Literal("cancelled") }, { additionalProperties: false }),
 ]);
 
-function command<T extends string, P extends Record<string, unknown>>(
-  type: T,
-  properties: P,
-) {
-  return Type.Object(
-    { type: Type.Literal(type), ...properties },
-    { additionalProperties: false },
-  );
+function command<T extends string, P extends TProperties>(type: T, properties: P) {
+  return Type.Object({ type: Type.Literal(type), ...properties }, { additionalProperties: false });
 }
 
 export const HeadlessCommandSchema = defineSchema<HeadlessCommand>(
@@ -352,8 +335,6 @@ export const HeadlessRequestFrameSchema = defineSchema<HeadlessRequestFrame>(
 export function parseHeadlessRequest(value: unknown): HeadlessRequestFrame {
   const result = HeadlessRequestFrameSchema.validate(value);
   if (result.ok) return result.value;
-  const detail = result.issues
-    .map((issue) => `${issue.path}: ${issue.message}`)
-    .join("; ");
+  const detail = result.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ");
   throw new Error(`Invalid headless request frame: ${detail}`);
 }
