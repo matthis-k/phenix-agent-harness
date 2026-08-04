@@ -1,10 +1,10 @@
+import type { RunId } from "../domain/shared.ts";
 import type {
   TokenReductionMetrics,
   TokenReductionPreparation,
   TokenReductionResult,
   TokenReductionRewrite,
 } from "../domain/token-reduction.ts";
-import type { RunId } from "../domain/shared.ts";
 import type { TokenReductionBackend } from "../ports/token-reduction-backend.ts";
 import type { TokenReductionEvidenceStore } from "../ports/token-reduction-evidence.ts";
 
@@ -167,7 +167,10 @@ function appendEvidenceReceipt(
   return [...content, { type: "text" as const, text: receipt }];
 }
 
-function mergeDetails(details: unknown, metrics: TokenReductionMetrics): Readonly<Record<string, unknown>> {
+function mergeDetails(
+  details: unknown,
+  metrics: TokenReductionMetrics,
+): Readonly<Record<string, unknown>> {
   const base = recordOf(details) ?? {};
   return { ...base, phenixTokenReduction: metrics };
 }
