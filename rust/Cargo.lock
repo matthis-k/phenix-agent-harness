@@ -996,6 +996,7 @@ dependencies = [
  "phenix-frontend-config",
  "phenix-runtime-api",
  "phenix-ui-core",
+ "phenix-ui-lua",
 ]
 
 [[package]]
