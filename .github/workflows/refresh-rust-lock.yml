@@ -1,0 +1,31 @@
+name: Refresh Rust lockfile
+
+on:
+  push:
+    branches:
+      - feature/rust-ratatui-frontend
+    paths:
+      - .github/workflows/refresh-rust-lock.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: feature/rust-ratatui-frontend
+      - name: Generate lockfile
+        run: cargo generate-lockfile --manifest-path rust/Cargo.toml
+      - name: Commit lockfile
+        run: |
+          if git diff --quiet -- rust/Cargo.lock; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add rust/Cargo.lock
+          git commit -m 'build(rust): refresh Cargo.lock'
+          git push origin HEAD:feature/rust-ratatui-frontend
