@@ -110,6 +110,17 @@ export type MemoryIntegrityIssue =
       readonly message: string;
     }
   | {
+      readonly kind: "note-evidence-missing";
+      readonly noteId: MemoryNoteId;
+      readonly evidenceId: EvidenceId;
+    }
+  | {
+      readonly kind: "note-reference-missing";
+      readonly noteId: MemoryNoteId;
+      readonly relation: "supersedes" | "invalidatedBy";
+      readonly referencedNoteId: MemoryNoteId;
+    }
+  | {
       readonly kind: "evidence-missing";
       readonly evidenceId: EvidenceId;
       readonly contentHash: string;
