@@ -5,9 +5,11 @@ use crate::{
 use phenix_frontend_config::FrontendProviderRef;
 use phenix_runtime_api::{BackendClient, BackendRuntime, BackendWorker};
 use phenix_ui_core::{
-    reduce, AppEffect, AppEvent, AppState, ElementId, FocusDirection, FocusTarget, LayoutAxis,
-    OverlayState, ResizeRequest,
+    reduce, AppEffect, AppEvent, AppState, FocusDirection, FocusTarget, LayoutAxis, OverlayState,
+    ResizeRequest,
 };
+#[cfg(test)]
+use phenix_ui_core::ElementId;
 use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
