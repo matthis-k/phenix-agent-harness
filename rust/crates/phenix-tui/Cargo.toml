@@ -1,0 +1,20 @@
+[package]
+name = "phenix-tui"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+phenix-process-backend = { path = "../phenix-process-backend" }
+phenix-runtime-api = { path = "../phenix-runtime-api" }
+phenix-ui-core = { path = "../phenix-ui-core" }
+phenix-ui-runtime = { path = "../phenix-ui-runtime" }
+ratatui = { workspace = true }
+serde_json = { workspace = true }
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "phenix"
+path = "src/main.rs"
