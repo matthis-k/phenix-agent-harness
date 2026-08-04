@@ -33,6 +33,10 @@ impl ElementId {
         Self("ui.layout".to_owned())
     }
 
+    pub fn header() -> Self {
+        Self("ui.header".to_owned())
+    }
+
     pub fn sidebar() -> Self {
         Self("ui.sidebar".to_owned())
     }
