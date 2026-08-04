@@ -237,7 +237,7 @@ mod tests {
         fn new(response: Value) -> Self {
             Self {
                 responses: VecDeque::from([Ok(
-                    serde_json::to_vec(&response).expect("scripted response JSON"),
+                    serde_json::to_vec(&response).expect("scripted response JSON")
                 )]),
                 requests: Vec::new(),
             }
