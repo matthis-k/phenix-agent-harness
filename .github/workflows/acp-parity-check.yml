@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/acp-parity-check.yml
       - scripts/apply-acp-parity.py
+      - scripts/fix-process-backend-acp-contract.py
       - rust/**
 
 permissions:
@@ -25,6 +26,7 @@ jobs:
       - name: Apply typed integration
         run: |
           python scripts/apply-acp-parity.py
+          python scripts/fix-process-backend-acp-contract.py
           cargo generate-lockfile --manifest-path rust/Cargo.toml
           cargo fmt --manifest-path rust/Cargo.toml --all
       - name: Commit generated changes
@@ -33,7 +35,7 @@ jobs:
             git config user.name github-actions[bot]
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
             git add rust
-            git commit -m "add typed ACP mode and terminal auth integration"
+            git commit -m "complete typed ACP contract integration"
             git push origin HEAD:${GITHUB_HEAD_REF}
           fi
       - name: Check
