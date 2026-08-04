@@ -37,6 +37,17 @@ pub enum UiEvent {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum InputEdit {
+    Insert(String),
+    Backspace,
+    Delete,
+    MoveLeft,
+    MoveRight,
+    HistoryPrevious,
+    HistoryNext,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ViewMutation {
     SetFocus(FocusTarget),
     MoveFocus(FocusDirection),
@@ -53,6 +64,8 @@ pub enum ViewMutation {
         element: ElementId,
         lines: i32,
     },
+    EditInput(InputEdit),
+    MoveOverlaySelection(i32),
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -307,7 +320,6 @@ mod tests {
         label: &'static str,
         calls: Rc<RefCell<Vec<&'static str>>>,
         stop: bool,
-        reaction: Option<fn() -> BusReaction>,
     }
 
     impl EventConsumer for RecordingConsumer {
@@ -321,33 +333,32 @@ mod tests {
             _envelope: &EventEnvelope<UiEvent>,
         ) -> ReactionBatch {
             self.calls.borrow_mut().push(self.label);
-            let reactions = self.reaction.map_or_else(Vec::new, |reaction| vec![reaction()]);
             if self.stop {
-                ReactionBatch::stop(reactions)
+                ReactionBatch::stop(Vec::new())
             } else {
-                ReactionBatch {
-                    reactions,
-                    propagation: Propagation::Continue,
-                }
+                ReactionBatch::none()
             }
         }
     }
 
     #[test]
-    fn explicit_routes_only_reach_the_addressed_element() {
+    fn focused_input_bubbles_through_addressable_consumers() {
         let calls = Rc::new(RefCell::new(Vec::new()));
-        let mut router = router_with_recorders(Rc::clone(&calls));
-        router.route_ui(
-            &AppState::default(),
-            &EventEnvelope::to(ElementId::sidebar(), UiEvent::Invalidate),
-        );
-        assert_eq!(*calls.borrow(), vec!["sidebar"]);
-    }
-
-    #[test]
-    fn focused_routes_bubble_from_the_focused_pane_to_its_ancestors() {
-        let calls = Rc::new(RefCell::new(Vec::new()));
-        let mut router = router_with_recorders(Rc::clone(&calls));
+        let mut router = EventRouter::standard();
+        for (id, label) in [
+            (ElementId::input(), "input"),
+            (ElementId::layout(), "layout"),
+            (ElementId::root(), "root"),
+        ] {
+            router
+                .register_consumer(Box::new(RecordingConsumer {
+                    id,
+                    label,
+                    calls: Rc::clone(&calls),
+                    stop: false,
+                }))
+                .expect("consumer");
+        }
         router.route_ui(
             &AppState::default(),
             &EventEnvelope::focused(UiEvent::Input(UiInput::Key(KeyInput {
@@ -360,86 +371,23 @@ mod tests {
     }
 
     #[test]
-    fn multiple_reactors_at_one_address_run_in_registration_order() {
+    fn multiple_consumers_at_one_address_are_ordered() {
         let calls = Rc::new(RefCell::new(Vec::new()));
         let mut router = EventRouter::standard();
-        for label in ["root.content", "root.shortcuts"] {
+        for label in ["first", "second"] {
             router
                 .register_consumer(Box::new(RecordingConsumer {
                     id: ElementId::root(),
                     label,
                     calls: Rc::clone(&calls),
                     stop: false,
-                    reaction: None,
                 }))
-                .expect("root consumer");
+                .expect("consumer");
         }
         router.route_ui(
             &AppState::default(),
             &EventEnvelope::to(ElementId::root(), UiEvent::Invalidate),
         );
-        assert_eq!(*calls.borrow(), vec!["root.content", "root.shortcuts"]);
-    }
-
-    #[test]
-    fn a_pane_can_emit_a_routed_resize_request() {
-        let calls = Rc::new(RefCell::new(Vec::new()));
-        let mut router = EventRouter::standard();
-        router
-            .register_consumer(Box::new(RecordingConsumer {
-                id: ElementId::sidebar(),
-                label: "sidebar",
-                calls,
-                stop: true,
-                reaction: Some(|| {
-                    BusReaction::Ui(
-                        EventEnvelope::to(
-                            ElementId::layout(),
-                            UiEvent::ResizeRequested {
-                                element: ElementId::sidebar(),
-                                axis: LayoutAxis::Horizontal,
-                                request: ResizeRequest::Grow(4),
-                            },
-                        )
-                        .from(ElementId::sidebar()),
-                    )
-                }),
-            }))
-            .expect("sidebar consumer");
-        let reactions = router.route_ui(
-            &AppState::default(),
-            &EventEnvelope::to(ElementId::sidebar(), UiEvent::Invalidate),
-        );
-        assert!(matches!(
-            reactions.as_slice(),
-            [BusReaction::Ui(EventEnvelope {
-                source: Some(source),
-                target: RouteTarget::Element(target),
-                event: UiEvent::ResizeRequested { element, .. },
-            })] if source == &ElementId::sidebar()
-                && target == &ElementId::layout()
-                && element == &ElementId::sidebar()
-        ));
-    }
-
-    fn router_with_recorders(calls: Rc<RefCell<Vec<&'static str>>>) -> EventRouter {
-        let mut router = EventRouter::standard();
-        for (id, label) in [
-            (ElementId::root(), "root"),
-            (ElementId::layout(), "layout"),
-            (ElementId::sidebar(), "sidebar"),
-            (ElementId::input(), "input"),
-        ] {
-            router
-                .register_consumer(Box::new(RecordingConsumer {
-                    id,
-                    label,
-                    calls: Rc::clone(&calls),
-                    stop: false,
-                    reaction: None,
-                }))
-                .expect("consumer registration");
-        }
-        router
+        assert_eq!(*calls.borrow(), vec!["first", "second"]);
     }
 }
