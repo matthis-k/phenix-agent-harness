@@ -1,59 +1,6 @@
-use phenix_ui_core::{ElementId, KeyCode, KeyInput, KeyModifiers};
+use phenix_ui_core::{KeyCode, KeyInput, KeyModifiers};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub enum PaneType {
-    Global,
-    Root,
-    Layout,
-    Sidebar,
-    Transcript,
-    Input,
-    Status,
-    Overlay,
-}
-
-impl PaneType {
-    pub fn parse(value: &str) -> Result<Self, KeyParseError> {
-        match normalize(value).as_str() {
-            "global" => Ok(Self::Global),
-            "root" => Ok(Self::Root),
-            "layout" => Ok(Self::Layout),
-            "sidebar" => Ok(Self::Sidebar),
-            "transcript" => Ok(Self::Transcript),
-            "input" => Ok(Self::Input),
-            "status" => Ok(Self::Status),
-            "overlay" => Ok(Self::Overlay),
-            _ => Err(KeyParseError::UnknownPane(value.to_owned())),
-        }
-    }
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Global => "global",
-            Self::Root => "root",
-            Self::Layout => "layout",
-            Self::Sidebar => "sidebar",
-            Self::Transcript => "transcript",
-            Self::Input => "input",
-            Self::Status => "status",
-            Self::Overlay => "overlay",
-        }
-    }
-
-    pub fn element_id(self) -> ElementId {
-        match self {
-            Self::Global | Self::Root => ElementId::root(),
-            Self::Layout => ElementId::layout(),
-            Self::Sidebar => ElementId::sidebar(),
-            Self::Transcript => ElementId::transcript(),
-            Self::Input => ElementId::input(),
-            Self::Status => ElementId::status(),
-            Self::Overlay => ElementId::overlay(),
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct KeyChord {
@@ -124,7 +71,6 @@ impl Display for KeyChord {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum KeyParseError {
-    UnknownPane(String),
     InvalidChord(String),
     InvalidKey(String),
 }
@@ -132,7 +78,6 @@ pub enum KeyParseError {
 impl Display for KeyParseError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnknownPane(value) => write!(formatter, "unknown pane type: {value}"),
             Self::InvalidChord(value) => write!(formatter, "invalid key chord: {value}"),
             Self::InvalidKey(value) => write!(formatter, "invalid key name: {value}"),
         }
@@ -193,11 +138,5 @@ mod tests {
             KeyChord::parse("<S-Tab>").expect("shift tab").code,
             KeyCode::BackTab
         );
-    }
-
-    #[test]
-    fn pane_types_have_stable_routing_addresses() {
-        assert_eq!(PaneType::Sidebar.element_id(), ElementId::sidebar());
-        assert_eq!(PaneType::Global.element_id(), ElementId::root());
     }
 }
