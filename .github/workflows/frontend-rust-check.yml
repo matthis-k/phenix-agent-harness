@@ -22,35 +22,63 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
-      - name: Apply event envelope migration
+      - name: Complete event envelope migration
         run: |
           python - <<'PY'
           from pathlib import Path
 
-          replacements = {
-              Path("rust/crates/phenix-ui-core/src/reducer.rs"): [
-                  ("    Backend(BackendOutput),", "    Backend(Box<BackendOutput>),"),
-                  (
-                      "        AppEvent::Backend(output) => reduce_backend_output(state, output),",
-                      "        AppEvent::Backend(output) => reduce_backend_output(state, *output),",
-                  ),
-              ],
-              Path("rust/crates/phenix-ui-runtime/src/consumers.rs"): [
-                  (
-                      "BusReaction::App(AppEvent::Backend(output.clone()))",
-                      "BusReaction::App(AppEvent::Backend(Box::new(output.clone())))",
-                  ),
-              ],
-          }
+          needle = "AppEvent::Backend("
 
-          for path, edits in replacements.items():
-              content = path.read_text()
-              for old, new in edits:
-                  if old in content:
-                      content = content.replace(old, new)
-                  elif new not in content:
-                      raise SystemExit(f"expected migration pattern missing in {path}: {old}")
-              path.write_text(content)
+          def wrap_backend_output_calls(content: str) -> str:
+              cursor = 0
+              while True:
+                  start = content.find(needle, cursor)
+                  if start < 0:
+                      return content
+                  argument_start = start + len(needle)
+                  if content.startswith("Box::new(", argument_start):
+                      cursor = argument_start
+                      continue
+                  if not content.startswith("BackendOutput::", argument_start):
+                      cursor = argument_start
+                      continue
+
+                  depth = 1
+                  index = argument_start
+                  in_string = False
+                  escaped = False
+                  while index < len(content):
+                      character = content[index]
+                      if in_string:
+                          if escaped:
+                              escaped = False
+                          elif character == "\\":
+                              escaped = True
+                          elif character == '"':
+                              in_string = False
+                      else:
+                          if character == '"':
+                              in_string = True
+                          elif character == "(":
+                              depth += 1
+                          elif character == ")":
+                              depth -= 1
+                              if depth == 0:
+                                  break
+                      index += 1
+                  if depth != 0:
+                      raise SystemExit("unbalanced AppEvent::Backend call")
+
+                  argument = content[argument_start:index]
+                  replacement = f"{needle}Box::new({argument}))"
+                  content = content[:start] + replacement + content[index + 1:]
+                  cursor = start + len(replacement)
+
+          for path in Path("rust/crates").rglob("*.rs"):
+              original = path.read_text()
+              migrated = wrap_backend_output_calls(original)
+              if migrated != original:
+                  path.write_text(migrated)
           PY
           cargo generate-lockfile --manifest-path rust/Cargo.toml
           cargo fmt --manifest-path rust/Cargo.toml --all
@@ -60,7 +88,7 @@ jobs:
             git config user.name github-actions[bot]
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
             git add rust
-            git commit -m "compact backend event envelopes"
+            git commit -m "finish backend event envelope migration"
             git push origin HEAD:${GITHUB_HEAD_REF}
           fi
       - name: Format
