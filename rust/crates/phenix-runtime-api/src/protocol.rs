@@ -1,5 +1,6 @@
 use crate::id::{AuthFlowId, DialogId, ObjectiveId, RunId, SessionEntryId, SessionId, ToolCallId};
 use std::collections::BTreeMap;
+use std::collections::BTreeMap;
 use std::fmt::{self, Debug, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -111,6 +112,14 @@ pub struct SessionModeSummary {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionModeSummary {
+    pub id: String,
+    pub display_name: String,
+    pub description: Option<String>,
+    pub selected: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ThinkingLevel {
     Off,
     Minimal,
@@ -135,6 +144,13 @@ pub struct AuthProviderSummary {
     pub methods: Vec<AuthMethod>,
     pub configured: bool,
     pub source: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExternalCommand {
+    pub program: String,
+    pub arguments: Vec<String>,
+    pub environment: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -609,6 +625,10 @@ pub enum BackendEvent {
         run_id: RunId,
         steering: Vec<String>,
         follow_ups: Vec<String>,
+    },
+    ExternalCommandRequested {
+        flow_id: AuthFlowId,
+        command: ExternalCommand,
     },
     ExternalCommandRequested {
         flow_id: AuthFlowId,
