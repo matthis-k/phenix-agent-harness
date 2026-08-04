@@ -90,7 +90,7 @@ export function createExecutionServices(input: {
   readonly notifyRoot: (message: string) => void | Promise<void> | undefined;
 }) {
   const { host, configuration, infrastructure, definitionRuntime } = input;
-  const { ids, stateDir, store, operations } = infrastructure;
+  const { diagnostics, ids, stateDir, store, operations } = infrastructure;
   const { definitions, functions } = definitionRuntime;
   const resolver = configuration.createModelResolver({
     inventory: new PiModelInventory(host.modelRegistry),
@@ -110,10 +110,12 @@ export function createExecutionServices(input: {
   );
   const userForms = new UserFormService(ids, systemClock);
   const memory = new MemoryService({
-    repository: new JsonlMemoryRepository(stateDir),
+    repository: new JsonlMemoryRepository(stateDir, configuration.memoryPolicy),
     store,
     ids,
     clock: systemClock,
+    diagnostics,
+    policy: configuration.memoryPolicy,
   });
   const tokenReduction =
     process.env.PHENIX_TOKEN_REDUCTION_BACKEND === "none" || !process.env.PHENIX_RTK_BIN
