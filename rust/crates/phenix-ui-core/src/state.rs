@@ -1,6 +1,6 @@
 use phenix_runtime_api::{
-    BackendCapabilities, BackendHealth, DialogId, ExtensionUiRequest, RuntimeSnapshot, SessionId,
-    TranscriptBlock,
+    BackendCapabilities, BackendHealth, DialogId, ExtensionUiRequest, RunId, RuntimeSnapshot,
+    SessionId, TranscriptBlock,
 };
 use std::collections::{BTreeMap, VecDeque};
 
@@ -67,12 +67,40 @@ pub struct AppState {
     pub capabilities: BackendCapabilities,
     pub snapshot: Option<RuntimeSnapshot>,
     pub active_session: Option<SessionId>,
+    pub root_run: Option<RunId>,
+    pub selected_run: Option<RunId>,
     pub input: InputState,
-    pub transcript: TranscriptState,
+    pub transcripts: BTreeMap<RunId, TranscriptState>,
     pub dialogs: VecDeque<DialogState>,
     pub statuses: BTreeMap<String, String>,
     pub notifications: VecDeque<String>,
     pub should_quit: bool,
+}
+
+impl AppState {
+    pub fn input_target(&self) -> Option<&RunId> {
+        self.selected_run.as_ref().or(self.root_run.as_ref())
+    }
+
+    pub fn transcript(&self, run_id: &RunId) -> Option<&TranscriptState> {
+        self.transcripts.get(run_id)
+    }
+
+    pub fn transcript_mut(&mut self, run_id: RunId) -> &mut TranscriptState {
+        self.transcripts.entry(run_id).or_insert_with(|| TranscriptState {
+            follow_end: true,
+            ..TranscriptState::default()
+        })
+    }
+
+    pub fn apply_snapshot(&mut self, snapshot: RuntimeSnapshot) {
+        self.connection = RuntimeConnectionState::from(&snapshot.health);
+        self.active_session = snapshot.active_session.clone();
+        self.root_run = snapshot.root_run.clone();
+        self.selected_run = snapshot.selected_run.clone().or_else(|| snapshot.root_run.clone());
+        self.capabilities = snapshot.capabilities.clone();
+        self.snapshot = Some(snapshot);
+    }
 }
 
 impl Default for AppState {
@@ -82,11 +110,10 @@ impl Default for AppState {
             capabilities: BackendCapabilities::default(),
             snapshot: None,
             active_session: None,
+            root_run: None,
+            selected_run: None,
             input: InputState::default(),
-            transcript: TranscriptState {
-                follow_end: true,
-                ..TranscriptState::default()
-            },
+            transcripts: BTreeMap::new(),
             dialogs: VecDeque::new(),
             statuses: BTreeMap::new(),
             notifications: VecDeque::new(),
