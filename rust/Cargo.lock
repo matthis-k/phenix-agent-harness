@@ -1423,6 +1423,7 @@ name = "phenix-tui"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "phenix-acp-backend",
  "phenix-frontend-config",
  "phenix-process-backend",
  "phenix-runtime-api",
