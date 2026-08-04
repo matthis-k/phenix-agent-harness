@@ -41,8 +41,13 @@ impl PermissionBroker {
             .map_err(|error| BackendError::Protocol(error.to_string()))?;
         let options = unique_labels(event.request.options);
         let labels = options.keys().cloned().collect::<Vec<_>>();
-        let title =
-            event.request.tool_call.title.clone().unwrap_or_else(|| {
+        let title = event
+            .request
+            .tool_call
+            .fields
+            .title
+            .clone()
+            .unwrap_or_else(|| {
                 format!("Permission for {}", event.request.tool_call.tool_call_id)
             });
         self.pending.insert(
@@ -86,7 +91,7 @@ impl PermissionBroker {
                 choose_by_confirmation(pending.options.values(), confirmed)
                     .unwrap_or(RequestPermissionOutcome::Cancelled)
             }
-            ExtensionUiResponse::Input(_) | ExtensionUiResponse::Cancelled => {
+            ExtensionUiResponse::Text(_) | ExtensionUiResponse::Cancelled => {
                 RequestPermissionOutcome::Cancelled
             }
         };
