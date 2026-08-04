@@ -33,22 +33,21 @@ impl KeyChord {
                 .filter(|token| !token.is_empty())
                 .collect::<Vec<_>>()
         };
-        if tokens.is_empty() {
+        let Some((key_token, modifier_tokens)) = tokens.split_last() else {
             return Err(KeyParseError::InvalidChord(value.to_owned()));
-        }
+        };
 
         let mut modifiers = KeyModifiers::default();
-        let mut key = None;
-        for token in tokens {
+        for token in modifier_tokens {
             match token.to_ascii_lowercase().as_str() {
-                "c" | "ctrl" | "control" => modifiers.control = true,
-                "a" | "m" | "alt" | "meta" => modifiers.alt = true,
-                "s" | "shift" => modifiers.shift = true,
-                _ if key.is_none() => key = Some(parse_code(token)?),
+                "c" | "ctrl" | "control" if !modifiers.control => modifiers.control = true,
+                "a" | "m" | "alt" | "meta" if !modifiers.alt => modifiers.alt = true,
+                "s" | "shift" if !modifiers.shift => modifiers.shift = true,
                 _ => return Err(KeyParseError::InvalidChord(value.to_owned())),
             }
         }
-        let code = key.ok_or_else(|| KeyParseError::InvalidChord(value.to_owned()))?;
+
+        let code = parse_code(key_token)?;
         if code == KeyCode::BackTab {
             modifiers.shift = false;
         }
@@ -144,5 +143,28 @@ mod tests {
             KeyChord::parse("<S-Tab>").expect("shift tab").code,
             KeyCode::BackTab
         );
+    }
+
+    #[test]
+    fn final_single_character_is_always_the_key_not_a_modifier_alias() {
+        let control_c = KeyChord::parse("<C-c>").expect("control-c");
+        assert_eq!(control_c.code, KeyCode::Character('c'));
+        assert!(control_c.modifiers.control);
+
+        let alt_m = KeyChord::parse("<M-m>").expect("alt-m");
+        assert_eq!(alt_m.code, KeyCode::Character('m'));
+        assert!(alt_m.modifiers.alt);
+    }
+
+    #[test]
+    fn duplicate_or_unknown_modifier_tokens_are_rejected() {
+        assert!(matches!(
+            KeyChord::parse("<C-C-x>"),
+            Err(KeyParseError::InvalidChord(_))
+        ));
+        assert!(matches!(
+            KeyChord::parse("<Hyper-x>"),
+            Err(KeyParseError::InvalidChord(_))
+        ));
     }
 }
