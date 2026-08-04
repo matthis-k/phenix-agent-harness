@@ -61,9 +61,7 @@ test("captures raw evidence before returning a compact model view", async () => 
     toolName: "bash",
     toolCallId: "call-1",
     input: { command: preparation.command },
-    content: [
-      { type: "text", text: "compact\n[full output: /tmp/rtk/full.log]" },
-    ],
+    content: [{ type: "text", text: "compact\n[full output: /tmp/rtk/full.log]" }],
     details: { exitCode: 0 },
     isError: false,
   });
