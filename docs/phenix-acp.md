@@ -81,7 +81,7 @@ typed params
 
 Expected failure modes must not be collapsed into an arbitrary string or a generic protocol error. Invalid identifiers and invalid immutable definitions are rejected during construction and deserialization.
 
-The local codec in `phenix-acp` establishes this invariant for Phenix extension messages. The production standard-ACP transport will use the official `agent-client-protocol` Rust SDK rather than duplicating the ACP schema or connection state machine.
+The local codec in `phenix-acp` establishes this invariant for Phenix extension messages. Standard ACP transport and connection state use the official `agent-client-protocol` Rust SDK rather than duplicating the ACP schema or JSON-RPC lifecycle.
 
 ## Phenix extension methods
 
@@ -130,6 +130,29 @@ phenix-tui
 ```
 
 The current custom Pi JSONL adapter remains transitional until standard ACP event and request parity is wired through the official SDK. UI components must not branch on Pi or any other backend identity.
+
+## Current live ACP slice
+
+`phenix-acp-backend` now provides an official-SDK-backed `AgentBackend` implementation. The Ratatui executable can select it without changing the UI or reducer:
+
+```sh
+PHENIX_BACKEND=acp PHENIX_ACP_COMMAND='pi-acp' phenix
+```
+
+The default remains the transitional process/JSONL adapter. The ACP path currently supports:
+
+- ACP v1 initialization;
+- creation of one new ACP session in the current working directory;
+- typed frontend initialization and snapshots;
+- text prompt submission;
+- streamed assistant text projection;
+- cancellation;
+- orderly shutdown;
+- explicit unsupported-operation errors for unmapped commands.
+
+The request relay terminates when ACP startup or transport initialization fails, so a failed agent process cannot leave the backend worker blocked while joining a synchronous relay thread.
+
+The ACP path does not yet claim parity for authentication, model and mode configuration, session listing/loading/resumption, MCP server forwarding, tool-call projection, permissions, elicitation, images, steering, follow-ups, or Phenix session-tree orchestration. Those capabilities remain disabled or return typed unsupported errors until mapped.
 
 ## Migration order
 
