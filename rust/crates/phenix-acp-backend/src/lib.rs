@@ -108,7 +108,7 @@ async fn run_connection(
     Client
         .builder()
         .name("phenix-acp")
-        .connect_with(agent, move |cx| async move {
+        .connect_with(agent, move |cx: ConnectTo<Agent>| async move {
             cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
                 .block_task()
                 .await?;
@@ -121,14 +121,11 @@ async fn run_connection(
         .map_err(|error| BackendError::Transport(error.to_string()))
 }
 
-async fn run_session<Link>(
-    mut session: agent_client_protocol::ActiveSession<'static, Link>,
+async fn run_session<'a>(
+    mut session: agent_client_protocol::ActiveSession<'a, ConnectTo<Agent>>,
     mut requests: mpsc::UnboundedReceiver<BackendRequest>,
     outputs: BackendOutputSender,
-) -> Result<(), BackendError>
-where
-    Link: agent_client_protocol::role::HasPeer<Agent>,
-{
+) -> Result<(), BackendError> {
     let session_id = SessionId::parse(session.session_id().to_string())
         .map_err(|error| BackendError::Protocol(error.to_string()))?;
     let root_run = RunId::parse("acp-root")
@@ -173,15 +170,12 @@ enum Next {
     Update(Result<SessionMessage, agent_client_protocol::Error>),
 }
 
-fn handle_request<Link>(
+fn handle_request<'a>(
     session: &mut agent_client_protocol::ActiveSession<'static, Link>,
     state: &mut AdapterState,
     request: BackendRequest,
     outputs: &BackendOutputSender,
-) -> Result<bool, BackendError>
-where
-    Link: agent_client_protocol::role::HasPeer<Agent>,
-{
+) -> Result<bool, BackendError> {
     let result = match request.command {
         BackendCommand::Initialize { .. } => Ok(BackendReply::Initialized {
             capabilities: state.capabilities.clone(),
@@ -255,7 +249,9 @@ async fn handle_session_message(
                         ..
                     }) = notification.update
                     {
-                        state.append_assistant_text(&text.text, outputs)?;
+                        state
+                            .append_assistant_text(&text.text, outputs)
+                            .map_err(to_acp_error)?;
                     }
                     Ok(())
                 })
