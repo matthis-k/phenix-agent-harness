@@ -94,6 +94,27 @@ pub struct BackendRuntime {
     worker: Option<JoinHandle<Result<(), BackendError>>>,
 }
 
+pub struct BackendWorker {
+    worker: Option<JoinHandle<Result<(), BackendError>>>,
+}
+
+impl BackendWorker {
+    pub fn join(mut self) -> Result<(), BackendError> {
+        let worker = self.worker.take().ok_or_else(|| {
+            BackendError::InvalidConfiguration("backend worker already joined".to_owned())
+        })?;
+        worker.join().map_err(|_| BackendError::Panicked)?
+    }
+}
+
+impl Drop for BackendWorker {
+    fn drop(&mut self) {
+        // Dropping a damaged backend must not stall terminal restoration. The
+        // orderly path sends Shutdown and explicitly joins the worker.
+        let _ = self.worker.take();
+    }
+}
+
 impl BackendRuntime {
     pub fn spawn(backend: DynAgentBackend, channel_capacity: usize) -> Result<Self, BackendError> {
         if channel_capacity == 0 {
@@ -126,6 +147,15 @@ impl BackendRuntime {
             outputs,
             worker: Some(worker),
         })
+    }
+
+    pub fn split(mut self) -> (BackendClient, Receiver<BackendOutput>, BackendWorker) {
+        let (_unused_sender, empty_outputs) = mpsc::sync_channel(1);
+        let outputs = std::mem::replace(&mut self.outputs, empty_outputs);
+        let worker = BackendWorker {
+            worker: self.worker.take(),
+        };
+        (self.client.clone(), outputs, worker)
     }
 
     pub fn join(mut self) -> Result<(), BackendError> {
@@ -250,6 +280,23 @@ mod tests {
             }
         );
         runtime.join().expect("backend joins cleanly");
+    }
+
+    #[test]
+    fn runtime_splits_into_nonblocking_client_output_stream_and_worker_handle() {
+        let runtime = BackendRuntime::spawn(Box::new(EchoBackend), 4).expect("spawn backend");
+        let (client, outputs, worker) = runtime.split();
+        let shutdown_request = client
+            .submit(BackendCommand::Shutdown)
+            .expect("submit shutdown request");
+        assert_eq!(
+            outputs.recv().expect("receive shutdown reply"),
+            BackendOutput::Reply {
+                request_id: shutdown_request,
+                result: Ok(BackendReply::Completed),
+            }
+        );
+        worker.join().expect("backend joins cleanly");
     }
 
     #[test]
