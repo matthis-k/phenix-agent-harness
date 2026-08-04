@@ -1,12 +1,13 @@
-use agent_client_protocol::schema::v1::{
-    AgentCapabilities, AvailableCommand, InitializeResponse, SessionConfigKind,
-    SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOptions, SessionId as AcpSessionId,
-    SessionModeState, ToolCall,
+use phenix_acp::acp::schema::v1::{
+    AgentCapabilities, AuthMethod as AcpAuthMethod, AvailableCommand, InitializeResponse,
+    SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOptions,
+    SessionId as AcpSessionId, SessionModeState, ToolCall,
 };
 use phenix_runtime_api::{
-    AuthMethod as FrontendAuthMethod, AuthProviderSummary, BackendCapabilities, BackendHealth,
-    ModelRef, ModelSummary, PersistedSessionSummary, PromptCapabilities, RunId, RunKind, RunOutcome,
-    RunState, RunSummary, RuntimeSnapshot, SessionCapabilities, SessionId, ThinkingLevel,
+    AuthMethod as FrontendAuthMethod, AuthProviderSummary, BackendCapabilities, BackendError,
+    BackendHealth, ImageInput, ModelRef, ModelSummary, PersistedSessionSummary,
+    PromptCapabilities, RunId, RunKind, RunState, RunSummary, RuntimeSnapshot, SessionCapabilities,
+    SessionId, ThinkingLevel, TranscriptBlock,
 };
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::PathBuf;
@@ -14,7 +15,7 @@ use std::path::PathBuf;
 #[derive(Clone, Debug)]
 pub(crate) struct PendingPrompt {
     pub text: String,
-    pub images: Vec<phenix_runtime_api::ImageInput>,
+    pub images: Vec<ImageInput>,
 }
 
 #[derive(Clone, Debug)]
@@ -29,6 +30,8 @@ pub(crate) struct SessionState {
     pub prompt_active: bool,
     pub follow_ups: VecDeque<PendingPrompt>,
     pub tools: HashMap<String, ToolCall>,
+    pub transcript_blocks: HashMap<String, TranscriptBlock>,
+    pub next_transcript_id: u64,
 }
 
 impl SessionState {
@@ -37,7 +40,9 @@ impl SessionState {
             .iter()
             .find(|option| matches!(option.category, Some(SessionConfigOptionCategory::Model)))
             .and_then(|option| match &option.kind {
-                SessionConfigKind::Select(select) => Some(model_ref(select.current_value.to_string())),
+                SessionConfigKind::Select(select) => {
+                    Some(model_ref(select.current_value.to_string()))
+                }
                 SessionConfigKind::Boolean(_) => None,
                 _ => None,
             })
@@ -56,13 +61,11 @@ impl SessionState {
                 SessionConfigKind::Select(select) => {
                     thinking_level_from_value(select.current_value.to_string().as_str())
                 }
-                SessionConfigKind::Boolean(boolean) => {
-                    Some(if boolean.current_value {
-                        ThinkingLevel::Medium
-                    } else {
-                        ThinkingLevel::Off
-                    })
-                }
+                SessionConfigKind::Boolean(boolean) => Some(if boolean.current_value {
+                    ThinkingLevel::Medium
+                } else {
+                    ThinkingLevel::Off
+                }),
                 _ => None,
             })
     }
@@ -103,12 +106,40 @@ impl SessionState {
             .flat_map(|option| match &option.kind {
                 SessionConfigKind::Select(select) => flatten_options(&select.options)
                     .into_iter()
-                    .filter_map(|option| thinking_level_from_value(option.value.to_string().as_str()))
+                    .filter_map(|option| {
+                        thinking_level_from_value(option.value.to_string().as_str())
+                    })
                     .collect(),
                 SessionConfigKind::Boolean(_) => vec![ThinkingLevel::Off, ThinkingLevel::Medium],
                 _ => Vec::new(),
             })
             .collect()
+    }
+
+    pub fn mode_summaries(&self) -> Vec<phenix_runtime_api::SessionModeSummary> {
+        self.modes
+            .as_ref()
+            .map(|modes| {
+                modes
+                    .available_modes
+                    .iter()
+                    .map(|mode| phenix_runtime_api::SessionModeSummary {
+                        id: mode.id.to_string(),
+                        display_name: mode.name.clone(),
+                        description: mode.description.clone(),
+                        selected: mode.id == modes.current_mode_id,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn next_transcript_key(&mut self, prefix: &str) -> Result<String, BackendError> {
+        let id = self.next_transcript_id;
+        self.next_transcript_id = self.next_transcript_id.checked_add(1).ok_or_else(|| {
+            BackendError::Protocol("ACP transcript IDs exhausted".to_owned())
+        })?;
+        Ok(format!("{prefix}-{id}"))
     }
 }
 
@@ -133,30 +164,39 @@ impl AdapterState {
         }
     }
 
+    pub fn refresh_capabilities(&mut self) {
+        let has_models = self
+            .sessions
+            .values()
+            .any(|session| !session.models(false).is_empty());
+        let has_thinking = self
+            .sessions
+            .values()
+            .any(|session| !session.thinking_levels().is_empty());
+        self.capabilities.models.listing = has_models;
+        self.capabilities.models.selection = has_models;
+        self.capabilities.models.thinking_levels = has_thinking;
+    }
+
     pub fn auth_providers(&self) -> Vec<AuthProviderSummary> {
         self.initialize
             .auth_methods
             .iter()
             .map(|method| match method {
-                agent_client_protocol::schema::v1::AuthMethod::Agent(method) => {
-                    AuthProviderSummary {
-                        id: method.id.to_string(),
-                        display_name: method.name.clone(),
-                        methods: vec![FrontendAuthMethod::OAuth],
-                        configured: false,
-                        source: method.description.clone(),
-                    }
-                }
-                #[cfg(feature = "unstable_auth_methods")]
-                agent_client_protocol::schema::v1::AuthMethod::Terminal(method) => {
-                    AuthProviderSummary {
-                        id: method.id.to_string(),
-                        display_name: method.name.clone(),
-                        methods: vec![FrontendAuthMethod::ApiKey],
-                        configured: false,
-                        source: method.description.clone(),
-                    }
-                }
+                AcpAuthMethod::Agent(method) => AuthProviderSummary {
+                    id: method.id.to_string(),
+                    display_name: method.name.clone(),
+                    methods: vec![FrontendAuthMethod::OAuth],
+                    configured: false,
+                    source: method.description.clone(),
+                },
+                AcpAuthMethod::Terminal(method) => AuthProviderSummary {
+                    id: method.id.to_string(),
+                    display_name: method.name.clone(),
+                    methods: vec![FrontendAuthMethod::ApiKey],
+                    configured: false,
+                    source: method.description.clone(),
+                },
                 _ => AuthProviderSummary {
                     id: "unsupported-auth-method".to_owned(),
                     display_name: "Unsupported ACP authentication method".to_owned(),
@@ -168,6 +208,7 @@ impl AdapterState {
             .collect()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn insert_session(
         &mut self,
         acp_id: AcpSessionId,
@@ -177,20 +218,18 @@ impl AdapterState {
         config_options: Option<Vec<SessionConfigOption>>,
         name: Option<String>,
         updated_at: Option<String>,
-    ) -> Result<SessionId, phenix_runtime_api::BackendError> {
+    ) -> Result<SessionId, BackendError> {
         let session_id = SessionId::parse(acp_id.to_string())
-            .map_err(|error| phenix_runtime_api::BackendError::Protocol(error.to_string()))?;
+            .map_err(|error| BackendError::Protocol(error.to_string()))?;
         let parent_run = parent_session
             .and_then(|parent| self.sessions.get(parent))
             .map(|session| session.run.id.clone());
         let run_id = RunId::parse(format!("acp-run-{}", self.next_run))
-            .map_err(|error| phenix_runtime_api::BackendError::Protocol(error.to_string()))?;
+            .map_err(|error| BackendError::Protocol(error.to_string()))?;
         self.next_run = self
             .next_run
             .checked_add(1)
-            .ok_or_else(|| {
-                phenix_runtime_api::BackendError::Protocol("ACP run IDs exhausted".to_owned())
-            })?;
+            .ok_or_else(|| BackendError::Protocol("ACP run IDs exhausted".to_owned()))?;
         let summary = PersistedSessionSummary {
             id: session_id.clone(),
             name: name.or_else(|| Some(format!("ACP session {session_id}"))),
@@ -222,7 +261,7 @@ impl AdapterState {
             pending_messages: 0,
             outcome: None,
         };
-        let session = SessionState {
+        let mut session = SessionState {
             acp_id,
             summary,
             run: run.clone(),
@@ -233,13 +272,15 @@ impl AdapterState {
             prompt_active: false,
             follow_ups: VecDeque::new(),
             tools: HashMap::new(),
+            transcript_blocks: HashMap::new(),
+            next_transcript_id: 1,
         };
         run.model = session.current_model();
         run.thinking_level = session.current_thinking_level();
-        let mut session = session;
         session.run = run;
         self.sessions.insert(session_id.clone(), session);
         self.active_session = Some(session_id.clone());
+        self.refresh_capabilities();
         Ok(session_id)
     }
 
@@ -273,47 +314,58 @@ impl AdapterState {
         }
     }
 
-    pub fn active_session_mut(
-        &mut self,
-    ) -> Result<&mut SessionState, phenix_runtime_api::BackendError> {
+    pub fn active_session_mut(&mut self) -> Result<&mut SessionState, BackendError> {
         let active = self.active_session.clone().ok_or_else(|| {
-            phenix_runtime_api::BackendError::InvalidConfiguration(
-                "no ACP session is active".to_owned(),
-            )
+            BackendError::InvalidConfiguration("no ACP session is active".to_owned())
         })?;
         self.sessions.get_mut(&active).ok_or_else(|| {
-            phenix_runtime_api::BackendError::Protocol(format!(
-                "active ACP session {active} is missing"
-            ))
+            BackendError::Protocol(format!("active ACP session {active} is missing"))
         })
     }
 
     pub fn session_for_run_mut(
         &mut self,
         run_id: &RunId,
-    ) -> Result<&mut SessionState, phenix_runtime_api::BackendError> {
+    ) -> Result<&mut SessionState, BackendError> {
         self.sessions
             .values_mut()
             .find(|session| &session.run.id == run_id)
             .ok_or_else(|| {
-                phenix_runtime_api::BackendError::InvalidConfiguration(format!(
+                BackendError::InvalidConfiguration(format!(
                     "run {run_id} is not backed by an ACP session"
                 ))
             })
     }
 
-    pub fn session_for_run(
-        &self,
-        run_id: &RunId,
-    ) -> Result<&SessionState, phenix_runtime_api::BackendError> {
+    pub fn session_for_run(&self, run_id: &RunId) -> Result<&SessionState, BackendError> {
         self.sessions
             .values()
             .find(|session| &session.run.id == run_id)
             .ok_or_else(|| {
-                phenix_runtime_api::BackendError::InvalidConfiguration(format!(
+                BackendError::InvalidConfiguration(format!(
                     "run {run_id} is not backed by an ACP session"
                 ))
             })
+    }
+
+    pub fn session_by_acp_mut(
+        &mut self,
+        acp_id: &AcpSessionId,
+    ) -> Result<&mut SessionState, BackendError> {
+        self.sessions
+            .values_mut()
+            .find(|session| &session.acp_id == acp_id)
+            .ok_or_else(|| {
+                BackendError::Protocol(format!(
+                    "ACP notification referenced unknown session {acp_id}"
+                ))
+            })
+    }
+
+    pub fn session_id_by_acp(&self, acp_id: &AcpSessionId) -> Option<SessionId> {
+        self.sessions
+            .iter()
+            .find_map(|(id, session)| (&session.acp_id == acp_id).then(|| id.clone()))
     }
 }
 
@@ -332,29 +384,29 @@ fn project_capabilities(initialize: &InitializeResponse) -> BackendCapabilities 
                 || agent.session_capabilities.resume.is_some()
                 || agent.session_capabilities.list.is_some(),
             switching: agent.load_session || agent.session_capabilities.resume.is_some(),
-            branching: session_fork_supported(agent),
+            branching: agent.session_capabilities.fork.is_some(),
             import: agent.load_session,
             export: false,
             tree: true,
         },
         authentication: phenix_runtime_api::AuthenticationCapabilities {
             provider_listing: !initialize.auth_methods.is_empty(),
-            oauth: !initialize.auth_methods.is_empty(),
-            api_keys: initialize.auth_methods.iter().any(|method| {
-                matches!(
-                    method,
-                    #[cfg(feature = "unstable_auth_methods")]
-                    agent_client_protocol::schema::v1::AuthMethod::Terminal(_)
-                )
-            }),
+            oauth: initialize
+                .auth_methods
+                .iter()
+                .any(|method| matches!(method, AcpAuthMethod::Agent(_))),
+            api_keys: initialize
+                .auth_methods
+                .iter()
+                .any(|method| matches!(method, AcpAuthMethod::Terminal(_))),
             device_code: false,
             browser_callback: false,
             logout: agent.auth.logout.is_some(),
         },
         models: phenix_runtime_api::ModelCapabilities {
-            listing: true,
-            selection: true,
-            thinking_levels: true,
+            listing: false,
+            selection: false,
+            thinking_levels: false,
             virtual_models: false,
         },
         resources: phenix_runtime_api::ResourceCapabilities {
@@ -373,18 +425,6 @@ fn project_capabilities(initialize: &InitializeResponse) -> BackendCapabilities 
             notifications: true,
             status: true,
         },
-    }
-}
-
-fn session_fork_supported(capabilities: &AgentCapabilities) -> bool {
-    #[cfg(feature = "unstable_session_fork")]
-    {
-        capabilities.session_capabilities.fork.is_some()
-    }
-    #[cfg(not(feature = "unstable_session_fork"))]
-    {
-        let _ = capabilities;
-        false
     }
 }
 
@@ -413,7 +453,7 @@ fn model_ref(value: String) -> ModelRef {
 
 fn flatten_options(
     options: &SessionConfigSelectOptions,
-) -> Vec<&agent_client_protocol::schema::v1::SessionConfigSelectOption> {
+) -> Vec<&phenix_acp::acp::schema::v1::SessionConfigSelectOption> {
     match options {
         SessionConfigSelectOptions::Ungrouped(options) => options.iter().collect(),
         SessionConfigSelectOptions::Grouped(groups) => groups
