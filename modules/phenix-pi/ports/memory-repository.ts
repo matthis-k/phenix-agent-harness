@@ -20,7 +20,7 @@ export interface PersistedMemoryState {
 export interface MemoryRepository {
   load(rootRunId: RunId): Promise<PersistedMemoryState>;
   appendEvidence(record: EvidenceRecord, content: string): Promise<void>;
-  appendNote(note: MemoryNote): Promise<void>;
+  appendNotes(notes: readonly MemoryNote[]): Promise<void>;
   readEvidence(record: EvidenceRecord): Promise<string | undefined>;
   hasEvidence(rootRunId: RunId, id: EvidenceId): Promise<boolean>;
   latestNote(rootRunId: RunId, id: MemoryNoteId): Promise<MemoryNote | undefined>;
