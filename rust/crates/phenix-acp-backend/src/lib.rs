@@ -20,8 +20,13 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::mpsc::Receiver;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
+
+const RELAY_POLL_PERIOD: Duration = Duration::from_millis(100);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AcpBackendConfig {
@@ -76,14 +81,21 @@ impl AgentBackend for AcpAgentBackend {
         let agent = AcpAgent::from_str(&self.config.command)
             .map_err(|error| BackendError::Start(error.to_string()))?;
         let (request_tx, request_rx) = mpsc::unbounded();
+        let stop_relay = Arc::new(AtomicBool::new(false));
+        let relay_stop = Arc::clone(&stop_relay);
         let relay = thread::Builder::new()
             .name("phenix-acp-request-relay".to_owned())
-            .spawn(move || {
-                for request in requests {
-                    let shutdown = matches!(request.command, BackendCommand::Shutdown);
-                    if request_tx.unbounded_send(request).is_err() || shutdown {
-                        break;
+            .spawn(move || loop {
+                match requests.recv_timeout(RELAY_POLL_PERIOD) {
+                    Ok(request) => {
+                        let shutdown = matches!(request.command, BackendCommand::Shutdown);
+                        if request_tx.unbounded_send(request).is_err() || shutdown {
+                            break;
+                        }
                     }
+                    Err(RecvTimeoutError::Timeout) if relay_stop.load(Ordering::Acquire) => break,
+                    Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => break,
                 }
             })
             .map_err(|error| BackendError::Start(error.to_string()))?;
@@ -94,6 +106,7 @@ impl AgentBackend for AcpAgentBackend {
             request_rx,
             outputs,
         ));
+        stop_relay.store(true, Ordering::Release);
         relay.join().map_err(|_| BackendError::Panicked)?;
         result
     }
