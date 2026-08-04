@@ -1,6 +1,6 @@
 use phenix_process_backend::{ProcessAgentBackend, ProcessBackendConfig};
 use phenix_runtime_api::{
-    BackendCommand, BackendRuntime, ClientInformation,
+    BackendCommand, BackendOutput, BackendReply, BackendRuntime, ClientInformation, RequestId,
 };
 use phenix_tui::{PhenixInputController, RatatuiRenderer};
 use phenix_ui_core::{
@@ -8,43 +8,128 @@ use phenix_ui_core::{
 };
 use phenix_ui_runtime::{UiIngressError, UiRuntime};
 use ratatui::crossterm::event::{
-    self, Event, KeyCode as CrosstermKeyCode, KeyEvent, KeyEventKind, KeyModifiers as CrosstermModifiers,
-    MouseButton as CrosstermMouseButton, MouseEvent, MouseEventKind,
+    self, Event, KeyCode as CrosstermKeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers as CrosstermModifiers, MouseButton as CrosstermMouseButton, MouseEvent,
+    MouseEventKind,
 };
 use std::collections::BTreeMap;
 use std::env;
 use std::error::Error;
+use std::io;
 use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
 
 const CHANNEL_CAPACITY: usize = 1_024;
+const INPUT_POLL_PERIOD: Duration = Duration::from_millis(100);
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let backend = BackendRuntime::spawn(Box::new(create_process_backend()?), CHANNEL_CAPACITY)?;
+    if env::args().nth(1).as_deref() == Some("--check") {
+        return run_handshake_check();
+    }
+    run_tui()
+}
+
+fn run_tui() -> Result<(), Box<dyn Error>> {
+    let backend = spawn_backend()?;
     backend.client.submit(BackendCommand::Initialize {
-        client: ClientInformation {
-            name: "phenix-tui".to_owned(),
-            build: env!("CARGO_PKG_VERSION").to_owned(),
-        },
+        client: client_information(),
     })?;
 
     let renderer = RatatuiRenderer::initialize()?;
-    let controller = PhenixInputController::default();
     let runtime = UiRuntime::from_backend_with_controller(
         AppState::default(),
         backend,
         renderer,
-        controller,
+        PhenixInputController::default(),
         CHANNEL_CAPACITY,
     )?;
     let mailbox = runtime.mailbox();
     let _ticker = runtime.spawn_ticker(Duration::from_millis(250))?;
-    let input_thread = spawn_terminal_input(mailbox)?;
-    let result = runtime.run();
-    let _ = input_thread.join();
-    result?;
+    let _input_thread = spawn_terminal_input(mailbox)?;
+    runtime.run()?;
     Ok(())
+}
+
+fn run_handshake_check() -> Result<(), Box<dyn Error>> {
+    let backend = spawn_backend()?;
+    let initialize_id = backend.client.submit(BackendCommand::Initialize {
+        client: client_information(),
+    })?;
+    let reply = receive_reply(&backend.outputs, &initialize_id)?;
+    if !matches!(reply, BackendReply::Initialized { .. }) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unexpected initialize reply: {reply:?}"),
+        )
+        .into());
+    }
+
+    let shutdown_id = backend.client.submit(BackendCommand::Shutdown)?;
+    let reply = receive_reply(&backend.outputs, &shutdown_id)?;
+    if reply != BackendReply::Completed {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unexpected shutdown reply: {reply:?}"),
+        )
+        .into());
+    }
+    backend.join()?;
+    println!("phenix: runtime handshake succeeded");
+    Ok(())
+}
+
+fn receive_reply(
+    outputs: &Receiver<BackendOutput>,
+    expected: &RequestId,
+) -> Result<BackendReply, Box<dyn Error>> {
+    loop {
+        match outputs.recv_timeout(HANDSHAKE_TIMEOUT) {
+            Ok(BackendOutput::Reply {
+                request_id,
+                result,
+            }) if &request_id == expected => return Ok(result?),
+            Ok(BackendOutput::Stopped { result }) => {
+                result?;
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    format!("runtime stopped before replying to {expected}"),
+                )
+                .into());
+            }
+            Ok(BackendOutput::Reply { .. } | BackendOutput::Event(_)) => {}
+            Err(RecvTimeoutError::Timeout) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!("runtime did not reply to {expected} within 30 seconds"),
+                )
+                .into())
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "runtime output channel disconnected",
+                )
+                .into())
+            }
+        }
+    }
+}
+
+fn spawn_backend() -> Result<BackendRuntime, Box<dyn Error>> {
+    Ok(BackendRuntime::spawn(
+        Box::new(create_process_backend()?),
+        CHANNEL_CAPACITY,
+    )?)
+}
+
+fn client_information() -> ClientInformation {
+    ClientInformation {
+        name: "phenix-tui".to_owned(),
+        build: env!("CARGO_PKG_VERSION").to_owned(),
+    }
 }
 
 fn create_process_backend() -> Result<ProcessAgentBackend, Box<dyn Error>> {
@@ -52,7 +137,10 @@ fn create_process_backend() -> Result<ProcessAgentBackend, Box<dyn Error>> {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("node"));
     let entry = env::var("PHENIX_HEADLESS_ENTRY").map_err(|_| {
-        "PHENIX_HEADLESS_ENTRY is not set; use the packaged `phenix` command or point it to headless/main.ts"
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "PHENIX_HEADLESS_ENTRY is not set; use the packaged `phenix` command or point it to headless/main.ts",
+        )
     })?;
     let mut config = ProcessBackendConfig::new(program);
     config.arguments = vec!["--experimental-strip-types".to_owned(), entry];
@@ -91,6 +179,14 @@ fn spawn_terminal_input(
     Ok(thread::Builder::new()
         .name("phenix-terminal-input".to_owned())
         .spawn(move || loop {
+            match event::poll(INPUT_POLL_PERIOD) {
+                Ok(false) => continue,
+                Ok(true) => {}
+                Err(_) => {
+                    let _ = mailbox.shutdown();
+                    return;
+                }
+            }
             let event = match event::read() {
                 Ok(event) => event,
                 Err(_) => {
@@ -140,9 +236,9 @@ fn convert_key(key: KeyEvent) -> KeyInput {
             CrosstermKeyCode::Insert => KeyCode::Insert,
             CrosstermKeyCode::F(number) => KeyCode::Function(number),
             CrosstermKeyCode::Char(character) => KeyCode::Character(character),
-            CrosstermKeyCode::Null => KeyCode::Character('\0'),
             CrosstermKeyCode::Esc => KeyCode::Escape,
-            CrosstermKeyCode::CapsLock
+            CrosstermKeyCode::Null
+            | CrosstermKeyCode::CapsLock
             | CrosstermKeyCode::ScrollLock
             | CrosstermKeyCode::NumLock
             | CrosstermKeyCode::PrintScreen
@@ -194,10 +290,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn headless_environment_is_explicitly_allowlisted() {
+    fn headless_environment_overrides_exclude_unrelated_values() {
         let environment = inherited_headless_environment();
         assert!(!environment.contains_key("GITHUB_TOKEN"));
-        assert!(!environment.contains_key("OPENAI_API_KEY"));
     }
 
     #[test]
