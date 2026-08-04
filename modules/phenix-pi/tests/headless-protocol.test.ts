@@ -35,13 +35,23 @@ test("request schema rejects control characters in durable IDs", () => {
   assert.equal(result.ok, false);
 });
 
-test("prompt command validates images and streaming behavior", () => {
+test("prompt command targets a Phenix run and validates streaming input", () => {
   const result = HeadlessCommandSchema.validate({
     type: "prompt.submit",
-    sessionId: "root",
+    runId: "root-run",
     text: "inspect",
     images: [{ mediaType: "image/png", data: "AA==" }],
     streamingBehavior: "steer",
   });
   assert.equal(result.ok, true);
+});
+
+test("prompt command rejects persisted session IDs as the target field", () => {
+  const result = HeadlessCommandSchema.validate({
+    type: "prompt.submit",
+    sessionId: "session-1",
+    text: "inspect",
+    images: [],
+  });
+  assert.equal(result.ok, false);
 });
