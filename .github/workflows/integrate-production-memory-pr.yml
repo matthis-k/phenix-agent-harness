@@ -34,13 +34,25 @@ jobs:
           name: devenv
       - name: Install devenv
         run: nix profile add nixpkgs#devenv
-      - name: Apply reviewed production integration
+      - name: Apply reviewed CI repair
         run: |
-          python .github/scripts/add_memory_snapshot_telemetry.py
-          python .github/scripts/integrate_memory_index_telemetry.py
-          python .github/scripts/fix_memory_static_invariants.py
-          python .github/scripts/fix_memory_interface_bounds.py
           python .github/scripts/repair_memory_ci.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('modules/phenix-pi/tests/memory-service.test.ts')
+          text = path.read_text()
+          text = text.replace(
+              '  readonly noteBatches: readonly MemoryNote[][] = [];',
+              '  readonly noteBatches: MemoryNote[][] = [];',
+              1,
+          )
+          text = text.replace(
+              '    (this.noteBatches as MemoryNote[][]).push([...notes]);',
+              '    this.noteBatches.push([...notes]);',
+              1,
+          )
+          path.write_text(text)
+          PY
       - name: Apply repository maintenance fixes
         run: devenv tasks run maintenance:fix
       - name: Preserve repository lock pins
