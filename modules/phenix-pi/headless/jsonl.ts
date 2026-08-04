@@ -23,14 +23,15 @@ export class JsonlDecoder {
 
   push(chunk: Uint8Array | string): readonly unknown[] {
     this.#buffer += typeof chunk === "string" ? chunk : this.#decoder.write(Buffer.from(chunk));
-    this.assertBufferedFrameBound();
-    return this.drainCompleteFrames();
+    const frames = this.drainCompleteFrames();
+    this.assertIncompleteFrameBound();
+    return frames;
   }
 
   finish(): readonly unknown[] {
     this.#buffer += this.#decoder.end();
-    this.assertBufferedFrameBound();
     const frames = [...this.drainCompleteFrames()];
+    this.assertIncompleteFrameBound();
     if (this.#buffer.length === 0) return frames;
     frames.push(parseLine(this.#buffer, this.#maxFrameBytes));
     this.#buffer = "";
@@ -49,7 +50,7 @@ export class JsonlDecoder {
     }
   }
 
-  private assertBufferedFrameBound(): void {
+  private assertIncompleteFrameBound(): void {
     if (Buffer.byteLength(this.#buffer, "utf8") > this.#maxFrameBytes) {
       throw new JsonlDecodeError(`JSONL frame exceeds ${this.#maxFrameBytes} bytes`);
     }
