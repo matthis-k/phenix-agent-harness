@@ -109,7 +109,6 @@ pub struct SessionModeSummary {
     pub description: Option<String>,
     pub selected: bool,
 }
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ThinkingLevel {
     Off,
@@ -143,7 +142,6 @@ pub struct ExternalCommand {
     pub arguments: Vec<String>,
     pub environment: BTreeMap<String, String>,
 }
-
 #[derive(Eq, PartialEq)]
 pub struct SecretValue(Vec<u8>);
 
@@ -609,18 +607,6 @@ pub enum BackendEvent {
         run_id: RunId,
         steering: Vec<String>,
         follow_ups: Vec<String>,
-    },
-    ExternalCommandRequested {
-        flow_id: AuthFlowId,
-        command: ExternalCommand,
-    },
-    ExternalCommandRequested {
-        flow_id: AuthFlowId,
-        command: ExternalCommand,
-    },
-    ExternalCommandRequested {
-        flow_id: AuthFlowId,
-        command: ExternalCommand,
     },
     ExternalCommandRequested {
         flow_id: AuthFlowId,
