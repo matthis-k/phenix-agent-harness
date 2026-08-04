@@ -1,4 +1,6 @@
+use crate::routing::ElementId;
 use phenix_runtime_api::{AuthFlowId, AuthPrompt, DialogId, ExtensionUiRequest, RunId};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum FocusTarget {
@@ -7,6 +9,27 @@ pub enum FocusTarget {
     #[default]
     Input,
     Overlay,
+}
+
+impl FocusTarget {
+    pub fn element_id(self) -> ElementId {
+        match self {
+            Self::Sidebar => ElementId::sidebar(),
+            Self::Transcript => ElementId::transcript(),
+            Self::Input => ElementId::input(),
+            Self::Overlay => ElementId::overlay(),
+        }
+    }
+
+    pub fn from_element(element: &ElementId) -> Option<Self> {
+        match element.as_str() {
+            "ui.sidebar" => Some(Self::Sidebar),
+            "ui.transcript" => Some(Self::Transcript),
+            "ui.input" => Some(Self::Input),
+            "ui.overlay" => Some(Self::Overlay),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -72,6 +95,23 @@ impl Default for ScrollState {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PaneViewState {
+    pub visible: bool,
+    pub width: Option<u16>,
+    pub height: Option<u16>,
+}
+
+impl Default for PaneViewState {
+    fn default() -> Self {
+        Self {
+            visible: true,
+            width: None,
+            height: None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ViewState {
     pub focus: FocusTarget,
@@ -83,10 +123,43 @@ pub struct ViewState {
     pub transcript_scroll: ScrollState,
     pub sidebar_scroll: ScrollState,
     pub show_details: bool,
+    pub panes: BTreeMap<ElementId, PaneViewState>,
+}
+
+impl ViewState {
+    pub fn pane(&self, element: &ElementId) -> PaneViewState {
+        self.panes.get(element).copied().unwrap_or_default()
+    }
+
+    pub fn pane_mut(&mut self, element: ElementId) -> &mut PaneViewState {
+        self.panes.entry(element).or_default()
+    }
 }
 
 impl Default for ViewState {
     fn default() -> Self {
+        let mut panes = BTreeMap::new();
+        panes.insert(
+            ElementId::sidebar(),
+            PaneViewState {
+                width: Some(28),
+                ..PaneViewState::default()
+            },
+        );
+        panes.insert(
+            ElementId::input(),
+            PaneViewState {
+                height: Some(3),
+                ..PaneViewState::default()
+            },
+        );
+        panes.insert(
+            ElementId::status(),
+            PaneViewState {
+                height: Some(1),
+                ..PaneViewState::default()
+            },
+        );
         Self {
             focus: FocusTarget::Input,
             sidebar_section: SidebarSection::Runs,
@@ -97,6 +170,7 @@ impl Default for ViewState {
             transcript_scroll: ScrollState::default(),
             sidebar_scroll: ScrollState::default(),
             show_details: false,
+            panes,
         }
     }
 }
