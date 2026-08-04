@@ -22,15 +22,17 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
-      - name: Refresh lockfile
-        run: cargo generate-lockfile --manifest-path rust/Cargo.toml
-      - name: Commit refreshed lockfile
+      - name: Refresh generated Rust files
         run: |
-          if ! git diff --quiet -- rust/Cargo.lock; then
+          cargo generate-lockfile --manifest-path rust/Cargo.toml
+          cargo fmt --manifest-path rust/Cargo.toml --all
+      - name: Commit generated Rust files
+        run: |
+          if ! git diff --quiet -- rust; then
             git config user.name github-actions[bot]
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-            git add rust/Cargo.lock
-            git commit -m "refresh Rust lockfile"
+            git add rust
+            git commit -m "refresh generated Rust files"
             git push origin HEAD:${GITHUB_HEAD_REF}
           fi
       - name: Format
