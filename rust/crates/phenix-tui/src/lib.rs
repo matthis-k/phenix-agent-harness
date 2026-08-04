@@ -1,16 +1,15 @@
 #![forbid(unsafe_code)]
 
 use phenix_runtime_api::{
-    AuthMethod, AuthPrompt, AuthPromptResponse, ExtensionUiRequest, ExtensionUiResponse,
-    ThinkingLevel, TranscriptRole,
+    AuthPrompt, AuthPromptResponse, ExtensionUiRequest, ExtensionUiResponse, TranscriptRole,
 };
 use phenix_ui_core::{
     AppEvent, AppState, FocusTarget, KeyCode, KeyInput, OverlayState, UiInput, UserIntent,
 };
 use phenix_ui_runtime::{UiInputController, UiRenderer};
-use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span, Text};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 use std::io;
@@ -38,11 +37,9 @@ impl RatatuiRenderer {
 
 impl UiRenderer for RatatuiRenderer {
     fn render(&mut self, state: &AppState) -> Result<(), String> {
-        let terminal = self
-            .terminal
+        self.terminal
             .as_mut()
-            .ok_or_else(|| "terminal is already restored".to_owned())?;
-        terminal
+            .ok_or_else(|| "terminal is already restored".to_owned())?
             .draw(|frame| render_application(frame, state))
             .map(|_| ())
             .map_err(|error| error.to_string())
@@ -65,11 +62,7 @@ impl UiInputController for PhenixInputController {
     fn handle(&mut self, state: &AppState, input: UiInput) -> Vec<AppEvent> {
         match input {
             UiInput::Key(key) => self.handle_key(state, key),
-            UiInput::Paste(text) => {
-                let mut input = state.input.text.clone();
-                input.push_str(&text);
-                vec![user(UserIntent::InputChanged(input))]
-            }
+            UiInput::Paste(text) => edit_input(state, |current| current.push_str(&text)),
             UiInput::Resize { .. }
             | UiInput::Mouse(_)
             | UiInput::FocusGained
@@ -82,158 +75,133 @@ impl PhenixInputController {
     fn handle_key(&mut self, state: &AppState, key: KeyInput) -> Vec<AppEvent> {
         if key.modifiers.control {
             return match key.code {
-                KeyCode::Character('d') | KeyCode::Character('q') => {
-                    vec![user(UserIntent::Quit)]
-                }
-                KeyCode::Character('c') => vec![user(UserIntent::Abort)],
-                KeyCode::Character('l') => vec![user(UserIntent::OpenAuthentication)],
-                KeyCode::Character('m') => vec![user(UserIntent::OpenModelPicker)],
-                KeyCode::Character('r') => vec![user(UserIntent::OpenSessionPicker)],
-                KeyCode::Character('o') => vec![user(UserIntent::ToggleDetails)],
-                KeyCode::Enter => vec![user(UserIntent::SteerPrompt)],
+                KeyCode::Character('d') | KeyCode::Character('q') => user(UserIntent::Quit),
+                KeyCode::Character('c') => user(UserIntent::Abort),
+                KeyCode::Character('l') => user(UserIntent::OpenAuthentication),
+                KeyCode::Character('m') => user(UserIntent::OpenModelPicker),
+                KeyCode::Character('r') => user(UserIntent::OpenSessionPicker),
+                KeyCode::Character('o') => user(UserIntent::ToggleDetails),
+                KeyCode::Enter => user(UserIntent::SteerPrompt),
                 _ => Vec::new(),
             };
         }
         if key.modifiers.alt && key.code == KeyCode::Enter {
-            return vec![user(UserIntent::FollowUpPrompt)];
+            return user(UserIntent::FollowUpPrompt);
         }
 
         match key.code {
             KeyCode::Escape => self.escape(state),
             KeyCode::Enter => self.enter(state, key.modifiers.shift),
-            KeyCode::Tab => vec![user(UserIntent::SetFocus(next_focus(state.view.focus)))],
-            KeyCode::BackTab => vec![user(UserIntent::SetFocus(previous_focus(
-                state.view.focus,
-            )))],
-            KeyCode::Backspace => {
-                let mut text = state.input.text.clone();
-                text.pop();
-                vec![user(UserIntent::InputChanged(text))]
-            }
-            KeyCode::Delete => Vec::new(),
+            KeyCode::Tab => user(UserIntent::SetFocus(next_focus(state.view.focus))),
+            KeyCode::BackTab => user(UserIntent::SetFocus(previous_focus(state.view.focus))),
+            KeyCode::Backspace => edit_input(state, |current| {
+                current.pop();
+            }),
             KeyCode::Character(character) if !key.modifiers.alt => {
-                let mut text = state.input.text.clone();
-                text.push(character);
                 self.history_offset = None;
-                vec![user(UserIntent::InputChanged(text))]
+                edit_input(state, |current| current.push(character))
             }
             KeyCode::Up => self.up(state),
             KeyCode::Down => self.down(state),
-            KeyCode::Left if state.view.focus == FocusTarget::Input => Vec::new(),
-            KeyCode::Right if state.view.focus == FocusTarget::Input => Vec::new(),
-            KeyCode::PageUp => {
-                select_relative_run(state, -5).map_or_else(Vec::new, |intent| vec![user(intent)])
-            }
-            KeyCode::PageDown => {
-                select_relative_run(state, 5).map_or_else(Vec::new, |intent| vec![user(intent)])
-            }
+            KeyCode::PageUp => select_relative_run(state, -5),
+            KeyCode::PageDown => select_relative_run(state, 5),
             _ => Vec::new(),
         }
     }
 
     fn escape(&mut self, state: &AppState) -> Vec<AppEvent> {
         if let Some(OverlayState::AuthenticationPrompt { flow_id, .. }) = &state.view.overlay {
-            return vec![user(UserIntent::CancelAuthentication(flow_id.clone()))];
+            return user(UserIntent::CancelAuthentication(flow_id.clone()));
         }
         if state.view.overlay.is_some() {
-            return vec![user(UserIntent::CloseOverlay)];
+            return user(UserIntent::CloseOverlay);
         }
         if !state.dialogs.is_empty() {
-            return vec![user(UserIntent::RespondToDialog(
-                ExtensionUiResponse::Cancelled,
-            ))];
+            return user(UserIntent::RespondToDialog(ExtensionUiResponse::Cancelled));
         }
-        vec![user(UserIntent::Abort)]
+        user(UserIntent::Abort)
     }
 
     fn enter(&mut self, state: &AppState, shift: bool) -> Vec<AppEvent> {
         if shift {
-            let mut text = state.input.text.clone();
-            text.push('\n');
-            return vec![user(UserIntent::InputChanged(text))];
+            return edit_input(state, |current| current.push('\n'));
         }
         if !state.dialogs.is_empty() {
             return respond_to_dialog(state);
         }
         match &state.view.overlay {
-            Some(OverlayState::ModelPicker { .. }) => state.models.first().map_or_else(Vec::new, |model| {
-                vec![user(UserIntent::SelectModel(model.model.clone()))]
-            }),
+            Some(OverlayState::ModelPicker { .. }) => state
+                .models
+                .first()
+                .map_or_else(Vec::new, |model| user(UserIntent::SelectModel(model.model.clone()))),
             Some(OverlayState::AuthenticationProviders { .. }) => state
                 .auth_providers
                 .first()
                 .and_then(|provider| {
-                    provider.methods.first().map(|method| UserIntent::StartAuthentication {
-                        provider_id: provider.id.clone(),
-                        method: method.clone(),
-                    })
+                    provider
+                        .methods
+                        .first()
+                        .map(|method| UserIntent::StartAuthentication {
+                            provider_id: provider.id.clone(),
+                            method: method.clone(),
+                        })
                 })
-                .map_or_else(Vec::new, |intent| vec![user(intent)]),
+                .map_or_else(Vec::new, user),
             Some(OverlayState::AuthenticationPrompt {
                 flow_id,
                 prompt,
                 selected,
                 ..
-            }) => {
-                let response = auth_response(prompt, &state.input.text, *selected);
-                vec![
-                    user(UserIntent::InputChanged(String::new())),
-                    user(UserIntent::RespondToAuthentication {
-                        flow_id: flow_id.clone(),
-                        response,
-                    }),
-                ]
-            }
+            }) => vec![
+                AppEvent::User(UserIntent::InputChanged(String::new())),
+                AppEvent::User(UserIntent::RespondToAuthentication {
+                    flow_id: flow_id.clone(),
+                    response: auth_response(prompt, &state.input.text, *selected),
+                }),
+            ],
             Some(OverlayState::SessionPicker { .. }) => state
                 .snapshot
                 .as_ref()
                 .and_then(|snapshot| snapshot.sessions.first())
                 .map_or_else(Vec::new, |session| {
-                    vec![user(UserIntent::SwitchSession(session.id.clone()))]
+                    user(UserIntent::SwitchSession(session.id.clone()))
                 }),
-            Some(OverlayState::CommandPalette { .. })
-            | Some(OverlayState::ExtensionDialog { .. })
-            | Some(OverlayState::Help) => Vec::new(),
-            None => vec![user(UserIntent::SubmitPrompt)],
+            Some(OverlayState::ExtensionDialog { .. }) => respond_to_dialog(state),
+            Some(OverlayState::CommandPalette { .. }) | Some(OverlayState::Help) => Vec::new(),
+            None => user(UserIntent::SubmitPrompt),
         }
     }
 
     fn up(&mut self, state: &AppState) -> Vec<AppEvent> {
         if state.view.focus == FocusTarget::Sidebar {
-            return select_relative_run(state, -1).map_or_else(Vec::new, |intent| vec![user(intent)]);
+            return select_relative_run(state, -1);
         }
-        if state.view.overlay.is_some() || !state.dialogs.is_empty() {
-            return Vec::new();
-        }
-        let history = &state.input.history;
-        if history.is_empty() {
+        if state.view.overlay.is_some() || state.input.history.is_empty() {
             return Vec::new();
         }
         let next = self
             .history_offset
-            .map_or(0, |offset| (offset + 1).min(history.len() - 1));
+            .map_or(0, |offset| (offset + 1).min(state.input.history.len() - 1));
         self.history_offset = Some(next);
-        let index = history.len() - 1 - next;
-        vec![user(UserIntent::InputChanged(history[index].clone()))]
+        let index = state.input.history.len() - 1 - next;
+        user(UserIntent::InputChanged(state.input.history[index].clone()))
     }
 
     fn down(&mut self, state: &AppState) -> Vec<AppEvent> {
         if state.view.focus == FocusTarget::Sidebar {
-            return select_relative_run(state, 1).map_or_else(Vec::new, |intent| vec![user(intent)]);
+            return select_relative_run(state, 1);
         }
         let Some(offset) = self.history_offset else {
             return Vec::new();
         };
         if offset == 0 {
             self.history_offset = None;
-            return vec![user(UserIntent::InputChanged(String::new()))];
+            return user(UserIntent::InputChanged(String::new()));
         }
         let next = offset - 1;
         self.history_offset = Some(next);
         let index = state.input.history.len() - 1 - next;
-        vec![user(UserIntent::InputChanged(
-            state.input.history[index].clone(),
-        ))]
+        user(UserIntent::InputChanged(state.input.history[index].clone()))
     }
 }
 
@@ -257,19 +225,28 @@ fn render_application(frame: &mut Frame<'_>, state: &AppState) {
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    let target = state
-        .input_target()
-        .map_or_else(|| "no run".to_owned(), ToString::to_string);
     let session = state
         .active_session
         .as_ref()
         .map_or_else(|| "new session".to_owned(), ToString::to_string);
-    let line = Line::from(vec![
-        Span::styled(" Phenix ", Style::default().fg(SURFACE).bg(ACCENT).bold()),
-        Span::styled(format!("  {session}"), Style::default().fg(TEXT)),
-        Span::styled(format!("  → {target}"), Style::default().fg(SUBTEXT)),
-    ]);
-    frame.render_widget(Paragraph::new(line).style(Style::default().bg(SURFACE_ALT)), area);
+    let target = state
+        .input_target()
+        .map_or_else(|| "no run".to_owned(), ToString::to_string);
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                " Phenix ",
+                Style::default()
+                    .fg(SURFACE)
+                    .bg(ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(format!("  {session}"), Style::default().fg(TEXT)),
+            Span::styled(format!("  → {target}"), Style::default().fg(SUBTEXT)),
+        ]))
+        .style(Style::default().bg(SURFACE_ALT)),
+        area,
+    );
 }
 
 fn render_body(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
@@ -282,8 +259,7 @@ fn render_body(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 }
 
 fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    let focused = state.view.focus == FocusTarget::Transcript;
-    let block = panel("Transcript", focused);
+    let block = panel("Transcript", state.view.focus == FocusTarget::Transcript);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let lines = state
@@ -295,12 +271,12 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 transcript
                     .blocks
                     .iter()
-                    .flat_map(|entry| transcript_lines(entry.role.clone(), &entry.text))
+                    .flat_map(|entry| transcript_lines(&entry.role, &entry.text))
                     .collect()
             },
         );
     frame.render_widget(
-        Paragraph::new(Text::from(lines))
+        Paragraph::new(lines)
             .wrap(Wrap { trim: false })
             .scroll((state.view.transcript_scroll.offset.min(u16::MAX as usize) as u16, 0)),
         inner,
@@ -308,8 +284,7 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 }
 
 fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    let focused = state.view.focus == FocusTarget::Sidebar;
-    let block = panel("Runs · Objectives · Sessions", focused);
+    let block = panel("Runs", state.view.focus == FocusTarget::Sidebar);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let items = state.snapshot.as_ref().map_or_else(Vec::new, |snapshot| {
@@ -319,40 +294,38 @@ fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             .map(|run| {
                 let selected = state.input_target() == Some(&run.id);
                 let marker = if selected { "▸" } else { " " };
-                let style = if selected {
-                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(TEXT)
-                };
                 let details = if state.view.show_details {
-                    format!("  {:?}  {}", run.state, run.definition_id)
+                    format!(" · {} · {:?}", run.definition_id, run.state)
                 } else {
-                    format!("  {:?}", run.state)
+                    format!(" · {:?}", run.state)
                 };
                 ListItem::new(Line::from(vec![
-                    Span::styled(format!("{marker} {}", run.display_name), style),
+                    Span::styled(
+                        format!("{marker} {}", run.display_name),
+                        if selected {
+                            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(TEXT)
+                        },
+                    ),
                     Span::styled(details, Style::default().fg(SUBTEXT)),
                 ]))
             })
             .collect()
     });
-    let list = if items.is_empty() {
-        List::new(vec![ListItem::new(Line::styled(
-            "Waiting for runtime snapshot…",
-            Style::default().fg(SUBTEXT),
-        ))])
-    } else {
-        List::new(items)
-    };
-    frame.render_widget(list, inner);
+    frame.render_widget(
+        if items.is_empty() {
+            List::new(vec![ListItem::new("Waiting for runtime snapshot…")])
+        } else {
+            List::new(items)
+        },
+        inner,
+    );
 }
 
 fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let focused = state.view.focus == FocusTarget::Input && state.view.overlay.is_none();
-    let title = state
-        .input_target()
-        .map_or_else(|| "Input".to_owned(), |run| format!("Input → {run}"));
-    let block = panel(&title, focused);
+    let block = panel("Input", focused);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     frame.render_widget(
@@ -371,7 +344,6 @@ fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 }
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    let health = format!("{:?}", state.connection);
     let status = state
         .statuses
         .iter()
@@ -379,14 +351,15 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         .collect::<Vec<_>>()
         .join(" · ");
     let notification = state.notifications.back().cloned().unwrap_or_default();
-    let text = [health, status, notification]
+    let line = [format!("{:?}", state.connection), status, notification]
         .into_iter()
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
         .join("  ·  ");
     frame.render_widget(
-        Paragraph::new(Line::styled(text, Style::default().fg(SUBTEXT)))
-            .style(Style::default().bg(SURFACE_ALT)),
+        Paragraph::new(line)
+            .style(Style::default().fg(SUBTEXT).bg(SURFACE_ALT))
+            .wrap(Wrap { trim: true }),
         area,
     );
 }
@@ -402,77 +375,104 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let overlay_area = centered(area, 70, 65);
     frame.render_widget(Clear, overlay_area);
     match overlay {
-        OverlayState::ModelPicker { .. } => {
-            let items = state.models.iter().map(|model| {
-                ListItem::new(format!(
-                    "{}/{}  {}",
-                    model.model.provider, model.model.model, model.display_name
-                ))
-            });
-            render_picker(frame, overlay_area, "Models", items.collect());
-        }
-        OverlayState::AuthenticationProviders { .. } => {
-            let items = state.auth_providers.iter().map(|provider| {
-                let configured = if provider.configured { "configured" } else { "login" };
-                ListItem::new(format!("{}  ({configured})", provider.display_name))
-            });
-            render_picker(frame, overlay_area, "Authentication", items.collect());
-        }
-        OverlayState::SessionPicker { .. } => {
-            let items = state
+        OverlayState::ModelPicker { .. } => render_picker(
+            frame,
+            overlay_area,
+            "Models",
+            state
+                .models
+                .iter()
+                .map(|model| {
+                    format!(
+                        "{}/{}  {}",
+                        model.model.provider, model.model.model, model.display_name
+                    )
+                })
+                .collect(),
+        ),
+        OverlayState::AuthenticationProviders { .. } => render_picker(
+            frame,
+            overlay_area,
+            "Authentication",
+            state
+                .auth_providers
+                .iter()
+                .map(|provider| {
+                    format!(
+                        "{}  ({})",
+                        provider.display_name,
+                        if provider.configured { "configured" } else { "login" }
+                    )
+                })
+                .collect(),
+        ),
+        OverlayState::SessionPicker { .. } => render_picker(
+            frame,
+            overlay_area,
+            "Resume session",
+            state
                 .snapshot
                 .as_ref()
                 .into_iter()
                 .flat_map(|snapshot| snapshot.sessions.iter())
                 .map(|session| {
-                    ListItem::new(
-                        session
-                            .name
-                            .clone()
-                            .unwrap_or_else(|| session.id.to_string()),
-                    )
-                });
-            render_picker(frame, overlay_area, "Resume session", items.collect());
-        }
+                    session
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| session.id.to_string())
+                })
+                .collect(),
+        ),
         OverlayState::AuthenticationPrompt {
             flow_id, prompt, ..
         } => render_auth_prompt(frame, overlay_area, flow_id.as_str(), prompt, state),
         OverlayState::ExtensionDialog { request, .. } => {
             render_extension_dialog(frame, overlay_area, request, state)
         }
-        OverlayState::CommandPalette { .. } => {
-            let items = state
+        OverlayState::CommandPalette { .. } => render_picker(
+            frame,
+            overlay_area,
+            "Commands",
+            state
                 .commands
                 .iter()
-                .map(|command| ListItem::new(format!("/{}", command.name)))
-                .collect();
-            render_picker(frame, overlay_area, "Commands", items);
-        }
-        OverlayState::Help => render_help(frame, overlay_area),
+                .map(|command| format!("/{}", command.name))
+                .collect(),
+        ),
+        OverlayState::Help => render_picker(
+            frame,
+            overlay_area,
+            "Help",
+            vec![
+                "Ctrl+L login · Ctrl+M models · Ctrl+R sessions".to_owned(),
+                "Ctrl+Enter steer · Alt+Enter follow-up · Esc abort".to_owned(),
+                "Tab focus · Ctrl+O details · Ctrl+D exit".to_owned(),
+            ],
+        ),
     }
 }
 
-fn render_picker(frame: &mut Frame<'_>, area: Rect, title: &str, items: Vec<ListItem<'_>>) {
+fn render_picker(frame: &mut Frame<'_>, area: Rect, title: &str, values: Vec<String>) {
     let block = panel(title, true);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    if items.is_empty() {
-        frame.render_widget(
-            Paragraph::new("No entries available.").style(Style::default().fg(SUBTEXT)),
-            inner,
-        );
-        return;
-    }
-    let mut lines = Vec::with_capacity(items.len());
-    for (index, item) in items.into_iter().enumerate() {
-        let style = if index == 0 {
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(TEXT)
-        };
-        lines.push(item.style(style));
-    }
-    frame.render_widget(List::new(lines).highlight_symbol("▸ "), inner);
+    let items = if values.is_empty() {
+        vec![ListItem::new("No entries available.")]
+    } else {
+        values
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| {
+                ListItem::new(format!("{} {value}", if index == 0 { "▸" } else { " " }))
+                    .style(if index == 0 {
+                        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(TEXT)
+                    })
+            })
+            .collect()
+    };
+    frame.render_widget(List::new(items), inner);
 }
 
 fn render_auth_prompt(
@@ -486,31 +486,23 @@ fn render_auth_prompt(
     let block = panel(&title, true);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let mut lines = Vec::new();
-    if let Some(flow) = state
-        .auth_flows
-        .iter()
-        .find_map(|(id, flow)| (id.as_str() == flow_id).then_some(flow))
-    {
-        for notice in &flow.notices {
-            lines.push(Line::styled(format!("{notice:?}"), Style::default().fg(YELLOW)));
-        }
-    }
-    lines.push(Line::styled(auth_prompt_message(prompt), Style::default().fg(TEXT)));
+    let mut lines = vec![Line::styled(
+        auth_prompt_message(prompt),
+        Style::default().fg(TEXT),
+    )];
     match prompt {
-        AuthPrompt::Select { options, .. } => {
-            for (index, option) in options.iter().enumerate() {
-                let marker = if index == 0 { "▸" } else { " " };
-                lines.push(Line::styled(
-                    format!("{marker} {}", option.label),
+        AuthPrompt::Select { options, .. } => lines.extend(options.iter().enumerate().map(
+            |(index, option)| {
+                Line::styled(
+                    format!("{} {}", if index == 0 { "▸" } else { " " }, option.label),
                     if index == 0 {
                         Style::default().fg(ACCENT)
                     } else {
                         Style::default().fg(TEXT)
                     },
-                ));
-            }
-        }
+                )
+            },
+        )),
         AuthPrompt::Secret { .. } => lines.push(Line::styled(
             "•".repeat(state.input.text.chars().count()),
             Style::default().fg(ACCENT),
@@ -550,10 +542,7 @@ fn render_extension_dialog(
         ),
         ExtensionUiRequest::Confirm { title, message } => (
             title.as_str(),
-            vec![
-                Line::styled(message.clone(), Style::default().fg(TEXT)),
-                Line::styled("Enter: confirm · Esc: cancel", Style::default().fg(SUBTEXT)),
-            ],
+            vec![Line::styled(message.clone(), Style::default().fg(TEXT))],
         ),
         ExtensionUiRequest::Input { title, secret, .. } => (
             title.as_str(),
@@ -578,38 +567,24 @@ fn render_extension_dialog(
             )],
         ),
     };
-    lines.push(Line::styled("", Style::default()));
-    lines.push(Line::styled("Enter: submit · Esc: cancel", Style::default().fg(SUBTEXT)));
+    lines.push(Line::styled(
+        "Enter: submit · Esc: cancel",
+        Style::default().fg(SUBTEXT),
+    ));
     let block = panel(title, true);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
 
-fn render_help(frame: &mut Frame<'_>, area: Rect) {
-    let block = panel("Help", true);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::from("Ctrl+L login · Ctrl+M models · Ctrl+R sessions"),
-            Line::from("Ctrl+Enter steer · Alt+Enter follow-up · Esc abort"),
-            Line::from("Tab focus · Ctrl+O details · Ctrl+D exit"),
-        ])
-        .style(Style::default().fg(TEXT)),
-        inner,
-    );
-}
-
 fn panel<'a>(title: &'a str, focused: bool) -> Block<'a> {
-    let border = if focused { ACCENT } else { SURFACE_ALT };
     Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(
             format!(" {title} "),
             Style::default().fg(if focused { ACCENT } else { SUBTEXT }),
         ))
-        .border_style(Style::default().fg(border))
+        .border_style(Style::default().fg(if focused { ACCENT } else { SURFACE_ALT }))
         .style(Style::default().bg(SURFACE).fg(TEXT))
 }
 
@@ -630,7 +605,6 @@ fn centered(area: Rect, width_percent: u16, height_percent: u16) -> Rect {
             Constraint::Percentage((100 - width_percent) / 2),
         ])
         .split(vertical[1])[1]
-        .inner(Margin::new(1, 1))
 }
 
 fn input_height(state: &AppState, width: u16) -> u16 {
@@ -652,18 +626,18 @@ fn cursor_position(text: &str, width: u16) -> (u16, u16) {
         if character == '\n' {
             row += 1;
             column = 0;
-            continue;
-        }
-        column += 1;
-        if column >= width {
-            row += 1;
-            column = 0;
+        } else {
+            column += 1;
+            if column >= width {
+                row += 1;
+                column = 0;
+            }
         }
     }
     (column.min(u16::MAX as usize) as u16, row.min(u16::MAX as usize) as u16)
 }
 
-fn transcript_lines(role: TranscriptRole, text: &str) -> Vec<Line<'static>> {
+fn transcript_lines(role: &TranscriptRole, text: &str) -> Vec<Line<'static>> {
     let (label, color) = match role {
         TranscriptRole::User => ("you", ACCENT),
         TranscriptRole::Assistant => ("assistant", GREEN),
@@ -675,9 +649,7 @@ fn transcript_lines(role: TranscriptRole, text: &str) -> Vec<Line<'static>> {
         format!("{label} ─"),
         Style::default().fg(color).add_modifier(Modifier::BOLD),
     )];
-    lines.extend(text.lines().map(|line| {
-        Line::from(Span::styled(line.to_owned(), Style::default().fg(TEXT)))
-    }));
+    lines.extend(text.lines().map(|line| Line::from(line.to_owned())));
     lines.push(Line::default());
     lines
 }
@@ -697,8 +669,8 @@ fn respond_to_dialog(state: &AppState) -> Vec<AppEvent> {
         }
     };
     vec![
-        user(UserIntent::InputChanged(String::new())),
-        user(UserIntent::RespondToDialog(response)),
+        AppEvent::User(UserIntent::InputChanged(String::new())),
+        AppEvent::User(UserIntent::RespondToDialog(response)),
     ]
 }
 
@@ -727,17 +699,27 @@ fn auth_prompt_message(prompt: &AuthPrompt) -> String {
     }
 }
 
-fn select_relative_run(state: &AppState, delta: isize) -> Option<UserIntent> {
-    let runs = &state.snapshot.as_ref()?.runs;
-    if runs.is_empty() {
-        return None;
+fn edit_input(state: &AppState, edit: impl FnOnce(&mut String)) -> Vec<AppEvent> {
+    let mut text = state.input.text.clone();
+    edit(&mut text);
+    user(UserIntent::InputChanged(text))
+}
+
+fn select_relative_run(state: &AppState, delta: isize) -> Vec<AppEvent> {
+    let Some(snapshot) = &state.snapshot else {
+        return Vec::new();
+    };
+    if snapshot.runs.is_empty() {
+        return Vec::new();
     }
     let current = state
         .input_target()
-        .and_then(|selected| runs.iter().position(|run| &run.id == selected))
+        .and_then(|selected| snapshot.runs.iter().position(|run| &run.id == selected))
         .unwrap_or(0);
-    let next = current.saturating_add_signed(delta).min(runs.len() - 1);
-    Some(UserIntent::SelectRun(runs[next].id.clone()))
+    let next = current
+        .saturating_add_signed(delta)
+        .min(snapshot.runs.len() - 1);
+    user(UserIntent::SelectRun(snapshot.runs[next].id.clone()))
 }
 
 fn next_focus(focus: FocusTarget) -> FocusTarget {
@@ -756,36 +738,24 @@ fn previous_focus(focus: FocusTarget) -> FocusTarget {
     }
 }
 
-fn user(intent: UserIntent) -> AppEvent {
-    AppEvent::User(intent)
-}
-
-pub fn default_thinking_level() -> ThinkingLevel {
-    ThinkingLevel::Medium
-}
-
-pub fn preferred_auth_method(methods: &[AuthMethod]) -> Option<AuthMethod> {
-    methods
-        .iter()
-        .find(|method| **method == AuthMethod::OAuth)
-        .cloned()
-        .or_else(|| methods.first().cloned())
+fn user(intent: UserIntent) -> Vec<AppEvent> {
+    vec![AppEvent::User(intent)]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_runtime_api::{RunId, RunKind, RunState, RunSummary, RuntimeSnapshot};
+    use phenix_runtime_api::{BackendHealth, RunId, RunKind, RunState, RunSummary, RuntimeSnapshot};
 
     #[test]
-    fn sidebar_navigation_selects_runs_without owning_state_outside_the_loop() {
+    fn sidebar_navigation_selects_runs_without_owning_state_outside_the_loop() {
         let first = RunId::parse("run-1").expect("run ID");
         let second = RunId::parse("run-2").expect("run ID");
         let mut state = AppState::default();
         state.selected_run = Some(first.clone());
         state.snapshot = Some(RuntimeSnapshot {
             capabilities: Default::default(),
-            health: phenix_runtime_api::BackendHealth::Ready,
+            health: BackendHealth::Ready,
             active_session: None,
             root_run: Some(first.clone()),
             selected_run: Some(first.clone()),
@@ -793,7 +763,10 @@ mod tests {
             runs: vec![run(first), run(second.clone())],
             objectives: Vec::new(),
         });
-        assert_eq!(select_relative_run(&state, 1), Some(UserIntent::SelectRun(second)));
+        assert_eq!(
+            select_relative_run(&state, 1),
+            user(UserIntent::SelectRun(second))
+        );
     }
 
     #[test]
