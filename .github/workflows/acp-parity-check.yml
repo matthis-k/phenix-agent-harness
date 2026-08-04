@@ -7,6 +7,7 @@ on:
       - .github/workflows/acp-parity-check.yml
       - scripts/cleanup-acp-parity.py
       - scripts/fix-acp-backend-schema.py
+      - scripts/fix-acp-backend-borrows.py
       - rust/**
 
 permissions:
@@ -27,6 +28,7 @@ jobs:
         run: |
           python scripts/cleanup-acp-parity.py
           python scripts/fix-acp-backend-schema.py
+          python scripts/fix-acp-backend-borrows.py
           cargo generate-lockfile --manifest-path rust/Cargo.toml
           cargo fmt --manifest-path rust/Cargo.toml --all
       - name: Commit generated changes
@@ -35,7 +37,7 @@ jobs:
             git config user.name github-actions[bot]
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
             git add rust
-            git commit -m "align ACP backend with typed frontend schema"
+            git commit -m "finish ACP backend borrow integration"
             git push origin HEAD:${GITHUB_HEAD_REF}
           fi
       - name: Check
