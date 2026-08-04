@@ -47,9 +47,7 @@ impl PermissionBroker {
             .fields
             .title
             .clone()
-            .unwrap_or_else(|| {
-                format!("Permission for {}", event.request.tool_call.tool_call_id)
-            });
+            .unwrap_or_else(|| format!("Permission for {}", event.request.tool_call.tool_call_id));
         self.pending.insert(
             dialog_id.clone(),
             PendingPermission {
