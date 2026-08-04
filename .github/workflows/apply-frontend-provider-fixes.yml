@@ -1,0 +1,86 @@
+name: Apply frontend provider fixes
+
+on:
+  push:
+    branches:
+      - feature/rust-ratatui-frontend
+    paths:
+      - .github/workflows/apply-frontend-provider-fixes.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: feature/rust-ratatui-frontend
+      - name: Apply semantic fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new):
+              file = Path(path)
+              text = file.read_text()
+              if old not in text:
+                  raise SystemExit(f"expected text missing in {path}")
+              file.write_text(text.replace(old, new, 1))
+
+          replace(
+              "rust/crates/phenix-frontend-config/src/lib.rs",
+              """pub enum FrontendCommand {\n    Application(ApplicationCommand),\n    Ui(UiCommand),\n    Input(InputCommand),\n    Overlay(OverlayCommand),\n}""",
+              """pub enum FrontendCommand {\n    Application(ApplicationCommand),\n    Ui(UiCommand),\n    Input(InputCommand),\n    Overlay(OverlayCommand),\n    Handled,\n}""",
+          )
+
+          replace(
+              "rust/crates/phenix-ui-lua/src/provider.rs",
+              """        self.sync_config();\n        Ok(self.commands.borrow_mut().drain(..).collect())""",
+              """        self.sync_config();\n        let mut commands = self.commands.borrow_mut();\n        if commands.is_empty() {\n            Ok(vec![FrontendCommand::Handled])\n        } else {\n            Ok(commands.drain(..).collect())\n        }""",
+          )
+
+          replace(
+              "rust/crates/phenix-ui-runtime/src/fabric.rs",
+              """    EditInput(InputEdit),\n    MoveOverlaySelection(i32),\n}""",
+              """    EditInput(InputEdit),\n    MoveOverlaySelection(i32),\n    Notify(String),\n}""",
+          )
+
+          replace(
+              "rust/crates/phenix-ui-runtime/src/frontend.rs",
+              """                    Err(error) => ReactionBatch::stop(vec![BusReaction::App(\n                        AppEvent::BackendSubmitFailed(format!(\n                            \"frontend configuration error: {error}\"\n                        )),\n                    )]),""",
+              """                    Err(error) => ReactionBatch::stop(vec![BusReaction::View(\n                        ViewMutation::Notify(format!(\n                            \"frontend configuration error: {error}\"\n                        )),\n                    )]),""",
+          )
+
+          replace(
+              "rust/crates/phenix-ui-runtime/src/frontend.rs",
+              """        FrontendCommand::Overlay(command) => overlay_reactions(state, command),\n    }""",
+              """        FrontendCommand::Overlay(command) => overlay_reactions(state, command),\n        FrontendCommand::Handled => Vec::new(),\n    }""",
+          )
+
+          replace(
+              "rust/crates/phenix-ui-runtime/src/runtime.rs",
+              """        ViewMutation::MoveOverlaySelection(delta) => move_overlay_selection(state, delta),\n    }""",
+              """        ViewMutation::MoveOverlaySelection(delta) => move_overlay_selection(state, delta),\n        ViewMutation::Notify(message) => state.notifications.push_back(message),\n    }""",
+          )
+
+          replace(
+              "rust/crates/phenix-ui-core/src/reducer.rs",
+              """fn reduce_backend_output(state: &mut AppState, output: BackendOutput) -> Vec<AppEffect> {\n    let mut quit = false;\n    match output {\n        BackendOutput::Reply { result, .. } => match result {\n            Ok(reply) => {\n                quit = matches!(reply, BackendReply::Completed) && state.exit_requested;\n                reduce_backend_reply(state, reply);\n            }\n            Err(error) => {\n                state.notifications.push_back(error.to_string());\n                state.connection = RuntimeConnectionState::Degraded(error.to_string());\n                quit = state.exit_requested;\n            }\n        },\n        BackendOutput::Event(event) => reduce_backend_event(state, event),\n        BackendOutput::Stopped { result } => {\n            state.connection = match result {\n                Ok(()) => RuntimeConnectionState::Stopped,\n                Err(error) => RuntimeConnectionState::Failed(error.to_string()),\n            };\n            quit = true;\n        }\n    }\n    if quit {\n        state.should_quit = true;\n        vec![AppEffect::Render, AppEffect::Quit]\n    } else {\n        vec![AppEffect::Render]\n    }\n}""",
+              """fn reduce_backend_output(state: &mut AppState, output: BackendOutput) -> Vec<AppEffect> {\n    match output {\n        BackendOutput::Reply { result, .. } => match result {\n            Ok(reply) => reduce_backend_reply(state, reply),\n            Err(error) => {\n                state.notifications.push_back(error.to_string());\n                state.connection = RuntimeConnectionState::Degraded(error.to_string());\n            }\n        },\n        BackendOutput::Event(event) => reduce_backend_event(state, event),\n        BackendOutput::Stopped { result } => {\n            state.connection = match result {\n                Ok(()) => RuntimeConnectionState::Stopped,\n                Err(error) => RuntimeConnectionState::Failed(error.to_string()),\n            };\n            state.should_quit = true;\n            return vec![AppEffect::Render, AppEffect::Quit];\n        }\n    }\n    vec![AppEffect::Render]\n}""",
+          )
+
+          replace(
+              "rust/crates/phenix-ui-core/src/reducer.rs",
+              """    fn quit_waits_for_runtime_completion() {\n        let mut state = AppState::default();\n        let effects = reduce(&mut state, AppEvent::User(UserIntent::Quit));\n        assert!(state.exit_requested);\n        assert!(!state.should_quit);\n        assert!(effects.contains(&AppEffect::Send(BackendCommand::Shutdown)));\n        let effects = reduce(\n            &mut state,\n            AppEvent::Backend(BackendOutput::Reply {\n                request_id: phenix_runtime_api::RequestId::parse(\"shutdown\").expect(\"request ID\"),\n                result: Ok(BackendReply::Completed),\n            }),\n        );\n        assert!(state.should_quit);\n        assert!(effects.contains(&AppEffect::Quit));\n    }""",
+              """    fn quit_waits_for_backend_termination() {\n        let mut state = AppState::default();\n        let effects = reduce(&mut state, AppEvent::User(UserIntent::Quit));\n        assert!(state.exit_requested);\n        assert!(!state.should_quit);\n        assert!(effects.contains(&AppEffect::Send(BackendCommand::Shutdown)));\n\n        let effects = reduce(\n            &mut state,\n            AppEvent::Backend(BackendOutput::Reply {\n                request_id: phenix_runtime_api::RequestId::parse(\"shutdown\").expect(\"request ID\"),\n                result: Ok(BackendReply::Completed),\n            }),\n        );\n        assert!(!state.should_quit);\n        assert!(!effects.contains(&AppEffect::Quit));\n\n        let effects = reduce(\n            &mut state,\n            AppEvent::Backend(BackendOutput::Stopped { result: Ok(()) }),\n        );\n        assert!(state.should_quit);\n        assert!(effects.contains(&AppEffect::Quit));\n    }""",
+          )
+          PY
+      - name: Commit fixes
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add rust/crates
+          git commit -m 'fix(frontend): preserve provider and shutdown semantics'
+          git push origin HEAD:feature/rust-ratatui-frontend
