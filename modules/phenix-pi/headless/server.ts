@@ -92,7 +92,10 @@ export class HeadlessProtocolServer {
   private dispatch(value: unknown): Promise<void> {
     const task = this.handleValue(value);
     this.#inFlight.add(task);
-    void task.finally(() => this.#inFlight.delete(task));
+    void task.then(
+      () => this.#inFlight.delete(task),
+      () => this.#inFlight.delete(task),
+    );
     return task;
   }
 
@@ -106,11 +109,13 @@ export class HeadlessProtocolServer {
     }
 
     if (this.#inFlightIds.has(request.id)) {
-      await this.enqueue(failedResponse(request.id, {
-        code: "invalid_state",
-        message: `Request ID is already in flight`,
-        retryable: true,
-      }));
+      await this.enqueue(
+        failedResponse(request.id, {
+          code: "invalid_state",
+          message: `Request ID is already in flight`,
+          retryable: true,
+        }),
+      );
       return;
     }
 
