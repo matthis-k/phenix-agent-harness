@@ -1,4 +1,4 @@
-use crate::{AcpMethod, IdError, RpcRequestId};
+use crate::{AcpMethod, RpcRequestId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::error::Error;
@@ -45,7 +45,7 @@ impl<T: AcpTransport> AcpClient<T> {
             .transport
             .exchange(&request)
             .map_err(CallError::Transport)?;
-        decode_response::<M::Result>(&request_id, &response)
+        decode_response::<M::Result, T::Error>(&request_id, &response)
     }
 
     fn allocate_request_id(&mut self) -> Result<RpcRequestId, CallError<T::Error>> {
@@ -201,12 +201,6 @@ where
     }
 }
 
-impl From<IdError> for EnvelopeError {
-    fn from(error: IdError) -> Self {
-        Self::UnsupportedJsonRpcVersion(error.to_string())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,8 +254,9 @@ mod tests {
 
     #[test]
     fn method_type_links_params_to_the_only_valid_result_type() {
-        let transport =
-            ScriptedTransport::new(br#"{"jsonrpc":"2.0","id":"1","result":{"tree_id":"tree-1"}}"#);
+        let transport = ScriptedTransport::new(
+            br#"{"jsonrpc":"2.0","id":"1","result":{"tree_id":"tree-1"}}"#,
+        );
         let mut client = AcpClient::new(transport);
         let result = client
             .call::<EchoMethod>(&EchoParams {
@@ -278,8 +273,9 @@ mod tests {
 
     #[test]
     fn malformed_result_is_not_collapsed_into_a_transport_or_remote_error() {
-        let transport =
-            ScriptedTransport::new(br#"{"jsonrpc":"2.0","id":"1","result":{"tree_id":7}}"#);
+        let transport = ScriptedTransport::new(
+            br#"{"jsonrpc":"2.0","id":"1","result":{"tree_id":7}}"#,
+        );
         let mut client = AcpClient::new(transport);
         assert!(matches!(
             client.call::<EchoMethod>(&EchoParams {
