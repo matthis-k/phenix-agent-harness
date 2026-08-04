@@ -10,6 +10,7 @@ import { JsonlRunLedger } from "../adapters/persistence/jsonl-run-ledger.ts";
 import { PiSdkAgentSessionBackend } from "../adapters/pi-sdk/agent-session-backend.ts";
 import { LiveAgentTranscriptStore } from "../adapters/pi-sdk/live-agent-transcript-store.ts";
 import { ProcessLocalOperationRunner } from "../adapters/process/local-operation-runner.ts";
+import { ProcessRtkTokenReductionBackend } from "../adapters/process/rtk-token-reduction-backend.ts";
 import { PiModelInventory } from "../adapters/routing/pi-model-inventory.ts";
 import { AgentExecutor } from "../application/agent-executor.ts";
 import { AttentionProcessManager } from "../application/attention-process-manager.ts";
@@ -114,6 +115,13 @@ export function createExecutionServices(input: {
     ids,
     clock: systemClock,
   });
+  const tokenReduction =
+    process.env.PHENIX_TOKEN_REDUCTION_BACKEND === "none" || !process.env.PHENIX_RTK_BIN
+      ? undefined
+      : new ProcessRtkTokenReductionBackend({
+          executable: process.env.PHENIX_RTK_BIN,
+          stateDirectory: stateDir,
+        });
   const kernel = createExecutionKernel({
     definitions,
     functions,
@@ -147,6 +155,7 @@ export function createExecutionServices(input: {
     agentDir: host.agentDir,
     transcripts,
     memory,
+    tokenReduction,
     eventBus: host.piEventBus,
     promptModeForRun: (runId) => {
       const run = store.projection.requireRun(runId);
