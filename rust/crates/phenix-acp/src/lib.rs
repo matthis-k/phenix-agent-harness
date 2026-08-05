@@ -32,8 +32,9 @@ pub use runtime::{
     AcpSession, AcpSessionFactory, FirstAvailableRouter, FixedRouter, GatewayCommand,
     GatewayEnvelope, GatewayError, GatewayEvent, GatewayFailure, GatewayReply, InteractionResponse,
     PhenixAcpGateway, PhenixAcpGatewayBuilder, RoutingDecision, RoutingRequest, SessionCommand,
-    SessionEvent, SessionImage, SessionOpenKind, SessionOpenRequest, SessionRouter, StaticWorkflow,
-    TreeStartResult, Workflow, WorkflowPlan, WorkflowPlanBuilder, WorkflowRequest, WorkflowStep,
+    SessionEvent, SessionImage, SessionOpenKind, SessionOpenRequest, SessionRouter,
+    SessionTranscriptRole, StaticWorkflow, TreeStartResult, Workflow, WorkflowPlan,
+    WorkflowPlanBuilder, WorkflowRequest, WorkflowStep,
 };
 pub use tools::{
     BuiltinToolPolicy, McpServerDefinition, McpServerTransport, ToolConfigError, ToolConfiguration,

@@ -1,9 +1,7 @@
 use crate::UiMailbox;
 use phenix_runtime_api::{AuthFlowId, AuthTerminalRequest};
 use phenix_ui_core::{AppEvent, TerminalSize};
-use portable_pty::{
-    native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize, PtySystem,
-};
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;

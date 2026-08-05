@@ -3,7 +3,7 @@ use crate::{
     InputEdit, NativeAuthTerminalHost, UiIngressError, UiMailbox, UiMessage, ViewMutation,
 };
 use phenix_frontend_config::FrontendProviderRef;
-use phenix_runtime_api::{BackendClient, BackendCommand, BackendRuntime, BackendWorker};
+use phenix_runtime_api::{BackendClient, BackendRuntime, BackendWorker};
 #[cfg(test)]
 use phenix_ui_core::ElementId;
 use phenix_ui_core::{
