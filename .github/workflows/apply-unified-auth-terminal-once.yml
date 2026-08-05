@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
           ref: fix/acp-auth-transcript-errors
-          fetch-depth: 0
+          fetch-depth: 1
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -26,6 +26,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/apply-unified-auth-terminal.py')
+          source = path.read_text()
+          old = '                program: invocation.remove(0),\n'
+          if source.count(old) != 2:
+              raise SystemExit('unexpected ACP auth migration matcher count')
+          path.write_text(source.replace(old, '                program,\n'))
+          PY
           python3 .github/scripts/apply-unified-auth-terminal.py
           cargo fmt --manifest-path rust/Cargo.toml --all
           set +e
