@@ -53,10 +53,9 @@ impl AcpSession for RecordingSession {
             .expect("command log")
             .push((self.id.clone(), command.clone()));
         let events = match command {
-            SessionCommand::Prompt { text, .. } => vec![
-                SessionEvent::Text { text },
-                SessionEvent::Completed,
-            ],
+            SessionCommand::Prompt { text, .. } => {
+                vec![SessionEvent::Text { text }, SessionEvent::Completed]
+            }
             SessionCommand::Steer { text, .. } => vec![SessionEvent::QueueChanged {
                 steering: vec![text],
                 follow_ups: Vec::new(),
@@ -75,6 +74,7 @@ impl AcpSession for RecordingSession {
             | SessionCommand::SetMode { .. }
             | SessionCommand::SetThinking { .. }
             | SessionCommand::Invoke { .. }
+            | SessionCommand::RespondInteraction { .. }
             | SessionCommand::Close => Vec::new(),
         };
         Ok(events)
@@ -105,8 +105,7 @@ fn definition() -> SessionTreeDefinition {
     SessionTreeDefinition::builder(definition_id(), router_id())
         .backend(BackendDefinition::new(
             backend_id(),
-            AcpEndpoint::stdio("pi-acp", Vec::new(), BTreeMap::new())
-                .expect("test endpoint"),
+            AcpEndpoint::stdio("pi-acp", Vec::new(), BTreeMap::new()).expect("test endpoint"),
         ))
         .expect("backend")
         .workflow(workflow_id())
@@ -226,11 +225,11 @@ fn workflow_plan_becomes_recursive_nodes_objectives_and_acp_sessions() {
     let opens = factory.opens.lock().expect("open log");
     assert_eq!(opens.len(), 3);
     assert!(matches!(
-        opens[1].open,
+        &opens[1].open,
         SessionOpenKind::New { parent: Some(_) }
     ));
     assert!(matches!(
-        opens[2].open,
+        &opens[2].open,
         SessionOpenKind::New { parent: Some(_) }
     ));
 }
@@ -270,9 +269,9 @@ fn persistent_session_operations_are_explicit_open_modes() {
         .expect("fork");
 
     let opens = factory.opens.lock().expect("open log");
-    assert!(matches!(opens[1].open, SessionOpenKind::Load { .. }));
-    assert!(matches!(opens[2].open, SessionOpenKind::Resume { .. }));
-    assert!(matches!(opens[3].open, SessionOpenKind::Fork { .. }));
+    assert!(matches!(&opens[1].open, SessionOpenKind::Load { .. }));
+    assert!(matches!(&opens[2].open, SessionOpenKind::Resume { .. }));
+    assert!(matches!(&opens[3].open, SessionOpenKind::Fork { .. }));
 }
 
 #[test]
@@ -357,17 +356,12 @@ fn json_host_surface_is_typed_and_returns_structured_errors() {
     })
     .expect("command JSON");
     let response = gateway.handle_json(&input);
-    let envelope: GatewayEnvelope =
-        serde_json::from_str(&response).expect("response envelope");
-    assert!(matches!(
-        envelope.reply,
-        Some(GatewayReply::TreeCreated(_))
-    ));
+    let envelope: GatewayEnvelope = serde_json::from_str(&response).expect("response envelope");
+    assert!(matches!(envelope.reply, Some(GatewayReply::TreeCreated(_))));
     assert!(envelope.error.is_none());
 
     let invalid = gateway.handle_json("{not-json");
-    let envelope: GatewayEnvelope =
-        serde_json::from_str(&invalid).expect("error envelope");
+    let envelope: GatewayEnvelope = serde_json::from_str(&invalid).expect("error envelope");
     assert_eq!(
         envelope.error.expect("decode failure").code,
         "decode".to_owned()
