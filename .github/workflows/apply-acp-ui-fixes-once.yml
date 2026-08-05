@@ -1,0 +1,33 @@
+name: Apply ACP UI fixes once
+
+on:
+  push:
+    branches:
+      - fix/acp-auth-transcript-errors
+    paths:
+      - .github/workflows/apply-acp-ui-fixes-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: fix/acp-auth-transcript-errors
+          fetch-depth: 0
+      - name: Apply reviewed ACP UI fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/apply-acp-ui-fixes.py
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          rm .github/scripts/apply-acp-ui-fixes.py
+          rm .github/workflows/apply-acp-ui-fixes-once.yml
+          git add rust .github/scripts/apply-acp-ui-fixes.py .github/workflows/apply-acp-ui-fixes-once.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(acp): surface authentication and preserve transcripts"
+          git push origin HEAD:fix/acp-auth-transcript-errors
