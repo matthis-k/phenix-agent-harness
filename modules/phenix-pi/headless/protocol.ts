@@ -1,4 +1,4 @@
-import { Type, type TProperties } from "typebox";
+import { type TProperties, Type } from "typebox";
 
 import { defineSchema } from "../domain/definition/schema.ts";
 
