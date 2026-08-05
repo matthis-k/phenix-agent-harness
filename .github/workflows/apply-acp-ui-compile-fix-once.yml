@@ -1,0 +1,44 @@
+name: Apply ACP UI compile fix once
+
+on:
+  push:
+    branches:
+      - fix/acp-auth-transcript-errors
+    paths:
+      - .github/workflows/apply-acp-ui-compile-fix-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: fix/acp-auth-transcript-errors
+      - name: Add reducer test capability import
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('rust/crates/phenix-ui-core/src/reducer.rs')
+          source = path.read_text()
+          old = '''        AuthPrompt, BackendHealth, DialogId, ExtensionUiRequest, RunKind, RunState, RunSummary,
+              RuntimeSnapshot, TranscriptBlock, TranscriptRole,
+          '''
+          new = '''        AuthPrompt, BackendCapabilities, BackendHealth, DialogId, ExtensionUiRequest, RunKind,
+              RunState, RunSummary, RuntimeSnapshot, TranscriptBlock, TranscriptRole,
+          '''
+          if source.count(old) != 1:
+              raise SystemExit('unexpected reducer test import shape')
+          path.write_text(source.replace(old, new, 1))
+          PY
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          rm .github/workflows/apply-acp-ui-compile-fix-once.yml
+          git add rust/crates/phenix-ui-core/src/reducer.rs .github/workflows/apply-acp-ui-compile-fix-once.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(ui): import capabilities in auth startup test"
+          git push origin HEAD:fix/acp-auth-transcript-errors
