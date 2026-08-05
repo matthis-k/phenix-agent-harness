@@ -27,6 +27,12 @@ diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/codin
  	sendUserMessage: SendUserMessageHandler;
 +	runCommandAction: RunCommandActionHandler;
  	appendEntry: AppendEntryHandler;
+@@ -1657,4 +1658,5 @@
+ export interface LoadExtensionsResult {
+ 	extensions: Extension[];
+ 	errors: Array<{ path: string; error: string }>;
++	events: EventBus;
+ 	/** Shared runtime - actions are throwing stubs until runner.initialize() */
 diff --git a/packages/coding-agent/src/core/extensions/loader.ts b/packages/coding-agent/src/core/extensions/loader.ts
 --- a/packages/coding-agent/src/core/extensions/loader.ts
 +++ b/packages/coding-agent/src/core/extensions/loader.ts
@@ -46,6 +52,12 @@ diff --git a/packages/coding-agent/src/core/extensions/loader.ts b/packages/codi
 +		},
 +
  		appendEntry(customType: string, data?: unknown): void {
+@@ -561,4 +566,5 @@
+ 	return {
+ 		extensions,
+ 		errors,
++		events: resolvedEventBus,
+ 		runtime: resolvedRuntime,
 diff --git a/packages/coding-agent/src/core/extensions/runner.ts b/packages/coding-agent/src/core/extensions/runner.ts
 --- a/packages/coding-agent/src/core/extensions/runner.ts
 +++ b/packages/coding-agent/src/core/extensions/runner.ts
