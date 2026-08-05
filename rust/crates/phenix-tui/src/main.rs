@@ -114,7 +114,7 @@ fn run_tui(provider: FrontendProviderRef) -> Result<(), Box<dyn Error>> {
     })?;
 
     let renderer = RatatuiRenderer::initialize(Rc::clone(&provider))?;
-    let mut runtime = UiRuntime::from_backend_with_frontend(
+    let runtime = UiRuntime::from_backend_with_frontend(
         AppState::default(),
         backend,
         renderer,
