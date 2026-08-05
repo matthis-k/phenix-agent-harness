@@ -6,6 +6,7 @@ mod client;
 mod definition;
 mod id;
 mod protocol;
+mod runtime;
 mod tools;
 
 pub use client::{
@@ -26,6 +27,13 @@ pub use protocol::{
     SessionTreeGetParams, SessionTreeList, SessionTreeListParams, SessionTreeListResult,
     SessionTreeSnapshot, SessionTreeSummary, WorkflowStart, WorkflowStartParams,
     WorkflowStartResult,
+};
+pub use runtime::{
+    AcpSession, AcpSessionFactory, FirstAvailableRouter, FixedRouter, GatewayCommand,
+    GatewayEnvelope, GatewayError, GatewayEvent, GatewayFailure, GatewayReply, PhenixAcpGateway,
+    PhenixAcpGatewayBuilder, RoutingDecision, RoutingRequest, SessionCommand, SessionEvent,
+    SessionImage, SessionOpenKind, SessionOpenRequest, SessionRouter, StaticWorkflow,
+    TreeStartResult, Workflow, WorkflowPlan, WorkflowPlanBuilder, WorkflowRequest, WorkflowStep,
 };
 pub use tools::{
     BuiltinToolPolicy, McpServerDefinition, McpServerTransport, ToolConfigError, ToolConfiguration,
