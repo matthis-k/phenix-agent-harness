@@ -1,9 +1,9 @@
 use crate::state::{AppState, DialogState, RuntimeConnectionState};
 use crate::view::{FocusTarget, OverlayState};
 use phenix_runtime_api::{
-    AuthFlowId, AuthMethod, AuthPromptResponse, BackendCommand, BackendEvent, BackendOutput,
-    BackendReply, ExtensionUiResponse, ModelRef, RunId, SessionId, StreamingBehavior,
-    ThinkingLevel,
+    AuthFlowId, AuthMethod, AuthPromptResponse, BackendCommand, BackendError, BackendEvent,
+    BackendOutput, BackendReply, ExtensionUiResponse, ModelRef, RunId, SessionId,
+    StreamingBehavior, ThinkingLevel, ToolExecutionOutcome, TranscriptBlock, TranscriptRole,
 };
 
 const MAX_INPUT_HISTORY: usize = 1_000;
@@ -357,7 +357,9 @@ fn reduce_backend_output(state: &mut AppState, output: BackendOutput) -> Vec<App
             Ok(reply) => reduce_backend_reply(state, reply),
             Err(error) => {
                 state.notifications.push_back(error.to_string());
-                state.connection = RuntimeConnectionState::Degraded(error.to_string());
+                if backend_error_damages_connection(&error) {
+                    state.connection = RuntimeConnectionState::Degraded(error.to_string());
+                }
             }
         },
         BackendOutput::Event(BackendEvent::ExternalCommandRequested { flow_id, command }) => {
@@ -505,10 +507,76 @@ fn reduce_backend_event(state: &mut AppState, event: BackendEvent) {
         BackendEvent::HealthChanged(health) => {
             state.connection = RuntimeConnectionState::from(&health);
         }
-        BackendEvent::ToolStarted { .. }
-        | BackendEvent::ToolUpdated { .. }
-        | BackendEvent::ToolFinished { .. }
-        | BackendEvent::QueueChanged { .. } => {}
+        BackendEvent::ToolStarted {
+            run_id,
+            tool_call_id,
+            tool_name,
+            input_summary,
+        } => state.transcript_mut(run_id.clone()).append(TranscriptBlock {
+            id: tool_block_id(&tool_call_id),
+            run_id,
+            role: TranscriptRole::Tool,
+            text: format!("{tool_name}\n{input_summary}"),
+            complete: false,
+        }),
+        BackendEvent::ToolUpdated {
+            run_id,
+            tool_call_id,
+            output,
+        } => state.transcript_mut(run_id.clone()).update(TranscriptBlock {
+            id: tool_block_id(&tool_call_id),
+            run_id,
+            role: TranscriptRole::Tool,
+            text: output,
+            complete: false,
+        }),
+        BackendEvent::ToolFinished {
+            run_id,
+            tool_call_id,
+            outcome,
+            output_summary,
+        } => state.transcript_mut(run_id.clone()).update(TranscriptBlock {
+            id: tool_block_id(&tool_call_id),
+            run_id,
+            role: TranscriptRole::Tool,
+            text: format!("{}\n{output_summary}", tool_outcome_label(&outcome)),
+            complete: true,
+        }),
+        BackendEvent::QueueChanged {
+            run_id,
+            steering,
+            follow_ups,
+        } => {
+            let key = format!("queue.{run_id}");
+            let pending = steering.len() + follow_ups.len();
+            if pending == 0 {
+                state.statuses.remove(&key);
+            } else {
+                state.statuses.insert(key, format!("{pending} queued"));
+            }
+        }
+    }
+}
+
+fn backend_error_damages_connection(error: &BackendError) -> bool {
+    matches!(
+        error,
+        BackendError::Start(_)
+            | BackendError::Transport(_)
+            | BackendError::Disconnected
+            | BackendError::Panicked
+    )
+}
+
+fn tool_block_id(tool_call_id: &phenix_runtime_api::ToolCallId) -> String {
+    format!("tool-{tool_call_id}")
+}
+
+fn tool_outcome_label(outcome: &ToolExecutionOutcome) -> &'static str {
+    match outcome {
+        ToolExecutionOutcome::Succeeded => "completed",
+        ToolExecutionOutcome::Failed => "failed",
+        ToolExecutionOutcome::Aborted => "aborted",
     }
 }
 
@@ -665,6 +733,55 @@ mod tests {
         let transcript = state.transcript(&run).expect("transcript");
         assert_eq!(transcript.blocks.len(), 1);
         assert_eq!(transcript.blocks[0].text, "complete");
+    }
+
+    #[test]
+    fn rejected_operation_does_not_degrade_a_healthy_connection() {
+        let mut state = AppState::default();
+        state.connection = RuntimeConnectionState::Ready;
+        reduce(
+            &mut state,
+            AppEvent::Backend(Box::new(BackendOutput::Reply {
+                request_id: phenix_runtime_api::RequestId::parse("request-1")
+                    .expect("request ID"),
+                result: Err(BackendError::Unsupported("no export".to_owned())),
+            })),
+        );
+        assert_eq!(state.connection, RuntimeConnectionState::Ready);
+        assert!(state
+            .notifications
+            .back()
+            .is_some_and(|message| message.contains("no export")));
+    }
+
+    #[test]
+    fn tool_lifecycle_uses_one_stable_transcript_block() {
+        let run = RunId::parse("root-run").expect("run ID");
+        let tool_call_id = phenix_runtime_api::ToolCallId::parse("tool-1").expect("tool ID");
+        let mut state = state_with_run(run.clone());
+        for event in [
+            BackendEvent::ToolStarted {
+                run_id: run.clone(),
+                tool_call_id: tool_call_id.clone(),
+                tool_name: "read".to_owned(),
+                input_summary: "file.rs".to_owned(),
+            },
+            BackendEvent::ToolFinished {
+                run_id: run.clone(),
+                tool_call_id,
+                outcome: ToolExecutionOutcome::Succeeded,
+                output_summary: "done".to_owned(),
+            },
+        ] {
+            reduce(
+                &mut state,
+                AppEvent::Backend(Box::new(BackendOutput::Event(event))),
+            );
+        }
+        let transcript = state.transcript(&run).expect("transcript");
+        assert_eq!(transcript.blocks.len(), 1);
+        assert!(transcript.blocks[0].complete);
+        assert!(transcript.blocks[0].text.contains("done"));
     }
 
     fn state_with_run(run: RunId) -> AppState {
