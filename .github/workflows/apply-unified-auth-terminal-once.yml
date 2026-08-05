@@ -33,7 +33,17 @@ jobs:
           old = '                program: invocation.remove(0),\n'
           if source.count(old) != 2:
               raise SystemExit('unexpected ACP auth migration matcher count')
-          path.write_text(source.replace(old, '                program,\n'))
+          source = source.replace(old, '                program,\n')
+          old = "'''        Some(OverlayState::AuthenticationPrompt { flow_id, .. }) = &state.view.overlay {\n'''"
+          new = "'''    if let Some(OverlayState::AuthenticationPrompt { flow_id, .. }) = &state.view.overlay {\n'''"
+          if source.count(old) != 1:
+              raise SystemExit('unexpected auth cancellation old matcher')
+          source = source.replace(old, new, 1)
+          old = "'''        Some(OverlayState::AuthenticationPrompt { flow_id, .. })\n        | Some(OverlayState::AuthenticationTerminal { flow_id }) = &state.view.overlay {\n'''"
+          new = "'''    if let Some(\n        OverlayState::AuthenticationPrompt { flow_id, .. }\n        | OverlayState::AuthenticationTerminal { flow_id },\n    ) = &state.view.overlay\n    {\n'''"
+          if source.count(old) != 1:
+              raise SystemExit('unexpected auth cancellation replacement matcher')
+          path.write_text(source.replace(old, new, 1))
           PY
           python3 .github/scripts/apply-unified-auth-terminal.py
           cargo fmt --manifest-path rust/Cargo.toml --all
