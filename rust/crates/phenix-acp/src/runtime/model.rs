@@ -210,18 +210,10 @@ impl SessionRouter for FirstAvailableRouter {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SessionOpenKind {
-    New {
-        parent: Option<AcpSessionId>,
-    },
-    Load {
-        session_id: AcpSessionId,
-    },
-    Resume {
-        session_id: AcpSessionId,
-    },
-    Fork {
-        session_id: AcpSessionId,
-    },
+    New { parent: Option<AcpSessionId> },
+    Load { session_id: AcpSessionId },
+    Resume { session_id: AcpSessionId },
+    Fork { session_id: AcpSessionId },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -239,6 +231,15 @@ pub struct SessionOpenRequest {
 pub struct SessionImage {
     pub media_type: String,
     pub data: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum InteractionResponse {
+    Selected(String),
+    Confirmed(bool),
+    Text(String),
+    Cancelled,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -279,6 +280,10 @@ pub enum SessionCommand {
     Invoke {
         name: String,
         arguments: String,
+    },
+    RespondInteraction {
+        request_id: String,
+        response: InteractionResponse,
     },
     Close,
 }
