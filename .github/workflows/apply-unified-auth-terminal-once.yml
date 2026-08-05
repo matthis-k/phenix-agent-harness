@@ -1,0 +1,43 @@
+name: Apply unified authentication terminal once
+
+on:
+  push:
+    branches:
+      - fix/acp-auth-transcript-errors
+    paths:
+      - .github/workflows/apply-unified-auth-terminal-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: fix/acp-auth-transcript-errors
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Apply unified authentication terminal
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/apply-unified-auth-terminal.py
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          set +e
+          cargo check --manifest-path rust/Cargo.toml --workspace --all-targets
+          check_status=$?
+          set -e
+          echo "Initial compile status: ${check_status}"
+          rm .github/scripts/apply-unified-auth-terminal.py
+          rm .github/workflows/apply-unified-auth-terminal-once.yml
+          git add rust src headless docs .github/scripts/apply-unified-auth-terminal.py .github/workflows/apply-unified-auth-terminal-once.yml 2>/dev/null || true
+          git add -u
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat(auth): embed backend authentication terminals"
+          git push origin HEAD:fix/acp-auth-transcript-errors
