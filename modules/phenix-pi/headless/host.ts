@@ -1,13 +1,13 @@
 import { join } from "node:path";
 import {
-  ModelRuntime,
-  SessionManager,
+  type AgentSessionRuntime,
+  type CreateAgentSessionRuntimeFactory,
   createAgentSessionFromServices,
   createAgentSessionRuntime,
   createAgentSessionServices,
   getAgentDir,
-  type AgentSessionRuntime,
-  type CreateAgentSessionRuntimeFactory,
+  ModelRuntime,
+  SessionManager,
 } from "@earendil-works/pi-coding-agent";
 
 import {
@@ -38,7 +38,9 @@ export interface HeadlessPiHost {
   dispose(): Promise<void>;
 }
 
-export async function createHeadlessPiHost(options: HeadlessPiHostOptions): Promise<HeadlessPiHost> {
+export async function createHeadlessPiHost(
+  options: HeadlessPiHostOptions,
+): Promise<HeadlessPiHost> {
   const cwd = options.cwd ?? process.cwd();
   const agentDir = options.agentDir ?? getAgentDir();
   const extensionPaths = [...options.extensionPaths];
@@ -121,8 +123,8 @@ export async function createHeadlessPiHost(options: HeadlessPiHostOptions): Prom
   const rebind = async (): Promise<void> => {
     workspace.replace(undefined);
     sessionEvents.bind(runtime.session);
-    const extensionRuntime = runtime.services.resourceLoader.getExtensions().runtime;
-    subscribeWorkspaceRuntime(extensionRuntime.events as WorkspaceRuntimeEventBus, (binding) => {
+    const extensions = runtime.services.resourceLoader.getExtensions();
+    subscribeWorkspaceRuntime(extensions.events as WorkspaceRuntimeEventBus, (binding) => {
       workspace.replace(binding);
     });
     await runtime.session.bindExtensions({
