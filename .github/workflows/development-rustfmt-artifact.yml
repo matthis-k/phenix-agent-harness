@@ -1,0 +1,27 @@
+name: Development Rustfmt Artifact
+
+on:
+  push:
+    branches:
+      - feature/rust-ratatui-frontend
+
+permissions:
+  contents: read
+
+jobs:
+  rustfmt-artifact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Format Rust sources in the disposable checkout
+        run: |
+          set -euo pipefail
+          cd rust
+          cargo fmt --all
+      - name: Upload formatted sources
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: formatted-rust-sources
+          path: rust
+          if-no-files-found: error
