@@ -1,0 +1,5 @@
+cargo:rerun-if-changed=build
+cargo:rustc-link-search=native=/home/runner/work/phenix-agent-harness/phenix-agent-harness/rust/target/debug/build/mlua-sys-d3de7fd2d56c0a1f/out/lib
+cargo:rustc-link-lib=static:-bundle=lua5.4
+cargo:include=/home/runner/work/phenix-agent-harness/phenix-agent-harness/rust/target/debug/build/mlua-sys-d3de7fd2d56c0a1f/out/include
+cargo:lib=/home/runner/work/phenix-agent-harness/phenix-agent-harness/rust/target/debug/build/mlua-sys-d3de7fd2d56c0a1f/out/lib

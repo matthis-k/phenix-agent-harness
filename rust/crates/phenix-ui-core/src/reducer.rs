@@ -484,11 +484,24 @@ fn reduce_backend_output(state: &mut AppState, output: BackendOutput) -> Vec<App
         BackendOutput::Event(BackendEvent::AuthTerminalRequested { flow_id, command }) => {
             begin_authentication_terminal(state, flow_id, command)
         }
-        BackendOutput::Event(event @ BackendEvent::AuthFinished { ref flow_id, .. }) => {
-            let flow_id = flow_id.clone();
-            reduce_backend_event(state, event);
+        BackendOutput::Event(BackendEvent::AuthFinished {
+            flow_id,
+            provider_id,
+            result,
+        }) => {
+            let release_flow_id = flow_id.clone();
+            reduce_backend_event(
+                state,
+                BackendEvent::AuthFinished {
+                    flow_id,
+                    provider_id,
+                    result,
+                },
+            );
             vec![
-                AppEffect::ReleaseAuthenticationTerminal { flow_id },
+                AppEffect::ReleaseAuthenticationTerminal {
+                    flow_id: release_flow_id,
+                },
                 AppEffect::Render,
             ]
         }
