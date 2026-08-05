@@ -138,25 +138,24 @@ fn unique_labels(options: Vec<PermissionOption>) -> BTreeMap<String, PermissionO
 }
 
 fn choose_by_confirmation<'a>(
-    options: impl Iterator<Item = &'a PermissionOption>,
+    mut options: impl Iterator<Item = &'a PermissionOption>,
     confirmed: bool,
 ) -> Option<RequestPermissionOutcome> {
-    let preferred = options
-        .find(|option| {
-            if confirmed {
-                matches!(
-                    option.kind,
-                    phenix_acp::acp::schema::v1::PermissionOptionKind::AllowOnce
-                        | phenix_acp::acp::schema::v1::PermissionOptionKind::AllowAlways
-                )
-            } else {
-                matches!(
-                    option.kind,
-                    phenix_acp::acp::schema::v1::PermissionOptionKind::RejectOnce
-                        | phenix_acp::acp::schema::v1::PermissionOptionKind::RejectAlways
-                )
-            }
-        })?;
+    let preferred = options.find(|option| {
+        if confirmed {
+            matches!(
+                option.kind,
+                phenix_acp::acp::schema::v1::PermissionOptionKind::AllowOnce
+                    | phenix_acp::acp::schema::v1::PermissionOptionKind::AllowAlways
+            )
+        } else {
+            matches!(
+                option.kind,
+                phenix_acp::acp::schema::v1::PermissionOptionKind::RejectOnce
+                    | phenix_acp::acp::schema::v1::PermissionOptionKind::RejectAlways
+            )
+        }
+    })?;
     Some(RequestPermissionOutcome::Selected(
         SelectedPermissionOutcome::new(preferred.option_id.clone()),
     ))
