@@ -467,7 +467,9 @@ impl PhenixAcpGateway {
                     super::SessionEvent::Cancelled { .. } => {
                         node.state = SessionNodeState::Cancelled
                     }
-                    super::SessionEvent::Text { .. }
+                    super::SessionEvent::TranscriptAppended { .. }
+                    | super::SessionEvent::TranscriptUpdated { .. }
+                    | super::SessionEvent::Text { .. }
                     | super::SessionEvent::Thought { .. }
                     | super::SessionEvent::ToolStarted { .. }
                     | super::SessionEvent::ToolUpdated { .. }

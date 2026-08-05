@@ -1,11 +1,11 @@
 use phenix_acp::{
     AcpSessionId, GatewayEvent, ObjectiveState as GatewayObjectiveState, SessionEvent,
-    SessionNodeId, SessionNodeState, SessionTreeSnapshot,
+    SessionNodeId, SessionNodeState, SessionTranscriptRole, SessionTreeSnapshot,
 };
 use phenix_runtime_api::{
-    BackendError, BackendEvent, DialogId, ExtensionUiRequest, ModelRef, ObjectiveId,
-    ObjectiveSource, ObjectiveState, ObjectiveSummary, RunId, RunKind, RunState, RuntimeSnapshot,
-    SessionId, ToolCallId, ToolExecutionOutcome, TranscriptBlock, TranscriptRole,
+    BackendError, BackendEvent, DialogId, ExtensionUiRequest, ModelRef, NotificationLevel,
+    ObjectiveId, ObjectiveSource, ObjectiveState, ObjectiveSummary, RunId, RunKind, RunState,
+    RuntimeSnapshot, SessionId, ToolCallId, ToolExecutionOutcome, TranscriptBlock, TranscriptRole,
 };
 use std::collections::BTreeMap;
 
@@ -179,6 +179,30 @@ fn gateway_event(
     })?;
     let events =
         match event.event {
+            SessionEvent::TranscriptAppended {
+                id,
+                role,
+                text,
+                complete,
+            } => vec![BackendEvent::TranscriptAppended(TranscriptBlock {
+                id,
+                run_id,
+                role: runtime_transcript_role(role),
+                text,
+                complete,
+            })],
+            SessionEvent::TranscriptUpdated {
+                id,
+                role,
+                text,
+                complete,
+            } => vec![BackendEvent::TranscriptUpdated(TranscriptBlock {
+                id,
+                run_id,
+                role: runtime_transcript_role(role),
+                text,
+                complete,
+            })],
             SessionEvent::Text { text } => vec![BackendEvent::TranscriptAppended(
                 transcript_block(transcript_sequence, run_id, TranscriptRole::Assistant, text)?,
             )],
@@ -249,9 +273,7 @@ fn gateway_event(
                 key: format!("run.{run_id}.compaction"),
                 text: Some("completed".to_owned()),
             }],
-            SessionEvent::Completed
-            | SessionEvent::Failed { .. }
-            | SessionEvent::Cancelled { .. } => backend
+            SessionEvent::Completed => backend
                 .runs
                 .iter()
                 .find(|run| run.id == run_id)
@@ -259,8 +281,48 @@ fn gateway_event(
                 .map(BackendEvent::RunChanged)
                 .into_iter()
                 .collect(),
+            SessionEvent::Failed { message } => {
+                let mut events = backend
+                    .runs
+                    .iter()
+                    .find(|run| run.id == run_id)
+                    .cloned()
+                    .map(BackendEvent::RunChanged)
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                events.push(BackendEvent::Notification {
+                    level: NotificationLevel::Error,
+                    message,
+                });
+                events
+            }
+            SessionEvent::Cancelled { reason } => {
+                let mut events = backend
+                    .runs
+                    .iter()
+                    .find(|run| run.id == run_id)
+                    .cloned()
+                    .map(BackendEvent::RunChanged)
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                events.push(BackendEvent::Notification {
+                    level: NotificationLevel::Warning,
+                    message: reason,
+                });
+                events
+            }
         };
     Ok(events)
+}
+
+fn runtime_transcript_role(role: SessionTranscriptRole) -> TranscriptRole {
+    match role {
+        SessionTranscriptRole::User => TranscriptRole::User,
+        SessionTranscriptRole::Assistant => TranscriptRole::Assistant,
+        SessionTranscriptRole::Thinking => TranscriptRole::Thinking,
+        SessionTranscriptRole::Tool => TranscriptRole::Tool,
+        SessionTranscriptRole::System => TranscriptRole::System,
+    }
 }
 
 fn run_ids_by_node(

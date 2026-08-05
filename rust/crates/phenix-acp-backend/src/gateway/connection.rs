@@ -2,7 +2,10 @@ use super::projection::{
     backend_error, empty_snapshot, interaction_event, runtime_session_id, terminal_run_event,
 };
 use crate::{AcpAgentBackend, AcpBackendConfig};
-use phenix_acp::{AcpSessionId, GatewayError, SessionEvent, SessionOpenKind, SessionOpenRequest};
+use phenix_acp::{
+    AcpSessionId, GatewayError, SessionEvent, SessionOpenKind, SessionOpenRequest,
+    SessionTranscriptRole,
+};
 use phenix_runtime_api::{
     BackendCommand, BackendEvent, BackendHealth, BackendOutput, BackendReply, BackendRuntime,
     ClientInformation, NotificationLevel, RunId, RuntimeSnapshot, SessionId, ToolExecutionOutcome,
@@ -23,7 +26,6 @@ pub(super) struct TreeConnection {
     sessions: BTreeMap<SessionId, RunId>,
     pending: BTreeMap<RunId, VecDeque<SessionEvent>>,
     control_events: VecDeque<BackendEvent>,
-    transcript_lengths: BTreeMap<(RunId, String), usize>,
     controls: usize,
     stopped: bool,
 }
@@ -42,7 +44,6 @@ impl TreeConnection {
             sessions: BTreeMap::new(),
             pending: BTreeMap::new(),
             control_events: VecDeque::new(),
-            transcript_lengths: BTreeMap::new(),
             controls: 0,
             stopped: false,
         };
@@ -276,14 +277,12 @@ impl TreeConnection {
             }
             BackendEvent::ObjectiveChanged(_) => {}
             BackendEvent::TranscriptAppended(block) => {
-                if let Some(event) = self.transcript_event(&block, false) {
-                    self.push(block.run_id, event);
-                }
+                let run_id = block.run_id.clone();
+                self.push(run_id, Self::transcript_event(block, false));
             }
             BackendEvent::TranscriptUpdated(block) => {
-                if let Some(event) = self.transcript_event(&block, true) {
-                    self.push(block.run_id, event);
-                }
+                let run_id = block.run_id.clone();
+                self.push(run_id, Self::transcript_event(block, true));
             }
             BackendEvent::ToolStarted {
                 run_id,
@@ -398,25 +397,27 @@ impl TreeConnection {
         Ok(())
     }
 
-    fn transcript_event(&mut self, block: &TranscriptBlock, updated: bool) -> Option<SessionEvent> {
-        let previous = self
-            .transcript_lengths
-            .insert((block.run_id.clone(), block.id.clone()), block.text.len())
-            .unwrap_or(0);
-        let text =
-            if updated && previous <= block.text.len() && block.text.is_char_boundary(previous) {
-                block.text[previous..].to_owned()
-            } else {
-                block.text.clone()
-            };
-        if text.is_empty() {
-            return None;
-        }
-        match &block.role {
-            TranscriptRole::Thinking => Some(SessionEvent::Thought { text }),
-            TranscriptRole::User => None,
-            TranscriptRole::Assistant | TranscriptRole::Tool | TranscriptRole::System => {
-                Some(SessionEvent::Text { text })
+    fn transcript_event(block: TranscriptBlock, updated: bool) -> SessionEvent {
+        let role = match block.role {
+            TranscriptRole::User => SessionTranscriptRole::User,
+            TranscriptRole::Assistant => SessionTranscriptRole::Assistant,
+            TranscriptRole::Thinking => SessionTranscriptRole::Thinking,
+            TranscriptRole::Tool => SessionTranscriptRole::Tool,
+            TranscriptRole::System => SessionTranscriptRole::System,
+        };
+        if updated {
+            SessionEvent::TranscriptUpdated {
+                id: block.id,
+                role,
+                text: block.text,
+                complete: block.complete,
+            }
+        } else {
+            SessionEvent::TranscriptAppended {
+                id: block.id,
+                role,
+                text: block.text,
+                complete: block.complete,
             }
         }
     }
@@ -495,5 +496,40 @@ impl TreeConnection {
             runtime.join().map_err(backend_error)?;
         }
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod transcript_tests {
+    use super::*;
+
+    #[test]
+    fn transcript_projection_preserves_user_role_identity_and_update_semantics() {
+        let run_id = RunId::parse("run-transcript").expect("run ID");
+        let block = TranscriptBlock {
+            id: "message-1".to_owned(),
+            run_id,
+            role: TranscriptRole::User,
+            text: "hello".to_owned(),
+            complete: true,
+        };
+        assert_eq!(
+            TreeConnection::transcript_event(block.clone(), false),
+            SessionEvent::TranscriptAppended {
+                id: "message-1".to_owned(),
+                role: SessionTranscriptRole::User,
+                text: "hello".to_owned(),
+                complete: true,
+            }
+        );
+        assert_eq!(
+            TreeConnection::transcript_event(block, true),
+            SessionEvent::TranscriptUpdated {
+                id: "message-1".to_owned(),
+                role: SessionTranscriptRole::User,
+                text: "hello".to_owned(),
+                complete: true,
+            }
+        );
     }
 }

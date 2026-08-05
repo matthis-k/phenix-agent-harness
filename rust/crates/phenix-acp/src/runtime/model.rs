@@ -289,8 +289,30 @@ pub enum SessionCommand {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionTranscriptRole {
+    User,
+    Assistant,
+    Thinking,
+    Tool,
+    System,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SessionEvent {
+    TranscriptAppended {
+        id: String,
+        role: SessionTranscriptRole,
+        text: String,
+        complete: bool,
+    },
+    TranscriptUpdated {
+        id: String,
+        role: SessionTranscriptRole,
+        text: String,
+        complete: bool,
+    },
     Text {
         text: String,
     },

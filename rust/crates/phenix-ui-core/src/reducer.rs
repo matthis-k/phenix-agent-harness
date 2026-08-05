@@ -354,63 +354,114 @@ fn no_run_notification(state: &mut AppState) -> Vec<AppEffect> {
 fn reduce_backend_output(state: &mut AppState, output: BackendOutput) -> Vec<AppEffect> {
     match output {
         BackendOutput::Reply { result, .. } => match result {
-            Ok(reply) => reduce_backend_reply(state, reply),
+            Ok(reply) => {
+                let mut effects = reduce_backend_reply(state, reply);
+                effects.push(AppEffect::Render);
+                effects
+            }
             Err(error) => {
                 state.notifications.push_back(error.to_string());
                 if backend_error_damages_connection(&error) {
                     state.connection = RuntimeConnectionState::Degraded(error.to_string());
                 }
+                vec![AppEffect::Render]
             }
         },
-        BackendOutput::Event(BackendEvent::ExternalCommandRequested { flow_id, command }) => {
-            return vec![
-                AppEffect::RunExternal { flow_id, command },
-                AppEffect::Render,
-            ];
+        BackendOutput::Event(BackendEvent::ExternalCommandRequested { flow_id, command }) => vec![
+            AppEffect::RunExternal { flow_id, command },
+            AppEffect::Render,
+        ],
+        BackendOutput::Event(event) => {
+            reduce_backend_event(state, event);
+            vec![AppEffect::Render]
         }
-        BackendOutput::Event(event) => reduce_backend_event(state, event),
         BackendOutput::Stopped { result } => {
             state.connection = match result {
                 Ok(()) => RuntimeConnectionState::Stopped,
                 Err(error) => RuntimeConnectionState::Failed(error.to_string()),
             };
             state.should_quit = true;
-            return vec![AppEffect::Render, AppEffect::Quit];
+            vec![AppEffect::Render, AppEffect::Quit]
         }
     }
-    vec![AppEffect::Render]
 }
 
-fn reduce_backend_reply(state: &mut AppState, reply: BackendReply) {
+fn reduce_backend_reply(state: &mut AppState, reply: BackendReply) -> Vec<AppEffect> {
     match reply {
-        BackendReply::Initialized { snapshot, .. } | BackendReply::Snapshot(snapshot) => {
+        BackendReply::Initialized { snapshot, .. } => {
             state.apply_snapshot(snapshot);
+            if state.active_session.is_none() && state.capabilities.authentication.provider_listing
+            {
+                state.view.overlay = Some(OverlayState::AuthenticationProviders {
+                    query: String::new(),
+                    selected: 0,
+                });
+                state.view.focus = FocusTarget::Overlay;
+                state.notifications.push_back(
+                    "Authentication is required before an ACP session can be created.".to_owned(),
+                );
+                vec![AppEffect::Send(BackendCommand::AuthProviders)]
+            } else {
+                Vec::new()
+            }
+        }
+        BackendReply::Snapshot(snapshot) => {
+            state.apply_snapshot(snapshot);
+            Vec::new()
         }
         BackendReply::Sessions(sessions) => {
             if let Some(snapshot) = &mut state.snapshot {
                 snapshot.sessions = sessions;
             }
+            Vec::new()
         }
         BackendReply::Runs(runs) => {
             if let Some(snapshot) = &mut state.snapshot {
                 snapshot.runs = runs;
             }
+            Vec::new()
         }
-        BackendReply::SessionModes(modes) => state.notifications.push_back(
-            modes
-                .into_iter()
-                .map(|mode| format!("{}{}", if mode.selected { "* " } else { "  " }, mode.id))
-                .collect::<Vec<_>>()
-                .join(" · "),
-        ),
-        BackendReply::Models(models) => state.models = models,
-        BackendReply::ThinkingLevels(levels) => state.thinking_levels = levels,
-        BackendReply::AuthProviders(providers) => state.auth_providers = providers,
-        BackendReply::Commands(commands) => state.commands = commands,
-        BackendReply::Exported { path } => state
-            .notifications
-            .push_back(format!("Session exported to {path}")),
-        BackendReply::Accepted | BackendReply::SessionTree(_) | BackendReply::Completed => {}
+        BackendReply::SessionModes(modes) => {
+            state.notifications.push_back(
+                modes
+                    .into_iter()
+                    .map(|mode| format!("{}{}", if mode.selected { "* " } else { "  " }, mode.id))
+                    .collect::<Vec<_>>()
+                    .join(" · "),
+            );
+            Vec::new()
+        }
+        BackendReply::Models(models) => {
+            state.models = models;
+            Vec::new()
+        }
+        BackendReply::ThinkingLevels(levels) => {
+            state.thinking_levels = levels;
+            Vec::new()
+        }
+        BackendReply::AuthProviders(providers) => {
+            if providers.is_empty() && state.active_session.is_none() {
+                state.notifications.push_back(
+                    "The ACP agent requires authentication but advertised no supported authentication method."
+                        .to_owned(),
+                );
+            }
+            state.auth_providers = providers;
+            Vec::new()
+        }
+        BackendReply::Commands(commands) => {
+            state.commands = commands;
+            Vec::new()
+        }
+        BackendReply::Exported { path } => {
+            state
+                .notifications
+                .push_back(format!("Session exported to {path}"));
+            Vec::new()
+        }
+        BackendReply::Accepted | BackendReply::SessionTree(_) | BackendReply::Completed => {
+            Vec::new()
+        }
     }
 }
 
@@ -468,13 +519,19 @@ fn reduce_backend_event(state: &mut AppState, event: BackendEvent) {
                     "Authentication for {provider_id} failed: {message}"
                 )),
             }
-            if matches!(
+            let active_prompt_matches = matches!(
                 state.view.overlay,
                 Some(OverlayState::AuthenticationPrompt {
                     flow_id: ref active_flow,
                     ..
                 }) if active_flow == &flow_id
-            ) {
+            );
+            if active_prompt_matches
+                || matches!(
+                    state.view.overlay,
+                    Some(OverlayState::AuthenticationProviders { .. })
+                )
+            {
                 close_overlay(state);
             }
         }
@@ -631,6 +688,38 @@ mod tests {
         let mut state = AppState::default();
         state.input.replace("/login".to_owned());
         let effects = reduce(&mut state, AppEvent::User(UserIntent::SubmitPrompt));
+        assert!(matches!(
+            state.view.overlay,
+            Some(OverlayState::AuthenticationProviders { .. })
+        ));
+        assert!(effects.contains(&AppEffect::Send(BackendCommand::AuthProviders)));
+    }
+
+    #[test]
+    fn initialization_without_a_session_opens_native_authentication() {
+        let mut capabilities = BackendCapabilities::default();
+        capabilities.authentication.provider_listing = true;
+        let snapshot = RuntimeSnapshot {
+            capabilities,
+            health: BackendHealth::Ready,
+            active_session: None,
+            root_run: None,
+            selected_run: None,
+            sessions: Vec::new(),
+            runs: Vec::new(),
+            objectives: Vec::new(),
+        };
+        let mut state = AppState::default();
+        let effects = reduce(
+            &mut state,
+            AppEvent::Backend(Box::new(BackendOutput::Reply {
+                request_id: phenix_runtime_api::RequestId::parse("initialize").expect("request ID"),
+                result: Ok(BackendReply::Initialized {
+                    capabilities: snapshot.capabilities.clone(),
+                    snapshot,
+                }),
+            })),
+        );
         assert!(matches!(
             state.view.overlay,
             Some(OverlayState::AuthenticationProviders { .. })
