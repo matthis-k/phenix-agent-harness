@@ -26,23 +26,17 @@ jobs:
           from pathlib import Path
           path = Path('.github/scripts/apply-acp-ui-fixes.py')
           source = path.read_text()
-          old = '''    AcpSession, AcpSessionFactory, AcpSessionId, GatewayError, SessionCommand, SessionEvent,
-              SessionOpenRequest, SessionTreeId,
-          '''
-          new = '''    AcpSessionId, GatewayError, SessionEvent, SessionOpenKind, SessionOpenRequest
-          '''
-          replacement = '''    AcpSessionId, GatewayError, SessionEvent, SessionOpenKind, SessionOpenRequest,
-              SessionTranscriptRole,
-          '''
-          if old not in source:
-              raise SystemExit('migration import matcher changed unexpectedly')
-          source = source.replace(old, new, 1)
-          source = source.replace(
-              '''    ''' + new + '''''',
-              '''    ''' + replacement + '''''',
-              1,
+          section = source.index('path = Path("rust/crates/phenix-acp-backend/src/gateway/connection.rs")')
+          start = source.index('source = replace_once(', section)
+          end = source.index('source = replace_once(', start + 1)
+          replacement = '''source = replace_once(
+              source,
+              ''' + "'''use phenix_acp::{AcpSessionId, GatewayError, SessionEvent, SessionOpenKind, SessionOpenRequest};\n'''" + ''',
+              ''' + "'''use phenix_acp::{\n    AcpSessionId, GatewayError, SessionEvent, SessionOpenKind, SessionOpenRequest,\n    SessionTranscriptRole,\n};\n'''" + ''',
+              "gateway connection import",
           )
-          path.write_text(source)
+          '''
+          path.write_text(source[:start] + replacement + source[end:])
           PY
           python3 .github/scripts/apply-acp-ui-fixes.py
           cargo fmt --manifest-path rust/Cargo.toml --all
