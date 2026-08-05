@@ -1,27 +1,35 @@
-name: Development Rustfmt Artifact
+name: Development Rust Core
 
 on:
   push:
     branches:
       - feature/rust-ratatui-frontend
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
 
+concurrency:
+  group: development-rust-core-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  rustfmt-artifact:
+  rust-core:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: rust
     steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-      - name: Format Rust sources in the disposable checkout
-        run: |
-          set -euo pipefail
-          cd rust
-          cargo fmt --all
-      - name: Upload formatted sources
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: formatted-rust-sources
-          path: rust
-          if-no-files-found: error
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - name: Install Rust components
+        run: rustup component add rustfmt clippy
+      - name: Verify formatting
+        run: cargo fmt --all --check
+      - name: Check workspace
+        run: cargo check --workspace --all-targets --locked
+      - name: Lint workspace
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test workspace
+        run: cargo test --workspace --all-targets --locked
