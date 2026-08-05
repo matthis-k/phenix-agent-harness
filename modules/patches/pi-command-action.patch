@@ -65,11 +65,11 @@ diff --git a/packages/coding-agent/src/core/extensions/runner.ts b/packages/codi
  		this.runtime.sendMessage = actions.sendMessage;
  		this.runtime.sendUserMessage = actions.sendUserMessage;
 +		this.runtime.runCommandAction = actions.runCommandAction;
-		this.runtime.appendEntry = actions.appendEntry;
+ 		this.runtime.appendEntry = actions.appendEntry;
 diff --git a/packages/coding-agent/src/core/resource-loader.ts b/packages/coding-agent/src/core/resource-loader.ts
 --- a/packages/coding-agent/src/core/resource-loader.ts
 +++ b/packages/coding-agent/src/core/resource-loader.ts
-@@ -241,5 +241,10 @@
+@@ -241,4 +241,9 @@
  		this.appendSystemPromptOverride = options.appendSystemPromptOverride;
  
 -		this.extensionsResult = { extensions: [], errors: [], runtime: createExtensionRuntime() };
