@@ -1,0 +1,90 @@
+name: Fix and verify unified authentication
+
+on:
+  push:
+    branches:
+      - fix/acp-auth-transcript-errors
+    paths:
+      - .github/workflows/fix-and-verify-unified-auth.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: fix/acp-auth-transcript-errors
+          fetch-depth: 1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Fix ownership and run gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('rust/crates/phenix-ui-core/src/reducer.rs')
+          source = path.read_text()
+          old = '''        BackendOutput::Event(event @ BackendEvent::AuthFinished { ref flow_id, .. }) => {
+              let flow_id = flow_id.clone();
+              reduce_backend_event(state, event);
+              vec![
+                  AppEffect::ReleaseAuthenticationTerminal { flow_id },
+                  AppEffect::Render,
+              ]
+          }
+          '''
+          new = '''        BackendOutput::Event(BackendEvent::AuthFinished {
+              flow_id,
+              provider_id,
+              result,
+          }) => {
+              let release_flow_id = flow_id.clone();
+              reduce_backend_event(
+                  state,
+                  BackendEvent::AuthFinished {
+                      flow_id,
+                      provider_id,
+                      result,
+                  },
+              );
+              vec![
+                  AppEffect::ReleaseAuthenticationTerminal {
+                      flow_id: release_flow_id,
+                  },
+                  AppEffect::Render,
+              ]
+          }
+          '''
+          if source.count(old) != 1:
+              raise SystemExit('unexpected AuthFinished reducer shape')
+          path.write_text(source.replace(old, new, 1))
+          PY
+
+          set +e
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          fmt_status=$?
+          cargo check --manifest-path rust/Cargo.toml --workspace --all-targets --locked
+          check_status=$?
+          cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings
+          clippy_status=$?
+          cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --locked
+          test_status=$?
+          set -e
+
+          echo "fmt=${fmt_status} check=${check_status} clippy=${clippy_status} test=${test_status}"
+          rm .github/workflows/fix-and-verify-unified-auth.yml
+          git add rust .github/workflows/fix-and-verify-unified-auth.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(auth): complete embedded terminal ownership"
+          git push origin HEAD:fix/acp-auth-transcript-errors
+
+          if (( fmt_status || check_status || clippy_status || test_status )); then
+            exit 1
+          fi
