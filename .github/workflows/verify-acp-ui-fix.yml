@@ -1,0 +1,27 @@
+name: Verify ACP UI fix
+
+on:
+  push:
+    branches:
+      - fix/acp-auth-transcript-errors
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Verify Rust workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path rust/Cargo.toml --all --check
+          cargo check --manifest-path rust/Cargo.toml --workspace --all-targets --locked
+          cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings
+          cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --locked
