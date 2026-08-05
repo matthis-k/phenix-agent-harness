@@ -95,6 +95,19 @@
         };
       };
 
+      acpSdkTarball = pkgs.fetchurl {
+        url = "https://registry.npmjs.org/@agentclientprotocol/sdk/-/sdk-1.3.0.tgz";
+        hash = "sha512-i3h/efaeuMUFAO1HSfo97QZQnnvMd7wWBYtBsdL6UMZg3a78sk3Ffya5Xu7C7tYsXomXoDXJBAzQF2PcFKAhIQ==";
+      };
+      acpSdk = pkgs.runCommand "agent-client-protocol-typescript-sdk-1.3.0"
+        {
+          nativeBuildInputs = [ pkgs.gnutar pkgs.gzip ];
+        }
+        ''
+          mkdir -p "$out"
+          tar -xzf ${acpSdkTarball} --strip-components=1 -C "$out"
+        '';
+
       phenixPiPackage = pkgs.runCommand "phenix-pi-package" { } ''
         mkdir -p "$out"
         cp -R ${./phenix-pi}/. "$out/"
@@ -103,6 +116,9 @@
         rm -rf "$out/node_modules"
         cp -R ${piNpmPackages}/node_modules "$out/node_modules"
         chmod -R u+w "$out/node_modules"
+
+        mkdir -p "$out/node_modules/@agentclientprotocol"
+        cp -R ${acpSdk} "$out/node_modules/@agentclientprotocol/sdk"
 
         piRoot=${piCodingAgent}/lib/node_modules/pi-monorepo
         mkdir -p "$out/node_modules/@earendil-works" "$out/node_modules/@types"
