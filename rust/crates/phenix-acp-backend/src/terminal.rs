@@ -8,7 +8,7 @@ use phenix_acp::acp::Error as AcpError;
 use std::collections::HashMap;
 use std::io::Read;
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -43,9 +43,12 @@ struct TerminalManagerInner {
 
 struct TerminalRecord {
     session_id: String,
+    terminal_id: String,
     child: Mutex<Option<Child>>,
     output: Mutex<OutputBuffer>,
     exit_status: Mutex<Option<TerminalExitStatus>>,
+    finished_notified: AtomicBool,
+    event_tx: futures::channel::mpsc::UnboundedSender<TerminalEvent>,
 }
 
 struct OutputBuffer {
@@ -199,9 +202,12 @@ impl TerminalManager {
             .unwrap_or(DEFAULT_OUTPUT_LIMIT);
         let record = Arc::new(TerminalRecord {
             session_id: request.session_id.to_string(),
+            terminal_id: terminal_id.clone(),
             child: Mutex::new(Some(child)),
             output: Mutex::new(OutputBuffer::new(limit)),
             exit_status: Mutex::new(None),
+            finished_notified: AtomicBool::new(false),
+            event_tx: self.inner.event_tx.clone(),
         });
         if let Some(stdout) = stdout {
             spawn_reader(Arc::clone(&record), stdout, "phenix-acp-terminal-stdout")?;
@@ -286,6 +292,16 @@ fn refresh_exit_status(record: &TerminalRecord) -> Result<(), AcpError> {
         .lock()
         .map_err(|_| internal_error("terminal status lock poisoned"))? = Some(projected.clone());
     *child_guard = None;
+    if !record.finished_notified.swap(true, Ordering::AcqRel) {
+        record
+            .event_tx
+            .unbounded_send(TerminalEvent::Finished {
+                session_id: record.session_id.clone(),
+                terminal_id: record.terminal_id.clone(),
+                exit_code: status.code().and_then(|code| u32::try_from(code).ok()),
+            })
+            .map_err(|_| internal_error("ACP backend event channel closed"))?;
+    }
     Ok(())
 }
 
