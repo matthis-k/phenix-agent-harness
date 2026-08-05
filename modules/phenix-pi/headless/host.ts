@@ -18,6 +18,7 @@ import { HeadlessAuthCoordinator } from "./auth-coordinator.ts";
 import { HeadlessExtensionUi } from "./extension-ui.ts";
 import { createNeutralThemeAccess } from "./neutral-theme.ts";
 import { createPiHeadlessExecutor } from "./pi-executor.ts";
+import type { HeadlessCommand } from "./protocol.ts";
 import { HeadlessProtocolServer } from "./server.ts";
 import { PiSessionEventBridge } from "./session-events.ts";
 import { ObservableWorkspaceAccess } from "./workspace-access.ts";
@@ -30,10 +31,14 @@ export interface HeadlessPiHostOptions {
   readonly maxFrameBytes?: number;
 }
 
+export type HeadlessEventListener = (event: unknown) => void | Promise<void>;
+
 export interface HeadlessPiHost {
   readonly server: HeadlessProtocolServer;
   readonly runtime: AgentSessionRuntime;
   readonly shutdownRequested: Promise<void>;
+  execute(command: HeadlessCommand): Promise<unknown>;
+  subscribe(listener: HeadlessEventListener): () => void;
   rebind(): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -82,7 +87,9 @@ export async function createHeadlessPiHost(
 
   let server: HeadlessProtocolServer | undefined;
   const pendingEvents: unknown[] = [];
+  const listeners = new Set<HeadlessEventListener>();
   const publish = async (event: unknown): Promise<void> => {
+    for (const listener of [...listeners]) await listener(event);
     if (!server) {
       pendingEvents.push(event);
       return;
@@ -162,9 +169,6 @@ export async function createHeadlessPiHost(
     workspace,
     auth,
     extensionUi,
-    // AgentSessionRuntime invokes the canonical rebind hook after every
-    // replacement, including replacements initiated from an extension. The
-    // legacy adapter callback therefore intentionally does nothing.
     rebindSession: async () => undefined,
     publish,
     requestShutdown: signalShutdown,
@@ -185,10 +189,16 @@ export async function createHeadlessPiHost(
     server,
     runtime,
     shutdownRequested,
+    execute: (command) => executor.execute(command),
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
     rebind,
     dispose: async () => {
       if (disposed) return;
       disposed = true;
+      listeners.clear();
       sessionEvents.dispose();
       workspace.replace(undefined);
       await server?.dispose();
