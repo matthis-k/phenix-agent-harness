@@ -9,6 +9,8 @@ use phenix_runtime_api::{
     ToolExecutionOutcome, TranscriptBlock, TranscriptRole,
 };
 
+const MAX_TOOL_SUMMARY_CHARS: usize = 8_192;
+
 pub(crate) fn apply_session_notification(
     state: &mut AdapterState,
     notification: SessionNotification,
@@ -101,13 +103,19 @@ pub(crate) fn apply_terminal_event(
             })?;
         }
         TerminalEvent::Finished {
-            session_id: _,
+            session_id,
             terminal_id,
             exit_code,
         } => {
+            let session = state
+                .sessions
+                .values()
+                .find(|session| session.acp_id.to_string() == session_id)
+                .map(|session| session.run.display_name.as_str())
+                .unwrap_or("unknown session");
             outputs.event(BackendEvent::StatusChanged {
                 key: format!("terminal.{terminal_id}"),
-                text: Some(format!("exited with {exit_code:?}")),
+                text: Some(format!("{session} · {terminal_id}: exited with {exit_code:?}")),
             })?;
         }
     }
@@ -239,7 +247,7 @@ fn apply_tool_call(
         run_id: session.run.id.clone(),
         tool_call_id: id.clone(),
         tool_name: tool.title.clone(),
-        input_summary: input,
+        input_summary: bounded_summary(input),
     })?;
     emit_tool_state(session, id, &tool, outputs)
 }
@@ -293,10 +301,23 @@ fn emit_tool_state(
 }
 
 fn tool_output(tool: &ToolCall) -> String {
-    tool.raw_output.as_ref().map_or_else(
+    bounded_summary(tool.raw_output.as_ref().map_or_else(
         || serde_json::to_string_pretty(&tool.content).unwrap_or_else(|_| "[]".to_owned()),
         |output| output.to_string(),
-    )
+    ))
+}
+
+fn bounded_summary(value: String) -> String {
+    let mut characters = value.chars();
+    let summary = characters
+        .by_ref()
+        .take(MAX_TOOL_SUMMARY_CHARS)
+        .collect::<String>();
+    if characters.next().is_some() {
+        format!("{summary}\n… [truncated]")
+    } else {
+        summary
+    }
 }
 
 fn apply_session_info(
@@ -317,4 +338,17 @@ fn apply_session_info(
         session.summary.updated_at = updated_at.as_str().map(str::to_owned);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_summaries_are_bounded_on_character_boundaries() {
+        let value = "中".repeat(MAX_TOOL_SUMMARY_CHARS + 1);
+        let summary = bounded_summary(value);
+        assert!(summary.ends_with("… [truncated]"));
+        assert_eq!(summary.matches('中').count(), MAX_TOOL_SUMMARY_CHARS);
+    }
 }
