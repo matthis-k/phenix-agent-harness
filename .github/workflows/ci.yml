@@ -32,18 +32,34 @@ jobs:
         with: { name: devenv }
       - name: Install devenv
         run: nix profile add nixpkgs#devenv
-      - name: Run repository maintenance
+      - name: Verify committed source
         shell: bash
         run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/devenv-test.log"
+          before="$(git status --porcelain=v1 --untracked-files=all)"
+          if [[ -n "$before" ]]; then
+            printf '%s\n' "$before"
+            echo "repository was dirty before verification" >&2
+            exit 1
+          fi
           set +e
-          devenv test > devenv-test.log 2>&1
+          devenv test >"$log" 2>&1
           status=$?
-          tail -n 320 devenv-test.log
+          set -e
+          tail -n 320 "$log"
+          git diff --exit-code
+          after="$(git status --porcelain=v1 --untracked-files=all)"
+          if [[ -n "$after" ]]; then
+            printf '%s\n' "$after"
+            echo "verification mutated committed source" >&2
+            exit 1
+          fi
           exit "$status"
       - name: Upload devenv diagnostics
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: devenv-test-log
-          path: devenv-test.log
+          path: ${{ runner.temp }}/devenv-test.log
           if-no-files-found: error
