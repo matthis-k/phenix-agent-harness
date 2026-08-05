@@ -3,8 +3,8 @@ import test from "node:test";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
 import {
-  PiSessionEventBridge,
   type HeadlessSessionEvent,
+  PiSessionEventBridge,
   type SessionEventSource,
 } from "../headless/session-events.ts";
 
@@ -71,7 +71,9 @@ test("rebinding unsubscribes the previous Pi session source", () => {
   const second = new FakeSource();
   const bridge = new PiSessionEventBridge({
     runId: () => "root-run",
-    publish: (event) => published.push(event),
+    publish: (event) => {
+      published.push(event);
+    },
   });
 
   bridge.bind(first);
