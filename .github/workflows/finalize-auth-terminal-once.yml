@@ -1,0 +1,79 @@
+name: Finalize generic authentication terminal once
+
+on:
+  push:
+    branches:
+      - fix/acp-auth-transcript-errors
+    paths:
+      - .github/workflows/finalize-auth-terminal-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: fix/acp-auth-transcript-errors
+          fetch-depth: 1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Remove stale mutability and run full gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CARGO_TARGET_DIR=/tmp/phenix-target
+
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('rust/crates/phenix-tui/src/main.rs')
+          source = path.read_text()
+          old = '    let mut runtime = UiRuntime::from_backend_with_frontend(\n'
+          new = '    let runtime = UiRuntime::from_backend_with_frontend(\n'
+          if source.count(old) != 1:
+              raise SystemExit('unexpected TUI runtime binding shape')
+          path.write_text(source.replace(old, new, 1))
+          PY
+
+          cargo fmt --manifest-path rust/Cargo.toml --all
+
+          set +e
+          cargo check --manifest-path rust/Cargo.toml --workspace --all-targets --locked --message-format=short > /tmp/check.log 2>&1
+          check_status=$?
+          cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked --message-format=short -- -D warnings > /tmp/clippy.log 2>&1
+          clippy_status=$?
+          cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --locked --message-format=short > /tmp/test.log 2>&1
+          test_status=$?
+          set -e
+
+          rm -f .github/diagnostics-auth-terminal.txt
+          if (( check_status || clippy_status || test_status )); then
+            {
+              echo "check_status=${check_status}"
+              echo "clippy_status=${clippy_status}"
+              echo "test_status=${test_status}"
+              for phase in check clippy test; do
+                echo
+                echo "## ${phase}"
+                grep -E '(^|: )(error(\[[A-Z0-9]+\])?:|warning:|test result:)' "/tmp/${phase}.log" | tail -n 240 || true
+                tail -n 120 "/tmp/${phase}.log"
+              done
+            } > .github/diagnostics-auth-terminal.txt
+          fi
+
+          rm .github/workflows/finalize-auth-terminal-once.yml
+          git add rust/crates/phenix-tui/src/main.rs
+          git add -u .github/diagnostics-auth-terminal.txt .github/workflows/finalize-auth-terminal-once.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -q -m "fix(auth): finalize embedded terminal lifecycle"
+          git push --quiet origin HEAD:fix/acp-auth-transcript-errors
+
+          echo "check=${check_status} clippy=${clippy_status} test=${test_status}"
+          if (( check_status || clippy_status || test_status )); then
+            exit 1
+          fi
