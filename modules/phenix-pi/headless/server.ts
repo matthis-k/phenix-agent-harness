@@ -1,12 +1,12 @@
 import { JsonlDecodeError, JsonlDecoder, serializeJsonLine } from "./jsonl.ts";
 import {
-  parseHeadlessRequest,
   type HeadlessCommand,
   type HeadlessEventFrame,
   type HeadlessOutboundFrame,
   type HeadlessProtocolError,
   type HeadlessRequestFrame,
   type HeadlessResponseFrame,
+  parseHeadlessRequest,
 } from "./protocol.ts";
 
 export interface HeadlessCommandExecutor {
