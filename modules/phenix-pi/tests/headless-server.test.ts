@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-
+import type { HeadlessCommand } from "../headless/protocol.ts";
 import {
   HeadlessCommandError,
-  HeadlessProtocolServer,
   type HeadlessCommandExecutor,
+  HeadlessProtocolServer,
 } from "../headless/server.ts";
-import type { HeadlessCommand } from "../headless/protocol.ts";
 
 test("headless server correlates concurrent responses and serializes complete frames", async () => {
   const writes: string[] = [];
@@ -23,7 +22,9 @@ test("headless server correlates concurrent responses and serializes complete fr
   });
   const server = new HeadlessProtocolServer({
     executor,
-    write: (line) => writes.push(line),
+    write: (line) => {
+      writes.push(line);
+    },
   });
 
   const acceptance = server.accept(
@@ -52,7 +53,9 @@ test("duplicate in-flight request IDs are rejected without a second execution", 
       await pending;
       return { kind: "done" };
     }),
-    write: (line) => writes.push(line),
+    write: (line) => {
+      writes.push(line);
+    },
   });
 
   const acceptance = server.accept(
@@ -74,7 +77,9 @@ test("invalid frames become protocol events instead of crashing the server", asy
   const writes: string[] = [];
   const server = new HeadlessProtocolServer({
     executor: executorFrom(async () => undefined),
-    write: (line) => writes.push(line),
+    write: (line) => {
+      writes.push(line);
+    },
   });
 
   await server.accept(`not-json\n`);
@@ -96,7 +101,9 @@ test("secret command values are never reflected in failure responses", async () 
         message: "Authentication flow is not awaiting input",
       });
     }),
-    write: (line) => writes.push(line),
+    write: (line) => {
+      writes.push(line);
+    },
   });
 
   await server.accept(
