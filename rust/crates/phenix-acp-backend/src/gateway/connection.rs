@@ -2,9 +2,7 @@ use super::projection::{
     backend_error, empty_snapshot, interaction_event, runtime_session_id, terminal_run_event,
 };
 use crate::{AcpAgentBackend, AcpBackendConfig};
-use phenix_acp::{
-    AcpSessionId, GatewayError, SessionEvent, SessionOpenKind, SessionOpenRequest,
-};
+use phenix_acp::{AcpSessionId, GatewayError, SessionEvent, SessionOpenKind, SessionOpenRequest};
 use phenix_runtime_api::{
     BackendCommand, BackendEvent, BackendHealth, BackendOutput, BackendReply, BackendRuntime,
     ClientInformation, NotificationLevel, RunId, RuntimeSnapshot, SessionId, ToolExecutionOutcome,
@@ -130,10 +128,7 @@ impl TreeConnection {
         })
     }
 
-    pub(super) fn submit(
-        &mut self,
-        command: BackendCommand,
-    ) -> Result<BackendReply, GatewayError> {
+    pub(super) fn submit(&mut self, command: BackendCommand) -> Result<BackendReply, GatewayError> {
         if self.stopped {
             return Err(GatewayError::session("ACP backend has stopped"));
         }

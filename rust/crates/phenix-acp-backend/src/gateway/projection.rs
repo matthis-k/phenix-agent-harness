@@ -23,9 +23,7 @@ pub(super) fn runtime_model(model: &ModelSelection) -> ModelRef {
     }
 }
 
-pub(super) fn runtime_session_id(
-    session_id: &AcpSessionId,
-) -> Result<SessionId, GatewayError> {
+pub(super) fn runtime_session_id(session_id: &AcpSessionId) -> Result<SessionId, GatewayError> {
     SessionId::parse(session_id.as_str()).map_err(|error| GatewayError::session(error.to_string()))
 }
 
@@ -71,10 +69,7 @@ pub(super) fn terminal_run_event(
     }
 }
 
-pub(super) fn interaction_event(
-    request_id: String,
-    request: ExtensionUiRequest,
-) -> SessionEvent {
+pub(super) fn interaction_event(request_id: String, request: ExtensionUiRequest) -> SessionEvent {
     match request {
         ExtensionUiRequest::Select { title, options } => SessionEvent::PermissionRequested {
             request_id,
@@ -103,9 +98,7 @@ pub(super) fn interaction_event(
     }
 }
 
-pub(super) fn runtime_interaction_response(
-    response: InteractionResponse,
-) -> ExtensionUiResponse {
+pub(super) fn runtime_interaction_response(response: InteractionResponse) -> ExtensionUiResponse {
     match response {
         InteractionResponse::Selected(value) => ExtensionUiResponse::Selected(value),
         InteractionResponse::Confirmed(value) => ExtensionUiResponse::Confirmed(value),

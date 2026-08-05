@@ -8,9 +8,9 @@ pub(crate) use model::objective_terminal_state;
 
 pub use model::{
     AcpSession, AcpSessionFactory, FirstAvailableRouter, FixedRouter, GatewayError, GatewayEvent,
-    InteractionResponse, RoutingDecision, RoutingRequest, SessionCommand, SessionEvent, SessionImage,
-    SessionOpenKind, SessionOpenRequest, SessionRouter, StaticWorkflow, TreeStartResult, Workflow,
-    WorkflowPlan, WorkflowPlanBuilder, WorkflowRequest, WorkflowStep,
+    InteractionResponse, RoutingDecision, RoutingRequest, SessionCommand, SessionEvent,
+    SessionImage, SessionOpenKind, SessionOpenRequest, SessionRouter, StaticWorkflow,
+    TreeStartResult, Workflow, WorkflowPlan, WorkflowPlanBuilder, WorkflowRequest, WorkflowStep,
 };
 
 #[cfg(test)]

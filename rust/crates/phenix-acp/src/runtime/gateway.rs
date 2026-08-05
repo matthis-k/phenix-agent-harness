@@ -36,10 +36,7 @@ impl PhenixAcpGatewayBuilder {
         Self::default()
     }
 
-    pub fn definition(
-        mut self,
-        definition: SessionTreeDefinition,
-    ) -> Result<Self, GatewayError> {
+    pub fn definition(mut self, definition: SessionTreeDefinition) -> Result<Self, GatewayError> {
         let id = definition.definition_id().clone();
         if self.definitions.insert(id.clone(), definition).is_some() {
             return Err(GatewayError::DuplicateDefinition(id));
@@ -75,7 +72,11 @@ impl PhenixAcpGatewayBuilder {
     where
         F: AcpSessionFactory,
     {
-        if self.backends.insert(id.clone(), Arc::new(backend)).is_some() {
+        if self
+            .backends
+            .insert(id.clone(), Arc::new(backend))
+            .is_some()
+        {
             return Err(GatewayError::DuplicateBackend(id));
         }
         Ok(self)
@@ -561,10 +562,7 @@ impl PhenixAcpGateway {
         Ok(())
     }
 
-    pub fn snapshot(
-        &self,
-        tree_id: &SessionTreeId,
-    ) -> Result<SessionTreeSnapshot, GatewayError> {
+    pub fn snapshot(&self, tree_id: &SessionTreeId) -> Result<SessionTreeSnapshot, GatewayError> {
         Ok(self.tree(tree_id)?.snapshot(tree_id.clone()))
     }
 
@@ -880,11 +878,7 @@ fn backend_ids(definition: &SessionTreeDefinition) -> Vec<BackendId> {
         .collect()
 }
 
-fn is_descendant(
-    tree: &TreeRuntime,
-    candidate: &SessionNodeId,
-    ancestor: &SessionNodeId,
-) -> bool {
+fn is_descendant(tree: &TreeRuntime, candidate: &SessionNodeId, ancestor: &SessionNodeId) -> bool {
     let mut current = Some(candidate);
     while let Some(id) = current {
         if id == ancestor {
@@ -897,7 +891,10 @@ fn is_descendant(
 
 fn depth(tree: &TreeRuntime, node_id: &SessionNodeId) -> usize {
     let mut depth = 0;
-    let mut current = tree.nodes.get(node_id).and_then(|node| node.parent.as_ref());
+    let mut current = tree
+        .nodes
+        .get(node_id)
+        .and_then(|node| node.parent.as_ref());
     while let Some(parent) = current {
         depth += 1;
         current = tree.nodes.get(parent).and_then(|node| node.parent.as_ref());
