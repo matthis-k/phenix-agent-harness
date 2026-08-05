@@ -599,9 +599,7 @@ async fn handle_request(
             } else if success {
                 Ok(())
             } else {
-                Err(message.unwrap_or_else(|| {
-                    "terminal authentication command failed".to_owned()
-                }))
+                Err(message.unwrap_or_else(|| "terminal authentication command failed".to_owned()))
             };
             if result.is_ok() {
                 outputs.event(BackendEvent::SnapshotChanged(runtime.adapter.snapshot()))?;
