@@ -743,8 +743,10 @@ mod tests {
 
     #[test]
     fn rejected_operation_does_not_degrade_a_healthy_connection() {
-        let mut state = AppState::default();
-        state.connection = RuntimeConnectionState::Ready;
+        let mut state = AppState {
+            connection: RuntimeConnectionState::Ready,
+            ..AppState::default()
+        };
         reduce(
             &mut state,
             AppEvent::Backend(Box::new(BackendOutput::Reply {
