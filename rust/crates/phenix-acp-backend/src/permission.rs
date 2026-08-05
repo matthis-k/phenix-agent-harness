@@ -1,3 +1,6 @@
+#[path = "gateway.rs"]
+mod gateway;
+
 use futures::channel::oneshot;
 use phenix_acp::acp::schema::v1::{
     PermissionOption, RequestPermissionOutcome, RequestPermissionRequest,
