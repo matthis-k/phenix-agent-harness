@@ -1,4 +1,4 @@
-#[path = "gateway.rs"]
+#[path = "gateway/mod.rs"]
 mod gateway;
 
 use futures::channel::oneshot;
