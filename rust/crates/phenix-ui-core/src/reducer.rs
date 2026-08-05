@@ -512,36 +512,42 @@ fn reduce_backend_event(state: &mut AppState, event: BackendEvent) {
             tool_call_id,
             tool_name,
             input_summary,
-        } => state.transcript_mut(run_id.clone()).append(TranscriptBlock {
-            id: tool_block_id(&tool_call_id),
-            run_id,
-            role: TranscriptRole::Tool,
-            text: format!("{tool_name}\n{input_summary}"),
-            complete: false,
-        }),
+        } => state
+            .transcript_mut(run_id.clone())
+            .append(TranscriptBlock {
+                id: tool_block_id(&tool_call_id),
+                run_id,
+                role: TranscriptRole::Tool,
+                text: format!("{tool_name}\n{input_summary}"),
+                complete: false,
+            }),
         BackendEvent::ToolUpdated {
             run_id,
             tool_call_id,
             output,
-        } => state.transcript_mut(run_id.clone()).update(TranscriptBlock {
-            id: tool_block_id(&tool_call_id),
-            run_id,
-            role: TranscriptRole::Tool,
-            text: output,
-            complete: false,
-        }),
+        } => state
+            .transcript_mut(run_id.clone())
+            .update(TranscriptBlock {
+                id: tool_block_id(&tool_call_id),
+                run_id,
+                role: TranscriptRole::Tool,
+                text: output,
+                complete: false,
+            }),
         BackendEvent::ToolFinished {
             run_id,
             tool_call_id,
             outcome,
             output_summary,
-        } => state.transcript_mut(run_id.clone()).update(TranscriptBlock {
-            id: tool_block_id(&tool_call_id),
-            run_id,
-            role: TranscriptRole::Tool,
-            text: format!("{}\n{output_summary}", tool_outcome_label(&outcome)),
-            complete: true,
-        }),
+        } => state
+            .transcript_mut(run_id.clone())
+            .update(TranscriptBlock {
+                id: tool_block_id(&tool_call_id),
+                run_id,
+                role: TranscriptRole::Tool,
+                text: format!("{}\n{output_summary}", tool_outcome_label(&outcome)),
+                complete: true,
+            }),
         BackendEvent::QueueChanged {
             run_id,
             steering,
@@ -742,8 +748,7 @@ mod tests {
         reduce(
             &mut state,
             AppEvent::Backend(Box::new(BackendOutput::Reply {
-                request_id: phenix_runtime_api::RequestId::parse("request-1")
-                    .expect("request ID"),
+                request_id: phenix_runtime_api::RequestId::parse("request-1").expect("request ID"),
                 result: Err(BackendError::Unsupported("no export".to_owned())),
             })),
         );
