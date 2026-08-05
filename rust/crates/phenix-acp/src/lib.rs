@@ -30,9 +30,9 @@ pub use protocol::{
 };
 pub use runtime::{
     AcpSession, AcpSessionFactory, FirstAvailableRouter, FixedRouter, GatewayCommand,
-    GatewayEnvelope, GatewayError, GatewayEvent, GatewayFailure, GatewayReply, PhenixAcpGateway,
-    PhenixAcpGatewayBuilder, RoutingDecision, RoutingRequest, SessionCommand, SessionEvent,
-    SessionImage, SessionOpenKind, SessionOpenRequest, SessionRouter, StaticWorkflow,
+    GatewayEnvelope, GatewayError, GatewayEvent, GatewayFailure, GatewayReply, InteractionResponse,
+    PhenixAcpGateway, PhenixAcpGatewayBuilder, RoutingDecision, RoutingRequest, SessionCommand,
+    SessionEvent, SessionImage, SessionOpenKind, SessionOpenRequest, SessionRouter, StaticWorkflow,
     TreeStartResult, Workflow, WorkflowPlan, WorkflowPlanBuilder, WorkflowRequest, WorkflowStep,
 };
 pub use tools::{
