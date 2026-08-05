@@ -12,23 +12,12 @@ use crate::{
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct PhenixAcpGatewayBuilder {
     definitions: BTreeMap<DefinitionId, SessionTreeDefinition>,
     routers: BTreeMap<RouterId, Arc<dyn SessionRouter>>,
     workflows: BTreeMap<WorkflowId, Arc<dyn Workflow>>,
     backends: BTreeMap<BackendId, Arc<dyn AcpSessionFactory>>,
-}
-
-impl Default for PhenixAcpGatewayBuilder {
-    fn default() -> Self {
-        Self {
-            definitions: BTreeMap::new(),
-            routers: BTreeMap::new(),
-            workflows: BTreeMap::new(),
-            backends: BTreeMap::new(),
-        }
-    }
 }
 
 impl PhenixAcpGatewayBuilder {
