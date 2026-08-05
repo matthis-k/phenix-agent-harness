@@ -1,0 +1,25 @@
+[package]
+name = "phenix-tui"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+clap = { workspace = true }
+phenix-acp = { path = "../phenix-acp" }
+phenix-acp-backend = { path = "../phenix-acp-backend" }
+phenix-acp-presets = { path = "../phenix-acp-presets" }
+phenix-frontend-config = { path = "../phenix-frontend-config" }
+phenix-process-backend = { path = "../phenix-process-backend" }
+phenix-runtime-api = { path = "../phenix-runtime-api" }
+phenix-ui-core = { path = "../phenix-ui-core" }
+phenix-ui-lua = { path = "../phenix-ui-lua" }
+phenix-ui-runtime = { path = "../phenix-ui-runtime" }
+ratatui = { workspace = true }
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "phenix"
+path = "src/main.rs"

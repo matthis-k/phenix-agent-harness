@@ -1,0 +1,107 @@
+use phenix_frontend_config::{LayoutNode, SplitDirection};
+use phenix_ui_core::{AppState, ElementId};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use std::collections::BTreeMap;
+
+pub(crate) fn collect_layout(
+    node: &LayoutNode,
+    area: Rect,
+    state: &AppState,
+    output: &mut BTreeMap<ElementId, Rect>,
+) {
+    match node {
+        LayoutNode::Pane(pane) => {
+            if state.view.pane(&pane.element).visible && area.width > 0 && area.height > 0 {
+                output.insert(pane.element.clone(), area);
+            }
+        }
+        LayoutNode::Split(split) => {
+            if split.children.is_empty() {
+                return;
+            }
+            let direction = match split.direction {
+                SplitDirection::Horizontal => Direction::Horizontal,
+                SplitDirection::Vertical => Direction::Vertical,
+            };
+            let constraints = split
+                .children
+                .iter()
+                .map(|child| child_constraint(child, split.direction, state))
+                .collect::<Vec<_>>();
+            let child_areas = Layout::default()
+                .direction(direction)
+                .constraints(constraints)
+                .split(area);
+            for (child, child_area) in split.children.iter().zip(child_areas.iter().copied()) {
+                collect_layout(child, child_area, state, output);
+            }
+        }
+    }
+}
+
+fn child_constraint(node: &LayoutNode, direction: SplitDirection, state: &AppState) -> Constraint {
+    match node {
+        LayoutNode::Pane(pane) => {
+            let view = state.view.pane(&pane.element);
+            if !view.visible {
+                return Constraint::Length(0);
+            }
+            let explicit = match direction {
+                SplitDirection::Horizontal => view.width,
+                SplitDirection::Vertical => view.height,
+            };
+            explicit.map_or_else(|| Constraint::Fill(pane.weight.max(1)), Constraint::Length)
+        }
+        LayoutNode::Split(split) => Constraint::Fill(layout_weight(&split.children).max(1)),
+    }
+}
+
+fn layout_weight(nodes: &[LayoutNode]) -> u16 {
+    nodes.iter().fold(0u16, |total, node| {
+        total.saturating_add(match node {
+            LayoutNode::Pane(pane) => pane.weight.max(1),
+            LayoutNode::Split(split) => layout_weight(&split.children).max(1),
+        })
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use phenix_frontend_config::{LayoutConfig, PaneLayout, PaneType, SplitLayout};
+
+    #[test]
+    fn semantic_layout_is_projected_without_widget_state() {
+        let state = AppState::default();
+        let mut output = BTreeMap::new();
+        collect_layout(
+            &LayoutConfig {
+                root: LayoutNode::Split(SplitLayout {
+                    direction: SplitDirection::Horizontal,
+                    children: vec![
+                        LayoutNode::Pane(PaneLayout {
+                            element: ElementId::transcript(),
+                            pane_type: PaneType::Transcript,
+                            weight: 3,
+                            minimum: None,
+                            maximum: None,
+                        }),
+                        LayoutNode::Pane(PaneLayout {
+                            element: ElementId::sidebar(),
+                            pane_type: PaneType::Sidebar,
+                            weight: 1,
+                            minimum: None,
+                            maximum: None,
+                        }),
+                    ],
+                }),
+            }
+            .root,
+            Rect::new(0, 0, 100, 20),
+            &state,
+            &mut output,
+        );
+        assert!(output.contains_key(&ElementId::transcript()));
+        assert_eq!(output[&ElementId::sidebar()].width, 28);
+    }
+}

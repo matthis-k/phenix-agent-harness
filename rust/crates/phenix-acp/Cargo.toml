@@ -1,0 +1,11 @@
+[package]
+name = "phenix-acp"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[dependencies]
+agent-client-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true

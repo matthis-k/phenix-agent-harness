@@ -117,6 +117,20 @@
         done
       '';
 
+      piAcp = pkgs.writeShellApplication {
+        name = "pi-acp";
+        runtimeInputs = [
+          pkgs.nodejs
+          piCodingAgent
+        ];
+        text = ''
+          export PI_ACP_PI_COMMAND="${piCodingAgent}/bin/pi"
+          export PI_SKIP_VERSION_CHECK=1
+          export PI_TELEMETRY=0
+          exec "${pkgs.nodejs}/bin/node" "${phenixPiPackage}/node_modules/pi-acp/dist/index.js" "$@"
+        '';
+      };
+
       phenixRuntimeTests =
         pkgs.runCommand "phenix-runtime-tests"
           {
@@ -146,6 +160,7 @@
       packages = {
         phenix-rtk = phenixRtk;
         pi-coding-agent = piCodingAgent;
+        pi-acp = piAcp;
         phenix-pi-package = phenixPiPackage;
         phenix-pi-npm-packages = piNpmPackages;
         phenix-runtime-tests = phenixRuntimeTests;

@@ -1,0 +1,10 @@
+[package]
+name = "phenix-ui-lua"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+mlua = { workspace = true }
+phenix-frontend-config = { path = "../phenix-frontend-config" }
+phenix-ui-core = { path = "../phenix-ui-core" }

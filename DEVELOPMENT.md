@@ -45,6 +45,7 @@ update-pi-npm-lock
 | `maintenance:workflows` | Validate GitHub Actions workflows with actionlint |
 | `maintenance:runtime` | Build and run the packaged Phenix runtime tests |
 | `maintenance:typecheck` | Build the TypeScript compiler gate |
+| `maintenance:rust-core` | Format, check, lint, and test all backend-neutral Rust targets |
 | `maintenance:flake` | Run the complete flake check |
 | `maintenance:check` | Aggregate every read-only maintenance task |
 | `maintenance:fix` | Apply statix and formatter fixes |
