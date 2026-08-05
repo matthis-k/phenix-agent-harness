@@ -30,16 +30,13 @@ jobs:
           from pathlib import Path
           path = Path('rust/crates/phenix-ui-core/src/reducer.rs')
           source = path.read_text()
-          old = '''        BackendOutput::Event(event @ BackendEvent::AuthFinished { ref flow_id, .. }) => {
-              let flow_id = flow_id.clone();
-              reduce_backend_event(state, event);
-              vec![
-                  AppEffect::ReleaseAuthenticationTerminal { flow_id },
-                  AppEffect::Render,
-              ]
-          }
-          '''
-          new = '''        BackendOutput::Event(BackendEvent::AuthFinished {
+          start_marker = '        BackendOutput::Event(event @ BackendEvent::AuthFinished'
+          end_marker = '        BackendOutput::Event(event) => {'
+          start = source.find(start_marker)
+          end = source.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit('unable to locate AuthFinished reducer arm')
+          replacement = '''        BackendOutput::Event(BackendEvent::AuthFinished {
               flow_id,
               provider_id,
               result,
@@ -61,9 +58,7 @@ jobs:
               ]
           }
           '''
-          if source.count(old) != 1:
-              raise SystemExit('unexpected AuthFinished reducer shape')
-          path.write_text(source.replace(old, new, 1))
+          path.write_text(source[:start] + replacement + source[end:])
           PY
 
           set +e
