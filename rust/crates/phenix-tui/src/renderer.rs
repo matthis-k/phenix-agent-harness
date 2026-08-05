@@ -36,17 +36,6 @@ impl UiRenderer for RatatuiRenderer {
             .map(|_| ())
             .map_err(|error| error.to_string())
     }
-
-    fn suspend(&mut self) -> Result<(), String> {
-        self.terminal.take();
-        ratatui::restore();
-        Ok(())
-    }
-
-    fn resume(&mut self) -> Result<(), String> {
-        self.terminal = Some(ratatui::try_init().map_err(|error| error.to_string())?);
-        Ok(())
-    }
 }
 
 impl Drop for RatatuiRenderer {
@@ -339,6 +328,9 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
             state,
             theme,
         ),
+        OverlayState::AuthenticationTerminal { flow_id } => {
+            render_auth_terminal(frame, centered(area, 90, 80), flow_id, state, theme)
+        }
         OverlayState::ExtensionDialog {
             request, selected, ..
         } => render_extension_dialog(frame, overlay_area, request, *selected, state, theme),
@@ -448,6 +440,58 @@ fn render_auth_prompt(
         )),
     }
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+}
+
+fn render_auth_terminal(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    flow_id: &phenix_runtime_api::AuthFlowId,
+    state: &AppState,
+    theme: &ThemeConfig,
+) {
+    frame.render_widget(Clear, area);
+    let Some(terminal) = state
+        .auth_terminal
+        .as_ref()
+        .filter(|terminal| &terminal.flow_id == flow_id)
+    else {
+        frame.render_widget(
+            Paragraph::new("Authentication terminal is not available.").block(panel(
+                "Authentication",
+                true,
+                theme,
+            )),
+            area,
+        );
+        return;
+    };
+    let title = format!("{} · Ctrl+] cancel", terminal.title);
+    let block = panel(&title, true, theme);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let mut text = terminal.screen.clone();
+    if let Some(result) = &terminal.result {
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str(result);
+    }
+    frame.render_widget(
+        Paragraph::new(text)
+            .style(theme_style(theme, "Normal"))
+            .wrap(Wrap { trim: false }),
+        inner,
+    );
+    if terminal.running && inner.width > 0 && inner.height > 0 {
+        frame.set_cursor_position((
+            inner
+                .x
+                .saturating_add(terminal.cursor_column.min(inner.width.saturating_sub(1))),
+            inner
+                .y
+                .saturating_add(terminal.cursor_row.min(inner.height.saturating_sub(1))),
+        ));
+    }
 }
 
 fn render_extension_dialog(
@@ -589,6 +633,6 @@ fn overlay_selected(state: &AppState) -> usize {
         | Some(OverlayState::AuthenticationPrompt { selected, .. })
         | Some(OverlayState::SessionPicker { selected, .. })
         | Some(OverlayState::ExtensionDialog { selected, .. }) => *selected,
-        Some(OverlayState::Help) | None => 0,
+        Some(OverlayState::AuthenticationTerminal { .. }) | Some(OverlayState::Help) | None => 0,
     }
 }

@@ -31,7 +31,11 @@ impl UiMailbox {
     }
 
     pub fn send_user(&self, intent: UserIntent) -> Result<(), UiIngressError> {
-        self.send_lossless(UiMessage::App(AppEvent::User(intent)))
+        self.send_app(AppEvent::User(intent))
+    }
+
+    pub fn send_app(&self, event: AppEvent) -> Result<(), UiIngressError> {
+        self.send_lossless(UiMessage::App(event))
     }
 
     pub fn send_backend(&self, output: BackendOutput) -> Result<(), UiIngressError> {

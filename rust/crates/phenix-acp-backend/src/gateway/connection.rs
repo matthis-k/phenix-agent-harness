@@ -238,7 +238,7 @@ impl TreeConnection {
     fn dispatch(&mut self, event: BackendEvent) -> Result<(), GatewayError> {
         if matches!(
             &event,
-            BackendEvent::ExternalCommandRequested { .. }
+            BackendEvent::AuthTerminalRequested { .. }
                 | BackendEvent::AuthPromptRequested { .. }
                 | BackendEvent::AuthNotice { .. }
                 | BackendEvent::AuthFinished { .. }
@@ -362,7 +362,7 @@ impl TreeConnection {
                 }),
                 Err(message) => self.push_active(SessionEvent::Failed { message }),
             },
-            BackendEvent::ExternalCommandRequested { command, .. } => {
+            BackendEvent::AuthTerminalRequested { command, .. } => {
                 self.push_active(SessionEvent::Text {
                     text: format!(
                         "authentication requires external command: {} {}",

@@ -1,6 +1,6 @@
 use crate::{
-    install_core_consumers, install_frontend_provider, BusReaction, EventRouter, InputEdit,
-    UiIngressError, UiMailbox, UiMessage, ViewMutation,
+    install_core_consumers, install_frontend_provider, AuthTerminalHost, BusReaction, EventRouter,
+    InputEdit, NativeAuthTerminalHost, UiIngressError, UiMailbox, UiMessage, ViewMutation,
 };
 use phenix_frontend_config::FrontendProviderRef;
 use phenix_runtime_api::{BackendClient, BackendCommand, BackendRuntime, BackendWorker};
@@ -13,10 +13,7 @@ use phenix_ui_core::{
 use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
-use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -24,14 +21,6 @@ const DEFAULT_DRAIN_LIMIT: usize = 256;
 
 pub trait UiRenderer {
     fn render(&mut self, state: &AppState) -> Result<(), String>;
-
-    fn suspend(&mut self) -> Result<(), String> {
-        Ok(())
-    }
-
-    fn resume(&mut self) -> Result<(), String> {
-        Ok(())
-    }
 }
 
 pub struct UiRuntime<R> {
@@ -44,7 +33,7 @@ pub struct UiRuntime<R> {
     backend_forwarder: Option<JoinHandle<()>>,
     backend_worker: Option<BackendWorker>,
     drain_limit: usize,
-    external_io_pause: Option<Arc<AtomicBool>>,
+    auth_terminal_host: Box<dyn AuthTerminalHost>,
 }
 
 impl<R> UiRuntime<R> {
@@ -119,7 +108,7 @@ impl<R: UiRenderer> UiRuntime<R> {
             backend_forwarder: Some(backend_forwarder),
             backend_worker: Some(backend_worker),
             drain_limit: DEFAULT_DRAIN_LIMIT,
-            external_io_pause: None,
+            auth_terminal_host: Box::new(NativeAuthTerminalHost::default()),
         })
     }
 
@@ -127,8 +116,8 @@ impl<R: UiRenderer> UiRuntime<R> {
         self.mailbox.clone()
     }
 
-    pub fn set_external_io_pause(&mut self, pause: Arc<AtomicBool>) {
-        self.external_io_pause = Some(pause);
+    pub fn set_auth_terminal_host(&mut self, host: Box<dyn AuthTerminalHost>) {
+        self.auth_terminal_host = host;
     }
 
     pub fn set_drain_limit(&mut self, drain_limit: usize) -> Result<(), UiRuntimeError> {
@@ -224,7 +213,22 @@ impl<R: UiRenderer> UiRuntime<R> {
                     queue.extend(self.router.route_ui(&self.state, &envelope))
                 }
                 BusReaction::View(mutation) => {
+                    let terminal_resize = match mutation {
+                        ViewMutation::SetTerminalSize { width, height } => {
+                            Some(phenix_ui_core::TerminalSize { width, height })
+                        }
+                        _ => None,
+                    };
                     apply_view_mutation(&mut self.state, mutation);
+                    if let (Some(size), Some(terminal)) =
+                        (terminal_resize, self.state.auth_terminal.as_ref())
+                    {
+                        if let Err(message) =
+                            self.auth_terminal_host.resize(&terminal.flow_id, size)
+                        {
+                            self.state.notifications.push_back(message);
+                        }
+                    }
                     dirty = true;
                 }
                 BusReaction::Render => dirty = true,
@@ -246,47 +250,50 @@ impl<R: UiRenderer> UiRuntime<R> {
                         ));
                     }
                 }
-                AppEffect::RunExternal { flow_id, command } => {
-                    if let Some(pause) = &self.external_io_pause {
-                        pause.store(true, Ordering::Release);
-                    }
-                    let result = (|| {
-                        self.renderer.suspend().map_err(UiRuntimeError::Render)?;
-                        let status = Command::new(&command.program)
-                            .args(&command.arguments)
-                            .envs(&command.environment)
-                            .status()
-                            .map_err(|error| UiRuntimeError::Start(error.to_string()));
-                        let resume = self.renderer.resume().map_err(UiRuntimeError::Render);
-                        match (status, resume) {
-                            (Ok(status), Ok(())) => Ok((
-                                status.success(),
-                                status.code().map(|code| format!("exit code {code}")),
-                            )),
-                            (Err(error), Ok(())) | (_, Err(error)) => Err(error),
-                        }
-                    })();
-                    if let Some(pause) = &self.external_io_pause {
-                        pause.store(false, Ordering::Release);
-                    }
-                    let command = match result {
-                        Ok((success, message)) => BackendCommand::AuthTerminalFinished {
-                            flow_id,
-                            success,
-                            message,
-                        },
-                        Err(error) => BackendCommand::AuthTerminalFinished {
-                            flow_id,
-                            success: false,
-                            message: Some(error.to_string()),
-                        },
-                    };
-                    if let Err(error) = self.backend.submit(command) {
+                AppEffect::StartAuthenticationTerminal { flow_id, request } => {
+                    let size = self.state.view.terminal;
+                    if let Err(message) = self.auth_terminal_host.start(
+                        flow_id.clone(),
+                        request,
+                        size,
+                        self.mailbox.clone(),
+                    ) {
+                        effects.push_back(AppEffect::Render);
                         effects.extend(reduce(
                             &mut self.state,
-                            AppEvent::BackendSubmitFailed(error.to_string()),
+                            AppEvent::AuthenticationTerminalExited {
+                                flow_id,
+                                success: false,
+                                message: Some(message),
+                            },
                         ));
                     }
+                    dirty = true;
+                }
+                AppEffect::WriteAuthenticationTerminal { flow_id, bytes } => {
+                    if let Err(message) = self.auth_terminal_host.write(&flow_id, &bytes) {
+                        effects.extend(reduce(
+                            &mut self.state,
+                            AppEvent::AuthenticationTerminalExited {
+                                flow_id,
+                                success: false,
+                                message: Some(message),
+                            },
+                        ));
+                    }
+                }
+                AppEffect::CancelAuthenticationTerminal { flow_id } => {
+                    if let Err(message) = self.auth_terminal_host.cancel(&flow_id) {
+                        effects.extend(reduce(
+                            &mut self.state,
+                            AppEvent::BackendSubmitFailed(message),
+                        ));
+                    }
+                    self.auth_terminal_host.release(&flow_id);
+                    dirty = true;
+                }
+                AppEffect::ReleaseAuthenticationTerminal { flow_id } => {
+                    self.auth_terminal_host.release(&flow_id);
                     dirty = true;
                 }
                 AppEffect::Render => dirty = true,
@@ -345,6 +352,9 @@ fn apply_view_mutation(state: &mut AppState, mutation: ViewMutation) {
         }
         ViewMutation::EditInput(edit) => apply_input_edit(state, edit),
         ViewMutation::MoveOverlaySelection(delta) => move_overlay_selection(state, delta),
+        ViewMutation::SetTerminalSize { width, height } => {
+            state.view.terminal = phenix_ui_core::TerminalSize { width, height };
+        }
         ViewMutation::Notify(message) => state.notifications.push_back(message),
     }
 }
@@ -397,6 +407,7 @@ fn move_overlay_selection(state: &mut AppState, delta: i32) {
             phenix_runtime_api::AuthPrompt::Select { options, .. } => options.len(),
             _ => 0,
         },
+        Some(OverlayState::AuthenticationTerminal { .. }) => 0,
         Some(OverlayState::SessionPicker { .. }) => state
             .snapshot
             .as_ref()
@@ -417,7 +428,9 @@ fn move_overlay_selection(state: &mut AppState, delta: i32) {
         | Some(OverlayState::AuthenticationPrompt { selected, .. })
         | Some(OverlayState::SessionPicker { selected, .. })
         | Some(OverlayState::ExtensionDialog { selected, .. }) => selected,
-        Some(OverlayState::Help) | None => return,
+        Some(OverlayState::AuthenticationTerminal { .. }) | Some(OverlayState::Help) | None => {
+            return
+        }
     };
     *selected = selected
         .saturating_add_signed(delta as isize)

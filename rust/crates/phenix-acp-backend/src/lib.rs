@@ -29,8 +29,8 @@ use phenix_acp::acp::schema::v1::{
 use phenix_acp::acp::schema::ProtocolVersion;
 use phenix_acp::acp::{AcpAgent, Agent, Client, ConnectionTo};
 use phenix_runtime_api::{
-    AgentBackend, AuthFlowId, BackendCommand, BackendError, BackendEvent, BackendOutputSender,
-    BackendReply, BackendRequest, CommandSource, CommandSummary, ExternalCommand,
+    AgentBackend, AuthFlowId, AuthTerminalRequest, BackendCommand, BackendError, BackendEvent,
+    BackendOutputSender, BackendReply, BackendRequest, CommandSource, CommandSummary,
     NotificationLevel, PersistedSessionTreeSnapshot, RunId, RunState, SessionEntrySummary,
     SessionId, StreamingBehavior, TranscriptBlock, TranscriptRole,
 };
@@ -1151,15 +1151,17 @@ async fn start_authentication(
             }
             let program = invocation.remove(0);
             invocation.extend(method.args);
-            let command = ExternalCommand {
+            let command = AuthTerminalRequest {
                 program,
                 arguments: invocation,
                 environment: method.env.into_iter().collect(),
+                cwd: Some(config.cwd.to_string_lossy().into_owned()),
+                title: Some(format!("Authenticate with {provider_id}")),
             };
             runtime
                 .pending_terminal_auth
                 .insert(flow_id.clone(), provider_id.clone());
-            outputs.event(BackendEvent::ExternalCommandRequested { flow_id, command })?;
+            outputs.event(BackendEvent::AuthTerminalRequested { flow_id, command })?;
         }
         _ => {
             return Err(BackendError::Unsupported(

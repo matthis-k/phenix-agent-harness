@@ -61,6 +61,9 @@ pub enum OverlayState {
         input: String,
         selected: usize,
     },
+    AuthenticationTerminal {
+        flow_id: AuthFlowId,
+    },
     SessionPicker {
         query: String,
         selected: usize,

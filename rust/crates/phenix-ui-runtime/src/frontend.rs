@@ -33,6 +33,21 @@ impl EventConsumer for FrontendProviderConsumer {
 
     fn on_ui(&mut self, state: &AppState, envelope: &EventEnvelope<UiEvent>) -> ReactionBatch {
         match &envelope.event {
+            UiEvent::Input(UiInput::Paste(text)) if active_auth_terminal(state).is_some() => {
+                let flow_id = active_auth_terminal(state).expect("checked active terminal");
+                ReactionBatch::stop(vec![BusReaction::App(AppEvent::User(
+                    UserIntent::WriteAuthenticationTerminal {
+                        flow_id,
+                        bytes: text.as_bytes().to_vec(),
+                    },
+                ))])
+            }
+            UiEvent::Input(UiInput::Key(key)) if active_auth_terminal(state).is_some() => {
+                terminal_key_reactions(
+                    active_auth_terminal(state).expect("checked active terminal"),
+                    *key,
+                )
+            }
             UiEvent::Input(UiInput::Paste(text)) => ReactionBatch::stop(vec![BusReaction::View(
                 ViewMutation::EditInput(InputEdit::Insert(text.clone())),
             )]),
@@ -73,6 +88,72 @@ pub fn install_frontend_provider(
     provider: FrontendProviderRef,
 ) -> Result<(), crate::RouterError> {
     router.register_consumer(Box::new(FrontendProviderConsumer::new(provider)))
+}
+
+fn active_auth_terminal(state: &AppState) -> Option<phenix_runtime_api::AuthFlowId> {
+    match &state.view.overlay {
+        Some(OverlayState::AuthenticationTerminal { flow_id }) => Some(flow_id.clone()),
+        _ => None,
+    }
+}
+
+fn terminal_key_reactions(
+    flow_id: phenix_runtime_api::AuthFlowId,
+    key: phenix_ui_core::KeyInput,
+) -> ReactionBatch {
+    if key.modifiers.control && key.code == KeyCode::Character(']') {
+        return ReactionBatch::stop(vec![BusReaction::App(AppEvent::User(
+            UserIntent::CancelAuthentication(flow_id),
+        ))]);
+    }
+    terminal_key_bytes(key).map_or_else(ReactionBatch::none, |bytes| {
+        ReactionBatch::stop(vec![BusReaction::App(AppEvent::User(
+            UserIntent::WriteAuthenticationTerminal { flow_id, bytes },
+        ))])
+    })
+}
+
+fn terminal_key_bytes(key: phenix_ui_core::KeyInput) -> Option<Vec<u8>> {
+    let mut bytes = match key.code {
+        KeyCode::Character(character) if key.modifiers.control => {
+            let upper = character.to_ascii_uppercase();
+            if ('@'..='_').contains(&upper) {
+                vec![(upper as u8) & 0x1f]
+            } else if character == '?' {
+                vec![0x7f]
+            } else {
+                return None;
+            }
+        }
+        KeyCode::Character(character) => character.to_string().into_bytes(),
+        KeyCode::Enter => vec![b'\r'],
+        KeyCode::Escape => vec![0x1b],
+        KeyCode::Backspace => vec![0x7f],
+        KeyCode::Delete => b"\x1b[3~".to_vec(),
+        KeyCode::Insert => b"\x1b[2~".to_vec(),
+        KeyCode::Left => b"\x1b[D".to_vec(),
+        KeyCode::Right => b"\x1b[C".to_vec(),
+        KeyCode::Up => b"\x1b[A".to_vec(),
+        KeyCode::Down => b"\x1b[B".to_vec(),
+        KeyCode::Home => b"\x1b[H".to_vec(),
+        KeyCode::End => b"\x1b[F".to_vec(),
+        KeyCode::PageUp => b"\x1b[5~".to_vec(),
+        KeyCode::PageDown => b"\x1b[6~".to_vec(),
+        KeyCode::Tab => vec![b'\t'],
+        KeyCode::BackTab => b"\x1b[Z".to_vec(),
+        KeyCode::Function(number) => match number {
+            1 => b"\x1bOP".to_vec(),
+            2 => b"\x1bOQ".to_vec(),
+            3 => b"\x1bOR".to_vec(),
+            4 => b"\x1bOS".to_vec(),
+            5..=12 => format!("\x1b[{}~", number + 10).into_bytes(),
+            _ => return None,
+        },
+    };
+    if key.modifiers.alt {
+        bytes.insert(0, 0x1b);
+    }
+    Some(bytes)
 }
 
 fn frontend_context(state: &AppState) -> FrontendContext {
@@ -252,7 +333,8 @@ fn accept_overlay(state: &AppState) -> Vec<BusReaction> {
                     session.id.clone(),
                 )))]
             }),
-        Some(OverlayState::ExtensionDialog { .. }) => Vec::new(),
+        Some(OverlayState::AuthenticationTerminal { .. })
+        | Some(OverlayState::ExtensionDialog { .. }) => Vec::new(),
         Some(OverlayState::CommandPalette { .. }) | Some(OverlayState::Help) | None => Vec::new(),
     }
 }
@@ -263,7 +345,11 @@ fn cancel_overlay(state: &AppState) -> Vec<BusReaction> {
             UserIntent::RespondToDialog(ExtensionUiResponse::Cancelled),
         ))];
     }
-    if let Some(OverlayState::AuthenticationPrompt { flow_id, .. }) = &state.view.overlay {
+    if let Some(
+        OverlayState::AuthenticationPrompt { flow_id, .. }
+        | OverlayState::AuthenticationTerminal { flow_id },
+    ) = &state.view.overlay
+    {
         return vec![BusReaction::App(AppEvent::User(
             UserIntent::CancelAuthentication(flow_id.clone()),
         ))];
@@ -293,7 +379,7 @@ fn overlay_selected(state: &AppState) -> usize {
         | Some(OverlayState::AuthenticationPrompt { selected, .. })
         | Some(OverlayState::SessionPicker { selected, .. })
         | Some(OverlayState::ExtensionDialog { selected, .. }) => *selected,
-        Some(OverlayState::Help) | None => 0,
+        Some(OverlayState::AuthenticationTerminal { .. }) | Some(OverlayState::Help) | None => 0,
     }
 }
 

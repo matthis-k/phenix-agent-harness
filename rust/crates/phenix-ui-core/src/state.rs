@@ -148,6 +148,17 @@ impl AuthFlowState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuthTerminalState {
+    pub flow_id: AuthFlowId,
+    pub title: String,
+    pub screen: String,
+    pub cursor_row: u16,
+    pub cursor_column: u16,
+    pub running: bool,
+    pub result: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppState {
     pub connection: RuntimeConnectionState,
     pub capabilities: BackendCapabilities,
@@ -161,6 +172,7 @@ pub struct AppState {
     pub thinking_levels: Vec<ThinkingLevel>,
     pub auth_providers: Vec<AuthProviderSummary>,
     pub auth_flows: BTreeMap<AuthFlowId, AuthFlowState>,
+    pub auth_terminal: Option<AuthTerminalState>,
     pub commands: Vec<CommandSummary>,
     pub dialogs: VecDeque<DialogState>,
     pub statuses: BTreeMap<String, String>,
@@ -223,6 +235,7 @@ impl Default for AppState {
             thinking_levels: Vec::new(),
             auth_providers: Vec::new(),
             auth_flows: BTreeMap::new(),
+            auth_terminal: None,
             commands: Vec::new(),
             dialogs: VecDeque::new(),
             statuses: BTreeMap::new(),

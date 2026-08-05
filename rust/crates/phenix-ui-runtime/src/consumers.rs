@@ -77,6 +77,12 @@ impl EventConsumer for UiStateConsumer {
                 element: element.clone(),
                 lines: *lines,
             }),
+            UiEvent::Input(phenix_ui_core::UiInput::Resize { width, height }) => {
+                Some(ViewMutation::SetTerminalSize {
+                    width: *width,
+                    height: *height,
+                })
+            }
             UiEvent::Invalidate => return ReactionBatch::one(BusReaction::Render),
             UiEvent::Input(_) | UiEvent::ShutdownRequested => None,
         };

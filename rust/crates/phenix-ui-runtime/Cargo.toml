@@ -8,6 +8,8 @@ publish = false
 phenix-frontend-config = { path = "../phenix-frontend-config" }
 phenix-runtime-api = { path = "../phenix-runtime-api" }
 phenix-ui-core = { path = "../phenix-ui-core" }
+portable-pty.workspace = true
+vt100.workspace = true
 
 [dev-dependencies]
 phenix-ui-lua = { path = "../phenix-ui-lua" }

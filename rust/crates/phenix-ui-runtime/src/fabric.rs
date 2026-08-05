@@ -66,6 +66,10 @@ pub enum ViewMutation {
     },
     EditInput(InputEdit),
     MoveOverlaySelection(i32),
+    SetTerminalSize {
+        width: u16,
+        height: u16,
+    },
     Notify(String),
 }
 

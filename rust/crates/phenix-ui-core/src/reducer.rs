@@ -1,8 +1,8 @@
-use crate::state::{AppState, DialogState, RuntimeConnectionState};
+use crate::state::{AppState, AuthTerminalState, DialogState, RuntimeConnectionState};
 use crate::view::{FocusTarget, OverlayState};
 use phenix_runtime_api::{
-    AuthFlowId, AuthMethod, AuthPromptResponse, BackendCommand, BackendError, BackendEvent,
-    BackendOutput, BackendReply, ExtensionUiResponse, ModelRef, RunId, SessionId,
+    AuthFlowId, AuthMethod, AuthPromptResponse, AuthTerminalRequest, BackendCommand, BackendError,
+    BackendEvent, BackendOutput, BackendReply, ExtensionUiResponse, ModelRef, RunId, SessionId,
     StreamingBehavior, ThinkingLevel, ToolExecutionOutcome, TranscriptBlock, TranscriptRole,
 };
 
@@ -29,6 +29,10 @@ pub enum UserIntent {
         flow_id: AuthFlowId,
         response: AuthPromptResponse,
     },
+    WriteAuthenticationTerminal {
+        flow_id: AuthFlowId,
+        bytes: Vec<u8>,
+    },
     CancelAuthentication(AuthFlowId),
     Logout(String),
     OpenSessionPicker,
@@ -44,15 +48,36 @@ pub enum UserIntent {
 pub enum AppEvent {
     User(UserIntent),
     Backend(Box<BackendOutput>),
+    AuthenticationTerminalFrame {
+        flow_id: AuthFlowId,
+        screen: String,
+        cursor_row: u16,
+        cursor_column: u16,
+    },
+    AuthenticationTerminalExited {
+        flow_id: AuthFlowId,
+        success: bool,
+        message: Option<String>,
+    },
     BackendSubmitFailed(String),
 }
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum AppEffect {
     Send(BackendCommand),
-    RunExternal {
+    StartAuthenticationTerminal {
         flow_id: AuthFlowId,
-        command: phenix_runtime_api::ExternalCommand,
+        request: AuthTerminalRequest,
+    },
+    WriteAuthenticationTerminal {
+        flow_id: AuthFlowId,
+        bytes: Vec<u8>,
+    },
+    CancelAuthenticationTerminal {
+        flow_id: AuthFlowId,
+    },
+    ReleaseAuthenticationTerminal {
+        flow_id: AuthFlowId,
     },
     Render,
     Quit,
@@ -62,6 +87,51 @@ pub fn reduce(state: &mut AppState, event: AppEvent) -> Vec<AppEffect> {
     match event {
         AppEvent::User(intent) => reduce_user_intent(state, intent),
         AppEvent::Backend(output) => reduce_backend_output(state, *output),
+        AppEvent::AuthenticationTerminalFrame {
+            flow_id,
+            screen,
+            cursor_row,
+            cursor_column,
+        } => {
+            if let Some(terminal) = state
+                .auth_terminal
+                .as_mut()
+                .filter(|terminal| terminal.flow_id == flow_id)
+            {
+                terminal.screen = screen;
+                terminal.cursor_row = cursor_row;
+                terminal.cursor_column = cursor_column;
+            }
+            vec![AppEffect::Render]
+        }
+        AppEvent::AuthenticationTerminalExited {
+            flow_id,
+            success,
+            message,
+        } => {
+            if let Some(terminal) = state
+                .auth_terminal
+                .as_mut()
+                .filter(|terminal| terminal.flow_id == flow_id)
+            {
+                terminal.running = false;
+                terminal.result = message.clone().or_else(|| {
+                    Some(if success {
+                        "Authentication command completed.".to_owned()
+                    } else {
+                        "Authentication command failed.".to_owned()
+                    })
+                });
+            }
+            vec![
+                AppEffect::Send(BackendCommand::AuthTerminalFinished {
+                    flow_id,
+                    success,
+                    message,
+                }),
+                AppEffect::Render,
+            ]
+        }
         AppEvent::BackendSubmitFailed(message) => {
             state.connection = RuntimeConnectionState::Degraded(message.clone());
             state.notifications.push_back(message);
@@ -123,12 +193,27 @@ fn reduce_user_intent(state: &mut AppState, intent: UserIntent) -> Vec<AppEffect
                 AppEffect::Render,
             ]
         }
+        UserIntent::WriteAuthenticationTerminal { flow_id, bytes } => {
+            vec![AppEffect::WriteAuthenticationTerminal { flow_id, bytes }]
+        }
         UserIntent::CancelAuthentication(flow_id) => {
+            let terminal_active = state
+                .auth_terminal
+                .as_ref()
+                .is_some_and(|terminal| terminal.flow_id == flow_id);
             close_overlay(state);
-            vec![
+            state.auth_terminal = None;
+            let mut effects = Vec::new();
+            if terminal_active {
+                effects.push(AppEffect::CancelAuthenticationTerminal {
+                    flow_id: flow_id.clone(),
+                });
+            }
+            effects.extend([
                 AppEffect::Send(BackendCommand::AuthLoginCancel { flow_id }),
                 AppEffect::Render,
-            ]
+            ]);
+            effects
         }
         UserIntent::Logout(provider_id) => {
             vec![AppEffect::Send(BackendCommand::AuthLogout { provider_id })]
@@ -351,6 +436,35 @@ fn no_run_notification(state: &mut AppState) -> Vec<AppEffect> {
     vec![AppEffect::Render]
 }
 
+fn begin_authentication_terminal(
+    state: &mut AppState,
+    flow_id: AuthFlowId,
+    request: AuthTerminalRequest,
+) -> Vec<AppEffect> {
+    let title = request
+        .title
+        .clone()
+        .unwrap_or_else(|| "Authentication".to_owned());
+    state.auth_flow_mut(flow_id.clone());
+    state.auth_terminal = Some(AuthTerminalState {
+        flow_id: flow_id.clone(),
+        title,
+        screen: String::new(),
+        cursor_row: 0,
+        cursor_column: 0,
+        running: true,
+        result: None,
+    });
+    state.view.overlay = Some(OverlayState::AuthenticationTerminal {
+        flow_id: flow_id.clone(),
+    });
+    state.view.focus = FocusTarget::Overlay;
+    vec![
+        AppEffect::StartAuthenticationTerminal { flow_id, request },
+        AppEffect::Render,
+    ]
+}
+
 fn reduce_backend_output(state: &mut AppState, output: BackendOutput) -> Vec<AppEffect> {
     match output {
         BackendOutput::Reply { result, .. } => match result {
@@ -367,10 +481,17 @@ fn reduce_backend_output(state: &mut AppState, output: BackendOutput) -> Vec<App
                 vec![AppEffect::Render]
             }
         },
-        BackendOutput::Event(BackendEvent::ExternalCommandRequested { flow_id, command }) => vec![
-            AppEffect::RunExternal { flow_id, command },
-            AppEffect::Render,
-        ],
+        BackendOutput::Event(BackendEvent::AuthTerminalRequested { flow_id, command }) => {
+            begin_authentication_terminal(state, flow_id, command)
+        }
+        BackendOutput::Event(event @ BackendEvent::AuthFinished { ref flow_id, .. }) => {
+            let flow_id = flow_id.clone();
+            reduce_backend_event(state, event);
+            vec![
+                AppEffect::ReleaseAuthenticationTerminal { flow_id },
+                AppEffect::Render,
+            ]
+        }
         BackendOutput::Event(event) => {
             reduce_backend_event(state, event);
             vec![AppEffect::Render]
@@ -489,7 +610,7 @@ fn reduce_backend_event(state: &mut AppState, event: BackendEvent) {
         BackendEvent::TranscriptUpdated(block) => {
             state.transcript_mut(block.run_id.clone()).update(block);
         }
-        BackendEvent::ExternalCommandRequested { .. } => {
+        BackendEvent::AuthTerminalRequested { .. } => {
             unreachable!("handled before reducer projection")
         }
         BackendEvent::AuthPromptRequested { flow_id, prompt } => {
@@ -511,6 +632,13 @@ fn reduce_backend_event(state: &mut AppState, event: BackendEvent) {
             result,
         } => {
             state.auth_flows.remove(&flow_id);
+            if state
+                .auth_terminal
+                .as_ref()
+                .is_some_and(|terminal| terminal.flow_id == flow_id)
+            {
+                state.auth_terminal = None;
+            }
             match result {
                 Ok(()) => state
                     .notifications
@@ -530,6 +658,7 @@ fn reduce_backend_event(state: &mut AppState, event: BackendEvent) {
                 || matches!(
                     state.view.overlay,
                     Some(OverlayState::AuthenticationProviders { .. })
+                        | Some(OverlayState::AuthenticationTerminal { .. })
                 )
             {
                 close_overlay(state);
@@ -659,8 +788,8 @@ fn upsert_by<T, K: PartialEq>(items: &mut Vec<T>, item: T, key: impl Fn(&T) -> K
 mod tests {
     use super::*;
     use phenix_runtime_api::{
-        AuthPrompt, BackendHealth, DialogId, ExtensionUiRequest, RunKind, RunState, RunSummary,
-        RuntimeSnapshot, TranscriptBlock, TranscriptRole,
+        AuthPrompt, BackendCapabilities, BackendHealth, DialogId, ExtensionUiRequest, RunKind,
+        RunState, RunSummary, RuntimeSnapshot, TranscriptBlock, TranscriptRole,
     };
 
     #[test]
@@ -725,6 +854,39 @@ mod tests {
             Some(OverlayState::AuthenticationProviders { .. })
         ));
         assert!(effects.contains(&AppEffect::Send(BackendCommand::AuthProviders)));
+    }
+
+    #[test]
+    fn terminal_authentication_is_owned_by_the_native_ui() {
+        let flow_id = AuthFlowId::parse("auth-terminal").expect("flow ID");
+        let request = AuthTerminalRequest {
+            program: "backend-auth".to_owned(),
+            arguments: vec!["login".to_owned()],
+            environment: Default::default(),
+            cwd: None,
+            title: Some("Backend login".to_owned()),
+        };
+        let mut state = AppState::default();
+        let effects = reduce(
+            &mut state,
+            AppEvent::Backend(Box::new(BackendOutput::Event(
+                BackendEvent::AuthTerminalRequested {
+                    flow_id: flow_id.clone(),
+                    command: request.clone(),
+                },
+            ))),
+        );
+        assert!(matches!(
+            state.view.overlay,
+            Some(OverlayState::AuthenticationTerminal { flow_id: ref active }) if active == &flow_id
+        ));
+        assert!(matches!(
+            effects.first(),
+            Some(AppEffect::StartAuthenticationTerminal {
+                flow_id: active,
+                request: active_request,
+            }) if active == &flow_id && active_request == &request
+        ));
     }
 
     #[test]

@@ -137,10 +137,12 @@ pub struct AuthProviderSummary {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ExternalCommand {
+pub struct AuthTerminalRequest {
     pub program: String,
     pub arguments: Vec<String>,
     pub environment: BTreeMap<String, String>,
+    pub cwd: Option<String>,
+    pub title: Option<String>,
 }
 #[derive(Eq, PartialEq)]
 pub struct SecretValue(Vec<u8>);
@@ -608,9 +610,9 @@ pub enum BackendEvent {
         steering: Vec<String>,
         follow_ups: Vec<String>,
     },
-    ExternalCommandRequested {
+    AuthTerminalRequested {
         flow_id: AuthFlowId,
-        command: ExternalCommand,
+        command: AuthTerminalRequest,
     },
     AuthPromptRequested {
         flow_id: AuthFlowId,
