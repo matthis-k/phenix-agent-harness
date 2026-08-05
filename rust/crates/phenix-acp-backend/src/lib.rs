@@ -591,15 +591,25 @@ async fn handle_request(
                         "terminal authentication flow {flow_id} is not pending"
                     ))
                 })?;
+            let result = if success && runtime.adapter.sessions.is_empty() {
+                create_session(connection, runtime, config.cwd.clone(), None)
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            } else if success {
+                Ok(())
+            } else {
+                Err(message.unwrap_or_else(|| {
+                    "terminal authentication command failed".to_owned()
+                }))
+            };
+            if result.is_ok() {
+                outputs.event(BackendEvent::SnapshotChanged(runtime.adapter.snapshot()))?;
+            }
             outputs.event(BackendEvent::AuthFinished {
                 flow_id,
                 provider_id,
-                result: if success {
-                    Ok(())
-                } else {
-                    Err(message
-                        .unwrap_or_else(|| "terminal authentication command failed".to_owned()))
-                },
+                result,
             })?;
             Ok(BackendReply::Completed)
         }
@@ -1104,12 +1114,21 @@ async fn start_authentication(
     let flow_id = runtime.next_auth_flow()?;
     match method {
         AcpAuthMethod::Agent(method) => {
-            let result = connection
+            let mut result = connection
                 .send_request(AuthenticateRequest::new(method.id))
                 .block_task()
                 .await
                 .map(|_| ())
                 .map_err(|error| error.to_string());
+            if result.is_ok() && runtime.adapter.sessions.is_empty() {
+                result = create_session(connection, runtime, config.cwd.clone(), None)
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| error.to_string());
+            }
+            if result.is_ok() {
+                outputs.event(BackendEvent::SnapshotChanged(runtime.adapter.snapshot()))?;
+            }
             outputs.event(BackendEvent::AuthFinished {
                 flow_id,
                 provider_id,
