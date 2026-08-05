@@ -1,4 +1,4 @@
-{ ... }:
+_:
 
 {
   perSystem =
@@ -65,8 +65,8 @@
           runtimeInputs = [ pkgs.nodejs ];
           text = ''
             export PHENIX_HEADLESS_PROGRAM="${pkgs.nodejs}/bin/node"
-            export PHENIX_HEADLESS_ENTRY="${config.packages.phenix-pi}/headless/main.ts"
-            export PHENIX_SOURCE_ROOT="${config.packages.phenix-pi}"
+            export PHENIX_HEADLESS_ENTRY="${config.packages.phenix-pi-package}/headless/main.ts"
+            export PHENIX_SOURCE_ROOT="${config.packages.phenix-pi-package}"
             ${configExport}
             exec "${phenixTui}/bin/phenix" ${pkgs.lib.escapeShellArgs wrapperArguments} "$@"
           '';
@@ -83,37 +83,40 @@
         '';
       };
 
-      phenixSmoke = pkgs.runCommand "phenix-frontend-smoke"
-        {
-          nativeBuildInputs = [
-            phenix
-            configuredSmokePackage
-          ];
-        }
-        ''
-          export HOME="$TMPDIR/home"
-          export XDG_CONFIG_HOME="$HOME/.config"
-          export XDG_DATA_HOME="$HOME/.local/share"
-          export XDG_STATE_HOME="$HOME/.local/state"
-          export XDG_CACHE_HOME="$HOME/.cache"
-          export PI_SKIP_VERSION_CHECK=1
-          mkdir -p "$XDG_CONFIG_HOME/phenix" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
+      phenixSmoke =
+        pkgs.runCommand "phenix-frontend-smoke"
+          {
+            nativeBuildInputs = [
+              phenix
+              configuredSmokePackage
+            ];
+          }
+          ''
+            export HOME="$TMPDIR/home"
+            export XDG_CONFIG_HOME="$HOME/.config"
+            export XDG_DATA_HOME="$HOME/.local/share"
+            export XDG_STATE_HOME="$HOME/.local/state"
+            export XDG_CACHE_HOME="$HOME/.cache"
+            export PI_SKIP_VERSION_CHECK=1
+            mkdir -p "$XDG_CONFIG_HOME/phenix" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
 
-          cat > "$XDG_CONFIG_HOME/phenix/init.lua" <<'EOF'
-          phenix.keymap.del("global", "<C-q>")
-          assert(type(phenix.layout.set) == "function")
-          EOF
+            cat > "$XDG_CONFIG_HOME/phenix/init.lua" <<'EOF'
+            phenix.keymap.del("global", "<C-q>")
+            assert(type(phenix.layout.set) == "function")
+            EOF
 
-          phenix --print-default-config | grep -q 'phenix.layout.set'
-          phenix --check
-          phenix-configured-smoke --check
-          touch "$out"
-        '';
+            phenix --print-default-config | grep -q 'phenix.layout.set'
+            phenix --check
+            phenix-configured-smoke --check
+            touch "$out"
+          '';
     in
     {
-      packages.phenix-tui = phenixTui;
-      packages.phenix = phenix;
-      packages.default = pkgs.lib.mkForce phenix;
+      packages = {
+        phenix-tui = phenixTui;
+        inherit phenix;
+        default = pkgs.lib.mkForce phenix;
+      };
 
       legacyPackages.phenixFrontend = {
         inherit mkPhenixWrapper;
