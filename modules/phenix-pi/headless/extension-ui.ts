@@ -77,11 +77,7 @@ export class HeadlessExtensionUi {
     this.#themes = input.themes;
     this.#createId = input.createId ?? randomUUID;
 
-    const setWidget = ((
-      key: string,
-      content: unknown,
-      options?: ExtensionWidgetOptions,
-    ): void => {
+    const setWidget = ((key: string, content: unknown, options?: ExtensionWidgetOptions): void => {
       if (content === undefined || isStringArray(content)) {
         this.#publish({
           type: "widget.changed",
@@ -96,16 +92,12 @@ export class HeadlessExtensionUi {
 
     this.context = {
       select: (title, options, opts) =>
-        this.requestDialog(
-          { kind: "select", title, options },
-          opts,
-          (response) => (response.kind === "selected" ? response.value : undefined),
+        this.requestDialog({ kind: "select", title, options }, opts, (response) =>
+          response.kind === "selected" ? response.value : undefined,
         ),
       confirm: (title, message, opts) =>
-        this.requestDialog(
-          { kind: "confirm", title, message },
-          opts,
-          (response) => (response.kind === "confirmed" ? response.value : false),
+        this.requestDialog({ kind: "confirm", title, message }, opts, (response) =>
+          response.kind === "confirmed" ? response.value : false,
         ),
       input: (title, placeholder, opts) =>
         this.requestDialog(
