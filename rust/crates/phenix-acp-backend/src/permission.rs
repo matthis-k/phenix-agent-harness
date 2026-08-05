@@ -142,7 +142,7 @@ fn choose_by_confirmation<'a>(
     confirmed: bool,
 ) -> Option<RequestPermissionOutcome> {
     let preferred = options
-        .filter(|option| {
+        .find(|option| {
             if confirmed {
                 matches!(
                     option.kind,
@@ -156,8 +156,7 @@ fn choose_by_confirmation<'a>(
                         | phenix_acp::acp::schema::v1::PermissionOptionKind::RejectAlways
                 )
             }
-        })
-        .next()?;
+        })?;
     Some(RequestPermissionOutcome::Selected(
         SelectedPermissionOutcome::new(preferred.option_id.clone()),
     ))
