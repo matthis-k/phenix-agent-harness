@@ -7,7 +7,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "command", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum GatewayCommand {
     CreateTree {
         definition_id: DefinitionId,
@@ -77,9 +77,7 @@ pub enum GatewayCommand {
 pub enum GatewayReply {
     TreeCreated(TreeStartResult),
     WorkflowStarted(WorkflowStartResult),
-    NodeCreated {
-        node_id: SessionNodeId,
-    },
+    NodeCreated { node_id: SessionNodeId },
     Events(Vec<GatewayEvent>),
     Snapshot(SessionTreeSnapshot),
     Trees(SessionTreeListResult),
@@ -126,9 +124,11 @@ impl PhenixAcpGateway {
                 tree_id,
                 workflow_id,
                 objective,
-            } => Ok(GatewayReply::WorkflowStarted(
-                self.start_workflow(&tree_id, &workflow_id, objective)?,
-            )),
+            } => Ok(GatewayReply::WorkflowStarted(self.start_workflow(
+                &tree_id,
+                &workflow_id,
+                objective,
+            )?)),
             GatewayCommand::Delegate {
                 tree_id,
                 parent_node,
@@ -144,13 +144,7 @@ impl PhenixAcpGateway {
                 objective,
                 session_id,
             } => Ok(GatewayReply::NodeCreated {
-                node_id: self.load_session(
-                    &tree_id,
-                    &parent_node,
-                    role,
-                    objective,
-                    session_id,
-                )?,
+                node_id: self.load_session(&tree_id, &parent_node, role, objective, session_id)?,
             }),
             GatewayCommand::ResumeSession {
                 tree_id,
@@ -192,9 +186,9 @@ impl PhenixAcpGateway {
                 tree_id,
                 objective,
                 role,
-            } => Ok(GatewayReply::Routing(self.explain_route(
-                &tree_id, objective, role,
-            )?)),
+            } => Ok(GatewayReply::Routing(
+                self.explain_route(&tree_id, objective, role)?,
+            )),
             GatewayCommand::MarkObjective {
                 tree_id,
                 objective_id,
