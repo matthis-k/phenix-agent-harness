@@ -1,0 +1,11 @@
+[package]
+name = "phenix-acp-presets"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+futures.workspace = true
+phenix-acp = { path = "../phenix-acp" }
+phenix-acp-backend = { path = "../phenix-acp-backend" }
+shell-words.workspace = true
