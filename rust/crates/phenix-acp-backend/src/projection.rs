@@ -115,7 +115,9 @@ pub(crate) fn apply_terminal_event(
                 .unwrap_or("unknown session");
             outputs.event(BackendEvent::StatusChanged {
                 key: format!("terminal.{terminal_id}"),
-                text: Some(format!("{session} · {terminal_id}: exited with {exit_code:?}")),
+                text: Some(format!(
+                    "{session} · {terminal_id}: exited with {exit_code:?}"
+                )),
             })?;
         }
     }
