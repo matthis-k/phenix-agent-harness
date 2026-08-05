@@ -1,13 +1,16 @@
-import type { AgentSession, AgentSessionRuntime, SessionInfo } from "@earendil-works/pi-coding-agent";
+import type { ImageContent, ThinkingLevel } from "@earendil-works/pi-ai";
+import type {
+  AgentSession,
+  AgentSessionRuntime,
+  SessionInfo,
+} from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import type { ImageContent, Model, ThinkingLevel } from "@earendil-works/pi-ai";
 
-import type { PhenixRuntime } from "../composition/create-phenix-runtime.ts";
-import { runId, type RunId } from "../domain/shared.ts";
+import { type RunId, runId } from "../domain/shared.ts";
 import { loadPhenixUiSnapshot } from "../extension/phenix-ui.ts";
-import type { WorkspaceRuntimeBinding } from "../extension/workspace-runtime-binding.ts";
 import { routeWorkspaceMessage } from "../extension/workspace/workspace-message-routing.ts";
-import { HeadlessAuthCoordinator } from "./auth-coordinator.ts";
+import type { WorkspaceRuntimeBinding } from "../extension/workspace-runtime-binding.ts";
+import type { HeadlessAuthCoordinator } from "./auth-coordinator.ts";
 import type {
   HeadlessAuthPort,
   HeadlessExecutionPort,
@@ -19,7 +22,7 @@ import type {
   HeadlessSessionPort,
 } from "./executor.ts";
 import { HeadlessRuntimeExecutor } from "./executor.ts";
-import { HeadlessExtensionUi } from "./extension-ui.ts";
+import type { HeadlessExtensionUi } from "./extension-ui.ts";
 import type {
   HeadlessCommand,
   HeadlessImage,
@@ -45,7 +48,9 @@ export interface PiHeadlessAdapterOptions {
 
 type Command<T extends HeadlessCommand["type"]> = Extract<HeadlessCommand, { readonly type: T }>;
 
-export function createPiHeadlessExecutor(options: PiHeadlessAdapterOptions): HeadlessRuntimeExecutor {
+export function createPiHeadlessExecutor(
+  options: PiHeadlessAdapterOptions,
+): HeadlessRuntimeExecutor {
   const adapter = new PiHeadlessAdapter(options);
   return new HeadlessRuntimeExecutor(adapter.dependencies);
 }
@@ -528,14 +533,19 @@ function piImages(images: readonly HeadlessImage[]): ImageContent[] {
 }
 
 function piThinkingLevel(level: HeadlessThinkingLevel): ThinkingLevel {
-  return level === "xhigh" ? "xhigh" : level;
+  return level === "off" ? "minimal" : level;
 }
 
-function findModel(models: readonly Model<any>[], ref: HeadlessModelRef): Model<any> | undefined {
+type AvailableModel = ReturnType<AgentSession["modelRuntime"]["getAvailableSnapshot"]>[number];
+
+function findModel(
+  models: readonly AvailableModel[],
+  ref: HeadlessModelRef,
+): AvailableModel | undefined {
   return models.find((model) => model.provider === ref.provider && model.id === ref.model);
 }
 
-function modelSummary(model: Model<any>): unknown {
+function modelSummary(model: AvailableModel): unknown {
   return {
     provider: model.provider,
     model: model.id,
