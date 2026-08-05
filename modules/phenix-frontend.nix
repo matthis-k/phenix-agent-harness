@@ -32,7 +32,7 @@ _:
         installPhase = ''
           runHook preInstall
           mkdir -p "$out/bin"
-          cp target/release/phenix "$out/bin/phenix"
+          cp "target/$CARGO_BUILD_TARGET/release/phenix" "$out/bin/phenix"
           runHook postInstall
         '';
       };
