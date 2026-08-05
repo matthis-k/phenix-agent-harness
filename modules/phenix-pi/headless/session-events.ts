@@ -212,7 +212,11 @@ export class PiSessionEventBridge {
     }
   }
 
-  private transcriptBlock(runId: string, message: unknown, complete: boolean): HeadlessTranscriptBlock {
+  private transcriptBlock(
+    runId: string,
+    message: unknown,
+    complete: boolean,
+  ): HeadlessTranscriptBlock {
     return {
       id: this.messageId(message),
       runId,
