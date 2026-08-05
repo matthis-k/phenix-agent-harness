@@ -173,9 +173,16 @@ impl AdapterState {
             .sessions
             .values()
             .any(|session| !session.thinking_levels().is_empty());
+        let has_compaction = self.sessions.values().any(|session| {
+            session
+                .commands
+                .iter()
+                .any(|command| matches!(command.name.as_str(), "compact" | "compaction"))
+        });
         self.capabilities.models.listing = has_models;
         self.capabilities.models.selection = has_models;
         self.capabilities.models.thinking_levels = has_thinking;
+        self.capabilities.prompting.compaction = has_compaction;
     }
 
     pub fn auth_providers(&self) -> Vec<AuthProviderSummary> {
@@ -375,7 +382,7 @@ fn project_capabilities(initialize: &InitializeResponse) -> BackendCapabilities 
             steering: true,
             follow_ups: true,
             images: agent.prompt_capabilities.image,
-            compaction: true,
+            compaction: false,
             retry_control: false,
         },
         sessions: SessionCapabilities {
@@ -386,7 +393,7 @@ fn project_capabilities(initialize: &InitializeResponse) -> BackendCapabilities 
             branching: agent.session_capabilities.fork.is_some(),
             import: agent.load_session,
             export: false,
-            tree: true,
+            tree: false,
         },
         authentication: phenix_runtime_api::AuthenticationCapabilities {
             provider_listing: !initialize.auth_methods.is_empty(),
@@ -418,8 +425,8 @@ fn project_capabilities(initialize: &InitializeResponse) -> BackendCapabilities 
         },
         extension_ui: phenix_runtime_api::ExtensionUiCapabilities {
             selection: true,
-            confirmation: true,
-            text_input: true,
+            confirmation: false,
+            text_input: false,
             secret_input: false,
             editor: false,
             notifications: true,
