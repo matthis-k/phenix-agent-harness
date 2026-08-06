@@ -1,7 +1,8 @@
+mod acp_config;
+
+use acp_config::load_acp_backend;
 use clap::Parser;
-use phenix_acp::{DefinitionId, RoleId, SessionTreeId};
-use phenix_acp_backend::{AcpAgentBackend, AcpBackendConfig, GatewayAgentBackend};
-use phenix_acp_presets::standard_gateway;
+use phenix_acp_backend::GatewayAgentBackend;
 use phenix_frontend_config::FrontendProviderRef;
 use phenix_process_backend::{ProcessAgentBackend, ProcessBackendConfig};
 use phenix_runtime_api::{
@@ -54,6 +55,10 @@ struct Arguments {
     #[arg(long, value_name = "PATH")]
     config: Option<PathBuf>,
 
+    /// Read config.json and referenced Phenix ACP definitions from this directory.
+    #[arg(short = 'p', long = "phenix-acp-config", value_name = "DIR")]
+    phenix_acp_config: Option<PathBuf>,
+
     /// Do not load the built-in frontend keymaps, theme, and layout defaults.
     #[arg(long)]
     no_default_config: bool,
@@ -75,10 +80,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let provider = load_frontend_provider(&arguments)?;
+    let acp_config = resolve_acp_config_directory(arguments.phenix_acp_config.as_deref());
     if arguments.check {
-        return run_handshake_check();
+        return run_handshake_check(acp_config.as_deref());
     }
-    run_tui(provider)
+    run_tui(provider, acp_config.as_deref())
 }
 
 fn load_frontend_provider(arguments: &Arguments) -> Result<FrontendProviderRef, Box<dyn Error>> {
@@ -109,8 +115,26 @@ fn default_config_path() -> Option<PathBuf> {
         .map(|home| home.join(".config/phenix/init.lua"))
 }
 
-fn run_tui(provider: FrontendProviderRef) -> Result<(), Box<dyn Error>> {
-    let backend = spawn_backend()?;
+fn resolve_acp_config_directory(explicit_path: Option<&Path>) -> Option<PathBuf> {
+    explicit_path
+        .map(Path::to_path_buf)
+        .or_else(|| default_acp_config_directory().filter(|path| path.join("config.json").is_file()))
+}
+
+fn default_acp_config_directory() -> Option<PathBuf> {
+    if let Some(root) = env::var_os("XDG_CONFIG_HOME") {
+        return Some(PathBuf::from(root).join("phenix-acp"));
+    }
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|home| home.join(".config/phenix-acp"))
+}
+
+fn run_tui(
+    provider: FrontendProviderRef,
+    acp_config: Option<&Path>,
+) -> Result<(), Box<dyn Error>> {
+    let backend = spawn_backend(acp_config)?;
     backend.client.submit(BackendCommand::Initialize {
         client: client_information(),
     })?;
@@ -132,8 +156,8 @@ fn run_tui(provider: FrontendProviderRef) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn run_handshake_check() -> Result<(), Box<dyn Error>> {
-    let backend = spawn_backend()?;
+fn run_handshake_check(acp_config: Option<&Path>) -> Result<(), Box<dyn Error>> {
+    let backend = spawn_backend(acp_config)?;
     let initialize_id = backend.client.submit(BackendCommand::Initialize {
         client: client_information(),
     })?;
@@ -196,11 +220,11 @@ fn receive_reply(
     }
 }
 
-fn spawn_backend() -> Result<BackendRuntime, Box<dyn Error>> {
+fn spawn_backend(acp_config: Option<&Path>) -> Result<BackendRuntime, Box<dyn Error>> {
     let backend: Box<dyn AgentBackend> =
         match parse_backend_kind(env::var("PHENIX_BACKEND").ok().as_deref())? {
             BackendKind::Process => Box::new(create_process_backend()?),
-            BackendKind::Acp => Box::new(create_acp_backend()?),
+            BackendKind::Acp => Box::new(create_acp_backend(acp_config)?),
         };
     Ok(BackendRuntime::spawn(backend, CHANNEL_CAPACITY)?)
 }
@@ -216,19 +240,18 @@ fn parse_backend_kind(value: Option<&str>) -> Result<BackendKind, io::Error> {
     }
 }
 
-fn create_acp_backend() -> Result<GatewayAgentBackend, Box<dyn Error>> {
-    let command = env::var("PHENIX_ACP_COMMAND").unwrap_or_else(|_| "pi-acp".to_owned());
-    let config = AcpBackendConfig::new(command, env::current_dir()?)?;
-    let transport = AcpAgentBackend::gateway_transport(config, CHANNEL_CAPACITY)?;
-    let gateway = standard_gateway(transport.clone())?;
-    Ok(GatewayAgentBackend::new(
-        gateway,
-        transport,
-        DefinitionId::parse("phenix.standard")?,
-        SessionTreeId::parse("tree-frontend")?,
-        RoleId::parse("coordinator")?,
-        "Interactive Phenix session tree",
-    ))
+fn create_acp_backend(config_directory: Option<&Path>) -> Result<GatewayAgentBackend, Box<dyn Error>> {
+    let config_directory = config_directory.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "Phenix ACP configuration was not found; create XDG_CONFIG_HOME/phenix-acp/config.json or pass -p/--phenix-acp-config",
+        )
+    })?;
+    Ok(load_acp_backend(
+        config_directory,
+        &env::current_dir()?,
+        CHANNEL_CAPACITY,
+    )?)
 }
 
 fn client_information() -> ClientInformation {
@@ -406,6 +429,12 @@ mod tests {
     fn xdg_config_path_uses_a_neovim_style_init_lua() {
         let path = PathBuf::from("/tmp/xdg-config").join("phenix/init.lua");
         assert_eq!(path, PathBuf::from("/tmp/xdg-config/phenix/init.lua"));
+    }
+
+    #[test]
+    fn xdg_acp_config_uses_a_dedicated_directory() {
+        let path = PathBuf::from("/tmp/xdg-config").join("phenix-acp");
+        assert_eq!(path, PathBuf::from("/tmp/xdg-config/phenix-acp"));
     }
 
     #[test]
