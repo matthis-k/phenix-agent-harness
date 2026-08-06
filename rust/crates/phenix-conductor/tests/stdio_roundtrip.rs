@@ -52,9 +52,59 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
     let tree = process.receive_response(4)?;
     assert_eq!(tree["result"]["id"], session_id);
     assert_eq!(tree["result"]["nodes"].as_array().map(Vec::len), Some(1));
+    let root_node_id = tree["result"]["root"]
+        .as_str()
+        .ok_or("tree snapshot did not contain a root node")?
+        .to_owned();
 
     process.send_request(
         5,
+        "_phenix/node/subscribe",
+        &json!({
+            "tree_id": session_id,
+            "node_id": root_node_id,
+        }),
+    )?;
+    process.receive_response(5)?;
+
+    process.send_request(
+        6,
+        "_phenix/node/execute",
+        &json!({
+            "tree_id": session_id,
+            "node_id": root_node_id,
+            "command": {
+                "kind": "prompt",
+                "text": "extended",
+                "images": [],
+            }
+        }),
+    )?;
+    let mut saw_extended_event = false;
+    let extended_completed = loop {
+        let message = process.receive()?;
+        if message.get("method").and_then(Value::as_str) == Some("_phenix/node/event")
+            && message.to_string().contains("echo: extended")
+        {
+            saw_extended_event = true;
+        }
+        if message.get("id") == Some(&Value::from(6)) {
+            break message;
+        }
+    };
+    assert!(
+        saw_extended_event,
+        "subscribed node did not emit the downstream Phenix ACP event"
+    );
+    assert!(
+        extended_completed["result"]["events"]
+            .as_array()
+            .is_some_and(|events| !events.is_empty()),
+        "node execution did not return its immediate event batch"
+    );
+
+    process.send_request(
+        7,
         "session/prompt",
         &PromptRequest::new(
             SessionId::new(session_id.clone()),
@@ -69,7 +119,7 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
         {
             saw_echo = true;
         }
-        if message.get("id") == Some(&Value::from(5)) {
+        if message.get("id") == Some(&Value::from(7)) {
             break message;
         }
     };
@@ -80,11 +130,11 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
     assert_eq!(completed["result"]["stopReason"], "end_turn");
 
     process.send_request(
-        6,
+        8,
         "_phenix/session_tree/get",
         &json!({ "tree_id": session_id }),
     )?;
-    let tree_after_prompt = process.receive_response(6)?;
+    let tree_after_prompt = process.receive_response(8)?;
     assert_eq!(tree_after_prompt["result"]["id"], session_id);
     assert_eq!(
         tree_after_prompt["result"]["nodes"][0]["downstream_session"],
