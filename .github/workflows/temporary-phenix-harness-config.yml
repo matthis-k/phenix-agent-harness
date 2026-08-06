@@ -17,7 +17,9 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - name: Apply migration
-        run: python .github/scripts/apply-phenix-harness-lua-config.py
+        run: |
+          python .github/scripts/apply-phenix-harness-lua-config.py
+          python .github/scripts/fix-phenix-harness-test-paths.py
       - name: Format
         working-directory: rust
         run: cargo fmt --all
@@ -30,6 +32,7 @@ jobs:
       - name: Commit clean result
         run: |
           rm .github/scripts/apply-phenix-harness-lua-config.py
+          rm .github/scripts/fix-phenix-harness-test-paths.py
           rm .github/workflows/temporary-phenix-harness-config.yml
           git config user.name "Phenix CI"
           git config user.email "69082876+matthis-k@users.noreply.github.com"
