@@ -1,0 +1,27 @@
+name: Temporary Phenix Harness cleanup
+
+on:
+  push:
+    branches:
+      - feat/phenix-acp-config-directory
+
+permissions:
+  contents: write
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Remove generated artifacts
+        run: |
+          git rm -r rust/target
+          git rm .github/workflows/temporary-clean-phenix-harness.yml
+      - name: Commit clean tree
+        run: |
+          git config user.name "Phenix CI"
+          git config user.email "69082876+matthis-k@users.noreply.github.com"
+          git -c core.hooksPath=/dev/null commit -m "chore: remove generated Rust artifacts"
+          git push origin HEAD:feat/phenix-acp-config-directory
