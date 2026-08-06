@@ -1,6 +1,6 @@
 use crate::{
-    AcpSessionId, BackendId, DefinitionId, GatewayEvent, ModelId, ObjectiveId, ObjectiveState,
-    ProviderId, RoleId, RouterId, SessionCommand, SessionNodeId, SessionTreeId, WorkflowId,
+    AcpSessionId, BackendId, DefinitionId, GatewayEvent, ModelId, ObjectiveId, ProviderId, RoleId,
+    RouterId, SessionCommand, SessionNodeId, SessionTreeId, WorkflowId,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -52,33 +52,11 @@ pub struct SessionNodeSnapshot {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ObjectiveStateWire {
+pub enum ObjectiveState {
     NotStarted,
     WorkInProgress,
     Done,
     Blocked,
-}
-
-impl From<ObjectiveState> for ObjectiveStateWire {
-    fn from(state: ObjectiveState) -> Self {
-        match state {
-            ObjectiveState::NotStarted => Self::NotStarted,
-            ObjectiveState::WorkInProgress => Self::WorkInProgress,
-            ObjectiveState::Done => Self::Done,
-            ObjectiveState::Blocked => Self::Blocked,
-        }
-    }
-}
-
-impl From<ObjectiveStateWire> for ObjectiveState {
-    fn from(state: ObjectiveStateWire) -> Self {
-        match state {
-            ObjectiveStateWire::NotStarted => Self::NotStarted,
-            ObjectiveStateWire::WorkInProgress => Self::WorkInProgress,
-            ObjectiveStateWire::Done => Self::Done,
-            ObjectiveStateWire::Blocked => Self::Blocked,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
