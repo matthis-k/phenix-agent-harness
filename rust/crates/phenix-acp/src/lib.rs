@@ -3,6 +3,7 @@
 pub use agent_client_protocol as acp;
 
 mod authoring;
+mod backend;
 mod client;
 mod conductor;
 mod definition;
@@ -17,6 +18,14 @@ pub use authoring::{
     parse_definition, parse_definition_with_format, parse_routing_table,
     parse_routing_table_with_format, parse_workflow, parse_workflow_with_format, Definition,
     DefinitionFormat, DefinitionKind, DefinitionParseError, Definitions, FormatAttempt,
+};
+pub use backend::{
+    AuthenticationCapabilities, BackendAuthMethod, BackendAuthProviderList,
+    BackendAuthProviderListResult, BackendAuthProviderSummary, BackendCapabilities,
+    BackendCapabilitiesGet, BackendCapabilitiesResult, BackendCommandList, BackendCommandListResult,
+    BackendCommandSource, BackendCommandSummary, BackendModelList, BackendModelListResult,
+    BackendModelSummary, BackendTargetParams, ExtensionUiCapabilities, ModelCapabilities,
+    PromptCapabilities, ResourceCapabilities, SessionCapabilities,
 };
 pub use client::{
     decode_extension_response, encode_extension_request, ExtensionCodecError, PhenixAcpCallError,
