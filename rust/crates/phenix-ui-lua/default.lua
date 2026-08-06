@@ -49,10 +49,14 @@ map("sidebar", "k", function() phenix.ui.pane.scroll("ui.sidebar", -1) end)
 map("sidebar", ">", function() phenix.ui.pane.resize("ui.sidebar", "horizontal", 2) end)
 map("sidebar", "<", function() phenix.ui.pane.resize("ui.sidebar", "horizontal", -2) end)
 
-map("transcript", "j", function() phenix.ui.pane.scroll("ui.transcript", 1) end)
-map("transcript", "k", function() phenix.ui.pane.scroll("ui.transcript", -1) end)
-map("transcript", "<PageDown>", function() phenix.ui.pane.scroll("ui.transcript", 10) end)
-map("transcript", "<PageUp>", function() phenix.ui.pane.scroll("ui.transcript", -10) end)
+-- Transcript offsets are measured from the newest content. Moving up therefore
+-- increases the distance from the end; moving down decreases it.
+map("transcript", "j", function() phenix.ui.pane.scroll("ui.transcript", -1) end)
+map("transcript", "k", function() phenix.ui.pane.scroll("ui.transcript", 1) end)
+map("transcript", "<Down>", function() phenix.ui.pane.scroll("ui.transcript", -1) end)
+map("transcript", "<Up>", function() phenix.ui.pane.scroll("ui.transcript", 1) end)
+map("transcript", "<PageDown>", function() phenix.ui.pane.scroll("ui.transcript", -10) end)
+map("transcript", "<PageUp>", function() phenix.ui.pane.scroll("ui.transcript", 10) end)
 
 map("overlay", "<CR>", phenix.overlay.accept, { desc = "Accept selected item" })
 map("overlay", "<Esc>", phenix.overlay.cancel, { desc = "Close overlay" })
