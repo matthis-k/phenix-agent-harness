@@ -2,6 +2,7 @@
 
 pub use agent_client_protocol as acp;
 
+mod authoring;
 mod client;
 mod definition;
 mod id;
@@ -10,6 +11,9 @@ mod runtime;
 mod source;
 mod tools;
 
+pub use authoring::{
+    parse_definition, parse_routing_table, parse_workflow, Definition, Definitions,
+};
 pub use client::{
     decode_extension_response, encode_extension_request, ExtensionCodecError, PhenixAcpCallError,
 };
@@ -37,9 +41,8 @@ pub use runtime::{
     TreeStartResult, Workflow, WorkflowPlan, WorkflowPlanBuilder, WorkflowRequest, WorkflowStep,
 };
 pub use source::{
-    parse_definition, DefinitionSourceError, DefinitionSourceKind, DefinitionSources, ModelTarget,
-    ParsedDefinition, RouteSelector, RoutingRule, RoutingTable, WorkflowDefinition,
-    WorkflowStepDefinition,
+    DefinitionSourceError, DefinitionSourceKind, ModelTarget, RouteSelector, RoutingRule,
+    RoutingTable, WorkflowDefinition, WorkflowStepDefinition,
 };
 pub use tools::{
     BuiltinToolPolicy, McpServerDefinition, McpServerTransport, ToolConfigError, ToolConfiguration,
