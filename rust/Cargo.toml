@@ -4,6 +4,7 @@ members = [
   "crates/phenix-acp",
   "crates/phenix-acp-backend",
   "crates/phenix-acp-presets",
+  "crates/phenix-conductor",
   "crates/phenix-frontend-config",
   "crates/phenix-process-backend",
   "crates/phenix-runtime-api",
@@ -30,4 +31,5 @@ ron = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 shell-words = "1.1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 toml = "0.9"
