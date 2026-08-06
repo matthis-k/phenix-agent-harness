@@ -13,7 +13,13 @@ const LEGACY_WORKFLOWS: &[WorkflowFixture] = &[
     WorkflowFixture {
         id: "workflow.debug",
         source: include_str!("fixtures/legacy/workflows/debug.md"),
-        roles: &["reproducer", "critic", "implementer", "tester", "finalizer"],
+        roles: &[
+            "reproducer",
+            "critic",
+            "implementer",
+            "tester",
+            "finalizer",
+        ],
     },
     WorkflowFixture {
         id: "workflow.design",
@@ -23,7 +29,12 @@ const LEGACY_WORKFLOWS: &[WorkflowFixture] = &[
     WorkflowFixture {
         id: "workflow.implement",
         source: include_str!("fixtures/legacy/workflows/implement.md"),
-        roles: &["difficulty-estimator", "planner", "implementer", "verifier"],
+        roles: &[
+            "difficulty-estimator",
+            "planner",
+            "implementer",
+            "verifier",
+        ],
     },
     WorkflowFixture {
         id: "workflow.migrate",
@@ -45,7 +56,13 @@ const LEGACY_WORKFLOWS: &[WorkflowFixture] = &[
     WorkflowFixture {
         id: "workflow.refactor",
         source: include_str!("fixtures/legacy/workflows/refactor.md"),
-        roles: &["scout", "architect", "implementer", "architect", "finalizer"],
+        roles: &[
+            "scout",
+            "architect",
+            "implementer",
+            "architect",
+            "finalizer",
+        ],
     },
     WorkflowFixture {
         id: "workflow.research",
@@ -96,55 +113,215 @@ struct RouterFixture {
 }
 
 const FREE_ROUTES: &[RouteExpectation] = &[
-    RouteExpectation { role: "scout", provider: "opencode", model: "deepseek-v4-flash-free" },
-    RouteExpectation { role: "planner", provider: "opencode", model: "deepseek-v4-flash-free" },
-    RouteExpectation { role: "architect", provider: "opencode", model: "deepseek-v4-flash-free" },
-    RouteExpectation { role: "implementer", provider: "opencode", model: "deepseek-v4-flash-free" },
-    RouteExpectation { role: "tester", provider: "opencode", model: "deepseek-v4-flash-free" },
-    RouteExpectation { role: "verifier", provider: "opencode", model: "deepseek-v4-flash-free" },
-    RouteExpectation { role: "critic", provider: "opencode", model: "deepseek-v4-flash-free" },
-    RouteExpectation { role: "finalizer", provider: "opencode", model: "deepseek-v4-flash-free" },
-    RouteExpectation { role: "qa-synthesizer", provider: "opencode", model: "deepseek-v4-flash-free" },
-    RouteExpectation { role: "reproducer", provider: "opencode", model: "deepseek-v4-flash-free" },
+    RouteExpectation {
+        role: "scout",
+        provider: "opencode",
+        model: "deepseek-v4-flash-free",
+    },
+    RouteExpectation {
+        role: "planner",
+        provider: "opencode",
+        model: "deepseek-v4-flash-free",
+    },
+    RouteExpectation {
+        role: "architect",
+        provider: "opencode",
+        model: "deepseek-v4-flash-free",
+    },
+    RouteExpectation {
+        role: "implementer",
+        provider: "opencode",
+        model: "deepseek-v4-flash-free",
+    },
+    RouteExpectation {
+        role: "tester",
+        provider: "opencode",
+        model: "deepseek-v4-flash-free",
+    },
+    RouteExpectation {
+        role: "verifier",
+        provider: "opencode",
+        model: "deepseek-v4-flash-free",
+    },
+    RouteExpectation {
+        role: "critic",
+        provider: "opencode",
+        model: "deepseek-v4-flash-free",
+    },
+    RouteExpectation {
+        role: "finalizer",
+        provider: "opencode",
+        model: "deepseek-v4-flash-free",
+    },
+    RouteExpectation {
+        role: "qa-synthesizer",
+        provider: "opencode",
+        model: "deepseek-v4-flash-free",
+    },
+    RouteExpectation {
+        role: "reproducer",
+        provider: "opencode",
+        model: "deepseek-v4-flash-free",
+    },
 ];
 
 const GO_ROUTES: &[RouteExpectation] = &[
-    RouteExpectation { role: "scout", provider: "opencode-go", model: "mimo-v2.5" },
-    RouteExpectation { role: "planner", provider: "opencode-go", model: "glm-5.1" },
-    RouteExpectation { role: "architect", provider: "opencode-go", model: "glm-5.2" },
-    RouteExpectation { role: "implementer", provider: "opencode-go", model: "kimi-k2.7-code" },
-    RouteExpectation { role: "tester", provider: "opencode-go", model: "kimi-k2.6" },
-    RouteExpectation { role: "verifier", provider: "opencode-go", model: "qwen3.7-max" },
-    RouteExpectation { role: "critic", provider: "opencode-go", model: "qwen3.7-max" },
-    RouteExpectation { role: "finalizer", provider: "opencode-go", model: "qwen3.7-plus" },
-    RouteExpectation { role: "qa-synthesizer", provider: "opencode-go", model: "qwen3.7-max" },
-    RouteExpectation { role: "reproducer", provider: "opencode-go", model: "qwen3.7-plus" },
+    RouteExpectation {
+        role: "scout",
+        provider: "opencode-go",
+        model: "mimo-v2.5",
+    },
+    RouteExpectation {
+        role: "planner",
+        provider: "opencode-go",
+        model: "glm-5.1",
+    },
+    RouteExpectation {
+        role: "architect",
+        provider: "opencode-go",
+        model: "glm-5.2",
+    },
+    RouteExpectation {
+        role: "implementer",
+        provider: "opencode-go",
+        model: "kimi-k2.7-code",
+    },
+    RouteExpectation {
+        role: "tester",
+        provider: "opencode-go",
+        model: "kimi-k2.6",
+    },
+    RouteExpectation {
+        role: "verifier",
+        provider: "opencode-go",
+        model: "qwen3.7-max",
+    },
+    RouteExpectation {
+        role: "critic",
+        provider: "opencode-go",
+        model: "qwen3.7-max",
+    },
+    RouteExpectation {
+        role: "finalizer",
+        provider: "opencode-go",
+        model: "qwen3.7-plus",
+    },
+    RouteExpectation {
+        role: "qa-synthesizer",
+        provider: "opencode-go",
+        model: "qwen3.7-max",
+    },
+    RouteExpectation {
+        role: "reproducer",
+        provider: "opencode-go",
+        model: "qwen3.7-plus",
+    },
 ];
 
 const GPT_ROUTES: &[RouteExpectation] = &[
-    RouteExpectation { role: "scout", provider: "openai-codex", model: "gpt-5.6-luna" },
-    RouteExpectation { role: "planner", provider: "openai-codex", model: "gpt-5.6-terra" },
-    RouteExpectation { role: "architect", provider: "openai-codex", model: "gpt-5.6" },
-    RouteExpectation { role: "implementer", provider: "openai-codex", model: "gpt-5.6-terra" },
-    RouteExpectation { role: "tester", provider: "openai-codex", model: "gpt-5.6-luna" },
-    RouteExpectation { role: "verifier", provider: "openai-codex", model: "gpt-5.6-terra" },
-    RouteExpectation { role: "critic", provider: "openai-codex", model: "gpt-5.6-terra" },
-    RouteExpectation { role: "finalizer", provider: "openai-codex", model: "gpt-5.6-terra" },
-    RouteExpectation { role: "qa-synthesizer", provider: "openai-codex", model: "gpt-5.6-terra" },
-    RouteExpectation { role: "reproducer", provider: "openai-codex", model: "gpt-5.6-terra" },
+    RouteExpectation {
+        role: "scout",
+        provider: "openai-codex",
+        model: "gpt-5.6-luna",
+    },
+    RouteExpectation {
+        role: "planner",
+        provider: "openai-codex",
+        model: "gpt-5.6-terra",
+    },
+    RouteExpectation {
+        role: "architect",
+        provider: "openai-codex",
+        model: "gpt-5.6",
+    },
+    RouteExpectation {
+        role: "implementer",
+        provider: "openai-codex",
+        model: "gpt-5.6-terra",
+    },
+    RouteExpectation {
+        role: "tester",
+        provider: "openai-codex",
+        model: "gpt-5.6-luna",
+    },
+    RouteExpectation {
+        role: "verifier",
+        provider: "openai-codex",
+        model: "gpt-5.6-terra",
+    },
+    RouteExpectation {
+        role: "critic",
+        provider: "openai-codex",
+        model: "gpt-5.6-terra",
+    },
+    RouteExpectation {
+        role: "finalizer",
+        provider: "openai-codex",
+        model: "gpt-5.6-terra",
+    },
+    RouteExpectation {
+        role: "qa-synthesizer",
+        provider: "openai-codex",
+        model: "gpt-5.6-terra",
+    },
+    RouteExpectation {
+        role: "reproducer",
+        provider: "openai-codex",
+        model: "gpt-5.6-terra",
+    },
 ];
 
 const MIXED_ROUTES: &[RouteExpectation] = &[
-    RouteExpectation { role: "scout", provider: "opencode-go", model: "mimo-v2.5" },
-    RouteExpectation { role: "planner", provider: "openai-codex", model: "gpt-5.6-terra" },
-    RouteExpectation { role: "architect", provider: "openai-codex", model: "gpt-5.6" },
-    RouteExpectation { role: "implementer", provider: "opencode-go", model: "kimi-k2.7-code" },
-    RouteExpectation { role: "tester", provider: "opencode-go", model: "kimi-k2.6" },
-    RouteExpectation { role: "verifier", provider: "openai-codex", model: "gpt-5.6-terra" },
-    RouteExpectation { role: "critic", provider: "openai-codex", model: "gpt-5.6-terra" },
-    RouteExpectation { role: "finalizer", provider: "opencode-go", model: "qwen3.7-plus" },
-    RouteExpectation { role: "qa-synthesizer", provider: "openai-codex", model: "gpt-5.6-terra" },
-    RouteExpectation { role: "reproducer", provider: "opencode-go", model: "qwen3.7-plus" },
+    RouteExpectation {
+        role: "scout",
+        provider: "opencode-go",
+        model: "mimo-v2.5",
+    },
+    RouteExpectation {
+        role: "planner",
+        provider: "openai-codex",
+        model: "gpt-5.6-terra",
+    },
+    RouteExpectation {
+        role: "architect",
+        provider: "openai-codex",
+        model: "gpt-5.6",
+    },
+    RouteExpectation {
+        role: "implementer",
+        provider: "opencode-go",
+        model: "kimi-k2.7-code",
+    },
+    RouteExpectation {
+        role: "tester",
+        provider: "opencode-go",
+        model: "kimi-k2.6",
+    },
+    RouteExpectation {
+        role: "verifier",
+        provider: "openai-codex",
+        model: "gpt-5.6-terra",
+    },
+    RouteExpectation {
+        role: "critic",
+        provider: "openai-codex",
+        model: "gpt-5.6-terra",
+    },
+    RouteExpectation {
+        role: "finalizer",
+        provider: "opencode-go",
+        model: "qwen3.7-plus",
+    },
+    RouteExpectation {
+        role: "qa-synthesizer",
+        provider: "openai-codex",
+        model: "gpt-5.6-terra",
+    },
+    RouteExpectation {
+        role: "reproducer",
+        provider: "opencode-go",
+        model: "qwen3.7-plus",
+    },
 ];
 
 const LEGACY_ROUTERS: &[RouterFixture] = &[
@@ -233,7 +410,10 @@ fn legacy_model_set_routers_parse_and_route_to_expected_targets() {
                     available_backends: vec![pi.clone()],
                 })
                 .unwrap_or_else(|error| {
-                    panic!("{} failed to route role {}: {error}", fixture.id, expected.role)
+                    panic!(
+                        "{} failed to route role {}: {error}",
+                        fixture.id, expected.role
+                    )
                 });
             assert_eq!(decision.backend.as_str(), "pi");
             let model = decision.model.expect("legacy route must select a model");
@@ -249,27 +429,47 @@ fn legacy_model_set_routers_parse_and_route_to_expected_targets() {
             workflow: Some(workflow.clone()),
             available_backends: vec![BackendId::parse("other").expect("backend id")],
         });
-        assert!(unavailable.is_err(), "{} accepted an unavailable backend", fixture.id);
+        assert!(
+            unavailable.is_err(),
+            "{} accepted an unavailable backend",
+            fixture.id
+        );
 
         definitions
             .add_routing_table(fixture.source)
             .unwrap_or_else(|error| panic!("{} did not register: {error}", fixture.id));
     }
 
-    assert_eq!(definitions.routing_tables().count(), LEGACY_ROUTERS.len());
+    assert_eq!(
+        definitions.routing_tables().count(),
+        LEGACY_ROUTERS.len()
+    );
 }
 
 #[test]
 fn checked_in_acp_example_definitions_remain_parseable() {
     let workflows = [
-        ("phenix.dynamic", include_str!("../../../../config/phenix-acp/workflows/dynamic.md")),
-        ("phenix.implement", include_str!("../../../../config/phenix-acp/workflows/implement.md")),
-        ("phenix.qa-fix", include_str!("../../../../config/phenix-acp/workflows/qa-fix.md")),
-        ("phenix.qa", include_str!("../../../../config/phenix-acp/workflows/qa.md")),
+        (
+            "phenix.dynamic",
+            include_str!("../../../../config/phenix-acp/workflows/dynamic.md"),
+        ),
+        (
+            "phenix.implement",
+            include_str!("../../../../config/phenix-acp/workflows/implement.md"),
+        ),
+        (
+            "phenix.qa-fix",
+            include_str!("../../../../config/phenix-acp/workflows/qa-fix.md"),
+        ),
+        (
+            "phenix.qa",
+            include_str!("../../../../config/phenix-acp/workflows/qa.md"),
+        ),
     ];
     for (expected_id, source) in workflows {
-        let workflow = parse_workflow(source)
-            .unwrap_or_else(|error| panic!("example workflow {expected_id} did not parse: {error}"));
+        let workflow = parse_workflow(source).unwrap_or_else(|error| {
+            panic!("example workflow {expected_id} did not parse: {error}")
+        });
         assert_eq!(workflow.id().as_str(), expected_id);
     }
 
