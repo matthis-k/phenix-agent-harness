@@ -9,8 +9,24 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
+
+const BUILTIN_COMMANDS: &[&str] = &[
+    "abort",
+    "compact",
+    "exit",
+    "login",
+    "logout",
+    "mode",
+    "model",
+    "new",
+    "quit",
+    "reload",
+    "resume",
+    "sessions",
+    "thinking",
+];
 
 pub struct RatatuiRenderer {
     terminal: Option<DefaultTerminal>,
@@ -115,29 +131,35 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme:
     );
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let lines = state
+
+    let mut lines = state
         .input_target()
         .and_then(|run_id| state.transcript(run_id))
-        .map_or_else(
-            || {
-                vec![Line::styled(
-                    "No transcript yet.",
-                    theme_style(theme, "Muted"),
-                )]
-            },
-            |transcript| {
-                transcript
-                    .blocks
-                    .iter()
-                    .flat_map(|entry| transcript_lines(&entry.role, &entry.text, theme))
-                    .collect()
-            },
-        );
+        .map_or_else(Vec::new, |transcript| {
+            transcript
+                .blocks
+                .iter()
+                .flat_map(|entry| transcript_lines(&entry.role, &entry.text, theme))
+                .collect()
+        });
+    for message in &state.notifications {
+        lines.extend(transcript_lines(&TranscriptRole::System, message, theme));
+    }
+    if lines.is_empty() {
+        lines.push(Line::styled(
+            "No transcript yet.",
+            theme_style(theme, "Muted"),
+        ));
+    }
+
+    let viewport_height = usize::from(inner.height.max(1));
+    let max_scroll = lines.len().saturating_sub(viewport_height);
+    let distance_from_end = state.view.transcript_scroll.offset;
+    let scroll = max_scroll.saturating_sub(distance_from_end);
     frame.render_widget(
-        Paragraph::new(lines).wrap(Wrap { trim: false }).scroll((
-            state.view.transcript_scroll.offset.min(u16::MAX as usize) as u16,
-            0,
-        )),
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll.min(u16::MAX as usize) as u16, 0)),
         inner,
     );
 }
@@ -190,12 +212,23 @@ fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &The
     let block = panel("Input", focused, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
+
+    let mut lines = vec![Line::styled(
+        state.input.text.clone(),
+        theme_style(theme, "Normal"),
+    )];
+    let suggestions = slash_command_suggestions(state);
+    if inner.height > 1 && !suggestions.is_empty() {
+        lines.push(Line::styled(
+            format!("commands  {}", suggestions.join("   ")),
+            theme_style(theme, "Muted"),
+        ));
+    }
     frame.render_widget(
-        Paragraph::new(state.input.text.as_str())
-            .style(theme_style(theme, "Normal"))
-            .wrap(Wrap { trim: false }),
+        Paragraph::new(lines).wrap(Wrap { trim: false }),
         inner,
     );
+
     if focused && inner.height > 0 {
         let cursor = state.input.cursor_byte.min(state.input.text.len());
         let prefix = &state.input.text[..cursor];
@@ -212,18 +245,37 @@ fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &The
 }
 
 fn render_status(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
-    let status = state
+    let selected_run = state.snapshot.as_ref().and_then(|snapshot| {
+        state
+            .input_target()
+            .and_then(|target| snapshot.runs.iter().find(|run| &run.id == target))
+    });
+    let model = selected_run
+        .and_then(|run| run.model.as_ref())
+        .map_or_else(|| "model: unavailable".to_owned(), |model| {
+            format!("model: {}/{}", model.provider, model.model)
+        });
+    let thinking = selected_run
+        .and_then(|run| run.thinking_level.as_ref())
+        .map(|level| format!("thinking: {level:?}"));
+    let run_state = selected_run.map(|run| format!("run: {:?}", run.state));
+    let queue = state
         .statuses
-        .iter()
-        .map(|(key, value)| format!("{key}: {value}"))
+        .values()
+        .cloned()
         .collect::<Vec<_>>()
         .join(" · ");
-    let notification = state.notifications.back().cloned().unwrap_or_default();
-    let line = [format!("{:?}", state.connection), status, notification]
-        .into_iter()
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("  ·  ");
+    let line = [
+        format!("{:?}", state.connection),
+        model,
+        thinking.unwrap_or_default(),
+        run_state.unwrap_or_default(),
+        queue,
+    ]
+    .into_iter()
+    .filter(|part| !part.is_empty())
+    .collect::<Vec<_>>()
+    .join("  ·  ");
     frame.render_widget(
         Paragraph::new(line)
             .style(theme_style(theme, "Surface"))
@@ -379,28 +431,40 @@ fn render_picker(
     let block = panel(title, true, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let items = if values.is_empty() {
-        vec![ListItem::new(Line::styled(
-            "No entries available.",
-            theme_style(theme, "Muted"),
-        ))]
-    } else {
-        values
-            .into_iter()
-            .enumerate()
-            .map(|(index, value)| {
-                ListItem::new(format!(
-                    "{} {value}",
-                    if index == selected { "▸" } else { " " }
-                ))
-                .style(if index == selected {
-                    theme_style(theme, "Accent")
-                } else {
-                    theme_style(theme, "Normal")
-                })
+    if values.is_empty() {
+        frame.render_widget(
+            List::new(vec![ListItem::new(Line::styled(
+                "No entries available.",
+                theme_style(theme, "Muted"),
+            ))]),
+            inner,
+        );
+        return;
+    }
+
+    let visible_rows = usize::from(inner.height.max(1));
+    let selected = selected.min(values.len().saturating_sub(1));
+    let start = selected
+        .saturating_add(1)
+        .saturating_sub(visible_rows)
+        .min(values.len().saturating_sub(visible_rows.min(values.len())));
+    let items = values
+        .into_iter()
+        .enumerate()
+        .skip(start)
+        .take(visible_rows)
+        .map(|(index, value)| {
+            ListItem::new(format!(
+                "{} {value}",
+                if index == selected { "▸" } else { " " }
+            ))
+            .style(if index == selected {
+                theme_style(theme, "Accent")
+            } else {
+                theme_style(theme, "Normal")
             })
-            .collect()
-    };
+        })
+        .collect::<Vec<_>>();
     frame.render_widget(List::new(items), inner);
 }
 
@@ -572,6 +636,29 @@ fn transcript_lines(role: &TranscriptRole, text: &str, theme: &ThemeConfig) -> V
     lines
 }
 
+fn slash_command_suggestions(state: &AppState) -> Vec<String> {
+    let Some(query) = state.input.text.strip_prefix('/') else {
+        return Vec::new();
+    };
+    if query.chars().any(char::is_whitespace) {
+        return Vec::new();
+    }
+    let mut commands = BUILTIN_COMMANDS
+        .iter()
+        .map(|command| (*command).to_owned())
+        .chain(state.commands.iter().map(|command| command.name.clone()))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter(|command| command.starts_with(query))
+        .map(|command| format!("/{command}"))
+        .take(5)
+        .collect::<Vec<_>>();
+    if commands.len() == 1 && commands[0] == state.input.text {
+        commands.clear();
+    }
+    commands
+}
+
 fn auth_prompt_message(prompt: &AuthPrompt) -> String {
     match prompt {
         AuthPrompt::Text { message, .. }
@@ -590,5 +677,72 @@ fn overlay_selected(state: &AppState) -> usize {
         | Some(OverlayState::SessionPicker { selected, .. })
         | Some(OverlayState::ExtensionDialog { selected, .. }) => *selected,
         Some(OverlayState::Help) | None => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use phenix_runtime_api::{BackendHealth, RunId, RunKind, RunState, RunSummary, RuntimeSnapshot};
+
+    #[test]
+    fn picker_window_keeps_deep_selection_visible() {
+        let selected = 12usize;
+        let visible_rows = 5usize;
+        let start = selected
+            .saturating_add(1)
+            .saturating_sub(visible_rows)
+            .min(20usize.saturating_sub(visible_rows));
+        assert_eq!(start, 8);
+        assert!((start..start + visible_rows).contains(&selected));
+    }
+
+    #[test]
+    fn slash_suggestions_include_builtins() {
+        let mut state = AppState::default();
+        state.input.replace("/mo".to_owned());
+        assert_eq!(slash_command_suggestions(&state), vec!["/mode", "/model"]);
+    }
+
+    #[test]
+    fn status_can_resolve_selected_run_model() {
+        let run_id = RunId::parse("run-root").expect("run ID");
+        let mut state = AppState::default();
+        state.root_run = Some(run_id.clone());
+        state.selected_run = Some(run_id.clone());
+        state.snapshot = Some(RuntimeSnapshot {
+            capabilities: Default::default(),
+            health: BackendHealth::Ready,
+            active_session: None,
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            sessions: Vec::new(),
+            runs: vec![RunSummary {
+                id: run_id,
+                parent: None,
+                kind: RunKind::Root,
+                definition_id: "root".to_owned(),
+                display_name: "Root".to_owned(),
+                state: RunState::Running,
+                persisted_session: None,
+                session_file: None,
+                model: Some(phenix_runtime_api::ModelRef {
+                    provider: "phenix".to_owned(),
+                    model: "mixed".to_owned(),
+                }),
+                thinking_level: None,
+                difficulty: None,
+                budget: None,
+                pending_messages: 0,
+                outcome: None,
+            }],
+            objectives: Vec::new(),
+        });
+        assert!(state
+            .snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.runs.first())
+            .and_then(|run| run.model.as_ref())
+            .is_some_and(|model| model.model == "mixed"));
     }
 }
