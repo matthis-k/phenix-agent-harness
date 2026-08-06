@@ -130,7 +130,8 @@ impl GatewayFrontendRuntime {
                 images,
                 streaming_behavior,
             } => {
-                let submitted_text = streaming_behavior.is_none().then(|| text.clone());
+                let is_prompt = streaming_behavior.is_none();
+                let submitted_text = is_prompt.then(|| text.clone());
                 let command = match streaming_behavior {
                     Some(StreamingBehavior::Steer) => SessionCommand::Steer {
                         text,
@@ -154,14 +155,14 @@ impl GatewayFrontendRuntime {
                     emit_prompt_status(outputs, &run_id, Some("dispatching to ACP endpoint"))?;
                 }
                 match self.execute_for_run(&run_id, command, outputs) {
-                    Ok(()) => {
-                        if streaming_behavior.is_none() {
+                    Ok(response_started) => {
+                        if is_prompt && !response_started {
                             emit_prompt_status(outputs, &run_id, Some("waiting for ACP response"))?;
                         }
                         Ok(BackendReply::Accepted)
                     }
                     Err(error) => {
-                        if streaming_behavior.is_none() {
+                        if is_prompt {
                             emit_prompt_status(outputs, &run_id, None)?;
                         }
                         Err(error)
@@ -419,7 +420,7 @@ impl GatewayFrontendRuntime {
         run_id: &RunId,
         command: SessionCommand,
         outputs: &BackendOutputSender,
-    ) -> Result<(), BackendError> {
+    ) -> Result<bool, BackendError> {
         let node = self.node_for_run(run_id)?;
         let events = self
             .gateway
@@ -432,7 +433,7 @@ impl GatewayFrontendRuntime {
         &mut self,
         events: Vec<phenix_acp::GatewayEvent>,
         outputs: &BackendOutputSender,
-    ) -> Result<(), BackendError> {
+    ) -> Result<bool, BackendError> {
         for event in &events {
             if let phenix_acp::SessionEvent::PermissionRequested { request_id, .. } = &event.event {
                 let dialog_id = phenix_runtime_api::DialogId::parse(request_id.clone())
@@ -451,7 +452,7 @@ impl GatewayFrontendRuntime {
             }
             outputs.event(event)?;
         }
-        Ok(())
+        Ok(!cleared_prompt_statuses.is_empty())
     }
 
     fn emit_snapshot_if_changed(
