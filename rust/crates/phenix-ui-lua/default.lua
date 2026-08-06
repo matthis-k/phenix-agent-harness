@@ -59,9 +59,13 @@ map("transcript", "<PageDown>", function() phenix.ui.pane.scroll("ui.transcript"
 map("transcript", "<PageUp>", function() phenix.ui.pane.scroll("ui.transcript", 10) end)
 
 map("overlay", "<CR>", phenix.overlay.accept, { desc = "Accept selected item" })
+map("overlay", "<Tab>", phenix.overlay.accept, { desc = "Complete selected item" })
 map("overlay", "<Esc>", phenix.overlay.cancel, { desc = "Close overlay" })
 map("overlay", "j", phenix.overlay.next, { desc = "Select next item" })
 map("overlay", "k", phenix.overlay.previous, { desc = "Select previous item" })
 map("overlay", "<Down>", phenix.overlay.next)
 map("overlay", "<Up>", phenix.overlay.previous)
 map("overlay", "<BS>", phenix.input.backspace)
+map("overlay", "<Del>", phenix.input.delete)
+map("overlay", "<Left>", phenix.input.move_left)
+map("overlay", "<Right>", phenix.input.move_right)
