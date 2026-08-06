@@ -103,8 +103,10 @@ impl InputState {
             .find('\n')
             .map_or(self.text.len(), |index| next_start + index);
         let column = self.cursor_byte - self.line_start();
-        self.cursor_byte =
-            clamp_to_char_boundary(&self.text, next_start + column.min(next_end - next_start));
+        self.cursor_byte = clamp_to_char_boundary(
+            &self.text,
+            next_start + column.min(next_end - next_start),
+        );
     }
 
     pub fn move_word_forward(&mut self) {
@@ -113,10 +115,7 @@ impl InputState {
             return;
         }
         let mut index = self.cursor_byte;
-        let first = self.text[index..]
-            .chars()
-            .next()
-            .expect("cursor before end");
+        let first = self.text[index..].chars().next().expect("cursor before end");
         if first.is_whitespace() {
             index = skip_forward_while(&self.text, index, char::is_whitespace);
         } else {
@@ -222,8 +221,7 @@ impl InputState {
     }
 
     fn normalize_cursor(&mut self) {
-        self.cursor_byte =
-            clamp_to_char_boundary(&self.text, self.cursor_byte.min(self.text.len()));
+        self.cursor_byte = clamp_to_char_boundary(&self.text, self.cursor_byte.min(self.text.len()));
     }
 }
 
@@ -231,10 +229,7 @@ fn previous_char_start(text: &str, index: usize) -> Option<usize> {
     if index == 0 {
         return None;
     }
-    text[..index]
-        .char_indices()
-        .next_back()
-        .map(|(index, _)| index)
+    text[..index].char_indices().next_back().map(|(index, _)| index)
 }
 
 fn clamp_to_char_boundary(text: &str, mut index: usize) -> usize {
@@ -245,7 +240,11 @@ fn clamp_to_char_boundary(text: &str, mut index: usize) -> usize {
     index
 }
 
-fn skip_forward_while(text: &str, mut index: usize, predicate: impl Fn(char) -> bool) -> usize {
+fn skip_forward_while(
+    text: &str,
+    mut index: usize,
+    predicate: impl Fn(char) -> bool,
+) -> usize {
     while index < text.len() {
         let character = text[index..].chars().next().expect("cursor before end");
         if !predicate(character) {
@@ -371,6 +370,11 @@ impl AppState {
 
 impl Default for AppState {
     fn default() -> Self {
+        let mut statuses = BTreeMap::new();
+        statuses.insert(
+            "frontend.editor".to_owned(),
+            "editor: owned · insert".to_owned(),
+        );
         Self {
             connection: RuntimeConnectionState::Starting,
             capabilities: BackendCapabilities::default(),
@@ -386,7 +390,7 @@ impl Default for AppState {
             auth_flows: BTreeMap::new(),
             commands: Vec::new(),
             dialogs: VecDeque::new(),
-            statuses: BTreeMap::new(),
+            statuses,
             notifications: VecDeque::new(),
             view: ViewState::default(),
             exit_requested: false,
@@ -428,7 +432,6 @@ mod tests {
     fn word_and_line_commands_are_deterministic() {
         let mut input = InputState::default();
         input.replace("one two\nthree".to_owned());
-        input.move_home();
         input.move_word_backward();
         assert_eq!(input.cursor_byte, 8);
         input.delete_line();
