@@ -103,10 +103,8 @@ impl InputState {
             .find('\n')
             .map_or(self.text.len(), |index| next_start + index);
         let column = self.cursor_byte - self.line_start();
-        self.cursor_byte = clamp_to_char_boundary(
-            &self.text,
-            next_start + column.min(next_end - next_start),
-        );
+        self.cursor_byte =
+            clamp_to_char_boundary(&self.text, next_start + column.min(next_end - next_start));
     }
 
     pub fn move_word_forward(&mut self) {
@@ -115,7 +113,10 @@ impl InputState {
             return;
         }
         let mut index = self.cursor_byte;
-        let first = self.text[index..].chars().next().expect("cursor before end");
+        let first = self.text[index..]
+            .chars()
+            .next()
+            .expect("cursor before end");
         if first.is_whitespace() {
             index = skip_forward_while(&self.text, index, char::is_whitespace);
         } else {
@@ -221,7 +222,8 @@ impl InputState {
     }
 
     fn normalize_cursor(&mut self) {
-        self.cursor_byte = clamp_to_char_boundary(&self.text, self.cursor_byte.min(self.text.len()));
+        self.cursor_byte =
+            clamp_to_char_boundary(&self.text, self.cursor_byte.min(self.text.len()));
     }
 }
 
@@ -229,7 +231,10 @@ fn previous_char_start(text: &str, index: usize) -> Option<usize> {
     if index == 0 {
         return None;
     }
-    text[..index].char_indices().next_back().map(|(index, _)| index)
+    text[..index]
+        .char_indices()
+        .next_back()
+        .map(|(index, _)| index)
 }
 
 fn clamp_to_char_boundary(text: &str, mut index: usize) -> usize {
@@ -240,11 +245,7 @@ fn clamp_to_char_boundary(text: &str, mut index: usize) -> usize {
     index
 }
 
-fn skip_forward_while(
-    text: &str,
-    mut index: usize,
-    predicate: impl Fn(char) -> bool,
-) -> usize {
+fn skip_forward_while(text: &str, mut index: usize, predicate: impl Fn(char) -> bool) -> usize {
     while index < text.len() {
         let character = text[index..].chars().next().expect("cursor before end");
         if !predicate(character) {
