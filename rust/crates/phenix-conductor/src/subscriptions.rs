@@ -1,4 +1,6 @@
-use agent_client_protocol::schema::v1::{ExtNotification, ExtRequest, ExtResponse};
+use agent_client_protocol::schema::v1::{
+    AgentNotification, ExtNotification, ExtRequest, ExtResponse,
+};
 use agent_client_protocol::{Client, ConnectionTo};
 use phenix_acp::{
     AcpMethod, AcpNotification, EmptyResult, GatewayEvent, NodeCancel, NodeEventNotification,
@@ -298,5 +300,8 @@ fn send_notification<N: AcpNotification>(
     params: &N::Params,
 ) -> Result<(), agent_client_protocol::Error> {
     let raw = to_raw_value(params).map_err(agent_client_protocol::Error::into_internal_error)?;
-    connection.send_notification(ExtNotification::new(N::METHOD, Arc::from(raw)))
+    connection.send_notification(AgentNotification::ExtNotification(ExtNotification::new(
+        N::METHOD,
+        Arc::from(raw),
+    )))
 }
