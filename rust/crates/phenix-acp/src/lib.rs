@@ -6,6 +6,7 @@ mod authoring;
 mod backend;
 mod client;
 mod conductor;
+mod configuration;
 mod definition;
 mod id;
 mod protocol;
@@ -36,6 +37,14 @@ pub use client::{
     decode_extension_response, encode_extension_request, ExtensionCodecError, PhenixAcpCallError,
 };
 pub use conductor::{ConductorError, PhenixConductor};
+pub use configuration::{
+    ConfigurationApply, ConfigurationApplyParams, ConfigurationApplyResult,
+    ConfigurationBackendInput, ConfigurationChangedNotification, ConfigurationChangedParams,
+    ConfigurationDefinitionInput, ConfigurationFormat, ConfigurationGet, ConfigurationGetParams,
+    ConfigurationGetResult, ConfigurationInput, ConfigurationRootInput, ConfigurationSnapshot,
+    ConfigurationSource, ConfigurationSourceError, ConfigurationSourceOrigin,
+    LoadedConfigurationSource,
+};
 pub use definition::{
     AcpEndpoint, BackendDefinition, DefinitionError, SessionTreeDefinition,
     SessionTreeDefinitionBuilder,
