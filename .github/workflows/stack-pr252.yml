@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - stack/final-open-prs-2026-08-07
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -15,6 +18,7 @@ concurrency:
 
 jobs:
   resolve:
+    if: github.event_name != 'pull_request' || github.head_ref == 'stack/final-open-prs-2026-08-07'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -27,7 +31,7 @@ jobs:
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+matthis-k@users.noreply.github.com"
           git fetch origin main stack/pr-252-head
           base="$(git merge-base origin/main origin/stack/pr-252-head)"
           overlap=(
