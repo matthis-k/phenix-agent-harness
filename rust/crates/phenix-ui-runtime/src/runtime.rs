@@ -7,8 +7,8 @@ use phenix_runtime_api::{BackendClient, BackendCommand, BackendRuntime, BackendW
 #[cfg(test)]
 use phenix_ui_core::ElementId;
 use phenix_ui_core::{
-    reduce, AppEffect, AppEvent, AppState, FocusDirection, FocusTarget, LayoutAxis, OverlayState,
-    ResizeRequest,
+    command_completions, reduce, AppEffect, AppEvent, AppState, FocusDirection, FocusTarget,
+    LayoutAxis, OverlayState, ResizeRequest,
 };
 use std::collections::VecDeque;
 use std::error::Error;
@@ -386,11 +386,41 @@ fn apply_input_edit(state: &mut AppState, edit: InputEdit) {
             }
         }
     }
+    sync_command_completion_overlay(state);
+}
+
+fn sync_command_completion_overlay(state: &mut AppState) {
+    if !matches!(
+        state.view.overlay,
+        None | Some(OverlayState::CommandPalette { .. })
+    ) {
+        return;
+    }
+    let completions = command_completions(state);
+    if completions.is_empty() {
+        if matches!(
+            state.view.overlay,
+            Some(OverlayState::CommandPalette { .. })
+        ) {
+            state.view.overlay = None;
+        }
+        return;
+    }
+    let selected = match &state.view.overlay {
+        Some(OverlayState::CommandPalette { selected, .. }) => {
+            (*selected).min(completions.len().saturating_sub(1))
+        }
+        _ => 0,
+    };
+    state.view.overlay = Some(OverlayState::CommandPalette {
+        query: state.input.text.clone(),
+        selected,
+    });
 }
 
 fn move_overlay_selection(state: &mut AppState, delta: i32) {
     let length = match &state.view.overlay {
-        Some(OverlayState::CommandPalette { .. }) => state.commands.len(),
+        Some(OverlayState::CommandPalette { .. }) => command_completions(state).len(),
         Some(OverlayState::ModelPicker { .. }) => state.models.len(),
         Some(OverlayState::AuthenticationProviders { .. }) => state.auth_providers.len(),
         Some(OverlayState::AuthenticationPrompt { prompt, .. }) => match prompt {
@@ -493,5 +523,22 @@ mod tests {
             },
         );
         assert_eq!(state.view.pane(&ElementId::sidebar()).width, Some(32));
+    }
+
+    #[test]
+    fn slash_input_opens_and_updates_a_command_completion_overlay() {
+        let mut state = AppState::default();
+        apply_input_edit(&mut state, InputEdit::Insert("/mo".to_owned()));
+        assert!(matches!(
+            state.view.overlay,
+            Some(OverlayState::CommandPalette { selected: 0, .. })
+        ));
+        move_overlay_selection(&mut state, 1);
+        assert!(matches!(
+            state.view.overlay,
+            Some(OverlayState::CommandPalette { selected: 1, .. })
+        ));
+        apply_input_edit(&mut state, InputEdit::Insert("del".to_owned()));
+        assert!(state.view.overlay.is_none());
     }
 }
