@@ -9,7 +9,8 @@ use phenix_runtime_api::{
     AuthPrompt, AuthPromptResponse, ExtensionUiRequest, ExtensionUiResponse, SecretValue,
 };
 use phenix_ui_core::{
-    AppEvent, AppState, ElementId, EventEnvelope, KeyCode, OverlayState, UiInput, UserIntent,
+    AppEvent, AppState, ElementId, EventEnvelope, FocusTarget, InputEditor, KeyCode, KeyInput,
+    OverlayState, UiInput, UserIntent, VimMode,
 };
 
 pub struct FrontendProviderConsumer {
@@ -45,7 +46,7 @@ impl EventConsumer for FrontendProviderConsumer {
                             .flat_map(|command| command_reactions(state, command))
                             .collect(),
                     ),
-                    Ok(_) => fallback_key(*key),
+                    Ok(_) => fallback_key(state, *key),
                     Err(error) => ReactionBatch::stop(vec![BusReaction::View(
                         ViewMutation::Notify(format!("frontend configuration error: {error}")),
                     )]),
@@ -297,17 +298,173 @@ fn overlay_selected(state: &AppState) -> usize {
     }
 }
 
-fn fallback_key(key: phenix_ui_core::KeyInput) -> ReactionBatch {
-    match key.code {
-        KeyCode::Character(character) if !key.modifiers.control && !key.modifiers.alt => {
-            ReactionBatch::stop(vec![BusReaction::View(ViewMutation::EditInput(
-                InputEdit::Insert(character.to_string()),
-            ))])
-        }
-        _ => ReactionBatch {
-            reactions: Vec::new(),
-            propagation: Propagation::Continue,
+fn fallback_key(state: &AppState, key: KeyInput) -> ReactionBatch {
+    if state.view.overlay.is_some() || !state.dialogs.is_empty() {
+        return continue_propagation();
+    }
+    if state.view.focus != FocusTarget::Input {
+        return match key.code {
+            KeyCode::Escape => stop_with(vec![application_intent(UserIntent::Abort)]),
+            _ => continue_propagation(),
+        };
+    }
+    if key.modifiers.control && key.code == KeyCode::Character('g') {
+        return cycle_editor(state.view.input_editor);
+    }
+
+    match state.view.input_editor {
+        InputEditor::External => external_editor_key(key),
+        InputEditor::Owned | InputEditor::Embedded => match state.view.vim_mode {
+            VimMode::Normal => normal_mode_key(state.view.input_editor, key),
+            VimMode::Insert => insert_mode_key(state.view.input_editor, key),
         },
+    }
+}
+
+fn cycle_editor(current: InputEditor) -> ReactionBatch {
+    let next = current.next();
+    let mut reactions = vec![edit_input(InputEdit::SetEditor(next))];
+    if next == InputEditor::External {
+        reactions.push(BusReaction::ExternalEditor);
+    }
+    stop_with(reactions)
+}
+
+fn external_editor_key(key: KeyInput) -> ReactionBatch {
+    match key.code {
+        KeyCode::Escape => stop_with(vec![edit_input(InputEdit::SetEditor(InputEditor::Owned))]),
+        KeyCode::Enter if key.modifiers.control => {
+            stop_with(vec![application_intent(UserIntent::SubmitPrompt)])
+        }
+        KeyCode::Enter => stop_with(vec![BusReaction::ExternalEditor]),
+        KeyCode::Character('i' | 'a' | 'e') if !key.modifiers.control && !key.modifiers.alt => {
+            stop_with(vec![BusReaction::ExternalEditor])
+        }
+        _ => continue_propagation(),
+    }
+}
+
+fn normal_mode_key(editor: InputEditor, key: KeyInput) -> ReactionBatch {
+    if key.modifiers.alt && key.code == KeyCode::Enter {
+        return stop_with(vec![application_intent(UserIntent::FollowUpPrompt)]);
+    }
+    if key.modifiers.control && key.code == KeyCode::Enter {
+        return stop_with(vec![application_intent(UserIntent::SteerPrompt)]);
+    }
+    match key.code {
+        KeyCode::Escape => stop_with(vec![application_intent(UserIntent::Abort)]),
+        KeyCode::Enter => stop_with(vec![application_intent(UserIntent::SubmitPrompt)]),
+        KeyCode::Left | KeyCode::Character('h') => {
+            stop_with(vec![edit_input(InputEdit::MoveLeft)])
+        }
+        KeyCode::Right | KeyCode::Character('l') => {
+            stop_with(vec![edit_input(InputEdit::MoveRight)])
+        }
+        KeyCode::Up | KeyCode::Character('k') => stop_with(vec![edit_input(match editor {
+            InputEditor::Owned => InputEdit::HistoryPrevious,
+            InputEditor::Embedded => InputEdit::MoveUp,
+            InputEditor::External => unreachable!("external editor handled separately"),
+        })]),
+        KeyCode::Down | KeyCode::Character('j') => stop_with(vec![edit_input(match editor {
+            InputEditor::Owned => InputEdit::HistoryNext,
+            InputEditor::Embedded => InputEdit::MoveDown,
+            InputEditor::External => unreachable!("external editor handled separately"),
+        })]),
+        KeyCode::Home | KeyCode::Character('0') => {
+            stop_with(vec![edit_input(InputEdit::MoveHome)])
+        }
+        KeyCode::End | KeyCode::Character('$') => {
+            stop_with(vec![edit_input(InputEdit::MoveEnd)])
+        }
+        KeyCode::Character('w') => stop_with(vec![edit_input(InputEdit::MoveWordForward)]),
+        KeyCode::Character('b') => stop_with(vec![edit_input(InputEdit::MoveWordBackward)]),
+        KeyCode::Delete | KeyCode::Character('x') => {
+            stop_with(vec![edit_input(InputEdit::Delete)])
+        }
+        KeyCode::Character('D') => stop_with(vec![edit_input(InputEdit::DeleteLine)]),
+        KeyCode::Character('i') => stop_with(vec![edit_input(InputEdit::SetVimMode(
+            VimMode::Insert,
+        ))]),
+        KeyCode::Character('a') => stop_with(vec![
+            edit_input(InputEdit::MoveRight),
+            edit_input(InputEdit::SetVimMode(VimMode::Insert)),
+        ]),
+        KeyCode::Character('I') => stop_with(vec![
+            edit_input(InputEdit::MoveHome),
+            edit_input(InputEdit::SetVimMode(VimMode::Insert)),
+        ]),
+        KeyCode::Character('A') => stop_with(vec![
+            edit_input(InputEdit::MoveEnd),
+            edit_input(InputEdit::SetVimMode(VimMode::Insert)),
+        ]),
+        KeyCode::Character('o') => stop_with(vec![
+            edit_input(InputEdit::MoveEnd),
+            edit_input(InputEdit::Insert("\n".to_owned())),
+            edit_input(InputEdit::SetVimMode(VimMode::Insert)),
+        ]),
+        _ => continue_propagation(),
+    }
+}
+
+fn insert_mode_key(editor: InputEditor, key: KeyInput) -> ReactionBatch {
+    if key.code == KeyCode::Escape {
+        return stop_with(vec![edit_input(InputEdit::SetVimMode(VimMode::Normal))]);
+    }
+    if key.modifiers.alt && key.code == KeyCode::Enter {
+        return stop_with(vec![application_intent(UserIntent::FollowUpPrompt)]);
+    }
+    if key.modifiers.control && key.code == KeyCode::Enter {
+        return stop_with(vec![application_intent(match editor {
+            InputEditor::Owned => UserIntent::SteerPrompt,
+            InputEditor::Embedded => UserIntent::SubmitPrompt,
+            InputEditor::External => unreachable!("external editor handled separately"),
+        })]);
+    }
+    match key.code {
+        KeyCode::Enter if key.modifiers.shift || editor == InputEditor::Embedded => {
+            stop_with(vec![edit_input(InputEdit::Insert("\n".to_owned()))])
+        }
+        KeyCode::Enter => stop_with(vec![application_intent(UserIntent::SubmitPrompt)]),
+        KeyCode::Backspace => stop_with(vec![edit_input(InputEdit::Backspace)]),
+        KeyCode::Delete => stop_with(vec![edit_input(InputEdit::Delete)]),
+        KeyCode::Left => stop_with(vec![edit_input(InputEdit::MoveLeft)]),
+        KeyCode::Right => stop_with(vec![edit_input(InputEdit::MoveRight)]),
+        KeyCode::Home => stop_with(vec![edit_input(InputEdit::MoveHome)]),
+        KeyCode::End => stop_with(vec![edit_input(InputEdit::MoveEnd)]),
+        KeyCode::Up => stop_with(vec![edit_input(match editor {
+            InputEditor::Owned => InputEdit::HistoryPrevious,
+            InputEditor::Embedded => InputEdit::MoveUp,
+            InputEditor::External => unreachable!("external editor handled separately"),
+        })]),
+        KeyCode::Down => stop_with(vec![edit_input(match editor {
+            InputEditor::Owned => InputEdit::HistoryNext,
+            InputEditor::Embedded => InputEdit::MoveDown,
+            InputEditor::External => unreachable!("external editor handled separately"),
+        })]),
+        KeyCode::Tab => stop_with(vec![edit_input(InputEdit::Insert("  ".to_owned()))]),
+        KeyCode::Character(character) if !key.modifiers.control && !key.modifiers.alt => {
+            stop_with(vec![edit_input(InputEdit::Insert(character.to_string()))])
+        }
+        _ => continue_propagation(),
+    }
+}
+
+fn edit_input(edit: InputEdit) -> BusReaction {
+    BusReaction::View(ViewMutation::EditInput(edit))
+}
+
+fn application_intent(intent: UserIntent) -> BusReaction {
+    BusReaction::App(AppEvent::User(intent))
+}
+
+fn stop_with(reactions: Vec<BusReaction>) -> ReactionBatch {
+    ReactionBatch::stop(reactions)
+}
+
+fn continue_propagation() -> ReactionBatch {
+    ReactionBatch {
+        reactions: Vec::new(),
+        propagation: Propagation::Continue,
     }
 }
 
@@ -315,7 +472,7 @@ fn fallback_key(key: phenix_ui_core::KeyInput) -> ReactionBatch {
 mod tests {
     use super::*;
     use phenix_frontend_config::{FrontendConfig, FrontendConfigProvider, FrontendProviderError};
-    use phenix_ui_core::{KeyInput, KeyModifiers};
+    use phenix_ui_core::{KeyModifiers, ViewState};
     use std::cell::RefCell;
     use std::path::Path;
     use std::rc::Rc;
@@ -350,17 +507,23 @@ mod tests {
         }
     }
 
+    fn key(code: KeyCode) -> KeyInput {
+        KeyInput {
+            code,
+            modifiers: KeyModifiers::default(),
+            repeat: false,
+        }
+    }
+
     #[test]
     fn provider_commands_are_translated_without_a_backend() {
         let provider: FrontendProviderRef = Rc::new(RefCell::new(FakeProvider));
         let mut consumer = FrontendProviderConsumer::new(provider);
         let reactions = consumer.on_ui(
             &AppState::default(),
-            &EventEnvelope::focused(UiEvent::Input(UiInput::Key(KeyInput {
-                code: KeyCode::Character('x'),
-                modifiers: KeyModifiers::default(),
-                repeat: false,
-            }))),
+            &EventEnvelope::focused(UiEvent::Input(UiInput::Key(key(
+                KeyCode::Character('x'),
+            )))),
         );
         assert!(matches!(
             reactions.reactions.as_slice(),
@@ -369,5 +532,36 @@ mod tests {
                 ..
             })] if element == &ElementId::sidebar()
         ));
+    }
+
+    #[test]
+    fn escape_enters_normal_mode_before_it_aborts() {
+        let state = AppState::default();
+        let reactions = fallback_key(&state, key(KeyCode::Escape));
+        assert_eq!(
+            reactions.reactions,
+            vec![edit_input(InputEdit::SetVimMode(VimMode::Normal))]
+        );
+
+        let mut state = AppState::default();
+        state.view.vim_mode = VimMode::Normal;
+        let reactions = fallback_key(&state, key(KeyCode::Escape));
+        assert_eq!(
+            reactions.reactions,
+            vec![application_intent(UserIntent::Abort)]
+        );
+    }
+
+    #[test]
+    fn editor_cycle_opens_external_editor_only_for_external_mode() {
+        let reactions = cycle_editor(InputEditor::Embedded);
+        assert_eq!(
+            reactions.reactions,
+            vec![
+                edit_input(InputEdit::SetEditor(InputEditor::External)),
+                BusReaction::ExternalEditor,
+            ]
+        );
+        assert_eq!(ViewState::default().input_editor, InputEditor::Owned);
     }
 }
