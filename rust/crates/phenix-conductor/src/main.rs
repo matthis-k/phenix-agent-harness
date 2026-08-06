@@ -1,8 +1,9 @@
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, CancelNotification, ClientRequest, CloseSessionResponse, ContentBlock,
     ContentChunk, EmbeddedResourceResource, ExtRequest, InitializeResponse, NewSessionResponse,
-    PromptCapabilities, PromptRequest, PromptResponse, SessionId, SessionNotification, SessionUpdate,
-    StopReason, TextContent, ToolCall, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
+    PromptCapabilities, PromptRequest, PromptResponse, SessionId, SessionNotification,
+    SessionUpdate, StopReason, TextContent, ToolCall, ToolCallStatus, ToolCallUpdate,
+    ToolCallUpdateFields,
 };
 use agent_client_protocol::{Agent, Client, ConnectionTo, Stdio};
 use base64::Engine;
@@ -256,11 +257,7 @@ fn project_event(
             let tool = ToolCall::new(call_id, name)
                 .status(ToolCallStatus::InProgress)
                 .raw_input(serde_json::json!({ "summary": input_summary }));
-            send_update(
-                connection,
-                upstream_session,
-                SessionUpdate::ToolCall(tool),
-            )?;
+            send_update(connection, upstream_session, SessionUpdate::ToolCall(tool))?;
             Ok(None)
         }
         SessionEvent::ToolUpdated { call_id, output } => {
@@ -326,7 +323,11 @@ fn project_event(
         }
         SessionEvent::QueueChanged { .. } => Ok(None),
         SessionEvent::Compacted => {
-            send_text_update(connection, upstream_session, "Context compacted.".to_owned())?;
+            send_text_update(
+                connection,
+                upstream_session,
+                "Context compacted.".to_owned(),
+            )?;
             Ok(None)
         }
         SessionEvent::Completed => Ok(Some(StopReason::EndTurn)),
@@ -350,9 +351,9 @@ fn send_text_update(
     send_update(
         connection,
         session_id,
-        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
-            TextContent::new(text),
-        ))),
+        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
+            text,
+        )))),
     )
 }
 
