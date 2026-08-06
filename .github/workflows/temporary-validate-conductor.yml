@@ -40,3 +40,4 @@ jobs:
           cargo fmt --all --check
           cargo check --workspace --all-targets --locked
           cargo test --package phenix-acp --all-targets --locked
+          cargo test --package phenix-conductor --all-targets --locked
