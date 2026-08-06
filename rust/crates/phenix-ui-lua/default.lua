@@ -11,13 +11,13 @@ phenix.theme.set("Border", { fg = "#313244", bg = "#1e1e2e" })
 phenix.theme.set("BorderFocused", { fg = "#89b4fa", bg = "#1e1e2e" })
 
 phenix.layout.set(phenix.layout.split("vertical", {
-  phenix.layout.pane("ui.header", { pane_type = "root", weight = 1 }),
+  phenix.layout.pane("ui.header", { pane_type = "root", weight = 1, min = 1, max = 1 }),
   phenix.layout.split("horizontal", {
     phenix.layout.pane("ui.transcript", { pane_type = "transcript", weight = 72 }),
     phenix.layout.pane("ui.sidebar", { pane_type = "sidebar", weight = 28 }),
   }),
-  phenix.layout.pane("ui.input", { pane_type = "input", weight = 4 }),
-  phenix.layout.pane("ui.status", { pane_type = "status", weight = 1 }),
+  phenix.layout.pane("ui.input", { pane_type = "input", weight = 4, min = 4, max = 4 }),
+  phenix.layout.pane("ui.status", { pane_type = "status", weight = 1, min = 1, max = 1 }),
 }))
 
 local map = phenix.keymap.set
