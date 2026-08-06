@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod layout;
-mod renderer_next;
+mod renderer;
 mod theme;
 
-pub use renderer_next::RatatuiRenderer;
+pub use renderer::RatatuiRenderer;
