@@ -1415,6 +1415,7 @@ name = "phenix-conductor"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
+ "base64",
  "clap",
  "phenix-acp",
  "phenix-acp-backend",
