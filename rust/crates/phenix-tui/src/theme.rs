@@ -3,7 +3,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 use ratatui::widgets::{Block, Borders};
 
-pub(crate) fn panel<'a>(title: &'a str, focused: bool, theme: &ThemeConfig) -> Block<'a> {
+pub(crate) fn panel(title: &str, focused: bool, theme: &ThemeConfig) -> Block<'static> {
     Block::default()
         .borders(Borders::TOP)
         .title(Span::styled(
