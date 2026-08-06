@@ -12,7 +12,7 @@ use phenix_runtime_api::{
     StreamingBehavior, ThinkingLevel, TranscriptBlock, TranscriptRole,
 };
 use projection::{gateway_events, node_for_run, node_for_session, project_snapshot};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::Duration;
 
@@ -145,15 +145,28 @@ impl GatewayFrontendRuntime {
                         images: session_images(images),
                     },
                 };
-                self.execute_for_run(&run_id, command, outputs)?;
                 if let Some(text) = submitted_text {
                     outputs.event(BackendEvent::TranscriptAppended(submitted_prompt_block(
                         &mut self.transcript_sequence,
-                        run_id,
+                        run_id.clone(),
                         text,
                     )?))?;
+                    emit_prompt_status(outputs, &run_id, Some("dispatching to ACP endpoint"))?;
                 }
-                Ok(BackendReply::Accepted)
+                match self.execute_for_run(&run_id, command, outputs) {
+                    Ok(()) => {
+                        if streaming_behavior.is_none() {
+                            emit_prompt_status(outputs, &run_id, Some("waiting for ACP response"))?;
+                        }
+                        Ok(BackendReply::Accepted)
+                    }
+                    Err(error) => {
+                        if streaming_behavior.is_none() {
+                            emit_prompt_status(outputs, &run_id, None)?;
+                        }
+                        Err(error)
+                    }
+                }
             }
             BackendCommand::PromptSteer {
                 run_id,
@@ -428,7 +441,14 @@ impl GatewayFrontendRuntime {
             }
         }
         let snapshot = self.projected_snapshot()?;
-        for event in gateway_events(events, &snapshot, &mut self.transcript_sequence)? {
+        let events = gateway_events(events, &snapshot, &mut self.transcript_sequence)?;
+        let mut cleared_prompt_statuses = BTreeSet::new();
+        for event in events {
+            if let Some(run_id) = response_activity_run(&event) {
+                if cleared_prompt_statuses.insert(run_id.clone()) {
+                    emit_prompt_status(outputs, run_id, None)?;
+                }
+            }
             outputs.event(event)?;
         }
         Ok(())
@@ -526,6 +546,36 @@ fn submitted_prompt_block(
     })
 }
 
+fn emit_prompt_status(
+    outputs: &BackendOutputSender,
+    run_id: &RunId,
+    text: Option<&str>,
+) -> Result<(), BackendError> {
+    outputs.event(BackendEvent::StatusChanged {
+        key: prompt_status_key(run_id),
+        text: text.map(str::to_owned),
+    })
+}
+
+fn prompt_status_key(run_id: &RunId) -> String {
+    format!("prompt.{run_id}")
+}
+
+fn response_activity_run(event: &BackendEvent) -> Option<&RunId> {
+    match event {
+        BackendEvent::TranscriptAppended(block) | BackendEvent::TranscriptUpdated(block)
+            if block.role != TranscriptRole::User =>
+        {
+            Some(&block.run_id)
+        }
+        BackendEvent::ToolStarted { run_id, .. }
+        | BackendEvent::ToolUpdated { run_id, .. }
+        | BackendEvent::ToolFinished { run_id, .. } => Some(run_id),
+        BackendEvent::RunChanged(run) => Some(&run.id),
+        _ => None,
+    }
+}
+
 fn backend_error(error: GatewayError) -> BackendError {
     BackendError::Protocol(error.to_string())
 }
@@ -548,5 +598,28 @@ mod tests {
         assert_eq!(block.role, TranscriptRole::User);
         assert_eq!(block.text, "hello");
         assert!(block.complete);
+    }
+
+    #[test]
+    fn response_activity_excludes_the_echoed_user_prompt() {
+        let run_id = RunId::parse("run-root").expect("valid run ID");
+        let user = BackendEvent::TranscriptAppended(TranscriptBlock {
+            id: "user".to_owned(),
+            run_id: run_id.clone(),
+            role: TranscriptRole::User,
+            text: "hello".to_owned(),
+            complete: true,
+        });
+        let assistant = BackendEvent::TranscriptAppended(TranscriptBlock {
+            id: "assistant".to_owned(),
+            run_id: run_id.clone(),
+            role: TranscriptRole::Assistant,
+            text: "hi".to_owned(),
+            complete: false,
+        });
+
+        assert_eq!(response_activity_run(&user), None);
+        assert_eq!(response_activity_run(&assistant), Some(&run_id));
+        assert_eq!(prompt_status_key(&run_id), "prompt.run-root");
     }
 }
