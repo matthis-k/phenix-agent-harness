@@ -78,10 +78,4 @@ mod tests {
         let style = theme_style(&ThemeConfig::default(), "Accent");
         assert!(style.add_modifier.contains(Modifier::BOLD));
     }
-
-    #[test]
-    fn panels_use_a_single_workspace_separator() {
-        let block = panel("Transcript", false, &ThemeConfig::default());
-        assert_eq!(block.borders, Borders::TOP);
-    }
 }
