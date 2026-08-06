@@ -7,6 +7,7 @@ mod definition;
 mod id;
 mod protocol;
 mod runtime;
+mod source;
 mod tools;
 
 pub use client::{
@@ -34,6 +35,11 @@ pub use runtime::{
     PhenixAcpGateway, PhenixAcpGatewayBuilder, RoutingDecision, RoutingRequest, SessionCommand,
     SessionEvent, SessionImage, SessionOpenKind, SessionOpenRequest, SessionRouter, StaticWorkflow,
     TreeStartResult, Workflow, WorkflowPlan, WorkflowPlanBuilder, WorkflowRequest, WorkflowStep,
+};
+pub use source::{
+    parse_definition, DefinitionSourceError, DefinitionSourceKind, DefinitionSources, ModelTarget,
+    ParsedDefinition, RouteSelector, RoutingRule, RoutingTable, WorkflowDefinition,
+    WorkflowStepDefinition,
 };
 pub use tools::{
     BuiltinToolPolicy, McpServerDefinition, McpServerTransport, ToolConfigError, ToolConfiguration,
