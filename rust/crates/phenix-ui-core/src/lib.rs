@@ -7,7 +7,9 @@ mod routing;
 mod state;
 mod view;
 
-pub use completion::{command_completions, CommandCompletion, MAX_COMMAND_COMPLETIONS};
+pub use completion::{
+    command_completions, selected_command_completion, CommandCompletion, MAX_COMMAND_COMPLETIONS,
+};
 pub use input::{KeyCode, KeyInput, KeyModifiers, MouseAction, MouseButton, MouseInput, UiInput};
 pub use reducer::{reduce, AppEffect, AppEvent, UserIntent};
 pub use routing::{
