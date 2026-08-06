@@ -1,7 +1,7 @@
 use phenix_runtime_api::BackendOutput;
 use phenix_ui_core::{
-    AppEvent, AppState, ElementId, EventEnvelope, FocusDirection, FocusTarget, LayoutAxis,
-    ResizeRequest, RouteTarget, UiInput,
+    AppEvent, AppState, ElementId, EventEnvelope, FocusDirection, FocusTarget, InputEditor,
+    LayoutAxis, ResizeRequest, RouteTarget, UiInput, VimMode,
 };
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -41,10 +41,19 @@ pub enum InputEdit {
     Insert(String),
     Backspace,
     Delete,
+    DeleteLine,
     MoveLeft,
     MoveRight,
+    MoveUp,
+    MoveDown,
+    MoveHome,
+    MoveEnd,
+    MoveWordForward,
+    MoveWordBackward,
     HistoryPrevious,
     HistoryNext,
+    SetEditor(InputEditor),
+    SetVimMode(VimMode),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -75,6 +84,7 @@ pub enum BusReaction {
     Content(Box<EventEnvelope<ContentEvent>>),
     Ui(EventEnvelope<UiEvent>),
     View(ViewMutation),
+    ExternalEditor,
     Render,
 }
 
