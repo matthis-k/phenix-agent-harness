@@ -13,13 +13,7 @@ const LEGACY_WORKFLOWS: &[WorkflowFixture] = &[
     WorkflowFixture {
         id: "workflow.debug",
         source: include_str!("fixtures/legacy/workflows/debug.md"),
-        roles: &[
-            "reproducer",
-            "critic",
-            "implementer",
-            "tester",
-            "finalizer",
-        ],
+        roles: &["reproducer", "critic", "implementer", "tester", "finalizer"],
     },
     WorkflowFixture {
         id: "workflow.design",
@@ -29,12 +23,7 @@ const LEGACY_WORKFLOWS: &[WorkflowFixture] = &[
     WorkflowFixture {
         id: "workflow.implement",
         source: include_str!("fixtures/legacy/workflows/implement.md"),
-        roles: &[
-            "difficulty-estimator",
-            "planner",
-            "implementer",
-            "verifier",
-        ],
+        roles: &["difficulty-estimator", "planner", "implementer", "verifier"],
     },
     WorkflowFixture {
         id: "workflow.migrate",
@@ -440,42 +429,82 @@ fn legacy_model_set_routers_parse_and_route_to_expected_targets() {
             .unwrap_or_else(|error| panic!("{} did not register: {error}", fixture.id));
     }
 
-    assert_eq!(
-        definitions.routing_tables().count(),
-        LEGACY_ROUTERS.len()
-    );
+    assert_eq!(definitions.routing_tables().count(), LEGACY_ROUTERS.len());
 }
 
 #[test]
-fn checked_in_acp_example_definitions_remain_parseable() {
+fn configured_harness_definitions_remain_parseable() {
     let workflows = [
         (
-            "phenix.dynamic",
-            include_str!("../../../../config/phenix-acp/workflows/dynamic.md"),
+            "workflow.debug",
+            include_str!("../../../../config/phenix-harness/workflows/debug.md"),
         ),
         (
-            "phenix.implement",
-            include_str!("../../../../config/phenix-acp/workflows/implement.md"),
+            "workflow.design",
+            include_str!("../../../../config/phenix-harness/workflows/design.md"),
         ),
         (
-            "phenix.qa-fix",
-            include_str!("../../../../config/phenix-acp/workflows/qa-fix.md"),
+            "workflow.implement",
+            include_str!("../../../../config/phenix-harness/workflows/implement.md"),
         ),
         (
-            "phenix.qa",
-            include_str!("../../../../config/phenix-acp/workflows/qa.md"),
+            "workflow.migrate",
+            include_str!("../../../../config/phenix-harness/workflows/migrate.md"),
+        ),
+        (
+            "workflow.qa",
+            include_str!("../../../../config/phenix-harness/workflows/qa.md"),
+        ),
+        (
+            "workflow.refactor",
+            include_str!("../../../../config/phenix-harness/workflows/refactor.md"),
+        ),
+        (
+            "workflow.research",
+            include_str!("../../../../config/phenix-harness/workflows/research.md"),
+        ),
+        (
+            "workflow.review",
+            include_str!("../../../../config/phenix-harness/workflows/review.md"),
+        ),
+        (
+            "workflow.security",
+            include_str!("../../../../config/phenix-harness/workflows/security.md"),
+        ),
+        (
+            "workflow.ui-change",
+            include_str!("../../../../config/phenix-harness/workflows/ui-change.md"),
         ),
     ];
     for (expected_id, source) in workflows {
         let workflow = parse_workflow(source).unwrap_or_else(|error| {
-            panic!("example workflow {expected_id} did not parse: {error}")
+            panic!("configured workflow {expected_id} did not parse: {error}")
         });
         assert_eq!(workflow.id().as_str(), expected_id);
     }
 
-    let router = parse_routing_table(include_str!(
-        "../../../../config/phenix-acp/routing/capability-budget.md"
-    ))
-    .expect("example routing table must parse");
-    assert_eq!(router.id().as_str(), "phenix.capability-budget");
+    let routing_tables = [
+        (
+            "router.legacy-free",
+            include_str!("../../../../config/phenix-harness/routing/free.md"),
+        ),
+        (
+            "router.legacy-opencode-go",
+            include_str!("../../../../config/phenix-harness/routing/opencode-go.md"),
+        ),
+        (
+            "router.legacy-chatgpt-plus",
+            include_str!("../../../../config/phenix-harness/routing/chatgpt-plus.md"),
+        ),
+        (
+            "router.legacy-mixed",
+            include_str!("../../../../config/phenix-harness/routing/mixed.md"),
+        ),
+    ];
+    for (expected_id, source) in routing_tables {
+        let router = parse_routing_table(source).unwrap_or_else(|error| {
+            panic!("configured routing table {expected_id} did not parse: {error}")
+        });
+        assert_eq!(router.id().as_str(), expected_id);
+    }
 }

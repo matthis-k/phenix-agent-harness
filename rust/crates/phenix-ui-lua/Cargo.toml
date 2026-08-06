@@ -6,5 +6,6 @@ publish = false
 
 [dependencies]
 mlua = { workspace = true }
+phenix-acp = { path = "../phenix-acp" }
 phenix-frontend-config = { path = "../phenix-frontend-config" }
 phenix-ui-core = { path = "../phenix-ui-core" }

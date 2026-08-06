@@ -1,3 +1,4 @@
+use crate::acp::{install_acp_api, AcpApplicationConfig, AcpConfigurationState};
 use crate::api::install_api;
 use crate::key::KeyChord;
 use mlua::{Function, Lua, RegistryKey, Table};
@@ -34,6 +35,7 @@ pub struct LuaFrontendProvider {
     commands: Rc<RefCell<Vec<FrontendCommand>>>,
     config: FrontendConfig,
     options: LuaFrontendOptions,
+    acp_config: Option<AcpApplicationConfig>,
 }
 
 impl LuaFrontendProvider {
@@ -45,11 +47,16 @@ impl LuaFrontendProvider {
             commands: built.commands,
             config: built.config,
             options,
+            acp_config: built.acp_config,
         })
     }
 
     pub fn default_source() -> &'static str {
         DEFAULT_CONFIG
+    }
+
+    pub fn acp_config(&self) -> Option<&AcpApplicationConfig> {
+        self.acp_config.as_ref()
     }
 
     fn sync_config(&mut self) {
@@ -139,6 +146,7 @@ impl FrontendConfigProvider for LuaFrontendProvider {
         self.state = built.state;
         self.commands = built.commands;
         self.config = built.config;
+        self.acp_config = built.acp_config;
         Ok(())
     }
 
@@ -151,6 +159,7 @@ impl FrontendConfigProvider for LuaFrontendProvider {
 pub(crate) struct LuaState {
     pub config: FrontendConfig,
     pub bindings: Vec<LuaBinding>,
+    pub acp: AcpConfigurationState,
 }
 
 impl LuaState {
@@ -180,6 +189,7 @@ struct BuiltProvider {
     state: Rc<RefCell<LuaState>>,
     commands: Rc<RefCell<Vec<FrontendCommand>>>,
     config: FrontendConfig,
+    acp_config: Option<AcpApplicationConfig>,
 }
 
 fn build_provider(options: &LuaFrontendOptions) -> Result<BuiltProvider, FrontendProviderError> {
@@ -187,6 +197,7 @@ fn build_provider(options: &LuaFrontendOptions) -> Result<BuiltProvider, Fronten
     let state = Rc::new(RefCell::new(LuaState::default()));
     let commands = Rc::new(RefCell::new(Vec::new()));
     install_api(&lua, Rc::clone(&state), Rc::clone(&commands))?;
+    install_acp_api(&lua, Rc::clone(&state))?;
 
     if options.load_defaults {
         execute(&lua, DEFAULT_CONFIG, "@phenix/default.lua")?;
@@ -197,16 +208,17 @@ fn build_provider(options: &LuaFrontendOptions) -> Result<BuiltProvider, Fronten
         execute(&lua, &source, &format!("@{}", path.display()))?;
     }
 
-    let config = {
+    let (config, acp_config) = {
         let mut state = state.borrow_mut();
         state.refresh_keymap_descriptions();
-        state.config.clone()
+        (state.config.clone(), state.acp.configuration())
     };
     Ok(BuiltProvider {
         lua,
         state,
         commands,
         config,
+        acp_config,
     })
 }
 
@@ -280,6 +292,46 @@ end)
             commands,
             vec![FrontendCommand::Application(ApplicationCommand::Quit)]
         );
+    }
+
+    #[test]
+    fn lua_configuration_declares_acp_runtime_and_definition_sources() {
+        let path = temporary_config(
+            r#"
+phenix.acp.configure({
+  definition_id = "phenix.harness",
+  router = "router.mixed",
+  backend = { id = "pi", command = "pi-acp" },
+  root = {
+    tree_id = "tree-frontend",
+    role = "coordinator",
+    objective = "Interactive tree",
+  },
+})
+phenix.acp.workflow("workflows/implement.md")
+phenix.acp.routing_table({ source = [[
+# Router
+```phenix-router
+id: router.mixed
+```
+## Routes
+| Role | Workflow | Target | Explanation |
+|---|---|---|---|
+| `*` | `*` | `pi/provider/model` | fallback |
+]], format = "markdown" })
+"#,
+        );
+        let provider = LuaFrontendProvider::new(LuaFrontendOptions {
+            source_path: Some(path.clone()),
+            load_defaults: false,
+        })
+        .expect("Lua provider");
+        let config = provider.acp_config().expect("ACP config");
+        assert_eq!(config.definition_id().as_str(), "phenix.harness");
+        assert_eq!(config.router().as_str(), "router.mixed");
+        assert_eq!(config.backend().id().as_str(), "pi");
+        assert_eq!(config.definitions().len(), 2);
+        fs::remove_file(path).ok();
     }
 
     fn context(pane_type: PaneType) -> FrontendContext {

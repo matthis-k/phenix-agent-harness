@@ -54,9 +54,7 @@ fn child_constraint(node: &LayoutNode, direction: SplitDirection, state: &AppSta
                 return Constraint::Length(explicit);
             }
             match (pane.minimum, pane.maximum) {
-                (Some(minimum), Some(maximum)) if minimum == maximum => {
-                    Constraint::Length(minimum)
-                }
+                (Some(minimum), Some(maximum)) if minimum == maximum => Constraint::Length(minimum),
                 (Some(minimum), None) => Constraint::Min(minimum),
                 (None, Some(maximum)) => Constraint::Max(maximum),
                 _ => Constraint::Fill(pane.weight.max(1)),

@@ -13,19 +13,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 
 const BUILTIN_COMMANDS: &[&str] = &[
-    "abort",
-    "compact",
-    "exit",
-    "login",
-    "logout",
-    "mode",
-    "model",
-    "new",
-    "quit",
-    "reload",
-    "resume",
-    "sessions",
-    "thinking",
+    "abort", "compact", "exit", "login", "logout", "mode", "model", "new", "quit", "reload",
+    "resume", "sessions", "thinking",
 ];
 
 pub struct RatatuiRenderer {
@@ -224,10 +213,7 @@ fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &The
             theme_style(theme, "Muted"),
         ));
     }
-    frame.render_widget(
-        Paragraph::new(lines).wrap(Wrap { trim: false }),
-        inner,
-    );
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 
     if focused && inner.height > 0 {
         let cursor = state.input.cursor_byte.min(state.input.text.len());
@@ -250,9 +236,10 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &Th
             .input_target()
             .and_then(|target| snapshot.runs.iter().find(|run| &run.id == target))
     });
-    let model = selected_run
-        .and_then(|run| run.model.as_ref())
-        .map_or_else(|| "selection: unavailable".to_owned(), model_selection_label);
+    let model = selected_run.and_then(|run| run.model.as_ref()).map_or_else(
+        || "selection: unavailable".to_owned(),
+        model_selection_label,
+    );
     let thinking = selected_run
         .and_then(|run| run.thinking_level.as_ref())
         .map(|level| format!("thinking: {level:?}"));
@@ -689,7 +676,9 @@ fn overlay_selected(state: &AppState) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_runtime_api::{BackendHealth, RunId, RunKind, RunState, RunSummary, RuntimeSnapshot};
+    use phenix_runtime_api::{
+        BackendHealth, RunId, RunKind, RunState, RunSummary, RuntimeSnapshot,
+    };
 
     #[test]
     fn picker_window_keeps_deep_selection_visible() {
