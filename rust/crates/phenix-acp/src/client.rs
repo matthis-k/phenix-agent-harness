@@ -103,12 +103,12 @@ mod tests {
         type Result = EchoResult;
     }
 
-    #[derive(Serialize)]
+    #[derive(Deserialize, Serialize)]
     struct EchoParams {
         value: String,
     }
 
-    #[derive(Debug, Deserialize, Eq, PartialEq)]
+    #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
     struct EchoResult {
         tree_id: SessionTreeId,
     }
