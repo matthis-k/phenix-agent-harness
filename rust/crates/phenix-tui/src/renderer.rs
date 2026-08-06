@@ -305,7 +305,11 @@ fn render_command_completion(
         .enumerate()
         .map(|(index, completion)| {
             let mut spans = vec![Span::styled(
-                format!("{} {}", if index == 0 { "▸" } else { " " }, completion.command),
+                format!(
+                    "{} {}",
+                    if index == 0 { "▸" } else { " " },
+                    completion.command
+                ),
                 if index == 0 {
                     theme_style(theme, "Accent")
                 } else {
@@ -330,9 +334,10 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &Th
             .input_target()
             .and_then(|target| snapshot.runs.iter().find(|run| &run.id == target))
     });
-    let model = selected_run
-        .and_then(|run| run.model.as_ref())
-        .map_or_else(|| "selection: unavailable".to_owned(), model_selection_label);
+    let model = selected_run.and_then(|run| run.model.as_ref()).map_or_else(
+        || "selection: unavailable".to_owned(),
+        model_selection_label,
+    );
     let thinking = selected_run
         .and_then(|run| run.thinking_level.as_ref())
         .map(|level| format!("thinking: {level:?}"));
