@@ -6,13 +6,12 @@ use agent_client_protocol::schema::ProtocolVersion;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::error::Error;
-use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -21,10 +20,8 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
     let fixture_agent = PathBuf::from(env!("CARGO_BIN_EXE_fixture-agent"));
     let conductor = PathBuf::from(env!("CARGO_BIN_EXE_phenix-conductor"));
     let cwd = std::env::current_dir()?;
-    let bootstrap_path = unique_temp_path("phenix-conductor-bootstrap", "json");
-    fs::write(&bootstrap_path, bootstrap_json(&fixture_agent).to_string())?;
 
-    let mut process = RpcProcess::spawn(&conductor, &bootstrap_path, &cwd)?;
+    let mut process = RpcProcess::spawn(&conductor, &cwd)?;
     process.send_request(
         1,
         "initialize",
@@ -32,6 +29,15 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
     )?;
     let initialized = process.receive_response(1)?;
     assert_eq!(initialized["result"]["protocolVersion"], 1);
+
+    process.send_request(
+        100,
+        "_phenix/config/apply",
+        &configuration_json(&fixture_agent),
+    )?;
+    let configured = process.receive_response(100)?;
+    assert_eq!(configured["result"]["revision"], 1);
+    assert_eq!(configured["result"]["definition_id"], "definition.fixture");
 
     process.send_request(2, "session/new", &NewSessionRequest::new(&cwd))?;
     let created = process.receive_response(2)?;
@@ -166,11 +172,10 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
     );
 
     process.shutdown();
-    let _ = fs::remove_file(bootstrap_path);
     Ok(())
 }
 
-fn bootstrap_json(fixture_agent: &Path) -> Value {
+fn configuration_json(fixture_agent: &Path) -> Value {
     let routing = r#"
 # Fixture routing
 
@@ -185,30 +190,29 @@ id: router.fixture
 | `*` | `*` | `fixture/provider/model` | fixture route |
 "#;
     json!({
-        "definition_id": "definition.fixture",
-        "router": "router.fixture",
-        "root": {
-            "role": "coordinator",
-            "objective": "coordinate the fixture session"
-        },
-        "backends": [{
-            "id": "fixture",
-            "command": format!("{:?}", fixture_agent)
-        }],
-        "definitions": [{
-            "kind": "routing_table",
-            "source": routing,
-            "format": "markdown"
-        }]
+        "source_root": ".",
+        "input": {
+            "definition_id": "definition.fixture",
+            "router": "router.fixture",
+            "root": {
+                "tree_id": "fixture-root",
+                "role": "coordinator",
+                "objective": "coordinate the fixture session"
+            },
+            "backends": [{
+                "id": "fixture",
+                "command": format!("{:?}", fixture_agent)
+            }],
+            "definitions": [{
+                "kind": "routing_table",
+                "source": {
+                    "kind": "inline",
+                    "source": routing,
+                    "format": "markdown"
+                }
+            }]
+        }
     })
-}
-
-fn unique_temp_path(stem: &str, extension: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock before Unix epoch")
-        .as_nanos();
-    std::env::temp_dir().join(format!("{stem}-{}-{nonce}.{extension}", std::process::id()))
 }
 
 struct RpcProcess {
@@ -218,10 +222,8 @@ struct RpcProcess {
 }
 
 impl RpcProcess {
-    fn spawn(conductor: &Path, bootstrap: &Path, cwd: &Path) -> Result<Self, Box<dyn Error>> {
+    fn spawn(conductor: &Path, cwd: &Path) -> Result<Self, Box<dyn Error>> {
         let mut child = Command::new(conductor)
-            .arg("--bootstrap")
-            .arg(bootstrap)
             .arg("--cwd")
             .arg(cwd)
             .stdin(Stdio::piped())
