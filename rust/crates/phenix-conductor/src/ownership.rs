@@ -11,10 +11,15 @@ use phenix_conductor::{
 };
 use serde::Serialize;
 use serde_json::value::to_raw_value;
+use std::env;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+const CONFIGURATION_FILE_ENV: &str = "PHENIX_CONFIGURATION_FILE";
 
 /// ACP-process owner for the canonical Phenix configuration and runtime.
 ///
@@ -35,12 +40,30 @@ impl ConductorOwner {
         if channel_capacity == 0 {
             return Err(ConductorOwnerError::InvalidChannelCapacity);
         }
-        Ok(Self {
+        let mut owner = Self {
             cwd,
             channel_capacity,
             runtime: None,
             configuration: None,
-        })
+        };
+        if let Some(path) = env::var_os(CONFIGURATION_FILE_ENV).map(PathBuf::from) {
+            let source = fs::read_to_string(&path).map_err(|source| {
+                ConductorOwnerError::ReadConfigurationFile {
+                    path: path.clone(),
+                    source,
+                }
+            })?;
+            fs::remove_file(&path).map_err(|source| {
+                ConductorOwnerError::RemoveConfigurationFile {
+                    path: path.clone(),
+                    source,
+                }
+            })?;
+            let params = serde_json::from_str(&source)
+                .map_err(ConductorOwnerError::DecodeConfiguration)?;
+            owner.apply_params(params)?;
+        }
+        Ok(owner)
     }
 
     pub fn handle_configuration_extension(
@@ -116,13 +139,11 @@ impl ConductorOwner {
     }
 
     pub fn conductor(&self) -> Result<&PhenixConductor, ConductorOwnerError> {
-        self.runtime()
-            .map(ConductorRuntime::conductor)
+        self.runtime().map(ConductorRuntime::conductor)
     }
 
     pub fn conductor_mut(&mut self) -> Result<&mut PhenixConductor, ConductorOwnerError> {
-        self.runtime_mut()
-            .map(ConductorRuntime::conductor_mut)
+        self.runtime_mut().map(ConductorRuntime::conductor_mut)
     }
 
     pub fn configuration(&self) -> Option<&ConfigurationSnapshot> {
@@ -130,11 +151,19 @@ impl ConductorOwner {
     }
 
     fn apply(&mut self, request: &ExtRequest) -> Result<ExtResponse, ConductorOwnerError> {
+        let params: ConfigurationApplyParams = serde_json::from_str(request.params.get())
+            .map_err(ConductorOwnerError::DecodeConfiguration)?;
+        let result = self.apply_params(params)?;
+        encode_response(&result)
+    }
+
+    fn apply_params(
+        &mut self,
+        params: ConfigurationApplyParams,
+    ) -> Result<ConfigurationApplyResult, ConductorOwnerError> {
         if self.runtime.is_some() {
             return Err(ConductorOwnerError::AlreadyConfigured);
         }
-        let params: ConfigurationApplyParams = serde_json::from_str(request.params.get())
-            .map_err(ConductorOwnerError::DecodeConfiguration)?;
         let source_root = resolve_source_root(&self.cwd, &params.source_root);
         let (bootstrap, snapshot) = build_bootstrap(params, &source_root)?;
 
@@ -150,7 +179,7 @@ impl ConductorOwner {
         };
         self.runtime = Some(runtime);
         self.configuration = Some(snapshot);
-        encode_response(&result)
+        Ok(result)
     }
 
     fn get(&self) -> Result<ExtResponse, ConductorOwnerError> {
@@ -278,6 +307,8 @@ pub enum ConductorOwnerError {
     AlreadyConfigured,
     MissingBackends,
     MissingDefinitions,
+    ReadConfigurationFile { path: PathBuf, source: io::Error },
+    RemoveConfigurationFile { path: PathBuf, source: io::Error },
     DecodeConfiguration(serde_json::Error),
     EncodeConfiguration(serde_json::Error),
     Source(ConfigurationSourceError),
@@ -302,6 +333,16 @@ impl Display for ConductorOwnerError {
             }
             Self::MissingDefinitions => formatter
                 .write_str("Phenix ACP configuration requires at least one definition source"),
+            Self::ReadConfigurationFile { path, source } => write!(
+                formatter,
+                "failed to read typed Phenix ACP configuration input {}: {source}",
+                path.display()
+            ),
+            Self::RemoveConfigurationFile { path, source } => write!(
+                formatter,
+                "failed to remove consumed Phenix ACP configuration input {}: {source}",
+                path.display()
+            ),
             Self::DecodeConfiguration(error) => {
                 write!(formatter, "invalid Phenix ACP configuration request: {error}")
             }
@@ -309,7 +350,9 @@ impl Display for ConductorOwnerError {
                 write!(formatter, "failed to encode Phenix ACP configuration response: {error}")
             }
             Self::Source(error) => Display::fmt(error, formatter),
-            Self::Build(error) => write!(formatter, "failed to construct Phenix ACP configuration: {error}"),
+            Self::Build(error) => {
+                write!(formatter, "failed to construct Phenix ACP configuration: {error}")
+            }
             Self::Runtime(error) => formatter.write_str(error),
         }
     }
@@ -318,6 +361,8 @@ impl Display for ConductorOwnerError {
 impl Error for ConductorOwnerError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::ReadConfigurationFile { source, .. }
+            | Self::RemoveConfigurationFile { source, .. } => Some(source),
             Self::DecodeConfiguration(error) | Self::EncodeConfiguration(error) => Some(error),
             Self::Source(error) => Some(error),
             Self::InvalidChannelCapacity
