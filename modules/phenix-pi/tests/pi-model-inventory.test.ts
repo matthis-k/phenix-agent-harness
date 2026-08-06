@@ -13,14 +13,13 @@ test("registered OpenCode free models are usable without configured auth", () =>
   const registry = freeModelRegistry();
   const inventory = new PiModelInventory(registry);
   const available = inventory.available();
-  const configured = defaultRoutingPolicy
-    .candidates("free", "general")
-    .map((model) => ({ provider: model.provider, model: model.model }));
+  const configured = defaultRoutingPolicy.candidates("free", "general");
 
   assert.deepEqual(available, configured);
   const candidate = available[0];
   assert.ok(candidate);
-  assert.equal(inventory.contains(candidate.provider, candidate.model), true);
+  assert.equal(candidate.backend, "pi");
+  assert.equal(inventory.contains(candidate), true);
 });
 
 test("phenix/free resolves a registered anonymous OpenCode model", async () => {
@@ -36,6 +35,7 @@ test("phenix/free resolves a registered anonymous OpenCode model", async () => {
     },
   );
 
+  assert.equal(resolved.target.backend, "pi");
   assert.equal(resolved.concrete.provider, "opencode");
   assert.match(resolved.concrete.model, /-free$/);
 });
@@ -47,8 +47,18 @@ test("registered paid models still require configured auth", () => {
   } as unknown as ModelRegistry;
   const inventory = new PiModelInventory(registry);
 
-  assert.equal(inventory.contains("opencode", "some-paid-model"), false);
-  assert.equal(inventory.contains("openai-codex", "gpt-5.6"), false);
+  assert.equal(
+    inventory.contains({ backend: "pi", provider: "opencode", model: "some-paid-model" }),
+    false,
+  );
+  assert.equal(
+    inventory.contains({ backend: "pi", provider: "openai-codex", model: "gpt-5.6" }),
+    false,
+  );
+  assert.equal(
+    inventory.contains({ backend: "claude", provider: "anthropic", model: "sonnet" }),
+    false,
+  );
 });
 
 function freeModelRegistry(): ModelRegistry {
