@@ -743,12 +743,14 @@ mod tests {
         let mut state = state_with_run(run.clone());
         state.input.replace("/phenix status".to_owned());
         let effects = reduce(&mut state, AppEvent::User(UserIntent::SubmitPrompt));
-        assert!(effects.contains(&AppEffect::Send(BackendCommand::PromptSubmit {
-            run_id: run,
-            text: "/phenix status".to_owned(),
-            images: Vec::new(),
-            streaming_behavior: None,
-        })));
+        assert!(
+            effects.contains(&AppEffect::Send(BackendCommand::PromptSubmit {
+                run_id: run,
+                text: "/phenix status".to_owned(),
+                images: Vec::new(),
+                streaming_behavior: None,
+            }))
+        );
     }
 
     #[test]
@@ -757,8 +759,7 @@ mod tests {
         reduce(
             &mut state,
             AppEvent::Backend(Box::new(BackendOutput::Reply {
-                request_id: phenix_runtime_api::RequestId::parse("commands")
-                    .expect("request ID"),
+                request_id: phenix_runtime_api::RequestId::parse("commands").expect("request ID"),
                 result: Ok(BackendReply::Commands(Vec::new())),
             })),
         );
