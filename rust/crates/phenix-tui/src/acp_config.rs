@@ -1,6 +1,6 @@
 use phenix_acp::{
-    AcpEndpoint, BackendDefinition, BackendId, DefinitionError, DefinitionId,
-    DefinitionSourceError, Definitions, GatewayError, PhenixAcpGateway, RoleId, RouterId,
+    AcpEndpoint, BackendDefinition, BackendId, DefinitionError, DefinitionFormat, DefinitionId,
+    DefinitionParseError, Definitions, GatewayError, PhenixAcpGateway, RoleId, RouterId,
     SessionTreeDefinition, SessionTreeId,
 };
 use phenix_acp_backend::{
@@ -22,10 +22,36 @@ struct Manifest {
     definition_id: String,
     router: String,
     #[serde(default)]
-    workflows: Vec<String>,
-    routing_tables: Vec<String>,
+    workflows: Vec<DefinitionInput>,
+    routing_tables: Vec<DefinitionInput>,
     backend: BackendManifest,
     root: RootManifest,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum DefinitionInput {
+    Path(String),
+    Source {
+        source: String,
+        #[serde(default)]
+        format: Option<DefinitionFormat>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ExpectedDefinition {
+    Workflow,
+    RoutingTable,
+}
+
+impl Display for ExpectedDefinition {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Workflow => formatter.write_str("workflow"),
+            Self::RoutingTable => formatter.write_str("routing table"),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,19 +94,25 @@ pub fn load_acp_backend(
 
     let mut definitions = Definitions::new();
     let mut referenced = BTreeSet::new();
-    for reference in &manifest.workflows {
-        let path = resolve_source_path(config_directory, reference, &mut referenced)?;
-        let source_text = read_source(&path)?;
-        definitions
-            .add_workflow(&source_text)
-            .map_err(|source| AcpConfigLoadError::DefinitionSource { path, source })?;
+    for (index, input) in manifest.workflows.iter().enumerate() {
+        add_definition(
+            &mut definitions,
+            config_directory,
+            input,
+            ExpectedDefinition::Workflow,
+            index,
+            &mut referenced,
+        )?;
     }
-    for reference in &manifest.routing_tables {
-        let path = resolve_source_path(config_directory, reference, &mut referenced)?;
-        let source_text = read_source(&path)?;
-        definitions
-            .add_routing_table(&source_text)
-            .map_err(|source| AcpConfigLoadError::DefinitionSource { path, source })?;
+    for (index, input) in manifest.routing_tables.iter().enumerate() {
+        add_definition(
+            &mut definitions,
+            config_directory,
+            input,
+            ExpectedDefinition::RoutingTable,
+            index,
+            &mut referenced,
+        )?;
     }
 
     let definition_id = DefinitionId::parse(manifest.definition_id).map_err(|source| {
@@ -152,6 +184,66 @@ pub fn load_acp_backend(
         root_role,
         manifest.root.objective,
     ))
+}
+
+fn add_definition(
+    definitions: &mut Definitions,
+    config_directory: &Path,
+    input: &DefinitionInput,
+    expected: ExpectedDefinition,
+    index: usize,
+    referenced: &mut BTreeSet<PathBuf>,
+) -> Result<(), AcpConfigLoadError> {
+    match input {
+        DefinitionInput::Path(reference) => {
+            let path = resolve_source_path(config_directory, reference, referenced)?;
+            let format = definition_format_for_path(&path)?;
+            let source_text = read_source(&path)?;
+            add_source(definitions, &source_text, Some(format), expected).map_err(|source| {
+                AcpConfigLoadError::DefinitionSource {
+                    origin: path.display().to_string(),
+                    source,
+                }
+            })
+        }
+        DefinitionInput::Source { source, format } => {
+            let origin = format!("inline {expected} #{}", index + 1);
+            add_source(definitions, source, *format, expected)
+                .map_err(|source| AcpConfigLoadError::DefinitionSource { origin, source })
+        }
+    }
+}
+
+fn add_source(
+    definitions: &mut Definitions,
+    source: &str,
+    format: Option<DefinitionFormat>,
+    expected: ExpectedDefinition,
+) -> Result<(), DefinitionParseError> {
+    match (expected, format) {
+        (ExpectedDefinition::Workflow, Some(format)) => {
+            definitions.add_workflow_with_format(source, format)?;
+        }
+        (ExpectedDefinition::Workflow, None) => {
+            definitions.add_workflow(source)?;
+        }
+        (ExpectedDefinition::RoutingTable, Some(format)) => {
+            definitions.add_routing_table_with_format(source, format)?;
+        }
+        (ExpectedDefinition::RoutingTable, None) => {
+            definitions.add_routing_table(source)?;
+        }
+    }
+    Ok(())
+}
+
+fn definition_format_for_path(path: &Path) -> Result<DefinitionFormat, AcpConfigLoadError> {
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .ok_or_else(|| AcpConfigLoadError::UnknownDefinitionFormat(path.to_path_buf()))?;
+    DefinitionFormat::from_extension(extension)
+        .ok_or_else(|| AcpConfigLoadError::UnknownDefinitionFormat(path.to_path_buf()))
 }
 
 struct BackendCommand {
@@ -234,9 +326,10 @@ pub enum AcpConfigLoadError {
         source: phenix_acp::IdError,
     },
     DefinitionSource {
-        path: PathBuf,
-        source: DefinitionSourceError,
+        origin: String,
+        source: DefinitionParseError,
     },
+    UnknownDefinitionFormat(PathBuf),
     InvalidReference(String),
     DuplicateReference(String),
     MissingRoutingTableReferences,
@@ -275,10 +368,10 @@ impl From<GatewayError> for AcpConfigLoadError {
     }
 }
 
-impl From<DefinitionSourceError> for AcpConfigLoadError {
-    fn from(source: DefinitionSourceError) -> Self {
+impl From<DefinitionParseError> for AcpConfigLoadError {
+    fn from(source: DefinitionParseError) -> Self {
         Self::DefinitionSource {
-            path: PathBuf::from("<registered definition>"),
+            origin: "registered definition".to_owned(),
             source,
         }
     }
@@ -296,9 +389,14 @@ impl Display for AcpConfigLoadError {
             Self::Identifier { field, source } => {
                 write!(formatter, "invalid config.json field {field}: {source}")
             }
-            Self::DefinitionSource { path, source } => {
-                write!(formatter, "invalid definition {}: {source}", path.display())
+            Self::DefinitionSource { origin, source } => {
+                write!(formatter, "invalid definition {origin}: {source}")
             }
+            Self::UnknownDefinitionFormat(path) => write!(
+                formatter,
+                "cannot infer definition format from {}; supported extensions are .md, .markdown, .json, .toml, and .ron",
+                path.display()
+            ),
             Self::InvalidReference(reference) => write!(
                 formatter,
                 "invalid definition reference {reference:?}; references must stay inside the configuration directory"
@@ -347,7 +445,8 @@ impl Error for AcpConfigLoadError {
             Self::Definition(source) => Some(source),
             Self::BackendConfig(source) => Some(source),
             Self::Gateway(source) => Some(source),
-            Self::InvalidReference(_)
+            Self::UnknownDefinitionFormat(_)
+            | Self::InvalidReference(_)
             | Self::DuplicateReference(_)
             | Self::MissingRoutingTableReferences
             | Self::MissingRoutingTable(_)
@@ -381,6 +480,40 @@ mod tests {
         let mut referenced = BTreeSet::new();
         resolve_source_path(root, "workflow.md", &mut referenced).expect("first reference");
         assert!(resolve_source_path(root, "workflow.md", &mut referenced).is_err());
+    }
+
+    #[test]
+    fn path_extensions_select_definition_formats() {
+        assert_eq!(
+            definition_format_for_path(Path::new("workflow.md")).expect("markdown"),
+            DefinitionFormat::Markdown
+        );
+        assert_eq!(
+            definition_format_for_path(Path::new("router.ron")).expect("ron"),
+            DefinitionFormat::Ron
+        );
+        assert!(definition_format_for_path(Path::new("router.yaml")).is_err());
+    }
+
+    #[test]
+    fn inline_sources_can_use_explicit_or_detected_formats() {
+        let workflow = r#"kind = "workflow"
+title = "Implementation"
+id = "phenix.implement"
+[[steps]]
+key = "implement"
+role = "implementer"
+objective = "Implement {objective}"
+"#;
+        let mut definitions = Definitions::new();
+        add_source(
+            &mut definitions,
+            workflow,
+            Some(DefinitionFormat::Toml),
+            ExpectedDefinition::Workflow,
+        )
+        .expect("explicit TOML");
+        assert_eq!(definitions.workflows().len(), 1);
     }
 
     #[test]
