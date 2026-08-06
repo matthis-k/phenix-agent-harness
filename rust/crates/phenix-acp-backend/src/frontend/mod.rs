@@ -9,7 +9,7 @@ use phenix_acp::{
 use phenix_runtime_api::{
     AgentBackend, BackendCommand, BackendError, BackendEvent, BackendOutputSender, BackendReply,
     BackendRequest, ExtensionUiResponse, ImageInput, ModelRef, RunId, RuntimeSnapshot, SessionId,
-    StreamingBehavior, ThinkingLevel,
+    StreamingBehavior, ThinkingLevel, TranscriptBlock, TranscriptRole,
 };
 use projection::{gateway_events, node_for_run, node_for_session, project_snapshot};
 use std::collections::BTreeMap;
@@ -130,6 +130,7 @@ impl GatewayFrontendRuntime {
                 images,
                 streaming_behavior,
             } => {
+                let submitted_text = streaming_behavior.is_none().then(|| text.clone());
                 let command = match streaming_behavior {
                     Some(StreamingBehavior::Steer) => SessionCommand::Steer {
                         text,
@@ -145,6 +146,13 @@ impl GatewayFrontendRuntime {
                     },
                 };
                 self.execute_for_run(&run_id, command, outputs)?;
+                if let Some(text) = submitted_text {
+                    outputs.event(BackendEvent::TranscriptAppended(submitted_prompt_block(
+                        &mut self.transcript_sequence,
+                        run_id,
+                        text,
+                    )?))?;
+                }
                 Ok(BackendReply::Accepted)
             }
             BackendCommand::PromptSteer {
@@ -500,6 +508,45 @@ fn interaction_response(response: ExtensionUiResponse) -> InteractionResponse {
     }
 }
 
+fn submitted_prompt_block(
+    sequence: &mut u64,
+    run_id: RunId,
+    text: String,
+) -> Result<TranscriptBlock, BackendError> {
+    let current = *sequence;
+    *sequence = sequence
+        .checked_add(1)
+        .ok_or_else(|| BackendError::Protocol("transcript IDs exhausted".to_owned()))?;
+    Ok(TranscriptBlock {
+        id: format!("gateway-transcript-{current}"),
+        run_id,
+        role: TranscriptRole::User,
+        text,
+        complete: true,
+    })
+}
+
 fn backend_error(error: GatewayError) -> BackendError {
     BackendError::Protocol(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepted_prompt_is_visible_as_a_user_transcript_block() {
+        let run_id = RunId::parse("run-root").expect("valid run ID");
+        let mut sequence = 7;
+
+        let block = submitted_prompt_block(&mut sequence, run_id.clone(), "hello".to_owned())
+            .expect("transcript block");
+
+        assert_eq!(sequence, 8);
+        assert_eq!(block.id, "gateway-transcript-7");
+        assert_eq!(block.run_id, run_id);
+        assert_eq!(block.role, TranscriptRole::User);
+        assert_eq!(block.text, "hello");
+        assert!(block.complete);
+    }
 }
