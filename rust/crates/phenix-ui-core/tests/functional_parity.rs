@@ -122,17 +122,18 @@ fn native_slash_commands_cover_runtime_controls() {
 }
 
 #[test]
-fn unknown_slash_commands_are_invoked_through_the_resource_port() {
+fn unknown_slash_commands_are_forwarded_unchanged_to_acp() {
     let run = RunId::parse("root-run").expect("run ID");
     let mut state = state_with_run(run.clone());
     state.input.replace("/phenix status".to_owned());
 
     assert_send(
         reduce(&mut state, AppEvent::User(UserIntent::SubmitPrompt)),
-        BackendCommand::CommandInvoke {
+        BackendCommand::PromptSubmit {
             run_id: run,
-            name: "phenix".to_owned(),
-            arguments: "status".to_owned(),
+            text: "/phenix status".to_owned(),
+            images: Vec::new(),
+            streaming_behavior: None,
         },
     );
 }
