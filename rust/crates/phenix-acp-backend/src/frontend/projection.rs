@@ -177,101 +177,96 @@ fn gateway_event(
             event.session_id
         ))
     })?;
-    let events = match event.event {
-        SessionEvent::Text { text } => vec![BackendEvent::TranscriptAppended(transcript_block(
-            transcript_sequence,
-            run_id,
-            TranscriptRole::Assistant,
-            text,
-        )?)],
-        SessionEvent::Thought { text } => vec![BackendEvent::TranscriptAppended(transcript_block(
-            transcript_sequence,
-            run_id,
-            TranscriptRole::Thinking,
-            text,
-        )?)],
-        SessionEvent::ToolStarted {
-            call_id,
-            name,
-            input_summary,
-        } => vec![BackendEvent::ToolStarted {
-            run_id,
-            tool_call_id: ToolCallId::parse(call_id)
-                .map_err(|error| BackendError::Protocol(error.to_string()))?,
-            tool_name: name,
-            input_summary,
-        }],
-        SessionEvent::ToolUpdated { call_id, output } => vec![BackendEvent::ToolUpdated {
-            run_id,
-            tool_call_id: ToolCallId::parse(call_id)
-                .map_err(|error| BackendError::Protocol(error.to_string()))?,
-            output,
-        }],
-        SessionEvent::ToolFinished {
-            call_id,
-            succeeded,
-            output_summary,
-        } => vec![BackendEvent::ToolFinished {
-            run_id,
-            tool_call_id: ToolCallId::parse(call_id)
-                .map_err(|error| BackendError::Protocol(error.to_string()))?,
-            outcome: if succeeded {
-                ToolExecutionOutcome::Succeeded
-            } else {
-                ToolExecutionOutcome::Failed
-            },
-            output_summary,
-        }],
-        SessionEvent::Terminal {
-            terminal_id,
-            output,
-            exit_code,
-        } => vec![BackendEvent::StatusChanged {
-            key: format!("terminal.{terminal_id}"),
-            text: Some(match exit_code {
-                Some(exit_code) => format!("{output}\n[exit {exit_code}]"),
-                None => output,
-            }),
-        }],
-        SessionEvent::PermissionRequested {
-            request_id,
-            title,
-            options,
-        } => vec![BackendEvent::ExtensionUiRequested {
-            dialog_id: DialogId::parse(request_id)
-                .map_err(|error| BackendError::Protocol(error.to_string()))?,
-            request: ExtensionUiRequest::Select { title, options },
-        }],
-        SessionEvent::QueueChanged {
-            steering,
-            follow_ups,
-        } => vec![BackendEvent::QueueChanged {
-            run_id,
-            steering,
-            follow_ups,
-        }],
-        SessionEvent::Compacted => vec![BackendEvent::StatusChanged {
-            key: format!("run.{run_id}.compaction"),
-            text: Some("completed".to_owned()),
-        }],
-        SessionEvent::Completed => terminal_run_events(backend, &run_id),
-        SessionEvent::Failed { message } => {
-            let mut events = terminal_run_events(backend, &run_id);
-            events.push(BackendEvent::Notification {
-                level: NotificationLevel::Error,
-                message: format!("ACP prompt failed: {message}"),
-            });
-            events
-        }
-        SessionEvent::Cancelled { reason } => {
-            let mut events = terminal_run_events(backend, &run_id);
-            events.push(BackendEvent::Notification {
-                level: NotificationLevel::Information,
-                message: format!("ACP prompt cancelled: {reason}"),
-            });
-            events
-        }
-    };
+    let events =
+        match event.event {
+            SessionEvent::Text { text } => vec![BackendEvent::TranscriptAppended(
+                transcript_block(transcript_sequence, run_id, TranscriptRole::Assistant, text)?,
+            )],
+            SessionEvent::Thought { text } => vec![BackendEvent::TranscriptAppended(
+                transcript_block(transcript_sequence, run_id, TranscriptRole::Thinking, text)?,
+            )],
+            SessionEvent::ToolStarted {
+                call_id,
+                name,
+                input_summary,
+            } => vec![BackendEvent::ToolStarted {
+                run_id,
+                tool_call_id: ToolCallId::parse(call_id)
+                    .map_err(|error| BackendError::Protocol(error.to_string()))?,
+                tool_name: name,
+                input_summary,
+            }],
+            SessionEvent::ToolUpdated { call_id, output } => vec![BackendEvent::ToolUpdated {
+                run_id,
+                tool_call_id: ToolCallId::parse(call_id)
+                    .map_err(|error| BackendError::Protocol(error.to_string()))?,
+                output,
+            }],
+            SessionEvent::ToolFinished {
+                call_id,
+                succeeded,
+                output_summary,
+            } => vec![BackendEvent::ToolFinished {
+                run_id,
+                tool_call_id: ToolCallId::parse(call_id)
+                    .map_err(|error| BackendError::Protocol(error.to_string()))?,
+                outcome: if succeeded {
+                    ToolExecutionOutcome::Succeeded
+                } else {
+                    ToolExecutionOutcome::Failed
+                },
+                output_summary,
+            }],
+            SessionEvent::Terminal {
+                terminal_id,
+                output,
+                exit_code,
+            } => vec![BackendEvent::StatusChanged {
+                key: format!("terminal.{terminal_id}"),
+                text: Some(match exit_code {
+                    Some(exit_code) => format!("{output}\n[exit {exit_code}]"),
+                    None => output,
+                }),
+            }],
+            SessionEvent::PermissionRequested {
+                request_id,
+                title,
+                options,
+            } => vec![BackendEvent::ExtensionUiRequested {
+                dialog_id: DialogId::parse(request_id)
+                    .map_err(|error| BackendError::Protocol(error.to_string()))?,
+                request: ExtensionUiRequest::Select { title, options },
+            }],
+            SessionEvent::QueueChanged {
+                steering,
+                follow_ups,
+            } => vec![BackendEvent::QueueChanged {
+                run_id,
+                steering,
+                follow_ups,
+            }],
+            SessionEvent::Compacted => vec![BackendEvent::StatusChanged {
+                key: format!("run.{run_id}.compaction"),
+                text: Some("completed".to_owned()),
+            }],
+            SessionEvent::Completed => terminal_run_events(backend, &run_id),
+            SessionEvent::Failed { message } => {
+                let mut events = terminal_run_events(backend, &run_id);
+                events.push(BackendEvent::Notification {
+                    level: NotificationLevel::Error,
+                    message: format!("ACP prompt failed: {message}"),
+                });
+                events
+            }
+            SessionEvent::Cancelled { reason } => {
+                let mut events = terminal_run_events(backend, &run_id);
+                events.push(BackendEvent::Notification {
+                    level: NotificationLevel::Information,
+                    message: format!("ACP prompt cancelled: {reason}"),
+                });
+                events
+            }
+        };
     Ok(events)
 }
 
