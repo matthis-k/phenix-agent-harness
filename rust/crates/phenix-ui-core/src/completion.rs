@@ -68,6 +68,17 @@ pub fn command_completions(state: &AppState) -> Vec<CommandCompletion> {
         .collect()
 }
 
+pub fn selected_command_completion(
+    state: &AppState,
+    selected: usize,
+) -> Option<CommandCompletion> {
+    let completions = command_completions(state);
+    completions
+        .get(selected)
+        .or_else(|| completions.first())
+        .cloned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,5 +114,17 @@ mod tests {
         assert!(command_completions(&state).is_empty());
         state.input.replace("/routing mixed".to_owned());
         assert!(command_completions(&state).is_empty());
+    }
+
+    #[test]
+    fn selected_completion_falls_back_to_the_first_visible_entry() {
+        let mut state = AppState::default();
+        state.input.replace("/mo".to_owned());
+        assert_eq!(
+            selected_command_completion(&state, usize::MAX)
+                .expect("completion")
+                .command,
+            "/mode"
+        );
     }
 }
