@@ -252,9 +252,7 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &Th
     });
     let model = selected_run
         .and_then(|run| run.model.as_ref())
-        .map_or_else(|| "model: unavailable".to_owned(), |model| {
-            format!("model: {}/{}", model.provider, model.model)
-        });
+        .map_or_else(|| "selection: unavailable".to_owned(), model_selection_label);
     let thinking = selected_run
         .and_then(|run| run.thinking_level.as_ref())
         .map(|level| format!("thinking: {level:?}"));
@@ -659,6 +657,14 @@ fn slash_command_suggestions(state: &AppState) -> Vec<String> {
     commands
 }
 
+fn model_selection_label(model: &phenix_runtime_api::ModelRef) -> String {
+    if model.provider == "phenix" {
+        format!("routing: {}/{}", model.provider, model.model)
+    } else {
+        format!("model: {}/{}", model.provider, model.model)
+    }
+}
+
 fn auth_prompt_message(prompt: &AuthPrompt) -> String {
     match prompt {
         AuthPrompt::Text { message, .. }
@@ -705,6 +711,20 @@ mod tests {
     }
 
     #[test]
+    fn routed_and_direct_models_have_distinct_status_labels() {
+        let routed = phenix_runtime_api::ModelRef {
+            provider: "phenix".to_owned(),
+            model: "mixed".to_owned(),
+        };
+        let direct = phenix_runtime_api::ModelRef {
+            provider: "openai".to_owned(),
+            model: "gpt-5.6".to_owned(),
+        };
+        assert_eq!(model_selection_label(&routed), "routing: phenix/mixed");
+        assert_eq!(model_selection_label(&direct), "model: openai/gpt-5.6");
+    }
+
+    #[test]
     fn status_can_resolve_selected_run_model() {
         let run_id = RunId::parse("run-root").expect("run ID");
         let mut state = AppState::default();
@@ -738,11 +758,12 @@ mod tests {
             }],
             objectives: Vec::new(),
         });
-        assert!(state
+        let model = state
             .snapshot
             .as_ref()
             .and_then(|snapshot| snapshot.runs.first())
             .and_then(|run| run.model.as_ref())
-            .is_some_and(|model| model.model == "mixed"));
+            .expect("selected model");
+        assert_eq!(model_selection_label(model), "routing: phenix/mixed");
     }
 }
