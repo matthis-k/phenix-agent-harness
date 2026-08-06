@@ -38,6 +38,7 @@ const spec = {
   customTools: [],
   context: {
     projectFiles: "none",
+    parentConversation: "none",
     artifacts: [],
     maxBytes: 0,
   },
