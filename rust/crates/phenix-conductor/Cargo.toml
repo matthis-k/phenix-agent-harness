@@ -10,6 +10,7 @@ base64.workspace = true
 clap.workspace = true
 phenix-acp = { path = "../phenix-acp" }
 phenix-acp-backend = { path = "../phenix-acp-backend" }
+phenix-runtime-api = { path = "../phenix-runtime-api" }
 serde.workspace = true
 serde_json.workspace = true
 shell-words.workspace = true
