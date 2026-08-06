@@ -115,7 +115,8 @@ mod tests {
 
     #[test]
     fn equal_minimum_and_maximum_reserve_a_fixed_pane_extent() {
-        let state = AppState::default();
+        let mut state = AppState::default();
+        state.view.pane_mut(ElementId::input()).height = None;
         let mut output = BTreeMap::new();
         collect_layout(
             &LayoutNode::Split(SplitLayout {
