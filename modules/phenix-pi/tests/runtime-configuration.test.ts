@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { AnyDefinition } from "../domain/definition/definition.ts";
+import { defaultMemoryPolicy } from "../domain/memory/policy.ts";
 import { type DefinitionId, definitionId } from "../domain/shared.ts";
 import { defineRuntimeConfiguration } from "../framework/runtime-configuration.ts";
 import { passthroughBudgetPolicy } from "../ports/budget-policy.ts";
@@ -19,6 +20,7 @@ function configuration(
 ) {
   return {
     budgetPolicy: passthroughBudgetPolicy,
+    memoryPolicy: defaultMemoryPolicy,
     catalog: {
       definitionIds,
       definitions,
@@ -44,6 +46,7 @@ test("accepts the concrete Phenix runtime suite", () => {
     phenixRuntimeConfiguration.catalog.definitionIds.length,
   );
   assert.ok(phenixRuntimeConfiguration.catalog.rootInvokableDefinitions.length > 0);
+  assert.equal(phenixRuntimeConfiguration.memoryPolicy, defaultMemoryPolicy);
 });
 
 test("rejects compiled definitions absent from the declared internal universe", () => {

@@ -239,6 +239,18 @@ test("derives pane identity and row behavior exclusively from registered project
     },
     memory: {
       rootRunId: "root",
+      health: {
+        rootRunId: "root",
+        state: "healthy",
+        writable: true,
+        issues: [],
+        evidenceCount: 0,
+        noteCount: 1,
+        activeNoteCount: 1,
+        storedBytes: 0,
+        ledgerBytes: 128,
+        verifiedEvidenceCount: 0,
+      },
       evidence: [],
       notes: [
         {
@@ -266,10 +278,21 @@ test("derives pane identity and row behavior exclusively from registered project
     editor: [],
     runs: ["root", "child"],
     objectives: ["objective-main", "objective-child"],
-    memory: ["memory-new"],
+    memory: ["memory-health", "memory-new"],
     files: ["README.md"],
     facts: ["fact-new", "fact-file", "fact-old"],
   });
+  const health = memoryWorkspaceView.project(snapshot)[0];
+  assert.ok(health);
+  assert.match(
+    health.render({
+      theme: THEME,
+      width: 120,
+      activeRunId: root.run.id,
+      expanded: false,
+    }).text,
+    /health healthy.*1 notes.*writable/,
+  );
   for (const view of workspaceViewRegistry.ordered) {
     for (const row of view.project(snapshot)) {
       assert.equal(typeof row.render, "function");

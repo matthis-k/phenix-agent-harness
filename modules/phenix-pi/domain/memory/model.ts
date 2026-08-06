@@ -1,16 +1,24 @@
 import type { ObjectiveId, RunId } from "../shared.ts";
 
-export type EvidenceId = string & { readonly __brand: "EvidenceId" };
-export type MemoryNoteId = string & { readonly __brand: "MemoryNoteId" };
+declare const evidenceIdBrand: unique symbol;
+declare const memoryNoteIdBrand: unique symbol;
 
-export function evidenceId(value: string): EvidenceId {
-  if (!value.trim()) throw new Error("Evidence ID must not be empty");
-  return value as EvidenceId;
+export type EvidenceId<TValue extends string = string> = TValue & {
+  readonly [evidenceIdBrand]: "EvidenceId";
+};
+export type MemoryNoteId<TValue extends string = string> = TValue & {
+  readonly [memoryNoteIdBrand]: "MemoryNoteId";
+};
+
+const MAX_ID_LENGTH = 160;
+const MEMORY_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+
+export function evidenceId<const TValue extends string>(value: TValue): EvidenceId<TValue> {
+  return validateMemoryId("Evidence ID", value) as EvidenceId<TValue>;
 }
 
-export function memoryNoteId(value: string): MemoryNoteId {
-  if (!value.trim()) throw new Error("Memory note ID must not be empty");
-  return value as MemoryNoteId;
+export function memoryNoteId<const TValue extends string>(value: TValue): MemoryNoteId<TValue> {
+  return validateMemoryId("Memory note ID", value) as MemoryNoteId<TValue>;
 }
 
 export const MEMORY_KINDS = [
@@ -60,26 +68,120 @@ export interface EvidenceRecord {
   readonly createdAt: string;
 }
 
-export interface MemoryNote {
+interface MemoryNoteBase {
   readonly id: MemoryNoteId;
   readonly rootRunId: RunId;
   readonly runId: RunId;
   readonly objectiveIds: readonly ObjectiveId[];
   readonly kind: MemoryKind;
-  readonly status: MemoryStatus;
   readonly retention: MemoryRetention;
   readonly reliability: MemoryReliability;
   readonly summary: string;
   readonly subject?: string;
   readonly evidenceIds: readonly EvidenceId[];
   readonly supersedes?: readonly MemoryNoteId[];
-  readonly invalidatedBy?: MemoryNoteId;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
 
+export type MemoryNote =
+  | (MemoryNoteBase & {
+      readonly status: "invalidated";
+      readonly invalidatedBy?: MemoryNoteId;
+    })
+  | (MemoryNoteBase & {
+      readonly status: Exclude<MemoryStatus, "invalidated">;
+      readonly invalidatedBy?: never;
+    });
+
+export type MemoryIntegrityIssue =
+  | {
+      readonly kind: "ledger-tail-truncated";
+      readonly line: number;
+      readonly message: string;
+    }
+  | {
+      readonly kind: "ledger-entry-corrupt";
+      readonly line: number;
+      readonly message: string;
+    }
+  | {
+      readonly kind: "repository-unavailable";
+      readonly message: string;
+    }
+  | {
+      readonly kind: "note-evidence-missing";
+      readonly noteId: MemoryNoteId;
+      readonly evidenceId: EvidenceId;
+    }
+  | {
+      readonly kind: "note-reference-missing";
+      readonly noteId: MemoryNoteId;
+      readonly relation: "supersedes" | "invalidatedBy";
+      readonly referencedNoteId: MemoryNoteId;
+    }
+  | {
+      readonly kind: "note-reference-invalid";
+      readonly noteId: MemoryNoteId;
+      readonly relation: "supersedes" | "invalidatedBy";
+      readonly referencedNoteId: MemoryNoteId;
+      readonly reason: "self-reference";
+    }
+  | {
+      readonly kind: "note-supersession-cycle";
+      readonly noteIds: readonly MemoryNoteId[];
+    }
+  | {
+      readonly kind: "evidence-missing";
+      readonly evidenceId: EvidenceId;
+      readonly contentHash: string;
+    }
+  | {
+      readonly kind: "evidence-size-mismatch";
+      readonly evidenceId: EvidenceId;
+      readonly expectedBytes: number;
+      readonly actualBytes: number;
+    }
+  | {
+      readonly kind: "evidence-hash-mismatch";
+      readonly evidenceId: EvidenceId;
+      readonly expectedHash: string;
+      readonly actualHash: string;
+    };
+
+export type MemoryHealthState = "healthy" | "degraded" | "corrupt" | "unavailable";
+
+export interface MemoryHealthSnapshot {
+  readonly rootRunId: RunId;
+  readonly state: MemoryHealthState;
+  readonly writable: boolean;
+  readonly issues: readonly MemoryIntegrityIssue[];
+  readonly evidenceCount: number;
+  readonly noteCount: number;
+  readonly activeNoteCount: number;
+  readonly storedBytes: number;
+  readonly ledgerBytes: number;
+  readonly verifiedEvidenceCount: number;
+}
+
+export interface MemoryRuntimeTelemetry {
+  readonly toolResultsCaptured: number;
+  readonly domainEventsCaptured: number;
+  readonly contextAssemblies: number;
+  readonly foldedContexts: number;
+  readonly aggressiveContexts: number;
+  readonly foldedToolResults: number;
+  readonly searchRequests: number;
+  readonly evidenceReads: number;
+  readonly evidenceReadBytes: number;
+  readonly operationFailures: number;
+  readonly repairRuns: number;
+  readonly maintenanceRuns: number;
+}
+
 export interface MemorySnapshot {
   readonly rootRunId: RunId;
+  readonly health: MemoryHealthSnapshot;
   readonly evidence: readonly EvidenceRecord[];
   readonly notes: readonly MemoryNote[];
   readonly stats: {
@@ -87,6 +189,20 @@ export interface MemorySnapshot {
     readonly activeNoteCount: number;
     readonly storedBytes: number;
   };
+}
+
+export interface MemoryRepairResult {
+  readonly repaired: boolean;
+  readonly removedLedgerBytes: number;
+  readonly remainingIssues: readonly MemoryIntegrityIssue[];
+}
+
+export interface MemoryMaintenanceResult {
+  readonly removedNoteCount: number;
+  readonly removedEvidenceCount: number;
+  readonly reclaimedEvidenceBytes: number;
+  readonly ledgerBytesBefore: number;
+  readonly ledgerBytesAfter: number;
 }
 
 export interface WorkingMemoryProjection {
@@ -99,4 +215,13 @@ export interface WorkingMemoryProjection {
   }[];
   readonly notes: readonly MemoryNote[];
   readonly recentEvidence: readonly EvidenceRecord[];
+}
+
+function validateMemoryId(name: string, value: string): string {
+  if (value.length === 0) throw new Error(`${name} must not be empty`);
+  if (value.length > MAX_ID_LENGTH) {
+    throw new Error(`${name} must not exceed ${MAX_ID_LENGTH} characters`);
+  }
+  if (!MEMORY_ID.test(value)) throw new Error(`${name} contains unsupported characters: ${value}`);
+  return value;
 }

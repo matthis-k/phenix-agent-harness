@@ -1,5 +1,6 @@
 import type { AnyDefinition } from "../domain/definition/definition.ts";
 import type { Schema } from "../domain/definition/schema.ts";
+import type { MemoryPolicy } from "../domain/memory/policy.ts";
 import type { SessionProfile } from "../domain/run/model.ts";
 import type { DefinitionId } from "../domain/shared.ts";
 import type { WorkflowFunctionRegistrar } from "../domain/workflow/functions.ts";
@@ -24,6 +25,7 @@ export interface RuntimeResolverDependencies {
 export interface RuntimeConfiguration<TDefinitionId extends DefinitionId = DefinitionId> {
   readonly catalog: RuntimeCatalogConfiguration<TDefinitionId>;
   readonly budgetPolicy: BudgetPolicy;
+  readonly memoryPolicy: MemoryPolicy;
   createModelResolver(dependencies: RuntimeResolverDependencies): ModelResolver;
 }
 
@@ -73,6 +75,7 @@ export function defineRuntimeConfiguration<const TDefinitionId extends Definitio
       hiddenDefinitions: Object.freeze(hiddenDefinitions),
     }),
     budgetPolicy: configuration.budgetPolicy,
+    memoryPolicy: configuration.memoryPolicy,
     createModelResolver: configuration.createModelResolver,
   });
 }
