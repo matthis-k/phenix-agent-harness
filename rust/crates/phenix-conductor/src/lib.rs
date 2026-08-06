@@ -2,17 +2,29 @@
 
 use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
 use phenix_acp::{
-    AcpEndpoint, BackendDefinition, BackendId, DefinitionError, DefinitionFormat,
-    DefinitionParseError, Definitions, GatewayError, GatewayEvent, PhenixAcpGateway,
-    PhenixConductor, RoleId, RouterId, SessionCommand, SessionNodeId, SessionTreeDefinition,
-    SessionTreeId,
+    AcpEndpoint, AcpMethod, AuthenticationCapabilities, BackendAuthMethod,
+    BackendAuthProviderList, BackendAuthProviderListResult, BackendAuthProviderSummary,
+    BackendCapabilities, BackendCapabilitiesGet, BackendCapabilitiesResult, BackendCommandList,
+    BackendCommandListResult, BackendCommandSource, BackendCommandSummary, BackendDefinition,
+    BackendId, BackendModelList, BackendModelListResult, BackendModelSummary, BackendTargetParams,
+    DefinitionError, DefinitionFormat, DefinitionParseError, Definitions, ExtensionUiCapabilities,
+    GatewayError, GatewayEvent, ModelCapabilities, ModelId, PhenixAcpGateway, PhenixConductor,
+    PromptCapabilities, ProviderId, ResourceCapabilities, RoleId, RouterId, SessionCapabilities,
+    SessionCommand, SessionNodeId, SessionTreeDefinition, SessionTreeId,
 };
-use phenix_acp_backend::{AcpAgentBackend, AcpBackendConfig, ConfigError as BackendConfigError};
-use serde::Deserialize;
+use phenix_acp_backend::{
+    AcpAgentBackend, AcpBackendConfig, AcpGatewayTransport, ConfigError as BackendConfigError,
+};
+use phenix_runtime_api::{
+    AuthMethod, BackendCommand, BackendReply, CommandSource, ModelSummary as RuntimeModelSummary,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::value::to_raw_value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::Path;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -59,6 +71,7 @@ pub struct ConductorRuntime {
     conductor: PhenixConductor,
     definition_id: phenix_acp::DefinitionId,
     root: BootstrapRoot,
+    backends: BTreeMap<BackendId, AcpGatewayTransport>,
     cancelled_sessions: BTreeSet<String>,
 }
 
@@ -67,14 +80,19 @@ impl ConductorRuntime {
         conductor: PhenixConductor,
         definition_id: phenix_acp::DefinitionId,
         root: BootstrapRoot,
+        backends: BTreeMap<BackendId, AcpGatewayTransport>,
     ) -> Result<Self, RuntimeError> {
         if root.objective.trim().is_empty() {
             return Err(RuntimeError::EmptyRootObjective);
+        }
+        if backends.is_empty() {
+            return Err(RuntimeError::MissingBackends);
         }
         Ok(Self {
             conductor,
             definition_id,
             root,
+            backends,
             cancelled_sessions: BTreeSet::new(),
         })
     }
@@ -90,8 +108,47 @@ impl ConductorRuntime {
     pub fn handle_extension(
         &mut self,
         request: ExtRequest,
-    ) -> Result<ExtResponse, phenix_acp::ConductorError> {
-        self.conductor.handle_extension(request)
+    ) -> Result<ExtResponse, RuntimeExtensionError> {
+        match request.method.as_ref() {
+            BackendCapabilitiesGet::METHOD => {
+                let params = decode_backend_params::<BackendCapabilitiesGet>(&request)?;
+                let capabilities = self.backend_capabilities(&params)?;
+                encode_extension_result::<BackendCapabilitiesGet>(&BackendCapabilitiesResult {
+                    backend: params.backend,
+                    capabilities,
+                })
+            }
+            BackendModelList::METHOD => {
+                let params = decode_backend_params::<BackendModelList>(&request)?;
+                let models = self.backend_models(&params)?;
+                encode_extension_result::<BackendModelList>(&BackendModelListResult {
+                    backend: params.backend,
+                    models,
+                })
+            }
+            BackendAuthProviderList::METHOD => {
+                let params = decode_backend_params::<BackendAuthProviderList>(&request)?;
+                let providers = self.backend_auth_providers(&params)?;
+                encode_extension_result::<BackendAuthProviderList>(
+                    &BackendAuthProviderListResult {
+                        backend: params.backend,
+                        providers,
+                    },
+                )
+            }
+            BackendCommandList::METHOD => {
+                let params = decode_backend_params::<BackendCommandList>(&request)?;
+                let commands = self.backend_commands(&params)?;
+                encode_extension_result::<BackendCommandList>(&BackendCommandListResult {
+                    backend: params.backend,
+                    commands,
+                })
+            }
+            _ => self
+                .conductor
+                .handle_extension(request)
+                .map_err(RuntimeExtensionError::Conductor),
+        }
     }
 
     pub fn create_standard_session(&mut self) -> Result<StandardSession, RuntimeError> {
@@ -151,6 +208,91 @@ impl ConductorRuntime {
             tree_id,
             root_node_id: snapshot.root,
         })
+    }
+
+    fn backend_capabilities(
+        &self,
+        params: &BackendTargetParams,
+    ) -> Result<BackendCapabilities, RuntimeExtensionError> {
+        let mut control = self.backend_control(params)?;
+        let snapshot = control.snapshot()?;
+        Ok(map_capabilities(snapshot.capabilities))
+    }
+
+    fn backend_models(
+        &self,
+        params: &BackendTargetParams,
+    ) -> Result<Vec<BackendModelSummary>, RuntimeExtensionError> {
+        match self
+            .backend_control(params)?
+            .submit(BackendCommand::ModelList)?
+        {
+            BackendReply::Models(models) => models.into_iter().map(map_model).collect(),
+            reply => Err(RuntimeExtensionError::UnexpectedReply {
+                method: BackendModelList::METHOD,
+                reply: format!("{reply:?}"),
+            }),
+        }
+    }
+
+    fn backend_auth_providers(
+        &self,
+        params: &BackendTargetParams,
+    ) -> Result<Vec<BackendAuthProviderSummary>, RuntimeExtensionError> {
+        match self
+            .backend_control(params)?
+            .submit(BackendCommand::AuthProviders)?
+        {
+            BackendReply::AuthProviders(providers) => Ok(providers
+                .into_iter()
+                .map(|provider| BackendAuthProviderSummary {
+                    id: provider.id,
+                    display_name: provider.display_name,
+                    methods: provider.methods.into_iter().map(map_auth_method).collect(),
+                    configured: provider.configured,
+                    source: provider.source,
+                })
+                .collect()),
+            reply => Err(RuntimeExtensionError::UnexpectedReply {
+                method: BackendAuthProviderList::METHOD,
+                reply: format!("{reply:?}"),
+            }),
+        }
+    }
+
+    fn backend_commands(
+        &self,
+        params: &BackendTargetParams,
+    ) -> Result<Vec<BackendCommandSummary>, RuntimeExtensionError> {
+        match self
+            .backend_control(params)?
+            .submit(BackendCommand::CommandList)?
+        {
+            BackendReply::Commands(commands) => Ok(commands
+                .into_iter()
+                .map(|command| BackendCommandSummary {
+                    name: command.name,
+                    description: command.description,
+                    source: map_command_source(command.source),
+                })
+                .collect()),
+            reply => Err(RuntimeExtensionError::UnexpectedReply {
+                method: BackendCommandList::METHOD,
+                reply: format!("{reply:?}"),
+            }),
+        }
+    }
+
+    fn backend_control(
+        &self,
+        params: &BackendTargetParams,
+    ) -> Result<phenix_acp_backend::AcpTreeControl, RuntimeExtensionError> {
+        self.conductor.gateway().snapshot(&params.tree_id)?;
+        self.backends
+            .get(&params.backend)
+            .ok_or_else(|| RuntimeExtensionError::UnknownBackend(params.backend.clone()))?
+            .control(params.tree_id.clone())
+            .map_err(RuntimeExtensionError::Gateway)
     }
 }
 
@@ -218,6 +360,9 @@ impl ConductorBootstrap {
             .iter()
             .map(|backend| backend.id.clone())
             .collect::<BTreeSet<_>>();
+        if configured_backends.len() != self.backends.len() {
+            return Err(BootstrapError::DuplicateBackend);
+        }
         let selected_router = definitions
             .routing_tables()
             .find(|router| router.id() == &self.router)
@@ -252,15 +397,131 @@ impl ConductorBootstrap {
         }
         let definition = definition.build()?;
 
+        let mut transports = BTreeMap::new();
         let mut builder = PhenixAcpGateway::builder().definition(definition)?;
         for backend in self.backends {
             let config = AcpBackendConfig::new(backend.command, cwd.to_path_buf())?;
             let transport = AcpAgentBackend::gateway_transport(config, channel_capacity)?;
-            builder = builder.backend(backend.id, transport)?;
+            builder = builder.backend(backend.id.clone(), transport.clone())?;
+            transports.insert(backend.id, transport);
         }
         let gateway = definitions.register(builder)?.build()?;
-        ConductorRuntime::new(PhenixConductor::new(gateway), self.definition_id, self.root)
-            .map_err(BootstrapError::Runtime)
+        ConductorRuntime::new(
+            PhenixConductor::new(gateway),
+            self.definition_id,
+            self.root,
+            transports,
+        )
+        .map_err(BootstrapError::Runtime)
+    }
+}
+
+fn decode_backend_params<M: AcpMethod<Params = BackendTargetParams>>(
+    request: &ExtRequest,
+) -> Result<BackendTargetParams, RuntimeExtensionError> {
+    serde_json::from_str(request.params.get()).map_err(|source| RuntimeExtensionError::Decode {
+        method: M::METHOD,
+        source,
+    })
+}
+
+fn encode_extension_result<M: AcpMethod>(
+    result: &M::Result,
+) -> Result<ExtResponse, RuntimeExtensionError> {
+    let raw = to_raw_value(result).map_err(|source| RuntimeExtensionError::Encode {
+        method: M::METHOD,
+        source,
+    })?;
+    Ok(ExtResponse::new(Arc::from(raw)))
+}
+
+fn map_capabilities(value: phenix_runtime_api::BackendCapabilities) -> BackendCapabilities {
+    BackendCapabilities {
+        prompting: PromptCapabilities {
+            steering: value.prompting.steering,
+            follow_ups: value.prompting.follow_ups,
+            images: value.prompting.images,
+            compaction: value.prompting.compaction,
+            retry_control: value.prompting.retry_control,
+        },
+        sessions: SessionCapabilities {
+            persistence: value.sessions.persistence,
+            switching: value.sessions.switching,
+            branching: value.sessions.branching,
+            import: value.sessions.import,
+            export: value.sessions.export,
+            tree: value.sessions.tree,
+        },
+        authentication: AuthenticationCapabilities {
+            provider_listing: value.authentication.provider_listing,
+            oauth: value.authentication.oauth,
+            api_keys: value.authentication.api_keys,
+            terminal: value.authentication.terminal,
+            device_code: value.authentication.device_code,
+            browser_callback: value.authentication.browser_callback,
+            logout: value.authentication.logout,
+        },
+        models: ModelCapabilities {
+            listing: value.models.listing,
+            selection: value.models.selection,
+            thinking_levels: value.models.thinking_levels,
+            virtual_models: value.models.virtual_models,
+        },
+        resources: ResourceCapabilities {
+            commands: value.resources.commands,
+            extensions: value.resources.extensions,
+            skills: value.resources.skills,
+            prompt_templates: value.resources.prompt_templates,
+            reload: value.resources.reload,
+        },
+        extension_ui: ExtensionUiCapabilities {
+            selection: value.extension_ui.selection,
+            confirmation: value.extension_ui.confirmation,
+            text_input: value.extension_ui.text_input,
+            secret_input: value.extension_ui.secret_input,
+            editor: value.extension_ui.editor,
+            notifications: value.extension_ui.notifications,
+            status: value.extension_ui.status,
+        },
+    }
+}
+
+fn map_model(value: RuntimeModelSummary) -> Result<BackendModelSummary, RuntimeExtensionError> {
+    let provider = ProviderId::parse(value.model.provider).map_err(|error| {
+        RuntimeExtensionError::InvalidBackendValue {
+            field: "provider",
+            message: error.to_string(),
+        }
+    })?;
+    let model = ModelId::parse(value.model.model).map_err(|error| {
+        RuntimeExtensionError::InvalidBackendValue {
+            field: "model",
+            message: error.to_string(),
+        }
+    })?;
+    Ok(BackendModelSummary {
+        provider,
+        model,
+        display_name: value.display_name,
+        supports_images: value.supports_images,
+        supports_thinking: value.supports_thinking,
+    })
+}
+
+fn map_auth_method(value: AuthMethod) -> BackendAuthMethod {
+    match value {
+        AuthMethod::OAuth => BackendAuthMethod::OAuth,
+        AuthMethod::ApiKey => BackendAuthMethod::ApiKey,
+        AuthMethod::Terminal => BackendAuthMethod::Terminal,
+    }
+}
+
+fn map_command_source(value: CommandSource) -> BackendCommandSource {
+    match value {
+        CommandSource::BuiltIn => BackendCommandSource::BuiltIn,
+        CommandSource::Extension => BackendCommandSource::Extension,
+        CommandSource::Skill => BackendCommandSource::Skill,
+        CommandSource::PromptTemplate => BackendCommandSource::PromptTemplate,
     }
 }
 
@@ -284,8 +545,73 @@ fn parse_command(command: &str) -> Result<ParsedCommand, BootstrapError> {
 }
 
 #[derive(Debug)]
+pub enum RuntimeExtensionError {
+    Decode {
+        method: &'static str,
+        source: serde_json::Error,
+    },
+    Encode {
+        method: &'static str,
+        source: serde_json::Error,
+    },
+    UnknownBackend(BackendId),
+    InvalidBackendValue {
+        field: &'static str,
+        message: String,
+    },
+    UnexpectedReply {
+        method: &'static str,
+        reply: String,
+    },
+    Gateway(GatewayError),
+    Conductor(phenix_acp::ConductorError),
+}
+
+impl From<GatewayError> for RuntimeExtensionError {
+    fn from(error: GatewayError) -> Self {
+        Self::Gateway(error)
+    }
+}
+
+impl Display for RuntimeExtensionError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Decode { method, source } => {
+                write!(formatter, "invalid parameters for {method}: {source}")
+            }
+            Self::Encode { method, source } => {
+                write!(formatter, "failed to encode result for {method}: {source}")
+            }
+            Self::UnknownBackend(backend) => write!(formatter, "unknown backend {backend}"),
+            Self::InvalidBackendValue { field, message } => {
+                write!(formatter, "invalid downstream {field}: {message}")
+            }
+            Self::UnexpectedReply { method, reply } => {
+                write!(formatter, "unexpected backend reply for {method}: {reply}")
+            }
+            Self::Gateway(error) => Display::fmt(error, formatter),
+            Self::Conductor(error) => Display::fmt(error, formatter),
+        }
+    }
+}
+
+impl Error for RuntimeExtensionError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Decode { source, .. } | Self::Encode { source, .. } => Some(source),
+            Self::Gateway(error) => Some(error),
+            Self::Conductor(error) => Some(error),
+            Self::UnknownBackend(_)
+            | Self::InvalidBackendValue { .. }
+            | Self::UnexpectedReply { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum RuntimeError {
     EmptyRootObjective,
+    MissingBackends,
     InvalidSessionId { session_id: String, message: String },
     Gateway(GatewayError),
 }
@@ -302,6 +628,7 @@ impl Display for RuntimeError {
             Self::EmptyRootObjective => {
                 formatter.write_str("conductor root objective must not be empty")
             }
+            Self::MissingBackends => formatter.write_str("conductor runtime requires a backend"),
             Self::InvalidSessionId {
                 session_id,
                 message,
@@ -318,7 +645,7 @@ impl Error for RuntimeError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Gateway(error) => Some(error),
-            Self::EmptyRootObjective | Self::InvalidSessionId { .. } => None,
+            Self::EmptyRootObjective | Self::MissingBackends | Self::InvalidSessionId { .. } => None,
         }
     }
 }
@@ -328,6 +655,7 @@ pub enum BootstrapError {
     Decode(serde_json::Error),
     MissingBackends,
     MissingDefinitions,
+    DuplicateBackend,
     MissingRouter(RouterId),
     MissingRoutedBackend {
         router: RouterId,
@@ -379,11 +707,11 @@ impl Display for BootstrapError {
             Self::MissingDefinitions => {
                 formatter.write_str("conductor bootstrap requires definitions")
             }
+            Self::DuplicateBackend => {
+                formatter.write_str("conductor bootstrap contains a duplicate backend ID")
+            }
             Self::MissingRouter(router) => {
-                write!(
-                    formatter,
-                    "conductor bootstrap selects missing router {router}"
-                )
+                write!(formatter, "conductor bootstrap selects missing router {router}")
             }
             Self::MissingRoutedBackend { router, backend } => write!(
                 formatter,
@@ -420,6 +748,7 @@ impl Error for BootstrapError {
             Self::Runtime(error) => Some(error),
             Self::MissingBackends
             | Self::MissingDefinitions
+            | Self::DuplicateBackend
             | Self::MissingRouter(_)
             | Self::MissingRoutedBackend { .. }
             | Self::EmptyRootObjective
@@ -502,14 +831,8 @@ id: workflow.test
         let source = serde_json::json!({
             "definition_id": "definition.test",
             "router": "router.test",
-            "root": {
-                "role": "coordinator",
-                "objective": "  "
-            },
-            "backends": [{
-                "id": "test",
-                "command": "test-agent"
-            }],
+            "root": { "role": "coordinator", "objective": "  " },
+            "backends": [{ "id": "test", "command": "test-agent" }],
             "definitions": [
                 { "kind": "routing_table", "source": ROUTER, "format": "markdown" }
             ]
