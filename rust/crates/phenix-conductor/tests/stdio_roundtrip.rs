@@ -61,11 +61,7 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
         "tree_id": session_id,
         "backend": "fixture",
     });
-    process.send_request(
-        5,
-        "_phenix/backend/capabilities/get",
-        &backend_target,
-    )?;
+    process.send_request(5, "_phenix/backend/capabilities/get", &backend_target)?;
     let capabilities = process.receive_response(5)?;
     assert_eq!(capabilities["result"]["backend"], "fixture");
     assert!(capabilities["result"]["capabilities"].is_object());
@@ -75,11 +71,7 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
     assert_eq!(models["result"]["backend"], "fixture");
     assert!(models["result"]["models"].is_array());
 
-    process.send_request(
-        7,
-        "_phenix/backend/auth_provider/list",
-        &backend_target,
-    )?;
+    process.send_request(7, "_phenix/backend/auth_provider/list", &backend_target)?;
     let providers = process.receive_response(7)?;
     assert_eq!(providers["result"]["backend"], "fixture");
     assert!(providers["result"]["providers"].is_array());
