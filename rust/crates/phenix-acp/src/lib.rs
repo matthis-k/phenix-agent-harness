@@ -12,7 +12,9 @@ mod source;
 mod tools;
 
 pub use authoring::{
-    parse_definition, parse_routing_table, parse_workflow, Definition, Definitions,
+    parse_definition, parse_definition_with_format, parse_routing_table,
+    parse_routing_table_with_format, parse_workflow, parse_workflow_with_format, Definition,
+    DefinitionFormat, DefinitionParseError, Definitions, FormatAttempt,
 };
 pub use client::{
     decode_extension_response, encode_extension_request, ExtensionCodecError, PhenixAcpCallError,
