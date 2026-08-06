@@ -207,9 +207,7 @@ fn accept_overlay(state: &AppState) -> Vec<BusReaction> {
         Some(OverlayState::CommandPalette { selected, .. }) => {
             selected_command_completion(state, *selected).map_or_else(Vec::new, |completion| {
                 vec![
-                    BusReaction::App(AppEvent::User(UserIntent::InputChanged(
-                        completion.command,
-                    ))),
+                    BusReaction::App(AppEvent::User(UserIntent::InputChanged(completion.command))),
                     BusReaction::App(AppEvent::User(UserIntent::CloseOverlay)),
                 ]
             })
