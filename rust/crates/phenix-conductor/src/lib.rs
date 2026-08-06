@@ -259,12 +259,8 @@ impl ConductorBootstrap {
             builder = builder.backend(backend.id, transport)?;
         }
         let gateway = definitions.register(builder)?.build()?;
-        ConductorRuntime::new(
-            PhenixConductor::new(gateway),
-            self.definition_id,
-            self.root,
-        )
-        .map_err(BootstrapError::Runtime)
+        ConductorRuntime::new(PhenixConductor::new(gateway), self.definition_id, self.root)
+            .map_err(BootstrapError::Runtime)
     }
 }
 
@@ -290,10 +286,7 @@ fn parse_command(command: &str) -> Result<ParsedCommand, BootstrapError> {
 #[derive(Debug)]
 pub enum RuntimeError {
     EmptyRootObjective,
-    InvalidSessionId {
-        session_id: String,
-        message: String,
-    },
+    InvalidSessionId { session_id: String, message: String },
     Gateway(GatewayError),
 }
 
@@ -490,16 +483,14 @@ id: workflow.test
 
     #[test]
     fn bootstrap_is_language_neutral_and_builds_without_starting_agents() {
-        let bootstrap =
-            ConductorBootstrap::from_json(&bootstrap_json("test")).expect("bootstrap");
+        let bootstrap = ConductorBootstrap::from_json(&bootstrap_json("test")).expect("bootstrap");
         let runtime = bootstrap.build(Path::new("/tmp"), 8).expect("runtime");
         assert!(runtime.conductor().gateway().list_trees().trees.is_empty());
     }
 
     #[test]
     fn every_routed_backend_must_be_configured() {
-        let bootstrap =
-            ConductorBootstrap::from_json(&bootstrap_json("other")).expect("bootstrap");
+        let bootstrap = ConductorBootstrap::from_json(&bootstrap_json("other")).expect("bootstrap");
         assert!(matches!(
             bootstrap.build(Path::new("/tmp"), 8),
             Err(BootstrapError::MissingRoutedBackend { .. })
