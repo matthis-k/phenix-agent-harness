@@ -1,13 +1,11 @@
 {
   "definition_id": "phenix.standard",
   "router": "phenix.capability-budget",
-  "workflows": [
+  "definitions": [
     "workflows/implement.md",
     "workflows/qa.md",
     "workflows/qa-fix.md",
-    "workflows/dynamic.md"
-  ],
-  "routing_tables": [
+    "workflows/dynamic.md",
     "routing/capability-budget.md"
   ],
   "backend": {
