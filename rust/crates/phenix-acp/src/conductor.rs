@@ -37,57 +37,60 @@ impl PhenixConductor {
         self.gateway
     }
 
-    pub fn handle_extension(
-        &mut self,
-        request: ExtRequest,
-    ) -> Result<ExtResponse, ConductorError> {
+    pub fn handle_extension(&mut self, request: ExtRequest) -> Result<ExtResponse, ConductorError> {
         match request.method.as_ref() {
-            SessionTreeCreate::METHOD => self.dispatch::<SessionTreeCreate, _>(&request, |gateway, params| {
-                let started = match params.tree_id {
-                    Some(tree_id) => gateway.create_tree_with_id(
-                        tree_id,
-                        &params.definition_id,
-                        params.root_role,
-                        params.objective,
-                    )?,
-                    None => gateway.create_tree(
-                        &params.definition_id,
-                        params.root_role,
-                        params.objective,
-                    )?,
-                };
-                Ok(SessionTreeCreateResult {
-                    tree_id: started.tree_id,
-                    objective_id: started.objective_id,
-                    root_node_id: started.root_node_id,
-                })
-            }),
-            SessionTreeGet::METHOD => self.dispatch::<SessionTreeGet, _>(&request, |gateway, params| {
-                gateway.snapshot(&params.tree_id)
-            }),
-            SessionTreeList::METHOD => {
-                self.dispatch::<SessionTreeList, _>(&request, |gateway, _params| {
-                    Ok(gateway.list_trees())
+            SessionTreeCreate::METHOD => {
+                self.dispatch::<SessionTreeCreate, _>(&request, |gateway, params| {
+                    let started = match params.tree_id {
+                        Some(tree_id) => gateway.create_tree_with_id(
+                            tree_id,
+                            &params.definition_id,
+                            params.root_role,
+                            params.objective,
+                        )?,
+                        None => gateway.create_tree(
+                            &params.definition_id,
+                            params.root_role,
+                            params.objective,
+                        )?,
+                    };
+                    Ok(SessionTreeCreateResult {
+                        tree_id: started.tree_id,
+                        objective_id: started.objective_id,
+                        root_node_id: started.root_node_id,
+                    })
                 })
             }
+            SessionTreeGet::METHOD => self
+                .dispatch::<SessionTreeGet, _>(&request, |gateway, params| {
+                    gateway.snapshot(&params.tree_id)
+                }),
+            SessionTreeList::METHOD => self
+                .dispatch::<SessionTreeList, _>(&request, |gateway, _params| {
+                    Ok(gateway.list_trees())
+                }),
             SessionTreeClose::METHOD => {
                 self.dispatch::<SessionTreeClose, _>(&request, |gateway, params| {
                     gateway.close_tree(&params.tree_id)?;
                     Ok(EmptyResult {})
                 })
             }
-            WorkflowStart::METHOD => self.dispatch::<WorkflowStart, _>(&request, |gateway, params| {
-                gateway.start_workflow(&params.tree_id, &params.workflow, params.objective)
-            }),
-            NodeDelegate::METHOD => self.dispatch::<NodeDelegate, _>(&request, |gateway, params| {
-                let node_id = gateway.delegate(
-                    &params.tree_id,
-                    &params.parent_node,
-                    params.role,
-                    params.objective,
-                )?;
-                Ok(NodeAttachResult { node_id })
-            }),
+            WorkflowStart::METHOD => {
+                self.dispatch::<WorkflowStart, _>(&request, |gateway, params| {
+                    gateway.start_workflow(&params.tree_id, &params.workflow, params.objective)
+                })
+            }
+            NodeDelegate::METHOD => {
+                self.dispatch::<NodeDelegate, _>(&request, |gateway, params| {
+                    let node_id = gateway.delegate(
+                        &params.tree_id,
+                        &params.parent_node,
+                        params.role,
+                        params.objective,
+                    )?;
+                    Ok(NodeAttachResult { node_id })
+                })
+            }
             NodeLoad::METHOD => self.dispatch::<NodeLoad, _>(&request, |gateway, params| {
                 let node_id = gateway.load_session(
                     &params.tree_id,
@@ -109,11 +112,8 @@ impl PhenixConductor {
                 Ok(NodeAttachResult { node_id })
             }),
             NodeFork::METHOD => self.dispatch::<NodeFork, _>(&request, |gateway, params| {
-                let node_id = gateway.fork_node(
-                    &params.tree_id,
-                    &params.node_id,
-                    params.objective,
-                )?;
+                let node_id =
+                    gateway.fork_node(&params.tree_id, &params.node_id, params.objective)?;
                 Ok(NodeAttachResult { node_id })
             }),
             NodeExecute::METHOD => self.dispatch::<NodeExecute, _>(&request, |gateway, params| {
@@ -180,7 +180,8 @@ fn encode_result<T: Serialize>(
     method: &'static str,
     result: &T,
 ) -> Result<ExtResponse, ConductorError> {
-    let result = to_raw_value(result).map_err(|source| ConductorError::Encode { method, source })?;
+    let result =
+        to_raw_value(result).map_err(|source| ConductorError::Encode { method, source })?;
     Ok(ExtResponse::new(Arc::from(result)))
 }
 
@@ -209,10 +210,16 @@ impl Display for ConductorError {
         match self {
             Self::UnknownMethod(method) => write!(formatter, "unknown Phenix ACP method {method}"),
             Self::Decode { method, source } => {
-                write!(formatter, "invalid parameters for Phenix ACP method {method}: {source}")
+                write!(
+                    formatter,
+                    "invalid parameters for Phenix ACP method {method}: {source}"
+                )
             }
             Self::Encode { method, source } => {
-                write!(formatter, "failed to encode Phenix ACP result for {method}: {source}")
+                write!(
+                    formatter,
+                    "failed to encode Phenix ACP result for {method}: {source}"
+                )
             }
             Self::Gateway(error) => Display::fmt(error, formatter),
         }
@@ -286,8 +293,7 @@ mod tests {
         let definition = SessionTreeDefinition::builder(definition_id, router.clone())
             .backend(BackendDefinition::new(
                 backend.clone(),
-                AcpEndpoint::stdio("test-agent", Vec::new(), BTreeMap::new())
-                    .expect("endpoint"),
+                AcpEndpoint::stdio("test-agent", Vec::new(), BTreeMap::new()).expect("endpoint"),
             ))
             .expect("backend definition")
             .build()
@@ -329,7 +335,9 @@ mod tests {
         })
         .expect("execute request");
         let executed = decode_extension_response::<NodeExecute>(
-            conductor.handle_extension(execute).expect("execute response"),
+            conductor
+                .handle_extension(execute)
+                .expect("execute response"),
         )
         .expect("execute result");
 
