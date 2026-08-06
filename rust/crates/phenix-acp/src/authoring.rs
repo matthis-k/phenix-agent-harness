@@ -26,7 +26,11 @@ pub enum DefinitionFormat {
 
 impl DefinitionFormat {
     pub fn from_extension(extension: &str) -> Option<Self> {
-        match extension.trim_start_matches('.').to_ascii_lowercase().as_str() {
+        match extension
+            .trim_start_matches('.')
+            .to_ascii_lowercase()
+            .as_str()
+        {
             "md" | "markdown" => Some(Self::Markdown),
             "json" => Some(Self::Json),
             "toml" => Some(Self::Toml),
@@ -102,7 +106,10 @@ impl Display for DefinitionParseError {
                 Ok(())
             }
             Self::UnexpectedKind { expected, actual } => {
-                write!(formatter, "expected {expected} source, found {actual} source")
+                write!(
+                    formatter,
+                    "expected {expected} source, found {actual} source"
+                )
             }
             Self::DuplicateDefinition { kind, id } => {
                 write!(formatter, "duplicate {kind} definition {id}")
@@ -374,7 +381,10 @@ fn decode_structured(
     match definition.kind.as_str() {
         "workflow" => {
             if definition.routes.is_some() {
-                return Err(invalid(format, "workflow definitions must not contain routes"));
+                return Err(invalid(
+                    format,
+                    "workflow definitions must not contain routes",
+                ));
             }
             let steps = definition
                 .steps
@@ -388,9 +398,7 @@ fn decode_structured(
                     table_cell(step.parent.as_deref().unwrap_or(""), "steps.parent", format)?;
                 let role = table_cell(&step.role, "steps.role", format)?;
                 let objective = table_cell(&step.objective, "steps.objective", format)?;
-                output.push_str(&format!(
-                    "| {key} | {parent} | {role} | {objective} |\n"
-                ));
+                output.push_str(&format!("| {key} | {parent} | {role} | {objective} |\n"));
             }
             Ok(output)
         }
@@ -401,9 +409,9 @@ fn decode_structured(
                     "routing table definitions must not contain steps",
                 ));
             }
-            let routes = definition.routes.ok_or_else(|| {
-                invalid(format, "routing table definitions require routes")
-            })?;
+            let routes = definition
+                .routes
+                .ok_or_else(|| invalid(format, "routing table definitions require routes"))?;
             let mut output = format!(
                 "# {title}\n\n```phenix-router\nid: {id}\n```\n\n## Routes\n\n| Role | Workflow | Target | Explanation |\n|---|---|---|---|\n"
             );
@@ -411,8 +419,7 @@ fn decode_structured(
                 let role = table_cell(&route.role, "routes.role", format)?;
                 let workflow = table_cell(&route.workflow, "routes.workflow", format)?;
                 let target = table_cell(&route.target, "routes.target", format)?;
-                let explanation =
-                    table_cell(&route.explanation, "routes.explanation", format)?;
+                let explanation = table_cell(&route.explanation, "routes.explanation", format)?;
                 output.push_str(&format!(
                     "| {role} | {workflow} | {target} | {explanation} |\n"
                 ));
@@ -427,10 +434,7 @@ fn decode_structured(
 }
 
 fn heading(value: &str, format: DefinitionFormat) -> Result<&str, DefinitionParseError> {
-    if value.trim() != value
-        || value.is_empty()
-        || has_line_break(value)
-        || value.starts_with('#')
+    if value.trim() != value || value.is_empty() || has_line_break(value) || value.starts_with('#')
     {
         return Err(invalid(
             format,
