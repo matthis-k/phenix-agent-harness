@@ -2,10 +2,10 @@ mod subscriptions;
 
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, CancelNotification, ClientRequest, CloseSessionResponse, ContentBlock,
-    ContentChunk, EmbeddedResourceResource, ExtRequest, InitializeResponse, NewSessionResponse,
-    PromptCapabilities, PromptRequest, PromptResponse, SessionId, SessionNotification,
-    SessionUpdate, StopReason, TextContent, ToolCall, ToolCallStatus, ToolCallUpdate,
-    ToolCallUpdateFields,
+    ContentChunk, EmbeddedResourceResource, ExtRequest, ExtResponse, InitializeResponse,
+    NewSessionResponse, PromptCapabilities, PromptRequest, PromptResponse, SessionId,
+    SessionNotification, SessionUpdate, StopReason, TextContent, ToolCall, ToolCallStatus,
+    ToolCallUpdate, ToolCallUpdateFields,
 };
 use agent_client_protocol::{Agent, Client, ConnectionTo, Stdio};
 use base64::Engine;
@@ -116,20 +116,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                     ClientRequest::ExtMethodRequest(extension) => {
                         let extension = normalize_extension_method(extension);
-                        let response = match request_subscriptions
-                            .handle_control(&extension, &request_runtime)?
-                        {
-                            Some(response) => response,
-                            None => lock_runtime(&request_runtime)?
-                                .handle_extension(extension.clone())
-                                .map_err(|error| {
-                                    agent_client_protocol::util::internal_error(error.to_string())
-                                })?,
-                        };
-                        request_subscriptions.publish_response(
-                            &extension,
-                            &response,
+                        let response = dispatch_extension(
+                            &request_runtime,
+                            &request_subscriptions,
                             &connection,
+                            &extension,
                         )?;
                         serde_json::to_value(response)
                             .map_err(agent_client_protocol::Error::into_internal_error)?
@@ -143,6 +134,34 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .connect_to(Stdio::new())
         .await?;
     Ok(())
+}
+
+fn dispatch_extension(
+    runtime: &Arc<Mutex<ConductorRuntime>>,
+    subscriptions: &SubscriptionHub,
+    connection: &ConnectionTo<Client>,
+    extension: &ExtRequest,
+) -> Result<ExtResponse, agent_client_protocol::Error> {
+    if let Some(response) = subscriptions.handle_control(extension, runtime)? {
+        return Ok(response);
+    }
+
+    let response = {
+        let mut runtime = lock_runtime(runtime)?;
+        match runtime
+            .handle_auth_extension(extension)
+            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?
+        {
+            Some(response) => response,
+            None => runtime
+                .handle_extension(extension.clone())
+                .map_err(|error| {
+                    agent_client_protocol::util::internal_error(error.to_string())
+                })?,
+        }
+    };
+    subscriptions.publish_response(extension, &response, connection)?;
+    Ok(response)
 }
 
 fn lock_runtime(
