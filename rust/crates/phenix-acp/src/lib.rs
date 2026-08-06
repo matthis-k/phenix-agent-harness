@@ -10,6 +10,7 @@ mod id;
 mod protocol;
 mod runtime;
 mod source;
+mod subscription;
 mod tools;
 
 pub use authoring::{
@@ -51,6 +52,9 @@ pub use runtime::{
 pub use source::{
     ModelTarget, RouteSelector, RoutingRule, RoutingTable, WorkflowDefinition,
     WorkflowStepDefinition,
+};
+pub use subscription::{
+    NodeSubscribe, NodeSubscriptionParams, NodeUnsubscribe,
 };
 pub use tools::{
     BuiltinToolPolicy, McpServerDefinition, McpServerTransport, ToolConfigError, ToolConfiguration,
