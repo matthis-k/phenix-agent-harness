@@ -9,8 +9,8 @@ use phenix_runtime_api::{
     AuthPrompt, AuthPromptResponse, ExtensionUiRequest, ExtensionUiResponse, SecretValue,
 };
 use phenix_ui_core::{
-    command_completions, AppEvent, AppState, ElementId, EventEnvelope, KeyCode, OverlayState,
-    UiInput, UserIntent,
+    selected_command_completion, AppEvent, AppState, ElementId, EventEnvelope, KeyCode,
+    OverlayState, UiInput, UserIntent,
 };
 
 pub struct FrontendProviderConsumer {
@@ -204,17 +204,16 @@ fn accept_overlay(state: &AppState) -> Vec<BusReaction> {
     }
 
     match &state.view.overlay {
-        Some(OverlayState::CommandPalette { selected, .. }) => command_completions(state)
-            .get(*selected)
-            .or_else(|| command_completions(state).first())
-            .map_or_else(Vec::new, |completion| {
+        Some(OverlayState::CommandPalette { selected, .. }) => {
+            selected_command_completion(state, *selected).map_or_else(Vec::new, |completion| {
                 vec![
                     BusReaction::App(AppEvent::User(UserIntent::InputChanged(
-                        completion.command.clone(),
+                        completion.command,
                     ))),
                     BusReaction::App(AppEvent::User(UserIntent::CloseOverlay)),
                 ]
-            }),
+            })
+        }
         Some(OverlayState::ModelPicker { selected, .. }) => state
             .models
             .get(*selected)
