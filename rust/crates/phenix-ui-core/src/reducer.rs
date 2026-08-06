@@ -261,23 +261,34 @@ fn submit_command(state: &mut AppState, text: &str) -> Vec<AppEffect> {
             vec![AppEffect::Send(BackendCommand::ThinkingLevels { run_id })]
         }
         "" => vec![AppEffect::Render],
-        _ if !command_is_advertised(state, name) => {
-            state.notifications.push_back(format!(
-                "Command /{name} is not advertised by the active backend. Type / to inspect available commands."
-            ));
-            vec![AppEffect::Render]
-        }
-        _ => {
-            let Some(run_id) = state.input_target().cloned() else {
-                return no_run_notification(state);
-            };
-            vec![AppEffect::Send(BackendCommand::CommandInvoke {
-                run_id,
-                name: name.to_owned(),
-                arguments: arguments.to_owned(),
-            })]
-        }
+        _ => forward_acp_command(state, text, name, arguments),
     }
+}
+
+fn forward_acp_command(
+    state: &mut AppState,
+    text: &str,
+    name: &str,
+    arguments: &str,
+) -> Vec<AppEffect> {
+    let Some(run_id) = state.input_target().cloned() else {
+        return no_run_notification(state);
+    };
+    let command = if acp_command_is_advertised(state, name) {
+        BackendCommand::CommandInvoke {
+            run_id,
+            name: name.to_owned(),
+            arguments: arguments.to_owned(),
+        }
+    } else {
+        BackendCommand::PromptSubmit {
+            run_id,
+            text: text.to_owned(),
+            images: Vec::new(),
+            streaming_behavior: None,
+        }
+    };
+    vec![AppEffect::Send(command), AppEffect::Render]
 }
 
 fn select_routing_profile(state: &mut AppState, profile: &str) -> Vec<AppEffect> {
@@ -303,7 +314,7 @@ fn select_routing_profile(state: &mut AppState, profile: &str) -> Vec<AppEffect>
     ]
 }
 
-fn command_is_advertised(state: &AppState, name: &str) -> bool {
+fn acp_command_is_advertised(state: &AppState, name: &str) -> bool {
     state.commands.iter().any(|command| command.name == name)
 }
 
@@ -709,18 +720,35 @@ mod tests {
     }
 
     #[test]
-    fn unknown_command_is_rejected_before_backend_submission() {
+    fn advertised_acp_command_uses_the_typed_command_operation() {
         let run = RunId::parse("root-run").expect("valid run");
-        let mut state = state_with_run(run);
-        state.input.replace("/phenix".to_owned());
+        let mut state = state_with_run(run.clone());
+        state.commands.push(CommandSummary {
+            name: "review".to_owned(),
+            description: None,
+            source: CommandSource::Extension,
+        });
+        state.input.replace("/review src".to_owned());
         let effects = reduce(&mut state, AppEvent::User(UserIntent::SubmitPrompt));
-        assert!(!effects
-            .iter()
-            .any(|effect| matches!(effect, AppEffect::Send(BackendCommand::CommandInvoke { .. }))));
-        assert!(state
-            .notifications
-            .back()
-            .is_some_and(|message| message.contains("not advertised")));
+        assert!(effects.contains(&AppEffect::Send(BackendCommand::CommandInvoke {
+            run_id: run,
+            name: "review".to_owned(),
+            arguments: "src".to_owned(),
+        })));
+    }
+
+    #[test]
+    fn unadvertised_command_is_forwarded_unchanged_to_acp() {
+        let run = RunId::parse("root-run").expect("valid run");
+        let mut state = state_with_run(run.clone());
+        state.input.replace("/phenix status".to_owned());
+        let effects = reduce(&mut state, AppEvent::User(UserIntent::SubmitPrompt));
+        assert!(effects.contains(&AppEffect::Send(BackendCommand::PromptSubmit {
+            run_id: run,
+            text: "/phenix status".to_owned(),
+            images: Vec::new(),
+            streaming_behavior: None,
+        })));
     }
 
     #[test]
