@@ -2,31 +2,17 @@ use crate::layout::collect_layout;
 use crate::theme::{panel, theme_style};
 use phenix_frontend_config::{FrontendConfig, FrontendProviderRef, ThemeConfig};
 use phenix_runtime_api::{AuthPrompt, ExtensionUiRequest, TranscriptRole};
-use phenix_ui_core::{AppState, ElementId, FocusTarget, OverlayState};
+use phenix_ui_core::{
+    command_completions, AppState, ElementId, FocusTarget, InputEditor, OverlayState,
+};
 use phenix_ui_runtime::UiRenderer;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::io;
-
-const BUILTIN_COMMANDS: &[&str] = &[
-    "abort",
-    "compact",
-    "exit",
-    "login",
-    "logout",
-    "mode",
-    "model",
-    "new",
-    "quit",
-    "reload",
-    "resume",
-    "sessions",
-    "thinking",
-];
 
 pub struct RatatuiRenderer {
     terminal: Option<DefaultTerminal>,
@@ -81,8 +67,19 @@ fn render_application(frame: &mut Frame<'_>, state: &AppState, config: &Frontend
 
     let mut panes = BTreeMap::new();
     collect_layout(&config.layout.root, area, state, &mut panes);
+    let input_area = panes.get(&ElementId::input()).copied();
     for (element, pane_area) in panes {
         render_pane(frame, pane_area, state, &config.theme, &element);
+    }
+
+    let completion_open = matches!(
+        state.view.overlay,
+        Some(OverlayState::CommandPalette { .. })
+    );
+    if (state.view.overlay.is_none() || completion_open) && state.dialogs.is_empty() {
+        if let Some(input_area) = input_area {
+            render_command_completion(frame, area, input_area, state, &config.theme);
+        }
     }
     render_overlay(frame, area, state, &config.theme);
 }
@@ -154,12 +151,11 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme:
 
     let viewport_height = usize::from(inner.height.max(1));
     let max_scroll = lines.len().saturating_sub(viewport_height);
-    let distance_from_end = state.view.transcript_scroll.offset;
-    let scroll = max_scroll.saturating_sub(distance_from_end);
+    let scroll = max_scroll.saturating_sub(state.view.transcript_scroll.offset);
     frame.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
-            .scroll((scroll.min(u16::MAX as usize) as u16, 0)),
+            .scroll((scroll.min(usize::from(u16::MAX)) as u16, 0)),
         inner,
     );
 }
@@ -174,7 +170,6 @@ fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
             .iter()
             .map(|run| {
                 let selected = state.input_target() == Some(&run.id);
-                let marker = if selected { "▸" } else { " " };
                 let details = if state.view.show_details {
                     format!(" · {} · {:?}", run.definition_id, run.state)
                 } else {
@@ -182,7 +177,11 @@ fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
                 };
                 ListItem::new(Line::from(vec![
                     Span::styled(
-                        format!("{marker} {}", run.display_name),
+                        format!(
+                            "{} {}",
+                            if selected { "▸" } else { " " },
+                            run.display_name
+                        ),
                         if selected {
                             theme_style(theme, "Accent")
                         } else {
@@ -208,28 +207,36 @@ fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
 }
 
 fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
-    let focused = state.view.focus == FocusTarget::Input && state.view.overlay.is_none();
-    let block = panel("Input", focused, theme);
+    let completion_open = matches!(
+        state.view.overlay,
+        Some(OverlayState::CommandPalette { .. })
+    );
+    let focused =
+        state.view.focus == FocusTarget::Input && (state.view.overlay.is_none() || completion_open);
+    let title = format!(
+        "Prompt · {} · {}",
+        state.view.input_editor.label(),
+        state.view.vim_mode.label()
+    );
+    let block = panel(&title, focused, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let mut lines = vec![Line::styled(
-        state.input.text.clone(),
-        theme_style(theme, "Normal"),
-    )];
-    let suggestions = slash_command_suggestions(state);
-    if inner.height > 1 && !suggestions.is_empty() {
-        lines.push(Line::styled(
-            format!("commands  {}", suggestions.join("   ")),
-            theme_style(theme, "Muted"),
-        ));
+    let mut lines = input_text_lines(&state.input.text, theme);
+    let auxiliary = match state.view.input_editor {
+        InputEditor::External => Some(
+            "Ctrl-G or Enter opens $EDITOR · Ctrl-Enter submits · Esc returns to owned".to_owned(),
+        ),
+        InputEditor::Owned | InputEditor::Embedded => None,
+    };
+    if usize::from(inner.height) > lines.len() {
+        if let Some(auxiliary) = auxiliary {
+            lines.push(Line::styled(auxiliary, theme_style(theme, "Muted")));
+        }
     }
-    frame.render_widget(
-        Paragraph::new(lines).wrap(Wrap { trim: false }),
-        inner,
-    );
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 
-    if focused && inner.height > 0 {
+    if focused && state.view.input_editor != InputEditor::External && inner.height > 0 {
         let cursor = state.input.cursor_byte.min(state.input.text.len());
         let prefix = &state.input.text[..cursor];
         let (column, row) = cursor_position(prefix, inner.width.max(1));
@@ -244,20 +251,111 @@ fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &The
     }
 }
 
+fn input_text_lines(text: &str, theme: &ThemeConfig) -> Vec<Line<'static>> {
+    text.split('\n')
+        .map(|line| Line::styled(line.to_owned(), theme_style(theme, "Normal")))
+        .collect()
+}
+
+fn render_command_completion(
+    frame: &mut Frame<'_>,
+    screen: Rect,
+    input_area: Rect,
+    state: &AppState,
+    theme: &ThemeConfig,
+) {
+    if state.view.focus != FocusTarget::Input {
+        return;
+    }
+    let completions = command_completions(state);
+    if completions.is_empty() || input_area.y <= screen.y {
+        return;
+    }
+    let selected = match &state.view.overlay {
+        Some(OverlayState::CommandPalette { selected, .. }) => {
+            (*selected).min(completions.len().saturating_sub(1))
+        }
+        _ => 0,
+    };
+
+    let content_width = completions
+        .iter()
+        .map(|completion| {
+            completion.command.chars().count()
+                + completion
+                    .description
+                    .as_ref()
+                    .map_or(0, |description| description.chars().count() + 3)
+        })
+        .max()
+        .unwrap_or(1)
+        .saturating_add(4)
+        .min(usize::from(input_area.width));
+    let width = u16::try_from(content_width)
+        .unwrap_or(input_area.width)
+        .max(20.min(input_area.width));
+    let requested_height = u16::try_from(completions.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(2);
+    let available_height = input_area.y.saturating_sub(screen.y);
+    let height = requested_height.min(available_height);
+    if height < 3 || width < 2 {
+        return;
+    }
+    let popup = Rect {
+        x: input_area.x,
+        y: input_area.y.saturating_sub(height),
+        width,
+        height,
+    };
+    frame.render_widget(Clear, popup);
+    let block = panel("Commands", true, theme);
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+    let items = completions
+        .into_iter()
+        .take(usize::from(inner.height))
+        .enumerate()
+        .map(|(index, completion)| {
+            let mut spans = vec![Span::styled(
+                format!(
+                    "{} {}",
+                    if index == selected { "▸" } else { " " },
+                    completion.command
+                ),
+                if index == selected {
+                    theme_style(theme, "Accent")
+                } else {
+                    theme_style(theme, "Normal")
+                },
+            )];
+            if let Some(description) = completion.description {
+                spans.push(Span::styled(
+                    format!("  —  {description}"),
+                    theme_style(theme, "Muted"),
+                ));
+            }
+            ListItem::new(Line::from(spans))
+        })
+        .collect::<Vec<_>>();
+    frame.render_widget(List::new(items), inner);
+}
+
 fn render_status(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
     let selected_run = state.snapshot.as_ref().and_then(|snapshot| {
         state
             .input_target()
             .and_then(|target| snapshot.runs.iter().find(|run| &run.id == target))
     });
-    let model = selected_run
-        .and_then(|run| run.model.as_ref())
-        .map_or_else(|| "selection: unavailable".to_owned(), model_selection_label);
+    let model = selected_run.and_then(|run| run.model.as_ref()).map_or_else(
+        || "selection: unavailable".to_owned(),
+        model_selection_label,
+    );
     let thinking = selected_run
         .and_then(|run| run.thinking_level.as_ref())
         .map(|level| format!("thinking: {level:?}"));
     let run_state = selected_run.map(|run| format!("run: {:?}", run.state));
-    let queue = state
+    let statuses = state
         .statuses
         .values()
         .cloned()
@@ -268,7 +366,7 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &Th
         model,
         thinking.unwrap_or_default(),
         run_state.unwrap_or_default(),
-        queue,
+        statuses,
     ]
     .into_iter()
     .filter(|part| !part.is_empty())
@@ -314,6 +412,9 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
     let Some(overlay) = &state.view.overlay else {
         return;
     };
+    if matches!(overlay, OverlayState::CommandPalette { .. }) {
+        return;
+    }
     let overlay_area = centered(area, 70, 65);
     frame.render_widget(Clear, overlay_area);
     match overlay {
@@ -392,29 +493,22 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
         OverlayState::ExtensionDialog {
             request, selected, ..
         } => render_extension_dialog(frame, overlay_area, request, *selected, state, theme),
-        OverlayState::CommandPalette { selected, .. } => render_picker(
-            frame,
-            overlay_area,
-            "Commands",
-            *selected,
-            state
-                .commands
-                .iter()
-                .map(|command| format!("/{}", command.name))
-                .collect(),
-            theme,
-        ),
         OverlayState::Help => render_picker(
             frame,
             overlay_area,
             "Help",
             0,
             vec![
+                "Ctrl-E cycles owned, embedded, and external editors".to_owned(),
+                "Ctrl-G opens the configured external editor".to_owned(),
+                "Esc enters normal mode; i/a return to insert mode".to_owned(),
+                "h/j/k/l navigate in normal mode".to_owned(),
                 "Frontend keymaps are configured in init.lua".to_owned(),
                 "Use `phenix --print-default-config` to inspect defaults".to_owned(),
             ],
             theme,
         ),
+        OverlayState::CommandPalette { .. } => unreachable!("handled before centered overlays"),
     }
 }
 
@@ -475,8 +569,7 @@ fn render_auth_prompt(
     state: &AppState,
     theme: &ThemeConfig,
 ) {
-    let title = format!("Authentication · {flow_id}");
-    let block = panel(&title, true, theme);
+    let block = panel(&format!("Authentication · {flow_id}"), true, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let mut lines = vec![Line::styled(
@@ -498,7 +591,7 @@ fn render_auth_prompt(
                         theme_style(theme, "Normal")
                     },
                 )
-            }))
+            }));
         }
         AuthPrompt::Secret { .. } => lines.push(Line::styled(
             "•".repeat(state.input.text.chars().count()),
@@ -596,7 +689,7 @@ fn centered(area: Rect, width_percent: u16, height_percent: u16) -> Rect {
 }
 
 fn cursor_position(text: &str, width: u16) -> (u16, u16) {
-    let width = width.max(1) as usize;
+    let width = usize::from(width.max(1));
     let mut row = 0usize;
     let mut column = 0usize;
     for character in text.chars() {
@@ -612,8 +705,8 @@ fn cursor_position(text: &str, width: u16) -> (u16, u16) {
         }
     }
     (
-        column.min(u16::MAX as usize) as u16,
-        row.min(u16::MAX as usize) as u16,
+        column.min(usize::from(u16::MAX)) as u16,
+        row.min(usize::from(u16::MAX)) as u16,
     )
 }
 
@@ -632,29 +725,6 @@ fn transcript_lines(role: &TranscriptRole, text: &str, theme: &ThemeConfig) -> V
     lines.extend(text.lines().map(|line| Line::from(line.to_owned())));
     lines.push(Line::default());
     lines
-}
-
-fn slash_command_suggestions(state: &AppState) -> Vec<String> {
-    let Some(query) = state.input.text.strip_prefix('/') else {
-        return Vec::new();
-    };
-    if query.chars().any(char::is_whitespace) {
-        return Vec::new();
-    }
-    let mut commands = BUILTIN_COMMANDS
-        .iter()
-        .map(|command| (*command).to_owned())
-        .chain(state.commands.iter().map(|command| command.name.clone()))
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .filter(|command| command.starts_with(query))
-        .map(|command| format!("/{command}"))
-        .take(5)
-        .collect::<Vec<_>>();
-    if commands.len() == 1 && commands[0] == state.input.text {
-        commands.clear();
-    }
-    commands
 }
 
 fn model_selection_label(model: &phenix_runtime_api::ModelRef) -> String {
@@ -689,7 +759,9 @@ fn overlay_selected(state: &AppState) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_runtime_api::{BackendHealth, RunId, RunKind, RunState, RunSummary, RuntimeSnapshot};
+    use phenix_runtime_api::{
+        BackendHealth, RunId, RunKind, RunState, RunSummary, RuntimeSnapshot,
+    };
 
     #[test]
     fn picker_window_keeps_deep_selection_visible() {
@@ -704,10 +776,9 @@ mod tests {
     }
 
     #[test]
-    fn slash_suggestions_include_builtins() {
-        let mut state = AppState::default();
-        state.input.replace("/mo".to_owned());
-        assert_eq!(slash_command_suggestions(&state), vec!["/mode", "/model"]);
+    fn input_buffer_is_split_into_explicit_lines() {
+        let lines = input_text_lines("one\n\nthree", &ThemeConfig::default());
+        assert_eq!(lines.len(), 3);
     }
 
     #[test]

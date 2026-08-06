@@ -7,6 +7,7 @@ import {
   isModelCapability,
   isPhenixModelSet,
   type ModelSelector,
+  parseModelTarget,
   type PiThinkingLevel,
   type ThinkingPolicy,
   virtualModel,
@@ -208,12 +209,20 @@ function parseModel(value: string): ModelSelector {
     if (!isPhenixModelSet(modelSet)) throw new Error(`Unknown Phenix model set ${modelSet}`);
     return virtualModel(modelSet);
   }
-  const separator = value.indexOf("/");
-  if (separator > 0 && separator < value.length - 1) {
+  const firstSeparator = value.indexOf("/");
+  const secondSeparator = value.indexOf("/", firstSeparator + 1);
+  if (
+    firstSeparator > 0 &&
+    secondSeparator > firstSeparator + 1 &&
+    secondSeparator < value.length - 1
+  ) {
+    return { kind: "target", ...parseModelTarget(value) };
+  }
+  if (firstSeparator > 0 && firstSeparator < value.length - 1) {
     return {
       kind: "concrete",
-      provider: value.slice(0, separator),
-      model: value.slice(separator + 1),
+      provider: value.slice(0, firstSeparator),
+      model: value.slice(firstSeparator + 1),
     };
   }
   throw new Error(`Unsupported agent model ${value}`);

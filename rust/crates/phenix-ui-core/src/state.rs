@@ -43,50 +43,144 @@ impl InputState {
     }
 
     pub fn insert(&mut self, text: &str) {
-        self.cursor_byte = self.cursor_byte.min(self.text.len());
-        while !self.text.is_char_boundary(self.cursor_byte) {
-            self.cursor_byte = self.cursor_byte.saturating_sub(1);
-        }
+        self.normalize_cursor();
         self.text.insert_str(self.cursor_byte, text);
         self.cursor_byte += text.len();
         self.history_cursor = None;
     }
 
     pub fn move_left(&mut self) {
-        if self.cursor_byte == 0 {
-            return;
-        }
-        self.cursor_byte = self.text[..self.cursor_byte]
-            .char_indices()
-            .next_back()
-            .map_or(0, |(index, _)| index);
+        self.normalize_cursor();
+        self.cursor_byte = previous_char_start(&self.text, self.cursor_byte).unwrap_or(0);
     }
 
     pub fn move_right(&mut self) {
+        self.normalize_cursor();
         if self.cursor_byte >= self.text.len() {
             return;
         }
-        let width = self.text[self.cursor_byte..]
+        self.cursor_byte += self.text[self.cursor_byte..]
             .chars()
             .next()
             .map_or(0, char::len_utf8);
-        self.cursor_byte += width;
     }
 
-    pub fn backspace(&mut self) {
+    pub fn move_home(&mut self) {
+        self.normalize_cursor();
+        self.cursor_byte = self.line_start();
+    }
+
+    pub fn move_end(&mut self) {
+        self.normalize_cursor();
+        self.cursor_byte = self.line_end();
+    }
+
+    pub fn move_up(&mut self) {
+        self.normalize_cursor();
+        let current_start = self.line_start();
+        if current_start == 0 {
+            return;
+        }
+        let previous_end = current_start - 1;
+        let previous_start = self.text[..previous_end]
+            .rfind('\n')
+            .map_or(0, |index| index + 1);
+        let column = self.cursor_byte - current_start;
+        self.cursor_byte = clamp_to_char_boundary(
+            &self.text,
+            previous_start + column.min(previous_end - previous_start),
+        );
+    }
+
+    pub fn move_down(&mut self) {
+        self.normalize_cursor();
+        let current_end = self.line_end();
+        if current_end >= self.text.len() {
+            return;
+        }
+        let next_start = current_end + 1;
+        let next_end = self.text[next_start..]
+            .find('\n')
+            .map_or(self.text.len(), |index| next_start + index);
+        let column = self.cursor_byte - self.line_start();
+        self.cursor_byte =
+            clamp_to_char_boundary(&self.text, next_start + column.min(next_end - next_start));
+    }
+
+    pub fn move_word_forward(&mut self) {
+        self.normalize_cursor();
+        if self.cursor_byte >= self.text.len() {
+            return;
+        }
+        let mut index = self.cursor_byte;
+        let first = self.text[index..]
+            .chars()
+            .next()
+            .expect("cursor before end");
+        if first.is_whitespace() {
+            index = skip_forward_while(&self.text, index, char::is_whitespace);
+        } else {
+            let class = character_class(first);
+            index = skip_forward_while(&self.text, index, |character| {
+                !character.is_whitespace() && character_class(character) == class
+            });
+            index = skip_forward_while(&self.text, index, char::is_whitespace);
+        }
+        self.cursor_byte = index;
+    }
+
+    pub fn move_word_backward(&mut self) {
+        self.normalize_cursor();
         if self.cursor_byte == 0 {
             return;
         }
-        let previous = self.text[..self.cursor_byte]
-            .char_indices()
-            .next_back()
-            .map_or(0, |(index, _)| index);
+        let mut index = self.cursor_byte;
+        while let Some(previous) = previous_char_start(&self.text, index) {
+            let character = self.text[previous..index]
+                .chars()
+                .next()
+                .expect("one character slice");
+            if !character.is_whitespace() {
+                break;
+            }
+            index = previous;
+        }
+        let Some(previous) = previous_char_start(&self.text, index) else {
+            self.cursor_byte = 0;
+            return;
+        };
+        let class = character_class(
+            self.text[previous..index]
+                .chars()
+                .next()
+                .expect("one character slice"),
+        );
+        index = previous;
+        while let Some(candidate) = previous_char_start(&self.text, index) {
+            let character = self.text[candidate..index]
+                .chars()
+                .next()
+                .expect("one character slice");
+            if character.is_whitespace() || character_class(character) != class {
+                break;
+            }
+            index = candidate;
+        }
+        self.cursor_byte = index;
+    }
+
+    pub fn backspace(&mut self) {
+        self.normalize_cursor();
+        let Some(previous) = previous_char_start(&self.text, self.cursor_byte) else {
+            return;
+        };
         self.text.drain(previous..self.cursor_byte);
         self.cursor_byte = previous;
         self.history_cursor = None;
     }
 
     pub fn delete(&mut self) {
+        self.normalize_cursor();
         if self.cursor_byte >= self.text.len() {
             return;
         }
@@ -97,6 +191,73 @@ impl InputState {
         self.text.drain(self.cursor_byte..self.cursor_byte + width);
         self.history_cursor = None;
     }
+
+    pub fn delete_line(&mut self) {
+        self.normalize_cursor();
+        let start = self.line_start();
+        let end = self.line_end();
+        if end < self.text.len() {
+            self.text.drain(start..=end);
+            self.cursor_byte = start.min(self.text.len());
+        } else if start > 0 {
+            self.text.drain(start - 1..end);
+            self.cursor_byte = start - 1;
+        } else {
+            self.text.clear();
+            self.cursor_byte = 0;
+        }
+        self.history_cursor = None;
+    }
+
+    fn line_start(&self) -> usize {
+        self.text[..self.cursor_byte]
+            .rfind('\n')
+            .map_or(0, |index| index + 1)
+    }
+
+    fn line_end(&self) -> usize {
+        self.text[self.cursor_byte..]
+            .find('\n')
+            .map_or(self.text.len(), |index| self.cursor_byte + index)
+    }
+
+    fn normalize_cursor(&mut self) {
+        self.cursor_byte =
+            clamp_to_char_boundary(&self.text, self.cursor_byte.min(self.text.len()));
+    }
+}
+
+fn previous_char_start(text: &str, index: usize) -> Option<usize> {
+    if index == 0 {
+        return None;
+    }
+    text[..index]
+        .char_indices()
+        .next_back()
+        .map(|(index, _)| index)
+}
+
+fn clamp_to_char_boundary(text: &str, mut index: usize) -> usize {
+    index = index.min(text.len());
+    while !text.is_char_boundary(index) {
+        index = index.saturating_sub(1);
+    }
+    index
+}
+
+fn skip_forward_while(text: &str, mut index: usize, predicate: impl Fn(char) -> bool) -> usize {
+    while index < text.len() {
+        let character = text[index..].chars().next().expect("cursor before end");
+        if !predicate(character) {
+            break;
+        }
+        index += character.len_utf8();
+    }
+    index
+}
+
+fn character_class(character: char) -> bool {
+    character.is_alphanumeric() || character == '_'
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -210,6 +371,11 @@ impl AppState {
 
 impl Default for AppState {
     fn default() -> Self {
+        let mut statuses = BTreeMap::new();
+        statuses.insert(
+            "frontend.editor".to_owned(),
+            "editor: owned · insert".to_owned(),
+        );
         Self {
             connection: RuntimeConnectionState::Starting,
             capabilities: BackendCapabilities::default(),
@@ -225,7 +391,7 @@ impl Default for AppState {
             auth_flows: BTreeMap::new(),
             commands: Vec::new(),
             dialogs: VecDeque::new(),
-            statuses: BTreeMap::new(),
+            statuses,
             notifications: VecDeque::new(),
             view: ViewState::default(),
             exit_requested: false,
@@ -248,5 +414,29 @@ mod tests {
         assert!(input.text.is_char_boundary(input.cursor_byte));
         input.delete();
         assert_eq!(input.text, "größ");
+    }
+
+    #[test]
+    fn multiline_navigation_preserves_the_nearest_valid_column() {
+        let mut input = InputState::default();
+        input.replace("alpha\nβ\ngamma".to_owned());
+        input.move_home();
+        input.move_up();
+        assert_eq!(&input.text[input.cursor_byte..], "β\ngamma");
+        input.move_up();
+        assert_eq!(input.cursor_byte, 0);
+        input.move_down();
+        assert_eq!(&input.text[input.cursor_byte..], "β\ngamma");
+    }
+
+    #[test]
+    fn word_and_line_commands_are_deterministic() {
+        let mut input = InputState::default();
+        input.replace("one two\nthree".to_owned());
+        input.move_word_backward();
+        assert_eq!(input.cursor_byte, 8);
+        input.delete_line();
+        assert_eq!(input.text, "one two");
+        assert_eq!(input.cursor_byte, 7);
     }
 }

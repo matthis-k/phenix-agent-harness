@@ -7,18 +7,21 @@ use phenix_runtime_api::{BackendClient, BackendCommand, BackendRuntime, BackendW
 #[cfg(test)]
 use phenix_ui_core::ElementId;
 use phenix_ui_core::{
-    reduce, AppEffect, AppEvent, AppState, FocusDirection, FocusTarget, LayoutAxis, OverlayState,
-    ResizeRequest,
+    command_completions, reduce, AppEffect, AppEvent, AppState, FocusDirection, FocusTarget,
+    InputEditor, LayoutAxis, OverlayState, ResizeRequest, VimMode,
 };
 use std::collections::VecDeque;
+use std::env;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
-use std::process::Command;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{self, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_DRAIN_LIMIT: usize = 256;
 
@@ -227,6 +230,14 @@ impl<R: UiRenderer> UiRuntime<R> {
                     apply_view_mutation(&mut self.state, mutation);
                     dirty = true;
                 }
+                BusReaction::ExternalEditor => {
+                    if let Err(error) = self.edit_with_external_editor() {
+                        self.state
+                            .notifications
+                            .push_back(format!("external editor failed: {error}"));
+                    }
+                    dirty = true;
+                }
                 BusReaction::Render => dirty = true,
             }
         }
@@ -295,12 +306,80 @@ impl<R: UiRenderer> UiRuntime<R> {
         }
         dirty
     }
+
+    fn edit_with_external_editor(&mut self) -> Result<(), UiRuntimeError> {
+        let (program, arguments) = external_editor_command()?;
+        let path = external_editor_path();
+        fs::write(&path, &self.state.input.text)
+            .map_err(|error| UiRuntimeError::ExternalEditor(error.to_string()))?;
+
+        if let Some(pause) = &self.external_io_pause {
+            pause.store(true, Ordering::Release);
+        }
+        let result = (|| {
+            self.renderer.suspend().map_err(UiRuntimeError::Render)?;
+            let status = Command::new(program)
+                .args(arguments)
+                .arg(&path)
+                .status()
+                .map_err(|error| UiRuntimeError::ExternalEditor(error.to_string()));
+            let resume = self.renderer.resume().map_err(UiRuntimeError::Render);
+            match (status, resume) {
+                (Ok(status), Ok(())) if status.success() => Ok(()),
+                (Ok(status), Ok(())) => {
+                    Err(UiRuntimeError::ExternalEditor(status.code().map_or_else(
+                        || "editor terminated by signal".to_owned(),
+                        |code| format!("editor exited with code {code}"),
+                    )))
+                }
+                (Err(error), Ok(())) | (_, Err(error)) => Err(error),
+            }
+        })();
+        if let Some(pause) = &self.external_io_pause {
+            pause.store(false, Ordering::Release);
+        }
+
+        let edited = result.and_then(|()| {
+            fs::read_to_string(&path)
+                .map_err(|error| UiRuntimeError::ExternalEditor(error.to_string()))
+        });
+        let _ = fs::remove_file(&path);
+        self.state.input.replace(edited?);
+        self.state.view.vim_mode = VimMode::Normal;
+        sync_command_completion_overlay(&mut self.state);
+        update_editor_status(&mut self.state);
+        Ok(())
+    }
 }
 
 impl<R> Drop for UiRuntime<R> {
     fn drop(&mut self) {
         self.detach_workers();
     }
+}
+
+fn external_editor_command() -> Result<(String, Vec<String>), UiRuntimeError> {
+    let source = ["PHENIX_EXTERNAL_EDITOR", "VISUAL", "EDITOR"]
+        .into_iter()
+        .find_map(|name| env::var(name).ok().filter(|value| !value.trim().is_empty()))
+        .unwrap_or_else(|| "vi".to_owned());
+    let mut words = shell_words::split(&source)
+        .map_err(|error| UiRuntimeError::ExternalEditor(error.to_string()))?;
+    if words.is_empty() {
+        return Err(UiRuntimeError::ExternalEditor(
+            "editor command is empty".to_owned(),
+        ));
+    }
+    let program = words.remove(0);
+    Ok((program, words))
+}
+
+fn external_editor_path() -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    env::temp_dir().join(format!("phenix-prompt-{}-{nonce}.md", process::id()))
 }
 
 fn apply_view_mutation(state: &mut AppState, mutation: ViewMutation) {
@@ -354,8 +433,15 @@ fn apply_input_edit(state: &mut AppState, edit: InputEdit) {
         InputEdit::Insert(text) => state.input.insert(&text),
         InputEdit::Backspace => state.input.backspace(),
         InputEdit::Delete => state.input.delete(),
+        InputEdit::DeleteLine => state.input.delete_line(),
         InputEdit::MoveLeft => state.input.move_left(),
         InputEdit::MoveRight => state.input.move_right(),
+        InputEdit::MoveUp => state.input.move_up(),
+        InputEdit::MoveDown => state.input.move_down(),
+        InputEdit::MoveHome => state.input.move_home(),
+        InputEdit::MoveEnd => state.input.move_end(),
+        InputEdit::MoveWordForward => state.input.move_word_forward(),
+        InputEdit::MoveWordBackward => state.input.move_word_backward(),
         InputEdit::HistoryPrevious => {
             if state.input.history.is_empty() {
                 return;
@@ -385,12 +471,61 @@ fn apply_input_edit(state: &mut AppState, edit: InputEdit) {
                 state.input.cursor_byte = state.input.text.len();
             }
         }
+        InputEdit::SetEditor(editor) => {
+            state.view.set_input_editor(editor);
+            update_editor_status(state);
+        }
+        InputEdit::SetVimMode(mode) => {
+            state.view.vim_mode = mode;
+            update_editor_status(state);
+        }
     }
+    sync_command_completion_overlay(state);
+}
+
+fn sync_command_completion_overlay(state: &mut AppState) {
+    if !matches!(
+        state.view.overlay,
+        None | Some(OverlayState::CommandPalette { .. })
+    ) {
+        return;
+    }
+    let completions = command_completions(state);
+    if completions.is_empty() {
+        if matches!(
+            state.view.overlay,
+            Some(OverlayState::CommandPalette { .. })
+        ) {
+            state.view.overlay = None;
+        }
+        return;
+    }
+    let selected = match &state.view.overlay {
+        Some(OverlayState::CommandPalette { selected, .. }) => {
+            (*selected).min(completions.len().saturating_sub(1))
+        }
+        _ => 0,
+    };
+    state.view.overlay = Some(OverlayState::CommandPalette {
+        query: state.input.text.clone(),
+        selected,
+    });
+}
+
+fn update_editor_status(state: &mut AppState) {
+    state.statuses.insert(
+        "frontend.editor".to_owned(),
+        format!(
+            "editor: {} · {}",
+            state.view.input_editor.label(),
+            state.view.vim_mode.label()
+        ),
+    );
 }
 
 fn move_overlay_selection(state: &mut AppState, delta: i32) {
     let length = match &state.view.overlay {
-        Some(OverlayState::CommandPalette { .. }) => state.commands.len(),
+        Some(OverlayState::CommandPalette { .. }) => command_completions(state).len(),
         Some(OverlayState::ModelPicker { .. }) => state.models.len(),
         Some(OverlayState::AuthenticationProviders { .. }) => state.auth_providers.len(),
         Some(OverlayState::AuthenticationPrompt { prompt, .. }) => match prompt {
@@ -448,6 +583,7 @@ pub enum UiRuntimeError {
     InvalidConfiguration(String),
     Start(String),
     Render(String),
+    ExternalEditor(String),
     Disconnected,
 }
 
@@ -459,6 +595,7 @@ impl Display for UiRuntimeError {
             }
             Self::Start(message) => write!(formatter, "failed to start UI producer: {message}"),
             Self::Render(message) => write!(formatter, "failed to render UI: {message}"),
+            Self::ExternalEditor(message) => write!(formatter, "external editor error: {message}"),
             Self::Disconnected => formatter.write_str("all UI message producers disconnected"),
         }
     }
@@ -493,5 +630,52 @@ mod tests {
             },
         );
         assert_eq!(state.view.pane(&ElementId::sidebar()).width, Some(32));
+    }
+
+    #[test]
+    fn editor_mode_updates_are_local_and_visible_in_status() {
+        let mut state = AppState::default();
+        state.view.terminal.height = 36;
+        apply_input_edit(&mut state, InputEdit::SetEditor(InputEditor::Embedded));
+        assert_eq!(state.view.pane(&ElementId::input()).height, Some(12));
+        assert_eq!(
+            state.statuses.get("frontend.editor").map(String::as_str),
+            Some("editor: embedded · normal")
+        );
+
+        apply_input_edit(&mut state, InputEdit::SetVimMode(VimMode::Insert));
+        assert_eq!(
+            state.statuses.get("frontend.editor").map(String::as_str),
+            Some("editor: embedded · insert")
+        );
+    }
+
+    #[test]
+    fn external_editor_paths_are_unique_and_markdown_typed() {
+        let first = external_editor_path();
+        let second = external_editor_path();
+        assert_eq!(
+            first.extension().and_then(|value| value.to_str()),
+            Some("md")
+        );
+        assert!(first.starts_with(env::temp_dir()));
+        assert!(second.starts_with(env::temp_dir()));
+    }
+
+    #[test]
+    fn slash_input_opens_and_updates_a_command_completion_overlay() {
+        let mut state = AppState::default();
+        apply_input_edit(&mut state, InputEdit::Insert("/mo".to_owned()));
+        assert!(matches!(
+            state.view.overlay,
+            Some(OverlayState::CommandPalette { selected: 0, .. })
+        ));
+        move_overlay_selection(&mut state, 1);
+        assert!(matches!(
+            state.view.overlay,
+            Some(OverlayState::CommandPalette { selected: 1, .. })
+        ));
+        apply_input_edit(&mut state, InputEdit::Insert("del".to_owned()));
+        assert!(state.view.overlay.is_none());
     }
 }

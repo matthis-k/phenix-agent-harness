@@ -1,7 +1,8 @@
+mod acp_config;
+
+use acp_config::load_acp_backend;
 use clap::Parser;
-use phenix_acp::{DefinitionId, RoleId, SessionTreeId};
-use phenix_acp_backend::{AcpAgentBackend, AcpBackendConfig, GatewayAgentBackend};
-use phenix_acp_presets::standard_gateway;
+use phenix_acp_backend::AcpAgentBackend;
 use phenix_frontend_config::FrontendProviderRef;
 use phenix_process_backend::{ProcessAgentBackend, ProcessBackendConfig};
 use phenix_runtime_api::{
@@ -12,7 +13,7 @@ use phenix_tui::RatatuiRenderer;
 use phenix_ui_core::{
     AppState, KeyCode, KeyInput, KeyModifiers, MouseAction, MouseButton, MouseInput, UiInput,
 };
-use phenix_ui_lua::{LuaFrontendOptions, LuaFrontendProvider};
+use phenix_ui_lua::{AcpApplicationConfig, LuaFrontendOptions, LuaFrontendProvider};
 use phenix_ui_runtime::{UiIngressError, UiRuntime};
 use ratatui::crossterm::event::{
     self, Event, KeyCode as CrosstermKeyCode, KeyEvent, KeyEventKind,
@@ -50,9 +51,9 @@ enum BackendKind {
     args_override_self = true
 )]
 struct Arguments {
-    /// Read frontend configuration from this Lua file instead of XDG_CONFIG_HOME/phenix/init.lua.
-    #[arg(long, value_name = "PATH")]
-    config: Option<PathBuf>,
+    /// Read frontend Lua and ACP source descriptors from this authoring directory.
+    #[arg(short = 'p', long = "config-dir", value_name = "DIR")]
+    config_dir: Option<PathBuf>,
 
     /// Do not load the built-in frontend keymaps, theme, and layout defaults.
     #[arg(long)]
@@ -74,43 +75,48 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    let provider = load_frontend_provider(&arguments)?;
+    let config_directory = resolve_config_directory(arguments.config_dir.as_deref())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "cannot resolve the Phenix Harness configuration directory; set XDG_CONFIG_HOME or HOME, or pass -p/--config-dir"))?;
+    let (provider, acp_config) = load_frontend_provider(&arguments, &config_directory)?;
     if arguments.check {
-        return run_handshake_check();
+        return run_handshake_check(&config_directory, acp_config.as_ref());
     }
-    run_tui(provider)
+    run_tui(provider, &config_directory, acp_config.as_ref())
 }
 
-fn load_frontend_provider(arguments: &Arguments) -> Result<FrontendProviderRef, Box<dyn Error>> {
-    let source_path = resolve_config_path(arguments.config.as_deref());
+fn load_frontend_provider(
+    arguments: &Arguments,
+    config_directory: &Path,
+) -> Result<(FrontendProviderRef, Option<AcpApplicationConfig>), Box<dyn Error>> {
     let provider = LuaFrontendProvider::new(LuaFrontendOptions {
-        source_path,
+        source_path: Some(config_directory.join("config.lua")),
         load_defaults: !arguments.no_default_config,
     })?;
-    Ok(Rc::new(RefCell::new(provider)))
+    let acp_config = provider.acp_config().cloned();
+    Ok((Rc::new(RefCell::new(provider)), acp_config))
 }
 
-fn resolve_config_path(explicit_path: Option<&Path>) -> Option<PathBuf> {
-    if let Some(path) = explicit_path {
-        return Some(path.to_path_buf());
-    }
-    if let Some(path) = env::var_os("PHENIX_CONFIG").map(PathBuf::from) {
-        return Some(path);
-    }
-    default_config_path().filter(|path| path.is_file())
+fn resolve_config_directory(explicit_path: Option<&Path>) -> Option<PathBuf> {
+    explicit_path
+        .map(Path::to_path_buf)
+        .or_else(default_config_directory)
 }
 
-fn default_config_path() -> Option<PathBuf> {
+fn default_config_directory() -> Option<PathBuf> {
     if let Some(root) = env::var_os("XDG_CONFIG_HOME") {
-        return Some(PathBuf::from(root).join("phenix/init.lua"));
+        return Some(PathBuf::from(root).join("phenix-harness"));
     }
     env::var_os("HOME")
         .map(PathBuf::from)
-        .map(|home| home.join(".config/phenix/init.lua"))
+        .map(|home| home.join(".config/phenix-harness"))
 }
 
-fn run_tui(provider: FrontendProviderRef) -> Result<(), Box<dyn Error>> {
-    let backend = spawn_backend()?;
+fn run_tui(
+    provider: FrontendProviderRef,
+    config_directory: &Path,
+    acp_config: Option<&AcpApplicationConfig>,
+) -> Result<(), Box<dyn Error>> {
+    let backend = spawn_backend(config_directory, acp_config)?;
     backend.client.submit(BackendCommand::Initialize {
         client: client_information(),
     })?;
@@ -132,8 +138,11 @@ fn run_tui(provider: FrontendProviderRef) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn run_handshake_check() -> Result<(), Box<dyn Error>> {
-    let backend = spawn_backend()?;
+fn run_handshake_check(
+    config_directory: &Path,
+    acp_config: Option<&AcpApplicationConfig>,
+) -> Result<(), Box<dyn Error>> {
+    let backend = spawn_backend(config_directory, acp_config)?;
     let initialize_id = backend.client.submit(BackendCommand::Initialize {
         client: client_information(),
     })?;
@@ -196,11 +205,14 @@ fn receive_reply(
     }
 }
 
-fn spawn_backend() -> Result<BackendRuntime, Box<dyn Error>> {
+fn spawn_backend(
+    config_directory: &Path,
+    acp_config: Option<&AcpApplicationConfig>,
+) -> Result<BackendRuntime, Box<dyn Error>> {
     let backend: Box<dyn AgentBackend> =
         match parse_backend_kind(env::var("PHENIX_BACKEND").ok().as_deref())? {
             BackendKind::Process => Box::new(create_process_backend()?),
-            BackendKind::Acp => Box::new(create_acp_backend()?),
+            BackendKind::Acp => Box::new(create_acp_backend(config_directory, acp_config)?),
         };
     Ok(BackendRuntime::spawn(backend, CHANNEL_CAPACITY)?)
 }
@@ -216,19 +228,25 @@ fn parse_backend_kind(value: Option<&str>) -> Result<BackendKind, io::Error> {
     }
 }
 
-fn create_acp_backend() -> Result<GatewayAgentBackend, Box<dyn Error>> {
-    let command = env::var("PHENIX_ACP_COMMAND").unwrap_or_else(|_| "pi-acp".to_owned());
-    let config = AcpBackendConfig::new(command, env::current_dir()?)?;
-    let transport = AcpAgentBackend::gateway_transport(config, CHANNEL_CAPACITY)?;
-    let gateway = standard_gateway(transport.clone())?;
-    Ok(GatewayAgentBackend::new(
-        gateway,
-        transport,
-        DefinitionId::parse("phenix.standard")?,
-        SessionTreeId::parse("tree-frontend")?,
-        RoleId::parse("coordinator")?,
-        "Interactive Phenix session tree",
-    ))
+fn create_acp_backend(
+    config_directory: &Path,
+    acp_config: Option<&AcpApplicationConfig>,
+) -> Result<AcpAgentBackend, Box<dyn Error>> {
+    let acp_config = acp_config.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{} must call phenix.acp.configure(...) and register workflow/routing source descriptors",
+                config_directory.join("config.lua").display()
+            ),
+        )
+    })?;
+    Ok(load_acp_backend(
+        config_directory,
+        acp_config,
+        &env::current_dir()?,
+        CHANNEL_CAPACITY,
+    )?)
 }
 
 fn client_information() -> ClientInformation {
@@ -403,9 +421,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn xdg_config_path_uses_a_neovim_style_init_lua() {
-        let path = PathBuf::from("/tmp/xdg-config").join("phenix/init.lua");
-        assert_eq!(path, PathBuf::from("/tmp/xdg-config/phenix/init.lua"));
+    fn xdg_config_uses_the_phenix_harness_application_directory() {
+        let path = PathBuf::from("/tmp/xdg-config").join("phenix-harness");
+        assert_eq!(path, PathBuf::from("/tmp/xdg-config/phenix-harness"));
+        assert_eq!(
+            path.join("config.lua"),
+            PathBuf::from("/tmp/xdg-config/phenix-harness/config.lua")
+        );
     }
 
     #[test]

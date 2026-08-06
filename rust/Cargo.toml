@@ -4,6 +4,7 @@ members = [
   "crates/phenix-acp",
   "crates/phenix-acp-backend",
   "crates/phenix-acp-presets",
+  "crates/phenix-conductor",
   "crates/phenix-frontend-config",
   "crates/phenix-process-backend",
   "crates/phenix-runtime-api",
@@ -26,6 +27,9 @@ clap = { version = "4.5.47", default-features = false, features = ["derive", "er
 futures = "0.3"
 mlua = { version = "0.12.0", features = ["lua54", "vendored"] }
 ratatui = "0.30.2"
+ron = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 shell-words = "1.1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+toml = "0.9"

@@ -26,6 +26,7 @@ import { SessionProfileFacadeImpl } from "../application/session-profile-facade.
 import { SupervisionProcessManager } from "../application/supervision-process-manager.ts";
 import { UserFormService } from "../application/user-form-service.ts";
 import type { SessionProfile } from "../domain/run/model.ts";
+import { AgentSessionBackendRouter } from "../framework/routing/agent-session-backend-router.ts";
 import type { RuntimeConfiguration } from "../framework/runtime-configuration.ts";
 import type { IdGenerator } from "../ports/clock.ts";
 import { systemClock } from "../ports/clock.ts";
@@ -90,7 +91,7 @@ export function createExecutionServices(input: {
   readonly notifyRoot: (message: string) => void | Promise<void> | undefined;
 }) {
   const { host, configuration, infrastructure, definitionRuntime } = input;
-  const { ids, stateDir, store, operations } = infrastructure;
+  const { diagnostics, ids, stateDir, store, operations } = infrastructure;
   const { definitions, functions } = definitionRuntime;
   const resolver = configuration.createModelResolver({
     inventory: new PiModelInventory(host.modelRegistry),
@@ -110,10 +111,12 @@ export function createExecutionServices(input: {
   );
   const userForms = new UserFormService(ids, systemClock);
   const memory = new MemoryService({
-    repository: new JsonlMemoryRepository(stateDir),
+    repository: new JsonlMemoryRepository(stateDir, configuration.memoryPolicy),
     store,
     ids,
     clock: systemClock,
+    diagnostics,
+    policy: configuration.memoryPolicy,
   });
   const tokenReduction =
     process.env.PHENIX_TOKEN_REDUCTION_BACKEND === "none" || !process.env.PHENIX_RTK_BIN
@@ -150,7 +153,7 @@ export function createExecutionServices(input: {
   } = kernel;
   projectExecution = execution;
   const transcripts = new LiveAgentTranscriptStore();
-  const backend = new PiSdkAgentSessionBackend({
+  const piBackend = new PiSdkAgentSessionBackend({
     modelRegistry: host.modelRegistry,
     agentDir: host.agentDir,
     transcripts,
@@ -161,6 +164,15 @@ export function createExecutionServices(input: {
       const run = store.projection.requireRun(runId);
       const definition = definitions.require(run.definitionId);
       return definition.kind === "agent" ? definition.promptMode : undefined;
+    },
+  });
+  const backend = new AgentSessionBackendRouter({
+    backends: new Map([["pi", piBackend]]),
+    backendForRun: (runId) => {
+      const resolved = store.projection.requireRun(runId).resolvedModel;
+      if (!resolved) throw new Error(`Run ${runId} has no resolved model`);
+      // Before backend-qualified routing, all persisted agent sessions were Pi-owned.
+      return resolved.target?.backend ?? "pi";
     },
   });
   const agents = new AgentExecutor({

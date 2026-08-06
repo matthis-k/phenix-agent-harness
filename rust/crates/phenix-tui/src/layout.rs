@@ -54,9 +54,7 @@ fn child_constraint(node: &LayoutNode, direction: SplitDirection, state: &AppSta
                 return Constraint::Length(explicit);
             }
             match (pane.minimum, pane.maximum) {
-                (Some(minimum), Some(maximum)) if minimum == maximum => {
-                    Constraint::Length(minimum)
-                }
+                (Some(minimum), Some(maximum)) if minimum == maximum => Constraint::Length(minimum),
                 (Some(minimum), None) => Constraint::Min(minimum),
                 (None, Some(maximum)) => Constraint::Max(maximum),
                 _ => Constraint::Fill(pane.weight.max(1)),
@@ -117,7 +115,8 @@ mod tests {
 
     #[test]
     fn equal_minimum_and_maximum_reserve_a_fixed_pane_extent() {
-        let state = AppState::default();
+        let mut state = AppState::default();
+        state.view.pane_mut(ElementId::input()).height = None;
         let mut output = BTreeMap::new();
         collect_layout(
             &LayoutNode::Split(SplitLayout {

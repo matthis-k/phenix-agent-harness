@@ -3,9 +3,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 use ratatui::widgets::{Block, Borders};
 
-pub(crate) fn panel<'a>(title: &'a str, focused: bool, theme: &ThemeConfig) -> Block<'a> {
+pub(crate) fn panel(title: &str, focused: bool, theme: &ThemeConfig) -> Block<'static> {
     Block::default()
-        .borders(Borders::ALL)
+        .borders(Borders::TOP)
         .title(Span::styled(
             format!(" {title} "),
             theme_style(theme, if focused { "Accent" } else { "Muted" }),

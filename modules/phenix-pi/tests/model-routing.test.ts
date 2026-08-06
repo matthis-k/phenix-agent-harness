@@ -2,35 +2,39 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { PhenixModelResolver } from "../adapters/routing/phenix-model-resolver.ts";
+import type { ModelTarget } from "../domain/definition/model.ts";
 import type { ModelInventory } from "../ports/model-resolver.ts";
 
 class Inventory implements ModelInventory {
-  private readonly models: readonly { provider: string; model: string }[];
+  private readonly models: readonly ModelTarget[];
 
-  constructor(models: readonly { provider: string; model: string }[]) {
+  constructor(models: readonly ModelTarget[]) {
     this.models = models;
   }
 
-  available() {
+  available(): readonly ModelTarget[] {
     return this.models;
   }
 
-  contains(provider: string, model: string): boolean {
+  contains(target: ModelTarget): boolean {
     return this.models.some(
-      (candidate) => candidate.provider === provider && candidate.model === model,
+      (candidate) =>
+        candidate.backend === target.backend &&
+        candidate.provider === target.provider &&
+        candidate.model === target.model,
     );
   }
 }
 
-const all = [
-  { provider: "opencode", model: "deepseek-v4-flash-free" },
-  { provider: "opencode", model: "mimo-v2.5-free" },
-  { provider: "opencode-go", model: "mimo-v2.5" },
-  { provider: "opencode-go", model: "qwen3.7-plus" },
-  { provider: "opencode-go", model: "glm-5.2" },
-  { provider: "opencode-go", model: "kimi-k2.7-code" },
-  { provider: "openai-codex", model: "gpt-5.6-terra" },
-  { provider: "openai-codex", model: "gpt-5.6" },
+const all: readonly ModelTarget[] = [
+  { backend: "pi", provider: "opencode", model: "deepseek-v4-flash-free" },
+  { backend: "pi", provider: "opencode", model: "mimo-v2.5-free" },
+  { backend: "pi", provider: "opencode-go", model: "mimo-v2.5" },
+  { backend: "pi", provider: "opencode-go", model: "qwen3.7-plus" },
+  { backend: "pi", provider: "opencode-go", model: "glm-5.2" },
+  { backend: "pi", provider: "opencode-go", model: "kimi-k2.7-code" },
+  { backend: "pi", provider: "openai-codex", model: "gpt-5.6-terra" },
+  { backend: "pi", provider: "openai-codex", model: "gpt-5.6" },
 ];
 
 async function resolve(
@@ -54,6 +58,11 @@ async function resolve(
 
 test("free routes every capability only to authenticated free candidates", async () => {
   const result = await resolve("free", "agent.implementer", "D3");
+  assert.deepEqual(result.target, {
+    backend: "pi",
+    provider: "opencode",
+    model: "deepseek-v4-flash-free",
+  });
   assert.deepEqual(result.concrete, {
     kind: "concrete",
     provider: "opencode",
@@ -71,28 +80,36 @@ test("session budget caps routed reasoning without changing capability selection
   assert.equal(high.thinking, "high");
 });
 
-test("OpenCode Go, ChatGPT Plus, and mixed select the capability-specific provider", async () => {
+test("OpenCode Go, ChatGPT Plus, and mixed select the capability-specific target", async () => {
   const go = await resolve("opencode-go", "agent.planner", "D3");
-  assert.equal(`${go.concrete.provider}/${go.concrete.model}`, "opencode-go/glm-5.2");
+  assert.equal(
+    `${go.target.backend}/${go.target.provider}/${go.target.model}`,
+    "pi/opencode-go/glm-5.2",
+  );
 
   const plus = await resolve("chatgpt-plus", "agent.verifier", "D2");
-  assert.equal(`${plus.concrete.provider}/${plus.concrete.model}`, "openai-codex/gpt-5.6-terra");
+  assert.equal(
+    `${plus.target.backend}/${plus.target.provider}/${plus.target.model}`,
+    "pi/openai-codex/gpt-5.6-terra",
+  );
 
   const mixedCode = await resolve("mixed", "agent.implementer", "D2");
   assert.equal(
-    `${mixedCode.concrete.provider}/${mixedCode.concrete.model}`,
-    "opencode-go/kimi-k2.7-code",
+    `${mixedCode.target.backend}/${mixedCode.target.provider}/${mixedCode.target.model}`,
+    "pi/opencode-go/kimi-k2.7-code",
   );
 
   const mixedReasoning = await resolve("mixed", "agent.planner", "D2");
   assert.equal(
-    `${mixedReasoning.concrete.provider}/${mixedReasoning.concrete.model}`,
-    "openai-codex/gpt-5.6-terra",
+    `${mixedReasoning.target.backend}/${mixedReasoning.target.provider}/${mixedReasoning.target.model}`,
+    "pi/openai-codex/gpt-5.6-terra",
   );
 });
 
 test("routing preserves ordered fallback candidates", async () => {
-  const inventory = new Inventory([{ provider: "opencode", model: "mimo-v2.5-free" }]);
+  const inventory = new Inventory([
+    { backend: "pi", provider: "opencode", model: "mimo-v2.5-free" },
+  ]);
   const candidates = await new PhenixModelResolver(inventory).resolveCandidates(
     { kind: "virtual", provider: "phenix", model: "free" },
     {
@@ -104,8 +121,8 @@ test("routing preserves ordered fallback candidates", async () => {
     },
   );
   assert.deepEqual(
-    candidates.map((item) => item.concrete.model),
-    ["mimo-v2.5-free"],
+    candidates.map((item) => item.target),
+    [{ backend: "pi", provider: "opencode", model: "mimo-v2.5-free" }],
   );
 });
 
@@ -121,5 +138,44 @@ test("session selectors resolve through the owning session model set", async () 
     },
   );
   assert.equal(result.virtual?.model, "chatgpt-plus");
+  assert.equal(result.target.backend, "pi");
   assert.equal(result.concrete.provider, "openai-codex");
+});
+
+test("unqualified concrete models cannot silently cross backend boundaries", async () => {
+  const inventory = new Inventory([
+    { backend: "pi", provider: "anthropic", model: "sonnet" },
+    { backend: "claude", provider: "anthropic", model: "sonnet" },
+  ]);
+  const resolver = new PhenixModelResolver(inventory);
+  const context = {
+    definitionId: "agent.base",
+    parentDefinitionId: "root.session",
+    thinking: "route" as const,
+    difficulty: "D1" as const,
+  };
+
+  await assert.rejects(
+    resolver.resolve(
+      { kind: "concrete", provider: "anthropic", model: "sonnet" },
+      context,
+    ),
+    /exists in multiple backends/,
+  );
+
+  const resolved = await resolver.resolve(
+    {
+      kind: "target",
+      backend: "claude",
+      provider: "anthropic",
+      model: "sonnet",
+    },
+    context,
+  );
+  assert.equal(resolved.target.backend, "claude");
+  assert.deepEqual(resolved.concrete, {
+    kind: "concrete",
+    provider: "anthropic",
+    model: "sonnet",
+  });
 });

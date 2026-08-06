@@ -33,6 +33,48 @@ impl FocusTarget {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum InputEditor {
+    #[default]
+    Owned,
+    Embedded,
+    External,
+}
+
+impl InputEditor {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Owned => "owned",
+            Self::Embedded => "embedded",
+            Self::External => "external",
+        }
+    }
+
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Owned => Self::Embedded,
+            Self::Embedded => Self::External,
+            Self::External => Self::Owned,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum VimMode {
+    Normal,
+    #[default]
+    Insert,
+}
+
+impl VimMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Insert => "insert",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum SidebarSection {
     #[default]
     Runs,
@@ -123,6 +165,8 @@ pub struct ViewState {
     pub transcript_scroll: ScrollState,
     pub sidebar_scroll: ScrollState,
     pub show_details: bool,
+    pub input_editor: InputEditor,
+    pub vim_mode: VimMode,
     pub panes: BTreeMap<ElementId, PaneViewState>,
 }
 
@@ -133,6 +177,19 @@ impl ViewState {
 
     pub fn pane_mut(&mut self, element: ElementId) -> &mut PaneViewState {
         self.panes.entry(element).or_default()
+    }
+
+    pub fn set_input_editor(&mut self, editor: InputEditor) {
+        self.input_editor = editor;
+        self.vim_mode = match editor {
+            InputEditor::Owned => VimMode::Insert,
+            InputEditor::Embedded | InputEditor::External => VimMode::Normal,
+        };
+        let input_height = match editor {
+            InputEditor::Embedded => self.terminal.height.saturating_div(3).clamp(8, 16),
+            InputEditor::Owned | InputEditor::External => 3,
+        };
+        self.pane_mut(ElementId::input()).height = Some(input_height);
     }
 }
 
@@ -156,7 +213,7 @@ impl Default for ViewState {
         panes.insert(
             ElementId::input(),
             PaneViewState {
-                height: Some(4),
+                height: Some(3),
                 ..PaneViewState::default()
             },
         );
@@ -177,7 +234,29 @@ impl Default for ViewState {
             transcript_scroll: ScrollState::default(),
             sidebar_scroll: ScrollState::default(),
             show_details: false,
+            input_editor: InputEditor::Owned,
+            vim_mode: VimMode::Insert,
             panes,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn editor_selection_controls_only_frontend_view_state() {
+        let mut view = ViewState::default();
+        view.terminal.height = 42;
+
+        view.set_input_editor(InputEditor::Embedded);
+        assert_eq!(view.input_editor, InputEditor::Embedded);
+        assert_eq!(view.vim_mode, VimMode::Normal);
+        assert_eq!(view.pane(&ElementId::input()).height, Some(14));
+
+        view.set_input_editor(InputEditor::External);
+        assert_eq!(view.input_editor, InputEditor::External);
+        assert_eq!(view.pane(&ElementId::input()).height, Some(3));
     }
 }
