@@ -20,10 +20,15 @@ pub use authoring::{
     DefinitionFormat, DefinitionKind, DefinitionParseError, Definitions, FormatAttempt,
 };
 pub use backend::{
-    AuthenticationCapabilities, BackendAuthMethod, BackendAuthProviderList,
-    BackendAuthProviderListResult, BackendAuthProviderSummary, BackendCapabilities,
+    AuthenticationCapabilities, BackendAuthCancel, BackendAuthCancelParams, BackendAuthLink,
+    BackendAuthLogout, BackendAuthLogoutParams, BackendAuthMethod, BackendAuthNotice,
+    BackendAuthPrompt, BackendAuthPromptOption, BackendAuthProviderList,
+    BackendAuthProviderListResult, BackendAuthProviderSummary, BackendAuthRespond,
+    BackendAuthRespondParams, BackendAuthResponse, BackendAuthStart, BackendAuthStartParams,
+    BackendAuthTerminalFinished, BackendAuthTerminalFinishedParams, BackendCapabilities,
     BackendCapabilitiesGet, BackendCapabilitiesResult, BackendCommandList,
-    BackendCommandListResult, BackendCommandSource, BackendCommandSummary, BackendModelList,
+    BackendCommandListResult, BackendCommandSource, BackendCommandSummary, BackendControlEvent,
+    BackendEventBatch, BackendEventPoll, BackendExternalCommand, BackendHealth, BackendModelList,
     BackendModelListResult, BackendModelSummary, BackendTargetParams, ExtensionUiCapabilities,
     ModelCapabilities, PromptCapabilities, ResourceCapabilities, SessionCapabilities,
 };
