@@ -4,6 +4,7 @@ pub use agent_client_protocol as acp;
 
 mod authoring;
 mod client;
+mod conductor;
 mod definition;
 mod id;
 mod protocol;
@@ -19,6 +20,7 @@ pub use authoring::{
 pub use client::{
     decode_extension_response, encode_extension_request, ExtensionCodecError, PhenixAcpCallError,
 };
+pub use conductor::{ConductorError, PhenixConductor};
 pub use definition::{
     AcpEndpoint, BackendDefinition, DefinitionError, SessionTreeDefinition,
     SessionTreeDefinitionBuilder,
@@ -28,12 +30,16 @@ pub use id::{
     ProviderId, RoleId, RouterId, RpcRequestId, SessionNodeId, SessionTreeId, ToolId, WorkflowId,
 };
 pub use protocol::{
-    AcpMethod, ModelSelection, ObjectiveSnapshot, ObjectiveState, RoutingExplain,
-    RoutingExplainParams, RoutingExplainResult, SessionNodeSnapshot, SessionNodeState,
+    AcpMethod, AcpNotification, EmptyResult, ModelSelection, NodeAttachResult, NodeCancel,
+    NodeCancelParams, NodeDelegate, NodeDelegateParams, NodeEventNotification, NodeEventParams,
+    NodeExecute, NodeExecuteParams, NodeExecuteResult, NodeFork, NodeForkParams, NodeLoad,
+    NodeLoadParams, NodeResume, NodeResumeParams, ObjectiveMark, ObjectiveMarkParams,
+    ObjectiveSnapshot, ObjectiveState, RoutingExplain, RoutingExplainParams, RoutingExplainResult,
+    SessionNodeSnapshot, SessionNodeState, SessionTreeClose, SessionTreeCloseParams,
     SessionTreeCreate, SessionTreeCreateParams, SessionTreeCreateResult, SessionTreeGet,
     SessionTreeGetParams, SessionTreeList, SessionTreeListParams, SessionTreeListResult,
-    SessionTreeSnapshot, SessionTreeSummary, WorkflowStart, WorkflowStartParams,
-    WorkflowStartResult,
+    SessionTreeSnapshot, SessionTreeSummary, SessionTreeUpdatedNotification,
+    SessionTreeUpdatedParams, WorkflowStart, WorkflowStartParams, WorkflowStartResult,
 };
 pub use runtime::{
     AcpSession, AcpSessionFactory, FirstAvailableRouter, FixedRouter, GatewayCommand,
