@@ -63,6 +63,7 @@ _:
           name ? "phenix",
           configText ? null,
           configFile ? null,
+          acpConfigDir ? ../config/phenix-acp,
           loadDefaults ? true,
           extraArgs ? [ ],
         }:
@@ -77,13 +78,21 @@ _:
           configExport = pkgs.lib.optionalString (frontendConfig != null) ''
             export PHENIX_CONFIG="${frontendConfig}"
           '';
-          wrapperArguments = (pkgs.lib.optional (!loadDefaults) "--no-default-config") ++ extraArgs;
+          wrapperArguments =
+            [
+              "--phenix-acp-config"
+              (toString acpConfigDir)
+            ]
+            ++ (pkgs.lib.optional (!loadDefaults) "--no-default-config")
+            ++ extraArgs;
         in
         pkgs.writeShellApplication {
           inherit name;
-          runtimeInputs = [ pkgs.nodejs ];
+          runtimeInputs = [
+            pkgs.nodejs
+            config.packages.pi-acp
+          ];
           text = ''
-            export PHENIX_ACP_COMMAND="${config.packages.pi-acp}/bin/pi-acp"
             export PHENIX_HEADLESS_PROGRAM="${pkgs.nodejs}/bin/node"
             export PHENIX_HEADLESS_ENTRY="${config.packages.phenix-pi-package}/headless/main.ts"
             export PHENIX_SOURCE_ROOT="${config.packages.phenix-pi-package}"
@@ -144,6 +153,7 @@ _:
       legacyPackages.phenixFrontend = {
         inherit mkPhenixWrapper;
         defaultLua = ../rust/crates/phenix-ui-lua/default.lua;
+        defaultAcpConfig = ../config/phenix-acp;
       };
 
       apps.phenix.program = pkgs.lib.getExe phenix;
