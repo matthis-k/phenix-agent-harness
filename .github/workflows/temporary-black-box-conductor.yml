@@ -98,37 +98,6 @@ jobs:
           process.send_request(
               9,
           '''
-          new = '''    process.send_request(
-              8,
-              "_phenix/node/subscribe",
-              &json!({
-                  "tree_id": tree_id,
-                  "node_id": specialist_node,
-              }),
-          )?;
-          process.receive_response(8)?;
-
-          process.send_request(
-              9,
-              "_phenix/node/execute",
-              &json!({
-                  "tree_id": tree_id,
-                  "node_id": specialist_node,
-                  "command": {
-                      "kind": "prompt",
-                      "text": tool_input["prompt"],
-                      "images": [],
-                  }
-              }),
-          )?;
-          let mut saw_specialist_result = False
-          while True:
-              pass
-
-          process.send_request(
-              10,
-          '''
-          # The Rust replacement is assembled separately to avoid accidental Python formatting.
           rust_new = '''    process.send_request(
               8,
               "_phenix/node/subscribe",
@@ -153,7 +122,8 @@ jobs:
               }),
           )?;
           let mut saw_specialist_result = false;
-          loop {
+          let mut saw_execute_response = false;
+          while !(saw_specialist_result && saw_execute_response) {
               let message = process.receive()?;
               if message.get("method").and_then(Value::as_str) == Some("_phenix/node/event")
                   && message.to_string().contains("42")
@@ -161,13 +131,10 @@ jobs:
                   saw_specialist_result = true;
               }
               if message.get("id") == Some(&Value::from(9)) {
-                  break;
+                  assert!(message.get("error").is_none(), "delegated execution failed: {message}");
+                  saw_execute_response = true;
               }
           }
-          assert!(
-              saw_specialist_result,
-              "specialist response did not traverse the subscribed conductor node"
-          );
 
           process.send_request(
               10,
@@ -178,7 +145,7 @@ jobs:
               text = text.replace('        10,\n        "_phenix/session_tree/get",', '        11,\n        "_phenix/session_tree/get",', 1)
               text = text.replace('let completed_tree = process.receive_response(10)?;', 'let completed_tree = process.receive_response(11)?;', 1)
               test.write_text(text)
-          elif 'saw_specialist_result' not in text:
+          elif 'saw_execute_response' not in text:
               raise SystemExit('black-box delegated execution block not found')
           PY
           rustup component add rustfmt
