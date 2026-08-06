@@ -121,12 +121,11 @@ pub fn load_acp_backend(
             source,
         }
     })?;
-    let router_id = RouterId::parse(manifest.router).map_err(|source| {
-        AcpConfigLoadError::Identifier {
+    let router_id =
+        RouterId::parse(manifest.router).map_err(|source| AcpConfigLoadError::Identifier {
             field: "router",
             source,
-        }
-    })?;
+        })?;
     let selected_router = definitions
         .routing_tables()
         .find(|router| router.id() == &router_id)
@@ -154,10 +153,8 @@ pub fn load_acp_backend(
     let tree_definition = tree_definition.build()?;
 
     let transport_config = AcpBackendConfig::new(manifest.backend.command, cwd)?;
-    let transport =
-        AcpAgentBackend::gateway_transport(transport_config, channel_capacity).map_err(
-            AcpConfigLoadError::Gateway,
-        )?;
+    let transport = AcpAgentBackend::gateway_transport(transport_config, channel_capacity)
+        .map_err(AcpConfigLoadError::Gateway)?;
     let builder = PhenixAcpGateway::builder()
         .definition(tree_definition)?
         .backend(backend_id, transport.clone())?;
@@ -169,12 +166,11 @@ pub fn load_acp_backend(
             source,
         }
     })?;
-    let root_role = RoleId::parse(manifest.root.role).map_err(|source| {
-        AcpConfigLoadError::Identifier {
+    let root_role =
+        RoleId::parse(manifest.root.role).map_err(|source| AcpConfigLoadError::Identifier {
             field: "root.role",
             source,
-        }
-    })?;
+        })?;
 
     Ok(GatewayAgentBackend::new(
         gateway,
