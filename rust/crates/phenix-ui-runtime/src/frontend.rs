@@ -34,9 +34,18 @@ impl EventConsumer for FrontendProviderConsumer {
 
     fn on_ui(&mut self, state: &AppState, envelope: &EventEnvelope<UiEvent>) -> ReactionBatch {
         match &envelope.event {
-            UiEvent::Input(UiInput::Paste(text)) => ReactionBatch::stop(vec![BusReaction::View(
-                ViewMutation::EditInput(InputEdit::Insert(text.clone())),
-            )]),
+            UiEvent::Input(UiInput::Paste(text)) => {
+                if state.view.focus == FocusTarget::Input
+                    || state.view.overlay.is_some()
+                    || !state.dialogs.is_empty()
+                {
+                    ReactionBatch::stop(vec![BusReaction::View(ViewMutation::EditInput(
+                        InputEdit::Insert(text.clone()),
+                    ))])
+                } else {
+                    ReactionBatch::none()
+                }
+            }
             UiEvent::Input(UiInput::Key(key)) => {
                 let context = frontend_context(state);
                 match self.provider.borrow_mut().handle_key(&context, *key) {
@@ -309,6 +318,9 @@ fn fallback_key(state: &AppState, key: KeyInput) -> ReactionBatch {
         };
     }
     if key.modifiers.control && key.code == KeyCode::Character('g') {
+        return open_external_editor();
+    }
+    if key.modifiers.control && key.code == KeyCode::Character('e') {
         return cycle_editor(state.view.input_editor);
     }
 
@@ -319,6 +331,13 @@ fn fallback_key(state: &AppState, key: KeyInput) -> ReactionBatch {
             VimMode::Insert => insert_mode_key(state.view.input_editor, key),
         },
     }
+}
+
+fn open_external_editor() -> ReactionBatch {
+    stop_with(vec![
+        edit_input(InputEdit::SetEditor(InputEditor::External)),
+        BusReaction::ExternalEditor,
+    ])
 }
 
 fn cycle_editor(current: InputEditor) -> ReactionBatch {
@@ -507,6 +526,17 @@ mod tests {
         }
     }
 
+    fn control_key(character: char) -> KeyInput {
+        KeyInput {
+            code: KeyCode::Character(character),
+            modifiers: KeyModifiers {
+                control: true,
+                ..KeyModifiers::default()
+            },
+            repeat: false,
+        }
+    }
+
     #[test]
     fn provider_commands_are_translated_without_a_backend() {
         let provider: FrontendProviderRef = Rc::new(RefCell::new(FakeProvider));
@@ -539,6 +569,18 @@ mod tests {
         assert_eq!(
             reactions.reactions,
             vec![application_intent(UserIntent::Abort)]
+        );
+    }
+
+    #[test]
+    fn ctrl_g_always_opens_the_external_editor() {
+        let reactions = fallback_key(&AppState::default(), control_key('g'));
+        assert_eq!(
+            reactions.reactions,
+            vec![
+                edit_input(InputEdit::SetEditor(InputEditor::External)),
+                BusReaction::ExternalEditor,
+            ]
         );
     }
 
