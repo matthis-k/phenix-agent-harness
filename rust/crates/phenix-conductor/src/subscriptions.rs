@@ -1,3 +1,4 @@
+use crate::ownership::ConductorOwner;
 use agent_client_protocol::schema::v1::{
     AgentNotification, ExtNotification, ExtRequest, ExtResponse,
 };
@@ -8,7 +9,6 @@ use phenix_acp::{
     NodeUnsubscribe, SessionCommand, SessionTreeSnapshot, SessionTreeUpdatedNotification,
     SessionTreeUpdatedParams,
 };
-use phenix_conductor::ConductorRuntime;
 use serde::Serialize;
 use serde_json::value::to_raw_value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -35,7 +35,7 @@ impl SubscriptionHub {
         Self::default()
     }
 
-    pub fn start(&self, runtime: Arc<Mutex<ConductorRuntime>>, connection: ConnectionTo<Client>) {
+    pub fn start(&self, runtime: Arc<Mutex<ConductorOwner>>, connection: ConnectionTo<Client>) {
         if self.started.swap(true, Ordering::AcqRel) {
             return;
         }
@@ -48,7 +48,7 @@ impl SubscriptionHub {
     pub fn handle_control(
         &self,
         request: &ExtRequest,
-        runtime: &Arc<Mutex<ConductorRuntime>>,
+        runtime: &Arc<Mutex<ConductorOwner>>,
     ) -> Result<Option<ExtResponse>, agent_client_protocol::Error> {
         match request.method.as_ref() {
             NodeSubscribe::METHOD => {
@@ -120,7 +120,7 @@ impl SubscriptionHub {
         Ok(())
     }
 
-    async fn run(self, runtime: Arc<Mutex<ConductorRuntime>>, connection: ConnectionTo<Client>) {
+    async fn run(self, runtime: Arc<Mutex<ConductorOwner>>, connection: ConnectionTo<Client>) {
         let mut last_snapshots = BTreeMap::<phenix_acp::SessionTreeId, SessionTreeSnapshot>::new();
         loop {
             tokio::time::sleep(SUBSCRIPTION_POLL_PERIOD).await;
@@ -140,22 +140,28 @@ impl SubscriptionHub {
                     if active_prompts.contains(&subscription.tree_id) {
                         continue;
                     }
-                    match runtime.conductor_mut().gateway_mut().execute(
-                        &subscription.tree_id,
-                        &subscription.node_id,
-                        SessionCommand::Poll,
-                    ) {
+                    let polled = runtime
+                        .conductor_mut()
+                        .map_err(|_| ())?
+                        .gateway_mut()
+                        .execute(
+                            &subscription.tree_id,
+                            &subscription.node_id,
+                            SessionCommand::Poll,
+                        );
+                    match polled {
                         Ok(polled) => events.extend(polled),
                         Err(_) => {
                             invalid.push(subscription.clone());
                             continue;
                         }
                     }
-                    match runtime
+                    let snapshot = runtime
                         .conductor()
+                        .map_err(|_| ())?
                         .gateway()
-                        .snapshot(&subscription.tree_id)
-                    {
+                        .snapshot(&subscription.tree_id);
+                    match snapshot {
                         Ok(snapshot) => {
                             snapshots.insert(subscription.tree_id.clone(), snapshot);
                         }
@@ -265,7 +271,7 @@ fn decode_subscription(
 }
 
 fn validate_subscription(
-    runtime: &Arc<Mutex<ConductorRuntime>>,
+    runtime: &Arc<Mutex<ConductorOwner>>,
     subscription: &NodeSubscriptionParams,
 ) -> Result<(), agent_client_protocol::Error> {
     let runtime = runtime
@@ -273,6 +279,7 @@ fn validate_subscription(
         .map_err(|_| agent_client_protocol::Error::internal_error())?;
     let snapshot = runtime
         .conductor()
+        .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?
         .gateway()
         .snapshot(&subscription.tree_id)
         .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
