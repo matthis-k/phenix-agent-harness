@@ -2,7 +2,7 @@ mod acp_config;
 
 use acp_config::load_acp_backend;
 use clap::Parser;
-use phenix_acp_backend::GatewayAgentBackend;
+use phenix_acp_backend::AcpAgentBackend;
 use phenix_frontend_config::FrontendProviderRef;
 use phenix_process_backend::{ProcessAgentBackend, ProcessBackendConfig};
 use phenix_runtime_api::{
@@ -51,7 +51,7 @@ enum BackendKind {
     args_override_self = true
 )]
 struct Arguments {
-    /// Read config.lua and referenced definitions from this Phenix Harness directory.
+    /// Read frontend Lua and ACP source descriptors from this authoring directory.
     #[arg(short = 'p', long = "config-dir", value_name = "DIR")]
     config_dir: Option<PathBuf>,
 
@@ -231,12 +231,12 @@ fn parse_backend_kind(value: Option<&str>) -> Result<BackendKind, io::Error> {
 fn create_acp_backend(
     config_directory: &Path,
     acp_config: Option<&AcpApplicationConfig>,
-) -> Result<GatewayAgentBackend, Box<dyn Error>> {
+) -> Result<AcpAgentBackend, Box<dyn Error>> {
     let acp_config = acp_config.ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "{} must call phenix.acp.configure(...) and register workflow/routing definitions",
+                "{} must call phenix.acp.configure(...) and register workflow/routing source descriptors",
                 config_directory.join("config.lua").display()
             ),
         )
