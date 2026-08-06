@@ -187,7 +187,7 @@ impl ViewState {
         };
         let input_height = match editor {
             InputEditor::Embedded => self.terminal.height.saturating_div(3).clamp(8, 16),
-            InputEditor::Owned | InputEditor::External => 4,
+            InputEditor::Owned | InputEditor::External => 3,
         };
         self.pane_mut(ElementId::input()).height = Some(input_height);
     }
@@ -213,7 +213,7 @@ impl Default for ViewState {
         panes.insert(
             ElementId::input(),
             PaneViewState {
-                height: Some(4),
+                height: Some(3),
                 ..PaneViewState::default()
             },
         );
@@ -257,6 +257,6 @@ mod tests {
 
         view.set_input_editor(InputEditor::External);
         assert_eq!(view.input_editor, InputEditor::External);
-        assert_eq!(view.pane(&ElementId::input()).height, Some(4));
+        assert_eq!(view.pane(&ElementId::input()).height, Some(3));
     }
 }
