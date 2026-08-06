@@ -52,9 +52,10 @@ jobs:
               transports.insert(backend.id, transport);
           }
           '''
-          if old not in text:
+          if old in text:
+              lib.write_text(text.replace(old, new, 1))
+          elif '"env": backend.environment' not in text:
               raise SystemExit('conductor backend launch block not found')
-          lib.write_text(text.replace(old, new, 1))
 
           main = Path('rust/crates/phenix-conductor/src/main.rs')
           text = main.read_text()
@@ -68,9 +69,117 @@ jobs:
                   .status(ToolCallStatus::InProgress)
                   .raw_input(raw_input);
           '''
-          if old not in text:
+          if old in text:
+              main.write_text(text.replace(old, new, 1))
+          elif 'serde_json::from_str(&input_summary)' not in text:
               raise SystemExit('conductor tool projection block not found')
-          main.write_text(text.replace(old, new, 1))
+
+          test = Path('rust/crates/phenix-conductor/tests/black_box_model_tool_loop.rs')
+          text = test.read_text()
+          old = '''    process.send_request(
+              8,
+              "_phenix/node/execute",
+              &json!({
+                  "tree_id": tree_id,
+                  "node_id": specialist_node,
+                  "command": {
+                      "kind": "prompt",
+                      "text": tool_input["prompt"],
+                      "images": [],
+                  }
+              }),
+          )?;
+          let specialist_result = process.receive_response(8)?;
+          assert!(
+              specialist_result.to_string().contains("42"),
+              "specialist response did not traverse the conductor: {specialist_result}"
+          );
+
+          process.send_request(
+              9,
+          '''
+          new = '''    process.send_request(
+              8,
+              "_phenix/node/subscribe",
+              &json!({
+                  "tree_id": tree_id,
+                  "node_id": specialist_node,
+              }),
+          )?;
+          process.receive_response(8)?;
+
+          process.send_request(
+              9,
+              "_phenix/node/execute",
+              &json!({
+                  "tree_id": tree_id,
+                  "node_id": specialist_node,
+                  "command": {
+                      "kind": "prompt",
+                      "text": tool_input["prompt"],
+                      "images": [],
+                  }
+              }),
+          )?;
+          let mut saw_specialist_result = False
+          while True:
+              pass
+
+          process.send_request(
+              10,
+          '''
+          # The Rust replacement is assembled separately to avoid accidental Python formatting.
+          rust_new = '''    process.send_request(
+              8,
+              "_phenix/node/subscribe",
+              &json!({
+                  "tree_id": tree_id,
+                  "node_id": specialist_node,
+              }),
+          )?;
+          process.receive_response(8)?;
+
+          process.send_request(
+              9,
+              "_phenix/node/execute",
+              &json!({
+                  "tree_id": tree_id,
+                  "node_id": specialist_node,
+                  "command": {
+                      "kind": "prompt",
+                      "text": tool_input["prompt"],
+                      "images": [],
+                  }
+              }),
+          )?;
+          let mut saw_specialist_result = false;
+          loop {
+              let message = process.receive()?;
+              if message.get("method").and_then(Value::as_str) == Some("_phenix/node/event")
+                  && message.to_string().contains("42")
+              {
+                  saw_specialist_result = true;
+              }
+              if message.get("id") == Some(&Value::from(9)) {
+                  break;
+              }
+          }
+          assert!(
+              saw_specialist_result,
+              "specialist response did not traverse the subscribed conductor node"
+          );
+
+          process.send_request(
+              10,
+          '''
+          if old in text:
+              text = text.replace(old, rust_new, 1)
+              text = text.replace('let final_messages = receive_prompt(&process, 9)?;', 'let final_messages = receive_prompt(&process, 10)?;', 1)
+              text = text.replace('        10,\n        "_phenix/session_tree/get",', '        11,\n        "_phenix/session_tree/get",', 1)
+              text = text.replace('let completed_tree = process.receive_response(10)?;', 'let completed_tree = process.receive_response(11)?;', 1)
+              test.write_text(text)
+          elif 'saw_specialist_result' not in text:
+              raise SystemExit('black-box delegated execution block not found')
           PY
           rustup component add rustfmt
           cd rust
