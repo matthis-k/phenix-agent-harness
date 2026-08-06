@@ -354,9 +354,7 @@ fn normal_mode_key(editor: InputEditor, key: KeyInput) -> ReactionBatch {
     match key.code {
         KeyCode::Escape => stop_with(vec![application_intent(UserIntent::Abort)]),
         KeyCode::Enter => stop_with(vec![application_intent(UserIntent::SubmitPrompt)]),
-        KeyCode::Left | KeyCode::Character('h') => {
-            stop_with(vec![edit_input(InputEdit::MoveLeft)])
-        }
+        KeyCode::Left | KeyCode::Character('h') => stop_with(vec![edit_input(InputEdit::MoveLeft)]),
         KeyCode::Right | KeyCode::Character('l') => {
             stop_with(vec![edit_input(InputEdit::MoveRight)])
         }
@@ -370,21 +368,15 @@ fn normal_mode_key(editor: InputEditor, key: KeyInput) -> ReactionBatch {
             InputEditor::Embedded => InputEdit::MoveDown,
             InputEditor::External => unreachable!("external editor handled separately"),
         })]),
-        KeyCode::Home | KeyCode::Character('0') => {
-            stop_with(vec![edit_input(InputEdit::MoveHome)])
-        }
-        KeyCode::End | KeyCode::Character('$') => {
-            stop_with(vec![edit_input(InputEdit::MoveEnd)])
-        }
+        KeyCode::Home | KeyCode::Character('0') => stop_with(vec![edit_input(InputEdit::MoveHome)]),
+        KeyCode::End | KeyCode::Character('$') => stop_with(vec![edit_input(InputEdit::MoveEnd)]),
         KeyCode::Character('w') => stop_with(vec![edit_input(InputEdit::MoveWordForward)]),
         KeyCode::Character('b') => stop_with(vec![edit_input(InputEdit::MoveWordBackward)]),
-        KeyCode::Delete | KeyCode::Character('x') => {
-            stop_with(vec![edit_input(InputEdit::Delete)])
-        }
+        KeyCode::Delete | KeyCode::Character('x') => stop_with(vec![edit_input(InputEdit::Delete)]),
         KeyCode::Character('D') => stop_with(vec![edit_input(InputEdit::DeleteLine)]),
-        KeyCode::Character('i') => stop_with(vec![edit_input(InputEdit::SetVimMode(
-            VimMode::Insert,
-        ))]),
+        KeyCode::Character('i') => {
+            stop_with(vec![edit_input(InputEdit::SetVimMode(VimMode::Insert))])
+        }
         KeyCode::Character('a') => stop_with(vec![
             edit_input(InputEdit::MoveRight),
             edit_input(InputEdit::SetVimMode(VimMode::Insert)),
@@ -521,9 +513,7 @@ mod tests {
         let mut consumer = FrontendProviderConsumer::new(provider);
         let reactions = consumer.on_ui(
             &AppState::default(),
-            &EventEnvelope::focused(UiEvent::Input(UiInput::Key(key(
-                KeyCode::Character('x'),
-            )))),
+            &EventEnvelope::focused(UiEvent::Input(UiInput::Key(key(KeyCode::Character('x'))))),
         );
         assert!(matches!(
             reactions.reactions.as_slice(),
