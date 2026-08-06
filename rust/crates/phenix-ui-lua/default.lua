@@ -16,7 +16,7 @@ phenix.layout.set(phenix.layout.split("vertical", {
     phenix.layout.pane("ui.transcript", { pane_type = "transcript", weight = 72 }),
     phenix.layout.pane("ui.sidebar", { pane_type = "sidebar", weight = 28 }),
   }),
-  phenix.layout.pane("ui.input", { pane_type = "input", weight = 4, min = 4, max = 4 }),
+  phenix.layout.pane("ui.input", { pane_type = "input", weight = 3, min = 3, max = 3 }),
   phenix.layout.pane("ui.status", { pane_type = "status", weight = 1, min = 1, max = 1 }),
 }))
 
