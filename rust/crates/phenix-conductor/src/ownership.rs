@@ -11,6 +11,7 @@ use phenix_conductor::{
 };
 use serde::Serialize;
 use serde_json::value::to_raw_value;
+use std::collections::BTreeMap;
 use std::env;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -47,6 +48,7 @@ impl ConductorOwner {
             configuration: None,
         };
         if let Some(path) = env::var_os(CONFIGURATION_FILE_ENV).map(PathBuf::from) {
+            env::remove_var(CONFIGURATION_FILE_ENV);
             let source = fs::read_to_string(&path).map_err(|source| {
                 ConductorOwnerError::ReadConfigurationFile {
                     path: path.clone(),
@@ -229,12 +231,14 @@ fn build_bootstrap(
     let backends = input
         .backends
         .into_iter()
-        .map(|backend| BootstrapBackend {
-            id: backend.id,
-            command: backend.command,
-            environment: backend.environment,
+        .map(|backend| {
+            Ok(BootstrapBackend {
+                id: backend.id,
+                command: command_with_environment(backend.command, backend.environment)?,
+                environment: BTreeMap::new(),
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, ConductorOwnerError>>()?;
 
     let mut workflow_count = 0usize;
     let mut routing_table_count = 0usize;
@@ -286,6 +290,32 @@ fn build_bootstrap(
     Ok((bootstrap, snapshot))
 }
 
+fn command_with_environment(
+    command: String,
+    environment: BTreeMap<String, String>,
+) -> Result<String, ConductorOwnerError> {
+    if environment.is_empty() {
+        return Ok(command);
+    }
+    let mut words = Vec::with_capacity(environment.len() + 2);
+    words.push("env".to_owned());
+    for (name, value) in environment {
+        if name.is_empty() || name.contains('=') || name.contains('\0') {
+            return Err(ConductorOwnerError::InvalidEnvironmentName(name));
+        }
+        if value.contains('\0') {
+            return Err(ConductorOwnerError::InvalidEnvironmentValue(name));
+        }
+        words.push(shell_quote(&format!("{name}={value}")));
+    }
+    words.push(command);
+    Ok(words.join(" "))
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 fn map_format(format: ConfigurationFormat) -> DefinitionFormat {
     match format {
         ConfigurationFormat::Markdown => DefinitionFormat::Markdown,
@@ -307,6 +337,8 @@ pub enum ConductorOwnerError {
     AlreadyConfigured,
     MissingBackends,
     MissingDefinitions,
+    InvalidEnvironmentName(String),
+    InvalidEnvironmentValue(String),
     ReadConfigurationFile { path: PathBuf, source: io::Error },
     RemoveConfigurationFile { path: PathBuf, source: io::Error },
     DecodeConfiguration(serde_json::Error),
@@ -333,6 +365,14 @@ impl Display for ConductorOwnerError {
             }
             Self::MissingDefinitions => formatter
                 .write_str("Phenix ACP configuration requires at least one definition source"),
+            Self::InvalidEnvironmentName(name) => write!(
+                formatter,
+                "invalid backend environment variable name {name:?}"
+            ),
+            Self::InvalidEnvironmentValue(name) => write!(
+                formatter,
+                "backend environment variable {name:?} contains a NUL byte"
+            ),
             Self::ReadConfigurationFile { path, source } => write!(
                 formatter,
                 "failed to read typed Phenix ACP configuration input {}: {source}",
@@ -370,6 +410,8 @@ impl Error for ConductorOwnerError {
             | Self::AlreadyConfigured
             | Self::MissingBackends
             | Self::MissingDefinitions
+            | Self::InvalidEnvironmentName(_)
+            | Self::InvalidEnvironmentValue(_)
             | Self::Build(_)
             | Self::Runtime(_) => None,
         }
@@ -383,7 +425,6 @@ mod tests {
         BackendId, ConfigurationBackendInput, ConfigurationInput, ConfigurationRootInput,
         ConfigurationSource, DefinitionId, RoleId, RouterId, SessionTreeId,
     };
-    use std::collections::BTreeMap;
 
     #[test]
     fn owner_starts_without_a_runtime_configuration() {
@@ -421,5 +462,24 @@ mod tests {
                 source: ConfigurationSource::Path { path }
             } if path == Path::new("workflows/implement.md")
         ));
+    }
+
+    #[test]
+    fn backend_environment_is_assembled_inside_the_conductor() {
+        let command = command_with_environment(
+            "mock-agent --acp".to_owned(),
+            BTreeMap::from([(
+                "PHENIX_MOCK_ACP_CONFIG".to_owned(),
+                "value with spaces and 'quotes'".to_owned(),
+            )]),
+        )
+        .expect("environment command");
+        let words = shell_words::split(&command).expect("shell words");
+        assert_eq!(words[0], "env");
+        assert_eq!(
+            words[1],
+            "PHENIX_MOCK_ACP_CONFIG=value with spaces and 'quotes'"
+        );
+        assert_eq!(&words[2..], &["mock-agent", "--acp"]);
     }
 }
