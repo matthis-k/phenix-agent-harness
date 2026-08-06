@@ -13,7 +13,6 @@ use phenix_runtime_api::{
     BackendHealth as RuntimeBackendHealth, BackendReply, ExternalCommand, SecretValue,
 };
 use serde::de::DeserializeOwned;
-use serde::Serialize;
 use serde_json::value::to_raw_value;
 use std::sync::Arc;
 
