@@ -1,3 +1,4 @@
+mod ownership;
 mod subscriptions;
 
 use agent_client_protocol::schema::v1::{
@@ -10,10 +11,9 @@ use agent_client_protocol::schema::v1::{
 use agent_client_protocol::{Agent, Client, ConnectionTo, Stdio};
 use base64::Engine;
 use clap::Parser;
+use ownership::ConductorOwner;
 use phenix_acp::{GatewayEvent, SessionCommand, SessionEvent, SessionImage};
-use phenix_conductor::{ConductorBootstrap, ConductorRuntime};
 use std::error::Error;
-use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -26,14 +26,10 @@ const PROMPT_POLL_PERIOD: Duration = Duration::from_millis(20);
 #[command(
     name = "phenix-conductor",
     version,
-    about = "Phenix ACP aggregate manager and orchestrator"
+    about = "Phenix ACP aggregate manager and configuration owner"
 )]
 struct Arguments {
-    /// JSON bootstrap containing immutable definitions and downstream ACP backends.
-    #[arg(long, value_name = "FILE")]
-    bootstrap: PathBuf,
-
-    /// Working directory passed to downstream ACP agents.
+    /// Working directory passed to downstream ACP agents and used for relative source roots.
     #[arg(long, value_name = "DIR")]
     cwd: Option<PathBuf>,
 
@@ -45,14 +41,14 @@ struct Arguments {
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
     let arguments = Arguments::parse();
-    let source = fs::read_to_string(&arguments.bootstrap)?;
     let cwd = match arguments.cwd {
         Some(cwd) => cwd,
         None => std::env::current_dir()?,
     };
-    let runtime =
-        ConductorBootstrap::from_json(&source)?.build(&cwd, arguments.channel_capacity)?;
-    let runtime = Arc::new(Mutex::new(runtime));
+    let runtime = Arc::new(Mutex::new(ConductorOwner::new(
+        cwd,
+        arguments.channel_capacity,
+    )?));
     let request_runtime = Arc::clone(&runtime);
     let cancel_runtime = Arc::clone(&runtime);
     let subscriptions = SubscriptionHub::new();
@@ -137,11 +133,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn dispatch_extension(
-    runtime: &Arc<Mutex<ConductorRuntime>>,
+    runtime: &Arc<Mutex<ConductorOwner>>,
     subscriptions: &SubscriptionHub,
     connection: &ConnectionTo<Client>,
     extension: &ExtRequest,
 ) -> Result<ExtResponse, agent_client_protocol::Error> {
+    {
+        let mut runtime = lock_runtime(runtime)?;
+        if let Some(response) = runtime
+            .handle_configuration_extension(extension)
+            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?
+        {
+            return Ok(response);
+        }
+    }
+
     if let Some(response) = subscriptions.handle_control(extension, runtime)? {
         return Ok(response);
     }
@@ -163,15 +169,15 @@ fn dispatch_extension(
 }
 
 fn lock_runtime(
-    runtime: &Arc<Mutex<ConductorRuntime>>,
-) -> Result<MutexGuard<'_, ConductorRuntime>, agent_client_protocol::Error> {
+    runtime: &Arc<Mutex<ConductorOwner>>,
+) -> Result<MutexGuard<'_, ConductorOwner>, agent_client_protocol::Error> {
     runtime
         .lock()
         .map_err(|_| agent_client_protocol::Error::internal_error())
 }
 
 async fn handle_prompt(
-    runtime: &Arc<Mutex<ConductorRuntime>>,
+    runtime: &Arc<Mutex<ConductorOwner>>,
     subscriptions: &SubscriptionHub,
     connection: &ConnectionTo<Client>,
     request: PromptRequest,
@@ -190,7 +196,10 @@ async fn handle_prompt(
                 return Ok(PromptResponse::new(reason));
             }
         }
-        if lock_runtime(runtime)?.take_standard_session_cancelled(&session_id) {
+        if lock_runtime(runtime)?
+            .take_standard_session_cancelled(&session_id)
+            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?
+        {
             return Ok(PromptResponse::new(StopReason::Cancelled));
         }
         tokio::time::sleep(PROMPT_POLL_PERIOD).await;
