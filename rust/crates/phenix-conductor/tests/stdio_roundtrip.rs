@@ -17,8 +17,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[test]
-fn standard_acp_round_trips_through_the_conductor_and_downstream_agent(
-) -> Result<(), Box<dyn Error>> {
+fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn Error>> {
     let fixture_agent = PathBuf::from(env!("CARGO_BIN_EXE_fixture-agent"));
     let conductor = PathBuf::from(env!("CARGO_BIN_EXE_phenix-conductor"));
     let cwd = std::env::current_dir()?;
@@ -41,11 +40,24 @@ fn standard_acp_round_trips_through_the_conductor_and_downstream_agent(
         .ok_or("session/new did not return a session ID")?
         .to_owned();
 
+    process.send_request(3, "_phenix/session_tree/list", &json!({}))?;
+    let listed = process.receive_response(3)?;
+    assert_eq!(listed["result"]["trees"][0]["tree_id"], session_id);
+
     process.send_request(
-        3,
+        4,
+        "_phenix/session_tree/get",
+        &json!({ "tree_id": session_id }),
+    )?;
+    let tree = process.receive_response(4)?;
+    assert_eq!(tree["result"]["id"], session_id);
+    assert_eq!(tree["result"]["nodes"].as_array().map(Vec::len), Some(1));
+
+    process.send_request(
+        5,
         "session/prompt",
         &PromptRequest::new(
-            SessionId::new(session_id),
+            SessionId::new(session_id.clone()),
             vec![ContentBlock::from("hello")],
         ),
     )?;
@@ -57,7 +69,7 @@ fn standard_acp_round_trips_through_the_conductor_and_downstream_agent(
         {
             saw_echo = true;
         }
-        if message.get("id") == Some(&Value::from(3)) {
+        if message.get("id") == Some(&Value::from(5)) {
             break message;
         }
     };
@@ -66,6 +78,18 @@ fn standard_acp_round_trips_through_the_conductor_and_downstream_agent(
         "conductor did not forward the downstream ACP update"
     );
     assert_eq!(completed["result"]["stopReason"], "end_turn");
+
+    process.send_request(
+        6,
+        "_phenix/session_tree/get",
+        &json!({ "tree_id": session_id }),
+    )?;
+    let tree_after_prompt = process.receive_response(6)?;
+    assert_eq!(tree_after_prompt["result"]["id"], session_id);
+    assert_eq!(
+        tree_after_prompt["result"]["nodes"][0]["downstream_session"],
+        "fixture-session"
+    );
 
     process.shutdown();
     let _ = fs::remove_file(bootstrap_path);
