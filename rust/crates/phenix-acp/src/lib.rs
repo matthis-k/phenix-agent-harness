@@ -22,10 +22,10 @@ pub use authoring::{
 pub use backend::{
     AuthenticationCapabilities, BackendAuthMethod, BackendAuthProviderList,
     BackendAuthProviderListResult, BackendAuthProviderSummary, BackendCapabilities,
-    BackendCapabilitiesGet, BackendCapabilitiesResult, BackendCommandList, BackendCommandListResult,
-    BackendCommandSource, BackendCommandSummary, BackendModelList, BackendModelListResult,
-    BackendModelSummary, BackendTargetParams, ExtensionUiCapabilities, ModelCapabilities,
-    PromptCapabilities, ResourceCapabilities, SessionCapabilities,
+    BackendCapabilitiesGet, BackendCapabilitiesResult, BackendCommandList,
+    BackendCommandListResult, BackendCommandSource, BackendCommandSummary, BackendModelList,
+    BackendModelListResult, BackendModelSummary, BackendTargetParams, ExtensionUiCapabilities,
+    ModelCapabilities, PromptCapabilities, ResourceCapabilities, SessionCapabilities,
 };
 pub use client::{
     decode_extension_response, encode_extension_request, ExtensionCodecError, PhenixAcpCallError,

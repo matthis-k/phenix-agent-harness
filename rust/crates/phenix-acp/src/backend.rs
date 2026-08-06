@@ -188,9 +188,6 @@ mod tests {
             BackendAuthProviderList::METHOD,
             "_phenix/backend/auth_provider/list"
         );
-        assert_eq!(
-            BackendCommandList::METHOD,
-            "_phenix/backend/command/list"
-        );
+        assert_eq!(BackendCommandList::METHOD, "_phenix/backend/command/list");
     }
 }

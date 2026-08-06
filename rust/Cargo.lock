@@ -1419,6 +1419,7 @@ dependencies = [
  "clap",
  "phenix-acp",
  "phenix-acp-backend",
+ "phenix-runtime-api",
  "serde",
  "serde_json",
  "shell-words",
