@@ -2,7 +2,7 @@ use crate::layout::collect_layout;
 use crate::theme::{panel, theme_style};
 use phenix_frontend_config::{FrontendConfig, FrontendProviderRef, ThemeConfig};
 use phenix_runtime_api::{AuthPrompt, ExtensionUiRequest, TranscriptRole};
-use phenix_ui_core::{AppState, ElementId, FocusTarget, OverlayState};
+use phenix_ui_core::{command_completions, AppState, ElementId, FocusTarget, OverlayState};
 use phenix_ui_runtime::UiRenderer;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Modifier;
@@ -11,31 +11,6 @@ use ratatui::widgets::{Block, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 use std::collections::BTreeMap;
 use std::io;
-
-const MAX_COMMAND_COMPLETIONS: usize = 8;
-
-const BUILTIN_COMMANDS: &[(&str, &str)] = &[
-    ("abort", "Interrupt the selected run"),
-    ("compact", "Compact the selected session"),
-    ("exit", "Exit Phenix"),
-    ("login", "Authenticate a provider"),
-    ("logout", "Log out a provider"),
-    ("mode", "Inspect or select an ACP session mode"),
-    ("model", "Select a concrete model"),
-    ("new", "Create a new session"),
-    ("quit", "Exit Phenix"),
-    ("reload", "Reload backend resources"),
-    ("resume", "Resume a persisted session"),
-    ("routing", "Select a Phenix routing profile"),
-    ("sessions", "Open the session picker"),
-    ("thinking", "Inspect available thinking levels"),
-];
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct CommandCompletion {
-    command: String,
-    description: Option<String>,
-}
 
 pub struct RatatuiRenderer {
     terminal: Option<DefaultTerminal>,
@@ -95,7 +70,11 @@ fn render_application(frame: &mut Frame<'_>, state: &AppState, config: &Frontend
         render_pane(frame, pane_area, state, &config.theme, &element);
     }
 
-    if state.view.overlay.is_none() && state.dialogs.is_empty() {
+    let completion_open = matches!(
+        state.view.overlay,
+        Some(OverlayState::CommandPalette { .. })
+    );
+    if (state.view.overlay.is_none() || completion_open) && state.dialogs.is_empty() {
         if let Some(input_area) = input_area {
             render_command_completion(frame, area, input_area, state, &config.theme);
         }
@@ -222,7 +201,12 @@ fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
 }
 
 fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
-    let focused = state.view.focus == FocusTarget::Input && state.view.overlay.is_none();
+    let completion_open = matches!(
+        state.view.overlay,
+        Some(OverlayState::CommandPalette { .. })
+    );
+    let focused = state.view.focus == FocusTarget::Input
+        && (state.view.overlay.is_none() || completion_open);
     let block = panel("Input", focused, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -264,6 +248,12 @@ fn render_command_completion(
     if completions.is_empty() || input_area.y <= screen.y {
         return;
     }
+    let selected = match &state.view.overlay {
+        Some(OverlayState::CommandPalette { selected, .. }) => {
+            (*selected).min(completions.len().saturating_sub(1))
+        }
+        _ => 0,
+    };
 
     let content_width = completions
         .iter()
@@ -307,10 +297,10 @@ fn render_command_completion(
             let mut spans = vec![Span::styled(
                 format!(
                     "{} {}",
-                    if index == 0 { "▸" } else { " " },
+                    if index == selected { "▸" } else { " " },
                     completion.command
                 ),
-                if index == 0 {
+                if index == selected {
                     theme_style(theme, "Accent")
                 } else {
                     theme_style(theme, "Normal")
@@ -399,6 +389,9 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
     let Some(overlay) = &state.view.overlay else {
         return;
     };
+    if matches!(overlay, OverlayState::CommandPalette { .. }) {
+        return;
+    }
     let overlay_area = centered(area, 70, 65);
     frame.render_widget(Clear, overlay_area);
     match overlay {
@@ -477,18 +470,6 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
         OverlayState::ExtensionDialog {
             request, selected, ..
         } => render_extension_dialog(frame, overlay_area, request, *selected, state, theme),
-        OverlayState::CommandPalette { selected, .. } => render_picker(
-            frame,
-            overlay_area,
-            "Commands",
-            *selected,
-            state
-                .commands
-                .iter()
-                .map(|command| format!("/{}", command.name))
-                .collect(),
-            theme,
-        ),
         OverlayState::Help => render_picker(
             frame,
             overlay_area,
@@ -500,6 +481,7 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
             ],
             theme,
         ),
+        OverlayState::CommandPalette { .. } => unreachable!("handled before centered overlays"),
     }
 }
 
@@ -718,48 +700,6 @@ fn transcript_lines(role: &TranscriptRole, text: &str, theme: &ThemeConfig) -> V
     lines
 }
 
-fn command_completions(state: &AppState) -> Vec<CommandCompletion> {
-    let Some(query) = state.input.text.strip_prefix('/') else {
-        return Vec::new();
-    };
-    if query.chars().any(char::is_whitespace) {
-        return Vec::new();
-    }
-
-    let mut commands = BTreeMap::new();
-    for (command, description) in BUILTIN_COMMANDS {
-        commands.insert(
-            (*command).to_owned(),
-            CommandCompletion {
-                command: format!("/{command}"),
-                description: Some((*description).to_owned()),
-            },
-        );
-    }
-    for command in &state.commands {
-        commands
-            .entry(command.name.clone())
-            .and_modify(|completion| {
-                if command.description.is_some() {
-                    completion.description = command.description.clone();
-                }
-            })
-            .or_insert_with(|| CommandCompletion {
-                command: format!("/{}", command.name),
-                description: command.description.clone(),
-            });
-    }
-
-    let exact_input = state.input.text.as_str();
-    commands
-        .into_iter()
-        .filter(|(command, _)| command.starts_with(query))
-        .map(|(_, completion)| completion)
-        .filter(|completion| completion.command != exact_input)
-        .take(MAX_COMMAND_COMPLETIONS)
-        .collect()
-}
-
 fn model_selection_label(model: &phenix_runtime_api::ModelRef) -> String {
     if model.provider == "phenix" {
         format!("routing: {}/{}", model.provider, model.model)
@@ -786,34 +726,5 @@ fn overlay_selected(state: &AppState) -> usize {
         | Some(OverlayState::SessionPicker { selected, .. })
         | Some(OverlayState::ExtensionDialog { selected, .. }) => *selected,
         Some(OverlayState::Help) | None => 0,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn command_completion_is_vertical_data_with_descriptions() {
-        let mut state = AppState::default();
-        state.input.replace("/mo".to_owned());
-        let completions = command_completions(&state);
-        assert_eq!(
-            completions
-                .iter()
-                .map(|completion| completion.command.as_str())
-                .collect::<Vec<_>>(),
-            vec!["/mode", "/model"]
-        );
-        assert!(completions
-            .iter()
-            .all(|completion| completion.description.is_some()));
-    }
-
-    #[test]
-    fn routing_is_a_native_completion() {
-        let mut state = AppState::default();
-        state.input.replace("/rou".to_owned());
-        assert_eq!(command_completions(&state)[0].command, "/routing");
     }
 }
