@@ -17,7 +17,7 @@ phenix.layout.set(phenix.layout.split("vertical", {
   phenix.layout.split("horizontal", {
     phenix.layout.split("vertical", {
       phenix.layout.pane("ui.transcript", { pane_type = "transcript", weight = 1 }),
-      phenix.layout.pane("ui.input", { pane_type = "input", weight = 4, min = 4 }),
+      phenix.layout.pane("ui.input", { pane_type = "input", weight = 3, min = 3 }),
       phenix.layout.pane("ui.status", { pane_type = "status", weight = 1, min = 1, max = 1 }),
     }),
     phenix.layout.pane("ui.sidebar", { pane_type = "sidebar", weight = 28, min = 24, max = 40 }),
@@ -63,9 +63,13 @@ map("transcript", "<PageDown>", function() phenix.ui.pane.scroll("ui.transcript"
 map("transcript", "<PageUp>", function() phenix.ui.pane.scroll("ui.transcript", 10) end)
 
 map("overlay", "<CR>", phenix.overlay.accept, { desc = "Accept selected item" })
+map("overlay", "<Tab>", phenix.overlay.accept, { desc = "Complete selected item" })
 map("overlay", "<Esc>", phenix.overlay.cancel, { desc = "Close overlay" })
 map("overlay", "j", phenix.overlay.next, { desc = "Select next item" })
 map("overlay", "k", phenix.overlay.previous, { desc = "Select previous item" })
 map("overlay", "<Down>", phenix.overlay.next)
 map("overlay", "<Up>", phenix.overlay.previous)
 map("overlay", "<BS>", phenix.input.backspace)
+map("overlay", "<Del>", phenix.input.delete)
+map("overlay", "<Left>", phenix.input.move_left)
+map("overlay", "<Right>", phenix.input.move_right)
