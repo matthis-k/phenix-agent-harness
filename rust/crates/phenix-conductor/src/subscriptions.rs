@@ -33,11 +33,7 @@ impl SubscriptionHub {
         Self::default()
     }
 
-    pub fn start(
-        &self,
-        runtime: Arc<Mutex<ConductorRuntime>>,
-        connection: ConnectionTo<Client>,
-    ) {
+    pub fn start(&self, runtime: Arc<Mutex<ConductorRuntime>>, connection: ConnectionTo<Client>) {
         if self.started.swap(true, Ordering::AcqRel) {
             return;
         }
@@ -74,14 +70,18 @@ impl SubscriptionHub {
         response: &ExtResponse,
         connection: &ConnectionTo<Client>,
     ) -> Result<(), agent_client_protocol::Error> {
-        if !matches!(request.method.as_ref(), NodeExecute::METHOD | NodeCancel::METHOD) {
+        if !matches!(
+            request.method.as_ref(),
+            NodeExecute::METHOD | NodeCancel::METHOD
+        ) {
             return Ok(());
         }
-        let result = serde_json::from_str::<NodeExecuteResult>(response.0.get()).map_err(|error| {
-            agent_client_protocol::util::internal_error(format!(
-                "invalid conductor node result: {error}"
-            ))
-        })?;
+        let result =
+            serde_json::from_str::<NodeExecuteResult>(response.0.get()).map_err(|error| {
+                agent_client_protocol::util::internal_error(format!(
+                    "invalid conductor node result: {error}"
+                ))
+            })?;
         for event in result.events {
             self.publish_event_if_subscribed(connection, event)?;
         }
@@ -106,10 +106,7 @@ impl SubscriptionHub {
         })
     }
 
-    pub fn remove_tree(
-        &self,
-        tree_id: &str,
-    ) -> Result<(), agent_client_protocol::Error> {
+    pub fn remove_tree(&self, tree_id: &str) -> Result<(), agent_client_protocol::Error> {
         let tree_id = phenix_acp::SessionTreeId::parse(tree_id).map_err(|error| {
             agent_client_protocol::util::internal_error(format!(
                 "standard ACP session is not a Phenix tree: {error}"
@@ -121,11 +118,7 @@ impl SubscriptionHub {
         Ok(())
     }
 
-    async fn run(
-        self,
-        runtime: Arc<Mutex<ConductorRuntime>>,
-        connection: ConnectionTo<Client>,
-    ) {
+    async fn run(self, runtime: Arc<Mutex<ConductorRuntime>>, connection: ConnectionTo<Client>) {
         let mut last_snapshots = BTreeMap::<phenix_acp::SessionTreeId, SessionTreeSnapshot>::new();
         loop {
             tokio::time::sleep(SUBSCRIPTION_POLL_PERIOD).await;

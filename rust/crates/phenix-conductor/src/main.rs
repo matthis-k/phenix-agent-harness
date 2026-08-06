@@ -79,9 +79,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         serde_json::to_value(
                             InitializeResponse::new(initialize.protocol_version)
                                 .agent_capabilities(AgentCapabilities::new().prompt_capabilities(
-                                    PromptCapabilities::new()
-                                        .image(true)
-                                        .embedded_context(true),
+                                    PromptCapabilities::new().image(true).embedded_context(true),
                                 )),
                         )
                         .map_err(agent_client_protocol::Error::into_internal_error)?
