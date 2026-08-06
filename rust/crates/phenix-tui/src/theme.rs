@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, Borders};
 
 pub(crate) fn panel<'a>(title: &'a str, focused: bool, theme: &ThemeConfig) -> Block<'a> {
     Block::default()
-        .borders(Borders::ALL)
+        .borders(Borders::TOP)
         .title(Span::styled(
             format!(" {title} "),
             theme_style(theme, if focused { "Accent" } else { "Muted" }),
@@ -77,5 +77,11 @@ mod tests {
     fn semantic_theme_groups_map_to_ratatui_styles() {
         let style = theme_style(&ThemeConfig::default(), "Accent");
         assert!(style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn panels_use_a_single_workspace_separator() {
+        let block = panel("Transcript", false, &ThemeConfig::default());
+        assert_eq!(block.borders, Borders::TOP);
     }
 }
