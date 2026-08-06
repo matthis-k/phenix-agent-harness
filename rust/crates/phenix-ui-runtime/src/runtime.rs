@@ -326,13 +326,12 @@ impl<R: UiRenderer> UiRuntime<R> {
             let resume = self.renderer.resume().map_err(UiRuntimeError::Render);
             match (status, resume) {
                 (Ok(status), Ok(())) if status.success() => Ok(()),
-                (Ok(status), Ok(())) => Err(UiRuntimeError::ExternalEditor(
-                    status
-                        .code()
-                        .map_or_else(|| "editor terminated by signal".to_owned(), |code| {
-                            format!("editor exited with code {code}")
-                        }),
-                )),
+                (Ok(status), Ok(())) => {
+                    Err(UiRuntimeError::ExternalEditor(status.code().map_or_else(
+                        || "editor terminated by signal".to_owned(),
+                        |code| format!("editor exited with code {code}"),
+                    )))
+                }
                 (Err(error), Ok(())) | (_, Err(error)) => Err(error),
             }
         })();
@@ -624,7 +623,10 @@ mod tests {
     fn external_editor_paths_are_unique_and_markdown_typed() {
         let first = external_editor_path();
         let second = external_editor_path();
-        assert_eq!(first.extension().and_then(|value| value.to_str()), Some("md"));
+        assert_eq!(
+            first.extension().and_then(|value| value.to_str()),
+            Some("md")
+        );
         assert!(first.starts_with(env::temp_dir()));
         assert!(second.starts_with(env::temp_dir()));
     }
