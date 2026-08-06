@@ -2,18 +2,16 @@ import type {
   ModelCapability,
   ModelResolutionContext,
   ModelSelector,
+  ModelTarget,
   PhenixModelSetId,
   PiThinkingLevel,
   ResolvedModel,
   VirtualModelRef,
 } from "../../domain/definition/model.ts";
-import { virtualModel } from "../../domain/definition/model.ts";
+import { formatModelTarget, virtualModel } from "../../domain/definition/model.ts";
 import type { ModelInventory, ModelResolver } from "../../ports/model-resolver.ts";
 
-export interface ModelCandidate {
-  readonly provider: string;
-  readonly model: string;
-}
+export type ModelCandidate = ModelTarget;
 
 export interface CapabilityRoute {
   readonly capability: ModelCapability;
@@ -54,35 +52,46 @@ export class PolicyModelResolver implements ModelResolver {
     const route = this.policy.route(context);
     const thinking = context.thinking === "route" ? route.thinking : context.thinking;
 
+    if (selector.kind === "target") {
+      if (!this.inventory.contains(selector)) {
+        throw new Error(`Model target ${formatModelTarget(selector)} is unavailable`);
+      }
+      return [resolvedTarget(selector, selector, thinking, route.capability)];
+    }
+
     if (selector.kind === "concrete") {
-      if (!this.inventory.contains(selector.provider, selector.model)) {
+      const matches = this.inventory
+        .available()
+        .filter(
+          (target) => target.provider === selector.provider && target.model === selector.model,
+        );
+      if (matches.length === 0) {
         throw new Error(`Concrete model ${selector.provider}/${selector.model} is unavailable`);
       }
-      return [
-        {
-          requested: selector,
-          concrete: selector,
-          thinking,
-          capability: route.capability,
-        },
-      ];
+      if (matches.length > 1) {
+        throw new Error(
+          `Concrete model ${selector.provider}/${selector.model} exists in multiple backends: ` +
+            `${matches.map(formatModelTarget).join(", ")}. Use a backend-qualified target.`,
+        );
+      }
+      const target = matches[0];
+      if (!target) throw new Error("Concrete model resolution lost its only target");
+      return [resolvedTarget(selector, target, thinking, route.capability)];
     }
 
     const modelSet = selector.kind === "virtual" ? selector.model : (context.modelSet ?? "mixed");
     const virtual: VirtualModelRef = virtualModel(modelSet);
     const pool = this.policy.pool(modelSet, route.capability);
-    const available = new Set(
-      this.inventory.available().map((item) => `${item.provider}/${item.model}`),
-    );
+    const available = new Set(this.inventory.available().map(formatModelTarget));
     const eligible = this.policy
       .candidates(modelSet, route.capability)
       .filter((item) => this.policy.allows(modelSet, item))
-      .filter((item) => available.has(`${item.provider}/${item.model}`));
+      .filter((item) => available.has(formatModelTarget(item)));
 
     if (eligible.length === 0) {
       const configured = this.policy
         .candidates(modelSet, route.capability)
-        .map((item) => `${item.provider}/${item.model}`)
+        .map(formatModelTarget)
         .join(", ");
       throw new Error(
         `No authenticated model is available for phenix/${modelSet} capability ${route.capability}. ` +
@@ -90,13 +99,41 @@ export class PolicyModelResolver implements ModelResolver {
       );
     }
 
-    return eligible.map((item) => ({
+    return eligible.map((target) => ({
       requested: selector,
       virtual,
-      concrete: { kind: "concrete", provider: item.provider, model: item.model },
+      target,
+      concrete: {
+        kind: "concrete",
+        provider: target.provider,
+        model: target.model,
+      },
       thinking,
       capability: route.capability,
       ...(pool ? { pool } : {}),
     }));
   }
+}
+
+function resolvedTarget(
+  requested: ModelSelector,
+  target: ModelTarget,
+  thinking: PiThinkingLevel,
+  capability: ModelCapability,
+): ResolvedModel {
+  return {
+    requested,
+    target: {
+      backend: target.backend,
+      provider: target.provider,
+      model: target.model,
+    },
+    concrete: {
+      kind: "concrete",
+      provider: target.provider,
+      model: target.model,
+    },
+    thinking,
+    capability,
+  };
 }
