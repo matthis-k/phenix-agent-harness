@@ -5,9 +5,7 @@ use phenix_acp::{
     DefinitionParseError, Definitions, GatewayError, PhenixAcpGateway, PhenixConductor, RouterId,
     SessionTreeDefinition,
 };
-use phenix_acp_backend::{
-    AcpAgentBackend, AcpBackendConfig, ConfigError as BackendConfigError,
-};
+use phenix_acp_backend::{AcpAgentBackend, AcpBackendConfig, ConfigError as BackendConfigError};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -120,7 +118,8 @@ impl ConductorBootstrap {
                 command.arguments,
                 backend.environment.clone(),
             )?;
-            definition = definition.backend(BackendDefinition::new(backend.id.clone(), endpoint))?;
+            definition =
+                definition.backend(BackendDefinition::new(backend.id.clone(), endpoint))?;
         }
         for workflow in workflow_ids {
             definition = definition.workflow(workflow)?;
@@ -212,7 +211,10 @@ impl Display for BootstrapError {
                 formatter.write_str("conductor bootstrap requires definitions")
             }
             Self::MissingRouter(router) => {
-                write!(formatter, "conductor bootstrap selects missing router {router}")
+                write!(
+                    formatter,
+                    "conductor bootstrap selects missing router {router}"
+                )
             }
             Self::MissingRoutedBackend { router, backend } => write!(
                 formatter,
@@ -300,9 +302,7 @@ id: workflow.test
         })
         .to_string();
         let bootstrap = ConductorBootstrap::from_json(&source).expect("bootstrap");
-        let conductor = bootstrap
-            .build(Path::new("/tmp"), 8)
-            .expect("conductor");
+        let conductor = bootstrap.build(Path::new("/tmp"), 8).expect("conductor");
         assert!(conductor.gateway().list_trees().trees.is_empty());
     }
 

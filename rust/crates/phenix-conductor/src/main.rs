@@ -39,8 +39,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Some(cwd) => cwd,
         None => std::env::current_dir()?,
     };
-    let conductor = ConductorBootstrap::from_json(&source)?
-        .build(&cwd, arguments.channel_capacity)?;
+    let conductor =
+        ConductorBootstrap::from_json(&source)?.build(&cwd, arguments.channel_capacity)?;
     let conductor = Arc::new(Mutex::new(conductor));
     let request_conductor = Arc::clone(&conductor);
 
@@ -93,9 +93,10 @@ mod tests {
 
     #[test]
     fn sdk_extension_fallback_is_restored_to_the_wire_method() {
-        let params = to_raw_value(&serde_json::json!({ "tree_id": "tree-1" }))
-            .expect("raw parameters");
-        let extension = normalize_extension_method(ExtRequest::new("phenix/session_tree/get", params.into()));
+        let params =
+            to_raw_value(&serde_json::json!({ "tree_id": "tree-1" })).expect("raw parameters");
+        let extension =
+            normalize_extension_method(ExtRequest::new("phenix/session_tree/get", params.into()));
         assert_eq!(extension.method.as_ref(), "_phenix/session_tree/get");
     }
 }
