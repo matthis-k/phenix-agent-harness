@@ -3,9 +3,9 @@ use phenix_acp::{
     SessionNodeId, SessionNodeState, SessionTreeSnapshot,
 };
 use phenix_runtime_api::{
-    BackendError, BackendEvent, DialogId, ExtensionUiRequest, ModelRef, ObjectiveId,
-    ObjectiveSource, ObjectiveState, ObjectiveSummary, RunId, RunKind, RunState, RuntimeSnapshot,
-    SessionId, ToolCallId, ToolExecutionOutcome, TranscriptBlock, TranscriptRole,
+    BackendError, BackendEvent, DialogId, ExtensionUiRequest, ModelRef, NotificationLevel,
+    ObjectiveId, ObjectiveSource, ObjectiveState, ObjectiveSummary, RunId, RunKind, RunState,
+    RuntimeSnapshot, SessionId, ToolCallId, ToolExecutionOutcome, TranscriptBlock, TranscriptRole,
 };
 use std::collections::BTreeMap;
 
@@ -249,18 +249,36 @@ fn gateway_event(
                 key: format!("run.{run_id}.compaction"),
                 text: Some("completed".to_owned()),
             }],
-            SessionEvent::Completed
-            | SessionEvent::Failed { .. }
-            | SessionEvent::Cancelled { .. } => backend
-                .runs
-                .iter()
-                .find(|run| run.id == run_id)
-                .cloned()
-                .map(BackendEvent::RunChanged)
-                .into_iter()
-                .collect(),
+            SessionEvent::Completed => terminal_run_events(backend, &run_id),
+            SessionEvent::Failed { message } => {
+                let mut events = terminal_run_events(backend, &run_id);
+                events.push(BackendEvent::Notification {
+                    level: NotificationLevel::Error,
+                    message: format!("ACP prompt failed: {message}"),
+                });
+                events
+            }
+            SessionEvent::Cancelled { reason } => {
+                let mut events = terminal_run_events(backend, &run_id);
+                events.push(BackendEvent::Notification {
+                    level: NotificationLevel::Information,
+                    message: format!("ACP prompt cancelled: {reason}"),
+                });
+                events
+            }
         };
     Ok(events)
+}
+
+fn terminal_run_events(backend: &RuntimeSnapshot, run_id: &RunId) -> Vec<BackendEvent> {
+    backend
+        .runs
+        .iter()
+        .find(|run| &run.id == run_id)
+        .cloned()
+        .map(BackendEvent::RunChanged)
+        .into_iter()
+        .collect()
 }
 
 fn run_ids_by_node(

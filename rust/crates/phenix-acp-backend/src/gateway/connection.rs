@@ -9,7 +9,10 @@ use phenix_runtime_api::{
     TranscriptBlock, TranscriptRole,
 };
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
+use std::time::Duration;
+
+const BACKEND_REPLY_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(super) struct SessionBinding {
     pub(super) acp_id: AcpSessionId,
@@ -150,8 +153,16 @@ impl TreeConnection {
                 .as_ref()
                 .ok_or_else(|| GatewayError::session("ACP backend runtime is unavailable"))?
                 .outputs
-                .recv()
-                .map_err(|_| GatewayError::session("ACP backend output channel closed"))?;
+                .recv_timeout(BACKEND_REPLY_TIMEOUT)
+                .map_err(|error| match error {
+                    RecvTimeoutError::Timeout => GatewayError::session(format!(
+                        "ACP backend did not acknowledge request {request_id} within {} seconds",
+                        BACKEND_REPLY_TIMEOUT.as_secs()
+                    )),
+                    RecvTimeoutError::Disconnected => {
+                        GatewayError::session("ACP backend output channel closed")
+                    }
+                })?;
             match output {
                 BackendOutput::Reply {
                     request_id: reply_id,
