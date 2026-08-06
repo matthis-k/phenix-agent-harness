@@ -31,6 +31,31 @@ _:
         '';
       };
 
+      phenixConductor = pkgs.rustPlatform.buildRustPackage {
+        pname = "phenix-conductor";
+        version = "0";
+        src = rustSource;
+
+        cargoLock.lockFile = ../rust/Cargo.lock;
+        cargoBuildFlags = [
+          "--package"
+          "phenix-conductor"
+        ];
+        cargoTestFlags = [
+          "--package"
+          "phenix-conductor"
+        ];
+
+        installPhase = ''
+          runHook preInstall
+          mkdir -p "$out/bin"
+          conductor_binary="$(find target -path '*/release/phenix-conductor' -type f -print -quit)"
+          test -n "$conductor_binary"
+          cp "$conductor_binary" "$out/bin/phenix-conductor"
+          runHook postInstall
+        '';
+      };
+
       phenixAcpSmoke = pkgs.rustPlatform.buildRustPackage {
         pname = "phenix-acp-smoke";
         version = "0";
@@ -79,11 +104,13 @@ _:
           runtimeInputs = [
             pkgs.nodejs
             config.packages.pi-acp
+            phenixConductor
           ];
           text = ''
             export PHENIX_HEADLESS_PROGRAM="${pkgs.nodejs}/bin/node"
             export PHENIX_HEADLESS_ENTRY="${config.packages.phenix-pi-package}/headless/main.ts"
             export PHENIX_SOURCE_ROOT="${config.packages.phenix-pi-package}"
+            export PHENIX_CONDUCTOR_COMMAND="${phenixConductor}/bin/phenix-conductor"
             exec "${phenixTui}/bin/phenix" ${pkgs.lib.escapeShellArgs wrapperArguments} "$@"
           '';
         };
@@ -133,6 +160,7 @@ _:
     {
       packages = {
         phenix-tui = phenixTui;
+        phenix-conductor = phenixConductor;
         phenix-acp-smoke = phenixAcpSmoke;
         inherit phenix;
         default = pkgs.lib.mkForce phenix;
