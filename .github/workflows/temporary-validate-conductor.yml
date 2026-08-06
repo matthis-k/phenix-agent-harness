@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: temporary-conductor-validation
@@ -19,11 +19,22 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-      - name: Validate Phenix ACP conductor surface
+      - name: Format and validate Phenix ACP conductor surface
         shell: bash
         run: |
           set -euo pipefail
           rustup component add rustfmt
+          cd rust
+          cargo fmt --all
+          cd ..
+          if ! git diff --quiet -- rust; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add rust
+            git -c core.hooksPath=/dev/null commit -m "style: format conductor protocol"
+            git push
+            exit 0
+          fi
           cd rust
           cargo fmt --all --check
           cargo check --workspace --all-targets --locked
