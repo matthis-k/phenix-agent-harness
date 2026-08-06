@@ -167,9 +167,10 @@ export function createExecutionServices(input: {
   const backend = new AgentSessionBackendRouter({
     backends: new Map([["pi", piBackend]]),
     backendForRun: (runId) => {
-      const target = store.projection.requireRun(runId).resolvedModel?.target;
-      if (!target) throw new Error(`Run ${runId} has no resolved model target`);
-      return target.backend;
+      const resolved = store.projection.requireRun(runId).resolvedModel;
+      if (!resolved) throw new Error(`Run ${runId} has no resolved model`);
+      // Before backend-qualified routing, all persisted agent sessions were Pi-owned.
+      return resolved.target?.backend ?? "pi";
     },
   });
   const agents = new AgentExecutor({
