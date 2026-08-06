@@ -1,6 +1,7 @@
 import type {
   ModelResolutionContext,
   ModelSelector,
+  ModelTarget,
   ResolvedModel,
 } from "../domain/definition/model.ts";
 
@@ -9,6 +10,6 @@ export interface ModelResolver {
 }
 
 export interface ModelInventory {
-  available(): readonly { readonly provider: string; readonly model: string }[];
-  contains(provider: string, model: string): boolean;
+  available(): readonly ModelTarget[];
+  contains(target: ModelTarget): boolean;
 }
