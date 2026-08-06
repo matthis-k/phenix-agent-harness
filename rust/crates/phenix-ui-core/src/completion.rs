@@ -68,10 +68,7 @@ pub fn command_completions(state: &AppState) -> Vec<CommandCompletion> {
         .collect()
 }
 
-pub fn selected_command_completion(
-    state: &AppState,
-    selected: usize,
-) -> Option<CommandCompletion> {
+pub fn selected_command_completion(state: &AppState, selected: usize) -> Option<CommandCompletion> {
     let completions = command_completions(state);
     completions
         .get(selected)
