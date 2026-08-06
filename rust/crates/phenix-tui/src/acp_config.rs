@@ -22,8 +22,7 @@ struct Manifest {
     definition_id: String,
     router: String,
     #[serde(default)]
-    workflows: Vec<DefinitionInput>,
-    routing_tables: Vec<DefinitionInput>,
+    definitions: Vec<DefinitionInput>,
     backend: BackendManifest,
     root: RootManifest,
 }
@@ -37,21 +36,6 @@ enum DefinitionInput {
         #[serde(default)]
         format: Option<DefinitionFormat>,
     },
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ExpectedDefinition {
-    Workflow,
-    RoutingTable,
-}
-
-impl Display for ExpectedDefinition {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Workflow => formatter.write_str("workflow"),
-            Self::RoutingTable => formatter.write_str("routing table"),
-        }
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -94,22 +78,11 @@ pub fn load_acp_backend(
 
     let mut definitions = Definitions::new();
     let mut referenced = BTreeSet::new();
-    for (index, input) in manifest.workflows.iter().enumerate() {
+    for (index, input) in manifest.definitions.iter().enumerate() {
         add_definition(
             &mut definitions,
             config_directory,
             input,
-            ExpectedDefinition::Workflow,
-            index,
-            &mut referenced,
-        )?;
-    }
-    for (index, input) in manifest.routing_tables.iter().enumerate() {
-        add_definition(
-            &mut definitions,
-            config_directory,
-            input,
-            ExpectedDefinition::RoutingTable,
             index,
             &mut referenced,
         )?;
@@ -186,7 +159,6 @@ fn add_definition(
     definitions: &mut Definitions,
     config_directory: &Path,
     input: &DefinitionInput,
-    expected: ExpectedDefinition,
     index: usize,
     referenced: &mut BTreeSet<PathBuf>,
 ) -> Result<(), AcpConfigLoadError> {
@@ -195,7 +167,7 @@ fn add_definition(
             let path = resolve_source_path(config_directory, reference, referenced)?;
             let format = definition_format_for_path(&path)?;
             let source_text = read_source(&path)?;
-            add_source(definitions, &source_text, Some(format), expected).map_err(|source| {
+            add_source(definitions, &source_text, Some(format)).map_err(|source| {
                 AcpConfigLoadError::DefinitionSource {
                     origin: path.display().to_string(),
                     source,
@@ -203,8 +175,8 @@ fn add_definition(
             })
         }
         DefinitionInput::Source { source, format } => {
-            let origin = format!("inline {expected} #{}", index + 1);
-            add_source(definitions, source, *format, expected)
+            let origin = format!("inline definition #{}", index + 1);
+            add_source(definitions, source, *format)
                 .map_err(|source| AcpConfigLoadError::DefinitionSource { origin, source })
         }
     }
@@ -214,20 +186,13 @@ fn add_source(
     definitions: &mut Definitions,
     source: &str,
     format: Option<DefinitionFormat>,
-    expected: ExpectedDefinition,
 ) -> Result<(), DefinitionParseError> {
-    match (expected, format) {
-        (ExpectedDefinition::Workflow, Some(format)) => {
-            definitions.add_workflow_with_format(source, format)?;
+    match format {
+        Some(format) => {
+            definitions.add_with_format(source, format)?;
         }
-        (ExpectedDefinition::Workflow, None) => {
-            definitions.add_workflow(source)?;
-        }
-        (ExpectedDefinition::RoutingTable, Some(format)) => {
-            definitions.add_routing_table_with_format(source, format)?;
-        }
-        (ExpectedDefinition::RoutingTable, None) => {
-            definitions.add_routing_table(source)?;
+        None => {
+            definitions.add(source)?;
         }
     }
     Ok(())
@@ -264,8 +229,8 @@ fn parse_backend_command(command: &str) -> Result<BackendCommand, AcpConfigLoadE
 }
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), AcpConfigLoadError> {
-    if manifest.routing_tables.is_empty() {
-        return Err(AcpConfigLoadError::MissingRoutingTableReferences);
+    if manifest.definitions.is_empty() {
+        return Err(AcpConfigLoadError::MissingDefinitionReferences);
     }
     if manifest.backend.command.trim().is_empty() {
         return Err(AcpConfigLoadError::EmptyBackendCommand);
@@ -328,7 +293,7 @@ pub enum AcpConfigLoadError {
     UnknownDefinitionFormat(PathBuf),
     InvalidReference(String),
     DuplicateReference(String),
-    MissingRoutingTableReferences,
+    MissingDefinitionReferences,
     MissingRoutingTable(RouterId),
     UnsupportedBackendTarget {
         router: RouterId,
@@ -400,8 +365,8 @@ impl Display for AcpConfigLoadError {
             Self::DuplicateReference(reference) => {
                 write!(formatter, "definition file {reference:?} is referenced more than once")
             }
-            Self::MissingRoutingTableReferences => {
-                formatter.write_str("config.json must reference at least one routing table")
+            Self::MissingDefinitionReferences => {
+                formatter.write_str("config.json must contain at least one definition")
             }
             Self::MissingRoutingTable(router) => {
                 write!(formatter, "config.json selects missing routing table {router}")
@@ -444,7 +409,7 @@ impl Error for AcpConfigLoadError {
             Self::UnknownDefinitionFormat(_)
             | Self::InvalidReference(_)
             | Self::DuplicateReference(_)
-            | Self::MissingRoutingTableReferences
+            | Self::MissingDefinitionReferences
             | Self::MissingRoutingTable(_)
             | Self::UnsupportedBackendTarget { .. }
             | Self::EmptyBackendCommand
@@ -502,13 +467,8 @@ role = "implementer"
 objective = "Implement {objective}"
 "#;
         let mut definitions = Definitions::new();
-        add_source(
-            &mut definitions,
-            workflow,
-            Some(DefinitionFormat::Toml),
-            ExpectedDefinition::Workflow,
-        )
-        .expect("explicit TOML");
+        add_source(&mut definitions, workflow, Some(DefinitionFormat::Toml))
+            .expect("explicit TOML");
         assert_eq!(definitions.workflows().len(), 1);
     }
 
