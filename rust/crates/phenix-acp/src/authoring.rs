@@ -1,7 +1,6 @@
 use crate::source;
 use crate::{
-    DefinitionSourceKind, PhenixAcpGatewayBuilder, RouterId, RoutingTable, WorkflowDefinition,
-    WorkflowId,
+    GatewayError, PhenixAcpGatewayBuilder, RouterId, RoutingTable, WorkflowDefinition, WorkflowId,
 };
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -51,6 +50,21 @@ impl Display for DefinitionFormat {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DefinitionKind {
+    Workflow,
+    RoutingTable,
+}
+
+impl Display for DefinitionKind {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Workflow => formatter.write_str("workflow"),
+            Self::RoutingTable => formatter.write_str("routing table"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Definition {
     Workflow(WorkflowDefinition),
@@ -58,10 +72,10 @@ pub enum Definition {
 }
 
 impl Definition {
-    pub fn kind(&self) -> DefinitionSourceKind {
+    pub fn kind(&self) -> DefinitionKind {
         match self {
-            Self::Workflow(_) => DefinitionSourceKind::Workflow,
-            Self::RoutingTable(_) => DefinitionSourceKind::Router,
+            Self::Workflow(_) => DefinitionKind::Workflow,
+            Self::RoutingTable(_) => DefinitionKind::RoutingTable,
         }
     }
 }
@@ -82,14 +96,13 @@ pub enum DefinitionParseError {
         attempts: Vec<FormatAttempt>,
     },
     UnexpectedKind {
-        expected: DefinitionSourceKind,
-        actual: DefinitionSourceKind,
+        expected: DefinitionKind,
+        actual: DefinitionKind,
     },
     DuplicateDefinition {
-        kind: DefinitionSourceKind,
+        kind: DefinitionKind,
         id: String,
     },
-    Gateway(String),
 }
 
 impl Display for DefinitionParseError {
@@ -114,7 +127,6 @@ impl Display for DefinitionParseError {
             Self::DuplicateDefinition { kind, id } => {
                 write!(formatter, "duplicate {kind} definition {id}")
             }
-            Self::Gateway(message) => formatter.write_str(message),
         }
     }
 }
@@ -132,7 +144,7 @@ impl Definitions {
         Self::default()
     }
 
-    pub fn add(&mut self, source: &str) -> Result<DefinitionSourceKind, DefinitionParseError> {
+    pub fn add(&mut self, source: &str) -> Result<DefinitionKind, DefinitionParseError> {
         let definition = parse_definition(source)?;
         let kind = definition.kind();
         self.insert(definition)?;
@@ -143,7 +155,7 @@ impl Definitions {
         &mut self,
         source: &str,
         format: DefinitionFormat,
-    ) -> Result<DefinitionSourceKind, DefinitionParseError> {
+    ) -> Result<DefinitionKind, DefinitionParseError> {
         let definition = parse_definition_with_format(source, format)?;
         let kind = definition.kind();
         self.insert(definition)?;
@@ -189,16 +201,12 @@ impl Definitions {
     pub fn register(
         self,
         mut builder: PhenixAcpGatewayBuilder,
-    ) -> Result<PhenixAcpGatewayBuilder, DefinitionParseError> {
+    ) -> Result<PhenixAcpGatewayBuilder, GatewayError> {
         for (id, routing_table) in self.routing_tables {
-            builder = builder
-                .router(id, routing_table)
-                .map_err(|error| DefinitionParseError::Gateway(error.to_string()))?;
+            builder = builder.router(id, routing_table)?;
         }
         for (id, workflow) in self.workflows {
-            builder = builder
-                .workflow(id, workflow)
-                .map_err(|error| DefinitionParseError::Gateway(error.to_string()))?;
+            builder = builder.workflow(id, workflow)?;
         }
         Ok(builder)
     }
@@ -222,7 +230,7 @@ impl Definitions {
         let id = workflow.id().clone();
         if self.workflows.insert(id.clone(), workflow).is_some() {
             return Err(DefinitionParseError::DuplicateDefinition {
-                kind: DefinitionSourceKind::Workflow,
+                kind: DefinitionKind::Workflow,
                 id: id.to_string(),
             });
         }
@@ -240,7 +248,7 @@ impl Definitions {
             .is_some()
         {
             return Err(DefinitionParseError::DuplicateDefinition {
-                kind: DefinitionSourceKind::Router,
+                kind: DefinitionKind::RoutingTable,
                 id: id.to_string(),
             });
         }
@@ -318,8 +326,8 @@ fn require_workflow(definition: Definition) -> Result<WorkflowDefinition, Defini
     match definition {
         Definition::Workflow(workflow) => Ok(workflow),
         Definition::RoutingTable(_) => Err(DefinitionParseError::UnexpectedKind {
-            expected: DefinitionSourceKind::Workflow,
-            actual: DefinitionSourceKind::Router,
+            expected: DefinitionKind::Workflow,
+            actual: DefinitionKind::RoutingTable,
         }),
     }
 }
@@ -328,8 +336,8 @@ fn require_routing_table(definition: Definition) -> Result<RoutingTable, Definit
     match definition {
         Definition::RoutingTable(routing_table) => Ok(routing_table),
         Definition::Workflow(_) => Err(DefinitionParseError::UnexpectedKind {
-            expected: DefinitionSourceKind::Router,
-            actual: DefinitionSourceKind::Workflow,
+            expected: DefinitionKind::RoutingTable,
+            actual: DefinitionKind::Workflow,
         }),
     }
 }
