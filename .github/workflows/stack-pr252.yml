@@ -1,0 +1,57 @@
+name: Resolve stacked PR 252
+
+on:
+  push:
+    branches:
+      - stack/final-open-prs-2026-08-07
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: resolve-stacked-pr-252
+  cancel-in-progress: true
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: stack/final-open-prs-2026-08-07
+          fetch-depth: 0
+      - name: Apply PR 252 frontend deltas
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main stack/pr-252-head
+          base="$(git merge-base origin/main origin/stack/pr-252-head)"
+          overlap=(
+            rust/crates/phenix-tui/src/layout.rs
+            rust/crates/phenix-tui/src/renderer.rs
+            rust/crates/phenix-tui/src/theme.rs
+            rust/crates/phenix-ui-core/src/lib.rs
+            rust/crates/phenix-ui-core/src/view.rs
+            rust/crates/phenix-ui-lua/default.lua
+            rust/crates/phenix-ui-runtime/src/frontend.rs
+            rust/crates/phenix-ui-runtime/src/runtime.rs
+          )
+          git diff --binary "$base"..origin/stack/pr-252-head -- "${overlap[@]}" > "$RUNNER_TEMP/pr252-overlap.patch"
+          git apply --3way --index "$RUNNER_TEMP/pr252-overlap.patch"
+          rustup component add rustfmt
+          cd rust
+          cargo fmt --all
+          cargo test --package phenix-ui-core --all-targets
+          cargo test --package phenix-ui-runtime --all-targets
+          cargo test --package phenix-tui --all-targets
+          cargo test --package phenix-acp-backend --all-targets
+          cd ..
+          git rm .github/workflows/stack-pr252.yml
+          git add rust
+          git -c core.hooksPath=/dev/null commit -m "stack: port PR 252 onto ACP frontend architecture"
+          git merge -s ours --no-edit origin/stack/pr-252-head
+          git push origin HEAD:stack/final-open-prs-2026-08-07
