@@ -156,7 +156,7 @@ impl Default for ViewState {
         panes.insert(
             ElementId::input(),
             PaneViewState {
-                height: Some(3),
+                height: Some(4),
                 ..PaneViewState::default()
             },
         );
