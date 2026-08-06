@@ -16,6 +16,6 @@ pub use state::{
     AppState, AuthFlowState, DialogState, InputState, RuntimeConnectionState, TranscriptState,
 };
 pub use view::{
-    FocusTarget, InputEditor, OverlayState, PaneViewState, ScrollState, SidebarSection, TerminalSize,
-    ViewState, VimMode,
+    FocusTarget, InputEditor, OverlayState, PaneViewState, ScrollState, SidebarSection,
+    TerminalSize, ViewState, VimMode,
 };
