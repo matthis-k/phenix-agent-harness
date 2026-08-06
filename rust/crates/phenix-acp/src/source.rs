@@ -1,7 +1,7 @@
 use crate::{
-    BackendId, GatewayError, IdError, ModelId, ModelSelection, PhenixAcpGatewayBuilder,
-    ProviderId, RoleId, RouterId, RoutingDecision, RoutingRequest, SessionRouter, Workflow,
-    WorkflowId, WorkflowPlan, WorkflowRequest,
+    BackendId, GatewayError, IdError, ModelId, ModelSelection, PhenixAcpGatewayBuilder, ProviderId,
+    RoleId, RouterId, RoutingDecision, RoutingRequest, SessionRouter, Workflow, WorkflowId,
+    WorkflowPlan, WorkflowRequest,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -59,12 +59,14 @@ impl ModelTarget {
     }
 
     fn parse_at(value: &str, line: Option<usize>) -> Result<Self, DefinitionSourceError> {
-        let first = value.find('/').ok_or_else(|| DefinitionSourceError::InvalidValue {
-            line,
-            field: "target",
-            value: value.to_owned(),
-            reason: "expected backend/provider/model".to_owned(),
-        })?;
+        let first = value
+            .find('/')
+            .ok_or_else(|| DefinitionSourceError::InvalidValue {
+                line,
+                field: "target",
+                value: value.to_owned(),
+                reason: "expected backend/provider/model".to_owned(),
+            })?;
         let second = value[first + 1..]
             .find('/')
             .map(|offset| first + 1 + offset)
@@ -95,7 +97,11 @@ impl ModelTarget {
 
 impl Display for ModelTarget {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{}/{}/{}", self.backend, self.provider, self.model)
+        write!(
+            formatter,
+            "{}/{}/{}",
+            self.backend, self.provider, self.model
+        )
     }
 }
 
@@ -154,7 +160,8 @@ impl Workflow for WorkflowDefinition {
                 step.key.clone(),
                 step.parent.clone(),
                 step.role.clone(),
-                step.objective.replace(OBJECTIVE_PLACEHOLDER, &request.objective),
+                step.objective
+                    .replace(OBJECTIVE_PLACEHOLDER, &request.objective),
             )?;
         }
         plan.build()
@@ -330,10 +337,7 @@ impl DefinitionSources {
         }
     }
 
-    pub fn add_workflow(
-        &mut self,
-        source: &str,
-    ) -> Result<WorkflowId, DefinitionSourceError> {
+    pub fn add_workflow(&mut self, source: &str) -> Result<WorkflowId, DefinitionSourceError> {
         match parse_definition(source)? {
             ParsedDefinition::Workflow(workflow) => {
                 let id = workflow.id().clone();
@@ -423,11 +427,12 @@ pub fn parse_definition(source: &str) -> Result<ParsedDefinition, DefinitionSour
         .trim()
         .to_owned();
 
-    let (declaration_line, declaration_source) = cursor.next_nonblank().ok_or_else(|| {
-        DefinitionSourceError::UnexpectedEnd {
-            expected: "a phenix-workflow or phenix-router fenced declaration",
-        }
-    })?;
+    let (declaration_line, declaration_source) =
+        cursor
+            .next_nonblank()
+            .ok_or_else(|| DefinitionSourceError::UnexpectedEnd {
+                expected: "a phenix-workflow or phenix-router fenced declaration",
+            })?;
     let kind = match declaration_source.trim() {
         "```phenix-workflow" => DefinitionSourceKind::Workflow,
         "```phenix-router" => DefinitionSourceKind::Router,
@@ -442,14 +447,15 @@ pub fn parse_definition(source: &str) -> Result<ParsedDefinition, DefinitionSour
     let metadata = parse_metadata(&mut cursor, declaration_line, kind)?;
     let id = required_metadata(&metadata, declaration_line, "id")?;
 
-    let (section_line, section_source) = cursor.next_nonblank().ok_or_else(|| {
-        DefinitionSourceError::UnexpectedEnd {
-            expected: match kind {
-                DefinitionSourceKind::Workflow => "the ## Steps section",
-                DefinitionSourceKind::Router => "the ## Routes section",
-            },
-        }
-    })?;
+    let (section_line, section_source) =
+        cursor
+            .next_nonblank()
+            .ok_or_else(|| DefinitionSourceError::UnexpectedEnd {
+                expected: match kind {
+                    DefinitionSourceKind::Workflow => "the ## Steps section",
+                    DefinitionSourceKind::Router => "the ## Routes section",
+                },
+            })?;
     let expected_section = match kind {
         DefinitionSourceKind::Workflow => "## Steps",
         DefinitionSourceKind::Router => "## Routes",
@@ -600,16 +606,14 @@ fn parse_router(
     for row in rows {
         let rule = RoutingRule {
             role: parse_selector(cell(&row, 0), row.line, "role", RoleId::parse)?,
-            workflow: parse_selector(
-                cell(&row, 1),
-                row.line,
-                "workflow",
-                WorkflowId::parse,
-            )?,
+            workflow: parse_selector(cell(&row, 1), row.line, "workflow", WorkflowId::parse)?,
             target: ModelTarget::parse_at(cell(&row, 2), Some(row.line))?,
             explanation: required_cell(&row, 3, "explanation")?.to_owned(),
         };
-        if let Some(shadowing) = rules.iter().find(|existing: &&RoutingRule| existing.covers(&rule)) {
+        if let Some(shadowing) = rules
+            .iter()
+            .find(|existing: &&RoutingRule| existing.covers(&rule))
+        {
             return Err(DefinitionSourceError::InvalidTable {
                 line: row.line,
                 reason: format!(
@@ -629,9 +633,7 @@ fn parse_router(
     let Some(last) = rules.last() else {
         unreachable!("non-empty routing rules were checked")
     };
-    if !matches!(last.role, RouteSelector::Any)
-        || !matches!(last.workflow, RouteSelector::Any)
-    {
+    if !matches!(last.role, RouteSelector::Any) || !matches!(last.workflow, RouteSelector::Any) {
         return Err(DefinitionSourceError::InvalidTable {
             line: cursor.last_line(),
             reason: "the final route must be the */* catch-all".to_owned(),
@@ -650,11 +652,12 @@ fn parse_table(
     cursor: &mut SourceCursor<'_>,
     expected_header: &[&str],
 ) -> Result<Vec<TableRow>, DefinitionSourceError> {
-    let (header_line, header_source) = cursor.next_nonblank().ok_or_else(|| {
-        DefinitionSourceError::UnexpectedEnd {
-            expected: "a Markdown table header",
-        }
-    })?;
+    let (header_line, header_source) =
+        cursor
+            .next_nonblank()
+            .ok_or_else(|| DefinitionSourceError::UnexpectedEnd {
+                expected: "a Markdown table header",
+            })?;
     let header = parse_pipe_row(header_source, header_line)?;
     if header.iter().map(String::as_str).collect::<Vec<_>>() != expected_header {
         return Err(DefinitionSourceError::InvalidTable {
@@ -667,11 +670,12 @@ fn parse_table(
         });
     }
 
-    let (separator_line, separator_source) = cursor.next_nonblank().ok_or_else(|| {
-        DefinitionSourceError::UnexpectedEnd {
-            expected: "a Markdown table separator",
-        }
-    })?;
+    let (separator_line, separator_source) =
+        cursor
+            .next_nonblank()
+            .ok_or_else(|| DefinitionSourceError::UnexpectedEnd {
+                expected: "a Markdown table separator",
+            })?;
     let separator = raw_pipe_row(separator_source, separator_line)?;
     if separator.len() != expected_header.len()
         || separator.iter().any(|cell| !valid_separator_cell(cell))
@@ -707,10 +711,7 @@ fn parse_pipe_row(source: &str, line: usize) -> Result<Vec<String>, DefinitionSo
         .collect()
 }
 
-fn raw_pipe_row<'a>(
-    source: &'a str,
-    line: usize,
-) -> Result<Vec<&'a str>, DefinitionSourceError> {
+fn raw_pipe_row<'a>(source: &'a str, line: usize) -> Result<Vec<&'a str>, DefinitionSourceError> {
     let trimmed = source.trim();
     if !trimmed.starts_with('|') || !trimmed.ends_with('|') {
         return Err(DefinitionSourceError::InvalidTable {
@@ -816,10 +817,7 @@ fn validate_symbol(
     Ok(())
 }
 
-fn validate_objective_template(
-    value: &str,
-    line: usize,
-) -> Result<(), DefinitionSourceError> {
+fn validate_objective_template(value: &str, line: usize) -> Result<(), DefinitionSourceError> {
     if value.is_empty() {
         return Err(DefinitionSourceError::InvalidTable {
             line,
@@ -990,7 +988,10 @@ impl Display for DefinitionSourceError {
                 write!(formatter, "definition source table line {line}: {reason}")
             }
             Self::UnexpectedKind { expected, actual } => {
-                write!(formatter, "expected {expected} source, found {actual} source")
+                write!(
+                    formatter,
+                    "expected {expected} source, found {actual} source"
+                )
             }
             Self::DuplicateDefinition { kind, id } => {
                 write!(formatter, "duplicate {kind} definition {id}")
@@ -1064,8 +1065,7 @@ id: phenix.capability-budget
 
     #[test]
     fn workflow_source_compiles_to_a_typed_plan() {
-        let ParsedDefinition::Workflow(workflow) =
-            parse_definition(WORKFLOW).expect("workflow")
+        let ParsedDefinition::Workflow(workflow) = parse_definition(WORKFLOW).expect("workflow")
         else {
             panic!("workflow definition expected")
         };
