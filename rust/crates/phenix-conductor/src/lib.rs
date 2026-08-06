@@ -2,9 +2,9 @@
 
 use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
 use phenix_acp::{
-    AcpEndpoint, AcpMethod, AuthenticationCapabilities, BackendAuthMethod,
-    BackendAuthProviderList, BackendAuthProviderListResult, BackendAuthProviderSummary,
-    BackendCapabilities, BackendCapabilitiesGet, BackendCapabilitiesResult, BackendCommandList,
+    AcpEndpoint, AcpMethod, AuthenticationCapabilities, BackendAuthMethod, BackendAuthProviderList,
+    BackendAuthProviderListResult, BackendAuthProviderSummary, BackendCapabilities,
+    BackendCapabilitiesGet, BackendCapabilitiesResult, BackendCommandList,
     BackendCommandListResult, BackendCommandSource, BackendCommandSummary, BackendDefinition,
     BackendId, BackendModelList, BackendModelListResult, BackendModelSummary, BackendTargetParams,
     DefinitionError, DefinitionFormat, DefinitionParseError, Definitions, ExtensionUiCapabilities,
@@ -129,12 +129,10 @@ impl ConductorRuntime {
             BackendAuthProviderList::METHOD => {
                 let params = decode_backend_params::<BackendAuthProviderList>(&request)?;
                 let providers = self.backend_auth_providers(&params)?;
-                encode_extension_result::<BackendAuthProviderList>(
-                    &BackendAuthProviderListResult {
-                        backend: params.backend,
-                        providers,
-                    },
-                )
+                encode_extension_result::<BackendAuthProviderList>(&BackendAuthProviderListResult {
+                    backend: params.backend,
+                    providers,
+                })
             }
             BackendCommandList::METHOD => {
                 let params = decode_backend_params::<BackendCommandList>(&request)?;
@@ -645,7 +643,9 @@ impl Error for RuntimeError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Gateway(error) => Some(error),
-            Self::EmptyRootObjective | Self::MissingBackends | Self::InvalidSessionId { .. } => None,
+            Self::EmptyRootObjective | Self::MissingBackends | Self::InvalidSessionId { .. } => {
+                None
+            }
         }
     }
 }
@@ -711,7 +711,10 @@ impl Display for BootstrapError {
                 formatter.write_str("conductor bootstrap contains a duplicate backend ID")
             }
             Self::MissingRouter(router) => {
-                write!(formatter, "conductor bootstrap selects missing router {router}")
+                write!(
+                    formatter,
+                    "conductor bootstrap selects missing router {router}"
+                )
             }
             Self::MissingRoutedBackend { router, backend } => write!(
                 formatter,
