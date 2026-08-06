@@ -205,8 +205,8 @@ fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &The
         state.view.overlay,
         Some(OverlayState::CommandPalette { .. })
     );
-    let focused = state.view.focus == FocusTarget::Input
-        && (state.view.overlay.is_none() || completion_open);
+    let focused =
+        state.view.focus == FocusTarget::Input && (state.view.overlay.is_none() || completion_open);
     let block = panel("Input", focused, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
