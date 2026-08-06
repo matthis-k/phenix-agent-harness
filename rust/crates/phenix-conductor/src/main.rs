@@ -1,3 +1,5 @@
+mod subscriptions;
+
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, CancelNotification, ClientRequest, CloseSessionResponse, ContentBlock,
     ContentChunk, EmbeddedResourceResource, ExtRequest, InitializeResponse, NewSessionResponse,
@@ -15,6 +17,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
+use subscriptions::SubscriptionHub;
 
 const DEFAULT_CHANNEL_CAPACITY: usize = 1_024;
 const PROMPT_POLL_PERIOD: Duration = Duration::from_millis(20);
@@ -52,6 +55,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let runtime = Arc::new(Mutex::new(runtime));
     let request_runtime = Arc::clone(&runtime);
     let cancel_runtime = Arc::clone(&runtime);
+    let subscriptions = SubscriptionHub::new();
+    let request_subscriptions = subscriptions.clone();
 
     Agent
         .builder()
@@ -68,14 +73,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .on_receive_request(
             async move |request: ClientRequest, responder, connection| {
                 let response = match request {
-                    ClientRequest::InitializeRequest(initialize) => serde_json::to_value(
-                        InitializeResponse::new(initialize.protocol_version).agent_capabilities(
-                            AgentCapabilities::new().prompt_capabilities(
-                                PromptCapabilities::new().image(true).embedded_context(true),
-                            ),
-                        ),
-                    )
-                    .map_err(agent_client_protocol::Error::into_internal_error)?,
+                    ClientRequest::InitializeRequest(initialize) => {
+                        request_subscriptions
+                            .start(Arc::clone(&request_runtime), connection.clone());
+                        serde_json::to_value(
+                            InitializeResponse::new(initialize.protocol_version)
+                                .agent_capabilities(AgentCapabilities::new().prompt_capabilities(
+                                    PromptCapabilities::new()
+                                        .image(true)
+                                        .embedded_context(true),
+                                )),
+                        )
+                        .map_err(agent_client_protocol::Error::into_internal_error)?
+                    }
                     ClientRequest::NewSessionRequest(_request) => {
                         let session = lock_runtime(&request_runtime)?
                             .create_standard_session()
@@ -86,25 +96,43 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             .map_err(agent_client_protocol::Error::into_internal_error)?
                     }
                     ClientRequest::PromptRequest(prompt) => serde_json::to_value(
-                        handle_prompt(&request_runtime, &connection, prompt).await?,
+                        handle_prompt(
+                            &request_runtime,
+                            &request_subscriptions,
+                            &connection,
+                            prompt,
+                        )
+                        .await?,
                     )
                     .map_err(agent_client_protocol::Error::into_internal_error)?,
                     ClientRequest::CloseSessionRequest(close) => {
+                        let session_id = close.session_id.to_string();
                         lock_runtime(&request_runtime)?
-                            .close_standard_session(&close.session_id.to_string())
+                            .close_standard_session(&session_id)
                             .map_err(|error| {
                                 agent_client_protocol::util::internal_error(error.to_string())
                             })?;
+                        request_subscriptions.remove_tree(&session_id)?;
                         serde_json::to_value(CloseSessionResponse::new())
                             .map_err(agent_client_protocol::Error::into_internal_error)?
                     }
                     ClientRequest::ExtMethodRequest(extension) => {
                         let extension = normalize_extension_method(extension);
-                        let response = lock_runtime(&request_runtime)?
-                            .handle_extension(extension)
-                            .map_err(|error| {
-                                agent_client_protocol::util::internal_error(error.to_string())
-                            })?;
+                        let response = match request_subscriptions
+                            .handle_control(&extension, &request_runtime)?
+                        {
+                            Some(response) => response,
+                            None => lock_runtime(&request_runtime)?
+                                .handle_extension(extension.clone())
+                                .map_err(|error| {
+                                    agent_client_protocol::util::internal_error(error.to_string())
+                                })?,
+                        };
+                        request_subscriptions.publish_response(
+                            &extension,
+                            &response,
+                            &connection,
+                        )?;
                         serde_json::to_value(response)
                             .map_err(agent_client_protocol::Error::into_internal_error)?
                     }
@@ -129,11 +157,13 @@ fn lock_runtime(
 
 async fn handle_prompt(
     runtime: &Arc<Mutex<ConductorRuntime>>,
+    subscriptions: &SubscriptionHub,
     connection: &ConnectionTo<Client>,
     request: PromptRequest,
 ) -> Result<PromptResponse, agent_client_protocol::Error> {
     let upstream_session = request.session_id;
     let session_id = upstream_session.to_string();
+    let _prompt_lease = subscriptions.begin_standard_prompt(&session_id)?;
     let command = prompt_command(request.prompt)?;
     let mut events = lock_runtime(runtime)?
         .execute_standard_session(&session_id, command)
