@@ -63,7 +63,7 @@ _:
           name ? "phenix",
           configText ? null,
           configFile ? null,
-          acpConfigDir ? ../config/phenix-acp,
+          acpConfigDir ? null,
           loadDefaults ? true,
           extraArgs ? [ ],
         }:
@@ -79,10 +79,10 @@ _:
             export PHENIX_CONFIG="${frontendConfig}"
           '';
           wrapperArguments =
-            [
+            (pkgs.lib.optionals (acpConfigDir != null) [
               "--phenix-acp-config"
               (toString acpConfigDir)
-            ]
+            ])
             ++ (pkgs.lib.optional (!loadDefaults) "--no-default-config")
             ++ extraArgs;
         in
@@ -129,6 +129,7 @@ _:
             export XDG_CACHE_HOME="$HOME/.cache"
             export PI_SKIP_VERSION_CHECK=1
             mkdir -p "$XDG_CONFIG_HOME/phenix" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
+            cp -R ${../config/phenix-acp} "$XDG_CONFIG_HOME/phenix-acp"
 
             cat > "$XDG_CONFIG_HOME/phenix/init.lua" <<'EOF_CONFIG'
             phenix.keymap.del("global", "<C-q>")
@@ -153,7 +154,7 @@ _:
       legacyPackages.phenixFrontend = {
         inherit mkPhenixWrapper;
         defaultLua = ../rust/crates/phenix-ui-lua/default.lua;
-        defaultAcpConfig = ../config/phenix-acp;
+        exampleAcpConfig = ../config/phenix-acp;
       };
 
       apps.phenix.program = pkgs.lib.getExe phenix;
