@@ -406,7 +406,10 @@ fn reduce_backend_output(state: &mut AppState, output: BackendOutput) -> Vec<App
                 let initialized = matches!(&reply, BackendReply::Initialized { .. });
                 reduce_backend_reply(state, reply);
                 if initialized {
-                    return vec![AppEffect::Send(BackendCommand::CommandList), AppEffect::Render];
+                    return vec![
+                        AppEffect::Send(BackendCommand::CommandList),
+                        AppEffect::Render,
+                    ];
                 }
             }
             Err(error) => {
@@ -710,13 +713,15 @@ mod tests {
         let mut state = state_with_run(run.clone());
         state.input.replace("/routing mixed".to_owned());
         let effects = reduce(&mut state, AppEvent::User(UserIntent::SubmitPrompt));
-        assert!(effects.contains(&AppEffect::Send(BackendCommand::ModelSelect {
-            run_id: run,
-            model: ModelRef {
-                provider: "phenix".to_owned(),
-                model: "mixed".to_owned(),
-            },
-        })));
+        assert!(
+            effects.contains(&AppEffect::Send(BackendCommand::ModelSelect {
+                run_id: run,
+                model: ModelRef {
+                    provider: "phenix".to_owned(),
+                    model: "mixed".to_owned(),
+                },
+            }))
+        );
     }
 
     #[test]
@@ -730,11 +735,13 @@ mod tests {
         });
         state.input.replace("/review src".to_owned());
         let effects = reduce(&mut state, AppEvent::User(UserIntent::SubmitPrompt));
-        assert!(effects.contains(&AppEffect::Send(BackendCommand::CommandInvoke {
-            run_id: run,
-            name: "review".to_owned(),
-            arguments: "src".to_owned(),
-        })));
+        assert!(
+            effects.contains(&AppEffect::Send(BackendCommand::CommandInvoke {
+                run_id: run,
+                name: "review".to_owned(),
+                arguments: "src".to_owned(),
+            }))
+        );
     }
 
     #[test]
