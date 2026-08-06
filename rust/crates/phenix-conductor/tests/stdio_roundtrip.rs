@@ -1,9 +1,10 @@
 use agent_client_protocol::schema::v1::{
-    ClientCapabilities, ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, SessionId,
+    ClientCapabilities, ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest,
+    SessionId,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::error::Error;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -22,17 +23,13 @@ fn standard_acp_round_trips_through_the_conductor_and_downstream_agent(
     let conductor = PathBuf::from(env!("CARGO_BIN_EXE_phenix-conductor"));
     let cwd = std::env::current_dir()?;
     let bootstrap_path = unique_temp_path("phenix-conductor-bootstrap", "json");
-    fs::write(
-        &bootstrap_path,
-        bootstrap_json(&fixture_agent).to_string(),
-    )?;
+    fs::write(&bootstrap_path, bootstrap_json(&fixture_agent).to_string())?;
 
     let mut process = RpcProcess::spawn(&conductor, &bootstrap_path, &cwd)?;
     process.send_request(
         1,
         "initialize",
-        &InitializeRequest::new(ProtocolVersion::V1)
-            .client_capabilities(ClientCapabilities::new()),
+        &InitializeRequest::new(ProtocolVersion::V1).client_capabilities(ClientCapabilities::new()),
     )?;
     let initialized = process.receive_response(1)?;
     assert_eq!(initialized["result"]["protocolVersion"], 1);
@@ -64,7 +61,10 @@ fn standard_acp_round_trips_through_the_conductor_and_downstream_agent(
             break message;
         }
     };
-    assert!(saw_echo, "conductor did not forward the downstream ACP update");
+    assert!(
+        saw_echo,
+        "conductor did not forward the downstream ACP update"
+    );
     assert_eq!(completed["result"]["stopReason"], "end_turn");
 
     process.shutdown();
