@@ -1,6 +1,7 @@
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, ClientRequest, ContentBlock, ContentChunk, InitializeResponse,
-    NewSessionResponse, PromptResponse, SessionNotification, SessionUpdate, StopReason, TextContent,
+    NewSessionResponse, PromptResponse, SessionNotification, SessionUpdate, StopReason,
+    TextContent,
 };
 use agent_client_protocol::{Agent, Stdio};
 use std::error::Error;
