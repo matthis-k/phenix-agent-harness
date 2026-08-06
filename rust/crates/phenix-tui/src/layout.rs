@@ -50,7 +50,17 @@ fn child_constraint(node: &LayoutNode, direction: SplitDirection, state: &AppSta
                 SplitDirection::Horizontal => view.width,
                 SplitDirection::Vertical => view.height,
             };
-            explicit.map_or_else(|| Constraint::Fill(pane.weight.max(1)), Constraint::Length)
+            if let Some(explicit) = explicit {
+                return Constraint::Length(explicit);
+            }
+            match (pane.minimum, pane.maximum) {
+                (Some(minimum), Some(maximum)) if minimum == maximum => {
+                    Constraint::Length(minimum)
+                }
+                (Some(minimum), None) => Constraint::Min(minimum),
+                (None, Some(maximum)) => Constraint::Max(maximum),
+                _ => Constraint::Fill(pane.weight.max(1)),
+            }
         }
         LayoutNode::Split(split) => Constraint::Fill(layout_weight(&split.children).max(1)),
     }
@@ -103,5 +113,37 @@ mod tests {
         );
         assert!(output.contains_key(&ElementId::transcript()));
         assert_eq!(output[&ElementId::sidebar()].width, 28);
+    }
+
+    #[test]
+    fn equal_minimum_and_maximum_reserve_a_fixed_pane_extent() {
+        let state = AppState::default();
+        let mut output = BTreeMap::new();
+        collect_layout(
+            &LayoutNode::Split(SplitLayout {
+                direction: SplitDirection::Vertical,
+                children: vec![
+                    LayoutNode::Pane(PaneLayout {
+                        element: ElementId::transcript(),
+                        pane_type: PaneType::Transcript,
+                        weight: 1,
+                        minimum: None,
+                        maximum: None,
+                    }),
+                    LayoutNode::Pane(PaneLayout {
+                        element: ElementId::input(),
+                        pane_type: PaneType::Input,
+                        weight: 1,
+                        minimum: Some(4),
+                        maximum: Some(4),
+                    }),
+                ],
+            }),
+            Rect::new(0, 0, 80, 24),
+            &state,
+            &mut output,
+        );
+        assert_eq!(output[&ElementId::input()].height, 4);
+        assert_eq!(output[&ElementId::transcript()].height, 20);
     }
 }
