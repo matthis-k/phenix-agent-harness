@@ -1,9 +1,10 @@
 use crate::source;
 use crate::{
-    DefinitionSourceError, DefinitionSourceKind, PhenixAcpGatewayBuilder, RouterId, RoutingTable,
-    WorkflowDefinition, WorkflowId,
+    DefinitionSourceKind, PhenixAcpGatewayBuilder, RouterId, RoutingTable, WorkflowDefinition,
+    WorkflowId,
 };
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
@@ -115,7 +116,8 @@ impl Error for DefinitionParseError {}
 
 #[derive(Clone, Debug, Default)]
 pub struct Definitions {
-    inner: source::DefinitionSources,
+    workflows: BTreeMap<WorkflowId, WorkflowDefinition>,
+    routing_tables: BTreeMap<RouterId, RoutingTable>,
 }
 
 impl Definitions {
@@ -123,210 +125,205 @@ impl Definitions {
         Self::default()
     }
 
-    pub fn add(&mut self, source_text: &str) -> Result<DefinitionSourceKind, DefinitionParseError> {
-        let (_, normalized, definition) = parse_auto(source_text)?;
+    pub fn add(&mut self, source: &str) -> Result<DefinitionSourceKind, DefinitionParseError> {
+        let definition = parse_definition(source)?;
         let kind = definition.kind();
-        self.inner
-            .add(&normalized)
-            .map_err(map_collection_error)?;
+        self.insert(definition)?;
         Ok(kind)
     }
 
     pub fn add_with_format(
         &mut self,
-        source_text: &str,
+        source: &str,
         format: DefinitionFormat,
     ) -> Result<DefinitionSourceKind, DefinitionParseError> {
-        let (normalized, definition) = parse_with_format(source_text, format)?;
+        let definition = parse_definition_with_format(source, format)?;
         let kind = definition.kind();
-        self.inner
-            .add(&normalized)
-            .map_err(map_collection_error)?;
+        self.insert(definition)?;
         Ok(kind)
     }
 
-    pub fn add_workflow(
-        &mut self,
-        source_text: &str,
-    ) -> Result<WorkflowId, DefinitionParseError> {
-        let (_, normalized, definition) = parse_auto(source_text)?;
-        require_kind(&definition, DefinitionSourceKind::Workflow)?;
-        self.inner
-            .add_workflow(&normalized)
-            .map_err(map_collection_error)
+    pub fn add_workflow(&mut self, source: &str) -> Result<WorkflowId, DefinitionParseError> {
+        let workflow = parse_workflow(source)?;
+        self.insert_workflow(workflow)
     }
 
     pub fn add_workflow_with_format(
         &mut self,
-        source_text: &str,
+        source: &str,
         format: DefinitionFormat,
     ) -> Result<WorkflowId, DefinitionParseError> {
-        let (normalized, definition) = parse_with_format(source_text, format)?;
-        require_kind(&definition, DefinitionSourceKind::Workflow)?;
-        self.inner
-            .add_workflow(&normalized)
-            .map_err(map_collection_error)
+        let workflow = parse_workflow_with_format(source, format)?;
+        self.insert_workflow(workflow)
     }
 
-    pub fn add_routing_table(
-        &mut self,
-        source_text: &str,
-    ) -> Result<RouterId, DefinitionParseError> {
-        let (_, normalized, definition) = parse_auto(source_text)?;
-        require_kind(&definition, DefinitionSourceKind::Router)?;
-        self.inner
-            .add_router(&normalized)
-            .map_err(map_collection_error)
+    pub fn add_routing_table(&mut self, source: &str) -> Result<RouterId, DefinitionParseError> {
+        let routing_table = parse_routing_table(source)?;
+        self.insert_routing_table(routing_table)
     }
 
     pub fn add_routing_table_with_format(
         &mut self,
-        source_text: &str,
+        source: &str,
         format: DefinitionFormat,
     ) -> Result<RouterId, DefinitionParseError> {
-        let (normalized, definition) = parse_with_format(source_text, format)?;
-        require_kind(&definition, DefinitionSourceKind::Router)?;
-        self.inner
-            .add_router(&normalized)
-            .map_err(map_collection_error)
+        let routing_table = parse_routing_table_with_format(source, format)?;
+        self.insert_routing_table(routing_table)
     }
 
     pub fn workflows(&self) -> impl ExactSizeIterator<Item = &WorkflowDefinition> {
-        self.inner.workflows()
+        self.workflows.values()
     }
 
     pub fn routing_tables(&self) -> impl ExactSizeIterator<Item = &RoutingTable> {
-        self.inner.routers()
+        self.routing_tables.values()
     }
 
     pub fn register(
         self,
-        builder: PhenixAcpGatewayBuilder,
+        mut builder: PhenixAcpGatewayBuilder,
     ) -> Result<PhenixAcpGatewayBuilder, DefinitionParseError> {
-        self.inner
-            .register(builder)
-            .map_err(|error| DefinitionParseError::Gateway(error.to_string()))
+        for (id, routing_table) in self.routing_tables {
+            builder = builder
+                .router(id, routing_table)
+                .map_err(|error| DefinitionParseError::Gateway(error.to_string()))?;
+        }
+        for (id, workflow) in self.workflows {
+            builder = builder
+                .workflow(id, workflow)
+                .map_err(|error| DefinitionParseError::Gateway(error.to_string()))?;
+        }
+        Ok(builder)
     }
-}
 
-pub fn parse_definition(source_text: &str) -> Result<Definition, DefinitionParseError> {
-    parse_auto(source_text).map(|(_, _, definition)| definition)
-}
-
-pub fn parse_definition_with_format(
-    source_text: &str,
-    format: DefinitionFormat,
-) -> Result<Definition, DefinitionParseError> {
-    parse_with_format(source_text, format).map(|(_, definition)| definition)
-}
-
-pub fn parse_workflow(source_text: &str) -> Result<WorkflowDefinition, DefinitionParseError> {
-    match parse_definition(source_text)? {
-        Definition::Workflow(workflow) => Ok(workflow),
-        Definition::RoutingTable(_) => Err(DefinitionParseError::UnexpectedKind {
-            expected: DefinitionSourceKind::Workflow,
-            actual: DefinitionSourceKind::Router,
-        }),
-    }
-}
-
-pub fn parse_workflow_with_format(
-    source_text: &str,
-    format: DefinitionFormat,
-) -> Result<WorkflowDefinition, DefinitionParseError> {
-    match parse_definition_with_format(source_text, format)? {
-        Definition::Workflow(workflow) => Ok(workflow),
-        Definition::RoutingTable(_) => Err(DefinitionParseError::UnexpectedKind {
-            expected: DefinitionSourceKind::Workflow,
-            actual: DefinitionSourceKind::Router,
-        }),
-    }
-}
-
-pub fn parse_routing_table(source_text: &str) -> Result<RoutingTable, DefinitionParseError> {
-    match parse_definition(source_text)? {
-        Definition::RoutingTable(router) => Ok(router),
-        Definition::Workflow(_) => Err(DefinitionParseError::UnexpectedKind {
-            expected: DefinitionSourceKind::Router,
-            actual: DefinitionSourceKind::Workflow,
-        }),
-    }
-}
-
-pub fn parse_routing_table_with_format(
-    source_text: &str,
-    format: DefinitionFormat,
-) -> Result<RoutingTable, DefinitionParseError> {
-    match parse_definition_with_format(source_text, format)? {
-        Definition::RoutingTable(router) => Ok(router),
-        Definition::Workflow(_) => Err(DefinitionParseError::UnexpectedKind {
-            expected: DefinitionSourceKind::Router,
-            actual: DefinitionSourceKind::Workflow,
-        }),
-    }
-}
-
-fn require_kind(
-    definition: &Definition,
-    expected: DefinitionSourceKind,
-) -> Result<(), DefinitionParseError> {
-    let actual = definition.kind();
-    if actual == expected {
+    fn insert(&mut self, definition: Definition) -> Result<(), DefinitionParseError> {
+        match definition {
+            Definition::Workflow(workflow) => {
+                self.insert_workflow(workflow)?;
+            }
+            Definition::RoutingTable(routing_table) => {
+                self.insert_routing_table(routing_table)?;
+            }
+        }
         Ok(())
-    } else {
-        Err(DefinitionParseError::UnexpectedKind { expected, actual })
+    }
+
+    fn insert_workflow(
+        &mut self,
+        workflow: WorkflowDefinition,
+    ) -> Result<WorkflowId, DefinitionParseError> {
+        let id = workflow.id().clone();
+        if self.workflows.insert(id.clone(), workflow).is_some() {
+            return Err(DefinitionParseError::DuplicateDefinition {
+                kind: DefinitionSourceKind::Workflow,
+                id: id.to_string(),
+            });
+        }
+        Ok(id)
+    }
+
+    fn insert_routing_table(
+        &mut self,
+        routing_table: RoutingTable,
+    ) -> Result<RouterId, DefinitionParseError> {
+        let id = routing_table.id().clone();
+        if self
+            .routing_tables
+            .insert(id.clone(), routing_table)
+            .is_some()
+        {
+            return Err(DefinitionParseError::DuplicateDefinition {
+                kind: DefinitionSourceKind::Router,
+                id: id.to_string(),
+            });
+        }
+        Ok(id)
     }
 }
 
-fn parse_auto(
-    source_text: &str,
-) -> Result<(DefinitionFormat, String, Definition), DefinitionParseError> {
+pub fn parse_definition(source: &str) -> Result<Definition, DefinitionParseError> {
     let mut attempts = Vec::with_capacity(FORMATS.len());
     for format in FORMATS {
-        match parse_with_format(source_text, format) {
-            Ok((normalized, definition)) => return Ok((format, normalized, definition)),
-            Err(DefinitionParseError::Invalid { message, .. }) => attempts.push(FormatAttempt {
+        match parse_definition_with_format(source, format) {
+            Ok(definition) => return Ok(definition),
+            Err(DefinitionParseError::Invalid { message, .. }) => {
+                attempts.push(FormatAttempt { format, message });
+            }
+            Err(error) => attempts.push(FormatAttempt {
                 format,
-                message,
-            }),
-            Err(other) => attempts.push(FormatAttempt {
-                format,
-                message: other.to_string(),
+                message: error.to_string(),
             }),
         }
     }
     Err(DefinitionParseError::AutoDetect { attempts })
 }
 
-fn parse_with_format(
-    source_text: &str,
+pub fn parse_definition_with_format(
+    source: &str,
     format: DefinitionFormat,
-) -> Result<(String, Definition), DefinitionParseError> {
-    let normalized = normalize_source(source_text, format)?;
-    let definition = match source::parse_definition(&normalized)
-        .map_err(|error| invalid(format, error.to_string()))?
-    {
-        source::ParsedDefinition::Workflow(workflow) => Definition::Workflow(workflow),
-        source::ParsedDefinition::Router(router) => Definition::RoutingTable(router),
+) -> Result<Definition, DefinitionParseError> {
+    let markdown = match format {
+        DefinitionFormat::Markdown => source.to_owned(),
+        DefinitionFormat::Json => decode_structured(
+            serde_json::from_str(source).map_err(|error| invalid(format, error.to_string()))?,
+            format,
+        )?,
+        DefinitionFormat::Toml => decode_structured(
+            toml::from_str(source).map_err(|error| invalid(format, error.to_string()))?,
+            format,
+        )?,
+        DefinitionFormat::Ron => decode_structured(
+            ron::from_str(source).map_err(|error| invalid(format, error.to_string()))?,
+            format,
+        )?,
     };
-    Ok((normalized, definition))
+    match source::parse_definition(&markdown).map_err(|error| invalid(format, error.to_string()))? {
+        source::ParsedDefinition::Workflow(workflow) => Ok(Definition::Workflow(workflow)),
+        source::ParsedDefinition::Router(routing_table) => {
+            Ok(Definition::RoutingTable(routing_table))
+        }
+    }
 }
 
-fn normalize_source(
-    source_text: &str,
+pub fn parse_workflow(source: &str) -> Result<WorkflowDefinition, DefinitionParseError> {
+    require_workflow(parse_definition(source)?)
+}
+
+pub fn parse_workflow_with_format(
+    source: &str,
     format: DefinitionFormat,
-) -> Result<String, DefinitionParseError> {
-    match format {
-        DefinitionFormat::Markdown => Ok(source_text.to_owned()),
-        DefinitionFormat::Json => serde_json::from_str::<StructuredDefinition>(source_text)
-            .map_err(|error| invalid(format, error.to_string()))?
-            .into_markdown(format),
-        DefinitionFormat::Toml => toml::from_str::<StructuredDefinition>(source_text)
-            .map_err(|error| invalid(format, error.to_string()))?
-            .into_markdown(format),
-        DefinitionFormat::Ron => ron::from_str::<StructuredDefinition>(source_text)
-            .map_err(|error| invalid(format, error.to_string()))?
-            .into_markdown(format),
+) -> Result<WorkflowDefinition, DefinitionParseError> {
+    require_workflow(parse_definition_with_format(source, format)?)
+}
+
+pub fn parse_routing_table(source: &str) -> Result<RoutingTable, DefinitionParseError> {
+    require_routing_table(parse_definition(source)?)
+}
+
+pub fn parse_routing_table_with_format(
+    source: &str,
+    format: DefinitionFormat,
+) -> Result<RoutingTable, DefinitionParseError> {
+    require_routing_table(parse_definition_with_format(source, format)?)
+}
+
+fn require_workflow(definition: Definition) -> Result<WorkflowDefinition, DefinitionParseError> {
+    match definition {
+        Definition::Workflow(workflow) => Ok(workflow),
+        Definition::RoutingTable(_) => Err(DefinitionParseError::UnexpectedKind {
+            expected: DefinitionSourceKind::Workflow,
+            actual: DefinitionSourceKind::Router,
+        }),
+    }
+}
+
+fn require_routing_table(definition: Definition) -> Result<RoutingTable, DefinitionParseError> {
+    match definition {
+        Definition::RoutingTable(routing_table) => Ok(routing_table),
+        Definition::Workflow(_) => Err(DefinitionParseError::UnexpectedKind {
+            expected: DefinitionSourceKind::Router,
+            actual: DefinitionSourceKind::Workflow,
+        }),
     }
 }
 
@@ -337,73 +334,16 @@ fn invalid(format: DefinitionFormat, message: impl Into<String>) -> DefinitionPa
     }
 }
 
-fn map_collection_error(error: DefinitionSourceError) -> DefinitionParseError {
-    match error {
-        DefinitionSourceError::DuplicateDefinition { kind, id } => {
-            DefinitionParseError::DuplicateDefinition { kind, id }
-        }
-        other => DefinitionParseError::Invalid {
-            format: DefinitionFormat::Markdown,
-            message: other.to_string(),
-        },
-    }
-}
-
 #[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-enum StructuredDefinition {
-    Workflow {
-        title: String,
-        id: String,
-        steps: Vec<StructuredWorkflowStep>,
-    },
-    RoutingTable {
-        title: String,
-        id: String,
-        routes: Vec<StructuredRoutingRule>,
-    },
-}
-
-impl StructuredDefinition {
-    fn into_markdown(self, format: DefinitionFormat) -> Result<String, DefinitionParseError> {
-        match self {
-            Self::Workflow { title, id, steps } => {
-                let title = heading(&title, format)?;
-                let id = metadata_value(&id, "id", format)?;
-                let mut output = format!(
-                    "# {title}\n\n```phenix-workflow\nid: {id}\n```\n\n## Steps\n\n| Key | Parent | Role | Objective |\n|---|---|---|---|\n"
-                );
-                for step in steps {
-                    let key = table_cell(&step.key, "steps.key", format)?;
-                    let parent = table_cell(step.parent.as_deref().unwrap_or(""), "steps.parent", format)?;
-                    let role = table_cell(&step.role, "steps.role", format)?;
-                    let objective = table_cell(&step.objective, "steps.objective", format)?;
-                    output.push_str(&format!(
-                        "| {key} | {parent} | {role} | {objective} |\n"
-                    ));
-                }
-                Ok(output)
-            }
-            Self::RoutingTable { title, id, routes } => {
-                let title = heading(&title, format)?;
-                let id = metadata_value(&id, "id", format)?;
-                let mut output = format!(
-                    "# {title}\n\n```phenix-router\nid: {id}\n```\n\n## Routes\n\n| Role | Workflow | Target | Explanation |\n|---|---|---|---|\n"
-                );
-                for route in routes {
-                    let role = table_cell(&route.role, "routes.role", format)?;
-                    let workflow = table_cell(&route.workflow, "routes.workflow", format)?;
-                    let target = table_cell(&route.target, "routes.target", format)?;
-                    let explanation =
-                        table_cell(&route.explanation, "routes.explanation", format)?;
-                    output.push_str(&format!(
-                        "| {role} | {workflow} | {target} | {explanation} |\n"
-                    ));
-                }
-                Ok(output)
-            }
-        }
-    }
+#[serde(deny_unknown_fields)]
+struct StructuredDefinition {
+    kind: String,
+    title: String,
+    id: String,
+    #[serde(default)]
+    steps: Option<Vec<StructuredWorkflowStep>>,
+    #[serde(default)]
+    routes: Option<Vec<StructuredRoutingRule>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -425,10 +365,71 @@ struct StructuredRoutingRule {
     explanation: String,
 }
 
+fn decode_structured(
+    definition: StructuredDefinition,
+    format: DefinitionFormat,
+) -> Result<String, DefinitionParseError> {
+    let title = heading(&definition.title, format)?;
+    let id = metadata_value(&definition.id, "id", format)?;
+    match definition.kind.as_str() {
+        "workflow" => {
+            if definition.routes.is_some() {
+                return Err(invalid(format, "workflow definitions must not contain routes"));
+            }
+            let steps = definition
+                .steps
+                .ok_or_else(|| invalid(format, "workflow definitions require steps"))?;
+            let mut output = format!(
+                "# {title}\n\n```phenix-workflow\nid: {id}\n```\n\n## Steps\n\n| Key | Parent | Role | Objective |\n|---|---|---|---|\n"
+            );
+            for step in steps {
+                let key = table_cell(&step.key, "steps.key", format)?;
+                let parent =
+                    table_cell(step.parent.as_deref().unwrap_or(""), "steps.parent", format)?;
+                let role = table_cell(&step.role, "steps.role", format)?;
+                let objective = table_cell(&step.objective, "steps.objective", format)?;
+                output.push_str(&format!(
+                    "| {key} | {parent} | {role} | {objective} |\n"
+                ));
+            }
+            Ok(output)
+        }
+        "routing_table" => {
+            if definition.steps.is_some() {
+                return Err(invalid(
+                    format,
+                    "routing table definitions must not contain steps",
+                ));
+            }
+            let routes = definition.routes.ok_or_else(|| {
+                invalid(format, "routing table definitions require routes")
+            })?;
+            let mut output = format!(
+                "# {title}\n\n```phenix-router\nid: {id}\n```\n\n## Routes\n\n| Role | Workflow | Target | Explanation |\n|---|---|---|---|\n"
+            );
+            for route in routes {
+                let role = table_cell(&route.role, "routes.role", format)?;
+                let workflow = table_cell(&route.workflow, "routes.workflow", format)?;
+                let target = table_cell(&route.target, "routes.target", format)?;
+                let explanation =
+                    table_cell(&route.explanation, "routes.explanation", format)?;
+                output.push_str(&format!(
+                    "| {role} | {workflow} | {target} | {explanation} |\n"
+                ));
+            }
+            Ok(output)
+        }
+        kind => Err(invalid(
+            format,
+            format!("unknown definition kind {kind:?}; expected workflow or routing_table"),
+        )),
+    }
+}
+
 fn heading(value: &str, format: DefinitionFormat) -> Result<&str, DefinitionParseError> {
     if value.trim() != value
         || value.is_empty()
-        || value.contains(['\n', '\r'])
+        || has_line_break(value)
         || value.starts_with('#')
     {
         return Err(invalid(
@@ -444,7 +445,7 @@ fn metadata_value<'a>(
     field: &'static str,
     format: DefinitionFormat,
 ) -> Result<&'a str, DefinitionParseError> {
-    if value.trim() != value || value.is_empty() || value.contains(['\n', '\r']) {
+    if value.trim() != value || value.is_empty() || has_line_break(value) {
         return Err(invalid(
             format,
             format!("{field} must be a non-empty single line without surrounding whitespace"),
@@ -459,7 +460,8 @@ fn table_cell<'a>(
     format: DefinitionFormat,
 ) -> Result<&'a str, DefinitionParseError> {
     if value.trim() != value
-        || value.contains(['\n', '\r', '|'])
+        || has_line_break(value)
+        || value.contains('|')
         || value.starts_with('`')
         || value.ends_with('`')
     {
@@ -471,6 +473,10 @@ fn table_cell<'a>(
         ));
     }
     Ok(value)
+}
+
+fn has_line_break(value: &str) -> bool {
+    value.contains('\n') || value.contains('\r')
 }
 
 #[cfg(test)]
@@ -518,14 +524,14 @@ objective = "Implement {objective}"
   kind: "routing_table",
   title: "Default routing",
   id: "phenix.default",
-  routes: [
+  routes: Some([
     (
       role: "*",
       workflow: "*",
       target: "pi/openai/gpt-5.6-sol",
       explanation: "Default route",
     ),
-  ],
+  ]),
 )"#;
 
     #[test]
@@ -564,6 +570,18 @@ objective = "Implement {objective}"
         assert!(parse_routing_table(ROUTER_JSON).is_ok());
         assert!(parse_workflow(ROUTER_JSON).is_err());
         assert!(parse_routing_table(WORKFLOW_MD).is_err());
+    }
+
+    #[test]
+    fn source_collection_rejects_duplicate_semantic_ids() {
+        let mut definitions = Definitions::new();
+        definitions
+            .add_workflow(WORKFLOW_MD)
+            .expect("first workflow");
+        assert!(matches!(
+            definitions.add_workflow(WORKFLOW_TOML),
+            Err(DefinitionParseError::DuplicateDefinition { .. })
+        ));
     }
 
     #[test]
