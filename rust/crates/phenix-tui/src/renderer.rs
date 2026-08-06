@@ -2,7 +2,7 @@ use crate::layout::collect_layout;
 use crate::theme::{panel, theme_style};
 use phenix_frontend_config::{FrontendConfig, FrontendProviderRef, ThemeConfig};
 use phenix_runtime_api::{AuthPrompt, ExtensionUiRequest, TranscriptRole};
-use phenix_ui_core::{AppState, ElementId, FocusTarget, OverlayState};
+use phenix_ui_core::{AppState, ElementId, FocusTarget, InputEditor, OverlayState};
 use phenix_ui_runtime::UiRenderer;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Modifier;
@@ -198,24 +198,33 @@ fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
 
 fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
     let focused = state.view.focus == FocusTarget::Input && state.view.overlay.is_none();
-    let block = panel("Input", focused, theme);
+    let title = format!(
+        "Prompt · {} · {}",
+        state.view.input_editor.label(),
+        state.view.vim_mode.label()
+    );
+    let block = panel(&title, focused, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let mut lines = vec![Line::styled(
-        state.input.text.clone(),
-        theme_style(theme, "Normal"),
-    )];
-    let suggestions = slash_command_suggestions(state);
-    if inner.height > 1 && !suggestions.is_empty() {
-        lines.push(Line::styled(
-            format!("commands  {}", suggestions.join("   ")),
-            theme_style(theme, "Muted"),
-        ));
+    let mut lines = input_text_lines(&state.input.text, theme);
+    let auxiliary = match state.view.input_editor {
+        InputEditor::External => Some(
+            "Ctrl-G or Enter opens $EDITOR · Ctrl-Enter submits · Esc returns to owned".to_owned(),
+        ),
+        InputEditor::Owned | InputEditor::Embedded => {
+            let suggestions = slash_command_suggestions(state);
+            (!suggestions.is_empty()).then(|| format!("commands  {}", suggestions.join("   ")))
+        }
+    };
+    if usize::from(inner.height) > lines.len() {
+        if let Some(auxiliary) = auxiliary {
+            lines.push(Line::styled(auxiliary, theme_style(theme, "Muted")));
+        }
     }
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 
-    if focused && inner.height > 0 {
+    if focused && state.view.input_editor != InputEditor::External && inner.height > 0 {
         let cursor = state.input.cursor_byte.min(state.input.text.len());
         let prefix = &state.input.text[..cursor];
         let (column, row) = cursor_position(prefix, inner.width.max(1));
@@ -228,6 +237,12 @@ fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &The
                 .saturating_add(row.min(inner.height.saturating_sub(1))),
         ));
     }
+}
+
+fn input_text_lines(text: &str, theme: &ThemeConfig) -> Vec<Line<'static>> {
+    text.split('\n')
+        .map(|line| Line::styled(line.to_owned(), theme_style(theme, "Normal")))
+        .collect()
 }
 
 fn render_status(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
@@ -397,6 +412,10 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
             "Help",
             0,
             vec![
+                "Ctrl-E cycles owned, embedded, and external editors".to_owned(),
+                "Ctrl-G opens the configured external editor".to_owned(),
+                "Esc enters normal mode; i/a return to insert mode".to_owned(),
+                "h/j/k/l navigate in normal mode".to_owned(),
                 "Frontend keymaps are configured in init.lua".to_owned(),
                 "Use `phenix --print-default-config` to inspect defaults".to_owned(),
             ],
@@ -690,6 +709,12 @@ mod tests {
             .min(20usize.saturating_sub(visible_rows));
         assert_eq!(start, 8);
         assert!((start..start + visible_rows).contains(&selected));
+    }
+
+    #[test]
+    fn input_buffer_is_split_into_explicit_lines() {
+        let lines = input_text_lines("one\n\nthree", &ThemeConfig::default());
+        assert_eq!(lines.len(), 3);
     }
 
     #[test]
