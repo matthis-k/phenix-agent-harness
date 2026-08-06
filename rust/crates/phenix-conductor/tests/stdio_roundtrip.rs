@@ -57,18 +57,50 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
         .ok_or("tree snapshot did not contain a root node")?
         .to_owned();
 
+    let backend_target = json!({
+        "tree_id": session_id,
+        "backend": "fixture",
+    });
     process.send_request(
         5,
+        "_phenix/backend/capabilities/get",
+        &backend_target,
+    )?;
+    let capabilities = process.receive_response(5)?;
+    assert_eq!(capabilities["result"]["backend"], "fixture");
+    assert!(capabilities["result"]["capabilities"].is_object());
+
+    process.send_request(6, "_phenix/backend/model/list", &backend_target)?;
+    let models = process.receive_response(6)?;
+    assert_eq!(models["result"]["backend"], "fixture");
+    assert!(models["result"]["models"].is_array());
+
+    process.send_request(
+        7,
+        "_phenix/backend/auth_provider/list",
+        &backend_target,
+    )?;
+    let providers = process.receive_response(7)?;
+    assert_eq!(providers["result"]["backend"], "fixture");
+    assert!(providers["result"]["providers"].is_array());
+
+    process.send_request(8, "_phenix/backend/command/list", &backend_target)?;
+    let commands = process.receive_response(8)?;
+    assert_eq!(commands["result"]["backend"], "fixture");
+    assert!(commands["result"]["commands"].is_array());
+
+    process.send_request(
+        9,
         "_phenix/node/subscribe",
         &json!({
             "tree_id": session_id,
             "node_id": root_node_id,
         }),
     )?;
-    process.receive_response(5)?;
+    process.receive_response(9)?;
 
     process.send_request(
-        6,
+        10,
         "_phenix/node/execute",
         &json!({
             "tree_id": session_id,
@@ -88,7 +120,7 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
         {
             saw_extended_event = true;
         }
-        if message.get("id") == Some(&Value::from(6)) {
+        if message.get("id") == Some(&Value::from(10)) {
             break message;
         }
     };
@@ -104,7 +136,7 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
     );
 
     process.send_request(
-        7,
+        11,
         "session/prompt",
         &PromptRequest::new(
             SessionId::new(session_id.clone()),
@@ -119,7 +151,7 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
         {
             saw_echo = true;
         }
-        if message.get("id") == Some(&Value::from(7)) {
+        if message.get("id") == Some(&Value::from(11)) {
             break message;
         }
     };
@@ -130,11 +162,11 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
     assert_eq!(completed["result"]["stopReason"], "end_turn");
 
     process.send_request(
-        8,
+        12,
         "_phenix/session_tree/get",
         &json!({ "tree_id": session_id }),
     )?;
-    let tree_after_prompt = process.receive_response(8)?;
+    let tree_after_prompt = process.receive_response(12)?;
     assert_eq!(tree_after_prompt["result"]["id"], session_id);
     assert_eq!(
         tree_after_prompt["result"]["nodes"][0]["downstream_session"],
