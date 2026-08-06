@@ -10,14 +10,18 @@ phenix.theme.set("Tool", { fg = "#cba6f7", bg = "#1e1e2e" })
 phenix.theme.set("Border", { fg = "#313244", bg = "#1e1e2e" })
 phenix.theme.set("BorderFocused", { fg = "#89b4fa", bg = "#1e1e2e" })
 
+-- Conversation-first workspace: the prompt belongs to the transcript column,
+-- while run/session context remains visible in a stable right sidebar.
 phenix.layout.set(phenix.layout.split("vertical", {
   phenix.layout.pane("ui.header", { pane_type = "root", weight = 1, min = 1, max = 1 }),
   phenix.layout.split("horizontal", {
-    phenix.layout.pane("ui.transcript", { pane_type = "transcript", weight = 72 }),
-    phenix.layout.pane("ui.sidebar", { pane_type = "sidebar", weight = 28 }),
+    phenix.layout.split("vertical", {
+      phenix.layout.pane("ui.transcript", { pane_type = "transcript", weight = 1 }),
+      phenix.layout.pane("ui.input", { pane_type = "input", weight = 4, min = 4 }),
+      phenix.layout.pane("ui.status", { pane_type = "status", weight = 1, min = 1, max = 1 }),
+    }),
+    phenix.layout.pane("ui.sidebar", { pane_type = "sidebar", weight = 28, min = 24, max = 40 }),
   }),
-  phenix.layout.pane("ui.input", { pane_type = "input", weight = 4, min = 4, max = 4 }),
-  phenix.layout.pane("ui.status", { pane_type = "status", weight = 1, min = 1, max = 1 }),
 }))
 
 local map = phenix.keymap.set
@@ -25,27 +29,24 @@ local map = phenix.keymap.set
 map("global", "<C-d>", phenix.action.quit, { desc = "Quit Phenix" })
 map("global", "<C-q>", phenix.action.quit, { desc = "Quit Phenix" })
 map("global", "<C-c>", phenix.action.abort, { desc = "Interrupt the selected run" })
-map("global", "<Esc>", phenix.action.abort, { desc = "Interrupt or close the active surface" })
 map("global", "<C-l>", phenix.action.login, { desc = "Open authentication" })
 map("global", "<C-m>", phenix.action.models, { desc = "Open model picker" })
 map("global", "<C-r>", phenix.action.sessions, { desc = "Open session picker" })
 map("global", "<C-o>", phenix.action.toggle_details, { desc = "Toggle detailed mode" })
 map("global", "<Tab>", function() phenix.ui.focus.move("next") end, { desc = "Focus next pane" })
 map("global", "<S-Tab>", function() phenix.ui.focus.move("previous") end, { desc = "Focus previous pane" })
+map("global", "<M-h>", function() phenix.ui.focus.move("left") end, { desc = "Focus left pane" })
+map("global", "<M-j>", function() phenix.ui.focus.move("down") end, { desc = "Focus lower pane" })
+map("global", "<M-k>", function() phenix.ui.focus.move("up") end, { desc = "Focus upper pane" })
+map("global", "<M-l>", function() phenix.ui.focus.move("right") end, { desc = "Focus right pane" })
 
-map("input", "<CR>", phenix.action.submit, { desc = "Submit prompt" })
-map("input", "<S-CR>", function() phenix.input.insert("\n") end, { desc = "Insert newline" })
-map("input", "<C-CR>", phenix.action.steer, { desc = "Steer active run" })
-map("input", "<M-CR>", phenix.action.follow_up, { desc = "Queue follow-up" })
-map("input", "<BS>", phenix.input.backspace, { desc = "Delete previous character" })
-map("input", "<Del>", phenix.input.delete, { desc = "Delete character" })
-map("input", "<Left>", phenix.input.move_left, { desc = "Move cursor left" })
-map("input", "<Right>", phenix.input.move_right, { desc = "Move cursor right" })
-map("input", "<Up>", phenix.input.history_previous, { desc = "Previous input history" })
-map("input", "<Down>", phenix.input.history_next, { desc = "Next input history" })
+-- Input editing is intentionally handled by the typed native modal editor. A
+-- user config may still override any individual key by adding an input map.
 
 map("sidebar", "j", function() phenix.ui.pane.scroll("ui.sidebar", 1) end)
 map("sidebar", "k", function() phenix.ui.pane.scroll("ui.sidebar", -1) end)
+map("sidebar", "h", function() phenix.ui.focus.set("ui.transcript") end)
+map("sidebar", "i", function() phenix.ui.focus.set("ui.input") end)
 map("sidebar", ">", function() phenix.ui.pane.resize("ui.sidebar", "horizontal", 2) end)
 map("sidebar", "<", function() phenix.ui.pane.resize("ui.sidebar", "horizontal", -2) end)
 
@@ -53,6 +54,9 @@ map("sidebar", "<", function() phenix.ui.pane.resize("ui.sidebar", "horizontal",
 -- increases the distance from the end; moving down decreases it.
 map("transcript", "j", function() phenix.ui.pane.scroll("ui.transcript", -1) end)
 map("transcript", "k", function() phenix.ui.pane.scroll("ui.transcript", 1) end)
+map("transcript", "l", function() phenix.ui.focus.set("ui.sidebar") end)
+map("transcript", "i", function() phenix.ui.focus.set("ui.input") end)
+map("transcript", "G", function() phenix.ui.pane.scroll("ui.transcript", -1000000) end)
 map("transcript", "<Down>", function() phenix.ui.pane.scroll("ui.transcript", -1) end)
 map("transcript", "<Up>", function() phenix.ui.pane.scroll("ui.transcript", 1) end)
 map("transcript", "<PageDown>", function() phenix.ui.pane.scroll("ui.transcript", -10) end)
