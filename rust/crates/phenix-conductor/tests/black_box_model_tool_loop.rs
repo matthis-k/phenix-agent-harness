@@ -24,19 +24,23 @@ fn inbound_prompt_routes_models_and_completes_a_delegation_tool_loop() -> Result
     let cwd = std::env::current_dir()?;
     let coordinator_log = unique_temp_path("phenix-mock-coordinator", "jsonl");
     let specialist_log = unique_temp_path("phenix-mock-specialist", "jsonl");
-    let bootstrap_path = unique_temp_path("phenix-black-box-bootstrap", "json");
-    fs::write(
-        &bootstrap_path,
-        bootstrap_json(&mock_agent, &coordinator_log, &specialist_log).to_string(),
-    )?;
 
-    let mut process = RpcProcess::spawn(&conductor, &bootstrap_path, &cwd)?;
+    let mut process = RpcProcess::spawn(&conductor, &cwd)?;
     process.send_request(
         1,
         "initialize",
         &InitializeRequest::new(ProtocolVersion::V1).client_capabilities(ClientCapabilities::new()),
     )?;
     process.receive_response(1)?;
+
+    process.send_request(
+        100,
+        "_phenix/config/apply",
+        &configuration_json(&mock_agent, &coordinator_log, &specialist_log),
+    )?;
+    let configured = process.receive_response(100)?;
+    assert_eq!(configured["result"]["revision"], 1);
+    assert_eq!(configured["result"]["definition_id"], "definition.black-box");
 
     process.send_request(2, "session/new", &NewSessionRequest::new(&cwd))?;
     let created = process.receive_response(2)?;
@@ -194,7 +198,7 @@ fn inbound_prompt_routes_models_and_completes_a_delegation_tool_loop() -> Result
     );
 
     process.shutdown();
-    for path in [bootstrap_path, coordinator_log, specialist_log] {
+    for path in [coordinator_log, specialist_log] {
         let _ = fs::remove_file(path);
     }
     Ok(())
@@ -288,7 +292,7 @@ fn read_json_lines(path: &Path) -> Result<Vec<Value>, Box<dyn Error>> {
         .collect()
 }
 
-fn bootstrap_json(mock_agent: &Path, coordinator_log: &Path, specialist_log: &Path) -> Value {
+fn configuration_json(mock_agent: &Path, coordinator_log: &Path, specialist_log: &Path) -> Value {
     let routing = r#"
 # Black-box routing
 
@@ -348,33 +352,40 @@ id: router.black-box
         ]
     });
     json!({
-        "definition_id": "definition.black-box",
-        "router": "router.black-box",
-        "root": {
-            "role": "coordinator",
-            "objective": "exercise the complete adapter path"
-        },
-        "backends": [
-            {
-                "id": "coordinator",
-                "command": format!("{:?}", mock_agent),
-                "environment": {
-                    "PHENIX_MOCK_ACP_CONFIG": coordinator.to_string()
-                }
+        "source_root": ".",
+        "input": {
+            "definition_id": "definition.black-box",
+            "router": "router.black-box",
+            "root": {
+                "tree_id": "black-box-root",
+                "role": "coordinator",
+                "objective": "exercise the complete adapter path"
             },
-            {
-                "id": "specialist",
-                "command": format!("{:?}", mock_agent),
-                "environment": {
-                    "PHENIX_MOCK_ACP_CONFIG": specialist.to_string()
+            "backends": [
+                {
+                    "id": "coordinator",
+                    "command": format!("{:?}", mock_agent),
+                    "environment": {
+                        "PHENIX_MOCK_ACP_CONFIG": coordinator.to_string()
+                    }
+                },
+                {
+                    "id": "specialist",
+                    "command": format!("{:?}", mock_agent),
+                    "environment": {
+                        "PHENIX_MOCK_ACP_CONFIG": specialist.to_string()
+                    }
                 }
-            }
-        ],
-        "definitions": [{
-            "kind": "routing_table",
-            "source": routing,
-            "format": "markdown"
-        }]
+            ],
+            "definitions": [{
+                "kind": "routing_table",
+                "source": {
+                    "kind": "inline",
+                    "source": routing,
+                    "format": "markdown"
+                }
+            }]
+        }
     })
 }
 
@@ -401,10 +412,8 @@ struct RpcProcess {
 }
 
 impl RpcProcess {
-    fn spawn(conductor: &Path, bootstrap: &Path, cwd: &Path) -> Result<Self, Box<dyn Error>> {
+    fn spawn(conductor: &Path, cwd: &Path) -> Result<Self, Box<dyn Error>> {
         let mut child = Command::new(conductor)
-            .arg("--bootstrap")
-            .arg(bootstrap)
             .arg("--cwd")
             .arg(cwd)
             .stdin(Stdio::piped())
