@@ -123,7 +123,12 @@ impl MockState {
             return Err(format!("unsupported mock config option {config_id:?}").into());
         }
         let model = required_string(&request, "value")?;
-        if !self.config.models.iter().any(|candidate| candidate.id == model) {
+        if !self
+            .config
+            .models
+            .iter()
+            .any(|candidate| candidate.id == model)
+        {
             return Err(format!("unknown mock model {model:?}").into());
         }
         let session = self

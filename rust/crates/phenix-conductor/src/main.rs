@@ -155,9 +155,7 @@ fn dispatch_extension(
             Some(response) => response,
             None => runtime
                 .handle_extension(extension.clone())
-                .map_err(|error| {
-                    agent_client_protocol::util::internal_error(error.to_string())
-                })?,
+                .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?,
         }
     };
     subscriptions.publish_response(extension, &response, connection)?;

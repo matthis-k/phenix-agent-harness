@@ -1,5 +1,6 @@
 use agent_client_protocol::schema::v1::{
-    ClientCapabilities, ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, SessionId,
+    ClientCapabilities, ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest,
+    SessionId,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use serde::Serialize;
@@ -16,7 +17,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[test]
-fn inbound_prompt_routes_models_and_completes_a_delegation_tool_loop() -> Result<(), Box<dyn Error>> {
+fn inbound_prompt_routes_models_and_completes_a_delegation_tool_loop() -> Result<(), Box<dyn Error>>
+{
     let mock_agent = PathBuf::from(env!("CARGO_BIN_EXE_mock-acp-agent"));
     let conductor = PathBuf::from(env!("CARGO_BIN_EXE_phenix-conductor"));
     let cwd = std::env::current_dir()?;
@@ -71,7 +73,9 @@ fn inbound_prompt_routes_models_and_completes_a_delegation_tool_loop() -> Result
         ),
     )?;
     let (initial_response, tool_input) = receive_prompt_with_tool(&process, 6, "phenix.delegate")?;
-    assert!(initial_response.to_string().contains("delegating to specialist"));
+    assert!(initial_response
+        .to_string()
+        .contains("delegating to specialist"));
     assert_eq!(tool_input["role"], "specialist");
     assert_eq!(tool_input["objective"], "compute the deterministic answer");
     assert_eq!(tool_input["prompt"], "calculate 6 * 7");
@@ -460,7 +464,9 @@ impl RpcProcess {
     }
 
     fn receive(&self) -> Result<Value, Box<dyn Error>> {
-        self.messages.recv_timeout(RESPONSE_TIMEOUT).map_err(Into::into)
+        self.messages
+            .recv_timeout(RESPONSE_TIMEOUT)
+            .map_err(Into::into)
     }
 
     fn shutdown(&mut self) {
