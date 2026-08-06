@@ -1,11 +1,8 @@
 use crate::{
-    AcpMethod, EmptyResult, GatewayError, NodeAttachResult, NodeCancel, NodeCancelParams,
-    NodeDelegate, NodeDelegateParams, NodeExecute, NodeExecuteParams, NodeExecuteResult, NodeFork,
-    NodeForkParams, NodeLoad, NodeLoadParams, NodeResume, NodeResumeParams, ObjectiveMark,
-    ObjectiveMarkParams, PhenixAcpGateway, RoleId, RoutingExplain, RoutingExplainParams,
-    SessionTreeClose, SessionTreeCloseParams, SessionTreeCreate, SessionTreeCreateParams,
-    SessionTreeCreateResult, SessionTreeGet, SessionTreeGetParams, SessionTreeList,
-    SessionTreeListParams, WorkflowStart, WorkflowStartParams,
+    AcpMethod, EmptyResult, GatewayError, NodeAttachResult, NodeCancel, NodeDelegate, NodeExecute,
+    NodeExecuteResult, NodeFork, NodeLoad, NodeResume, ObjectiveMark, PhenixAcpGateway, RoleId,
+    RoutingExplain, RoutingExplainParams, SessionTreeClose, SessionTreeCreate,
+    SessionTreeCreateResult, SessionTreeGet, SessionTreeList, WorkflowStart,
 };
 use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
 use serde::Serialize;
@@ -243,7 +240,7 @@ mod tests {
         decode_extension_response, encode_extension_request, AcpEndpoint, AcpSession,
         AcpSessionFactory, AcpSessionId, BackendDefinition, BackendId, DefinitionId, FixedRouter,
         NodeExecuteParams, RoleId, RouterId, SessionCommand, SessionEvent, SessionOpenRequest,
-        SessionTreeDefinition,
+        SessionTreeCreateParams, SessionTreeDefinition,
     };
     use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicU64, Ordering};
