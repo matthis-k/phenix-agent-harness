@@ -2,11 +2,13 @@ use crate::state::{AppState, DialogState, RuntimeConnectionState};
 use crate::view::{FocusTarget, OverlayState};
 use phenix_runtime_api::{
     AuthFlowId, AuthMethod, AuthPromptResponse, BackendCommand, BackendError, BackendEvent,
-    BackendOutput, BackendReply, ExtensionUiResponse, ModelRef, RunId, SessionId,
-    StreamingBehavior, ThinkingLevel, ToolExecutionOutcome, TranscriptBlock, TranscriptRole,
+    BackendOutput, BackendReply, CommandSource, CommandSummary, ExtensionUiResponse, ModelRef,
+    RunId, SessionId, StreamingBehavior, ThinkingLevel, ToolExecutionOutcome, TranscriptBlock,
+    TranscriptRole,
 };
 
 const MAX_INPUT_HISTORY: usize = 1_000;
+const ROUTING_PROFILES: &[&str] = &["free", "opencode-go", "chatgpt-plus", "mixed"];
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum UserIntent {
@@ -219,6 +221,8 @@ fn submit_command(state: &mut AppState, text: &str) -> Vec<AppEffect> {
             provider_id: arguments.to_owned(),
         })],
         "model" => open_model_picker(state),
+        "routing" if arguments.is_empty() => open_model_picker(state),
+        "routing" => select_routing_profile(state, arguments),
         "resume" | "sessions" => open_session_picker(state),
         "new" => vec![AppEffect::Send(BackendCommand::SessionCreate {
             parent_session: None,
@@ -257,17 +261,61 @@ fn submit_command(state: &mut AppState, text: &str) -> Vec<AppEffect> {
             vec![AppEffect::Send(BackendCommand::ThinkingLevels { run_id })]
         }
         "" => vec![AppEffect::Render],
-        _ => {
-            let Some(run_id) = state.input_target().cloned() else {
-                return no_run_notification(state);
-            };
-            vec![AppEffect::Send(BackendCommand::CommandInvoke {
-                run_id,
-                name: name.to_owned(),
-                arguments: arguments.to_owned(),
-            })]
-        }
+        _ => forward_acp_command(state, text, name, arguments),
     }
+}
+
+fn forward_acp_command(
+    state: &mut AppState,
+    text: &str,
+    name: &str,
+    arguments: &str,
+) -> Vec<AppEffect> {
+    let Some(run_id) = state.input_target().cloned() else {
+        return no_run_notification(state);
+    };
+    let command = if acp_command_is_advertised(state, name) {
+        BackendCommand::CommandInvoke {
+            run_id,
+            name: name.to_owned(),
+            arguments: arguments.to_owned(),
+        }
+    } else {
+        BackendCommand::PromptSubmit {
+            run_id,
+            text: text.to_owned(),
+            images: Vec::new(),
+            streaming_behavior: None,
+        }
+    };
+    vec![AppEffect::Send(command), AppEffect::Render]
+}
+
+fn select_routing_profile(state: &mut AppState, profile: &str) -> Vec<AppEffect> {
+    if !ROUTING_PROFILES.contains(&profile) {
+        state.notifications.push_back(format!(
+            "Unknown routing profile `{profile}`. Available profiles: {}.",
+            ROUTING_PROFILES.join(", ")
+        ));
+        return vec![AppEffect::Render];
+    }
+    let Some(run_id) = state.input_target().cloned() else {
+        return no_run_notification(state);
+    };
+    vec![
+        AppEffect::Send(BackendCommand::ModelSelect {
+            run_id,
+            model: ModelRef {
+                provider: "phenix".to_owned(),
+                model: profile.to_owned(),
+            },
+        }),
+        AppEffect::Render,
+    ]
+}
+
+fn acp_command_is_advertised(state: &AppState, name: &str) -> bool {
+    state.commands.iter().any(|command| command.name == name)
 }
 
 fn respond_to_dialog(state: &mut AppState, response: ExtensionUiResponse) -> Vec<AppEffect> {
@@ -354,7 +402,16 @@ fn no_run_notification(state: &mut AppState) -> Vec<AppEffect> {
 fn reduce_backend_output(state: &mut AppState, output: BackendOutput) -> Vec<AppEffect> {
     match output {
         BackendOutput::Reply { result, .. } => match result {
-            Ok(reply) => reduce_backend_reply(state, reply),
+            Ok(reply) => {
+                let initialized = matches!(&reply, BackendReply::Initialized { .. });
+                reduce_backend_reply(state, reply);
+                if initialized {
+                    return vec![
+                        AppEffect::Send(BackendCommand::CommandList),
+                        AppEffect::Render,
+                    ];
+                }
+            }
             Err(error) => {
                 state.notifications.push_back(error.to_string());
                 if backend_error_damages_connection(&error) {
@@ -406,7 +463,19 @@ fn reduce_backend_reply(state: &mut AppState, reply: BackendReply) {
         BackendReply::Models(models) => state.models = models,
         BackendReply::ThinkingLevels(levels) => state.thinking_levels = levels,
         BackendReply::AuthProviders(providers) => state.auth_providers = providers,
-        BackendReply::Commands(commands) => state.commands = commands,
+        BackendReply::Commands(mut commands) => {
+            if !commands.iter().any(|command| command.name == "routing") {
+                commands.push(CommandSummary {
+                    name: "routing".to_owned(),
+                    description: Some(
+                        "Select a Phenix routing profile: free, opencode-go, chatgpt-plus, or mixed"
+                            .to_owned(),
+                    ),
+                    source: CommandSource::BuiltIn,
+                });
+            }
+            state.commands = commands;
+        }
         BackendReply::Exported { path } => state
             .notifications
             .push_back(format!("Session exported to {path}")),
@@ -636,6 +705,75 @@ mod tests {
             Some(OverlayState::AuthenticationProviders { .. })
         ));
         assert!(effects.contains(&AppEffect::Send(BackendCommand::AuthProviders)));
+    }
+
+    #[test]
+    fn routing_command_selects_a_typed_virtual_model() {
+        let run = RunId::parse("root-run").expect("valid run");
+        let mut state = state_with_run(run.clone());
+        state.input.replace("/routing mixed".to_owned());
+        let effects = reduce(&mut state, AppEvent::User(UserIntent::SubmitPrompt));
+        assert!(
+            effects.contains(&AppEffect::Send(BackendCommand::ModelSelect {
+                run_id: run,
+                model: ModelRef {
+                    provider: "phenix".to_owned(),
+                    model: "mixed".to_owned(),
+                },
+            }))
+        );
+    }
+
+    #[test]
+    fn advertised_acp_command_uses_the_typed_command_operation() {
+        let run = RunId::parse("root-run").expect("valid run");
+        let mut state = state_with_run(run.clone());
+        state.commands.push(CommandSummary {
+            name: "review".to_owned(),
+            description: None,
+            source: CommandSource::Extension,
+        });
+        state.input.replace("/review src".to_owned());
+        let effects = reduce(&mut state, AppEvent::User(UserIntent::SubmitPrompt));
+        assert!(
+            effects.contains(&AppEffect::Send(BackendCommand::CommandInvoke {
+                run_id: run,
+                name: "review".to_owned(),
+                arguments: "src".to_owned(),
+            }))
+        );
+    }
+
+    #[test]
+    fn unadvertised_command_is_forwarded_unchanged_to_acp() {
+        let run = RunId::parse("root-run").expect("valid run");
+        let mut state = state_with_run(run.clone());
+        state.input.replace("/phenix status".to_owned());
+        let effects = reduce(&mut state, AppEvent::User(UserIntent::SubmitPrompt));
+        assert!(
+            effects.contains(&AppEffect::Send(BackendCommand::PromptSubmit {
+                run_id: run,
+                text: "/phenix status".to_owned(),
+                images: Vec::new(),
+                streaming_behavior: None,
+            }))
+        );
+    }
+
+    #[test]
+    fn backend_commands_include_the_frontend_routing_command() {
+        let mut state = AppState::default();
+        reduce(
+            &mut state,
+            AppEvent::Backend(Box::new(BackendOutput::Reply {
+                request_id: phenix_runtime_api::RequestId::parse("commands").expect("request ID"),
+                result: Ok(BackendReply::Commands(Vec::new())),
+            })),
+        );
+        assert!(state
+            .commands
+            .iter()
+            .any(|command| command.name == "routing"));
     }
 
     #[test]
