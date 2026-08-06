@@ -9,8 +9,8 @@ use phenix_runtime_api::{
     AuthPrompt, AuthPromptResponse, ExtensionUiRequest, ExtensionUiResponse, SecretValue,
 };
 use phenix_ui_core::{
-    AppEvent, AppState, ElementId, EventEnvelope, FocusTarget, InputEditor, KeyCode, KeyInput,
-    OverlayState, UiInput, UserIntent, VimMode,
+    selected_command_completion, AppEvent, AppState, ElementId, EventEnvelope, FocusTarget,
+    InputEditor, KeyCode, KeyInput, OverlayState, UiInput, UserIntent, VimMode,
 };
 
 pub struct FrontendProviderConsumer {
@@ -213,6 +213,14 @@ fn accept_overlay(state: &AppState) -> Vec<BusReaction> {
     }
 
     match &state.view.overlay {
+        Some(OverlayState::CommandPalette { selected, .. }) => {
+            selected_command_completion(state, *selected).map_or_else(Vec::new, |completion| {
+                vec![
+                    BusReaction::App(AppEvent::User(UserIntent::InputChanged(completion.command))),
+                    BusReaction::App(AppEvent::User(UserIntent::CloseOverlay)),
+                ]
+            })
+        }
         Some(OverlayState::ModelPicker { selected, .. }) => state
             .models
             .get(*selected)
@@ -263,7 +271,7 @@ fn accept_overlay(state: &AppState) -> Vec<BusReaction> {
                 )))]
             }),
         Some(OverlayState::ExtensionDialog { .. }) => Vec::new(),
-        Some(OverlayState::CommandPalette { .. }) | Some(OverlayState::Help) | None => Vec::new(),
+        Some(OverlayState::Help) | None => Vec::new(),
     }
 }
 
@@ -595,5 +603,23 @@ mod tests {
             ]
         );
         assert_eq!(ViewState::default().input_editor, InputEditor::Owned);
+    }
+
+    #[test]
+    fn accepting_command_completion_inserts_the_selected_command() {
+        let mut state = AppState::default();
+        state.input.replace("/mo".to_owned());
+        state.view.overlay = Some(OverlayState::CommandPalette {
+            query: "/mo".to_owned(),
+            selected: 1,
+        });
+        let reactions = accept_overlay(&state);
+        assert!(matches!(
+            reactions.as_slice(),
+            [
+                BusReaction::App(AppEvent::User(UserIntent::InputChanged(command))),
+                BusReaction::App(AppEvent::User(UserIntent::CloseOverlay))
+            ] if command == "/model"
+        ));
     }
 }
