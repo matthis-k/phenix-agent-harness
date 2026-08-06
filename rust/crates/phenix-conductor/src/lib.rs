@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod auth;
+
 use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
 use phenix_acp::{
     AcpEndpoint, AcpMethod, AuthenticationCapabilities, BackendAuthMethod, BackendAuthProviderList,
