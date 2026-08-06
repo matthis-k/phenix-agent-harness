@@ -14,7 +14,7 @@ mod tools;
 pub use authoring::{
     parse_definition, parse_definition_with_format, parse_routing_table,
     parse_routing_table_with_format, parse_workflow, parse_workflow_with_format, Definition,
-    DefinitionFormat, DefinitionParseError, Definitions, FormatAttempt,
+    DefinitionFormat, DefinitionKind, DefinitionParseError, Definitions, FormatAttempt,
 };
 pub use client::{
     decode_extension_response, encode_extension_request, ExtensionCodecError, PhenixAcpCallError,
@@ -43,8 +43,8 @@ pub use runtime::{
     TreeStartResult, Workflow, WorkflowPlan, WorkflowPlanBuilder, WorkflowRequest, WorkflowStep,
 };
 pub use source::{
-    DefinitionSourceError, DefinitionSourceKind, ModelTarget, RouteSelector, RoutingRule,
-    RoutingTable, WorkflowDefinition, WorkflowStepDefinition,
+    ModelTarget, RouteSelector, RoutingRule, RoutingTable, WorkflowDefinition,
+    WorkflowStepDefinition,
 };
 pub use tools::{
     BuiltinToolPolicy, McpServerDefinition, McpServerTransport, ToolConfigError, ToolConfiguration,
