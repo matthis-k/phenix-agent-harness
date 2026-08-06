@@ -18,10 +18,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: feat/phenix-acp-config-directory
       - name: Register auth module and remove migration
         shell: bash
         run: |
           set -euo pipefail
+          git pull --rebase origin feat/phenix-acp-config-directory
           python - <<'PY'
           from pathlib import Path
           path = Path('rust/crates/phenix-conductor/src/lib.rs')
