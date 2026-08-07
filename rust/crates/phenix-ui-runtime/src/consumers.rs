@@ -126,9 +126,14 @@ impl EventConsumer for TranscriptRichBlockConsumer {
         if key.modifiers.control || key.modifiers.alt {
             return ReactionBatch::none();
         }
+        let initial = state.view.transcript_selected_block.is_none();
         let mutation = match key.code {
-            KeyCode::Character('[') => ViewMutation::MoveTranscriptBlock(-1),
-            KeyCode::Character(']') => ViewMutation::MoveTranscriptBlock(1),
+            KeyCode::Character('[') => {
+                ViewMutation::MoveTranscriptBlock(if initial { 0 } else { -1 })
+            }
+            KeyCode::Character(']') => {
+                ViewMutation::MoveTranscriptBlock(if initial { 0 } else { 1 })
+            }
             KeyCode::Character('v') => ViewMutation::CycleTranscriptBlockView(1),
             KeyCode::Character('V') => ViewMutation::CycleTranscriptBlockView(-1),
             KeyCode::Character('H') => ViewMutation::ScrollTranscriptBlock {
@@ -310,6 +315,11 @@ mod tests {
         assert_eq!(
             batch.reactions,
             vec![BusReaction::View(ViewMutation::CycleTranscriptBlockView(1))]
+        );
+        let first_move = consumer.on_ui(&state, &key(']'));
+        assert_eq!(
+            first_move.reactions,
+            vec![BusReaction::View(ViewMutation::MoveTranscriptBlock(0))]
         );
         let ordinary = consumer.on_ui(&state, &key('x'));
         assert_eq!(ordinary.propagation, Propagation::Continue);
