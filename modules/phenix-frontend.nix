@@ -6,8 +6,14 @@ _:
     let
       rustSource = pkgs.lib.cleanSource ../rust;
 
-      phenixTui = pkgs.rustPlatform.buildRustPackage {
-        pname = "phenix-tui";
+      # The user-facing runtime is one Rust workspace product. Building the TUI
+      # and conductor separately recompiles their shared dependency graph and
+      # runs overlapping package tests during ordinary system builds. The
+      # canonical maintenance gate already runs fmt/check/clippy/tests for the
+      # complete Rust workspace, so runtime packaging only builds installable
+      # binaries once.
+      phenixRustRuntime = pkgs.rustPlatform.buildRustPackage {
+        pname = "phenix-rust-runtime";
         version = "0";
         src = rustSource;
 
@@ -15,42 +21,21 @@ _:
         cargoBuildFlags = [
           "--package"
           "phenix-tui"
-        ];
-        cargoTestFlags = [
           "--package"
-          "phenix-tui"
+          "phenix-conductor"
         ];
+        doCheck = false;
 
         installPhase = ''
           runHook preInstall
           mkdir -p "$out/bin"
+
           phenix_binary="$(find target -path '*/release/phenix' -type f -print -quit)"
-          test -n "$phenix_binary"
-          cp "$phenix_binary" "$out/bin/phenix"
-          runHook postInstall
-        '';
-      };
-
-      phenixConductor = pkgs.rustPlatform.buildRustPackage {
-        pname = "phenix-conductor";
-        version = "0";
-        src = rustSource;
-
-        cargoLock.lockFile = ../rust/Cargo.lock;
-        cargoBuildFlags = [
-          "--package"
-          "phenix-conductor"
-        ];
-        cargoTestFlags = [
-          "--package"
-          "phenix-conductor"
-        ];
-
-        installPhase = ''
-          runHook preInstall
-          mkdir -p "$out/bin"
           conductor_binary="$(find target -path '*/release/phenix-conductor' -type f -print -quit)"
+          test -n "$phenix_binary"
           test -n "$conductor_binary"
+
+          cp "$phenix_binary" "$out/bin/phenix"
           cp "$conductor_binary" "$out/bin/phenix-conductor"
           runHook postInstall
         '';
@@ -104,14 +89,14 @@ _:
           runtimeInputs = [
             pkgs.nodejs
             config.packages.pi-acp
-            phenixConductor
+            phenixRustRuntime
           ];
           text = ''
             export PHENIX_HEADLESS_PROGRAM="${pkgs.nodejs}/bin/node"
             export PHENIX_HEADLESS_ENTRY="${config.packages.phenix-pi-package}/headless/main.ts"
             export PHENIX_SOURCE_ROOT="${config.packages.phenix-pi-package}"
-            export PHENIX_CONDUCTOR_COMMAND="${phenixConductor}/bin/phenix-conductor"
-            exec "${phenixTui}/bin/phenix" ${pkgs.lib.escapeShellArgs wrapperArguments} "$@"
+            export PHENIX_CONDUCTOR_COMMAND="${phenixRustRuntime}/bin/phenix-conductor"
+            exec "${phenixRustRuntime}/bin/phenix" ${pkgs.lib.escapeShellArgs wrapperArguments} "$@"
           '';
         };
 
@@ -159,8 +144,9 @@ _:
     in
     {
       packages = {
-        phenix-tui = phenixTui;
-        phenix-conductor = phenixConductor;
+        phenix-runtime = phenixRustRuntime;
+        phenix-tui = phenixRustRuntime;
+        phenix-conductor = phenixRustRuntime;
         phenix-acp-smoke = phenixAcpSmoke;
         inherit phenix;
         default = pkgs.lib.mkForce phenix;
