@@ -1,6 +1,8 @@
 use crate::layout::collect_layout;
+use crate::rich_document::RichMedia;
+use crate::terminal_media::{TerminalImagePlacement, TerminalMediaRenderer};
 use crate::theme::{panel, surface_style, theme_style};
-use crate::transcript::transcript_document;
+use crate::transcript::{transcript_document, TranscriptDocument};
 use phenix_frontend_config::{FrontendConfig, FrontendProviderRef, ThemeConfig};
 use phenix_runtime_api::{AuthPrompt, ExtensionUiRequest, ObjectiveState, RunSummary};
 use phenix_ui_core::{
@@ -17,6 +19,7 @@ use std::io;
 pub struct RatatuiRenderer {
     terminal: Option<DefaultTerminal>,
     provider: FrontendProviderRef,
+    media: TerminalMediaRenderer,
 }
 
 impl RatatuiRenderer {
@@ -24,6 +27,7 @@ impl RatatuiRenderer {
         Ok(Self {
             terminal: Some(ratatui::try_init()?),
             provider,
+            media: TerminalMediaRenderer::default(),
         })
     }
 }
@@ -31,15 +35,22 @@ impl RatatuiRenderer {
 impl UiRenderer for RatatuiRenderer {
     fn render(&mut self, state: &AppState) -> Result<(), String> {
         let config = self.provider.borrow().config().clone();
+        let mut screen = Rect::default();
         self.terminal
             .as_mut()
             .ok_or_else(|| "terminal is already restored".to_owned())?
-            .draw(|frame| render_application(frame, state, &config))
-            .map(|_| ())
-            .map_err(|error| error.to_string())
+            .draw(|frame| {
+                screen = frame.area();
+                render_application(frame, state, &config);
+            })
+            .map_err(|error| error.to_string())?;
+
+        let images = terminal_image_placements(screen, state, &config);
+        self.media.render(&images).map_err(|error| error.to_string())
     }
 
     fn suspend(&mut self) -> Result<(), String> {
+        self.media.clear().map_err(|error| error.to_string())?;
         self.terminal.take();
         ratatui::restore();
         Ok(())
@@ -53,6 +64,7 @@ impl UiRenderer for RatatuiRenderer {
 
 impl Drop for RatatuiRenderer {
     fn drop(&mut self) {
+        let _ = self.media.clear();
         self.terminal.take();
         ratatui::restore();
     }
@@ -142,6 +154,8 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme:
     frame.render_widget(block, area);
 
     let document = transcript_document(state, theme, inner.width);
+    let viewport_height = usize::from(inner.height.max(1));
+    let scroll = transcript_scroll(&document, state, viewport_height);
     let mut lines = document.lines;
     if lines.is_empty() {
         lines.push(Line::styled(
@@ -150,8 +164,20 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme:
         ));
     }
 
-    let viewport_height = usize::from(inner.height.max(1));
-    let max_scroll = lines.len().saturating_sub(viewport_height);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll.min(usize::from(u16::MAX)) as u16, 0)),
+        inner,
+    );
+}
+
+fn transcript_scroll(
+    document: &TranscriptDocument,
+    state: &AppState,
+    viewport_height: usize,
+) -> usize {
+    let max_scroll = document.lines.len().saturating_sub(viewport_height);
     let selected_scroll = state.view.transcript_selected_turn.and_then(|selected| {
         if document.turn_ranges.is_empty() {
             return None;
@@ -160,15 +186,61 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme:
         let range = &document.turn_ranges[selected];
         Some(range.end.saturating_sub(viewport_height).min(max_scroll))
     });
-    let scroll = selected_scroll
-        .unwrap_or_else(|| max_scroll.saturating_sub(state.view.transcript_scroll.offset));
+    selected_scroll.unwrap_or_else(|| max_scroll.saturating_sub(state.view.transcript_scroll.offset))
+}
 
-    frame.render_widget(
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
-            .scroll((scroll.min(usize::from(u16::MAX)) as u16, 0)),
-        inner,
-    );
+fn terminal_image_placements(
+    screen: Rect,
+    state: &AppState,
+    config: &FrontendConfig,
+) -> Vec<TerminalImagePlacement> {
+    if state.view.overlay.is_some() || !state.dialogs.is_empty() {
+        return Vec::new();
+    }
+    let mut panes = BTreeMap::new();
+    collect_layout(&config.layout.root, screen, state, &mut panes);
+    let Some(area) = panes.get(&ElementId::transcript()).copied() else {
+        return Vec::new();
+    };
+    let inner = workspace_pane(state.view.focus == FocusTarget::Transcript, &config.theme).inner(area);
+    if inner.width == 0 || inner.height == 0 {
+        return Vec::new();
+    }
+    let document = transcript_document(state, &config.theme, inner.width);
+    let viewport_height = usize::from(inner.height);
+    let scroll = transcript_scroll(&document, state, viewport_height);
+    let viewport_end = scroll.saturating_add(viewport_height);
+
+    document
+        .media
+        .into_iter()
+        .filter_map(|anchor| match anchor.media {
+            RichMedia::Image {
+                source,
+                rows,
+                alt: _,
+            } => {
+                let start = anchor.line;
+                let end = start.saturating_add(usize::from(rows));
+                // Do not rescale a partially clipped image into the remaining rows.
+                // It disappears while crossing a viewport edge and reappears once the
+                // complete placement rectangle is visible.
+                if start < scroll || end > viewport_end {
+                    return None;
+                }
+                let y = inner
+                    .y
+                    .saturating_add(u16::try_from(start - scroll).unwrap_or(u16::MAX));
+                Some(TerminalImagePlacement {
+                    x: inner.x,
+                    y,
+                    columns: inner.width,
+                    rows,
+                    source,
+                })
+            }
+        })
+        .collect()
 }
 
 fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
@@ -732,7 +804,7 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
                         } else {
                             "login"
                         }
-                    )
+                    ),
                 })
                 .collect(),
             theme,
@@ -785,6 +857,8 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
                 "Alt-4 specialized workspace · exact run/workflow inspection".to_owned(),
                 "Ctrl-B toggles the operational column".to_owned(),
                 "Transcript j/k selects messages; Enter toggles message details".to_owned(),
+                "Transcript [/] selects rich blocks; v/V changes the selected block view".to_owned(),
+                "Transcript H/L and J/K scroll the selected rendered block viewport".to_owned(),
                 "Transcript arrows/Page keys scroll within long messages".to_owned(),
                 "Ctrl-O focuses transcript and toggles selected message details".to_owned(),
                 "Ctrl-E cycles owned, embedded, and external editors".to_owned(),
@@ -1031,7 +1105,8 @@ fn overlay_selected(state: &AppState) -> usize {
 mod tests {
     use super::*;
     use phenix_runtime_api::{
-        BackendHealth, RunId, RunKind, RunState, RunSummary, RuntimeSnapshot,
+        BackendHealth, RunId, RunKind, RunState, RunSummary, RuntimeSnapshot, TranscriptBlock,
+        TranscriptRole,
     };
 
     #[test]
@@ -1107,5 +1182,35 @@ mod tests {
             .and_then(|run| run.model.as_ref())
             .expect("selected model");
         assert_eq!(model_selection_label(model), "routing: phenix/mixed");
+    }
+
+    #[test]
+    fn visible_png_media_is_projected_to_terminal_coordinates() {
+        let run_id = RunId::parse("run-image").expect("run id");
+        let mut state = AppState::default();
+        state.root_run = Some(run_id.clone());
+        state.selected_run = Some(run_id.clone());
+        state.transcript_mut(run_id.clone()).append(TranscriptBlock {
+            id: "u1".to_owned(),
+            run_id: run_id.clone(),
+            role: TranscriptRole::User,
+            text: "image".to_owned(),
+            complete: true,
+        });
+        state.transcript_mut(run_id).append(TranscriptBlock {
+            id: "a1".to_owned(),
+            run_id: RunId::parse("run-image").expect("run id"),
+            role: TranscriptRole::Assistant,
+            text: "![preview](data:image/png;base64,Zm9v)".to_owned(),
+            complete: true,
+        });
+        let placements = terminal_image_placements(
+            Rect::new(0, 0, 120, 40),
+            &state,
+            &FrontendConfig::default(),
+        );
+        assert_eq!(placements.len(), 1);
+        assert_eq!(placements[0].source, "data:image/png;base64,Zm9v");
+        assert!(placements[0].rows > 0);
     }
 }
