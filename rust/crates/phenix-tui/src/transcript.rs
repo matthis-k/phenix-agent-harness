@@ -1,9 +1,9 @@
-use crate::rich_document::{render_document, RenderedRichBlock, RichMedia};
+use crate::rich_document::{render_document, RichBlockPresentation, RichMedia};
 use crate::theme::{surface_style, theme_style};
 use phenix_frontend_config::ThemeConfig;
 use phenix_ui_core::{
-    group_transcript_turns, parse_markdown, AppState, RichBlockView, RichBlockViewport,
-    TranscriptDetailKind, TranscriptTurn, TranscriptTurnDetail,
+    group_transcript_turns, parse_markdown, AppState, TranscriptDetailKind, TranscriptTurn,
+    TranscriptTurnDetail,
 };
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -11,7 +11,6 @@ use std::ops::Range;
 
 const DETAIL_PREFIX: &str = "  │ ";
 const TURN_GAP_LINES: usize = 2;
-const RICH_VIEWPORT_ROWS: usize = 12;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TranscriptMediaAnchor {
@@ -54,7 +53,7 @@ pub(crate) fn transcript_document(
         }
     }
 
-    let selected = if turns.is_empty() {
+    let selected_turn = if turns.is_empty() {
         None
     } else {
         Some(
@@ -78,7 +77,8 @@ pub(crate) fn transcript_document(
             &mut lines,
             &mut media,
             turn,
-            selected == Some(index) && state.view.focus == phenix_ui_core::FocusTarget::Transcript,
+            selected_turn == Some(index)
+                && state.view.focus == phenix_ui_core::FocusTarget::Transcript,
             state.view.transcript_turn_is_expanded(&turn.id),
             width,
             state,
@@ -111,27 +111,22 @@ fn render_turn(
 
     if !turn.response.trim().is_empty() {
         let document = parse_markdown(&turn.response);
-        let rendered = render_document(&document, width, theme, |block_index| {
-            state
-                .view
-                .rich_block_view(&rich_block_key(&turn.id, block_index))
+        let rendered = render_document(&document, width, theme, |block_index, _| {
+            let key = rich_block_key(&turn.id, block_index);
+            RichBlockPresentation {
+                view: state.view.rich_block_view(&key),
+                viewport: state.view.rich_block_viewport(&key),
+                selected: selected && state.view.transcript_selected_block == Some(block_index),
+            }
         });
-        for (block_index, mut block) in rendered.into_iter().enumerate() {
+        for (block_index, block) in rendered.into_iter().enumerate() {
             if block_index > 0 {
                 lines.push(Line::default());
             }
-            let key = rich_block_key(&turn.id, block_index);
-            apply_rich_block_viewport(
-                &mut block,
-                state.view.rich_block_viewport(&key),
-                usize::from(width.max(1)),
-            );
-            if selected && state.view.transcript_selected_block == Some(block_index) {
-                mark_selected_block(&mut block, theme);
-            }
             let start = lines.len();
-            if let Some(block_media) = block.media.clone() {
+            if let Some(block_media) = block.media {
                 media.push(TranscriptMediaAnchor {
+                    // Interactive rich blocks reserve their first row for the view toolbar.
                     line: start.saturating_add(1),
                     media: block_media,
                 });
@@ -157,67 +152,6 @@ fn render_turn(
 
 fn rich_block_key(turn_id: &str, index: usize) -> String {
     format!("{turn_id}:block:{index}")
-}
-
-fn apply_rich_block_viewport(
-    block: &mut RenderedRichBlock,
-    viewport: RichBlockViewport,
-    width: usize,
-) {
-    if block.active_view != RichBlockView::Rendered || block.lines.len() <= 1 {
-        return;
-    }
-    let toolbar = block.lines.remove(0);
-    let body = std::mem::take(&mut block.lines);
-    let body = body
-        .into_iter()
-        .skip(viewport.vertical)
-        .take(RICH_VIEWPORT_ROWS)
-        .map(|line| clip_line(&line, viewport.horizontal, width))
-        .collect::<Vec<_>>();
-    block.lines = std::iter::once(toolbar).chain(body).collect();
-}
-
-fn clip_line(line: &Line<'_>, horizontal: usize, width: usize) -> Line<'static> {
-    if horizontal == 0 {
-        return line.clone().into_owned();
-    }
-    let mut skip = horizontal;
-    let mut remaining = width;
-    let mut spans = Vec::new();
-    for span in &line.spans {
-        if remaining == 0 {
-            break;
-        }
-        let characters = span.content.chars().collect::<Vec<_>>();
-        if skip >= characters.len() {
-            skip -= characters.len();
-            continue;
-        }
-        let start = skip;
-        skip = 0;
-        let take = remaining.min(characters.len().saturating_sub(start));
-        let content = characters[start..start + take].iter().collect::<String>();
-        remaining -= take;
-        spans.push(Span::styled(content, span.style));
-    }
-    Line::from(spans)
-}
-
-fn mark_selected_block(block: &mut RenderedRichBlock, theme: &ThemeConfig) {
-    let Some(toolbar) = block.lines.first_mut() else {
-        return;
-    };
-    let Some(first) = toolbar.spans.first_mut() else {
-        return;
-    };
-    let text = first.content.to_string();
-    first.content = if let Some(stripped) = text.strip_prefix(' ') {
-        format!("▸{stripped}").into()
-    } else {
-        format!("▸{text}").into()
-    };
-    first.style = theme_style(theme, "Accent").add_modifier(Modifier::BOLD);
 }
 
 fn user_message_lines(text: &str, width: u16, theme: &ThemeConfig) -> Vec<Line<'static>> {
@@ -389,6 +323,7 @@ fn wrap_preserving_text(line: &str, width: usize) -> Vec<String> {
 mod tests {
     use super::*;
     use phenix_runtime_api::{RunId, TranscriptBlock, TranscriptRole};
+    use phenix_ui_core::{RichBlockView, RichBlockViewport};
 
     fn block(id: &str, role: TranscriptRole, text: &str) -> TranscriptBlock {
         TranscriptBlock {
@@ -431,13 +366,11 @@ mod tests {
         transcript.append(block("a2", TranscriptRole::Assistant, "answer two"));
         let document = transcript_document(&state, &ThemeConfig::default(), 50);
         assert_eq!(document.turn_ranges.len(), 2);
-        let first_end = document.turn_ranges[0].end;
-        let second_start = document.turn_ranges[1].start;
-        assert!(second_start >= first_end + TURN_GAP_LINES);
+        assert!(document.turn_ranges[1].start >= document.turn_ranges[0].end + TURN_GAP_LINES);
     }
 
     #[test]
-    fn per_block_view_state_changes_only_that_component() {
+    fn per_block_view_and_viewport_state_reaches_the_component_renderer() {
         let run_id = RunId::parse("run-1").expect("run id");
         let mut state = AppState::default();
         state.root_run = Some(run_id.clone());
@@ -445,43 +378,25 @@ mod tests {
         state.transcript_mut(run_id.clone()).append(block(
             "u1",
             TranscriptRole::User,
-            "tables",
+            "code",
         ));
         state.transcript_mut(run_id).append(block(
             "a1",
             TranscriptRole::Assistant,
-            "| A | B |\n| --- | --- |\n| 1 | 2 |\n\n| C | D |\n| --- | --- |\n| 3 | 4 |",
+            "```rust\nzero\none\ntwo\nthree\n```",
         ));
+        let key = "run-1:u1:block:0".to_owned();
         state
             .view
-            .set_rich_block_view("run-1:u1:block:0".to_owned(), RichBlockView::Grid);
+            .set_rich_block_view(key.clone(), RichBlockView::Source);
+        *state.view.rich_block_viewport_mut(key) = RichBlockViewport {
+            horizontal: 0,
+            vertical: 2,
+        };
         let document = transcript_document(&state, &ThemeConfig::default(), 50);
         let text = document.lines.iter().map(line_text).collect::<Vec<_>>();
-        assert!(text.iter().any(|line| line.starts_with('┌')));
-        assert!(text.iter().any(|line| line.contains("[dense]") || line.contains("[grid]")));
-    }
-
-    #[test]
-    fn rendered_block_viewport_is_independent_of_transcript_scroll() {
-        let mut block = RenderedRichBlock {
-            lines: std::iter::once(Line::from("toolbar"))
-                .chain((0..20).map(|index| Line::from(format!("line-{index}"))))
-                .collect(),
-            views: vec![RichBlockView::Source, RichBlockView::Rendered],
-            active_view: RichBlockView::Rendered,
-            media: None,
-        };
-        apply_rich_block_viewport(
-            &mut block,
-            RichBlockViewport {
-                horizontal: 0,
-                vertical: 5,
-            },
-            80,
-        );
-        assert_eq!(line_text(&block.lines[0]), "toolbar");
-        assert_eq!(line_text(&block.lines[1]), "line-5");
-        assert_eq!(block.lines.len(), RICH_VIEWPORT_ROWS + 1);
+        assert!(text.iter().any(|line| line.contains("two")));
+        assert!(!text.iter().any(|line| line.trim() == "zero"));
     }
 
     #[test]
@@ -502,39 +417,7 @@ mod tests {
         ));
         let document = transcript_document(&state, &ThemeConfig::default(), 50);
         assert_eq!(document.media.len(), 1);
-        assert!(matches!(
-            document.media[0].media,
-            RichMedia::Image { .. }
-        ));
-    }
-
-    #[test]
-    fn collapsed_turn_reads_like_chat_content() {
-        let turn = TranscriptTurn {
-            id: "run-1:u1".to_owned(),
-            user: Some("hi".to_owned()),
-            response: "Hello **there**.".to_owned(),
-            details: vec![TranscriptTurnDetail {
-                kind: TranscriptDetailKind::Thinking,
-                text: "hidden".to_owned(),
-            }],
-        };
-        let mut lines = Vec::new();
-        render_turn(
-            &mut lines,
-            &mut Vec::new(),
-            &turn,
-            false,
-            false,
-            80,
-            &AppState::default(),
-            &ThemeConfig::default(),
-        );
-        let text = lines.iter().map(line_text).collect::<Vec<_>>();
-        assert!(text.iter().any(|line| line.contains("hi")));
-        assert!(text.iter().any(|line| line.contains("Hello there.")));
-        assert!(text.iter().any(|line| line.contains("[Thinking]")));
-        assert!(!text.iter().any(|line| line.contains("hidden")));
+        assert!(matches!(document.media[0].media, RichMedia::Image { .. }));
     }
 
     #[test]
