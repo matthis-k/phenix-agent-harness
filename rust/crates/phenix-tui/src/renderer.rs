@@ -1179,9 +1179,11 @@ mod tests {
     #[test]
     fn visible_png_media_is_projected_to_terminal_coordinates() {
         let run_id = RunId::parse("run-image").expect("run id");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
-        state.selected_run = Some(run_id.clone());
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..AppState::default()
+        };
         state
             .transcript_mut(run_id.clone())
             .append(TranscriptBlock {
