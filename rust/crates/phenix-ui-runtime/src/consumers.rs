@@ -96,6 +96,63 @@ impl EventConsumer for UiStateConsumer {
     }
 }
 
+/// Native interaction for rich transcript components. This deliberately remains
+/// below the Lua keymap surface while the block interaction model is still being
+/// stabilized. It does not define layout/window semantics.
+struct TranscriptRichBlockConsumer {
+    id: ElementId,
+}
+
+impl TranscriptRichBlockConsumer {
+    fn new() -> Self {
+        Self {
+            id: ElementId::transcript(),
+        }
+    }
+}
+
+impl EventConsumer for TranscriptRichBlockConsumer {
+    fn element_id(&self) -> &ElementId {
+        &self.id
+    }
+
+    fn on_ui(&mut self, state: &AppState, envelope: &EventEnvelope<UiEvent>) -> ReactionBatch {
+        if state.view.focus != FocusTarget::Transcript || state.view.overlay.is_some() {
+            return ReactionBatch::none();
+        }
+        let UiEvent::Input(UiInput::Key(key)) = &envelope.event else {
+            return ReactionBatch::none();
+        };
+        if key.modifiers.control || key.modifiers.alt {
+            return ReactionBatch::none();
+        }
+        let mutation = match key.code {
+            KeyCode::Character('[') => ViewMutation::MoveTranscriptBlock(-1),
+            KeyCode::Character(']') => ViewMutation::MoveTranscriptBlock(1),
+            KeyCode::Character('v') => ViewMutation::CycleTranscriptBlockView(1),
+            KeyCode::Character('V') => ViewMutation::CycleTranscriptBlockView(-1),
+            KeyCode::Character('H') => ViewMutation::ScrollTranscriptBlock {
+                horizontal: -4,
+                vertical: 0,
+            },
+            KeyCode::Character('L') => ViewMutation::ScrollTranscriptBlock {
+                horizontal: 4,
+                vertical: 0,
+            },
+            KeyCode::Character('J') => ViewMutation::ScrollTranscriptBlock {
+                horizontal: 0,
+                vertical: 1,
+            },
+            KeyCode::Character('K') => ViewMutation::ScrollTranscriptBlock {
+                horizontal: 0,
+                vertical: -1,
+            },
+            _ => return ReactionBatch::none(),
+        };
+        ReactionBatch::stop(vec![BusReaction::View(mutation)])
+    }
+}
+
 #[derive(Clone, Copy)]
 enum WorkspaceMode {
     Default,
@@ -206,6 +263,7 @@ pub fn install_core_consumers(router: &mut EventRouter) -> Result<(), RouterErro
     ] {
         router.register_consumer(Box::new(UiStateConsumer::new(element)))?;
     }
+    router.register_consumer(Box::new(TranscriptRichBlockConsumer::new()))?;
     router.register_consumer(Box::new(WorkspaceModeConsumer::new()))?;
     router.register_consumer(Box::new(ShutdownConsumer::new()))?;
     Ok(())
@@ -216,6 +274,17 @@ mod tests {
     use super::*;
     use phenix_runtime_api::BackendError;
     use phenix_ui_core::{KeyInput, KeyModifiers};
+
+    fn key(character: char) -> EventEnvelope<UiEvent> {
+        EventEnvelope::to(
+            ElementId::transcript(),
+            UiEvent::Input(UiInput::Key(KeyInput {
+                code: KeyCode::Character(character),
+                modifiers: KeyModifiers::default(),
+                repeat: false,
+            })),
+        )
+    }
 
     fn mode_key(digit: char) -> EventEnvelope<UiEvent> {
         EventEnvelope::to(
@@ -229,6 +298,22 @@ mod tests {
                 repeat: false,
             })),
         )
+    }
+
+    #[test]
+    fn transcript_rich_block_controls_are_non_modal() {
+        let mut state = AppState::default();
+        state.view.focus = FocusTarget::Transcript;
+        let mut consumer = TranscriptRichBlockConsumer::new();
+        let batch = consumer.on_ui(&state, &key('v'));
+        assert_eq!(batch.propagation, Propagation::Stop);
+        assert_eq!(
+            batch.reactions,
+            vec![BusReaction::View(ViewMutation::CycleTranscriptBlockView(1))]
+        );
+        let ordinary = consumer.on_ui(&state, &key('x'));
+        assert_eq!(ordinary.propagation, Propagation::Continue);
+        assert!(ordinary.reactions.is_empty());
     }
 
     #[test]
