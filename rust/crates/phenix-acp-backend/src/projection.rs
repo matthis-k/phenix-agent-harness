@@ -236,9 +236,7 @@ fn content_markdown(content: &ContentBlock) -> Result<String, BackendError> {
             image.mime_type, image.data
         )),
         ContentBlock::Audio(audio) => Ok(format!("[audio: {}]", audio.mime_type)),
-        ContentBlock::ResourceLink(resource) => {
-            Ok(format!("[resource]({})", resource.uri))
-        }
+        ContentBlock::ResourceLink(resource) => Ok(format!("[resource]({})", resource.uri)),
         ContentBlock::Resource(resource) => serde_json::to_string(resource)
             .map(|value| format!("[embedded resource: {value}]"))
             .map_err(|error| BackendError::Protocol(error.to_string())),
@@ -371,10 +369,8 @@ mod tests {
 
     #[test]
     fn image_content_survives_projection_as_a_rich_image() {
-        let image = ContentBlock::Image(ImageContent::new(
-            "Zm9v".to_owned(),
-            "image/png".to_owned(),
-        ));
+        let image =
+            ContentBlock::Image(ImageContent::new("Zm9v".to_owned(), "image/png".to_owned()));
         assert_eq!(
             content_markdown(&image).expect("image projection"),
             "![ACP image](data:image/png;base64,Zm9v)"

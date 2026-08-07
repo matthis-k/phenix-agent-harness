@@ -125,12 +125,7 @@ impl TerminalMediaRenderer {
             .protocols
             .get(&key)
             .expect("cached protocol exists after insertion");
-        let area = Rect::new(
-            placement.x,
-            placement.y,
-            placement.columns,
-            placement.rows,
-        );
+        let area = Rect::new(placement.x, placement.y, placement.columns, placement.rows);
         if protocol.needs_placeholder(area).is_some() {
             return Ok(());
         }

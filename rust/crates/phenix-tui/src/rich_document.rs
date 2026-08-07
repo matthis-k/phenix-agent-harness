@@ -49,10 +49,7 @@ pub(crate) fn render_document(
         .map(|(index, block)| {
             let mut presentation = presentation_for(index, block);
             let views = block.candidate_views();
-            if presentation
-                .view
-                .is_none_or(|view| !views.contains(&view))
-            {
+            if presentation.view.is_none_or(|view| !views.contains(&view)) {
                 presentation.view = Some(block.default_view());
             }
             render_block(block, presentation, width, theme)
@@ -110,11 +107,7 @@ fn render_block(
                         "• ".to_owned()
                     };
                     let mut spans = vec![Span::styled(marker, theme_style(theme, "Accent"))];
-                    spans.extend(styled_rich_text(
-                        item,
-                        theme_style(theme, "Normal"),
-                        theme,
-                    ));
+                    spans.extend(styled_rich_text(item, theme_style(theme, "Normal"), theme));
                     Line::from(spans)
                 })
                 .collect(),
@@ -138,7 +131,9 @@ fn render_code(
     width: usize,
     theme: &ThemeConfig,
 ) -> RenderedRichBlock {
-    let view = presentation.view.unwrap_or_else(|| RichBlock::Code(code.clone()).default_view());
+    let view = presentation
+        .view
+        .unwrap_or_else(|| RichBlock::Code(code.clone()).default_view());
     if view == RichBlockView::Rendered && code.language_is("mermaid") {
         return render_mermaid(code, presentation, width, theme);
     }
@@ -441,14 +436,22 @@ fn table_widths(table: &RichTable, available: usize, separator_width: usize) -> 
     let available = available.saturating_sub(separators).max(columns);
     let mut widths = (0..columns)
         .map(|column| {
-            std::iter::once(table.header.get(column).map_or_else(String::new, RichText::text))
-                .chain(table.rows.iter().map(|row| {
-                    row.get(column).map_or_else(String::new, RichText::text)
-                }))
-                .map(|cell| cell.chars().count())
-                .max()
-                .unwrap_or(1)
-                .clamp(1, 48)
+            std::iter::once(
+                table
+                    .header
+                    .get(column)
+                    .map_or_else(String::new, RichText::text),
+            )
+            .chain(
+                table
+                    .rows
+                    .iter()
+                    .map(|row| row.get(column).map_or_else(String::new, RichText::text)),
+            )
+            .map(|cell| cell.chars().count())
+            .max()
+            .unwrap_or(1)
+            .clamp(1, 48)
         })
         .collect::<Vec<_>>();
     while widths.iter().sum::<usize>() > available {
@@ -535,7 +538,11 @@ fn render_image(
     let surface = surface_style(theme, "MediaBlock");
     let views = RichBlock::Image(image.clone()).candidate_views();
     let mut lines = vec![block_toolbar(
-        if image.alt.is_empty() { "image" } else { &image.alt },
+        if image.alt.is_empty() {
+            "image"
+        } else {
+            &image.alt
+        },
         views,
         view,
         presentation.selected,
@@ -553,7 +560,10 @@ fn render_image(
             ));
             for fragment in wrap_text(&image.source, width.saturating_sub(4).max(1)) {
                 lines.push(padded_line(
-                    vec![Span::styled(format!("  {fragment}"), theme_style(theme, "Normal"))],
+                    vec![Span::styled(
+                        format!("  {fragment}"),
+                        theme_style(theme, "Normal"),
+                    )],
                     width,
                     surface,
                 ));
@@ -561,9 +571,7 @@ fn render_image(
             RenderedRichBlock { lines, media: None }
         }
         _ => {
-            lines.extend(
-                (0..IMAGE_PREVIEW_ROWS).map(|_| surface_line("", width, surface)),
-            );
+            lines.extend((0..IMAGE_PREVIEW_ROWS).map(|_| surface_line("", width, surface)));
             RenderedRichBlock {
                 lines,
                 media: Some(RichMedia::Image {
@@ -595,8 +603,7 @@ fn block_toolbar(
     )];
     spans.push(Span::styled(
         label.to_owned(),
-        theme_style(theme, if selected { "Accent" } else { "Muted" })
-            .add_modifier(Modifier::BOLD),
+        theme_style(theme, if selected { "Accent" } else { "Muted" }).add_modifier(Modifier::BOLD),
     ));
     if views.len() > 1 {
         spans.push(Span::styled("  ", surface));
@@ -622,7 +629,9 @@ fn styled_rich_text(text: &RichText, base: Style, theme: &ThemeConfig) -> Vec<Sp
         .iter()
         .map(|span| match span {
             RichSpan::Text(value) => Span::styled(value.clone(), base),
-            RichSpan::Strong(value) => Span::styled(value.clone(), base.add_modifier(Modifier::BOLD)),
+            RichSpan::Strong(value) => {
+                Span::styled(value.clone(), base.add_modifier(Modifier::BOLD))
+            }
             RichSpan::Emphasis(value) => {
                 Span::styled(value.clone(), base.add_modifier(Modifier::ITALIC))
             }
@@ -709,7 +718,10 @@ mod tests {
         assert!(rendered[0].lines.len() <= CODE_VIEWPORT_ROWS + 2);
         let background = surface_style(&ThemeConfig::default(), "CodeBlock").bg;
         assert!(background.is_some());
-        assert!(rendered[0].lines.iter().all(|line| line.style.bg == background));
+        assert!(rendered[0]
+            .lines
+            .iter()
+            .all(|line| line.style.bg == background));
     }
 
     #[test]
@@ -747,7 +759,9 @@ mod tests {
         let dense_text = dense[0].lines.iter().map(line_text).collect::<Vec<_>>();
         let grid_text = grid[0].lines.iter().map(line_text).collect::<Vec<_>>();
         assert!(!dense_text.iter().any(|line| line.starts_with('┌')));
-        assert!(grid_text.iter().any(|line| line.starts_with("  ┌") || line.starts_with('┌')));
+        assert!(grid_text
+            .iter()
+            .any(|line| line.starts_with("  ┌") || line.starts_with('┌')));
     }
 
     #[test]

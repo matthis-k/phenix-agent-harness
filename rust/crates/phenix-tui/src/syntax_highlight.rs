@@ -98,9 +98,7 @@ fn highlight_style(name: &str, theme: &ThemeConfig) -> Style {
         "keyword" | "conditional" | "repeat" | "operator" | "preproc" => {
             theme_style(theme, "Tool").add_modifier(Modifier::BOLD)
         }
-        "type" | "constructor" | "module" | "tag" | "attribute" => {
-            theme_style(theme, "Accent")
-        }
+        "type" | "constructor" | "module" | "tag" | "attribute" => theme_style(theme, "Accent"),
         "function" | "method" => theme_style(theme, "Tool"),
         "punctuation" => theme_style(theme, "Muted"),
         "field" | "property" | "parameter" | "variable" | "embedded" | "label" | _ => {
@@ -132,14 +130,9 @@ fn configured(
     injections: &str,
     locals: &str,
 ) -> HighlightConfiguration {
-    let mut configuration = HighlightConfiguration::new(
-        language,
-        name,
-        highlights,
-        injections,
-        locals,
-    )
-    .expect("bundled tree-sitter query must match bundled grammar");
+    let mut configuration =
+        HighlightConfiguration::new(language, name, highlights, injections, locals)
+            .expect("bundled tree-sitter query must match bundled grammar");
     configuration.configure(HIGHLIGHT_NAMES);
     configuration
 }
@@ -286,13 +279,16 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert_eq!(rendered, source);
-        assert!(lines.iter().any(|line| line.spans.iter().any(|span| {
-            span.style != theme_style(&ThemeConfig::default(), "Normal")
-        })));
+        assert!(lines.iter().any(|line| line
+            .spans
+            .iter()
+            .any(|span| { span.style != theme_style(&ThemeConfig::default(), "Normal") })));
     }
 
     #[test]
     fn unsupported_language_falls_back_to_plain_rendering() {
-        assert!(highlighted_lines(Some("unknown-language"), "x", &ThemeConfig::default()).is_none());
+        assert!(
+            highlighted_lines(Some("unknown-language"), "x", &ThemeConfig::default()).is_none()
+        );
     }
 }

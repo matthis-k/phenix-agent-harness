@@ -347,11 +347,10 @@ mod tests {
     fn unexpected_backend_stop_is_a_visible_failure_not_a_user_quit() {
         let mut consumer = RootContentConsumer::new();
         let state = AppState::default();
-        let envelope = EventEnvelope::broadcast(ContentEvent::Backend(Box::new(
-            BackendOutput::Stopped {
+        let envelope =
+            EventEnvelope::broadcast(ContentEvent::Backend(Box::new(BackendOutput::Stopped {
                 result: Err(BackendError::Transport("downstream closed".to_owned())),
-            },
-        )));
+            })));
         let batch = consumer.on_content(&state, &envelope);
         assert!(matches!(
             batch.reactions.as_slice(),

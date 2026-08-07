@@ -33,7 +33,9 @@ pub(crate) fn transcript_document(
     let mut turns = state
         .input_target()
         .and_then(|run_id| state.transcript(run_id))
-        .map_or_else(Vec::new, |transcript| group_transcript_turns(&transcript.blocks));
+        .map_or_else(Vec::new, |transcript| {
+            group_transcript_turns(&transcript.blocks)
+        });
 
     if !state.notifications.is_empty() {
         if turns.is_empty() {
@@ -45,11 +47,15 @@ pub(crate) fn transcript_document(
             });
         }
         if let Some(turn) = turns.last_mut() {
-            turn.details
-                .extend(state.notifications.iter().map(|message| TranscriptTurnDetail {
-                    kind: TranscriptDetailKind::System,
-                    text: message.clone(),
-                }));
+            turn.details.extend(
+                state
+                    .notifications
+                    .iter()
+                    .map(|message| TranscriptTurnDetail {
+                        kind: TranscriptDetailKind::System,
+                        text: message.clone(),
+                    }),
+            );
         }
     }
 
@@ -347,7 +353,9 @@ mod tests {
         let theme = ThemeConfig::default();
         let lines = user_message_lines("abcdefghijklmnopqrstuvwxyz", 16, &theme);
         assert!(lines.len() > 2);
-        assert!(lines.iter().all(|line| line_text(line).chars().count() >= 16));
+        assert!(lines
+            .iter()
+            .all(|line| line_text(line).chars().count() >= 16));
         let background = surface_style(&theme, "UserMessage").bg;
         assert!(background.is_some());
         assert!(lines.iter().all(|line| line.style.bg == background));
@@ -375,11 +383,9 @@ mod tests {
         let mut state = AppState::default();
         state.root_run = Some(run_id.clone());
         state.selected_run = Some(run_id.clone());
-        state.transcript_mut(run_id.clone()).append(block(
-            "u1",
-            TranscriptRole::User,
-            "code",
-        ));
+        state
+            .transcript_mut(run_id.clone())
+            .append(block("u1", TranscriptRole::User, "code"));
         state.transcript_mut(run_id).append(block(
             "a1",
             TranscriptRole::Assistant,
@@ -405,11 +411,9 @@ mod tests {
         let mut state = AppState::default();
         state.root_run = Some(run_id.clone());
         state.selected_run = Some(run_id.clone());
-        state.transcript_mut(run_id.clone()).append(block(
-            "u1",
-            TranscriptRole::User,
-            "image",
-        ));
+        state
+            .transcript_mut(run_id.clone())
+            .append(block("u1", TranscriptRole::User, "image"));
         state.transcript_mut(run_id).append(block(
             "a1",
             TranscriptRole::Assistant,

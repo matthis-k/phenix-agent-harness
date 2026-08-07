@@ -40,7 +40,10 @@ fn inbound_prompt_routes_models_and_completes_a_delegation_tool_loop() -> Result
     )?;
     let configured = process.receive_response(100)?;
     assert_eq!(configured["result"]["revision"], 1);
-    assert_eq!(configured["result"]["definition_id"], "definition.black-box");
+    assert_eq!(
+        configured["result"]["definition_id"],
+        "definition.black-box"
+    );
 
     process.send_request(2, "session/new", &NewSessionRequest::new(&cwd))?;
     let created = process.receive_response(2)?;
