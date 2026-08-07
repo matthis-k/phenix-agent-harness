@@ -1,5 +1,6 @@
 use phenix_frontend_config::{
     FrontendCommand, FrontendConfig, FrontendConfigProvider, FrontendContext, FrontendProviderError,
+    FrontendProviderRef,
 };
 use phenix_ui_core::{AppState, EventEnvelope, KeyCode, KeyInput, KeyModifiers, UiInput};
 use phenix_ui_runtime::{
@@ -54,10 +55,14 @@ fn enter(shift: bool) -> EventEnvelope<UiEvent> {
     })))
 }
 
+fn consumer() -> FrontendProviderConsumer {
+    let provider: FrontendProviderRef = Rc::new(RefCell::new(EmptyProvider::default()));
+    FrontendProviderConsumer::new(provider)
+}
+
 #[test]
 fn shift_enter_inserts_a_newline_instead_of_submitting() {
-    let provider = Rc::new(RefCell::new(EmptyProvider::default()));
-    let mut consumer = FrontendProviderConsumer::new(provider);
+    let mut consumer = consumer();
     let reactions = consumer.on_ui(&AppState::default(), &enter(true));
 
     assert_eq!(
@@ -70,8 +75,7 @@ fn shift_enter_inserts_a_newline_instead_of_submitting() {
 
 #[test]
 fn plain_enter_remains_the_submit_action() {
-    let provider = Rc::new(RefCell::new(EmptyProvider::default()));
-    let mut consumer = FrontendProviderConsumer::new(provider);
+    let mut consumer = consumer();
     let reactions = consumer.on_ui(&AppState::default(), &enter(false));
 
     assert!(matches!(
