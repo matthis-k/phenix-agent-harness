@@ -136,6 +136,12 @@ pub(crate) fn finish_prompt(
             outputs.event(BackendEvent::TranscriptUpdated(block.clone()))?;
         }
     }
+    // ACP message IDs are optional. Anonymous chunks are therefore keyed only for the
+    // lifetime of one prompt. Keeping those keys after completion caused the next prompt
+    // to append into the previous assistant/user message (for example `availableHi`).
+    // The frontend already owns the emitted transcript history, so this map is strictly
+    // streaming state and must be reset at the prompt boundary.
+    session.transcript_blocks.clear();
     match stop_reason {
         phenix_acp::acp::schema::v1::StopReason::Cancelled => {
             session.run.state = RunState::Cancelled;
