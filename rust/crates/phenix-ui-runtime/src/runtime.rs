@@ -791,8 +791,10 @@ mod tests {
     #[test]
     fn transcript_turns_are_selected_and_expanded_independently() {
         let run_id = phenix_runtime_api::RunId::parse("run-1").expect("run id");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            ..AppState::default()
+        };
         for (id, role) in [
             ("u1", TranscriptRole::User),
             ("a1", TranscriptRole::Assistant),
@@ -819,8 +821,10 @@ mod tests {
     #[test]
     fn rich_blocks_have_independent_views_and_viewports() {
         let run_id = phenix_runtime_api::RunId::parse("run-rich").expect("run id");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            ..AppState::default()
+        };
         state.selected_run = Some(run_id.clone());
         state
             .transcript_mut(run_id.clone())
