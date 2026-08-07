@@ -1,15 +1,13 @@
 use crate::{
     install_core_consumers, install_frontend_provider, BusReaction, EventRouter, InputEdit,
-    UiIngressError, UiMailbox, UiMessage, ViewMutation,
+    UiEvent, UiIngressError, UiMailbox, UiMessage, ViewMutation,
 };
 use phenix_frontend_config::FrontendProviderRef;
 use phenix_runtime_api::{BackendClient, BackendCommand, BackendRuntime, BackendWorker};
-#[cfg(test)]
-use phenix_ui_core::ElementId;
 use phenix_ui_core::{
     command_completions, group_transcript_turns, parse_markdown, reduce, AppEffect, AppEvent,
-    AppState, FocusDirection, FocusTarget, InputEditor, LayoutAxis, OverlayState, ResizeRequest,
-    RichBlock, RichBlockView, VimMode,
+    AppState, ElementId, FocusDirection, FocusTarget, InputEditor, LayoutAxis, OverlayState,
+    ResizeRequest, RichBlock, RichBlockView, RouteTarget, UiInput, VimMode,
 };
 use std::collections::VecDeque;
 use std::env;
@@ -28,6 +26,13 @@ const DEFAULT_DRAIN_LIMIT: usize = 256;
 
 pub trait UiRenderer {
     fn render(&mut self, state: &AppState) -> Result<(), String>;
+
+    /// Return the top-level UI element occupying a terminal coordinate from the
+    /// most recently rendered frame. Keyboard focus is intentionally irrelevant
+    /// to this lookup; pointer events are spatially addressed.
+    fn hit_test(&self, _column: u16, _row: u16) -> Option<ElementId> {
+        None
+    }
 
     fn suspend(&mut self) -> Result<(), String> {
         Ok(())
@@ -209,7 +214,16 @@ impl<R: UiRenderer> UiRuntime<R> {
     fn apply(&mut self, message: UiMessage) -> bool {
         let reactions = match message {
             UiMessage::Content(envelope) => self.router.route_content(&self.state, &envelope),
-            UiMessage::Ui(envelope) => self.router.route_ui(&self.state, &envelope),
+            UiMessage::Ui(mut envelope) => {
+                if matches!(&envelope.target, RouteTarget::Focused) {
+                    if let UiEvent::Input(UiInput::Mouse(mouse)) = &envelope.event {
+                        if let Some(element) = self.renderer.hit_test(mouse.column, mouse.row) {
+                            envelope.target = RouteTarget::Bubble(element);
+                        }
+                    }
+                }
+                self.router.route_ui(&self.state, &envelope)
+            }
             UiMessage::App(event) => vec![BusReaction::App(event)],
         };
         self.apply_reactions(reactions)
@@ -452,7 +466,8 @@ fn move_transcript_turn(state: &mut AppState, delta: i32) {
             .min(last),
     );
     state.view.transcript_selected_block = None;
-    state.view.transcript_scroll.follow_end = false;
+    state.view.transcript_scroll.follow_end = true;
+    state.view.transcript_scroll.offset = 0;
 }
 
 fn toggle_transcript_turn_details(state: &mut AppState) {
@@ -801,8 +816,12 @@ mod tests {
                 complete: true,
             });
         }
+        state.view.transcript_scroll.follow_end = false;
+        state.view.transcript_scroll.offset = 12;
         apply_view_mutation(&mut state, ViewMutation::MoveTranscriptTurn(-1));
         assert_eq!(state.view.transcript_selected_turn, Some(0));
+        assert!(state.view.transcript_scroll.follow_end);
+        assert_eq!(state.view.transcript_scroll.offset, 0);
         apply_view_mutation(&mut state, ViewMutation::ToggleTranscriptTurnDetails);
         assert!(state.view.transcript_turn_is_expanded("run-1:u1"));
         assert!(!state.view.transcript_turn_is_expanded("run-1:u2"));
