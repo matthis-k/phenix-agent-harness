@@ -654,7 +654,7 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &Th
     .join("  ·  ");
     frame.render_widget(
         Paragraph::new(line)
-            .style(surface_style(theme, "Normal"))
+            .style(surface_style(theme, "Surface"))
             .wrap(Wrap { trim: true }),
         area,
     );
