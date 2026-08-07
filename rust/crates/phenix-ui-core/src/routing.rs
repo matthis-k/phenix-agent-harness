@@ -37,12 +37,20 @@ impl ElementId {
         Self("ui.header".to_owned())
     }
 
+    pub fn inspector() -> Self {
+        Self("ui.inspector".to_owned())
+    }
+
     pub fn sidebar() -> Self {
         Self("ui.sidebar".to_owned())
     }
 
     pub fn transcript() -> Self {
         Self("ui.transcript".to_owned())
+    }
+
+    pub fn specialized() -> Self {
+        Self("ui.specialized".to_owned())
     }
 
     pub fn input() -> Self {
@@ -175,5 +183,11 @@ mod tests {
         assert_eq!(envelope.source, Some(ElementId::sidebar()));
         assert_eq!(envelope.target, RouteTarget::Element(ElementId::layout()));
         assert_eq!(envelope.event, "grow");
+    }
+
+    #[test]
+    fn built_in_workspace_panes_have_stable_addresses() {
+        assert_eq!(ElementId::inspector().as_str(), "ui.inspector");
+        assert_eq!(ElementId::specialized().as_str(), "ui.specialized");
     }
 }
