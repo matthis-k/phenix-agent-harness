@@ -2,7 +2,7 @@ use crate::view::ViewState;
 use phenix_runtime_api::{
     AuthFlowId, AuthNotice, AuthPrompt, AuthProviderSummary, BackendCapabilities, BackendHealth,
     CommandSummary, DialogId, ExtensionUiRequest, ModelSummary, RunId, RuntimeSnapshot, SessionId,
-    ThinkingLevel, TranscriptBlock,
+    ThinkingLevel, TranscriptBlock, TranscriptRole,
 };
 use std::collections::{BTreeMap, VecDeque};
 
@@ -281,6 +281,19 @@ impl TranscriptState {
     pub fn update(&mut self, block: TranscriptBlock) {
         self.append(block);
     }
+
+    /// Stable IDs for conversation turns. A user block always starts a new turn;
+    /// pre-user backend output forms an initial synthetic turn instead of being
+    /// merged into the first user message.
+    pub fn turn_ids(&self) -> Vec<String> {
+        let mut ids = Vec::new();
+        for block in &self.blocks {
+            if matches!(block.role, TranscriptRole::User) || ids.is_empty() {
+                ids.push(block.id.clone());
+            }
+        }
+        ids
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -347,6 +360,12 @@ impl AppState {
                 follow_end: true,
                 ..TranscriptState::default()
             })
+    }
+
+    pub fn active_transcript_turn_ids(&self) -> Vec<String> {
+        self.input_target()
+            .and_then(|run_id| self.transcript(run_id))
+            .map_or_else(Vec::new, TranscriptState::turn_ids)
     }
 
     pub fn apply_snapshot(&mut self, snapshot: RuntimeSnapshot) {
@@ -438,5 +457,27 @@ mod tests {
         input.delete_line();
         assert_eq!(input.text, "one two");
         assert_eq!(input.cursor_byte, 7);
+    }
+
+    #[test]
+    fn user_blocks_define_stable_transcript_turns() {
+        let run_id = RunId::parse("run-1").expect("run id");
+        let mut transcript = TranscriptState::default();
+        for (id, role, text) in [
+            ("u1", TranscriptRole::User, "one"),
+            ("a1", TranscriptRole::Assistant, "answer one"),
+            ("t1", TranscriptRole::Thinking, "thought"),
+            ("u2", TranscriptRole::User, "two"),
+            ("a2", TranscriptRole::Assistant, "answer two"),
+        ] {
+            transcript.append(TranscriptBlock {
+                id: id.to_owned(),
+                run_id: run_id.clone(),
+                role,
+                text: text.to_owned(),
+                complete: true,
+            });
+        }
+        assert_eq!(transcript.turn_ids(), vec!["u1", "u2"]);
     }
 }
