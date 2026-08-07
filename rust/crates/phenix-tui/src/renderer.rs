@@ -337,32 +337,52 @@ fn render_session_section(
 fn render_runs_section(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
     frame.render_widget(flat_surface(theme), area);
     let mut lines = vec![section_heading("Runs", theme)];
-    match &state.snapshot {
-        Some(snapshot) if !snapshot.runs.is_empty() => {
-            lines.extend(snapshot.runs.iter().map(|run| {
-                let selected = state.input_target() == Some(&run.id);
-                Line::from(vec![
-                    Span::styled(
-                        if selected { "  ▸ " } else { "    " },
-                        if selected {
-                            theme_style(theme, "Accent")
-                        } else {
-                            theme_style(theme, "Muted")
-                        },
-                    ),
-                    Span::styled(
-                        run.display_name.clone(),
-                        if selected {
-                            theme_style(theme, "Accent")
-                        } else {
-                            theme_style(theme, "Normal")
-                        },
-                    ),
-                    Span::styled(format!(" · {:?}", run.state), theme_style(theme, "Muted")),
-                ])
-            }));
+    let visible = state.visible_runs();
+    if visible.is_empty() {
+        lines.push(Line::styled("  none", theme_style(theme, "Muted")));
+    } else {
+        for (index, entry) in visible.iter().enumerate() {
+            let Some(run) = state.run(&entry.id) else {
+                continue;
+            };
+            let cursor = state.view.focus == FocusTarget::Sidebar && index == state.view.sidebar_index;
+            let active = state.input_target() == Some(&run.id);
+            let indent = "  ".repeat(entry.depth.min(8));
+            let fold = if entry.has_children {
+                if state.view.run_is_collapsed(&run.id) {
+                    "▸ "
+                } else {
+                    "▾ "
+                }
+            } else {
+                "  "
+            };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    if cursor { "▸ " } else { "  " },
+                    if cursor {
+                        theme_style(theme, "Accent")
+                    } else {
+                        theme_style(theme, "Muted")
+                    },
+                ),
+                Span::styled(indent, theme_style(theme, "Muted")),
+                Span::styled(fold, theme_style(theme, "Muted")),
+                Span::styled(
+                    run.display_name.clone(),
+                    if active || cursor {
+                        theme_style(theme, "Accent")
+                    } else {
+                        theme_style(theme, "Normal")
+                    },
+                ),
+                Span::styled(
+                    if active { "  ●" } else { "" },
+                    theme_style(theme, "Success"),
+                ),
+                Span::styled(format!(" · {:?}", run.state), theme_style(theme, "Muted")),
+            ]));
         }
-        _ => lines.push(Line::styled("  none", theme_style(theme, "Muted"))),
     }
 
     let scroll = state.view.sidebar_scroll.offset.min(usize::from(u16::MAX)) as u16;
@@ -874,22 +894,21 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
             "Help",
             0,
             vec![
-                "Alt-1 default workspace · transcript + operational panes".to_owned(),
-                "Alt-2 advanced workspace · inspector + transcript + operations".to_owned(),
-                "Alt-3 zen workspace · transcript only".to_owned(),
-                "Alt-4 specialized workspace · exact run/workflow inspection".to_owned(),
-                "Ctrl-B toggles the operational column".to_owned(),
-                "Transcript j/k selects messages; Enter toggles message details".to_owned(),
+                "Ctrl-W h/j/k/l moves between windows; Ctrl-W +/-/</> resizes".to_owned(),
+                "[b / ]b switches previous/next run without changing focus".to_owned(),
+                "gt / gT switches next/previous persisted session".to_owned(),
+                "Space f m/s/a opens model/session/auth selection".to_owned(),
+                "Run tree: j/k cursor · h/l collapse-parent/expand-child · Enter activate"
+                    .to_owned(),
+                "Transcript j/k or {/} selects conversation turns; za toggles details".to_owned(),
+                "Transcript Ctrl-D/U/F/B scrolls without changing semantic selection".to_owned(),
                 "Transcript [/] selects rich blocks; v/V changes the selected block view"
                     .to_owned(),
                 "Transcript H/L and J/K scroll the selected rendered block viewport".to_owned(),
-                "Transcript arrows/Page keys scroll within long messages".to_owned(),
-                "Ctrl-O focuses transcript and toggles selected message details".to_owned(),
-                "Ctrl-E cycles owned, embedded, and external editors".to_owned(),
+                "Ctrl-C explicitly aborts the selected run; Esc never aborts work".to_owned(),
                 "Ctrl-G opens the configured external editor".to_owned(),
                 "Owned input: Shift-Enter newline; Ctrl-W/U/K shell-style editing".to_owned(),
                 "Command completion: arrows/Ctrl-N/P navigate; Ctrl-Y/Enter accept".to_owned(),
-                "Esc enters normal mode; i/a return to insert mode".to_owned(),
                 "Theme and keymaps are configured in config.lua".to_owned(),
             ],
             theme,
