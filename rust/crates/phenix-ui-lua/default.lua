@@ -1,5 +1,6 @@
 phenix.theme.set("Normal", { fg = "#cdd6f4", bg = "#1e1e2e" })
 phenix.theme.set("Surface", { fg = "#cdd6f4", bg = "#313244" })
+phenix.theme.set("SurfaceFocused", { fg = "#cdd6f4", bg = "#45475a" })
 phenix.theme.set("Muted", { fg = "#a6adc8", bg = "#1e1e2e" })
 phenix.theme.set("Accent", { fg = "#89b4fa", bg = "#1e1e2e", bold = true })
 phenix.theme.set("Success", { fg = "#a6e3a1", bg = "#1e1e2e" })
