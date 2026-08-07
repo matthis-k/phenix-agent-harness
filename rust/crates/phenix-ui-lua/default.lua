@@ -37,7 +37,7 @@ map("global", "<C-w>l", function() phenix.ui.focus.move("right") end, { desc = "
 map("global", "<C-w>w", function() phenix.ui.focus.move("next") end, { desc = "Focus next window" })
 map("global", "<C-w>W", function() phenix.ui.focus.move("previous") end, { desc = "Focus previous window" })
 map("global", "<C-w>>", function(ctx) phenix.ui.pane.resize(ctx.focused_element, "horizontal", 2) end, { desc = "Widen window" })
-map("global", "<C-w><", function(ctx) phenix.ui.pane.resize(ctx.focused_element, "horizontal", -2) end, { desc = "Narrow window" })
+map("global", "<C-w><lt>", function(ctx) phenix.ui.pane.resize(ctx.focused_element, "horizontal", -2) end, { desc = "Narrow window" })
 map("global", "<C-w>+", function(ctx) phenix.ui.pane.resize(ctx.focused_element, "vertical", 2) end, { desc = "Increase window height" })
 map("global", "<C-w>-", function(ctx) phenix.ui.pane.resize(ctx.focused_element, "vertical", -2) end, { desc = "Decrease window height" })
 map("global", "<Tab>", function() phenix.ui.focus.move("next") end, { desc = "Focus next pane" })
@@ -61,7 +61,9 @@ end, { desc = "Toggle operational sidebar" })
 
 -- The sidebar is still a projection rather than a fully semantic tree cursor,
 -- so j/k retain local scrolling until run-node selection is promoted to a typed
--- navigation action. Window movement itself is always <C-w> based.
+-- navigation action. Window movement itself is always <C-w> based. Escape is a
+-- navigation cancellation key and intentionally emits no runtime action.
+map("sidebar", "<Esc>", function() end, { desc = "Cancel pending navigation" })
 map("sidebar", "j", function() phenix.ui.pane.scroll("ui.sidebar", 1) end, { desc = "Scroll sidebar down" })
 map("sidebar", "k", function() phenix.ui.pane.scroll("ui.sidebar", -1) end, { desc = "Scroll sidebar up" })
 map("sidebar", "gg", function() phenix.ui.pane.scroll("ui.sidebar", -1000000) end, { desc = "Sidebar start" })
@@ -72,6 +74,7 @@ map("sidebar", "i", function() phenix.ui.focus.set("ui.input") end, { desc = "En
 -- semantic conversation turns; Ctrl motions scroll the rendered viewport without
 -- changing the selected turn. Rich-block-local controls remain native below this
 -- keymap (currently [ ], v/V, H/L, J/K).
+map("transcript", "<Esc>", function() end, { desc = "Cancel pending navigation" })
 map("transcript", "j", function() phenix.ui.transcript.move(1) end, { desc = "Next conversation turn" })
 map("transcript", "k", function() phenix.ui.transcript.move(-1) end, { desc = "Previous conversation turn" })
 map("transcript", "}", function() phenix.ui.transcript.move(1) end, { desc = "Next conversation turn" })
