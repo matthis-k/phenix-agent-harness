@@ -177,27 +177,39 @@ fn split_assistant_envelope(text: &str) -> (Option<String>, String) {
     let Some(context_start) = text.find("## Context") else {
         return (None, text.to_owned());
     };
-
+    let before_context = &text[..context_start];
     let after_context = &text[context_start..];
-    if let Some(blank_line) = after_context.find("\n\n") {
-        let split = context_start + blank_line + 2;
-        let context = text[..split].trim().to_owned();
-        let response = text[split..].trim_start().to_owned();
-        if !response.is_empty() {
-            return (Some(context), response);
-        }
+
+    // `## Context` is perfectly valid answer Markdown. Only reinterpret it as an
+    // implementation envelope when the surrounding content has Pi's startup shape.
+    let pi_like = before_context
+        .lines()
+        .any(|line| line.trim_start().starts_with("pi v"))
+        || after_context.contains("commands:");
+    if !pi_like {
+        return (None, text.to_owned());
     }
 
-    // Pi's ACP adapter currently emits its startup/context envelope and the actual
-    // answer as anonymous chunks. In some versions the final status line and first
-    // answer token arrive without a newline (`commands: 8 availableHi ...`). Split
-    // that stable status suffix so the transport envelope stays in collapsed details.
+    // Pi's ACP bridge may concatenate the first answer token directly onto the
+    // status suffix: `commands: 8 availableHi ...`. Prefer this explicit boundary
+    // over a generic blank line so the whole startup/context prelude remains detail.
     if let Some(commands_offset) = after_context.find("commands:") {
         let commands_start = context_start + commands_offset;
         if let Some(available_offset) = text[commands_start..].find(" available") {
             let split = commands_start + available_offset + " available".len();
             let context = text[..split].trim().to_owned();
             let response = text[split..].trim_start().to_owned();
+            if !response.is_empty() {
+                return (Some(context), response);
+            }
+        }
+    }
+
+    if let Some(blank_line) = after_context.find("\n\n") {
+        let split = context_start + blank_line + 2;
+        let context = text[..split].trim().to_owned();
+        let response = text[split..].trim_start().to_owned();
+        if !response.is_empty() {
             return (Some(context), response);
         }
     }
@@ -555,6 +567,14 @@ mod tests {
         let (context, response) = split_assistant_envelope(text);
         assert!(context.expect("context").contains("AGENTS.md"));
         assert_eq!(response, "Hi there!");
+    }
+
+    #[test]
+    fn ordinary_context_heading_stays_in_the_response() {
+        let text = "## Context\nThis is part of the actual answer.\n\nMore text.";
+        let (context, response) = split_assistant_envelope(text);
+        assert!(context.is_none());
+        assert_eq!(response, text);
     }
 
     #[test]
