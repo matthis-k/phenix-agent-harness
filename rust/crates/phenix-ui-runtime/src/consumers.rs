@@ -4,8 +4,8 @@ use crate::{
 };
 use phenix_runtime_api::BackendOutput;
 use phenix_ui_core::{
-    AppEvent, AppState, ElementId, EventEnvelope, FocusTarget, KeyCode, MouseAction, MouseButton,
-    UiInput, UserIntent,
+    AppEvent, AppState, ElementId, EventEnvelope, FocusTarget, InputEditor, KeyCode, MouseAction,
+    MouseButton, UiInput, UserIntent, VimMode,
 };
 
 const MOUSE_SCROLL_LINES: i32 = 3;
@@ -94,6 +94,20 @@ impl UiStateConsumer {
             | MouseAction::Move => None,
         }
     }
+
+    fn consumes_navigation_escape(&self, state: &AppState) -> bool {
+        if state.view.overlay.is_some() || state.view.focus.element_id() != self.id {
+            return false;
+        }
+        match state.view.focus {
+            FocusTarget::Sidebar | FocusTarget::Transcript => true,
+            FocusTarget::Input => {
+                state.view.input_editor != InputEditor::External
+                    && state.view.vim_mode == VimMode::Normal
+            }
+            FocusTarget::Overlay => false,
+        }
+    }
 }
 
 impl EventConsumer for UiStateConsumer {
@@ -101,7 +115,18 @@ impl EventConsumer for UiStateConsumer {
         &self.id
     }
 
-    fn on_ui(&mut self, _state: &AppState, envelope: &EventEnvelope<UiEvent>) -> ReactionBatch {
+    fn on_ui(&mut self, state: &AppState, envelope: &EventEnvelope<UiEvent>) -> ReactionBatch {
+        if matches!(
+            &envelope.event,
+            UiEvent::Input(UiInput::Key(key)) if key.code == KeyCode::Escape
+        ) && self.consumes_navigation_escape(state)
+        {
+            // Escape is a modal/navigation cancellation key. Runtime interruption
+            // remains the explicit Ctrl-C / :abort action and must never happen
+            // merely because a user is already in Normal mode.
+            return ReactionBatch::stop(Vec::new());
+        }
+
         let mutation = match &envelope.event {
             UiEvent::FocusRequested(element) => {
                 FocusTarget::from_element(element).map(ViewMutation::SetFocus)
@@ -334,6 +359,17 @@ mod tests {
         )
     }
 
+    fn escape(element: ElementId) -> EventEnvelope<UiEvent> {
+        EventEnvelope::to(
+            element,
+            UiEvent::Input(UiInput::Key(KeyInput {
+                code: KeyCode::Escape,
+                modifiers: KeyModifiers::default(),
+                repeat: false,
+            })),
+        )
+    }
+
     fn mode_key(digit: char) -> EventEnvelope<UiEvent> {
         EventEnvelope::to(
             ElementId::root(),
@@ -367,6 +403,39 @@ mod tests {
         let ordinary = consumer.on_ui(&state, &key('x'));
         assert_eq!(ordinary.propagation, Propagation::Continue);
         assert!(ordinary.reactions.is_empty());
+    }
+
+    #[test]
+    fn escape_is_non_destructive_in_navigation_and_input_normal_mode() {
+        let mut state = AppState::default();
+        state.view.focus = FocusTarget::Transcript;
+        let mut transcript = UiStateConsumer::new(ElementId::transcript());
+        let batch = transcript.on_ui(&state, &escape(ElementId::transcript()));
+        assert_eq!(batch.propagation, Propagation::Stop);
+        assert!(batch.reactions.is_empty());
+
+        state.view.focus = FocusTarget::Input;
+        state.view.vim_mode = VimMode::Normal;
+        let mut input = UiStateConsumer::new(ElementId::input());
+        let batch = input.on_ui(&state, &escape(ElementId::input()));
+        assert_eq!(batch.propagation, Propagation::Stop);
+        assert!(batch.reactions.is_empty());
+    }
+
+    #[test]
+    fn insert_and_external_escape_still_reach_editor_fallback() {
+        let mut state = AppState::default();
+        state.view.focus = FocusTarget::Input;
+        let mut input = UiStateConsumer::new(ElementId::input());
+
+        state.view.vim_mode = VimMode::Insert;
+        let insert = input.on_ui(&state, &escape(ElementId::input()));
+        assert_eq!(insert.propagation, Propagation::Continue);
+
+        state.view.vim_mode = VimMode::Normal;
+        state.view.input_editor = InputEditor::External;
+        let external = input.on_ui(&state, &escape(ElementId::input()));
+        assert_eq!(external.propagation, Propagation::Continue);
     }
 
     #[test]
