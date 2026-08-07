@@ -1,8 +1,9 @@
-use crate::rich_document::render_markdown;
+use crate::rich_document::{flatten_blocks, render_document};
 use crate::theme::{surface_style, theme_style};
 use phenix_frontend_config::ThemeConfig;
 use phenix_ui_core::{
-    group_transcript_turns, AppState, TranscriptDetailKind, TranscriptTurn, TranscriptTurnDetail,
+    group_transcript_turns, parse_markdown, AppState, TranscriptDetailKind, TranscriptTurn,
+    TranscriptTurnDetail,
 };
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -70,6 +71,7 @@ pub(crate) fn transcript_document(
             selected == Some(index) && state.view.focus == phenix_ui_core::FocusTarget::Transcript,
             state.view.transcript_turn_is_expanded(&turn.id),
             width,
+            state,
             theme,
         );
         turn_ranges.push(start..lines.len());
@@ -84,6 +86,7 @@ fn render_turn(
     selected: bool,
     expanded: bool,
     width: u16,
+    state: &AppState,
     theme: &ThemeConfig,
 ) {
     if let Some(user) = &turn.user {
@@ -92,7 +95,13 @@ fn render_turn(
     }
 
     if !turn.response.trim().is_empty() {
-        lines.extend(render_markdown(&turn.response, width, theme));
+        let document = parse_markdown(&turn.response);
+        let rendered = render_document(&document, width, theme, |block_index| {
+            state
+                .view
+                .rich_block_view(&rich_block_key(&turn.id, block_index))
+        });
+        lines.extend(flatten_blocks(rendered));
     } else if turn.user.is_some() {
         lines.push(Line::styled("…", theme_style(theme, "Muted")));
     }
@@ -108,6 +117,10 @@ fn render_turn(
             }
         }
     }
+}
+
+fn rich_block_key(turn_id: &str, index: usize) -> String {
+    format!("{turn_id}:block:{index}")
 }
 
 fn user_message_lines(text: &str, width: u16, theme: &ThemeConfig) -> Vec<Line<'static>> {
@@ -279,6 +292,7 @@ fn wrap_preserving_text(line: &str, width: usize) -> Vec<String> {
 mod tests {
     use super::*;
     use phenix_runtime_api::{RunId, TranscriptBlock, TranscriptRole};
+    use phenix_ui_core::RichBlockView;
 
     fn block(id: &str, role: TranscriptRole, text: &str) -> TranscriptBlock {
         TranscriptBlock {
@@ -327,6 +341,31 @@ mod tests {
     }
 
     #[test]
+    fn per_block_view_state_changes_only_that_component() {
+        let run_id = RunId::parse("run-1").expect("run id");
+        let mut state = AppState::default();
+        state.root_run = Some(run_id.clone());
+        state.selected_run = Some(run_id.clone());
+        state.transcript_mut(run_id.clone()).append(block(
+            "u1",
+            TranscriptRole::User,
+            "tables",
+        ));
+        state.transcript_mut(run_id).append(block(
+            "a1",
+            TranscriptRole::Assistant,
+            "| A | B |\n| --- | --- |\n| 1 | 2 |\n\n| C | D |\n| --- | --- |\n| 3 | 4 |",
+        ));
+        state
+            .view
+            .set_rich_block_view("run-1:u1:block:0".to_owned(), RichBlockView::Grid);
+        let document = transcript_document(&state, &ThemeConfig::default(), 50);
+        let text = document.lines.iter().map(line_text).collect::<Vec<_>>();
+        assert!(text.iter().any(|line| line.starts_with('┌')));
+        assert!(text.iter().any(|line| line.contains("[dense]") || line.contains("[grid]")));
+    }
+
+    #[test]
     fn collapsed_turn_reads_like_chat_content() {
         let turn = TranscriptTurn {
             id: "run-1:u1".to_owned(),
@@ -337,6 +376,7 @@ mod tests {
                 text: "hidden".to_owned(),
             }],
         };
+        let mut state = AppState::default();
         let mut lines = Vec::new();
         render_turn(
             &mut lines,
@@ -344,6 +384,7 @@ mod tests {
             false,
             false,
             80,
+            &state,
             &ThemeConfig::default(),
         );
         let text = lines.iter().map(line_text).collect::<Vec<_>>();
@@ -351,6 +392,7 @@ mod tests {
         assert!(text.iter().any(|line| line.contains("Hello there.")));
         assert!(text.iter().any(|line| line.contains("[Thinking]")));
         assert!(!text.iter().any(|line| line.contains("hidden")));
+        state.view.transcript_selected_block = Some(0);
     }
 
     #[test]
@@ -368,6 +410,7 @@ mod tests {
             false,
             false,
             60,
+            &AppState::default(),
             &ThemeConfig::default(),
         );
         let text = lines.iter().map(line_text).collect::<Vec<_>>();
