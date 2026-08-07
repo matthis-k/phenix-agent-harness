@@ -167,8 +167,11 @@ impl EventRouter {
             .register_element(ElementId::layout(), Some(ElementId::root()))
             .expect("layout element registration is valid");
         for element in [
+            ElementId::header(),
+            ElementId::inspector(),
             ElementId::sidebar(),
             ElementId::transcript(),
+            ElementId::specialized(),
             ElementId::input(),
             ElementId::status(),
         ] {
@@ -379,6 +382,29 @@ mod tests {
             }))),
         );
         assert_eq!(*calls.borrow(), vec!["input", "layout", "root"]);
+    }
+
+    #[test]
+    fn all_native_workspace_panes_are_addressable() {
+        let mut router = EventRouter::standard();
+        for element in [
+            ElementId::header(),
+            ElementId::inspector(),
+            ElementId::sidebar(),
+            ElementId::transcript(),
+            ElementId::specialized(),
+            ElementId::input(),
+            ElementId::status(),
+        ] {
+            router
+                .register_consumer(Box::new(RecordingConsumer {
+                    id: element.clone(),
+                    label: "pane",
+                    calls: Rc::new(RefCell::new(Vec::new())),
+                    stop: false,
+                }))
+                .expect("workspace pane must be routable");
+        }
     }
 
     #[test]
