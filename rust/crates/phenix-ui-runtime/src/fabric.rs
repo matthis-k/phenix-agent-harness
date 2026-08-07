@@ -75,6 +75,12 @@ pub enum ViewMutation {
     },
     MoveTranscriptTurn(i32),
     ToggleTranscriptTurnDetails,
+    MoveTranscriptBlock(i32),
+    CycleTranscriptBlockView(i32),
+    ScrollTranscriptBlock {
+        horizontal: i32,
+        vertical: i32,
+    },
     EditInput(InputEdit),
     MoveOverlaySelection(i32),
     Notify(String),
@@ -273,7 +279,7 @@ impl EventRouter {
             let Some(node) = self.nodes.get(&element) else {
                 break;
             };
-            path.push(element);
+            path.push(element.clone());
             current = node.parent.clone();
         }
         path
