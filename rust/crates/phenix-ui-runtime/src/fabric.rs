@@ -73,6 +73,8 @@ pub enum ViewMutation {
         element: ElementId,
         lines: i32,
     },
+    MoveTranscriptTurn(i32),
+    ToggleTranscriptTurnDetails,
     EditInput(InputEdit),
     MoveOverlaySelection(i32),
     Notify(String),
