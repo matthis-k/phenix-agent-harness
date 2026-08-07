@@ -18,8 +18,9 @@ use phenix_ui_runtime::{UiIngressError, UiRuntime};
 use ratatui::crossterm::{
     event::{
         self, Event, KeyCode as CrosstermKeyCode, KeyEvent, KeyEventKind,
-        KeyModifiers as CrosstermModifiers, KeyboardEnhancementFlags, MouseButton as CrosstermMouseButton,
-        MouseEvent, MouseEventKind, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+        KeyModifiers as CrosstermModifiers, KeyboardEnhancementFlags,
+        MouseButton as CrosstermMouseButton, MouseEvent, MouseEventKind,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::supports_keyboard_enhancement,
@@ -56,9 +57,7 @@ impl KeyboardEnhancementGuard {
             let mut output = io::stdout();
             execute!(
                 output,
-                PushKeyboardEnhancementFlags(
-                    KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                )
+                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
             )?;
         }
         Ok(Self { enabled })
@@ -350,15 +349,15 @@ fn spawn_terminal_input(
                 Ok(false) => continue,
                 Ok(true) => {}
                 Err(_) => {
-                    let _ = mailbox.shutdown();
-                    return;
+                    thread::sleep(INPUT_POLL_PERIOD);
+                    continue;
                 }
             }
             let event = match event::read() {
                 Ok(event) => event,
                 Err(_) => {
-                    let _ = mailbox.shutdown();
-                    return;
+                    thread::sleep(INPUT_POLL_PERIOD);
+                    continue;
                 }
             };
             let Some(input) = convert_event(event) else {
