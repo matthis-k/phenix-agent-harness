@@ -502,19 +502,35 @@ fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &The
             lines.push(Line::styled(auxiliary, theme_style(theme, "Muted")));
         }
     }
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+
+    let cursor = state.input.cursor_byte.min(state.input.text.len());
+    let prefix = &state.input.text[..cursor];
+    let (column, row) = cursor_position(prefix, inner.width.max(1));
+    let scroll = if focused
+        && state.view.input_editor != InputEditor::External
+        && inner.height > 0
+    {
+        row.saturating_sub(inner.height.saturating_sub(1))
+    } else {
+        0
+    };
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll, 0)),
+        inner,
+    );
 
     if focused && state.view.input_editor != InputEditor::External && inner.height > 0 {
-        let cursor = state.input.cursor_byte.min(state.input.text.len());
-        let prefix = &state.input.text[..cursor];
-        let (column, row) = cursor_position(prefix, inner.width.max(1));
         frame.set_cursor_position((
             inner
                 .x
                 .saturating_add(column.min(inner.width.saturating_sub(1))),
-            inner
-                .y
-                .saturating_add(row.min(inner.height.saturating_sub(1))),
+            inner.y.saturating_add(
+                row.saturating_sub(scroll)
+                    .min(inner.height.saturating_sub(1)),
+            ),
         ));
     }
 }
