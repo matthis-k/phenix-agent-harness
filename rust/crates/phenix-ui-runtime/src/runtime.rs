@@ -7,8 +7,9 @@ use phenix_runtime_api::{BackendClient, BackendCommand, BackendRuntime, BackendW
 #[cfg(test)]
 use phenix_ui_core::ElementId;
 use phenix_ui_core::{
-    command_completions, reduce, AppEffect, AppEvent, AppState, FocusDirection, FocusTarget,
-    InputEditor, LayoutAxis, OverlayState, ResizeRequest, VimMode,
+    command_completions, group_transcript_turns, parse_markdown, reduce, AppEffect, AppEvent,
+    AppState, FocusDirection, FocusTarget, InputEditor, LayoutAxis, OverlayState, ResizeRequest,
+    RichBlock, RichBlockView, VimMode,
 };
 use std::collections::VecDeque;
 use std::env;
@@ -424,6 +425,12 @@ fn apply_view_mutation(state: &mut AppState, mutation: ViewMutation) {
         }
         ViewMutation::MoveTranscriptTurn(delta) => move_transcript_turn(state, delta),
         ViewMutation::ToggleTranscriptTurnDetails => toggle_transcript_turn_details(state),
+        ViewMutation::MoveTranscriptBlock(delta) => move_transcript_block(state, delta),
+        ViewMutation::CycleTranscriptBlockView(delta) => cycle_transcript_block_view(state, delta),
+        ViewMutation::ScrollTranscriptBlock {
+            horizontal,
+            vertical,
+        } => scroll_transcript_block(state, horizontal, vertical),
         ViewMutation::EditInput(edit) => apply_input_edit(state, edit),
         ViewMutation::MoveOverlaySelection(delta) => move_overlay_selection(state, delta),
         ViewMutation::Notify(message) => state.notifications.push_back(message),
@@ -434,6 +441,7 @@ fn move_transcript_turn(state: &mut AppState, delta: i32) {
     let turn_ids = state.active_transcript_turn_ids();
     if turn_ids.is_empty() {
         state.view.transcript_selected_turn = None;
+        state.view.transcript_selected_block = None;
         return;
     }
     let last = turn_ids.len() - 1;
@@ -443,6 +451,7 @@ fn move_transcript_turn(state: &mut AppState, delta: i32) {
             .saturating_add_signed(delta as isize)
             .min(last),
     );
+    state.view.transcript_selected_block = None;
     state.view.transcript_scroll.follow_end = false;
 }
 
@@ -455,6 +464,117 @@ fn toggle_transcript_turn_details(state: &mut AppState) {
     let selected = state.view.transcript_selected_turn.unwrap_or(last).min(last);
     state.view.transcript_selected_turn = Some(selected);
     state.view.toggle_transcript_turn(turn_ids[selected].clone());
+}
+
+fn selected_rich_document(state: &AppState) -> Option<(String, phenix_ui_core::RichDocument)> {
+    let run_id = state.input_target()?;
+    let transcript = state.transcript(run_id)?;
+    let turns = group_transcript_turns(&transcript.blocks);
+    let last = turns.len().checked_sub(1)?;
+    let selected = state.view.transcript_selected_turn.unwrap_or(last).min(last);
+    let turn = &turns[selected];
+    Some((turn.id.clone(), parse_markdown(&turn.response)))
+}
+
+fn interactive_rich_blocks(document: &phenix_ui_core::RichDocument) -> Vec<usize> {
+    document
+        .blocks
+        .iter()
+        .enumerate()
+        .filter_map(|(index, block)| (block.candidate_views().len() > 1).then_some(index))
+        .collect()
+}
+
+fn rich_block_key(turn_id: &str, index: usize) -> String {
+    format!("{turn_id}:block:{index}")
+}
+
+fn default_rich_block_view(block: &RichBlock) -> RichBlockView {
+    match block {
+        RichBlock::Table(_) => RichBlockView::Dense,
+        RichBlock::Code(code) if code.language_is("mermaid") => RichBlockView::Rendered,
+        RichBlock::Code(_) => RichBlockView::Highlighted,
+        RichBlock::Image(_) => RichBlockView::Preview,
+        RichBlock::Heading { .. }
+        | RichBlock::Paragraph(_)
+        | RichBlock::Quote(_)
+        | RichBlock::List { .. }
+        | RichBlock::Rule => RichBlockView::Rendered,
+    }
+}
+
+fn move_transcript_block(state: &mut AppState, delta: i32) {
+    let Some((_, document)) = selected_rich_document(state) else {
+        state.view.transcript_selected_block = None;
+        return;
+    };
+    let interactive = interactive_rich_blocks(&document);
+    if interactive.is_empty() {
+        state.view.transcript_selected_block = None;
+        return;
+    }
+    let current_position = state
+        .view
+        .transcript_selected_block
+        .and_then(|selected| interactive.iter().position(|index| *index == selected))
+        .unwrap_or(0);
+    let next = current_position
+        .saturating_add_signed(delta as isize)
+        .min(interactive.len() - 1);
+    state.view.transcript_selected_block = Some(interactive[next]);
+    state.view.transcript_scroll.follow_end = false;
+}
+
+fn cycle_transcript_block_view(state: &mut AppState, delta: i32) {
+    let Some((turn_id, document)) = selected_rich_document(state) else {
+        return;
+    };
+    let interactive = interactive_rich_blocks(&document);
+    let Some(block_index) = state
+        .view
+        .transcript_selected_block
+        .filter(|selected| interactive.contains(selected))
+        .or_else(|| interactive.first().copied())
+    else {
+        return;
+    };
+    state.view.transcript_selected_block = Some(block_index);
+    let block = &document.blocks[block_index];
+    let views = block.candidate_views();
+    let key = rich_block_key(&turn_id, block_index);
+    let current = state
+        .view
+        .rich_block_view(&key)
+        .filter(|view| views.contains(view))
+        .unwrap_or_else(|| default_rich_block_view(block));
+    let current_index = views.iter().position(|view| *view == current).unwrap_or(0);
+    let len = i64::try_from(views.len()).unwrap_or(1).max(1);
+    let next = (i64::try_from(current_index).unwrap_or(0) + i64::from(delta)).rem_euclid(len);
+    let next = usize::try_from(next).unwrap_or(0);
+    state.view.set_rich_block_view(key, views[next]);
+}
+
+fn scroll_transcript_block(state: &mut AppState, horizontal: i32, vertical: i32) {
+    let Some((turn_id, document)) = selected_rich_document(state) else {
+        return;
+    };
+    let interactive = interactive_rich_blocks(&document);
+    let Some(block_index) = state
+        .view
+        .transcript_selected_block
+        .filter(|selected| interactive.contains(selected))
+        .or_else(|| interactive.first().copied())
+    else {
+        return;
+    };
+    state.view.transcript_selected_block = Some(block_index);
+    let viewport = state
+        .view
+        .rich_block_viewport_mut(rich_block_key(&turn_id, block_index));
+    viewport.horizontal = viewport
+        .horizontal
+        .saturating_add_signed(horizontal as isize);
+    viewport.vertical = viewport.vertical.saturating_add_signed(vertical as isize);
 }
 
 fn apply_input_edit(state: &mut AppState, edit: InputEdit) {
@@ -686,6 +806,54 @@ mod tests {
         apply_view_mutation(&mut state, ViewMutation::ToggleTranscriptTurnDetails);
         assert!(state.view.transcript_turn_is_expanded("run-1:u1"));
         assert!(!state.view.transcript_turn_is_expanded("run-1:u2"));
+    }
+
+    #[test]
+    fn rich_blocks_have_independent_views_and_viewports() {
+        let run_id = phenix_runtime_api::RunId::parse("run-rich").expect("run id");
+        let mut state = AppState::default();
+        state.root_run = Some(run_id.clone());
+        state.selected_run = Some(run_id.clone());
+        state.transcript_mut(run_id.clone()).append(TranscriptBlock {
+            id: "u1".to_owned(),
+            run_id: run_id.clone(),
+            role: TranscriptRole::User,
+            text: "show it".to_owned(),
+            complete: true,
+        });
+        state.transcript_mut(run_id.clone()).append(TranscriptBlock {
+            id: "a1".to_owned(),
+            run_id,
+            role: TranscriptRole::Assistant,
+            text: "| A | B |\n| --- | --- |\n| 1 | 2 |\n\n```mermaid\nflowchart LR\nA --> B\n```".to_owned(),
+            complete: true,
+        });
+
+        move_transcript_block(&mut state, 1);
+        assert_eq!(state.view.transcript_selected_block, Some(0));
+        cycle_transcript_block_view(&mut state, 1);
+        assert_eq!(
+            state.view.rich_block_view("run-rich:u1:block:0"),
+            Some(RichBlockView::Grid)
+        );
+
+        move_transcript_block(&mut state, 1);
+        assert_eq!(state.view.transcript_selected_block, Some(1));
+        scroll_transcript_block(&mut state, 4, 2);
+        assert_eq!(
+            state
+                .view
+                .rich_block_viewport("run-rich:u1:block:1")
+                .horizontal,
+            4
+        );
+        assert_eq!(
+            state
+                .view
+                .rich_block_viewport("run-rich:u1:block:1")
+                .vertical,
+            2
+        );
     }
 
     #[test]
