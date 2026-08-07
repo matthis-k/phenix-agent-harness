@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
+base64 = { workspace = true }
 clap = { workspace = true }
 phenix-acp = { path = "../phenix-acp" }
 phenix-acp-backend = { path = "../phenix-acp-backend" }
