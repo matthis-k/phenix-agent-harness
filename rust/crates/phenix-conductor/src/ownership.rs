@@ -148,10 +148,6 @@ impl ConductorOwner {
         self.runtime_mut().map(ConductorRuntime::conductor_mut)
     }
 
-    pub fn configuration(&self) -> Option<&ConfigurationSnapshot> {
-        self.configuration.as_ref()
-    }
-
     fn apply(&mut self, request: &ExtRequest) -> Result<ExtResponse, ConductorOwnerError> {
         let params: ConfigurationApplyParams = serde_json::from_str(request.params.get())
             .map_err(ConductorOwnerError::DecodeConfiguration)?;
