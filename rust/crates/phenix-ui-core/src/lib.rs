@@ -6,6 +6,7 @@ mod reducer;
 mod rich_text;
 mod routing;
 mod state;
+mod transcript;
 mod view;
 
 pub use completion::{
@@ -24,6 +25,9 @@ pub use routing::{
 pub use state::{
     transcript_turn_id, AppState, AuthFlowState, DialogState, InputState, RuntimeConnectionState,
     TranscriptState,
+};
+pub use transcript::{
+    group_transcript_turns, TranscriptDetailKind, TranscriptTurn, TranscriptTurnDetail,
 };
 pub use view::{
     FocusTarget, InputEditor, OverlayState, PaneViewState, ScrollState, SidebarSection,
