@@ -49,7 +49,14 @@ fn collect_layout_inner(
                     child_constraint(child, split.direction, area, state),
                 ));
                 if node_is_visible(child, state) && Some(index) != last_visible {
-                    slots.push((None, Constraint::Length(PANE_GUTTER)));
+                    let next_visible = split
+                        .children
+                        .iter()
+                        .skip(index + 1)
+                        .find(|candidate| node_is_visible(candidate, state));
+                    if !input_status_pair(child, next_visible, split.direction) {
+                        slots.push((None, Constraint::Length(PANE_GUTTER)));
+                    }
                 }
             }
             let constraints = slots
@@ -72,6 +79,20 @@ fn collect_layout_inner(
             }
         }
     }
+}
+
+fn input_status_pair(
+    current: &LayoutNode,
+    next: Option<&LayoutNode>,
+    direction: SplitDirection,
+) -> bool {
+    direction == SplitDirection::Vertical
+        && pane_is(current, &ElementId::input())
+        && next.is_some_and(|node| pane_is(node, &ElementId::status()))
+}
+
+fn pane_is(node: &LayoutNode, element: &ElementId) -> bool {
+    matches!(node, LayoutNode::Pane(pane) if &pane.element == element)
 }
 
 fn inset_workspace(area: Rect) -> Rect {
@@ -322,5 +343,41 @@ mod tests {
         assert_eq!(owned_input_height("one\ntwo\nthree", 40), 4);
         assert_eq!(owned_input_height(&"x".repeat(100), 20), 6);
         assert_eq!(owned_input_height(&"x".repeat(1000), 20), OWNED_INPUT_MAX_HEIGHT);
+    }
+
+    #[test]
+    fn input_and_status_share_one_visual_surface_without_a_gutter() {
+        let state = AppState::default();
+        let layout = LayoutNode::Split(SplitLayout {
+            direction: SplitDirection::Vertical,
+            children: vec![
+                LayoutNode::Pane(PaneLayout {
+                    element: ElementId::transcript(),
+                    pane_type: PaneType::Transcript,
+                    weight: 1,
+                    minimum: None,
+                    maximum: None,
+                }),
+                LayoutNode::Pane(PaneLayout {
+                    element: ElementId::input(),
+                    pane_type: PaneType::Input,
+                    weight: 1,
+                    minimum: None,
+                    maximum: None,
+                }),
+                LayoutNode::Pane(PaneLayout {
+                    element: ElementId::status(),
+                    pane_type: PaneType::Status,
+                    weight: 1,
+                    minimum: Some(1),
+                    maximum: Some(1),
+                }),
+            ],
+        });
+        let mut output = BTreeMap::new();
+        collect_layout(&layout, Rect::new(0, 0, 80, 24), &state, &mut output);
+        let input = output[&ElementId::input()];
+        let status = output[&ElementId::status()];
+        assert_eq!(input.y + input.height, status.y);
     }
 }
