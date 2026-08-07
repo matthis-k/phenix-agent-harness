@@ -230,8 +230,10 @@ jobs:
           PY
           cd rust
           cargo fmt --all
-          cargo check -p phenix-tui -p phenix-ui-runtime -p phenix-acp-backend --all-targets --locked
-          cargo test -p phenix-tui -p phenix-ui-runtime -p phenix-acp-backend --locked
+          cargo check -p phenix-tui -p phenix-ui-runtime -p phenix-acp-backend --all-targets
+          cargo test -p phenix-tui -p phenix-ui-runtime -p phenix-acp-backend
+          echo '--- Cargo.lock refresh ---'
+          git diff -- Cargo.lock || true
       - name: Commit validated patch
         if: success()
         shell: bash
@@ -241,6 +243,6 @@ jobs:
           fi
           git config user.name 'Matthis Kälble'
           git config user.email '69082876+matthis-k@users.noreply.github.com'
-          git add rust/crates/phenix-tui/src/renderer.rs rust/crates/phenix-tui/src/rich_document.rs rust/crates/phenix-acp-backend/src/lib.rs
+          git add rust/Cargo.lock rust/crates/phenix-tui/src/renderer.rs rust/crates/phenix-tui/src/rich_document.rs rust/crates/phenix-acp-backend/src/lib.rs
           git commit -m 'fix: stabilize transcript interaction and prompt delivery'
           git push origin HEAD:main
