@@ -126,6 +126,8 @@ pub enum UiCommand {
         element: ElementId,
         lines: i32,
     },
+    TranscriptTurnMove(i32),
+    TranscriptTurnToggleDetails,
     Invalidate,
 }
 
