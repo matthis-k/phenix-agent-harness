@@ -9,19 +9,28 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   lock:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
       - name: Generate Cargo.lock
         working-directory: rust
         run: cargo generate-lockfile
-      - name: Upload Cargo.lock
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: rich-transcript-cargo-lock
-          path: rust/Cargo.lock
-          if-no-files-found: error
+      - name: Commit generated lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- rust/Cargo.lock; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rust/Cargo.lock
+          git commit -m "build(rust): refresh rich transcript lockfile"
+          git push origin HEAD:${{ github.event.pull_request.head.ref || github.ref_name }}
