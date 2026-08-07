@@ -4,8 +4,11 @@ use crate::{
 };
 use phenix_runtime_api::BackendOutput;
 use phenix_ui_core::{
-    AppEvent, AppState, ElementId, EventEnvelope, FocusTarget, KeyCode, UiInput, UserIntent,
+    AppEvent, AppState, ElementId, EventEnvelope, FocusTarget, KeyCode, MouseAction, MouseButton,
+    UiInput, UserIntent,
 };
+
+const MOUSE_SCROLL_LINES: i32 = 3;
 
 struct RootContentConsumer {
     id: ElementId,
@@ -55,6 +58,42 @@ impl UiStateConsumer {
     fn new(id: ElementId) -> Self {
         Self { id }
     }
+
+    fn pointer_mutation(&self, action: MouseAction) -> Option<ViewMutation> {
+        match action {
+            MouseAction::Press(MouseButton::Left) => {
+                FocusTarget::from_element(&self.id).map(ViewMutation::SetFocus)
+            }
+            MouseAction::ScrollUp => match self.id.as_str() {
+                // Transcript scroll is stored as distance from the end; sidebar
+                // scroll is stored as distance from the start.
+                "ui.transcript" => Some(ViewMutation::ScrollPane {
+                    element: self.id.clone(),
+                    lines: MOUSE_SCROLL_LINES,
+                }),
+                "ui.sidebar" => Some(ViewMutation::ScrollPane {
+                    element: self.id.clone(),
+                    lines: -MOUSE_SCROLL_LINES,
+                }),
+                _ => None,
+            },
+            MouseAction::ScrollDown => match self.id.as_str() {
+                "ui.transcript" => Some(ViewMutation::ScrollPane {
+                    element: self.id.clone(),
+                    lines: -MOUSE_SCROLL_LINES,
+                }),
+                "ui.sidebar" => Some(ViewMutation::ScrollPane {
+                    element: self.id.clone(),
+                    lines: MOUSE_SCROLL_LINES,
+                }),
+                _ => None,
+            },
+            MouseAction::Press(MouseButton::Middle | MouseButton::Right)
+            | MouseAction::Release(_)
+            | MouseAction::Drag(_)
+            | MouseAction::Move => None,
+        }
+    }
 }
 
 impl EventConsumer for UiStateConsumer {
@@ -87,6 +126,7 @@ impl EventConsumer for UiStateConsumer {
                 element: element.clone(),
                 lines: *lines,
             }),
+            UiEvent::Input(UiInput::Mouse(mouse)) => self.pointer_mutation(mouse.action),
             UiEvent::Invalidate => return ReactionBatch::one(BusReaction::Render),
             UiEvent::Input(_) | UiEvent::ShutdownRequested => None,
         };
@@ -261,8 +301,11 @@ pub fn install_core_consumers(router: &mut EventRouter) -> Result<(), RouterErro
     for element in [
         ElementId::root(),
         ElementId::layout(),
+        ElementId::header(),
+        ElementId::inspector(),
         ElementId::sidebar(),
         ElementId::transcript(),
+        ElementId::specialized(),
         ElementId::input(),
         ElementId::status(),
     ] {
@@ -278,7 +321,7 @@ pub fn install_core_consumers(router: &mut EventRouter) -> Result<(), RouterErro
 mod tests {
     use super::*;
     use phenix_runtime_api::BackendError;
-    use phenix_ui_core::{KeyInput, KeyModifiers};
+    use phenix_ui_core::{KeyInput, KeyModifiers, MouseInput};
 
     fn key(character: char) -> EventEnvelope<UiEvent> {
         EventEnvelope::to(
@@ -324,6 +367,31 @@ mod tests {
         let ordinary = consumer.on_ui(&state, &key('x'));
         assert_eq!(ordinary.propagation, Propagation::Continue);
         assert!(ordinary.reactions.is_empty());
+    }
+
+    #[test]
+    fn transcript_pointer_scroll_does_not_require_transcript_focus() {
+        let mut state = AppState::default();
+        state.view.focus = FocusTarget::Input;
+        let mut consumer = UiStateConsumer::new(ElementId::transcript());
+        let envelope = EventEnvelope::to(
+            ElementId::transcript(),
+            UiEvent::Input(UiInput::Mouse(MouseInput {
+                column: 4,
+                row: 5,
+                action: MouseAction::ScrollDown,
+                modifiers: KeyModifiers::default(),
+            })),
+        );
+        let batch = consumer.on_ui(&state, &envelope);
+        assert_eq!(
+            batch.reactions,
+            vec![BusReaction::View(ViewMutation::ScrollPane {
+                element: ElementId::transcript(),
+                lines: -MOUSE_SCROLL_LINES,
+            })]
+        );
+        assert_eq!(state.view.focus, FocusTarget::Input);
     }
 
     #[test]
