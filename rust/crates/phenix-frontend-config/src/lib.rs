@@ -92,6 +92,7 @@ pub struct FrontendContext {
     pub overlay_open: bool,
     pub dialog_open: bool,
     pub input_empty: bool,
+    pub input_insert_mode: bool,
     pub details_visible: bool,
 }
 
