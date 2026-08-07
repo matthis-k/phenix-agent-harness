@@ -13,8 +13,10 @@ pub enum PaneType {
     Global,
     Root,
     Layout,
+    Inspector,
     Sidebar,
     Transcript,
+    Specialized,
     Input,
     Status,
     Overlay,
@@ -26,8 +28,10 @@ impl PaneType {
             Self::Global => "global",
             Self::Root => "root",
             Self::Layout => "layout",
+            Self::Inspector => "inspector",
             Self::Sidebar => "sidebar",
             Self::Transcript => "transcript",
+            Self::Specialized => "specialized",
             Self::Input => "input",
             Self::Status => "status",
             Self::Overlay => "overlay",
@@ -39,8 +43,10 @@ impl PaneType {
             "global" => Ok(Self::Global),
             "root" => Ok(Self::Root),
             "layout" => Ok(Self::Layout),
+            "inspector" => Ok(Self::Inspector),
             "sidebar" => Ok(Self::Sidebar),
             "transcript" => Ok(Self::Transcript),
+            "specialized" => Ok(Self::Specialized),
             "input" => Ok(Self::Input),
             "status" => Ok(Self::Status),
             "overlay" => Ok(Self::Overlay),
@@ -54,8 +60,10 @@ impl PaneType {
         match self {
             Self::Global | Self::Root => ElementId::root(),
             Self::Layout => ElementId::layout(),
+            Self::Inspector => ElementId::inspector(),
             Self::Sidebar => ElementId::sidebar(),
             Self::Transcript => ElementId::transcript(),
+            Self::Specialized => ElementId::specialized(),
             Self::Input => ElementId::input(),
             Self::Status => ElementId::status(),
             Self::Overlay => ElementId::overlay(),
@@ -65,8 +73,10 @@ impl PaneType {
     pub fn from_element(element: &ElementId) -> Self {
         match element.as_str() {
             "ui.layout" => Self::Layout,
+            "ui.inspector" => Self::Inspector,
             "ui.sidebar" => Self::Sidebar,
             "ui.transcript" => Self::Transcript,
+            "ui.specialized" => Self::Specialized,
             "ui.input" => Self::Input,
             "ui.status" => Self::Status,
             "ui.overlay" => Self::Overlay,
@@ -262,19 +272,53 @@ pub struct LayoutConfig {
 
 impl Default for LayoutConfig {
     fn default() -> Self {
+        let conversation = LayoutNode::Split(SplitLayout {
+            direction: SplitDirection::Vertical,
+            children: vec![
+                pane(ElementId::transcript(), PaneType::Transcript, 1, None, None),
+                pane(ElementId::input(), PaneType::Input, 3, Some(3), None),
+                pane(ElementId::status(), PaneType::Status, 1, Some(1), Some(1)),
+            ],
+        });
+        let workspace = LayoutNode::Split(SplitLayout {
+            direction: SplitDirection::Horizontal,
+            children: vec![
+                pane(
+                    ElementId::inspector(),
+                    PaneType::Inspector,
+                    22,
+                    Some(18),
+                    Some(32),
+                ),
+                conversation,
+                pane(
+                    ElementId::sidebar(),
+                    PaneType::Sidebar,
+                    28,
+                    Some(24),
+                    Some(40),
+                ),
+                pane(
+                    ElementId::specialized(),
+                    PaneType::Specialized,
+                    1,
+                    None,
+                    None,
+                ),
+            ],
+        });
         Self {
             root: LayoutNode::Split(SplitLayout {
                 direction: SplitDirection::Vertical,
                 children: vec![
-                    LayoutNode::Split(SplitLayout {
-                        direction: SplitDirection::Horizontal,
-                        children: vec![
-                            pane(ElementId::transcript(), PaneType::Transcript, 72),
-                            pane(ElementId::sidebar(), PaneType::Sidebar, 28),
-                        ],
-                    }),
-                    pane(ElementId::input(), PaneType::Input, 4),
-                    pane(ElementId::status(), PaneType::Status, 1),
+                    pane(
+                        ElementId::header(),
+                        PaneType::Root,
+                        1,
+                        Some(1),
+                        Some(1),
+                    ),
+                    workspace,
                 ],
             }),
         }
@@ -371,13 +415,19 @@ fn rgb(red: u8, green: u8, blue: u8) -> ColorSpec {
     ColorSpec::Rgb { red, green, blue }
 }
 
-fn pane(element: ElementId, pane_type: PaneType, weight: u16) -> LayoutNode {
+fn pane(
+    element: ElementId,
+    pane_type: PaneType,
+    weight: u16,
+    minimum: Option<u16>,
+    maximum: Option<u16>,
+) -> LayoutNode {
     LayoutNode::Pane(PaneLayout {
         element,
         pane_type,
         weight,
-        minimum: None,
-        maximum: None,
+        minimum,
+        maximum,
     })
 }
 
@@ -388,6 +438,11 @@ mod tests {
     #[test]
     fn pane_types_are_renderer_neutral_but_have_stable_addresses() {
         assert_eq!(PaneType::Sidebar.element_id(), ElementId::sidebar());
+        assert_eq!(PaneType::Inspector.element_id(), ElementId::inspector());
+        assert_eq!(
+            PaneType::Specialized.element_id(),
+            ElementId::specialized()
+        );
         assert_eq!(PaneType::from_element(&ElementId::input()), PaneType::Input);
     }
 
