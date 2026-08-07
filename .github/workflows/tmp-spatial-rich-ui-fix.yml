@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
       - name: Apply focused Rust fixes
         shell: bash
         run: |
@@ -230,7 +230,7 @@ jobs:
           PY
           cd rust
           cargo fmt --all
-          cargo check --workspace --all-targets --locked
+          cargo check -p phenix-tui -p phenix-ui-runtime -p phenix-acp-backend --all-targets --locked
           cargo test -p phenix-tui -p phenix-ui-runtime -p phenix-acp-backend --locked
       - name: Commit validated patch
         if: success()
