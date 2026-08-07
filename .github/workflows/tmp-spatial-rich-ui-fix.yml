@@ -199,6 +199,62 @@ jobs:
                       },
                   );''')
 
+          runtime = 'rust/crates/phenix-ui-runtime/src/runtime.rs'
+          replace(runtime,
+          '''    let current_position = state
+                  .view
+                  .transcript_selected_block
+                  .and_then(|selected| interactive.iter().position(|index| *index == selected))
+                  .unwrap_or(0);
+              let next = current_position
+                  .saturating_add_signed(delta as isize)
+                  .min(interactive.len() - 1);
+              state.view.transcript_selected_block = Some(interactive[next]);
+              state.view.transcript_scroll.follow_end = false;''',
+          '''    let Some(current_position) = state
+                  .view
+                  .transcript_selected_block
+                  .and_then(|selected| interactive.iter().position(|index| *index == selected))
+              else {
+                  state.view.transcript_selected_block = Some(interactive[0]);
+                  state.view.transcript_scroll.follow_end = false;
+                  return;
+              };
+              let next = current_position
+                  .saturating_add_signed(delta as isize)
+                  .min(interactive.len() - 1);
+              state.view.transcript_selected_block = Some(interactive[next]);
+              state.view.transcript_scroll.follow_end = false;''')
+          replace(runtime,
+          '''    AppState, ElementId, FocusDirection, FocusTarget, InputEditor, LayoutAxis, OverlayState,
+              ResizeRequest, RichBlock, RichBlockView, RouteTarget, UiInput, VimMode,''',
+          '''    AppState, ElementId, FocusDirection, FocusTarget, LayoutAxis, OverlayState, ResizeRequest,
+              RichBlock, RichBlockView, RouteTarget, UiInput, VimMode,''')
+          replace(runtime,
+          '''use std::path::{Path, PathBuf};''',
+          '''use std::path::PathBuf;''')
+          replace(runtime,
+          '''mod tests {
+              use super::*;
+              use phenix_runtime_api::{TranscriptBlock, TranscriptRole};''',
+          '''mod tests {
+              use super::*;
+              use phenix_runtime_api::{TranscriptBlock, TranscriptRole};
+              use phenix_ui_core::InputEditor;''')
+
+          projection = 'rust/crates/phenix-acp-backend/src/projection.rs'
+          replace(projection,
+          '''    ContentBlock, ContentChunk, ImageContent, SessionNotification, SessionUpdate, ToolCall,
+              ToolCallStatus, ToolCallUpdate,''',
+          '''    ContentBlock, ContentChunk, SessionNotification, SessionUpdate, ToolCall, ToolCallStatus,
+              ToolCallUpdate,''')
+          replace(projection,
+          '''mod tests {
+              use super::*;''',
+          '''mod tests {
+              use super::*;
+              use phenix_acp::acp::schema::v1::ImageContent;''')
+
           backend = 'rust/crates/phenix-acp-backend/src/lib.rs'
           replace(backend,
           '''            None => {
@@ -243,6 +299,6 @@ jobs:
           fi
           git config user.name 'Matthis Kälble'
           git config user.email '69082876+matthis-k@users.noreply.github.com'
-          git add rust/Cargo.lock rust/crates/phenix-tui/src/renderer.rs rust/crates/phenix-tui/src/rich_document.rs rust/crates/phenix-acp-backend/src/lib.rs
+          git add rust/Cargo.lock rust/crates/phenix-tui/src/renderer.rs rust/crates/phenix-tui/src/rich_document.rs rust/crates/phenix-ui-runtime/src/runtime.rs rust/crates/phenix-acp-backend/src/lib.rs rust/crates/phenix-acp-backend/src/projection.rs
           git commit -m 'fix: stabilize transcript interaction and prompt delivery'
           git push origin HEAD:main
