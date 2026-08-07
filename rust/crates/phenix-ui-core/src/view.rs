@@ -169,6 +169,7 @@ pub struct ViewState {
     pub terminal: TerminalSize,
     pub selected_run: Option<RunId>,
     pub sidebar_index: usize,
+    pub collapsed_runs: BTreeSet<RunId>,
     pub transcript_scroll: ScrollState,
     pub sidebar_scroll: ScrollState,
     pub transcript_selected_turn: Option<usize>,
@@ -189,6 +190,24 @@ impl ViewState {
 
     pub fn pane_mut(&mut self, element: ElementId) -> &mut PaneViewState {
         self.panes.entry(element).or_default()
+    }
+
+    pub fn run_is_collapsed(&self, run_id: &RunId) -> bool {
+        self.collapsed_runs.contains(run_id)
+    }
+
+    pub fn set_run_collapsed(&mut self, run_id: RunId, collapsed: bool) {
+        if collapsed {
+            self.collapsed_runs.insert(run_id);
+        } else {
+            self.collapsed_runs.remove(&run_id);
+        }
+    }
+
+    pub fn toggle_run_collapsed(&mut self, run_id: RunId) {
+        if !self.collapsed_runs.remove(&run_id) {
+            self.collapsed_runs.insert(run_id);
+        }
     }
 
     pub fn transcript_turn_is_expanded(&self, id: &str) -> bool {
@@ -286,6 +305,7 @@ impl Default for ViewState {
             terminal: TerminalSize::default(),
             selected_run: None,
             sidebar_index: 0,
+            collapsed_runs: BTreeSet::new(),
             transcript_scroll: ScrollState::default(),
             sidebar_scroll: ScrollState::default(),
             transcript_selected_turn: None,
@@ -318,6 +338,17 @@ mod tests {
         view.set_input_editor(InputEditor::External);
         assert_eq!(view.input_editor, InputEditor::External);
         assert_eq!(view.pane(&ElementId::input()).height, Some(5));
+    }
+
+    #[test]
+    fn run_tree_collapse_state_is_local_frontend_state() {
+        let run_id = RunId::parse("run-child").expect("run id");
+        let mut view = ViewState::default();
+        assert!(!view.run_is_collapsed(&run_id));
+        view.toggle_run_collapsed(run_id.clone());
+        assert!(view.run_is_collapsed(&run_id));
+        view.set_run_collapsed(run_id.clone(), false);
+        assert!(!view.run_is_collapsed(&run_id));
     }
 
     #[test]
