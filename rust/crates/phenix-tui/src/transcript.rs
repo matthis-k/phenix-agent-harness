@@ -1,13 +1,14 @@
 use crate::rich_document::render_markdown;
-use crate::theme::theme_style;
+use crate::theme::{surface_style, theme_style};
 use phenix_frontend_config::ThemeConfig;
 use phenix_runtime_api::{TranscriptBlock, TranscriptRole};
 use phenix_ui_core::{transcript_turn_id, AppState};
-use ratatui::style::Modifier;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use std::ops::Range;
 
 const DETAIL_PREFIX: &str = "  │ ";
+const TURN_GAP_LINES: usize = 2;
 
 #[derive(Debug)]
 pub(crate) struct TranscriptDocument {
@@ -97,6 +98,9 @@ pub(crate) fn transcript_document(
     let mut lines = Vec::new();
     let mut turn_ranges = Vec::with_capacity(turns.len());
     for (index, turn) in turns.iter().enumerate() {
+        if index > 0 {
+            lines.extend((0..TURN_GAP_LINES).map(|_| Line::default()));
+        }
         let start = lines.len();
         render_turn(
             &mut lines,
@@ -183,20 +187,7 @@ fn render_turn(
     theme: &ThemeConfig,
 ) {
     if let Some(user) = &turn.user {
-        lines.push(Line::styled(
-            "You",
-            theme_style(theme, "Accent").add_modifier(Modifier::BOLD),
-        ));
-        if user.is_empty() {
-            lines.push(Line::styled("  ", theme_style(theme, "Surface")));
-        } else {
-            lines.extend(user.lines().map(|line| {
-                Line::from(vec![
-                    Span::styled("▌", theme_style(theme, "Accent")),
-                    Span::styled(format!(" {line} "), theme_style(theme, "Surface")),
-                ])
-            }));
-        }
+        lines.extend(user_message_lines(user, width, theme));
         lines.push(Line::default());
     }
 
@@ -217,10 +208,57 @@ fn render_turn(
             }
         }
     }
+}
 
-    if lines.last().is_some_and(|line| !line.spans.is_empty()) {
-        lines.push(Line::default());
+fn user_message_lines(text: &str, width: u16, theme: &ThemeConfig) -> Vec<Line<'static>> {
+    let width = usize::from(width.max(1));
+    let surface = surface_style(theme, "UserMessage");
+    let content_width = width.saturating_sub(4).max(1);
+    let mut lines = vec![padded_surface_line(
+        vec![
+            Span::styled("  ", surface),
+            Span::styled(
+                "You",
+                theme_style(theme, "Accent").add_modifier(Modifier::BOLD),
+            ),
+        ],
+        width,
+        surface,
+    )];
+
+    if text.is_empty() {
+        lines.push(padded_surface_line(Vec::new(), width, surface));
+        return lines;
     }
+
+    for logical_line in text.split('\n') {
+        for fragment in wrap_preserving_text(logical_line, content_width) {
+            lines.push(padded_surface_line(
+                vec![
+                    Span::styled("  ", surface),
+                    Span::styled(fragment, theme_style(theme, "Normal")),
+                ],
+                width,
+                surface,
+            ));
+        }
+    }
+    lines
+}
+
+fn padded_surface_line(
+    mut spans: Vec<Span<'static>>,
+    width: usize,
+    surface: Style,
+) -> Line<'static> {
+    let used = spans
+        .iter()
+        .map(|span| span.content.chars().count())
+        .sum::<usize>();
+    if used < width {
+        spans.push(Span::styled(" ".repeat(width - used), surface));
+    }
+    Line::from(spans).style(surface)
 }
 
 fn detail_summary_line(
@@ -382,6 +420,35 @@ mod tests {
     }
 
     #[test]
+    fn user_message_is_one_full_width_surface_including_wraps() {
+        let theme = ThemeConfig::default();
+        let lines = user_message_lines("abcdefghijklmnopqrstuvwxyz", 16, &theme);
+        assert!(lines.len() > 2);
+        assert!(lines.iter().all(|line| line_text(line).chars().count() >= 16));
+        let background = surface_style(&theme, "UserMessage").bg;
+        assert!(background.is_some());
+        assert!(lines.iter().all(|line| line.style.bg == background));
+    }
+
+    #[test]
+    fn distinct_turns_have_explicit_vertical_rhythm() {
+        let run_id = RunId::parse("run-1").expect("run id");
+        let mut state = AppState::default();
+        state.root_run = Some(run_id.clone());
+        state.selected_run = Some(run_id.clone());
+        let transcript = state.transcript_mut(run_id);
+        transcript.append(block("u1", TranscriptRole::User, "one"));
+        transcript.append(block("a1", TranscriptRole::Assistant, "answer one"));
+        transcript.append(block("u2", TranscriptRole::User, "two"));
+        transcript.append(block("a2", TranscriptRole::Assistant, "answer two"));
+        let document = transcript_document(&state, &ThemeConfig::default(), 50);
+        assert_eq!(document.turn_ranges.len(), 2);
+        let first_end = document.turn_ranges[0].end;
+        let second_start = document.turn_ranges[1].start;
+        assert!(second_start >= first_end + TURN_GAP_LINES);
+    }
+
+    #[test]
     fn collapsed_turn_reads_like_chat_content() {
         let turn = ConversationTurn {
             id: "run-1:u1".to_owned(),
@@ -403,7 +470,7 @@ mod tests {
         );
         let text = lines.iter().map(line_text).collect::<Vec<_>>();
         assert!(text.iter().any(|line| line.contains("hi")));
-        assert!(text.iter().any(|line| line == "Hello there."));
+        assert!(text.iter().any(|line| line.contains("Hello there.")));
         assert!(text.iter().any(|line| line.contains("[Thinking]")));
         assert!(!text.iter().any(|line| line.contains("hidden")));
     }
