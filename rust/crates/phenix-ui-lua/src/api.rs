@@ -280,6 +280,32 @@ fn ui_api(
     .map_err(runtime_error)?;
     api.set("pane", pane).map_err(runtime_error)?;
 
+    let transcript = lua.create_table().map_err(runtime_error)?;
+    let transcript_move_commands = Rc::clone(&commands);
+    transcript
+        .set(
+            "move",
+            lua.create_function(move |_, delta: i32| {
+                transcript_move_commands
+                    .borrow_mut()
+                    .push(FrontendCommand::Ui(UiCommand::TranscriptTurnMove(delta)));
+                Ok(())
+            })
+            .map_err(runtime_error)?,
+        )
+        .map_err(runtime_error)?;
+    transcript
+        .set(
+            "toggle_details",
+            command_function(
+                lua,
+                Rc::clone(&commands),
+                FrontendCommand::Ui(UiCommand::TranscriptTurnToggleDetails),
+            )?,
+        )
+        .map_err(runtime_error)?;
+    api.set("transcript", transcript).map_err(runtime_error)?;
+
     api.set(
         "invalidate",
         command_function(lua, commands, FrontendCommand::Ui(UiCommand::Invalidate))?,
