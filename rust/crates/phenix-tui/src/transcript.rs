@@ -180,7 +180,12 @@ fn apply_rich_block_viewport(
 
 fn clip_line(line: &Line<'_>, horizontal: usize, width: usize) -> Line<'static> {
     if horizontal == 0 {
-        return line.clone().into_owned();
+        let spans = line
+            .spans
+            .iter()
+            .map(|span| Span::styled(span.content.to_string(), span.style))
+            .collect::<Vec<_>>();
+        return Line::from(spans).style(line.style);
     }
     let mut skip = horizontal;
     let mut remaining = width;
@@ -201,7 +206,7 @@ fn clip_line(line: &Line<'_>, horizontal: usize, width: usize) -> Line<'static> 
         remaining -= take;
         spans.push(Span::styled(content, span.style));
     }
-    Line::from(spans)
+    Line::from(spans).style(line.style)
 }
 
 fn mark_selected_block(block: &mut RenderedRichBlock, theme: &ThemeConfig) {
