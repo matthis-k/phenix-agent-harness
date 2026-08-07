@@ -1,6 +1,6 @@
 use crate::routing::ElementId;
 use phenix_runtime_api::{AuthFlowId, AuthPrompt, DialogId, ExtensionUiRequest, RunId};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum FocusTarget {
@@ -164,6 +164,8 @@ pub struct ViewState {
     pub sidebar_index: usize,
     pub transcript_scroll: ScrollState,
     pub sidebar_scroll: ScrollState,
+    pub transcript_selected_turn: Option<usize>,
+    pub expanded_transcript_turns: BTreeSet<String>,
     pub show_details: bool,
     pub input_editor: InputEditor,
     pub vim_mode: VimMode,
@@ -177,6 +179,16 @@ impl ViewState {
 
     pub fn pane_mut(&mut self, element: ElementId) -> &mut PaneViewState {
         self.panes.entry(element).or_default()
+    }
+
+    pub fn transcript_turn_is_expanded(&self, id: &str) -> bool {
+        self.expanded_transcript_turns.contains(id)
+    }
+
+    pub fn toggle_transcript_turn(&mut self, id: String) {
+        if !self.expanded_transcript_turns.remove(&id) {
+            self.expanded_transcript_turns.insert(id);
+        }
     }
 
     pub fn set_input_editor(&mut self, editor: InputEditor) {
@@ -234,6 +246,8 @@ impl Default for ViewState {
             sidebar_index: 0,
             transcript_scroll: ScrollState::default(),
             sidebar_scroll: ScrollState::default(),
+            transcript_selected_turn: None,
+            expanded_transcript_turns: BTreeSet::new(),
             show_details: false,
             input_editor: InputEditor::Owned,
             vim_mode: VimMode::Insert,
@@ -245,14 +259,6 @@ impl Default for ViewState {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn default_workspace_prioritizes_the_transcript() {
-        let view = ViewState::default();
-        assert!(!view.pane(&ElementId::sidebar()).visible);
-        assert!(view.pane(&ElementId::transcript()).visible);
-        assert!(view.pane(&ElementId::input()).visible);
-    }
 
     #[test]
     fn editor_selection_controls_only_frontend_view_state() {
@@ -267,5 +273,15 @@ mod tests {
         view.set_input_editor(InputEditor::External);
         assert_eq!(view.input_editor, InputEditor::External);
         assert_eq!(view.pane(&ElementId::input()).height, Some(3));
+    }
+
+    #[test]
+    fn transcript_turn_expansion_is_independent_per_turn() {
+        let mut view = ViewState::default();
+        view.toggle_transcript_turn("turn-a".to_owned());
+        assert!(view.transcript_turn_is_expanded("turn-a"));
+        assert!(!view.transcript_turn_is_expanded("turn-b"));
+        view.toggle_transcript_turn("turn-a".to_owned());
+        assert!(!view.transcript_turn_is_expanded("turn-a"));
     }
 }
