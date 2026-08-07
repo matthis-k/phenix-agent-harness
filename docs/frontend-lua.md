@@ -1,31 +1,24 @@
 # Lua frontend configuration
 
-Phenix frontend behavior is provided by an embedded Lua configuration provider. The provider is not a Ratatui plugin: it produces renderer-neutral theme, layout, keymap, and frontend-command values.
+Phenix currently keeps native window composition and rendering in Rust. The embedded Lua provider configures semantic theme groups, keymaps, and frontend commands; it does not construct the window tree.
 
-The native terminal application and a future `phenix-ai.nvim` adapter consume the same provider contract.
+A future Neovim-like window API is intentionally deferred until the native workspace model has settled. The current Lua API should not be treated as that future window API.
 
 ## Loading
 
-Configuration precedence is:
-
-1. `phenix --config /path/to/init.lua`
-2. `PHENIX_CONFIG`
-3. `$XDG_CONFIG_HOME/phenix/init.lua`
-4. `$HOME/.config/phenix/init.lua`
-
-The built-in configuration is evaluated first. User configuration may override or delete any built-in mapping. `--no-default-config` skips the built-in Lua file.
+The native frontend loads the built-in Lua defaults first unless `--no-default-config` is used, then evaluates the selected user configuration. The packaged wrapper falls back to the packaged `config/phenix-harness` authoring root when no user `config.lua` exists.
 
 `phenix --print-default-config` prints the exact built-in Lua source.
 
 ## Provider boundary
 
 ```text
-init.lua
+config.lua
   -> LuaFrontendProvider
       -> FrontendConfig
-           theme
-           layout tree
+           semantic theme groups
            keymap descriptions
+           Rust-owned layout value
       -> key callback
            FrontendCommand[]
               application
@@ -34,7 +27,7 @@ init.lua
               overlay behavior
 ```
 
-The provider does not expose Ratatui widgets, terminal handles, Neovim windows, backend sessions, or mutable `AppState` references.
+The provider does not expose Ratatui widgets, terminal handles, windows, backend sessions, or mutable `AppState` references. It also does not expose a layout-construction API.
 
 Lua callbacks execute on the single frontend-reactivity owner thread. They append semantic commands to a callback-local collector. The owner loop applies those commands after the callback returns.
 
@@ -49,18 +42,7 @@ phenix.keymap.del("global", "<C-q>")
 phenix.keymap.clear("transcript")
 ```
 
-Scopes are pane types:
-
-- `global`
-- `root`
-- `layout`
-- `sidebar`
-- `transcript`
-- `input`
-- `status`
-- `overlay`
-
-Pane mappings are resolved before global mappings. The same chord can therefore have different behavior in different pane types.
+Scopes are pane types. The native workspace currently defines stable identities for the transcript, operational sidebar, lower-level inspector, specialized inspection surface, composer, status line, and overlays. Only panes that participate in the current focus model receive pane-local mappings.
 
 Both Neovim-style notation and explicit modifier notation are accepted:
 
@@ -72,7 +54,7 @@ Both Neovim-style notation and explicit modifier notation are accepted:
 "alt+enter"
 ```
 
-Unmapped printable characters fall through to text insertion. Control and navigation behavior comes from Lua mappings rather than hidden native defaults.
+Unmapped printable characters fall through to the native input editor when the input pane is focused.
 
 ## Application actions
 
@@ -99,7 +81,6 @@ phenix.ui.focus.move("left")
 phenix.ui.focus.move("next")
 
 phenix.ui.pane.resize("ui.sidebar", "horizontal", 4)
-phenix.ui.pane.resize("ui.input", "vertical", -1)
 phenix.ui.pane.set_size("ui.sidebar", "horizontal", 32)
 phenix.ui.pane.show("ui.sidebar")
 phenix.ui.pane.hide("ui.sidebar")
@@ -109,7 +90,14 @@ phenix.ui.pane.scroll("ui.transcript", 10)
 phenix.ui.invalidate()
 ```
 
-These functions emit routed UI events. The layout/reactivity owner applies the resulting view mutations; Lua never mutates renderer state directly.
+These are mutations of existing Rust-owned panes, not window construction. The runtime applies them to typed view state; Lua never owns the pane tree or renderer state.
+
+The built-in native workspace modes are also Rust-owned:
+
+- `Alt-1`: default — transcript plus operational sidebar
+- `Alt-2`: advanced — lower-level inspector, transcript, and operational sidebar
+- `Alt-3`: zen — transcript/composer/status only
+- `Alt-4`: specialized — focused exact run/workflow inspection
 
 ## Input and overlays
 
@@ -132,7 +120,7 @@ Overlay acceptance remains semantic. The runtime adapter resolves it against the
 
 ## Theme
 
-Themes use semantic highlight groups rather than Ratatui or Neovim-specific style objects.
+Themes use semantic highlight groups rather than Ratatui-specific style objects.
 
 ```lua
 phenix.theme.set("Accent", {
@@ -152,63 +140,18 @@ Color values may be:
 - terminal palette indices from `0` to `255`
 - `{ r = 137, g = 180, b = 250 }`
 
-The Ratatui adapter maps highlight groups to terminal styles. A Neovim adapter can map the same groups to `nvim_set_hl` definitions.
+The Ratatui adapter maps highlight groups to terminal styles. A future Neovim frontend can map the same semantic groups to Neovim highlights without inheriting the current terminal window implementation.
 
-## Layout
+## Window composition
 
-Layouts are renderer-neutral trees of panes and splits.
+Window composition is intentionally native Rust code for now. `LayoutConfig::default()` defines the superset workspace tree, while typed pane visibility selects the default, advanced, zen, or specialized composition.
 
-```lua
-phenix.layout.set(phenix.layout.split("vertical", {
-  phenix.layout.pane("ui.header", { weight = 1 }),
-  phenix.layout.split("horizontal", {
-    phenix.layout.pane("ui.transcript", {
-      pane_type = "transcript",
-      weight = 72,
-    }),
-    phenix.layout.pane("ui.sidebar", {
-      pane_type = "sidebar",
-      weight = 28,
-    }),
-  }),
-  phenix.layout.pane("ui.input", { pane_type = "input", weight = 4 }),
-  phenix.layout.pane("ui.status", { pane_type = "status", weight = 1 }),
-}))
-```
+There is deliberately no `phenix.layout.*` Lua API. The earlier provisional split/pane constructor was removed rather than preserved as a compatibility surface.
 
-Pane options are:
+The eventual Neovim-esque window API should be designed around the settled typed primitives—stable pane IDs, splits, focus, visibility, sizing, and workspace composition—rather than being constrained by that removed prototype.
 
-- `pane_type`
-- `weight`
-- `min`
-- `max`
+## Future Neovim-style API
 
-Runtime resize commands override the corresponding pane dimension in view state without modifying the declarative layout tree.
+The likely direction is an API analogous to Neovim's window model: windows/panes have stable identities, split relationships are inspectable, and open/close/focus/resize operations act on those identities. That API does not exist yet.
 
-## Nix wrappers
-
-The flake exposes:
-
-```nix
-legacyPackages.${system}.phenixFrontend.mkPhenixWrapper {
-  configText = ''
-    phenix.keymap.del("global", "<C-q>")
-    phenix.keymap.set("sidebar", "<C-l>", function()
-      phenix.ui.focus.set("ui.transcript")
-    end)
-  '';
-}
-```
-
-`configFile = ./init.lua` may be used instead of `configText`. The generated wrapper sets `PHENIX_CONFIG`, while an explicit `--config` argument still takes precedence.
-
-## Neovim adoption
-
-A future `phenix-ai.nvim` should consume `phenix-frontend-config` and `phenix-ui-lua`, then provide a Neovim adapter for:
-
-- semantic layout trees to windows and splits,
-- semantic highlight groups to Neovim highlight definitions,
-- frontend commands to window, focus, buffer, and Phenix-runtime operations,
-- routed content events to buffer projections.
-
-The Lua configuration API should remain the same between the native TUI and Neovim. Renderer-specific operations must not be added to the provider contract; they belong in adapter crates or plugin code.
+When it is introduced, renderer-specific handles should stay behind adapters. The native TUI should remain a consumer of the same typed window model rather than becoming a special case or keeping a second layout API alive.
