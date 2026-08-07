@@ -1,5 +1,5 @@
 use crate::layout::collect_layout;
-use crate::theme::{panel, theme_style};
+use crate::theme::{panel, surface_style, theme_style};
 use crate::transcript::transcript_document;
 use phenix_frontend_config::{FrontendConfig, FrontendProviderRef, ThemeConfig};
 use phenix_runtime_api::{AuthPrompt, ExtensionUiRequest, ObjectiveState, RunSummary};
@@ -61,7 +61,7 @@ impl Drop for RatatuiRenderer {
 fn render_application(frame: &mut Frame<'_>, state: &AppState, config: &FrontendConfig) {
     let area = frame.area();
     frame.render_widget(
-        Block::new().style(theme_style(&config.theme, "Normal")),
+        Block::new().style(surface_style(&config.theme, "Normal")),
         area,
     );
 
@@ -117,7 +117,7 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &Th
             Span::styled(format!("  {session}"), theme_style(theme, "Normal")),
             Span::styled(format!("  → {target}"), theme_style(theme, "Muted")),
         ]))
-        .style(theme_style(theme, "Surface")),
+        .style(surface_style(theme, "Normal")),
         area,
     );
 }
@@ -579,7 +579,7 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &Th
     .join("  ·  ");
     frame.render_widget(
         Paragraph::new(line)
-            .style(theme_style(theme, "Surface"))
+            .style(surface_style(theme, "Normal"))
             .wrap(Wrap { trim: true }),
         area,
     );
