@@ -95,7 +95,7 @@ fn completed_turn_does_not_close_the_conversation_session() {
         )));
         assert!(events
             .iter()
-            .any(|event| matches!(event.event, SessionEvent::Completed)));
+            .any(|event| matches!(&event.event, SessionEvent::Completed)));
     }
 
     let snapshot = gateway.snapshot(&tree.tree_id).expect("tree remains alive");
