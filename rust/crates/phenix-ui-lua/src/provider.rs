@@ -6,13 +6,15 @@ use phenix_frontend_config::{
     FrontendCommand, FrontendConfig, FrontendConfigProvider, FrontendContext,
     FrontendProviderError, KeymapDescription, PaneType,
 };
-use phenix_ui_core::KeyInput;
+use phenix_ui_core::{KeyCode, KeyInput};
 use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 const DEFAULT_CONFIG: &str = include_str!("../default.lua");
+const KEY_SEQUENCE_TIMEOUT: Duration = Duration::from_millis(500);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LuaFrontendOptions {
@@ -36,6 +38,14 @@ pub struct LuaFrontendProvider {
     config: FrontendConfig,
     options: LuaFrontendOptions,
     acp_config: Option<AcpApplicationConfig>,
+    pending_keys: Vec<KeyInput>,
+    pending_since: Option<Instant>,
+}
+
+enum KeyResolution {
+    None,
+    Prefix,
+    Callback(Function),
 }
 
 impl LuaFrontendProvider {
@@ -48,6 +58,8 @@ impl LuaFrontendProvider {
             config: built.config,
             options,
             acp_config: built.acp_config,
+            pending_keys: Vec::new(),
+            pending_since: None,
         })
     }
 
@@ -65,29 +77,107 @@ impl LuaFrontendProvider {
         self.config = state.config.clone();
     }
 
-    fn callback_for(
+    fn clear_pending_keys(&mut self) {
+        self.pending_keys.clear();
+        self.pending_since = None;
+    }
+
+    fn expire_pending_keys(&mut self, now: Instant) {
+        if self
+            .pending_since
+            .is_some_and(|started| now.duration_since(started) >= KEY_SEQUENCE_TIMEOUT)
+        {
+            self.clear_pending_keys();
+        }
+    }
+
+    fn resolve_scope(
         &self,
-        context: &FrontendContext,
-        input: KeyInput,
-    ) -> Result<Option<Function>, FrontendProviderError> {
+        pane: PaneType,
+        inputs: &[KeyInput],
+    ) -> Result<KeyResolution, FrontendProviderError> {
         let state = self.state.borrow();
-        let binding = state
+        if let Some(binding) = state
             .bindings
             .iter()
             .rev()
-            .find(|binding| binding.pane == context.pane_type && binding.chord.matches(input))
-            .or_else(|| {
-                state.bindings.iter().rev().find(|binding| {
-                    binding.pane == PaneType::Global && binding.chord.matches(input)
-                })
-            });
-        binding
-            .map(|binding| {
-                self.lua
-                    .registry_value::<Function>(&binding.callback)
-                    .map_err(lua_runtime_error)
-            })
-            .transpose()
+            .find(|binding| binding.pane == pane && binding.chord.matches_inputs(inputs))
+        {
+            return self
+                .lua
+                .registry_value::<Function>(&binding.callback)
+                .map(KeyResolution::Callback)
+                .map_err(lua_runtime_error);
+        }
+        if state
+            .bindings
+            .iter()
+            .any(|binding| binding.pane == pane && binding.chord.starts_with_inputs(inputs))
+        {
+            return Ok(KeyResolution::Prefix);
+        }
+        Ok(KeyResolution::None)
+    }
+
+    fn resolve_pending(
+        &self,
+        context: &FrontendContext,
+    ) -> Result<KeyResolution, FrontendProviderError> {
+        match self.resolve_scope(context.pane_type, &self.pending_keys)? {
+            KeyResolution::None if context.pane_type != PaneType::Global => {
+                self.resolve_scope(PaneType::Global, &self.pending_keys)
+            }
+            resolution => Ok(resolution),
+        }
+    }
+
+    fn callback_for(
+        &mut self,
+        context: &FrontendContext,
+        input: KeyInput,
+    ) -> Result<KeyResolution, FrontendProviderError> {
+        let now = Instant::now();
+        self.expire_pending_keys(now);
+
+        if input.code == KeyCode::Escape && !self.pending_keys.is_empty() {
+            self.clear_pending_keys();
+            return Ok(KeyResolution::Prefix);
+        }
+
+        let had_pending = !self.pending_keys.is_empty();
+        self.pending_keys.push(input);
+        match self.resolve_pending(context)? {
+            KeyResolution::Callback(callback) => {
+                self.clear_pending_keys();
+                Ok(KeyResolution::Callback(callback))
+            }
+            KeyResolution::Prefix => {
+                self.pending_since.get_or_insert(now);
+                Ok(KeyResolution::Prefix)
+            }
+            KeyResolution::None if had_pending => {
+                self.clear_pending_keys();
+                self.pending_keys.push(input);
+                match self.resolve_pending(context)? {
+                    KeyResolution::Callback(callback) => {
+                        self.clear_pending_keys();
+                        Ok(KeyResolution::Callback(callback))
+                    }
+                    KeyResolution::Prefix => {
+                        self.pending_since = Some(now);
+                        Ok(KeyResolution::Prefix)
+                    }
+                    KeyResolution::None => {
+                        self.clear_pending_keys();
+                        Ok(KeyResolution::None)
+                    }
+                }
+            }
+            KeyResolution::None => {
+                self.clear_pending_keys();
+                Ok(KeyResolution::None)
+            }
+        }
     }
 
     fn context_table(&self, context: &FrontendContext) -> Result<Table, FrontendProviderError> {
@@ -124,9 +214,15 @@ impl FrontendConfigProvider for LuaFrontendProvider {
         context: &FrontendContext,
         input: KeyInput,
     ) -> Result<Vec<FrontendCommand>, FrontendProviderError> {
-        let Some(callback) = self.callback_for(context, input)? else {
-            return Ok(Vec::new());
+        let resolution = self.callback_for(context, input)?;
+        let KeyResolution::Callback(callback) = resolution else {
+            return Ok(match resolution {
+                KeyResolution::Prefix => vec![FrontendCommand::Handled],
+                KeyResolution::None => Vec::new(),
+                KeyResolution::Callback(_) => unreachable!("callback handled above"),
+            });
         };
+
         self.commands.borrow_mut().clear();
         callback
             .call::<()>(self.context_table(context)?)
@@ -147,6 +243,7 @@ impl FrontendConfigProvider for LuaFrontendProvider {
         self.commands = built.commands;
         self.config = built.config;
         self.acp_config = built.acp_config;
+        self.clear_pending_keys();
         Ok(())
     }
 
@@ -247,7 +344,7 @@ mod tests {
     fn user_configuration_can_remove_and_replace_defaults() {
         let path = temporary_config(
             r#"
-phenix.keymap.del("global", "<C-d>")
+phenix.keymap.del("global", "<C-q>")
 phenix.keymap.set("sidebar", "x", function()
   phenix.ui.focus.set("ui.input")
 end)
@@ -261,7 +358,7 @@ end)
 
         let global = context(PaneType::Input);
         assert!(provider
-            .handle_key(&global, key(KeyCode::Character('d'), true, false, false))
+            .handle_key(&global, key(KeyCode::Character('q'), true, false, false))
             .expect("removed mapping")
             .is_empty());
 
@@ -285,13 +382,94 @@ end)
         let commands = provider
             .handle_key(
                 &context(PaneType::Global),
-                key(KeyCode::Character('d'), true, false, false),
+                key(KeyCode::Character('q'), true, false, false),
             )
             .expect("default quit mapping");
         assert_eq!(
             commands,
             vec![FrontendCommand::Application(ApplicationCommand::Quit)]
         );
+    }
+
+    #[test]
+    fn resolves_neovim_sequences_with_pane_precedence() {
+        let path = temporary_config(
+            r#"
+phenix.keymap.set("global", "gg", function()
+  phenix.ui.focus.set("ui.transcript")
+end)
+phenix.keymap.set("sidebar", "gg", function()
+  phenix.ui.focus.set("ui.input")
+end)
+phenix.keymap.set("global", "<leader>fm", phenix.action.models)
+"#,
+        );
+        let mut provider = LuaFrontendProvider::new(LuaFrontendOptions {
+            source_path: Some(path.clone()),
+            load_defaults: false,
+        })
+        .expect("Lua provider");
+
+        let sidebar = context(PaneType::Sidebar);
+        assert_eq!(
+            provider
+                .handle_key(&sidebar, key(KeyCode::Character('g'), false, false, false))
+                .expect("prefix"),
+            vec![FrontendCommand::Handled]
+        );
+        assert_eq!(
+            provider
+                .handle_key(&sidebar, key(KeyCode::Character('g'), false, false, false))
+                .expect("complete"),
+            vec![FrontendCommand::Ui(UiCommand::FocusSet(ElementId::input()))]
+        );
+
+        let global = context(PaneType::Transcript);
+        for character in [' ', 'f'] {
+            assert_eq!(
+                provider
+                    .handle_key(&global, key(KeyCode::Character(character), false, false, false))
+                    .expect("leader prefix"),
+                vec![FrontendCommand::Handled]
+            );
+        }
+        assert_eq!(
+            provider
+                .handle_key(&global, key(KeyCode::Character('m'), false, false, false))
+                .expect("leader completion"),
+            vec![FrontendCommand::Application(
+                ApplicationCommand::OpenModelPicker
+            )]
+        );
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn escape_cancels_a_pending_sequence_without_running_an_action() {
+        let path = temporary_config(
+            r#"
+phenix.keymap.set("global", "gg", phenix.action.quit)
+"#,
+        );
+        let mut provider = LuaFrontendProvider::new(LuaFrontendOptions {
+            source_path: Some(path.clone()),
+            load_defaults: false,
+        })
+        .expect("Lua provider");
+        let global = context(PaneType::Transcript);
+        assert_eq!(
+            provider
+                .handle_key(&global, key(KeyCode::Character('g'), false, false, false))
+                .expect("prefix"),
+            vec![FrontendCommand::Handled]
+        );
+        assert_eq!(
+            provider
+                .handle_key(&global, key(KeyCode::Escape, false, false, false))
+                .expect("cancel prefix"),
+            vec![FrontendCommand::Handled]
+        );
+        fs::remove_file(path).ok();
     }
 
     #[test]
