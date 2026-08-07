@@ -1,3 +1,4 @@
+use crate::rich_document::render_markdown;
 use crate::theme::theme_style;
 use phenix_frontend_config::ThemeConfig;
 use phenix_runtime_api::{TranscriptBlock, TranscriptRole};
@@ -200,7 +201,7 @@ fn render_turn(
     }
 
     if !turn.response.trim().is_empty() {
-        lines.extend(markdown_document_lines(&turn.response, theme));
+        lines.extend(render_markdown(&turn.response, width, theme));
     } else if turn.user.is_some() {
         lines.push(Line::styled("…", theme_style(theme, "Muted")));
     }
@@ -328,187 +329,6 @@ fn wrap_preserving_text(line: &str, width: usize) -> Vec<String> {
     output
 }
 
-fn markdown_document_lines(text: &str, theme: &ThemeConfig) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-    let mut in_code_block = false;
-
-    for raw in text.lines() {
-        let trimmed = raw.trim_start();
-        if let Some(fence) = trimmed.strip_prefix("```") {
-            if in_code_block {
-                in_code_block = false;
-                lines.push(Line::default());
-            } else {
-                in_code_block = true;
-                let language = fence.trim();
-                if !language.is_empty() {
-                    lines.push(Line::styled(
-                        format!("  {language}"),
-                        theme_style(theme, "Muted"),
-                    ));
-                }
-            }
-            continue;
-        }
-
-        if in_code_block {
-            lines.push(Line::from(vec![
-                Span::styled("  │ ", theme_style(theme, "Muted")),
-                Span::styled(raw.to_owned(), theme_style(theme, "Surface")),
-            ]));
-            continue;
-        }
-
-        if trimmed.is_empty() {
-            lines.push(Line::default());
-            continue;
-        }
-
-        if is_markdown_rule(trimmed) {
-            lines.push(Line::styled(
-                "────────────────────────────────",
-                theme_style(theme, "Border"),
-            ));
-            continue;
-        }
-
-        if let Some((level, heading)) = markdown_heading(trimmed) {
-            let group = if level <= 2 { "Accent" } else { "Normal" };
-            lines.push(Line::styled(
-                heading.to_owned(),
-                theme_style(theme, group).add_modifier(Modifier::BOLD),
-            ));
-            continue;
-        }
-
-        if let Some(item) = trimmed
-            .strip_prefix("- ")
-            .or_else(|| trimmed.strip_prefix("* "))
-        {
-            let mut spans = vec![Span::styled("• ", theme_style(theme, "Accent"))];
-            spans.extend(inline_markdown_spans(item, theme));
-            lines.push(Line::from(spans));
-            continue;
-        }
-
-        if let Some((marker, item)) = ordered_list_item(trimmed) {
-            let mut spans = vec![Span::styled(
-                format!("{marker} "),
-                theme_style(theme, "Accent"),
-            )];
-            spans.extend(inline_markdown_spans(item, theme));
-            lines.push(Line::from(spans));
-            continue;
-        }
-
-        if let Some(quote) = trimmed.strip_prefix("> ") {
-            lines.push(Line::from(vec![
-                Span::styled("│ ", theme_style(theme, "Muted")),
-                Span::styled(
-                    quote.to_owned(),
-                    theme_style(theme, "Muted").add_modifier(Modifier::ITALIC),
-                ),
-            ]));
-            continue;
-        }
-
-        lines.push(Line::from(inline_markdown_spans(raw, theme)));
-    }
-
-    lines
-}
-
-fn markdown_heading(line: &str) -> Option<(usize, &str)> {
-    let level = line.chars().take_while(|character| *character == '#').count();
-    if !(1..=6).contains(&level) {
-        return None;
-    }
-    let heading = line.get(level..)?.strip_prefix(' ')?;
-    Some((level, heading.trim()))
-}
-
-fn ordered_list_item(line: &str) -> Option<(&str, &str)> {
-    let (marker, item) = line.split_once(' ')?;
-    let digits = marker.strip_suffix('.')?;
-    if digits.is_empty() || !digits.chars().all(|character| character.is_ascii_digit()) {
-        return None;
-    }
-    Some((marker, item))
-}
-
-fn is_markdown_rule(line: &str) -> bool {
-    let compact = line
-        .chars()
-        .filter(|character| !character.is_whitespace())
-        .collect::<String>();
-    let Some(marker) = compact.chars().next() else {
-        return false;
-    };
-    compact.len() >= 3
-        && matches!(marker, '-' | '*' | '_')
-        && compact.chars().all(|character| character == marker)
-}
-
-fn inline_markdown_spans(text: &str, theme: &ThemeConfig) -> Vec<Span<'static>> {
-    let mut spans = Vec::new();
-    let mut remaining = text;
-
-    while !remaining.is_empty() {
-        let bold = remaining.find("**");
-        let code = remaining.find('`');
-        let next = match (bold, code) {
-            (Some(bold), Some(code)) => bold.min(code),
-            (Some(bold), None) => bold,
-            (None, Some(code)) => code,
-            (None, None) => {
-                spans.push(Span::styled(
-                    remaining.to_owned(),
-                    theme_style(theme, "Normal"),
-                ));
-                break;
-            }
-        };
-
-        if next > 0 {
-            spans.push(Span::styled(
-                remaining[..next].to_owned(),
-                theme_style(theme, "Normal"),
-            ));
-            remaining = &remaining[next..];
-            continue;
-        }
-
-        if let Some(after_open) = remaining.strip_prefix("**") {
-            if let Some(end) = after_open.find("**") {
-                spans.push(Span::styled(
-                    after_open[..end].to_owned(),
-                    theme_style(theme, "Normal").add_modifier(Modifier::BOLD),
-                ));
-                remaining = &after_open[end + 2..];
-            } else {
-                spans.push(Span::styled("**", theme_style(theme, "Normal")));
-                remaining = after_open;
-            }
-            continue;
-        }
-
-        if let Some(after_open) = remaining.strip_prefix('`') {
-            if let Some(end) = after_open.find('`') {
-                spans.push(Span::styled(
-                    after_open[..end].to_owned(),
-                    theme_style(theme, "Surface"),
-                ));
-                remaining = &after_open[end + 1..];
-            } else {
-                spans.push(Span::styled("`", theme_style(theme, "Normal")));
-                remaining = after_open;
-            }
-        }
-    }
-
-    spans
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -586,6 +406,29 @@ mod tests {
         assert!(text.iter().any(|line| line == "Hello there."));
         assert!(text.iter().any(|line| line.contains("[Thinking]")));
         assert!(!text.iter().any(|line| line.contains("hidden")));
+    }
+
+    #[test]
+    fn rich_markdown_table_is_rendered_inside_assistant_response() {
+        let turn = ConversationTurn {
+            id: "run-1:u1".to_owned(),
+            user: Some("status?".to_owned()),
+            response: "| Check | State |\n| --- | --- |\n| tests | green |".to_owned(),
+            details: Vec::new(),
+        };
+        let mut lines = Vec::new();
+        render_turn(
+            &mut lines,
+            &turn,
+            false,
+            false,
+            60,
+            &ThemeConfig::default(),
+        );
+        let text = lines.iter().map(line_text).collect::<Vec<_>>();
+        assert!(text.iter().any(|line| line.contains("Check") && line.contains("State")));
+        assert!(text.iter().any(|line| line.contains('┼')));
+        assert!(text.iter().any(|line| line.contains("tests") && line.contains("green")));
     }
 
     #[test]
