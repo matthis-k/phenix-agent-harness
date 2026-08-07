@@ -211,24 +211,44 @@ impl Default for ThemeConfig {
         let mut theme = Self {
             highlights: BTreeMap::new(),
         };
-        for (group, foreground, background, bold) in [
-            ("Normal", rgb(205, 214, 244), rgb(30, 30, 46), false),
-            ("Surface", rgb(205, 214, 244), rgb(49, 50, 68), false),
-            ("Muted", rgb(166, 173, 200), rgb(30, 30, 46), false),
-            ("Accent", rgb(137, 180, 250), rgb(30, 30, 46), true),
-            ("Success", rgb(166, 227, 161), rgb(30, 30, 46), false),
-            ("Warning", rgb(249, 226, 175), rgb(30, 30, 46), false),
-            ("Error", rgb(243, 139, 168), rgb(30, 30, 46), false),
-            ("Thinking", rgb(249, 226, 175), rgb(30, 30, 46), false),
-            ("Tool", rgb(203, 166, 247), rgb(30, 30, 46), false),
-            ("Border", rgb(49, 50, 68), rgb(30, 30, 46), false),
-            ("BorderFocused", rgb(137, 180, 250), rgb(30, 30, 46), false),
+
+        // Catppuccin Mocha baseline: crust is application chrome/canvas and base
+        // is the ordinary pane surface. Focus changes the border/title rather than
+        // promoting an entire pane to a brighter surface level.
+        theme.set(
+            "Normal",
+            HighlightStyle {
+                foreground: Some(rgb(205, 214, 244)),
+                background: Some(rgb(17, 17, 27)),
+                ..HighlightStyle::default()
+            },
+        );
+        for group in ["Surface", "SurfaceFocused"] {
+            theme.set(
+                group,
+                HighlightStyle {
+                    foreground: Some(rgb(205, 214, 244)),
+                    background: Some(rgb(30, 30, 46)),
+                    ..HighlightStyle::default()
+                },
+            );
+        }
+
+        for (group, foreground, bold) in [
+            ("Muted", rgb(166, 173, 200), false),
+            ("Accent", rgb(137, 180, 250), true),
+            ("Success", rgb(166, 227, 161), false),
+            ("Warning", rgb(249, 226, 175), false),
+            ("Error", rgb(243, 139, 168), false),
+            ("Thinking", rgb(249, 226, 175), false),
+            ("Tool", rgb(203, 166, 247), false),
+            ("Border", rgb(49, 50, 68), false),
+            ("BorderFocused", rgb(137, 180, 250), false),
         ] {
             theme.set(
                 group,
                 HighlightStyle {
                     foreground: Some(foreground),
-                    background: Some(background),
                     bold,
                     ..HighlightStyle::default()
                 },
@@ -448,10 +468,13 @@ mod tests {
 
     #[test]
     fn default_theme_uses_semantic_highlight_groups() {
-        assert!(ThemeConfig::default().highlights.contains_key("Normal"));
-        assert!(ThemeConfig::default()
-            .highlights
-            .contains_key("BorderFocused"));
+        let theme = ThemeConfig::default();
+        assert!(theme.highlights.contains_key("Normal"));
+        assert!(theme.highlights.contains_key("SurfaceFocused"));
+        assert!(theme.highlights.contains_key("BorderFocused"));
+        assert_eq!(theme.style("Normal").background, Some(rgb(17, 17, 27)));
+        assert_eq!(theme.style("Surface").background, Some(rgb(30, 30, 46)));
+        assert_eq!(theme.style("Accent").background, None);
     }
 
     #[test]
