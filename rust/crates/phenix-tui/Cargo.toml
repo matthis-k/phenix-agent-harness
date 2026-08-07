@@ -22,6 +22,7 @@ ratatui-image = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 shell-words = { workspace = true }
+tree-sitter = { workspace = true }
 tree-sitter-bash = { workspace = true }
 tree-sitter-highlight = { workspace = true }
 tree-sitter-json = { workspace = true }
