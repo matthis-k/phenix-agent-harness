@@ -8,6 +8,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::error::Error;
+use std::fmt::Display;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
@@ -277,20 +278,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         InitializeResponse::new(initialize.protocol_version)
                             .agent_capabilities(AgentCapabilities::new()),
                     )
-                    .map_err(agent_client_protocol::Error::into_internal_error)?,
+                    .map_err(internal_error)?,
                     ClientRequest::NewSessionRequest(_) => request_state
                         .lock()
                         .map_err(|_| agent_client_protocol::Error::internal_error())?
                         .create_session()
-                        .map_err(agent_client_protocol::Error::into_internal_error)?,
+                        .map_err(internal_error)?,
                     ClientRequest::SetSessionConfigOptionRequest(request) => {
-                        let request = serde_json::to_value(request)
-                            .map_err(agent_client_protocol::Error::into_internal_error)?;
+                        let request = serde_json::to_value(request).map_err(internal_error)?;
                         request_state
                             .lock()
                             .map_err(|_| agent_client_protocol::Error::internal_error())?
                             .select_config(request)
-                            .map_err(agent_client_protocol::Error::into_internal_error)?
+                            .map_err(internal_error)?
                     }
                     ClientRequest::PromptRequest(prompt) => {
                         let session_id = prompt.session_id.clone();
@@ -307,7 +307,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             .lock()
                             .map_err(|_| agent_client_protocol::Error::internal_error())?
                             .prompt(&session_id.to_string(), text)
-                            .map_err(agent_client_protocol::Error::into_internal_error)?;
+                            .map_err(internal_error)?;
 
                         connection.send_notification(SessionNotification::new(
                             session_id.clone(),
@@ -347,6 +347,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .connect_to(Stdio::new())
         .await?;
     Ok(())
+}
+
+fn internal_error(error: impl Display) -> agent_client_protocol::Error {
+    agent_client_protocol::Error::into_internal_error(std::io::Error::other(error.to_string()))
 }
 
 fn required_string(value: &Value, key: &str) -> Result<String, Box<dyn Error>> {
