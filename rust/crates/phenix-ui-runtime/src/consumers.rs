@@ -2,6 +2,7 @@ use crate::{
     BusReaction, ContentEvent, EventConsumer, EventRouter, Propagation, ReactionBatch, RouterError,
     UiEvent, ViewMutation,
 };
+use phenix_runtime_api::BackendOutput;
 use phenix_ui_core::{
     AppEvent, AppState, ElementId, EventEnvelope, FocusTarget, KeyCode, UiInput, UserIntent,
 };
@@ -25,13 +26,20 @@ impl EventConsumer for RootContentConsumer {
 
     fn on_content(
         &mut self,
-        _state: &AppState,
+        state: &AppState,
         envelope: &EventEnvelope<ContentEvent>,
     ) -> ReactionBatch {
         match &envelope.event {
-            ContentEvent::Backend(output) => {
-                ReactionBatch::one(BusReaction::App(AppEvent::Backend(output.clone())))
-            }
+            ContentEvent::Backend(output) => match output.as_ref() {
+                BackendOutput::Stopped { result } if !state.exit_requested => {
+                    let message = match result {
+                        Ok(()) => "runtime stopped unexpectedly".to_owned(),
+                        Err(error) => format!("runtime stopped unexpectedly: {error}"),
+                    };
+                    ReactionBatch::one(BusReaction::App(AppEvent::BackendSubmitFailed(message)))
+                }
+                _ => ReactionBatch::one(BusReaction::App(AppEvent::Backend(output.clone()))),
+            },
             ContentEvent::ClockTick | ContentEvent::RefreshRequested => {
                 ReactionBatch::one(BusReaction::Render)
             }
@@ -206,6 +214,7 @@ pub fn install_core_consumers(router: &mut EventRouter) -> Result<(), RouterErro
 #[cfg(test)]
 mod tests {
     use super::*;
+    use phenix_runtime_api::BackendError;
     use phenix_ui_core::{KeyInput, KeyModifiers};
 
     fn mode_key(digit: char) -> EventEnvelope<UiEvent> {
@@ -237,5 +246,36 @@ mod tests {
             BusReaction::View(ViewMutation::SetPaneVisibility { element, visible: true })
                 if element == &ElementId::transcript()
         )));
+    }
+
+    #[test]
+    fn unexpected_backend_stop_is_a_visible_failure_not_a_user_quit() {
+        let mut consumer = RootContentConsumer::new();
+        let state = AppState::default();
+        let envelope = EventEnvelope::broadcast(ContentEvent::Backend(Box::new(
+            BackendOutput::Stopped {
+                result: Err(BackendError::Transport("downstream closed".to_owned())),
+            },
+        )));
+        let batch = consumer.on_content(&state, &envelope);
+        assert!(matches!(
+            batch.reactions.as_slice(),
+            [BusReaction::App(AppEvent::BackendSubmitFailed(message))]
+                if message.contains("downstream closed")
+        ));
+    }
+
+    #[test]
+    fn requested_backend_stop_still_completes_shutdown() {
+        let mut consumer = RootContentConsumer::new();
+        let mut state = AppState::default();
+        state.exit_requested = true;
+        let output = Box::new(BackendOutput::Stopped { result: Ok(()) });
+        let envelope = EventEnvelope::broadcast(ContentEvent::Backend(output.clone()));
+        let batch = consumer.on_content(&state, &envelope);
+        assert_eq!(
+            batch.reactions,
+            vec![BusReaction::App(AppEvent::Backend(output))]
+        );
     }
 }
