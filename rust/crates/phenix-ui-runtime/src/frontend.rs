@@ -310,7 +310,7 @@ fn auth_response(prompt: &AuthPrompt, text: &str, selected: usize) -> AuthPrompt
             .get(selected)
             .or_else(|| options.first())
             .map_or(AuthPromptResponse::Cancelled, |option| {
-                AuthPromptResponse::Selected(option.id.clone()),
+                AuthPromptResponse::Selected(option.id.clone())
             }),
     }
 }
