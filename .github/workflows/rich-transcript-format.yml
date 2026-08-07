@@ -16,8 +16,10 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
       - name: Apply rich transcript cleanup
-        shell: python {0}
+        shell: bash
         run: |
+          set -euo pipefail
+          python - <<'PY'
           from pathlib import Path
 
           runtime = Path("rust/crates/phenix-ui-runtime/src/runtime.rs")
@@ -133,6 +135,7 @@ jobs:
               raise SystemExit("expected table width helper not found")
           text = text.replace(old_sig, new_sig)
           rich.write_text(text)
+          PY
       - name: Format workspace
         working-directory: rust
         run: cargo fmt --all
