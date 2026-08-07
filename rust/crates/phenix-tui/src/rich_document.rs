@@ -116,7 +116,7 @@ fn render_block(
         RichBlock::Table(table) => render_table(table, presentation, width, theme),
         RichBlock::Rule => RenderedRichBlock {
             lines: vec![Line::styled(
-                "─".repeat(width.min(48).max(3)),
+                "─".repeat(width.clamp(3, 48)),
                 theme_style(theme, "Border"),
             )],
             media: None,

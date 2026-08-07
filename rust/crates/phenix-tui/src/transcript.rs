@@ -83,12 +83,14 @@ pub(crate) fn transcript_document(
             &mut lines,
             &mut media,
             turn,
-            selected_turn == Some(index)
-                && state.view.focus == phenix_ui_core::FocusTarget::Transcript,
-            state.view.transcript_turn_is_expanded(&turn.id),
-            width,
-            state,
-            theme,
+            TurnRenderContext {
+                selected: selected_turn == Some(index)
+                    && state.view.focus == phenix_ui_core::FocusTarget::Transcript,
+                expanded: state.view.transcript_turn_is_expanded(&turn.id),
+                width,
+                state,
+                theme,
+            },
         );
         turn_ranges.push(start..lines.len());
     }
@@ -100,16 +102,27 @@ pub(crate) fn transcript_document(
     }
 }
 
+struct TurnRenderContext<'a> {
+    selected: bool,
+    expanded: bool,
+    width: u16,
+    state: &'a AppState,
+    theme: &'a ThemeConfig,
+}
+
 fn render_turn(
     lines: &mut Vec<Line<'static>>,
     media: &mut Vec<TranscriptMediaAnchor>,
     turn: &TranscriptTurn,
-    selected: bool,
-    expanded: bool,
-    width: u16,
-    state: &AppState,
-    theme: &ThemeConfig,
+    context: TurnRenderContext<'_>,
 ) {
+    let TurnRenderContext {
+        selected,
+        expanded,
+        width,
+        state,
+        theme,
+    } = context;
     if let Some(user) = &turn.user {
         lines.extend(user_message_lines(user, width, theme));
         lines.push(Line::default());
@@ -364,9 +377,11 @@ mod tests {
     #[test]
     fn distinct_turns_have_explicit_vertical_rhythm() {
         let run_id = RunId::parse("run-1").expect("run id");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
-        state.selected_run = Some(run_id.clone());
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..AppState::default()
+        };
         let transcript = state.transcript_mut(run_id);
         transcript.append(block("u1", TranscriptRole::User, "one"));
         transcript.append(block("a1", TranscriptRole::Assistant, "answer one"));
@@ -380,9 +395,11 @@ mod tests {
     #[test]
     fn per_block_view_and_viewport_state_reaches_the_component_renderer() {
         let run_id = RunId::parse("run-1").expect("run id");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
-        state.selected_run = Some(run_id.clone());
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..AppState::default()
+        };
         state
             .transcript_mut(run_id.clone())
             .append(block("u1", TranscriptRole::User, "code"));
@@ -408,9 +425,11 @@ mod tests {
     #[test]
     fn image_blocks_keep_a_media_anchor() {
         let run_id = RunId::parse("run-1").expect("run id");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
-        state.selected_run = Some(run_id.clone());
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..AppState::default()
+        };
         state
             .transcript_mut(run_id.clone())
             .append(block("u1", TranscriptRole::User, "image"));

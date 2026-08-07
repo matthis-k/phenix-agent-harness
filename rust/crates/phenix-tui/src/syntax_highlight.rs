@@ -101,9 +101,10 @@ fn highlight_style(name: &str, theme: &ThemeConfig) -> Style {
         "type" | "constructor" | "module" | "tag" | "attribute" => theme_style(theme, "Accent"),
         "function" | "method" => theme_style(theme, "Tool"),
         "punctuation" => theme_style(theme, "Muted"),
-        "field" | "property" | "parameter" | "variable" | "embedded" | "label" | _ => {
+        "field" | "property" | "parameter" | "variable" | "embedded" | "label" => {
             theme_style(theme, "Normal")
         }
+        _ => theme_style(theme, "Normal"),
     }
 }
 

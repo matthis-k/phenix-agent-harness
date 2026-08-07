@@ -1134,9 +1134,11 @@ mod tests {
     #[test]
     fn status_can_resolve_selected_run_model() {
         let run_id = RunId::parse("run-root").expect("run ID");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
-        state.selected_run = Some(run_id.clone());
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..AppState::default()
+        };
         state.snapshot = Some(RuntimeSnapshot {
             capabilities: Default::default(),
             health: BackendHealth::Ready,
