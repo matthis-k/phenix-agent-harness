@@ -39,11 +39,27 @@ pub(crate) fn theme_style(theme: &ThemeConfig, group: &str) -> Style {
 
 /// Resolve a style for an actual rectangular surface.
 ///
-/// This is intentionally distinct from `theme_style`: canvas/pane backgrounds are
-/// structural, while semantic text highlights should never choose their own
-/// background implicitly.
+/// Rich transcript blocks use semantic surface names even when an older theme has
+/// not defined them yet. The fallback hierarchy is derived from existing theme
+/// colors rather than hardcoded RGB values:
+/// - `UserMessage`: raised surface using the border/surface0 color
+/// - `CodeBlock` / `MediaBlock`: crust-like canvas using `Normal`
+///
+/// A theme can override any of these groups explicitly.
 pub(crate) fn surface_style(theme: &ThemeConfig, group: &str) -> Style {
-    raw_theme_style(theme, group)
+    let explicit = raw_theme_style(theme, group);
+    if explicit.bg.is_some() || matches!(group, "Normal" | "Surface" | "SurfaceFocused") {
+        return explicit;
+    }
+    match group {
+        "UserMessage" => {
+            let mut style = raw_theme_style(theme, "Surface");
+            style.bg = raw_theme_style(theme, "Border").fg;
+            style
+        }
+        "CodeBlock" | "MediaBlock" => raw_theme_style(theme, "Normal"),
+        _ => explicit,
+    }
 }
 
 fn raw_theme_style(theme: &ThemeConfig, group: &str) -> Style {
@@ -88,7 +104,10 @@ fn resolved_group<'a>(theme: &ThemeConfig, group: &'a str) -> &'a str {
 }
 
 fn is_surface_group(group: &str) -> bool {
-    matches!(group, "Surface" | "SurfaceFocused")
+    matches!(
+        group,
+        "Normal" | "Surface" | "SurfaceFocused" | "UserMessage" | "CodeBlock" | "MediaBlock"
+    )
 }
 
 fn ratatui_color(color: ColorSpec) -> Color {
@@ -134,6 +153,19 @@ mod tests {
         assert_eq!(
             surface_style(&theme, "SurfaceFocused"),
             surface_style(&theme, "Surface")
+        );
+    }
+
+    #[test]
+    fn rich_block_surfaces_have_distinct_backgrounds() {
+        let theme = ThemeConfig::default();
+        assert_ne!(
+            surface_style(&theme, "UserMessage").bg,
+            surface_style(&theme, "Surface").bg
+        );
+        assert_ne!(
+            surface_style(&theme, "CodeBlock").bg,
+            surface_style(&theme, "Surface").bg
         );
     }
 }
