@@ -75,13 +75,12 @@ pub(crate) fn flatten_blocks(blocks: Vec<RenderedRichBlock>) -> Vec<Line<'static
 fn supported_views(block: &RichBlock) -> Vec<RichBlockView> {
     match block {
         RichBlock::Table(_) => vec![RichBlockView::Dense, RichBlockView::Grid],
-        RichBlock::Code(code) if code.language_is("mermaid") => {
-            vec![RichBlockView::Source, RichBlockView::Rendered]
-        }
-        // Tree-sitter highlighting plugs in here. Until a grammar-backed
-        // highlighter is linked, advertising a fake `Highlighted` view would be
-        // worse than exposing only the source representation.
-        RichBlock::Code(_) => vec![RichBlockView::Source],
+        RichBlock::Code(code) if code.language_is("mermaid") => vec![
+            RichBlockView::Source,
+            RichBlockView::Highlighted,
+            RichBlockView::Rendered,
+        ],
+        RichBlock::Code(_) => vec![RichBlockView::Source, RichBlockView::Highlighted],
         RichBlock::Image(_) => vec![RichBlockView::Preview, RichBlockView::Metadata],
         RichBlock::Heading { .. }
         | RichBlock::Paragraph(_)
@@ -95,7 +94,7 @@ fn default_view(block: &RichBlock, views: &[RichBlockView]) -> RichBlockView {
     match block {
         RichBlock::Table(_) => RichBlockView::Dense,
         RichBlock::Code(code) if code.language_is("mermaid") => RichBlockView::Rendered,
-        RichBlock::Code(_) => RichBlockView::Source,
+        RichBlock::Code(_) => RichBlockView::Highlighted,
         RichBlock::Image(_) => RichBlockView::Preview,
         _ => views.first().copied().unwrap_or(RichBlockView::Rendered),
     }
@@ -207,7 +206,15 @@ fn render_code(
         for raw in code.source.lines() {
             for fragment in wrap_text(raw, content_width) {
                 let mut spans = vec![Span::styled("  ", surface)];
-                spans.push(Span::styled(fragment, theme_style(theme, "Normal")));
+                if active_view == RichBlockView::Highlighted {
+                    spans.extend(highlight_code_line(
+                        code.language.as_deref(),
+                        &fragment,
+                        theme,
+                    ));
+                } else {
+                    spans.push(Span::styled(fragment, theme_style(theme, "Normal")));
+                }
                 lines.push(padded_line(spans, width, surface));
             }
         }
@@ -219,6 +226,89 @@ fn render_code(
         active_view,
         media: None,
     }
+}
+
+fn highlight_code_line(
+    language: Option<&str>,
+    line: &str,
+    theme: &ThemeConfig,
+) -> Vec<Span<'static>> {
+    let comment_marker = match language.unwrap_or_default().to_ascii_lowercase().as_str() {
+        "python" | "py" | "ruby" | "rb" | "nix" | "sh" | "bash" | "zsh" | "yaml"
+        | "yml" => "#",
+        _ => "//",
+    };
+    if let Some(index) = line.find(comment_marker) {
+        let mut spans = highlight_code_tokens(&line[..index], theme);
+        spans.push(Span::styled(
+            line[index..].to_owned(),
+            theme_style(theme, "Muted").add_modifier(Modifier::ITALIC),
+        ));
+        return spans;
+    }
+    highlight_code_tokens(line, theme)
+}
+
+fn highlight_code_tokens(line: &str, theme: &ThemeConfig) -> Vec<Span<'static>> {
+    const KEYWORDS: &[&str] = &[
+        "as", "async", "await", "break", "class", "const", "continue", "def", "else",
+        "enum", "export", "false", "fn", "for", "from", "function", "if", "impl", "import",
+        "in", "interface", "let", "match", "mod", "mut", "nil", "null", "pub", "return",
+        "self", "static", "struct", "super", "this", "trait", "true", "type", "use", "var",
+        "while",
+    ];
+
+    let mut spans = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+
+    let flush_plain = |value: &mut String, output: &mut Vec<Span<'static>>| {
+        if value.is_empty() {
+            return;
+        }
+        let token = std::mem::take(value);
+        let trimmed = token.trim_matches(|character: char| !character.is_alphanumeric() && character != '_');
+        let style = if KEYWORDS.contains(&trimmed) {
+            theme_style(theme, "Tool").add_modifier(Modifier::BOLD)
+        } else if !trimmed.is_empty() && trimmed.chars().all(|character| character.is_ascii_digit()) {
+            theme_style(theme, "Warning")
+        } else {
+            theme_style(theme, "Normal")
+        };
+        output.push(Span::styled(token, style));
+    };
+
+    for character in line.chars() {
+        if let Some(open) = quote {
+            current.push(character);
+            if character == open {
+                spans.push(Span::styled(
+                    std::mem::take(&mut current),
+                    theme_style(theme, "Success"),
+                ));
+                quote = None;
+            }
+            continue;
+        }
+        if matches!(character, '"' | '\'') {
+            flush_plain(&mut current, &mut spans);
+            current.push(character);
+            quote = Some(character);
+            continue;
+        }
+        if character.is_whitespace() || "(){}[],:;=+-*/<>.!&|".contains(character) {
+            flush_plain(&mut current, &mut spans);
+            spans.push(Span::styled(character.to_string(), theme_style(theme, "Muted")));
+        } else {
+            current.push(character);
+        }
+    }
+    if quote.is_some() {
+        spans.push(Span::styled(current, theme_style(theme, "Success")));
+    } else {
+        flush_plain(&mut current, &mut spans);
+    }
+    spans
 }
 
 fn render_mermaid(
@@ -264,23 +354,22 @@ fn render_mermaid(
     }
 }
 
-/// Lightweight dependency-free Mermaid fallback. It intentionally handles only
-/// common edge syntax. A full renderer can later replace this representation
-/// without changing the rich-text primitive or transcript model.
+/// Dependency-free Mermaid fallback for common edge syntax. It is deliberately
+/// small: the rich block still exposes source/highlighted/rendered views, and a
+/// full Mermaid renderer can replace this representation without changing the
+/// document model.
 fn render_mermaid_fallback(source: &str) -> Vec<String> {
-    let mut lines = source.lines().map(str::trim).filter(|line| !line.is_empty());
-    let first = lines.next();
-    let mut output = Vec::new();
-    if first.is_some_and(|line| line.starts_with("flowchart") || line.starts_with("graph")) {
-        // Header carries direction only; edges below are the useful visual content.
-    } else if let Some(first) = first {
-        lines = source.lines().map(str::trim).filter(|line| !line.is_empty());
-        if !first.contains("-->") && !first.contains("==>") && !first.contains("-.->") {
-            return Vec::new();
-        }
+    let lines = source
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        return Vec::new();
     }
-
-    for line in lines {
+    let start = usize::from(lines[0].starts_with("flowchart") || lines[0].starts_with("graph"));
+    let mut output = Vec::new();
+    for line in lines.into_iter().skip(start) {
         let arrow = ["-.->", "==>", "-->", "---"]
             .into_iter()
             .find(|arrow| line.contains(arrow));
@@ -341,7 +430,7 @@ fn render_table(
 }
 
 fn render_table_dense(table: &RichTable, width: usize, theme: &ThemeConfig) -> Vec<Line<'static>> {
-    let widths = table_widths(table, width, 3);
+    let widths = table_widths(table, width, TableLayout::Dense);
     if widths.is_empty() {
         return Vec::new();
     }
@@ -364,7 +453,7 @@ fn render_table_dense(table: &RichTable, width: usize, theme: &ThemeConfig) -> V
 }
 
 fn render_table_grid(table: &RichTable, width: usize, theme: &ThemeConfig) -> Vec<Line<'static>> {
-    let widths = table_widths(table, width.saturating_sub(2), 3);
+    let widths = table_widths(table, width, TableLayout::Grid);
     if widths.is_empty() {
         return Vec::new();
     }
@@ -385,7 +474,13 @@ fn render_table_grid(table: &RichTable, width: usize, theme: &ThemeConfig) -> Ve
     output
 }
 
-fn table_widths(table: &RichTable, width: usize, separator: usize) -> Vec<usize> {
+#[derive(Clone, Copy)]
+enum TableLayout {
+    Dense,
+    Grid,
+}
+
+fn table_widths(table: &RichTable, width: usize, layout: TableLayout) -> Vec<usize> {
     let columns = table
         .rows
         .iter()
@@ -396,8 +491,11 @@ fn table_widths(table: &RichTable, width: usize, separator: usize) -> Vec<usize>
     if columns == 0 {
         return Vec::new();
     }
-    let separator_width = columns.saturating_sub(1).saturating_mul(separator);
-    let available = width.saturating_sub(separator_width).max(columns);
+    let fixed = match layout {
+        TableLayout::Dense => columns.saturating_sub(1).saturating_mul(3),
+        TableLayout::Grid => columns.saturating_mul(3).saturating_add(1),
+    };
+    let available = width.saturating_sub(fixed).max(columns);
     let mut widths = (0..columns)
         .map(|column| {
             std::iter::once(table.header.get(column).map_or_else(String::new, RichText::text))
@@ -665,12 +763,14 @@ mod tests {
         assert!(text.iter().filter(|line| line.contains('┼')).count() >= 2);
         assert!(text.iter().any(|line| line.starts_with('┌')));
         assert!(text.iter().any(|line| line.starts_with('└')));
+        assert!(text.iter().all(|line| line.chars().count() <= 50));
     }
 
     #[test]
     fn code_is_a_full_width_surface_block() {
         let document = parse_markdown("```rust\nfn main() {}\n```");
         let blocks = render_document(&document, 32, &ThemeConfig::default(), |_| None);
+        assert_eq!(blocks[0].active_view, RichBlockView::Highlighted);
         assert!(blocks[0]
             .lines
             .iter()
@@ -678,12 +778,16 @@ mod tests {
     }
 
     #[test]
-    fn mermaid_has_source_and_rendered_views() {
+    fn mermaid_has_source_highlighted_and_rendered_views() {
         let document = parse_markdown("```mermaid\nflowchart LR\nA[Start] --> B[Done]\n```");
         let blocks = render_document(&document, 50, &ThemeConfig::default(), |_| None);
         assert_eq!(
             blocks[0].views,
-            vec![RichBlockView::Source, RichBlockView::Rendered]
+            vec![
+                RichBlockView::Source,
+                RichBlockView::Highlighted,
+                RichBlockView::Rendered,
+            ]
         );
         assert_eq!(blocks[0].active_view, RichBlockView::Rendered);
         assert!(blocks[0]
