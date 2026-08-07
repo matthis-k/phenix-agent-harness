@@ -175,6 +175,12 @@ fn ui_reactions(state: &AppState, command: UiCommand) -> Vec<BusReaction> {
             element.clone(),
             UiEvent::ScrollRequested { element, lines },
         ))],
+        UiCommand::TranscriptTurnMove(delta) => {
+            vec![BusReaction::View(ViewMutation::MoveTranscriptTurn(delta))]
+        }
+        UiCommand::TranscriptTurnToggleDetails => {
+            vec![BusReaction::View(ViewMutation::ToggleTranscriptTurnDetails)]
+        }
         UiCommand::Invalidate => vec![BusReaction::Render],
     }
 }
