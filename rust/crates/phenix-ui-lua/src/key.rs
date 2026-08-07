@@ -208,7 +208,7 @@ fn parse_code(token: &str) -> Result<KeyCode, KeyParseError> {
         "space" | "leader" => KeyCode::Character(' '),
         "lt" => KeyCode::Character('<'),
         "gt" => KeyCode::Character('>'),
-        function if function.starts_with('f') => {
+        function if function.len() > 1 && function.starts_with('f') => {
             let number = function[1..]
                 .parse::<u8>()
                 .map_err(|_| KeyParseError::InvalidKey(token.to_owned()))?;
@@ -286,6 +286,9 @@ mod tests {
     fn final_single_character_is_always_the_key_not_a_modifier_alias() {
         let control_c = KeyChord::parse("<C-c>").expect("control-c");
         assert!(control_c.matches(key(KeyCode::Character('c'), true, false, false)));
+
+        let control_f = KeyChord::parse("<C-f>").expect("control-f");
+        assert!(control_f.matches(key(KeyCode::Character('f'), true, false, false)));
 
         let alt_m = KeyChord::parse("<M-m>").expect("alt-m");
         assert!(alt_m.matches(key(KeyCode::Character('m'), false, true, false)));
