@@ -9,7 +9,7 @@ use phenix_ui_core::{
 use phenix_ui_runtime::UiRenderer;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 use std::collections::BTreeMap;
 use std::io;
@@ -103,6 +103,20 @@ fn render_pane(
     }
 }
 
+fn workspace_pane(focused: bool, theme: &ThemeConfig) -> Block<'static> {
+    Block::new()
+        .borders(Borders::TOP)
+        .border_style(theme_style(
+            theme,
+            if focused { "BorderFocused" } else { "Border" },
+        ))
+        .style(surface_style(theme, "Surface"))
+}
+
+fn flat_surface(theme: &ThemeConfig) -> Block<'static> {
+    Block::new().style(surface_style(theme, "Surface"))
+}
+
 fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
     let session = state
         .active_session
@@ -123,15 +137,11 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &Th
 }
 
 fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
-    let block = panel(
-        "Transcript",
-        state.view.focus == FocusTarget::Transcript,
-        theme,
-    );
+    let block = workspace_pane(state.view.focus == FocusTarget::Transcript, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let document = transcript_document(state, theme);
+    let document = transcript_document(state, theme, inner.width);
     let mut lines = document.lines;
     if lines.is_empty() {
         lines.push(Line::styled(
@@ -162,32 +172,76 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme:
 }
 
 fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
-    let block = panel("Phenix", state.view.focus == FocusTarget::Sidebar, theme);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Fill(2),
+            Constraint::Length(1),
+            Constraint::Fill(1),
+        ])
+        .split(area);
 
-    let mut lines = vec![section_heading("Health", theme)];
-    lines.push(Line::styled(
-        format!("  {:?}", state.connection),
-        connection_style(state, theme),
-    ));
-    lines.push(Line::default());
+    render_health_section(frame, sections[0], state, theme);
+    render_session_section(frame, sections[2], state, theme);
+    render_runs_section(frame, sections[4], state, theme);
+    render_objectives_section(frame, sections[6], state, theme);
+}
 
-    lines.push(section_heading("Session", theme));
-    lines.push(Line::styled(
-        state
-            .active_session
-            .as_ref()
-            .map_or_else(|| "  —".to_owned(), |session| format!("  {session}")),
-        theme_style(theme, "Normal"),
-    ));
+fn render_health_section(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &AppState,
+    theme: &ThemeConfig,
+) {
+    frame.render_widget(flat_surface(theme), area);
+    frame.render_widget(
+        Paragraph::new(vec![
+            section_heading("Health", theme),
+            Line::styled(
+                format!("  {:?}", state.connection),
+                connection_style(state, theme),
+            ),
+        ]),
+        area,
+    );
+}
 
-    if let Some(snapshot) = &state.snapshot {
-        lines.push(Line::default());
-        lines.push(section_heading("Runs", theme));
-        if snapshot.runs.is_empty() {
-            lines.push(Line::styled("  none", theme_style(theme, "Muted")));
-        } else {
+fn render_session_section(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &AppState,
+    theme: &ThemeConfig,
+) {
+    frame.render_widget(flat_surface(theme), area);
+    frame.render_widget(
+        Paragraph::new(vec![
+            section_heading("Session", theme),
+            Line::styled(
+                state
+                    .active_session
+                    .as_ref()
+                    .map_or_else(|| "  —".to_owned(), |session| format!("  {session}")),
+                theme_style(theme, "Normal"),
+            ),
+        ]),
+        area,
+    );
+}
+
+fn render_runs_section(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &AppState,
+    theme: &ThemeConfig,
+) {
+    frame.render_widget(flat_surface(theme), area);
+    let mut lines = vec![section_heading("Runs", theme)];
+    match &state.snapshot {
+        Some(snapshot) if !snapshot.runs.is_empty() => {
             lines.extend(snapshot.runs.iter().map(|run| {
                 let selected = state.input_target() == Some(&run.id);
                 Line::from(vec![
@@ -214,22 +268,7 @@ fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
                 ])
             }));
         }
-
-        lines.push(Line::default());
-        lines.push(section_heading("Objectives", theme));
-        if snapshot.objectives.is_empty() {
-            lines.push(Line::styled("  none", theme_style(theme, "Muted")));
-        } else {
-            lines.extend(snapshot.objectives.iter().map(|objective| {
-                Line::from(vec![
-                    Span::styled(
-                        format!("  {} ", objective_marker(&objective.state)),
-                        objective_style(&objective.state, theme),
-                    ),
-                    Span::styled(objective.title.clone(), theme_style(theme, "Normal")),
-                ])
-            }));
-        }
+        _ => lines.push(Line::styled("  none", theme_style(theme, "Muted"))),
     }
 
     let scroll = state
@@ -241,12 +280,37 @@ fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
             .scroll((scroll, 0)),
-        inner,
+        area,
     );
 }
 
+fn render_objectives_section(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &AppState,
+    theme: &ThemeConfig,
+) {
+    frame.render_widget(flat_surface(theme), area);
+    let mut lines = vec![section_heading("Objectives", theme)];
+    match &state.snapshot {
+        Some(snapshot) if !snapshot.objectives.is_empty() => {
+            lines.extend(snapshot.objectives.iter().map(|objective| {
+                Line::from(vec![
+                    Span::styled(
+                        format!("  {} ", objective_marker(&objective.state)),
+                        objective_style(&objective.state, theme),
+                    ),
+                    Span::styled(objective.title.clone(), theme_style(theme, "Normal")),
+                ])
+            }));
+        }
+        _ => lines.push(Line::styled("  none", theme_style(theme, "Muted"))),
+    }
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
+}
+
 fn render_inspector(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
-    let block = panel("Inspector", false, theme);
+    let block = workspace_pane(false, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -271,7 +335,7 @@ fn render_inspector(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: 
 }
 
 fn render_specialized(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
-    let block = panel("Inspect", false, theme);
+    let block = workspace_pane(false, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -422,12 +486,7 @@ fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &The
     );
     let focused =
         state.view.focus == FocusTarget::Input && (state.view.overlay.is_none() || completion_open);
-    let title = format!(
-        "Prompt · {} · {}",
-        state.view.input_editor.label(),
-        state.view.vim_mode.label()
-    );
-    let block = panel(&title, focused, theme);
+    let block = workspace_pane(focused, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -704,16 +763,18 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
             "Help",
             0,
             vec![
-                "Alt-1 default workspace · transcript + operational sidebar".to_owned(),
-                "Alt-2 advanced workspace · inspector + transcript + sidebar".to_owned(),
+                "Alt-1 default workspace · transcript + operational panes".to_owned(),
+                "Alt-2 advanced workspace · inspector + transcript + operations".to_owned(),
                 "Alt-3 zen workspace · transcript only".to_owned(),
                 "Alt-4 specialized workspace · exact run/workflow inspection".to_owned(),
-                "Ctrl-B toggles the operational sidebar".to_owned(),
+                "Ctrl-B toggles the operational column".to_owned(),
                 "Transcript j/k selects messages; Enter toggles message details".to_owned(),
                 "Transcript arrows/Page keys scroll within long messages".to_owned(),
                 "Ctrl-O focuses transcript and toggles selected message details".to_owned(),
                 "Ctrl-E cycles owned, embedded, and external editors".to_owned(),
                 "Ctrl-G opens the configured external editor".to_owned(),
+                "Owned input: Shift-Enter newline; Ctrl-W/U/K shell-style editing".to_owned(),
+                "Command completion: arrows/Ctrl-N/P navigate; Ctrl-Y/Enter accept".to_owned(),
                 "Esc enters normal mode; i/a return to insert mode".to_owned(),
                 "Theme and keymaps are configured in config.lua".to_owned(),
             ],
