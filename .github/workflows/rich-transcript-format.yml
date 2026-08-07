@@ -16,7 +16,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
       - name: Apply rich transcript cleanup
-        shell: python
+        shell: python {0}
         run: |
           from pathlib import Path
 
