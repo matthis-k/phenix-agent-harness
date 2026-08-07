@@ -99,9 +99,10 @@ fn child_constraint(
     }
     match node {
         LayoutNode::Pane(pane) => {
-            if matches!((pane.minimum, pane.maximum), (Some(minimum), Some(maximum)) if minimum == maximum)
-            {
-                return Constraint::Length(pane.minimum.expect("matched fixed pane"));
+            if let (Some(minimum), Some(maximum)) = (pane.minimum, pane.maximum) {
+                if minimum == maximum {
+                    return Constraint::Length(minimum);
+                }
             }
 
             if direction == SplitDirection::Vertical
