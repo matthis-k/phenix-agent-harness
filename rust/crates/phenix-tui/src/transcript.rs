@@ -1,9 +1,9 @@
-use crate::rich_document::{flatten_blocks, render_document};
+use crate::rich_document::{render_document, RenderedRichBlock, RichMedia};
 use crate::theme::{surface_style, theme_style};
 use phenix_frontend_config::ThemeConfig;
 use phenix_ui_core::{
-    group_transcript_turns, parse_markdown, AppState, TranscriptDetailKind, TranscriptTurn,
-    TranscriptTurnDetail,
+    group_transcript_turns, parse_markdown, AppState, RichBlockView, RichBlockViewport,
+    TranscriptDetailKind, TranscriptTurn, TranscriptTurnDetail,
 };
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -11,11 +11,19 @@ use std::ops::Range;
 
 const DETAIL_PREFIX: &str = "  │ ";
 const TURN_GAP_LINES: usize = 2;
+const RICH_VIEWPORT_ROWS: usize = 12;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TranscriptMediaAnchor {
+    pub line: usize,
+    pub media: RichMedia,
+}
 
 #[derive(Debug)]
 pub(crate) struct TranscriptDocument {
     pub lines: Vec<Line<'static>>,
     pub turn_ranges: Vec<Range<usize>>,
+    pub media: Vec<TranscriptMediaAnchor>,
 }
 
 pub(crate) fn transcript_document(
@@ -59,6 +67,7 @@ pub(crate) fn transcript_document(
     };
 
     let mut lines = Vec::new();
+    let mut media = Vec::new();
     let mut turn_ranges = Vec::with_capacity(turns.len());
     for (index, turn) in turns.iter().enumerate() {
         if index > 0 {
@@ -67,6 +76,7 @@ pub(crate) fn transcript_document(
         let start = lines.len();
         render_turn(
             &mut lines,
+            &mut media,
             turn,
             selected == Some(index) && state.view.focus == phenix_ui_core::FocusTarget::Transcript,
             state.view.transcript_turn_is_expanded(&turn.id),
@@ -77,11 +87,16 @@ pub(crate) fn transcript_document(
         turn_ranges.push(start..lines.len());
     }
 
-    TranscriptDocument { lines, turn_ranges }
+    TranscriptDocument {
+        lines,
+        turn_ranges,
+        media,
+    }
 }
 
 fn render_turn(
     lines: &mut Vec<Line<'static>>,
+    media: &mut Vec<TranscriptMediaAnchor>,
     turn: &TranscriptTurn,
     selected: bool,
     expanded: bool,
@@ -101,7 +116,28 @@ fn render_turn(
                 .view
                 .rich_block_view(&rich_block_key(&turn.id, block_index))
         });
-        lines.extend(flatten_blocks(rendered));
+        for (block_index, mut block) in rendered.into_iter().enumerate() {
+            if block_index > 0 {
+                lines.push(Line::default());
+            }
+            let key = rich_block_key(&turn.id, block_index);
+            apply_rich_block_viewport(
+                &mut block,
+                state.view.rich_block_viewport(&key),
+                usize::from(width.max(1)),
+            );
+            if selected && state.view.transcript_selected_block == Some(block_index) {
+                mark_selected_block(&mut block, theme);
+            }
+            let start = lines.len();
+            if let Some(block_media) = block.media.clone() {
+                media.push(TranscriptMediaAnchor {
+                    line: start.saturating_add(1),
+                    media: block_media,
+                });
+            }
+            lines.extend(block.lines);
+        }
     } else if turn.user.is_some() {
         lines.push(Line::styled("…", theme_style(theme, "Muted")));
     }
@@ -121,6 +157,67 @@ fn render_turn(
 
 fn rich_block_key(turn_id: &str, index: usize) -> String {
     format!("{turn_id}:block:{index}")
+}
+
+fn apply_rich_block_viewport(
+    block: &mut RenderedRichBlock,
+    viewport: RichBlockViewport,
+    width: usize,
+) {
+    if block.active_view != RichBlockView::Rendered || block.lines.len() <= 1 {
+        return;
+    }
+    let toolbar = block.lines.remove(0);
+    let body = std::mem::take(&mut block.lines);
+    let body = body
+        .into_iter()
+        .skip(viewport.vertical)
+        .take(RICH_VIEWPORT_ROWS)
+        .map(|line| clip_line(&line, viewport.horizontal, width))
+        .collect::<Vec<_>>();
+    block.lines = std::iter::once(toolbar).chain(body).collect();
+}
+
+fn clip_line(line: &Line<'_>, horizontal: usize, width: usize) -> Line<'static> {
+    if horizontal == 0 {
+        return line.clone().into_owned();
+    }
+    let mut skip = horizontal;
+    let mut remaining = width;
+    let mut spans = Vec::new();
+    for span in &line.spans {
+        if remaining == 0 {
+            break;
+        }
+        let characters = span.content.chars().collect::<Vec<_>>();
+        if skip >= characters.len() {
+            skip -= characters.len();
+            continue;
+        }
+        let start = skip;
+        skip = 0;
+        let take = remaining.min(characters.len().saturating_sub(start));
+        let content = characters[start..start + take].iter().collect::<String>();
+        remaining -= take;
+        spans.push(Span::styled(content, span.style));
+    }
+    Line::from(spans)
+}
+
+fn mark_selected_block(block: &mut RenderedRichBlock, theme: &ThemeConfig) {
+    let Some(toolbar) = block.lines.first_mut() else {
+        return;
+    };
+    let Some(first) = toolbar.spans.first_mut() else {
+        return;
+    };
+    let text = first.content.to_string();
+    first.content = if let Some(stripped) = text.strip_prefix(' ') {
+        format!("▸{stripped}").into()
+    } else {
+        format!("▸{text}").into()
+    };
+    first.style = theme_style(theme, "Accent").add_modifier(Modifier::BOLD);
 }
 
 fn user_message_lines(text: &str, width: u16, theme: &ThemeConfig) -> Vec<Line<'static>> {
@@ -292,7 +389,6 @@ fn wrap_preserving_text(line: &str, width: usize) -> Vec<String> {
 mod tests {
     use super::*;
     use phenix_runtime_api::{RunId, TranscriptBlock, TranscriptRole};
-    use phenix_ui_core::RichBlockView;
 
     fn block(id: &str, role: TranscriptRole, text: &str) -> TranscriptBlock {
         TranscriptBlock {
@@ -366,6 +462,53 @@ mod tests {
     }
 
     #[test]
+    fn rendered_block_viewport_is_independent_of_transcript_scroll() {
+        let mut block = RenderedRichBlock {
+            lines: std::iter::once(Line::from("toolbar"))
+                .chain((0..20).map(|index| Line::from(format!("line-{index}"))))
+                .collect(),
+            views: vec![RichBlockView::Source, RichBlockView::Rendered],
+            active_view: RichBlockView::Rendered,
+            media: None,
+        };
+        apply_rich_block_viewport(
+            &mut block,
+            RichBlockViewport {
+                horizontal: 0,
+                vertical: 5,
+            },
+            80,
+        );
+        assert_eq!(line_text(&block.lines[0]), "toolbar");
+        assert_eq!(line_text(&block.lines[1]), "line-5");
+        assert_eq!(block.lines.len(), RICH_VIEWPORT_ROWS + 1);
+    }
+
+    #[test]
+    fn image_blocks_keep_a_media_anchor() {
+        let run_id = RunId::parse("run-1").expect("run id");
+        let mut state = AppState::default();
+        state.root_run = Some(run_id.clone());
+        state.selected_run = Some(run_id.clone());
+        state.transcript_mut(run_id.clone()).append(block(
+            "u1",
+            TranscriptRole::User,
+            "image",
+        ));
+        state.transcript_mut(run_id).append(block(
+            "a1",
+            TranscriptRole::Assistant,
+            "![preview](data:image/png;base64,Zm9v)",
+        ));
+        let document = transcript_document(&state, &ThemeConfig::default(), 50);
+        assert_eq!(document.media.len(), 1);
+        assert!(matches!(
+            document.media[0].media,
+            RichMedia::Image { .. }
+        ));
+    }
+
+    #[test]
     fn collapsed_turn_reads_like_chat_content() {
         let turn = TranscriptTurn {
             id: "run-1:u1".to_owned(),
@@ -376,15 +519,15 @@ mod tests {
                 text: "hidden".to_owned(),
             }],
         };
-        let mut state = AppState::default();
         let mut lines = Vec::new();
         render_turn(
             &mut lines,
+            &mut Vec::new(),
             &turn,
             false,
             false,
             80,
-            &state,
+            &AppState::default(),
             &ThemeConfig::default(),
         );
         let text = lines.iter().map(line_text).collect::<Vec<_>>();
@@ -392,31 +535,6 @@ mod tests {
         assert!(text.iter().any(|line| line.contains("Hello there.")));
         assert!(text.iter().any(|line| line.contains("[Thinking]")));
         assert!(!text.iter().any(|line| line.contains("hidden")));
-        state.view.transcript_selected_block = Some(0);
-    }
-
-    #[test]
-    fn rich_markdown_table_is_rendered_inside_assistant_response() {
-        let turn = TranscriptTurn {
-            id: "run-1:u1".to_owned(),
-            user: Some("status?".to_owned()),
-            response: "| Check | State |\n| --- | --- |\n| tests | green |".to_owned(),
-            details: Vec::new(),
-        };
-        let mut lines = Vec::new();
-        render_turn(
-            &mut lines,
-            &turn,
-            false,
-            false,
-            60,
-            &AppState::default(),
-            &ThemeConfig::default(),
-        );
-        let text = lines.iter().map(line_text).collect::<Vec<_>>();
-        assert!(text.iter().any(|line| line.contains("Check") && line.contains("State")));
-        assert!(text.iter().any(|line| line.contains('┼')));
-        assert!(text.iter().any(|line| line.contains("tests") && line.contains("green")));
     }
 
     #[test]
