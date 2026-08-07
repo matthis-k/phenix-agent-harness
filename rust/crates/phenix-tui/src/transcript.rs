@@ -1,8 +1,9 @@
 use crate::rich_document::render_markdown;
 use crate::theme::{surface_style, theme_style};
 use phenix_frontend_config::ThemeConfig;
-use phenix_runtime_api::{TranscriptBlock, TranscriptRole};
-use phenix_ui_core::{transcript_turn_id, AppState};
+use phenix_ui_core::{
+    group_transcript_turns, AppState, TranscriptDetailKind, TranscriptTurn, TranscriptTurnDetail,
+};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use std::ops::Range;
@@ -16,45 +17,6 @@ pub(crate) struct TranscriptDocument {
     pub turn_ranges: Vec<Range<usize>>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct ConversationTurn {
-    id: String,
-    user: Option<String>,
-    response: String,
-    details: Vec<TurnDetail>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct TurnDetail {
-    kind: DetailKind,
-    text: String,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum DetailKind {
-    Thinking,
-    Tool,
-    System,
-}
-
-impl DetailKind {
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Thinking => "Thinking",
-            Self::Tool => "Tool",
-            Self::System => "Notice",
-        }
-    }
-
-    const fn theme_group(self) -> &'static str {
-        match self {
-            Self::Thinking => "Thinking",
-            Self::Tool => "Tool",
-            Self::System => "Muted",
-        }
-    }
-}
-
 pub(crate) fn transcript_document(
     state: &AppState,
     theme: &ThemeConfig,
@@ -63,11 +25,11 @@ pub(crate) fn transcript_document(
     let mut turns = state
         .input_target()
         .and_then(|run_id| state.transcript(run_id))
-        .map_or_else(Vec::new, |transcript| group_turns(&transcript.blocks));
+        .map_or_else(Vec::new, |transcript| group_transcript_turns(&transcript.blocks));
 
     if !state.notifications.is_empty() {
         if turns.is_empty() {
-            turns.push(ConversationTurn {
+            turns.push(TranscriptTurn {
                 id: "frontend-notifications".to_owned(),
                 user: None,
                 response: String::new(),
@@ -76,8 +38,8 @@ pub(crate) fn transcript_document(
         }
         if let Some(turn) = turns.last_mut() {
             turn.details
-                .extend(state.notifications.iter().map(|message| TurnDetail {
-                    kind: DetailKind::System,
+                .extend(state.notifications.iter().map(|message| TranscriptTurnDetail {
+                    kind: TranscriptDetailKind::System,
                     text: message.clone(),
                 }));
         }
@@ -116,71 +78,9 @@ pub(crate) fn transcript_document(
     TranscriptDocument { lines, turn_ranges }
 }
 
-fn group_turns(blocks: &[TranscriptBlock]) -> Vec<ConversationTurn> {
-    let mut turns = Vec::new();
-    for block in blocks {
-        if matches!(block.role, TranscriptRole::User) {
-            turns.push(ConversationTurn {
-                id: transcript_turn_id(block),
-                user: Some(block.text.clone()),
-                response: String::new(),
-                details: Vec::new(),
-            });
-            continue;
-        }
-
-        if turns.is_empty() {
-            turns.push(ConversationTurn {
-                id: transcript_turn_id(block),
-                user: None,
-                response: String::new(),
-                details: Vec::new(),
-            });
-        }
-        let turn = turns.last_mut().expect("turn inserted above");
-        match block.role {
-            TranscriptRole::Assistant => append_document_text(&mut turn.response, &block.text),
-            TranscriptRole::Thinking => {
-                push_detail(turn, DetailKind::Thinking, block.text.clone());
-            }
-            TranscriptRole::Tool => {
-                push_detail(turn, DetailKind::Tool, block.text.clone());
-            }
-            TranscriptRole::System => {
-                push_detail(turn, DetailKind::System, block.text.clone());
-            }
-            TranscriptRole::User => unreachable!("handled before current turn lookup"),
-        }
-    }
-    turns
-}
-
-fn push_detail(turn: &mut ConversationTurn, kind: DetailKind, text: String) {
-    if text.trim().is_empty() {
-        return;
-    }
-    if let Some(last) = turn.details.last_mut() {
-        if last.kind == kind {
-            append_document_text(&mut last.text, &text);
-            return;
-        }
-    }
-    turn.details.push(TurnDetail { kind, text });
-}
-
-fn append_document_text(target: &mut String, source: &str) {
-    if source.trim().is_empty() {
-        return;
-    }
-    if !target.is_empty() && !target.ends_with('\n') && !source.starts_with('\n') {
-        target.push_str("\n\n");
-    }
-    target.push_str(source);
-}
-
 fn render_turn(
     lines: &mut Vec<Line<'static>>,
-    turn: &ConversationTurn,
+    turn: &TranscriptTurn,
     selected: bool,
     expanded: bool,
     width: u16,
@@ -262,7 +162,7 @@ fn padded_surface_line(
 }
 
 fn detail_summary_line(
-    turn: &ConversationTurn,
+    turn: &TranscriptTurn,
     selected: bool,
     expanded: bool,
     theme: &ThemeConfig,
@@ -270,17 +170,17 @@ fn detail_summary_line(
     let thinking = turn
         .details
         .iter()
-        .filter(|detail| detail.kind == DetailKind::Thinking)
+        .filter(|detail| detail.kind == TranscriptDetailKind::Thinking)
         .count();
     let tools = turn
         .details
         .iter()
-        .filter(|detail| detail.kind == DetailKind::Tool)
+        .filter(|detail| detail.kind == TranscriptDetailKind::Tool)
         .count();
     let notices = turn
         .details
         .iter()
-        .filter(|detail| detail.kind == DetailKind::System)
+        .filter(|detail| detail.kind == TranscriptDetailKind::System)
         .count();
 
     let marker_style = if selected {
@@ -329,10 +229,18 @@ fn detail_summary_line(
     Line::from(spans)
 }
 
-fn detail_lines(detail: &TurnDetail, width: u16, theme: &ThemeConfig) -> Vec<Line<'static>> {
-    let group = detail.kind.theme_group();
+fn detail_lines(
+    detail: &TranscriptTurnDetail,
+    width: u16,
+    theme: &ThemeConfig,
+) -> Vec<Line<'static>> {
+    let (label, group) = match detail.kind {
+        TranscriptDetailKind::Thinking => ("Thinking", "Thinking"),
+        TranscriptDetailKind::Tool => ("Tool", "Tool"),
+        TranscriptDetailKind::System => ("Notice", "Muted"),
+    };
     let mut lines = vec![Line::styled(
-        format!("  {}", detail.kind.label()),
+        format!("  {label}"),
         theme_style(theme, group).add_modifier(Modifier::BOLD),
     )];
     let content_width = usize::from(width)
@@ -370,7 +278,7 @@ fn wrap_preserving_text(line: &str, width: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_runtime_api::RunId;
+    use phenix_runtime_api::{RunId, TranscriptBlock, TranscriptRole};
 
     fn block(id: &str, role: TranscriptRole, text: &str) -> TranscriptBlock {
         TranscriptBlock {
@@ -387,36 +295,6 @@ mod tests {
             .iter()
             .map(|span| span.content.as_ref())
             .collect::<String>()
-    }
-
-    #[test]
-    fn groups_acp_details_under_the_user_turn() {
-        let turns = group_turns(&[
-            block("u1", TranscriptRole::User, "hi"),
-            block("t1", TranscriptRole::Thinking, "think"),
-            block("a1", TranscriptRole::Assistant, "hello"),
-            block("tool1", TranscriptRole::Tool, "read file"),
-        ]);
-        assert_eq!(turns.len(), 1);
-        assert_eq!(turns[0].id, "run-1:u1");
-        assert_eq!(turns[0].user.as_deref(), Some("hi"));
-        assert_eq!(turns[0].response, "hello");
-        assert_eq!(turns[0].details.len(), 2);
-    }
-
-    #[test]
-    fn assistant_markdown_is_not_reinterpreted_as_backend_metadata() {
-        let turns = group_turns(&[block(
-            "a1",
-            TranscriptRole::Assistant,
-            "## Context\nThis is ordinary answer content.",
-        )]);
-        assert_eq!(turns.len(), 1);
-        assert_eq!(
-            turns[0].response,
-            "## Context\nThis is ordinary answer content."
-        );
-        assert!(turns[0].details.is_empty());
     }
 
     #[test]
@@ -450,12 +328,12 @@ mod tests {
 
     #[test]
     fn collapsed_turn_reads_like_chat_content() {
-        let turn = ConversationTurn {
+        let turn = TranscriptTurn {
             id: "run-1:u1".to_owned(),
             user: Some("hi".to_owned()),
             response: "Hello **there**.".to_owned(),
-            details: vec![TurnDetail {
-                kind: DetailKind::Thinking,
+            details: vec![TranscriptTurnDetail {
+                kind: TranscriptDetailKind::Thinking,
                 text: "hidden".to_owned(),
             }],
         };
@@ -477,7 +355,7 @@ mod tests {
 
     #[test]
     fn rich_markdown_table_is_rendered_inside_assistant_response() {
-        let turn = ConversationTurn {
+        let turn = TranscriptTurn {
             id: "run-1:u1".to_owned(),
             user: Some("status?".to_owned()),
             response: "| Check | State |\n| --- | --- |\n| tests | green |".to_owned(),
@@ -500,8 +378,8 @@ mod tests {
 
     #[test]
     fn expanded_details_keep_a_stable_hanging_indent_when_wrapped() {
-        let detail = TurnDetail {
-            kind: DetailKind::Thinking,
+        let detail = TranscriptTurnDetail {
+            kind: TranscriptDetailKind::Thinking,
             text: "abcdefghijklmnopqrstuvwxyz".to_owned(),
         };
         let lines = detail_lines(&detail, 12, &ThemeConfig::default());
