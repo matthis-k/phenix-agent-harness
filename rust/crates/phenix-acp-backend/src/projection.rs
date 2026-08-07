@@ -1,8 +1,8 @@
 use crate::state::{AdapterState, SessionState};
 use crate::terminal::TerminalEvent;
 use phenix_acp::acp::schema::v1::{
-    ContentBlock, ContentChunk, ImageContent, SessionNotification, SessionUpdate, ToolCall,
-    ToolCallStatus, ToolCallUpdate,
+    ContentBlock, ContentChunk, SessionNotification, SessionUpdate, ToolCall, ToolCallStatus,
+    ToolCallUpdate,
 };
 use phenix_runtime_api::{
     BackendError, BackendEvent, BackendOutputSender, RunOutcome, RunState, ToolCallId,
@@ -358,6 +358,7 @@ fn apply_session_info(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use phenix_acp::acp::schema::v1::ImageContent;
 
     #[test]
     fn tool_summaries_are_bounded_on_character_boundaries() {

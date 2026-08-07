@@ -4,19 +4,18 @@ use crate::{
 };
 use phenix_frontend_config::FrontendProviderRef;
 use phenix_runtime_api::{BackendClient, BackendCommand, BackendRuntime, BackendWorker};
-#[cfg(test)]
-use phenix_ui_core::ElementId;
 use phenix_ui_core::{
     command_completions, group_transcript_turns, parse_markdown, reduce, AppEffect, AppEvent,
-    AppState, FocusDirection, FocusTarget, InputEditor, LayoutAxis, OverlayState, ResizeRequest,
-    VimMode,
+    AppState, FocusDirection, FocusTarget, LayoutAxis, OverlayState, ResizeRequest, VimMode,
 };
+#[cfg(test)]
+use phenix_ui_core::{ElementId, InputEditor, RichBlockView};
 use std::collections::VecDeque;
 use std::env;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{self, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
