@@ -2,6 +2,7 @@
 
 mod layout;
 mod renderer;
+mod rich_document;
 mod theme;
 mod transcript;
 
