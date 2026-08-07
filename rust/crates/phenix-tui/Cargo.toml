@@ -25,6 +25,7 @@ shell-words = { workspace = true }
 tree-sitter = { workspace = true }
 tree-sitter-bash = { workspace = true }
 tree-sitter-highlight = { workspace = true }
+tree-sitter-javascript = { workspace = true }
 tree-sitter-json = { workspace = true }
 tree-sitter-lua = { workspace = true }
 tree-sitter-nix = { workspace = true }
