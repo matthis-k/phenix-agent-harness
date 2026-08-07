@@ -3,8 +3,7 @@ use crate::provider::{LuaBinding, LuaState};
 use mlua::{Function, Lua, Table, Value};
 use phenix_frontend_config::{
     ApplicationCommand, ColorSpec, FrontendCommand, FrontendProviderError, HighlightStyle,
-    InputCommand, LayoutConfig, LayoutNode, NamedColor, OverlayCommand, PaneLayout, PaneType,
-    SplitDirection, SplitLayout, ThemeConfig, UiCommand,
+    InputCommand, NamedColor, OverlayCommand, PaneType, ThemeConfig, UiCommand,
 };
 use phenix_ui_core::{ElementId, FocusDirection, LayoutAxis, ResizeRequest};
 use std::cell::RefCell;
@@ -33,9 +32,6 @@ pub(crate) fn install_api(
         .map_err(runtime_error)?;
     phenix
         .set("theme", theme_api(lua, Rc::clone(&state))?)
-        .map_err(runtime_error)?;
-    phenix
-        .set("layout", layout_api(lua, state)?)
         .map_err(runtime_error)?;
     lua.globals().set("phenix", phenix).map_err(runtime_error)
 }
@@ -413,67 +409,6 @@ fn theme_api(lua: &Lua, state: Rc<RefCell<LuaState>>) -> Result<Table, FrontendP
     Ok(api)
 }
 
-fn layout_api(lua: &Lua, state: Rc<RefCell<LuaState>>) -> Result<Table, FrontendProviderError> {
-    let api = lua.create_table().map_err(runtime_error)?;
-
-    api.set(
-        "pane",
-        lua.create_function(move |lua, (element, options): (String, Option<Table>)| {
-            let table = lua.create_table()?;
-            table.set("kind", "pane")?;
-            table.set("element", element)?;
-            if let Some(options) = options {
-                for key in ["pane_type", "weight", "min", "max"] {
-                    let value: Value = options.get(key)?;
-                    if !matches!(value, Value::Nil) {
-                        table.set(key, value)?;
-                    }
-                }
-            }
-            Ok(table)
-        })
-        .map_err(runtime_error)?,
-    )
-    .map_err(runtime_error)?;
-
-    api.set(
-        "split",
-        lua.create_function(move |lua, (direction, children): (String, Table)| {
-            let table = lua.create_table()?;
-            table.set("kind", "split")?;
-            table.set("direction", direction)?;
-            table.set("children", children)?;
-            Ok(table)
-        })
-        .map_err(runtime_error)?,
-    )
-    .map_err(runtime_error)?;
-
-    let set_state = Rc::clone(&state);
-    api.set(
-        "set",
-        lua.create_function(move |_, node: Table| {
-            set_state.borrow_mut().config.layout = LayoutConfig {
-                root: parse_layout_node(node)?,
-            };
-            Ok(())
-        })
-        .map_err(runtime_error)?,
-    )
-    .map_err(runtime_error)?;
-
-    api.set(
-        "reset",
-        lua.create_function(move |_, ()| {
-            state.borrow_mut().config.layout = LayoutConfig::default();
-            Ok(())
-        })
-        .map_err(runtime_error)?,
-    )
-    .map_err(runtime_error)?;
-    Ok(api)
-}
-
 fn command_function(
     lua: &Lua,
     commands: Rc<RefCell<Vec<FrontendCommand>>>,
@@ -539,58 +474,6 @@ fn parse_color_name(value: &str) -> mlua::Result<ColorSpec> {
         _ => return Err(mlua::Error::runtime(format!("unknown color: {value}"))),
     };
     Ok(ColorSpec::Named(named))
-}
-
-fn parse_layout_node(table: Table) -> mlua::Result<LayoutNode> {
-    match table.get::<String>("kind")?.as_str() {
-        "pane" => {
-            let element =
-                ElementId::parse(table.get::<String>("element")?).map_err(mlua::Error::external)?;
-            let pane_type = table
-                .get::<Option<String>>("pane_type")?
-                .map(|value| PaneType::parse(&value).map_err(mlua::Error::external))
-                .transpose()?
-                .unwrap_or_else(|| PaneType::from_element(&element));
-            Ok(LayoutNode::Pane(PaneLayout {
-                element,
-                pane_type,
-                weight: table.get::<Option<u16>>("weight")?.unwrap_or(1).max(1),
-                minimum: table.get("min")?,
-                maximum: table.get("max")?,
-            }))
-        }
-        "split" => {
-            let direction = match table
-                .get::<String>("direction")?
-                .trim()
-                .to_ascii_lowercase()
-                .as_str()
-            {
-                "horizontal" | "h" => SplitDirection::Horizontal,
-                "vertical" | "v" => SplitDirection::Vertical,
-                value => {
-                    return Err(mlua::Error::runtime(format!(
-                        "unknown split direction: {value}"
-                    )))
-                }
-            };
-            let children_table = table.get::<Table>("children")?;
-            let children = children_table
-                .sequence_values::<Table>()
-                .map(|value| value.and_then(parse_layout_node))
-                .collect::<mlua::Result<Vec<_>>>()?;
-            if children.is_empty() {
-                return Err(mlua::Error::runtime("layout split must contain children"));
-            }
-            Ok(LayoutNode::Split(SplitLayout {
-                direction,
-                children,
-            }))
-        }
-        value => Err(mlua::Error::runtime(format!(
-            "unknown layout node kind: {value}"
-        ))),
-    }
 }
 
 fn parse_focus_direction(value: &str) -> mlua::Result<FocusDirection> {
