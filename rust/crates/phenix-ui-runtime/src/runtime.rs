@@ -665,8 +665,7 @@ mod tests {
     #[test]
     fn transcript_turns_are_selected_and_expanded_independently() {
         let run_id = phenix_runtime_api::RunId::parse("run-1").expect("run id");
-        state_with_transcript(&mut state(), &run_id);
-        let mut state = state();
+        let mut state = AppState::default();
         state.root_run = Some(run_id.clone());
         for (id, role) in [
             ("u1", TranscriptRole::User),
@@ -685,15 +684,9 @@ mod tests {
         apply_view_mutation(&mut state, ViewMutation::MoveTranscriptTurn(-1));
         assert_eq!(state.view.transcript_selected_turn, Some(0));
         apply_view_mutation(&mut state, ViewMutation::ToggleTranscriptTurnDetails);
-        assert!(state.view.transcript_turn_is_expanded("u1"));
-        assert!(!state.view.transcript_turn_is_expanded("u2"));
+        assert!(state.view.transcript_turn_is_expanded("run-1:u1"));
+        assert!(!state.view.transcript_turn_is_expanded("run-1:u2"));
     }
-
-    fn state() -> AppState {
-        AppState::default()
-    }
-
-    fn state_with_transcript(_state: &mut AppState, _run_id: &phenix_runtime_api::RunId) {}
 
     #[test]
     fn editor_mode_updates_are_local_and_visible_in_status() {
