@@ -36,7 +36,10 @@ map("global", "<C-b>", function()
   phenix.ui.pane.toggle("ui.sidebar")
   phenix.ui.focus.set("ui.transcript")
 end, { desc = "Toggle runs sidebar" })
-map("global", "<C-o>", phenix.action.toggle_details, { desc = "Toggle agent transcript details" })
+map("global", "<C-o>", function()
+  phenix.ui.focus.set("ui.transcript")
+  phenix.ui.transcript.toggle_details()
+end, { desc = "Toggle details for the selected transcript turn" })
 map("global", "<Tab>", function() phenix.ui.focus.move("next") end, { desc = "Focus next pane" })
 map("global", "<S-Tab>", function() phenix.ui.focus.move("previous") end, { desc = "Focus previous pane" })
 map("global", "<M-h>", function() phenix.ui.focus.move("left") end, { desc = "Focus left pane" })
@@ -54,17 +57,18 @@ map("sidebar", "i", function() phenix.ui.focus.set("ui.input") end)
 map("sidebar", ">", function() phenix.ui.pane.resize("ui.sidebar", "horizontal", 2) end)
 map("sidebar", "<", function() phenix.ui.pane.resize("ui.sidebar", "horizontal", -2) end)
 
--- Transcript offsets are measured from the newest content. Moving up therefore
--- increases the distance from the end; moving down decreases it. Moving right
--- reveals the normally hidden runs pane before focusing it.
-map("transcript", "j", function() phenix.ui.pane.scroll("ui.transcript", -1) end)
-map("transcript", "k", function() phenix.ui.pane.scroll("ui.transcript", 1) end)
+-- The transcript is message-oriented. j/k select complete conversation turns;
+-- Enter expands that turn's context/thinking/tool details. Arrow/Page keys keep
+-- line-level scrolling available for long messages.
+map("transcript", "j", function() phenix.ui.transcript.move(1) end, { desc = "Select next message" })
+map("transcript", "k", function() phenix.ui.transcript.move(-1) end, { desc = "Select previous message" })
+map("transcript", "<CR>", phenix.ui.transcript.toggle_details, { desc = "Toggle selected message details" })
 map("transcript", "l", function()
   phenix.ui.pane.show("ui.sidebar")
   phenix.ui.focus.set("ui.sidebar")
 end)
 map("transcript", "i", function() phenix.ui.focus.set("ui.input") end)
-map("transcript", "G", function() phenix.ui.pane.scroll("ui.transcript", -1000000) end)
+map("transcript", "G", function() phenix.ui.transcript.move(1000000) end)
 map("transcript", "<Down>", function() phenix.ui.pane.scroll("ui.transcript", -1) end)
 map("transcript", "<Up>", function() phenix.ui.pane.scroll("ui.transcript", 1) end)
 map("transcript", "<PageDown>", function() phenix.ui.pane.scroll("ui.transcript", -10) end)
