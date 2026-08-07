@@ -17,7 +17,8 @@ pub use routing::{
     RouteTarget,
 };
 pub use state::{
-    AppState, AuthFlowState, DialogState, InputState, RuntimeConnectionState, TranscriptState,
+    transcript_turn_id, AppState, AuthFlowState, DialogState, InputState, RuntimeConnectionState,
+    TranscriptState,
 };
 pub use view::{
     FocusTarget, InputEditor, OverlayState, PaneViewState, ScrollState, SidebarSection,
