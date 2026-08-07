@@ -1,0 +1,35 @@
+name: Rich transcript compile fix
+
+on:
+  push:
+    branches:
+      - refactor/rich-transcript-blocks
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: refactor/rich-transcript-blocks
+      - name: Apply fixes
+        run: python .github/scripts/rich_compile_fix.py
+      - name: Format workspace
+        working-directory: rust
+        run: cargo fmt --all
+      - name: Commit fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- rust; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rust
+          git commit -m "fix(tui): satisfy rich transcript compile contracts"
+          git push origin HEAD:refactor/rich-transcript-blocks
