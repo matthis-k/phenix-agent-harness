@@ -10,8 +10,8 @@ phenix.theme.set("Tool", { fg = "#cba6f7", bg = "#1e1e2e" })
 phenix.theme.set("Border", { fg = "#313244", bg = "#1e1e2e" })
 phenix.theme.set("BorderFocused", { fg = "#89b4fa", bg = "#1e1e2e" })
 
--- Conversation-first workspace: the prompt belongs to the transcript column,
--- while run/session context remains visible in a stable right sidebar.
+-- Conversation-first workspace: the transcript owns almost all horizontal
+-- space by default. Auxiliary panes are addressable and toggled when needed.
 phenix.layout.set(phenix.layout.split("vertical", {
   phenix.layout.pane("ui.header", { pane_type = "root", weight = 1, min = 1, max = 1 }),
   phenix.layout.split("horizontal", {
@@ -32,7 +32,8 @@ map("global", "<C-c>", phenix.action.abort, { desc = "Interrupt the selected run
 map("global", "<C-l>", phenix.action.login, { desc = "Open authentication" })
 map("global", "<C-m>", phenix.action.models, { desc = "Open model picker" })
 map("global", "<C-r>", phenix.action.sessions, { desc = "Open session picker" })
-map("global", "<C-o>", phenix.action.toggle_details, { desc = "Toggle detailed mode" })
+map("global", "<C-b>", function() phenix.ui.pane.toggle("ui.sidebar") end, { desc = "Toggle runs sidebar" })
+map("global", "<C-o>", phenix.action.toggle_details, { desc = "Toggle agent transcript details" })
 map("global", "<Tab>", function() phenix.ui.focus.move("next") end, { desc = "Focus next pane" })
 map("global", "<S-Tab>", function() phenix.ui.focus.move("previous") end, { desc = "Focus previous pane" })
 map("global", "<M-h>", function() phenix.ui.focus.move("left") end, { desc = "Focus left pane" })
@@ -51,10 +52,14 @@ map("sidebar", ">", function() phenix.ui.pane.resize("ui.sidebar", "horizontal",
 map("sidebar", "<", function() phenix.ui.pane.resize("ui.sidebar", "horizontal", -2) end)
 
 -- Transcript offsets are measured from the newest content. Moving up therefore
--- increases the distance from the end; moving down decreases it.
+-- increases the distance from the end; moving down decreases it. Moving right
+-- reveals the normally hidden runs pane before focusing it.
 map("transcript", "j", function() phenix.ui.pane.scroll("ui.transcript", -1) end)
 map("transcript", "k", function() phenix.ui.pane.scroll("ui.transcript", 1) end)
-map("transcript", "l", function() phenix.ui.focus.set("ui.sidebar") end)
+map("transcript", "l", function()
+  phenix.ui.pane.show("ui.sidebar")
+  phenix.ui.focus.set("ui.sidebar")
+end)
 map("transcript", "i", function() phenix.ui.focus.set("ui.input") end)
 map("transcript", "G", function() phenix.ui.pane.scroll("ui.transcript", -1000000) end)
 map("transcript", "<Down>", function() phenix.ui.pane.scroll("ui.transcript", -1) end)
