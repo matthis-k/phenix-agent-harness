@@ -365,7 +365,7 @@ fn render_table(
 }
 
 fn dense_table_lines(table: &RichTable, width: usize, theme: &ThemeConfig) -> Vec<Line<'static>> {
-    let widths = table_widths(table, width.saturating_sub(2), 3);
+    let widths = table_widths(table, width.saturating_sub(2), false);
     if widths.is_empty() {
         return Vec::new();
     }
@@ -388,7 +388,7 @@ fn dense_table_lines(table: &RichTable, width: usize, theme: &ThemeConfig) -> Ve
 }
 
 fn grid_table_lines(table: &RichTable, width: usize, theme: &ThemeConfig) -> Vec<Line<'static>> {
-    let widths = table_widths(table, width.saturating_sub(2), 3);
+    let widths = table_widths(table, width.saturating_sub(2), true);
     if widths.is_empty() {
         return Vec::new();
     }
@@ -421,7 +421,7 @@ fn grid_table_lines(table: &RichTable, width: usize, theme: &ThemeConfig) -> Vec
     lines
 }
 
-fn table_widths(table: &RichTable, available: usize, separator_width: usize) -> Vec<usize> {
+fn table_widths(table: &RichTable, available: usize, grid: bool) -> Vec<usize> {
     let columns = table
         .rows
         .iter()
@@ -432,8 +432,12 @@ fn table_widths(table: &RichTable, available: usize, separator_width: usize) -> 
     if columns == 0 {
         return Vec::new();
     }
-    let separators = columns.saturating_sub(1).saturating_mul(separator_width);
-    let available = available.saturating_sub(separators).max(columns);
+    let chrome = if grid {
+        columns.saturating_mul(3).saturating_add(1)
+    } else {
+        columns.saturating_sub(1).saturating_mul(3)
+    };
+    let available = available.saturating_sub(chrome).max(columns);
     let mut widths = (0..columns)
         .map(|column| {
             std::iter::once(

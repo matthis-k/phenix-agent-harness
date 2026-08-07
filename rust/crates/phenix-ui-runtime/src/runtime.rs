@@ -9,7 +9,7 @@ use phenix_ui_core::ElementId;
 use phenix_ui_core::{
     command_completions, group_transcript_turns, parse_markdown, reduce, AppEffect, AppEvent,
     AppState, FocusDirection, FocusTarget, InputEditor, LayoutAxis, OverlayState, ResizeRequest,
-    RichBlock, RichBlockView, VimMode,
+    VimMode,
 };
 use std::collections::VecDeque;
 use std::env;
@@ -492,26 +492,12 @@ fn interactive_rich_blocks(document: &phenix_ui_core::RichDocument) -> Vec<usize
         .blocks
         .iter()
         .enumerate()
-        .filter_map(|(index, block)| (block.candidate_views().len() > 1).then_some(index))
+        .filter_map(|(index, block)| block.is_interactive().then_some(index))
         .collect()
 }
 
 fn rich_block_key(turn_id: &str, index: usize) -> String {
     format!("{turn_id}:block:{index}")
-}
-
-fn default_rich_block_view(block: &RichBlock) -> RichBlockView {
-    match block {
-        RichBlock::Table(_) => RichBlockView::Dense,
-        RichBlock::Code(code) if code.language_is("mermaid") => RichBlockView::Rendered,
-        RichBlock::Code(_) => RichBlockView::Highlighted,
-        RichBlock::Image(_) => RichBlockView::Preview,
-        RichBlock::Heading { .. }
-        | RichBlock::Paragraph(_)
-        | RichBlock::Quote(_)
-        | RichBlock::List { .. }
-        | RichBlock::Rule => RichBlockView::Rendered,
-    }
 }
 
 fn move_transcript_block(state: &mut AppState, delta: i32) {
@@ -524,14 +510,24 @@ fn move_transcript_block(state: &mut AppState, delta: i32) {
         state.view.transcript_selected_block = None;
         return;
     }
-    let current_position = state
+    let next = state
         .view
         .transcript_selected_block
         .and_then(|selected| interactive.iter().position(|index| *index == selected))
-        .unwrap_or(0);
-    let next = current_position
-        .saturating_add_signed(delta as isize)
-        .min(interactive.len() - 1);
+        .map_or_else(
+            || {
+                if delta.is_negative() {
+                    interactive.len() - 1
+                } else {
+                    0
+                }
+            },
+            |current| {
+                current
+                    .saturating_add_signed(delta as isize)
+                    .min(interactive.len() - 1)
+            },
+        );
     state.view.transcript_selected_block = Some(interactive[next]);
     state.view.transcript_scroll.follow_end = false;
 }
@@ -557,7 +553,7 @@ fn cycle_transcript_block_view(state: &mut AppState, delta: i32) {
         .view
         .rich_block_view(&key)
         .filter(|view| views.contains(view))
-        .unwrap_or_else(|| default_rich_block_view(block));
+        .unwrap_or_else(|| block.default_view());
     let current_index = views.iter().position(|view| *view == current).unwrap_or(0);
     let len = i64::try_from(views.len()).unwrap_or(1).max(1);
     let next = (i64::try_from(current_index).unwrap_or(0) + i64::from(delta)).rem_euclid(len);
