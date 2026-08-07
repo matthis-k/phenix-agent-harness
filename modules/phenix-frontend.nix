@@ -6,12 +6,10 @@ _:
     let
       rustSource = pkgs.lib.cleanSource ../rust;
 
-      # The user-facing runtime is one Rust workspace product. Building the TUI
-      # and conductor separately recompiles their shared dependency graph and
-      # runs overlapping package tests during ordinary system builds. The
-      # canonical maintenance gate already runs fmt/check/clippy/tests for the
-      # complete Rust workspace, so runtime packaging only builds installable
-      # binaries once.
+      # The user-facing runtime is one Rust workspace product. Build only the
+      # two binaries that are actually shipped. Test/fixture binaries remain
+      # covered by the canonical Rust maintenance gate instead of entering the
+      # ordinary Nix runtime closure.
       phenixRustRuntime = pkgs.rustPlatform.buildRustPackage {
         pname = "phenix-rust-runtime";
         version = "0";
@@ -22,6 +20,10 @@ _:
           "--package"
           "phenix-tui"
           "--package"
+          "phenix-conductor"
+          "--bin"
+          "phenix"
+          "--bin"
           "phenix-conductor"
         ];
         doCheck = false;
