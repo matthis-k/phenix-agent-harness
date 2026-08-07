@@ -1,7 +1,7 @@
 use crate::theme::theme_style;
 use phenix_frontend_config::ThemeConfig;
 use phenix_runtime_api::{TranscriptBlock, TranscriptRole};
-use phenix_ui_core::AppState;
+use phenix_ui_core::{transcript_turn_id, AppState};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use std::ops::Range;
@@ -28,7 +28,6 @@ struct TurnDetail {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DetailKind {
-    Context,
     Thinking,
     Tool,
     System,
@@ -37,7 +36,6 @@ enum DetailKind {
 impl DetailKind {
     const fn label(self) -> &'static str {
         match self {
-            Self::Context => "Context",
             Self::Thinking => "Thinking",
             Self::Tool => "Tool",
             Self::System => "Notice",
@@ -46,9 +44,9 @@ impl DetailKind {
 
     const fn theme_group(self) -> &'static str {
         match self {
-            Self::Context | Self::System => "Muted",
             Self::Thinking => "Thinking",
             Self::Tool => "Tool",
+            Self::System => "Muted",
         }
     }
 }
@@ -69,10 +67,11 @@ pub(crate) fn transcript_document(state: &AppState, theme: &ThemeConfig) -> Tran
             });
         }
         if let Some(turn) = turns.last_mut() {
-            turn.details.extend(state.notifications.iter().map(|message| TurnDetail {
-                kind: DetailKind::System,
-                text: message.clone(),
-            }));
+            turn.details
+                .extend(state.notifications.iter().map(|message| TurnDetail {
+                    kind: DetailKind::System,
+                    text: message.clone(),
+                }));
         }
     }
 
@@ -110,7 +109,7 @@ fn group_turns(blocks: &[TranscriptBlock]) -> Vec<ConversationTurn> {
     for block in blocks {
         if matches!(block.role, TranscriptRole::User) {
             turns.push(ConversationTurn {
-                id: block.id.clone(),
+                id: transcript_turn_id(block),
                 user: Some(block.text.clone()),
                 response: String::new(),
                 details: Vec::new(),
@@ -120,7 +119,7 @@ fn group_turns(blocks: &[TranscriptBlock]) -> Vec<ConversationTurn> {
 
         if turns.is_empty() {
             turns.push(ConversationTurn {
-                id: block.id.clone(),
+                id: transcript_turn_id(block),
                 user: None,
                 response: String::new(),
                 details: Vec::new(),
@@ -128,13 +127,7 @@ fn group_turns(blocks: &[TranscriptBlock]) -> Vec<ConversationTurn> {
         }
         let turn = turns.last_mut().expect("turn inserted above");
         match block.role {
-            TranscriptRole::Assistant => {
-                let (context, response) = split_assistant_envelope(&block.text);
-                if let Some(context) = context {
-                    push_detail(turn, DetailKind::Context, context);
-                }
-                append_document_text(&mut turn.response, response);
-            }
+            TranscriptRole::Assistant => append_document_text(&mut turn.response, &block.text),
             TranscriptRole::Thinking => {
                 push_detail(turn, DetailKind::Thinking, block.text.clone());
             }
@@ -156,65 +149,21 @@ fn push_detail(turn: &mut ConversationTurn, kind: DetailKind, text: String) {
     }
     if let Some(last) = turn.details.last_mut() {
         if last.kind == kind {
-            append_document_text(&mut last.text, text);
+            append_document_text(&mut last.text, &text);
             return;
         }
     }
     turn.details.push(TurnDetail { kind, text });
 }
 
-fn append_document_text(target: &mut String, source: String) {
+fn append_document_text(target: &mut String, source: &str) {
     if source.trim().is_empty() {
         return;
     }
     if !target.is_empty() && !target.ends_with('\n') && !source.starts_with('\n') {
         target.push_str("\n\n");
     }
-    target.push_str(&source);
-}
-
-fn split_assistant_envelope(text: &str) -> (Option<String>, String) {
-    let Some(context_start) = text.find("## Context") else {
-        return (None, text.to_owned());
-    };
-    let before_context = &text[..context_start];
-    let after_context = &text[context_start..];
-
-    // `## Context` is perfectly valid answer Markdown. Only reinterpret it as an
-    // implementation envelope when the surrounding content has Pi's startup shape.
-    let pi_like = before_context
-        .lines()
-        .any(|line| line.trim_start().starts_with("pi v"))
-        || after_context.contains("commands:");
-    if !pi_like {
-        return (None, text.to_owned());
-    }
-
-    // Pi's ACP bridge may concatenate the first answer token directly onto the
-    // status suffix: `commands: 8 availableHi ...`. Prefer this explicit boundary
-    // over a generic blank line so the whole startup/context prelude remains detail.
-    if let Some(commands_offset) = after_context.find("commands:") {
-        let commands_start = context_start + commands_offset;
-        if let Some(available_offset) = text[commands_start..].find(" available") {
-            let split = commands_start + available_offset + " available".len();
-            let context = text[..split].trim().to_owned();
-            let response = text[split..].trim_start().to_owned();
-            if !response.is_empty() {
-                return (Some(context), response);
-            }
-        }
-    }
-
-    if let Some(blank_line) = after_context.find("\n\n") {
-        let split = context_start + blank_line + 2;
-        let context = text[..split].trim().to_owned();
-        let response = text[split..].trim_start().to_owned();
-        if !response.is_empty() {
-            return (Some(context), response);
-        }
-    }
-
-    (None, text.to_owned())
+    target.push_str(source);
 }
 
 fn render_turn(
@@ -230,12 +179,13 @@ fn render_turn(
             theme_style(theme, "Accent").add_modifier(Modifier::BOLD),
         ));
         if user.is_empty() {
-            lines.push(Line::from(Span::styled("│", theme_style(theme, "Accent"))));
+            lines.push(Line::styled("  ", theme_style(theme, "Surface")));
         } else {
             lines.extend(user.lines().map(|line| {
-                let mut spans = vec![Span::styled("│ ", theme_style(theme, "Accent"))];
-                spans.extend(inline_markdown_spans(line, theme));
-                Line::from(spans)
+                Line::from(vec![
+                    Span::styled("▌", theme_style(theme, "Accent")),
+                    Span::styled(format!(" {line} "), theme_style(theme, "Surface")),
+                ])
             }));
         }
         lines.push(Line::default());
@@ -270,11 +220,6 @@ fn detail_summary_line(
     expanded: bool,
     theme: &ThemeConfig,
 ) -> Line<'static> {
-    let context = turn
-        .details
-        .iter()
-        .filter(|detail| detail.kind == DetailKind::Context)
-        .count();
     let thinking = turn
         .details
         .iter()
@@ -291,42 +236,50 @@ fn detail_summary_line(
         .filter(|detail| detail.kind == DetailKind::System)
         .count();
 
-    let mut parts = Vec::new();
-    if context > 0 {
-        parts.push("context".to_owned());
-    }
+    let marker_style = if selected {
+        theme_style(theme, "Accent")
+    } else {
+        theme_style(theme, "Muted")
+    };
+    let mut spans = vec![Span::styled(
+        if expanded { "▾ " } else { "▸ " },
+        marker_style,
+    )];
+    let mut first = true;
+    let mut push_chip = |label: String, group: &'static str| {
+        if !first {
+            spans.push(Span::styled("  ", theme_style(theme, "Muted")));
+        }
+        spans.push(Span::styled(
+            format!("[{label}]"),
+            theme_style(theme, group).add_modifier(Modifier::BOLD),
+        ));
+        first = false;
+    };
     if thinking > 0 {
-        parts.push("thinking".to_owned());
+        push_chip("Thinking".to_owned(), "Thinking");
     }
     if tools > 0 {
-        parts.push(if tools == 1 {
-            "1 tool".to_owned()
-        } else {
-            format!("{tools} tools")
-        });
+        push_chip(
+            if tools == 1 {
+                "Tool".to_owned()
+            } else {
+                format!("Tools {tools}")
+            },
+            "Tool",
+        );
     }
     if notices > 0 {
-        parts.push(if notices == 1 {
-            "1 notice".to_owned()
-        } else {
-            format!("{notices} notices")
-        });
+        push_chip(
+            if notices == 1 {
+                "Notice".to_owned()
+            } else {
+                format!("Notices {notices}")
+            },
+            "Muted",
+        );
     }
-
-    let marker = if expanded { "▾" } else { "▸" };
-    let text = if parts.is_empty() {
-        format!("{marker} Details")
-    } else {
-        format!("{marker} Details · {}", parts.join(" · "))
-    };
-    Line::styled(
-        text,
-        if selected {
-            theme_style(theme, "Accent")
-        } else {
-            theme_style(theme, "Muted")
-        },
-    )
+    Line::from(spans)
 }
 
 fn detail_lines(detail: &TurnDetail, theme: &ThemeConfig) -> Vec<Line<'static>> {
@@ -548,7 +501,7 @@ mod tests {
     }
 
     #[test]
-    fn groups_internal_blocks_under_the_user_turn() {
+    fn groups_acp_details_under_the_user_turn() {
         let turns = group_turns(&[
             block("u1", TranscriptRole::User, "hi"),
             block("t1", TranscriptRole::Thinking, "think"),
@@ -556,31 +509,31 @@ mod tests {
             block("tool1", TranscriptRole::Tool, "read file"),
         ]);
         assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].id, "run-1:u1");
         assert_eq!(turns[0].user.as_deref(), Some("hi"));
         assert_eq!(turns[0].response, "hello");
         assert_eq!(turns[0].details.len(), 2);
     }
 
     #[test]
-    fn pi_context_envelope_is_separated_from_the_response() {
-        let text = "pi v0.80.10\n---\n## Context\n- /repo/AGENTS.md\ncommands: 8 availableHi there!";
-        let (context, response) = split_assistant_envelope(text);
-        assert!(context.expect("context").contains("AGENTS.md"));
-        assert_eq!(response, "Hi there!");
-    }
-
-    #[test]
-    fn ordinary_context_heading_stays_in_the_response() {
-        let text = "## Context\nThis is part of the actual answer.\n\nMore text.";
-        let (context, response) = split_assistant_envelope(text);
-        assert!(context.is_none());
-        assert_eq!(response, text);
+    fn assistant_markdown_is_not_reinterpreted_as_backend_metadata() {
+        let turns = group_turns(&[block(
+            "a1",
+            TranscriptRole::Assistant,
+            "## Context\nThis is ordinary answer content.",
+        )]);
+        assert_eq!(turns.len(), 1);
+        assert_eq!(
+            turns[0].response,
+            "## Context\nThis is ordinary answer content."
+        );
+        assert!(turns[0].details.is_empty());
     }
 
     #[test]
     fn collapsed_turn_reads_like_chat_content() {
         let turn = ConversationTurn {
-            id: "u1".to_owned(),
+            id: "run-1:u1".to_owned(),
             user: Some("hi".to_owned()),
             response: "Hello **there**.".to_owned(),
             details: vec![TurnDetail {
@@ -591,9 +544,9 @@ mod tests {
         let mut lines = Vec::new();
         render_turn(&mut lines, &turn, false, false, &ThemeConfig::default());
         let text = lines.iter().map(line_text).collect::<Vec<_>>();
-        assert!(text.iter().any(|line| line == "│ hi"));
+        assert!(text.iter().any(|line| line.contains("hi")));
         assert!(text.iter().any(|line| line == "Hello there."));
-        assert!(text.iter().any(|line| line.starts_with("▸ Details")));
+        assert!(text.iter().any(|line| line.contains("[Thinking]")));
         assert!(!text.iter().any(|line| line.contains("hidden")));
     }
 }
