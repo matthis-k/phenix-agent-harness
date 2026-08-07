@@ -48,11 +48,16 @@ map("global", "<M-k>", function() phenix.ui.focus.move("up") end)
 map("global", "<M-l>", function() phenix.ui.focus.move("right") end)
 
 -- Runs are the buffer-like execution unit. These change the active transcript
--- without changing window focus.
-map("global", "[b", function() phenix.action.move_run(-1) end, { desc = "Previous run" })
-map("global", "]b", function() phenix.action.move_run(1) end, { desc = "Next run" })
-map("global", "[r", function() phenix.action.move_run(-1) end, { desc = "Previous run" })
-map("global", "]r", function() phenix.action.move_run(1) end, { desc = "Next run" })
+-- without changing window focus. Keep the browsing cursor aligned with the
+-- active buffer so subsequent tree navigation remains predictable.
+local function move_run(delta)
+  phenix.action.move_run(delta)
+  phenix.ui.sidebar.move_run(delta)
+end
+map("global", "[b", function() move_run(-1) end, { desc = "Previous run" })
+map("global", "]b", function() move_run(1) end, { desc = "Next run" })
+map("global", "[r", function() move_run(-1) end, { desc = "Previous run" })
+map("global", "]r", function() move_run(1) end, { desc = "Next run" })
 
 -- Persisted sessions are the tabpage-like durable context.
 map("global", "gt", function() phenix.action.move_session(1) end, { desc = "Next session" })
@@ -72,8 +77,9 @@ map("global", "<leader>tb", function()
   phenix.ui.focus.set("ui.transcript")
 end, { desc = "Toggle operational sidebar" })
 
--- Input editing is handled by the typed native modal editor. User Lua may
--- override individual input keys without replacing the editor implementation.
+-- Input editing is handled by the typed native modal editor. Global multi-key
+-- Normal mappings are inactive while the composer is inserting, so Space, g,
+-- and Ctrl-W remain ordinary editing input there.
 
 -- The run tree has its own cursor. j/k move that cursor; h/l follow tree
 -- semantics; Enter changes the active run; o changes it and returns to transcript.
