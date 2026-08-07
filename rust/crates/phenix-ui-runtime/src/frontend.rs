@@ -104,6 +104,8 @@ fn frontend_context(state: &AppState) -> FrontendContext {
         overlay_open: state.view.overlay.is_some(),
         dialog_open: !state.dialogs.is_empty(),
         input_empty: state.input.text.is_empty(),
+        input_insert_mode: state.view.focus == FocusTarget::Input
+            && state.view.vim_mode == VimMode::Insert,
         details_visible: state.view.show_details,
     }
 }
@@ -786,7 +788,9 @@ mod tests {
             query: "/mo".to_owned(),
             selected: 0,
         });
-        assert_eq!(frontend_context(&state).pane_type, PaneType::Input);
+        let context = frontend_context(&state);
+        assert_eq!(context.pane_type, PaneType::Input);
+        assert!(context.input_insert_mode);
     }
 
     #[test]
