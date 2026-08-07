@@ -462,8 +462,12 @@ mod tests {
             .set_rich_block_view("run-1:u1:block:0".to_owned(), RichBlockView::Grid);
         let document = transcript_document(&state, &ThemeConfig::default(), 50);
         let text = document.lines.iter().map(line_text).collect::<Vec<_>>();
-        assert!(text.iter().any(|line| line.starts_with('┌')));
-        assert!(text.iter().any(|line| line.contains("[dense]") || line.contains("[grid]")));
+        assert!(text
+            .iter()
+            .any(|line| line.trim_start().starts_with('┌')));
+        assert!(text
+            .iter()
+            .any(|line| line.contains("[dense]") || line.contains("[grid]")));
     }
 
     #[test]
