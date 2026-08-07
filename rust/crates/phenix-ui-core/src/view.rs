@@ -211,15 +211,31 @@ impl Default for ViewState {
         panes.insert(
             ElementId::header(),
             PaneViewState {
+                visible: false,
                 height: Some(1),
                 ..PaneViewState::default()
             },
         );
         panes.insert(
-            ElementId::sidebar(),
+            ElementId::inspector(),
             PaneViewState {
                 visible: false,
+                width: Some(22),
+                ..PaneViewState::default()
+            },
+        );
+        panes.insert(ElementId::transcript(), PaneViewState::default());
+        panes.insert(
+            ElementId::sidebar(),
+            PaneViewState {
                 width: Some(28),
+                ..PaneViewState::default()
+            },
+        );
+        panes.insert(
+            ElementId::specialized(),
+            PaneViewState {
+                visible: false,
                 ..PaneViewState::default()
             },
         );
@@ -283,5 +299,17 @@ mod tests {
         assert!(!view.transcript_turn_is_expanded("turn-b"));
         view.toggle_transcript_turn("turn-a".to_owned());
         assert!(!view.transcript_turn_is_expanded("turn-a"));
+    }
+
+    #[test]
+    fn default_workspace_exposes_conversation_and_operations_only() {
+        let view = ViewState::default();
+        assert!(view.pane(&ElementId::transcript()).visible);
+        assert!(view.pane(&ElementId::input()).visible);
+        assert!(view.pane(&ElementId::status()).visible);
+        assert!(view.pane(&ElementId::sidebar()).visible);
+        assert!(!view.pane(&ElementId::inspector()).visible);
+        assert!(!view.pane(&ElementId::specialized()).visible);
+        assert!(!view.pane(&ElementId::header()).visible);
     }
 }
