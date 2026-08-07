@@ -6,6 +6,8 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use std::ops::Range;
 
+const DETAIL_PREFIX: &str = "  │ ";
+
 #[derive(Debug)]
 pub(crate) struct TranscriptDocument {
     pub lines: Vec<Line<'static>>,
@@ -51,7 +53,11 @@ impl DetailKind {
     }
 }
 
-pub(crate) fn transcript_document(state: &AppState, theme: &ThemeConfig) -> TranscriptDocument {
+pub(crate) fn transcript_document(
+    state: &AppState,
+    theme: &ThemeConfig,
+    width: u16,
+) -> TranscriptDocument {
     let mut turns = state
         .input_target()
         .and_then(|run_id| state.transcript(run_id))
@@ -96,6 +102,7 @@ pub(crate) fn transcript_document(state: &AppState, theme: &ThemeConfig) -> Tran
             turn,
             selected == Some(index) && state.view.focus == phenix_ui_core::FocusTarget::Transcript,
             state.view.transcript_turn_is_expanded(&turn.id),
+            width,
             theme,
         );
         turn_ranges.push(start..lines.len());
@@ -171,6 +178,7 @@ fn render_turn(
     turn: &ConversationTurn,
     selected: bool,
     expanded: bool,
+    width: u16,
     theme: &ThemeConfig,
 ) {
     if let Some(user) = &turn.user {
@@ -204,7 +212,7 @@ fn render_turn(
         lines.push(detail_summary_line(turn, selected, expanded, theme));
         if expanded {
             for detail in &turn.details {
-                lines.extend(detail_lines(detail, theme));
+                lines.extend(detail_lines(detail, width, theme));
             }
         }
     }
@@ -282,19 +290,42 @@ fn detail_summary_line(
     Line::from(spans)
 }
 
-fn detail_lines(detail: &TurnDetail, theme: &ThemeConfig) -> Vec<Line<'static>> {
+fn detail_lines(detail: &TurnDetail, width: u16, theme: &ThemeConfig) -> Vec<Line<'static>> {
     let group = detail.kind.theme_group();
     let mut lines = vec![Line::styled(
         format!("  {}", detail.kind.label()),
         theme_style(theme, group).add_modifier(Modifier::BOLD),
     )];
-    lines.extend(detail.text.lines().map(|line| {
-        Line::from(vec![
-            Span::styled("  │ ", theme_style(theme, group)),
-            Span::styled(line.to_owned(), theme_style(theme, "Muted")),
-        ])
-    }));
+    let content_width = usize::from(width)
+        .saturating_sub(DETAIL_PREFIX.chars().count())
+        .max(1);
+    for logical_line in detail.text.lines() {
+        for fragment in wrap_preserving_text(logical_line, content_width) {
+            lines.push(Line::from(vec![
+                Span::styled(DETAIL_PREFIX, theme_style(theme, group)),
+                Span::styled(fragment, theme_style(theme, "Muted")),
+            ]));
+        }
+    }
     lines
+}
+
+fn wrap_preserving_text(line: &str, width: usize) -> Vec<String> {
+    if line.is_empty() {
+        return vec![String::new()];
+    }
+    let mut output = Vec::new();
+    let mut current = String::new();
+    for character in line.chars() {
+        if current.chars().count() == width {
+            output.push(std::mem::take(&mut current));
+        }
+        current.push(character);
+    }
+    if !current.is_empty() {
+        output.push(current);
+    }
+    output
 }
 
 fn markdown_document_lines(text: &str, theme: &ThemeConfig) -> Vec<Line<'static>> {
@@ -542,11 +573,31 @@ mod tests {
             }],
         };
         let mut lines = Vec::new();
-        render_turn(&mut lines, &turn, false, false, &ThemeConfig::default());
+        render_turn(
+            &mut lines,
+            &turn,
+            false,
+            false,
+            80,
+            &ThemeConfig::default(),
+        );
         let text = lines.iter().map(line_text).collect::<Vec<_>>();
         assert!(text.iter().any(|line| line.contains("hi")));
         assert!(text.iter().any(|line| line == "Hello there."));
         assert!(text.iter().any(|line| line.contains("[Thinking]")));
         assert!(!text.iter().any(|line| line.contains("hidden")));
+    }
+
+    #[test]
+    fn expanded_details_keep_a_stable_hanging_indent_when_wrapped() {
+        let detail = TurnDetail {
+            kind: DetailKind::Thinking,
+            text: "abcdefghijklmnopqrstuvwxyz".to_owned(),
+        };
+        let lines = detail_lines(&detail, 12, &ThemeConfig::default());
+        let rendered = lines.iter().skip(1).map(line_text).collect::<Vec<_>>();
+        assert!(rendered.len() > 1);
+        assert!(rendered.iter().all(|line| line.starts_with(DETAIL_PREFIX)));
+        assert!(rendered.iter().all(|line| line.chars().count() <= 12));
     }
 }
