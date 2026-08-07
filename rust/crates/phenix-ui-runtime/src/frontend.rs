@@ -87,7 +87,13 @@ pub fn install_frontend_provider(
 
 fn frontend_context(state: &AppState) -> FrontendContext {
     let focused_element = state.view.focus.element_id();
-    let pane_type = if state.view.overlay.is_some() || !state.dialogs.is_empty() {
+    let passive_completion = matches!(
+        state.view.overlay,
+        Some(OverlayState::CommandPalette { .. })
+    );
+    let pane_type = if (state.view.overlay.is_some() && !passive_completion)
+        || !state.dialogs.is_empty()
+    {
         PaneType::Overlay
     } else {
         PaneType::from_element(&focused_element)
@@ -322,9 +328,17 @@ fn overlay_selected(state: &AppState) -> usize {
 }
 
 fn fallback_key(state: &AppState, key: KeyInput) -> ReactionBatch {
-    if state.view.overlay.is_some() || !state.dialogs.is_empty() {
+    if matches!(
+        state.view.overlay,
+        Some(OverlayState::CommandPalette { .. })
+    ) {
+        if let Some(reactions) = command_completion_key(state, key) {
+            return stop_with(reactions);
+        }
+    } else if state.view.overlay.is_some() || !state.dialogs.is_empty() {
         return continue_propagation();
     }
+
     if state.view.focus != FocusTarget::Input {
         return match key.code {
             KeyCode::Escape => stop_with(vec![application_intent(UserIntent::Abort)]),
@@ -342,9 +356,28 @@ fn fallback_key(state: &AppState, key: KeyInput) -> ReactionBatch {
         InputEditor::External => external_editor_key(key),
         InputEditor::Owned | InputEditor::Embedded => match state.view.vim_mode {
             VimMode::Normal => normal_mode_key(state.view.input_editor, key),
-            VimMode::Insert => insert_mode_key(state.view.input_editor, key),
+            VimMode::Insert => insert_mode_key(state, state.view.input_editor, key),
         },
     }
+}
+
+fn command_completion_key(state: &AppState, key: KeyInput) -> Option<Vec<BusReaction>> {
+    let navigate = match key.code {
+        KeyCode::Up => Some(-1),
+        KeyCode::Down => Some(1),
+        KeyCode::Character('p') if key.modifiers.control => Some(-1),
+        KeyCode::Character('n') if key.modifiers.control => Some(1),
+        _ => None,
+    };
+    if let Some(delta) = navigate {
+        return Some(vec![BusReaction::View(ViewMutation::MoveOverlaySelection(delta))]);
+    }
+    if key.code == KeyCode::Enter
+        || (key.code == KeyCode::Character('y') && key.modifiers.control)
+    {
+        return Some(accept_overlay(state));
+    }
+    None
 }
 
 fn open_external_editor() -> ReactionBatch {
@@ -431,7 +464,7 @@ fn normal_mode_key(editor: InputEditor, key: KeyInput) -> ReactionBatch {
     }
 }
 
-fn insert_mode_key(editor: InputEditor, key: KeyInput) -> ReactionBatch {
+fn insert_mode_key(state: &AppState, editor: InputEditor, key: KeyInput) -> ReactionBatch {
     if key.code == KeyCode::Escape {
         return stop_with(vec![edit_input(InputEdit::SetVimMode(VimMode::Normal))]);
     }
@@ -444,6 +477,11 @@ fn insert_mode_key(editor: InputEditor, key: KeyInput) -> ReactionBatch {
             InputEditor::Embedded => UserIntent::SubmitPrompt,
             InputEditor::External => unreachable!("external editor handled separately"),
         })]);
+    }
+    if editor == InputEditor::Owned && key.modifiers.control {
+        if let Some(reactions) = owned_terminal_edit_key(state, key.code) {
+            return stop_with(reactions);
+        }
     }
     match key.code {
         KeyCode::Enter if key.modifiers.shift || editor == InputEditor::Embedded => {
@@ -472,6 +510,50 @@ fn insert_mode_key(editor: InputEditor, key: KeyInput) -> ReactionBatch {
         }
         _ => continue_propagation(),
     }
+}
+
+fn owned_terminal_edit_key(state: &AppState, code: KeyCode) -> Option<Vec<BusReaction>> {
+    let reactions = match code {
+        KeyCode::Character('a') => vec![edit_input(InputEdit::MoveHome)],
+        KeyCode::Character('f') => vec![edit_input(InputEdit::MoveRight)],
+        KeyCode::Character('h') => vec![edit_input(InputEdit::Backspace)],
+        KeyCode::Character('p') => vec![edit_input(InputEdit::HistoryPrevious)],
+        KeyCode::Character('n') => vec![edit_input(InputEdit::HistoryNext)],
+        KeyCode::Character('w') => erase_before_cursor(state, EraseBoundary::PreviousWord),
+        KeyCode::Character('u') => erase_before_cursor(state, EraseBoundary::LineStart),
+        KeyCode::Character('k') => erase_after_cursor(state),
+        _ => return None,
+    };
+    Some(reactions)
+}
+
+#[derive(Clone, Copy)]
+enum EraseBoundary {
+    PreviousWord,
+    LineStart,
+}
+
+fn erase_before_cursor(state: &AppState, boundary: EraseBoundary) -> Vec<BusReaction> {
+    let original = state.input.cursor_byte.min(state.input.text.len());
+    let mut probe = state.input.clone();
+    match boundary {
+        EraseBoundary::PreviousWord => probe.move_word_backward(),
+        EraseBoundary::LineStart => probe.move_home(),
+    }
+    let count = state.input.text[probe.cursor_byte..original].chars().count();
+    std::iter::repeat_with(|| edit_input(InputEdit::Backspace))
+        .take(count)
+        .collect()
+}
+
+fn erase_after_cursor(state: &AppState) -> Vec<BusReaction> {
+    let original = state.input.cursor_byte.min(state.input.text.len());
+    let mut probe = state.input.clone();
+    probe.move_end();
+    let count = state.input.text[original..probe.cursor_byte].chars().count();
+    std::iter::repeat_with(|| edit_input(InputEdit::Delete))
+        .take(count)
+        .collect()
 }
 
 fn edit_input(edit: InputEdit) -> BusReaction {
@@ -569,6 +651,54 @@ mod tests {
     }
 
     #[test]
+    fn command_completion_keeps_input_context() {
+        let mut state = AppState::default();
+        state.input.replace("/mo".to_owned());
+        state.view.overlay = Some(OverlayState::CommandPalette {
+            query: "/mo".to_owned(),
+            selected: 0,
+        });
+        assert_eq!(frontend_context(&state).pane_type, PaneType::Input);
+    }
+
+    #[test]
+    fn command_completion_only_intercepts_navigation_and_acceptance() {
+        let mut state = AppState::default();
+        state.input.replace("/mo".to_owned());
+        state.view.overlay = Some(OverlayState::CommandPalette {
+            query: "/mo".to_owned(),
+            selected: 0,
+        });
+
+        let typed = fallback_key(&state, key(KeyCode::Character('x')));
+        assert_eq!(
+            typed.reactions,
+            vec![edit_input(InputEdit::Insert("x".to_owned()))]
+        );
+
+        let down = fallback_key(&state, key(KeyCode::Down));
+        assert_eq!(
+            down.reactions,
+            vec![BusReaction::View(ViewMutation::MoveOverlaySelection(1))]
+        );
+
+        let ctrl_n = fallback_key(&state, control_key('n'));
+        assert_eq!(
+            ctrl_n.reactions,
+            vec![BusReaction::View(ViewMutation::MoveOverlaySelection(1))]
+        );
+
+        let accepted = fallback_key(&state, control_key('y'));
+        assert!(matches!(
+            accepted.reactions.as_slice(),
+            [
+                BusReaction::App(AppEvent::User(UserIntent::InputChanged(_))),
+                BusReaction::App(AppEvent::User(UserIntent::CloseOverlay))
+            ]
+        ));
+    }
+
+    #[test]
     fn escape_enters_normal_mode_before_it_aborts() {
         let state = AppState::default();
         let reactions = fallback_key(&state, key(KeyCode::Escape));
@@ -584,6 +714,24 @@ mod tests {
             reactions.reactions,
             vec![application_intent(UserIntent::Abort)]
         );
+    }
+
+    #[test]
+    fn owned_insert_mode_supports_terminal_word_and_line_erasure() {
+        let mut state = AppState::default();
+        state.input.replace("hello wide world".to_owned());
+
+        let word = fallback_key(&state, control_key('w'));
+        assert_eq!(word.reactions.len(), 5);
+        assert!(word.reactions.iter().all(|reaction| {
+            matches!(reaction, BusReaction::View(ViewMutation::EditInput(InputEdit::Backspace)))
+        }));
+
+        let line = fallback_key(&state, control_key('u'));
+        assert_eq!(line.reactions.len(), state.input.text.chars().count());
+        assert!(line.reactions.iter().all(|reaction| {
+            matches!(reaction, BusReaction::View(ViewMutation::EditInput(InputEdit::Backspace)))
+        }));
     }
 
     #[test]
