@@ -30,6 +30,6 @@ pub use transcript::{
     group_transcript_turns, TranscriptDetailKind, TranscriptTurn, TranscriptTurnDetail,
 };
 pub use view::{
-    FocusTarget, InputEditor, OverlayState, PaneViewState, ScrollState, SidebarSection,
-    TerminalSize, ViewState, VimMode,
+    FocusTarget, InputEditor, OverlayState, PaneViewState, RichBlockViewport, ScrollState,
+    SidebarSection, TerminalSize, ViewState, VimMode,
 };
