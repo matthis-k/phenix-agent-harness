@@ -260,6 +260,12 @@ fn character_class(character: char) -> bool {
     character.is_alphanumeric() || character == '_'
 }
 
+/// Stable view identity for a transcript turn. Backend-local block IDs may repeat
+/// across independently configured runs, so the run ID is part of the key.
+pub fn transcript_turn_id(block: &TranscriptBlock) -> String {
+    format!("{}:{}", block.run_id, block.id)
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TranscriptState {
     pub blocks: Vec<TranscriptBlock>,
@@ -289,7 +295,7 @@ impl TranscriptState {
         let mut ids = Vec::new();
         for block in &self.blocks {
             if matches!(block.role, TranscriptRole::User) || ids.is_empty() {
-                ids.push(block.id.clone());
+                ids.push(transcript_turn_id(block));
             }
         }
         ids
@@ -478,6 +484,22 @@ mod tests {
                 complete: true,
             });
         }
-        assert_eq!(transcript.turn_ids(), vec!["u1", "u2"]);
+        assert_eq!(transcript.turn_ids(), vec!["run-1:u1", "run-1:u2"]);
+    }
+
+    #[test]
+    fn turn_identity_is_namespaced_by_run() {
+        let first = TranscriptBlock {
+            id: "u1".to_owned(),
+            run_id: RunId::parse("run-a").expect("run id"),
+            role: TranscriptRole::User,
+            text: String::new(),
+            complete: true,
+        };
+        let second = TranscriptBlock {
+            run_id: RunId::parse("run-b").expect("run id"),
+            ..first.clone()
+        };
+        assert_ne!(transcript_turn_id(&first), transcript_turn_id(&second));
     }
 }
