@@ -95,18 +95,12 @@ impl UiStateConsumer {
         }
     }
 
-    fn consumes_navigation_escape(&self, state: &AppState) -> bool {
-        if state.view.overlay.is_some() || state.view.focus.element_id() != self.id {
-            return false;
-        }
-        match state.view.focus {
-            FocusTarget::Sidebar | FocusTarget::Transcript => true,
-            FocusTarget::Input => {
-                state.view.input_editor != InputEditor::External
-                    && state.view.vim_mode == VimMode::Normal
-            }
-            FocusTarget::Overlay => false,
-        }
+    fn consumes_input_normal_escape(&self, state: &AppState) -> bool {
+        self.id == ElementId::input()
+            && state.view.overlay.is_none()
+            && state.view.focus == FocusTarget::Input
+            && state.view.input_editor != InputEditor::External
+            && state.view.vim_mode == VimMode::Normal
     }
 }
 
@@ -119,11 +113,11 @@ impl EventConsumer for UiStateConsumer {
         if matches!(
             &envelope.event,
             UiEvent::Input(UiInput::Key(key)) if key.code == KeyCode::Escape
-        ) && self.consumes_navigation_escape(state)
+        ) && self.consumes_input_normal_escape(state)
         {
-            // Escape is a modal/navigation cancellation key. Runtime interruption
-            // remains the explicit Ctrl-C / :abort action and must never happen
-            // merely because a user is already in Normal mode.
+            // Escape is a modal cancellation key. Runtime interruption remains
+            // the explicit Ctrl-C / :abort action and must never happen merely
+            // because a user is already in Normal mode.
             return ReactionBatch::stop(Vec::new());
         }
 
@@ -406,14 +400,8 @@ mod tests {
     }
 
     #[test]
-    fn escape_is_non_destructive_in_navigation_and_input_normal_mode() {
+    fn escape_is_non_destructive_in_input_normal_mode() {
         let mut state = AppState::default();
-        state.view.focus = FocusTarget::Transcript;
-        let mut transcript = UiStateConsumer::new(ElementId::transcript());
-        let batch = transcript.on_ui(&state, &escape(ElementId::transcript()));
-        assert_eq!(batch.propagation, Propagation::Stop);
-        assert!(batch.reactions.is_empty());
-
         state.view.focus = FocusTarget::Input;
         state.view.vim_mode = VimMode::Normal;
         let mut input = UiStateConsumer::new(ElementId::input());
