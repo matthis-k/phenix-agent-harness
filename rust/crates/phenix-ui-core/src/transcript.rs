@@ -46,11 +46,9 @@ pub fn group_transcript_turns(blocks: &[TranscriptBlock]) -> Vec<TranscriptTurn>
         let turn = turns.last_mut().expect("turn inserted above");
         match block.role {
             TranscriptRole::Assistant => append_document_text(&mut turn.response, &block.text),
-            TranscriptRole::Thinking => push_detail(
-                turn,
-                TranscriptDetailKind::Thinking,
-                block.text.clone(),
-            ),
+            TranscriptRole::Thinking => {
+                push_detail(turn, TranscriptDetailKind::Thinking, block.text.clone())
+            }
             TranscriptRole::Tool => {
                 push_detail(turn, TranscriptDetailKind::Tool, block.text.clone())
             }

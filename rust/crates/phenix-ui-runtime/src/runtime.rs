@@ -945,7 +945,10 @@ mod tests {
     #[test]
     fn run_tree_cursor_moves_collapses_and_descends_semantically() {
         let mut state = run_tree_state();
-        assert_eq!(state.sidebar_cursor_run_id().map(|id| id.to_string()), Some("root".to_owned()));
+        assert_eq!(
+            state.sidebar_cursor_run_id().map(|id| id.to_string()),
+            Some("root".to_owned())
+        );
 
         move_sidebar_run(&mut state, 1);
         assert_eq!(
@@ -962,7 +965,11 @@ mod tests {
                 .into_iter()
                 .map(|entry| entry.id.to_string())
                 .collect::<Vec<_>>(),
-            vec!["root".to_owned(), "child-a".to_owned(), "child-b".to_owned()]
+            vec![
+                "root".to_owned(),
+                "child-a".to_owned(),
+                "child-b".to_owned()
+            ]
         );
         move_sidebar_run_child(&mut state);
         assert!(!state

@@ -345,7 +345,8 @@ fn render_runs_section(frame: &mut Frame<'_>, area: Rect, state: &AppState, them
             let Some(run) = state.run(&entry.id) else {
                 continue;
             };
-            let cursor = state.view.focus == FocusTarget::Sidebar && index == state.view.sidebar_index;
+            let cursor =
+                state.view.focus == FocusTarget::Sidebar && index == state.view.sidebar_index;
             let active = state.input_target() == Some(&run.id);
             let indent = "  ".repeat(entry.depth.min(8));
             let fold = if entry.has_children {

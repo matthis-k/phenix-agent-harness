@@ -229,7 +229,10 @@ impl ViewState {
     }
 
     pub fn rich_block_viewport(&self, id: &str) -> RichBlockViewport {
-        self.rich_block_viewports.get(id).copied().unwrap_or_default()
+        self.rich_block_viewports
+            .get(id)
+            .copied()
+            .unwrap_or_default()
     }
 
     pub fn rich_block_viewport_mut(&mut self, id: String) -> &mut RichBlockViewport {
@@ -365,15 +368,13 @@ mod tests {
     fn rich_block_presentation_is_independent_per_instance() {
         let mut view = ViewState::default();
         view.set_rich_block_view("turn-a:block:0".to_owned(), RichBlockView::Grid);
-        view.rich_block_viewport_mut("turn-a:block:0".to_owned()).horizontal = 4;
+        view.rich_block_viewport_mut("turn-a:block:0".to_owned())
+            .horizontal = 4;
         assert_eq!(
             view.rich_block_view("turn-a:block:0"),
             Some(RichBlockView::Grid)
         );
-        assert_eq!(
-            view.rich_block_viewport("turn-a:block:0").horizontal,
-            4
-        );
+        assert_eq!(view.rich_block_viewport("turn-a:block:0").horizontal, 4);
         assert_eq!(view.rich_block_view("turn-b:block:0"), None);
     }
 

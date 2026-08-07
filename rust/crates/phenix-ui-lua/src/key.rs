@@ -252,21 +252,19 @@ mod tests {
     fn accepts_neovim_and_explicit_modifier_notation() {
         assert_eq!(KeyChord::parse("<C-d>"), KeyChord::parse("ctrl+d"));
         assert_eq!(KeyChord::parse("<M-CR>"), KeyChord::parse("alt+enter"));
-        assert!(KeyChord::parse("<S-Tab>")
-            .expect("shift tab")
-            .matches(key(KeyCode::BackTab, false, false, false)));
+        assert!(KeyChord::parse("<S-Tab>").expect("shift tab").matches(key(
+            KeyCode::BackTab,
+            false,
+            false,
+            false
+        )));
     }
 
     #[test]
     fn parses_neovim_style_multi_key_sequences() {
         let sequence = KeyChord::parse("<C-w>h").expect("window chord");
         assert_eq!(sequence.len(), 2);
-        assert!(sequence.starts_with_inputs(&[key(
-            KeyCode::Character('w'),
-            true,
-            false,
-            false
-        )]));
+        assert!(sequence.starts_with_inputs(&[key(KeyCode::Character('w'), true, false, false)]));
         assert!(sequence.matches_inputs(&[
             key(KeyCode::Character('w'), true, false, false),
             key(KeyCode::Character('h'), false, false, false),
@@ -276,12 +274,7 @@ mod tests {
         assert_eq!(gg.len(), 2);
         let leader = KeyChord::parse("<leader>fm").expect("leader sequence");
         assert_eq!(leader.len(), 3);
-        assert!(leader.starts_with_inputs(&[key(
-            KeyCode::Character(' '),
-            false,
-            false,
-            false
-        )]));
+        assert!(leader.starts_with_inputs(&[key(KeyCode::Character(' '), false, false, false)]));
         let narrow = KeyChord::parse("<C-w><lt>").expect("literal angle sequence");
         assert!(narrow.matches_inputs(&[
             key(KeyCode::Character('w'), true, false, false),

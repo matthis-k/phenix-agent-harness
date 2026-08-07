@@ -61,8 +61,8 @@ impl ConductorOwner {
                     source,
                 }
             })?;
-            let params = serde_json::from_str(&source)
-                .map_err(ConductorOwnerError::DecodeConfiguration)?;
+            let params =
+                serde_json::from_str(&source).map_err(ConductorOwnerError::DecodeConfiguration)?;
             owner.apply_params(params)?;
         }
         Ok(owner)
@@ -131,10 +131,7 @@ impl ConductorOwner {
             .take_standard_session_cancelled(session_id))
     }
 
-    pub fn close_standard_session(
-        &mut self,
-        session_id: &str,
-    ) -> Result<(), ConductorOwnerError> {
+    pub fn close_standard_session(&mut self, session_id: &str) -> Result<(), ConductorOwnerError> {
         self.runtime_mut()?
             .close_standard_session(session_id)
             .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))

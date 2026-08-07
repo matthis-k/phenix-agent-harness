@@ -404,9 +404,11 @@ impl AppState {
     }
 
     pub fn first_run_child(&self, run_id: &RunId) -> Option<RunId> {
-        self.snapshot.as_ref()?.runs.iter().find_map(|run| {
-            (run.parent.as_ref() == Some(run_id)).then(|| run.id.clone())
-        })
+        self.snapshot
+            .as_ref()?
+            .runs
+            .iter()
+            .find_map(|run| (run.parent.as_ref() == Some(run_id)).then(|| run.id.clone()))
     }
 
     pub fn run_parent(&self, run_id: &RunId) -> Option<RunId> {
@@ -439,16 +441,11 @@ impl AppState {
             if let Some(index) = visible.iter().position(|entry| &entry.id == selected) {
                 self.view.sidebar_index = index;
             } else {
-                self.view.sidebar_index = self
-                    .view
-                    .sidebar_index
-                    .min(visible.len().saturating_sub(1));
+                self.view.sidebar_index =
+                    self.view.sidebar_index.min(visible.len().saturating_sub(1));
             }
         } else {
-            self.view.sidebar_index = self
-                .view
-                .sidebar_index
-                .min(visible.len().saturating_sub(1));
+            self.view.sidebar_index = self.view.sidebar_index.min(visible.len().saturating_sub(1));
         }
     }
 
@@ -460,7 +457,10 @@ impl AppState {
 }
 
 fn project_visible_runs(runs: &[RunSummary], collapsed: &BTreeSet<RunId>) -> Vec<VisibleRun> {
-    let known = runs.iter().map(|run| run.id.clone()).collect::<BTreeSet<_>>();
+    let known = runs
+        .iter()
+        .map(|run| run.id.clone())
+        .collect::<BTreeSet<_>>();
     let mut children = BTreeMap::<Option<RunId>, Vec<&RunSummary>>::new();
     for run in runs {
         let parent = run.parent.clone().filter(|parent| known.contains(parent));
@@ -471,14 +471,7 @@ fn project_visible_runs(runs: &[RunSummary], collapsed: &BTreeSet<RunId>) -> Vec
     let mut visited = BTreeSet::new();
     if let Some(roots) = children.get(&None) {
         for root in roots {
-            append_visible_run(
-                root,
-                0,
-                &children,
-                collapsed,
-                &mut visited,
-                &mut visible,
-            );
+            append_visible_run(root, 0, &children, collapsed, &mut visited, &mut visible);
         }
     }
 
@@ -487,14 +480,7 @@ fn project_visible_runs(runs: &[RunSummary], collapsed: &BTreeSet<RunId>) -> Vec
     // set prevents a malformed cycle from recursing indefinitely.
     for run in runs {
         if !visited.contains(&run.id) {
-            append_visible_run(
-                run,
-                0,
-                &children,
-                collapsed,
-                &mut visited,
-                &mut visible,
-            );
+            append_visible_run(run, 0, &children, collapsed, &mut visited, &mut visible);
         }
     }
     visible

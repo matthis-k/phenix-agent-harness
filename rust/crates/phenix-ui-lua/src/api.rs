@@ -130,7 +130,10 @@ fn action_api(
         ("models", ApplicationCommand::OpenModelPicker),
         ("sessions", ApplicationCommand::OpenSessionPicker),
         ("new_session", ApplicationCommand::CreateSession),
-        ("activate_sidebar_run", ApplicationCommand::ActivateSidebarRun),
+        (
+            "activate_sidebar_run",
+            ApplicationCommand::ActivateSidebarRun,
+        ),
         ("toggle_details", ApplicationCommand::ToggleDetails),
         ("close_overlay", ApplicationCommand::CloseOverlay),
     ] {
@@ -149,9 +152,9 @@ fn action_api(
     api.set(
         "move_run",
         lua.create_function(move |_, delta: i32| {
-            run_commands
-                .borrow_mut()
-                .push(FrontendCommand::Application(ApplicationCommand::MoveRun(delta)));
+            run_commands.borrow_mut().push(FrontendCommand::Application(
+                ApplicationCommand::MoveRun(delta),
+            ));
             Ok(())
         })
         .map_err(runtime_error)?,
@@ -162,9 +165,11 @@ fn action_api(
     api.set(
         "move_session",
         lua.create_function(move |_, delta: i32| {
-            session_commands.borrow_mut().push(FrontendCommand::Application(
-                ApplicationCommand::MoveSession(delta),
-            ));
+            session_commands
+                .borrow_mut()
+                .push(FrontendCommand::Application(
+                    ApplicationCommand::MoveSession(delta),
+                ));
             Ok(())
         })
         .map_err(runtime_error)?,

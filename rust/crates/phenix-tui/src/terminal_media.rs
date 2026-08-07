@@ -44,7 +44,8 @@ impl TerminalMediaRenderer {
             let Some(payload) = png_payload(&placement.source) else {
                 continue;
             };
-            let Some(image_id) = IMAGE_ID_BASE.checked_add(u32::try_from(index).unwrap_or(u32::MAX))
+            let Some(image_id) =
+                IMAGE_ID_BASE.checked_add(u32::try_from(index).unwrap_or(u32::MAX))
             else {
                 continue;
             };
@@ -95,7 +96,10 @@ fn send_png(
     rows: u16,
     payload: &str,
 ) -> io::Result<()> {
-    let chunks = payload.as_bytes().chunks(KITTY_CHUNK_BYTES).collect::<Vec<_>>();
+    let chunks = payload
+        .as_bytes()
+        .chunks(KITTY_CHUNK_BYTES)
+        .collect::<Vec<_>>();
     if chunks.is_empty() {
         return Ok(());
     }

@@ -439,7 +439,10 @@ phenix.keymap.set("global", "<leader>fm", phenix.action.models)
         for character in [' ', 'f'] {
             assert_eq!(
                 provider
-                    .handle_key(&global, key(KeyCode::Character(character), false, false, false))
+                    .handle_key(
+                        &global,
+                        key(KeyCode::Character(character), false, false, false)
+                    )
                     .expect("leader prefix"),
                 vec![FrontendCommand::Handled]
             );
@@ -462,34 +465,22 @@ phenix.keymap.set("global", "<leader>fm", phenix.action.models)
         let insert = input_context(true);
 
         assert!(provider
-            .handle_key(
-                &insert,
-                key(KeyCode::Character(' '), false, false, false),
-            )
+            .handle_key(&insert, key(KeyCode::Character(' '), false, false, false),)
             .expect("space passes to editor")
             .is_empty());
         assert!(provider
-            .handle_key(
-                &insert,
-                key(KeyCode::Character('w'), true, false, false),
-            )
+            .handle_key(&insert, key(KeyCode::Character('w'), true, false, false),)
             .expect("ctrl-w passes to editor")
             .is_empty());
         assert!(provider
-            .handle_key(
-                &insert,
-                key(KeyCode::Character('g'), false, false, false),
-            )
+            .handle_key(&insert, key(KeyCode::Character('g'), false, false, false),)
             .expect("g passes to editor")
             .is_empty());
 
         // Explicit single-key global actions still apply in Insert mode.
         assert_eq!(
             provider
-                .handle_key(
-                    &insert,
-                    key(KeyCode::Character('c'), true, false, false),
-                )
+                .handle_key(&insert, key(KeyCode::Character('c'), true, false, false),)
                 .expect("ctrl-c remains explicit abort"),
             vec![FrontendCommand::Application(ApplicationCommand::Abort)]
         );
