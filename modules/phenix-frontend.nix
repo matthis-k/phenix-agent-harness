@@ -98,7 +98,15 @@ _:
             export PHENIX_HEADLESS_ENTRY="${config.packages.phenix-pi-package}/headless/main.ts"
             export PHENIX_SOURCE_ROOT="${config.packages.phenix-pi-package}"
             export PHENIX_CONDUCTOR_COMMAND="${phenixRustRuntime}/bin/phenix-conductor"
-            exec "${phenixRustRuntime}/bin/phenix" ${pkgs.lib.escapeShellArgs wrapperArguments} "$@"
+
+            config_args=()
+            ${pkgs.lib.optionalString (configDir == null) ''
+              user_config_root="''${XDG_CONFIG_HOME:-''${HOME:-}/.config}/phenix-harness"
+              if [ ! -f "$user_config_root/config.lua" ]; then
+                config_args=(--config-dir "${../config/phenix-harness}")
+              fi
+            ''}
+            exec "${phenixRustRuntime}/bin/phenix" "''${config_args[@]}" ${pkgs.lib.escapeShellArgs wrapperArguments} "$@"
           '';
         };
 
@@ -135,10 +143,14 @@ _:
             export XDG_CACHE_HOME="$HOME/.cache"
             export PI_SKIP_VERSION_CHECK=1
             mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
-            cp -R ${../config/phenix-harness} "$XDG_CONFIG_HOME/phenix-harness"
 
+            # A fresh install has no user config. The packaged authoring config
+            # must make the ordinary wrapper usable without seeding ~/.config.
             phenix --print-default-config | grep -q 'phenix.layout.set'
             phenix --check
+
+            # An explicitly configured wrapper still owns its selected authoring
+            # root and must not be replaced by the packaged fallback.
             phenix-configured-smoke --check
             phenix-acp-smoke
             touch "$out"
