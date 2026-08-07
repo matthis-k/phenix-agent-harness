@@ -4,19 +4,18 @@ use crate::{
 };
 use phenix_frontend_config::FrontendProviderRef;
 use phenix_runtime_api::{BackendClient, BackendCommand, BackendRuntime, BackendWorker};
-#[cfg(test)]
-use phenix_ui_core::ElementId;
 use phenix_ui_core::{
     command_completions, group_transcript_turns, parse_markdown, reduce, AppEffect, AppEvent,
-    AppState, FocusDirection, FocusTarget, InputEditor, LayoutAxis, OverlayState, ResizeRequest,
-    RichBlock, RichBlockView, VimMode,
+    AppState, FocusDirection, FocusTarget, LayoutAxis, OverlayState, ResizeRequest, VimMode,
 };
+#[cfg(test)]
+use phenix_ui_core::{ElementId, InputEditor, RichBlockView};
 use std::collections::VecDeque;
 use std::env;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{self, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -445,12 +444,13 @@ fn move_transcript_turn(state: &mut AppState, delta: i32) {
         return;
     }
     let last = turn_ids.len() - 1;
-    let current = state.view.transcript_selected_turn.unwrap_or(last).min(last);
-    state.view.transcript_selected_turn = Some(
-        current
-            .saturating_add_signed(delta as isize)
-            .min(last),
-    );
+    let current = state
+        .view
+        .transcript_selected_turn
+        .unwrap_or(last)
+        .min(last);
+    state.view.transcript_selected_turn =
+        Some(current.saturating_add_signed(delta as isize).min(last));
     state.view.transcript_selected_block = None;
     state.view.transcript_scroll.follow_end = false;
 }
@@ -461,9 +461,15 @@ fn toggle_transcript_turn_details(state: &mut AppState) {
         return;
     }
     let last = turn_ids.len() - 1;
-    let selected = state.view.transcript_selected_turn.unwrap_or(last).min(last);
+    let selected = state
+        .view
+        .transcript_selected_turn
+        .unwrap_or(last)
+        .min(last);
     state.view.transcript_selected_turn = Some(selected);
-    state.view.toggle_transcript_turn(turn_ids[selected].clone());
+    state
+        .view
+        .toggle_transcript_turn(turn_ids[selected].clone());
 }
 
 fn selected_rich_document(state: &AppState) -> Option<(String, phenix_ui_core::RichDocument)> {
@@ -471,7 +477,11 @@ fn selected_rich_document(state: &AppState) -> Option<(String, phenix_ui_core::R
     let transcript = state.transcript(run_id)?;
     let turns = group_transcript_turns(&transcript.blocks);
     let last = turns.len().checked_sub(1)?;
-    let selected = state.view.transcript_selected_turn.unwrap_or(last).min(last);
+    let selected = state
+        .view
+        .transcript_selected_turn
+        .unwrap_or(last)
+        .min(last);
     let turn = &turns[selected];
     Some((turn.id.clone(), parse_markdown(&turn.response)))
 }
@@ -481,26 +491,12 @@ fn interactive_rich_blocks(document: &phenix_ui_core::RichDocument) -> Vec<usize
         .blocks
         .iter()
         .enumerate()
-        .filter_map(|(index, block)| (block.candidate_views().len() > 1).then_some(index))
+        .filter_map(|(index, block)| block.is_interactive().then_some(index))
         .collect()
 }
 
 fn rich_block_key(turn_id: &str, index: usize) -> String {
     format!("{turn_id}:block:{index}")
-}
-
-fn default_rich_block_view(block: &RichBlock) -> RichBlockView {
-    match block {
-        RichBlock::Table(_) => RichBlockView::Dense,
-        RichBlock::Code(code) if code.language_is("mermaid") => RichBlockView::Rendered,
-        RichBlock::Code(_) => RichBlockView::Highlighted,
-        RichBlock::Image(_) => RichBlockView::Preview,
-        RichBlock::Heading { .. }
-        | RichBlock::Paragraph(_)
-        | RichBlock::Quote(_)
-        | RichBlock::List { .. }
-        | RichBlock::Rule => RichBlockView::Rendered,
-    }
 }
 
 fn move_transcript_block(state: &mut AppState, delta: i32) {
@@ -513,14 +509,24 @@ fn move_transcript_block(state: &mut AppState, delta: i32) {
         state.view.transcript_selected_block = None;
         return;
     }
-    let current_position = state
+    let next = state
         .view
         .transcript_selected_block
         .and_then(|selected| interactive.iter().position(|index| *index == selected))
-        .unwrap_or(0);
-    let next = current_position
-        .saturating_add_signed(delta as isize)
-        .min(interactive.len() - 1);
+        .map_or_else(
+            || {
+                if delta.is_negative() {
+                    interactive.len() - 1
+                } else {
+                    0
+                }
+            },
+            |current| {
+                current
+                    .saturating_add_signed(delta as isize)
+                    .min(interactive.len() - 1)
+            },
+        );
     state.view.transcript_selected_block = Some(interactive[next]);
     state.view.transcript_scroll.follow_end = false;
 }
@@ -546,7 +552,7 @@ fn cycle_transcript_block_view(state: &mut AppState, delta: i32) {
         .view
         .rich_block_view(&key)
         .filter(|view| views.contains(view))
-        .unwrap_or_else(|| default_rich_block_view(block));
+        .unwrap_or_else(|| block.default_view());
     let current_index = views.iter().position(|view| *view == current).unwrap_or(0);
     let len = i64::try_from(views.len()).unwrap_or(1).max(1);
     let next = (i64::try_from(current_index).unwrap_or(0) + i64::from(delta)).rem_euclid(len);
@@ -785,21 +791,25 @@ mod tests {
     #[test]
     fn transcript_turns_are_selected_and_expanded_independently() {
         let run_id = phenix_runtime_api::RunId::parse("run-1").expect("run id");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            ..AppState::default()
+        };
         for (id, role) in [
             ("u1", TranscriptRole::User),
             ("a1", TranscriptRole::Assistant),
             ("u2", TranscriptRole::User),
             ("a2", TranscriptRole::Assistant),
         ] {
-            state.transcript_mut(run_id.clone()).append(TranscriptBlock {
-                id: id.to_owned(),
-                run_id: run_id.clone(),
-                role,
-                text: id.to_owned(),
-                complete: true,
-            });
+            state
+                .transcript_mut(run_id.clone())
+                .append(TranscriptBlock {
+                    id: id.to_owned(),
+                    run_id: run_id.clone(),
+                    role,
+                    text: id.to_owned(),
+                    complete: true,
+                });
         }
         apply_view_mutation(&mut state, ViewMutation::MoveTranscriptTurn(-1));
         assert_eq!(state.view.transcript_selected_turn, Some(0));
@@ -811,23 +821,31 @@ mod tests {
     #[test]
     fn rich_blocks_have_independent_views_and_viewports() {
         let run_id = phenix_runtime_api::RunId::parse("run-rich").expect("run id");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            ..AppState::default()
+        };
         state.selected_run = Some(run_id.clone());
-        state.transcript_mut(run_id.clone()).append(TranscriptBlock {
-            id: "u1".to_owned(),
-            run_id: run_id.clone(),
-            role: TranscriptRole::User,
-            text: "show it".to_owned(),
-            complete: true,
-        });
-        state.transcript_mut(run_id.clone()).append(TranscriptBlock {
-            id: "a1".to_owned(),
-            run_id,
-            role: TranscriptRole::Assistant,
-            text: "| A | B |\n| --- | --- |\n| 1 | 2 |\n\n```mermaid\nflowchart LR\nA --> B\n```".to_owned(),
-            complete: true,
-        });
+        state
+            .transcript_mut(run_id.clone())
+            .append(TranscriptBlock {
+                id: "u1".to_owned(),
+                run_id: run_id.clone(),
+                role: TranscriptRole::User,
+                text: "show it".to_owned(),
+                complete: true,
+            });
+        state
+            .transcript_mut(run_id.clone())
+            .append(TranscriptBlock {
+                id: "a1".to_owned(),
+                run_id,
+                role: TranscriptRole::Assistant,
+                text:
+                    "| A | B |\n| --- | --- |\n| 1 | 2 |\n\n```mermaid\nflowchart LR\nA --> B\n```"
+                        .to_owned(),
+                complete: true,
+            });
 
         move_transcript_block(&mut state, 1);
         assert_eq!(state.view.transcript_selected_block, Some(0));

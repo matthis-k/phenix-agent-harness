@@ -347,11 +347,10 @@ mod tests {
     fn unexpected_backend_stop_is_a_visible_failure_not_a_user_quit() {
         let mut consumer = RootContentConsumer::new();
         let state = AppState::default();
-        let envelope = EventEnvelope::broadcast(ContentEvent::Backend(Box::new(
-            BackendOutput::Stopped {
+        let envelope =
+            EventEnvelope::broadcast(ContentEvent::Backend(Box::new(BackendOutput::Stopped {
                 result: Err(BackendError::Transport("downstream closed".to_owned())),
-            },
-        )));
+            })));
         let batch = consumer.on_content(&state, &envelope);
         assert!(matches!(
             batch.reactions.as_slice(),
@@ -363,8 +362,10 @@ mod tests {
     #[test]
     fn requested_backend_stop_still_completes_shutdown() {
         let mut consumer = RootContentConsumer::new();
-        let mut state = AppState::default();
-        state.exit_requested = true;
+        let state = AppState {
+            exit_requested: true,
+            ..AppState::default()
+        };
         let output = Box::new(BackendOutput::Stopped { result: Ok(()) });
         let envelope = EventEnvelope::broadcast(ContentEvent::Backend(output.clone()));
         let batch = consumer.on_content(&state, &envelope);

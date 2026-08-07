@@ -97,8 +97,9 @@ pub enum RichBlock {
 }
 
 impl RichBlock {
-    /// Semantic representations that may make sense for this block. A concrete
-    /// renderer is free to expose only the subset it actually implements.
+    /// Semantic representations that may make sense for this block. Concrete
+    /// renderers may support a subset, but presentation policy has one canonical
+    /// source of truth here rather than being duplicated per frontend.
     pub fn candidate_views(&self) -> &'static [RichBlockView] {
         match self {
             Self::Code(code) if code.language_is("mermaid") => &[
@@ -115,6 +116,24 @@ impl RichBlock {
             | Self::List { .. }
             | Self::Rule => &[RichBlockView::Rendered],
         }
+    }
+
+    pub fn default_view(&self) -> RichBlockView {
+        match self {
+            Self::Table(_) => RichBlockView::Dense,
+            Self::Code(code) if code.language_is("mermaid") => RichBlockView::Rendered,
+            Self::Code(_) => RichBlockView::Highlighted,
+            Self::Image(_) => RichBlockView::Preview,
+            Self::Heading { .. }
+            | Self::Paragraph(_)
+            | Self::Quote(_)
+            | Self::List { .. }
+            | Self::Rule => RichBlockView::Rendered,
+        }
+    }
+
+    pub fn is_interactive(&self) -> bool {
+        self.candidate_views().len() > 1
     }
 }
 
@@ -338,7 +357,10 @@ fn starts_block(lines: &[&str], index: usize) -> bool {
 }
 
 fn markdown_heading(line: &str) -> Option<(usize, &str)> {
-    let level = line.chars().take_while(|character| *character == '#').count();
+    let level = line
+        .chars()
+        .take_while(|character| *character == '#')
+        .count();
     if !(1..=6).contains(&level) {
         return None;
     }
@@ -403,10 +425,15 @@ fn markdown_image(line: &str) -> Option<(&str, &str)> {
 }
 
 fn next_inline_marker(text: &str) -> Option<usize> {
-    [text.find("**"), text.find('`'), text.find('['), text.find('*')]
-        .into_iter()
-        .flatten()
-        .min()
+    [
+        text.find("**"),
+        text.find('`'),
+        text.find('['),
+        text.find('*'),
+    ]
+    .into_iter()
+    .flatten()
+    .min()
 }
 
 #[cfg(test)]
@@ -418,18 +445,26 @@ mod tests {
         let document = parse_markdown(
             "# Heading\n\n| Name | State |\n| --- | --- |\n| build | green |\n\n```mermaid\nflowchart LR\nA --> B\n```",
         );
-        assert!(matches!(document.blocks[0], RichBlock::Heading { level: 1, .. }));
+        assert!(matches!(
+            document.blocks[0],
+            RichBlock::Heading { level: 1, .. }
+        ));
         assert!(matches!(document.blocks[1], RichBlock::Table(_)));
         assert!(matches!(document.blocks[2], RichBlock::Code(_)));
     }
 
     #[test]
-    fn block_views_are_semantic_not_renderer_specific() {
+    fn block_views_and_defaults_are_semantic_not_renderer_specific() {
         let table = RichBlock::Table(RichTable {
             header: vec![RichText::plain("Name")],
             rows: vec![vec![RichText::plain("build")]],
         });
-        assert_eq!(table.candidate_views(), &[RichBlockView::Dense, RichBlockView::Grid]);
+        assert_eq!(
+            table.candidate_views(),
+            &[RichBlockView::Dense, RichBlockView::Grid]
+        );
+        assert_eq!(table.default_view(), RichBlockView::Dense);
+        assert!(table.is_interactive());
 
         let mermaid = RichBlock::Code(RichCodeBlock {
             language: Some("mermaid".to_owned()),
@@ -443,6 +478,7 @@ mod tests {
                 RichBlockView::Rendered,
             ]
         );
+        assert_eq!(mermaid.default_view(), RichBlockView::Rendered);
     }
 
     #[test]

@@ -91,13 +91,12 @@ fn frontend_context(state: &AppState) -> FrontendContext {
         state.view.overlay,
         Some(OverlayState::CommandPalette { .. })
     );
-    let pane_type = if (state.view.overlay.is_some() && !passive_completion)
-        || !state.dialogs.is_empty()
-    {
-        PaneType::Overlay
-    } else {
-        PaneType::from_element(&focused_element)
-    };
+    let pane_type =
+        if (state.view.overlay.is_some() && !passive_completion) || !state.dialogs.is_empty() {
+            PaneType::Overlay
+        } else {
+            PaneType::from_element(&focused_element)
+        };
     FrontendContext {
         focused_element,
         pane_type,
@@ -370,15 +369,15 @@ fn command_completion_key(state: &AppState, key: KeyInput) -> Option<Vec<BusReac
         _ => None,
     };
     if let Some(delta) = navigate {
-        return Some(vec![BusReaction::View(ViewMutation::MoveOverlaySelection(delta))]);
+        return Some(vec![BusReaction::View(ViewMutation::MoveOverlaySelection(
+            delta,
+        ))]);
     }
     let plain_enter = key.code == KeyCode::Enter
         && !key.modifiers.shift
         && !key.modifiers.control
         && !key.modifiers.alt;
-    let ctrl_y = key.code == KeyCode::Character('y')
-        && key.modifiers.control
-        && !key.modifiers.alt;
+    let ctrl_y = key.code == KeyCode::Character('y') && key.modifiers.control && !key.modifiers.alt;
     if plain_enter || ctrl_y {
         return Some(accept_overlay(state));
     }
@@ -545,7 +544,9 @@ fn erase_before_cursor(state: &AppState, boundary: EraseBoundary) -> Vec<BusReac
         EraseBoundary::PreviousWord => probe.move_word_backward(),
         EraseBoundary::LineStart => probe.move_home(),
     }
-    let count = state.input.text[probe.cursor_byte..original].chars().count();
+    let count = state.input.text[probe.cursor_byte..original]
+        .chars()
+        .count();
     std::iter::repeat_with(|| edit_input(InputEdit::Backspace))
         .take(count)
         .collect()
@@ -555,7 +556,9 @@ fn erase_after_cursor(state: &AppState) -> Vec<BusReaction> {
     let original = state.input.cursor_byte.min(state.input.text.len());
     let mut probe = state.input.clone();
     probe.move_end();
-    let count = state.input.text[original..probe.cursor_byte].chars().count();
+    let count = state.input.text[original..probe.cursor_byte]
+        .chars()
+        .count();
     std::iter::repeat_with(|| edit_input(InputEdit::Delete))
         .take(count)
         .collect()
@@ -746,13 +749,19 @@ mod tests {
         let word = fallback_key(&state, control_key('w'));
         assert_eq!(word.reactions.len(), 5);
         assert!(word.reactions.iter().all(|reaction| {
-            matches!(reaction, BusReaction::View(ViewMutation::EditInput(InputEdit::Backspace)))
+            matches!(
+                reaction,
+                BusReaction::View(ViewMutation::EditInput(InputEdit::Backspace))
+            )
         }));
 
         let line = fallback_key(&state, control_key('u'));
         assert_eq!(line.reactions.len(), state.input.text.chars().count());
         assert!(line.reactions.iter().all(|reaction| {
-            matches!(reaction, BusReaction::View(ViewMutation::EditInput(InputEdit::Backspace)))
+            matches!(
+                reaction,
+                BusReaction::View(ViewMutation::EditInput(InputEdit::Backspace))
+            )
         }));
     }
 

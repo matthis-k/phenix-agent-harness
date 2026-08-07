@@ -46,7 +46,9 @@ impl UiRenderer for RatatuiRenderer {
             .map_err(|error| error.to_string())?;
 
         let images = terminal_image_placements(screen, state, &config);
-        self.media.render(&images).map_err(|error| error.to_string())
+        self.media
+            .render(&images)
+            .map_err(|error| error.to_string())
     }
 
     fn suspend(&mut self) -> Result<(), String> {
@@ -186,7 +188,8 @@ fn transcript_scroll(
         let range = &document.turn_ranges[selected];
         Some(range.end.saturating_sub(viewport_height).min(max_scroll))
     });
-    selected_scroll.unwrap_or_else(|| max_scroll.saturating_sub(state.view.transcript_scroll.offset))
+    selected_scroll
+        .unwrap_or_else(|| max_scroll.saturating_sub(state.view.transcript_scroll.offset))
 }
 
 fn terminal_image_placements(
@@ -202,7 +205,8 @@ fn terminal_image_placements(
     let Some(area) = panes.get(&ElementId::transcript()).copied() else {
         return Vec::new();
     };
-    let inner = workspace_pane(state.view.focus == FocusTarget::Transcript, &config.theme).inner(area);
+    let inner =
+        workspace_pane(state.view.focus == FocusTarget::Transcript, &config.theme).inner(area);
     if inner.width == 0 || inner.height == 0 {
         return Vec::new();
     }
@@ -260,12 +264,7 @@ fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
     render_objectives_section(frame, sections[6], state, theme);
 }
 
-fn render_health_section(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    state: &AppState,
-    theme: &ThemeConfig,
-) {
+fn render_health_section(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
     frame.render_widget(flat_surface(theme), area);
     frame.render_widget(
         Paragraph::new(vec![
@@ -301,12 +300,7 @@ fn render_session_section(
     );
 }
 
-fn render_runs_section(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    state: &AppState,
-    theme: &ThemeConfig,
-) {
+fn render_runs_section(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
     frame.render_widget(flat_surface(theme), area);
     let mut lines = vec![section_heading("Runs", theme)];
     match &state.snapshot {
@@ -330,21 +324,14 @@ fn render_runs_section(
                             theme_style(theme, "Normal")
                         },
                     ),
-                    Span::styled(
-                        format!(" · {:?}", run.state),
-                        theme_style(theme, "Muted"),
-                    ),
+                    Span::styled(format!(" · {:?}", run.state), theme_style(theme, "Muted")),
                 ])
             }));
         }
         _ => lines.push(Line::styled("  none", theme_style(theme, "Muted"))),
     }
 
-    let scroll = state
-        .view
-        .sidebar_scroll
-        .offset
-        .min(usize::from(u16::MAX)) as u16;
+    let scroll = state.view.sidebar_scroll.offset.min(usize::from(u16::MAX)) as u16;
     frame.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
@@ -384,7 +371,11 @@ fn render_inspector(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: 
     frame.render_widget(block, area);
 
     let mut lines = vec![section_heading("Runtime", theme)];
-    lines.push(key_value_line("connection", format!("{:?}", state.connection), theme));
+    lines.push(key_value_line(
+        "connection",
+        format!("{:?}", state.connection),
+        theme,
+    ));
     if let Some(session) = &state.active_session {
         lines.push(key_value_line("session", session.to_string(), theme));
     }
@@ -397,7 +388,10 @@ fn render_inspector(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: 
     if let Some(run) = selected_run(state) {
         lines.extend(run_detail_lines(run, theme));
     } else {
-        lines.push(Line::styled("  no run selected", theme_style(theme, "Muted")));
+        lines.push(Line::styled(
+            "  no run selected",
+            theme_style(theme, "Muted"),
+        ));
     }
 
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
@@ -575,9 +569,7 @@ fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &The
     let cursor = state.input.cursor_byte.min(state.input.text.len());
     let prefix = &state.input.text[..cursor];
     let (column, row) = cursor_position(prefix, inner.width.max(1));
-    let scroll = if focused
-        && state.view.input_editor != InputEditor::External
-        && inner.height > 0
+    let scroll = if focused && state.view.input_editor != InputEditor::External && inner.height > 0
     {
         row.saturating_sub(inner.height.saturating_sub(1))
     } else {
@@ -854,7 +846,8 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
                 "Alt-4 specialized workspace · exact run/workflow inspection".to_owned(),
                 "Ctrl-B toggles the operational column".to_owned(),
                 "Transcript j/k selects messages; Enter toggles message details".to_owned(),
-                "Transcript [/] selects rich blocks; v/V changes the selected block view".to_owned(),
+                "Transcript [/] selects rich blocks; v/V changes the selected block view"
+                    .to_owned(),
                 "Transcript H/L and J/K scroll the selected rendered block viewport".to_owned(),
                 "Transcript arrows/Page keys scroll within long messages".to_owned(),
                 "Ctrl-O focuses transcript and toggles selected message details".to_owned(),
@@ -1141,9 +1134,11 @@ mod tests {
     #[test]
     fn status_can_resolve_selected_run_model() {
         let run_id = RunId::parse("run-root").expect("run ID");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
-        state.selected_run = Some(run_id.clone());
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..AppState::default()
+        };
         state.snapshot = Some(RuntimeSnapshot {
             capabilities: Default::default(),
             health: BackendHealth::Ready,
@@ -1184,28 +1179,31 @@ mod tests {
     #[test]
     fn visible_png_media_is_projected_to_terminal_coordinates() {
         let run_id = RunId::parse("run-image").expect("run id");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
-        state.selected_run = Some(run_id.clone());
-        state.transcript_mut(run_id.clone()).append(TranscriptBlock {
-            id: "u1".to_owned(),
-            run_id: run_id.clone(),
-            role: TranscriptRole::User,
-            text: "image".to_owned(),
-            complete: true,
-        });
-        state.transcript_mut(run_id.clone()).append(TranscriptBlock {
-            id: "a1".to_owned(),
-            run_id,
-            role: TranscriptRole::Assistant,
-            text: "![preview](data:image/png;base64,Zm9v)".to_owned(),
-            complete: true,
-        });
-        let placements = terminal_image_placements(
-            Rect::new(0, 0, 120, 40),
-            &state,
-            &FrontendConfig::default(),
-        );
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..AppState::default()
+        };
+        state
+            .transcript_mut(run_id.clone())
+            .append(TranscriptBlock {
+                id: "u1".to_owned(),
+                run_id: run_id.clone(),
+                role: TranscriptRole::User,
+                text: "image".to_owned(),
+                complete: true,
+            });
+        state
+            .transcript_mut(run_id.clone())
+            .append(TranscriptBlock {
+                id: "a1".to_owned(),
+                run_id,
+                role: TranscriptRole::Assistant,
+                text: "![preview](data:image/png;base64,Zm9v)".to_owned(),
+                complete: true,
+            });
+        let placements =
+            terminal_image_placements(Rect::new(0, 0, 120, 40), &state, &FrontendConfig::default());
         assert_eq!(placements.len(), 1);
         assert_eq!(placements[0].source, "data:image/png;base64,Zm9v");
         assert!(placements[0].rows > 0);
