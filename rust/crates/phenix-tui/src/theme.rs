@@ -22,18 +22,12 @@ fn foreground_style(theme: &ThemeConfig, group: &str) -> Style {
     theme_style(theme, group)
 }
 
-/// Resolve a semantic text style.
-///
-/// Text highlights deliberately inherit the surface underneath them. Theme files
-/// may still carry legacy background values for text groups, but rendering those
-/// backgrounds inline creates rectangular holes whenever the containing pane uses
-/// a different elevation. Only explicit surface styles are allowed to paint a
-/// background.
+/// Resolve a semantic text style. Text always inherits the rectangular surface
+/// underneath it; backgrounds are exclusively the responsibility of
+/// `surface_style`.
 pub(crate) fn theme_style(theme: &ThemeConfig, group: &str) -> Style {
     let mut style = raw_theme_style(theme, group);
-    if !is_surface_group(group) {
-        style.bg = None;
-    }
+    style.bg = None;
     style
 }
 
@@ -103,13 +97,6 @@ fn resolved_group<'a>(theme: &ThemeConfig, group: &'a str) -> &'a str {
     }
 }
 
-fn is_surface_group(group: &str) -> bool {
-    matches!(
-        group,
-        "Normal" | "Surface" | "SurfaceFocused" | "UserMessage" | "CodeBlock" | "MediaBlock"
-    )
-}
-
 fn ratatui_color(color: ColorSpec) -> Color {
     match color {
         ColorSpec::Default => Color::Reset,
@@ -136,9 +123,10 @@ mod tests {
 
     #[test]
     fn semantic_text_styles_never_paint_their_legacy_background() {
-        let style = theme_style(&ThemeConfig::default(), "Accent");
-        assert!(style.add_modifier.contains(Modifier::BOLD));
-        assert_eq!(style.bg, None);
+        let theme = ThemeConfig::default();
+        assert_eq!(theme_style(&theme, "Accent").bg, None);
+        assert_eq!(theme_style(&theme, "Normal").bg, None);
+        assert_eq!(theme_style(&theme, "Surface").bg, None);
     }
 
     #[test]
