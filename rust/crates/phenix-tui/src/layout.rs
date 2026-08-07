@@ -78,39 +78,58 @@ mod tests {
     use super::*;
     use phenix_frontend_config::{LayoutConfig, PaneLayout, PaneType, SplitLayout};
 
+    fn transcript_sidebar_layout() -> LayoutNode {
+        LayoutConfig {
+            root: LayoutNode::Split(SplitLayout {
+                direction: SplitDirection::Horizontal,
+                children: vec![
+                    LayoutNode::Pane(PaneLayout {
+                        element: ElementId::transcript(),
+                        pane_type: PaneType::Transcript,
+                        weight: 3,
+                        minimum: None,
+                        maximum: None,
+                    }),
+                    LayoutNode::Pane(PaneLayout {
+                        element: ElementId::sidebar(),
+                        pane_type: PaneType::Sidebar,
+                        weight: 1,
+                        minimum: None,
+                        maximum: None,
+                    }),
+                ],
+            }),
+        }
+        .root
+    }
+
     #[test]
     fn semantic_layout_is_projected_without_widget_state() {
-        let state = AppState::default();
+        let mut state = AppState::default();
+        state.view.pane_mut(ElementId::sidebar()).visible = true;
         let mut output = BTreeMap::new();
         collect_layout(
-            &LayoutConfig {
-                root: LayoutNode::Split(SplitLayout {
-                    direction: SplitDirection::Horizontal,
-                    children: vec![
-                        LayoutNode::Pane(PaneLayout {
-                            element: ElementId::transcript(),
-                            pane_type: PaneType::Transcript,
-                            weight: 3,
-                            minimum: None,
-                            maximum: None,
-                        }),
-                        LayoutNode::Pane(PaneLayout {
-                            element: ElementId::sidebar(),
-                            pane_type: PaneType::Sidebar,
-                            weight: 1,
-                            minimum: None,
-                            maximum: None,
-                        }),
-                    ],
-                }),
-            }
-            .root,
+            &transcript_sidebar_layout(),
             Rect::new(0, 0, 100, 20),
             &state,
             &mut output,
         );
         assert!(output.contains_key(&ElementId::transcript()));
         assert_eq!(output[&ElementId::sidebar()].width, 28);
+    }
+
+    #[test]
+    fn hidden_sidebar_returns_its_width_to_the_transcript() {
+        let state = AppState::default();
+        let mut output = BTreeMap::new();
+        collect_layout(
+            &transcript_sidebar_layout(),
+            Rect::new(0, 0, 100, 20),
+            &state,
+            &mut output,
+        );
+        assert!(!output.contains_key(&ElementId::sidebar()));
+        assert_eq!(output[&ElementId::transcript()].width, 100);
     }
 
     #[test]
