@@ -30,7 +30,6 @@ struct ImageCacheKey {
     rows: u16,
 }
 
-#[derive(Debug)]
 pub(crate) struct TerminalMediaRenderer {
     picker: Picker,
     protocols: HashMap<ImageCacheKey, Protocol>,
