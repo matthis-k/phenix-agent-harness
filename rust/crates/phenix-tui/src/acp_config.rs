@@ -22,9 +22,9 @@ const CONDUCTOR_COMMAND_ENV: &str = "PHENIX_CONDUCTOR_COMMAND";
 /// Build a direct ACP client backend for the Phenix conductor.
 ///
 /// The frontend serializes only source descriptors. It does not resolve or parse
-/// definition files and it never constructs `PhenixAcpGateway`. The conductor
-/// reads this typed request and creates the canonical configuration object inside
-/// the ACP process.
+/// definition files and it never constructs the conductor-owned gateway runtime.
+/// The conductor reads this typed request and creates the canonical configuration
+/// object inside the ACP process.
 pub fn load_acp_backend(
     config_directory: &Path,
     config: &AcpApplicationConfig,
