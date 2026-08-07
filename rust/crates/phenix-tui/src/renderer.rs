@@ -486,7 +486,7 @@ fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &The
     );
     let focused =
         state.view.focus == FocusTarget::Input && (state.view.overlay.is_none() || completion_open);
-    let block = workspace_pane(focused, theme);
+    let block = flat_surface(theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
