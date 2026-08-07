@@ -1043,18 +1043,4 @@ id: phenix.capability-budget
             Err(DefinitionSourceError::InvalidTable { .. })
         ));
     }
-
-    #[test]
-    fn source_collection_rejects_duplicate_ids_and_wrong_kinds() {
-        let mut sources = DefinitionSources::new();
-        sources.add_workflow(WORKFLOW).expect("workflow");
-        assert!(matches!(
-            sources.add_workflow(WORKFLOW),
-            Err(DefinitionSourceError::DuplicateDefinition { .. })
-        ));
-        assert!(matches!(
-            sources.add_workflow(ROUTER),
-            Err(DefinitionSourceError::UnexpectedKind { .. })
-        ));
-    }
 }

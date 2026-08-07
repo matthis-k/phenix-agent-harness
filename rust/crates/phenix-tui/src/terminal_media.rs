@@ -62,7 +62,7 @@ impl TerminalMediaRenderer {
             for placement in placements {
                 self.render_placement(&mut backend, placement)?;
             }
-            backend.flush()?;
+            ratatui::backend::Backend::flush(&mut backend)?;
         }
         execute!(stdout, cursor::RestorePosition)?;
         stdout.flush()
