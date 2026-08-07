@@ -136,6 +136,7 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme:
             transcript
                 .blocks
                 .iter()
+                .filter(|entry| transcript_role_visible(&entry.role, state.view.show_details))
                 .flat_map(|entry| transcript_lines(&entry.role, &entry.text, theme))
                 .collect()
         });
@@ -499,11 +500,13 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
             "Help",
             0,
             vec![
+                "Ctrl-B toggles the runs sidebar".to_owned(),
+                "Ctrl-O toggles thinking and tool transcript details".to_owned(),
                 "Ctrl-E cycles owned, embedded, and external editors".to_owned(),
                 "Ctrl-G opens the configured external editor".to_owned(),
                 "Esc enters normal mode; i/a return to insert mode".to_owned(),
                 "h/j/k/l navigate in normal mode".to_owned(),
-                "Frontend keymaps are configured in init.lua".to_owned(),
+                "Frontend keymaps are configured in config.lua".to_owned(),
                 "Use `phenix --print-default-config` to inspect defaults".to_owned(),
             ],
             theme,
@@ -710,21 +713,259 @@ fn cursor_position(text: &str, width: u16) -> (u16, u16) {
     )
 }
 
+fn transcript_role_visible(role: &TranscriptRole, show_details: bool) -> bool {
+    show_details || !matches!(role, TranscriptRole::Thinking | TranscriptRole::Tool)
+}
+
 fn transcript_lines(role: &TranscriptRole, text: &str, theme: &ThemeConfig) -> Vec<Line<'static>> {
-    let (label, group) = match role {
-        TranscriptRole::User => ("you", "Accent"),
-        TranscriptRole::Assistant => ("assistant", "Success"),
-        TranscriptRole::Thinking => ("thinking", "Thinking"),
-        TranscriptRole::Tool => ("tool", "Tool"),
-        TranscriptRole::System => ("system", "Error"),
-    };
+    match role {
+        TranscriptRole::User => user_transcript_lines(text, theme),
+        TranscriptRole::Assistant => assistant_transcript_lines(text, theme),
+        TranscriptRole::Thinking => detail_transcript_lines("Thinking", "Thinking", text, theme),
+        TranscriptRole::Tool => detail_transcript_lines("Tool", "Tool", text, theme),
+        TranscriptRole::System => system_transcript_lines(text, theme),
+    }
+}
+
+fn user_transcript_lines(text: &str, theme: &ThemeConfig) -> Vec<Line<'static>> {
     let mut lines = vec![Line::styled(
-        format!("{label} ─"),
-        theme_style(theme, group).add_modifier(Modifier::BOLD),
+        "You",
+        theme_style(theme, "Accent").add_modifier(Modifier::BOLD),
     )];
-    lines.extend(text.lines().map(|line| Line::from(line.to_owned())));
+    if text.is_empty() {
+        lines.push(Line::from(Span::styled("▌", theme_style(theme, "Accent"))));
+    } else {
+        lines.extend(text.lines().map(|line| {
+            let mut spans = vec![Span::styled("▌ ", theme_style(theme, "Accent"))];
+            spans.extend(inline_markdown_spans(line, theme));
+            Line::from(spans)
+        }));
+    }
     lines.push(Line::default());
     lines
+}
+
+fn assistant_transcript_lines(text: &str, theme: &ThemeConfig) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::styled(
+        "Assistant",
+        theme_style(theme, "Success").add_modifier(Modifier::BOLD),
+    )];
+    lines.extend(markdown_document_lines(text, theme));
+    lines.push(Line::default());
+    lines
+}
+
+fn detail_transcript_lines(
+    label: &str,
+    group: &str,
+    text: &str,
+    theme: &ThemeConfig,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::styled(
+        label.to_owned(),
+        theme_style(theme, group).add_modifier(Modifier::BOLD),
+    )];
+    lines.extend(text.lines().map(|line| {
+        Line::from(vec![
+            Span::styled("│ ", theme_style(theme, group)),
+            Span::styled(line.to_owned(), theme_style(theme, "Muted")),
+        ])
+    }));
+    lines.push(Line::default());
+    lines
+}
+
+fn system_transcript_lines(text: &str, theme: &ThemeConfig) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::styled(
+        "System",
+        theme_style(theme, "Error").add_modifier(Modifier::BOLD),
+    )];
+    lines.extend(text.lines().map(|line| {
+        Line::from(vec![
+            Span::styled("! ", theme_style(theme, "Error")),
+            Span::styled(line.to_owned(), theme_style(theme, "Normal")),
+        ])
+    }));
+    lines.push(Line::default());
+    lines
+}
+
+fn markdown_document_lines(text: &str, theme: &ThemeConfig) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let mut in_code_block = false;
+
+    for raw in text.lines() {
+        let trimmed = raw.trim_start();
+        if let Some(fence) = trimmed.strip_prefix("```") {
+            if in_code_block {
+                in_code_block = false;
+                lines.push(Line::default());
+            } else {
+                in_code_block = true;
+                let language = fence.trim();
+                if !language.is_empty() {
+                    lines.push(Line::styled(
+                        format!("  {language}"),
+                        theme_style(theme, "Muted"),
+                    ));
+                }
+            }
+            continue;
+        }
+
+        if in_code_block {
+            lines.push(Line::from(vec![
+                Span::styled("  │ ", theme_style(theme, "Muted")),
+                Span::styled(raw.to_owned(), theme_style(theme, "Surface")),
+            ]));
+            continue;
+        }
+
+        if trimmed.is_empty() {
+            lines.push(Line::default());
+            continue;
+        }
+
+        if is_markdown_rule(trimmed) {
+            lines.push(Line::styled(
+                "  ────────────────────────────────",
+                theme_style(theme, "Border"),
+            ));
+            continue;
+        }
+
+        if let Some((level, heading)) = markdown_heading(trimmed) {
+            let group = if level <= 2 { "Accent" } else { "Normal" };
+            lines.push(Line::styled(
+                heading.to_owned(),
+                theme_style(theme, group).add_modifier(Modifier::BOLD),
+            ));
+            continue;
+        }
+
+        if let Some(item) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+        {
+            let mut spans = vec![Span::styled("  • ", theme_style(theme, "Accent"))];
+            spans.extend(inline_markdown_spans(item, theme));
+            lines.push(Line::from(spans));
+            continue;
+        }
+
+        if let Some((marker, item)) = ordered_list_item(trimmed) {
+            let mut spans = vec![Span::styled(
+                format!("  {marker} "),
+                theme_style(theme, "Accent"),
+            )];
+            spans.extend(inline_markdown_spans(item, theme));
+            lines.push(Line::from(spans));
+            continue;
+        }
+
+        if let Some(quote) = trimmed.strip_prefix("> ") {
+            lines.push(Line::from(vec![
+                Span::styled("  │ ", theme_style(theme, "Muted")),
+                Span::styled(
+                    quote.to_owned(),
+                    theme_style(theme, "Muted").add_modifier(Modifier::ITALIC),
+                ),
+            ]));
+            continue;
+        }
+
+        lines.push(Line::from(inline_markdown_spans(raw, theme)));
+    }
+
+    lines
+}
+
+fn markdown_heading(line: &str) -> Option<(usize, &str)> {
+    let level = line.chars().take_while(|character| *character == '#').count();
+    if !(1..=6).contains(&level) {
+        return None;
+    }
+    let heading = line.get(level..)?.strip_prefix(' ')?;
+    Some((level, heading.trim()))
+}
+
+fn ordered_list_item(line: &str) -> Option<(&str, &str)> {
+    let (marker, item) = line.split_once(' ')?;
+    let digits = marker.strip_suffix('.')?;
+    if digits.is_empty() || !digits.chars().all(|character| character.is_ascii_digit()) {
+        return None;
+    }
+    Some((marker, item))
+}
+
+fn is_markdown_rule(line: &str) -> bool {
+    let compact = line.chars().filter(|character| !character.is_whitespace()).collect::<String>();
+    let Some(marker) = compact.chars().next() else {
+        return false;
+    };
+    compact.len() >= 3
+        && matches!(marker, '-' | '*' | '_')
+        && compact.chars().all(|character| character == marker)
+}
+
+fn inline_markdown_spans(text: &str, theme: &ThemeConfig) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let mut remaining = text;
+
+    while !remaining.is_empty() {
+        let bold = remaining.find("**");
+        let code = remaining.find('`');
+        let next = match (bold, code) {
+            (Some(bold), Some(code)) => bold.min(code),
+            (Some(bold), None) => bold,
+            (None, Some(code)) => code,
+            (None, None) => {
+                spans.push(Span::styled(
+                    remaining.to_owned(),
+                    theme_style(theme, "Normal"),
+                ));
+                break;
+            }
+        };
+
+        if next > 0 {
+            spans.push(Span::styled(
+                remaining[..next].to_owned(),
+                theme_style(theme, "Normal"),
+            ));
+            remaining = &remaining[next..];
+            continue;
+        }
+
+        if let Some(after_open) = remaining.strip_prefix("**") {
+            if let Some(end) = after_open.find("**") {
+                spans.push(Span::styled(
+                    after_open[..end].to_owned(),
+                    theme_style(theme, "Normal").add_modifier(Modifier::BOLD),
+                ));
+                remaining = &after_open[end + 2..];
+            } else {
+                spans.push(Span::styled("**", theme_style(theme, "Normal")));
+                remaining = after_open;
+            }
+            continue;
+        }
+
+        if let Some(after_open) = remaining.strip_prefix('`') {
+            if let Some(end) = after_open.find('`') {
+                spans.push(Span::styled(
+                    after_open[..end].to_owned(),
+                    theme_style(theme, "Surface"),
+                ));
+                remaining = &after_open[end + 1..];
+            } else {
+                spans.push(Span::styled("`", theme_style(theme, "Normal")));
+                remaining = after_open;
+            }
+        }
+    }
+
+    spans
 }
 
 fn model_selection_label(model: &phenix_runtime_api::ModelRef) -> String {
@@ -763,6 +1004,13 @@ mod tests {
         BackendHealth, RunId, RunKind, RunState, RunSummary, RuntimeSnapshot,
     };
 
+    fn line_text(line: &Line<'_>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>()
+    }
+
     #[test]
     fn picker_window_keeps_deep_selection_visible() {
         let selected = 12usize;
@@ -779,6 +1027,37 @@ mod tests {
     fn input_buffer_is_split_into_explicit_lines() {
         let lines = input_text_lines("one\n\nthree", &ThemeConfig::default());
         assert_eq!(lines.len(), 3);
+    }
+
+    #[test]
+    fn normal_transcript_hides_agent_internal_blocks() {
+        assert!(!transcript_role_visible(&TranscriptRole::Thinking, false));
+        assert!(!transcript_role_visible(&TranscriptRole::Tool, false));
+        assert!(transcript_role_visible(&TranscriptRole::User, false));
+        assert!(transcript_role_visible(&TranscriptRole::Assistant, false));
+        assert!(transcript_role_visible(&TranscriptRole::Thinking, true));
+    }
+
+    #[test]
+    fn markdown_transcript_uses_document_structure_instead_of_raw_markers() {
+        let theme = ThemeConfig::default();
+        let lines = transcript_lines(
+            &TranscriptRole::Assistant,
+            "## Context\n- one\nUse **bold** and `code`.",
+            &theme,
+        );
+        let text = lines.iter().map(line_text).collect::<Vec<_>>();
+        assert!(text.iter().any(|line| line == "Context"));
+        assert!(text.iter().any(|line| line == "  • one"));
+        assert!(text.iter().any(|line| line == "Use bold and code."));
+        assert!(!text.iter().any(|line| line.contains("## Context")));
+    }
+
+    #[test]
+    fn user_messages_have_a_distinct_chat_marker() {
+        let lines = transcript_lines(&TranscriptRole::User, "hello", &ThemeConfig::default());
+        assert_eq!(line_text(&lines[0]), "You");
+        assert_eq!(line_text(&lines[1]), "▌ hello");
     }
 
     #[test]
