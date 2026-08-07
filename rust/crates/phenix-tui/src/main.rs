@@ -15,10 +15,14 @@ use phenix_ui_core::{
 };
 use phenix_ui_lua::{AcpApplicationConfig, LuaFrontendOptions, LuaFrontendProvider};
 use phenix_ui_runtime::{UiIngressError, UiRuntime};
-use ratatui::crossterm::event::{
-    self, Event, KeyCode as CrosstermKeyCode, KeyEvent, KeyEventKind,
-    KeyModifiers as CrosstermModifiers, MouseButton as CrosstermMouseButton, MouseEvent,
-    MouseEventKind,
+use ratatui::crossterm::{
+    event::{
+        self, Event, KeyCode as CrosstermKeyCode, KeyEvent, KeyEventKind,
+        KeyModifiers as CrosstermModifiers, KeyboardEnhancementFlags, MouseButton as CrosstermMouseButton,
+        MouseEvent, MouseEventKind, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    },
+    execute,
+    terminal::supports_keyboard_enhancement,
 };
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -36,6 +40,39 @@ use std::time::Duration;
 const CHANNEL_CAPACITY: usize = 1_024;
 const INPUT_POLL_PERIOD: Duration = Duration::from_millis(100);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+
+struct KeyboardEnhancementGuard {
+    enabled: bool,
+}
+
+impl KeyboardEnhancementGuard {
+    fn activate() -> io::Result<Self> {
+        // Modified Enter is indistinguishable from plain Enter in the legacy terminal
+        // encoding. Ask compatible terminals for unambiguous CSI-u modified-key events.
+        // A failed/unsupported capability query is not fatal: the TUI remains usable,
+        // just without modifier information that the terminal cannot provide.
+        let enabled = supports_keyboard_enhancement().unwrap_or(false);
+        if enabled {
+            let mut output = io::stdout();
+            execute!(
+                output,
+                PushKeyboardEnhancementFlags(
+                    KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                )
+            )?;
+        }
+        Ok(Self { enabled })
+    }
+}
+
+impl Drop for KeyboardEnhancementGuard {
+    fn drop(&mut self) {
+        if self.enabled {
+            let mut output = io::stdout();
+            let _ = execute!(output, PopKeyboardEnhancementFlags);
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BackendKind {
@@ -55,7 +92,7 @@ struct Arguments {
     #[arg(short = 'p', long = "config-dir", value_name = "DIR")]
     config_dir: Option<PathBuf>,
 
-    /// Do not load the built-in frontend keymaps, theme, and layout defaults.
+    /// Do not load the built-in frontend keymap and theme defaults.
     #[arg(long)]
     no_default_config: bool,
 
@@ -122,6 +159,7 @@ fn run_tui(
     })?;
 
     let renderer = RatatuiRenderer::initialize(Rc::clone(&provider))?;
+    let _keyboard_enhancement = KeyboardEnhancementGuard::activate()?;
     let mut runtime = UiRuntime::from_backend_with_frontend(
         AppState::default(),
         backend,
@@ -445,6 +483,17 @@ mod tests {
         assert_eq!(key.code, KeyCode::Character('x'));
         assert!(key.modifiers.control);
         assert!(key.modifiers.shift);
+    }
+
+    #[test]
+    fn modified_enter_preserves_shift_for_multiline_input() {
+        let key = convert_key(KeyEvent::new(
+            CrosstermKeyCode::Enter,
+            CrosstermModifiers::SHIFT,
+        ));
+        assert_eq!(key.code, KeyCode::Enter);
+        assert!(key.modifiers.shift);
+        assert!(!key.modifiers.control);
     }
 
     #[test]
