@@ -1,8 +1,8 @@
 use crate::state::{AdapterState, SessionState};
 use crate::terminal::TerminalEvent;
 use phenix_acp::acp::schema::v1::{
-    ContentBlock, ContentChunk, SessionNotification, SessionUpdate, ToolCall, ToolCallStatus,
-    ToolCallUpdate,
+    ContentBlock, ContentChunk, ImageContent, SessionNotification, SessionUpdate, ToolCall,
+    ToolCallStatus, ToolCallUpdate,
 };
 use phenix_runtime_api::{
     BackendError, BackendEvent, BackendOutputSender, RunOutcome, RunState, ToolCallId,
@@ -172,7 +172,7 @@ fn append_chunk(
     chunk: ContentChunk,
     outputs: &BackendOutputSender,
 ) -> Result<(), BackendError> {
-    let text = content_text(&chunk.content)?;
+    let text = content_markdown(&chunk.content)?;
     if text.is_empty() {
         return Ok(());
     }
@@ -224,12 +224,21 @@ fn append_complete_block(
     }))
 }
 
-fn content_text(content: &ContentBlock) -> Result<String, BackendError> {
+/// Normalize standard ACP content into the rich transcript's Markdown ingestion
+/// format without destroying media payloads. Images use data URIs so the
+/// renderer-neutral rich-text parser can produce an `Image` primitive while the
+/// terminal renderer remains free to choose Kitty/Sixel/text fallback rendering.
+fn content_markdown(content: &ContentBlock) -> Result<String, BackendError> {
     match content {
         ContentBlock::Text(text) => Ok(text.text.clone()),
-        ContentBlock::Image(image) => Ok(format!("[image: {}]", image.mime_type)),
+        ContentBlock::Image(image) => Ok(format!(
+            "![ACP image](data:{};base64,{})",
+            image.mime_type, image.data
+        )),
         ContentBlock::Audio(audio) => Ok(format!("[audio: {}]", audio.mime_type)),
-        ContentBlock::ResourceLink(resource) => Ok(format!("[resource: {}]", resource.uri)),
+        ContentBlock::ResourceLink(resource) => {
+            Ok(format!("[resource]({})", resource.uri))
+        }
         ContentBlock::Resource(resource) => serde_json::to_string(resource)
             .map(|value| format!("[embedded resource: {value}]"))
             .map_err(|error| BackendError::Protocol(error.to_string())),
@@ -358,5 +367,17 @@ mod tests {
         let summary = bounded_summary(value);
         assert!(summary.ends_with("… [truncated]"));
         assert_eq!(summary.matches('中').count(), MAX_TOOL_SUMMARY_CHARS);
+    }
+
+    #[test]
+    fn image_content_survives_projection_as_a_rich_image() {
+        let image = ContentBlock::Image(ImageContent::new(
+            "Zm9v".to_owned(),
+            "image/png".to_owned(),
+        ));
+        assert_eq!(
+            content_markdown(&image).expect("image projection"),
+            "![ACP image](data:image/png;base64,Zm9v)"
+        );
     }
 }
