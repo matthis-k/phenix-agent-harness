@@ -118,6 +118,7 @@ _:
         phenix.keymap.del("global", "<C-q>")
         phenix.theme.set("Accent", { fg = "#ffffff", bold = true })
         assert(type(phenix.ui.pane.resize) == "function")
+        assert(phenix.layout == nil)
         EOF_CONFIG
       '';
 
@@ -146,7 +147,9 @@ _:
 
             # A fresh install has no user config. The packaged authoring config
             # must make the ordinary wrapper usable without seeding ~/.config.
-            phenix --print-default-config | grep -q 'phenix.layout.set'
+            # Window composition is Rust-owned; the default Lua remains a
+            # theme/keymap layer only.
+            phenix --print-default-config | grep -Fq 'phenix.theme.set("Normal"'
             phenix --check
 
             # An explicitly configured wrapper still owns its selected authoring
