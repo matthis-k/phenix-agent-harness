@@ -422,10 +422,39 @@ fn apply_view_mutation(state: &mut AppState, mutation: ViewMutation) {
                 scroll.offset = scroll.offset.saturating_add_signed(lines as isize);
             }
         }
+        ViewMutation::MoveTranscriptTurn(delta) => move_transcript_turn(state, delta),
+        ViewMutation::ToggleTranscriptTurnDetails => toggle_transcript_turn_details(state),
         ViewMutation::EditInput(edit) => apply_input_edit(state, edit),
         ViewMutation::MoveOverlaySelection(delta) => move_overlay_selection(state, delta),
         ViewMutation::Notify(message) => state.notifications.push_back(message),
     }
+}
+
+fn move_transcript_turn(state: &mut AppState, delta: i32) {
+    let turn_ids = state.active_transcript_turn_ids();
+    if turn_ids.is_empty() {
+        state.view.transcript_selected_turn = None;
+        return;
+    }
+    let last = turn_ids.len() - 1;
+    let current = state.view.transcript_selected_turn.unwrap_or(last).min(last);
+    state.view.transcript_selected_turn = Some(
+        current
+            .saturating_add_signed(delta as isize)
+            .min(last),
+    );
+    state.view.transcript_scroll.follow_end = false;
+}
+
+fn toggle_transcript_turn_details(state: &mut AppState) {
+    let turn_ids = state.active_transcript_turn_ids();
+    if turn_ids.is_empty() {
+        return;
+    }
+    let last = turn_ids.len() - 1;
+    let selected = state.view.transcript_selected_turn.unwrap_or(last).min(last);
+    state.view.transcript_selected_turn = Some(selected);
+    state.view.toggle_transcript_turn(turn_ids[selected].clone());
 }
 
 fn apply_input_edit(state: &mut AppState, edit: InputEdit) {
@@ -606,6 +635,7 @@ impl Error for UiRuntimeError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use phenix_runtime_api::{TranscriptBlock, TranscriptRole};
 
     #[test]
     fn view_mutations_preserve_editor_cursor_and_pane_size() {
@@ -631,6 +661,39 @@ mod tests {
         );
         assert_eq!(state.view.pane(&ElementId::sidebar()).width, Some(32));
     }
+
+    #[test]
+    fn transcript_turns_are_selected_and_expanded_independently() {
+        let run_id = phenix_runtime_api::RunId::parse("run-1").expect("run id");
+        state_with_transcript(&mut state(), &run_id);
+        let mut state = state();
+        state.root_run = Some(run_id.clone());
+        for (id, role) in [
+            ("u1", TranscriptRole::User),
+            ("a1", TranscriptRole::Assistant),
+            ("u2", TranscriptRole::User),
+            ("a2", TranscriptRole::Assistant),
+        ] {
+            state.transcript_mut(run_id.clone()).append(TranscriptBlock {
+                id: id.to_owned(),
+                run_id: run_id.clone(),
+                role,
+                text: id.to_owned(),
+                complete: true,
+            });
+        }
+        apply_view_mutation(&mut state, ViewMutation::MoveTranscriptTurn(-1));
+        assert_eq!(state.view.transcript_selected_turn, Some(0));
+        apply_view_mutation(&mut state, ViewMutation::ToggleTranscriptTurnDetails);
+        assert!(state.view.transcript_turn_is_expanded("u1"));
+        assert!(!state.view.transcript_turn_is_expanded("u2"));
+    }
+
+    fn state() -> AppState {
+        AppState::default()
+    }
+
+    fn state_with_transcript(_state: &mut AppState, _run_id: &phenix_runtime_api::RunId) {}
 
     #[test]
     fn editor_mode_updates_are_local_and_visible_in_status() {
