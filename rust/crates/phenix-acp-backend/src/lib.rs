@@ -390,7 +390,11 @@ async fn handle_request(
                 Ok(BackendReply::Accepted)
             }
             None => {
-                start_prompt(
+                // Normal user submits are sequential conversation turns. If the
+                // previous ACP prompt has not delivered its PromptFinished event
+                // yet, preserve the turn by queueing it instead of racing the
+                // adapter's active-prompt invariant.
+                queue_follow_up(
                     connection,
                     runtime,
                     run_id,

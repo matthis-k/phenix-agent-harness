@@ -34,12 +34,10 @@ impl RenderedRichBlock {
     }
 }
 
-pub(crate) fn render_markdown(
-    text: &str,
-    width: u16,
-    theme: &ThemeConfig,
-) -> Vec<Line<'static>> {
-    flatten_blocks(render_document(&parse_markdown(text), width, theme, |_| None))
+pub(crate) fn render_markdown(text: &str, width: u16, theme: &ThemeConfig) -> Vec<Line<'static>> {
+    flatten_blocks(render_document(&parse_markdown(text), width, theme, |_| {
+        None
+    }))
 }
 
 pub(crate) fn render_document(
@@ -229,7 +227,9 @@ fn render_rule(
     width: usize,
     theme: &ThemeConfig,
 ) -> RenderedRichBlock {
-    let inner = width.saturating_sub(DOCUMENT_MARGIN.saturating_mul(2)).max(1);
+    let inner = width
+        .saturating_sub(DOCUMENT_MARGIN.saturating_mul(2))
+        .max(1);
     let mut spans = Vec::new();
     if width > inner {
         spans.push(Span::raw(" ".repeat(DOCUMENT_MARGIN.min(width))));
@@ -298,8 +298,7 @@ fn highlight_code_line(
     theme: &ThemeConfig,
 ) -> Vec<Span<'static>> {
     let comment_marker = match language.unwrap_or_default().to_ascii_lowercase().as_str() {
-        "python" | "py" | "ruby" | "rb" | "nix" | "sh" | "bash" | "zsh" | "yaml"
-        | "yml" => "#",
+        "python" | "py" | "ruby" | "rb" | "nix" | "sh" | "bash" | "zsh" | "yaml" | "yml" => "#",
         _ => "//",
     };
     if let Some(index) = line.find(comment_marker) {
@@ -315,10 +314,45 @@ fn highlight_code_line(
 
 fn highlight_code_tokens(line: &str, theme: &ThemeConfig) -> Vec<Span<'static>> {
     const KEYWORDS: &[&str] = &[
-        "as", "async", "await", "break", "class", "const", "continue", "def", "else",
-        "enum", "export", "false", "fn", "for", "from", "function", "if", "impl", "import",
-        "in", "interface", "let", "match", "mod", "mut", "nil", "null", "pub", "return",
-        "self", "static", "struct", "super", "this", "trait", "true", "type", "use", "var",
+        "as",
+        "async",
+        "await",
+        "break",
+        "class",
+        "const",
+        "continue",
+        "def",
+        "else",
+        "enum",
+        "export",
+        "false",
+        "fn",
+        "for",
+        "from",
+        "function",
+        "if",
+        "impl",
+        "import",
+        "in",
+        "interface",
+        "let",
+        "match",
+        "mod",
+        "mut",
+        "nil",
+        "null",
+        "pub",
+        "return",
+        "self",
+        "static",
+        "struct",
+        "super",
+        "this",
+        "trait",
+        "true",
+        "type",
+        "use",
+        "var",
         "while",
     ];
 
@@ -331,13 +365,11 @@ fn highlight_code_tokens(line: &str, theme: &ThemeConfig) -> Vec<Span<'static>> 
             return;
         }
         let token = std::mem::take(value);
-        let trimmed = token.trim_matches(|character: char| {
-            !character.is_alphanumeric() && character != '_'
-        });
+        let trimmed =
+            token.trim_matches(|character: char| !character.is_alphanumeric() && character != '_');
         let style = if KEYWORDS.contains(&trimmed) {
             theme_style(theme, "Tool").add_modifier(Modifier::BOLD)
-        } else if !trimmed.is_empty()
-            && trimmed.chars().all(|character| character.is_ascii_digit())
+        } else if !trimmed.is_empty() && trimmed.chars().all(|character| character.is_ascii_digit())
         {
             theme_style(theme, "Warning")
         } else {
@@ -454,7 +486,11 @@ fn render_mermaid_fallback(source: &str) -> Vec<String> {
         if left.is_empty() || right.is_empty() {
             continue;
         }
-        let glyph = if arrow == "---" { "──" } else { "──▶" };
+        let glyph = if arrow == "---" {
+            "──"
+        } else {
+            "──▶"
+        };
         output.push(format!("{left} {glyph} {right}"));
     }
     output
@@ -494,7 +530,10 @@ fn render_table(
         RichBlockView::Grid => render_table_grid(table, inner_width, theme),
         _ => render_table_dense(table, inner_width, theme),
     };
-    lines.extend(body.into_iter().map(|line| inset_line(line, DOCUMENT_MARGIN)));
+    lines.extend(
+        body.into_iter()
+            .map(|line| inset_line(line, DOCUMENT_MARGIN)),
+    );
     RenderedRichBlock {
         lines,
         views,
@@ -503,11 +542,7 @@ fn render_table(
     }
 }
 
-fn render_table_dense(
-    table: &RichTable,
-    width: usize,
-    theme: &ThemeConfig,
-) -> Vec<Line<'static>> {
+fn render_table_dense(table: &RichTable, width: usize, theme: &ThemeConfig) -> Vec<Line<'static>> {
     let widths = table_widths(table, width, TableLayout::Dense);
     if widths.is_empty() {
         return Vec::new();
@@ -526,11 +561,7 @@ fn render_table_dense(
     output
 }
 
-fn render_table_grid(
-    table: &RichTable,
-    width: usize,
-    theme: &ThemeConfig,
-) -> Vec<Line<'static>> {
+fn render_table_grid(table: &RichTable, width: usize, theme: &ThemeConfig) -> Vec<Line<'static>> {
     let widths = table_widths(table, width, TableLayout::Grid);
     if widths.is_empty() {
         return Vec::new();
@@ -583,9 +614,12 @@ fn table_widths(table: &RichTable, width: usize, layout: TableLayout) -> Vec<usi
                     .get(column)
                     .map_or_else(String::new, RichText::text),
             )
-            .chain(table.rows.iter().map(|row| {
-                row.get(column).map_or_else(String::new, RichText::text)
-            }))
+            .chain(
+                table
+                    .rows
+                    .iter()
+                    .map(|row| row.get(column).map_or_else(String::new, RichText::text)),
+            )
             .map(|cell| cell.chars().count())
             .max()
             .unwrap_or(1)
@@ -787,10 +821,11 @@ fn inset_line(line: Line<'static>, margin: usize) -> Line<'static> {
     if margin == 0 {
         return line;
     }
+    let style = line.style;
     let mut spans = Vec::with_capacity(line.spans.len() + 1);
     spans.push(Span::raw(" ".repeat(margin)));
     spans.extend(line.spans);
-    Line::from(spans).style(line.style)
+    Line::from(spans).style(style)
 }
 
 fn padded_line(mut spans: Vec<Span<'static>>, width: usize, surface: Style) -> Line<'static> {
@@ -871,17 +906,19 @@ mod tests {
     #[test]
     fn heading_bands_form_a_nested_visual_tree() {
         let mut theme = ThemeConfig::default();
+        let surface_background = theme.style("Surface").background;
+        let normal_background = theme.style("Normal").background;
         theme.set(
             "Heading1",
             phenix_frontend_config::HighlightStyle {
-                background: theme.style("Surface").background,
+                background: surface_background,
                 ..Default::default()
             },
         );
         theme.set(
             "Heading2",
             phenix_frontend_config::HighlightStyle {
-                background: theme.style("Normal").background,
+                background: normal_background,
                 ..Default::default()
             },
         );
@@ -923,7 +960,10 @@ mod tests {
         });
         let text = blocks[0].lines.iter().map(line_text).collect::<Vec<_>>();
         assert!(text.iter().filter(|line| line.contains('┼')).count() >= 2);
-        let top = text.iter().find(|line| line.contains('┌')).expect("top rule");
+        let top = text
+            .iter()
+            .find(|line| line.contains('┌'))
+            .expect("top rule");
         assert!(top.chars().count() >= 49);
         assert!(text.iter().all(|line| line.chars().count() <= 50));
     }

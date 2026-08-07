@@ -1450,6 +1450,7 @@ version = "0.1.0"
 name = "phenix-tui"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "clap",
  "phenix-acp",
  "phenix-acp-backend",
