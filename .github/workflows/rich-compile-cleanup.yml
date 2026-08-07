@@ -1,0 +1,35 @@
+name: Rich transcript compile cleanup
+
+on:
+  push:
+    branches:
+      - refactor/rich-transcript-blocks
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: refactor/rich-transcript-blocks
+      - name: Apply cleanup
+        run: python .github/scripts/rich_compile_cleanup.py
+      - name: Format workspace
+        working-directory: rust
+        run: cargo fmt --all
+      - name: Commit cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- rust; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rust
+          git commit -m "refactor(rust): remove stale rich transcript warnings"
+          git push origin HEAD:refactor/rich-transcript-blocks
