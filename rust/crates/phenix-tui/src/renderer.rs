@@ -380,7 +380,7 @@ fn key_value_line(key: &str, value: String, theme: &ThemeConfig) -> Line<'static
 }
 
 fn connection_style(state: &AppState, theme: &ThemeConfig) -> ratatui::style::Style {
-    match state.connection {
+    match &state.connection {
         phenix_ui_core::RuntimeConnectionState::Ready => theme_style(theme, "Success"),
         phenix_ui_core::RuntimeConnectionState::Starting => theme_style(theme, "Warning"),
         phenix_ui_core::RuntimeConnectionState::Degraded(_) => theme_style(theme, "Warning"),
