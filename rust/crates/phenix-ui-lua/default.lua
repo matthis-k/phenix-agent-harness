@@ -10,19 +10,9 @@ phenix.theme.set("Tool", { fg = "#cba6f7", bg = "#1e1e2e" })
 phenix.theme.set("Border", { fg = "#313244", bg = "#1e1e2e" })
 phenix.theme.set("BorderFocused", { fg = "#89b4fa", bg = "#1e1e2e" })
 
--- Conversation-first workspace: the transcript owns almost all horizontal
--- space by default. Auxiliary panes are addressable and toggled when needed.
-phenix.layout.set(phenix.layout.split("vertical", {
-  phenix.layout.pane("ui.header", { pane_type = "root", weight = 1, min = 1, max = 1 }),
-  phenix.layout.split("horizontal", {
-    phenix.layout.split("vertical", {
-      phenix.layout.pane("ui.transcript", { pane_type = "transcript", weight = 1 }),
-      phenix.layout.pane("ui.input", { pane_type = "input", weight = 3, min = 3 }),
-      phenix.layout.pane("ui.status", { pane_type = "status", weight = 1, min = 1, max = 1 }),
-    }),
-    phenix.layout.pane("ui.sidebar", { pane_type = "sidebar", weight = 28, min = 24, max = 40 }),
-  }),
-}))
+-- The built-in workspace composition is intentionally Rust-owned for now.
+-- Lua remains responsible for theme/keymap configuration; a richer window API
+-- can later target the same typed pane identities without duplicating layout state.
 
 local map = phenix.keymap.set
 
@@ -35,7 +25,7 @@ map("global", "<C-r>", phenix.action.sessions, { desc = "Open session picker" })
 map("global", "<C-b>", function()
   phenix.ui.pane.toggle("ui.sidebar")
   phenix.ui.focus.set("ui.transcript")
-end, { desc = "Toggle runs sidebar" })
+end, { desc = "Toggle operational sidebar" })
 map("global", "<C-o>", function()
   phenix.ui.focus.set("ui.transcript")
   phenix.ui.transcript.toggle_details()
@@ -58,8 +48,7 @@ map("sidebar", ">", function() phenix.ui.pane.resize("ui.sidebar", "horizontal",
 map("sidebar", "<", function() phenix.ui.pane.resize("ui.sidebar", "horizontal", -2) end)
 
 -- The transcript is message-oriented. j/k select complete conversation turns;
--- Enter expands that turn's context/thinking/tool details. Arrow/Page keys keep
--- line-level scrolling available for long messages.
+-- Enter expands the ACP-native thinking/tool/notice details for that turn.
 map("transcript", "j", function() phenix.ui.transcript.move(1) end, { desc = "Select next message" })
 map("transcript", "k", function() phenix.ui.transcript.move(-1) end, { desc = "Select previous message" })
 map("transcript", "<CR>", phenix.ui.transcript.toggle_details, { desc = "Toggle selected message details" })
