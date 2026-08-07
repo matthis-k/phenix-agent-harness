@@ -48,10 +48,14 @@ map("sidebar", "i", function() phenix.ui.focus.set("ui.input") end)
 map("sidebar", ">", function() phenix.ui.pane.resize("ui.sidebar", "horizontal", 2) end)
 map("sidebar", "<", function() phenix.ui.pane.resize("ui.sidebar", "horizontal", -2) end)
 
--- The transcript is message-oriented. j/k select complete conversation turns;
--- Enter expands the ACP-native thinking/tool/notice details for that turn.
-map("transcript", "j", function() phenix.ui.transcript.move(1) end, { desc = "Select next message" })
-map("transcript", "k", function() phenix.ui.transcript.move(-1) end, { desc = "Select previous message" })
+-- Transcript selection and viewport motion are deliberately independent.
+-- Ctrl-N/P move between complete conversation turns; j/k always move the
+-- transcript viewport by one visual line. Operations such as details/view
+-- changes therefore target the selected turn without hijacking ordinary scroll.
+map("transcript", "<C-n>", function() phenix.ui.transcript.move(1) end, { desc = "Select next message" })
+map("transcript", "<C-p>", function() phenix.ui.transcript.move(-1) end, { desc = "Select previous message" })
+map("transcript", "j", function() phenix.ui.pane.scroll("ui.transcript", -1) end, { desc = "Scroll transcript down one line" })
+map("transcript", "k", function() phenix.ui.pane.scroll("ui.transcript", 1) end, { desc = "Scroll transcript up one line" })
 map("transcript", "<CR>", phenix.ui.transcript.toggle_details, { desc = "Toggle selected message details" })
 map("transcript", "l", function()
   phenix.ui.pane.show("ui.sidebar")
