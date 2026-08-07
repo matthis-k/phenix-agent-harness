@@ -2,7 +2,7 @@ use crate::layout::collect_layout;
 use crate::theme::{panel, theme_style};
 use crate::transcript::transcript_document;
 use phenix_frontend_config::{FrontendConfig, FrontendProviderRef, ThemeConfig};
-use phenix_runtime_api::{AuthPrompt, ExtensionUiRequest};
+use phenix_runtime_api::{AuthPrompt, ExtensionUiRequest, ObjectiveState, RunSummary};
 use phenix_ui_core::{
     command_completions, AppState, ElementId, FocusTarget, InputEditor, OverlayState,
 };
@@ -93,8 +93,10 @@ fn render_pane(
 ) {
     match element.as_str() {
         "ui.header" => render_header(frame, area, state, theme),
+        "ui.inspector" => render_inspector(frame, area, state, theme),
         "ui.transcript" => render_transcript(frame, area, state, theme),
         "ui.sidebar" => render_sidebar(frame, area, state, theme),
+        "ui.specialized" => render_specialized(frame, area, state, theme),
         "ui.input" => render_input(frame, area, state, theme),
         "ui.status" => render_status(frame, area, state, theme),
         _ => render_unknown_pane(frame, area, theme, element),
@@ -160,49 +162,257 @@ fn render_transcript(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme:
 }
 
 fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
-    let block = panel("Runs", state.view.focus == FocusTarget::Sidebar, theme);
+    let block = panel("Phenix", state.view.focus == FocusTarget::Sidebar, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let items = state.snapshot.as_ref().map_or_else(Vec::new, |snapshot| {
-        snapshot
-            .runs
-            .iter()
-            .map(|run| {
+
+    let mut lines = vec![section_heading("Health", theme)];
+    lines.push(Line::styled(
+        format!("  {:?}", state.connection),
+        connection_style(state, theme),
+    ));
+    lines.push(Line::default());
+
+    lines.push(section_heading("Session", theme));
+    lines.push(Line::styled(
+        state
+            .active_session
+            .as_ref()
+            .map_or_else(|| "  —".to_owned(), |session| format!("  {session}")),
+        theme_style(theme, "Normal"),
+    ));
+
+    if let Some(snapshot) = &state.snapshot {
+        lines.push(Line::default());
+        lines.push(section_heading("Runs", theme));
+        if snapshot.runs.is_empty() {
+            lines.push(Line::styled("  none", theme_style(theme, "Muted")));
+        } else {
+            lines.extend(snapshot.runs.iter().map(|run| {
                 let selected = state.input_target() == Some(&run.id);
-                let details = if state.view.show_details {
-                    format!(" · {} · {:?}", run.definition_id, run.state)
-                } else {
-                    format!(" · {:?}", run.state)
-                };
-                ListItem::new(Line::from(vec![
+                Line::from(vec![
                     Span::styled(
-                        format!(
-                            "{} {}",
-                            if selected { "▸" } else { " " },
-                            run.display_name
-                        ),
+                        if selected { "  ▸ " } else { "    " },
+                        if selected {
+                            theme_style(theme, "Accent")
+                        } else {
+                            theme_style(theme, "Muted")
+                        },
+                    ),
+                    Span::styled(
+                        run.display_name.clone(),
                         if selected {
                             theme_style(theme, "Accent")
                         } else {
                             theme_style(theme, "Normal")
                         },
                     ),
-                    Span::styled(details, theme_style(theme, "Muted")),
-                ]))
-            })
-            .collect()
-    });
-    frame.render_widget(
-        if items.is_empty() {
-            List::new(vec![ListItem::new(Line::styled(
-                "Waiting for runtime snapshot…",
-                theme_style(theme, "Muted"),
-            ))])
+                    Span::styled(
+                        format!(" · {:?}", run.state),
+                        theme_style(theme, "Muted"),
+                    ),
+                ])
+            }));
+        }
+
+        lines.push(Line::default());
+        lines.push(section_heading("Objectives", theme));
+        if snapshot.objectives.is_empty() {
+            lines.push(Line::styled("  none", theme_style(theme, "Muted")));
         } else {
-            List::new(items)
-        },
+            lines.extend(snapshot.objectives.iter().map(|objective| {
+                Line::from(vec![
+                    Span::styled(
+                        format!("  {} ", objective_marker(&objective.state)),
+                        objective_style(&objective.state, theme),
+                    ),
+                    Span::styled(objective.title.clone(), theme_style(theme, "Normal")),
+                ])
+            }));
+        }
+    }
+
+    let scroll = state
+        .view
+        .sidebar_scroll
+        .offset
+        .min(usize::from(u16::MAX)) as u16;
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll, 0)),
         inner,
     );
+}
+
+fn render_inspector(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
+    let block = panel("Inspector", false, theme);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines = vec![section_heading("Runtime", theme)];
+    lines.push(key_value_line("connection", format!("{:?}", state.connection), theme));
+    if let Some(session) = &state.active_session {
+        lines.push(key_value_line("session", session.to_string(), theme));
+    }
+    for (key, value) in &state.statuses {
+        lines.push(key_value_line(key, value.clone(), theme));
+    }
+
+    lines.push(Line::default());
+    lines.push(section_heading("Selected run", theme));
+    if let Some(run) = selected_run(state) {
+        lines.extend(run_detail_lines(run, theme));
+    } else {
+        lines.push(Line::styled("  no run selected", theme_style(theme, "Muted")));
+    }
+
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+}
+
+fn render_specialized(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
+    let block = panel("Inspect", false, theme);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines = Vec::new();
+    if let Some(run) = selected_run(state) {
+        lines.push(Line::styled(
+            run.display_name.clone(),
+            theme_style(theme, "Accent"),
+        ));
+        lines.push(Line::styled(
+            format!("{} · {:?} · {:?}", run.id, run.kind, run.state),
+            theme_style(theme, "Muted"),
+        ));
+        lines.push(Line::default());
+        lines.extend(run_detail_lines(run, theme));
+
+        if let Some(snapshot) = &state.snapshot {
+            let objectives = snapshot
+                .objectives
+                .iter()
+                .filter(|objective| objective.root_run_id == run.id)
+                .collect::<Vec<_>>();
+            if !objectives.is_empty() {
+                lines.push(Line::default());
+                lines.push(section_heading("Objectives", theme));
+                for objective in objectives {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("  {} ", objective_marker(&objective.state)),
+                            objective_style(&objective.state, theme),
+                        ),
+                        Span::styled(objective.title.clone(), theme_style(theme, "Normal")),
+                    ]));
+                    if let Some(description) = &objective.description {
+                        lines.push(Line::styled(
+                            format!("    {description}"),
+                            theme_style(theme, "Muted"),
+                        ));
+                    }
+                }
+            }
+        }
+    } else {
+        lines.push(Line::styled(
+            "No selected run to inspect.",
+            theme_style(theme, "Muted"),
+        ));
+        lines.push(Line::default());
+        lines.push(Line::styled(
+            "This surface is reserved for exact run/workflow inspection. Graph rendering can be added when graph data is projected into the typed frontend model.",
+            theme_style(theme, "Muted"),
+        ));
+    }
+
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+}
+
+fn run_detail_lines(run: &RunSummary, theme: &ThemeConfig) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        key_value_line("id", run.id.to_string(), theme),
+        key_value_line("definition", run.definition_id.clone(), theme),
+        key_value_line("kind", format!("{:?}", run.kind), theme),
+        key_value_line("state", format!("{:?}", run.state), theme),
+    ];
+    if let Some(parent) = &run.parent {
+        lines.push(key_value_line("parent", parent.to_string(), theme));
+    }
+    if let Some(model) = &run.model {
+        lines.push(key_value_line("model", model_selection_label(model), theme));
+    }
+    if let Some(thinking) = &run.thinking_level {
+        lines.push(key_value_line("thinking", format!("{thinking:?}"), theme));
+    }
+    if let Some(difficulty) = &run.difficulty {
+        lines.push(key_value_line("difficulty", difficulty.clone(), theme));
+    }
+    if let Some(budget) = &run.budget {
+        lines.push(key_value_line("budget", budget.clone(), theme));
+    }
+    if let Some(session) = &run.persisted_session {
+        lines.push(key_value_line("session", session.to_string(), theme));
+    }
+    if let Some(session_file) = &run.session_file {
+        lines.push(key_value_line("session file", session_file.clone(), theme));
+    }
+    lines.push(key_value_line(
+        "pending",
+        run.pending_messages.to_string(),
+        theme,
+    ));
+    if let Some(outcome) = &run.outcome {
+        lines.push(key_value_line("outcome", format!("{outcome:?}"), theme));
+    }
+    lines
+}
+
+fn section_heading(label: &str, theme: &ThemeConfig) -> Line<'static> {
+    Line::styled(label.to_owned(), theme_style(theme, "Accent"))
+}
+
+fn key_value_line(key: &str, value: String, theme: &ThemeConfig) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("  {key}: "), theme_style(theme, "Muted")),
+        Span::styled(value, theme_style(theme, "Normal")),
+    ])
+}
+
+fn connection_style(state: &AppState, theme: &ThemeConfig) -> ratatui::style::Style {
+    match state.connection {
+        phenix_ui_core::RuntimeConnectionState::Ready => theme_style(theme, "Success"),
+        phenix_ui_core::RuntimeConnectionState::Starting => theme_style(theme, "Warning"),
+        phenix_ui_core::RuntimeConnectionState::Degraded(_) => theme_style(theme, "Warning"),
+        phenix_ui_core::RuntimeConnectionState::Failed(_) => theme_style(theme, "Error"),
+        phenix_ui_core::RuntimeConnectionState::Stopped => theme_style(theme, "Muted"),
+    }
+}
+
+fn objective_marker(state: &ObjectiveState) -> &'static str {
+    match state {
+        ObjectiveState::NotStarted => "○",
+        ObjectiveState::WorkInProgress => "◐",
+        ObjectiveState::Done => "●",
+        ObjectiveState::Blocked => "!",
+    }
+}
+
+fn objective_style(state: &ObjectiveState, theme: &ThemeConfig) -> ratatui::style::Style {
+    match state {
+        ObjectiveState::Done => theme_style(theme, "Success"),
+        ObjectiveState::Blocked => theme_style(theme, "Error"),
+        ObjectiveState::WorkInProgress => theme_style(theme, "Accent"),
+        ObjectiveState::NotStarted => theme_style(theme, "Muted"),
+    }
+}
+
+fn selected_run(state: &AppState) -> Option<&RunSummary> {
+    state.snapshot.as_ref().and_then(|snapshot| {
+        state
+            .input_target()
+            .and_then(|target| snapshot.runs.iter().find(|run| &run.id == target))
+    })
 }
 
 fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
@@ -341,11 +551,7 @@ fn render_command_completion(
 }
 
 fn render_status(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
-    let selected_run = state.snapshot.as_ref().and_then(|snapshot| {
-        state
-            .input_target()
-            .and_then(|target| snapshot.runs.iter().find(|run| &run.id == target))
-    });
+    let selected_run = selected_run(state);
     let model = selected_run.and_then(|run| run.model.as_ref()).map_or_else(
         || "selection: unavailable".to_owned(),
         model_selection_label,
@@ -498,15 +704,18 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
             "Help",
             0,
             vec![
-                "Ctrl-B toggles the runs sidebar".to_owned(),
+                "Alt-1 default workspace · transcript + operational sidebar".to_owned(),
+                "Alt-2 advanced workspace · inspector + transcript + sidebar".to_owned(),
+                "Alt-3 zen workspace · transcript only".to_owned(),
+                "Alt-4 specialized workspace · exact run/workflow inspection".to_owned(),
+                "Ctrl-B toggles the operational sidebar".to_owned(),
                 "Transcript j/k selects messages; Enter toggles message details".to_owned(),
                 "Transcript arrows/Page keys scroll within long messages".to_owned(),
                 "Ctrl-O focuses transcript and toggles selected message details".to_owned(),
                 "Ctrl-E cycles owned, embedded, and external editors".to_owned(),
                 "Ctrl-G opens the configured external editor".to_owned(),
                 "Esc enters normal mode; i/a return to insert mode".to_owned(),
-                "Frontend keymaps are configured in config.lua".to_owned(),
-                "Use `phenix --print-default-config` to inspect defaults".to_owned(),
+                "Theme and keymaps are configured in config.lua".to_owned(),
             ],
             theme,
         ),
