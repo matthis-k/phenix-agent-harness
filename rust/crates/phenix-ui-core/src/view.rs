@@ -206,6 +206,7 @@ impl Default for ViewState {
         panes.insert(
             ElementId::sidebar(),
             PaneViewState {
+                visible: false,
                 width: Some(28),
                 ..PaneViewState::default()
             },
@@ -244,6 +245,14 @@ impl Default for ViewState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_workspace_prioritizes_the_transcript() {
+        let view = ViewState::default();
+        assert!(!view.pane(&ElementId::sidebar()).visible);
+        assert!(view.pane(&ElementId::transcript()).visible);
+        assert!(view.pane(&ElementId::input()).visible);
+    }
 
     #[test]
     fn editor_selection_controls_only_frontend_view_state() {
