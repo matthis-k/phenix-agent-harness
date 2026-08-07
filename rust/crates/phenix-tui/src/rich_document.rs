@@ -8,6 +8,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 const IMAGE_PREVIEW_ROWS: u16 = 8;
+const DOCUMENT_MARGIN: usize = 1;
+const MAX_HEADING_DEPTH: usize = 4;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum RichMedia {
@@ -52,10 +54,10 @@ pub(crate) fn render_document(
         .iter()
         .enumerate()
         .map(|(index, block)| {
-            let views = supported_views(block);
+            let views = block.candidate_views().to_vec();
             let active_view = view_for(index)
                 .filter(|candidate| views.contains(candidate))
-                .unwrap_or_else(|| default_view(block, &views));
+                .unwrap_or_else(|| default_view(block));
             render_block(block, active_view, views, width, theme)
         })
         .collect()
@@ -72,31 +74,17 @@ pub(crate) fn flatten_blocks(blocks: Vec<RenderedRichBlock>) -> Vec<Line<'static
     lines
 }
 
-fn supported_views(block: &RichBlock) -> Vec<RichBlockView> {
-    match block {
-        RichBlock::Table(_) => vec![RichBlockView::Dense, RichBlockView::Grid],
-        RichBlock::Code(code) if code.language_is("mermaid") => vec![
-            RichBlockView::Source,
-            RichBlockView::Highlighted,
-            RichBlockView::Rendered,
-        ],
-        RichBlock::Code(_) => vec![RichBlockView::Source, RichBlockView::Highlighted],
-        RichBlock::Image(_) => vec![RichBlockView::Preview, RichBlockView::Metadata],
-        RichBlock::Heading { .. }
-        | RichBlock::Paragraph(_)
-        | RichBlock::Quote(_)
-        | RichBlock::List { .. }
-        | RichBlock::Rule => vec![RichBlockView::Rendered],
-    }
-}
-
-fn default_view(block: &RichBlock, views: &[RichBlockView]) -> RichBlockView {
+fn default_view(block: &RichBlock) -> RichBlockView {
     match block {
         RichBlock::Table(_) => RichBlockView::Dense,
         RichBlock::Code(code) if code.language_is("mermaid") => RichBlockView::Rendered,
         RichBlock::Code(_) => RichBlockView::Highlighted,
         RichBlock::Image(_) => RichBlockView::Preview,
-        _ => views.first().copied().unwrap_or(RichBlockView::Rendered),
+        RichBlock::Heading { .. }
+        | RichBlock::Paragraph(_)
+        | RichBlock::Quote(_)
+        | RichBlock::List { .. }
+        | RichBlock::Rule => RichBlockView::Rendered,
     }
 }
 
@@ -108,16 +96,9 @@ fn render_block(
     theme: &ThemeConfig,
 ) -> RenderedRichBlock {
     match block {
-        RichBlock::Heading { level, content } => RenderedRichBlock {
-            lines: vec![Line::from(styled_rich_text(
-                content,
-                heading_style(*level, theme).add_modifier(Modifier::BOLD),
-                theme,
-            ))],
-            views,
-            active_view,
-            media: None,
-        },
+        RichBlock::Heading { level, content } => {
+            render_heading(*level, content, active_view, views, width, theme)
+        }
         RichBlock::Paragraph(content) => RenderedRichBlock {
             lines: vec![Line::from(styled_rich_text(
                 content,
@@ -166,16 +147,99 @@ fn render_block(
             media: None,
         },
         RichBlock::Table(table) => render_table(table, active_view, views, width, theme),
-        RichBlock::Rule => RenderedRichBlock {
-            lines: vec![Line::styled(
-                "─".repeat(width.min(48).max(3)),
-                theme_style(theme, "Border"),
-            )],
-            views,
-            active_view,
-            media: None,
-        },
+        RichBlock::Rule => render_rule(active_view, views, width, theme),
         RichBlock::Image(image) => render_image(image, active_view, views, width, theme),
+    }
+}
+
+fn render_heading(
+    level: u8,
+    content: &RichText,
+    active_view: RichBlockView,
+    views: Vec<RichBlockView>,
+    width: usize,
+    theme: &ThemeConfig,
+) -> RenderedRichBlock {
+    let depth = usize::from(level.saturating_sub(1)).min(MAX_HEADING_DEPTH);
+    let maximum_margin = width.saturating_sub(3) / 2;
+    let margin = depth.min(maximum_margin);
+    let band_width = width.saturating_sub(margin.saturating_mul(2)).max(1);
+    let surface = heading_surface(level, theme);
+    let mut content_spans = styled_rich_text(
+        content,
+        heading_style(level, theme).add_modifier(Modifier::BOLD),
+        theme,
+    );
+    for span in &mut content_spans {
+        span.style = on_surface(span.style, surface);
+    }
+
+    let mut band = Vec::new();
+    if band_width > 1 {
+        band.push(Span::styled(" ", surface));
+    }
+    band.extend(content_spans);
+    let used = band
+        .iter()
+        .map(|span| span.content.chars().count())
+        .sum::<usize>();
+    if used < band_width {
+        band.push(Span::styled(" ".repeat(band_width - used), surface));
+    }
+
+    let mut spans = Vec::new();
+    if margin > 0 {
+        spans.push(Span::raw(" ".repeat(margin)));
+    }
+    spans.extend(band);
+    if margin > 0 {
+        spans.push(Span::raw(" ".repeat(margin)));
+    }
+
+    RenderedRichBlock {
+        lines: vec![Line::from(spans)],
+        views,
+        active_view,
+        media: None,
+    }
+}
+
+fn heading_surface(level: u8, theme: &ThemeConfig) -> Style {
+    let group = match level {
+        1 => "Heading1",
+        2 => "Heading2",
+        3 => "Heading3",
+        _ => "Heading4",
+    };
+    let explicit = surface_style(theme, group);
+    if explicit.bg.is_some() {
+        explicit
+    } else {
+        match level {
+            1 => surface_style(theme, "CodeBlock"),
+            2 => surface_style(theme, "UserMessage"),
+            _ => surface_style(theme, "Surface"),
+        }
+    }
+}
+
+fn render_rule(
+    active_view: RichBlockView,
+    views: Vec<RichBlockView>,
+    width: usize,
+    theme: &ThemeConfig,
+) -> RenderedRichBlock {
+    let inner = width.saturating_sub(DOCUMENT_MARGIN.saturating_mul(2)).max(1);
+    let mut spans = Vec::new();
+    if width > inner {
+        spans.push(Span::raw(" ".repeat(DOCUMENT_MARGIN.min(width))));
+    }
+    spans.push(Span::styled("─".repeat(inner), theme_style(theme, "Muted")));
+    RenderedRichBlock {
+        lines: vec![Line::from(spans)],
+        views,
+        active_view,
+        media: None,
     }
 }
 
@@ -267,10 +331,14 @@ fn highlight_code_tokens(line: &str, theme: &ThemeConfig) -> Vec<Span<'static>> 
             return;
         }
         let token = std::mem::take(value);
-        let trimmed = token.trim_matches(|character: char| !character.is_alphanumeric() && character != '_');
+        let trimmed = token.trim_matches(|character: char| {
+            !character.is_alphanumeric() && character != '_'
+        });
         let style = if KEYWORDS.contains(&trimmed) {
             theme_style(theme, "Tool").add_modifier(Modifier::BOLD)
-        } else if !trimmed.is_empty() && trimmed.chars().all(|character| character.is_ascii_digit()) {
+        } else if !trimmed.is_empty()
+            && trimmed.chars().all(|character| character.is_ascii_digit())
+        {
             theme_style(theme, "Warning")
         } else {
             theme_style(theme, "Normal")
@@ -298,7 +366,10 @@ fn highlight_code_tokens(line: &str, theme: &ThemeConfig) -> Vec<Span<'static>> 
         }
         if character.is_whitespace() || "(){}[],:;=+-*/<>.!&|".contains(character) {
             flush_plain(&mut current, &mut spans);
-            spans.push(Span::styled(character.to_string(), theme_style(theme, "Muted")));
+            spans.push(Span::styled(
+                character.to_string(),
+                theme_style(theme, "Muted"),
+            ));
         } else {
             current.push(character);
         }
@@ -339,7 +410,10 @@ fn render_mermaid(
     } else {
         for line in rendered {
             lines.push(padded_line(
-                vec![Span::styled(format!("  {line}"), theme_style(theme, "Normal"))],
+                vec![Span::styled(
+                    format!("  {line}"),
+                    theme_style(theme, "Normal"),
+                )],
                 width,
                 surface,
             ));
@@ -354,10 +428,6 @@ fn render_mermaid(
     }
 }
 
-/// Dependency-free Mermaid fallback for common edge syntax. It is deliberately
-/// small: the rich block still exposes source/highlighted/rendered views, and a
-/// full Mermaid renderer can replace this representation without changing the
-/// document model.
 fn render_mermaid_fallback(source: &str) -> Vec<String> {
     let lines = source
         .lines()
@@ -417,10 +487,14 @@ fn render_table(
         Style::default(),
         theme,
     )];
-    lines.extend(match active_view {
-        RichBlockView::Grid => render_table_grid(table, width, theme),
-        _ => render_table_dense(table, width, theme),
-    });
+    let inner_width = width
+        .saturating_sub(DOCUMENT_MARGIN.saturating_mul(2))
+        .max(1);
+    let body = match active_view {
+        RichBlockView::Grid => render_table_grid(table, inner_width, theme),
+        _ => render_table_dense(table, inner_width, theme),
+    };
+    lines.extend(body.into_iter().map(|line| inset_line(line, DOCUMENT_MARGIN)));
     RenderedRichBlock {
         lines,
         views,
@@ -429,19 +503,19 @@ fn render_table(
     }
 }
 
-fn render_table_dense(table: &RichTable, width: usize, theme: &ThemeConfig) -> Vec<Line<'static>> {
+fn render_table_dense(
+    table: &RichTable,
+    width: usize,
+    theme: &ThemeConfig,
+) -> Vec<Line<'static>> {
     let widths = table_widths(table, width, TableLayout::Dense);
     if widths.is_empty() {
         return Vec::new();
     }
     let mut output = vec![table_line(&table.header, &widths, true, false, theme)];
     output.push(Line::styled(
-        widths
-            .iter()
-            .map(|cell_width| "─".repeat(*cell_width))
-            .collect::<Vec<_>>()
-            .join("─┼─"),
-        theme_style(theme, "Border"),
+        dense_rule(&widths),
+        theme_style(theme, "Muted"),
     ));
     output.extend(
         table
@@ -452,7 +526,11 @@ fn render_table_dense(table: &RichTable, width: usize, theme: &ThemeConfig) -> V
     output
 }
 
-fn render_table_grid(table: &RichTable, width: usize, theme: &ThemeConfig) -> Vec<Line<'static>> {
+fn render_table_grid(
+    table: &RichTable,
+    width: usize,
+    theme: &ThemeConfig,
+) -> Vec<Line<'static>> {
     let widths = table_widths(table, width, TableLayout::Grid);
     if widths.is_empty() {
         return Vec::new();
@@ -461,16 +539,17 @@ fn render_table_grid(table: &RichTable, width: usize, theme: &ThemeConfig) -> Ve
     let header_rule = grid_rule('├', '┼', '┤', &widths);
     let row_rule = grid_rule('├', '┼', '┤', &widths);
     let bottom = grid_rule('└', '┴', '┘', &widths);
-    let mut output = vec![Line::styled(top, theme_style(theme, "Border"))];
+    let structural = theme_style(theme, "Muted");
+    let mut output = vec![Line::styled(top, structural)];
     output.push(table_line(&table.header, &widths, true, true, theme));
-    output.push(Line::styled(header_rule, theme_style(theme, "Border")));
+    output.push(Line::styled(header_rule, structural));
     for (index, row) in table.rows.iter().enumerate() {
         output.push(table_line(row, &widths, false, true, theme));
         if index + 1 < table.rows.len() {
-            output.push(Line::styled(row_rule.clone(), theme_style(theme, "Border")));
+            output.push(Line::styled(row_rule.clone(), structural));
         }
     }
-    output.push(Line::styled(bottom, theme_style(theme, "Border")));
+    output.push(Line::styled(bottom, structural));
     output
 }
 
@@ -498,16 +577,22 @@ fn table_widths(table: &RichTable, width: usize, layout: TableLayout) -> Vec<usi
     let available = width.saturating_sub(fixed).max(columns);
     let mut widths = (0..columns)
         .map(|column| {
-            std::iter::once(table.header.get(column).map_or_else(String::new, RichText::text))
-                .chain(table.rows.iter().map(|row| {
-                    row.get(column).map_or_else(String::new, RichText::text)
-                }))
-                .map(|cell| cell.chars().count())
-                .max()
-                .unwrap_or(1)
-                .clamp(1, 40)
+            std::iter::once(
+                table
+                    .header
+                    .get(column)
+                    .map_or_else(String::new, RichText::text),
+            )
+            .chain(table.rows.iter().map(|row| {
+                row.get(column).map_or_else(String::new, RichText::text)
+            }))
+            .map(|cell| cell.chars().count())
+            .max()
+            .unwrap_or(1)
+            .clamp(1, 40)
         })
         .collect::<Vec<_>>();
+
     while widths.iter().sum::<usize>() > available {
         let Some((index, _)) = widths
             .iter()
@@ -519,7 +604,21 @@ fn table_widths(table: &RichTable, width: usize, layout: TableLayout) -> Vec<usi
         };
         widths[index] -= 1;
     }
+
+    let mut column = 0usize;
+    while widths.iter().sum::<usize>() < available {
+        widths[column] = widths[column].saturating_add(1);
+        column = (column + 1) % columns;
+    }
     widths
+}
+
+fn dense_rule(widths: &[usize]) -> String {
+    widths
+        .iter()
+        .map(|cell_width| "─".repeat(*cell_width))
+        .collect::<Vec<_>>()
+        .join("─┼─")
 }
 
 fn table_line(
@@ -576,7 +675,11 @@ fn render_image(
     theme: &ThemeConfig,
 ) -> RenderedRichBlock {
     let surface = surface_style(theme, "MediaBlock");
-    let title = if image.alt.is_empty() { "image" } else { image.alt.as_str() };
+    let title = if image.alt.is_empty() {
+        "image"
+    } else {
+        image.alt.as_str()
+    };
     let mut lines = vec![block_toolbar(
         title,
         &views,
@@ -644,6 +747,10 @@ fn block_toolbar(
                 },
             ));
         }
+        spans.push(Span::styled(
+            "  ·  [ / ] select · v/V view",
+            theme_style(theme, "Muted"),
+        ));
     }
     padded_line(spans, width, surface)
 }
@@ -654,7 +761,9 @@ fn styled_rich_text(content: &RichText, base: Style, theme: &ThemeConfig) -> Vec
         .iter()
         .map(|span| match span {
             RichSpan::Text(value) => Span::styled(value.clone(), base),
-            RichSpan::Strong(value) => Span::styled(value.clone(), base.add_modifier(Modifier::BOLD)),
+            RichSpan::Strong(value) => {
+                Span::styled(value.clone(), base.add_modifier(Modifier::BOLD))
+            }
             RichSpan::Emphasis(value) => {
                 Span::styled(value.clone(), base.add_modifier(Modifier::ITALIC))
             }
@@ -665,6 +774,23 @@ fn styled_rich_text(content: &RichText, base: Style, theme: &ThemeConfig) -> Vec
             ),
         })
         .collect()
+}
+
+fn on_surface(mut style: Style, surface: Style) -> Style {
+    if let Some(background) = surface.bg {
+        style.bg = Some(background);
+    }
+    style
+}
+
+fn inset_line(line: Line<'static>, margin: usize) -> Line<'static> {
+    if margin == 0 {
+        return line;
+    }
+    let mut spans = Vec::with_capacity(line.spans.len() + 1);
+    spans.push(Span::raw(" ".repeat(margin)));
+    spans.extend(line.spans);
+    Line::from(spans).style(line.style)
 }
 
 fn padded_line(mut spans: Vec<Span<'static>>, width: usize, surface: Style) -> Line<'static> {
@@ -743,6 +869,40 @@ mod tests {
     }
 
     #[test]
+    fn heading_bands_form_a_nested_visual_tree() {
+        let mut theme = ThemeConfig::default();
+        theme.set(
+            "Heading1",
+            phenix_frontend_config::HighlightStyle {
+                background: theme.style("Surface").background,
+                ..Default::default()
+            },
+        );
+        theme.set(
+            "Heading2",
+            phenix_frontend_config::HighlightStyle {
+                background: theme.style("Normal").background,
+                ..Default::default()
+            },
+        );
+        let document = parse_markdown("# Root\n\n## Child");
+        let blocks = render_document(&document, 30, &theme, |_| None);
+        let root = line_text(&blocks[0].lines[0]);
+        let child = line_text(&blocks[1].lines[0]);
+        assert_eq!(root.chars().next(), Some(' '));
+        assert!(child.starts_with(' '));
+        assert_eq!(root.chars().count(), 30);
+        assert_eq!(child.chars().count(), 30);
+    }
+
+    #[test]
+    fn document_rule_runs_across_nearly_the_full_width() {
+        let document = parse_markdown("---");
+        let blocks = render_document(&document, 50, &ThemeConfig::default(), |_| None);
+        assert!(line_text(&blocks[0].lines[0]).chars().count() >= 49);
+    }
+
+    #[test]
     fn table_exposes_dense_and_grid_views() {
         let document = parse_markdown("| Name | State |\n| --- | --- |\n| build | green |");
         let blocks = render_document(&document, 40, &ThemeConfig::default(), |_| None);
@@ -754,27 +914,30 @@ mod tests {
     }
 
     #[test]
-    fn grid_table_has_horizontal_rules_between_values() {
-        let document = parse_markdown("| Name | State |\n| --- | --- |\n| build | green |\n| test | pending |");
+    fn grid_table_uses_the_available_width_and_rules_between_values() {
+        let document = parse_markdown(
+            "| Name | State |\n| --- | --- |\n| build | green |\n| test | pending |",
+        );
         let blocks = render_document(&document, 50, &ThemeConfig::default(), |_| {
             Some(RichBlockView::Grid)
         });
         let text = blocks[0].lines.iter().map(line_text).collect::<Vec<_>>();
         assert!(text.iter().filter(|line| line.contains('┼')).count() >= 2);
-        assert!(text.iter().any(|line| line.starts_with('┌')));
-        assert!(text.iter().any(|line| line.starts_with('└')));
+        let top = text.iter().find(|line| line.contains('┌')).expect("top rule");
+        assert!(top.chars().count() >= 49);
         assert!(text.iter().all(|line| line.chars().count() <= 50));
     }
 
     #[test]
-    fn code_is_a_full_width_surface_block() {
+    fn code_is_a_full_width_surface_block_with_discoverable_views() {
         let document = parse_markdown("```rust\nfn main() {}\n```");
-        let blocks = render_document(&document, 32, &ThemeConfig::default(), |_| None);
+        let blocks = render_document(&document, 48, &ThemeConfig::default(), |_| None);
         assert_eq!(blocks[0].active_view, RichBlockView::Highlighted);
         assert!(blocks[0]
             .lines
             .iter()
-            .all(|line| line_text(line).chars().count() >= 32));
+            .all(|line| line_text(line).chars().count() >= 48));
+        assert!(line_text(&blocks[0].lines[0]).contains("v/V view"));
     }
 
     #[test]
