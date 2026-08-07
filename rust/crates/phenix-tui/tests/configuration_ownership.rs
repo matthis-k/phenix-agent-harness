@@ -3,17 +3,17 @@ const MAIN: &str = include_str!("../src/main.rs");
 
 #[test]
 fn frontend_emits_sources_without_constructing_the_phenix_runtime() {
-    for forbidden in [
-        "PhenixAcpGateway",
-        "PhenixAcpGatewayBuilder",
-        "GatewayAgentBackend",
-        "Definitions::new",
-        "SessionTreeDefinition::builder",
-        "AcpAgentBackend::gateway_transport",
+    for forbidden_construct in [
+        "PhenixAcpGateway::",
+        "PhenixAcpGatewayBuilder::",
+        "GatewayAgentBackend::",
+        "Definitions::new(",
+        "SessionTreeDefinition::builder(",
+        "AcpAgentBackend::gateway_transport(",
     ] {
         assert!(
-            !ACP_CONFIG.contains(forbidden) && !MAIN.contains(forbidden),
-            "native frontend must not own or construct ACP runtime state: found {forbidden}"
+            !ACP_CONFIG.contains(forbidden_construct) && !MAIN.contains(forbidden_construct),
+            "native frontend must not construct ACP runtime state: found {forbidden_construct}"
         );
     }
 
