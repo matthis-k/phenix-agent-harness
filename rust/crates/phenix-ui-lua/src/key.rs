@@ -89,7 +89,7 @@ impl KeyChord {
         self.strokes.len()
     }
 
-    pub fn matches(self, input: KeyInput) -> bool {
+    pub fn matches(&self, input: KeyInput) -> bool {
         self.strokes.len() == 1 && self.strokes[0].matches(input)
     }
 
@@ -206,6 +206,8 @@ fn parse_code(token: &str) -> Result<KeyCode, KeyParseError> {
         "tab" => KeyCode::Tab,
         "s-tab" | "backtab" | "back-tab" => KeyCode::BackTab,
         "space" | "leader" => KeyCode::Character(' '),
+        "lt" => KeyCode::Character('<'),
+        "gt" => KeyCode::Character('>'),
         function if function.starts_with('f') => {
             let number = function[1..]
                 .parse::<u8>()
@@ -280,6 +282,11 @@ mod tests {
             false,
             false
         )]));
+        let narrow = KeyChord::parse("<C-w><lt>").expect("literal angle sequence");
+        assert!(narrow.matches_inputs(&[
+            key(KeyCode::Character('w'), true, false, false),
+            key(KeyCode::Character('<'), false, false, false),
+        ]));
     }
 
     #[test]
