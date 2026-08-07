@@ -3,7 +3,19 @@ use phenix_ui_core::{AppState, ElementId};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use std::collections::BTreeMap;
 
+const OUTER_GUTTER: u16 = 1;
+const PANE_GUTTER: u16 = 1;
+
 pub(crate) fn collect_layout(
+    node: &LayoutNode,
+    area: Rect,
+    state: &AppState,
+    output: &mut BTreeMap<ElementId, Rect>,
+) {
+    collect_layout_inner(node, inset_workspace(area), state, output);
+}
+
+fn collect_layout_inner(
     node: &LayoutNode,
     area: Rect,
     state: &AppState,
@@ -33,11 +45,52 @@ pub(crate) fn collect_layout(
                 .direction(direction)
                 .constraints(constraints)
                 .split(area);
-            for (child, child_area) in split.children.iter().zip(child_areas.iter().copied()) {
-                collect_layout(child, child_area, state, output);
+            let last_visible = split
+                .children
+                .iter()
+                .rposition(|child| node_is_visible(child, state));
+            for (index, (child, child_area)) in split
+                .children
+                .iter()
+                .zip(child_areas.iter().copied())
+                .enumerate()
+            {
+                let child_area = if Some(index) == last_visible || !node_is_visible(child, state) {
+                    child_area
+                } else {
+                    reserve_trailing_gutter(child_area, split.direction)
+                };
+                collect_layout_inner(child, child_area, state, output);
             }
         }
     }
+}
+
+fn inset_workspace(area: Rect) -> Rect {
+    if area.width <= OUTER_GUTTER.saturating_mul(2)
+        || area.height <= OUTER_GUTTER.saturating_mul(2)
+    {
+        return area;
+    }
+    Rect {
+        x: area.x.saturating_add(OUTER_GUTTER),
+        y: area.y.saturating_add(OUTER_GUTTER),
+        width: area.width.saturating_sub(OUTER_GUTTER.saturating_mul(2)),
+        height: area.height.saturating_sub(OUTER_GUTTER.saturating_mul(2)),
+    }
+}
+
+fn reserve_trailing_gutter(mut area: Rect, direction: SplitDirection) -> Rect {
+    match direction {
+        SplitDirection::Horizontal if area.width > PANE_GUTTER => {
+            area.width = area.width.saturating_sub(PANE_GUTTER);
+        }
+        SplitDirection::Vertical if area.height > PANE_GUTTER => {
+            area.height = area.height.saturating_sub(PANE_GUTTER);
+        }
+        SplitDirection::Horizontal | SplitDirection::Vertical => {}
+    }
+    area
 }
 
 fn child_constraint(node: &LayoutNode, direction: SplitDirection, state: &AppState) -> Constraint {
@@ -120,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_layout_is_projected_without_widget_state() {
+    fn semantic_layout_is_projected_with_canvas_gutters() {
         let state = AppState::default();
         let mut output = BTreeMap::new();
         collect_layout(
@@ -129,8 +182,12 @@ mod tests {
             &state,
             &mut output,
         );
-        assert!(output.contains_key(&ElementId::transcript()));
-        assert_eq!(output[&ElementId::sidebar()].width, 28);
+        let transcript = output[&ElementId::transcript()];
+        let sidebar = output[&ElementId::sidebar()];
+        assert_eq!(transcript.x, 1);
+        assert_eq!(sidebar.width, 28);
+        assert_eq!(transcript.x + transcript.width + PANE_GUTTER, sidebar.x);
+        assert_eq!(sidebar.x + sidebar.width, 99);
     }
 
     #[test]
@@ -145,7 +202,8 @@ mod tests {
             &mut output,
         );
         assert!(!output.contains_key(&ElementId::sidebar()));
-        assert_eq!(output[&ElementId::transcript()].width, 100);
+        assert_eq!(output[&ElementId::transcript()].x, 1);
+        assert_eq!(output[&ElementId::transcript()].width, 98);
     }
 
     #[test]
@@ -186,7 +244,7 @@ mod tests {
         });
         let mut output = BTreeMap::new();
         collect_layout(&nested, Rect::new(0, 0, 80, 20), &state, &mut output);
-        assert_eq!(output[&ElementId::transcript()].width, 80);
+        assert_eq!(output[&ElementId::transcript()], Rect::new(1, 1, 78, 18));
     }
 
     #[test]
@@ -219,6 +277,12 @@ mod tests {
             &mut output,
         );
         assert_eq!(output[&ElementId::input()].height, 4);
-        assert_eq!(output[&ElementId::transcript()].height, 20);
+        assert_eq!(output[&ElementId::transcript()].height, 17);
+        assert_eq!(
+            output[&ElementId::transcript()].y
+                + output[&ElementId::transcript()].height
+                + PANE_GUTTER,
+            output[&ElementId::input()].y
+        );
     }
 }
