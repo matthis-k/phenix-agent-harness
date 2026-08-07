@@ -1,0 +1,244 @@
+name: Temporary spatial transcript patch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/tmp-spatial-rich-ui-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.head_commit.message == 'chore: apply spatial transcript patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply focused Rust fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=1):
+              p = Path(path)
+              text = p.read_text()
+              found = text.count(old)
+              if found < count:
+                  raise SystemExit(f"{path}: expected at least {count} occurrence(s), found {found}: {old[:100]!r}")
+              p.write_text(text.replace(old, new, count))
+
+          renderer = 'rust/crates/phenix-tui/src/renderer.rs'
+          replace(renderer,
+          '''use phenix_ui_runtime::UiRenderer;
+          use ratatui::layout::{Constraint, Direction, Layout, Rect};''',
+          '''use phenix_ui_runtime::UiRenderer;
+          use ratatui::crossterm::{
+              event::{DisableMouseCapture, EnableMouseCapture},
+              execute,
+          };
+          use ratatui::layout::{Constraint, Direction, Layout, Rect};''')
+          replace(renderer,
+          '''pub struct RatatuiRenderer {
+              terminal: Option<DefaultTerminal>,
+              provider: FrontendProviderRef,
+              media: TerminalMediaRenderer,
+          }''',
+          '''pub struct RatatuiRenderer {
+              terminal: Option<DefaultTerminal>,
+              provider: FrontendProviderRef,
+              media: TerminalMediaRenderer,
+              hit_map: BTreeMap<ElementId, Rect>,
+          }''')
+          replace(renderer,
+          '''    pub fn initialize(provider: FrontendProviderRef) -> io::Result<Self> {
+                  Ok(Self {
+                      terminal: Some(ratatui::try_init()?),
+                      provider,
+                      media: TerminalMediaRenderer::default(),
+                  })
+              }''',
+          '''    pub fn initialize(provider: FrontendProviderRef) -> io::Result<Self> {
+                  let terminal = ratatui::try_init()?;
+                  if let Err(error) = execute!(io::stdout(), EnableMouseCapture) {
+                      ratatui::restore();
+                      return Err(error);
+                  }
+                  Ok(Self {
+                      terminal: Some(terminal),
+                      provider,
+                      media: TerminalMediaRenderer::default(),
+                      hit_map: BTreeMap::new(),
+                  })
+              }''')
+          replace(renderer,
+          '''        let images = terminal_image_placements(screen, state, &config);
+                  self.media.render(&images).map_err(|error| error.to_string())
+              }
+
+              fn suspend(&mut self) -> Result<(), String> {
+                  self.media.clear().map_err(|error| error.to_string())?;
+                  self.terminal.take();
+                  ratatui::restore();
+                  Ok(())
+              }
+
+              fn resume(&mut self) -> Result<(), String> {
+                  self.terminal = Some(ratatui::try_init().map_err(|error| error.to_string())?);
+                  Ok(())
+              }''',
+          '''        let mut hit_map = BTreeMap::new();
+                  collect_layout(&config.layout.root, screen, state, &mut hit_map);
+                  self.hit_map = hit_map;
+
+                  let images = terminal_image_placements(screen, state, &config);
+                  self.media.render(&images).map_err(|error| error.to_string())
+              }
+
+              fn hit_test(&self, column: u16, row: u16) -> Option<ElementId> {
+                  self.hit_map.iter().find_map(|(element, area)| {
+                      rect_contains(*area, column, row).then(|| element.clone())
+                  })
+              }
+
+              fn suspend(&mut self) -> Result<(), String> {
+                  execute!(io::stdout(), DisableMouseCapture).map_err(|error| error.to_string())?;
+                  self.media.clear().map_err(|error| error.to_string())?;
+                  self.terminal.take();
+                  ratatui::restore();
+                  Ok(())
+              }
+
+              fn resume(&mut self) -> Result<(), String> {
+                  self.terminal = Some(ratatui::try_init().map_err(|error| error.to_string())?);
+                  execute!(io::stdout(), EnableMouseCapture).map_err(|error| error.to_string())?;
+                  Ok(())
+              }''')
+          replace(renderer,
+          '''impl Drop for RatatuiRenderer {
+              fn drop(&mut self) {
+                  let _ = self.media.clear();
+                  self.terminal.take();
+                  ratatui::restore();
+              }
+          }
+
+          fn render_application''',
+          '''impl Drop for RatatuiRenderer {
+              fn drop(&mut self) {
+                  let _ = execute!(io::stdout(), DisableMouseCapture);
+                  let _ = self.media.clear();
+                  self.terminal.take();
+                  ratatui::restore();
+              }
+          }
+
+          fn rect_contains(area: Rect, column: u16, row: u16) -> bool {
+              column >= area.x
+                  && row >= area.y
+                  && column < area.x.saturating_add(area.width)
+                  && row < area.y.saturating_add(area.height)
+          }
+
+          fn render_application''')
+          replace(renderer,
+          '''    selected_scroll.unwrap_or_else(|| max_scroll.saturating_sub(state.view.transcript_scroll.offset))
+          }''',
+          '''    if state.view.transcript_scroll.follow_end {
+                  selected_scroll.unwrap_or(max_scroll)
+              } else {
+                  max_scroll.saturating_sub(state.view.transcript_scroll.offset)
+              }
+          }''')
+
+          rich = 'rust/crates/phenix-tui/src/rich_document.rs'
+          replace(rich,
+          '''    let mut spans = Vec::with_capacity(line.spans.len() + 1);
+              spans.push(Span::raw(" ".repeat(margin)));
+              spans.extend(line.spans);
+              Line::from(spans).style(line.style)
+          }''',
+          '''    let style = line.style;
+              let mut spans = Vec::with_capacity(line.spans.len() + 1);
+              spans.push(Span::raw(" ".repeat(margin)));
+              spans.extend(line.spans);
+              Line::from(spans).style(style)
+          }''')
+          replace(rich,
+          '''        let mut theme = ThemeConfig::default();
+                  theme.set(
+                      "Heading1",
+                      phenix_frontend_config::HighlightStyle {
+                          background: theme.style("Surface").background,
+                          ..Default::default()
+                      },
+                  );
+                  theme.set(
+                      "Heading2",
+                      phenix_frontend_config::HighlightStyle {
+                          background: theme.style("Normal").background,
+                          ..Default::default()
+                      },
+                  );''',
+          '''        let mut theme = ThemeConfig::default();
+                  let surface_background = theme.style("Surface").background;
+                  let normal_background = theme.style("Normal").background;
+                  theme.set(
+                      "Heading1",
+                      phenix_frontend_config::HighlightStyle {
+                          background: surface_background,
+                          ..Default::default()
+                      },
+                  );
+                  theme.set(
+                      "Heading2",
+                      phenix_frontend_config::HighlightStyle {
+                          background: normal_background,
+                          ..Default::default()
+                      },
+                  );''')
+
+          backend = 'rust/crates/phenix-acp-backend/src/lib.rs'
+          replace(backend,
+          '''            None => {
+                          start_prompt(
+                              connection,
+                              runtime,
+                              run_id,
+                              PendingPrompt { text, images },
+                              internal_tx,
+                              outputs,
+                          )?;
+                          Ok(BackendReply::Accepted)
+                      }''',
+          '''            None => {
+                          // Normal user submits are sequential conversation turns. If the
+                          // previous ACP prompt has not delivered its PromptFinished event
+                          // yet, preserve the turn by queueing it instead of racing the
+                          // adapter's active-prompt invariant.
+                          queue_follow_up(
+                              connection,
+                              runtime,
+                              run_id,
+                              PendingPrompt { text, images },
+                              internal_tx,
+                              outputs,
+                          )?;
+                          Ok(BackendReply::Accepted)
+                      }''')
+          PY
+          cd rust
+          cargo fmt --all
+          cargo check --workspace --all-targets --locked
+          cargo test -p phenix-tui -p phenix-ui-runtime -p phenix-acp-backend --locked
+      - name: Commit validated patch
+        shell: bash
+        run: |
+          git config user.name 'Matthis Kälble'
+          git config user.email '69082876+matthis-k@users.noreply.github.com'
+          git add rust/crates/phenix-tui/src/renderer.rs rust/crates/phenix-tui/src/rich_document.rs rust/crates/phenix-acp-backend/src/lib.rs
+          git commit -m 'fix: stabilize transcript interaction and prompt delivery'
+          git push origin HEAD:main
