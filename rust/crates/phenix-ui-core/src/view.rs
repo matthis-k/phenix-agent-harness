@@ -1,3 +1,4 @@
+use crate::rich_text::RichBlockView;
 use crate::routing::ElementId;
 use phenix_runtime_api::{AuthFlowId, AuthPrompt, DialogId, ExtensionUiRequest, RunId};
 use std::collections::{BTreeMap, BTreeSet};
@@ -137,6 +138,12 @@ impl Default for ScrollState {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RichBlockViewport {
+    pub horizontal: usize,
+    pub vertical: usize,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PaneViewState {
     pub visible: bool,
@@ -165,7 +172,10 @@ pub struct ViewState {
     pub transcript_scroll: ScrollState,
     pub sidebar_scroll: ScrollState,
     pub transcript_selected_turn: Option<usize>,
+    pub transcript_selected_block: Option<usize>,
     pub expanded_transcript_turns: BTreeSet<String>,
+    pub rich_block_views: BTreeMap<String, RichBlockView>,
+    pub rich_block_viewports: BTreeMap<String, RichBlockViewport>,
     pub show_details: bool,
     pub input_editor: InputEditor,
     pub vim_mode: VimMode,
@@ -191,6 +201,22 @@ impl ViewState {
         }
     }
 
+    pub fn rich_block_view(&self, id: &str) -> Option<RichBlockView> {
+        self.rich_block_views.get(id).copied()
+    }
+
+    pub fn set_rich_block_view(&mut self, id: String, view: RichBlockView) {
+        self.rich_block_views.insert(id, view);
+    }
+
+    pub fn rich_block_viewport(&self, id: &str) -> RichBlockViewport {
+        self.rich_block_viewports.get(id).copied().unwrap_or_default()
+    }
+
+    pub fn rich_block_viewport_mut(&mut self, id: String) -> &mut RichBlockViewport {
+        self.rich_block_viewports.entry(id).or_default()
+    }
+
     pub fn set_input_editor(&mut self, editor: InputEditor) {
         self.input_editor = editor;
         self.vim_mode = match editor {
@@ -199,7 +225,7 @@ impl ViewState {
         };
         let input_height = match editor {
             InputEditor::Embedded => self.terminal.height.saturating_div(3).clamp(8, 16),
-            InputEditor::Owned | InputEditor::External => 3,
+            InputEditor::Owned | InputEditor::External => 5,
         };
         self.pane_mut(ElementId::input()).height = Some(input_height);
     }
@@ -242,7 +268,7 @@ impl Default for ViewState {
         panes.insert(
             ElementId::input(),
             PaneViewState {
-                height: Some(3),
+                height: Some(5),
                 ..PaneViewState::default()
             },
         );
@@ -263,7 +289,10 @@ impl Default for ViewState {
             transcript_scroll: ScrollState::default(),
             sidebar_scroll: ScrollState::default(),
             transcript_selected_turn: None,
+            transcript_selected_block: None,
             expanded_transcript_turns: BTreeSet::new(),
+            rich_block_views: BTreeMap::new(),
+            rich_block_viewports: BTreeMap::new(),
             show_details: false,
             input_editor: InputEditor::Owned,
             vim_mode: VimMode::Insert,
@@ -288,7 +317,7 @@ mod tests {
 
         view.set_input_editor(InputEditor::External);
         assert_eq!(view.input_editor, InputEditor::External);
-        assert_eq!(view.pane(&ElementId::input()).height, Some(3));
+        assert_eq!(view.pane(&ElementId::input()).height, Some(5));
     }
 
     #[test]
@@ -299,6 +328,22 @@ mod tests {
         assert!(!view.transcript_turn_is_expanded("turn-b"));
         view.toggle_transcript_turn("turn-a".to_owned());
         assert!(!view.transcript_turn_is_expanded("turn-a"));
+    }
+
+    #[test]
+    fn rich_block_presentation_is_independent_per_instance() {
+        let mut view = ViewState::default();
+        view.set_rich_block_view("turn-a:block:0".to_owned(), RichBlockView::Grid);
+        view.rich_block_viewport_mut("turn-a:block:0".to_owned()).horizontal = 4;
+        assert_eq!(
+            view.rich_block_view("turn-a:block:0"),
+            Some(RichBlockView::Grid)
+        );
+        assert_eq!(
+            view.rich_block_viewport("turn-a:block:0").horizontal,
+            4
+        );
+        assert_eq!(view.rich_block_view("turn-b:block:0"), None);
     }
 
     #[test]
