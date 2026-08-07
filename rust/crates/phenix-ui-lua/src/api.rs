@@ -129,6 +129,8 @@ fn action_api(
         ("login", ApplicationCommand::OpenAuthentication),
         ("models", ApplicationCommand::OpenModelPicker),
         ("sessions", ApplicationCommand::OpenSessionPicker),
+        ("new_session", ApplicationCommand::CreateSession),
+        ("activate_sidebar_run", ApplicationCommand::ActivateSidebarRun),
         ("toggle_details", ApplicationCommand::ToggleDetails),
         ("close_overlay", ApplicationCommand::CloseOverlay),
     ] {
@@ -142,6 +144,33 @@ fn action_api(
         )
         .map_err(runtime_error)?;
     }
+
+    let run_commands = Rc::clone(&commands);
+    api.set(
+        "move_run",
+        lua.create_function(move |_, delta: i32| {
+            run_commands
+                .borrow_mut()
+                .push(FrontendCommand::Application(ApplicationCommand::MoveRun(delta)));
+            Ok(())
+        })
+        .map_err(runtime_error)?,
+    )
+    .map_err(runtime_error)?;
+
+    let session_commands = Rc::clone(&commands);
+    api.set(
+        "move_session",
+        lua.create_function(move |_, delta: i32| {
+            session_commands.borrow_mut().push(FrontendCommand::Application(
+                ApplicationCommand::MoveSession(delta),
+            ));
+            Ok(())
+        })
+        .map_err(runtime_error)?,
+    )
+    .map_err(runtime_error)?;
+
     Ok(api)
 }
 
@@ -275,6 +304,34 @@ fn ui_api(
     )
     .map_err(runtime_error)?;
     api.set("pane", pane).map_err(runtime_error)?;
+
+    let sidebar = lua.create_table().map_err(runtime_error)?;
+    let sidebar_move_commands = Rc::clone(&commands);
+    sidebar
+        .set(
+            "move_run",
+            lua.create_function(move |_, delta: i32| {
+                sidebar_move_commands
+                    .borrow_mut()
+                    .push(FrontendCommand::Ui(UiCommand::SidebarRunMove(delta)));
+                Ok(())
+            })
+            .map_err(runtime_error)?,
+        )
+        .map_err(runtime_error)?;
+    for (name, command) in [
+        ("parent", UiCommand::SidebarRunParent),
+        ("child", UiCommand::SidebarRunChild),
+        ("toggle", UiCommand::SidebarRunToggle),
+    ] {
+        sidebar
+            .set(
+                name,
+                command_function(lua, Rc::clone(&commands), FrontendCommand::Ui(command))?,
+            )
+            .map_err(runtime_error)?;
+    }
+    api.set("sidebar", sidebar).map_err(runtime_error)?;
 
     let transcript = lua.create_table().map_err(runtime_error)?;
     let transcript_move_commands = Rc::clone(&commands);
