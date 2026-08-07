@@ -222,9 +222,6 @@ fn terminal_image_placements(
             } => {
                 let start = anchor.line;
                 let end = start.saturating_add(usize::from(rows));
-                // Do not rescale a partially clipped image into the remaining rows.
-                // It disappears while crossing a viewport edge and reappears once the
-                // complete placement rectangle is visible.
                 if start < scroll || end > viewport_end {
                     return None;
                 }
@@ -804,7 +801,7 @@ fn render_overlay(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
                         } else {
                             "login"
                         }
-                    ),
+                    )
                 })
                 .collect(),
             theme,
@@ -1197,9 +1194,9 @@ mod tests {
             text: "image".to_owned(),
             complete: true,
         });
-        state.transcript_mut(run_id).append(TranscriptBlock {
+        state.transcript_mut(run_id.clone()).append(TranscriptBlock {
             id: "a1".to_owned(),
-            run_id: RunId::parse("run-image").expect("run id"),
+            run_id,
             role: TranscriptRole::Assistant,
             text: "![preview](data:image/png;base64,Zm9v)".to_owned(),
             complete: true,
