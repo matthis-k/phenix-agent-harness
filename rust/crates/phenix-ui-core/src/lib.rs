@@ -3,6 +3,7 @@
 mod completion;
 mod input;
 mod reducer;
+mod rich_text;
 mod routing;
 mod state;
 mod view;
@@ -12,6 +13,10 @@ pub use completion::{
 };
 pub use input::{KeyCode, KeyInput, KeyModifiers, MouseAction, MouseButton, MouseInput, UiInput};
 pub use reducer::{reduce, AppEffect, AppEvent, UserIntent};
+pub use rich_text::{
+    parse_inline, parse_markdown, RichBlock, RichBlockView, RichCodeBlock, RichDocument, RichImage,
+    RichSpan, RichTable, RichText,
+};
 pub use routing::{
     ElementId, EventEnvelope, FocusDirection, InvalidElementId, LayoutAxis, ResizeRequest,
     RouteTarget,
