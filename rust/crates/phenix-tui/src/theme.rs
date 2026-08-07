@@ -15,21 +15,39 @@ pub(crate) fn panel(title: &str, focused: bool, theme: &ThemeConfig) -> Block<'s
             theme,
             if focused { "BorderFocused" } else { "Border" },
         ))
-        .style(theme_style(theme, surface))
+        .style(surface_style(theme, surface))
 }
 
 fn foreground_style(theme: &ThemeConfig, group: &str) -> Style {
-    let mut style = theme_style(theme, group);
-    style.bg = None;
+    theme_style(theme, group)
+}
+
+/// Resolve a semantic text style.
+///
+/// Text highlights deliberately inherit the surface underneath them. Theme files
+/// may still carry legacy background values for text groups, but rendering those
+/// backgrounds inline creates rectangular holes whenever the containing pane uses
+/// a different elevation. Only explicit surface styles are allowed to paint a
+/// background.
+pub(crate) fn theme_style(theme: &ThemeConfig, group: &str) -> Style {
+    let mut style = raw_theme_style(theme, group);
+    if !is_surface_group(group) {
+        style.bg = None;
+    }
     style
 }
 
-pub(crate) fn theme_style(theme: &ThemeConfig, group: &str) -> Style {
-    let group = if group == "SurfaceFocused" && !theme.highlights.contains_key(group) {
-        "Surface"
-    } else {
-        group
-    };
+/// Resolve a style for an actual rectangular surface.
+///
+/// This is intentionally distinct from `theme_style`: canvas/pane backgrounds are
+/// structural, while semantic text highlights should never choose their own
+/// background implicitly.
+pub(crate) fn surface_style(theme: &ThemeConfig, group: &str) -> Style {
+    raw_theme_style(theme, group)
+}
+
+fn raw_theme_style(theme: &ThemeConfig, group: &str) -> Style {
+    let group = resolved_group(theme, group);
     let HighlightStyle {
         foreground,
         background,
@@ -61,6 +79,18 @@ pub(crate) fn theme_style(theme: &ThemeConfig, group: &str) -> Style {
     style.add_modifier(modifiers)
 }
 
+fn resolved_group<'a>(theme: &ThemeConfig, group: &'a str) -> &'a str {
+    if group == "SurfaceFocused" && !theme.highlights.contains_key(group) {
+        "Surface"
+    } else {
+        group
+    }
+}
+
+fn is_surface_group(group: &str) -> bool {
+    matches!(group, "Surface" | "SurfaceFocused")
+}
+
 fn ratatui_color(color: ColorSpec) -> Color {
     match color {
         ColorSpec::Default => Color::Reset,
@@ -86,17 +116,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn semantic_theme_groups_map_to_ratatui_styles() {
+    fn semantic_text_styles_never_paint_their_legacy_background() {
         let style = theme_style(&ThemeConfig::default(), "Accent");
         assert!(style.add_modifier.contains(Modifier::BOLD));
+        assert_eq!(style.bg, None);
+    }
+
+    #[test]
+    fn explicit_surfaces_keep_their_background() {
+        let style = surface_style(&ThemeConfig::default(), "Surface");
+        assert!(style.bg.is_some());
     }
 
     #[test]
     fn focused_surface_falls_back_to_surface_for_older_themes() {
         let theme = ThemeConfig::default();
         assert_eq!(
-            theme_style(&theme, "SurfaceFocused"),
-            theme_style(&theme, "Surface")
+            surface_style(&theme, "SurfaceFocused"),
+            surface_style(&theme, "Surface")
         );
     }
 }
