@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 const OUTER_GUTTER: u16 = 1;
 const PANE_GUTTER: u16 = 1;
-const OWNED_INPUT_MIN_HEIGHT: u16 = 2;
+const OWNED_INPUT_MIN_HEIGHT: u16 = 5;
 const OWNED_INPUT_MAX_HEIGHT: u16 = 10;
 
 pub(crate) fn collect_layout(
@@ -165,9 +165,8 @@ fn owned_input_height(text: &str, width: u16) -> u16 {
             })
             .sum()
     };
-    let content_height = u16::try_from(visual_lines).unwrap_or(u16::MAX);
-    content_height
-        .saturating_add(1)
+    u16::try_from(visual_lines)
+        .unwrap_or(u16::MAX)
         .clamp(OWNED_INPUT_MIN_HEIGHT, OWNED_INPUT_MAX_HEIGHT)
 }
 
@@ -339,9 +338,10 @@ mod tests {
 
     #[test]
     fn owned_input_grows_with_lines_and_wraps_up_to_a_maximum() {
-        assert_eq!(owned_input_height("", 40), 2);
-        assert_eq!(owned_input_height("one\ntwo\nthree", 40), 4);
-        assert_eq!(owned_input_height(&"x".repeat(100), 20), 6);
+        assert_eq!(owned_input_height("", 40), 5);
+        assert_eq!(owned_input_height("one\ntwo\nthree", 40), 5);
+        assert_eq!(owned_input_height(&"x".repeat(100), 20), 5);
+        assert_eq!(owned_input_height(&"x".repeat(120), 20), 6);
         assert_eq!(owned_input_height(&"x".repeat(1000), 20), OWNED_INPUT_MAX_HEIGHT);
     }
 
