@@ -310,7 +310,7 @@ fn auth_response(prompt: &AuthPrompt, text: &str, selected: usize) -> AuthPrompt
             .get(selected)
             .or_else(|| options.first())
             .map_or(AuthPromptResponse::Cancelled, |option| {
-                AuthPromptResponse::Selected(option.id.clone())
+                AuthPromptResponse::Selected(option.id.clone()),
             }),
     }
 }
@@ -363,18 +363,23 @@ fn fallback_key(state: &AppState, key: KeyInput) -> ReactionBatch {
 
 fn command_completion_key(state: &AppState, key: KeyInput) -> Option<Vec<BusReaction>> {
     let navigate = match key.code {
-        KeyCode::Up => Some(-1),
-        KeyCode::Down => Some(1),
-        KeyCode::Character('p') if key.modifiers.control => Some(-1),
-        KeyCode::Character('n') if key.modifiers.control => Some(1),
+        KeyCode::Up if !key.modifiers.control && !key.modifiers.alt => Some(-1),
+        KeyCode::Down if !key.modifiers.control && !key.modifiers.alt => Some(1),
+        KeyCode::Character('p') if key.modifiers.control && !key.modifiers.alt => Some(-1),
+        KeyCode::Character('n') if key.modifiers.control && !key.modifiers.alt => Some(1),
         _ => None,
     };
     if let Some(delta) = navigate {
         return Some(vec![BusReaction::View(ViewMutation::MoveOverlaySelection(delta))]);
     }
-    if key.code == KeyCode::Enter
-        || (key.code == KeyCode::Character('y') && key.modifiers.control)
-    {
+    let plain_enter = key.code == KeyCode::Enter
+        && !key.modifiers.shift
+        && !key.modifiers.control
+        && !key.modifiers.alt;
+    let ctrl_y = key.code == KeyCode::Character('y')
+        && key.modifiers.control
+        && !key.modifiers.alt;
+    if plain_enter || ctrl_y {
         return Some(accept_overlay(state));
     }
     None
@@ -633,6 +638,17 @@ mod tests {
         }
     }
 
+    fn shift_key(code: KeyCode) -> KeyInput {
+        KeyInput {
+            code,
+            modifiers: KeyModifiers {
+                shift: true,
+                ..KeyModifiers::default()
+            },
+            repeat: false,
+        }
+    }
+
     #[test]
     fn provider_commands_are_translated_without_a_backend() {
         let provider: FrontendProviderRef = Rc::new(RefCell::new(FakeProvider));
@@ -662,7 +678,7 @@ mod tests {
     }
 
     #[test]
-    fn command_completion_only_intercepts_navigation_and_acceptance() {
+    fn command_completion_only_intercepts_navigation_and_plain_acceptance() {
         let mut state = AppState::default();
         state.input.replace("/mo".to_owned());
         state.view.overlay = Some(OverlayState::CommandPalette {
@@ -696,6 +712,12 @@ mod tests {
                 BusReaction::App(AppEvent::User(UserIntent::CloseOverlay))
             ]
         ));
+
+        let newline = fallback_key(&state, shift_key(KeyCode::Enter));
+        assert_eq!(
+            newline.reactions,
+            vec![edit_input(InputEdit::Insert("\n".to_owned()))]
+        );
     }
 
     #[test]
