@@ -16,9 +16,9 @@ phenix.theme.set("Border", { fg = "#313244" })
 phenix.theme.set("BorderFocused", { fg = "#89b4fa" })
 
 -- The built-in workspace composition remains renderer-neutral. The default
--- interaction vocabulary intentionally follows Neovim: windows use <C-w>,
--- semantic transcript motion uses j/k and {/}, viewport motion uses Ctrl keys,
--- and Space is the default <leader>.
+-- interaction vocabulary intentionally follows Neovim: windows use <C-w>, runs
+-- behave like buffers, sessions like tabpages, transcript turns like paragraphs,
+-- viewport motion uses Ctrl keys, and Space is the default <leader>.
 
 local map = phenix.keymap.set
 
@@ -47,10 +47,26 @@ map("global", "<M-j>", function() phenix.ui.focus.move("down") end)
 map("global", "<M-k>", function() phenix.ui.focus.move("up") end)
 map("global", "<M-l>", function() phenix.ui.focus.move("right") end)
 
+-- Runs are the buffer-like execution unit. These change the active transcript
+-- without changing window focus.
+map("global", "[b", function() phenix.action.move_run(-1) end, { desc = "Previous run" })
+map("global", "]b", function() phenix.action.move_run(1) end, { desc = "Next run" })
+map("global", "[r", function() phenix.action.move_run(-1) end, { desc = "Previous run" })
+map("global", "]r", function() phenix.action.move_run(1) end, { desc = "Next run" })
+
+-- Persisted sessions are the tabpage-like durable context.
+map("global", "gt", function() phenix.action.move_session(1) end, { desc = "Next session" })
+map("global", "gT", function() phenix.action.move_session(-1) end, { desc = "Previous session" })
+
 -- Telescope-like leader namespace for Phenix-specific control surfaces.
 map("global", "<leader>fm", phenix.action.models, { desc = "Find model" })
 map("global", "<leader>fs", phenix.action.sessions, { desc = "Find session" })
+map("global", "<leader>sn", phenix.action.new_session, { desc = "New session" })
 map("global", "<leader>fa", phenix.action.login, { desc = "Authentication providers" })
+map("global", "<leader>fb", function()
+  phenix.ui.pane.show("ui.sidebar")
+  phenix.ui.focus.set("ui.sidebar")
+end, { desc = "Navigate runs" })
 map("global", "<leader>tb", function()
   phenix.ui.pane.toggle("ui.sidebar")
   phenix.ui.focus.set("ui.transcript")
@@ -59,15 +75,21 @@ end, { desc = "Toggle operational sidebar" })
 -- Input editing is handled by the typed native modal editor. User Lua may
 -- override individual input keys without replacing the editor implementation.
 
--- The sidebar is still a projection rather than a fully semantic tree cursor,
--- so j/k retain local scrolling until run-node selection is promoted to a typed
--- navigation action. Window movement itself is always <C-w> based. Escape is a
--- navigation cancellation key and intentionally emits no runtime action.
+-- The run tree has its own cursor. j/k move that cursor; h/l follow tree
+-- semantics; Enter changes the active run; o changes it and returns to transcript.
 map("sidebar", "<Esc>", function() end, { desc = "Cancel pending navigation" })
-map("sidebar", "j", function() phenix.ui.pane.scroll("ui.sidebar", 1) end, { desc = "Scroll sidebar down" })
-map("sidebar", "k", function() phenix.ui.pane.scroll("ui.sidebar", -1) end, { desc = "Scroll sidebar up" })
-map("sidebar", "gg", function() phenix.ui.pane.scroll("ui.sidebar", -1000000) end, { desc = "Sidebar start" })
-map("sidebar", "G", function() phenix.ui.pane.scroll("ui.sidebar", 1000000) end, { desc = "Sidebar end" })
+map("sidebar", "j", function() phenix.ui.sidebar.move_run(1) end, { desc = "Next visible run" })
+map("sidebar", "k", function() phenix.ui.sidebar.move_run(-1) end, { desc = "Previous visible run" })
+map("sidebar", "h", phenix.ui.sidebar.parent, { desc = "Collapse run or select parent" })
+map("sidebar", "l", phenix.ui.sidebar.child, { desc = "Expand run or select first child" })
+map("sidebar", "za", phenix.ui.sidebar.toggle, { desc = "Toggle run subtree" })
+map("sidebar", "gg", function() phenix.ui.sidebar.move_run(-1000000) end, { desc = "First visible run" })
+map("sidebar", "G", function() phenix.ui.sidebar.move_run(1000000) end, { desc = "Last visible run" })
+map("sidebar", "<CR>", phenix.action.activate_sidebar_run, { desc = "Open run transcript" })
+map("sidebar", "o", function()
+  phenix.action.activate_sidebar_run()
+  phenix.ui.focus.set("ui.transcript")
+end, { desc = "Open run and focus transcript" })
 map("sidebar", "i", function() phenix.ui.focus.set("ui.input") end, { desc = "Enter composer" })
 
 -- Transcript selection and viewport motion are independent. j/k and {/} move
