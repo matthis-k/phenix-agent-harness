@@ -1,7 +1,9 @@
 name: Rich transcript format bootstrap
 
 on:
-  pull_request:
+  push:
+    branches:
+      - refactor/rich-transcript-blocks
   workflow_dispatch:
 
 permissions:
@@ -9,133 +11,13 @@ permissions:
 
 jobs:
   format:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          ref: refactor/rich-transcript-blocks
       - name: Apply rich transcript cleanup
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-
-          runtime = Path("rust/crates/phenix-ui-runtime/src/runtime.rs")
-          text = runtime.read_text()
-          text = text.replace(
-              "    AppState, FocusDirection, FocusTarget, InputEditor, LayoutAxis, OverlayState, ResizeRequest,\n    RichBlock, RichBlockView, VimMode,\n",
-              "    AppState, FocusDirection, FocusTarget, InputEditor, LayoutAxis, OverlayState, ResizeRequest,\n    VimMode,\n",
-          )
-          text = text.replace(
-              ".filter_map(|(index, block)| (block.candidate_views().len() > 1).then_some(index))",
-              ".filter_map(|(index, block)| block.is_interactive().then_some(index))",
-          )
-          default_fn = '''fn default_rich_block_view(block: &RichBlock) -> RichBlockView {
-              match block {
-                  RichBlock::Table(_) => RichBlockView::Dense,
-                  RichBlock::Code(code) if code.language_is("mermaid") => RichBlockView::Rendered,
-                  RichBlock::Code(_) => RichBlockView::Highlighted,
-                  RichBlock::Image(_) => RichBlockView::Preview,
-                  RichBlock::Heading { .. }
-                  | RichBlock::Paragraph(_)
-                  | RichBlock::Quote(_)
-                  | RichBlock::List { .. }
-                  | RichBlock::Rule => RichBlockView::Rendered,
-              }
-          }
-
-          '''
-          text = text.replace(default_fn, "")
-          text = text.replace(
-              ".unwrap_or_else(|| default_rich_block_view(block));",
-              ".unwrap_or_else(|| block.default_view());",
-          )
-          old_move = '''    let current_position = state
-              .view
-              .transcript_selected_block
-              .and_then(|selected| interactive.iter().position(|index| *index == selected))
-              .unwrap_or(0);
-          let next = current_position
-              .saturating_add_signed(delta as isize)
-              .min(interactive.len() - 1);
-          state.view.transcript_selected_block = Some(interactive[next]);
-'''
-          new_move = '''    let next = state
-              .view
-              .transcript_selected_block
-              .and_then(|selected| interactive.iter().position(|index| *index == selected))
-              .map_or_else(
-                  || {
-                      if delta.is_negative() {
-                          interactive.len() - 1
-                      } else {
-                          0
-                      }
-                  },
-                  |current| {
-                      current
-                          .saturating_add_signed(delta as isize)
-                          .min(interactive.len() - 1)
-                  },
-              );
-          state.view.transcript_selected_block = Some(interactive[next]);
-'''
-          if old_move not in text:
-              raise SystemExit("expected rich-block navigation block not found")
-          text = text.replace(old_move, new_move)
-          runtime.write_text(text)
-
-          rich = Path("rust/crates/phenix-tui/src/rich_document.rs")
-          text = rich.read_text()
-          text = text.replace(
-              "let widths = table_widths(table, width.saturating_sub(2), 3);",
-              "let widths = table_widths(table, width.saturating_sub(2), false);",
-              1,
-          )
-          text = text.replace(
-              "let widths = table_widths(table, width.saturating_sub(2), 3);",
-              "let widths = table_widths(table, width.saturating_sub(2), true);",
-              1,
-          )
-          old_sig = '''fn table_widths(table: &RichTable, available: usize, separator_width: usize) -> Vec<usize> {
-              let columns = table
-                  .rows
-                  .iter()
-                  .map(Vec::len)
-                  .chain(std::iter::once(table.header.len()))
-                  .max()
-                  .unwrap_or(0);
-              if columns == 0 {
-                  return Vec::new();
-              }
-              let separators = columns.saturating_sub(1).saturating_mul(separator_width);
-              let available = available.saturating_sub(separators).max(columns);
-'''
-          new_sig = '''fn table_widths(table: &RichTable, available: usize, grid: bool) -> Vec<usize> {
-              let columns = table
-                  .rows
-                  .iter()
-                  .map(Vec::len)
-                  .chain(std::iter::once(table.header.len()))
-                  .max()
-                  .unwrap_or(0);
-              if columns == 0 {
-                  return Vec::new();
-              }
-              let chrome = if grid {
-                  columns.saturating_mul(3).saturating_add(1)
-              } else {
-                  columns.saturating_sub(1).saturating_mul(3)
-              };
-              let available = available.saturating_sub(chrome).max(columns);
-'''
-          if old_sig not in text:
-              raise SystemExit("expected table width helper not found")
-          text = text.replace(old_sig, new_sig)
-          rich.write_text(text)
-          PY
+        run: python .github/scripts/rich_transcript_cleanup.py
       - name: Format workspace
         working-directory: rust
         run: cargo fmt --all
@@ -150,4 +32,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add rust
           git commit -m "refactor(tui): consolidate rich block presentation"
-          git push origin HEAD:${{ github.event.pull_request.head.ref || github.ref_name }}
+          git push origin HEAD:refactor/rich-transcript-blocks
