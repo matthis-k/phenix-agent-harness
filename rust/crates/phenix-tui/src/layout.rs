@@ -36,31 +36,34 @@ fn collect_layout_inner(
                 SplitDirection::Horizontal => Direction::Horizontal,
                 SplitDirection::Vertical => Direction::Vertical,
             };
-            let constraints = split
-                .children
-                .iter()
-                .map(|child| child_constraint(child, split.direction, state))
-                .collect::<Vec<_>>();
-            let child_areas = Layout::default()
-                .direction(direction)
-                .constraints(constraints)
-                .split(area);
             let last_visible = split
                 .children
                 .iter()
                 .rposition(|child| node_is_visible(child, state));
-            for (index, (child, child_area)) in split
-                .children
+            let mut slots = Vec::with_capacity(split.children.len().saturating_mul(2));
+            for (index, child) in split.children.iter().enumerate() {
+                slots.push((Some(index), child_constraint(child, split.direction, state)));
+                if node_is_visible(child, state) && Some(index) != last_visible {
+                    slots.push((None, Constraint::Length(PANE_GUTTER)));
+                }
+            }
+            let constraints = slots
                 .iter()
-                .zip(child_areas.iter().copied())
-                .enumerate()
-            {
-                let child_area = if Some(index) == last_visible || !node_is_visible(child, state) {
-                    child_area
-                } else {
-                    reserve_trailing_gutter(child_area, split.direction)
-                };
-                collect_layout_inner(child, child_area, state, output);
+                .map(|(_, constraint)| *constraint)
+                .collect::<Vec<_>>();
+            let slot_areas = Layout::default()
+                .direction(direction)
+                .constraints(constraints)
+                .split(area);
+            for ((child_index, _), child_area) in slots.iter().zip(slot_areas.iter().copied()) {
+                if let Some(child_index) = child_index {
+                    collect_layout_inner(
+                        &split.children[*child_index],
+                        child_area,
+                        state,
+                        output,
+                    );
+                }
             }
         }
     }
@@ -78,19 +81,6 @@ fn inset_workspace(area: Rect) -> Rect {
         width: area.width.saturating_sub(OUTER_GUTTER.saturating_mul(2)),
         height: area.height.saturating_sub(OUTER_GUTTER.saturating_mul(2)),
     }
-}
-
-fn reserve_trailing_gutter(mut area: Rect, direction: SplitDirection) -> Rect {
-    match direction {
-        SplitDirection::Horizontal if area.width > PANE_GUTTER => {
-            area.width = area.width.saturating_sub(PANE_GUTTER);
-        }
-        SplitDirection::Vertical if area.height > PANE_GUTTER => {
-            area.height = area.height.saturating_sub(PANE_GUTTER);
-        }
-        SplitDirection::Horizontal | SplitDirection::Vertical => {}
-    }
-    area
 }
 
 fn child_constraint(node: &LayoutNode, direction: SplitDirection, state: &AppState) -> Constraint {
@@ -248,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_minimum_and_maximum_reserve_a_fixed_pane_extent() {
+    fn fixed_panes_keep_their_extent_while_gutters_use_flexible_space() {
         let mut state = AppState::default();
         state.view.pane_mut(ElementId::input()).height = None;
         let mut output = BTreeMap::new();
