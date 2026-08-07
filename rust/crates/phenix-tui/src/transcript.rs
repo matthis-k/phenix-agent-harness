@@ -2,8 +2,8 @@ use crate::rich_document::{render_document, RenderedRichBlock, RichMedia};
 use crate::theme::{surface_style, theme_style};
 use phenix_frontend_config::ThemeConfig;
 use phenix_ui_core::{
-    group_transcript_turns, parse_markdown, AppState, RichBlockView, RichBlockViewport,
-    TranscriptDetailKind, TranscriptTurn, TranscriptTurnDetail,
+    group_transcript_turns, parse_markdown, AppState, FocusTarget, RichBlockView,
+    RichBlockViewport, TranscriptDetailKind, TranscriptTurn, TranscriptTurnDetail,
 };
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -12,6 +12,8 @@ use std::ops::Range;
 const DETAIL_PREFIX: &str = "  │ ";
 const TURN_GAP_LINES: usize = 2;
 const RICH_VIEWPORT_ROWS: usize = 12;
+const TURN_RAIL: &str = "▌";
+const BLOCK_RAIL: &str = "┃";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TranscriptMediaAnchor {
@@ -65,6 +67,7 @@ pub(crate) fn transcript_document(
                 .min(turns.len() - 1),
         )
     };
+    let transcript_focused = state.view.focus == FocusTarget::Transcript;
 
     let mut lines = Vec::new();
     let mut media = Vec::new();
@@ -74,16 +77,26 @@ pub(crate) fn transcript_document(
             lines.extend((0..TURN_GAP_LINES).map(|_| Line::default()));
         }
         let start = lines.len();
+        let turn_selected = selected == Some(index);
         render_turn(
             &mut lines,
             &mut media,
             turn,
-            selected == Some(index) && state.view.focus == phenix_ui_core::FocusTarget::Transcript,
+            turn_selected,
+            transcript_focused,
             state.view.transcript_turn_is_expanded(&turn.id),
             width,
             state,
             theme,
         );
+        if turn_selected {
+            decorate_selected_turn(
+                &mut lines[start..],
+                usize::from(width.max(1)),
+                transcript_focused,
+                theme,
+            );
+        }
         turn_ranges.push(start..lines.len());
     }
 
@@ -94,11 +107,13 @@ pub(crate) fn transcript_document(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_turn(
     lines: &mut Vec<Line<'static>>,
     media: &mut Vec<TranscriptMediaAnchor>,
     turn: &TranscriptTurn,
     selected: bool,
+    focused: bool,
     expanded: bool,
     width: u16,
     state: &AppState,
@@ -109,8 +124,14 @@ fn render_turn(
         lines.push(Line::default());
     }
 
+    let mut has_interactive_block = false;
+    let mut selected_block_view = None;
     if !turn.response.trim().is_empty() {
         let document = parse_markdown(&turn.response);
+        has_interactive_block = document
+            .blocks
+            .iter()
+            .any(|block| block.candidate_views().len() > 1);
         let rendered = render_document(&document, width, theme, |block_index| {
             state
                 .view
@@ -127,7 +148,8 @@ fn render_turn(
                 usize::from(width.max(1)),
             );
             if selected && state.view.transcript_selected_block == Some(block_index) {
-                mark_selected_block(&mut block, theme);
+                selected_block_view = Some(block.active_view);
+                decorate_selected_block(&mut block, usize::from(width.max(1)), theme);
             }
             let start = lines.len();
             if let Some(block_media) = block.media.clone() {
@@ -152,6 +174,19 @@ fn render_turn(
                 lines.extend(detail_lines(detail, width, theme));
             }
         }
+    }
+
+    if selected {
+        if !lines.is_empty() {
+            lines.push(Line::default());
+        }
+        lines.push(selection_hint_line(
+            turn,
+            has_interactive_block,
+            selected_block_view,
+            focused,
+            theme,
+        ));
     }
 }
 
@@ -209,20 +244,90 @@ fn clip_line(line: &Line<'_>, horizontal: usize, width: usize) -> Line<'static> 
     Line::from(spans).style(line.style)
 }
 
-fn mark_selected_block(block: &mut RenderedRichBlock, theme: &ThemeConfig) {
+fn decorate_selected_turn(
+    lines: &mut [Line<'static>],
+    width: usize,
+    focused: bool,
+    theme: &ThemeConfig,
+) {
+    let rail_style = if focused {
+        theme_style(theme, "Accent").add_modifier(Modifier::BOLD)
+    } else {
+        theme_style(theme, "BorderFocused")
+    };
+    for line in lines {
+        *line = add_selection_rail(line, TURN_RAIL, rail_style, width);
+    }
+}
+
+fn decorate_selected_block(
+    block: &mut RenderedRichBlock,
+    width: usize,
+    theme: &ThemeConfig,
+) {
+    let rail_style = theme_style(theme, "Accent").add_modifier(Modifier::BOLD);
+    for line in &mut block.lines {
+        *line = add_selection_rail(line, BLOCK_RAIL, rail_style, width);
+    }
+
     let Some(toolbar) = block.lines.first_mut() else {
         return;
     };
-    let Some(first) = toolbar.spans.first_mut() else {
-        return;
-    };
-    let text = first.content.to_string();
-    first.content = if let Some(stripped) = text.strip_prefix(' ') {
-        format!("▸{stripped}").into()
+    toolbar.spans.insert(
+        1.min(toolbar.spans.len()),
+        Span::styled(" selected ", rail_style),
+    );
+}
+
+fn add_selection_rail(
+    line: &Line<'_>,
+    rail: &'static str,
+    rail_style: Style,
+    width: usize,
+) -> Line<'static> {
+    if width == 0 {
+        return Line::default();
+    }
+    let clipped = clip_line(line, 0, width.saturating_sub(1));
+    let mut spans = Vec::with_capacity(clipped.spans.len() + 1);
+    spans.push(Span::styled(rail, rail_style));
+    spans.extend(clipped.spans);
+    Line::from(spans).style(line.style)
+}
+
+fn selection_hint_line(
+    turn: &TranscriptTurn,
+    has_interactive_block: bool,
+    selected_block_view: Option<RichBlockView>,
+    focused: bool,
+    theme: &ThemeConfig,
+) -> Line<'static> {
+    let marker_style = if focused {
+        theme_style(theme, "Accent").add_modifier(Modifier::BOLD)
     } else {
-        format!("▸{text}").into()
+        theme_style(theme, "Muted")
     };
-    first.style = theme_style(theme, "Accent").add_modifier(Modifier::BOLD);
+    let mut spans = vec![
+        Span::styled("selected message", marker_style),
+        Span::styled("  ·  ", theme_style(theme, "Muted")),
+        Span::styled("Ctrl-N/P messages", theme_style(theme, "Muted")),
+    ];
+    if !turn.details.is_empty() {
+        spans.push(Span::styled("  ·  ", theme_style(theme, "Muted")));
+        spans.push(Span::styled("Enter details", theme_style(theme, "Accent")));
+    }
+    if has_interactive_block {
+        spans.push(Span::styled("  ·  ", theme_style(theme, "Muted")));
+        spans.push(Span::styled("[/] block", theme_style(theme, "Muted")));
+        if let Some(view) = selected_block_view {
+            spans.push(Span::styled("  ·  ", theme_style(theme, "Muted")));
+            spans.push(Span::styled(
+                format!("v/V view: {}", view.label()),
+                theme_style(theme, "Accent"),
+            ));
+        }
+    }
+    Line::from(spans)
 }
 
 fn user_message_lines(text: &str, width: u16, theme: &ThemeConfig) -> Vec<Line<'static>> {
@@ -442,6 +547,60 @@ mod tests {
     }
 
     #[test]
+    fn effective_selected_turn_remains_visible_when_input_has_focus() {
+        let run_id = RunId::parse("run-1").expect("run id");
+        let mut state = AppState::default();
+        state.root_run = Some(run_id.clone());
+        state.selected_run = Some(run_id.clone());
+        state.view.focus = FocusTarget::Input;
+        state.transcript_mut(run_id.clone()).append(block(
+            "u1",
+            TranscriptRole::User,
+            "hello",
+        ));
+        state.transcript_mut(run_id).append(block(
+            "a1",
+            TranscriptRole::Assistant,
+            "world",
+        ));
+        let document = transcript_document(&state, &ThemeConfig::default(), 50);
+        let selected = &document.lines[document.turn_ranges[0].clone()];
+        assert!(selected
+            .iter()
+            .filter(|line| !line_text(line).is_empty())
+            .all(|line| line_text(line).starts_with(TURN_RAIL)));
+        assert!(selected
+            .iter()
+            .any(|line| line_text(line).contains("selected message")));
+    }
+
+    #[test]
+    fn selected_rich_block_is_visually_nested_inside_selected_turn() {
+        let run_id = RunId::parse("run-1").expect("run id");
+        let mut state = AppState::default();
+        state.root_run = Some(run_id.clone());
+        state.selected_run = Some(run_id.clone());
+        state.view.focus = FocusTarget::Transcript;
+        state.view.transcript_selected_turn = Some(0);
+        state.view.transcript_selected_block = Some(0);
+        state.transcript_mut(run_id.clone()).append(block(
+            "u1",
+            TranscriptRole::User,
+            "table",
+        ));
+        state.transcript_mut(run_id).append(block(
+            "a1",
+            TranscriptRole::Assistant,
+            "| A | B |\n| --- | --- |\n| 1 | 2 |",
+        ));
+        let document = transcript_document(&state, &ThemeConfig::default(), 50);
+        let text = document.lines.iter().map(line_text).collect::<Vec<_>>();
+        assert!(text.iter().any(|line| line.contains(BLOCK_RAIL)));
+        assert!(text.iter().any(|line| line.contains("selected")));
+        assert!(text.iter().any(|line| line.contains("v/V view:")));
+    }
+
+    #[test]
     fn per_block_view_state_changes_only_that_component() {
         let run_id = RunId::parse("run-1").expect("run id");
         let mut state = AppState::default();
@@ -462,9 +621,7 @@ mod tests {
             .set_rich_block_view("run-1:u1:block:0".to_owned(), RichBlockView::Grid);
         let document = transcript_document(&state, &ThemeConfig::default(), 50);
         let text = document.lines.iter().map(line_text).collect::<Vec<_>>();
-        assert!(text
-            .iter()
-            .any(|line| line.trim_start().starts_with('┌')));
+        assert!(text.iter().any(|line| line.contains('┌')));
         assert!(text
             .iter()
             .any(|line| line.contains("[dense]") || line.contains("[grid]")));
@@ -533,6 +690,7 @@ mod tests {
             &mut lines,
             &mut Vec::new(),
             &turn,
+            false,
             false,
             false,
             80,
