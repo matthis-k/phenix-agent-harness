@@ -214,13 +214,10 @@ impl FrontendConfigProvider for LuaFrontendProvider {
         context: &FrontendContext,
         input: KeyInput,
     ) -> Result<Vec<FrontendCommand>, FrontendProviderError> {
-        let resolution = self.callback_for(context, input)?;
-        let KeyResolution::Callback(callback) = resolution else {
-            return Ok(match resolution {
-                KeyResolution::Prefix => vec![FrontendCommand::Handled],
-                KeyResolution::None => Vec::new(),
-                KeyResolution::Callback(_) => unreachable!("callback handled above"),
-            });
+        let callback = match self.callback_for(context, input)? {
+            KeyResolution::Callback(callback) => callback,
+            KeyResolution::Prefix => return Ok(vec![FrontendCommand::Handled]),
+            KeyResolution::None => return Ok(Vec::new()),
         };
 
         self.commands.borrow_mut().clear();
@@ -437,6 +434,37 @@ phenix.keymap.set("global", "<leader>fm", phenix.action.models)
             provider
                 .handle_key(&global, key(KeyCode::Character('m'), false, false, false))
                 .expect("leader completion"),
+            vec![FrontendCommand::Application(
+                ApplicationCommand::OpenModelPicker
+            )]
+        );
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn failed_prefix_retries_the_current_key() {
+        let path = temporary_config(
+            r#"
+phenix.keymap.set("global", "gg", phenix.action.quit)
+phenix.keymap.set("global", "x", phenix.action.models)
+"#,
+        );
+        let mut provider = LuaFrontendProvider::new(LuaFrontendOptions {
+            source_path: Some(path.clone()),
+            load_defaults: false,
+        })
+        .expect("Lua provider");
+        let global = context(PaneType::Transcript);
+        assert_eq!(
+            provider
+                .handle_key(&global, key(KeyCode::Character('g'), false, false, false))
+                .expect("prefix"),
+            vec![FrontendCommand::Handled]
+        );
+        assert_eq!(
+            provider
+                .handle_key(&global, key(KeyCode::Character('x'), false, false, false))
+                .expect("retry x"),
             vec![FrontendCommand::Application(
                 ApplicationCommand::OpenModelPicker
             )]
