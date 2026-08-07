@@ -1,10 +1,12 @@
 use phenix_frontend_config::{LayoutNode, SplitDirection};
-use phenix_ui_core::{AppState, ElementId};
+use phenix_ui_core::{AppState, ElementId, InputEditor};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use std::collections::BTreeMap;
 
 const OUTER_GUTTER: u16 = 1;
 const PANE_GUTTER: u16 = 1;
+const OWNED_INPUT_MIN_HEIGHT: u16 = 2;
+const OWNED_INPUT_MAX_HEIGHT: u16 = 10;
 
 pub(crate) fn collect_layout(
     node: &LayoutNode,
@@ -42,7 +44,10 @@ fn collect_layout_inner(
                 .rposition(|child| node_is_visible(child, state));
             let mut slots = Vec::with_capacity(split.children.len().saturating_mul(2));
             for (index, child) in split.children.iter().enumerate() {
-                slots.push((Some(index), child_constraint(child, split.direction, state)));
+                slots.push((
+                    Some(index),
+                    child_constraint(child, split.direction, area, state),
+                ));
                 if node_is_visible(child, state) && Some(index) != last_visible {
                     slots.push((None, Constraint::Length(PANE_GUTTER)));
                 }
@@ -83,12 +88,29 @@ fn inset_workspace(area: Rect) -> Rect {
     }
 }
 
-fn child_constraint(node: &LayoutNode, direction: SplitDirection, state: &AppState) -> Constraint {
+fn child_constraint(
+    node: &LayoutNode,
+    direction: SplitDirection,
+    area: Rect,
+    state: &AppState,
+) -> Constraint {
     if !node_is_visible(node, state) {
         return Constraint::Length(0);
     }
     match node {
         LayoutNode::Pane(pane) => {
+            if matches!((pane.minimum, pane.maximum), (Some(minimum), Some(maximum)) if minimum == maximum)
+            {
+                return Constraint::Length(pane.minimum.expect("matched fixed pane"));
+            }
+
+            if direction == SplitDirection::Vertical
+                && pane.element == ElementId::input()
+                && state.view.input_editor == InputEditor::Owned
+            {
+                return Constraint::Length(owned_input_height(&state.input.text, area.width));
+            }
+
             let view = state.view.pane(&pane.element);
             let explicit = match direction {
                 SplitDirection::Horizontal => view.width,
@@ -98,7 +120,6 @@ fn child_constraint(node: &LayoutNode, direction: SplitDirection, state: &AppSta
                 return Constraint::Length(explicit);
             }
             match (pane.minimum, pane.maximum) {
-                (Some(minimum), Some(maximum)) if minimum == maximum => Constraint::Length(minimum),
                 (Some(minimum), None) => Constraint::Min(minimum),
                 (None, Some(maximum)) => Constraint::Max(maximum),
                 _ => Constraint::Fill(pane.weight.max(1)),
@@ -108,6 +129,24 @@ fn child_constraint(node: &LayoutNode, direction: SplitDirection, state: &AppSta
             Constraint::Fill(layout_weight(&split.children, state).max(1))
         }
     }
+}
+
+fn owned_input_height(text: &str, width: u16) -> u16 {
+    let width = usize::from(width.max(1));
+    let visual_lines = if text.is_empty() {
+        1usize
+    } else {
+        text.split('\n')
+            .map(|line| {
+                let characters = line.chars().count();
+                characters.max(1).div_ceil(width)
+            })
+            .sum()
+    };
+    let content_height = u16::try_from(visual_lines).unwrap_or(u16::MAX);
+    content_height
+        .saturating_add(1)
+        .clamp(OWNED_INPUT_MIN_HEIGHT, OWNED_INPUT_MAX_HEIGHT)
 }
 
 fn node_is_visible(node: &LayoutNode, state: &AppState) -> bool {
@@ -274,5 +313,13 @@ mod tests {
                 + PANE_GUTTER,
             output[&ElementId::input()].y
         );
+    }
+
+    #[test]
+    fn owned_input_grows_with_lines_and_wraps_up_to_a_maximum() {
+        assert_eq!(owned_input_height("", 40), 2);
+        assert_eq!(owned_input_height("one\ntwo\nthree", 40), 4);
+        assert_eq!(owned_input_height(&"x".repeat(100), 20), 6);
+        assert_eq!(owned_input_height(&"x".repeat(1000), 20), OWNED_INPUT_MAX_HEIGHT);
     }
 }
