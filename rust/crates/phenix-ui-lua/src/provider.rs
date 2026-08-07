@@ -91,29 +91,40 @@ impl LuaFrontendProvider {
         }
     }
 
+    fn binding_is_active(context: &FrontendContext, binding: &LuaBinding) -> bool {
+        // Global multi-key sequences model Normal-mode navigation. They must not
+        // consume ordinary composer insertion: Space may be <leader>, `g` may
+        // begin `gt`, and Ctrl-W may begin a window command in Normal mode while
+        // all three are valid Insert-mode editing input.
+        !(binding.pane == PaneType::Global
+            && context.pane_type == PaneType::Input
+            && context.input_insert_mode
+            && binding.chord.len() > 1)
+    }
+
     fn resolve_scope(
         &self,
+        context: &FrontendContext,
         pane: PaneType,
         inputs: &[KeyInput],
     ) -> Result<KeyResolution, FrontendProviderError> {
         let state = self.state.borrow();
-        if let Some(binding) = state
-            .bindings
-            .iter()
-            .rev()
-            .find(|binding| binding.pane == pane && binding.chord.matches_inputs(inputs))
-        {
+        if let Some(binding) = state.bindings.iter().rev().find(|binding| {
+            binding.pane == pane
+                && Self::binding_is_active(context, binding)
+                && binding.chord.matches_inputs(inputs)
+        }) {
             return self
                 .lua
                 .registry_value::<Function>(&binding.callback)
                 .map(KeyResolution::Callback)
                 .map_err(lua_runtime_error);
         }
-        if state
-            .bindings
-            .iter()
-            .any(|binding| binding.pane == pane && binding.chord.starts_with_inputs(inputs))
-        {
+        if state.bindings.iter().any(|binding| {
+            binding.pane == pane
+                && Self::binding_is_active(context, binding)
+                && binding.chord.starts_with_inputs(inputs)
+        }) {
             return Ok(KeyResolution::Prefix);
         }
         Ok(KeyResolution::None)
@@ -123,9 +134,9 @@ impl LuaFrontendProvider {
         &self,
         context: &FrontendContext,
     ) -> Result<KeyResolution, FrontendProviderError> {
-        match self.resolve_scope(context.pane_type, &self.pending_keys)? {
+        match self.resolve_scope(context, context.pane_type, &self.pending_keys)? {
             KeyResolution::None if context.pane_type != PaneType::Global => {
-                self.resolve_scope(PaneType::Global, &self.pending_keys)
+                self.resolve_scope(context, PaneType::Global, &self.pending_keys)
             }
             resolution => Ok(resolution),
         }
@@ -196,6 +207,9 @@ impl LuaFrontendProvider {
             .map_err(lua_runtime_error)?;
         table
             .set("input_empty", context.input_empty)
+            .map_err(lua_runtime_error)?;
+        table
+            .set("input_insert_mode", context.input_insert_mode)
             .map_err(lua_runtime_error)?;
         table
             .set("details_visible", context.details_visible)
@@ -442,6 +456,46 @@ phenix.keymap.set("global", "<leader>fm", phenix.action.models)
     }
 
     #[test]
+    fn global_normal_sequences_do_not_steal_insert_mode_text_editing() {
+        let mut provider =
+            LuaFrontendProvider::new(LuaFrontendOptions::default()).expect("Lua provider");
+        let insert = input_context(true);
+
+        assert!(provider
+            .handle_key(
+                &insert,
+                key(KeyCode::Character(' '), false, false, false),
+            )
+            .expect("space passes to editor")
+            .is_empty());
+        assert!(provider
+            .handle_key(
+                &insert,
+                key(KeyCode::Character('w'), true, false, false),
+            )
+            .expect("ctrl-w passes to editor")
+            .is_empty());
+        assert!(provider
+            .handle_key(
+                &insert,
+                key(KeyCode::Character('g'), false, false, false),
+            )
+            .expect("g passes to editor")
+            .is_empty());
+
+        // Explicit single-key global actions still apply in Insert mode.
+        assert_eq!(
+            provider
+                .handle_key(
+                    &insert,
+                    key(KeyCode::Character('c'), true, false, false),
+                )
+                .expect("ctrl-c remains explicit abort"),
+            vec![FrontendCommand::Application(ApplicationCommand::Abort)]
+        );
+    }
+
+    #[test]
     fn failed_prefix_retries_the_current_key() {
         let path = temporary_config(
             r#"
@@ -547,7 +601,15 @@ id: router.mixed
             overlay_open: pane_type == PaneType::Overlay,
             dialog_open: false,
             input_empty: true,
+            input_insert_mode: false,
             details_visible: false,
+        }
+    }
+
+    fn input_context(insert_mode: bool) -> FrontendContext {
+        FrontendContext {
+            input_insert_mode: insert_mode,
+            ..context(PaneType::Input)
         }
     }
 
