@@ -1,14 +1,15 @@
 use crate::{
     install_core_consumers, install_frontend_provider, BusReaction, EventRouter, InputEdit,
-    UiEvent, UiIngressError, UiMailbox, UiMessage, ViewMutation,
+    UiIngressError, UiMailbox, UiMessage, ViewMutation,
 };
 use phenix_frontend_config::FrontendProviderRef;
 use phenix_runtime_api::{BackendClient, BackendCommand, BackendRuntime, BackendWorker};
 use phenix_ui_core::{
     command_completions, group_transcript_turns, parse_markdown, reduce, AppEffect, AppEvent,
-    AppState, ElementId, FocusDirection, FocusTarget, LayoutAxis, OverlayState, ResizeRequest,
-    RichBlock, RichBlockView, RouteTarget, UiInput, VimMode,
+    AppState, FocusDirection, FocusTarget, LayoutAxis, OverlayState, ResizeRequest, VimMode,
 };
+#[cfg(test)]
+use phenix_ui_core::{ElementId, InputEditor, RichBlockView};
 use std::collections::VecDeque;
 use std::env;
 use std::error::Error;
@@ -26,13 +27,6 @@ const DEFAULT_DRAIN_LIMIT: usize = 256;
 
 pub trait UiRenderer {
     fn render(&mut self, state: &AppState) -> Result<(), String>;
-
-    /// Return the top-level UI element occupying a terminal coordinate from the
-    /// most recently rendered frame. Keyboard focus is intentionally irrelevant
-    /// to this lookup; pointer events are spatially addressed.
-    fn hit_test(&self, _column: u16, _row: u16) -> Option<ElementId> {
-        None
-    }
 
     fn suspend(&mut self) -> Result<(), String> {
         Ok(())
@@ -214,16 +208,7 @@ impl<R: UiRenderer> UiRuntime<R> {
     fn apply(&mut self, message: UiMessage) -> bool {
         let reactions = match message {
             UiMessage::Content(envelope) => self.router.route_content(&self.state, &envelope),
-            UiMessage::Ui(mut envelope) => {
-                if matches!(&envelope.target, RouteTarget::Focused) {
-                    if let UiEvent::Input(UiInput::Mouse(mouse)) = &envelope.event {
-                        if let Some(element) = self.renderer.hit_test(mouse.column, mouse.row) {
-                            envelope.target = RouteTarget::Bubble(element);
-                        }
-                    }
-                }
-                self.router.route_ui(&self.state, &envelope)
-            }
+            UiMessage::Ui(envelope) => self.router.route_ui(&self.state, &envelope),
             UiMessage::App(event) => vec![BusReaction::App(event)],
         };
         self.apply_reactions(reactions)
@@ -467,8 +452,7 @@ fn move_transcript_turn(state: &mut AppState, delta: i32) {
     state.view.transcript_selected_turn =
         Some(current.saturating_add_signed(delta as isize).min(last));
     state.view.transcript_selected_block = None;
-    state.view.transcript_scroll.follow_end = true;
-    state.view.transcript_scroll.offset = 0;
+    state.view.transcript_scroll.follow_end = false;
 }
 
 fn toggle_transcript_turn_details(state: &mut AppState) {
@@ -507,26 +491,12 @@ fn interactive_rich_blocks(document: &phenix_ui_core::RichDocument) -> Vec<usize
         .blocks
         .iter()
         .enumerate()
-        .filter_map(|(index, block)| (block.candidate_views().len() > 1).then_some(index))
+        .filter_map(|(index, block)| block.is_interactive().then_some(index))
         .collect()
 }
 
 fn rich_block_key(turn_id: &str, index: usize) -> String {
     format!("{turn_id}:block:{index}")
-}
-
-fn default_rich_block_view(block: &RichBlock) -> RichBlockView {
-    match block {
-        RichBlock::Table(_) => RichBlockView::Dense,
-        RichBlock::Code(code) if code.language_is("mermaid") => RichBlockView::Rendered,
-        RichBlock::Code(_) => RichBlockView::Highlighted,
-        RichBlock::Image(_) => RichBlockView::Preview,
-        RichBlock::Heading { .. }
-        | RichBlock::Paragraph(_)
-        | RichBlock::Quote(_)
-        | RichBlock::List { .. }
-        | RichBlock::Rule => RichBlockView::Rendered,
-    }
 }
 
 fn move_transcript_block(state: &mut AppState, delta: i32) {
@@ -539,18 +509,24 @@ fn move_transcript_block(state: &mut AppState, delta: i32) {
         state.view.transcript_selected_block = None;
         return;
     }
-    let Some(current_position) = state
+    let next = state
         .view
         .transcript_selected_block
         .and_then(|selected| interactive.iter().position(|index| *index == selected))
-    else {
-        state.view.transcript_selected_block = Some(interactive[0]);
-        state.view.transcript_scroll.follow_end = false;
-        return;
-    };
-    let next = current_position
-        .saturating_add_signed(delta as isize)
-        .min(interactive.len() - 1);
+        .map_or_else(
+            || {
+                if delta.is_negative() {
+                    interactive.len() - 1
+                } else {
+                    0
+                }
+            },
+            |current| {
+                current
+                    .saturating_add_signed(delta as isize)
+                    .min(interactive.len() - 1)
+            },
+        );
     state.view.transcript_selected_block = Some(interactive[next]);
     state.view.transcript_scroll.follow_end = false;
 }
@@ -576,7 +552,7 @@ fn cycle_transcript_block_view(state: &mut AppState, delta: i32) {
         .view
         .rich_block_view(&key)
         .filter(|view| views.contains(view))
-        .unwrap_or_else(|| default_rich_block_view(block));
+        .unwrap_or_else(|| block.default_view());
     let current_index = views.iter().position(|view| *view == current).unwrap_or(0);
     let len = i64::try_from(views.len()).unwrap_or(1).max(1);
     let next = (i64::try_from(current_index).unwrap_or(0) + i64::from(delta)).rem_euclid(len);
@@ -786,7 +762,6 @@ impl Error for UiRuntimeError {}
 mod tests {
     use super::*;
     use phenix_runtime_api::{TranscriptBlock, TranscriptRole};
-    use phenix_ui_core::InputEditor;
 
     #[test]
     fn view_mutations_preserve_editor_cursor_and_pane_size() {
@@ -818,7 +793,7 @@ mod tests {
         let run_id = phenix_runtime_api::RunId::parse("run-1").expect("run id");
         let mut state = AppState {
             root_run: Some(run_id.clone()),
-            ..Default::default()
+            ..AppState::default()
         };
         for (id, role) in [
             ("u1", TranscriptRole::User),
@@ -836,12 +811,8 @@ mod tests {
                     complete: true,
                 });
         }
-        state.view.transcript_scroll.follow_end = false;
-        state.view.transcript_scroll.offset = 12;
         apply_view_mutation(&mut state, ViewMutation::MoveTranscriptTurn(-1));
         assert_eq!(state.view.transcript_selected_turn, Some(0));
-        assert!(state.view.transcript_scroll.follow_end);
-        assert_eq!(state.view.transcript_scroll.offset, 0);
         apply_view_mutation(&mut state, ViewMutation::ToggleTranscriptTurnDetails);
         assert!(state.view.transcript_turn_is_expanded("run-1:u1"));
         assert!(!state.view.transcript_turn_is_expanded("run-1:u2"));
@@ -852,9 +823,9 @@ mod tests {
         let run_id = phenix_runtime_api::RunId::parse("run-rich").expect("run id");
         let mut state = AppState {
             root_run: Some(run_id.clone()),
-            selected_run: Some(run_id.clone()),
-            ..Default::default()
+            ..AppState::default()
         };
+        state.selected_run = Some(run_id.clone());
         state
             .transcript_mut(run_id.clone())
             .append(TranscriptBlock {
