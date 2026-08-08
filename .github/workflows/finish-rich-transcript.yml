@@ -95,7 +95,9 @@ jobs:
           anchor = 'use std::collections::VecDeque;'
           if anchor not in s:
               raise SystemExit('runtime std import anchor not found')
-          s = s.replace(anchor, '#[cfg(test)]\nuse phenix_ui_core::RichBlockView;\n' + anchor, 1)
+          nl = chr(10)
+          test_import = '#[cfg(test)]' + nl + 'use phenix_ui_core::RichBlockView;' + nl
+          s = s.replace(anchor, test_import + anchor, 1)
           path.write_text(s)
           PY2'''
           script = script.replace(
