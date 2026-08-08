@@ -1,0 +1,89 @@
+name: PR 262 repair
+
+on:
+  push:
+    branches:
+      - feat/neovim-native-interaction
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+
+      - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
+        with: { name: devenv }
+
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
+
+      - name: Apply canonical source fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('rust/crates/phenix-ui-lua/src/key.rs')
+          source = path.read_text()
+          needle = "    pub fn len(&self) -> usize {\n        self.strokes.len()\n    }\n"
+          replacement = needle + "\n    pub fn is_empty(&self) -> bool {\n        self.strokes.is_empty()\n    }\n"
+          if "pub fn is_empty(&self)" not in source:
+              if needle not in source:
+                  raise SystemExit('KeyChord::len body changed unexpectedly')
+              path.write_text(source.replace(needle, replacement, 1))
+          PY
+          devenv tasks run maintenance:fix:rust-format --mode single
+          git diff --check
+          if ! git diff --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add rust
+            git commit -m 'fix: normalize Neovim navigation sources'
+            git push
+          fi
+
+      - name: Capture Rust lint
+        id: lint
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          devenv tasks run maintenance:rust-clippy --mode single 2>&1 | tee "$RUNNER_TEMP/pr-262-clippy.log"
+
+      - name: Capture Rust tests
+        id: tests
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          devenv tasks run maintenance:rust-tests --mode single 2>&1 | tee "$RUNNER_TEMP/pr-262-tests.log"
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pr-262-repair-diagnostics
+          path: |
+            ${{ runner.temp }}/pr-262-clippy.log
+            ${{ runner.temp }}/pr-262-tests.log
+          if-no-files-found: warn
+
+      - name: Verify captured checks
+        if: always()
+        shell: bash
+        run: |
+          test '${{ steps.lint.outcome }}' = success
+          test '${{ steps.tests.outcome }}' = success
