@@ -33,6 +33,25 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('rust/crates/phenix-ui-lua/src/key.rs')
+          source = path.read_text()
+          needle = """    pub fn len(&self) -> usize {
+              self.strokes.len()
+          }
+          """
+          replacement = needle + """
+              pub fn is_empty(&self) -> bool {
+                  self.strokes.is_empty()
+              }
+          """
+          if 'pub fn is_empty(&self)' not in source:
+              if needle not in source:
+                  raise SystemExit('KeyChord::len implementation not found')
+              path.write_text(source.replace(needle, replacement, 1))
+          PY
           devenv tasks run maintenance:fix
           git rm .github/workflows/fix-neovim-ci.yml
           git add -A
