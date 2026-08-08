@@ -17,45 +17,19 @@ concurrency:
 jobs:
   checks:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    name: Canonical fix diagnostics
+    name: Source snapshot diagnostics
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
-      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
-        with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-            accept-flake-config = true
-            max-jobs = auto
-
-      - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
-        with: { name: devenv }
-
-      - name: Install devenv
-        run: nix profile add nixpkgs#devenv
-
-      - name: Apply canonical fixes
-        shell: bash
-        run: |
-          set +e
-          mkdir -p "$RUNNER_TEMP/ci-diagnostics"
-          devenv tasks run maintenance:fix:rust-clippy --mode single > "$RUNNER_TEMP/ci-diagnostics/rust-clippy-fix.log" 2>&1
-          devenv tasks run maintenance:fix:rust-format --mode single > "$RUNNER_TEMP/ci-diagnostics/rust-format-fix.log" 2>&1
-          devenv tasks run maintenance:fix:statix --mode single > "$RUNNER_TEMP/ci-diagnostics/statix-fix.log" 2>&1
-          devenv tasks run maintenance:fix:format --mode single > "$RUNNER_TEMP/ci-diagnostics/nix-format-fix.log" 2>&1
-          set -e
-          git diff > "$RUNNER_TEMP/ci-diagnostics/canonical-fixes.diff"
-          git status --porcelain=v1 --untracked-files=all > "$RUNNER_TEMP/ci-diagnostics/status.txt"
-          cat "$RUNNER_TEMP/ci-diagnostics/status.txt"
-
-      - name: Upload canonical fixes
+      - name: Upload source snapshot
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: canonical-fix-diagnostics
-          path: ${{ runner.temp }}/ci-diagnostics
+          name: source-snapshot
+          path: |
+            rust
+            .github/workflows/ci.yml
           if-no-files-found: error
 
       - name: Diagnostic run is not mergeable
