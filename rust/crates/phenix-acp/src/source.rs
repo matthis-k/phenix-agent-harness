@@ -1,14 +1,12 @@
 use crate::{
-    BackendId, GatewayError, IdError, ModelId, ModelSelection, PhenixAcpGatewayBuilder, ProviderId,
-    RoleId, RouterId, RoutingDecision, RoutingRequest, SessionRouter, Workflow, WorkflowId,
-    WorkflowPlan, WorkflowRequest,
+    BackendId, GatewayError, IdError, ModelId, ModelSelection, ProviderId, RoleId, RouterId,
+    RoutingDecision, RoutingRequest, SessionRouter, Workflow, WorkflowId, WorkflowPlan,
+    WorkflowRequest,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
-const WORKFLOW_DECLARATION: &str = "phenix-workflow";
-const ROUTER_DECLARATION: &str = "phenix-router";
 const OBJECTIVE_PLACEHOLDER: &str = "{objective}";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -292,115 +290,6 @@ pub enum ParsedDefinition {
     Router(RoutingTable),
 }
 
-impl ParsedDefinition {
-    pub fn kind(&self) -> DefinitionSourceKind {
-        match self {
-            Self::Workflow(_) => DefinitionSourceKind::Workflow,
-            Self::Router(_) => DefinitionSourceKind::Router,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct DefinitionSources {
-    workflows: BTreeMap<WorkflowId, WorkflowDefinition>,
-    routers: BTreeMap<RouterId, RoutingTable>,
-}
-
-impl DefinitionSources {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn add(&mut self, source: &str) -> Result<DefinitionSourceKind, DefinitionSourceError> {
-        match parse_definition(source)? {
-            ParsedDefinition::Workflow(workflow) => {
-                let id = workflow.id().clone();
-                if self.workflows.insert(id.clone(), workflow).is_some() {
-                    return Err(DefinitionSourceError::DuplicateDefinition {
-                        kind: DefinitionSourceKind::Workflow,
-                        id: id.to_string(),
-                    });
-                }
-                Ok(DefinitionSourceKind::Workflow)
-            }
-            ParsedDefinition::Router(router) => {
-                let id = router.id().clone();
-                if self.routers.insert(id.clone(), router).is_some() {
-                    return Err(DefinitionSourceError::DuplicateDefinition {
-                        kind: DefinitionSourceKind::Router,
-                        id: id.to_string(),
-                    });
-                }
-                Ok(DefinitionSourceKind::Router)
-            }
-        }
-    }
-
-    pub fn add_workflow(&mut self, source: &str) -> Result<WorkflowId, DefinitionSourceError> {
-        match parse_definition(source)? {
-            ParsedDefinition::Workflow(workflow) => {
-                let id = workflow.id().clone();
-                if self.workflows.insert(id.clone(), workflow).is_some() {
-                    return Err(DefinitionSourceError::DuplicateDefinition {
-                        kind: DefinitionSourceKind::Workflow,
-                        id: id.to_string(),
-                    });
-                }
-                Ok(id)
-            }
-            ParsedDefinition::Router(_) => Err(DefinitionSourceError::UnexpectedKind {
-                expected: DefinitionSourceKind::Workflow,
-                actual: DefinitionSourceKind::Router,
-            }),
-        }
-    }
-
-    pub fn add_router(&mut self, source: &str) -> Result<RouterId, DefinitionSourceError> {
-        match parse_definition(source)? {
-            ParsedDefinition::Router(router) => {
-                let id = router.id().clone();
-                if self.routers.insert(id.clone(), router).is_some() {
-                    return Err(DefinitionSourceError::DuplicateDefinition {
-                        kind: DefinitionSourceKind::Router,
-                        id: id.to_string(),
-                    });
-                }
-                Ok(id)
-            }
-            ParsedDefinition::Workflow(_) => Err(DefinitionSourceError::UnexpectedKind {
-                expected: DefinitionSourceKind::Router,
-                actual: DefinitionSourceKind::Workflow,
-            }),
-        }
-    }
-
-    pub fn workflows(&self) -> impl ExactSizeIterator<Item = &WorkflowDefinition> {
-        self.workflows.values()
-    }
-
-    pub fn routers(&self) -> impl ExactSizeIterator<Item = &RoutingTable> {
-        self.routers.values()
-    }
-
-    pub fn register(
-        self,
-        mut builder: PhenixAcpGatewayBuilder,
-    ) -> Result<PhenixAcpGatewayBuilder, DefinitionSourceError> {
-        for (id, router) in self.routers {
-            builder = builder
-                .router(id, router)
-                .map_err(DefinitionSourceError::Gateway)?;
-        }
-        for (id, workflow) in self.workflows {
-            builder = builder
-                .workflow(id, workflow)
-                .map_err(DefinitionSourceError::Gateway)?;
-        }
-        Ok(builder)
-    }
-}
-
 pub fn parse_definition(source: &str) -> Result<ParsedDefinition, DefinitionSourceError> {
     if source.trim().is_empty() {
         return Err(DefinitionSourceError::EmptyDocument);
@@ -427,12 +316,11 @@ pub fn parse_definition(source: &str) -> Result<ParsedDefinition, DefinitionSour
         .trim()
         .to_owned();
 
-    let (declaration_line, declaration_source) =
-        cursor
-            .next_nonblank()
-            .ok_or_else(|| DefinitionSourceError::UnexpectedEnd {
-                expected: "a phenix-workflow or phenix-router fenced declaration",
-            })?;
+    let (declaration_line, declaration_source) = cursor
+        .next_nonblank()
+        .ok_or(DefinitionSourceError::UnexpectedEnd {
+            expected: "a phenix-workflow or phenix-router fenced declaration",
+        })?;
     let kind = match declaration_source.trim() {
         "```phenix-workflow" => DefinitionSourceKind::Workflow,
         "```phenix-router" => DefinitionSourceKind::Router,
@@ -447,15 +335,14 @@ pub fn parse_definition(source: &str) -> Result<ParsedDefinition, DefinitionSour
     let metadata = parse_metadata(&mut cursor, declaration_line, kind)?;
     let id = required_metadata(&metadata, declaration_line, "id")?;
 
-    let (section_line, section_source) =
-        cursor
-            .next_nonblank()
-            .ok_or_else(|| DefinitionSourceError::UnexpectedEnd {
-                expected: match kind {
-                    DefinitionSourceKind::Workflow => "the ## Steps section",
-                    DefinitionSourceKind::Router => "the ## Routes section",
-                },
-            })?;
+    let (section_line, section_source) = cursor
+        .next_nonblank()
+        .ok_or(DefinitionSourceError::UnexpectedEnd {
+            expected: match kind {
+                DefinitionSourceKind::Workflow => "the ## Steps section",
+                DefinitionSourceKind::Router => "the ## Routes section",
+            },
+        })?;
     let expected_section = match kind {
         DefinitionSourceKind::Workflow => "## Steps",
         DefinitionSourceKind::Router => "## Routes",
@@ -652,12 +539,11 @@ fn parse_table(
     cursor: &mut SourceCursor<'_>,
     expected_header: &[&str],
 ) -> Result<Vec<TableRow>, DefinitionSourceError> {
-    let (header_line, header_source) =
-        cursor
-            .next_nonblank()
-            .ok_or_else(|| DefinitionSourceError::UnexpectedEnd {
-                expected: "a Markdown table header",
-            })?;
+    let (header_line, header_source) = cursor
+        .next_nonblank()
+        .ok_or(DefinitionSourceError::UnexpectedEnd {
+            expected: "a Markdown table header",
+        })?;
     let header = parse_pipe_row(header_source, header_line)?;
     if header.iter().map(String::as_str).collect::<Vec<_>>() != expected_header {
         return Err(DefinitionSourceError::InvalidTable {
@@ -670,12 +556,11 @@ fn parse_table(
         });
     }
 
-    let (separator_line, separator_source) =
-        cursor
-            .next_nonblank()
-            .ok_or_else(|| DefinitionSourceError::UnexpectedEnd {
-                expected: "a Markdown table separator",
-            })?;
+    let (separator_line, separator_source) = cursor
+        .next_nonblank()
+        .ok_or(DefinitionSourceError::UnexpectedEnd {
+            expected: "a Markdown table separator",
+        })?;
     let separator = raw_pipe_row(separator_source, separator_line)?;
     if separator.len() != expected_header.len()
         || separator.iter().any(|cell| !valid_separator_cell(cell))
@@ -711,7 +596,7 @@ fn parse_pipe_row(source: &str, line: usize) -> Result<Vec<String>, DefinitionSo
         .collect()
 }
 
-fn raw_pipe_row<'a>(source: &'a str, line: usize) -> Result<Vec<&'a str>, DefinitionSourceError> {
+fn raw_pipe_row(source: &str, line: usize) -> Result<Vec<&str>, DefinitionSourceError> {
     let trimmed = source.trim();
     if !trimmed.starts_with('|') || !trimmed.ends_with('|') {
         return Err(DefinitionSourceError::InvalidTable {
@@ -917,15 +802,6 @@ pub enum DefinitionSourceError {
         line: usize,
         reason: String,
     },
-    UnexpectedKind {
-        expected: DefinitionSourceKind,
-        actual: DefinitionSourceKind,
-    },
-    DuplicateDefinition {
-        kind: DefinitionSourceKind,
-        id: String,
-    },
-    Gateway(GatewayError),
 }
 
 impl Display for DefinitionSourceError {
@@ -987,28 +863,11 @@ impl Display for DefinitionSourceError {
             Self::InvalidTable { line, reason } => {
                 write!(formatter, "definition source table line {line}: {reason}")
             }
-            Self::UnexpectedKind { expected, actual } => {
-                write!(
-                    formatter,
-                    "expected {expected} source, found {actual} source"
-                )
-            }
-            Self::DuplicateDefinition { kind, id } => {
-                write!(formatter, "duplicate {kind} definition {id}")
-            }
-            Self::Gateway(error) => Display::fmt(error, formatter),
         }
     }
 }
 
-impl Error for DefinitionSourceError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Gateway(error) => Some(error),
-            _ => None,
-        }
-    }
-}
+impl Error for DefinitionSourceError {}
 
 #[cfg(test)]
 mod tests {
@@ -1152,20 +1011,6 @@ id: phenix.capability-budget
         assert!(matches!(
             parse_definition(&no_catch_all),
             Err(DefinitionSourceError::InvalidTable { .. })
-        ));
-    }
-
-    #[test]
-    fn source_collection_rejects_duplicate_ids_and_wrong_kinds() {
-        let mut sources = DefinitionSources::new();
-        sources.add_workflow(WORKFLOW).expect("workflow");
-        assert!(matches!(
-            sources.add_workflow(WORKFLOW),
-            Err(DefinitionSourceError::DuplicateDefinition { .. })
-        ));
-        assert!(matches!(
-            sources.add_workflow(ROUTER),
-            Err(DefinitionSourceError::UnexpectedKind { .. })
         ));
     }
 }
