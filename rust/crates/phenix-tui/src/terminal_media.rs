@@ -173,7 +173,7 @@ mod tests {
     #[test]
     fn data_uri_decoder_accepts_standard_acp_image_payloads() {
         // 1x1 transparent PNG.
-        let source = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL2WQAAAABJRU5ErkJggg==";
+        let source = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
         let image = decode_image(source).expect("PNG data URI");
         assert_eq!(image.width(), 1);
         assert_eq!(image.height(), 1);
