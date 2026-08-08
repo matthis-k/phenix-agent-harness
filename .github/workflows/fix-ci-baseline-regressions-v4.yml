@@ -66,6 +66,38 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+
+          source_paths=(
+            rust/crates/phenix-runtime-api/src/protocol.rs
+            rust/crates/phenix-acp/src/runtime/model.rs
+            rust/crates/phenix-acp-backend/src/projection.rs
+            rust/crates/phenix-acp-backend/src/gateway/connection.rs
+            rust/crates/phenix-acp-backend/src/frontend/projection.rs
+            rust/crates/phenix-conductor/src/main.rs
+            rust/crates/phenix-ui-core/src/reducer.rs
+            rust/crates/phenix-process-backend/src/wire.rs
+            rust/crates/phenix-conductor/src/bin/fixture-agent.rs
+            rust/crates/phenix-ui-core/tests/editor_modes.rs
+            rust/crates/phenix-conductor/tests/black_box_model_tool_loop.rs
+            rust/crates/phenix-conductor/tests/stdio_roundtrip.rs
+          )
+          workflow_paths=(
+            .github/workflows/fix-ci-baseline-regressions.yml
+            .github/workflows/fix-ci-baseline-regressions-v2.yml
+            .github/workflows/fix-ci-baseline-regressions-v3.yml
+            .github/workflows/fix-ci-baseline-regressions-v4.yml
+          )
+
+          git add -- "${source_paths[@]}"
+          git add -u -- "${workflow_paths[@]}"
+
+          actual="$(git diff --cached --name-only | sort)"
+          expected="$(printf '%s\n' "${source_paths[@]}" "${workflow_paths[@]}" | sort)"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "unexpected staged paths"
+            diff -u <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") || true
+            exit 1
+          fi
+
           git commit -m "fix: repair conductor and editor CI baselines"
           git push origin HEAD:fix/ci-baseline-regressions
