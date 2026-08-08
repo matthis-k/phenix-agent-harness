@@ -1,0 +1,48 @@
+name: Rich transcript integration probe
+
+on:
+  push:
+    branches:
+      - refactor/rich-transcript-blocks
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 0
+      - name: Probe merge with current main
+        shell: bash
+        run: |
+          set +e
+          git config user.name "phenix-ci"
+          git config user.email "phenix-ci@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-commit --no-ff origin/main
+          status=$?
+          {
+            echo "merge_status=$status"
+            echo
+            git status --short
+            echo
+            echo "conflicts:"
+            git diff --name-only --diff-filter=U
+          } | tee /tmp/merge-status.txt
+          mkdir -p /tmp/conflicts
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            mkdir -p "/tmp/conflicts/$(dirname "$path")"
+            cp "$path" "/tmp/conflicts/$path"
+          done < <(git diff --name-only --diff-filter=U)
+          exit 0
+      - name: Upload merge probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: rich-transcript-merge-probe
+          path: |
+            /tmp/merge-status.txt
+            /tmp/conflicts
