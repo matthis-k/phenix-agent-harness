@@ -4,11 +4,18 @@ _:
   perSystem =
     { pkgs, ... }:
     let
-      source = pkgs.lib.cleanSource ../rust;
+      source = pkgs.lib.fileset.toSource {
+        root = ../.;
+        fileset = pkgs.lib.fileset.unions [
+          ../rust
+          ../config/phenix-harness
+        ];
+      };
       check = pkgs.rustPlatform.buildRustPackage {
         pname = "phenix-rust-core-check";
         version = "0";
         src = source;
+        sourceRoot = "source/rust";
 
         cargoLock.lockFile = ../rust/Cargo.lock;
         nativeBuildInputs = [
