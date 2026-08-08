@@ -9,10 +9,6 @@ use phenix_ui_core::{
     command_completions, AppState, ElementId, FocusTarget, InputEditor, OverlayState,
 };
 use phenix_ui_runtime::UiRenderer;
-use ratatui::crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture},
-    execute,
-};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
@@ -24,21 +20,14 @@ pub struct RatatuiRenderer {
     terminal: Option<DefaultTerminal>,
     provider: FrontendProviderRef,
     media: TerminalMediaRenderer,
-    hit_map: BTreeMap<ElementId, Rect>,
 }
 
 impl RatatuiRenderer {
     pub fn initialize(provider: FrontendProviderRef) -> io::Result<Self> {
-        let terminal = ratatui::try_init()?;
-        if let Err(error) = execute!(io::stdout(), EnableMouseCapture) {
-            ratatui::restore();
-            return Err(error);
-        }
         Ok(Self {
-            terminal: Some(terminal),
+            terminal: Some(ratatui::try_init()?),
             provider,
             media: TerminalMediaRenderer::default(),
-            hit_map: BTreeMap::new(),
         })
     }
 }
@@ -56,24 +45,13 @@ impl UiRenderer for RatatuiRenderer {
             })
             .map_err(|error| error.to_string())?;
 
-        let mut hit_map = BTreeMap::new();
-        collect_layout(&config.layout.root, screen, state, &mut hit_map);
-        self.hit_map = hit_map;
-
         let images = terminal_image_placements(screen, state, &config);
         self.media
             .render(&images)
             .map_err(|error| error.to_string())
     }
 
-    fn hit_test(&self, column: u16, row: u16) -> Option<ElementId> {
-        self.hit_map
-            .iter()
-            .find_map(|(element, area)| rect_contains(*area, column, row).then(|| element.clone()))
-    }
-
     fn suspend(&mut self) -> Result<(), String> {
-        execute!(io::stdout(), DisableMouseCapture).map_err(|error| error.to_string())?;
         self.media.clear().map_err(|error| error.to_string())?;
         self.terminal.take();
         ratatui::restore();
@@ -82,25 +60,16 @@ impl UiRenderer for RatatuiRenderer {
 
     fn resume(&mut self) -> Result<(), String> {
         self.terminal = Some(ratatui::try_init().map_err(|error| error.to_string())?);
-        execute!(io::stdout(), EnableMouseCapture).map_err(|error| error.to_string())?;
         Ok(())
     }
 }
 
 impl Drop for RatatuiRenderer {
     fn drop(&mut self) {
-        let _ = execute!(io::stdout(), DisableMouseCapture);
         let _ = self.media.clear();
         self.terminal.take();
         ratatui::restore();
     }
-}
-
-fn rect_contains(area: Rect, column: u16, row: u16) -> bool {
-    column >= area.x
-        && row >= area.y
-        && column < area.x.saturating_add(area.width)
-        && row < area.y.saturating_add(area.height)
 }
 
 fn render_application(frame: &mut Frame<'_>, state: &AppState, config: &FrontendConfig) {
@@ -219,11 +188,8 @@ fn transcript_scroll(
         let range = &document.turn_ranges[selected];
         Some(range.end.saturating_sub(viewport_height).min(max_scroll))
     });
-    if state.view.transcript_scroll.follow_end {
-        selected_scroll.unwrap_or(max_scroll)
-    } else {
-        max_scroll.saturating_sub(state.view.transcript_scroll.offset)
-    }
+    selected_scroll
+        .unwrap_or_else(|| max_scroll.saturating_sub(state.view.transcript_scroll.offset))
 }
 
 fn terminal_image_placements(
@@ -1168,9 +1134,11 @@ mod tests {
     #[test]
     fn status_can_resolve_selected_run_model() {
         let run_id = RunId::parse("run-root").expect("run ID");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
-        state.selected_run = Some(run_id.clone());
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..AppState::default()
+        };
         state.snapshot = Some(RuntimeSnapshot {
             capabilities: Default::default(),
             health: BackendHealth::Ready,
@@ -1214,7 +1182,7 @@ mod tests {
         let mut state = AppState {
             root_run: Some(run_id.clone()),
             selected_run: Some(run_id.clone()),
-            ..Default::default()
+            ..AppState::default()
         };
         state
             .transcript_mut(run_id.clone())
