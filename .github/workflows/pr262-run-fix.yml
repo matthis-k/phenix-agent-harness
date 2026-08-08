@@ -1,0 +1,26 @@
+name: PR262 patch
+on: push
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: feat/neovim-native-interaction
+          fetch-depth: 0
+      - name: Apply patch
+        run: python3 .github/pr262_fix.py
+      - name: Format and verify diff
+        run: |
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          git diff --check
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f .github/pr262_fix.py .github/workflows/pr262-final-clippy.yml .github/workflows/pr262-run-fix.yml
+          git add -A
+          git commit -m 'fix: satisfy strict Rust lint gate'
+          git push origin HEAD:feat/neovim-native-interaction
