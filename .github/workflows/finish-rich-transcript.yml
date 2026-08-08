@@ -24,12 +24,12 @@ jobs:
           import subprocess
 
           text = subprocess.check_output(
-              ['git', 'show', 'HEAD^:.github/workflows/finish-rich-transcript.yml'],
+              ['git', 'show', '87c2ae1bceee7dd680531211f47eb195cba75b17:.github/workflows/finish-rich-transcript.yml'],
               text=True,
           )
           marker = '        run: |\n'
           if marker not in text:
-              raise SystemExit('previous finalizer run block not found')
+              raise SystemExit('finalizer run block not found')
           block = text.split(marker, 1)[1]
           script = '\n'.join(
               line[10:] if line.startswith('          ') else line
@@ -38,7 +38,6 @@ jobs:
 
           old = 'cargo fmt --all\ncargo fmt --all --check'
           feature_files = [
-              'crates/phenix-tui/src/lib.rs',
               'crates/phenix-tui/src/rich_document.rs',
               'crates/phenix-tui/src/syntax_highlight.rs',
               'crates/phenix-tui/src/terminal_media.rs',
