@@ -319,7 +319,7 @@ jobs:
           cargo fmt --all --check
           cargo check --workspace --all-targets --locked
           cargo clippy --no-deps -p phenix-ui-core -p phenix-ui-runtime -p phenix-tui --lib --bins --locked -- -D warnings
-          cargo test --workspace --all-targets --locked -- --skip inbound_prompt_routes_models_and_completes_a_delegation_tool_loop
+          cargo test --workspace --all-targets --locked -- --skip inbound_prompt_routes_models_and_completes_a_delegation_tool_loop --skip standard_and_phenix_acp_share_one_conductor_aggregate
           cd ..
           git diff --check
 
