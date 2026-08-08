@@ -1,0 +1,46 @@
+name: Format Diagnostic
+
+on:
+  push:
+    branches:
+      - ci-format-diagnostic
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
+        with: { name: devenv }
+
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
+
+      - name: Apply canonical formatting
+        run: |
+          devenv tasks run maintenance:fix:rust-format --mode single
+          devenv tasks run maintenance:fix:format --mode single
+          git diff > /tmp/format.diff
+          git status --porcelain=v1 --untracked-files=all > /tmp/status.txt
+          cat /tmp/format.diff
+
+      - name: Upload formatting diff
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: format-diagnostic
+          path: |
+            /tmp/format.diff
+            /tmp/status.txt
+          if-no-files-found: error
