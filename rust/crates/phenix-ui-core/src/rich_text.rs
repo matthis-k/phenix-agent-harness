@@ -338,7 +338,10 @@ fn starts_block(lines: &[&str], index: usize) -> bool {
 }
 
 fn markdown_heading(line: &str) -> Option<(usize, &str)> {
-    let level = line.chars().take_while(|character| *character == '#').count();
+    let level = line
+        .chars()
+        .take_while(|character| *character == '#')
+        .count();
     if !(1..=6).contains(&level) {
         return None;
     }
@@ -403,10 +406,15 @@ fn markdown_image(line: &str) -> Option<(&str, &str)> {
 }
 
 fn next_inline_marker(text: &str) -> Option<usize> {
-    [text.find("**"), text.find('`'), text.find('['), text.find('*')]
-        .into_iter()
-        .flatten()
-        .min()
+    [
+        text.find("**"),
+        text.find('`'),
+        text.find('['),
+        text.find('*'),
+    ]
+    .into_iter()
+    .flatten()
+    .min()
 }
 
 #[cfg(test)]
@@ -418,7 +426,10 @@ mod tests {
         let document = parse_markdown(
             "# Heading\n\n| Name | State |\n| --- | --- |\n| build | green |\n\n```mermaid\nflowchart LR\nA --> B\n```",
         );
-        assert!(matches!(document.blocks[0], RichBlock::Heading { level: 1, .. }));
+        assert!(matches!(
+            document.blocks[0],
+            RichBlock::Heading { level: 1, .. }
+        ));
         assert!(matches!(document.blocks[1], RichBlock::Table(_)));
         assert!(matches!(document.blocks[2], RichBlock::Code(_)));
     }
@@ -429,7 +440,10 @@ mod tests {
             header: vec![RichText::plain("Name")],
             rows: vec![vec![RichText::plain("build")]],
         });
-        assert_eq!(table.candidate_views(), &[RichBlockView::Dense, RichBlockView::Grid]);
+        assert_eq!(
+            table.candidate_views(),
+            &[RichBlockView::Dense, RichBlockView::Grid]
+        );
 
         let mermaid = RichBlock::Code(RichCodeBlock {
             language: Some("mermaid".to_owned()),
