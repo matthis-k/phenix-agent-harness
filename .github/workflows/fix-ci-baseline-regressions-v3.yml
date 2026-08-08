@@ -70,6 +70,60 @@ jobs:
           if text.count(old) != 1:
               raise SystemExit('black-box async execution assertion shape changed unexpectedly')
           path.write_text(text.replace(old, new))
+
+          path = Path('rust/crates/phenix-conductor/tests/stdio_roundtrip.rs')
+          text = path.read_text()
+          old = (
+              '    let mut saw_extended_event = false;\n'
+              '    let extended_completed = loop {\n'
+              '        let message = process.receive()?;\n'
+              '        if message.get("method").and_then(Value::as_str) == Some("_phenix/node/event")\n'
+              '            && message.to_string().contains("echo: extended")\n'
+              '        {\n'
+              '            saw_extended_event = true;\n'
+              '        }\n'
+              '        if message.get("id") == Some(&Value::from(10)) {\n'
+              '            break message;\n'
+              '        }\n'
+              '    };\n'
+              '    assert!(\n'
+              '        saw_extended_event,\n'
+              '        "subscribed node did not emit the downstream Phenix ACP event"\n'
+              '    );\n'
+              '    assert!(\n'
+              '        extended_completed["result"]["events"]\n'
+              '            .as_array()\n'
+              '            .is_some_and(|events| !events.is_empty()),\n'
+              '        "node execution did not return its immediate event batch"\n'
+              '    );\n'
+          )
+          new = (
+              '    let mut saw_extended_event = false;\n'
+              '    let mut extended_completed = None;\n'
+              '    while !saw_extended_event || extended_completed.is_none() {\n'
+              '        let message = process.receive()?;\n'
+              '        if message.get("method").and_then(Value::as_str) == Some("_phenix/node/event")\n'
+              '            && message.to_string().contains("echo: extended")\n'
+              '        {\n'
+              '            saw_extended_event = true;\n'
+              '        }\n'
+              '        if message.get("id") == Some(&Value::from(10)) {\n'
+              '            extended_completed = Some(message);\n'
+              '        }\n'
+              '    }\n'
+              '    let extended_completed = extended_completed.expect("node execute response");\n'
+              '    assert!(\n'
+              '        saw_extended_event,\n'
+              '        "subscribed node did not emit the downstream Phenix ACP event"\n'
+              '    );\n'
+              '    assert!(\n'
+              '        extended_completed["result"]["events"].is_array(),\n'
+              '        "node execution did not return its immediate event batch"\n'
+              '    );\n'
+          )
+          if text.count(old) != 1:
+              raise SystemExit('stdio async subscription assertion shape changed unexpectedly')
+          path.write_text(text.replace(old, new))
           PY
 
           rm .github/workflows/fix-ci-baseline-regressions.yml
