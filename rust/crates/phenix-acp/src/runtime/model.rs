@@ -300,6 +300,7 @@ pub enum SessionEvent {
     ToolStarted {
         call_id: String,
         name: String,
+        raw_input_json: String,
         input_summary: String,
     },
     ToolUpdated {

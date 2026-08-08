@@ -821,6 +821,21 @@ pub(crate) fn decode_event(value: Value) -> Result<Option<BackendEvent>, Backend
             run_id: parse_run_id(string_field(object, "runId")?)?,
             tool_call_id: parse_tool_call_id(string_field(object, "toolCallId")?)?,
             tool_name: string_field(object, "toolName")?.to_owned(),
+            raw_input_json: object
+                .get("rawInput")
+                .or_else(|| object.get("input"))
+                .map_or_else(
+                    || {
+                        json!({
+                            "summary": object
+                                .get("inputSummary")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default()
+                        })
+                        .to_string()
+                    },
+                    |value| value.to_string(),
+                ),
             input_summary: string_field(object, "inputSummary")?.to_owned(),
         }),
         "tool.updated" => Some(BackendEvent::ToolUpdated {

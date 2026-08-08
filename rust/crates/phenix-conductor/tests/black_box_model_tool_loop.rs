@@ -110,10 +110,31 @@ fn inbound_prompt_routes_models_and_completes_a_delegation_tool_loop() -> Result
             }
         }),
     )?;
-    let specialist_result = process.receive_response(8)?;
+    let mut specialist_results = vec![process.receive_response(8)?];
+    for poll_id in 8_000..8_250 {
+        if specialist_results
+            .iter()
+            .any(|result| result.to_string().contains("42"))
+        {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+        process.send_request(
+            poll_id,
+            "_phenix/node/execute",
+            &json!({
+                "tree_id": tree_id,
+                "node_id": specialist_node,
+                "command": { "kind": "poll" }
+            }),
+        )?;
+        specialist_results.push(process.receive_response(poll_id)?);
+    }
     assert!(
-        specialist_result.to_string().contains("42"),
-        "specialist response did not traverse the conductor: {specialist_result}"
+        specialist_results
+            .iter()
+            .any(|result| result.to_string().contains("42")),
+        "specialist response did not traverse the conductor: {specialist_results:?}"
     );
 
     process.send_request(

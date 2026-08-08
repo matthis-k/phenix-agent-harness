@@ -306,11 +306,17 @@ fn project_event(
         SessionEvent::ToolStarted {
             call_id,
             name,
-            input_summary,
+            raw_input_json,
+            input_summary: _,
         } => {
+            let raw_input = serde_json::from_str::<serde_json::Value>(&raw_input_json).map_err(|error| {
+                agent_client_protocol::util::internal_error(format!(
+                    "invalid structured tool input from ACP backend: {error}"
+                ))
+            })?;
             let tool = ToolCall::new(call_id, name)
                 .status(ToolCallStatus::InProgress)
-                .raw_input(serde_json::json!({ "summary": input_summary }));
+                .raw_input(raw_input);
             send_update(connection, upstream_session, SessionUpdate::ToolCall(tool))?;
             Ok(None)
         }

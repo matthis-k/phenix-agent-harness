@@ -590,6 +590,7 @@ pub enum BackendEvent {
         run_id: RunId,
         tool_call_id: ToolCallId,
         tool_name: String,
+        raw_input_json: String,
         input_summary: String,
     },
     ToolUpdated {
