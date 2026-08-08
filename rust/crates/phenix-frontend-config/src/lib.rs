@@ -92,6 +92,7 @@ pub struct FrontendContext {
     pub overlay_open: bool,
     pub dialog_open: bool,
     pub input_empty: bool,
+    pub input_insert_mode: bool,
     pub details_visible: bool,
 }
 
@@ -114,6 +115,10 @@ pub enum ApplicationCommand {
     OpenAuthentication,
     OpenModelPicker,
     OpenSessionPicker,
+    CreateSession,
+    MoveSession(i32),
+    MoveRun(i32),
+    ActivateSidebarRun,
     ToggleDetails,
     CloseOverlay,
 }
@@ -136,6 +141,10 @@ pub enum UiCommand {
         element: ElementId,
         lines: i32,
     },
+    SidebarRunMove(i32),
+    SidebarRunParent,
+    SidebarRunChild,
+    SidebarRunToggle,
     TranscriptTurnMove(i32),
     TranscriptTurnToggleDetails,
     Invalidate,

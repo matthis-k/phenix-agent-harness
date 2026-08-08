@@ -1,15 +1,16 @@
 use crate::{
     install_core_consumers, install_frontend_provider, BusReaction, EventRouter, InputEdit,
-    UiIngressError, UiMailbox, UiMessage, ViewMutation,
+    UiEvent, UiIngressError, UiMailbox, UiMessage, ViewMutation,
 };
 use phenix_frontend_config::FrontendProviderRef;
 use phenix_runtime_api::{BackendClient, BackendCommand, BackendRuntime, BackendWorker};
 use phenix_ui_core::{
     command_completions, group_transcript_turns, parse_markdown, reduce, AppEffect, AppEvent,
-    AppState, FocusDirection, FocusTarget, LayoutAxis, OverlayState, ResizeRequest, VimMode,
+    AppState, ElementId, FocusDirection, FocusTarget, LayoutAxis, OverlayState, ResizeRequest,
+    RouteTarget, UiInput, VimMode,
 };
 #[cfg(test)]
-use phenix_ui_core::{ElementId, InputEditor, RichBlockView};
+use phenix_ui_core::{InputEditor, RichBlockView};
 use std::collections::VecDeque;
 use std::env;
 use std::error::Error;
@@ -27,6 +28,13 @@ const DEFAULT_DRAIN_LIMIT: usize = 256;
 
 pub trait UiRenderer {
     fn render(&mut self, state: &AppState) -> Result<(), String>;
+
+    /// Return the top-level UI element occupying a terminal coordinate from the
+    /// most recently rendered frame. Keyboard focus is intentionally irrelevant
+    /// to this lookup; pointer events are spatially addressed.
+    fn hit_test(&self, _column: u16, _row: u16) -> Option<ElementId> {
+        None
+    }
 
     fn suspend(&mut self) -> Result<(), String> {
         Ok(())
@@ -208,7 +216,16 @@ impl<R: UiRenderer> UiRuntime<R> {
     fn apply(&mut self, message: UiMessage) -> bool {
         let reactions = match message {
             UiMessage::Content(envelope) => self.router.route_content(&self.state, &envelope),
-            UiMessage::Ui(envelope) => self.router.route_ui(&self.state, &envelope),
+            UiMessage::Ui(mut envelope) => {
+            if matches!(&envelope.target, RouteTarget::Focused) {
+                if let UiEvent::Input(UiInput::Mouse(mouse)) = &envelope.event {
+                    if let Some(element) = self.renderer.hit_test(mouse.column, mouse.row) {
+                        envelope.target = RouteTarget::Bubble(element);
+                    }
+                }
+            }
+            self.router.route_ui(&self.state, &envelope)
+        }
             UiMessage::App(event) => vec![BusReaction::App(event)],
         };
         self.apply_reactions(reactions)
@@ -422,6 +439,10 @@ fn apply_view_mutation(state: &mut AppState, mutation: ViewMutation) {
                 scroll.offset = scroll.offset.saturating_add_signed(lines as isize);
             }
         }
+        ViewMutation::MoveSidebarRun(delta) => move_sidebar_run(state, delta),
+        ViewMutation::MoveSidebarRunParent => move_sidebar_run_parent(state),
+        ViewMutation::MoveSidebarRunChild => move_sidebar_run_child(state),
+        ViewMutation::ToggleSidebarRun => toggle_sidebar_run(state),
         ViewMutation::MoveTranscriptTurn(delta) => move_transcript_turn(state, delta),
         ViewMutation::ToggleTranscriptTurnDetails => toggle_transcript_turn_details(state),
         ViewMutation::MoveTranscriptBlock(delta) => move_transcript_block(state, delta),
@@ -433,6 +454,89 @@ fn apply_view_mutation(state: &mut AppState, mutation: ViewMutation) {
         ViewMutation::EditInput(edit) => apply_input_edit(state, edit),
         ViewMutation::MoveOverlaySelection(delta) => move_overlay_selection(state, delta),
         ViewMutation::Notify(message) => state.notifications.push_back(message),
+    }
+}
+
+fn move_sidebar_run(state: &mut AppState, delta: i32) {
+    let visible = state.visible_runs();
+    if visible.is_empty() {
+        state.view.sidebar_index = 0;
+        state.view.sidebar_scroll.offset = 0;
+        return;
+    }
+    let last = visible.len() - 1;
+    state.view.sidebar_index = state
+        .view
+        .sidebar_index
+        .min(last)
+        .saturating_add_signed(delta as isize)
+        .min(last);
+    state.view.sidebar_scroll.offset = state.view.sidebar_index.saturating_sub(1);
+}
+
+fn set_sidebar_cursor(state: &mut AppState, run_id: &phenix_runtime_api::RunId) {
+    let visible = state.visible_runs();
+    if let Some(index) = visible.iter().position(|entry| &entry.id == run_id) {
+        state.view.sidebar_index = index;
+        state.view.sidebar_scroll.offset = index.saturating_sub(1);
+    }
+}
+
+fn move_sidebar_run_parent(state: &mut AppState) {
+    let Some(run_id) = state.sidebar_cursor_run_id() else {
+        return;
+    };
+    let visible = state.visible_runs();
+    let has_children = visible
+        .iter()
+        .find(|entry| entry.id == run_id)
+        .is_some_and(|entry| entry.has_children);
+    if has_children && !state.view.run_is_collapsed(&run_id) {
+        state.view.set_run_collapsed(run_id, true);
+        return;
+    }
+    if let Some(parent) = state.run_parent(&run_id) {
+        set_sidebar_cursor(state, &parent);
+    }
+}
+
+fn move_sidebar_run_child(state: &mut AppState) {
+    let Some(run_id) = state.sidebar_cursor_run_id() else {
+        return;
+    };
+    let visible = state.visible_runs();
+    let has_children = visible
+        .iter()
+        .find(|entry| entry.id == run_id)
+        .is_some_and(|entry| entry.has_children);
+    if !has_children {
+        return;
+    }
+    if state.view.run_is_collapsed(&run_id) {
+        state.view.set_run_collapsed(run_id, false);
+        return;
+    }
+    if let Some(child) = state.first_run_child(&run_id) {
+        set_sidebar_cursor(state, &child);
+    }
+}
+
+fn toggle_sidebar_run(state: &mut AppState) {
+    let Some(run_id) = state.sidebar_cursor_run_id() else {
+        return;
+    };
+    let has_children = state
+        .visible_runs()
+        .iter()
+        .find(|entry| entry.id == run_id)
+        .is_some_and(|entry| entry.has_children);
+    if has_children {
+        state.view.toggle_run_collapsed(run_id);
+        let visible = state.visible_runs();
+        state.view.sidebar_index = state
+            .view
+            .sidebar_index
+            .min(visible.len().saturating_sub(1));
     }
 }
 
