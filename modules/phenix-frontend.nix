@@ -7,9 +7,8 @@ _:
       rustSource = pkgs.lib.cleanSource ../rust;
 
       # The user-facing runtime is one Rust workspace product. Build only the
-      # two binaries that are actually shipped. Test/fixture binaries remain
-      # covered by the canonical Rust maintenance gate instead of entering the
-      # ordinary Nix runtime closure.
+      # binaries that are actually shipped. Test/fixture binaries remain
+      # covered by the canonical Rust maintenance gate.
       phenixRustRuntime = pkgs.rustPlatform.buildRustPackage {
         pname = "phenix-rust-runtime";
         version = "0";
@@ -89,14 +88,10 @@ _:
         pkgs.writeShellApplication {
           inherit name;
           runtimeInputs = [
-            pkgs.nodejs
             config.packages.pi-acp
             phenixRustRuntime
           ];
           text = ''
-            export PHENIX_HEADLESS_PROGRAM="${pkgs.nodejs}/bin/node"
-            export PHENIX_HEADLESS_ENTRY="${config.packages.phenix-pi-package}/headless/main.ts"
-            export PHENIX_SOURCE_ROOT="${config.packages.phenix-pi-package}"
             export PHENIX_CONDUCTOR_COMMAND="${phenixRustRuntime}/bin/phenix-conductor"
 
             config_args=()
@@ -114,6 +109,7 @@ _:
 
       configuredSmokeDir = pkgs.runCommand "phenix-configured-smoke-config" { } ''
         cp -R ${../config/phenix-harness} "$out"
+        chmod u+w "$out/config.lua"
         cat >> "$out/config.lua" <<'EOF_CONFIG'
         phenix.keymap.del("global", "<C-q>")
         phenix.theme.set("Accent", { fg = "#ffffff", bold = true })
@@ -145,15 +141,8 @@ _:
             export PI_SKIP_VERSION_CHECK=1
             mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
 
-            # A fresh install has no user config. The packaged authoring config
-            # must make the ordinary wrapper usable without seeding ~/.config.
-            # Window composition is Rust-owned; the default Lua remains a
-            # theme/keymap layer only.
             phenix --print-default-config | grep -Fq 'phenix.theme.set("Normal"'
             phenix --check
-
-            # An explicitly configured wrapper still owns its selected authoring
-            # root and must not be replaced by the packaged fallback.
             phenix-configured-smoke --check
             phenix-acp-smoke
             touch "$out"

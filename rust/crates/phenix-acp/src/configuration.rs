@@ -16,7 +16,9 @@ use std::path::{Component, Path, PathBuf};
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ConfigurationSource {
-    Path { path: PathBuf },
+    Path {
+        path: PathBuf,
+    },
     Inline {
         source: String,
         #[serde(default)]
@@ -268,19 +270,17 @@ fn load_path_source(
     relative_path: &Path,
 ) -> Result<LoadedConfigurationSource, ConfigurationSourceError> {
     validate_relative_path(relative_path)?;
-    let root = fs::canonicalize(source_root).map_err(|source| {
-        ConfigurationSourceError::ResolveRoot {
+    let root =
+        fs::canonicalize(source_root).map_err(|source| ConfigurationSourceError::ResolveRoot {
             path: source_root.to_path_buf(),
             source,
-        }
-    })?;
+        })?;
     let joined = root.join(relative_path);
-    let path = fs::canonicalize(&joined).map_err(|source| {
-        ConfigurationSourceError::ResolveSource {
+    let path =
+        fs::canonicalize(&joined).map_err(|source| ConfigurationSourceError::ResolveSource {
             path: joined.clone(),
             source,
-        }
-    })?;
+        })?;
     if !path.starts_with(&root) {
         return Err(ConfigurationSourceError::OutsideSourceRoot { root, path });
     }

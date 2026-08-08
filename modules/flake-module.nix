@@ -5,9 +5,9 @@
     { system, ... }:
     {
       phenixWrapped = {
-        pi = inputs.self.packages.${system}.pi;
-        piPackage = inputs.self.packages.${system}.phenix-pi-package;
-        rtk = inputs.self.packages.${system}.phenix-rtk;
+        phenix = inputs.self.packages.${system}.phenix;
+        conductor = inputs.self.packages.${system}.phenix-conductor;
+        piAcp = inputs.self.packages.${system}.pi-acp;
         stitch = inputs.self.packages.${system}.stitch;
         stitchMcp = inputs.self.packages.${system}.stitch-mcp;
       };

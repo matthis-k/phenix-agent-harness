@@ -1,6 +1,6 @@
 use phenix_frontend_config::{
-    FrontendCommand, FrontendConfig, FrontendConfigProvider, FrontendContext, FrontendProviderError,
-    FrontendProviderRef,
+    FrontendCommand, FrontendConfig, FrontendConfigProvider, FrontendContext,
+    FrontendProviderError, FrontendProviderRef,
 };
 use phenix_ui_core::{AppState, EventEnvelope, KeyCode, KeyInput, KeyModifiers, UiInput};
 use phenix_ui_runtime::{
@@ -10,16 +10,9 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
+#[derive(Default)]
 struct EmptyProvider {
     config: FrontendConfig,
-}
-
-impl Default for EmptyProvider {
-    fn default() -> Self {
-        Self {
-            config: FrontendConfig::default(),
-        }
-    }
 }
 
 impl FrontendConfigProvider for EmptyProvider {
@@ -67,9 +60,9 @@ fn shift_enter_inserts_a_newline_instead_of_submitting() {
 
     assert_eq!(
         reactions.reactions,
-        vec![BusReaction::View(ViewMutation::EditInput(InputEdit::Insert(
-            "\n".to_owned()
-        )))]
+        vec![BusReaction::View(ViewMutation::EditInput(
+            InputEdit::Insert("\n".to_owned())
+        ))]
     );
 }
 

@@ -10,7 +10,6 @@ clap = { workspace = true }
 phenix-acp = { path = "../phenix-acp" }
 phenix-acp-backend = { path = "../phenix-acp-backend" }
 phenix-frontend-config = { path = "../phenix-frontend-config" }
-phenix-process-backend = { path = "../phenix-process-backend" }
 phenix-runtime-api = { path = "../phenix-runtime-api" }
 phenix-ui-core = { path = "../phenix-ui-core" }
 phenix-ui-lua = { path = "../phenix-ui-lua" }

@@ -1,18 +1,24 @@
 # Development
 
-The repository uses a standalone devenv task graph for maintenance. Nix provides the toolchain, build closures, and reproducibility boundary; `maintenance.nix` is the canonical source for local and CI checks.
+The repository uses devenv for its canonical maintenance graph. Nix provides the toolchain and reproducible build boundary; the application itself is the Rust workspace plus its Lua/Markdown authoring configuration.
 
-## Enter the development shell
+## Development shell
 
 ```sh
 nix develop
 ```
 
-The shell includes devenv, the Pi runtime toolchain, Stitch, and the repository helpers shown at startup.
+The shell contains the Rust, Nix, Lua, actionlint, Statix, and Stitch tooling needed for the current repository. It intentionally does not carry the retired in-repository TypeScript/Pi-extension toolchain.
 
 ## Canonical commands
 
-Run the complete read-only maintenance graph:
+Apply deterministic mechanical fixes:
+
+```sh
+devenv tasks run maintenance:fix
+```
+
+Run the complete validation graph:
 
 ```sh
 devenv test
@@ -24,33 +30,24 @@ The equivalent explicit task is:
 devenv tasks run maintenance:check
 ```
 
-Apply the repository-owned mechanical fixes, then review the resulting diff:
-
-```sh
-devenv tasks run maintenance:fix
-```
-
-Update the independently locked Pi extension dependencies after editing `modules/pi-npm/package.json`:
-
-```sh
-update-pi-npm-lock
-```
+Pull-request CI automatically applies the same mechanical fix graph to same-repository branches before running validation. If normalization changes the tree, CI commits that normalization and validates the resulting commit in the follow-up run.
 
 ## Maintenance graph
 
 | Task | Responsibility |
 | --- | --- |
-| `maintenance:format` | Check Nix formatting and Biome formatting/lint rules |
-| `maintenance:statix` | Check Nix static-analysis rules |
+| `maintenance:format` | Verify canonical Nix and Rust formatting |
+| `maintenance:statix` | Verify Nix static-analysis rules |
 | `maintenance:workflows` | Validate GitHub Actions workflows with actionlint |
-| `maintenance:runtime` | Build and run the packaged Phenix runtime tests |
-| `maintenance:typecheck` | Build the TypeScript compiler gate |
-| `maintenance:rust-core` | Format, check, lint, and test all backend-neutral Rust targets |
-| `maintenance:flake` | Run the complete flake check |
-| `maintenance:check` | Aggregate every read-only maintenance task |
-| `maintenance:fix` | Apply statix and formatter fixes |
+| `maintenance:tools` | Verify required maintenance executables |
+| `maintenance:rust-compile` | Compile/check the complete Rust workspace |
+| `maintenance:rust-clippy` | Run Clippy with warnings denied |
+| `maintenance:rust-tests` | Run all Rust targets/tests |
+| `maintenance:flake` | Run Nix flake checks and packaged smoke tests |
+| `maintenance:check` | Aggregate the read-only validation graph |
+| `maintenance:fix` | Apply safe Statix rewrites plus Nix/Rust formatting |
 
-Do not duplicate task selection in GitHub Actions, shell wrappers, or extra Nix applications. CI installs devenv and runs `devenv test`, so local and remote verification use the same graph.
+Formatting and safe static rewrites are mechanical. Compiler failures, Clippy findings requiring judgment, tests, runtime failures, and Nix evaluation/build failures must be fixed intentionally.
 
 ## Stitch
 

@@ -20,7 +20,7 @@ use phenix_acp_backend::{
 use phenix_runtime_api::{
     AuthMethod, BackendCommand, BackendReply, CommandSource, ModelSummary as RuntimeModelSummary,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::value::to_raw_value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;

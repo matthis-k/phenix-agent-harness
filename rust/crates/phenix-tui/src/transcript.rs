@@ -36,7 +36,9 @@ pub(crate) fn transcript_document(
     let mut turns = state
         .input_target()
         .and_then(|run_id| state.transcript(run_id))
-        .map_or_else(Vec::new, |transcript| group_transcript_turns(&transcript.blocks));
+        .map_or_else(Vec::new, |transcript| {
+            group_transcript_turns(&transcript.blocks)
+        });
 
     if !state.notifications.is_empty() {
         if turns.is_empty() {
@@ -48,11 +50,15 @@ pub(crate) fn transcript_document(
             });
         }
         if let Some(turn) = turns.last_mut() {
-            turn.details
-                .extend(state.notifications.iter().map(|message| TranscriptTurnDetail {
-                    kind: TranscriptDetailKind::System,
-                    text: message.clone(),
-                }));
+            turn.details.extend(
+                state
+                    .notifications
+                    .iter()
+                    .map(|message| TranscriptTurnDetail {
+                        kind: TranscriptDetailKind::System,
+                        text: message.clone(),
+                    }),
+            );
         }
     }
 
@@ -260,11 +266,7 @@ fn decorate_selected_turn(
     }
 }
 
-fn decorate_selected_block(
-    block: &mut RenderedRichBlock,
-    width: usize,
-    theme: &ThemeConfig,
-) {
+fn decorate_selected_block(block: &mut RenderedRichBlock, width: usize, theme: &ThemeConfig) {
     let rail_style = theme_style(theme, "Accent").add_modifier(Modifier::BOLD);
     for line in &mut block.lines {
         *line = add_selection_rail(line, BLOCK_RAIL, rail_style, width);
@@ -522,7 +524,9 @@ mod tests {
         let theme = ThemeConfig::default();
         let lines = user_message_lines("abcdefghijklmnopqrstuvwxyz", 16, &theme);
         assert!(lines.len() > 2);
-        assert!(lines.iter().all(|line| line_text(line).chars().count() >= 16));
+        assert!(lines
+            .iter()
+            .all(|line| line_text(line).chars().count() >= 16));
         let background = surface_style(&theme, "UserMessage").bg;
         assert!(background.is_some());
         assert!(lines.iter().all(|line| line.style.bg == background));
@@ -531,9 +535,11 @@ mod tests {
     #[test]
     fn distinct_turns_have_explicit_vertical_rhythm() {
         let run_id = RunId::parse("run-1").expect("run id");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
-        state.selected_run = Some(run_id.clone());
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..Default::default()
+        };
         let transcript = state.transcript_mut(run_id);
         transcript.append(block("u1", TranscriptRole::User, "one"));
         transcript.append(block("a1", TranscriptRole::Assistant, "answer one"));
@@ -549,20 +555,18 @@ mod tests {
     #[test]
     fn effective_selected_turn_remains_visible_when_input_has_focus() {
         let run_id = RunId::parse("run-1").expect("run id");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
-        state.selected_run = Some(run_id.clone());
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..Default::default()
+        };
         state.view.focus = FocusTarget::Input;
-        state.transcript_mut(run_id.clone()).append(block(
-            "u1",
-            TranscriptRole::User,
-            "hello",
-        ));
-        state.transcript_mut(run_id).append(block(
-            "a1",
-            TranscriptRole::Assistant,
-            "world",
-        ));
+        state
+            .transcript_mut(run_id.clone())
+            .append(block("u1", TranscriptRole::User, "hello"));
+        state
+            .transcript_mut(run_id)
+            .append(block("a1", TranscriptRole::Assistant, "world"));
         let document = transcript_document(&state, &ThemeConfig::default(), 50);
         let selected = &document.lines[document.turn_ranges[0].clone()];
         assert!(selected
@@ -577,17 +581,17 @@ mod tests {
     #[test]
     fn selected_rich_block_is_visually_nested_inside_selected_turn() {
         let run_id = RunId::parse("run-1").expect("run id");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
-        state.selected_run = Some(run_id.clone());
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..Default::default()
+        };
         state.view.focus = FocusTarget::Transcript;
         state.view.transcript_selected_turn = Some(0);
         state.view.transcript_selected_block = Some(0);
-        state.transcript_mut(run_id.clone()).append(block(
-            "u1",
-            TranscriptRole::User,
-            "table",
-        ));
+        state
+            .transcript_mut(run_id.clone())
+            .append(block("u1", TranscriptRole::User, "table"));
         state.transcript_mut(run_id).append(block(
             "a1",
             TranscriptRole::Assistant,
@@ -603,14 +607,14 @@ mod tests {
     #[test]
     fn per_block_view_state_changes_only_that_component() {
         let run_id = RunId::parse("run-1").expect("run id");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
-        state.selected_run = Some(run_id.clone());
-        state.transcript_mut(run_id.clone()).append(block(
-            "u1",
-            TranscriptRole::User,
-            "tables",
-        ));
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..Default::default()
+        };
+        state
+            .transcript_mut(run_id.clone())
+            .append(block("u1", TranscriptRole::User, "tables"));
         state.transcript_mut(run_id).append(block(
             "a1",
             TranscriptRole::Assistant,
@@ -633,7 +637,6 @@ mod tests {
             lines: std::iter::once(Line::from("toolbar"))
                 .chain((0..20).map(|index| Line::from(format!("line-{index}"))))
                 .collect(),
-            views: vec![RichBlockView::Source, RichBlockView::Rendered],
             active_view: RichBlockView::Rendered,
             media: None,
         };
@@ -653,14 +656,14 @@ mod tests {
     #[test]
     fn image_blocks_keep_a_media_anchor() {
         let run_id = RunId::parse("run-1").expect("run id");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
-        state.selected_run = Some(run_id.clone());
-        state.transcript_mut(run_id.clone()).append(block(
-            "u1",
-            TranscriptRole::User,
-            "image",
-        ));
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..Default::default()
+        };
+        state
+            .transcript_mut(run_id.clone())
+            .append(block("u1", TranscriptRole::User, "image"));
         state.transcript_mut(run_id).append(block(
             "a1",
             TranscriptRole::Assistant,
@@ -668,10 +671,7 @@ mod tests {
         ));
         let document = transcript_document(&state, &ThemeConfig::default(), 50);
         assert_eq!(document.media.len(), 1);
-        assert!(matches!(
-            document.media[0].media,
-            RichMedia::Image { .. }
-        ));
+        assert!(matches!(document.media[0].media, RichMedia::Image { .. }));
     }
 
     #[test]

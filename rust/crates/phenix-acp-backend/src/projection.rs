@@ -251,7 +251,7 @@ fn apply_tool_call(
 ) -> Result<(), BackendError> {
     let id = ToolCallId::parse(tool.tool_call_id.to_string())
         .map_err(|error| BackendError::Protocol(error.to_string()))?;
-    let input = tool
+    let raw_input_json = tool
         .raw_input
         .as_ref()
         .map_or_else(|| "{}".to_owned(), serde_json::Value::to_string);
@@ -262,7 +262,8 @@ fn apply_tool_call(
         run_id: session.run.id.clone(),
         tool_call_id: id.clone(),
         tool_name: tool.title.clone(),
-        input_summary: bounded_summary(input),
+        raw_input_json: raw_input_json.clone(),
+        input_summary: bounded_summary(raw_input_json),
     })?;
     emit_tool_state(session, id, &tool, outputs)
 }

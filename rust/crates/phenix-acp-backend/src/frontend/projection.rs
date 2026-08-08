@@ -188,12 +188,14 @@ fn gateway_event(
             SessionEvent::ToolStarted {
                 call_id,
                 name,
+                raw_input_json,
                 input_summary,
             } => vec![BackendEvent::ToolStarted {
                 run_id,
                 tool_call_id: ToolCallId::parse(call_id)
                     .map_err(|error| BackendError::Protocol(error.to_string()))?,
                 tool_name: name,
+                raw_input_json,
                 input_summary,
             }],
             SessionEvent::ToolUpdated { call_id, output } => vec![BackendEvent::ToolUpdated {

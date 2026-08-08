@@ -1,13 +1,12 @@
 { pkgs, ... }:
 let
   repositoryRoot = ''repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; cd "$repo_root"'';
-  nixSources = "find . -type f -name '*.nix' -not -path './.git/*' -not -path './.devenv/*' -not -path '*/node_modules/*'";
+  nixSources = "find . -type f -name '*.nix' -not -path './.git/*' -not -path './.devenv/*'";
 in
 {
   scripts = {
     "maintenance-check-format" = {
       packages = [
-        pkgs.biome
         pkgs.findutils
         pkgs.git
         pkgs.nixfmt
@@ -15,12 +14,6 @@ in
       exec = ''
         ${repositoryRoot}
         ${nixSources} -exec nixfmt --check {} +
-        biome ci \
-          --config-path biome.json \
-          --no-errors-on-unmatched \
-          --files-ignore-unknown=true \
-          --error-on-warnings \
-          biome.json modules
       '';
     };
 
@@ -63,22 +56,6 @@ in
       '';
     };
 
-    "maintenance-check-runtime" = {
-      packages = [ pkgs.git ];
-      exec = ''
-        ${repositoryRoot}
-        nix build --no-link --print-build-logs .#phenix-runtime-tests
-      '';
-    };
-
-    "maintenance-check-typecheck" = {
-      packages = [ pkgs.git ];
-      exec = ''
-        ${repositoryRoot}
-        nix build --no-link --print-build-logs .#phenix-typecheck
-      '';
-    };
-
     "maintenance-check-flake" = {
       packages = [ pkgs.git ];
       exec = ''
@@ -100,7 +77,6 @@ in
 
     "maintenance-fix-format" = {
       packages = [
-        pkgs.biome
         pkgs.findutils
         pkgs.git
         pkgs.nixfmt
@@ -108,11 +84,6 @@ in
       exec = ''
         ${repositoryRoot}
         ${nixSources} -exec nixfmt {} +
-        biome check \
-          --write \
-          --no-errors-on-unmatched \
-          --files-ignore-unknown=true \
-          biome.json modules
       '';
     };
   };
@@ -122,8 +93,6 @@ in
     "maintenance:statix".exec = "maintenance-check-statix";
     "maintenance:workflows".exec = "maintenance-check-workflows";
     "maintenance:tools".exec = "maintenance-check-tools";
-    "maintenance:runtime".exec = "maintenance-check-runtime";
-    "maintenance:typecheck".exec = "maintenance-check-typecheck";
     "maintenance:flake".exec = "maintenance-check-flake";
 
     "maintenance:check" = {
@@ -133,8 +102,6 @@ in
         "maintenance:statix"
         "maintenance:workflows"
         "maintenance:tools"
-        "maintenance:runtime"
-        "maintenance:typecheck"
         "maintenance:flake"
       ];
       before = [ "devenv:enterTest" ];
