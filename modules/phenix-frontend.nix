@@ -114,6 +114,7 @@ _:
 
       configuredSmokeDir = pkgs.runCommand "phenix-configured-smoke-config" { } ''
         cp -R ${../config/phenix-harness} "$out"
+        chmod u+w "$out/config.lua"
         cat >> "$out/config.lua" <<'EOF_CONFIG'
         phenix.keymap.del("global", "<C-q>")
         phenix.theme.set("Accent", { fg = "#ffffff", bold = true })
