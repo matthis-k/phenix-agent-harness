@@ -1,0 +1,67 @@
+name: PR 262 clippy fix
+
+on:
+  push:
+    branches:
+      - feat/neovim-native-interaction
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: feat/neovim-native-interaction
+      - name: Apply clippy fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("rust/crates/phenix-acp/src/source.rs")
+          text = path.read_text()
+          text = text.replace(
+              '.ok_or_else(|| DefinitionSourceError::UnexpectedEnd {\n                expected: "a phenix-workflow or phenix-router fenced declaration",\n            })?',
+              '.ok_or(DefinitionSourceError::UnexpectedEnd {\n                expected: "a phenix-workflow or phenix-router fenced declaration",\n            })?',
+              1,
+          )
+          text = text.replace(
+              '.ok_or_else(|| DefinitionSourceError::UnexpectedEnd {\n                expected: match kind {\n                    DefinitionSourceKind::Workflow => "the ## Steps section",\n                    DefinitionSourceKind::Router => "the ## Routes section",\n                },\n            })?',
+              '.ok_or(DefinitionSourceError::UnexpectedEnd {\n                expected: match kind {\n                    DefinitionSourceKind::Workflow => "the ## Steps section",\n                    DefinitionSourceKind::Router => "the ## Routes section",\n                },\n            })?',
+              1,
+          )
+          text = text.replace(
+              '.ok_or_else(|| DefinitionSourceError::UnexpectedEnd {\n                expected: "a Markdown table header",\n            })?',
+              '.ok_or(DefinitionSourceError::UnexpectedEnd {\n                expected: "a Markdown table header",\n            })?',
+              1,
+          )
+          text = text.replace(
+              '.ok_or_else(|| DefinitionSourceError::UnexpectedEnd {\n                expected: "a Markdown table separator",\n            })?',
+              '.ok_or(DefinitionSourceError::UnexpectedEnd {\n                expected: "a Markdown table separator",\n            })?',
+              1,
+          )
+          text = text.replace(
+              "fn raw_pipe_row<'a>(source: &'a str, line: usize) -> Result<Vec<&'a str>, DefinitionSourceError> {",
+              "fn raw_pipe_row(source: &str, line: usize) -> Result<Vec<&str>, DefinitionSourceError> {",
+              1,
+          )
+          path.write_text(text)
+          PY
+          cd rust
+          cargo fmt --all
+          cd ..
+          rm .github/workflows/pr262-clippy-fix.yml
+      - name: Commit fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: satisfy strict clippy gate"
+          git push origin HEAD:feat/neovim-native-interaction
