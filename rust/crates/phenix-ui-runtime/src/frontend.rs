@@ -148,7 +148,7 @@ fn application_reactions(state: &AppState, command: ApplicationCommand) -> Vec<B
             state.sidebar_cursor_run_id().map(UserIntent::SelectRun)
         }
         ApplicationCommand::MoveSession(delta) => {
-            session_neighbor(state, delta).map(|session_id| UserIntent::SwitchSession(session_id))
+            session_neighbor(state, delta).map(UserIntent::SwitchSession)
         }
         ApplicationCommand::ToggleDetails => Some(UserIntent::ToggleDetails),
         ApplicationCommand::CloseOverlay => Some(UserIntent::CloseOverlay),

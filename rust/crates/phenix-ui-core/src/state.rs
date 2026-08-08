@@ -636,22 +636,24 @@ mod tests {
 
     #[test]
     fn run_projection_is_hierarchical_and_respects_collapsed_nodes() {
-        let mut state = AppState::default();
-        state.snapshot = Some(RuntimeSnapshot {
-            capabilities: BackendCapabilities::default(),
-            health: BackendHealth::Ready,
-            active_session: None,
-            root_run: Some(RunId::parse("root").expect("root")),
-            selected_run: Some(RunId::parse("root").expect("root")),
-            sessions: Vec::new(),
-            runs: vec![
-                run("root", None),
-                run("child-a", Some("root")),
-                run("grandchild", Some("child-a")),
-                run("child-b", Some("root")),
-            ],
-            objectives: Vec::new(),
-        });
+        let mut state = AppState {
+            snapshot: Some(RuntimeSnapshot {
+                capabilities: BackendCapabilities::default(),
+                health: BackendHealth::Ready,
+                active_session: None,
+                root_run: Some(RunId::parse("root").expect("root")),
+                selected_run: Some(RunId::parse("root").expect("root")),
+                sessions: Vec::new(),
+                runs: vec![
+                    run("root", None),
+                    run("child-a", Some("root")),
+                    run("grandchild", Some("child-a")),
+                    run("child-b", Some("root")),
+                ],
+                objectives: Vec::new(),
+            }),
+            ..AppState::default()
+        };
         assert_eq!(
             state
                 .visible_runs()
