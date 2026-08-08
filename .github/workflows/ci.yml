@@ -1,7 +1,7 @@
 name: CI Repair
 
 on:
-  pull_request:
+  push:
   workflow_dispatch:
 
 permissions:
@@ -44,6 +44,6 @@ jobs:
           git add -u
           git commit -m 'fix: make CI maintenance checks clean'
 
-      - name: Push repair
+      - name: Publish repair staging branch
         shell: bash
-        run: git push origin HEAD:fix/ci-baseline-regressions
+        run: git push --force origin HEAD:ci-repair-staging
