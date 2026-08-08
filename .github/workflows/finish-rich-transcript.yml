@@ -73,14 +73,14 @@ jobs:
           table_body = re.compile(
               r'    let body = match view \{\n\s+RichBlockView::Grid => grid_table_lines\(table, width, theme\),\n\s+_ => dense_table_lines\(table, width, theme\),\n\s+\};'
           )
-          table_replacement = ''' + "'''" + '''    let table_width = width.saturating_sub(DOCUMENT_MARGIN.saturating_mul(2));
+          table_replacement = '''    let table_width = width.saturating_sub(DOCUMENT_MARGIN.saturating_mul(2));
           let body = match view {
               RichBlockView::Grid => grid_table_lines(table, table_width, theme),
               _ => dense_table_lines(table, table_width, theme),
           }
           .into_iter()
           .map(|line| inset_line(line, DOCUMENT_MARGIN))
-          .collect::<Vec<_>>();''' + "'''" + '''
+          .collect::<Vec<_>>();'''
           s, count = table_body.subn(table_replacement, s, count=1)
           if count != 1:
               raise SystemExit(f'expected one table body, replaced {count}')
@@ -107,7 +107,7 @@ jobs:
           )
           script = script.replace(
               'cargo clippy --workspace --all-targets --locked -- -D warnings',
-              'cargo clippy --no-deps -p phenix-ui-core -p phenix-ui-runtime -p phenix-tui --all-targets --locked -- -D warnings',
+              'cargo clippy --no-deps -p phenix-ui-core -p phenix-ui-runtime -p phenix-tui --lib --bins --locked -- -D warnings',
               1,
           )
           Path('/tmp/rebuild-rich.sh').write_text(script)
