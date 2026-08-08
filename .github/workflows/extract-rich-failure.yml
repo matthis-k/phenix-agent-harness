@@ -1,0 +1,23 @@
+name: Capture rich transcript failure
+
+on:
+  push:
+    branches:
+      - refactor/rich-transcript-blocks
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Capture previous finalizer failure
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run view 31232022639 --repo matthis-k/phenix-agent-harness --log-failed > /tmp/failure.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rich-finalizer-failure
+          path: /tmp/failure.log
