@@ -430,7 +430,7 @@ pub fn parse_definition(source: &str) -> Result<ParsedDefinition, DefinitionSour
     let (declaration_line, declaration_source) =
         cursor
             .next_nonblank()
-            .ok_or_else(|| DefinitionSourceError::UnexpectedEnd {
+            .ok_or(DefinitionSourceError::UnexpectedEnd {
                 expected: "a phenix-workflow or phenix-router fenced declaration",
             })?;
     let kind = match declaration_source.trim() {
@@ -450,7 +450,7 @@ pub fn parse_definition(source: &str) -> Result<ParsedDefinition, DefinitionSour
     let (section_line, section_source) =
         cursor
             .next_nonblank()
-            .ok_or_else(|| DefinitionSourceError::UnexpectedEnd {
+            .ok_or(DefinitionSourceError::UnexpectedEnd {
                 expected: match kind {
                     DefinitionSourceKind::Workflow => "the ## Steps section",
                     DefinitionSourceKind::Router => "the ## Routes section",
@@ -655,7 +655,7 @@ fn parse_table(
     let (header_line, header_source) =
         cursor
             .next_nonblank()
-            .ok_or_else(|| DefinitionSourceError::UnexpectedEnd {
+            .ok_or(DefinitionSourceError::UnexpectedEnd {
                 expected: "a Markdown table header",
             })?;
     let header = parse_pipe_row(header_source, header_line)?;
@@ -673,7 +673,7 @@ fn parse_table(
     let (separator_line, separator_source) =
         cursor
             .next_nonblank()
-            .ok_or_else(|| DefinitionSourceError::UnexpectedEnd {
+            .ok_or(DefinitionSourceError::UnexpectedEnd {
                 expected: "a Markdown table separator",
             })?;
     let separator = raw_pipe_row(separator_source, separator_line)?;
@@ -711,7 +711,7 @@ fn parse_pipe_row(source: &str, line: usize) -> Result<Vec<String>, DefinitionSo
         .collect()
 }
 
-fn raw_pipe_row<'a>(source: &'a str, line: usize) -> Result<Vec<&'a str>, DefinitionSourceError> {
+fn raw_pipe_row(source: &str, line: usize) -> Result<Vec<&str>, DefinitionSourceError> {
     let trimmed = source.trim();
     if !trimmed.starts_with('|') || !trimmed.ends_with('|') {
         return Err(DefinitionSourceError::InvalidTable {
