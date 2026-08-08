@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   fix:
-    if: github.event.head_commit.message == 'chore: run canonical CI fixes'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
@@ -24,7 +23,8 @@ jobs:
             accept-flake-config = true
             max-jobs = auto
       - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71
-        with: { name: devenv }
+        with:
+          name: devenv
       - name: Install devenv
         run: nix profile add nixpkgs#devenv
       - name: Apply canonical source fixes
