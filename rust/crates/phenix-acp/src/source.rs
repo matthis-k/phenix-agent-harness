@@ -316,11 +316,12 @@ pub fn parse_definition(source: &str) -> Result<ParsedDefinition, DefinitionSour
         .trim()
         .to_owned();
 
-    let (declaration_line, declaration_source) = cursor
-        .next_nonblank()
-        .ok_or(DefinitionSourceError::UnexpectedEnd {
-            expected: "a phenix-workflow or phenix-router fenced declaration",
-        })?;
+    let (declaration_line, declaration_source) =
+        cursor
+            .next_nonblank()
+            .ok_or(DefinitionSourceError::UnexpectedEnd {
+                expected: "a phenix-workflow or phenix-router fenced declaration",
+            })?;
     let kind = match declaration_source.trim() {
         "```phenix-workflow" => DefinitionSourceKind::Workflow,
         "```phenix-router" => DefinitionSourceKind::Router,
@@ -335,14 +336,15 @@ pub fn parse_definition(source: &str) -> Result<ParsedDefinition, DefinitionSour
     let metadata = parse_metadata(&mut cursor, declaration_line, kind)?;
     let id = required_metadata(&metadata, declaration_line, "id")?;
 
-    let (section_line, section_source) = cursor
-        .next_nonblank()
-        .ok_or(DefinitionSourceError::UnexpectedEnd {
-            expected: match kind {
-                DefinitionSourceKind::Workflow => "the ## Steps section",
-                DefinitionSourceKind::Router => "the ## Routes section",
-            },
-        })?;
+    let (section_line, section_source) =
+        cursor
+            .next_nonblank()
+            .ok_or(DefinitionSourceError::UnexpectedEnd {
+                expected: match kind {
+                    DefinitionSourceKind::Workflow => "the ## Steps section",
+                    DefinitionSourceKind::Router => "the ## Routes section",
+                },
+            })?;
     let expected_section = match kind {
         DefinitionSourceKind::Workflow => "## Steps",
         DefinitionSourceKind::Router => "## Routes",
@@ -539,11 +541,12 @@ fn parse_table(
     cursor: &mut SourceCursor<'_>,
     expected_header: &[&str],
 ) -> Result<Vec<TableRow>, DefinitionSourceError> {
-    let (header_line, header_source) = cursor
-        .next_nonblank()
-        .ok_or(DefinitionSourceError::UnexpectedEnd {
-            expected: "a Markdown table header",
-        })?;
+    let (header_line, header_source) =
+        cursor
+            .next_nonblank()
+            .ok_or(DefinitionSourceError::UnexpectedEnd {
+                expected: "a Markdown table header",
+            })?;
     let header = parse_pipe_row(header_source, header_line)?;
     if header.iter().map(String::as_str).collect::<Vec<_>>() != expected_header {
         return Err(DefinitionSourceError::InvalidTable {
@@ -556,11 +559,12 @@ fn parse_table(
         });
     }
 
-    let (separator_line, separator_source) = cursor
-        .next_nonblank()
-        .ok_or(DefinitionSourceError::UnexpectedEnd {
-            expected: "a Markdown table separator",
-        })?;
+    let (separator_line, separator_source) =
+        cursor
+            .next_nonblank()
+            .ok_or(DefinitionSourceError::UnexpectedEnd {
+                expected: "a Markdown table separator",
+            })?;
     let separator = raw_pipe_row(separator_source, separator_line)?;
     if separator.len() != expected_header.len()
         || separator.iter().any(|cell| !valid_separator_cell(cell))

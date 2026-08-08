@@ -1,8 +1,7 @@
 use crate::theme::{surface_style, theme_style};
 use phenix_frontend_config::ThemeConfig;
 use phenix_ui_core::{
-    parse_markdown, RichBlock, RichBlockView, RichCodeBlock, RichDocument, RichImage, RichSpan,
-    RichTable, RichText,
+    RichBlock, RichBlockView, RichCodeBlock, RichDocument, RichImage, RichSpan, RichTable, RichText,
 };
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -23,21 +22,8 @@ pub(crate) enum RichMedia {
 #[derive(Clone, Debug)]
 pub(crate) struct RenderedRichBlock {
     pub lines: Vec<Line<'static>>,
-    pub views: Vec<RichBlockView>,
     pub active_view: RichBlockView,
     pub media: Option<RichMedia>,
-}
-
-impl RenderedRichBlock {
-    pub fn height(&self) -> usize {
-        self.lines.len()
-    }
-}
-
-pub(crate) fn render_markdown(text: &str, width: u16, theme: &ThemeConfig) -> Vec<Line<'static>> {
-    flatten_blocks(render_document(&parse_markdown(text), width, theme, |_| {
-        None
-    }))
 }
 
 pub(crate) fn render_document(
@@ -59,17 +45,6 @@ pub(crate) fn render_document(
             render_block(block, active_view, views, width, theme)
         })
         .collect()
-}
-
-pub(crate) fn flatten_blocks(blocks: Vec<RenderedRichBlock>) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-    for (index, block) in blocks.into_iter().enumerate() {
-        if index > 0 {
-            lines.push(Line::default());
-        }
-        lines.extend(block.lines);
-    }
-    lines
 }
 
 fn default_view(block: &RichBlock) -> RichBlockView {
@@ -95,7 +70,7 @@ fn render_block(
 ) -> RenderedRichBlock {
     match block {
         RichBlock::Heading { level, content } => {
-            render_heading(*level, content, active_view, views, width, theme)
+            render_heading(*level, content, active_view, width, theme)
         }
         RichBlock::Paragraph(content) => RenderedRichBlock {
             lines: vec![Line::from(styled_rich_text(
@@ -103,7 +78,6 @@ fn render_block(
                 theme_style(theme, "Normal"),
                 theme,
             ))],
-            views,
             active_view,
             media: None,
         },
@@ -120,7 +94,6 @@ fn render_block(
                     Line::from(spans)
                 })
                 .collect(),
-            views,
             active_view,
             media: None,
         },
@@ -140,12 +113,11 @@ fn render_block(
                     Line::from(spans)
                 })
                 .collect(),
-            views,
             active_view,
             media: None,
         },
         RichBlock::Table(table) => render_table(table, active_view, views, width, theme),
-        RichBlock::Rule => render_rule(active_view, views, width, theme),
+        RichBlock::Rule => render_rule(active_view, width, theme),
         RichBlock::Image(image) => render_image(image, active_view, views, width, theme),
     }
 }
@@ -154,7 +126,6 @@ fn render_heading(
     level: u8,
     content: &RichText,
     active_view: RichBlockView,
-    views: Vec<RichBlockView>,
     width: usize,
     theme: &ThemeConfig,
 ) -> RenderedRichBlock {
@@ -196,7 +167,6 @@ fn render_heading(
 
     RenderedRichBlock {
         lines: vec![Line::from(spans)],
-        views,
         active_view,
         media: None,
     }
@@ -223,7 +193,6 @@ fn heading_surface(level: u8, theme: &ThemeConfig) -> Style {
 
 fn render_rule(
     active_view: RichBlockView,
-    views: Vec<RichBlockView>,
     width: usize,
     theme: &ThemeConfig,
 ) -> RenderedRichBlock {
@@ -237,7 +206,6 @@ fn render_rule(
     spans.push(Span::styled("─".repeat(inner), theme_style(theme, "Muted")));
     RenderedRichBlock {
         lines: vec![Line::from(spans)],
-        views,
         active_view,
         media: None,
     }
@@ -286,7 +254,6 @@ fn render_code(
     lines.push(surface_line("", width, surface));
     RenderedRichBlock {
         lines,
-        views,
         active_view,
         media: None,
     }
@@ -454,7 +421,6 @@ fn render_mermaid(
     lines.push(surface_line("", width, surface));
     RenderedRichBlock {
         lines,
-        views,
         active_view: RichBlockView::Rendered,
         media: None,
     }
@@ -536,7 +502,6 @@ fn render_table(
     );
     RenderedRichBlock {
         lines,
-        views,
         active_view,
         media: None,
     }
@@ -744,7 +709,6 @@ fn render_image(
     };
     RenderedRichBlock {
         lines,
-        views,
         active_view,
         media,
     }
@@ -895,6 +859,7 @@ fn heading_style(level: u8, theme: &ThemeConfig) -> Style {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use phenix_ui_core::parse_markdown;
 
     fn line_text(line: &Line<'_>) -> String {
         line.spans
@@ -944,8 +909,8 @@ mod tests {
         let document = parse_markdown("| Name | State |\n| --- | --- |\n| build | green |");
         let blocks = render_document(&document, 40, &ThemeConfig::default(), |_| None);
         assert_eq!(
-            blocks[0].views,
-            vec![RichBlockView::Dense, RichBlockView::Grid]
+            document.blocks[0].candidate_views(),
+            &[RichBlockView::Dense, RichBlockView::Grid]
         );
         assert_eq!(blocks[0].active_view, RichBlockView::Dense);
     }
@@ -985,8 +950,8 @@ mod tests {
         let document = parse_markdown("```mermaid\nflowchart LR\nA[Start] --> B[Done]\n```");
         let blocks = render_document(&document, 50, &ThemeConfig::default(), |_| None);
         assert_eq!(
-            blocks[0].views,
-            vec![
+            document.blocks[0].candidate_views(),
+            &[
                 RichBlockView::Source,
                 RichBlockView::Highlighted,
                 RichBlockView::Rendered,
@@ -1005,6 +970,6 @@ mod tests {
         let document = parse_markdown("![architecture](./graph.png)");
         let blocks = render_document(&document, 40, &ThemeConfig::default(), |_| None);
         assert!(matches!(blocks[0].media, Some(RichMedia::Image { .. })));
-        assert!(blocks[0].height() > usize::from(IMAGE_PREVIEW_ROWS));
+        assert!(blocks[0].lines.len() > usize::from(IMAGE_PREVIEW_ROWS));
     }
 }

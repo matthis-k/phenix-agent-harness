@@ -430,8 +430,10 @@ mod tests {
     #[test]
     fn requested_backend_stop_still_completes_shutdown() {
         let mut consumer = RootContentConsumer::new();
-        let mut state = AppState::default();
-        state.exit_requested = true;
+        let state = AppState {
+            exit_requested: true,
+            ..Default::default()
+        };
         let output = Box::new(BackendOutput::Stopped { result: Ok(()) });
         let envelope = EventEnvelope::broadcast(ContentEvent::Backend(output.clone()));
         let batch = consumer.on_content(&state, &envelope);

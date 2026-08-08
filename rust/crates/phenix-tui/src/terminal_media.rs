@@ -139,7 +139,7 @@ fn png_payload(source: &str) -> Option<String> {
 
 fn valid_base64(payload: &str) -> bool {
     !payload.is_empty()
-        && payload.len() % 4 == 0
+        && payload.len().is_multiple_of(4)
         && payload
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'='))

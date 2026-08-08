@@ -10,16 +10,9 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
+#[derive(Default)]
 struct EmptyProvider {
     config: FrontendConfig,
-}
-
-impl Default for EmptyProvider {
-    fn default() -> Self {
-        Self {
-            config: FrontendConfig::default(),
-        }
-    }
 }
 
 impl FrontendConfigProvider for EmptyProvider {

@@ -535,9 +535,11 @@ mod tests {
     #[test]
     fn distinct_turns_have_explicit_vertical_rhythm() {
         let run_id = RunId::parse("run-1").expect("run id");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
-        state.selected_run = Some(run_id.clone());
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..Default::default()
+        };
         let transcript = state.transcript_mut(run_id);
         transcript.append(block("u1", TranscriptRole::User, "one"));
         transcript.append(block("a1", TranscriptRole::Assistant, "answer one"));
@@ -553,9 +555,11 @@ mod tests {
     #[test]
     fn effective_selected_turn_remains_visible_when_input_has_focus() {
         let run_id = RunId::parse("run-1").expect("run id");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
-        state.selected_run = Some(run_id.clone());
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..Default::default()
+        };
         state.view.focus = FocusTarget::Input;
         state
             .transcript_mut(run_id.clone())
@@ -577,9 +581,11 @@ mod tests {
     #[test]
     fn selected_rich_block_is_visually_nested_inside_selected_turn() {
         let run_id = RunId::parse("run-1").expect("run id");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
-        state.selected_run = Some(run_id.clone());
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..Default::default()
+        };
         state.view.focus = FocusTarget::Transcript;
         state.view.transcript_selected_turn = Some(0);
         state.view.transcript_selected_block = Some(0);
@@ -601,9 +607,11 @@ mod tests {
     #[test]
     fn per_block_view_state_changes_only_that_component() {
         let run_id = RunId::parse("run-1").expect("run id");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
-        state.selected_run = Some(run_id.clone());
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..Default::default()
+        };
         state
             .transcript_mut(run_id.clone())
             .append(block("u1", TranscriptRole::User, "tables"));
@@ -629,7 +637,6 @@ mod tests {
             lines: std::iter::once(Line::from("toolbar"))
                 .chain((0..20).map(|index| Line::from(format!("line-{index}"))))
                 .collect(),
-            views: vec![RichBlockView::Source, RichBlockView::Rendered],
             active_view: RichBlockView::Rendered,
             media: None,
         };
@@ -649,9 +656,11 @@ mod tests {
     #[test]
     fn image_blocks_keep_a_media_anchor() {
         let run_id = RunId::parse("run-1").expect("run id");
-        let mut state = AppState::default();
-        state.root_run = Some(run_id.clone());
-        state.selected_run = Some(run_id.clone());
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..Default::default()
+        };
         state
             .transcript_mut(run_id.clone())
             .append(block("u1", TranscriptRole::User, "image"));

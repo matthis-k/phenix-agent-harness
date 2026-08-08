@@ -1,6 +1,10 @@
 { pkgs, ... }:
 let
   repositoryRoot = ''repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; cd "$repo_root/rust"'';
+  cargoEnvironment = ''
+    export CARGO_HOME="$TMPDIR/phenix-cargo-home"
+    export CARGO_TARGET_DIR="$TMPDIR/phenix-cargo-target"
+  '';
 in
 {
   scripts = {
@@ -36,7 +40,7 @@ in
       ];
       exec = ''
         ${repositoryRoot}
-        export CARGO_HOME="$TMPDIR/phenix-cargo-home"
+        ${cargoEnvironment}
         cargo check --workspace --all-targets --locked
       '';
     };
@@ -50,7 +54,7 @@ in
       ];
       exec = ''
         ${repositoryRoot}
-        export CARGO_HOME="$TMPDIR/phenix-cargo-home"
+        ${cargoEnvironment}
         cargo clippy --workspace --all-targets --locked -- -D warnings
       '';
     };
@@ -64,7 +68,7 @@ in
       ];
       exec = ''
         ${repositoryRoot}
-        export CARGO_HOME="$TMPDIR/phenix-cargo-home"
+        ${cargoEnvironment}
         cargo clippy --fix --workspace --all-targets --locked --allow-dirty --allow-staged
         cargo clippy --workspace --all-targets --locked -- -D warnings
       '';
@@ -78,7 +82,7 @@ in
       ];
       exec = ''
         ${repositoryRoot}
-        export CARGO_HOME="$TMPDIR/phenix-cargo-home"
+        ${cargoEnvironment}
         cargo test --workspace --all-targets --locked
       '';
     };
