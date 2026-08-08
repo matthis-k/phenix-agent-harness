@@ -17,11 +17,12 @@ concurrency:
 jobs:
   checks:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    name: Final maintenance checks
+    name: Maintenance checks
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
@@ -29,38 +30,63 @@ jobs:
             experimental-features = nix-command flakes
             accept-flake-config = true
             max-jobs = auto
+
       - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
         with: { name: devenv }
+
       - name: Install devenv
+        id: install-devenv
         run: nix profile add nixpkgs#devenv
-      - name: Verify committed source
+
+      - name: Formatting
+        if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
+        run: devenv tasks run maintenance:format
+
+      - name: Rust compile / check
+        if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
+        run: devenv tasks run maintenance:rust-compile --mode single
+
+      - name: Rust lint
+        if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
+        run: devenv tasks run maintenance:rust-clippy --mode single
+
+      - name: Rust tests
+        if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
+        run: devenv tasks run maintenance:rust-tests --mode single
+
+      - name: Nix static analysis
+        if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
+        run: devenv tasks run maintenance:statix --mode single
+
+      - name: GitHub Actions syntax
+        if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
+        run: devenv tasks run maintenance:workflows --mode single
+
+      - name: Required tool availability
+        if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
+        run: devenv tasks run maintenance:tools --mode single
+
+      - name: Runtime integration tests
+        if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
+        run: devenv tasks run maintenance:runtime --mode single
+
+      - name: Nix typecheck
+        if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
+        run: devenv tasks run maintenance:typecheck --mode single
+
+      - name: Nix flake and smoke checks
+        if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
+        run: devenv tasks run maintenance:flake --mode single
+
+      - name: Repository remains clean
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           set -euo pipefail
-          log="$RUNNER_TEMP/devenv-test.log"
-          before="$(git status --porcelain=v1 --untracked-files=all)"
-          if [[ -n "$before" ]]; then
-            printf '%s\n' "$before"
-            echo "repository was dirty before verification" >&2
-            exit 1
-          fi
-          set +e
-          devenv test >"$log" 2>&1
-          status=$?
-          set -e
-          tail -n 320 "$log"
           git diff --exit-code
-          after="$(git status --porcelain=v1 --untracked-files=all)"
-          if [[ -n "$after" ]]; then
-            printf '%s\n' "$after"
-            echo "verification mutated committed source" >&2
+          status="$(git status --porcelain=v1 --untracked-files=all)"
+          if [[ -n "$status" ]]; then
+            printf '%s\n' "$status"
+            echo "maintenance checks mutated committed source" >&2
             exit 1
           fi
-          exit "$status"
-      - name: Upload devenv diagnostics
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: devenv-test-log
-          path: ${{ runner.temp }}/devenv-test.log
-          if-no-files-found: error
