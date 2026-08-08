@@ -69,12 +69,7 @@ fn collect_layout_inner(
                 .split(area);
             for ((child_index, _), child_area) in slots.iter().zip(slot_areas.iter().copied()) {
                 if let Some(child_index) = child_index {
-                    collect_layout_inner(
-                        &split.children[*child_index],
-                        child_area,
-                        state,
-                        output,
-                    );
+                    collect_layout_inner(&split.children[*child_index], child_area, state, output);
                 }
             }
         }
@@ -96,8 +91,7 @@ fn pane_is(node: &LayoutNode, element: &ElementId) -> bool {
 }
 
 fn inset_workspace(area: Rect) -> Rect {
-    if area.width <= OUTER_GUTTER.saturating_mul(2)
-        || area.height <= OUTER_GUTTER.saturating_mul(2)
+    if area.width <= OUTER_GUTTER.saturating_mul(2) || area.height <= OUTER_GUTTER.saturating_mul(2)
     {
         return area;
     }
@@ -147,9 +141,7 @@ fn child_constraint(
                 _ => Constraint::Fill(pane.weight.max(1)),
             }
         }
-        LayoutNode::Split(split) => {
-            Constraint::Fill(layout_weight(&split.children, state).max(1))
-        }
+        LayoutNode::Split(split) => Constraint::Fill(layout_weight(&split.children, state).max(1)),
     }
 }
 
@@ -342,7 +334,10 @@ mod tests {
         assert_eq!(owned_input_height("one\ntwo\nthree", 40), 5);
         assert_eq!(owned_input_height(&"x".repeat(100), 20), 5);
         assert_eq!(owned_input_height(&"x".repeat(120), 20), 6);
-        assert_eq!(owned_input_height(&"x".repeat(1000), 20), OWNED_INPUT_MAX_HEIGHT);
+        assert_eq!(
+            owned_input_height(&"x".repeat(1000), 20),
+            OWNED_INPUT_MAX_HEIGHT
+        );
     }
 
     #[test]

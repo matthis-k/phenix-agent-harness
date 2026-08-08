@@ -92,6 +92,7 @@ pub struct FrontendContext {
     pub overlay_open: bool,
     pub dialog_open: bool,
     pub input_empty: bool,
+    pub input_insert_mode: bool,
     pub details_visible: bool,
 }
 
@@ -114,6 +115,10 @@ pub enum ApplicationCommand {
     OpenAuthentication,
     OpenModelPicker,
     OpenSessionPicker,
+    CreateSession,
+    MoveSession(i32),
+    MoveRun(i32),
+    ActivateSidebarRun,
     ToggleDetails,
     CloseOverlay,
 }
@@ -136,6 +141,10 @@ pub enum UiCommand {
         element: ElementId,
         lines: i32,
     },
+    SidebarRunMove(i32),
+    SidebarRunParent,
+    SidebarRunChild,
+    SidebarRunToggle,
     TranscriptTurnMove(i32),
     TranscriptTurnToggleDetails,
     Invalidate,
@@ -331,13 +340,7 @@ impl Default for LayoutConfig {
             root: LayoutNode::Split(SplitLayout {
                 direction: SplitDirection::Vertical,
                 children: vec![
-                    pane(
-                        ElementId::header(),
-                        PaneType::Root,
-                        1,
-                        Some(1),
-                        Some(1),
-                    ),
+                    pane(ElementId::header(), PaneType::Root, 1, Some(1), Some(1)),
                     workspace,
                 ],
             }),
@@ -459,10 +462,7 @@ mod tests {
     fn pane_types_are_renderer_neutral_but_have_stable_addresses() {
         assert_eq!(PaneType::Sidebar.element_id(), ElementId::sidebar());
         assert_eq!(PaneType::Inspector.element_id(), ElementId::inspector());
-        assert_eq!(
-            PaneType::Specialized.element_id(),
-            ElementId::specialized()
-        );
+        assert_eq!(PaneType::Specialized.element_id(), ElementId::specialized());
         assert_eq!(PaneType::from_element(&ElementId::input()), PaneType::Input);
     }
 

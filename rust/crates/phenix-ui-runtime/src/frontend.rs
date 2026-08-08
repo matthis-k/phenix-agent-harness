@@ -91,26 +91,27 @@ fn frontend_context(state: &AppState) -> FrontendContext {
         state.view.overlay,
         Some(OverlayState::CommandPalette { .. })
     );
-    let pane_type = if (state.view.overlay.is_some() && !passive_completion)
-        || !state.dialogs.is_empty()
-    {
-        PaneType::Overlay
-    } else {
-        PaneType::from_element(&focused_element)
-    };
+    let pane_type =
+        if (state.view.overlay.is_some() && !passive_completion) || !state.dialogs.is_empty() {
+            PaneType::Overlay
+        } else {
+            PaneType::from_element(&focused_element)
+        };
     FrontendContext {
         focused_element,
         pane_type,
         overlay_open: state.view.overlay.is_some(),
         dialog_open: !state.dialogs.is_empty(),
         input_empty: state.input.text.is_empty(),
+        input_insert_mode: state.view.focus == FocusTarget::Input
+            && state.view.vim_mode == VimMode::Insert,
         details_visible: state.view.show_details,
     }
 }
 
 fn command_reactions(state: &AppState, command: FrontendCommand) -> Vec<BusReaction> {
     match command {
-        FrontendCommand::Application(command) => application_reactions(command),
+        FrontendCommand::Application(command) => application_reactions(state, command),
         FrontendCommand::Ui(command) => ui_reactions(state, command),
         FrontendCommand::Input(command) => {
             vec![BusReaction::View(ViewMutation::EditInput(match command {
@@ -128,20 +129,50 @@ fn command_reactions(state: &AppState, command: FrontendCommand) -> Vec<BusReact
     }
 }
 
-fn application_reactions(command: ApplicationCommand) -> Vec<BusReaction> {
+fn application_reactions(state: &AppState, command: ApplicationCommand) -> Vec<BusReaction> {
     let intent = match command {
-        ApplicationCommand::Submit => UserIntent::SubmitPrompt,
-        ApplicationCommand::Steer => UserIntent::SteerPrompt,
-        ApplicationCommand::FollowUp => UserIntent::FollowUpPrompt,
-        ApplicationCommand::Abort => UserIntent::Abort,
-        ApplicationCommand::Quit => UserIntent::Quit,
-        ApplicationCommand::OpenAuthentication => UserIntent::OpenAuthentication,
-        ApplicationCommand::OpenModelPicker => UserIntent::OpenModelPicker,
-        ApplicationCommand::OpenSessionPicker => UserIntent::OpenSessionPicker,
-        ApplicationCommand::ToggleDetails => UserIntent::ToggleDetails,
-        ApplicationCommand::CloseOverlay => UserIntent::CloseOverlay,
+        ApplicationCommand::Submit => Some(UserIntent::SubmitPrompt),
+        ApplicationCommand::Steer => Some(UserIntent::SteerPrompt),
+        ApplicationCommand::FollowUp => Some(UserIntent::FollowUpPrompt),
+        ApplicationCommand::Abort => Some(UserIntent::Abort),
+        ApplicationCommand::Quit => Some(UserIntent::Quit),
+        ApplicationCommand::OpenAuthentication => Some(UserIntent::OpenAuthentication),
+        ApplicationCommand::OpenModelPicker => Some(UserIntent::OpenModelPicker),
+        ApplicationCommand::OpenSessionPicker => Some(UserIntent::OpenSessionPicker),
+        ApplicationCommand::CreateSession => Some(UserIntent::CreateSession),
+        ApplicationCommand::MoveRun(delta) => state
+            .input_target()
+            .and_then(|run_id| state.visible_run_neighbor(run_id, delta))
+            .map(UserIntent::SelectRun),
+        ApplicationCommand::ActivateSidebarRun => {
+            state.sidebar_cursor_run_id().map(UserIntent::SelectRun)
+        }
+        ApplicationCommand::MoveSession(delta) => {
+            session_neighbor(state, delta).map(UserIntent::SwitchSession)
+        }
+        ApplicationCommand::ToggleDetails => Some(UserIntent::ToggleDetails),
+        ApplicationCommand::CloseOverlay => Some(UserIntent::CloseOverlay),
     };
-    vec![BusReaction::App(AppEvent::User(intent))]
+    intent
+        .map(|intent| vec![BusReaction::App(AppEvent::User(intent))])
+        .unwrap_or_default()
+}
+
+fn session_neighbor(state: &AppState, delta: i32) -> Option<phenix_runtime_api::SessionId> {
+    let sessions = &state.snapshot.as_ref()?.sessions;
+    if sessions.is_empty() {
+        return None;
+    }
+    let current = state
+        .active_session
+        .as_ref()
+        .and_then(|active| sessions.iter().position(|session| &session.id == active))
+        .unwrap_or(0);
+    let length = i64::try_from(sessions.len()).ok()?;
+    let next = (i64::try_from(current).ok()? + i64::from(delta)).rem_euclid(length);
+    sessions
+        .get(usize::try_from(next).ok()?)
+        .map(|session| session.id.clone())
 }
 
 fn ui_reactions(state: &AppState, command: UiCommand) -> Vec<BusReaction> {
@@ -181,6 +212,16 @@ fn ui_reactions(state: &AppState, command: UiCommand) -> Vec<BusReaction> {
             element.clone(),
             UiEvent::ScrollRequested { element, lines },
         ))],
+        UiCommand::SidebarRunMove(delta) => {
+            vec![BusReaction::View(ViewMutation::MoveSidebarRun(delta))]
+        }
+        UiCommand::SidebarRunParent => {
+            vec![BusReaction::View(ViewMutation::MoveSidebarRunParent)]
+        }
+        UiCommand::SidebarRunChild => {
+            vec![BusReaction::View(ViewMutation::MoveSidebarRunChild)]
+        }
+        UiCommand::SidebarRunToggle => vec![BusReaction::View(ViewMutation::ToggleSidebarRun)],
         UiCommand::TranscriptTurnMove(delta) => {
             vec![BusReaction::View(ViewMutation::MoveTranscriptTurn(delta))]
         }
@@ -341,7 +382,7 @@ fn fallback_key(state: &AppState, key: KeyInput) -> ReactionBatch {
 
     if state.view.focus != FocusTarget::Input {
         return match key.code {
-            KeyCode::Escape => stop_with(vec![application_intent(UserIntent::Abort)]),
+            KeyCode::Escape => stop_with(Vec::new()),
             _ => continue_propagation(),
         };
     }
@@ -370,15 +411,15 @@ fn command_completion_key(state: &AppState, key: KeyInput) -> Option<Vec<BusReac
         _ => None,
     };
     if let Some(delta) = navigate {
-        return Some(vec![BusReaction::View(ViewMutation::MoveOverlaySelection(delta))]);
+        return Some(vec![BusReaction::View(ViewMutation::MoveOverlaySelection(
+            delta,
+        ))]);
     }
     let plain_enter = key.code == KeyCode::Enter
         && !key.modifiers.shift
         && !key.modifiers.control
         && !key.modifiers.alt;
-    let ctrl_y = key.code == KeyCode::Character('y')
-        && key.modifiers.control
-        && !key.modifiers.alt;
+    let ctrl_y = key.code == KeyCode::Character('y') && key.modifiers.control && !key.modifiers.alt;
     if plain_enter || ctrl_y {
         return Some(accept_overlay(state));
     }
@@ -423,7 +464,7 @@ fn normal_mode_key(editor: InputEditor, key: KeyInput) -> ReactionBatch {
         return stop_with(vec![application_intent(UserIntent::SteerPrompt)]);
     }
     match key.code {
-        KeyCode::Escape => stop_with(vec![application_intent(UserIntent::Abort)]),
+        KeyCode::Escape => stop_with(Vec::new()),
         KeyCode::Enter => stop_with(vec![application_intent(UserIntent::SubmitPrompt)]),
         KeyCode::Left | KeyCode::Character('h') => stop_with(vec![edit_input(InputEdit::MoveLeft)]),
         KeyCode::Right | KeyCode::Character('l') => {
@@ -545,7 +586,9 @@ fn erase_before_cursor(state: &AppState, boundary: EraseBoundary) -> Vec<BusReac
         EraseBoundary::PreviousWord => probe.move_word_backward(),
         EraseBoundary::LineStart => probe.move_home(),
     }
-    let count = state.input.text[probe.cursor_byte..original].chars().count();
+    let count = state.input.text[probe.cursor_byte..original]
+        .chars()
+        .count();
     std::iter::repeat_with(|| edit_input(InputEdit::Backspace))
         .take(count)
         .collect()
@@ -555,7 +598,9 @@ fn erase_after_cursor(state: &AppState) -> Vec<BusReaction> {
     let original = state.input.cursor_byte.min(state.input.text.len());
     let mut probe = state.input.clone();
     probe.move_end();
-    let count = state.input.text[original..probe.cursor_byte].chars().count();
+    let count = state.input.text[original..probe.cursor_byte]
+        .chars()
+        .count();
     std::iter::repeat_with(|| edit_input(InputEdit::Delete))
         .take(count)
         .collect()
@@ -584,6 +629,10 @@ fn continue_propagation() -> ReactionBatch {
 mod tests {
     use super::*;
     use phenix_frontend_config::{FrontendConfig, FrontendConfigProvider, FrontendProviderError};
+    use phenix_runtime_api::{
+        BackendCapabilities, BackendHealth, PersistedSessionSummary, RunKind, RunState, RunSummary,
+        RuntimeSnapshot, SessionId,
+    };
     use phenix_ui_core::{KeyModifiers, ViewState};
     use std::cell::RefCell;
     use std::path::Path;
@@ -649,6 +698,25 @@ mod tests {
         }
     }
 
+    fn run(id: &str, parent: Option<&str>) -> RunSummary {
+        RunSummary {
+            id: phenix_runtime_api::RunId::parse(id).expect("run id"),
+            parent: parent.map(|parent| phenix_runtime_api::RunId::parse(parent).expect("parent")),
+            kind: RunKind::Agent,
+            definition_id: id.to_owned(),
+            display_name: id.to_owned(),
+            state: RunState::Running,
+            persisted_session: None,
+            session_file: None,
+            model: None,
+            thinking_level: None,
+            difficulty: None,
+            budget: None,
+            pending_messages: 0,
+            outcome: None,
+        }
+    }
+
     #[test]
     fn provider_commands_are_translated_without_a_backend() {
         let provider: FrontendProviderRef = Rc::new(RefCell::new(FakeProvider));
@@ -667,6 +735,55 @@ mod tests {
     }
 
     #[test]
+    fn semantic_run_and_session_navigation_resolves_against_state() {
+        let session_a = SessionId::parse("session-a").expect("session");
+        let session_b = SessionId::parse("session-b").expect("session");
+        let root = phenix_runtime_api::RunId::parse("root").expect("root");
+        let child = phenix_runtime_api::RunId::parse("child").expect("child");
+        let mut state = AppState::default();
+        state.apply_snapshot(RuntimeSnapshot {
+            capabilities: BackendCapabilities::default(),
+            health: BackendHealth::Ready,
+            active_session: Some(session_a.clone()),
+            root_run: Some(root.clone()),
+            selected_run: Some(root.clone()),
+            sessions: vec![
+                PersistedSessionSummary {
+                    id: session_a,
+                    name: None,
+                    session_file: None,
+                    cwd: None,
+                    root_run_id: Some(root.clone()),
+                    updated_at: None,
+                },
+                PersistedSessionSummary {
+                    id: session_b.clone(),
+                    name: None,
+                    session_file: None,
+                    cwd: None,
+                    root_run_id: None,
+                    updated_at: None,
+                },
+            ],
+            runs: vec![run("root", None), run("child", Some("root"))],
+            objectives: Vec::new(),
+        });
+
+        assert_eq!(
+            application_reactions(&state, ApplicationCommand::MoveRun(1)),
+            vec![BusReaction::App(AppEvent::User(UserIntent::SelectRun(
+                child
+            )))]
+        );
+        assert_eq!(
+            application_reactions(&state, ApplicationCommand::MoveSession(1)),
+            vec![BusReaction::App(AppEvent::User(UserIntent::SwitchSession(
+                session_b
+            )))]
+        );
+    }
+
+    #[test]
     fn command_completion_keeps_input_context() {
         let mut state = AppState::default();
         state.input.replace("/mo".to_owned());
@@ -674,7 +791,9 @@ mod tests {
             query: "/mo".to_owned(),
             selected: 0,
         });
-        assert_eq!(frontend_context(&state).pane_type, PaneType::Input);
+        let context = frontend_context(&state);
+        assert_eq!(context.pane_type, PaneType::Input);
+        assert!(context.input_insert_mode);
     }
 
     #[test]
@@ -721,7 +840,7 @@ mod tests {
     }
 
     #[test]
-    fn escape_enters_normal_mode_before_it_aborts() {
+    fn escape_only_changes_or_cancels_ui_mode() {
         let state = AppState::default();
         let reactions = fallback_key(&state, key(KeyCode::Escape));
         assert_eq!(
@@ -732,10 +851,13 @@ mod tests {
         let mut state = AppState::default();
         state.view.vim_mode = VimMode::Normal;
         let reactions = fallback_key(&state, key(KeyCode::Escape));
-        assert_eq!(
-            reactions.reactions,
-            vec![application_intent(UserIntent::Abort)]
-        );
+        assert!(reactions.reactions.is_empty());
+        assert_eq!(reactions.propagation, Propagation::Stop);
+
+        state.view.focus = FocusTarget::Transcript;
+        let reactions = fallback_key(&state, key(KeyCode::Escape));
+        assert!(reactions.reactions.is_empty());
+        assert_eq!(reactions.propagation, Propagation::Stop);
     }
 
     #[test]
@@ -746,13 +868,19 @@ mod tests {
         let word = fallback_key(&state, control_key('w'));
         assert_eq!(word.reactions.len(), 5);
         assert!(word.reactions.iter().all(|reaction| {
-            matches!(reaction, BusReaction::View(ViewMutation::EditInput(InputEdit::Backspace)))
+            matches!(
+                reaction,
+                BusReaction::View(ViewMutation::EditInput(InputEdit::Backspace))
+            )
         }));
 
         let line = fallback_key(&state, control_key('u'));
         assert_eq!(line.reactions.len(), state.input.text.chars().count());
         assert!(line.reactions.iter().all(|reaction| {
-            matches!(reaction, BusReaction::View(ViewMutation::EditInput(InputEdit::Backspace)))
+            matches!(
+                reaction,
+                BusReaction::View(ViewMutation::EditInput(InputEdit::Backspace))
+            )
         }));
     }
 

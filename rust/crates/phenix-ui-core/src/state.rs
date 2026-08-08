@@ -1,10 +1,10 @@
 use crate::view::ViewState;
 use phenix_runtime_api::{
     AuthFlowId, AuthNotice, AuthPrompt, AuthProviderSummary, BackendCapabilities, BackendHealth,
-    CommandSummary, DialogId, ExtensionUiRequest, ModelSummary, RunId, RuntimeSnapshot, SessionId,
-    ThinkingLevel, TranscriptBlock, TranscriptRole,
+    CommandSummary, DialogId, ExtensionUiRequest, ModelSummary, RunId, RunSummary, RuntimeSnapshot,
+    SessionId, ThinkingLevel, TranscriptBlock, TranscriptRole,
 };
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RuntimeConnectionState {
@@ -303,6 +303,13 @@ impl TranscriptState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VisibleRun {
+    pub id: RunId,
+    pub depth: usize,
+    pub has_children: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DialogState {
     pub id: DialogId,
     pub request: ExtensionUiRequest,
@@ -374,6 +381,49 @@ impl AppState {
             .map_or_else(Vec::new, TranscriptState::turn_ids)
     }
 
+    pub fn visible_runs(&self) -> Vec<VisibleRun> {
+        let Some(snapshot) = &self.snapshot else {
+            return Vec::new();
+        };
+        project_visible_runs(&snapshot.runs, &self.view.collapsed_runs)
+    }
+
+    pub fn sidebar_cursor_run_id(&self) -> Option<RunId> {
+        let visible = self.visible_runs();
+        visible
+            .get(self.view.sidebar_index.min(visible.len().saturating_sub(1)))
+            .map(|entry| entry.id.clone())
+    }
+
+    pub fn run(&self, run_id: &RunId) -> Option<&RunSummary> {
+        self.snapshot
+            .as_ref()?
+            .runs
+            .iter()
+            .find(|run| &run.id == run_id)
+    }
+
+    pub fn first_run_child(&self, run_id: &RunId) -> Option<RunId> {
+        self.snapshot
+            .as_ref()?
+            .runs
+            .iter()
+            .find_map(|run| (run.parent.as_ref() == Some(run_id)).then(|| run.id.clone()))
+    }
+
+    pub fn run_parent(&self, run_id: &RunId) -> Option<RunId> {
+        self.run(run_id)?.parent.clone()
+    }
+
+    pub fn visible_run_neighbor(&self, run_id: &RunId, delta: i32) -> Option<RunId> {
+        let visible = self.visible_runs();
+        let current = visible.iter().position(|entry| &entry.id == run_id)?;
+        let next = current
+            .saturating_add_signed(delta as isize)
+            .min(visible.len().saturating_sub(1));
+        visible.get(next).map(|entry| entry.id.clone())
+    }
+
     pub fn apply_snapshot(&mut self, snapshot: RuntimeSnapshot) {
         self.connection = RuntimeConnectionState::from(&snapshot.health);
         self.active_session = snapshot.active_session.clone();
@@ -385,12 +435,89 @@ impl AppState {
         self.view.selected_run = self.selected_run.clone();
         self.capabilities = snapshot.capabilities.clone();
         self.snapshot = Some(snapshot);
+
+        let visible = self.visible_runs();
+        if let Some(selected) = self.selected_run.as_ref() {
+            if let Some(index) = visible.iter().position(|entry| &entry.id == selected) {
+                self.view.sidebar_index = index;
+            } else {
+                self.view.sidebar_index =
+                    self.view.sidebar_index.min(visible.len().saturating_sub(1));
+            }
+        } else {
+            self.view.sidebar_index = self.view.sidebar_index.min(visible.len().saturating_sub(1));
+        }
     }
 
     pub fn auth_flow_mut(&mut self, flow_id: AuthFlowId) -> &mut AuthFlowState {
         self.auth_flows
             .entry(flow_id.clone())
             .or_insert_with(|| AuthFlowState::new(flow_id))
+    }
+}
+
+fn project_visible_runs(runs: &[RunSummary], collapsed: &BTreeSet<RunId>) -> Vec<VisibleRun> {
+    let known = runs
+        .iter()
+        .map(|run| run.id.clone())
+        .collect::<BTreeSet<_>>();
+    let mut children = BTreeMap::<Option<RunId>, Vec<&RunSummary>>::new();
+    for run in runs {
+        let parent = run.parent.clone().filter(|parent| known.contains(parent));
+        children.entry(parent).or_default().push(run);
+    }
+
+    let mut visible = Vec::new();
+    let mut visited = BTreeSet::new();
+    if let Some(roots) = children.get(&None) {
+        for root in roots {
+            append_visible_run(root, 0, &children, collapsed, &mut visited, &mut visible);
+        }
+    }
+
+    // Invalid/cyclic backend projections must not make runs disappear from the
+    // frontend. Any unvisited node is surfaced as an additional root; the visited
+    // set prevents a malformed cycle from recursing indefinitely.
+    for run in runs {
+        if !visited.contains(&run.id) {
+            append_visible_run(run, 0, &children, collapsed, &mut visited, &mut visible);
+        }
+    }
+    visible
+}
+
+fn append_visible_run(
+    run: &RunSummary,
+    depth: usize,
+    children: &BTreeMap<Option<RunId>, Vec<&RunSummary>>,
+    collapsed: &BTreeSet<RunId>,
+    visited: &mut BTreeSet<RunId>,
+    visible: &mut Vec<VisibleRun>,
+) {
+    if !visited.insert(run.id.clone()) {
+        return;
+    }
+    let descendants = children.get(&Some(run.id.clone()));
+    let has_children = descendants.is_some_and(|children| !children.is_empty());
+    visible.push(VisibleRun {
+        id: run.id.clone(),
+        depth,
+        has_children,
+    });
+    if collapsed.contains(&run.id) {
+        return;
+    }
+    if let Some(descendants) = descendants {
+        for child in descendants {
+            append_visible_run(
+                child,
+                depth.saturating_add(1),
+                children,
+                collapsed,
+                visited,
+                visible,
+            );
+        }
     }
 }
 
@@ -428,6 +555,26 @@ impl Default for AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use phenix_runtime_api::{RunKind, RunState};
+
+    fn run(id: &str, parent: Option<&str>) -> RunSummary {
+        RunSummary {
+            id: RunId::parse(id).expect("run id"),
+            parent: parent.map(|parent| RunId::parse(parent).expect("parent id")),
+            kind: RunKind::Agent,
+            definition_id: id.to_owned(),
+            display_name: id.to_owned(),
+            state: RunState::Running,
+            persisted_session: None,
+            session_file: None,
+            model: None,
+            thinking_level: None,
+            difficulty: None,
+            budget: None,
+            pending_messages: 0,
+            outcome: None,
+        }
+    }
 
     #[test]
     fn editor_operations_preserve_utf8_boundaries() {
@@ -485,6 +632,52 @@ mod tests {
             });
         }
         assert_eq!(transcript.turn_ids(), vec!["run-1:u1", "run-1:u2"]);
+    }
+
+    #[test]
+    fn run_projection_is_hierarchical_and_respects_collapsed_nodes() {
+        let mut state = AppState {
+            snapshot: Some(RuntimeSnapshot {
+                capabilities: BackendCapabilities::default(),
+                health: BackendHealth::Ready,
+                active_session: None,
+                root_run: Some(RunId::parse("root").expect("root")),
+                selected_run: Some(RunId::parse("root").expect("root")),
+                sessions: Vec::new(),
+                runs: vec![
+                    run("root", None),
+                    run("child-a", Some("root")),
+                    run("grandchild", Some("child-a")),
+                    run("child-b", Some("root")),
+                ],
+                objectives: Vec::new(),
+            }),
+            ..AppState::default()
+        };
+        assert_eq!(
+            state
+                .visible_runs()
+                .into_iter()
+                .map(|entry| (entry.id.to_string(), entry.depth))
+                .collect::<Vec<_>>(),
+            vec![
+                ("root".to_owned(), 0),
+                ("child-a".to_owned(), 1),
+                ("grandchild".to_owned(), 2),
+                ("child-b".to_owned(), 1),
+            ]
+        );
+        state
+            .view
+            .set_run_collapsed(RunId::parse("child-a").expect("child"), true);
+        assert_eq!(
+            state
+                .visible_runs()
+                .into_iter()
+                .map(|entry| entry.id.to_string())
+                .collect::<Vec<_>>(),
+            vec!["root", "child-a", "child-b"]
+        );
     }
 
     #[test]

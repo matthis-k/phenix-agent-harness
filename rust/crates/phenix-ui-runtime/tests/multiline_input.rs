@@ -1,6 +1,6 @@
 use phenix_frontend_config::{
-    FrontendCommand, FrontendConfig, FrontendConfigProvider, FrontendContext, FrontendProviderError,
-    FrontendProviderRef,
+    FrontendCommand, FrontendConfig, FrontendConfigProvider, FrontendContext,
+    FrontendProviderError, FrontendProviderRef,
 };
 use phenix_ui_core::{AppState, EventEnvelope, KeyCode, KeyInput, KeyModifiers, UiInput};
 use phenix_ui_runtime::{
@@ -67,9 +67,9 @@ fn shift_enter_inserts_a_newline_instead_of_submitting() {
 
     assert_eq!(
         reactions.reactions,
-        vec![BusReaction::View(ViewMutation::EditInput(InputEdit::Insert(
-            "\n".to_owned()
-        )))]
+        vec![BusReaction::View(ViewMutation::EditInput(
+            InputEdit::Insert("\n".to_owned())
+        ))]
     );
 }
 

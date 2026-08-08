@@ -169,6 +169,7 @@ pub struct ViewState {
     pub terminal: TerminalSize,
     pub selected_run: Option<RunId>,
     pub sidebar_index: usize,
+    pub collapsed_runs: BTreeSet<RunId>,
     pub transcript_scroll: ScrollState,
     pub sidebar_scroll: ScrollState,
     pub transcript_selected_turn: Option<usize>,
@@ -191,6 +192,24 @@ impl ViewState {
         self.panes.entry(element).or_default()
     }
 
+    pub fn run_is_collapsed(&self, run_id: &RunId) -> bool {
+        self.collapsed_runs.contains(run_id)
+    }
+
+    pub fn set_run_collapsed(&mut self, run_id: RunId, collapsed: bool) {
+        if collapsed {
+            self.collapsed_runs.insert(run_id);
+        } else {
+            self.collapsed_runs.remove(&run_id);
+        }
+    }
+
+    pub fn toggle_run_collapsed(&mut self, run_id: RunId) {
+        if !self.collapsed_runs.remove(&run_id) {
+            self.collapsed_runs.insert(run_id);
+        }
+    }
+
     pub fn transcript_turn_is_expanded(&self, id: &str) -> bool {
         self.expanded_transcript_turns.contains(id)
     }
@@ -210,7 +229,10 @@ impl ViewState {
     }
 
     pub fn rich_block_viewport(&self, id: &str) -> RichBlockViewport {
-        self.rich_block_viewports.get(id).copied().unwrap_or_default()
+        self.rich_block_viewports
+            .get(id)
+            .copied()
+            .unwrap_or_default()
     }
 
     pub fn rich_block_viewport_mut(&mut self, id: String) -> &mut RichBlockViewport {
@@ -286,6 +308,7 @@ impl Default for ViewState {
             terminal: TerminalSize::default(),
             selected_run: None,
             sidebar_index: 0,
+            collapsed_runs: BTreeSet::new(),
             transcript_scroll: ScrollState::default(),
             sidebar_scroll: ScrollState::default(),
             transcript_selected_turn: None,
@@ -321,6 +344,17 @@ mod tests {
     }
 
     #[test]
+    fn run_tree_collapse_state_is_local_frontend_state() {
+        let run_id = RunId::parse("run-child").expect("run id");
+        let mut view = ViewState::default();
+        assert!(!view.run_is_collapsed(&run_id));
+        view.toggle_run_collapsed(run_id.clone());
+        assert!(view.run_is_collapsed(&run_id));
+        view.set_run_collapsed(run_id.clone(), false);
+        assert!(!view.run_is_collapsed(&run_id));
+    }
+
+    #[test]
     fn transcript_turn_expansion_is_independent_per_turn() {
         let mut view = ViewState::default();
         view.toggle_transcript_turn("turn-a".to_owned());
@@ -334,15 +368,13 @@ mod tests {
     fn rich_block_presentation_is_independent_per_instance() {
         let mut view = ViewState::default();
         view.set_rich_block_view("turn-a:block:0".to_owned(), RichBlockView::Grid);
-        view.rich_block_viewport_mut("turn-a:block:0".to_owned()).horizontal = 4;
+        view.rich_block_viewport_mut("turn-a:block:0".to_owned())
+            .horizontal = 4;
         assert_eq!(
             view.rich_block_view("turn-a:block:0"),
             Some(RichBlockView::Grid)
         );
-        assert_eq!(
-            view.rich_block_viewport("turn-a:block:0").horizontal,
-            4
-        );
+        assert_eq!(view.rich_block_viewport("turn-a:block:0").horizontal, 4);
         assert_eq!(view.rich_block_view("turn-b:block:0"), None);
     }
 

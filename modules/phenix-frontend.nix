@@ -114,6 +114,10 @@ _:
 
       configuredSmokeDir = pkgs.runCommand "phenix-configured-smoke-config" { } ''
         cp -R ${../config/phenix-harness} "$out"
+        # Files copied from the Nix store retain read-only modes. This derivation
+        # intentionally extends config.lua, so make the copied tree writable in
+        # the build sandbox before appending the smoke-test overrides.
+        chmod -R u+w "$out"
         cat >> "$out/config.lua" <<'EOF_CONFIG'
         phenix.keymap.del("global", "<C-q>")
         phenix.theme.set("Accent", { fg = "#ffffff", bold = true })

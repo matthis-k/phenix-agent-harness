@@ -3,9 +3,7 @@ use phenix_acp::{
     ConfigurationFormat, ConfigurationInput, ConfigurationRootInput, ConfigurationSource,
     DefinitionFormat,
 };
-use phenix_acp_backend::{
-    AcpAgentBackend, AcpBackendConfig, ConfigError as BackendConfigError,
-};
+use phenix_acp_backend::{AcpAgentBackend, AcpBackendConfig, ConfigError as BackendConfigError};
 use phenix_ui_lua::{AcpApplicationConfig, AcpDefinitionInput, AcpDefinitionSource};
 use std::collections::BTreeMap;
 use std::env;
@@ -33,8 +31,8 @@ pub fn load_acp_backend(
 ) -> Result<AcpAgentBackend, AcpConfigLoadError> {
     let request = configuration_request(config_directory, config);
     let request_path = write_configuration_request(&request)?;
-    let conductor = env::var(CONDUCTOR_COMMAND_ENV)
-        .unwrap_or_else(|_| "phenix-conductor".to_owned());
+    let conductor =
+        env::var(CONDUCTOR_COMMAND_ENV).unwrap_or_else(|_| "phenix-conductor".to_owned());
     let command = format!(
         "env {CONFIGURATION_FILE_ENV}={} {conductor}",
         shell_quote(&request_path.display().to_string())
@@ -62,11 +60,7 @@ fn configuration_request(
                 command: config.backend().command().to_owned(),
                 environment: BTreeMap::new(),
             }],
-            definitions: config
-                .definitions()
-                .iter()
-                .map(map_definition)
-                .collect(),
+            definitions: config.definitions().iter().map(map_definition).collect(),
         },
     }
 }
@@ -76,11 +70,9 @@ fn map_definition(input: &AcpDefinitionInput) -> ConfigurationDefinitionInput {
         AcpDefinitionInput::Workflow(source) => ConfigurationDefinitionInput::Workflow {
             source: map_source(source),
         },
-        AcpDefinitionInput::RoutingTable(source) => {
-            ConfigurationDefinitionInput::RoutingTable {
-                source: map_source(source),
-            }
-        }
+        AcpDefinitionInput::RoutingTable(source) => ConfigurationDefinitionInput::RoutingTable {
+            source: map_source(source),
+        },
     }
 }
 
@@ -170,7 +162,10 @@ impl Display for AcpConfigLoadError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Encode(source) => {
-                write!(formatter, "failed to encode Phenix ACP configuration input: {source}")
+                write!(
+                    formatter,
+                    "failed to encode Phenix ACP configuration input: {source}"
+                )
             }
             Self::Write { path, source } => write!(
                 formatter,

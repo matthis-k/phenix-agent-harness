@@ -437,6 +437,10 @@ fn apply_view_mutation(state: &mut AppState, mutation: ViewMutation) {
                 scroll.offset = scroll.offset.saturating_add_signed(lines as isize);
             }
         }
+        ViewMutation::MoveSidebarRun(delta) => move_sidebar_run(state, delta),
+        ViewMutation::MoveSidebarRunParent => move_sidebar_run_parent(state),
+        ViewMutation::MoveSidebarRunChild => move_sidebar_run_child(state),
+        ViewMutation::ToggleSidebarRun => toggle_sidebar_run(state),
         ViewMutation::MoveTranscriptTurn(delta) => move_transcript_turn(state, delta),
         ViewMutation::ToggleTranscriptTurnDetails => toggle_transcript_turn_details(state),
         ViewMutation::MoveTranscriptBlock(delta) => move_transcript_block(state, delta),
@@ -448,6 +452,89 @@ fn apply_view_mutation(state: &mut AppState, mutation: ViewMutation) {
         ViewMutation::EditInput(edit) => apply_input_edit(state, edit),
         ViewMutation::MoveOverlaySelection(delta) => move_overlay_selection(state, delta),
         ViewMutation::Notify(message) => state.notifications.push_back(message),
+    }
+}
+
+fn move_sidebar_run(state: &mut AppState, delta: i32) {
+    let visible = state.visible_runs();
+    if visible.is_empty() {
+        state.view.sidebar_index = 0;
+        state.view.sidebar_scroll.offset = 0;
+        return;
+    }
+    let last = visible.len() - 1;
+    state.view.sidebar_index = state
+        .view
+        .sidebar_index
+        .min(last)
+        .saturating_add_signed(delta as isize)
+        .min(last);
+    state.view.sidebar_scroll.offset = state.view.sidebar_index.saturating_sub(1);
+}
+
+fn set_sidebar_cursor(state: &mut AppState, run_id: &phenix_runtime_api::RunId) {
+    let visible = state.visible_runs();
+    if let Some(index) = visible.iter().position(|entry| &entry.id == run_id) {
+        state.view.sidebar_index = index;
+        state.view.sidebar_scroll.offset = index.saturating_sub(1);
+    }
+}
+
+fn move_sidebar_run_parent(state: &mut AppState) {
+    let Some(run_id) = state.sidebar_cursor_run_id() else {
+        return;
+    };
+    let visible = state.visible_runs();
+    let has_children = visible
+        .iter()
+        .find(|entry| entry.id == run_id)
+        .is_some_and(|entry| entry.has_children);
+    if has_children && !state.view.run_is_collapsed(&run_id) {
+        state.view.set_run_collapsed(run_id, true);
+        return;
+    }
+    if let Some(parent) = state.run_parent(&run_id) {
+        set_sidebar_cursor(state, &parent);
+    }
+}
+
+fn move_sidebar_run_child(state: &mut AppState) {
+    let Some(run_id) = state.sidebar_cursor_run_id() else {
+        return;
+    };
+    let visible = state.visible_runs();
+    let has_children = visible
+        .iter()
+        .find(|entry| entry.id == run_id)
+        .is_some_and(|entry| entry.has_children);
+    if !has_children {
+        return;
+    }
+    if state.view.run_is_collapsed(&run_id) {
+        state.view.set_run_collapsed(run_id, false);
+        return;
+    }
+    if let Some(child) = state.first_run_child(&run_id) {
+        set_sidebar_cursor(state, &child);
+    }
+}
+
+fn toggle_sidebar_run(state: &mut AppState) {
+    let Some(run_id) = state.sidebar_cursor_run_id() else {
+        return;
+    };
+    let has_children = state
+        .visible_runs()
+        .iter()
+        .find(|entry| entry.id == run_id)
+        .is_some_and(|entry| entry.has_children);
+    if has_children {
+        state.view.toggle_run_collapsed(run_id);
+        let visible = state.visible_runs();
+        state.view.sidebar_index = state
+            .view
+            .sidebar_index
+            .min(visible.len().saturating_sub(1));
     }
 }
 
@@ -785,8 +872,50 @@ impl Error for UiRuntimeError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_runtime_api::{TranscriptBlock, TranscriptRole};
+    use phenix_runtime_api::{
+        BackendCapabilities, BackendHealth, RunKind, RunState, RunSummary, RuntimeSnapshot,
+        TranscriptBlock, TranscriptRole,
+    };
     use phenix_ui_core::InputEditor;
+
+    fn run(id: &str, parent: Option<&str>) -> RunSummary {
+        RunSummary {
+            id: phenix_runtime_api::RunId::parse(id).expect("run id"),
+            parent: parent.map(|parent| phenix_runtime_api::RunId::parse(parent).expect("parent")),
+            kind: RunKind::Agent,
+            definition_id: id.to_owned(),
+            display_name: id.to_owned(),
+            state: RunState::Running,
+            persisted_session: None,
+            session_file: None,
+            model: None,
+            thinking_level: None,
+            difficulty: None,
+            budget: None,
+            pending_messages: 0,
+            outcome: None,
+        }
+    }
+
+    fn run_tree_state() -> AppState {
+        let mut state = AppState::default();
+        state.apply_snapshot(RuntimeSnapshot {
+            capabilities: BackendCapabilities::default(),
+            health: BackendHealth::Ready,
+            active_session: None,
+            root_run: Some(phenix_runtime_api::RunId::parse("root").expect("root")),
+            selected_run: Some(phenix_runtime_api::RunId::parse("root").expect("root")),
+            sessions: Vec::new(),
+            runs: vec![
+                run("root", None),
+                run("child-a", Some("root")),
+                run("grandchild", Some("child-a")),
+                run("child-b", Some("root")),
+            ],
+            objectives: Vec::new(),
+        });
+        state
+    }
 
     #[test]
     fn view_mutations_preserve_editor_cursor_and_pane_size() {
@@ -811,6 +940,46 @@ mod tests {
             },
         );
         assert_eq!(state.view.pane(&ElementId::sidebar()).width, Some(32));
+    }
+
+    #[test]
+    fn run_tree_cursor_moves_collapses_and_descends_semantically() {
+        let mut state = run_tree_state();
+        assert_eq!(
+            state.sidebar_cursor_run_id().map(|id| id.to_string()),
+            Some("root".to_owned())
+        );
+
+        move_sidebar_run(&mut state, 1);
+        assert_eq!(
+            state.sidebar_cursor_run_id().map(|id| id.to_string()),
+            Some("child-a".to_owned())
+        );
+        move_sidebar_run_parent(&mut state);
+        assert!(state
+            .view
+            .run_is_collapsed(&phenix_runtime_api::RunId::parse("child-a").expect("child")));
+        assert_eq!(
+            state
+                .visible_runs()
+                .into_iter()
+                .map(|entry| entry.id.to_string())
+                .collect::<Vec<_>>(),
+            vec![
+                "root".to_owned(),
+                "child-a".to_owned(),
+                "child-b".to_owned()
+            ]
+        );
+        move_sidebar_run_child(&mut state);
+        assert!(!state
+            .view
+            .run_is_collapsed(&phenix_runtime_api::RunId::parse("child-a").expect("child")));
+        move_sidebar_run_child(&mut state);
+        assert_eq!(
+            state.sidebar_cursor_run_id().map(|id| id.to_string()),
+            Some("grandchild".to_owned())
+        );
     }
 
     #[test]
