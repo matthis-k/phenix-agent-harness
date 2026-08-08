@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - name: Rebuild feature on current main
         shell: bash
         run: |
@@ -24,7 +24,7 @@ jobs:
           import subprocess
 
           text = subprocess.check_output(
-              ['git', 'show', 'HEAD^:.github/workflows/finish-rich-transcript.yml'],
+              ['git', 'show', 'be1ae20230d293b522c015ee4b6a64133bbd3df2:.github/workflows/finish-rich-transcript.yml'],
               text=True,
           )
           start = text.index('        run: |\n') + len('        run: |\n')
@@ -32,20 +32,26 @@ jobs:
           lines = text[start:end].splitlines()
           script = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines)
           script = script.replace(
-              '    rust/Cargo.toml \\\n',
-              '    rust/Cargo.toml \\\n    rust/Cargo.lock \\\n',
+              '  rust/Cargo.toml \\\n',
+              '  rust/Cargo.toml \\\n  rust/Cargo.lock \\\n',
               1,
           )
           script = script.replace('cargo generate-lockfile\n', '', 1)
           Path('/tmp/rebuild-rich.sh').write_text(script)
           EOF
-          bash /tmp/rebuild-rich.sh
+          set +e
+          bash /tmp/rebuild-rich.sh > /tmp/rebuild.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/rebuild.log
+          exit "$status"
       - name: Upload validation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: rich-transcript-clean-validation
           path: |
+            /tmp/rebuild.log
             /tmp/cargo-check.log
             /tmp/cargo-clippy.log
             /tmp/cargo-test.log
