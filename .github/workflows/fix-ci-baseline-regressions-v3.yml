@@ -32,39 +32,41 @@ jobs:
 
           path = Path('rust/crates/phenix-conductor/tests/black_box_model_tool_loop.rs')
           text = path.read_text()
-          old = '''    let specialist_result = process.receive_response(8)?;
-    assert!(
-        specialist_result.to_string().contains("42"),
-        "specialist response did not traverse the conductor: {specialist_result}"
-    );
-'''
-          new = '''    let mut specialist_results = vec![process.receive_response(8)?];
-    for poll_id in 8_000..8_250 {
-        if specialist_results
-            .iter()
-            .any(|result| result.to_string().contains("42"))
-        {
-            break;
-        }
-        thread::sleep(Duration::from_millis(20));
-        process.send_request(
-            poll_id,
-            "_phenix/node/execute",
-            &json!({
-                "tree_id": tree_id,
-                "node_id": specialist_node,
-                "command": { "kind": "poll" }
-            }),
-        )?;
-        specialist_results.push(process.receive_response(poll_id)?);
-    }
-    assert!(
-        specialist_results
-            .iter()
-            .any(|result| result.to_string().contains("42")),
-        "specialist response did not traverse the conductor: {specialist_results:?}"
-    );
-'''
+          old = (
+              '    let specialist_result = process.receive_response(8)?;\n'
+              '    assert!(\n'
+              '        specialist_result.to_string().contains("42"),\n'
+              '        "specialist response did not traverse the conductor: {specialist_result}"\n'
+              '    );\n'
+          )
+          new = (
+              '    let mut specialist_results = vec![process.receive_response(8)?];\n'
+              '    for poll_id in 8_000..8_250 {\n'
+              '        if specialist_results\n'
+              '            .iter()\n'
+              '            .any(|result| result.to_string().contains("42"))\n'
+              '        {\n'
+              '            break;\n'
+              '        }\n'
+              '        thread::sleep(Duration::from_millis(20));\n'
+              '        process.send_request(\n'
+              '            poll_id,\n'
+              '            "_phenix/node/execute",\n'
+              '            &json!({\n'
+              '                "tree_id": tree_id,\n'
+              '                "node_id": specialist_node,\n'
+              '                "command": { "kind": "poll" }\n'
+              '            }),\n'
+              '        )?;\n'
+              '        specialist_results.push(process.receive_response(poll_id)?);\n'
+              '    }\n'
+              '    assert!(\n'
+              '        specialist_results\n'
+              '            .iter()\n'
+              '            .any(|result| result.to_string().contains("42")),\n'
+              '        "specialist response did not traverse the conductor: {specialist_results:?}"\n'
+              '    );\n'
+          )
           if text.count(old) != 1:
               raise SystemExit('black-box async execution assertion shape changed unexpectedly')
           path.write_text(text.replace(old, new))
