@@ -107,7 +107,7 @@ jobs:
           )
           script = script.replace(
               'cargo clippy --workspace --all-targets --locked -- -D warnings',
-              'cargo clippy -p phenix-ui-core -p phenix-ui-runtime -p phenix-tui --all-targets --locked -- -D warnings',
+              'cargo clippy --no-deps -p phenix-ui-core -p phenix-ui-runtime -p phenix-tui --all-targets --locked -- -D warnings',
               1,
           )
           Path('/tmp/rebuild-rich.sh').write_text(script)
