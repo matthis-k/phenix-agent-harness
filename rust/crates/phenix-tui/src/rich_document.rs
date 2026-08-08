@@ -191,11 +191,7 @@ fn heading_surface(level: u8, theme: &ThemeConfig) -> Style {
     }
 }
 
-fn render_rule(
-    active_view: RichBlockView,
-    width: usize,
-    theme: &ThemeConfig,
-) -> RenderedRichBlock {
+fn render_rule(active_view: RichBlockView, width: usize, theme: &ThemeConfig) -> RenderedRichBlock {
     let inner = width
         .saturating_sub(DOCUMENT_MARGIN.saturating_mul(2))
         .max(1);
