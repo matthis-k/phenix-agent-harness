@@ -55,6 +55,21 @@ in
       '';
     };
 
+    "maintenance-fix-rust-clippy" = {
+      packages = [
+        pkgs.cargo
+        pkgs.clippy
+        pkgs.git
+        pkgs.rustc
+      ];
+      exec = ''
+        ${repositoryRoot}
+        export CARGO_HOME="$TMPDIR/phenix-cargo-home"
+        cargo clippy --fix --workspace --all-targets --locked --allow-dirty --allow-staged
+        cargo clippy --workspace --all-targets --locked -- -D warnings
+      '';
+    };
+
     "maintenance-check-rust-tests" = {
       packages = [
         pkgs.cargo
@@ -74,7 +89,11 @@ in
     "maintenance:rust-compile".exec = "maintenance-check-rust-compile";
     "maintenance:rust-clippy".exec = "maintenance-check-rust-clippy";
     "maintenance:rust-tests".exec = "maintenance-check-rust-tests";
-    "maintenance:fix:rust-format".exec = "maintenance-fix-rust-format";
+    "maintenance:fix:rust-clippy".exec = "maintenance-fix-rust-clippy";
+    "maintenance:fix:rust-format" = {
+      exec = "maintenance-fix-rust-format";
+      after = [ "maintenance:fix:rust-clippy" ];
+    };
 
     "maintenance:format".after = [ "maintenance:rust-format" ];
     "maintenance:check".after = [
