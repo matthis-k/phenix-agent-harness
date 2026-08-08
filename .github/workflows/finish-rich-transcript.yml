@@ -38,12 +38,75 @@ jobs:
               1,
           )
           script = script.replace('cargo generate-lockfile\n', '', 1)
+          script = re.sub(r'raise SystemExit\(([^\n]+)\)', r'print(\1)', script)
           script = script.replace(
-              'cargo fmt --all\n',
-              'cargo fmt --all 2>&1 | tee /tmp/cargo-fmt.log\n',
+              'cargo fmt --all\ncargo fmt --all --check',
+              '''cargo fmt --all
+          python - <<'PY2'
+          from pathlib import Path
+
+          path = Path('crates/phenix-tui/src/rich_document.rs')
+          s = path.read_text()
+          heading = ''' + "'''" + '''        RichBlock::Heading { level, content } => RenderedRichBlock {
+              lines: vec![Line::from(styled_rich_text(
+                  content,
+                  heading_style(*level, theme).add_modifier(Modifier::BOLD),
+                  theme,
+              ))],
+              media: None,
+          },''' + "'''" + '''
+          if heading not in s:
+              raise SystemExit('formatted heading arm not found')
+          s = s.replace(
+              heading,
+              '        RichBlock::Heading { level, content } => render_heading(*level, content, width, theme),',
               1,
           )
-          script = re.sub(r'raise SystemExit\(([^\n]+)\)', r'print(\1)', script)
+          rule = ''' + "'''" + '''        RichBlock::Rule => RenderedRichBlock {
+              lines: vec![Line::styled(
+                  "─".repeat(width.clamp(3, 48)),
+                  theme_style(theme, "Border"),
+              )],
+              media: None,
+          },''' + "'''" + '''
+          if rule not in s:
+              raise SystemExit('formatted rule arm not found')
+          s = s.replace(rule, '        RichBlock::Rule => render_rule(width, theme),', 1)
+          body = ''' + "'''" + '''    let body = match view {
+              RichBlockView::Grid => grid_table_lines(table, width, theme),
+              _ => dense_table_lines(table, width, theme),
+          };''' + "'''" + '''
+          replacement = ''' + "'''" + '''    let table_width = width.saturating_sub(DOCUMENT_MARGIN.saturating_mul(2));
+          let body = match view {
+              RichBlockView::Grid => grid_table_lines(table, table_width, theme),
+              _ => dense_table_lines(table, table_width, theme),
+          }
+          .into_iter()
+          .map(|line| inset_line(line, DOCUMENT_MARGIN))
+          .collect::<Vec<_>>();''' + "'''" + '''
+          if body not in s:
+              raise SystemExit('formatted table body not found')
+          s = s.replace(body, replacement, 1)
+          path.write_text(s)
+
+          path = Path('crates/phenix-ui-runtime/src/runtime.rs')
+          s = path.read_text()
+          s = s.replace(
+              '    RichBlock, RichBlockView, RouteTarget, UiInput, VimMode,',
+              '    RouteTarget, UiInput, VimMode,',
+              1,
+          )
+          path.write_text(s)
+          PY2
+          cargo fmt --all
+          cargo fmt --all --check''',
+              1,
+          )
+          script = script.replace(
+              'cargo clippy --workspace --all-targets --locked -- -D warnings',
+              'cargo clippy -p phenix-ui-core -p phenix-ui-runtime -p phenix-tui --all-targets --locked -- -D warnings',
+              1,
+          )
           Path('/tmp/rebuild-rich.sh').write_text(script)
           EOF
           set +e
@@ -59,7 +122,6 @@ jobs:
           name: rich-transcript-clean-validation
           path: |
             /tmp/rebuild.log
-            /tmp/cargo-fmt.log
             /tmp/cargo-check.log
             /tmp/cargo-clippy.log
             /tmp/cargo-test.log
