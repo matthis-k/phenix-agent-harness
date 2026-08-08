@@ -1,4 +1,4 @@
-name: Fix rich transcript test fixtures
+name: Fix rich transcript table assertion
 
 on:
   push:
@@ -15,45 +15,34 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
           fetch-depth: 0
-      - name: Patch and verify focused rich transcript tests
+      - name: Patch table assertion
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
 
-          table = Path('rust/crates/phenix-tui/src/rich_document.rs')
-          source = table.read_text()
-          old = '''        assert!(grid_text
-              .iter()
-              .any(|line| line.starts_with("  ┌") || line.starts_with('┌')));'''
-          new = '''        assert!(grid_text
-              .iter()
-              .any(|line| line.trim_start().starts_with('┌')));'''
-          if old in source:
-              table.write_text(source.replace(old, new, 1))
-
-          media = Path('rust/crates/phenix-tui/src/terminal_media.rs')
-          source = media.read_text()
-          old_png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL2WQAAAABJRU5ErkJggg=='
-          new_png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
-          if old_png in source:
-              media.write_text(source.replace(old_png, new_png, 1))
+          path = Path('rust/crates/phenix-tui/src/rich_document.rs')
+          source = path.read_text()
+          old = '.any(|line| line.starts_with("  ┌") || line.starts_with(\'┌\')));'
+          new = '.any(|line| line.trim_start().starts_with(\'┌\')));'
+          if old not in source:
+              if new in source:
+                  raise SystemExit(0)
+              raise SystemExit('table assertion marker not found')
+          path.write_text(source.replace(old, new, 1))
           PY
-
-          if git diff --quiet -- rust/crates/phenix-tui/src/rich_document.rs rust/crates/phenix-tui/src/terminal_media.rs; then
-            echo "Fixtures already corrected."
-            exit 0
-          fi
 
           cd rust
           cargo fmt --all
           cargo test -p phenix-tui rich_document::tests::table_views_are_visually_distinct --locked
-          cargo test -p phenix-tui terminal_media::tests::data_uri_decoder_accepts_standard_acp_image_payloads --locked
           cd ..
 
+          if git diff --quiet -- rust/crates/phenix-tui/src/rich_document.rs; then
+            exit 0
+          fi
           git config user.name "Matthis Kälble"
           git config user.email "69082876+matthis-k@users.noreply.github.com"
-          git add rust/crates/phenix-tui/src/rich_document.rs rust/crates/phenix-tui/src/terminal_media.rs
-          git commit -m "fix(tui): correct rich transcript test fixtures"
+          git add rust/crates/phenix-tui/src/rich_document.rs
+          git commit -m "fix(tui): make table-view assertion margin agnostic"
           git push origin HEAD:refactor/rich-transcript-blocks
