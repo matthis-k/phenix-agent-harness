@@ -40,7 +40,11 @@ jobs:
 
       - name: Formatting
         if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
-        run: devenv tasks run maintenance:format
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/ci-diagnostics"
+          devenv tasks run maintenance:format 2>&1 | tee "$RUNNER_TEMP/ci-diagnostics/format.log"
 
       - name: Rust compile / check
         if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
@@ -48,7 +52,11 @@ jobs:
 
       - name: Rust lint
         if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
-        run: devenv tasks run maintenance:rust-clippy --mode single
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/ci-diagnostics"
+          devenv tasks run maintenance:rust-clippy --mode single 2>&1 | tee "$RUNNER_TEMP/ci-diagnostics/clippy.log"
 
       - name: Rust tests
         if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
@@ -68,17 +76,29 @@ jobs:
 
       - name: Nix flake and smoke checks
         if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
-        run: devenv tasks run maintenance:flake --mode single
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/ci-diagnostics"
+          devenv tasks run maintenance:flake --mode single 2>&1 | tee "$RUNNER_TEMP/ci-diagnostics/flake.log"
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
         shell: bash
         run: |
           set -euo pipefail
-          git diff --exit-code
-          status="$(git status --porcelain=v1 --untracked-files=all)"
-          if [[ -n "$status" ]]; then
-            printf '%s\n' "$status"
-            echo "maintenance checks mutated committed source" >&2
-            exit 1
-          fi
+          mkdir -p "$RUNNER_TEMP/ci-diagnostics"
+          git diff > "$RUNNER_TEMP/ci-diagnostics/source.diff"
+          git status --porcelain=v1 --untracked-files=all > "$RUNNER_TEMP/ci-diagnostics/status.txt"
+          cat "$RUNNER_TEMP/ci-diagnostics/source.diff"
+          cat "$RUNNER_TEMP/ci-diagnostics/status.txt"
+          test ! -s "$RUNNER_TEMP/ci-diagnostics/source.diff"
+          test ! -s "$RUNNER_TEMP/ci-diagnostics/status.txt"
+
+      - name: Upload CI diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ci-diagnostics
+          path: ${{ runner.temp }}/ci-diagnostics
+          if-no-files-found: error
