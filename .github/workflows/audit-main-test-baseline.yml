@@ -1,0 +1,30 @@
+name: Audit main test baseline
+
+on:
+  push:
+    branches:
+      - refactor/rich-transcript-blocks
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: main
+      - name: Enumerate main workspace test failures
+        shell: bash
+        working-directory: rust
+        run: |
+          set +e
+          cargo test --workspace --all-targets --locked --no-fail-fast 2>&1 | tee /tmp/main-tests.log
+          status=${PIPESTATUS[0]}
+          echo "cargo_status=$status" >> /tmp/main-tests.log
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: main-workspace-test-baseline
+          path: /tmp/main-tests.log
