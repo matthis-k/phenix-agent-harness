@@ -6,7 +6,6 @@ members = [
   "crates/phenix-acp-presets",
   "crates/phenix-conductor",
   "crates/phenix-frontend-config",
-  "crates/phenix-process-backend",
   "crates/phenix-runtime-api",
   "crates/phenix-tui",
   "crates/phenix-ui-core",

@@ -16,6 +16,18 @@ in
       '';
     };
 
+    "maintenance-fix-rust-format" = {
+      packages = [
+        pkgs.cargo
+        pkgs.git
+        pkgs.rustfmt
+      ];
+      exec = ''
+        ${repositoryRoot}
+        cargo fmt --all
+      '';
+    };
+
     "maintenance-check-rust-compile" = {
       packages = [
         pkgs.cargo
@@ -62,6 +74,7 @@ in
     "maintenance:rust-compile".exec = "maintenance-check-rust-compile";
     "maintenance:rust-clippy".exec = "maintenance-check-rust-clippy";
     "maintenance:rust-tests".exec = "maintenance-check-rust-tests";
+    "maintenance:fix:rust-format".exec = "maintenance-fix-rust-format";
 
     "maintenance:format".after = [ "maintenance:rust-format" ];
     "maintenance:check".after = [
@@ -69,5 +82,6 @@ in
       "maintenance:rust-clippy"
       "maintenance:rust-tests"
     ];
+    "maintenance:fix".after = [ "maintenance:fix:rust-format" ];
   };
 }

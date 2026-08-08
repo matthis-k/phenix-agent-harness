@@ -1,5 +1,5 @@
 {
-  description = "Phenix recursive agent and workflow harness for Pi";
+  description = "Phenix agent harness with a native Rust frontend and ACP backend orchestration";
 
   inputs = {
     phenix-pins.url = "github:matthis-k/phenix-pins";
@@ -34,7 +34,6 @@
       imports = [
         ./modules/pi-packages.nix
         ./modules/rust-core.nix
-        ./modules/standalone.nix
         ./modules/phenix-frontend.nix
         ./modules/development.nix
         ./modules/stitch.nix
