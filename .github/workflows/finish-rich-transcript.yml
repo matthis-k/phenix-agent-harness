@@ -21,6 +21,7 @@ jobs:
           set -euo pipefail
           python - <<'EOF'
           from pathlib import Path
+          import re
           import subprocess
 
           text = subprocess.check_output(
@@ -37,6 +38,12 @@ jobs:
               1,
           )
           script = script.replace('cargo generate-lockfile\n', '', 1)
+          script = script.replace(
+              'cargo fmt --all\n',
+              'cargo fmt --all 2>&1 | tee /tmp/cargo-fmt.log\n',
+              1,
+          )
+          script = re.sub(r'raise SystemExit\(([^\n]+)\)', r'print(\1)', script)
           Path('/tmp/rebuild-rich.sh').write_text(script)
           EOF
           set +e
@@ -52,6 +59,7 @@ jobs:
           name: rich-transcript-clean-validation
           path: |
             /tmp/rebuild.log
+            /tmp/cargo-fmt.log
             /tmp/cargo-check.log
             /tmp/cargo-clippy.log
             /tmp/cargo-test.log
