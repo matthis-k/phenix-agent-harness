@@ -1,4 +1,4 @@
-name: Capture rich transcript failure
+name: Verify rich transcript baseline
 
 on:
   push:
@@ -6,18 +6,15 @@ on:
       - refactor/rich-transcript-blocks
 
 permissions:
-  actions: read
   contents: read
 
 jobs:
-  capture:
+  conductor-baseline:
     runs-on: ubuntu-latest
     steps:
-      - name: Capture previous finalizer failure
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh run view 31232022639 --repo matthis-k/phenix-agent-harness --log-failed > /tmp/failure.log
-      - uses: actions/upload-artifact@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
-          name: rich-finalizer-failure
-          path: /tmp/failure.log
+          ref: main
+      - name: Run failing conductor integration test on main
+        working-directory: rust
+        run: cargo test -p phenix-conductor --test black_box_model_tool_loop --locked
