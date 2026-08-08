@@ -1,4 +1,4 @@
-name: Apply Canonical Rustfmt
+name: Targeted Flake Diagnostic
 
 on:
   push:
@@ -7,12 +7,12 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  format:
+  flake:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -24,6 +24,7 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
             accept-flake-config = true
+            max-jobs = auto
 
       - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
         with: { name: devenv }
@@ -31,22 +32,16 @@ jobs:
       - name: Install devenv
         run: nix profile add nixpkgs#devenv
 
-      - name: Apply canonical Rust formatting
+      - name: Nix flake and smoke checks
         shell: bash
         run: |
-          set -euo pipefail
-          devenv tasks run maintenance:fix:rust-format --mode single
-          changed="$(git diff --name-only)"
-          printf '%s\n' "$changed"
-          test "$changed" = "rust/crates/phenix-tui/src/rich_document.rs"
-          git diff --check
+          set -o pipefail
+          devenv tasks run maintenance:flake --mode single 2>&1 | tee /tmp/flake.log
 
-      - name: Commit and push formatting
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add rust/crates/phenix-tui/src/rich_document.rs
-          git commit -m 'style: apply canonical rustfmt'
-          git push origin HEAD:fix/ci-baseline-regressions
+      - name: Upload flake log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: targeted-flake-diagnostic
+          path: /tmp/flake.log
+          if-no-files-found: error
