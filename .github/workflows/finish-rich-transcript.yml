@@ -19,340 +19,40 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SOURCE_HEAD=$(git rev-parse HEAD)
-          git fetch origin main
-          git checkout -B rich-integration origin/main
-
-          git checkout "$SOURCE_HEAD" -- \
-            rust/Cargo.toml \
-            rust/Cargo.lock \
-            rust/crates/phenix-tui/Cargo.toml \
-            rust/crates/phenix-tui/src/lib.rs \
-            rust/crates/phenix-tui/src/rich_document.rs \
-            rust/crates/phenix-tui/src/syntax_highlight.rs \
-            rust/crates/phenix-tui/src/terminal_media.rs \
-            rust/crates/phenix-ui-core/src/rich_text.rs
-
           python - <<'PY'
           from pathlib import Path
-          import re
-
-          path = Path('rust/crates/phenix-tui/src/rich_document.rs')
-          source = path.read_text()
-          source = source.replace(
-              'const IMAGE_PREVIEW_ROWS: u16 = 10;\n',
-              'const IMAGE_PREVIEW_ROWS: u16 = 8;\nconst DOCUMENT_MARGIN: usize = 1;\nconst MAX_HEADING_DEPTH: usize = 4;\n',
-              1,
-          )
-
-          render_code_marker = '\nfn render_code(\n'
-          if render_code_marker not in source:
-              raise SystemExit('render_code marker not found')
-          source = source.replace(
-              render_code_marker,
-              r'''
-
-          fn render_heading(
-              level: u8,
-              content: &RichText,
-              width: usize,
-              theme: &ThemeConfig,
-          ) -> RenderedRichBlock {
-              let depth = usize::from(level.saturating_sub(1)).min(MAX_HEADING_DEPTH);
-              let maximum_margin = width.saturating_sub(3) / 2;
-              let margin = depth.min(maximum_margin);
-              let band_width = width.saturating_sub(margin.saturating_mul(2)).max(1);
-              let surface = heading_surface(level, theme);
-              let mut content_spans = styled_rich_text(
-                  content,
-                  heading_style(level, theme).add_modifier(Modifier::BOLD),
-                  theme,
-              );
-              for span in &mut content_spans {
-                  span.style = on_surface(span.style, surface);
-              }
-              let mut band = Vec::new();
-              if band_width > 1 {
-                  band.push(Span::styled(" ", surface));
-              }
-              band.extend(content_spans);
-              let used = band.iter().map(|span| span.content.chars().count()).sum::<usize>();
-              if used < band_width {
-                  band.push(Span::styled(" ".repeat(band_width - used), surface));
-              }
-              let mut spans = Vec::new();
-              if margin > 0 {
-                  spans.push(Span::raw(" ".repeat(margin)));
-              }
-              spans.extend(band);
-              if margin > 0 {
-                  spans.push(Span::raw(" ".repeat(margin)));
-              }
-              RenderedRichBlock { lines: vec![Line::from(spans)], media: None }
-          }
-
-          fn heading_surface(level: u8, theme: &ThemeConfig) -> Style {
-              let group = match level {
-                  1 => "Heading1",
-                  2 => "Heading2",
-                  3 => "Heading3",
-                  _ => "Heading4",
-              };
-              let explicit = surface_style(theme, group);
-              if explicit.bg.is_some() {
-                  explicit
-              } else {
-                  match level {
-                      1 => surface_style(theme, "CodeBlock"),
-                      2 => surface_style(theme, "UserMessage"),
-                      _ => surface_style(theme, "Surface"),
-                  }
-              }
-          }
-
-          fn render_rule(width: usize, theme: &ThemeConfig) -> RenderedRichBlock {
-              let inner = width.saturating_sub(DOCUMENT_MARGIN.saturating_mul(2)).max(1);
-              let mut spans = Vec::new();
-              if width > inner {
-                  spans.push(Span::raw(" ".repeat(DOCUMENT_MARGIN.min(width))));
-              }
-              spans.push(Span::styled("─".repeat(inner), theme_style(theme, "Muted")));
-              RenderedRichBlock { lines: vec![Line::from(spans)], media: None }
-          }
-          ''' + render_code_marker,
-              1,
-          )
-
-          style_marker = '\nfn heading_style(level: u8, theme: &ThemeConfig) -> Style {'
-          if style_marker not in source:
-              raise SystemExit('heading style marker not found')
-          source = source.replace(
-              style_marker,
-              r'''
-
-          fn on_surface(mut style: Style, surface: Style) -> Style {
-              if let Some(background) = surface.bg {
-                  style.bg = Some(background);
-              }
-              style
-          }
-
-          fn inset_line(line: Line<'static>, margin: usize) -> Line<'static> {
-              if margin == 0 {
-                  return line;
-              }
-              let style = line.style;
-              let mut spans = Vec::with_capacity(line.spans.len() + 1);
-              spans.push(Span::raw(" ".repeat(margin)));
-              spans.extend(line.spans);
-              Line::from(spans).style(style)
-          }
-          ''' + style_marker,
-              1,
-          )
-
-          toolbar_tail = '''        }
-              }
-              padded_line(spans, width, surface)
-          }'''
-          if toolbar_tail in source:
-              source = source.replace(
-                  toolbar_tail,
-                  '''        }
-              spans.push(Span::styled(
-                  "  ·  [ / ] select · v/V view",
-                  theme_style(theme, "Muted"),
-              ));
-              }
-              padded_line(spans, width, surface)
-          }''',
-                  1,
-              )
-
-          heading = re.compile(
-              r'        RichBlock::Heading \{ level, content \} => RenderedRichBlock \{\n.*?\n            media: None,\n        \},',
-              re.S,
-          )
-          source, count = heading.subn(
-              '        RichBlock::Heading { level, content } =>\n            render_heading(*level, content, width, theme),',
-              source,
-              count=1,
-          )
-          if count != 1:
-              raise SystemExit(f'expected one heading arm, replaced {count}')
-
-          rule = re.compile(
-              r'        RichBlock::Rule => RenderedRichBlock \{\n.*?\n            media: None,\n        \},',
-              re.S,
-          )
-          source, count = rule.subn(
-              '        RichBlock::Rule => render_rule(width, theme),',
-              source,
-              count=1,
-          )
-          if count != 1:
-              raise SystemExit(f'expected one rule arm, replaced {count}')
-
-          table = re.compile(
-              r'    let body = match view \{\n\s+RichBlockView::Grid => grid_table_lines\(table, width, theme\),\n\s+_ => dense_table_lines\(table, width, theme\),\n\s+\};'
-          )
-          table_body = '''    let table_width = width.saturating_sub(DOCUMENT_MARGIN.saturating_mul(2));
-              let body = match view {
-                  RichBlockView::Grid => grid_table_lines(table, table_width, theme),
-                  _ => dense_table_lines(table, table_width, theme),
-              }
-              .into_iter()
-              .map(|line| inset_line(line, DOCUMENT_MARGIN))
-              .collect::<Vec<_>>();'''
-          source, count = table.subn(table_body, source, count=1)
-          if count != 1:
-              raise SystemExit(f'expected one table body, replaced {count}')
-          path.write_text(source)
-
-          path = Path('rust/crates/phenix-tui/src/transcript.rs')
-          source = path.read_text()
-          source = source.replace(
-              'use crate::rich_document::{render_document, RenderedRichBlock, RichMedia};',
-              'use crate::rich_document::{render_document, RenderedRichBlock, RichBlockPresentation, RichMedia};',
-              1,
-          )
-          source = source.replace(
-              '    group_transcript_turns, parse_markdown, AppState, FocusTarget, RichBlockView,\n    RichBlockViewport, TranscriptDetailKind, TranscriptTurn, TranscriptTurnDetail,\n',
-              '    group_transcript_turns, parse_markdown, AppState, FocusTarget, RichBlockView,\n    TranscriptDetailKind, TranscriptTurn, TranscriptTurnDetail,\n',
-              1,
-          )
-          source = source.replace('const RICH_VIEWPORT_ROWS: usize = 12;\n', '', 1)
-
-          start = source.index('    if !turn.response.trim().is_empty() {')
-          end = source.index('    } else if turn.user.is_some() {', start)
-          replacement = r'''    if !turn.response.trim().is_empty() {
-              let document = parse_markdown(&turn.response);
-              has_interactive_block = document.blocks.iter().any(|block| block.is_interactive());
-              let rendered = render_document(&document, width, theme, |block_index, block| {
-                  let key = rich_block_key(&turn.id, block_index);
-                  RichBlockPresentation {
-                      view: state.view.rich_block_view(&key),
-                      viewport: state.view.rich_block_viewport(&key),
-                      selected: selected
-                          && block.is_interactive()
-                          && state.view.transcript_selected_block == Some(block_index),
-                  }
-              });
-              for (block_index, mut block) in rendered.into_iter().enumerate() {
-                  if block_index > 0 {
-                      lines.push(Line::default());
-                  }
-                  let key = rich_block_key(&turn.id, block_index);
-                  if selected && state.view.transcript_selected_block == Some(block_index) {
-                      let source_block = &document.blocks[block_index];
-                      let views = source_block.candidate_views();
-                      selected_block_view = Some(
-                          state
-                              .view
-                              .rich_block_view(&key)
-                              .filter(|view| views.contains(view))
-                              .unwrap_or_else(|| source_block.default_view()),
-                      );
-                      decorate_selected_block(&mut block, usize::from(width.max(1)), theme);
-                  }
-                  let start = lines.len();
-                  if let Some(block_media) = block.media.clone() {
-                      media.push(TranscriptMediaAnchor {
-                          line: start.saturating_add(1),
-                          media: block_media,
-                      });
-                  }
-                  lines.extend(block.lines);
-              }
-          '''
-          source = source[:start] + replacement + source[end:]
-
-          viewport_start = source.find('fn apply_rich_block_viewport(')
-          if viewport_start != -1:
-              viewport_end = source.index('fn clip_line(', viewport_start)
-              source = source[:viewport_start] + source[viewport_end:]
-
-          obsolete_test = source.find(
-              '    #[test]\n    fn rendered_block_viewport_is_independent_of_transcript_scroll()'
-          )
-          if obsolete_test != -1:
-              next_test = source.index(
-                  '    #[test]\n    fn image_blocks_keep_a_media_anchor()', obsolete_test
-              )
-              source = source[:obsolete_test] + source[next_test:]
-          path.write_text(source)
-
-          path = Path('rust/crates/phenix-ui-runtime/src/runtime.rs')
-          source = path.read_text()
-          source = source.replace(
-              '.filter_map(|(index, block)| (block.candidate_views().len() > 1).then_some(index))',
-              '.filter_map(|(index, block)| block.is_interactive().then_some(index))',
-              1,
-          )
-          default_start = source.find('fn default_rich_block_view(')
-          if default_start != -1:
-              default_end = source.index('fn move_transcript_block(', default_start)
-              source = source[:default_start] + source[default_end:]
-          source = source.replace(
-              '.unwrap_or_else(|| default_rich_block_view(block));',
-              '.unwrap_or_else(|| block.default_view());',
-              1,
-          )
-          source = source.replace(
-              '    RichBlock, RichBlockView, RouteTarget, UiInput, VimMode,',
-              '    RouteTarget, UiInput, VimMode,',
-              1,
-          )
-          anchor = 'use std::collections::VecDeque;'
-          if anchor not in source:
-              raise SystemExit('runtime import anchor not found')
-          source = source.replace(
-              anchor,
-              '#[cfg(test)]\nuse phenix_ui_core::RichBlockView;\n' + anchor,
-              1,
-          )
-          path.write_text(source)
-          PY
-
-          cd rust
-          cargo fmt --all
-          cargo fmt --all --check
-          cargo check --workspace --all-targets --locked
-          cargo clippy --no-deps -p phenix-ui-core -p phenix-ui-runtime -p phenix-tui --lib --bins --locked -- -D warnings
-          cargo test --workspace --all-targets --locked -- --skip inbound_prompt_routes_models_and_completes_a_delegation_tool_loop --skip standard_and_phenix_acp_share_one_conductor_aggregate --skip editor_backends_share_a_single_typed_view_state
-          cd ..
-          git diff --check
-
-          python - <<'PY'
           import subprocess
 
-          expected = {
-              'rust/Cargo.lock',
-              'rust/Cargo.toml',
-              'rust/crates/phenix-tui/Cargo.toml',
-              'rust/crates/phenix-tui/src/lib.rs',
-              'rust/crates/phenix-tui/src/rich_document.rs',
-              'rust/crates/phenix-tui/src/syntax_highlight.rs',
-              'rust/crates/phenix-tui/src/terminal_media.rs',
-              'rust/crates/phenix-tui/src/transcript.rs',
-              'rust/crates/phenix-ui-core/src/rich_text.rs',
-              'rust/crates/phenix-ui-runtime/src/runtime.rs',
-          }
-          changed = set(
-              subprocess.check_output(
-                  ['git', 'diff', '--name-only', 'origin/main'], text=True
-              ).splitlines()
+          text = subprocess.check_output(
+              ['git', 'show', 'HEAD^:.github/workflows/finish-rich-transcript.yml'],
+              text=True,
           )
-          unexpected = changed - expected
-          missing = expected - changed
-          if unexpected:
-              raise SystemExit(f'unexpected changed paths: {sorted(unexpected)}')
-          if missing:
-              raise SystemExit(f'expected feature paths missing from diff: {sorted(missing)}')
-          PY
+          marker = '        run: |\n'
+          if marker not in text:
+              raise SystemExit('previous finalizer run block not found')
+          block = text.split(marker, 1)[1]
+          script = '\n'.join(
+              line[10:] if line.startswith('          ') else line
+              for line in block.splitlines()
+          ) + '\n'
 
-          git config user.name "Matthis Kälble"
-          git config user.email "69082876+matthis-k@users.noreply.github.com"
-          git add -A
-          git commit -m "refactor(tui): finish rich transcript blocks"
-          git push --force-with-lease origin HEAD:refactor/rich-transcript-blocks
+          old = 'cargo fmt --all\ncargo fmt --all --check'
+          feature_files = [
+              'crates/phenix-tui/src/lib.rs',
+              'crates/phenix-tui/src/rich_document.rs',
+              'crates/phenix-tui/src/syntax_highlight.rs',
+              'crates/phenix-tui/src/terminal_media.rs',
+              'crates/phenix-tui/src/transcript.rs',
+              'crates/phenix-ui-core/src/rich_text.rs',
+              'crates/phenix-ui-runtime/src/runtime.rs',
+          ]
+          files = ' '.join(feature_files)
+          new = (
+              f'rustfmt --edition 2021 {files}\n'
+              f'rustfmt --edition 2021 --check {files}'
+          )
+          if old not in script:
+              raise SystemExit('cargo fmt block not found')
+          Path('/tmp/finalize-rich.sh').write_text(script.replace(old, new, 1))
+          PY
+          bash /tmp/finalize-rich.sh
