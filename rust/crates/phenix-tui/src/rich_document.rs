@@ -765,7 +765,7 @@ mod tests {
         assert!(!dense_text.iter().any(|line| line.starts_with('┌')));
         assert!(grid_text
             .iter()
-            .any(|line| line.starts_with("  ┌") || line.starts_with('┌')));
+            .any(|line| line.trim_start().starts_with('┌')));
     }
 
     #[test]
