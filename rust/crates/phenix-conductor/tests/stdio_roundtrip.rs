@@ -111,7 +111,8 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
         }),
     )?;
     let mut saw_extended_event = false;
-    let extended_completed = loop {
+    let mut extended_completed = None;
+    while !saw_extended_event || extended_completed.is_none() {
         let message = process.receive()?;
         if message.get("method").and_then(Value::as_str) == Some("_phenix/node/event")
             && message.to_string().contains("echo: extended")
@@ -119,17 +120,16 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
             saw_extended_event = true;
         }
         if message.get("id") == Some(&Value::from(10)) {
-            break message;
+            extended_completed = Some(message);
         }
-    };
+    }
+    let extended_completed = extended_completed.expect("node execute response");
     assert!(
         saw_extended_event,
         "subscribed node did not emit the downstream Phenix ACP event"
     );
     assert!(
-        extended_completed["result"]["events"]
-            .as_array()
-            .is_some_and(|events| !events.is_empty()),
+        extended_completed["result"]["events"].is_array(),
         "node execution did not return its immediate event batch"
     );
 

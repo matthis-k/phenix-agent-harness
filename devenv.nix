@@ -6,5 +6,12 @@ let
 in
 {
   imports = maintenanceModules;
+
+  enterShell = ''
+    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      git config core.hooksPath .githooks
+    fi
+  '';
+
   enterTest = "";
 }

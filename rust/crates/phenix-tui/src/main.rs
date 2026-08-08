@@ -4,7 +4,6 @@ use acp_config::load_acp_backend;
 use clap::Parser;
 use phenix_acp_backend::AcpAgentBackend;
 use phenix_frontend_config::FrontendProviderRef;
-use phenix_process_backend::{ProcessAgentBackend, ProcessBackendConfig};
 use phenix_runtime_api::{
     AgentBackend, BackendCommand, BackendOutput, BackendReply, BackendRuntime, ClientInformation,
     RequestId,
@@ -26,7 +25,6 @@ use ratatui::crossterm::{
     terminal::supports_keyboard_enhancement,
 };
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::env;
 use std::error::Error;
 use std::io;
@@ -71,12 +69,6 @@ impl Drop for KeyboardEnhancementGuard {
             let _ = execute!(output, PopKeyboardEnhancementFlags);
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum BackendKind {
-    Process,
-    Acp,
 }
 
 #[derive(Debug, Parser)]
@@ -247,22 +239,8 @@ fn spawn_backend(
     acp_config: Option<&AcpApplicationConfig>,
 ) -> Result<BackendRuntime, Box<dyn Error>> {
     let backend: Box<dyn AgentBackend> =
-        match parse_backend_kind(env::var("PHENIX_BACKEND").ok().as_deref())? {
-            BackendKind::Process => Box::new(create_process_backend()?),
-            BackendKind::Acp => Box::new(create_acp_backend(config_directory, acp_config)?),
-        };
+        Box::new(create_acp_backend(config_directory, acp_config)?);
     Ok(BackendRuntime::spawn(backend, CHANNEL_CAPACITY)?)
-}
-
-fn parse_backend_kind(value: Option<&str>) -> Result<BackendKind, io::Error> {
-    match value.map(str::trim) {
-        None | Some("") | Some("acp") => Ok(BackendKind::Acp),
-        Some("process") => Ok(BackendKind::Process),
-        Some(value) => Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("unsupported PHENIX_BACKEND value: {value}"),
-        )),
-    }
 }
 
 fn create_acp_backend(
@@ -291,47 +269,6 @@ fn client_information() -> ClientInformation {
         name: "phenix-tui".to_owned(),
         build: env!("CARGO_PKG_VERSION").to_owned(),
     }
-}
-
-fn create_process_backend() -> Result<ProcessAgentBackend, Box<dyn Error>> {
-    let program = env::var_os("PHENIX_HEADLESS_PROGRAM")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("node"));
-    let entry = env::var("PHENIX_HEADLESS_ENTRY").map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            "PHENIX_HEADLESS_ENTRY is not set; use the packaged `phenix` command or point it to headless/main.ts",
-        )
-    })?;
-    let mut config = ProcessBackendConfig::new(program);
-    config.arguments = vec!["--experimental-strip-types".to_owned(), entry];
-    config.cwd = env::current_dir().ok();
-    config.environment = inherited_headless_environment();
-    Ok(ProcessAgentBackend::new(config)?)
-}
-
-fn inherited_headless_environment() -> BTreeMap<String, String> {
-    [
-        "HOME",
-        "PATH",
-        "TERM",
-        "COLORTERM",
-        "LANG",
-        "LC_ALL",
-        "PI_CODING_AGENT_DIR",
-        "PI_SKIP_VERSION_CHECK",
-        "PI_TELEMETRY",
-        "PHENIX_SOURCE_ROOT",
-        "PHENIX_ROOT",
-        "PHENIX_DEV",
-        "XDG_CONFIG_HOME",
-        "XDG_DATA_HOME",
-        "XDG_STATE_HOME",
-        "XDG_CACHE_HOME",
-    ]
-    .into_iter()
-    .filter_map(|key| env::var(key).ok().map(|value| (key.to_owned(), value)))
-    .collect()
 }
 
 fn spawn_terminal_input(
@@ -468,12 +405,6 @@ mod tests {
     }
 
     #[test]
-    fn headless_environment_overrides_exclude_unrelated_values() {
-        let environment = inherited_headless_environment();
-        assert!(!environment.contains_key("GITHUB_TOKEN"));
-    }
-
-    #[test]
     fn crossterm_keys_are_reduced_to_backend_neutral_values() {
         let key = convert_key(KeyEvent::new(
             CrosstermKeyCode::Char('x'),
@@ -493,20 +424,5 @@ mod tests {
         assert_eq!(key.code, KeyCode::Enter);
         assert!(key.modifiers.shift);
         assert!(!key.modifiers.control);
-    }
-
-    #[test]
-    fn backend_selection_defaults_to_acp_and_keeps_process_fallback_explicit() {
-        assert_eq!(parse_backend_kind(None).expect("default"), BackendKind::Acp);
-        assert_eq!(
-            parse_backend_kind(Some("acp")).expect("ACP"),
-            BackendKind::Acp
-        );
-        assert_eq!(
-            parse_backend_kind(Some("process")).expect("process"),
-            BackendKind::Process
-        );
-        assert!(parse_backend_kind(Some("pi-jsonl")).is_err());
-        assert!(parse_backend_kind(Some("unknown")).is_err());
     }
 }

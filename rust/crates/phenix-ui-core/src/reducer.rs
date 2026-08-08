@@ -581,6 +581,7 @@ fn reduce_backend_event(state: &mut AppState, event: BackendEvent) {
             tool_call_id,
             tool_name,
             input_summary,
+            ..
         } => state
             .transcript_mut(run_id.clone())
             .append(TranscriptBlock {
@@ -909,6 +910,7 @@ mod tests {
                 run_id: run.clone(),
                 tool_call_id: tool_call_id.clone(),
                 tool_name: "read".to_owned(),
+                raw_input_json: r#"{"path":"file.rs"}"#.to_owned(),
                 input_summary: "file.rs".to_owned(),
             },
             BackendEvent::ToolFinished {

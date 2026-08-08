@@ -1,9 +1,9 @@
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, ClientRequest, ContentBlock, ContentChunk, InitializeResponse,
-    NewSessionResponse, PromptResponse, SessionNotification, SessionUpdate, StopReason,
-    TextContent,
+    PromptResponse, SessionNotification, SessionUpdate, StopReason, TextContent,
 };
 use agent_client_protocol::{Agent, Stdio};
+use serde_json::{json, Value};
 use std::error::Error;
 
 #[tokio::main(flavor = "multi_thread")]
@@ -19,10 +19,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             .agent_capabilities(AgentCapabilities::new()),
                     )
                     .map_err(agent_client_protocol::Error::into_internal_error)?,
-                    ClientRequest::NewSessionRequest(_) => {
-                        serde_json::to_value(NewSessionResponse::new("fixture-session"))
-                            .map_err(agent_client_protocol::Error::into_internal_error)?
-                    }
+                    ClientRequest::NewSessionRequest(_) => json!({
+                        "sessionId": "fixture-session",
+                        "configOptions": fixture_model_options(),
+                    }),
+                    ClientRequest::SetSessionConfigOptionRequest(_) => json!({
+                        "configOptions": fixture_model_options(),
+                    }),
                     ClientRequest::PromptRequest(prompt) => {
                         let text = prompt
                             .prompt
@@ -51,4 +54,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .connect_to(Stdio::new())
         .await?;
     Ok(())
+}
+
+fn fixture_model_options() -> Value {
+    json!([{
+        "id": "model",
+        "name": "Model",
+        "category": "model",
+        "type": "select",
+        "currentValue": "provider/model",
+        "options": [{
+            "value": "provider/model",
+            "name": "Fixture Model",
+        }],
+    }])
 }

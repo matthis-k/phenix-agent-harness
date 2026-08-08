@@ -300,12 +300,14 @@ impl TreeConnection {
                 run_id,
                 tool_call_id,
                 tool_name,
+                raw_input_json,
                 input_summary,
             } => self.push(
                 run_id,
                 SessionEvent::ToolStarted {
                     call_id: tool_call_id.to_string(),
                     name: tool_name,
+                    raw_input_json,
                     input_summary,
                 },
             ),

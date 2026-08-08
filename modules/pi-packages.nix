@@ -6,24 +6,13 @@
     let
       piVersion = "0.80.10";
 
-      phenixRtk = pkgs.rtk.overrideAttrs (oldAttrs: {
-        pname = "phenix-rtk";
-        patches = (oldAttrs.patches or [ ]) ++ [ ./patches/rtk-lossless-tee.patch ];
-        meta = oldAttrs.meta // {
-          description = "RTK backend with lossless Phenix evidence capture";
-        };
-      });
-
-      # Pi is pinned independently from Nixpkgs. The harness needs both the
-      # executable and public SDK packages, so binary-only flakes are not enough.
+      # Pi is an external ACP backend implementation. Build the pinned upstream
+      # CLI without Phenix-specific source patches; Phenix owns UX and
+      # orchestration in the native Rust harness instead of modifying Pi's TUI.
       piCodingAgent = pkgs.buildNpmPackage {
         pname = "pi-coding-agent";
         version = piVersion;
         src = inputs.pi-src;
-        patches = [
-          ./patches/pi-command-action.patch
-          ./patches/pi-fullscreen-status-line.patch
-        ];
 
         npmDepsHash = "sha256-XGvDNH+eilsgc0Z7ITqbitB/9RVc+WuDfCcr1pibNqk=";
         npmWorkspace = "packages/coding-agent";
@@ -83,39 +72,36 @@
         versionCheckProgramArg = "--version";
       };
 
-      piNpmRoot = ./pi-npm;
-      piNpmPackages = pkgs.importNpmLock.buildNodeModules {
-        npmRoot = piNpmRoot;
-        inherit (pkgs) nodejs;
-        derivationArgs = {
-          pname = "phenix-pi-npm-packages";
-          version = "2.0.0";
-          npmFlags = [ "--legacy-peer-deps" ];
-          npm_config_ignore_scripts = true;
-        };
+      # pi-acp is a published external adapter. Package exactly the adapter and
+      # its two runtime dependencies; no in-repository TypeScript source, npm
+      # lock, extension bundle, or TypeScript build toolchain is needed.
+      piAcpTarball = pkgs.fetchurl {
+        url = "https://registry.npmjs.org/pi-acp/-/pi-acp-0.0.32.tgz";
+        hash = "sha512-2/0dfoVhkDTHDQ0R8wwb1ykwlSJm46VEoUyMllzc9hNbEuzUleZXqUwzGScf6+GvepU/4qA4v7hRgGTLgFp5Mw==";
+      };
+      acpSdkTarball = pkgs.fetchurl {
+        url = "https://registry.npmjs.org/@agentclientprotocol/sdk/-/sdk-0.26.0.tgz";
+        hash = "sha512-ialrcI+RzKOYe+fw+TfpyTdRmEoqIkXLlwbTi6XgaXXfdhNcdod7TmE1VsTnG3yTlox8TMTSMQgWbLLbz3r86Q==";
+      };
+      zodTarball = pkgs.fetchurl {
+        url = "https://registry.npmjs.org/zod/-/zod-3.25.76.tgz";
+        hash = "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==";
       };
 
-      phenixPiPackage = pkgs.runCommand "phenix-pi-package" { } ''
-        mkdir -p "$out"
-        cp -R ${./phenix-pi}/. "$out/"
-        chmod -R u+w "$out"
-
-        rm -rf "$out/node_modules"
-        cp -R ${piNpmPackages}/node_modules "$out/node_modules"
-        chmod -R u+w "$out/node_modules"
-
-        piRoot=${piCodingAgent}/lib/node_modules/pi-monorepo
-        mkdir -p "$out/node_modules/@earendil-works" "$out/node_modules/@types"
-        ln -s "$piRoot" "$out/node_modules/@earendil-works/pi-coding-agent"
-        ln -s "$piRoot/node_modules/@types/node" "$out/node_modules/@types/node"
-        ln -s "$piRoot/node_modules/undici-types" "$out/node_modules/undici-types"
-        for package in pi-agent-core pi-ai pi-tui; do
-          source="$piRoot/node_modules/@earendil-works/$package"
-          test -e "$source"
-          rm -rf "$out/node_modules/@earendil-works/$package"
-          ln -s "$source" "$out/node_modules/@earendil-works/$package"
-        done
-      '';
+      piAcpPackage =
+        pkgs.runCommand "pi-acp-package"
+          {
+            nativeBuildInputs = [
+              pkgs.gnutar
+              pkgs.gzip
+            ];
+          }
+          ''
+            mkdir -p "$out" "$out/node_modules/@agentclientprotocol/sdk" "$out/node_modules/zod"
+            tar -xzf ${piAcpTarball} --strip-components=1 -C "$out"
+            tar -xzf ${acpSdkTarball} --strip-components=1 -C "$out/node_modules/@agentclientprotocol/sdk"
+            tar -xzf ${zodTarball} --strip-components=1 -C "$out/node_modules/zod"
+          '';
 
       piAcp = pkgs.writeShellApplication {
         name = "pi-acp";
@@ -127,44 +113,14 @@
           export PI_ACP_PI_COMMAND="${piCodingAgent}/bin/pi"
           export PI_SKIP_VERSION_CHECK=1
           export PI_TELEMETRY=0
-          exec "${pkgs.nodejs}/bin/node" "${phenixPiPackage}/node_modules/pi-acp/dist/index.js" "$@"
+          exec "${pkgs.nodejs}/bin/node" "${piAcpPackage}/dist/index.js" "$@"
         '';
       };
-
-      phenixRuntimeTests =
-        pkgs.runCommand "phenix-runtime-tests"
-          {
-            nativeBuildInputs = [ pkgs.nodejs ];
-          }
-          ''
-            cd ${phenixPiPackage}
-            node --experimental-strip-types --test tests/*.test.ts
-            touch "$out"
-          '';
-
-      phenixTypecheck =
-        pkgs.runCommand "phenix-typecheck"
-          {
-            nativeBuildInputs = [
-              pkgs.nodejs
-              pkgs.typescript
-            ];
-          }
-          ''
-            cd ${phenixPiPackage}
-            tsc --project tsconfig.json --pretty false
-            touch "$out"
-          '';
     in
     {
       packages = {
-        phenix-rtk = phenixRtk;
         pi-coding-agent = piCodingAgent;
         pi-acp = piAcp;
-        phenix-pi-package = phenixPiPackage;
-        phenix-pi-npm-packages = piNpmPackages;
-        phenix-runtime-tests = phenixRuntimeTests;
-        phenix-typecheck = phenixTypecheck;
       };
     };
 }
