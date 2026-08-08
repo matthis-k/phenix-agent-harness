@@ -1,12 +1,13 @@
-name: Format Diagnostic
+name: Apply Canonical Rustfmt
 
 on:
   push:
     branches:
       - ci-format-diagnostic
+  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   format:
@@ -14,6 +15,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: fix/ci-baseline-regressions
 
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
@@ -28,19 +31,22 @@ jobs:
       - name: Install devenv
         run: nix profile add nixpkgs#devenv
 
-      - name: Apply canonical formatting
+      - name: Apply canonical Rust formatting
+        shell: bash
         run: |
+          set -euo pipefail
           devenv tasks run maintenance:fix:rust-format --mode single
-          devenv tasks run maintenance:fix:format --mode single
-          git diff > /tmp/format.diff
-          git status --porcelain=v1 --untracked-files=all > /tmp/status.txt
-          cat /tmp/format.diff
+          changed="$(git diff --name-only)"
+          printf '%s\n' "$changed"
+          test "$changed" = "rust/crates/phenix-tui/src/rich_document.rs"
+          git diff --check
 
-      - name: Upload formatting diff
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: format-diagnostic
-          path: |
-            /tmp/format.diff
-            /tmp/status.txt
-          if-no-files-found: error
+      - name: Commit and push formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add rust/crates/phenix-tui/src/rich_document.rs
+          git commit -m 'style: apply canonical rustfmt'
+          git push origin HEAD:fix/ci-baseline-regressions
