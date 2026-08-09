@@ -505,6 +505,11 @@ fn append_visible_run(
         has_children,
     });
     if collapsed.contains(&run.id) {
+        if let Some(descendants) = descendants {
+            for child in descendants {
+                mark_run_subtree_visited(child, children, visited);
+            }
+        }
         return;
     }
     if let Some(descendants) = descendants {
@@ -517,6 +522,21 @@ fn append_visible_run(
                 visited,
                 visible,
             );
+        }
+    }
+}
+
+fn mark_run_subtree_visited(
+    run: &RunSummary,
+    children: &BTreeMap<Option<RunId>, Vec<&RunSummary>>,
+    visited: &mut BTreeSet<RunId>,
+) {
+    if !visited.insert(run.id.clone()) {
+        return;
+    }
+    if let Some(descendants) = children.get(&Some(run.id.clone())) {
+        for child in descendants {
+            mark_run_subtree_visited(child, children, visited);
         }
     }
 }
