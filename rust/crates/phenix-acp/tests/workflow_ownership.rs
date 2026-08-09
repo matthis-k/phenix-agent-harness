@@ -25,12 +25,12 @@ fn implementation_uses_supplied_plan_as_a_branch_not_an_advisory() {
     assert!(graph.transitions.iter().any(|transition| matches!(
         &transition.when,
         WorkflowCondition::InputExists { path }
-            if transition.to == "implement" && path == "implementation.plan"
+            if transition.to == "implement" && path == "plan"
     )));
     assert!(graph.transitions.iter().any(|transition| matches!(
         &transition.when,
         WorkflowCondition::InputMissing { path }
-            if transition.to == "plan" && path == "implementation.plan"
+            if transition.to == "plan" && path == "plan"
     )));
 }
 
