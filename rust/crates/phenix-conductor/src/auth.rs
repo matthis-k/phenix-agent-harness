@@ -312,7 +312,6 @@ fn map_notice(value: AuthNotice) -> BackendAuthNotice {
             message,
             links: links.into_iter().map(map_link).collect(),
         },
-        BackendAuthNotice::Url { .. } => unreachable!(),
         AuthNotice::Url { url, instructions } => BackendAuthNotice::Url { url, instructions },
         AuthNotice::DeviceCode {
             user_code,
