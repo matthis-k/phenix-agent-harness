@@ -9,5 +9,4 @@ pub use acp::{
     AcpApplicationConfig, AcpBackendConfig, AcpDefinitionInput, AcpDefinitionSource,
     AcpStandardSessionConfig,
 };
-pub use key::{KeyChord, KeyParseError};
 pub use provider::{LuaFrontendOptions, LuaFrontendProvider};
