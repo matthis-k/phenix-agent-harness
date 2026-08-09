@@ -6,14 +6,14 @@ use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
 use phenix_acp::{
     AcpEndpoint, AcpMethod, AuthenticationCapabilities, BackendAuthMethod, BackendAuthProviderList,
     BackendAuthProviderListResult, BackendAuthProviderSummary, BackendCapabilities,
-    BackendCapabilitiesGet, BackendCapabilitiesResult, BackendCommandList,
-    BackendCommandListResult, BackendCommandSource, BackendCommandSummary, BackendDefinition,
-    BackendId, BackendModelList, BackendModelListResult, BackendModelSummary, BackendTargetParams,
-    DefinitionError, DefinitionFormat, DefinitionParseError, Definitions, Difficulty,
-    ExtensionUiCapabilities, GatewayError, GatewayEvent, ModelCapabilities, ModelId,
-    PhenixAcpGateway, PhenixConductor, PromptCapabilities, ProviderId, ResourceCapabilities, RoleId,
-    RouterId, SessionCapabilities, SessionCommand, SessionNodeId, SessionTreeDefinition,
-    SessionTreeId, ToolConfiguration,
+    BackendCapabilitiesGet, BackendCapabilitiesResult, BackendCommandList, BackendCommandListResult,
+    BackendCommandSource, BackendCommandSummary, BackendDefinition, BackendId, BackendModelList,
+    BackendModelListResult, BackendModelSummary, BackendTargetParams, DefinitionError,
+    DefinitionFormat, DefinitionParseError, Definitions, Difficulty, ExtensionUiCapabilities,
+    GatewayError, GatewayEvent, ModelCapabilities, ModelId, PhenixAcpGateway, PhenixConductor,
+    PromptCapabilities, ProviderId, ResourceCapabilities, RoleId, RouterId, SessionCapabilities,
+    SessionCommand, SessionNodeId, SessionTreeDefinition, SessionTreeId, ToolConfiguration,
+    WorkflowGraph, WorkflowId,
 };
 use phenix_acp_backend::{
     AcpAgentBackend, AcpBackendConfig, AcpGatewayTransport, ConfigError as BackendConfigError,
@@ -402,15 +402,22 @@ impl ConductorBootstrap {
             }
         }
 
+        let workflow_graphs = definitions
+            .workflows()
+            .filter_map(|workflow| {
+                workflow
+                    .policy_graph()
+                    .cloned()
+                    .map(|graph| (workflow.id().clone(), graph))
+            })
+            .collect::<BTreeMap<WorkflowId, WorkflowGraph>>();
         let workflow_ids = definitions
             .workflows()
             .map(|workflow| workflow.id().clone())
             .collect::<Vec<_>>();
-        let mut definition = SessionTreeDefinition::builder(
-            self.definition_id.clone(),
-            self.router.clone(),
-        )
-        .tools(self.tools);
+        let mut definition =
+            SessionTreeDefinition::builder(self.definition_id.clone(), self.router.clone())
+                .tools(self.tools);
         for backend in &self.backends {
             let command = parse_command(&backend.command)?;
             let endpoint = AcpEndpoint::stdio(
@@ -436,7 +443,7 @@ impl ConductorBootstrap {
         }
         let gateway = definitions.register(builder)?.build()?;
         ConductorRuntime::new(
-            PhenixConductor::new(gateway),
+            PhenixConductor::with_workflow_graphs(gateway, workflow_graphs),
             self.definition_id,
             self.standard_session,
             transports,
