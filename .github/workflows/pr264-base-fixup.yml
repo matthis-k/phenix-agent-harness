@@ -126,6 +126,14 @@ jobs:
           if old_return not in text:
               raise SystemExit('expected subscription unit result')
           subscriptions.write_text(text.replace(old_return, new_return, 1))
+
+          black_box = Path('rust/crates/phenix-conductor/tests/black_box_model_tool_loop.rs')
+          text = black_box.read_text()
+          old_root = '''            "root": {\n                "tree_id": "black-box-root",\n                "role": "coordinator",\n                "objective": "exercise the complete adapter path"\n            },\n'''
+          new_root = '''            "standard_session": {\n                "role": "coordinator",\n                "difficulty": "d1",\n                "objective": "exercise the complete adapter path"\n            },\n'''
+          if old_root not in text:
+              raise SystemExit('expected legacy black-box root config')
+          black_box.write_text(text.replace(old_root, new_root, 1))
           PY
           cd rust
           cargo fmt --all
@@ -134,6 +142,9 @@ jobs:
         working-directory: rust
       - name: Rust clippy with committed dependency graph
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        working-directory: rust
+      - name: Black-box conductor regression
+        run: cargo test -p phenix-conductor --test black_box_model_tool_loop --locked
         working-directory: rust
       - name: Rust tests
         run: cargo test --workspace --all-targets --locked
