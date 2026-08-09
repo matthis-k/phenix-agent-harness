@@ -369,10 +369,8 @@ fn parse_structured_workflow(table: Table) -> mlua::Result<AcpDefinitionSource> 
             .transpose()?
             .unwrap_or_else(|| "-".to_owned());
         let role = authoring_cell(&step.get::<String>("role")?, "workflow step.role")?;
-        let objective = authoring_cell(
-            &step.get::<String>("objective")?,
-            "workflow step.objective",
-        )?;
+        let objective =
+            authoring_cell(&step.get::<String>("objective")?, "workflow step.objective")?;
         rows.push(format!("| {key} | {parent} | {role} | {objective} |"));
     }
     if rows.is_empty() {
@@ -417,10 +415,7 @@ fn parse_structured_routing_table(table: Table) -> mlua::Result<AcpDefinitionSou
         rows.push(format!(
             "| {} | {} | {} | {} | {} | {} | {} | {} |",
             authoring_cell(&route.get::<String>("role")?, "routing rule.role")?,
-            authoring_cell(
-                &route.get::<String>("workflow")?,
-                "routing rule.workflow"
-            )?,
+            authoring_cell(&route.get::<String>("workflow")?, "routing rule.workflow")?,
             authoring_cell(&route.get::<String>("d0")?, "routing rule.d0")?,
             authoring_cell(&route.get::<String>("d1")?, "routing rule.d1")?,
             authoring_cell(&route.get::<String>("d2")?, "routing rule.d2")?,
@@ -608,11 +603,9 @@ return {
             )
             .eval()
             .expect("routing table");
-        let source = parse_definition_source(
-            Value::Table(table),
-            DefinitionInputKind::RoutingTable,
-        )
-        .expect("structured routing source");
+        let source =
+            parse_definition_source(Value::Table(table), DefinitionInputKind::RoutingTable)
+                .expect("structured routing source");
         let AcpDefinitionSource::Inline {
             source,
             format: Some(DefinitionFormat::Markdown),
