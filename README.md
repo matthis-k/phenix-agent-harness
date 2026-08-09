@@ -95,7 +95,7 @@ A fresh conductor is unconfigured. Frontends or other clients submit configurati
 
 Applying configuration creates an immutable revision. New session trees use the active revision; existing trees remain pinned to the revision under which they were created. Multiple trees with different immutable configurations may coexist.
 
-Lua is a first-class authoring surface, not a second runtime implementation. Structured Lua definitions and external JSON/TOML/RON/Markdown sources should converge through the same canonical parsing and validation boundary before becoming conductor-owned state.
+Lua is a first-class authoring surface, not a second runtime implementation. Structured Lua definitions and external JSON/TOML/RON/Markdown sources converge through the same canonical parsing and validation boundary before becoming conductor-owned state.
 
 The repository configuration under [`config/phenix-harness/`](config/phenix-harness/) is an explicit example/authoring configuration. It is not implicit conductor policy.
 
@@ -114,7 +114,8 @@ The workspace is intentionally split by responsibility:
 | `phenix-ui-runtime` | Frontend event/reducer runtime |
 | `phenix-ui-lua` | Lua frontend/configuration provider |
 | `phenix-frontend-config` | Frontend configuration boundary |
-| `phenix-acp-presets` | Explicit examples/fixtures; never implicit conductor policy |
+
+The packaged ACP smoke fixture is test/product-validation machinery, not a reusable application API.
 
 These boundaries should remain strong enough that another frontend can use the same conductor without inheriting Ratatui or Lua implementation details.
 
@@ -125,7 +126,7 @@ These boundaries should remain strong enough that another frontend can use the s
 - Preserve typed failure modes across configuration, transport, protocol, runtime, and UI boundaries.
 - Standard ACP remains authoritative for singular-agent behavior; Phenix extensions cover aggregate orchestration concepts.
 - Do not add parallel frontend-to-agent protocols or duplicate orchestration implementations.
-- Tests should concentrate on domain behavior and cross-boundary integration, with credential-free fake ACP backends where possible.
+- Tests should assert domain behavior, user-visible semantics, or cross-boundary integration—not source shape, version counters, literal internal layouts, compatibility spellings, or other incidental implementation details.
 
 ## Documentation
 
