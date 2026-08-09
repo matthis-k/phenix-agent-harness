@@ -1,0 +1,387 @@
+name: PR 265 finalize workflow ownership
+
+on:
+  push:
+    branches:
+      - fix/workflow-ownership-issue-227
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: fix/workflow-ownership-issue-227
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+      - name: Apply ownership and roundtrip fixes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              if text.count(old) != 1:
+                  raise SystemExit(f'{path}: expected one replacement target, found {text.count(old)}')
+              file.write_text(text.replace(old, new, 1))
+
+          workflow = 'rust/crates/phenix-acp/src/runtime/workflow.rs'
+          replace_once(
+              workflow,
+              '''            WorkflowCondition::InputExists { path } => value_at_path(&self.input, path).is_some(),
+              WorkflowCondition::InputMissing { path } => value_at_path(&self.input, path).is_none(),
+          ''',
+              '''            WorkflowCondition::InputExists { path } => {
+                  source.settled() && value_at_path(&self.input, path).is_some()
+              }
+              WorkflowCondition::InputMissing { path } => {
+                  source.settled() && value_at_path(&self.input, path).is_none()
+              }
+          ''',
+          )
+          marker = '''    #[test]
+              fn optional_review_failure_does_not_erase_successful_evidence() {
+          '''
+          test = '''    #[test]
+              fn input_conditions_wait_for_the_source_state_to_settle() {
+                  let graph = WorkflowGraph {
+                      entry: "invoke".to_owned(),
+                      states: vec![
+                          state(
+                              "invoke",
+                              true,
+                              WorkflowStateKind::Invoke {
+                                  role: RoleId::parse("worker").expect("role"),
+                                  objective: "Work on {objective}".to_owned(),
+                              },
+                          ),
+                          state(
+                              "return",
+                              false,
+                              WorkflowStateKind::Return {
+                                  summary: "Done".to_owned(),
+                              },
+                          ),
+                      ],
+                      transitions: vec![edge(
+                          "invoke",
+                          "return",
+                          WorkflowCondition::InputExists {
+                              path: "plan".to_owned(),
+                          },
+                      )],
+                  };
+                  let mut machine = WorkflowMachine::new(
+                      graph,
+                      "change",
+                      serde_json::json!({"plan": "provided"}),
+                  )
+                  .expect("machine");
+
+                  let actions = machine.next_actions().expect("invoke");
+                  assert_eq!(actions.len(), 1);
+                  assert!(matches!(
+                      actions.first(),
+                      Some(WorkflowAction::Invoke { key, .. }) if key == "invoke"
+                  ));
+
+                  bind_and_complete(&mut machine, "invoke", 1, r#"{"status":"done"}"#);
+                  let actions = machine.next_actions().expect("return");
+                  assert!(matches!(
+                      actions.last(),
+                      Some(WorkflowAction::Complete(WorkflowTerminal {
+                          success: true,
+                          ..
+                      }))
+                  ));
+              }
+
+          ''' + marker
+          replace_once(workflow, marker, test)
+
+          conductor = 'rust/crates/phenix-acp/src/conductor.rs'
+          replace_once(
+              conductor,
+              '''            SessionTreeClose::METHOD => {
+                  let params = self.decode::<SessionTreeClose>(&request)?;
+                  self.workflow_runs.remove(&params.tree_id);
+                  self.gateway.close_tree(&params.tree_id)?;
+                  encode_result(SessionTreeClose::METHOD, &EmptyResult {})
+              }
+          ''',
+              '''            SessionTreeClose::METHOD => {
+                  let params = self.decode::<SessionTreeClose>(&request)?;
+                  self.close_tree(&params.tree_id)?;
+                  encode_result(SessionTreeClose::METHOD, &EmptyResult {})
+              }
+          ''',
+          )
+          replace_once(
+              conductor,
+              '''        let mut run = self
+                  .workflow_runs
+                  .remove(tree_id)
+                  .ok_or_else(|| GatewayError::Invariant("managed workflow disappeared".to_owned()))?;
+              self.poll_running_states(tree_id, &mut run)?;
+              self.drive_managed_workflow(tree_id, &mut run)?;
+              let events = drain_pending(&mut run, node_id);
+              self.workflow_runs.insert(tree_id.clone(), run);
+              Ok(events)
+          ''',
+              '''        self.with_managed_run(tree_id, |conductor, run| {
+                  conductor.poll_running_states(tree_id, run)?;
+                  conductor.drive_managed_workflow(tree_id, run)?;
+                  Ok(drain_pending(run, node_id))
+              })
+          ''',
+          )
+          replace_once(
+              conductor,
+              '''        let Some(graph) = self.workflow_graphs.get(&params.workflow).cloned() else {
+                  return self.gateway.start_workflow(
+                      &params.tree_id,
+                      &params.workflow,
+                      params.difficulty,
+                      params.objective,
+                  );
+              };
+              if self.workflow_runs.contains_key(&params.tree_id) {
+                  return Err(GatewayError::workflow(format!(
+                      "tree {} already has a conductor-managed workflow",
+                      params.tree_id
+                  )));
+              }
+          ''',
+              '''        if self
+                  .workflow_runs
+                  .get(&params.tree_id)
+                  .is_some_and(|run| !run.finished)
+              {
+                  return Err(GatewayError::workflow(format!(
+                      "tree {} already has a conductor-managed workflow",
+                      params.tree_id
+                  )));
+              }
+              self.workflow_runs.remove(&params.tree_id);
+
+              let Some(graph) = self.workflow_graphs.get(&params.workflow).cloned() else {
+                  return self.gateway.start_workflow(
+                      &params.tree_id,
+                      &params.workflow,
+                      params.difficulty,
+                      params.objective,
+                  );
+              };
+          ''',
+          )
+          replace_once(
+              conductor,
+              '''        self.drive_managed_workflow(&params.tree_id, &mut run)?;
+              let first_node = run
+          ''',
+              '''        if let Err(error) = self.drive_managed_workflow(&params.tree_id, &mut run) {
+                  for node_id in run.machine.running_nodes() {
+                      let _ = self.gateway.cancel_subtree(&params.tree_id, &node_id);
+                  }
+                  let _ = self.gateway.finish_workflow(
+                      &params.tree_id,
+                      &run.workflow_id,
+                      &run.objective_id,
+                      false,
+                  );
+                  return Err(error);
+              }
+              let first_node = run
+          ''',
+          )
+          old_methods = '''    fn execute_node(
+              &mut self,
+              tree_id: &SessionTreeId,
+              node_id: &SessionNodeId,
+              command: SessionCommand,
+          ) -> Result<Vec<GatewayEvent>, GatewayError> {
+              if !self.workflow_runs.contains_key(tree_id) {
+                  return self.gateway.execute(tree_id, node_id, command);
+              }
+              let mut run = self
+                  .workflow_runs
+                  .remove(tree_id)
+                  .ok_or_else(|| GatewayError::Invariant("managed workflow disappeared".to_owned()))?;
+              let events = self.gateway.execute(tree_id, node_id, command)?;
+              self.observe_if_running(&mut run, node_id, &events)?;
+              self.drive_managed_workflow(tree_id, &mut run)?;
+              self.workflow_runs.insert(tree_id.clone(), run);
+              Ok(events)
+          }
+
+              fn cancel_node(
+              &mut self,
+              tree_id: &SessionTreeId,
+              node_id: &SessionNodeId,
+          ) -> Result<Vec<GatewayEvent>, GatewayError> {
+              if !self.workflow_runs.contains_key(tree_id) {
+                  return self.gateway.cancel_subtree(tree_id, node_id);
+              }
+              let mut run = self
+                  .workflow_runs
+                  .remove(tree_id)
+                  .ok_or_else(|| GatewayError::Invariant("managed workflow disappeared".to_owned()))?;
+              let events = self.gateway.cancel_subtree(tree_id, node_id)?;
+              for event in &events {
+                  self.observe_if_running(&mut run, &event.node_id, std::slice::from_ref(event))?;
+              }
+              self.drive_managed_workflow(tree_id, &mut run)?;
+              self.workflow_runs.insert(tree_id.clone(), run);
+              Ok(events)
+          }
+          '''
+          new_methods = '''    pub fn execute_node(
+              &mut self,
+              tree_id: &SessionTreeId,
+              node_id: &SessionNodeId,
+              command: SessionCommand,
+          ) -> Result<Vec<GatewayEvent>, GatewayError> {
+              if !self.workflow_runs.contains_key(tree_id) {
+                  return self.gateway.execute(tree_id, node_id, command);
+              }
+              self.with_managed_run(tree_id, |conductor, run| {
+                  let events = conductor.gateway.execute(tree_id, node_id, command)?;
+                  conductor.observe_if_running(run, node_id, &events)?;
+                  conductor.drive_managed_workflow(tree_id, run)?;
+                  Ok(events)
+              })
+          }
+
+              pub fn cancel_node(
+              &mut self,
+              tree_id: &SessionTreeId,
+              node_id: &SessionNodeId,
+          ) -> Result<Vec<GatewayEvent>, GatewayError> {
+              if !self.workflow_runs.contains_key(tree_id) {
+                  return self.gateway.cancel_subtree(tree_id, node_id);
+              }
+              self.with_managed_run(tree_id, |conductor, run| {
+                  let events = conductor.gateway.cancel_subtree(tree_id, node_id)?;
+                  for event in &events {
+                      conductor.observe_if_running(run, &event.node_id, std::slice::from_ref(event))?;
+                  }
+                  conductor.drive_managed_workflow(tree_id, run)?;
+                  Ok(events)
+              })
+          }
+
+              pub fn close_tree(&mut self, tree_id: &SessionTreeId) -> Result<(), GatewayError> {
+              self.gateway.close_tree(tree_id)?;
+              self.workflow_runs.remove(tree_id);
+              Ok(())
+          }
+
+              fn with_managed_run<T>(
+              &mut self,
+              tree_id: &SessionTreeId,
+              operation: impl FnOnce(&mut Self, &mut ManagedWorkflowRun) -> Result<T, GatewayError>,
+          ) -> Result<T, GatewayError> {
+              let mut run = self
+                  .workflow_runs
+                  .remove(tree_id)
+                  .ok_or_else(|| GatewayError::Invariant("managed workflow disappeared".to_owned()))?;
+              let result = operation(self, &mut run);
+              self.workflow_runs.insert(tree_id.clone(), run);
+              result
+          }
+          '''
+          replace_once(conductor, old_methods, new_methods)
+
+          runtime = 'rust/crates/phenix-conductor/src/lib.rs'
+          replace_once(
+              runtime,
+              '''        self.conductor
+                  .gateway_mut()
+                  .execute(&binding.tree_id, &binding.root_node_id, command)
+                  .map_err(RuntimeError::Gateway)
+          ''',
+              '''        self.conductor
+                  .execute_node(&binding.tree_id, &binding.root_node_id, command)
+                  .map_err(RuntimeError::Gateway)
+          ''',
+          )
+          replace_once(
+              runtime,
+              '''        let events = self
+                  .conductor
+                  .gateway_mut()
+                  .cancel_subtree(&binding.tree_id, &binding.root_node_id)?;
+          ''',
+              '''        let events = self
+                  .conductor
+                  .cancel_node(&binding.tree_id, &binding.root_node_id)?;
+          ''',
+          )
+          replace_once(
+              runtime,
+              '''        self.conductor.gateway_mut().close_tree(&tree_id)?;
+          ''',
+              '''        self.conductor.close_tree(&tree_id)?;
+          ''',
+          )
+
+          roundtrip = 'rust/crates/phenix-conductor/tests/stdio_roundtrip.rs'
+          replace_once(
+              roundtrip,
+              '''    let mut saw_echo = false;
+              let completed = loop {
+                  let message = process.receive()?;
+                  if message.get("method").and_then(Value::as_str) == Some("session/update")
+                      && message.to_string().contains("echo: hello")
+                  {
+                      saw_echo = true;
+                  }
+                  if message.get("id") == Some(&Value::from(11)) {
+                      break message;
+                  }
+              };
+          ''',
+              '''    let mut saw_echo = false;
+              let mut completed = None;
+              while !saw_echo || completed.is_none() {
+                  let message = process.receive()?;
+                  if message.get("method").and_then(Value::as_str) == Some("session/update")
+                      && message.to_string().contains("echo: hello")
+                  {
+                      saw_echo = true;
+                  }
+                  if message.get("id") == Some(&Value::from(11)) {
+                      completed = Some(message);
+                  }
+              }
+              let completed = completed.expect("prompt response");
+          ''',
+          )
+          PY
+          cargo fmt --manifest-path rust/Cargo.toml --all
+      - name: Compile and strict lint
+        run: |
+          cargo check --manifest-path rust/Cargo.toml --workspace --all-targets --locked
+          cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings
+      - name: Stress stdio roundtrip
+        run: |
+          for i in $(seq 1 12); do
+            echo "stdio roundtrip iteration $i"
+            cargo test --manifest-path rust/Cargo.toml --locked -p phenix-conductor --test stdio_roundtrip -- --exact standard_and_phenix_acp_share_one_conductor_aggregate
+          done
+      - name: Full Rust tests
+        run: cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --locked
+      - name: Commit validated source
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add rust/crates/phenix-acp/src/conductor.rs rust/crates/phenix-acp/src/runtime/workflow.rs rust/crates/phenix-conductor/src/lib.rs rust/crates/phenix-conductor/tests/stdio_roundtrip.rs
+          git -c core.hooksPath=/dev/null -c commit.gpgSign=false commit --no-verify -m "fix: preserve conductor workflow ownership"
+          git push origin HEAD:fix/workflow-ownership-issue-227
