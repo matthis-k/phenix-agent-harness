@@ -24,7 +24,7 @@ pub use routing::{
 };
 pub use state::{
     transcript_turn_id, AppState, AuthFlowState, DialogState, InputState, RuntimeConnectionState,
-    TranscriptState,
+    TranscriptState, VisibleRun,
 };
 pub use transcript::{
     group_transcript_turns, TranscriptDetailKind, TranscriptTurn, TranscriptTurnDetail,
