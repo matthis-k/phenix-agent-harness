@@ -1,5 +1,5 @@
 use crate::protocol::{AcpMethod, AcpNotification};
-use crate::{BackendId, DefinitionId, RoleId, RouterId, SessionTreeId};
+use crate::{BackendId, DefinitionId, Difficulty, RoleId, RouterId, ToolConfiguration};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -27,12 +27,6 @@ pub enum ConfigurationSource {
 }
 
 impl ConfigurationSource {
-    /// Resolve an application-provided source inside the ACP process.
-    ///
-    /// Path sources are deliberately relative to an explicit source root. The
-    /// canonicalized candidate must remain below that root, including through
-    /// symlinks. Inline sources remain strings until the ACP-side parser consumes
-    /// them.
     pub fn load(
         &self,
         source_root: &Path,
@@ -92,21 +86,32 @@ pub enum ConfigurationSourceOrigin {
     Inline,
 }
 
+/// User-supplied framework configuration.
+///
+/// This contains reusable policy and definitions only. It deliberately does not
+/// identify a concrete session tree. A tree is an instance created later through
+/// `_phenix/session_tree/create` and freezes the active configuration revision.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigurationInput {
     pub definition_id: DefinitionId,
     pub router: RouterId,
-    pub root: ConfigurationRootInput,
     pub backends: Vec<ConfigurationBackendInput>,
     pub definitions: Vec<ConfigurationDefinitionInput>,
+    #[serde(default)]
+    pub tools: ToolConfiguration,
+    /// Optional projection used only when a standard ACP `session/new` must be
+    /// translated into a Phenix tree. Phenix-specific clients should create
+    /// trees explicitly instead of relying on this adapter template.
+    #[serde(default)]
+    pub standard_session: Option<ConfigurationStandardSessionInput>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ConfigurationRootInput {
-    pub tree_id: SessionTreeId,
+pub struct ConfigurationStandardSessionInput {
     pub role: RoleId,
+    pub difficulty: Difficulty,
     pub objective: String,
 }
 
@@ -140,7 +145,7 @@ pub struct ConfigurationApplyParams {
     /// Filesystem root used by Phenix ACP when resolving path sources.
     pub source_root: PathBuf,
     /// Application-provided source descriptors. Phenix ACP constructs the actual
-    /// configuration object from this input.
+    /// immutable configuration revision from this input.
     pub input: ConfigurationInput,
 }
 
@@ -175,6 +180,8 @@ pub struct ConfigurationSnapshot {
     pub backend_ids: Vec<BackendId>,
     pub workflow_count: usize,
     pub routing_table_count: usize,
+    pub has_standard_session_template: bool,
+    pub mcp_server_count: usize,
 }
 
 pub struct ConfigurationChangedNotification;
