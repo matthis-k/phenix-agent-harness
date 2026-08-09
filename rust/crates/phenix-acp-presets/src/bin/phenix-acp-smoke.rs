@@ -1,12 +1,15 @@
 #![forbid(unsafe_code)]
 
+#[path = "../fixture.rs"]
+mod fixture;
+
+use fixture::smoke_gateway;
 use phenix_acp::acp::schema::v1::{
     AgentCapabilities, ClientRequest, InitializeResponse, PromptResponse, StopReason,
 };
 use phenix_acp::acp::{Agent, Result as AcpResult, Stdio};
 use phenix_acp::{DefinitionId, Difficulty, RoleId, SessionCommand, SessionEvent};
 use phenix_acp_backend::{AcpAgentBackend, AcpBackendConfig};
-use phenix_acp_presets::standard_gateway;
 use serde_json::{json, Value};
 use std::env;
 use std::error::Error;
@@ -130,9 +133,9 @@ fn run_smoke() -> Result<(), Box<dyn Error>> {
     );
     let config = AcpBackendConfig::new(fixture_command, env::current_dir()?)?;
     let factory = AcpAgentBackend::gateway_factory(config, CHANNEL_CAPACITY);
-    let mut gateway = standard_gateway(factory)?;
+    let mut gateway = smoke_gateway(factory)?;
 
-    let definition = DefinitionId::parse("phenix.standard")?;
+    let definition = DefinitionId::parse("phenix.smoke")?;
     let role = RoleId::parse("coordinator")?;
     let started = gateway.create_tree(
         &definition,
