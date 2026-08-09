@@ -1,0 +1,78 @@
+name: PR 264 finalize v2
+
+on:
+  push:
+    branches:
+      - refactor/phenix-acp-boundaries-routing-d0-d4
+    paths:
+      - .github/workflows/pr264-finalize-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fixup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: refactor/phenix-acp-boundaries-routing-d0-d4
+      - name: Install rustfmt and clippy
+        run: rustup component add rustfmt clippy
+      - name: Apply validated candidate and normalized assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('.github/workflows/pr264-finalize-fixup.yml').read_text().splitlines()
+          start = source.index('      - name: Apply validated base candidate')
+          run = source.index('        run: |', start) + 1
+          end = next(i for i in range(run, len(source)) if source[i].startswith('      - name: '))
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in source[run:end]) + '\n'
+          Path('/tmp/apply-pr264-final.sh').write_text(script)
+          PY
+          bash /tmp/apply-pr264-final.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('rust/crates/phenix-conductor/tests/black_box_model_tool_loop.rs')
+          text = path.read_text()
+          replacements = {
+              '    assert_eq!(tree["result"]["nodes"][0]["backend"], "coordinator");\n':
+                  '    assert_eq!(tree["result"]["nodes"][0]["model"]["backend"], "coordinator");\n',
+              '    assert_eq!(child["backend"], "specialist");\n':
+                  '    assert_eq!(child["model"]["backend"], "specialist");\n',
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f'expected stale backend assertion not found: {old.strip()}')
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+          cd rust
+          cargo fmt --all
+      - name: Rust check and refresh lockfile
+        run: cargo check --workspace --all-targets
+        working-directory: rust
+      - name: Rust clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        working-directory: rust
+      - name: Black-box conductor regression
+        run: cargo test -p phenix-conductor --test black_box_model_tool_loop --locked
+        working-directory: rust
+      - name: Rust tests
+        run: cargo test --workspace --all-targets --locked
+        working-directory: rust
+      - name: Commit source repairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add rust
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit'
+            exit 0
+          fi
+          git commit -m 'fix: complete ACP v2 migration'
+          git push origin HEAD:refactor/phenix-acp-boundaries-routing-d0-d4
