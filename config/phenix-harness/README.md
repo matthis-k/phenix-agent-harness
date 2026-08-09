@@ -52,6 +52,8 @@ The workflow library intentionally reuses a small role vocabulary:
 
 These roles are shared by both native Phenix workflows and the Matt-inspired procedures. A procedure contributes workflow structure and a bounded objective; it does not create a parallel agent taxonomy. Model selection is kept out of agent prose and remains routing policy.
 
+The earlier Phenix authority split is preserved as part of those shared contracts. `coordinator`, `scout`, `planner`, `architect`, `tester`, `critic`, and `verifier` are read-only roles. `implementer` owns bounded code, test, and instrumentation mutations. `finalizer` and `qa-synthesizer` synthesize established evidence rather than mutating implementation files. Matt-inspired workflows therefore route test creation and diagnostic instrumentation through `implementer` instead of silently widening `tester` permissions.
+
 ## Native Phenix workflows
 
 The current Lua catalog restores the native Phenix workflow family as first-class definitions:
@@ -132,13 +134,13 @@ workflow.wayfinder
 
 The overlapping skills strengthen native Phenix workflows instead of creating duplicates:
 
-- `workflow.debug`: reproduce → minimize → hypothesize → instrument → fix → regression.
+- `workflow.debug`: reproduce → minimize → hypothesize → diagnostic plan → instrumentation → evidence → fix → regression.
 - `workflow.review`: independent engineering-standards and spec-conformance branches.
 - `workflow.research`: independent source gathering, counterevidence, challenge, and synthesis.
 
 Other useful structures remain explicit:
 
-- `workflow.tdd`: red → green → refactor → verify.
+- `workflow.tdd`: red-plan → red → green → refactor → verify. The read-only tester identifies the seam; the implementer creates the failing test.
 - `workflow.spec`: repository context → stable seams → specification → independent verification.
 - `workflow.tickets`: pre-factor analysis → tracer-bullet decomposition → challenge → publish.
 - `workflow.wayfinder`: reconnaissance → decision map → high-leverage resolution → frontier verification.
