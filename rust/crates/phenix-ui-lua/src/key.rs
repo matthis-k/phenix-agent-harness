@@ -278,28 +278,13 @@ mod tests {
     #[test]
     fn final_single_character_is_always_the_key_not_a_modifier_alias() {
         let control_c = KeyChord::parse("<C-c>").expect("control-c");
-        assert!(control_c.matches_inputs(&[key(
-            KeyCode::Character('c'),
-            true,
-            false,
-            false
-        )]));
+        assert!(control_c.matches_inputs(&[key(KeyCode::Character('c'), true, false, false)]));
 
         let control_f = KeyChord::parse("<C-f>").expect("control-f");
-        assert!(control_f.matches_inputs(&[key(
-            KeyCode::Character('f'),
-            true,
-            false,
-            false
-        )]));
+        assert!(control_f.matches_inputs(&[key(KeyCode::Character('f'), true, false, false)]));
 
         let alt_m = KeyChord::parse("<M-m>").expect("alt-m");
-        assert!(alt_m.matches_inputs(&[key(
-            KeyCode::Character('m'),
-            false,
-            true,
-            false
-        )]));
+        assert!(alt_m.matches_inputs(&[key(KeyCode::Character('m'), false, true, false)]));
     }
 
     #[test]
