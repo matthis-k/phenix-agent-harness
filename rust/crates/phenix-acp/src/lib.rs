@@ -54,26 +54,27 @@ pub use id::{
     ProviderId, RoleId, RouterId, RpcRequestId, SessionNodeId, SessionTreeId, ToolId, WorkflowId,
 };
 pub use protocol::{
-    AcpMethod, AcpNotification, EmptyResult, ModelSelection, NodeAttachResult, NodeCancel,
-    NodeCancelParams, NodeDelegate, NodeDelegateParams, NodeEventNotification, NodeEventParams,
-    NodeExecute, NodeExecuteParams, NodeExecuteResult, NodeFork, NodeForkParams, NodeLoad,
-    NodeLoadParams, NodeResume, NodeResumeParams, ObjectiveMark, ObjectiveMarkParams,
+    AcpMethod, AcpNotification, Difficulty, EmptyResult, ModelConfig, ModelSelection, NodeAttachResult,
+    NodeCancel, NodeCancelParams, NodeDelegate, NodeDelegateParams, NodeEventNotification,
+    NodeEventParams, NodeExecute, NodeExecuteParams, NodeExecuteResult, NodeFork, NodeForkParams,
+    NodeLoad, NodeLoadParams, NodeResume, NodeResumeParams, ObjectiveMark, ObjectiveMarkParams,
     ObjectiveSnapshot, ObjectiveState, RoutingExplain, RoutingExplainParams, RoutingExplainResult,
     SessionNodeSnapshot, SessionNodeState, SessionTreeClose, SessionTreeCloseParams,
     SessionTreeCreate, SessionTreeCreateParams, SessionTreeCreateResult, SessionTreeGet,
     SessionTreeGetParams, SessionTreeList, SessionTreeListParams, SessionTreeListResult,
     SessionTreeSnapshot, SessionTreeSummary, SessionTreeUpdatedNotification,
-    SessionTreeUpdatedParams, WorkflowStart, WorkflowStartParams, WorkflowStartResult,
+    SessionTreeUpdatedParams, ThinkingLevel, WorkflowStart, WorkflowStartParams,
+    WorkflowStartResult,
 };
 pub use runtime::{
-    AcpSession, AcpSessionFactory, FirstAvailableRouter, FixedRouter, GatewayCommand,
-    GatewayEnvelope, GatewayError, GatewayEvent, GatewayFailure, GatewayReply, InteractionResponse,
-    PhenixAcpGateway, PhenixAcpGatewayBuilder, RoutingDecision, RoutingRequest, SessionCommand,
-    SessionEvent, SessionImage, SessionOpenKind, SessionOpenRequest, SessionRouter, StaticWorkflow,
+    AcpSession, AcpSessionFactory, FixedRouter, GatewayCommand, GatewayEnvelope, GatewayError,
+    GatewayEvent, GatewayFailure, GatewayReply, InteractionResponse, PhenixAcpGateway,
+    PhenixAcpGatewayBuilder, RoutingDecision, RoutingRequest, SessionCommand, SessionEvent,
+    SessionImage, SessionOpenKind, SessionOpenRequest, SessionRouter, StaticWorkflow,
     TreeStartResult, Workflow, WorkflowPlan, WorkflowPlanBuilder, WorkflowRequest, WorkflowStep,
 };
 pub use source::{
-    ModelTarget, RouteSelector, RoutingRule, RoutingTable, WorkflowDefinition,
+    DifficultyModelConfigs, RouteSelector, RoutingRule, RoutingTable, WorkflowDefinition,
     WorkflowStepDefinition,
 };
 pub use subscription::{NodeSubscribe, NodeSubscriptionParams, NodeUnsubscribe};
