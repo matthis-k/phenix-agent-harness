@@ -48,6 +48,11 @@ jobs:
           new = '''    assert_eq!(\n        configured["result"]["revision"],\n        1,\n        "configuration apply failed: {configured}"\n    );\n'''
           if old not in text:
               raise SystemExit('expected revision assertion not found')
+          text = text.replace(old, new, 1)
+          old = '    let tree_id = required_string(&created["result"], "sessionId")?;\n'
+          new = '''    let tree_id = required_string(&created["result"], "sessionId")\n        .map_err(|error| format!("session/new failed: {created}; {error}"))?;\n'''
+          if old not in text:
+              raise SystemExit('expected sessionId extraction not found')
           path.write_text(text.replace(old, new, 1))
           PY
           cd rust
