@@ -2,16 +2,18 @@
 
 use phenix_acp::{
     AcpEndpoint, AcpSessionFactory, BackendDefinition, BackendId, DefinitionError, DefinitionId,
-    FixedRouter, GatewayError, PhenixAcpGateway, PhenixAcpGatewayBuilder, RoleId, RouterId,
-    SessionTreeDefinition, SessionTreeDefinitionBuilder, Workflow, WorkflowId, WorkflowPlan,
-    WorkflowRequest,
+    FixedRouter, GatewayError, ModelConfig, ModelId, PhenixAcpGateway, PhenixAcpGatewayBuilder,
+    ProviderId, RoleId, RouterId, SessionTreeDefinition, SessionTreeDefinitionBuilder,
+    ThinkingLevel, Workflow, WorkflowId, WorkflowPlan, WorkflowRequest,
 };
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
+// This crate is an explicit fixture/example package. None of these values are
+// imported by phenix-conductor or installed as conductor defaults.
 const STANDARD_DEFINITION: &str = "phenix.standard";
-const STANDARD_ROUTER: &str = "phenix.capability-budget";
+const STANDARD_ROUTER: &str = "phenix.fixture-router";
 const PI_BACKEND: &str = "pi";
 
 pub fn standard_builder() -> Result<SessionTreeDefinitionBuilder, DefinitionError> {
@@ -40,8 +42,8 @@ where
         .definition(standard()?)?
         .router(
             router_id(),
-            FixedRouter::new(backend_id()).explanation(
-                "standard Phenix policy selected the configured ACP backend for this tree",
+            FixedRouter::new(fixture_model()).explanation(
+                "explicit fixture policy selected the configured ACP backend and model",
             ),
         )?
         .backend(backend_id(), backend)?;
@@ -79,9 +81,9 @@ impl Display for StandardGatewayError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Definition(error) => {
-                write!(formatter, "invalid standard ACP definition: {error}")
+                write!(formatter, "invalid fixture ACP definition: {error}")
             }
-            Self::Gateway(error) => write!(formatter, "invalid standard ACP gateway: {error}"),
+            Self::Gateway(error) => write!(formatter, "invalid fixture ACP gateway: {error}"),
         }
     }
 }
@@ -223,6 +225,15 @@ fn backend_id() -> BackendId {
     BackendId::parse(PI_BACKEND).expect("static backend ID is valid")
 }
 
+fn fixture_model() -> ModelConfig {
+    ModelConfig {
+        backend: backend_id(),
+        provider: ProviderId::parse("fixture").expect("static provider ID is valid"),
+        model: ModelId::parse("fixture-model").expect("static model ID is valid"),
+        thinking: ThinkingLevel::Medium,
+    }
+}
+
 fn workflow_id(name: &str) -> WorkflowId {
     WorkflowId::parse(format!("phenix.{name}")).expect("static workflow ID is valid")
 }
@@ -233,7 +244,7 @@ mod tests {
     use phenix_acp::SessionTreeId;
 
     #[test]
-    fn standard_preset_is_only_a_reusable_immutable_tree_definition() {
+    fn standard_preset_is_only_an_explicit_reusable_fixture_definition() {
         let first = standard().expect("standard preset");
         let second = standard().expect("standard preset");
         assert_eq!(first, second);
@@ -242,7 +253,7 @@ mod tests {
     }
 
     #[test]
-    fn standard_workflows_expand_objectives_into_typed_session_steps() {
+    fn fixture_workflows_expand_objectives_into_typed_session_steps() {
         let request = WorkflowRequest {
             tree_id: SessionTreeId::parse("tree-test").expect("tree ID"),
             objective: "ship the feature".to_owned(),
