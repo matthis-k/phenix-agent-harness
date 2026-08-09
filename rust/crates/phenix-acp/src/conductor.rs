@@ -43,11 +43,13 @@ impl PhenixConductor {
                             tree_id,
                             &params.definition_id,
                             params.root_role,
+                            params.difficulty,
                             params.objective,
                         )?,
                         None => gateway.create_tree(
                             &params.definition_id,
                             params.root_role,
+                            params.difficulty,
                             params.objective,
                         )?,
                     };
@@ -74,7 +76,12 @@ impl PhenixConductor {
             }
             WorkflowStart::METHOD => {
                 self.dispatch::<WorkflowStart, _>(&request, |gateway, params| {
-                    gateway.start_workflow(&params.tree_id, &params.workflow, params.objective)
+                    gateway.start_workflow(
+                        &params.tree_id,
+                        &params.workflow,
+                        params.difficulty,
+                        params.objective,
+                    )
                 })
             }
             NodeDelegate::METHOD => {
@@ -83,6 +90,7 @@ impl PhenixConductor {
                         &params.tree_id,
                         &params.parent_node,
                         params.role,
+                        params.difficulty,
                         params.objective,
                     )?;
                     Ok(NodeAttachResult { node_id })
@@ -93,6 +101,7 @@ impl PhenixConductor {
                     &params.tree_id,
                     &params.parent_node,
                     params.role,
+                    params.difficulty,
                     params.objective,
                     params.session_id,
                 )?;
@@ -103,6 +112,7 @@ impl PhenixConductor {
                     &params.tree_id,
                     &params.parent_node,
                     params.role,
+                    params.difficulty,
                     params.objective,
                     params.session_id,
                 )?;
@@ -130,7 +140,12 @@ impl PhenixConductor {
             RoutingExplain::METHOD => {
                 self.dispatch::<RoutingExplain, _>(&request, |gateway, params| {
                     let role = route_role(gateway, &params)?;
-                    gateway.explain_route(&params.tree_id, params.objective, role)
+                    gateway.explain_route(
+                        &params.tree_id,
+                        params.objective,
+                        role,
+                        params.difficulty,
+                    )
                 })
             }
             method => Err(ConductorError::UnknownMethod(method.to_owned())),
@@ -238,9 +253,10 @@ mod tests {
     use super::*;
     use crate::{
         decode_extension_response, encode_extension_request, AcpEndpoint, AcpSession,
-        AcpSessionFactory, AcpSessionId, BackendDefinition, BackendId, DefinitionId, FixedRouter,
-        NodeExecuteParams, RoleId, RouterId, SessionCommand, SessionEvent, SessionOpenRequest,
-        SessionTreeCreateParams, SessionTreeDefinition,
+        AcpSessionFactory, AcpSessionId, BackendDefinition, BackendId, DefinitionId, Difficulty,
+        FixedRouter, ModelConfig, ModelId, NodeExecuteParams, ProviderId, RoleId, RouterId,
+        SessionCommand, SessionEvent, SessionOpenRequest, SessionTreeCreateParams,
+        SessionTreeDefinition, ThinkingLevel,
     };
     use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -295,10 +311,16 @@ mod tests {
             .expect("backend definition")
             .build()
             .expect("tree definition");
+        let model = ModelConfig {
+            backend: backend.clone(),
+            provider: ProviderId::parse("test-provider").expect("provider"),
+            model: ModelId::parse("test-model").expect("model"),
+            thinking: ThinkingLevel::Low,
+        };
         let gateway = PhenixAcpGateway::builder()
             .definition(definition)
             .expect("definition")
-            .router(router, FixedRouter::new(backend.clone()))
+            .router(router, FixedRouter::new(model))
             .expect("router")
             .backend(backend, TestFactory::default())
             .expect("backend")
@@ -314,6 +336,7 @@ mod tests {
             tree_id: None,
             definition_id: DefinitionId::parse("test.definition").expect("definition"),
             root_role: RoleId::parse("coordinator").expect("role"),
+            difficulty: Difficulty::D1,
             objective: "coordinate the test".to_owned(),
         })
         .expect("create request");
