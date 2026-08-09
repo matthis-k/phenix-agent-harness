@@ -111,7 +111,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             .map_err(agent_client_protocol::Error::into_internal_error)?
                     }
                     ClientRequest::ExtMethodRequest(extension) => {
-                        let extension = normalize_extension_method(extension);
                         let response = dispatch_extension(
                             &request_runtime,
                             &request_subscriptions,
@@ -426,28 +425,10 @@ fn send_update(
     connection.send_notification(SessionNotification::new(session_id.clone(), update))
 }
 
-fn normalize_extension_method(extension: ExtRequest) -> ExtRequest {
-    if extension.method.starts_with('_') {
-        extension
-    } else {
-        ExtRequest::new(format!("_{}", extension.method), extension.params)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::{ImageContent, TextContent};
-    use serde_json::value::to_raw_value;
-
-    #[test]
-    fn sdk_extension_fallback_is_restored_to_the_wire_method() {
-        let params =
-            to_raw_value(&serde_json::json!({ "tree_id": "tree-1" })).expect("raw parameters");
-        let extension =
-            normalize_extension_method(ExtRequest::new("phenix/session_tree/get", params.into()));
-        assert_eq!(extension.method.as_ref(), "_phenix/session_tree/get");
-    }
 
     #[test]
     fn standard_acp_prompt_content_maps_to_the_gateway_command() {
