@@ -21,10 +21,11 @@ let
   fail = message: throw "phenix-flake-maintenance: ${message}";
 
   validOutputName = match "^[A-Za-z0-9][A-Za-z0-9_-]*$" outputName != null;
-  yaml = value: toJSON value;
+  yaml = toJSON;
   commandArgs = command: concatStringsSep " " command.path;
 
-  renderEnv = env:
+  renderEnv =
+    env:
     let
       names = attrNames env;
     in
@@ -36,7 +37,8 @@ let
         ${concatStringsSep "\n" (map (name: "  ${name}: ${yaml env.${name}}") names)}
       '';
 
-  renderNeeds = needs:
+  renderNeeds =
+    needs:
     if needs == [ ] then
       ""
     else
@@ -47,7 +49,8 @@ let
 
   indent = prefix: text: prefix + replaceStrings [ "\n" ] [ "\n${prefix}" ] text;
 
-  renderStep = env: command:
+  renderStep =
+    env: command:
     let
       envBlock = renderEnv env;
     in
@@ -58,15 +61,16 @@ let
     '';
 
   renderCleanStep = ''
-      - name: Repository remains clean
-        if: ''${{ !cancelled() }}
-        run: |
-          set -euo pipefail
-          git diff --exit-code
-          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+    - name: Repository remains clean
+      if: ''${{ !cancelled() }}
+      run: |
+        set -euo pipefail
+        git diff --exit-code
+        test -z "$(git status --porcelain=v1 --untracked-files=all)"
   '';
 
-  renderJob = job:
+  renderJob =
+    job:
     let
       needsBlock = renderNeeds job.needs;
       commandSteps = concatStringsSep "\n" (map (renderStep job.env) job.commands);

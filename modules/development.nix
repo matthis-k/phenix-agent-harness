@@ -105,7 +105,9 @@ _: {
             name = target.id;
             value = {
               description = target.label;
-              ci = rustCi // { stepName = target.label; };
+              ci = rustCi // {
+                stepName = target.label;
+              };
               runtimeInputs = pkgs: [
                 pkgs.cargo
                 pkgs.git
@@ -120,9 +122,7 @@ _: {
         );
 
       expectedCargoTargetLines = builtins.concatStringsSep "\n" (
-        builtins.map (
-          target: "printf '%s\\t%s\\n' '${target.package}' '${target.test}'"
-        ) cargoTestTargets
+        builtins.map (target: "printf '%s\\t%s\\n' '${target.package}' '${target.test}'") cargoTestTargets
       );
 
       mkProductCommand =
@@ -133,7 +133,9 @@ _: {
         }:
         {
           inherit description;
-          ci = productCi // { inherit stepName; };
+          ci = productCi // {
+            inherit stepName;
+          };
           runtimeInputs = pkgs: [
             pkgs.git
             pkgs.nix
@@ -183,7 +185,9 @@ _: {
                 commands = {
                   nix-format = {
                     description = "Nix formatting";
-                    ci = sourceCi // { stepName = "Nix formatting"; };
+                    ci = sourceCi // {
+                      stepName = "Nix formatting";
+                    };
                     runtimeInputs = pkgs: [
                       pkgs.findutils
                       pkgs.git
@@ -200,7 +204,9 @@ _: {
 
                   rust-format = {
                     description = "Rust formatting";
-                    ci = sourceCi // { stepName = "Rust formatting"; };
+                    ci = sourceCi // {
+                      stepName = "Rust formatting";
+                    };
                     runtimeInputs = pkgs: [
                       pkgs.cargo
                       pkgs.git
@@ -214,7 +220,9 @@ _: {
 
                   statix = {
                     description = "Nix static analysis";
-                    ci = sourceCi // { stepName = "Statix"; };
+                    ci = sourceCi // {
+                      stepName = "Statix";
+                    };
                     runtimeInputs = pkgs: [
                       pkgs.git
                       pkgs.statix
@@ -227,7 +235,9 @@ _: {
 
                   actionlint = {
                     description = "GitHub Actions syntax";
-                    ci = sourceCi // { stepName = "Actionlint"; };
+                    ci = sourceCi // {
+                      stepName = "Actionlint";
+                    };
                     runtimeInputs = pkgs: [
                       pkgs.actionlint
                       pkgs.findutils
@@ -243,7 +253,9 @@ _: {
 
                   test-targets = {
                     description = "Every Cargo integration target has an explicit test boundary";
-                    ci = sourceCi // { stepName = "Test target classification"; };
+                    ci = sourceCi // {
+                      stepName = "Test target classification";
+                    };
                     runtimeInputs = pkgs: [
                       pkgs.cargo
                       pkgs.coreutils
@@ -277,7 +289,9 @@ _: {
 
                   flake-eval = {
                     description = "Flake output and check evaluation";
-                    ci = sourceCi // { stepName = "Flake evaluation"; };
+                    ci = sourceCi // {
+                      stepName = "Flake evaluation";
+                    };
                     runtimeInputs = pkgs: [
                       pkgs.git
                       pkgs.nix
@@ -290,7 +304,9 @@ _: {
 
                   workflow-sync = {
                     description = "Committed GitHub workflow matches the Nix CI declaration";
-                    ci = sourceCi // { stepName = "Generated workflow"; };
+                    ci = sourceCi // {
+                      stepName = "Generated workflow";
+                    };
                     runtimeInputs = pkgs: [
                       pkgs.diffutils
                       pkgs.git
@@ -313,7 +329,9 @@ _: {
 
               rust = {
                 description = "Rust static analysis with Clippy";
-                ci = rustCi // { stepName = "Clippy"; };
+                ci = rustCi // {
+                  stepName = "Clippy";
+                };
                 runtimeInputs = pkgs: [
                   pkgs.cargo
                   pkgs.clippy
@@ -340,7 +358,9 @@ _: {
             commands = {
               unit = {
                 description = "In-crate library and binary tests";
-                ci = rustCi // { stepName = "Unit tests"; };
+                ci = rustCi // {
+                  stepName = "Unit tests";
+                };
                 runtimeInputs = pkgs: [
                   pkgs.cargo
                   pkgs.git
@@ -354,7 +374,9 @@ _: {
 
               doc = {
                 description = "Rust documentation tests";
-                ci = rustCi // { stepName = "Doc tests"; };
+                ci = rustCi // {
+                  stepName = "Doc tests";
+                };
                 runtimeInputs = pkgs: [
                   pkgs.cargo
                   pkgs.git
