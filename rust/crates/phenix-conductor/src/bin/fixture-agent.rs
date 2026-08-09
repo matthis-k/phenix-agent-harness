@@ -21,11 +21,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     .map_err(agent_client_protocol::Error::into_internal_error)?,
                     ClientRequest::NewSessionRequest(_) => json!({
                         "sessionId": "fixture-session",
-                        "configOptions": fixture_model_options(),
+                        "configOptions": fixture_config_options(),
                     }),
-                    ClientRequest::SetSessionConfigOptionRequest(_) => json!({
-                        "configOptions": fixture_model_options(),
-                    }),
+                    ClientRequest::SetSessionConfigOptionRequest(request) => {
+                        json!({
+                            "configOptions": fixture_config_options_with(
+                                &request.config_id.to_string(),
+                                request.value.as_ref(),
+                            ),
+                        })
+                    }
                     ClientRequest::PromptRequest(prompt) => {
                         let text = prompt
                             .prompt
@@ -56,16 +61,46 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn fixture_model_options() -> Value {
-    json!([{
-        "id": "model",
-        "name": "Model",
-        "category": "model",
-        "type": "select",
-        "currentValue": "provider/model",
-        "options": [{
-            "value": "provider/model",
-            "name": "Fixture Model",
-        }],
-    }])
+fn fixture_config_options() -> Value {
+    fixture_config_options_with("", &Value::Null)
+}
+
+fn fixture_config_options_with(config_id: &str, value: &Value) -> Value {
+    let selected_model = if config_id == "model" {
+        value.as_str().unwrap_or("provider/model")
+    } else {
+        "provider/model"
+    };
+    let selected_thinking = if config_id == "thinking" {
+        value.as_str().unwrap_or("medium")
+    } else {
+        "medium"
+    };
+    json!([
+        {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": selected_model,
+            "options": [{
+                "value": "provider/model",
+                "name": "Fixture Model",
+            }],
+        },
+        {
+            "id": "thinking",
+            "name": "Thinking",
+            "category": "thought_level",
+            "type": "select",
+            "currentValue": selected_thinking,
+            "options": [
+                { "value": "minimal", "name": "Minimal" },
+                { "value": "low", "name": "Low" },
+                { "value": "medium", "name": "Medium" },
+                { "value": "high", "name": "High" },
+                { "value": "max", "name": "Max" }
+            ],
+        }
+    ])
 }
