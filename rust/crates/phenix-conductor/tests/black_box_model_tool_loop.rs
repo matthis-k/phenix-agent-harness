@@ -39,7 +39,10 @@ fn inbound_prompt_routes_models_and_completes_a_delegation_tool_loop() -> Result
         &configuration_json(&mock_agent, &coordinator_log, &specialist_log),
     )?;
     let configured = process.receive_response(100)?;
-    assert_eq!(configured["result"]["revision"], 1);
+    assert_eq!(
+        configured["result"]["revision"], 1,
+        "configuration apply failed: {configured}"
+    );
     assert_eq!(
         configured["result"]["definition_id"],
         "definition.black-box"
@@ -56,7 +59,10 @@ fn inbound_prompt_routes_models_and_completes_a_delegation_tool_loop() -> Result
     )?;
     let tree = process.receive_response(3)?;
     let root_node = required_string(&tree["result"], "root")?;
-    assert_eq!(tree["result"]["nodes"][0]["backend"], "coordinator");
+    assert_eq!(
+        tree["result"]["nodes"][0]["model"]["backend"],
+        "coordinator"
+    );
     assert_eq!(tree["result"]["nodes"][0]["model"]["provider"], "mock");
     assert_eq!(tree["result"]["nodes"][0]["model"]["model"], "coordinator");
 
@@ -179,7 +185,7 @@ fn inbound_prompt_routes_models_and_completes_a_delegation_tool_loop() -> Result
         .find(|node| node["id"] == specialist_node)
         .ok_or("delegated specialist node is missing")?;
     assert_eq!(child["parent"], root_node);
-    assert_eq!(child["backend"], "specialist");
+    assert_eq!(child["model"]["backend"], "specialist");
     assert_eq!(child["model"]["provider"], "mock");
     assert_eq!(child["model"]["model"], "specialist");
 
@@ -326,11 +332,11 @@ id: router.black-box
 
 ## Routes
 
-| Role | Workflow | Target | Explanation |
-|---|---|---|---|
-| `coordinator` | `*` | `coordinator/mock/coordinator` | deterministic coordinator |
-| `specialist` | `*` | `specialist/mock/specialist` | deterministic specialist |
-| `*` | `*` | `coordinator/mock/coordinator` | fallback coordinator |
+| Role | Workflow | D0 | D1 | D2 | D3 | D4 | Explanation |
+|---|---|---|---|---|---|---|---|
+| `coordinator` | `*` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator/off` | deterministic coordinator |
+| `specialist` | `*` | `specialist/mock/specialist/off` | `specialist/mock/specialist/off` | `specialist/mock/specialist/off` | `specialist/mock/specialist/off` | `specialist/mock/specialist/off` | deterministic specialist |
+| `*` | `*` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator/off` | `coordinator/mock/coordinator/off` | fallback coordinator |
 "#;
     let coordinator = json!({
         "backend_id": "coordinator",
@@ -380,9 +386,9 @@ id: router.black-box
         "input": {
             "definition_id": "definition.black-box",
             "router": "router.black-box",
-            "root": {
-                "tree_id": "black-box-root",
+            "standard_session": {
                 "role": "coordinator",
+                "difficulty": "d1",
                 "objective": "exercise the complete adapter path"
             },
             "backends": [

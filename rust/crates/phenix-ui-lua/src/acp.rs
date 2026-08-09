@@ -174,13 +174,17 @@ pub(crate) fn install_acp_api(
                 .transpose()?
                 .unwrap_or_default();
             let backend = AcpBackendConfig {
-                id: BackendId::parse(table.get::<String>("id")?)
-                    .map_err(mlua::Error::external)?,
+                id: BackendId::parse(table.get::<String>("id")?).map_err(mlua::Error::external)?,
                 command,
                 environment,
             };
             let mut state = backend_state.borrow_mut();
-            if state.acp.backends.iter().any(|existing| existing.id == backend.id) {
+            if state
+                .acp
+                .backends
+                .iter()
+                .any(|existing| existing.id == backend.id)
+            {
                 return Err(configuration_error(format!(
                     "duplicate ACP backend {}",
                     backend.id
@@ -232,10 +236,14 @@ fn parse_environment(table: Table) -> mlua::Result<BTreeMap<String, String>> {
     for pair in table.pairs::<Value, Value>() {
         let (key, value) = pair?;
         let Value::String(key) = key else {
-            return Err(configuration_error("backend.environment keys must be strings"));
+            return Err(configuration_error(
+                "backend.environment keys must be strings",
+            ));
         };
         let Value::String(value) = value else {
-            return Err(configuration_error("backend.environment values must be strings"));
+            return Err(configuration_error(
+                "backend.environment values must be strings",
+            ));
         };
         let key = key.to_str()?.to_owned();
         if key.is_empty() || key.contains('=') || key.contains('\0') {

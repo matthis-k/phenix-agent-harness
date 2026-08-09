@@ -277,7 +277,8 @@ impl ConductorOwner {
     }
 
     fn active_revision(&self) -> Result<u64, ConductorOwnerError> {
-        self.active_revision.ok_or(ConductorOwnerError::NotConfigured)
+        self.active_revision
+            .ok_or(ConductorOwnerError::NotConfigured)
     }
 
     fn revision_mut(&mut self, revision: u64) -> Result<&mut RuntimeRevision, ConductorOwnerError> {
@@ -286,7 +287,10 @@ impl ConductorOwner {
             .ok_or(ConductorOwnerError::UnknownRevision(revision))
     }
 
-    fn runtime_for_tree(&self, tree_id: &SessionTreeId) -> Result<&ConductorRuntime, ConductorOwnerError> {
+    fn runtime_for_tree(
+        &self,
+        tree_id: &SessionTreeId,
+    ) -> Result<&ConductorRuntime, ConductorOwnerError> {
         let revision = self
             .tree_revisions
             .get(tree_id)
@@ -307,7 +311,8 @@ impl ConductorOwner {
             .get(tree_id)
             .copied()
             .ok_or_else(|| ConductorOwnerError::UnknownTree(tree_id.clone()))?;
-        self.revision_mut(revision).map(|revision| &mut revision.runtime)
+        self.revision_mut(revision)
+            .map(|revision| &mut revision.runtime)
     }
 
     fn allocate_tree_id(&mut self) -> Result<SessionTreeId, ConductorOwnerError> {
@@ -415,11 +420,13 @@ fn build_bootstrap(
         definitions.push(definition);
     }
 
-    let standard_session = input.standard_session.map(|template| BootstrapStandardSession {
-        role: template.role,
-        difficulty: template.difficulty,
-        objective: template.objective,
-    });
+    let standard_session = input
+        .standard_session
+        .map(|template| BootstrapStandardSession {
+            role: template.role,
+            difficulty: template.difficulty,
+            objective: template.objective,
+        });
     let mcp_server_count = input.tools.mcp_servers().len();
     let snapshot = ConfigurationSnapshot {
         revision,
@@ -517,7 +524,10 @@ impl Display for ConductorOwnerError {
                 "Phenix ACP has no active user configuration; submit _phenix/config/apply first",
             ),
             Self::UnknownRevision(revision) => {
-                write!(formatter, "unknown Phenix ACP configuration revision {revision}")
+                write!(
+                    formatter,
+                    "unknown Phenix ACP configuration revision {revision}"
+                )
             }
             Self::UnknownTree(tree) => write!(formatter, "unknown Phenix session tree {tree}"),
             Self::DuplicateTree(tree) => write!(formatter, "duplicate Phenix session tree {tree}"),
@@ -525,7 +535,9 @@ impl Display for ConductorOwnerError {
                 write!(formatter, "Phenix ACP method {method} requires tree_id")
             }
             Self::InvalidTreeTarget(message) => write!(formatter, "invalid tree target: {message}"),
-            Self::IdentifierExhausted => formatter.write_str("Phenix owner identifiers are exhausted"),
+            Self::IdentifierExhausted => {
+                formatter.write_str("Phenix owner identifiers are exhausted")
+            }
             Self::MissingBackends => {
                 formatter.write_str("Phenix ACP configuration requires at least one backend")
             }
@@ -535,24 +547,40 @@ impl Display for ConductorOwnerError {
                 formatter.write_str("Phenix ACP configuration contains a duplicate backend ID")
             }
             Self::InvalidEnvironmentName(name) => {
-                write!(formatter, "invalid backend environment variable name {name:?}")
+                write!(
+                    formatter,
+                    "invalid backend environment variable name {name:?}"
+                )
             }
             Self::InvalidEnvironmentValue(name) => write!(
                 formatter,
                 "backend environment variable {name:?} contains a NUL byte"
             ),
             Self::DecodeConfiguration(error) => {
-                write!(formatter, "invalid Phenix ACP configuration request: {error}")
+                write!(
+                    formatter,
+                    "invalid Phenix ACP configuration request: {error}"
+                )
             }
             Self::EncodeConfiguration(error) => {
-                write!(formatter, "failed to encode Phenix ACP configuration response: {error}")
+                write!(
+                    formatter,
+                    "failed to encode Phenix ACP configuration response: {error}"
+                )
             }
             Self::DecodeRequest(error) => write!(formatter, "invalid Phenix ACP request: {error}"),
-            Self::EncodeRequest(error) => write!(formatter, "failed to encode Phenix ACP request: {error}"),
-            Self::DecodeResponse(error) => write!(formatter, "failed to decode Phenix ACP response: {error}"),
+            Self::EncodeRequest(error) => {
+                write!(formatter, "failed to encode Phenix ACP request: {error}")
+            }
+            Self::DecodeResponse(error) => {
+                write!(formatter, "failed to decode Phenix ACP response: {error}")
+            }
             Self::Source(error) => Display::fmt(error, formatter),
             Self::Build(error) => {
-                write!(formatter, "failed to construct Phenix ACP configuration: {error}")
+                write!(
+                    formatter,
+                    "failed to construct Phenix ACP configuration: {error}"
+                )
             }
             Self::Runtime(error) => formatter.write_str(error),
         }

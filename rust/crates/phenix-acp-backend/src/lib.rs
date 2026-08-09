@@ -16,13 +16,13 @@ use permission::{PermissionBroker, PermissionRequestEvent};
 use phenix_acp::acp::schema::v1::{
     AuthCapabilities, AuthMethod as AcpAuthMethod, AuthenticateRequest,
     BooleanConfigOptionCapabilities, CancelNotification, ClientCapabilities,
-    ClientSessionCapabilities, ContentBlock, CreateTerminalRequest, ExtRequest, ExtResponse,
-    ForkSessionRequest, ImageContent, InitializeRequest, KillTerminalRequest, ListSessionsRequest,
-    LoadSessionRequest, LogoutRequest, NewSessionRequest, PromptRequest, PromptResponse,
-    ReleaseTerminalRequest, RequestPermissionRequest, ResumeSessionRequest, SessionConfigKind,
-    SessionConfigOptionCategory, SessionConfigOptionValue, SessionConfigOptionsCapabilities,
-    SessionModeId, SessionNotification, SetSessionConfigOptionRequest, SetSessionModeRequest,
-    TerminalOutputRequest, TextContent, WaitForTerminalExitRequest,
+    ClientSessionCapabilities, ContentBlock, CreateTerminalRequest, ExtRequest, ForkSessionRequest,
+    ImageContent, InitializeRequest, KillTerminalRequest, ListSessionsRequest, LoadSessionRequest,
+    LogoutRequest, NewSessionRequest, PromptRequest, PromptResponse, ReleaseTerminalRequest,
+    RequestPermissionRequest, ResumeSessionRequest, SessionConfigKind, SessionConfigOptionCategory,
+    SessionConfigOptionValue, SessionConfigOptionsCapabilities, SessionModeId, SessionNotification,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, TerminalOutputRequest, TextContent,
+    WaitForTerminalExitRequest,
 };
 use phenix_acp::acp::schema::ProtocolVersion;
 use phenix_acp::acp::{AcpAgent, Agent, Client, ConnectionTo};
@@ -293,7 +293,11 @@ async fn run_connection(
             );
             let initialize = cx.send_request(initialize).block_task().await?;
             for request in startup_requests {
-                let _: ExtResponse = cx.send_request(request).block_task().await?;
+                let request = phenix_acp::acp::UntypedMessage::new(
+                    request.method.as_ref(),
+                    request.params.as_ref(),
+                )?;
+                let _: serde_json::Value = cx.send_request(request).block_task().await?;
             }
             let runtime = RuntimeState::new(AdapterState::new(initialize));
             run_backend_loop(

@@ -11,8 +11,8 @@ use phenix_acp::{
     BackendId, BackendModelList, BackendModelListResult, BackendModelSummary, BackendTargetParams,
     DefinitionError, DefinitionFormat, DefinitionParseError, Definitions, Difficulty,
     ExtensionUiCapabilities, GatewayError, GatewayEvent, ModelCapabilities, ModelId,
-    PhenixAcpGateway, PhenixConductor, PromptCapabilities, ProviderId, ResourceCapabilities, RoleId,
-    RouterId, SessionCapabilities, SessionCommand, SessionNodeId, SessionTreeDefinition,
+    PhenixAcpGateway, PhenixConductor, PromptCapabilities, ProviderId, ResourceCapabilities,
+    RoleId, RouterId, SessionCapabilities, SessionCommand, SessionNodeId, SessionTreeDefinition,
     SessionTreeId, ToolConfiguration,
 };
 use phenix_acp_backend::{
@@ -406,11 +406,9 @@ impl ConductorBootstrap {
             .workflows()
             .map(|workflow| workflow.id().clone())
             .collect::<Vec<_>>();
-        let mut definition = SessionTreeDefinition::builder(
-            self.definition_id.clone(),
-            self.router.clone(),
-        )
-        .tools(self.tools);
+        let mut definition =
+            SessionTreeDefinition::builder(self.definition_id.clone(), self.router.clone())
+                .tools(self.tools);
         for backend in &self.backends {
             let command = parse_command(&backend.command)?;
             let endpoint = AcpEndpoint::stdio(

@@ -135,9 +135,7 @@ impl DifficultyModelConfigs {
     }
 
     pub fn iter(&self) -> impl ExactSizeIterator<Item = (Difficulty, &ModelConfig)> {
-        Difficulty::ALL
-            .into_iter()
-            .zip(self.models.iter())
+        Difficulty::ALL.into_iter().zip(self.models.iter())
     }
 }
 
