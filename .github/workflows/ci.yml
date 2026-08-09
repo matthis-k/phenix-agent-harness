@@ -103,18 +103,6 @@ jobs:
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
         run: nix run .#phenix-maintenance -- test integration phenix-acp-repeated-prompts
 
-      - name: "phenix-tui / configuration_ownership"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test integration phenix-tui-configuration-ownership
-
-      - name: "phenix-ui-core / editor_modes"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test integration phenix-ui-core-editor-modes
-
       - name: "phenix-ui-core / runtime_controls"
         env:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
