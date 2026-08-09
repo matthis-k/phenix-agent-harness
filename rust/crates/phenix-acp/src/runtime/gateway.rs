@@ -566,7 +566,6 @@ impl PhenixAcpGateway {
             role,
             difficulty,
             objective.into(),
-            None,
             AttachMode::New,
         )
     }
@@ -586,7 +585,6 @@ impl PhenixAcpGateway {
             role,
             difficulty,
             objective.into(),
-            None,
             AttachMode::Load(session_id),
         )
     }
@@ -606,7 +604,6 @@ impl PhenixAcpGateway {
             role,
             difficulty,
             objective.into(),
-            None,
             AttachMode::Resume(session_id),
         )
     }
@@ -631,7 +628,6 @@ impl PhenixAcpGateway {
             role,
             Some(difficulty),
             objective.into(),
-            None,
             AttachMode::Fork(source_session),
         )
     }
@@ -820,7 +816,6 @@ impl PhenixAcpGateway {
         role: RoleId,
         difficulty: Option<Difficulty>,
         objective: String,
-        workflow: Option<WorkflowId>,
         mode: AttachMode,
     ) -> Result<SessionNodeId, GatewayError> {
         let (definition, parent_session, parent_objective, parent_difficulty) = {
@@ -847,7 +842,7 @@ impl PhenixAcpGateway {
                 role: role.clone(),
                 difficulty,
                 objective: objective.clone(),
-                workflow,
+                workflow: None,
                 available_backends: backend_ids(&definition),
             },
         )?;
@@ -929,7 +924,7 @@ impl PhenixAcpGateway {
         let factory = self
             .backends
             .get(&backend)
-            .ok_or_else(|| GatewayError::MissingBackend(backend))?;
+            .ok_or(GatewayError::MissingBackend(backend))?;
         factory.open(request)
     }
 

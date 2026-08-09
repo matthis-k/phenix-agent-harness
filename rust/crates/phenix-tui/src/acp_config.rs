@@ -130,10 +130,8 @@ impl Error for AcpConfigLoadError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn frontend_configuration_uses_the_wire_control_plane_not_a_temp_file() {
-        assert!(!include_str!("acp_config.rs").contains("PHENIX_CONFIGURATION_FILE"));
+        assert!(!include_str!("acp_config.rs").contains(concat!("PHENIX_CONFIGURATION_", "FILE")));
     }
 }

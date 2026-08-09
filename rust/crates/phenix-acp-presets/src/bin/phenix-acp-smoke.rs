@@ -54,12 +54,16 @@ async fn run_fixture() -> AcpResult<()> {
                             "configOptions": fixture_config_options(),
                         })
                     }
-                    ClientRequest::SetSessionConfigOptionRequest(request) => json!({
-                        "configOptions": fixture_config_options_with(
-                            &request.config_id.to_string(),
-                            request.value.as_ref(),
-                        ),
-                    }),
+                    ClientRequest::SetSessionConfigOptionRequest(request) => {
+                        let value = serde_json::to_value(&request.value)
+                            .map_err(phenix_acp::acp::Error::into_internal_error)?;
+                        json!({
+                            "configOptions": fixture_config_options_with(
+                                &request.config_id.to_string(),
+                                &value,
+                            ),
+                        })
+                    }
                     ClientRequest::PromptRequest(_) => {
                         serde_json::to_value(PromptResponse::new(StopReason::EndTurn))
                             .map_err(phenix_acp::acp::Error::into_internal_error)?

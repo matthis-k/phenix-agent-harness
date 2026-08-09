@@ -134,7 +134,7 @@ impl SubscriptionHub {
             let mut events = Vec::new();
             let mut snapshots = BTreeMap::new();
             let mut invalid = Vec::new();
-            let runtime_result = runtime.lock().map_err(|_| ()).and_then(|mut runtime| {
+            let runtime_result = runtime.lock().map_err(|_| ()).map(|mut runtime| {
                 for subscription in &subscriptions {
                     if active_prompts.contains(&subscription.tree_id) {
                         continue;
@@ -153,7 +153,6 @@ impl SubscriptionHub {
                         Err(_) => invalid.push(subscription.clone()),
                     }
                 }
-                Ok(())
             });
             if runtime_result.is_err() {
                 break;

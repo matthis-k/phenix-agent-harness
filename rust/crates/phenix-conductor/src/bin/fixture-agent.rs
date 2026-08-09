@@ -24,10 +24,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         "configOptions": fixture_config_options(),
                     }),
                     ClientRequest::SetSessionConfigOptionRequest(request) => {
+                        let value = serde_json::to_value(&request.value)
+                            .map_err(agent_client_protocol::Error::into_internal_error)?;
                         json!({
                             "configOptions": fixture_config_options_with(
                                 &request.config_id.to_string(),
-                                request.value.as_ref(),
+                                &value,
                             ),
                         })
                     }

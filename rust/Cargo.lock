@@ -1622,6 +1622,7 @@ dependencies = [
  "futures",
  "phenix-acp",
  "phenix-acp-backend",
+ "serde_json",
  "shell-words",
 ]
 
@@ -1649,15 +1650,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "phenix-process-backend"
-version = "0.1.0"
-dependencies = [
- "phenix-runtime-api",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "phenix-runtime-api"
 version = "0.1.0"
 
@@ -1672,7 +1664,6 @@ dependencies = [
  "phenix-acp",
  "phenix-acp-backend",
  "phenix-frontend-config",
- "phenix-process-backend",
  "phenix-runtime-api",
  "phenix-ui-core",
  "phenix-ui-lua",
