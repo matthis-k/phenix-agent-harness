@@ -15,14 +15,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
-      - name: Apply candidate backend fix
+      - name: Apply candidate base and workflow fixes
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          path = Path('rust/crates/phenix-acp-backend/src/lib.rs')
-          text = path.read_text()
+
+          backend = Path('rust/crates/phenix-acp-backend/src/lib.rs')
+          text = backend.read_text()
           text = text.replace(
               '    ClientSessionCapabilities, ContentBlock, CreateTerminalRequest, ExtRequest, ExtResponse,\n',
               '    ClientSessionCapabilities, ContentBlock, CreateTerminalRequest, ExtRequest,\n',
@@ -32,13 +33,65 @@ jobs:
           new = '''            for request in startup_requests {\n                let request = phenix_acp::acp::UntypedMessage::new(\n                    request.method.as_ref(),\n                    request.params.as_ref(),\n                )?;\n                let _: serde_json::Value = cx.send_request(request).block_task().await?;\n            }\n'''
           if old not in text:
               raise SystemExit('expected startup extension request loop not found')
-          path.write_text(text.replace(old, new, 1))
+          backend.write_text(text.replace(old, new, 1))
+
+          cargo = Path('rust/crates/phenix-acp-presets/Cargo.toml')
+          text = cargo.read_text()
+          if 'serde_json.workspace = true' not in text:
+              text = text.replace(
+                  'shell-words.workspace = true\n',
+                  'serde_json.workspace = true\nshell-words.workspace = true\n',
+                  1,
+              )
+          cargo.write_text(text)
+
+          workflow = Path('rust/crates/phenix-acp/src/runtime/workflow.rs')
+          text = workflow.read_text()
+          text = text.replace(
+              '''    pub fn terminal(&self) -> Option<&WorkflowTerminal> {\n        self.terminal.as_ref()\n    }\n\n''',
+              '',
+              1,
+          )
+          old = '''            WorkflowCondition::InputExists { path } => value_at_path(&self.input, path).is_some(),\n            WorkflowCondition::InputMissing { path } => value_at_path(&self.input, path).is_none(),\n'''
+          new = '''            WorkflowCondition::InputExists { path } => {\n                source.settled() && value_at_path(&self.input, path).is_some()\n            }\n            WorkflowCondition::InputMissing { path } => {\n                source.settled() && value_at_path(&self.input, path).is_none()\n            }\n'''
+          if old not in text:
+              raise SystemExit('expected input transition matching block not found')
+          workflow.write_text(text.replace(old, new, 1))
+
+          conductor = Path('rust/crates/phenix-acp/src/conductor.rs')
+          text = conductor.read_text()
+          old = '''        let mut run = self\n            .workflow_runs\n            .remove(tree_id)\n            .ok_or_else(|| GatewayError::Invariant("managed workflow disappeared".to_owned()))?;\n        self.poll_running_states(tree_id, &mut run)?;\n        self.drive_managed_workflow(tree_id, &mut run)?;\n        let events = drain_pending(&mut run, node_id);\n        self.workflow_runs.insert(tree_id.clone(), run);\n        Ok(events)\n'''
+          new = '''        self.with_managed_run(tree_id, |this, run| {\n            this.poll_running_states(tree_id, run)?;\n            this.drive_managed_workflow(tree_id, run)?;\n            Ok(drain_pending(run, node_id))\n        })\n'''
+          if old not in text:
+              raise SystemExit('expected poll managed-run block not found')
+          text = text.replace(old, new, 1)
+
+          old = '''        self.drive_managed_workflow(&params.tree_id, &mut run)?;\n        let first_node = run\n'''
+          new = '''        if let Err(error) = self.drive_managed_workflow(&params.tree_id, &mut run) {\n            let _ = self.gateway.finish_workflow(\n                &params.tree_id,\n                &run.workflow_id,\n                &run.objective_id,\n                false,\n            );\n            return Err(error);\n        }\n        let first_node = run\n'''
+          if old not in text:
+              raise SystemExit('expected initial workflow drive not found')
+          text = text.replace(old, new, 1)
+
+          old = '''        let mut run = self\n            .workflow_runs\n            .remove(tree_id)\n            .ok_or_else(|| GatewayError::Invariant("managed workflow disappeared".to_owned()))?;\n        let events = self.gateway.execute(tree_id, node_id, command)?;\n        self.observe_if_running(&mut run, node_id, &events)?;\n        self.drive_managed_workflow(tree_id, &mut run)?;\n        self.workflow_runs.insert(tree_id.clone(), run);\n        Ok(events)\n'''
+          new = '''        self.with_managed_run(tree_id, |this, run| {\n            let events = this.gateway.execute(tree_id, node_id, command)?;\n            this.observe_if_running(run, node_id, &events)?;\n            this.drive_managed_workflow(tree_id, run)?;\n            Ok(events)\n        })\n'''
+          if old not in text:
+              raise SystemExit('expected execute managed-run block not found')
+          text = text.replace(old, new, 1)
+
+          old = '''        let mut run = self\n            .workflow_runs\n            .remove(tree_id)\n            .ok_or_else(|| GatewayError::Invariant("managed workflow disappeared".to_owned()))?;\n        let events = self.gateway.cancel_subtree(tree_id, node_id)?;\n        for event in &events {\n            self.observe_if_running(&mut run, &event.node_id, std::slice::from_ref(event))?;\n        }\n        self.drive_managed_workflow(tree_id, &mut run)?;\n        self.workflow_runs.insert(tree_id.clone(), run);\n        Ok(events)\n    }\n\n    fn poll_running_states(\n'''
+          new = '''        self.with_managed_run(tree_id, |this, run| {\n            let events = this.gateway.cancel_subtree(tree_id, node_id)?;\n            for event in &events {\n                this.observe_if_running(run, &event.node_id, std::slice::from_ref(event))?;\n            }\n            this.drive_managed_workflow(tree_id, run)?;\n            Ok(events)\n        })\n    }\n\n    fn with_managed_run<T>(\n        &mut self,\n        tree_id: &SessionTreeId,\n        operation: impl FnOnce(&mut Self, &mut ManagedWorkflowRun) -> Result<T, GatewayError>,\n    ) -> Result<T, GatewayError> {\n        let mut run = self\n            .workflow_runs\n            .remove(tree_id)\n            .ok_or_else(|| GatewayError::Invariant("managed workflow disappeared".to_owned()))?;\n        let result = operation(self, &mut run);\n        self.workflow_runs.insert(tree_id.clone(), run);\n        result\n    }\n\n    fn poll_running_states(\n'''
+          if old not in text:
+              raise SystemExit('expected cancel managed-run block not found')
+          conductor.write_text(text.replace(old, new, 1))
           PY
           cd rust
           cargo fmt --all
-      - name: Rust check
-        run: cargo check --workspace --all-targets --locked
+      - name: Rust check and refresh lockfile
+        run: cargo check --workspace --all-targets
         working-directory: rust
       - name: Rust clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        working-directory: rust
+      - name: Rust tests
+        run: cargo test --workspace --all-targets --locked
         working-directory: rust
