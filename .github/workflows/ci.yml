@@ -15,11 +15,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  checks:
+  source:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    name: Maintenance checks
+    name: Source
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
@@ -31,39 +31,100 @@ jobs:
             accept-flake-config = true
             max-jobs = auto
 
-      - name: Run declared maintenance stages
-        shell: bash
-        run: |
-          set -euo pipefail
-          export CARGO_HOME="$RUNNER_TEMP/phenix-cargo-home"
-          export CARGO_TARGET_DIR="$RUNNER_TEMP/phenix-cargo-target"
-
-          provider='.#packages.x86_64-linux.phenix-maintenance.phenixMaintenance'
-          schema="$(nix eval "$provider.ci.schemaVersion")"
-          if [[ "$schema" != 1 ]]; then
-            printf 'Unsupported phenix-maintenance schema version: %s\n' "$schema" >&2
-            exit 1
-          fi
-
-          steps_json="$(nix eval --json "$provider.ci.steps")"
-          mapfile -t stages < <(
-            python3 -c 'import json,sys; [print(step["id"]) for step in json.load(sys.stdin)]' <<< "$steps_json"
-          )
-
-          if [[ ${#stages[@]} -eq 0 ]]; then
-            printf '%s\n' 'No maintenance stages are enabled.' >&2
-            exit 1
-          fi
-
-          for stage in "${stages[@]}"; do
-            printf '\n==> maintenance stage: %s\n' "$stage"
-            nix run .#phenix-maintenance -- ci run "$stage"
-          done
+      - name: Source validation
+        run: nix run .#phenix-maintenance -- check source
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
-        shell: bash
         run: |
           set -euo pipefail
           git diff --exit-code
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+  rust:
+    needs: source
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: Rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+
+      - name: Configure shared Cargo state
+        run: |
+          echo "CARGO_HOME=$RUNNER_TEMP/phenix-cargo-home" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/phenix-cargo-target" >> "$GITHUB_ENV"
+
+      - name: Clippy
+        run: nix run .#phenix-maintenance -- check rust
+
+      - name: Unit tests
+        run: nix run .#phenix-maintenance -- test unit
+
+      - name: Integration tests
+        run: nix run .#phenix-maintenance -- test integration
+
+      - name: System tests
+        run: nix run .#phenix-maintenance -- test system
+
+      - name: Repository remains clean
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+  product:
+    needs: source
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: Product
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+
+      - name: Product tests
+        run: nix run .#phenix-maintenance -- test product
+
+      - name: Repository remains clean
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+  checks:
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    name: Maintenance checks
+    needs:
+      - source
+      - rust
+      - product
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all validation boundaries passed
+        env:
+          SOURCE_RESULT: ${{ needs.source.result }}
+          RUST_RESULT: ${{ needs.rust.result }}
+          PRODUCT_RESULT: ${{ needs.product.result }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RESULT" == success ]]
+          [[ "$RUST_RESULT" == success ]]
+          [[ "$PRODUCT_RESULT" == success ]]
