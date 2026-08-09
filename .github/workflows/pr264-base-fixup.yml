@@ -1,0 +1,71 @@
+name: PR 264 base fixup
+
+on:
+  push:
+    branches:
+      - refactor/phenix-acp-boundaries-routing-d0-d4
+    paths:
+      - .github/workflows/pr264-base-fixup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fixup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: refactor/phenix-acp-boundaries-routing-d0-d4
+      - name: Install rustfmt and clippy
+        run: rustup component add rustfmt clippy
+      - name: Apply ACP transport and smoke dependency fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          backend = Path('rust/crates/phenix-acp-backend/src/lib.rs')
+          text = backend.read_text()
+          old_import = '    ClientSessionCapabilities, ContentBlock, CreateTerminalRequest, ExtRequest, ExtResponse,\n'
+          new_import = '    ClientSessionCapabilities, ContentBlock, CreateTerminalRequest, ExtRequest,\n'
+          if old_import not in text:
+              raise SystemExit('expected ExtRequest/ExtResponse import not found')
+          text = text.replace(old_import, new_import, 1)
+          old_loop = '''            for request in startup_requests {\n                let _: ExtResponse = cx.send_request(request).block_task().await?;\n            }\n'''
+          new_loop = '''            for request in startup_requests {\n                let request = phenix_acp::acp::UntypedMessage::new(\n                    request.method.as_ref(),\n                    request.params.as_ref(),\n                )?;\n                let _: serde_json::Value = cx.send_request(request).block_task().await?;\n            }\n'''
+          if old_loop not in text:
+              raise SystemExit('expected startup extension request loop not found')
+          backend.write_text(text.replace(old_loop, new_loop, 1))
+
+          cargo = Path('rust/crates/phenix-acp-presets/Cargo.toml')
+          text = cargo.read_text()
+          marker = 'shell-words.workspace = true\n'
+          if 'serde_json.workspace = true' not in text:
+              if marker not in text:
+                  raise SystemExit('expected shell-words dependency marker not found')
+              text = text.replace(marker, 'serde_json.workspace = true\n' + marker, 1)
+          cargo.write_text(text)
+          PY
+          cd rust
+          cargo fmt --all
+      - name: Rust check
+        run: cargo check --workspace --all-targets --locked
+        working-directory: rust
+      - name: Rust clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        working-directory: rust
+      - name: Commit fixup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add rust
+          if git diff --cached --quiet; then
+            echo 'No changes to commit'
+            exit 0
+          fi
+          git commit -m 'fix: restore ACP workspace compilation'
+          git push origin HEAD:refactor/phenix-acp-boundaries-routing-d0-d4
