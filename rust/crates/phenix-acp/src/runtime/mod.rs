@@ -3,7 +3,7 @@ mod host;
 mod model;
 mod workflow;
 
-pub use gateway::{PhenixAcpGateway, PhenixAcpGatewayBuilder};
+pub use gateway::{PhenixAcpGateway, PhenixAcpGatewayBuilder, WorkflowNodeAttach};
 pub use host::{GatewayCommand, GatewayEnvelope, GatewayFailure, GatewayReply};
 pub(crate) use model::objective_terminal_state;
 pub(crate) use workflow::WorkflowMachine;

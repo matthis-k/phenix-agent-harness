@@ -5,7 +5,7 @@ use crate::{
     ObjectiveMark, PhenixAcpGateway, RoleId, RoutingExplain, RoutingExplainParams, SessionCommand,
     SessionEvent, SessionNodeId, SessionTreeClose, SessionTreeCreate, SessionTreeCreateResult,
     SessionTreeGet, SessionTreeId, SessionTreeList, WorkflowAction, WorkflowGraph, WorkflowId,
-    WorkflowStart, WorkflowStartParams, WorkflowStartResult,
+    WorkflowNodeAttach, WorkflowStart, WorkflowStartParams, WorkflowStartResult,
 };
 use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
 use serde::Serialize;
@@ -369,12 +369,14 @@ impl PhenixConductor {
                     } => {
                         let node_id = self.gateway.attach_workflow_node(
                             tree_id,
-                            &run.workflow_id,
-                            &run.objective_id,
-                            &run.root_node_id,
-                            role,
-                            Some(run.difficulty),
-                            objective.clone(),
+                            WorkflowNodeAttach {
+                                workflow_id: run.workflow_id.clone(),
+                                objective_id: run.objective_id.clone(),
+                                parent_node: run.root_node_id.clone(),
+                                role,
+                                difficulty: Some(run.difficulty),
+                                objective: objective.clone(),
+                            },
                         )?;
                         run.machine.bind_invoke(&key, node_id.clone())?;
                         let prompt = workflow_prompt(&objective, &context)?;

@@ -494,10 +494,6 @@ impl WorkflowMachine {
         })
     }
 
-    pub fn terminal(&self) -> Option<&WorkflowTerminal> {
-        self.terminal.as_ref()
-    }
-
     fn activate(
         &mut self,
         key: &str,

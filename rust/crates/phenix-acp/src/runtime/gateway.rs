@@ -12,6 +12,16 @@ use crate::{
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkflowNodeAttach {
+    pub workflow_id: WorkflowId,
+    pub objective_id: ObjectiveId,
+    pub parent_node: SessionNodeId,
+    pub role: RoleId,
+    pub difficulty: Option<Difficulty>,
+    pub objective: String,
+}
+
 #[derive(Clone, Default)]
 pub struct PhenixAcpGatewayBuilder {
     definitions: BTreeMap<DefinitionId, SessionTreeDefinition>,
@@ -274,27 +284,29 @@ impl PhenixAcpGateway {
     pub fn attach_workflow_node(
         &mut self,
         tree_id: &SessionTreeId,
-        workflow_id: &WorkflowId,
-        workflow_objective: &ObjectiveId,
-        parent_node: &SessionNodeId,
-        role: RoleId,
-        difficulty: Option<Difficulty>,
-        objective: impl Into<String>,
+        request: WorkflowNodeAttach,
     ) -> Result<SessionNodeId, GatewayError> {
-        let objective = objective.into();
+        let WorkflowNodeAttach {
+            workflow_id,
+            objective_id: workflow_objective,
+            parent_node,
+            role,
+            difficulty,
+            objective,
+        } = request;
         let (definition, root_node, parent_session, parent_objective, parent_difficulty) = {
             let tree = self.tree(tree_id)?;
-            if tree.active_workflow.as_ref() != Some(workflow_id) {
+            if tree.active_workflow.as_ref() != Some(&workflow_id) {
                 return Err(GatewayError::workflow(format!(
                     "workflow {workflow_id} is not active in tree {tree_id}"
                 )));
             }
-            if !tree.objectives.contains_key(workflow_objective) {
+            if !tree.objectives.contains_key(&workflow_objective) {
                 return Err(GatewayError::UnknownObjective(workflow_objective.clone()));
             }
             let parent = tree
                 .nodes
-                .get(parent_node)
+                .get(&parent_node)
                 .ok_or_else(|| GatewayError::UnknownNode(parent_node.clone()))?;
             (
                 tree.definition.clone(),
@@ -335,7 +347,7 @@ impl PhenixAcpGateway {
             let _ = session.execute(SessionCommand::Close);
             return Err(error);
         }
-        let objective_parent = if parent_node == &root_node {
+        let objective_parent = if parent_node == root_node {
             workflow_objective.clone()
         } else {
             parent_objective

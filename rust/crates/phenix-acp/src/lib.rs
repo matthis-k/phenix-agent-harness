@@ -72,8 +72,9 @@ pub use runtime::{
     PhenixAcpGatewayBuilder, RoutingDecision, RoutingRequest, SessionCommand, SessionEvent,
     SessionImage, SessionOpenKind, SessionOpenRequest, SessionRouter, StaticWorkflow,
     TreeStartResult, Workflow, WorkflowAction, WorkflowCondition, WorkflowGraph,
-    WorkflowGraphState, WorkflowJoin, WorkflowOutcomeStatus, WorkflowPlan, WorkflowPlanBuilder,
-    WorkflowRequest, WorkflowStateKind, WorkflowStep, WorkflowTerminal, WorkflowTransition,
+    WorkflowGraphState, WorkflowJoin, WorkflowNodeAttach, WorkflowOutcomeStatus, WorkflowPlan,
+    WorkflowPlanBuilder, WorkflowRequest, WorkflowStateKind, WorkflowStep, WorkflowTerminal,
+    WorkflowTransition,
 };
 pub use source::{
     DifficultyModelConfigs, RouteSelector, RoutingRule, RoutingTable, WorkflowDefinition,
