@@ -1,6 +1,7 @@
 use crate::{
     AcpSessionId, BackendId, DefinitionId, Difficulty, ModelConfig, ModelSelection, ObjectiveId,
-    ObjectiveState, RoleId, RouterId, SessionNodeId, SessionTreeId, ThinkingLevel, WorkflowId,
+    ObjectiveState, RoleId, RouterId, SessionNodeId, SessionTreeId, ThinkingLevel, WorkflowGraph,
+    WorkflowId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -13,6 +14,10 @@ pub trait SessionRouter: Send + Sync + 'static {
 
 pub trait Workflow: Send + Sync + 'static {
     fn plan(&self, request: &WorkflowRequest) -> Result<WorkflowPlan, GatewayError>;
+
+    fn graph(&self) -> Option<WorkflowGraph> {
+        None
+    }
 }
 
 pub trait AcpSessionFactory: Send + Sync + 'static {
