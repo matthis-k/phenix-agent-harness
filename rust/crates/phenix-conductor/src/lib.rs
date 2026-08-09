@@ -21,7 +21,6 @@ use phenix_acp_backend::{
 use phenix_runtime_api::{
     AuthMethod, BackendCommand, BackendReply, CommandSource, ModelSummary as RuntimeModelSummary,
 };
-use serde::Deserialize;
 use serde_json::value::to_raw_value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -33,49 +32,40 @@ use std::sync::Arc;
 ///
 /// The conductor crate contains the machinery to consume this structure; it does
 /// not construct a policy-bearing instance on its own.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConductorBootstrap {
     pub definition_id: phenix_acp::DefinitionId,
     pub router: RouterId,
-    #[serde(default)]
     pub standard_session: Option<BootstrapStandardSession>,
     pub backends: Vec<BootstrapBackend>,
     pub definitions: Vec<BootstrapDefinition>,
-    #[serde(default)]
     pub tools: ToolConfiguration,
 }
 
-/// Optional compatibility projection for standard ACP `session/new`.
+/// Standard ACP `session/new` projection into a Phenix session tree.
 /// Phenix-native clients create trees explicitly and do not need this template.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BootstrapStandardSession {
     pub role: RoleId,
     pub difficulty: Difficulty,
     pub objective: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BootstrapBackend {
     pub id: BackendId,
     pub command: String,
-    #[serde(default)]
     pub environment: BTreeMap<String, String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BootstrapDefinition {
     Workflow {
         source: String,
-        #[serde(default)]
         format: Option<DefinitionFormat>,
     },
     RoutingTable {
         source: String,
-        #[serde(default)]
         format: Option<DefinitionFormat>,
     },
 }
@@ -330,10 +320,6 @@ fn parse_tree_id(session_id: &str) -> Result<SessionTreeId, RuntimeError> {
 }
 
 impl ConductorBootstrap {
-    pub fn from_json(source: &str) -> Result<Self, BootstrapError> {
-        serde_json::from_str(source).map_err(BootstrapError::Decode)
-    }
-
     pub fn build(
         self,
         cwd: &Path,
@@ -686,7 +672,6 @@ impl Error for RuntimeError {
 
 #[derive(Debug)]
 pub enum BootstrapError {
-    Decode(serde_json::Error),
     MissingBackends,
     MissingDefinitions,
     DuplicateBackend,
@@ -737,7 +722,6 @@ impl From<GatewayError> for BootstrapError {
 impl Display for BootstrapError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Decode(error) => write!(formatter, "invalid conductor bootstrap JSON: {error}"),
             Self::MissingBackends => formatter.write_str("conductor bootstrap requires a backend"),
             Self::MissingDefinitions => {
                 formatter.write_str("conductor bootstrap requires definitions")
@@ -777,7 +761,6 @@ impl Display for BootstrapError {
 impl Error for BootstrapError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Decode(error) => Some(error),
             Self::InvalidCommand { source, .. } => Some(source),
             Self::DefinitionParse(error) => Some(error),
             Self::Definition(error) => Some(error),
@@ -828,60 +811,51 @@ id: workflow.test
 | `work` | | `implementer` | Implement {objective} |
 "#;
 
-    fn bootstrap_json(backend: &str) -> String {
-        serde_json::json!({
-            "definition_id": "definition.test",
-            "router": "router.test",
-            "standard_session": {
-                "role": "coordinator",
-                "difficulty": "d2",
-                "objective": "coordinate the standard ACP session"
-            },
-            "backends": [{
-                "id": backend,
-                "command": "test-agent --stdio"
+    fn bootstrap(backend: &str) -> ConductorBootstrap {
+        ConductorBootstrap {
+            definition_id: phenix_acp::DefinitionId::parse("definition.test")
+                .expect("definition id"),
+            router: RouterId::parse("router.test").expect("router id"),
+            standard_session: Some(BootstrapStandardSession {
+                role: RoleId::parse("coordinator").expect("role id"),
+                difficulty: Difficulty::D2,
+                objective: "coordinate the standard ACP session".to_owned(),
+            }),
+            backends: vec![BootstrapBackend {
+                id: BackendId::parse(backend).expect("backend id"),
+                command: "test-agent --stdio".to_owned(),
+                environment: BTreeMap::new(),
             }],
-            "definitions": [
-                { "kind": "routing_table", "source": ROUTER, "format": "markdown" },
-                { "kind": "workflow", "source": WORKFLOW, "format": "markdown" }
-            ]
-        })
-        .to_string()
-    }
-
-    #[test]
-    fn bootstrap_is_language_neutral_and_builds_without_starting_agents() {
-        let bootstrap = ConductorBootstrap::from_json(&bootstrap_json("test")).expect("bootstrap");
-        let runtime = bootstrap.build(Path::new("/tmp"), 8).expect("runtime");
-        assert!(runtime.conductor().gateway().list_trees().trees.is_empty());
+            definitions: vec![
+                BootstrapDefinition::RoutingTable {
+                    source: ROUTER.to_owned(),
+                    format: Some(DefinitionFormat::Markdown),
+                },
+                BootstrapDefinition::Workflow {
+                    source: WORKFLOW.to_owned(),
+                    format: Some(DefinitionFormat::Markdown),
+                },
+            ],
+            tools: ToolConfiguration::new(),
+        }
     }
 
     #[test]
     fn every_difficulty_target_must_use_a_configured_backend() {
-        let bootstrap = ConductorBootstrap::from_json(&bootstrap_json("other")).expect("bootstrap");
         assert!(matches!(
-            bootstrap.build(Path::new("/tmp"), 8),
+            bootstrap("other").build(Path::new("/tmp"), 8),
             Err(BootstrapError::MissingRoutedBackend { .. })
         ));
     }
 
     #[test]
-    fn standard_session_template_is_optional_but_validated_when_present() {
-        let source = serde_json::json!({
-            "definition_id": "definition.test",
-            "router": "router.test",
-            "standard_session": {
-                "role": "coordinator",
-                "difficulty": "d2",
-                "objective": "  "
-            },
-            "backends": [{ "id": "test", "command": "test-agent" }],
-            "definitions": [
-                { "kind": "routing_table", "source": ROUTER, "format": "markdown" }
-            ]
-        })
-        .to_string();
-        let bootstrap = ConductorBootstrap::from_json(&source).expect("bootstrap");
+    fn blank_standard_session_objective_is_rejected() {
+        let mut bootstrap = bootstrap("test");
+        bootstrap
+            .standard_session
+            .as_mut()
+            .expect("standard session")
+            .objective = "  ".to_owned();
         assert!(matches!(
             bootstrap.build(Path::new("/tmp"), 8),
             Err(BootstrapError::EmptyStandardSessionObjective)
