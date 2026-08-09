@@ -40,10 +40,9 @@ pub use conductor::{ConductorError, PhenixConductor};
 pub use configuration::{
     ConfigurationApply, ConfigurationApplyParams, ConfigurationApplyResult,
     ConfigurationBackendInput, ConfigurationChangedNotification, ConfigurationChangedParams,
-    ConfigurationDefinitionInput, ConfigurationFormat, ConfigurationGet, ConfigurationGetParams,
-    ConfigurationGetResult, ConfigurationInput, ConfigurationSnapshot, ConfigurationSource,
-    ConfigurationSourceError, ConfigurationSourceOrigin, ConfigurationStandardSessionInput,
-    LoadedConfigurationSource,
+    ConfigurationDefinitionInput, ConfigurationGet, ConfigurationGetParams, ConfigurationGetResult,
+    ConfigurationInput, ConfigurationSnapshot, ConfigurationSource, ConfigurationSourceError,
+    ConfigurationSourceOrigin, ConfigurationStandardSessionInput, LoadedConfigurationSource,
 };
 pub use definition::{
     AcpEndpoint, BackendDefinition, DefinitionError, SessionTreeDefinition,
