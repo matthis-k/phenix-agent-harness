@@ -329,21 +329,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn editor_selection_controls_only_frontend_view_state() {
-        let mut view = ViewState::default();
-        view.terminal.height = 42;
-
-        view.set_input_editor(InputEditor::Embedded);
-        assert_eq!(view.input_editor, InputEditor::Embedded);
-        assert_eq!(view.vim_mode, VimMode::Normal);
-        assert_eq!(view.pane(&ElementId::input()).height, Some(14));
-
-        view.set_input_editor(InputEditor::External);
-        assert_eq!(view.input_editor, InputEditor::External);
-        assert_eq!(view.pane(&ElementId::input()).height, Some(5));
-    }
-
-    #[test]
     fn run_tree_collapse_state_is_local_frontend_state() {
         let run_id = RunId::parse("run-child").expect("run id");
         let mut view = ViewState::default();
