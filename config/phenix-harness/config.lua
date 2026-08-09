@@ -1,15 +1,16 @@
 phenix.acp.configure({
   definition_id = "phenix.harness",
   router = "router.legacy-mixed",
-  backend = {
-    id = "pi",
-    command = "pi-acp",
-  },
-  root = {
-    tree_id = "tree-frontend",
+  standard_session = {
     role = "coordinator",
+    difficulty = "d2",
     objective = "Interactive Phenix session tree",
   },
+})
+
+phenix.acp.backend({
+  id = "pi",
+  command = "pi-acp",
 })
 
 phenix.acp.workflow("workflows/debug.md")
