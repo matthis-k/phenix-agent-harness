@@ -50,24 +50,41 @@ There is one supported frontend-to-agent path. Do not add a second process proto
 
 ## Maintenance
 
-Mechanical, semantics-preserving normalization is repository-owned:
+The flake owns the development shell, product packages, package smoke checks, and a single declarative maintenance provider. Do not add a second development-environment lock or task graph.
+
+The provider is exposed as `packages.<system>.phenix-maintenance`; its generated executable is `maintenance`. The Nix command tree is authoritative for local execution and CI stage discovery.
+
+Enter the repository environment with:
 
 ```sh
-devenv tasks run maintenance:fix
+nix develop
 ```
 
-It applies canonical Rust/Nix formatting and safe Statix rewrites. Pull-request CI applies the same mechanical fixes automatically to same-repository branches and commits them before validation.
-
-Validation remains read-only and explicit by concern:
+Apply deterministic normalization with:
 
 ```sh
-devenv test
+maintenance fix
 ```
 
-The maintenance graph checks formatting, Rust compilation, Clippy, Rust tests, Nix static analysis, GitHub Actions syntax, required tools, and the flake/smoke checks.
+Run the complete read-only validation graph with:
+
+```sh
+maintenance all
+```
+
+Validation is intentionally separated by boundary:
+
+- `maintenance check source`: formatting, Nix static analysis, workflow syntax, flake evaluation;
+- `maintenance check rust`: Clippy/static Rust gate;
+- `maintenance test unit`: in-crate and doc tests;
+- `maintenance test integration`: crate/API integration targets;
+- `maintenance test system`: black-box Phenix process/protocol tests;
+- `maintenance test product`: Nix-built installed-product/package smoke tests.
+
+Keep a behavior in one canonical execution layer. In particular, product derivations must not rerun the Cargo behavioral suites.
 
 Compiler errors, judgment-bearing lint findings, test failures, runtime failures, and Nix evaluation/build failures are never auto-repaired.
 
 ## Required verification
 
-Before considering a change complete, the repository must pass the canonical maintenance graph and leave the committed tree clean. Do not weaken a check to make transitional code pass; either fix the current implementation or remove the obsolete surface that the check was protecting.
+Before considering a change complete, run the relevant focused layer while iterating and `maintenance all` before final handoff. Do not weaken a check to make transitional code pass; either fix the current implementation or remove the obsolete surface that the check was protecting.

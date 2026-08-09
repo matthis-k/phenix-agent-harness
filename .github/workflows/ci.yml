@@ -15,11 +15,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  checks:
+  plan:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    name: Maintenance checks
+    name: Discover maintenance stages
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
@@ -31,74 +33,76 @@ jobs:
             accept-flake-config = true
             max-jobs = auto
 
-      - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
-        with: { name: devenv }
-
-      - name: Install devenv
-        id: install-devenv
-        run: nix profile add nixpkgs#devenv
-
-      - name: Formatting
-        if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
-        shell: bash
-        run: |
-          set -o pipefail
-          mkdir -p "$RUNNER_TEMP/ci-diagnostics"
-          devenv tasks run maintenance:format 2>&1 | tee "$RUNNER_TEMP/ci-diagnostics/format.log"
-
-      - name: Rust compile / check
-        if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
-        run: devenv tasks run maintenance:rust-compile --mode single
-
-      - name: Rust lint
-        if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
-        shell: bash
-        run: |
-          set -o pipefail
-          mkdir -p "$RUNNER_TEMP/ci-diagnostics"
-          devenv tasks run maintenance:rust-clippy --mode single 2>&1 | tee "$RUNNER_TEMP/ci-diagnostics/clippy.log"
-
-      - name: Rust tests
-        if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
-        run: devenv tasks run maintenance:rust-tests --mode single
-
-      - name: Nix static analysis
-        if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
-        run: devenv tasks run maintenance:statix --mode single
-
-      - name: GitHub Actions syntax
-        if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
-        run: devenv tasks run maintenance:workflows --mode single
-
-      - name: Required tool availability
-        if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
-        run: devenv tasks run maintenance:tools --mode single
-
-      - name: Nix flake and smoke checks
-        if: ${{ !cancelled() && steps.install-devenv.outcome == 'success' }}
-        shell: bash
-        run: |
-          set -o pipefail
-          mkdir -p "$RUNNER_TEMP/ci-diagnostics"
-          devenv tasks run maintenance:flake --mode single 2>&1 | tee "$RUNNER_TEMP/ci-diagnostics/flake.log"
-
-      - name: Repository remains clean
-        if: ${{ !cancelled() }}
+      - id: matrix
+        name: Read phenix-maintenance provider metadata
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/ci-diagnostics"
-          git diff > "$RUNNER_TEMP/ci-diagnostics/source.diff"
-          git status --porcelain=v1 --untracked-files=all > "$RUNNER_TEMP/ci-diagnostics/status.txt"
-          cat "$RUNNER_TEMP/ci-diagnostics/source.diff"
-          cat "$RUNNER_TEMP/ci-diagnostics/status.txt"
-          test ! -s "$RUNNER_TEMP/ci-diagnostics/source.diff"
-          test ! -s "$RUNNER_TEMP/ci-diagnostics/status.txt"
 
-      - name: Upload CI diagnostics
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+          provider='.#packages.x86_64-linux.phenix-maintenance.phenixMaintenance'
+          schema="$(nix eval "$provider.ci.schemaVersion")"
+          if [[ "$schema" != 1 ]]; then
+            printf 'Unsupported phenix-maintenance schema version: %s\n' "$schema" >&2
+            exit 1
+          fi
+
+          stage_count="$(nix eval "$provider.ci.stageCount")"
+          if [[ "$stage_count" -eq 0 ]]; then
+            printf '%s\n' 'No maintenance commands are exposed to CI.' >&2
+            exit 1
+          fi
+
+          matrix="$(nix eval --json "$provider.ci.matrix")"
+          printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
+
+  maintenance:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    needs: plan
+    name: Maintenance / ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout }}
+    env:
+      CARGO_HOME: ${{ runner.temp }}/phenix-cargo-home
+      CARGO_TARGET_DIR: ${{ runner.temp }}/phenix-cargo-target
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
-          name: ci-diagnostics
-          path: ${{ runner.temp }}/ci-diagnostics
-          if-no-files-found: error
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+
+      - name: Run ${{ matrix.name }}
+        env:
+          MAINTENANCE_STAGE: ${{ matrix.id }}
+        run: nix run .#phenix-maintenance -- ci run "$MAINTENANCE_STAGE"
+
+      - name: Repository remains clean
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+  checks:
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    needs:
+      - plan
+      - maintenance
+    name: Maintenance checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require discovered maintenance stages
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          MAINTENANCE_RESULT: ${{ needs.maintenance.result }}
+        run: |
+          test "$PLAN_RESULT" = success
+          test "$MAINTENANCE_RESULT" = success

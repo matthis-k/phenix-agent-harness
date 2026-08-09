@@ -7,8 +7,8 @@ _:
       rustSource = pkgs.lib.cleanSource ../rust;
 
       # The user-facing runtime is one Rust workspace product. Build only the
-      # binaries that are actually shipped. Test/fixture binaries remain
-      # covered by the canonical Rust maintenance gate.
+      # binaries that are actually shipped. Unit/integration/system tests are
+      # owned by the Cargo CI layers rather than rerun during packaging.
       phenixRustRuntime = pkgs.rustPlatform.buildRustPackage {
         pname = "phenix-rust-runtime";
         version = "0";
@@ -54,10 +54,7 @@ _:
           "--bin"
           "phenix-acp-smoke"
         ];
-        cargoTestFlags = [
-          "--package"
-          "phenix-acp-presets"
-        ];
+        doCheck = false;
 
         installPhase = ''
           runHook preInstall
@@ -118,7 +115,7 @@ _:
       };
 
       phenixSmoke =
-        pkgs.runCommand "phenix-frontend-smoke"
+        pkgs.runCommand "phenix-product-smoke"
           {
             nativeBuildInputs = [
               phenix
@@ -164,6 +161,6 @@ _:
       apps.phenix.program = pkgs.lib.getExe phenix;
       apps.default.program = pkgs.lib.getExe phenix;
 
-      checks.phenix-frontend = phenixSmoke;
+      checks.phenix-product-smoke = phenixSmoke;
     };
 }
