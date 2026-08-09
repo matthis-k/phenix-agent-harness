@@ -7,8 +7,6 @@ use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
-pub type DynAgentBackend = Box<dyn AgentBackend>;
-
 pub trait AgentBackend: Send + 'static {
     fn run(
         self: Box<Self>,
@@ -116,7 +114,10 @@ impl Drop for BackendWorker {
 }
 
 impl BackendRuntime {
-    pub fn spawn(backend: DynAgentBackend, channel_capacity: usize) -> Result<Self, BackendError> {
+    pub fn spawn(
+        backend: Box<dyn AgentBackend>,
+        channel_capacity: usize,
+    ) -> Result<Self, BackendError> {
         if channel_capacity == 0 {
             return Err(BackendError::InvalidConfiguration(
                 "backend channel capacity must be positive".to_owned(),
