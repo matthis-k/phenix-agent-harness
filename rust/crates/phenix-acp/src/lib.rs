@@ -49,8 +49,8 @@ pub use definition::{
     SessionTreeDefinitionBuilder,
 };
 pub use id::{
-    AcpSessionId, BackendId, DefinitionId, IdError, McpServerName, ModelId, ObjectiveId,
-    ProviderId, RoleId, RouterId, RpcRequestId, SessionNodeId, SessionTreeId, ToolId, WorkflowId,
+    AcpSessionId, BackendId, DefinitionId, IdError, McpServerName, ModelId, ObjectiveId, ProviderId,
+    RoleId, RouterId, SessionNodeId, SessionTreeId, ToolId, WorkflowId,
 };
 pub use protocol::{
     AcpMethod, AcpNotification, Difficulty, EmptyResult, ModelConfig, ModelSelection,
