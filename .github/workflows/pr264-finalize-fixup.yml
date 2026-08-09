@@ -35,6 +35,7 @@ jobs:
           bash /tmp/apply-pr264-fixes.sh
           python3 - <<'PY'
           from pathlib import Path
+
           path = Path('rust/crates/phenix-conductor/tests/black_box_model_tool_loop.rs')
           text = path.read_text()
           old_routes = '''| Role | Workflow | Target | Explanation |\n|---|---|---|---|\n| `coordinator` | `*` | `coordinator/mock/coordinator` | deterministic coordinator |\n| `specialist` | `*` | `specialist/mock/specialist` | deterministic specialist |\n| `*` | `*` | `coordinator/mock/coordinator` | fallback coordinator |\n'''
@@ -47,6 +48,24 @@ jobs:
           if old not in text:
               raise SystemExit('expected black-box revision assertion not found')
           path.write_text(text.replace(old, new, 1))
+
+          mock = Path('rust/crates/phenix-conductor/src/bin/mock-acp-agent.rs')
+          text = mock.read_text()
+          text = text.replace(
+              '            "configOptions": self.model_options(&selected_model),\n',
+              '            "configOptions": self.config_options(&selected_model),\n',
+              1,
+          )
+          old_select = '''        let config_id = required_string(&request, "configId")?;\n        if config_id != "model" {\n            return Err(format!("unsupported mock config option {config_id:?}").into());\n        }\n        let model = required_string(&request, "value")?;\n        if !self\n            .config\n            .models\n            .iter()\n            .any(|candidate| candidate.id == model)\n        {\n            return Err(format!("unknown mock model {model:?}").into());\n        }\n        let session = self\n            .sessions\n            .get_mut(&session_id)\n            .ok_or_else(|| format!("unknown mock session {session_id:?}"))?;\n        session.selected_model = model.clone();\n        self.log(json!({\n            "kind": "model_selected",\n            "backend": self.config.backend_id,\n            "session_id": session_id,\n            "model": model,\n        }))?;\n        Ok(json!({\n            "configOptions": self.model_options(&model),\n        }))\n'''
+          new_select = '''        let config_id = required_string(&request, "configId")?;\n        let value = required_string(&request, "value")?;\n        match config_id.as_str() {\n            "model" => {\n                if !self\n                    .config\n                    .models\n                    .iter()\n                    .any(|candidate| candidate.id == value)\n                {\n                    return Err(format!("unknown mock model {value:?}").into());\n                }\n                let session = self\n                    .sessions\n                    .get_mut(&session_id)\n                    .ok_or_else(|| format!("unknown mock session {session_id:?}"))?;\n                session.selected_model = value.clone();\n                self.log(json!({\n                    "kind": "model_selected",\n                    "backend": self.config.backend_id,\n                    "session_id": session_id,\n                    "model": value,\n                }))?;\n                Ok(json!({\n                    "configOptions": self.config_options(&value),\n                }))\n            }\n            "thinking" => {\n                if value != "off" {\n                    return Err(format!("unsupported mock thinking level {value:?}").into());\n                }\n                let model = self\n                    .sessions\n                    .get(&session_id)\n                    .ok_or_else(|| format!("unknown mock session {session_id:?}"))?\n                    .selected_model\n                    .clone();\n                Ok(json!({\n                    "configOptions": self.config_options(&model),\n                }))\n            }\n            _ => Err(format!("unsupported mock config option {config_id:?}").into()),\n        }\n'''
+          if old_select not in text:
+              raise SystemExit('expected model-only mock config selection')
+          text = text.replace(old_select, new_select, 1)
+          old_options = '''    fn model_options(&self, current: &str) -> Value {\n        json!([{\n            "id": "model",\n            "name": "Model",\n            "category": "model",\n            "type": "select",\n            "currentValue": current,\n            "options": self.config.models.iter().map(|model| json!({\n                "value": model.id,\n                "name": model.display_name,\n            })).collect::<Vec<_>>(),\n        }])\n    }\n'''
+          new_options = '''    fn config_options(&self, current_model: &str) -> Value {\n        json!([\n            {\n                "id": "model",\n                "name": "Model",\n                "category": "model",\n                "type": "select",\n                "currentValue": current_model,\n                "options": self.config.models.iter().map(|model| json!({\n                    "value": model.id,\n                    "name": model.display_name,\n                })).collect::<Vec<_>>(),\n            },\n            {\n                "id": "thinking",\n                "name": "Thinking",\n                "category": "thought_level",\n                "type": "select",\n                "currentValue": "off",\n                "options": [{ "value": "off", "name": "Off" }],\n            }\n        ])\n    }\n'''
+          if old_options not in text:
+              raise SystemExit('expected model-only mock options')
+          mock.write_text(text.replace(old_options, new_options, 1))
           PY
           cd rust
           cargo fmt --all
@@ -55,6 +74,9 @@ jobs:
         working-directory: rust
       - name: Rust clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        working-directory: rust
+      - name: Black-box conductor regression
+        run: cargo test -p phenix-conductor --test black_box_model_tool_loop --locked
         working-directory: rust
       - name: Rust tests
         run: cargo test --workspace --all-targets --locked
