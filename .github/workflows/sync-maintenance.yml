@@ -1,0 +1,45 @@
+name: Maintenance projection sync
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.head_ref }}
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Format Nix and regenerate workflow
+        run: |
+          set -euo pipefail
+          nix develop --command bash -c \
+            'find . -type f -name "*.nix" -not -path "./.git/*" -print0 | xargs -0 -r nixfmt'
+
+          system="$(nix eval --impure --raw --expr builtins.currentSystem)"
+          nix eval --raw \
+            ".#packages.$system.phenix-maintenance.phenixMaintenance.ci.github.workflow" \
+            > .github/workflows/ci.yml
+
+          rm .github/workflows/sync-maintenance.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add modules/development.nix vendor/phenix-flake-maintenance/lib .github/workflows/ci.yml .github/workflows/sync-maintenance.yml
+
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+
+          git commit -m 'ci: regenerate maintenance workflow'
+          git push origin HEAD:${{ github.head_ref }}
