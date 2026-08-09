@@ -58,6 +58,9 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
     let tree = process.receive_response(4)?;
     assert_eq!(tree["result"]["id"], session_id);
     assert_eq!(tree["result"]["nodes"].as_array().map(Vec::len), Some(1));
+    assert_eq!(tree["result"]["nodes"][0]["difficulty"], "d2");
+    assert_eq!(tree["result"]["nodes"][0]["model"]["backend"], "fixture");
+    assert_eq!(tree["result"]["nodes"][0]["model"]["thinking"], "medium");
     let root_node_id = tree["result"]["root"]
         .as_str()
         .ok_or("tree snapshot did not contain a root node")?
@@ -185,18 +188,18 @@ id: router.fixture
 
 ## Routes
 
-| Role | Workflow | Target | Explanation |
-|---|---|---|---|
-| `*` | `*` | `fixture/provider/model` | fixture route |
+| Role | Workflow | D0 | D1 | D2 | D3 | D4 | Explanation |
+|---|---|---|---|---|---|---|---|
+| `*` | `*` | `fixture/provider/model/minimal` | `fixture/provider/model/low` | `fixture/provider/model/medium` | `fixture/provider/model/high` | `fixture/provider/model/max` | fixture route |
 "#;
     json!({
         "source_root": ".",
         "input": {
             "definition_id": "definition.fixture",
             "router": "router.fixture",
-            "root": {
-                "tree_id": "fixture-root",
+            "standard_session": {
                 "role": "coordinator",
+                "difficulty": "d2",
                 "objective": "coordinate the fixture session"
             },
             "backends": [{

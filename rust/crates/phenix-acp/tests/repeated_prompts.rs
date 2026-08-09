@@ -1,7 +1,8 @@
 use phenix_acp::{
     AcpEndpoint, AcpSession, AcpSessionFactory, AcpSessionId, BackendDefinition, BackendId,
-    DefinitionId, FixedRouter, GatewayError, PhenixAcpGateway, RoleId, RouterId, SessionCommand,
-    SessionEvent, SessionOpenRequest, SessionTreeDefinition,
+    DefinitionId, Difficulty, FixedRouter, GatewayError, ModelConfig, ModelId, PhenixAcpGateway,
+    ProviderId, RoleId, RouterId, SessionCommand, SessionEvent, SessionOpenRequest,
+    SessionTreeDefinition, ThinkingLevel,
 };
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -60,10 +61,16 @@ fn completed_turn_does_not_close_the_conversation_session() {
         .expect("backend definition")
         .build()
         .expect("tree definition");
+    let model = ModelConfig {
+        backend: backend.clone(),
+        provider: ProviderId::parse("test-provider").expect("provider"),
+        model: ModelId::parse("test-model").expect("model"),
+        thinking: ThinkingLevel::Medium,
+    };
     let mut gateway = PhenixAcpGateway::builder()
         .definition(definition)
         .expect("definition")
-        .router(router, FixedRouter::new(backend.clone()))
+        .router(router, FixedRouter::new(model))
         .expect("router")
         .backend(backend, TestFactory::default())
         .expect("backend")
@@ -74,6 +81,7 @@ fn completed_turn_does_not_close_the_conversation_session() {
         .create_tree(
             &definition_id,
             RoleId::parse("coordinator").expect("role"),
+            Difficulty::D2,
             "interactive conversation",
         )
         .expect("tree");

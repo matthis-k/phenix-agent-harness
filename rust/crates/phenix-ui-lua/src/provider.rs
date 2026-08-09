@@ -552,13 +552,13 @@ phenix.keymap.set("global", "gg", phenix.action.quit)
 phenix.acp.configure({
   definition_id = "phenix.harness",
   router = "router.mixed",
-  backend = { id = "pi", command = "pi-acp" },
-  root = {
-    tree_id = "tree-frontend",
+  standard_session = {
     role = "coordinator",
+    difficulty = "d1",
     objective = "Interactive tree",
   },
 })
+phenix.acp.backend({ id = "pi", command = "pi-acp" })
 phenix.acp.workflow("workflows/implement.md")
 phenix.acp.routing_table({ source = [[
 # Router
@@ -580,7 +580,16 @@ id: router.mixed
         let config = provider.acp_config().expect("ACP config");
         assert_eq!(config.definition_id().as_str(), "phenix.harness");
         assert_eq!(config.router().as_str(), "router.mixed");
-        assert_eq!(config.backend().id().as_str(), "pi");
+        assert_eq!(config.backends().len(), 1);
+        assert_eq!(config.backends()[0].id().as_str(), "pi");
+        assert_eq!(
+            config
+                .standard_session()
+                .expect("standard session")
+                .role()
+                .as_str(),
+            "coordinator"
+        );
         assert_eq!(config.definitions().len(), 2);
         fs::remove_file(path).ok();
     }

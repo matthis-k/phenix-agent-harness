@@ -1,4 +1,4 @@
-use super::{ConductorRuntime, RuntimeExtensionError};
+use super::{ConductorRuntime, RuntimeError, RuntimeExtensionError, StandardSession};
 use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
 use phenix_acp::{
     AcpMethod, BackendAuthCancel, BackendAuthCancelParams, BackendAuthLink, BackendAuthLogout,
@@ -6,7 +6,7 @@ use phenix_acp::{
     BackendAuthRespond, BackendAuthRespondParams, BackendAuthResponse, BackendAuthStart,
     BackendAuthStartParams, BackendAuthTerminalFinished, BackendAuthTerminalFinishedParams,
     BackendControlEvent, BackendEventBatch, BackendEventPoll, BackendExternalCommand,
-    BackendHealth, BackendTargetParams,
+    BackendHealth, BackendTargetParams, SessionTreeId,
 };
 use phenix_runtime_api::{
     AuthFlowId, AuthLink, AuthNotice, AuthPrompt, AuthPromptResponse, BackendCommand, BackendEvent,
@@ -17,6 +17,28 @@ use serde_json::value::to_raw_value;
 use std::sync::Arc;
 
 impl ConductorRuntime {
+    pub fn create_standard_session_with_id(
+        &mut self,
+        tree_id: SessionTreeId,
+    ) -> Result<StandardSession, RuntimeError> {
+        let template = self
+            .standard_session
+            .clone()
+            .ok_or(RuntimeError::MissingStandardSessionTemplate)?;
+        let started = self.conductor.gateway_mut().create_tree_with_id(
+            tree_id,
+            &self.definition_id,
+            template.role,
+            template.difficulty,
+            template.objective,
+        )?;
+        Ok(StandardSession {
+            session_id: started.tree_id.to_string(),
+            tree_id: started.tree_id,
+            root_node_id: started.root_node_id,
+        })
+    }
+
     pub fn handle_auth_extension(
         &mut self,
         request: &ExtRequest,

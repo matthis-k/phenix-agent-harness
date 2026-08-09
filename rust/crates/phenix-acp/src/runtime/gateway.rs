@@ -4,10 +4,10 @@ use super::{
     SessionRouter, TreeStartResult, Workflow, WorkflowRequest,
 };
 use crate::{
-    AcpSessionId, BackendId, DefinitionId, ObjectiveId, ObjectiveSnapshot, ObjectiveState, RoleId,
-    RouterId, RoutingExplainResult, SessionNodeId, SessionNodeSnapshot, SessionNodeState,
-    SessionTreeDefinition, SessionTreeId, SessionTreeListResult, SessionTreeSnapshot,
-    SessionTreeSummary, WorkflowId, WorkflowStartResult,
+    AcpSessionId, BackendId, DefinitionId, Difficulty, ModelConfig, ObjectiveId, ObjectiveSnapshot,
+    ObjectiveState, RoleId, RouterId, RoutingExplainResult, SessionNodeId, SessionNodeSnapshot,
+    SessionNodeState, SessionTreeDefinition, SessionTreeId, SessionTreeListResult,
+    SessionTreeSnapshot, SessionTreeSummary, WorkflowId, WorkflowStartResult,
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -123,10 +123,11 @@ impl PhenixAcpGateway {
         &mut self,
         definition_id: &DefinitionId,
         root_role: RoleId,
+        difficulty: Difficulty,
         objective: impl Into<String>,
     ) -> Result<TreeStartResult, GatewayError> {
         let tree_id = self.allocate_tree_id()?;
-        self.create_tree_with_id(tree_id, definition_id, root_role, objective)
+        self.create_tree_with_id(tree_id, definition_id, root_role, difficulty, objective)
     }
 
     pub fn create_tree_with_id(
@@ -134,6 +135,7 @@ impl PhenixAcpGateway {
         tree_id: SessionTreeId,
         definition_id: &DefinitionId,
         root_role: RoleId,
+        difficulty: Difficulty,
         objective: impl Into<String>,
     ) -> Result<TreeStartResult, GatewayError> {
         if self.trees.contains_key(&tree_id) {
@@ -153,6 +155,7 @@ impl PhenixAcpGateway {
                 tree_id: tree_id.clone(),
                 parent_node: None,
                 role: root_role.clone(),
+                difficulty,
                 objective: objective.clone(),
                 workflow: None,
                 available_backends: backend_ids(&definition),
@@ -161,8 +164,8 @@ impl PhenixAcpGateway {
         let request = SessionOpenRequest {
             tree_id: tree_id.clone(),
             node_id: node_id.clone(),
-            backend: routing.backend.clone(),
             role: root_role.clone(),
+            difficulty,
             objective: objective.clone(),
             model: routing.model.clone(),
             open: SessionOpenKind::New { parent: None },
@@ -187,8 +190,8 @@ impl PhenixAcpGateway {
             id: node_id.clone(),
             parent: None,
             role: root_role,
+            difficulty,
             state: SessionNodeState::Running,
-            backend: routing.backend,
             model: routing.model,
             objective_id: objective_id.clone(),
             session,
@@ -216,10 +219,11 @@ impl PhenixAcpGateway {
         &mut self,
         tree_id: &SessionTreeId,
         workflow_id: &WorkflowId,
+        difficulty: Option<Difficulty>,
         objective: impl Into<String>,
     ) -> Result<WorkflowStartResult, GatewayError> {
         let objective = objective.into();
-        let (definition, root_node, root_session, root_objective) = {
+        let (definition, root_node, root_session, root_objective, root_difficulty) = {
             let tree = self.tree(tree_id)?;
             if !tree
                 .definition
@@ -239,8 +243,10 @@ impl PhenixAcpGateway {
                 tree.root.clone(),
                 root.session.id().clone(),
                 root.objective_id.clone(),
+                root.difficulty,
             )
         };
+        let difficulty = difficulty.unwrap_or(root_difficulty);
         let workflow = self
             .workflows
             .get(workflow_id)
@@ -279,6 +285,7 @@ impl PhenixAcpGateway {
                     tree_id: tree_id.clone(),
                     parent_node: Some(parent_node.clone()),
                     role: step.role.clone(),
+                    difficulty,
                     objective: step.objective.clone(),
                     workflow: Some(workflow_id.clone()),
                     available_backends: backend_ids(&definition),
@@ -287,8 +294,8 @@ impl PhenixAcpGateway {
             let request = SessionOpenRequest {
                 tree_id: tree_id.clone(),
                 node_id: node_id.clone(),
-                backend: routing.backend.clone(),
                 role: step.role.clone(),
+                difficulty,
                 objective: step.objective.clone(),
                 model: routing.model.clone(),
                 open: SessionOpenKind::New {
@@ -318,8 +325,8 @@ impl PhenixAcpGateway {
                     id: node_id,
                     parent: Some(parent_node),
                     role: step.role,
+                    difficulty,
                     state: SessionNodeState::Running,
-                    backend: routing.backend,
                     model: routing.model,
                     objective_id: objective_id.clone(),
                     session,
@@ -368,14 +375,15 @@ impl PhenixAcpGateway {
         tree_id: &SessionTreeId,
         parent_node: &SessionNodeId,
         role: RoleId,
+        difficulty: Option<Difficulty>,
         objective: impl Into<String>,
     ) -> Result<SessionNodeId, GatewayError> {
         self.attach_new_node(
             tree_id,
             parent_node,
             role,
+            difficulty,
             objective.into(),
-            None,
             AttachMode::New,
         )
     }
@@ -385,6 +393,7 @@ impl PhenixAcpGateway {
         tree_id: &SessionTreeId,
         parent_node: &SessionNodeId,
         role: RoleId,
+        difficulty: Option<Difficulty>,
         objective: impl Into<String>,
         session_id: AcpSessionId,
     ) -> Result<SessionNodeId, GatewayError> {
@@ -392,8 +401,8 @@ impl PhenixAcpGateway {
             tree_id,
             parent_node,
             role,
+            difficulty,
             objective.into(),
-            None,
             AttachMode::Load(session_id),
         )
     }
@@ -403,6 +412,7 @@ impl PhenixAcpGateway {
         tree_id: &SessionTreeId,
         parent_node: &SessionNodeId,
         role: RoleId,
+        difficulty: Option<Difficulty>,
         objective: impl Into<String>,
         session_id: AcpSessionId,
     ) -> Result<SessionNodeId, GatewayError> {
@@ -410,8 +420,8 @@ impl PhenixAcpGateway {
             tree_id,
             parent_node,
             role,
+            difficulty,
             objective.into(),
-            None,
             AttachMode::Resume(session_id),
         )
     }
@@ -422,16 +432,20 @@ impl PhenixAcpGateway {
         node_id: &SessionNodeId,
         objective: impl Into<String>,
     ) -> Result<SessionNodeId, GatewayError> {
-        let (role, source_session) = {
+        let (role, difficulty, source_session) = {
             let node = self.node(tree_id, node_id)?;
-            (node.role.clone(), node.session.id().clone())
+            (
+                node.role.clone(),
+                node.difficulty,
+                node.session.id().clone(),
+            )
         };
         self.attach_new_node(
             tree_id,
             node_id,
             role,
+            Some(difficulty),
             objective.into(),
-            None,
             AttachMode::Fork(source_session),
         )
     }
@@ -590,6 +604,7 @@ impl PhenixAcpGateway {
         tree_id: &SessionTreeId,
         objective: impl Into<String>,
         role: RoleId,
+        difficulty: Difficulty,
     ) -> Result<RoutingExplainResult, GatewayError> {
         let tree = self.tree(tree_id)?;
         let decision = self.route(
@@ -598,6 +613,7 @@ impl PhenixAcpGateway {
                 tree_id: tree_id.clone(),
                 parent_node: Some(tree.root.clone()),
                 role,
+                difficulty,
                 objective: objective.into(),
                 workflow: tree.active_workflow.clone(),
                 available_backends: backend_ids(&tree.definition),
@@ -605,7 +621,7 @@ impl PhenixAcpGateway {
         )?;
         Ok(RoutingExplainResult {
             router: tree.definition.router().clone(),
-            backend: decision.backend,
+            difficulty: decision.difficulty,
             model: decision.model,
             explanation: decision.explanation,
         })
@@ -616,11 +632,11 @@ impl PhenixAcpGateway {
         tree_id: &SessionTreeId,
         parent_node: &SessionNodeId,
         role: RoleId,
+        difficulty: Option<Difficulty>,
         objective: String,
-        workflow: Option<WorkflowId>,
         mode: AttachMode,
     ) -> Result<SessionNodeId, GatewayError> {
-        let (definition, parent_session, parent_objective) = {
+        let (definition, parent_session, parent_objective, parent_difficulty) = {
             let tree = self.tree(tree_id)?;
             let parent = tree
                 .nodes
@@ -630,8 +646,10 @@ impl PhenixAcpGateway {
                 tree.definition.clone(),
                 parent.session.id().clone(),
                 parent.objective_id.clone(),
+                parent.difficulty,
             )
         };
+        let difficulty = difficulty.unwrap_or(parent_difficulty);
         let node_id = self.allocate_node_id()?;
         let objective_id = self.allocate_objective_id()?;
         let routing = self.route(
@@ -640,8 +658,9 @@ impl PhenixAcpGateway {
                 tree_id: tree_id.clone(),
                 parent_node: Some(parent_node.clone()),
                 role: role.clone(),
+                difficulty,
                 objective: objective.clone(),
-                workflow,
+                workflow: None,
                 available_backends: backend_ids(&definition),
             },
         )?;
@@ -656,8 +675,8 @@ impl PhenixAcpGateway {
         let request = SessionOpenRequest {
             tree_id: tree_id.clone(),
             node_id: node_id.clone(),
-            backend: routing.backend.clone(),
             role: role.clone(),
+            difficulty,
             objective: objective.clone(),
             model: routing.model.clone(),
             open,
@@ -683,8 +702,8 @@ impl PhenixAcpGateway {
                 id: node_id.clone(),
                 parent: Some(parent_node.clone()),
                 role,
+                difficulty,
                 state: SessionNodeState::Running,
-                backend: routing.backend,
                 model: routing.model,
                 objective_id,
                 session,
@@ -705,11 +724,11 @@ impl PhenixAcpGateway {
         let decision = router.route(&request)?;
         if !definition
             .backends()
-            .any(|backend| backend.id() == &decision.backend)
+            .any(|backend| backend.id() == &decision.model.backend)
         {
             return Err(GatewayError::BackendNotAllowed {
                 definition: definition.definition_id().clone(),
-                backend: decision.backend,
+                backend: decision.model.backend,
             });
         }
         Ok(decision)
@@ -719,10 +738,11 @@ impl PhenixAcpGateway {
         &self,
         request: SessionOpenRequest,
     ) -> Result<Box<dyn AcpSession>, GatewayError> {
+        let backend = request.model.backend.clone();
         let factory = self
             .backends
-            .get(&request.backend)
-            .ok_or_else(|| GatewayError::MissingBackend(request.backend.clone()))?;
+            .get(&backend)
+            .ok_or(GatewayError::MissingBackend(backend))?;
         factory.open(request)
     }
 
@@ -852,9 +872,9 @@ struct NodeRuntime {
     id: SessionNodeId,
     parent: Option<SessionNodeId>,
     role: RoleId,
+    difficulty: Difficulty,
     state: SessionNodeState,
-    backend: BackendId,
-    model: Option<crate::ModelSelection>,
+    model: ModelConfig,
     objective_id: ObjectiveId,
     session: Box<dyn AcpSession>,
 }
@@ -865,11 +885,11 @@ impl NodeRuntime {
             id: self.id.clone(),
             parent: self.parent.clone(),
             role: self.role.clone(),
+            difficulty: self.difficulty,
             state: self.state.clone(),
-            backend: self.backend.clone(),
+            model: self.model.clone(),
             objective_id: self.objective_id.clone(),
             downstream_session: Some(self.session.id().clone()),
-            model: self.model.clone(),
         }
     }
 }

@@ -1,39 +1,42 @@
 use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
 use phenix_acp::{
-    AcpMethod, ConfigurationApply, ConfigurationApplyParams, ConfigurationApplyResult,
-    ConfigurationDefinitionInput, ConfigurationFormat, ConfigurationGet, ConfigurationGetResult,
-    ConfigurationSnapshot, ConfigurationSourceError, DefinitionFormat, GatewayEvent,
-    PhenixConductor, SessionCommand,
+    decode_extension_response, encode_extension_request, AcpMethod, ConfigurationApply,
+    ConfigurationApplyParams, ConfigurationApplyResult, ConfigurationDefinitionInput,
+    ConfigurationFormat, ConfigurationGet, ConfigurationGetResult, ConfigurationSnapshot,
+    ConfigurationSourceError, DefinitionFormat, GatewayEvent, SessionCommand, SessionNodeId,
+    SessionTreeClose, SessionTreeCreate, SessionTreeCreateParams, SessionTreeId, SessionTreeList,
+    SessionTreeListResult, SessionTreeSnapshot,
 };
 use phenix_conductor::{
-    BootstrapBackend, BootstrapDefinition, BootstrapRoot, ConductorBootstrap, ConductorRuntime,
-    StandardSession,
+    BootstrapBackend, BootstrapDefinition, BootstrapStandardSession, ConductorBootstrap,
+    ConductorRuntime, StandardSession,
 };
 use serde::Serialize;
 use serde_json::value::to_raw_value;
-use std::collections::BTreeMap;
-use std::env;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
-use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const CONFIGURATION_FILE_ENV: &str = "PHENIX_CONFIGURATION_FILE";
-
-/// ACP-process owner for the canonical Phenix configuration and runtime.
+/// ACP-process owner for user-supplied immutable configuration revisions.
 ///
-/// The frontend submits only source descriptors. This type resolves those
-/// descriptors, parses and validates the complete configuration, and constructs
-/// `ConductorRuntime` inside the Phenix ACP process. Configuration is immutable
-/// for the lifetime of this owner so every session tree has one stable runtime
-/// configuration.
+/// Applying configuration creates a new revision and makes it active for future
+/// trees. Existing trees remain bound to the revision under which they were
+/// created; neither their routing nor workflow registry mutates in place.
 pub struct ConductorOwner {
     cwd: PathBuf,
     channel_capacity: usize,
-    runtime: Option<ConductorRuntime>,
-    configuration: Option<ConfigurationSnapshot>,
+    revisions: BTreeMap<u64, RuntimeRevision>,
+    active_revision: Option<u64>,
+    tree_revisions: BTreeMap<SessionTreeId, u64>,
+    next_revision: u64,
+    next_tree: u64,
+}
+
+struct RuntimeRevision {
+    runtime: ConductorRuntime,
+    configuration: ConfigurationSnapshot,
 }
 
 impl ConductorOwner {
@@ -41,31 +44,15 @@ impl ConductorOwner {
         if channel_capacity == 0 {
             return Err(ConductorOwnerError::InvalidChannelCapacity);
         }
-        let mut owner = Self {
+        Ok(Self {
             cwd,
             channel_capacity,
-            runtime: None,
-            configuration: None,
-        };
-        if let Some(path) = env::var_os(CONFIGURATION_FILE_ENV).map(PathBuf::from) {
-            env::remove_var(CONFIGURATION_FILE_ENV);
-            let source = fs::read_to_string(&path).map_err(|source| {
-                ConductorOwnerError::ReadConfigurationFile {
-                    path: path.clone(),
-                    source,
-                }
-            })?;
-            fs::remove_file(&path).map_err(|source| {
-                ConductorOwnerError::RemoveConfigurationFile {
-                    path: path.clone(),
-                    source,
-                }
-            })?;
-            let params =
-                serde_json::from_str(&source).map_err(ConductorOwnerError::DecodeConfiguration)?;
-            owner.apply_params(params)?;
-        }
-        Ok(owner)
+            revisions: BTreeMap::new(),
+            active_revision: None,
+            tree_revisions: BTreeMap::new(),
+            next_revision: 1,
+            next_tree: 1,
+        })
     }
 
     pub fn handle_configuration_extension(
@@ -83,7 +70,10 @@ impl ConductorOwner {
         &mut self,
         request: &ExtRequest,
     ) -> Result<Option<ExtResponse>, ConductorOwnerError> {
-        self.runtime_mut()?
+        let Some(tree_id) = request_tree_id(request)? else {
+            return Ok(None);
+        };
+        self.runtime_for_tree_mut(&tree_id)?
             .handle_auth_extension(request)
             .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))
     }
@@ -92,15 +82,41 @@ impl ConductorOwner {
         &mut self,
         request: ExtRequest,
     ) -> Result<ExtResponse, ConductorOwnerError> {
-        self.runtime_mut()?
-            .handle_extension(request)
-            .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))
+        match request.method.as_ref() {
+            SessionTreeCreate::METHOD => self.create_tree_extension(request),
+            SessionTreeList::METHOD => {
+                let _: phenix_acp::SessionTreeListParams =
+                    serde_json::from_str(request.params.get())
+                        .map_err(ConductorOwnerError::DecodeRequest)?;
+                encode_response(&self.list_trees())
+            }
+            _ => {
+                let tree_id = request_tree_id(&request)?.ok_or_else(|| {
+                    ConductorOwnerError::MissingTreeTarget(request.method.to_string())
+                })?;
+                let close = request.method.as_ref() == SessionTreeClose::METHOD;
+                let response = self
+                    .runtime_for_tree_mut(&tree_id)?
+                    .handle_extension(request)
+                    .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))?;
+                if close {
+                    self.tree_revisions.remove(&tree_id);
+                }
+                Ok(response)
+            }
+        }
     }
 
     pub fn create_standard_session(&mut self) -> Result<StandardSession, ConductorOwnerError> {
-        self.runtime_mut()?
-            .create_standard_session()
-            .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))
+        let tree_id = self.allocate_tree_id()?;
+        let revision = self.active_revision()?;
+        let session = self
+            .revision_mut(revision)?
+            .runtime
+            .create_standard_session_with_id(tree_id.clone())
+            .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))?;
+        self.tree_revisions.insert(tree_id, revision);
+        Ok(session)
     }
 
     pub fn execute_standard_session(
@@ -108,7 +124,8 @@ impl ConductorOwner {
         session_id: &str,
         command: SessionCommand,
     ) -> Result<Vec<GatewayEvent>, ConductorOwnerError> {
-        self.runtime_mut()?
+        let tree_id = parse_tree_id(session_id)?;
+        self.runtime_for_tree_mut(&tree_id)?
             .execute_standard_session(session_id, command)
             .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))
     }
@@ -117,7 +134,8 @@ impl ConductorOwner {
         &mut self,
         session_id: &str,
     ) -> Result<Vec<GatewayEvent>, ConductorOwnerError> {
-        self.runtime_mut()?
+        let tree_id = parse_tree_id(session_id)?;
+        self.runtime_for_tree_mut(&tree_id)?
             .cancel_standard_session(session_id)
             .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))
     }
@@ -126,23 +144,88 @@ impl ConductorOwner {
         &mut self,
         session_id: &str,
     ) -> Result<bool, ConductorOwnerError> {
+        let tree_id = parse_tree_id(session_id)?;
         Ok(self
-            .runtime_mut()?
+            .runtime_for_tree_mut(&tree_id)?
             .take_standard_session_cancelled(session_id))
     }
 
     pub fn close_standard_session(&mut self, session_id: &str) -> Result<(), ConductorOwnerError> {
-        self.runtime_mut()?
+        let tree_id = parse_tree_id(session_id)?;
+        self.runtime_for_tree_mut(&tree_id)?
             .close_standard_session(session_id)
+            .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))?;
+        self.tree_revisions.remove(&tree_id);
+        Ok(())
+    }
+
+    pub fn snapshot_tree(
+        &self,
+        tree_id: &SessionTreeId,
+    ) -> Result<SessionTreeSnapshot, ConductorOwnerError> {
+        self.runtime_for_tree(tree_id)?
+            .conductor()
+            .gateway()
+            .snapshot(tree_id)
             .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))
     }
 
-    pub fn conductor(&self) -> Result<&PhenixConductor, ConductorOwnerError> {
-        self.runtime().map(ConductorRuntime::conductor)
+    pub fn poll_node(
+        &mut self,
+        tree_id: &SessionTreeId,
+        node_id: &SessionNodeId,
+    ) -> Result<Vec<GatewayEvent>, ConductorOwnerError> {
+        self.runtime_for_tree_mut(tree_id)?
+            .conductor_mut()
+            .gateway_mut()
+            .execute(tree_id, node_id, SessionCommand::Poll)
+            .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))
     }
 
-    pub fn conductor_mut(&mut self) -> Result<&mut PhenixConductor, ConductorOwnerError> {
-        self.runtime_mut().map(ConductorRuntime::conductor_mut)
+    pub fn list_trees(&self) -> SessionTreeListResult {
+        let mut trees = self
+            .revisions
+            .values()
+            .flat_map(|revision| revision.runtime.conductor().gateway().list_trees().trees)
+            .collect::<Vec<_>>();
+        trees.sort_by(|left, right| left.tree_id.cmp(&right.tree_id));
+        SessionTreeListResult { trees }
+    }
+
+    fn create_tree_extension(
+        &mut self,
+        request: ExtRequest,
+    ) -> Result<ExtResponse, ConductorOwnerError> {
+        let mut params: SessionTreeCreateParams = serde_json::from_str(request.params.get())
+            .map_err(ConductorOwnerError::DecodeRequest)?;
+        let tree_id = match params.tree_id.take() {
+            Some(tree_id) => {
+                if self.tree_revisions.contains_key(&tree_id) {
+                    return Err(ConductorOwnerError::DuplicateTree(tree_id));
+                }
+                tree_id
+            }
+            None => self.allocate_tree_id()?,
+        };
+        params.tree_id = Some(tree_id.clone());
+        let routed = encode_extension_request::<SessionTreeCreate>(&params)
+            .map_err(|error| ConductorOwnerError::EncodeRequest(error.to_string()))?;
+        let revision = self.active_revision()?;
+        let response = self
+            .revision_mut(revision)?
+            .runtime
+            .handle_extension(routed)
+            .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))?;
+        let created = decode_extension_response::<SessionTreeCreate>(response.clone())
+            .map_err(|error| ConductorOwnerError::DecodeResponse(error.to_string()))?;
+        if created.tree_id != tree_id {
+            return Err(ConductorOwnerError::Runtime(format!(
+                "configured runtime created tree {} instead of requested tree {tree_id}",
+                created.tree_id
+            )));
+        }
+        self.tree_revisions.insert(tree_id, revision);
+        Ok(response)
     }
 
     fn apply(&mut self, request: &ExtRequest) -> Result<ExtResponse, ConductorOwnerError> {
@@ -156,44 +239,114 @@ impl ConductorOwner {
         &mut self,
         params: ConfigurationApplyParams,
     ) -> Result<ConfigurationApplyResult, ConductorOwnerError> {
-        if self.runtime.is_some() {
-            return Err(ConductorOwnerError::AlreadyConfigured);
-        }
+        let revision = self.next_revision;
         let source_root = resolve_source_root(&self.cwd, &params.source_root);
-        let (bootstrap, snapshot) = build_bootstrap(params, &source_root)?;
+        let (bootstrap, snapshot) = build_bootstrap(params, &source_root, revision)?;
 
-        // Build into a local value first. The active owner remains unmodified if
-        // any source, parse, validation, backend, or transport construction fails.
+        // Construct the complete revision before publishing it. A failed parse,
+        // validation, backend construction, or transport setup leaves active state
+        // unchanged.
         let runtime = bootstrap
             .build(&self.cwd, self.channel_capacity)
             .map_err(|error| ConductorOwnerError::Build(error.to_string()))?;
         let result = ConfigurationApplyResult {
-            revision: snapshot.revision,
+            revision,
             definition_id: snapshot.definition_id.clone(),
             router: snapshot.router.clone(),
         };
-        self.runtime = Some(runtime);
-        self.configuration = Some(snapshot);
+        self.revisions.insert(
+            revision,
+            RuntimeRevision {
+                runtime,
+                configuration: snapshot,
+            },
+        );
+        self.active_revision = Some(revision);
+        self.next_revision = revision
+            .checked_add(1)
+            .ok_or(ConductorOwnerError::IdentifierExhausted)?;
         Ok(result)
     }
 
     fn get(&self) -> Result<ExtResponse, ConductorOwnerError> {
-        encode_response(&ConfigurationGetResult {
-            active: self.configuration.clone(),
-        })
+        let active = self
+            .active_revision
+            .and_then(|revision| self.revisions.get(&revision))
+            .map(|revision| revision.configuration.clone());
+        encode_response(&ConfigurationGetResult { active })
     }
 
-    fn runtime(&self) -> Result<&ConductorRuntime, ConductorOwnerError> {
-        self.runtime
-            .as_ref()
+    fn active_revision(&self) -> Result<u64, ConductorOwnerError> {
+        self.active_revision
             .ok_or(ConductorOwnerError::NotConfigured)
     }
 
-    fn runtime_mut(&mut self) -> Result<&mut ConductorRuntime, ConductorOwnerError> {
-        self.runtime
-            .as_mut()
-            .ok_or(ConductorOwnerError::NotConfigured)
+    fn revision_mut(&mut self, revision: u64) -> Result<&mut RuntimeRevision, ConductorOwnerError> {
+        self.revisions
+            .get_mut(&revision)
+            .ok_or(ConductorOwnerError::UnknownRevision(revision))
     }
+
+    fn runtime_for_tree(
+        &self,
+        tree_id: &SessionTreeId,
+    ) -> Result<&ConductorRuntime, ConductorOwnerError> {
+        let revision = self
+            .tree_revisions
+            .get(tree_id)
+            .copied()
+            .ok_or_else(|| ConductorOwnerError::UnknownTree(tree_id.clone()))?;
+        self.revisions
+            .get(&revision)
+            .map(|revision| &revision.runtime)
+            .ok_or(ConductorOwnerError::UnknownRevision(revision))
+    }
+
+    fn runtime_for_tree_mut(
+        &mut self,
+        tree_id: &SessionTreeId,
+    ) -> Result<&mut ConductorRuntime, ConductorOwnerError> {
+        let revision = self
+            .tree_revisions
+            .get(tree_id)
+            .copied()
+            .ok_or_else(|| ConductorOwnerError::UnknownTree(tree_id.clone()))?;
+        self.revision_mut(revision)
+            .map(|revision| &mut revision.runtime)
+    }
+
+    fn allocate_tree_id(&mut self) -> Result<SessionTreeId, ConductorOwnerError> {
+        loop {
+            let sequence = self.next_tree;
+            self.next_tree = sequence
+                .checked_add(1)
+                .ok_or(ConductorOwnerError::IdentifierExhausted)?;
+            let tree_id = SessionTreeId::parse(format!("tree-{sequence}"))
+                .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))?;
+            if !self.tree_revisions.contains_key(&tree_id) {
+                return Ok(tree_id);
+            }
+        }
+    }
+}
+
+fn request_tree_id(request: &ExtRequest) -> Result<Option<SessionTreeId>, ConductorOwnerError> {
+    let value: serde_json::Value =
+        serde_json::from_str(request.params.get()).map_err(ConductorOwnerError::DecodeRequest)?;
+    let Some(tree_id) = value.get("tree_id") else {
+        return Ok(None);
+    };
+    let tree_id = tree_id.as_str().ok_or_else(|| {
+        ConductorOwnerError::InvalidTreeTarget("tree_id must be a string".to_owned())
+    })?;
+    SessionTreeId::parse(tree_id.to_owned())
+        .map(Some)
+        .map_err(|error| ConductorOwnerError::InvalidTreeTarget(error.to_string()))
+}
+
+fn parse_tree_id(session_id: &str) -> Result<SessionTreeId, ConductorOwnerError> {
+    SessionTreeId::parse(session_id.to_owned())
+        .map_err(|error| ConductorOwnerError::InvalidTreeTarget(error.to_string()))
 }
 
 fn resolve_source_root(cwd: &Path, configured: &Path) -> PathBuf {
@@ -207,6 +360,7 @@ fn resolve_source_root(cwd: &Path, configured: &Path) -> PathBuf {
 fn build_bootstrap(
     params: ConfigurationApplyParams,
     source_root: &Path,
+    revision: u64,
 ) -> Result<(ConductorBootstrap, ConfigurationSnapshot), ConductorOwnerError> {
     let input = params.input;
     if input.backends.is_empty() {
@@ -221,6 +375,10 @@ fn build_bootstrap(
         .iter()
         .map(|backend| backend.id.clone())
         .collect::<Vec<_>>();
+    let unique_backends = backend_ids.iter().collect::<BTreeSet<_>>();
+    if unique_backends.len() != backend_ids.len() {
+        return Err(ConductorOwnerError::DuplicateBackend);
+    }
     let backends = input
         .backends
         .into_iter()
@@ -262,23 +420,31 @@ fn build_bootstrap(
         definitions.push(definition);
     }
 
+    let standard_session = input
+        .standard_session
+        .map(|template| BootstrapStandardSession {
+            role: template.role,
+            difficulty: template.difficulty,
+            objective: template.objective,
+        });
+    let mcp_server_count = input.tools.mcp_servers().len();
     let snapshot = ConfigurationSnapshot {
-        revision: 1,
+        revision,
         definition_id: input.definition_id.clone(),
         router: input.router.clone(),
         backend_ids,
         workflow_count,
         routing_table_count,
+        has_standard_session_template: standard_session.is_some(),
+        mcp_server_count,
     };
     let bootstrap = ConductorBootstrap {
         definition_id: input.definition_id,
         router: input.router,
-        root: BootstrapRoot {
-            role: input.root.role,
-            objective: input.root.objective,
-        },
+        standard_session,
         backends,
         definitions,
+        tools: input.tools,
     };
     Ok((bootstrap, snapshot))
 }
@@ -327,15 +493,22 @@ fn encode_response<T: Serialize>(value: &T) -> Result<ExtResponse, ConductorOwne
 pub enum ConductorOwnerError {
     InvalidChannelCapacity,
     NotConfigured,
-    AlreadyConfigured,
+    UnknownRevision(u64),
+    UnknownTree(SessionTreeId),
+    DuplicateTree(SessionTreeId),
+    MissingTreeTarget(String),
+    InvalidTreeTarget(String),
+    IdentifierExhausted,
     MissingBackends,
     MissingDefinitions,
+    DuplicateBackend,
     InvalidEnvironmentName(String),
     InvalidEnvironmentValue(String),
-    ReadConfigurationFile { path: PathBuf, source: io::Error },
-    RemoveConfigurationFile { path: PathBuf, source: io::Error },
     DecodeConfiguration(serde_json::Error),
     EncodeConfiguration(serde_json::Error),
+    DecodeRequest(serde_json::Error),
+    EncodeRequest(String),
+    DecodeResponse(String),
     Source(ConfigurationSourceError),
     Build(String),
     Runtime(String),
@@ -348,43 +521,66 @@ impl Display for ConductorOwnerError {
                 formatter.write_str("ACP downstream channel capacity must be greater than zero")
             }
             Self::NotConfigured => formatter.write_str(
-                "Phenix ACP is not configured; submit _phenix/config/apply before creating sessions",
+                "Phenix ACP has no active user configuration; submit _phenix/config/apply first",
             ),
-            Self::AlreadyConfigured => formatter.write_str(
-                "Phenix ACP configuration is immutable for this runtime; start another runtime for a different configuration",
-            ),
+            Self::UnknownRevision(revision) => {
+                write!(
+                    formatter,
+                    "unknown Phenix ACP configuration revision {revision}"
+                )
+            }
+            Self::UnknownTree(tree) => write!(formatter, "unknown Phenix session tree {tree}"),
+            Self::DuplicateTree(tree) => write!(formatter, "duplicate Phenix session tree {tree}"),
+            Self::MissingTreeTarget(method) => {
+                write!(formatter, "Phenix ACP method {method} requires tree_id")
+            }
+            Self::InvalidTreeTarget(message) => write!(formatter, "invalid tree target: {message}"),
+            Self::IdentifierExhausted => {
+                formatter.write_str("Phenix owner identifiers are exhausted")
+            }
             Self::MissingBackends => {
                 formatter.write_str("Phenix ACP configuration requires at least one backend")
             }
             Self::MissingDefinitions => formatter
                 .write_str("Phenix ACP configuration requires at least one definition source"),
-            Self::InvalidEnvironmentName(name) => write!(
-                formatter,
-                "invalid backend environment variable name {name:?}"
-            ),
+            Self::DuplicateBackend => {
+                formatter.write_str("Phenix ACP configuration contains a duplicate backend ID")
+            }
+            Self::InvalidEnvironmentName(name) => {
+                write!(
+                    formatter,
+                    "invalid backend environment variable name {name:?}"
+                )
+            }
             Self::InvalidEnvironmentValue(name) => write!(
                 formatter,
                 "backend environment variable {name:?} contains a NUL byte"
             ),
-            Self::ReadConfigurationFile { path, source } => write!(
-                formatter,
-                "failed to read typed Phenix ACP configuration input {}: {source}",
-                path.display()
-            ),
-            Self::RemoveConfigurationFile { path, source } => write!(
-                formatter,
-                "failed to remove consumed Phenix ACP configuration input {}: {source}",
-                path.display()
-            ),
             Self::DecodeConfiguration(error) => {
-                write!(formatter, "invalid Phenix ACP configuration request: {error}")
+                write!(
+                    formatter,
+                    "invalid Phenix ACP configuration request: {error}"
+                )
             }
             Self::EncodeConfiguration(error) => {
-                write!(formatter, "failed to encode Phenix ACP configuration response: {error}")
+                write!(
+                    formatter,
+                    "failed to encode Phenix ACP configuration response: {error}"
+                )
+            }
+            Self::DecodeRequest(error) => write!(formatter, "invalid Phenix ACP request: {error}"),
+            Self::EncodeRequest(error) => {
+                write!(formatter, "failed to encode Phenix ACP request: {error}")
+            }
+            Self::DecodeResponse(error) => {
+                write!(formatter, "failed to decode Phenix ACP response: {error}")
             }
             Self::Source(error) => Display::fmt(error, formatter),
             Self::Build(error) => {
-                write!(formatter, "failed to construct Phenix ACP configuration: {error}")
+                write!(
+                    formatter,
+                    "failed to construct Phenix ACP configuration: {error}"
+                )
             }
             Self::Runtime(error) => formatter.write_str(error),
         }
@@ -394,17 +590,25 @@ impl Display for ConductorOwnerError {
 impl Error for ConductorOwnerError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::ReadConfigurationFile { source, .. }
-            | Self::RemoveConfigurationFile { source, .. } => Some(source),
-            Self::DecodeConfiguration(error) | Self::EncodeConfiguration(error) => Some(error),
+            Self::DecodeConfiguration(error)
+            | Self::EncodeConfiguration(error)
+            | Self::DecodeRequest(error) => Some(error),
             Self::Source(error) => Some(error),
             Self::InvalidChannelCapacity
             | Self::NotConfigured
-            | Self::AlreadyConfigured
+            | Self::UnknownRevision(_)
+            | Self::UnknownTree(_)
+            | Self::DuplicateTree(_)
+            | Self::MissingTreeTarget(_)
+            | Self::InvalidTreeTarget(_)
+            | Self::IdentifierExhausted
             | Self::MissingBackends
             | Self::MissingDefinitions
+            | Self::DuplicateBackend
             | Self::InvalidEnvironmentName(_)
             | Self::InvalidEnvironmentValue(_)
+            | Self::EncodeRequest(_)
+            | Self::DecodeResponse(_)
             | Self::Build(_)
             | Self::Runtime(_) => None,
         }
@@ -415,12 +619,12 @@ impl Error for ConductorOwnerError {
 mod tests {
     use super::*;
     use phenix_acp::{
-        BackendId, ConfigurationBackendInput, ConfigurationInput, ConfigurationRootInput,
-        ConfigurationSource, DefinitionId, RoleId, RouterId, SessionTreeId,
+        BackendId, ConfigurationBackendInput, ConfigurationInput,
+        ConfigurationStandardSessionInput, Difficulty, RoleId, RouterId, ToolConfiguration,
     };
 
     #[test]
-    fn owner_starts_without_a_runtime_configuration() {
+    fn owner_starts_as_an_unconfigured_framework() {
         let mut owner = ConductorOwner::new(PathBuf::from("."), 8).expect("owner");
         assert!(matches!(
             owner.create_standard_session(),
@@ -429,32 +633,26 @@ mod tests {
     }
 
     #[test]
-    fn configuration_input_keeps_paths_unresolved_until_the_owner_builds_it() {
+    fn configuration_does_not_contain_a_concrete_tree_identity() {
         let input = ConfigurationInput {
-            definition_id: DefinitionId::parse("default").expect("definition"),
+            definition_id: phenix_acp::DefinitionId::parse("default").expect("definition"),
             router: RouterId::parse("default").expect("router"),
-            root: ConfigurationRootInput {
-                tree_id: SessionTreeId::parse("root").expect("tree"),
-                role: RoleId::parse("root").expect("role"),
-                objective: "Help the user".to_owned(),
-            },
             backends: vec![ConfigurationBackendInput {
                 id: BackendId::parse("pi").expect("backend"),
                 command: "pi --mode acp".to_owned(),
                 environment: BTreeMap::new(),
             }],
-            definitions: vec![ConfigurationDefinitionInput::Workflow {
-                source: ConfigurationSource::Path {
-                    path: PathBuf::from("workflows/implement.md"),
-                },
-            }],
+            definitions: Vec::new(),
+            tools: ToolConfiguration::new(),
+            standard_session: Some(ConfigurationStandardSessionInput {
+                role: RoleId::parse("root").expect("role"),
+                difficulty: Difficulty::D2,
+                objective: "Help the user".to_owned(),
+            }),
         };
-        assert!(matches!(
-            &input.definitions[0],
-            ConfigurationDefinitionInput::Workflow {
-                source: ConfigurationSource::Path { path }
-            } if path == Path::new("workflows/implement.md")
-        ));
+        let encoded = serde_json::to_value(input).expect("configuration JSON");
+        assert!(encoded.get("root").is_none());
+        assert!(encoded.to_string().find("tree_id").is_none());
     }
 
     #[test]

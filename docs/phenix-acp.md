@@ -1,71 +1,82 @@
 # Phenix ACP architecture
 
-Phenix uses standard Agent Client Protocol (ACP) for downstream agent sessions and a Rust-owned orchestration layer for state that does not belong in one ACP session.
+Phenix extends Agent Client Protocol (ACP) with aggregate state and operations that do not belong to one agent session. The conductor is the server for that protocol and is itself an ACP client of ordinary downstream agents.
 
 ```text
-Lua / Markdown authoring configuration
-              |
-              v
-Rust Phenix definitions, routers, workflows
-              |
-              v
-Immutable Phenix session tree
-              |
-              v
-Phenix conductor / ACP gateway
-   root node       -> standard ACP session A
-   implementer     -> standard ACP session B
-   verifier        -> standard ACP session C
-              |
-              v
-Pi ACP / Codex / other ACP agents
+user configuration / frontend
+            |
+            | standard ACP + typed _phenix/*
+            v
+      phenix-conductor
+      Phenix ACP server
+      - configuration revisions
+      - session trees / objectives
+      - routing / workflow engines
+      - node <-> ACP session state
+            |
+            | standard ACP client
+            v
+   Pi ACP / Codex / other ACP agents
 ```
 
-A Phenix tree is not represented as one ACP session. Each live Phenix node owns one downstream standard ACP session. The Rust gateway owns tree identity, parentage, objectives, routing, workflows, backend selection, session bindings, subtree cancellation, and shutdown.
+A Phenix tree is not one ACP session. Each live Phenix node owns one downstream standard ACP session. The conductor virtualizes those singular sessions into one aggregate northbound endpoint.
+
+## Mechanism versus policy
+
+`phenix-conductor` is a framework. It ships the machinery to load, validate, store and execute routing tables, workflows, backend definitions and tool policy, but it does not install any of those policies itself. A fresh conductor is unconfigured.
+
+Concrete workflows, routers, roles, backend choices, models and thinking levels come from the user or a higher-level application through `_phenix/config/*`. Repository sample definitions and smoke fixtures are explicit opt-in authoring/test data; they are not conductor defaults.
+
+## Configuration revisions and tree instances
+
+Applying configuration creates an immutable revision. A later apply creates a new revision and makes it active for future trees. Existing trees remain bound to their original revision, so routing or workflow policy cannot change under a running tree.
+
+Reusable configuration contains definitions, routing, backends and tool policy. Concrete tree instance data does not: root role, difficulty, objective and optional requested tree identity belong to `_phenix/session_tree/create`.
+
+The optional `standard_session` configuration is only an adapter template for clients that use ordinary ACP `session/new`; Phenix-native clients should create trees explicitly.
+
+## Difficulty-aware routing
+
+A router row has one complete model configuration for each difficulty level:
+
+```text
+| Role | Workflow | D0 | D1 | D2 | D3 | D4 | Explanation |
+```
+
+Each D0-D4 cell is atomic:
+
+```text
+backend/provider/model/thinking
+```
+
+For example:
+
+```text
+pi/openai-codex/gpt-5.6-terra/high
+```
+
+The conductor does not infer omitted members of that tuple. Difficulty is explicit runtime state. Delegated work inherits its parent/tree difficulty unless the operation explicitly supplies another difficulty.
 
 ## Crate responsibilities
 
-- `phenix-acp`: canonical typed session-tree, routing, workflow, configuration, tool/MCP policy, and `_phenix/*` protocol concepts.
-- `phenix-acp-presets`: reusable Phenix definitions, routers, workflows, and credential-free ACP smoke fixtures.
-- `phenix-acp-backend`: standard ACP transport through the official `agent-client-protocol` Rust SDK.
-- `phenix-conductor`: aggregate standard/Phenix ACP orchestration boundary.
-- `phenix-runtime-api`: typed runtime events, commands, replies, and backend/frontend boundary.
-- `phenix-tui`: Ratatui frontend; it owns UX and integration, not backend routing/workflow policy.
+- `phenix-acp`: canonical Phenix wire types, configuration/source parsing, tree/routing/workflow abstractions and aggregate runtime primitives.
+- `phenix-conductor`: Phenix ACP server and authoritative aggregate/configuration state owner.
+- `phenix-acp-backend`: ordinary ACP client transport/adaptation. It does not own frontend orchestration or hard-code Phenix roles.
+- `phenix-runtime-api`: typed frontend/backend runtime projection API.
+- `phenix-tui`: UX, Lua authoring integration and rendering. It configures the conductor through Phenix ACP rather than constructing gateway state.
+- `phenix-acp-presets`: explicit fixture/example package used by smoke verification, never imported by the conductor as policy.
 
-## Immutable configuration per tree
+## Standard ACP versus Phenix extensions
 
-A `SessionTreeDefinition` is validated and frozen before execution. Multiple independently configured trees may run concurrently, but a running tree does not mutate its routing/workflow configuration in place.
+Standard ACP remains authoritative for singular-agent behavior: initialization, authentication, session lifecycle, prompting/cancellation, images, tools, permissions, terminals and model/session configuration.
 
-The gateway is assembled before execution:
+Phenix extensions cover aggregate concepts such as configuration revisions, session trees, recursive workflow execution, difficulty-aware routing, objectives, node operations and subscriptions.
 
-```rust
-let gateway = PhenixAcpGateway::builder()
-    .definition(definition)?
-    .router(router_id, router)?
-    .workflow(workflow_id, workflow)?
-    .backend(backend_id, session_factory)?
-    .build()?;
-```
-
-The builder rejects missing/duplicate registrations and routes to unavailable backends. Workflow plans are validated before downstream sessions are opened.
-
-## Standard ACP and Phenix extensions
-
-Standard ACP remains authoritative for singular-agent behavior: initialization, authentication, session lifecycle, prompts/cancellation, images/streaming, tools/permissions/terminals, and model/session configuration.
-
-Phenix extensions cover orchestration concepts ACP does not model, including session trees, recursive workflow execution, routing explanation, and node-level orchestration.
-
-There is one supported downstream protocol: ACP. The former Pi JSONL/process fallback has been removed; new orchestration behavior belongs in the Rust gateway rather than a compatibility transport.
-
-## Packaged backend
-
-The packaged `phenix` application supplies pinned `pi-acp` and Pi executables as one available downstream ACP agent implementation. `pi-acp` owns singular Pi sessions only. Phenix tree/routing/workflow/frontend authority remains in Rust.
-
-The repository does not maintain Pi TUI patches, an in-repository Pi extension application, or a second process protocol.
+There is one downstream protocol: ACP. Supporting another agent means configuring another ACP backend, not adding a parallel frontend transport.
 
 ## Verification
 
-Mechanical normalization is applied through `maintenance:fix` (and automatically on same-repository pull requests). Validation then runs the committed source explicitly:
+The canonical validation path remains:
 
 ```text
 cargo fmt --all --check
@@ -75,4 +86,4 @@ cargo test --workspace --all-targets --locked
 nix flake check --print-build-logs --keep-going
 ```
 
-The packaged `phenix-acp-smoke` path uses credential-free ACP fixtures so the gateway and frontend packaging can be checked without production credentials.
+Credential-free fixtures exercise the conductor-to-ACP boundary without requiring production credentials.

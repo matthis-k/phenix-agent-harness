@@ -93,18 +93,12 @@ _:
           ];
           text = ''
             export PHENIX_CONDUCTOR_COMMAND="${phenixRustRuntime}/bin/phenix-conductor"
-
-            config_args=()
-            ${pkgs.lib.optionalString (configDir == null) ''
-              user_config_root="''${XDG_CONFIG_HOME:-''${HOME:-}/.config}/phenix-harness"
-              if [ ! -f "$user_config_root/config.lua" ]; then
-                config_args=(--config-dir "${../config/phenix-harness}")
-              fi
-            ''}
-            exec "${phenixRustRuntime}/bin/phenix" "''${config_args[@]}" ${pkgs.lib.escapeShellArgs wrapperArguments} "$@"
+            exec "${phenixRustRuntime}/bin/phenix" ${pkgs.lib.escapeShellArgs wrapperArguments} "$@"
           '';
         };
 
+      # The ordinary package contains no orchestration policy. Users configure it
+      # through their own XDG config or an explicit --config-dir.
       phenix = mkPhenixWrapper { };
 
       configuredSmokeDir = pkgs.runCommand "phenix-configured-smoke-config" { } ''
@@ -142,7 +136,10 @@ _:
             mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
 
             phenix --print-default-config | grep -Fq 'phenix.theme.set("Normal"'
-            phenix --check
+            if phenix --check; then
+              echo "unconfigured phenix unexpectedly accepted implicit runtime policy" >&2
+              exit 1
+            fi
             phenix-configured-smoke --check
             phenix-acp-smoke
             touch "$out"

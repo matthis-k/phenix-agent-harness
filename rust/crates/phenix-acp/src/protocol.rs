@@ -4,6 +4,7 @@ use crate::{
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::fmt::{self, Display, Formatter};
 
 pub trait AcpMethod {
     const METHOD: &'static str;
@@ -25,6 +26,95 @@ pub struct ModelSelection {
     pub model: ModelId,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Difficulty {
+    D0,
+    D1,
+    D2,
+    D3,
+    D4,
+}
+
+impl Difficulty {
+    pub const ALL: [Self; 5] = [Self::D0, Self::D1, Self::D2, Self::D3, Self::D4];
+
+    pub const fn index(self) -> usize {
+        match self {
+            Self::D0 => 0,
+            Self::D1 => 1,
+            Self::D2 => 2,
+            Self::D3 => 3,
+            Self::D4 => 4,
+        }
+    }
+}
+
+impl Display for Difficulty {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::D0 => "d0",
+            Self::D1 => "d1",
+            Self::D2 => "d2",
+            Self::D3 => "d3",
+            Self::D4 => "d4",
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinkingLevel {
+    Off,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    ExtraHigh,
+    Max,
+}
+
+impl Display for ThinkingLevel {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Off => "off",
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::ExtraHigh => "extra_high",
+            Self::Max => "max",
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ModelConfig {
+    pub backend: BackendId,
+    pub provider: ProviderId,
+    pub model: ModelId,
+    pub thinking: ThinkingLevel,
+}
+
+impl ModelConfig {
+    pub fn selection(&self) -> ModelSelection {
+        ModelSelection {
+            provider: self.provider.clone(),
+            model: self.model.clone(),
+        }
+    }
+}
+
+impl Display for ModelConfig {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{}/{}/{}/{}",
+            self.backend, self.provider, self.model, self.thinking
+        )
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionNodeState {
@@ -43,11 +133,11 @@ pub struct SessionNodeSnapshot {
     pub id: SessionNodeId,
     pub parent: Option<SessionNodeId>,
     pub role: RoleId,
+    pub difficulty: Difficulty,
     pub state: SessionNodeState,
-    pub backend: BackendId,
+    pub model: ModelConfig,
     pub objective_id: ObjectiveId,
     pub downstream_session: Option<AcpSessionId>,
-    pub model: Option<ModelSelection>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -91,6 +181,7 @@ pub struct SessionTreeCreateParams {
     pub tree_id: Option<SessionTreeId>,
     pub definition_id: DefinitionId,
     pub root_role: RoleId,
+    pub difficulty: Difficulty,
     pub objective: String,
 }
 
@@ -162,6 +253,8 @@ impl AcpMethod for WorkflowStart {
 pub struct WorkflowStartParams {
     pub tree_id: SessionTreeId,
     pub workflow: WorkflowId,
+    #[serde(default)]
+    pub difficulty: Option<Difficulty>,
     pub objective: String,
 }
 
@@ -184,6 +277,8 @@ pub struct NodeDelegateParams {
     pub tree_id: SessionTreeId,
     pub parent_node: SessionNodeId,
     pub role: RoleId,
+    #[serde(default)]
+    pub difficulty: Option<Difficulty>,
     pub objective: String,
 }
 
@@ -200,6 +295,8 @@ pub struct NodeLoadParams {
     pub tree_id: SessionTreeId,
     pub parent_node: SessionNodeId,
     pub role: RoleId,
+    #[serde(default)]
+    pub difficulty: Option<Difficulty>,
     pub objective: String,
     pub session_id: AcpSessionId,
 }
@@ -217,6 +314,8 @@ pub struct NodeResumeParams {
     pub tree_id: SessionTreeId,
     pub parent_node: SessionNodeId,
     pub role: RoleId,
+    #[serde(default)]
+    pub difficulty: Option<Difficulty>,
     pub objective: String,
     pub session_id: AcpSessionId,
 }
@@ -303,13 +402,14 @@ pub struct RoutingExplainParams {
     pub tree_id: SessionTreeId,
     pub objective: String,
     pub required_role: Option<RoleId>,
+    pub difficulty: Difficulty,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RoutingExplainResult {
     pub router: RouterId,
-    pub backend: BackendId,
-    pub model: Option<ModelSelection>,
+    pub difficulty: Difficulty,
+    pub model: ModelConfig,
     pub explanation: String,
 }
 

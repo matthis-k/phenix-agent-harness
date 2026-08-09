@@ -1,6 +1,6 @@
 use crate::{
-    AcpSessionId, BackendId, DefinitionId, ModelSelection, ObjectiveId, ObjectiveState, RoleId,
-    RouterId, SessionNodeId, SessionTreeId, WorkflowId,
+    AcpSessionId, BackendId, DefinitionId, Difficulty, ModelConfig, ModelSelection, ObjectiveId,
+    ObjectiveState, RoleId, RouterId, SessionNodeId, SessionTreeId, ThinkingLevel, WorkflowId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -30,6 +30,7 @@ pub struct RoutingRequest {
     pub tree_id: SessionTreeId,
     pub parent_node: Option<SessionNodeId>,
     pub role: RoleId,
+    pub difficulty: Difficulty,
     pub objective: String,
     pub workflow: Option<WorkflowId>,
     pub available_backends: Vec<BackendId>,
@@ -37,8 +38,8 @@ pub struct RoutingRequest {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RoutingDecision {
-    pub backend: BackendId,
-    pub model: Option<ModelSelection>,
+    pub difficulty: Difficulty,
+    pub model: ModelConfig,
     pub explanation: String,
 }
 
@@ -155,23 +156,16 @@ impl Workflow for StaticWorkflow {
 
 #[derive(Clone, Debug)]
 pub struct FixedRouter {
-    backend: BackendId,
-    model: Option<ModelSelection>,
+    model: ModelConfig,
     explanation: String,
 }
 
 impl FixedRouter {
-    pub fn new(backend: BackendId) -> Self {
+    pub fn new(model: ModelConfig) -> Self {
         Self {
-            backend,
-            model: None,
-            explanation: "fixed backend selected by immutable tree policy".to_owned(),
+            model,
+            explanation: "fixed model configuration selected by user configuration".to_owned(),
         }
-    }
-
-    pub fn model(mut self, model: ModelSelection) -> Self {
-        self.model = Some(model);
-        self
     }
 
     pub fn explanation(mut self, explanation: impl Into<String>) -> Self {
@@ -181,28 +175,21 @@ impl FixedRouter {
 }
 
 impl SessionRouter for FixedRouter {
-    fn route(&self, _request: &RoutingRequest) -> Result<RoutingDecision, GatewayError> {
+    fn route(&self, request: &RoutingRequest) -> Result<RoutingDecision, GatewayError> {
+        if !request
+            .available_backends
+            .iter()
+            .any(|backend| backend == &self.model.backend)
+        {
+            return Err(GatewayError::routing(format!(
+                "fixed router selected unavailable backend {}",
+                self.model.backend
+            )));
+        }
         Ok(RoutingDecision {
-            backend: self.backend.clone(),
+            difficulty: request.difficulty,
             model: self.model.clone(),
             explanation: self.explanation.clone(),
-        })
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct FirstAvailableRouter;
-
-impl SessionRouter for FirstAvailableRouter {
-    fn route(&self, request: &RoutingRequest) -> Result<RoutingDecision, GatewayError> {
-        let backend = request.available_backends.first().cloned().ok_or_else(|| {
-            GatewayError::Routing("no backend is available for the session tree".to_owned())
-        })?;
-        Ok(RoutingDecision {
-            backend,
-            model: None,
-            explanation: "selected the first backend allowed by the immutable tree definition"
-                .to_owned(),
         })
     }
 }
@@ -220,10 +207,10 @@ pub enum SessionOpenKind {
 pub struct SessionOpenRequest {
     pub tree_id: SessionTreeId,
     pub node_id: SessionNodeId,
-    pub backend: BackendId,
     pub role: RoleId,
+    pub difficulty: Difficulty,
     pub objective: String,
-    pub model: Option<ModelSelection>,
+    pub model: ModelConfig,
     pub open: SessionOpenKind,
 }
 
@@ -275,7 +262,7 @@ pub enum SessionCommand {
         mode_id: String,
     },
     SetThinking {
-        level: String,
+        level: ThinkingLevel,
     },
     Invoke {
         name: String,

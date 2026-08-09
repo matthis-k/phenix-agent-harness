@@ -113,39 +113,55 @@ impl MockState {
         }))?;
         Ok(json!({
             "sessionId": session_id,
-            "configOptions": self.model_options(&selected_model),
+            "configOptions": self.config_options(&selected_model),
         }))
     }
 
     fn select_config(&mut self, request: Value) -> Result<Value, Box<dyn Error>> {
         let session_id = required_string(&request, "sessionId")?;
         let config_id = required_string(&request, "configId")?;
-        if config_id != "model" {
-            return Err(format!("unsupported mock config option {config_id:?}").into());
+        let value = required_string(&request, "value")?;
+        match config_id.as_str() {
+            "model" => {
+                if !self
+                    .config
+                    .models
+                    .iter()
+                    .any(|candidate| candidate.id == value)
+                {
+                    return Err(format!("unknown mock model {value:?}").into());
+                }
+                let session = self
+                    .sessions
+                    .get_mut(&session_id)
+                    .ok_or_else(|| format!("unknown mock session {session_id:?}"))?;
+                session.selected_model = value.clone();
+                self.log(json!({
+                    "kind": "model_selected",
+                    "backend": self.config.backend_id,
+                    "session_id": session_id,
+                    "model": value,
+                }))?;
+                Ok(json!({
+                    "configOptions": self.config_options(&value),
+                }))
+            }
+            "thinking" => {
+                if value != "off" {
+                    return Err(format!("unsupported mock thinking level {value:?}").into());
+                }
+                let model = self
+                    .sessions
+                    .get(&session_id)
+                    .ok_or_else(|| format!("unknown mock session {session_id:?}"))?
+                    .selected_model
+                    .clone();
+                Ok(json!({
+                    "configOptions": self.config_options(&model),
+                }))
+            }
+            _ => Err(format!("unsupported mock config option {config_id:?}").into()),
         }
-        let model = required_string(&request, "value")?;
-        if !self
-            .config
-            .models
-            .iter()
-            .any(|candidate| candidate.id == model)
-        {
-            return Err(format!("unknown mock model {model:?}").into());
-        }
-        let session = self
-            .sessions
-            .get_mut(&session_id)
-            .ok_or_else(|| format!("unknown mock session {session_id:?}"))?;
-        session.selected_model = model.clone();
-        self.log(json!({
-            "kind": "model_selected",
-            "backend": self.config.backend_id,
-            "session_id": session_id,
-            "model": model,
-        }))?;
-        Ok(json!({
-            "configOptions": self.model_options(&model),
-        }))
     }
 
     fn prompt(
@@ -231,18 +247,28 @@ impl MockState {
         })
     }
 
-    fn model_options(&self, current: &str) -> Value {
-        json!([{
-            "id": "model",
-            "name": "Model",
-            "category": "model",
-            "type": "select",
-            "currentValue": current,
-            "options": self.config.models.iter().map(|model| json!({
-                "value": model.id,
-                "name": model.display_name,
-            })).collect::<Vec<_>>(),
-        }])
+    fn config_options(&self, current_model: &str) -> Value {
+        json!([
+            {
+                "id": "model",
+                "name": "Model",
+                "category": "model",
+                "type": "select",
+                "currentValue": current_model,
+                "options": self.config.models.iter().map(|model| json!({
+                    "value": model.id,
+                    "name": model.display_name,
+                })).collect::<Vec<_>>(),
+            },
+            {
+                "id": "thinking",
+                "name": "Thinking",
+                "category": "thought_level",
+                "type": "select",
+                "currentValue": "off",
+                "options": [{ "value": "off", "name": "Off" }],
+            }
+        ])
     }
 
     fn log(&self, event: Value) -> Result<(), Box<dyn Error>> {

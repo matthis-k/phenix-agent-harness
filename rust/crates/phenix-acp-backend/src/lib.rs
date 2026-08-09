@@ -1,13 +1,11 @@
 #![forbid(unsafe_code)]
 
-mod frontend;
 mod gateway;
 mod permission;
 mod projection;
 mod state;
 mod terminal;
 
-pub use frontend::GatewayAgentBackend;
 pub use gateway::{AcpGatewayTransport, AcpTreeControl};
 
 use base64::Engine;
@@ -18,7 +16,7 @@ use permission::{PermissionBroker, PermissionRequestEvent};
 use phenix_acp::acp::schema::v1::{
     AuthCapabilities, AuthMethod as AcpAuthMethod, AuthenticateRequest,
     BooleanConfigOptionCapabilities, CancelNotification, ClientCapabilities,
-    ClientSessionCapabilities, ContentBlock, CreateTerminalRequest, ForkSessionRequest,
+    ClientSessionCapabilities, ContentBlock, CreateTerminalRequest, ExtRequest, ForkSessionRequest,
     ImageContent, InitializeRequest, KillTerminalRequest, ListSessionsRequest, LoadSessionRequest,
     LogoutRequest, NewSessionRequest, PromptRequest, PromptResponse, ReleaseTerminalRequest,
     RequestPermissionRequest, ResumeSessionRequest, SessionConfigKind, SessionConfigOptionCategory,
@@ -84,13 +82,26 @@ impl Display for ConfigError {
 
 impl Error for ConfigError {}
 
+/// Standard ACP client adapter used by the frontend and by downstream gateway
+/// transports. Optional startup requests are sent only after the ACP initialize
+/// handshake and before frontend runtime requests are accepted; this is how the
+/// frontend configures a bare Phenix conductor through its public wire API.
 pub struct AcpAgentBackend {
     config: AcpBackendConfig,
+    startup_requests: Vec<ExtRequest>,
 }
 
 impl AcpAgentBackend {
     pub fn new(config: AcpBackendConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            startup_requests: Vec::new(),
+        }
+    }
+
+    pub fn with_startup_request(mut self, request: ExtRequest) -> Self {
+        self.startup_requests.push(request);
+        self
     }
 }
 
@@ -100,7 +111,11 @@ impl AgentBackend for AcpAgentBackend {
         requests: Receiver<BackendRequest>,
         outputs: BackendOutputSender,
     ) -> Result<(), BackendError> {
-        let agent = AcpAgent::from_str(&self.config.command)
+        let AcpAgentBackend {
+            config,
+            startup_requests,
+        } = *self;
+        let agent = AcpAgent::from_str(&config.command)
             .map_err(|error| BackendError::Start(error.to_string()))?;
         let (request_tx, request_rx) = mpsc::unbounded();
         let stop_relay = Arc::new(AtomicBool::new(false));
@@ -122,8 +137,13 @@ impl AgentBackend for AcpAgentBackend {
             })
             .map_err(|error| BackendError::Start(error.to_string()))?;
 
-        let result =
-            futures::executor::block_on(run_connection(agent, self.config, request_rx, outputs));
+        let result = futures::executor::block_on(run_connection(
+            agent,
+            config,
+            startup_requests,
+            request_rx,
+            outputs,
+        ));
         stop_relay.store(true, Ordering::Release);
         relay.join().map_err(|_| BackendError::Panicked)?;
         result
@@ -170,6 +190,7 @@ impl RuntimeState {
 async fn run_connection(
     agent: AcpAgent,
     config: AcpBackendConfig,
+    startup_requests: Vec<ExtRequest>,
     requests: mpsc::UnboundedReceiver<BackendRequest>,
     outputs: BackendOutputSender,
 ) -> Result<(), BackendError> {
@@ -271,6 +292,13 @@ async fn run_connection(
                     ),
             );
             let initialize = cx.send_request(initialize).block_task().await?;
+            for request in startup_requests {
+                let request = phenix_acp::acp::UntypedMessage::new(
+                    request.method.as_ref(),
+                    request.params.as_ref(),
+                )?;
+                let _: serde_json::Value = cx.send_request(request).block_task().await?;
+            }
             let runtime = RuntimeState::new(AdapterState::new(initialize));
             run_backend_loop(
                 cx,

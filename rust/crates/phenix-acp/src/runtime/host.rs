@@ -1,8 +1,8 @@
 use super::{GatewayError, GatewayEvent, PhenixAcpGateway, SessionCommand, TreeStartResult};
 use crate::{
-    AcpSessionId, DefinitionId, ObjectiveId, ObjectiveState, RoleId, RoutingExplainResult,
-    SessionNodeId, SessionTreeId, SessionTreeListResult, SessionTreeSnapshot, WorkflowId,
-    WorkflowStartResult,
+    AcpSessionId, DefinitionId, Difficulty, ObjectiveId, ObjectiveState, RoleId,
+    RoutingExplainResult, SessionNodeId, SessionTreeId, SessionTreeListResult, SessionTreeSnapshot,
+    WorkflowId, WorkflowStartResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -12,23 +12,27 @@ pub enum GatewayCommand {
     CreateTree {
         definition_id: DefinitionId,
         root_role: RoleId,
+        difficulty: Difficulty,
         objective: String,
     },
     StartWorkflow {
         tree_id: SessionTreeId,
         workflow_id: WorkflowId,
+        difficulty: Option<Difficulty>,
         objective: String,
     },
     Delegate {
         tree_id: SessionTreeId,
         parent_node: SessionNodeId,
         role: RoleId,
+        difficulty: Option<Difficulty>,
         objective: String,
     },
     LoadSession {
         tree_id: SessionTreeId,
         parent_node: SessionNodeId,
         role: RoleId,
+        difficulty: Option<Difficulty>,
         objective: String,
         session_id: AcpSessionId,
     },
@@ -36,6 +40,7 @@ pub enum GatewayCommand {
         tree_id: SessionTreeId,
         parent_node: SessionNodeId,
         role: RoleId,
+        difficulty: Option<Difficulty>,
         objective: String,
         session_id: AcpSessionId,
     },
@@ -61,6 +66,7 @@ pub enum GatewayCommand {
         tree_id: SessionTreeId,
         objective: String,
         role: RoleId,
+        difficulty: Difficulty,
     },
     MarkObjective {
         tree_id: SessionTreeId,
@@ -114,42 +120,56 @@ impl PhenixAcpGateway {
             GatewayCommand::CreateTree {
                 definition_id,
                 root_role,
+                difficulty,
                 objective,
             } => Ok(GatewayReply::TreeCreated(self.create_tree(
                 &definition_id,
                 root_role,
+                difficulty,
                 objective,
             )?)),
             GatewayCommand::StartWorkflow {
                 tree_id,
                 workflow_id,
+                difficulty,
                 objective,
             } => Ok(GatewayReply::WorkflowStarted(self.start_workflow(
                 &tree_id,
                 &workflow_id,
+                difficulty,
                 objective,
             )?)),
             GatewayCommand::Delegate {
                 tree_id,
                 parent_node,
                 role,
+                difficulty,
                 objective,
             } => Ok(GatewayReply::NodeCreated {
-                node_id: self.delegate(&tree_id, &parent_node, role, objective)?,
+                node_id: self.delegate(&tree_id, &parent_node, role, difficulty, objective)?,
             }),
             GatewayCommand::LoadSession {
                 tree_id,
                 parent_node,
                 role,
+                difficulty,
                 objective,
                 session_id,
             } => Ok(GatewayReply::NodeCreated {
-                node_id: self.load_session(&tree_id, &parent_node, role, objective, session_id)?,
+                node_id: self.load_session(
+                    &tree_id,
+                    &parent_node,
+                    role,
+                    difficulty,
+                    objective,
+                    session_id,
+                )?,
             }),
             GatewayCommand::ResumeSession {
                 tree_id,
                 parent_node,
                 role,
+                difficulty,
                 objective,
                 session_id,
             } => Ok(GatewayReply::NodeCreated {
@@ -157,6 +177,7 @@ impl PhenixAcpGateway {
                     &tree_id,
                     &parent_node,
                     role,
+                    difficulty,
                     objective,
                     session_id,
                 )?,
@@ -186,8 +207,9 @@ impl PhenixAcpGateway {
                 tree_id,
                 objective,
                 role,
+                difficulty,
             } => Ok(GatewayReply::Routing(
-                self.explain_route(&tree_id, objective, role)?,
+                self.explain_route(&tree_id, objective, role, difficulty)?,
             )),
             GatewayCommand::MarkObjective {
                 tree_id,

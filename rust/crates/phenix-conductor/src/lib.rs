@@ -9,10 +9,11 @@ use phenix_acp::{
     BackendCapabilitiesGet, BackendCapabilitiesResult, BackendCommandList,
     BackendCommandListResult, BackendCommandSource, BackendCommandSummary, BackendDefinition,
     BackendId, BackendModelList, BackendModelListResult, BackendModelSummary, BackendTargetParams,
-    DefinitionError, DefinitionFormat, DefinitionParseError, Definitions, ExtensionUiCapabilities,
-    GatewayError, GatewayEvent, ModelCapabilities, ModelId, PhenixAcpGateway, PhenixConductor,
-    PromptCapabilities, ProviderId, ResourceCapabilities, RoleId, RouterId, SessionCapabilities,
-    SessionCommand, SessionNodeId, SessionTreeDefinition, SessionTreeId,
+    DefinitionError, DefinitionFormat, DefinitionParseError, Definitions, Difficulty,
+    ExtensionUiCapabilities, GatewayError, GatewayEvent, ModelCapabilities, ModelId,
+    PhenixAcpGateway, PhenixConductor, PromptCapabilities, ProviderId, ResourceCapabilities,
+    RoleId, RouterId, SessionCapabilities, SessionCommand, SessionNodeId, SessionTreeDefinition,
+    SessionTreeId, ToolConfiguration,
 };
 use phenix_acp_backend::{
     AcpAgentBackend, AcpBackendConfig, AcpGatewayTransport, ConfigError as BackendConfigError,
@@ -28,20 +29,30 @@ use std::fmt::{self, Display, Formatter};
 use std::path::Path;
 use std::sync::Arc;
 
+/// Materialized user configuration used to build one immutable runtime revision.
+///
+/// The conductor crate contains the machinery to consume this structure; it does
+/// not construct a policy-bearing instance on its own.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ConductorBootstrap {
     pub definition_id: phenix_acp::DefinitionId,
     pub router: RouterId,
-    pub root: BootstrapRoot,
+    #[serde(default)]
+    pub standard_session: Option<BootstrapStandardSession>,
     pub backends: Vec<BootstrapBackend>,
     pub definitions: Vec<BootstrapDefinition>,
+    #[serde(default)]
+    pub tools: ToolConfiguration,
 }
 
+/// Optional compatibility projection for standard ACP `session/new`.
+/// Phenix-native clients create trees explicitly and do not need this template.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct BootstrapRoot {
+pub struct BootstrapStandardSession {
     pub role: RoleId,
+    pub difficulty: Difficulty,
     pub objective: String,
 }
 
@@ -72,7 +83,7 @@ pub enum BootstrapDefinition {
 pub struct ConductorRuntime {
     conductor: PhenixConductor,
     definition_id: phenix_acp::DefinitionId,
-    root: BootstrapRoot,
+    standard_session: Option<BootstrapStandardSession>,
     backends: BTreeMap<BackendId, AcpGatewayTransport>,
     cancelled_sessions: BTreeSet<String>,
 }
@@ -81,11 +92,14 @@ impl ConductorRuntime {
     pub fn new(
         conductor: PhenixConductor,
         definition_id: phenix_acp::DefinitionId,
-        root: BootstrapRoot,
+        standard_session: Option<BootstrapStandardSession>,
         backends: BTreeMap<BackendId, AcpGatewayTransport>,
     ) -> Result<Self, RuntimeError> {
-        if root.objective.trim().is_empty() {
-            return Err(RuntimeError::EmptyRootObjective);
+        if standard_session
+            .as_ref()
+            .is_some_and(|template| template.objective.trim().is_empty())
+        {
+            return Err(RuntimeError::EmptyStandardSessionObjective);
         }
         if backends.is_empty() {
             return Err(RuntimeError::MissingBackends);
@@ -93,7 +107,7 @@ impl ConductorRuntime {
         Ok(Self {
             conductor,
             definition_id,
-            root,
+            standard_session,
             backends,
             cancelled_sessions: BTreeSet::new(),
         })
@@ -152,10 +166,15 @@ impl ConductorRuntime {
     }
 
     pub fn create_standard_session(&mut self) -> Result<StandardSession, RuntimeError> {
+        let template = self
+            .standard_session
+            .clone()
+            .ok_or(RuntimeError::MissingStandardSessionTemplate)?;
         let started = self.conductor.gateway_mut().create_tree(
             &self.definition_id,
-            self.root.role.clone(),
-            self.root.objective.clone(),
+            template.role,
+            template.difficulty,
+            template.objective,
         )?;
         Ok(StandardSession {
             session_id: started.tree_id.to_string(),
@@ -323,8 +342,12 @@ impl ConductorBootstrap {
         if channel_capacity == 0 {
             return Err(BootstrapError::InvalidChannelCapacity);
         }
-        if self.root.objective.trim().is_empty() {
-            return Err(BootstrapError::EmptyRootObjective);
+        if self
+            .standard_session
+            .as_ref()
+            .is_some_and(|template| template.objective.trim().is_empty())
+        {
+            return Err(BootstrapError::EmptyStandardSessionObjective);
         }
         if self.backends.is_empty() {
             return Err(BootstrapError::MissingBackends);
@@ -368,11 +391,14 @@ impl ConductorBootstrap {
             .find(|router| router.id() == &self.router)
             .ok_or_else(|| BootstrapError::MissingRouter(self.router.clone()))?;
         for rule in selected_router.rules() {
-            if !configured_backends.contains(rule.target().backend()) {
-                return Err(BootstrapError::MissingRoutedBackend {
-                    router: self.router.clone(),
-                    backend: rule.target().backend().clone(),
-                });
+            for (difficulty, model) in rule.models().iter() {
+                if !configured_backends.contains(&model.backend) {
+                    return Err(BootstrapError::MissingRoutedBackend {
+                        router: self.router.clone(),
+                        difficulty,
+                        backend: model.backend.clone(),
+                    });
+                }
             }
         }
 
@@ -381,7 +407,8 @@ impl ConductorBootstrap {
             .map(|workflow| workflow.id().clone())
             .collect::<Vec<_>>();
         let mut definition =
-            SessionTreeDefinition::builder(self.definition_id.clone(), self.router.clone());
+            SessionTreeDefinition::builder(self.definition_id.clone(), self.router.clone())
+                .tools(self.tools);
         for backend in &self.backends {
             let command = parse_command(&backend.command)?;
             let endpoint = AcpEndpoint::stdio(
@@ -409,7 +436,7 @@ impl ConductorBootstrap {
         ConductorRuntime::new(
             PhenixConductor::new(gateway),
             self.definition_id,
-            self.root,
+            self.standard_session,
             transports,
         )
         .map_err(BootstrapError::Runtime)
@@ -610,7 +637,8 @@ impl Error for RuntimeExtensionError {
 
 #[derive(Debug)]
 pub enum RuntimeError {
-    EmptyRootObjective,
+    EmptyStandardSessionObjective,
+    MissingStandardSessionTemplate,
     MissingBackends,
     InvalidSessionId { session_id: String, message: String },
     Gateway(GatewayError),
@@ -625,9 +653,12 @@ impl From<GatewayError> for RuntimeError {
 impl Display for RuntimeError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::EmptyRootObjective => {
-                formatter.write_str("conductor root objective must not be empty")
+            Self::EmptyStandardSessionObjective => {
+                formatter.write_str("standard ACP session template objective must not be empty")
             }
+            Self::MissingStandardSessionTemplate => formatter.write_str(
+                "standard ACP session/new is unavailable because this user configuration has no standard_session template; create a Phenix tree explicitly",
+            ),
             Self::MissingBackends => formatter.write_str("conductor runtime requires a backend"),
             Self::InvalidSessionId {
                 session_id,
@@ -645,9 +676,10 @@ impl Error for RuntimeError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Gateway(error) => Some(error),
-            Self::EmptyRootObjective | Self::MissingBackends | Self::InvalidSessionId { .. } => {
-                None
-            }
+            Self::EmptyStandardSessionObjective
+            | Self::MissingStandardSessionTemplate
+            | Self::MissingBackends
+            | Self::InvalidSessionId { .. } => None,
         }
     }
 }
@@ -661,9 +693,10 @@ pub enum BootstrapError {
     MissingRouter(RouterId),
     MissingRoutedBackend {
         router: RouterId,
+        difficulty: Difficulty,
         backend: BackendId,
     },
-    EmptyRootObjective,
+    EmptyStandardSessionObjective,
     InvalidChannelCapacity,
     EmptyCommand,
     InvalidCommand {
@@ -713,18 +746,18 @@ impl Display for BootstrapError {
                 formatter.write_str("conductor bootstrap contains a duplicate backend ID")
             }
             Self::MissingRouter(router) => {
-                write!(
-                    formatter,
-                    "conductor bootstrap selects missing router {router}"
-                )
+                write!(formatter, "conductor bootstrap selects missing router {router}")
             }
-            Self::MissingRoutedBackend { router, backend } => write!(
+            Self::MissingRoutedBackend {
+                router,
+                difficulty,
+                backend,
+            } => write!(
                 formatter,
-                "router {router} selects backend {backend}, which is not configured"
+                "router {router} selects backend {backend} for {difficulty}, which is not configured"
             ),
-            Self::EmptyRootObjective => {
-                formatter.write_str("conductor root objective must not be empty")
-            }
+            Self::EmptyStandardSessionObjective => formatter
+                .write_str("standard ACP session template objective must not be empty"),
             Self::InvalidChannelCapacity => {
                 formatter.write_str("conductor channel capacity must be positive")
             }
@@ -756,7 +789,7 @@ impl Error for BootstrapError {
             | Self::DuplicateBackend
             | Self::MissingRouter(_)
             | Self::MissingRoutedBackend { .. }
-            | Self::EmptyRootObjective
+            | Self::EmptyStandardSessionObjective
             | Self::InvalidChannelCapacity
             | Self::EmptyCommand => None,
         }
@@ -776,9 +809,9 @@ id: router.test
 
 ## Routes
 
-| Role | Workflow | Target | Explanation |
-|---|---|---|---|
-| `*` | `*` | `test/provider/model` | test route |
+| Role | Workflow | D0 | D1 | D2 | D3 | D4 | Explanation |
+|---|---|---|---|---|---|---|---|
+| `*` | `*` | `test/provider/model/minimal` | `test/provider/model/low` | `test/provider/model/medium` | `test/provider/model/high` | `test/provider/model/max` | test route |
 "#;
 
     const WORKFLOW: &str = r#"
@@ -799,8 +832,9 @@ id: workflow.test
         serde_json::json!({
             "definition_id": "definition.test",
             "router": "router.test",
-            "root": {
+            "standard_session": {
                 "role": "coordinator",
+                "difficulty": "d2",
                 "objective": "coordinate the standard ACP session"
             },
             "backends": [{
@@ -823,7 +857,7 @@ id: workflow.test
     }
 
     #[test]
-    fn every_routed_backend_must_be_configured() {
+    fn every_difficulty_target_must_use_a_configured_backend() {
         let bootstrap = ConductorBootstrap::from_json(&bootstrap_json("other")).expect("bootstrap");
         assert!(matches!(
             bootstrap.build(Path::new("/tmp"), 8),
@@ -832,11 +866,15 @@ id: workflow.test
     }
 
     #[test]
-    fn empty_root_objectives_are_rejected_before_starting_backends() {
+    fn standard_session_template_is_optional_but_validated_when_present() {
         let source = serde_json::json!({
             "definition_id": "definition.test",
             "router": "router.test",
-            "root": { "role": "coordinator", "objective": "  " },
+            "standard_session": {
+                "role": "coordinator",
+                "difficulty": "d2",
+                "objective": "  "
+            },
             "backends": [{ "id": "test", "command": "test-agent" }],
             "definitions": [
                 { "kind": "routing_table", "source": ROUTER, "format": "markdown" }
@@ -846,7 +884,7 @@ id: workflow.test
         let bootstrap = ConductorBootstrap::from_json(&source).expect("bootstrap");
         assert!(matches!(
             bootstrap.build(Path::new("/tmp"), 8),
-            Err(BootstrapError::EmptyRootObjective)
+            Err(BootstrapError::EmptyStandardSessionObjective)
         ));
     }
 }

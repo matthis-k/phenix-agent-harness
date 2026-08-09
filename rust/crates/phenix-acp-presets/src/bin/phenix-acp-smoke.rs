@@ -1,13 +1,13 @@
 #![forbid(unsafe_code)]
 
 use phenix_acp::acp::schema::v1::{
-    AgentCapabilities, InitializeRequest, InitializeResponse, NewSessionRequest,
-    NewSessionResponse, PromptRequest, PromptResponse, StopReason,
+    AgentCapabilities, ClientRequest, InitializeResponse, PromptResponse, StopReason,
 };
 use phenix_acp::acp::{Agent, Result as AcpResult, Stdio};
-use phenix_acp::{DefinitionId, RoleId, SessionCommand, SessionEvent};
+use phenix_acp::{DefinitionId, Difficulty, RoleId, SessionCommand, SessionEvent};
 use phenix_acp_backend::{AcpAgentBackend, AcpBackendConfig};
 use phenix_acp_presets::standard_gateway;
+use serde_json::{json, Value};
 use std::env;
 use std::error::Error;
 use std::io;
@@ -40,31 +40,86 @@ async fn run_fixture() -> AcpResult<()> {
         .builder()
         .name("phenix-acp-fixture")
         .on_receive_request(
-            async move |initialize: InitializeRequest, responder, _connection| {
-                responder.respond(
-                    InitializeResponse::new(initialize.protocol_version)
-                        .agent_capabilities(AgentCapabilities::new()),
-                )
-            },
-            phenix_acp::acp::on_receive_request!(),
-        )
-        .on_receive_request(
-            async move |_request: NewSessionRequest, responder, _connection| {
-                let sequence = new_session_ids.fetch_add(1, Ordering::Relaxed);
-                responder.respond(NewSessionResponse::new(format!(
-                    "fixture-session-{sequence}"
-                )))
-            },
-            phenix_acp::acp::on_receive_request!(),
-        )
-        .on_receive_request(
-            async move |_request: PromptRequest, responder, _connection| {
-                responder.respond(PromptResponse::new(StopReason::EndTurn))
+            async move |request: ClientRequest, responder, _connection| {
+                let response = match request {
+                    ClientRequest::InitializeRequest(initialize) => serde_json::to_value(
+                        InitializeResponse::new(initialize.protocol_version)
+                            .agent_capabilities(AgentCapabilities::new()),
+                    )
+                    .map_err(phenix_acp::acp::Error::into_internal_error)?,
+                    ClientRequest::NewSessionRequest(_) => {
+                        let sequence = new_session_ids.fetch_add(1, Ordering::Relaxed);
+                        json!({
+                            "sessionId": format!("fixture-session-{sequence}"),
+                            "configOptions": fixture_config_options(),
+                        })
+                    }
+                    ClientRequest::SetSessionConfigOptionRequest(request) => {
+                        let value = serde_json::to_value(&request.value)
+                            .map_err(phenix_acp::acp::Error::into_internal_error)?;
+                        json!({
+                            "configOptions": fixture_config_options_with(
+                                &request.config_id.to_string(),
+                                &value,
+                            ),
+                        })
+                    }
+                    ClientRequest::PromptRequest(_) => {
+                        serde_json::to_value(PromptResponse::new(StopReason::EndTurn))
+                            .map_err(phenix_acp::acp::Error::into_internal_error)?
+                    }
+                    _ => return Err(phenix_acp::acp::Error::method_not_found()),
+                };
+                responder.respond(response)
             },
             phenix_acp::acp::on_receive_request!(),
         )
         .connect_to(Stdio::new())
         .await
+}
+
+fn fixture_config_options() -> Value {
+    fixture_config_options_with("", &Value::Null)
+}
+
+fn fixture_config_options_with(config_id: &str, value: &Value) -> Value {
+    let selected_model = if config_id == "model" {
+        value.as_str().unwrap_or("fixture/fixture-model")
+    } else {
+        "fixture/fixture-model"
+    };
+    let selected_thinking = if config_id == "thinking" {
+        value.as_str().unwrap_or("medium")
+    } else {
+        "medium"
+    };
+    json!([
+        {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": selected_model,
+            "options": [{
+                "value": "fixture/fixture-model",
+                "name": "Fixture Model",
+            }],
+        },
+        {
+            "id": "thinking",
+            "name": "Thinking",
+            "category": "thought_level",
+            "type": "select",
+            "currentValue": selected_thinking,
+            "options": [
+                { "value": "minimal", "name": "Minimal" },
+                { "value": "low", "name": "Low" },
+                { "value": "medium", "name": "Medium" },
+                { "value": "high", "name": "High" },
+                { "value": "max", "name": "Max" }
+            ],
+        }
+    ])
 }
 
 fn run_smoke() -> Result<(), Box<dyn Error>> {
@@ -79,7 +134,12 @@ fn run_smoke() -> Result<(), Box<dyn Error>> {
 
     let definition = DefinitionId::parse("phenix.standard")?;
     let role = RoleId::parse("coordinator")?;
-    let started = gateway.create_tree(&definition, role, "verify packaged ACP gateway")?;
+    let started = gateway.create_tree(
+        &definition,
+        role,
+        Difficulty::D2,
+        "verify packaged ACP gateway",
+    )?;
     let snapshot = gateway.snapshot(&started.tree_id)?;
     let root = snapshot
         .nodes

@@ -1,6 +1,7 @@
 use phenix_acp::{
-    parse_routing_table, parse_workflow, BackendId, Definitions, RoleId, RoutingRequest,
-    SessionRouter, SessionTreeId, Workflow, WorkflowId, WorkflowRequest,
+    parse_routing_table, parse_workflow, BackendId, Definitions, Difficulty, RoleId,
+    RoutingRequest, SessionRouter, SessionTreeId, ThinkingLevel, Workflow, WorkflowId,
+    WorkflowRequest,
 };
 
 struct WorkflowFixture {
@@ -89,250 +90,42 @@ const LEGACY_WORKFLOWS: &[WorkflowFixture] = &[
     },
 ];
 
-struct RouteExpectation {
+struct RouterFixture {
+    id: &'static str,
+    source: &'static str,
     role: &'static str,
     provider: &'static str,
     model: &'static str,
 }
 
-struct RouterFixture {
-    id: &'static str,
-    source: &'static str,
-    routes: &'static [RouteExpectation],
-}
-
-const FREE_ROUTES: &[RouteExpectation] = &[
-    RouteExpectation {
-        role: "scout",
-        provider: "opencode",
-        model: "deepseek-v4-flash-free",
-    },
-    RouteExpectation {
-        role: "planner",
-        provider: "opencode",
-        model: "deepseek-v4-flash-free",
-    },
-    RouteExpectation {
-        role: "architect",
-        provider: "opencode",
-        model: "deepseek-v4-flash-free",
-    },
-    RouteExpectation {
-        role: "implementer",
-        provider: "opencode",
-        model: "deepseek-v4-flash-free",
-    },
-    RouteExpectation {
-        role: "tester",
-        provider: "opencode",
-        model: "deepseek-v4-flash-free",
-    },
-    RouteExpectation {
-        role: "verifier",
-        provider: "opencode",
-        model: "deepseek-v4-flash-free",
-    },
-    RouteExpectation {
-        role: "critic",
-        provider: "opencode",
-        model: "deepseek-v4-flash-free",
-    },
-    RouteExpectation {
-        role: "finalizer",
-        provider: "opencode",
-        model: "deepseek-v4-flash-free",
-    },
-    RouteExpectation {
-        role: "qa-synthesizer",
-        provider: "opencode",
-        model: "deepseek-v4-flash-free",
-    },
-    RouteExpectation {
-        role: "reproducer",
-        provider: "opencode",
-        model: "deepseek-v4-flash-free",
-    },
-];
-
-const GO_ROUTES: &[RouteExpectation] = &[
-    RouteExpectation {
-        role: "scout",
-        provider: "opencode-go",
-        model: "mimo-v2.5",
-    },
-    RouteExpectation {
-        role: "planner",
-        provider: "opencode-go",
-        model: "glm-5.1",
-    },
-    RouteExpectation {
-        role: "architect",
-        provider: "opencode-go",
-        model: "glm-5.2",
-    },
-    RouteExpectation {
-        role: "implementer",
-        provider: "opencode-go",
-        model: "kimi-k2.7-code",
-    },
-    RouteExpectation {
-        role: "tester",
-        provider: "opencode-go",
-        model: "kimi-k2.6",
-    },
-    RouteExpectation {
-        role: "verifier",
-        provider: "opencode-go",
-        model: "qwen3.7-max",
-    },
-    RouteExpectation {
-        role: "critic",
-        provider: "opencode-go",
-        model: "qwen3.7-max",
-    },
-    RouteExpectation {
-        role: "finalizer",
-        provider: "opencode-go",
-        model: "qwen3.7-plus",
-    },
-    RouteExpectation {
-        role: "qa-synthesizer",
-        provider: "opencode-go",
-        model: "qwen3.7-max",
-    },
-    RouteExpectation {
-        role: "reproducer",
-        provider: "opencode-go",
-        model: "qwen3.7-plus",
-    },
-];
-
-const GPT_ROUTES: &[RouteExpectation] = &[
-    RouteExpectation {
-        role: "scout",
-        provider: "openai-codex",
-        model: "gpt-5.6-luna",
-    },
-    RouteExpectation {
-        role: "planner",
-        provider: "openai-codex",
-        model: "gpt-5.6-terra",
-    },
-    RouteExpectation {
-        role: "architect",
-        provider: "openai-codex",
-        model: "gpt-5.6",
-    },
-    RouteExpectation {
-        role: "implementer",
-        provider: "openai-codex",
-        model: "gpt-5.6-terra",
-    },
-    RouteExpectation {
-        role: "tester",
-        provider: "openai-codex",
-        model: "gpt-5.6-luna",
-    },
-    RouteExpectation {
-        role: "verifier",
-        provider: "openai-codex",
-        model: "gpt-5.6-terra",
-    },
-    RouteExpectation {
-        role: "critic",
-        provider: "openai-codex",
-        model: "gpt-5.6-terra",
-    },
-    RouteExpectation {
-        role: "finalizer",
-        provider: "openai-codex",
-        model: "gpt-5.6-terra",
-    },
-    RouteExpectation {
-        role: "qa-synthesizer",
-        provider: "openai-codex",
-        model: "gpt-5.6-terra",
-    },
-    RouteExpectation {
-        role: "reproducer",
-        provider: "openai-codex",
-        model: "gpt-5.6-terra",
-    },
-];
-
-const MIXED_ROUTES: &[RouteExpectation] = &[
-    RouteExpectation {
-        role: "scout",
-        provider: "opencode-go",
-        model: "mimo-v2.5",
-    },
-    RouteExpectation {
-        role: "planner",
-        provider: "openai-codex",
-        model: "gpt-5.6-terra",
-    },
-    RouteExpectation {
-        role: "architect",
-        provider: "openai-codex",
-        model: "gpt-5.6",
-    },
-    RouteExpectation {
-        role: "implementer",
-        provider: "opencode-go",
-        model: "kimi-k2.7-code",
-    },
-    RouteExpectation {
-        role: "tester",
-        provider: "opencode-go",
-        model: "kimi-k2.6",
-    },
-    RouteExpectation {
-        role: "verifier",
-        provider: "openai-codex",
-        model: "gpt-5.6-terra",
-    },
-    RouteExpectation {
-        role: "critic",
-        provider: "openai-codex",
-        model: "gpt-5.6-terra",
-    },
-    RouteExpectation {
-        role: "finalizer",
-        provider: "opencode-go",
-        model: "qwen3.7-plus",
-    },
-    RouteExpectation {
-        role: "qa-synthesizer",
-        provider: "openai-codex",
-        model: "gpt-5.6-terra",
-    },
-    RouteExpectation {
-        role: "reproducer",
-        provider: "opencode-go",
-        model: "qwen3.7-plus",
-    },
-];
-
 const LEGACY_ROUTERS: &[RouterFixture] = &[
     RouterFixture {
         id: "router.legacy-free",
         source: include_str!("fixtures/legacy/routing/free.md"),
-        routes: FREE_ROUTES,
+        role: "implementer",
+        provider: "opencode",
+        model: "deepseek-v4-flash-free",
     },
     RouterFixture {
         id: "router.legacy-opencode-go",
         source: include_str!("fixtures/legacy/routing/opencode-go.md"),
-        routes: GO_ROUTES,
+        role: "implementer",
+        provider: "opencode-go",
+        model: "kimi-k2.7-code",
     },
     RouterFixture {
         id: "router.legacy-chatgpt-plus",
         source: include_str!("fixtures/legacy/routing/chatgpt-plus.md"),
-        routes: GPT_ROUTES,
+        role: "architect",
+        provider: "openai-codex",
+        model: "gpt-5.6",
     },
     RouterFixture {
         id: "router.legacy-mixed",
         source: include_str!("fixtures/legacy/routing/mixed.md"),
-        routes: MIXED_ROUTES,
+        role: "planner",
+        provider: "openai-codex",
+        model: "gpt-5.6-terra",
     },
 ];
 
@@ -377,7 +170,7 @@ fn legacy_workflow_projections_parse_and_build_plans() {
 }
 
 #[test]
-fn legacy_model_set_routers_parse_and_route_to_expected_targets() {
+fn migrated_routers_select_complete_model_configs_for_each_difficulty() {
     let tree_id = SessionTreeId::parse("tree-legacy-routing").expect("tree id");
     let pi = BackendId::parse("pi").expect("backend id");
     let workflow = WorkflowId::parse("workflow.implement").expect("workflow id");
@@ -388,32 +181,41 @@ fn legacy_model_set_routers_parse_and_route_to_expected_targets() {
             .unwrap_or_else(|error| panic!("{} did not parse: {error}", fixture.id));
         assert_eq!(router.id().as_str(), fixture.id);
 
-        for expected in fixture.routes {
+        for (difficulty, thinking) in [
+            (Difficulty::D0, ThinkingLevel::Minimal),
+            (Difficulty::D1, ThinkingLevel::Low),
+            (Difficulty::D2, ThinkingLevel::Medium),
+            (Difficulty::D3, ThinkingLevel::High),
+            (Difficulty::D4, ThinkingLevel::Max),
+        ] {
             let decision = router
                 .route(&RoutingRequest {
                     tree_id: tree_id.clone(),
                     parent_node: None,
-                    role: RoleId::parse(expected.role).expect("role id"),
+                    role: RoleId::parse(fixture.role).expect("role id"),
+                    difficulty,
                     objective: "route a legacy delegated session".to_owned(),
                     workflow: Some(workflow.clone()),
                     available_backends: vec![pi.clone()],
                 })
                 .unwrap_or_else(|error| {
                     panic!(
-                        "{} failed to route role {}: {error}",
-                        fixture.id, expected.role
+                        "{} failed to route role {} at {difficulty}: {error}",
+                        fixture.id, fixture.role
                     )
                 });
-            assert_eq!(decision.backend.as_str(), "pi");
-            let model = decision.model.expect("legacy route must select a model");
-            assert_eq!(model.provider.as_str(), expected.provider);
-            assert_eq!(model.model.as_str(), expected.model);
+            assert_eq!(decision.difficulty, difficulty);
+            assert_eq!(decision.model.backend.as_str(), "pi");
+            assert_eq!(decision.model.provider.as_str(), fixture.provider);
+            assert_eq!(decision.model.model.as_str(), fixture.model);
+            assert_eq!(decision.model.thinking, thinking);
         }
 
         let unavailable = router.route(&RoutingRequest {
             tree_id: tree_id.clone(),
             parent_node: None,
-            role: RoleId::parse("implementer").expect("role id"),
+            role: RoleId::parse(fixture.role).expect("role id"),
+            difficulty: Difficulty::D2,
             objective: "reject the wrong backend".to_owned(),
             workflow: Some(workflow.clone()),
             available_backends: vec![BackendId::parse("other").expect("backend id")],
