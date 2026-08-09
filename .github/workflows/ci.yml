@@ -31,12 +31,18 @@ jobs:
             accept-flake-config = true
             max-jobs = auto
 
-      - name: Capture canonical formatter diff
+      - name: Produce canonical formatter output
         shell: bash
         run: |
           set -euo pipefail
           export CARGO_HOME="$RUNNER_TEMP/phenix-cargo-home"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/phenix-cargo-target"
           nix run .#phenix-maintenance -- fix
-          git diff -- vendor/phenix-flake-maintenance/lib
-          exit 1
+          tar -czf "$RUNNER_TEMP/phenix-flake-maintenance-lib.tar.gz" vendor/phenix-flake-maintenance/lib
+
+      - name: Upload canonical formatter output
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: formatted-maintenance-lib
+          path: ${{ runner.temp }}/phenix-flake-maintenance-lib.tar.gz
+          if-no-files-found: error
