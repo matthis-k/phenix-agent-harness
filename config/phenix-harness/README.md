@@ -2,12 +2,12 @@
 
 This directory is an **explicit example/authoring surface**, not built-in conductor policy and not a fallback selected by the packaged application.
 
-A user may copy, reference or pass this directory explicitly with `--config-dir`. If no user configuration is supplied, Phenix does not silently install these workflows, routing tables, roles, backend choices or model choices.
+A user may copy, reference, or pass this directory explicitly with `--config-dir`. If no user configuration is supplied, Phenix does not silently install these workflows, routing tables, roles, backend choices, or model choices.
 
 ```text
-frontend-local Lua and definition files
-        ↓ authoring declarations
-    typed _phenix/config/apply
+Lua authoring policy
+        ↓
+typed _phenix/config/apply
         ↓
 phenix-conductor
     immutable configuration revision
@@ -15,54 +15,130 @@ phenix-conductor
 future session trees pin that revision
 ```
 
-`config.lua` declares reusable Phenix ACP configuration: definitions, router selection, backend registrations and an optional `standard_session` adapter template. Concrete Phenix tree identities are created later through the session-tree API; they are not part of the reusable configuration.
+`config.lua` is the complete first-class example policy. It defines:
 
-Files below `workflows/` and `routing/` are source documents referenced by this example. Their content becomes authoritative only after a conductor accepts the corresponding configuration request.
+- the downstream ACP backend;
+- the shared base-agent role vocabulary;
+- the native Phenix workflows;
+- Matt Pocock-inspired structural workflows;
+- D0-D4 routing tables and model/thinking policy.
 
-## Base agents
+There is no separate `legacy` workflow or routing layer in this example.
 
-`BASE_AGENTS.md` defines the small reusable role vocabulary used by the workflow set. In the current ACP model a base agent is a `RoleId` contract plus routing policy: the role chooses an appropriate model, while the workflow step supplies the bounded procedure-specific objective.
+## Shared base agents
 
-Keep the role vocabulary broad and reusable. A new engineering procedure should normally compose `scout`, `planner`, `architect`, `implementer`, `tester`, `critic`, `verifier`, `finalizer`, `qa-synthesizer`, and `coordinator` rather than adding one role per workflow.
+The workflow library intentionally reuses a small role vocabulary:
 
-## Engineering workflows
+- `coordinator`
+- `scout`
+- `planner`
+- `architect`
+- `implementer`
+- `tester`
+- `critic`
+- `verifier`
+- `finalizer`
+- `qa-synthesizer`
 
-The core authoring set adapts several procedures from Matt Pocock's MIT-licensed `mattpocock/skills` project to Phenix's explicit session-tree workflow model. The procedures are rewritten as Phenix role graphs rather than copied as agent-skill prompts.
+These are shared across the native Phenix workflows and the Matt-inspired procedures. A procedure adds graph structure and a bounded objective; it does not create a new agent taxonomy or encode model names into workflow prose.
 
-The main idea-to-implementation path is:
+The active routing table remains responsible for selecting the concrete backend/provider/model/thinking configuration for each role and difficulty.
+
+## Native Phenix workflows
+
+The native core restores the workflow set used by the earlier Phenix harness:
 
 ```text
-workflow.grill-with-docs
-        ↓
-workflow.spec
-        ↓
-workflow.tickets
-        ↓
 workflow.implement
-        ↓
-workflow.review
+workflow.qa
+workflow.qa-fix
 ```
 
-Additional focused workflows are available for `workflow.tdd`, `workflow.debug`, `workflow.domain-model`, `workflow.architecture`, and `workflow.wayfinder`. Existing Phenix-specific design, migration, QA, refactor, research, security, and UI workflows remain available alongside them.
+The definitions are rewritten for the current Rust ACP role/tree model rather than carrying forward the retired TypeScript/Markdown runtime implementation.
 
-The important separation is preserved in the graph: implementation is TDD-first; debugging is reproduce/minimize/hypothesize/instrument/fix/regression; and code review keeps engineering-standards review separate from spec-conformance review instead of collapsing them into one verdict.
+`workflow.implement` keeps the canonical plan → implement → verify separation.
 
-Upstream inspiration: `https://github.com/mattpocock/skills`.
+`workflow.qa` keeps independent repository, test, architecture, and security review branches followed by QA synthesis.
 
-## Routing format
+`workflow.qa-fix` extends the same QA structure with a bounded repair plan, implementation, independent verification, and final handoff.
 
-Routing tables select a complete model configuration for each difficulty:
+The older workflow engine had richer typed transitions such as a D0 short path, conditional QA repair, joins, and bounded repair loops. The current ACP workflow plan is a static delegated-session tree, so this example does **not** fake those transition semantics in prompt prose. They should return as typed kernel capabilities if and when the current Rust workflow runtime exposes them.
+
+## Difficulty policy
+
+Difficulty is first-class typed runtime data in the current ACP design. A workflow start carries D0-D4, and routing resolves a complete model configuration from:
 
 ```text
-| Role | Workflow | D0 | D1 | D2 | D3 | D4 | Explanation |
+role × workflow × difficulty
 ```
 
-Every D0-D4 cell is:
+Each route selects:
 
 ```text
 backend/provider/model/thinking
 ```
 
-This example keeps the existing role/model choices while making thinking level explicit per difficulty. Those choices are sample user policy, not conductor defaults.
+The Lua policy defines all D0-D4 cells directly.
 
-The frontend can be replaced without moving runtime ownership. Other clients may configure the same conductor through the same Phenix ACP API without implementing Lua or sharing this directory layout.
+QA also restores the earlier policy of using deliberately capable review routes: workflow-specific routing rows pin repository/test review to D2-class model configurations and architecture/security/synthesis to D3-class configurations regardless of the caller's lower requested difficulty. Repair planning and implementation in `workflow.qa-fix` continue to follow the requested workflow difficulty.
+
+Available example routing tables are:
+
+```text
+router.mixed
+router.opencode-go
+router.chatgpt-plus
+router.free
+```
+
+`router.mixed` is selected by default in this example.
+
+## Matt-inspired structural workflows
+
+The additional workflow set adapts the most reusable structures from `mattpocock/skills` to Phenix's shared base agents:
+
+```text
+workflow.grill
+workflow.spec
+workflow.tickets
+workflow.tdd
+workflow.debug
+workflow.review
+workflow.architecture
+workflow.domain-model
+workflow.wayfinder
+workflow.research
+```
+
+The important translation rule is that Matt-style procedures contribute **structure**, not a parallel agent system.
+
+Examples:
+
+- `workflow.tdd`: red → green → refactor → verify.
+- `workflow.debug`: reproduce → minimize → hypothesize → instrument → fix → regression.
+- `workflow.review`: independent standards and spec-conformance reviewers.
+- `workflow.spec`: repository context → seams → specification → independent verification.
+- `workflow.tickets`: pre-factor analysis → tracer-bullet decomposition → challenge → publish.
+- `workflow.wayfinder`: reconnaissance → decision map → high-leverage resolution → frontier verification.
+
+The idea-to-implementation path can therefore be composed conceptually as:
+
+```text
+workflow.grill
+    ↓
+workflow.spec
+    ↓
+workflow.tickets
+    ↓
+workflow.implement
+    ↓
+workflow.review
+```
+
+Upstream procedural inspiration: `https://github.com/mattpocock/skills`.
+
+## Ownership boundary
+
+Lua is only the authoring surface. The frontend evaluates it and submits definition sources through the typed Phenix ACP configuration request. The conductor constructs and owns the immutable runtime revision. Existing session trees remain pinned to the revision under which they were created.
+
+The frontend can therefore be replaced without moving runtime ownership, and other clients can configure the same conductor through the same Phenix ACP control plane.
