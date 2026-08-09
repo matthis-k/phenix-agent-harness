@@ -4,6 +4,7 @@ use crate::{
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fmt::{self, Display, Formatter};
 
 pub trait AcpMethod {
@@ -256,6 +257,8 @@ pub struct WorkflowStartParams {
     #[serde(default)]
     pub difficulty: Option<Difficulty>,
     pub objective: String,
+    #[serde(default)]
+    pub input: Value,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -470,5 +473,16 @@ mod tests {
     fn conductor_notifications_are_separate_from_request_response_methods() {
         assert_notification::<NodeEventNotification>("_phenix/node/event");
         assert_notification::<SessionTreeUpdatedNotification>("_phenix/session_tree/updated");
+    }
+
+    #[test]
+    fn workflow_input_defaults_to_null_for_existing_clients() {
+        let decoded: WorkflowStartParams = serde_json::from_value(serde_json::json!({
+            "tree_id": "tree-1",
+            "workflow": "workflow.implement",
+            "objective": "ship"
+        }))
+        .expect("workflow params");
+        assert_eq!(decoded.input, Value::Null);
     }
 }
