@@ -119,10 +119,7 @@ impl Display for DefinitionParseError {
                 Ok(())
             }
             Self::UnexpectedKind { expected, actual } => {
-                write!(
-                    formatter,
-                    "expected {expected} source, found {actual} source"
-                )
+                write!(formatter, "expected {expected} source, found {actual} source")
             }
             Self::DuplicateDefinition { kind, id } => {
                 write!(formatter, "duplicate {kind} definition {id}")
@@ -376,7 +373,11 @@ struct StructuredWorkflowStep {
 struct StructuredRoutingRule {
     role: String,
     workflow: String,
-    target: String,
+    d0: String,
+    d1: String,
+    d2: String,
+    d3: String,
+    d4: String,
     explanation: String,
 }
 
@@ -421,15 +422,19 @@ fn decode_structured(
                 .routes
                 .ok_or_else(|| invalid(format, "routing table definitions require routes"))?;
             let mut output = format!(
-                "# {title}\n\n```phenix-router\nid: {id}\n```\n\n## Routes\n\n| Role | Workflow | Target | Explanation |\n|---|---|---|---|\n"
+                "# {title}\n\n```phenix-router\nid: {id}\n```\n\n## Routes\n\n| Role | Workflow | D0 | D1 | D2 | D3 | D4 | Explanation |\n|---|---|---|---|---|---|---|---|\n"
             );
             for route in routes {
                 let role = table_cell(&route.role, "routes.role", format)?;
                 let workflow = table_cell(&route.workflow, "routes.workflow", format)?;
-                let target = table_cell(&route.target, "routes.target", format)?;
+                let d0 = table_cell(&route.d0, "routes.d0", format)?;
+                let d1 = table_cell(&route.d1, "routes.d1", format)?;
+                let d2 = table_cell(&route.d2, "routes.d2", format)?;
+                let d3 = table_cell(&route.d3, "routes.d3", format)?;
+                let d4 = table_cell(&route.d4, "routes.d4", format)?;
                 let explanation = table_cell(&route.explanation, "routes.explanation", format)?;
                 output.push_str(&format!(
-                    "| {role} | {workflow} | {target} | {explanation} |\n"
+                    "| {role} | {workflow} | {d0} | {d1} | {d2} | {d3} | {d4} | {explanation} |\n"
                 ));
             }
             Ok(output)
@@ -516,7 +521,11 @@ id: phenix.implement
     {
       "role": "*",
       "workflow": "*",
-      "target": "pi/openai/gpt-5.6-sol",
+      "d0": "pi/openai/gpt-5.6-sol/minimal",
+      "d1": "pi/openai/gpt-5.6-sol/low",
+      "d2": "pi/openai/gpt-5.6-sol/medium",
+      "d3": "pi/openai/gpt-5.6-sol/high",
+      "d4": "pi/openai/gpt-5.6-sol/max",
       "explanation": "Default route"
     }
   ]
@@ -540,7 +549,11 @@ objective = "Implement {objective}"
     (
       role: "*",
       workflow: "*",
-      target: "pi/openai/gpt-5.6-sol",
+      d0: "pi/openai/gpt-5.6-sol/minimal",
+      d1: "pi/openai/gpt-5.6-sol/low",
+      d2: "pi/openai/gpt-5.6-sol/medium",
+      d3: "pi/openai/gpt-5.6-sol/high",
+      d4: "pi/openai/gpt-5.6-sol/max",
       explanation: "Default route",
     ),
   ]),
