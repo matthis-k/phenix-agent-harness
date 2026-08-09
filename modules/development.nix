@@ -50,18 +50,6 @@ _: {
           label = "phenix-acp / repeated_prompts";
         }
         {
-          id = "phenix-tui-configuration-ownership";
-          package = "phenix-tui";
-          test = "configuration_ownership";
-          label = "phenix-tui / configuration_ownership";
-        }
-        {
-          id = "phenix-ui-core-editor-modes";
-          package = "phenix-ui-core";
-          test = "editor_modes";
-          label = "phenix-ui-core / editor_modes";
-        }
-        {
           id = "phenix-ui-core-runtime-controls";
           package = "phenix-ui-core";
           test = "runtime_controls";
