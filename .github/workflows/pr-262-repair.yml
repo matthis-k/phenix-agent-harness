@@ -12,135 +12,22 @@ permissions:
 jobs:
   repair:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
-      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
-        with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-            accept-flake-config = true
-            max-jobs = auto
+      - name: Apply source repair
+        run: python3 .github/repair-pr-262.py
 
-      - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
-        with: { name: devenv }
-
-      - name: Install devenv
-        run: nix profile add nixpkgs#devenv
-
-      - name: Apply deterministic source fixes
+      - name: Commit source repair
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-
-          key_path = Path('rust/crates/phenix-ui-lua/src/key.rs')
-          key_source = key_path.read_text()
-          key_needle = "    pub fn len(&self) -> usize {\n        self.strokes.len()\n    }\n"
-          key_replacement = key_needle + "\n    pub fn is_empty(&self) -> bool {\n        self.strokes.is_empty()\n    }\n"
-          if "pub fn is_empty(&self)" not in key_source:
-              if key_needle not in key_source:
-                  raise SystemExit('KeyChord::len body changed unexpectedly')
-              key_path.write_text(key_source.replace(key_needle, key_replacement, 1))
-
-          runtime_path = Path('rust/crates/phenix-ui-runtime/src/runtime.rs')
-          runtime_source = runtime_path.read_text()
-          runtime_old = '''            UiMessage::Ui(mut envelope) => {
-            if matches!(&envelope.target, RouteTarget::Focused) {
-                if let UiEvent::Input(UiInput::Mouse(mouse)) = &envelope.event {
-                    if let Some(element) = self.renderer.hit_test(mouse.column, mouse.row) {
-                        envelope.target = RouteTarget::Bubble(element);
-                    }
-                }
-            }
-            self.router.route_ui(&self.state, &envelope)
-        }
-'''
-          runtime_new = '''            UiMessage::Ui(mut envelope) => {
-                if matches!(&envelope.target, RouteTarget::Focused) {
-                    if let UiEvent::Input(UiInput::Mouse(mouse)) = &envelope.event {
-                        if let Some(element) = self.renderer.hit_test(mouse.column, mouse.row) {
-                            envelope.target = RouteTarget::Bubble(element);
-                        }
-                    }
-                }
-                self.router.route_ui(&self.state, &envelope)
-            }
-'''
-          if runtime_old in runtime_source:
-              runtime_path.write_text(runtime_source.replace(runtime_old, runtime_new, 1))
-          elif runtime_new not in runtime_source:
-              raise SystemExit('UiRuntime::apply block changed unexpectedly')
-
-          consumers_path = Path('rust/crates/phenix-ui-runtime/src/consumers.rs')
-          consumers_source = consumers_path.read_text()
-          consumers_old = '''        let mut state = AppState::default();
-        state.exit_requested = true;
-        let output = Box::new(BackendOutput::Stopped { result: Ok(()) });
-'''
-          consumers_new = '''        let state = AppState {
-            exit_requested: true,
-            ..AppState::default()
-        };
-        let output = Box::new(BackendOutput::Stopped { result: Ok(()) });
-'''
-          if consumers_old in consumers_source:
-              consumers_path.write_text(consumers_source.replace(consumers_old, consumers_new, 1))
-          elif consumers_new not in consumers_source:
-              raise SystemExit('requested_backend_stop setup changed unexpectedly')
-          PY
-
           git diff --check
-          if ! git diff --quiet; then
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add rust
-            git commit -m 'fix: satisfy Neovim navigation CI checks'
-            git push
+          if git diff --quiet; then
+            exit 0
           fi
-
-      - name: Capture Rust formatting
-        id: format
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          devenv tasks run maintenance:rust-format --mode single 2>&1 | tee "$RUNNER_TEMP/pr-262-format.log"
-
-      - name: Capture Rust lint
-        id: lint
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          devenv tasks run maintenance:rust-clippy --mode single 2>&1 | tee "$RUNNER_TEMP/pr-262-clippy.log"
-
-      - name: Capture Rust tests
-        id: tests
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          devenv tasks run maintenance:rust-tests --mode single 2>&1 | tee "$RUNNER_TEMP/pr-262-tests.log"
-
-      - name: Upload diagnostics
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: pr-262-repair-diagnostics-${{ github.run_id }}
-          path: |
-            ${{ runner.temp }}/pr-262-format.log
-            ${{ runner.temp }}/pr-262-clippy.log
-            ${{ runner.temp }}/pr-262-tests.log
-          if-no-files-found: warn
-
-      - name: Verify captured checks
-        if: always()
-        shell: bash
-        run: |
-          test '${{ steps.format.outcome }}' = success
-          test '${{ steps.lint.outcome }}' = success
-          test '${{ steps.tests.outcome }}' = success
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add rust
+          git commit -m 'fix: satisfy Neovim navigation CI checks'
+          git push
