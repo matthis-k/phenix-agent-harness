@@ -15,6 +15,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - name: Apply candidate backend fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('rust/crates/phenix-acp-backend/src/lib.rs')
+          text = path.read_text()
+          text = text.replace(
+              '    ClientSessionCapabilities, ContentBlock, CreateTerminalRequest, ExtRequest, ExtResponse,\n',
+              '    ClientSessionCapabilities, ContentBlock, CreateTerminalRequest, ExtRequest,\n',
+              1,
+          )
+          old = '            for request in startup_requests {\n                let _: ExtResponse = cx.send_request(request).block_task().await?;\n            }\n'
+          new = '''            for request in startup_requests {\n                let request = phenix_acp::acp::UntypedMessage::new(\n                    request.method.as_ref(),\n                    request.params.as_ref(),\n                )?;\n                let _: serde_json::Value = cx.send_request(request).block_task().await?;\n            }\n'''
+          if old not in text:
+              raise SystemExit('expected startup extension request loop not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          cd rust
+          cargo fmt --all
       - name: Rust check
-        run: cargo check --workspace
+        run: cargo check --workspace --all-targets --locked
+        working-directory: rust
+      - name: Rust clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
         working-directory: rust
