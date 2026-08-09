@@ -190,8 +190,7 @@ impl ConductorRuntime {
     ) -> Result<Vec<GatewayEvent>, RuntimeError> {
         let binding = self.standard_session(session_id)?;
         self.conductor
-            .gateway_mut()
-            .execute(&binding.tree_id, &binding.root_node_id, command)
+            .execute_node(&binding.tree_id, &binding.root_node_id, command)
             .map_err(RuntimeError::Gateway)
     }
 
@@ -202,8 +201,7 @@ impl ConductorRuntime {
         let binding = self.standard_session(session_id)?;
         let events = self
             .conductor
-            .gateway_mut()
-            .cancel_subtree(&binding.tree_id, &binding.root_node_id)?;
+            .cancel_node(&binding.tree_id, &binding.root_node_id)?;
         self.cancelled_sessions.insert(session_id.to_owned());
         Ok(events)
     }
@@ -214,7 +212,7 @@ impl ConductorRuntime {
 
     pub fn close_standard_session(&mut self, session_id: &str) -> Result<(), RuntimeError> {
         let tree_id = parse_tree_id(session_id)?;
-        self.conductor.gateway_mut().close_tree(&tree_id)?;
+        self.conductor.close_tree(&tree_id)?;
         self.cancelled_sessions.remove(session_id);
         Ok(())
     }

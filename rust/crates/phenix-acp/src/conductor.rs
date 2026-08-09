@@ -102,8 +102,7 @@ impl PhenixConductor {
                 }),
             SessionTreeClose::METHOD => {
                 let params = self.decode::<SessionTreeClose>(&request)?;
-                self.workflow_runs.remove(&params.tree_id);
-                self.gateway.close_tree(&params.tree_id)?;
+                self.close_tree(&params.tree_id)?;
                 encode_result(SessionTreeClose::METHOD, &EmptyResult {})
             }
             WorkflowStart::METHOD => {
@@ -195,21 +194,29 @@ impl PhenixConductor {
             return self.gateway.execute(tree_id, node_id, SessionCommand::Poll);
         }
 
-        let mut run = self
-            .workflow_runs
-            .remove(tree_id)
-            .ok_or_else(|| GatewayError::Invariant("managed workflow disappeared".to_owned()))?;
-        self.poll_running_states(tree_id, &mut run)?;
-        self.drive_managed_workflow(tree_id, &mut run)?;
-        let events = drain_pending(&mut run, node_id);
-        self.workflow_runs.insert(tree_id.clone(), run);
-        Ok(events)
+        self.with_managed_run(tree_id, |conductor, run| {
+            conductor.poll_running_states(tree_id, run)?;
+            conductor.drive_managed_workflow(tree_id, run)?;
+            Ok(drain_pending(run, node_id))
+        })
     }
 
     fn start_workflow(
         &mut self,
         params: WorkflowStartParams,
     ) -> Result<WorkflowStartResult, GatewayError> {
+        if self
+            .workflow_runs
+            .get(&params.tree_id)
+            .is_some_and(|run| !run.finished)
+        {
+            return Err(GatewayError::workflow(format!(
+                "tree {} already has a conductor-managed workflow",
+                params.tree_id
+            )));
+        }
+        self.workflow_runs.remove(&params.tree_id);
+
         let Some(graph) = self.workflow_graphs.get(&params.workflow).cloned() else {
             return self.gateway.start_workflow(
                 &params.tree_id,
@@ -218,12 +225,6 @@ impl PhenixConductor {
                 params.objective,
             );
         };
-        if self.workflow_runs.contains_key(&params.tree_id) {
-            return Err(GatewayError::workflow(format!(
-                "tree {} already has a conductor-managed workflow",
-                params.tree_id
-            )));
-        }
 
         let (objective_id, root_node_id, root_difficulty) = self.gateway.begin_workflow(
             &params.tree_id,
@@ -252,7 +253,18 @@ impl PhenixConductor {
             pending_events: BTreeMap::new(),
             finished: false,
         };
-        self.drive_managed_workflow(&params.tree_id, &mut run)?;
+        if let Err(error) = self.drive_managed_workflow(&params.tree_id, &mut run) {
+            for node_id in run.machine.running_nodes() {
+                let _ = self.gateway.cancel_subtree(&params.tree_id, &node_id);
+            }
+            let _ = self.gateway.finish_workflow(
+                &params.tree_id,
+                &run.workflow_id,
+                &run.objective_id,
+                false,
+            );
+            return Err(error);
+        }
         let first_node = run
             .machine
             .first_bound_node()
@@ -264,7 +276,7 @@ impl PhenixConductor {
         })
     }
 
-    fn execute_node(
+    pub fn execute_node(
         &mut self,
         tree_id: &SessionTreeId,
         node_id: &SessionNodeId,
@@ -273,18 +285,15 @@ impl PhenixConductor {
         if !self.workflow_runs.contains_key(tree_id) {
             return self.gateway.execute(tree_id, node_id, command);
         }
-        let mut run = self
-            .workflow_runs
-            .remove(tree_id)
-            .ok_or_else(|| GatewayError::Invariant("managed workflow disappeared".to_owned()))?;
-        let events = self.gateway.execute(tree_id, node_id, command)?;
-        self.observe_if_running(&mut run, node_id, &events)?;
-        self.drive_managed_workflow(tree_id, &mut run)?;
-        self.workflow_runs.insert(tree_id.clone(), run);
-        Ok(events)
+        self.with_managed_run(tree_id, |conductor, run| {
+            let events = conductor.gateway.execute(tree_id, node_id, command)?;
+            conductor.observe_if_running(run, node_id, &events)?;
+            conductor.drive_managed_workflow(tree_id, run)?;
+            Ok(events)
+        })
     }
 
-    fn cancel_node(
+    pub fn cancel_node(
         &mut self,
         tree_id: &SessionTreeId,
         node_id: &SessionNodeId,
@@ -292,17 +301,34 @@ impl PhenixConductor {
         if !self.workflow_runs.contains_key(tree_id) {
             return self.gateway.cancel_subtree(tree_id, node_id);
         }
+        self.with_managed_run(tree_id, |conductor, run| {
+            let events = conductor.gateway.cancel_subtree(tree_id, node_id)?;
+            for event in &events {
+                conductor.observe_if_running(run, &event.node_id, std::slice::from_ref(event))?;
+            }
+            conductor.drive_managed_workflow(tree_id, run)?;
+            Ok(events)
+        })
+    }
+
+    pub fn close_tree(&mut self, tree_id: &SessionTreeId) -> Result<(), GatewayError> {
+        self.gateway.close_tree(tree_id)?;
+        self.workflow_runs.remove(tree_id);
+        Ok(())
+    }
+
+    fn with_managed_run<T>(
+        &mut self,
+        tree_id: &SessionTreeId,
+        operation: impl FnOnce(&mut Self, &mut ManagedWorkflowRun) -> Result<T, GatewayError>,
+    ) -> Result<T, GatewayError> {
         let mut run = self
             .workflow_runs
             .remove(tree_id)
             .ok_or_else(|| GatewayError::Invariant("managed workflow disappeared".to_owned()))?;
-        let events = self.gateway.cancel_subtree(tree_id, node_id)?;
-        for event in &events {
-            self.observe_if_running(&mut run, &event.node_id, std::slice::from_ref(event))?;
-        }
-        self.drive_managed_workflow(tree_id, &mut run)?;
+        let result = operation(self, &mut run);
         self.workflow_runs.insert(tree_id.clone(), run);
-        Ok(events)
+        result
     }
 
     fn poll_running_states(

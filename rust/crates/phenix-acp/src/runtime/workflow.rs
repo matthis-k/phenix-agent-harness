@@ -559,8 +559,12 @@ impl WorkflowMachine {
         };
         match &transition.when {
             WorkflowCondition::Always => source.settled(),
-            WorkflowCondition::InputExists { path } => value_at_path(&self.input, path).is_some(),
-            WorkflowCondition::InputMissing { path } => value_at_path(&self.input, path).is_none(),
+            WorkflowCondition::InputExists { path } => {
+                source.settled() && value_at_path(&self.input, path).is_some()
+            }
+            WorkflowCondition::InputMissing { path } => {
+                source.settled() && value_at_path(&self.input, path).is_none()
+            }
             WorkflowCondition::OutputEquals { path, value } => source
                 .output()
                 .and_then(|output| value_at_path(output, path))
@@ -855,6 +859,57 @@ mod tests {
         };
         assert_eq!(key, "implement");
         assert_eq!(context["input"]["plan"]["steps"][0], "copy");
+    }
+
+    #[test]
+    fn input_conditions_wait_for_the_source_state_to_settle() {
+        let graph = WorkflowGraph {
+            entry: "invoke".to_owned(),
+            states: vec![
+                state(
+                    "invoke",
+                    true,
+                    WorkflowStateKind::Invoke {
+                        role: RoleId::parse("worker").expect("role"),
+                        objective: "Work on {objective}".to_owned(),
+                    },
+                ),
+                state(
+                    "return",
+                    false,
+                    WorkflowStateKind::Return {
+                        summary: "Done".to_owned(),
+                    },
+                ),
+            ],
+            transitions: vec![edge(
+                "invoke",
+                "return",
+                WorkflowCondition::InputExists {
+                    path: "plan".to_owned(),
+                },
+            )],
+        };
+        let mut machine =
+            WorkflowMachine::new(graph, "change", serde_json::json!({"plan": "provided"}))
+                .expect("machine");
+
+        let actions = machine.next_actions().expect("invoke");
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(
+            actions.first(),
+            Some(WorkflowAction::Invoke { key, .. }) if key == "invoke"
+        ));
+
+        bind_and_complete(&mut machine, "invoke", 1, r#"{"status":"done"}"#);
+        let actions = machine.next_actions().expect("return");
+        assert!(matches!(
+            actions.last(),
+            Some(WorkflowAction::Complete(WorkflowTerminal {
+                success: true,
+                ..
+            }))
+        ));
     }
 
     #[test]
