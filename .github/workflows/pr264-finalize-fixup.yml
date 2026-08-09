@@ -1,0 +1,74 @@
+name: PR 264 finalize fixup
+
+on:
+  push:
+    branches:
+      - refactor/phenix-acp-boundaries-routing-d0-d4
+    paths:
+      - .github/workflows/pr264-finalize-fixup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fixup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: refactor/phenix-acp-boundaries-routing-d0-d4
+      - name: Install rustfmt and clippy
+        run: rustup component add rustfmt clippy
+      - name: Apply validated base candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('.github/workflows/pr264-base-fixup.yml').read_text().splitlines()
+          start = source.index('      - name: Apply ACP transport and migration fixes')
+          run = source.index('        run: |', start) + 1
+          end = next(i for i in range(run, len(source)) if source[i].startswith('      - name: '))
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in source[run:end]) + '\n'
+          Path('/tmp/apply-pr264-fixes.sh').write_text(script)
+          PY
+          bash /tmp/apply-pr264-fixes.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('rust/crates/phenix-conductor/tests/black_box_model_tool_loop.rs')
+          text = path.read_text()
+          old_routes = '''| Role | Workflow | Target | Explanation |\n|---|---|---|---|\n| `coordinator` | `*` | `coordinator/mock/coordinator` | deterministic coordinator |\n| `specialist` | `*` | `specialist/mock/specialist` | deterministic specialist |\n| `*` | `*` | `coordinator/mock/coordinator` | fallback coordinator |\n'''
+          new_routes = '''| Role | Workflow | D0 | D1 | D2 | D3 | D4 | Explanation |\n|---|---|---|---|---|---|---|---|\n| `coordinator` | `*` | `coordinator/mock/coordinator` | `coordinator/mock/coordinator` | `coordinator/mock/coordinator` | `coordinator/mock/coordinator` | `coordinator/mock/coordinator` | deterministic coordinator |\n| `specialist` | `*` | `specialist/mock/specialist` | `specialist/mock/specialist` | `specialist/mock/specialist` | `specialist/mock/specialist` | `specialist/mock/specialist` | deterministic specialist |\n| `*` | `*` | `coordinator/mock/coordinator` | `coordinator/mock/coordinator` | `coordinator/mock/coordinator` | `coordinator/mock/coordinator` | `coordinator/mock/coordinator` | fallback coordinator |\n'''
+          if old_routes not in text:
+              raise SystemExit('expected legacy black-box routing table not found')
+          text = text.replace(old_routes, new_routes, 1)
+          old = '    assert_eq!(configured["result"]["revision"], 1);\n'
+          new = '''    assert_eq!(\n        configured["result"]["revision"],\n        1,\n        "configuration apply failed: {configured}"\n    );\n'''
+          if old not in text:
+              raise SystemExit('expected black-box revision assertion not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          cd rust
+          cargo fmt --all
+      - name: Rust check and refresh lockfile
+        run: cargo check --workspace --all-targets
+        working-directory: rust
+      - name: Rust clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        working-directory: rust
+      - name: Rust tests
+        run: cargo test --workspace --all-targets --locked
+        working-directory: rust
+      - name: Commit source repairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add rust
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit'
+            exit 0
+          fi
+          git commit -m 'fix: restore ACP workspace compilation'
+          git push origin HEAD:refactor/phenix-acp-boundaries-routing-d0-d4
