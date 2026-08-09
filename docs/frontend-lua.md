@@ -1,6 +1,6 @@
 # Lua frontend configuration
 
-Phenix currently keeps native window composition and rendering in Rust. The embedded Lua provider configures semantic theme groups, keymaps, and frontend commands; it does not construct the window tree.
+Phenix currently keeps native window composition and rendering in Rust. The embedded Lua provider configures semantic theme groups, keymaps, frontend commands, and the user-authored Phenix ACP policy submitted to the conductor; it does not construct the window tree or own conductor runtime state.
 
 A future Neovim-like window API is intentionally deferred until the native workspace model has settled. The current Lua API should not be treated as that future window API.
 
@@ -19,6 +19,11 @@ config.lua
            semantic theme groups
            keymap descriptions
            Rust-owned layout value
+      -> AcpApplicationConfig
+           backend descriptors
+           workflow definitions
+           routing definitions
+           standard-session template
       -> key callback
            FrontendCommand[]
               application
@@ -27,9 +32,86 @@ config.lua
               overlay behavior
 ```
 
-The provider does not expose Ratatui widgets, terminal handles, windows, backend sessions, or mutable `AppState` references. It also does not expose a layout-construction API.
+The provider does not expose Ratatui widgets, terminal handles, windows, backend sessions, mutable `AppState` references, or conductor runtime ownership. It also does not expose a layout-construction API.
 
 Lua callbacks execute on the single frontend-reactivity owner thread. They append semantic commands to a callback-local collector. The owner loop applies those commands after the callback returns.
+
+## Phenix ACP authoring
+
+Lua is a first-class authoring surface for the policy that Phenix submits through `_phenix/config/apply`. It does not construct the runtime itself: the conductor parses and validates the definitions, constructs the immutable configuration revision, and future session trees pin that revision.
+
+The configuration root is explicit:
+
+```lua
+phenix.acp.configure({
+  definition_id = "phenix.harness",
+  router = "router.mixed",
+  standard_session = {
+    role = "coordinator",
+    difficulty = "d2",
+    objective = "Interactive Phenix session tree",
+  },
+})
+
+phenix.acp.backend({
+  id = "pi",
+  command = "pi-acp",
+})
+```
+
+Workflows can be authored directly as structured Lua rather than stored in a second Markdown configuration tree:
+
+```lua
+phenix.acp.workflow({
+  id = "workflow.implement",
+  title = "Implementation",
+  steps = {
+    {
+      key = "plan",
+      role = "planner",
+      objective = "Plan {objective}",
+    },
+    {
+      key = "implement",
+      parent = "plan",
+      role = "implementer",
+      objective = "Implement {objective}",
+    },
+  },
+})
+```
+
+Routing tables likewise carry the full D0-D4 model configuration explicitly:
+
+```lua
+phenix.acp.routing_table({
+  id = "router.mixed",
+  title = "Mixed routing",
+  routes = {
+    {
+      role = "*",
+      workflow = "*",
+      d0 = "pi/provider/model/minimal",
+      d1 = "pi/provider/model/low",
+      d2 = "pi/provider/model/medium",
+      d3 = "pi/provider/model/high",
+      d4 = "pi/provider/model/max",
+      explanation = "fallback",
+    },
+  },
+})
+```
+
+The path and inline-source descriptor forms remain available for external definition files:
+
+```lua
+phenix.acp.workflow("workflows/custom.md")
+phenix.acp.routing_table({ source = source, format = "markdown" })
+```
+
+Structured definitions are converted at the authoring boundary and then passed through the same canonical Phenix definition parser as external sources. Lua therefore does not maintain a second workflow or routing semantics implementation.
+
+Difficulty is runtime policy, not prompt text. A workflow start carries D0-D4 and the active router selects a complete `backend/provider/model/thinking` target using role, workflow, and difficulty. Workflow-specific routing rows may deliberately constrain a workflow to stronger model/thinking configurations without changing the reusable role vocabulary.
 
 ## Keymaps
 
