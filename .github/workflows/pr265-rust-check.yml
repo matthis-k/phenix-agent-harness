@@ -45,6 +45,14 @@ jobs:
               )
           cargo.write_text(text)
 
+          smoke = Path('rust/crates/phenix-acp-presets/src/bin/phenix-acp-smoke.rs')
+          text = smoke.read_text()
+          old = '''                    ClientRequest::SetSessionConfigOptionRequest(request) => json!({\n                        "configOptions": fixture_config_options_with(\n                            &request.config_id.to_string(),\n                            request.value.as_ref(),\n                        ),\n                    }),\n'''
+          new = '''                    ClientRequest::SetSessionConfigOptionRequest(request) => {\n                        let value = serde_json::to_value(&request.value)\n                            .map_err(phenix_acp::acp::Error::into_internal_error)?;\n                        json!({\n                            "configOptions": fixture_config_options_with(\n                                &request.config_id.to_string(),\n                                &value,\n                            ),\n                        })\n                    }\n'''
+          if old not in text:
+              raise SystemExit('expected smoke config-option arm not found')
+          smoke.write_text(text.replace(old, new, 1))
+
           workflow = Path('rust/crates/phenix-acp/src/runtime/workflow.rs')
           text = workflow.read_text()
           text = text.replace(
