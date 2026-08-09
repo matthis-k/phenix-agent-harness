@@ -41,17 +41,17 @@ pub use configuration::{
     ConfigurationApply, ConfigurationApplyParams, ConfigurationApplyResult,
     ConfigurationBackendInput, ConfigurationChangedNotification, ConfigurationChangedParams,
     ConfigurationDefinitionInput, ConfigurationFormat, ConfigurationGet, ConfigurationGetParams,
-    ConfigurationGetResult, ConfigurationInput, ConfigurationSnapshot,
-    ConfigurationSource, ConfigurationSourceError, ConfigurationSourceOrigin,
-    ConfigurationStandardSessionInput, LoadedConfigurationSource,
+    ConfigurationGetResult, ConfigurationInput, ConfigurationSnapshot, ConfigurationSource,
+    ConfigurationSourceError, ConfigurationSourceOrigin, ConfigurationStandardSessionInput,
+    LoadedConfigurationSource,
 };
 pub use definition::{
     AcpEndpoint, BackendDefinition, DefinitionError, SessionTreeDefinition,
     SessionTreeDefinitionBuilder,
 };
 pub use id::{
-    AcpSessionId, BackendId, DefinitionId, IdError, McpServerName, ModelId, ObjectiveId,
-    ProviderId, RoleId, RouterId, RpcRequestId, SessionNodeId, SessionTreeId, ToolId, WorkflowId,
+    AcpSessionId, BackendId, DefinitionId, IdError, McpServerName, ModelId, ObjectiveId, ProviderId,
+    RoleId, RouterId, RpcRequestId, SessionNodeId, SessionTreeId, ToolId, WorkflowId,
 };
 pub use protocol::{
     AcpMethod, AcpNotification, Difficulty, EmptyResult, ModelConfig, ModelSelection, NodeAttachResult,
@@ -71,7 +71,9 @@ pub use runtime::{
     GatewayEvent, GatewayFailure, GatewayReply, InteractionResponse, PhenixAcpGateway,
     PhenixAcpGatewayBuilder, RoutingDecision, RoutingRequest, SessionCommand, SessionEvent,
     SessionImage, SessionOpenKind, SessionOpenRequest, SessionRouter, StaticWorkflow,
-    TreeStartResult, Workflow, WorkflowPlan, WorkflowPlanBuilder, WorkflowRequest, WorkflowStep,
+    TreeStartResult, Workflow, WorkflowAction, WorkflowCondition, WorkflowGraph, WorkflowGraphState,
+    WorkflowJoin, WorkflowOutcomeStatus, WorkflowPlan, WorkflowPlanBuilder, WorkflowRequest,
+    WorkflowStateKind, WorkflowStep, WorkflowTerminal, WorkflowTransition,
 };
 pub use source::{
     DifficultyModelConfigs, RouteSelector, RoutingRule, RoutingTable, WorkflowDefinition,
