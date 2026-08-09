@@ -19,7 +19,7 @@ jobs:
           ref: refactor/phenix-acp-boundaries-routing-d0-d4
       - name: Install rustfmt and clippy
         run: rustup component add rustfmt clippy
-      - name: Apply ACP transport and smoke fixes
+      - name: Apply ACP transport and migration fixes
         shell: bash
         run: |
           set -euo pipefail
@@ -70,6 +70,19 @@ jobs:
               else:
                   raise SystemExit(f'expected config-option arm not found in {path}')
               path.write_text(text)
+
+          provider = Path('rust/crates/phenix-ui-lua/src/provider.rs')
+          text = provider.read_text()
+          old_config = '''phenix.acp.configure({\n  definition_id = "phenix.harness",\n  router = "router.mixed",\n  backend = { id = "pi", command = "pi-acp" },\n  root = {\n    tree_id = "tree-frontend",\n    role = "coordinator",\n    objective = "Interactive tree",\n  },\n})\n'''
+          new_config = '''phenix.acp.configure({\n  definition_id = "phenix.harness",\n  router = "router.mixed",\n  standard_session = {\n    role = "coordinator",\n    difficulty = "d1",\n    objective = "Interactive tree",\n  },\n})\nphenix.acp.backend({ id = "pi", command = "pi-acp" })\n'''
+          if old_config not in text:
+              raise SystemExit('expected legacy Lua ACP config fixture not found')
+          text = text.replace(old_config, new_config, 1)
+          old_assert = '        assert_eq!(config.backend().id().as_str(), "pi");\n'
+          new_assert = '''        assert_eq!(config.backends().len(), 1);\n        assert_eq!(config.backends()[0].id().as_str(), "pi");\n        assert_eq!(\n            config.standard_session().expect("standard session").role().as_str(),\n            "coordinator"\n        );\n'''
+          if old_assert not in text:
+              raise SystemExit('expected singular backend assertion not found')
+          provider.write_text(text.replace(old_assert, new_assert, 1))
           PY
           cd rust
           cargo fmt --all
