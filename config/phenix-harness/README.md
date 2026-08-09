@@ -34,8 +34,8 @@ The supported state kinds are `invoke`, `decision`, `return`, and `fail`. `decis
 `Next` is a semicolon-separated set of deterministic transitions. Conditions may inspect caller input, typed predecessor output, or predecessor outcome:
 
 ```text
-implement if input.implementation.plan exists
-plan if input.implementation.plan missing
+implement if input.plan exists
+plan if input.plan missing
 repair if output.decision = repair
 repository if output.domains contains repository
 fallback if outcome = failure
@@ -45,7 +45,7 @@ Workflow invoke outputs are parsed as JSON when possible and are passed to downs
 
 The example workflows apply these ownership rules:
 
-- `workflow.implement` treats a caller-supplied `input.implementation.plan` as authoritative and skips its planner.
+- `workflow.implement` treats a caller-supplied `input.plan` as authoritative and skips its planner.
 - Debugging cannot mutate after an inconclusive reproduction.
 - Post-implementation reviewers return explicit accept/repair/fail decisions with one bounded repair/recheck path.
 - QA waits for all evidence branches to settle and distinguishes mandatory from optional evidence.
