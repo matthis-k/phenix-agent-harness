@@ -1,8 +1,9 @@
 let
-  ciSchemaVersion = 1;
+  ciSchemaVersion = 2;
   renderMaintenance = import ./render-maintenance.nix;
+  renderGithubWorkflow = import ./render-github-workflow.nix;
   mkMaintenance = import ./mk-maintenance.nix {
-    inherit ciSchemaVersion renderMaintenance;
+    inherit ciSchemaVersion renderMaintenance renderGithubWorkflow;
   };
   mkMaintenancePackage = import ./mk-maintenance-package.nix;
 
@@ -38,12 +39,13 @@ let
     };
 in
 {
-  version = "0.4.0";
+  version = "0.5.0";
   inherit
     ciSchemaVersion
     mkMaintenance
     mkMaintenanceOutputs
     mkMaintenancePackage
+    renderGithubWorkflow
     renderMaintenance
     ;
 }
