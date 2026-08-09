@@ -7,54 +7,36 @@ This repository is the native Phenix agent harness. Treat the current Rust/ACP i
 Use this order:
 
 1. Executable Rust code and deterministic tests.
-2. `config/phenix-harness/` for the packaged authoring configuration.
-3. `docs/phenix-acp.md` and focused current design documents.
-4. This file for repository working rules.
+2. [`README.md`](README.md) for the intended architecture and subsystem boundaries.
+3. `config/phenix-harness/` for the explicit example authoring configuration.
+4. Focused current references such as `docs/frontend-lua.md`.
+5. This file for repository working rules.
 
 When documentation and code disagree, fix or remove the stale documentation in the same change.
 
-## Current architecture
+## Architecture discipline
 
-```text
-Ratatui frontend (`phenix-tui`)
-        |
-        v
-frontend config / typed UI state
-        |
-        v
-Phenix conductor + ACP gateway
-        |
-        v
-standard ACP backends (`phenix-acp-backend`)
-        |
-        v
-Pi ACP / other ACP-compatible agents
-```
+The root README defines the intended split: **the conductor owns orchestration; the TUI owns interaction and presentation**.
 
-- `phenix-tui` owns terminal UX, rendering, input, focus, overlays, and frontend integration.
-- `phenix-ui-core`, `phenix-ui-runtime`, `phenix-ui-lua`, and `phenix-frontend-config` own frontend state/configuration boundaries.
-- `phenix-acp` owns typed Phenix session-tree, routing, workflow, configuration, and extension protocol concepts.
-- `phenix-conductor` owns aggregate orchestration and the standard/Phenix ACP boundary.
-- `phenix-acp-backend` adapts standard ACP agents through the official Rust SDK.
-- `phenix-runtime-api` is the typed runtime boundary shared by backend and frontend layers.
-- Pi is an external ACP backend dependency. Phenix does not patch or embed a second Pi-facing application layer.
+Keep that boundary explicit:
 
-There is one supported frontend-to-agent path. Do not add a second process protocol, backend selector, headless TypeScript fallback, or duplicate orchestration implementation.
-
-## Configuration
-
-- A running session tree has immutable configuration.
-- Multiple independently configured trees may coexist.
+- `phenix-conductor` is the authoritative aggregate runtime and Phenix ACP server.
+- `phenix-tui` is a conductor client; it must not grow a second routing, workflow, session-tree, or downstream-process implementation.
+- `phenix-acp-backend` adapts ordinary ACP agents through the official Rust SDK.
 - Lua is an authoring/configuration surface, not a second runtime implementation.
-- Standard ACP owns singular-agent behavior; `_phenix/*` extensions cover Phenix orchestration concepts that ACP does not model.
+- A running session tree has immutable configuration; multiple independently configured trees may coexist.
+- Standard ACP owns singular-agent behavior; typed `_phenix/*` extensions cover aggregate orchestration concepts ACP does not model.
 - Use nominal/typed identifiers and parse external data once at boundaries. Do not propagate unchecked stringly state through the runtime.
+
+There is one supported frontend-to-agent path. Do not add a second process protocol, backend selector, headless compatibility fallback, or duplicate orchestration implementation.
 
 ## Frontend discipline
 
 - Prefer Ratatui ecosystem widgets and abstractions over local low-level primitives.
 - The frontend should compose UX and typed integrations rather than reimplement text/layout/rendering fundamentals.
-- Rich text, transcript blocks, images, panes, and other semantic UI units are valid frontend abstractions; raw text-cell or layout machinery should normally come from libraries.
+- Rich text, transcript blocks, images, panes, pickers, and other semantic UI units are valid frontend abstractions; raw text-cell or layout machinery should normally come from libraries.
 - Keep backend routing/workflow policy out of the renderer and input layer.
+- Put exact keybindings and presentation behavior in effective configuration/runtime help rather than duplicating them in architecture prose.
 
 ## Change discipline
 
@@ -64,6 +46,7 @@ There is one supported frontend-to-agent path. Do not add a second process proto
 - Make invalid runtime states difficult or impossible to represent.
 - Preserve typed errors at subsystem boundaries; do not collapse actionable failures into generic exit states.
 - Add focused regression tests for behavioral fixes and integration tests for cross-boundary behavior.
+- Keep implementation-specific invariants close to the code/tests that enforce them instead of creating speculative design documents.
 
 ## Maintenance
 
