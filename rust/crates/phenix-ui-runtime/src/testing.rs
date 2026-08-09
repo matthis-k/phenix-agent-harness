@@ -218,6 +218,7 @@ mod tests {
         ));
         let result = FrontendScenario::new(provider)
             .with_state(sidebar_state())
+            .input(key('w', true, false, false))
             .input(key('>', false, false, false))
             .run()
             .expect("scenario");
@@ -234,7 +235,10 @@ mod tests {
             LuaFrontendProvider::new(LuaFrontendOptions::default()).expect("Lua provider"),
         ));
         let result = FrontendScenario::new(provider)
-            .input(key('l', true, false, false))
+            .with_state(sidebar_state())
+            .input(key(' ', false, false, false))
+            .input(key('f', false, false, false))
+            .input(key('a', false, false, false))
             .run()
             .expect("scenario");
         assert!(result.emitted(|command| matches!(command, BackendCommand::AuthProviders)));
