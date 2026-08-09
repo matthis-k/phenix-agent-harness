@@ -177,8 +177,7 @@ impl ConductorOwner {
     ) -> Result<Vec<GatewayEvent>, ConductorOwnerError> {
         self.runtime_for_tree_mut(tree_id)?
             .conductor_mut()
-            .gateway_mut()
-            .execute(tree_id, node_id, SessionCommand::Poll)
+            .poll_node(tree_id, node_id)
             .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))
     }
 
@@ -286,7 +285,10 @@ impl ConductorOwner {
             .ok_or(ConductorOwnerError::UnknownRevision(revision))
     }
 
-    fn runtime_for_tree(&self, tree_id: &SessionTreeId) -> Result<&ConductorRuntime, ConductorOwnerError> {
+    fn runtime_for_tree(
+        &self,
+        tree_id: &SessionTreeId,
+    ) -> Result<&ConductorRuntime, ConductorOwnerError> {
         let revision = self
             .tree_revisions
             .get(tree_id)
@@ -307,7 +309,8 @@ impl ConductorOwner {
             .get(tree_id)
             .copied()
             .ok_or_else(|| ConductorOwnerError::UnknownTree(tree_id.clone()))?;
-        self.revision_mut(revision).map(|revision| &mut revision.runtime)
+        self.revision_mut(revision)
+            .map(|revision| &mut revision.runtime)
     }
 
     fn allocate_tree_id(&mut self) -> Result<SessionTreeId, ConductorOwnerError> {
@@ -525,7 +528,9 @@ impl Display for ConductorOwnerError {
                 write!(formatter, "Phenix ACP method {method} requires tree_id")
             }
             Self::InvalidTreeTarget(message) => write!(formatter, "invalid tree target: {message}"),
-            Self::IdentifierExhausted => formatter.write_str("Phenix owner identifiers are exhausted"),
+            Self::IdentifierExhausted => {
+                formatter.write_str("Phenix owner identifiers are exhausted")
+            }
             Self::MissingBackends => {
                 formatter.write_str("Phenix ACP configuration requires at least one backend")
             }
@@ -548,8 +553,12 @@ impl Display for ConductorOwnerError {
                 write!(formatter, "failed to encode Phenix ACP configuration response: {error}")
             }
             Self::DecodeRequest(error) => write!(formatter, "invalid Phenix ACP request: {error}"),
-            Self::EncodeRequest(error) => write!(formatter, "failed to encode Phenix ACP request: {error}"),
-            Self::DecodeResponse(error) => write!(formatter, "failed to decode Phenix ACP response: {error}"),
+            Self::EncodeRequest(error) => {
+                write!(formatter, "failed to encode Phenix ACP request: {error}")
+            }
+            Self::DecodeResponse(error) => {
+                write!(formatter, "failed to decode Phenix ACP response: {error}")
+            }
             Self::Source(error) => Display::fmt(error, formatter),
             Self::Build(error) => {
                 write!(formatter, "failed to construct Phenix ACP configuration: {error}")
