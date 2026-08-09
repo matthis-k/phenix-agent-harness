@@ -1,6 +1,6 @@
 # Native frontend architecture
 
-Phenix owns the terminal user experience through the Rust/Ratatui frontend. Agent harnesses are reached through standard ACP behind the Rust-owned Phenix ACP gateway rather than through frontend-specific backend integrations.
+Phenix owns the terminal user experience through the Rust/Ratatui frontend. The frontend is a client of the Phenix conductor; it does not construct orchestration runtime state itself.
 
 ```text
 terminal input ─┐
@@ -9,15 +9,14 @@ clock/refresh ──┘
 
 Ratatui frontend
   -> phenix-ui-core
-  -> typed Phenix runtime boundary
-  -> Phenix ACP gateway
-  -> standard ACP sessions
+  -> phenix-runtime-api
+  -> ACP client adapter
+  -> phenix-conductor (standard ACP + _phenix/*)
+  -> ordinary ACP client sessions
   -> Pi / Codex / other ACP agents
 ```
 
-ACP is the packaged default. The typed Pi JSONL backend is retained only as an explicit recovery fallback while real-agent persistence and recovery parity continue to mature. New frontend or orchestration behavior must target the typed Rust ACP/Phenix boundary and must not extend the fallback protocol.
-
-Protocol details are documented in `phenix-acp.md`; gateway lifecycle and packaged verification are documented in `phenix-acp-gateway-runtime.md`.
+There is one production orchestration boundary: the conductor ACP server. A frontend does not call `PhenixAcpGateway` directly and there is no frontend-specific process protocol fallback.
 
 ## Ownership model
 
@@ -38,7 +37,7 @@ The content bus carries facts and lifecycle changes:
 - ACP replies, notifications, and typed failures;
 - transcript, tool, queue, session, objective, and session-tree changes;
 - authentication and elicitation lifecycle;
-- workflow and routing state exposed by the Phenix gateway;
+- workflow, difficulty and routing state exposed by the conductor;
 - clock and refresh events that affect projections.
 
 Content events must not contain terminal geometry, Ratatui widgets, pane sizes, focus transitions, or presentation-specific component references.
@@ -70,54 +69,68 @@ payload: ContentEvent or UiEvent
 
 ## Backend and protocol boundary
 
-The frontend depends on the typed runtime API. It does not depend on Pi, Codex, OpenCode, ACP process details, or backend implementation classes.
+The frontend depends on the typed runtime API and the ACP client adapter. It does not depend on Pi, Codex, OpenCode, downstream ACP process details, or conductor implementation classes.
 
 The production path is:
 
 ```text
-frontend command
+frontend authoring/config
+  -> typed _phenix/config/apply over ACP
+  -> conductor-owned immutable configuration revision
+
+frontend operation
   -> typed runtime command
-  -> Phenix session-tree gateway operation
+  -> standard ACP or typed _phenix/* request
+  -> phenix-conductor
+  -> aggregate tree operation
   -> standard ACP request for one downstream session
-  -> validated ACP reply or notification
+  -> validated ACP reply/notification
   -> typed runtime event
   -> frontend reducer
 ```
 
-Each expected failure stage has a distinct error variant. Configuration, serialization, transport, malformed protocol data, remote ACP errors, unsupported capabilities, and projection failures must not be collapsed into undifferentiated strings.
+Expected failure stages remain distinct. Configuration, serialization, transport, malformed protocol data, remote ACP errors, unsupported capabilities, and projection failures must not be collapsed into undifferentiated strings.
 
-Standard ACP operations retain their standard request and event types. Phenix-specific orchestration is represented by typed gateway operations and namespaced `_phenix/*` methods where an external ACP extension boundary is required. The Ratatui frontend uses the in-process typed gateway boundary; it does not require a second frontend-specific protocol server.
+Standard ACP operations retain standard request and event types. Phenix-specific orchestration uses namespaced typed `_phenix/*` methods. The in-process gateway types are conductor implementation details, not an alternative frontend API.
 
-## Immutable session-tree configuration
+## Configuration ownership
 
-A session tree is an independently configured orchestration domain containing one logical root and all sessions delegated from it. Every session and objective belongs to exactly one tree.
+A fresh conductor is unconfigured. The frontend may use Lua and local definition files as an authoring surface, but it sends source descriptors to the conductor through `_phenix/config/apply`; it does not parse those sources into gateway state or start downstream agents itself.
 
-The tree definition is validated and immutable for its lifetime. It selects:
+Applying configuration creates an immutable conductor-owned revision. A later configuration apply creates a new revision for future trees. Existing trees remain bound to the revision under which they were created.
+
+Reusable configuration contains:
 
 - available ACP backends;
-- routing policy;
-- workflow registry;
-- context and recovery policy;
+- routing tables;
+- workflow definitions;
 - MCP server declarations;
-- built-in tool policy.
+- built-in tool policy;
+- other reusable orchestration policy.
 
-Operational state remains mutable. A host may run multiple trees with different definitions concurrently. Changing routing, workflows, backends, or tools creates a new tree rather than mutating a running tree.
+Concrete tree instance data is separate. Root role, difficulty, objective, and optional requested tree identity belong to tree creation. The optional `standard_session` authoring field is only a compatibility template for translating ordinary ACP `session/new` into a Phenix tree.
 
-The frontend composition root creates the initial tree, but it does not execute routing or workflow transitions. It interacts with the tree through typed runtime commands and consumes projected gateway state.
+## Difficulty and routing
+
+Difficulty is explicit runtime state with levels `D0` through `D4`. A routing rule contains one complete model configuration per level. Every routing cell is the atomic tuple:
+
+```text
+backend/provider/model/thinking
+```
+
+The conductor does not invent a missing backend, provider, model, or thinking level. Delegated work inherits the current difficulty unless the caller explicitly overrides it.
 
 ## Tool configuration
 
-Client-provided MCP servers are part of immutable tree configuration and are forwarded during downstream ACP session setup. Backend-built-in tool policy is modeled separately because base ACP does not prescribe a universal built-in-tool allow/deny API.
+Client-provided MCP servers are part of user-owned immutable configuration and are forwarded during downstream ACP session setup when supported. Backend-built-in tool policy is modeled separately because base ACP does not prescribe a universal built-in-tool allow/deny API.
 
-Adapters must either enforce the requested built-in tool policy through advertised ACP configuration or report a typed unsupported-capability error. Silent fallback is forbidden.
-
-MCP forwarding remains deferred; the configuration model is retained so forwarding can be added without changing the tree-definition API.
+Adapters must either enforce requested tool policy through advertised ACP configuration or report a typed unsupported-capability error. Silent fallback is forbidden.
 
 ## Identity model
 
 Nominal identities must not be interchanged:
 
-- `SessionTreeId`: immutable orchestration-domain identity
+- `SessionTreeId`: orchestration-domain identity
 - `SessionNodeId`: logical node in a Phenix session graph
 - ACP session ID: downstream conversation identity
 - `ObjectiveId`: objective graph identity
@@ -148,15 +161,16 @@ The Ratatui frontend owns:
 - overlays, pickers, and dialogs;
 - frontend keymaps through the Lua provider.
 
-The gateway owns:
+The conductor owns:
 
+- configuration revisions;
 - session-tree authority;
 - objective and workflow state;
-- backend-agnostic routing;
+- difficulty-aware backend/model/thinking routing;
 - downstream ACP session bindings;
 - subtree cancellation and tree shutdown;
 - cross-session recovery and health;
-- context construction policy.
+- aggregate context/orchestration state.
 
 Downstream ACP agents own their native conversation state, model execution, transcript production, tool execution, authentication, and agent-specific capabilities.
 
@@ -164,12 +178,12 @@ Downstream ACP agents own their native conversation state, model execution, tran
 
 Testing is layered:
 
-1. Pure router, reducer, and projection tests without ACP, Pi, a terminal, or Ratatui.
-2. Typed ACP codec tests that distinguish encoding, transport, protocol, remote, and result errors.
-3. Gateway conformance tests against fake ACP agents.
-4. Backend adapter tests against Pi and other agents.
+1. Pure router, reducer, parser and projection tests without a live agent or terminal.
+2. Typed ACP/Phenix codec tests distinguishing encoding, transport, protocol, remote, and result errors.
+3. Conductor conformance tests against fake ACP agents.
+4. Downstream ACP adapter tests.
 5. Recording-renderer and interaction tests for the Ratatui projection.
-6. Packaged end-to-end checks through the gateway and a credential-free ACP fixture.
+6. Packaged end-to-end checks through frontend -> conductor -> credential-free ACP fixture.
 
 A frontend interaction test must not require provider credentials or a live model unless explicitly classified as an end-to-end test.
 
@@ -184,24 +198,22 @@ A new backend-facing operation requires:
 5. Separate typed failure modes.
 6. Reducer coverage and a deliberate frontend projection.
 
-A new UI producer sends a value-type content or UI envelope. It may not receive mutable state, renderer access, backend objects, or widget references.
+A new UI producer sends a value-type content or UI envelope. It may not receive mutable state, renderer access, conductor/gateway objects, backend objects, or widget references.
 
 ## Shutdown
 
-Frontend quit requests orderly gateway and session shutdown but does not immediately terminate the owner loop. The frontend exits only after the backend worker or ACP connection publishes its stopped state, preserving response flushing, session persistence, extension cleanup, and terminal restoration.
+Frontend quit requests orderly conductor/session shutdown but does not immediately terminate the owner loop. The frontend exits only after the backend worker or ACP connection publishes its stopped state, preserving response flushing, session persistence, extension cleanup, and terminal restoration.
 
-## Verification and fallback-removal gates
+## Verification
 
 Every change to this path must preserve:
 
 - Rust formatting, Clippy, workspace tests, and locked Nix builds;
-- typed ACP and Phenix extension conformance tests;
-- routed content and UI bus tests without Pi;
-- immutable tree-definition and workflow-plan validation;
+- typed standard ACP and Phenix extension conformance tests;
+- routed content and UI bus tests without a live model;
+- immutable configuration-revision and workflow-plan validation;
 - standard ACP authentication, sessions, prompts, cancellation, configuration, transcript, tool, permission, terminal, and image behavior;
-- Phenix session-tree, objective, routing, workflow, and health projection tests;
-- packaged Ratatui-to-gateway-to-agent initialization and shutdown checks;
-- no default invocation of Pi's interactive TUI;
+- Phenix session-tree, objective, difficulty, routing, workflow, and health projection tests;
+- packaged Ratatui -> conductor -> agent initialization and shutdown checks;
+- no implicit selection of sample workflows, routers, roles, backends, models or thinking policy;
 - read-only CI that rejects generated or unformatted source.
-
-The explicit JSONL fallback can be removed after real-agent persistence, resume/fork recovery, authentication, permissions, terminal behavior, and failure recovery have equivalent packaged coverage. Its existence is not permission to maintain a second orchestration API.
