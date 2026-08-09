@@ -11,7 +11,7 @@ let
 in
 {
   inherit name description commands;
-  script = rendered.script;
+  inherit (rendered) script;
   ci = {
     schemaVersion = ciSchemaVersion;
     stageCount = builtins.length rendered.steps;

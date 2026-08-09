@@ -14,21 +14,22 @@ let
       outputName ? "phenix-maintenance",
     }:
     let
-      materialized = system: mkMaintenancePackage {
-        pkgs = pkgsFor system;
-        inherit maintenance;
-      };
+      materialized =
+        system:
+        mkMaintenancePackage {
+          pkgs = pkgsFor system;
+          inherit maintenance;
+        };
 
-      perSystem = selector:
+      perSystem =
+        selector:
         builtins.listToAttrs (
-          builtins.map
-            (system: {
-              name = system;
-              value = {
-                ${outputName} = selector (materialized system);
-              };
-            })
-            systems
+          builtins.map (system: {
+            name = system;
+            value = {
+              ${outputName} = selector (materialized system);
+            };
+          }) systems
         );
     in
     {
