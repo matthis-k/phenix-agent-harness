@@ -1,8 +1,7 @@
 use phenix_acp::{
     encode_extension_request, ConfigurationApply, ConfigurationApplyParams,
-    ConfigurationBackendInput, ConfigurationDefinitionInput, ConfigurationFormat,
-    ConfigurationInput, ConfigurationSource, ConfigurationStandardSessionInput, DefinitionFormat,
-    ToolConfiguration,
+    ConfigurationBackendInput, ConfigurationDefinitionInput, ConfigurationInput,
+    ConfigurationSource, ConfigurationStandardSessionInput, ToolConfiguration,
 };
 use phenix_acp_backend::{AcpAgentBackend, AcpBackendConfig, ConfigError as BackendConfigError};
 use phenix_ui_lua::{AcpApplicationConfig, AcpDefinitionInput, AcpDefinitionSource};
@@ -81,17 +80,8 @@ fn map_source(source: &AcpDefinitionSource) -> ConfigurationSource {
         AcpDefinitionSource::Path(path) => ConfigurationSource::Path { path: path.clone() },
         AcpDefinitionSource::Inline { source, format } => ConfigurationSource::Inline {
             source: source.clone(),
-            format: format.map(map_format),
+            format: *format,
         },
-    }
-}
-
-fn map_format(format: DefinitionFormat) -> ConfigurationFormat {
-    match format {
-        DefinitionFormat::Markdown => ConfigurationFormat::Markdown,
-        DefinitionFormat::Json => ConfigurationFormat::Json,
-        DefinitionFormat::Toml => ConfigurationFormat::Toml,
-        DefinitionFormat::Ron => ConfigurationFormat::Ron,
     }
 }
 
