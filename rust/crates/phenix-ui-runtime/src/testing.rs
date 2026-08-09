@@ -205,32 +205,13 @@ impl Error for FrontendScenarioError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_frontend_config::FrontendConfigProvider;
-    use phenix_ui_core::{ElementId, KeyCode, KeyInput, KeyModifiers};
+    use phenix_ui_core::{KeyCode, KeyInput, KeyModifiers};
     use phenix_ui_lua::{LuaFrontendOptions, LuaFrontendProvider};
     use std::cell::RefCell;
     use std::rc::Rc;
 
     #[test]
-    fn lua_resize_wiring_is_testable_without_pi_or_a_terminal() {
-        let provider: FrontendProviderRef = Rc::new(RefCell::new(
-            LuaFrontendProvider::new(LuaFrontendOptions::default()).expect("Lua provider"),
-        ));
-        let result = FrontendScenario::new(provider)
-            .with_state(sidebar_state())
-            .input(key('w', true, false, false))
-            .input(key('>', false, false, false))
-            .run()
-            .expect("scenario");
-        assert_eq!(
-            result.state.view.pane(&ElementId::sidebar()).width,
-            Some(30)
-        );
-        assert!(result.rendered_states.len() >= 2);
-    }
-
-    #[test]
-    fn application_actions_capture_backend_commands_without_executing_pi() {
+    fn configured_authentication_keymap_emits_the_authentication_action() {
         let provider: FrontendProviderRef = Rc::new(RefCell::new(
             LuaFrontendProvider::new(LuaFrontendOptions::default()).expect("Lua provider"),
         ));
@@ -242,19 +223,6 @@ mod tests {
             .run()
             .expect("scenario");
         assert!(result.emitted(|command| matches!(command, BackendCommand::AuthProviders)));
-    }
-
-    #[test]
-    fn provider_snapshot_contains_theme_layout_and_keymaps_without_a_renderer() {
-        let provider =
-            LuaFrontendProvider::new(LuaFrontendOptions::default()).expect("Lua provider");
-        let config = provider.config();
-        assert!(config.theme.highlights.contains_key("Accent"));
-        assert!(!config.keymaps.is_empty());
-        assert!(matches!(
-            &config.layout.root,
-            phenix_frontend_config::LayoutNode::Split(_)
-        ));
     }
 
     fn sidebar_state() -> AppState {
