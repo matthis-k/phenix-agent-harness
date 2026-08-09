@@ -395,16 +395,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn xdg_config_uses_the_phenix_harness_application_directory() {
-        let path = PathBuf::from("/tmp/xdg-config").join("phenix-harness");
-        assert_eq!(path, PathBuf::from("/tmp/xdg-config/phenix-harness"));
-        assert_eq!(
-            path.join("config.lua"),
-            PathBuf::from("/tmp/xdg-config/phenix-harness/config.lua")
-        );
-    }
-
-    #[test]
     fn crossterm_keys_are_reduced_to_backend_neutral_values() {
         let key = convert_key(KeyEvent::new(
             CrosstermKeyCode::Char('x'),
