@@ -7,15 +7,13 @@ result-*
 # Local development state
 /.cache/
 /.pi-subagents
-.devenv/
-.direnv/
+/.direnv/
 .phenix-agent-state/
 .pre-commit-config.yaml
 
-# Diagnostics and temporary migration state
+# Diagnostics
 *.log
 *.log.*
-.maintenance-trigger
 
 # Generated QA output
 /.phenix-qa/
