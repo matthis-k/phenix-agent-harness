@@ -99,14 +99,20 @@ impl AcpSessionFactory for AcpGatewayTransport {
                 .lock()
                 .map_err(|_| GatewayError::session("ACP tree connection lock poisoned"))?;
             let binding = connection_guard.open(&request, created)?;
-            if let Some(model) = &request.model {
-                if let Err(error) = connection_guard.submit(BackendCommand::ModelSelect {
-                    run_id: binding.run_id.clone(),
-                    model: runtime_model(model),
-                }) {
-                    let _ = connection_guard.release(&binding.session_id);
-                    return Err(error);
-                }
+            let selection = request.model.selection();
+            if let Err(error) = connection_guard.submit(BackendCommand::ModelSelect {
+                run_id: binding.run_id.clone(),
+                model: runtime_model(&selection),
+            }) {
+                let _ = connection_guard.release(&binding.session_id);
+                return Err(error);
+            }
+            if let Err(error) = connection_guard.submit(BackendCommand::ThinkingSelect {
+                run_id: binding.run_id.clone(),
+                level: parse_thinking_level(&request.model.thinking.to_string())?,
+            }) {
+                let _ = connection_guard.release(&binding.session_id);
+                return Err(error);
             }
             Ok(binding)
         })();
@@ -297,7 +303,7 @@ impl AcpSession for GatewayAcpSession {
             SessionCommand::SetThinking { level } => {
                 connection.submit(BackendCommand::ThinkingSelect {
                     run_id: self.run_id.clone(),
-                    level: parse_thinking_level(&level)?,
+                    level: parse_thinking_level(&level.to_string())?,
                 })?;
             }
             SessionCommand::Invoke { name, arguments } => {
