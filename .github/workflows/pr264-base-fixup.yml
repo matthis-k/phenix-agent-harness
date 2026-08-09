@@ -122,7 +122,7 @@ jobs:
               raise SystemExit('expected subscription and_then')
           text = text.replace(old_bind, 'runtime.lock().map_err(|_| ()).map(|mut runtime| {', 1)
           old_return = '''                Ok(())\n            });\n            if runtime_result.is_err() {\n'''
-          new_return = '''                ()\n            });\n            if runtime_result.is_err() {\n'''
+          new_return = '''            });\n            if runtime_result.is_err() {\n'''
           if old_return not in text:
               raise SystemExit('expected subscription unit result')
           subscriptions.write_text(text.replace(old_return, new_return, 1))
