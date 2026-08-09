@@ -20,13 +20,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
-      - name: Remove dead workflow API
+      - name: Apply typed workflow attach API
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import re
-          path = Path('rust/crates/phenix-acp/src/runtime/workflow.rs')
-          text = path.read_text()
+
+          workflow = Path('rust/crates/phenix-acp/src/runtime/workflow.rs')
+          text = workflow.read_text()
           text, count = re.subn(
               r'\n    pub fn terminal\(&self\) -> Option<&WorkflowTerminal> \{\n        self\.terminal\.as_ref\(\)\n    \}\n',
               '\n',
@@ -35,7 +36,108 @@ jobs:
           )
           if count != 1:
               raise SystemExit(f'expected one dead terminal method, removed {count}')
-          path.write_text(text)
+          workflow.write_text(text)
+
+          gateway = Path('rust/crates/phenix-acp/src/runtime/gateway.rs')
+          text = gateway.read_text()
+          marker = '#[derive(Clone, Default)]\npub struct PhenixAcpGatewayBuilder {'
+          struct = '''#[derive(Clone, Debug, Eq, PartialEq)]
+          pub struct WorkflowNodeAttach {
+              pub workflow_id: WorkflowId,
+              pub objective_id: ObjectiveId,
+              pub parent_node: SessionNodeId,
+              pub role: RoleId,
+              pub difficulty: Option<Difficulty>,
+              pub objective: String,
+          }
+
+          #[derive(Clone, Default)]
+          pub struct PhenixAcpGatewayBuilder {'''
+          if marker not in text:
+              raise SystemExit('gateway builder marker not found')
+          text = text.replace(marker, struct, 1)
+          old = '''    pub fn attach_workflow_node(
+              &mut self,
+              tree_id: &SessionTreeId,
+              workflow_id: &WorkflowId,
+              workflow_objective: &ObjectiveId,
+              parent_node: &SessionNodeId,
+              role: RoleId,
+              difficulty: Option<Difficulty>,
+              objective: impl Into<String>,
+          ) -> Result<SessionNodeId, GatewayError> {
+              let objective = objective.into();
+          '''
+          new = '''    pub fn attach_workflow_node(
+              &mut self,
+              tree_id: &SessionTreeId,
+              request: WorkflowNodeAttach,
+          ) -> Result<SessionNodeId, GatewayError> {
+              let WorkflowNodeAttach {
+                  workflow_id,
+                  objective_id: workflow_objective,
+                  parent_node,
+                  role,
+                  difficulty,
+                  objective,
+              } = request;
+          '''
+          if old not in text:
+              raise SystemExit('old attach_workflow_node signature not found')
+          text = text.replace(old, new, 1)
+          replacements = [
+              ('tree.active_workflow.as_ref() != Some(workflow_id)', 'tree.active_workflow.as_ref() != Some(&workflow_id)'),
+              ('tree.objectives.contains_key(workflow_objective)', 'tree.objectives.contains_key(&workflow_objective)'),
+              ('tree.nodes\n                .get(parent_node)', 'tree.nodes\n                .get(&parent_node)'),
+              ('parent_node: Some(parent_node.clone())', 'parent_node: Some(parent_node.clone())'),
+              ('if parent_node == &root_node {', 'if parent_node == root_node {'),
+          ]
+          for old_part, new_part in replacements:
+              if old_part not in text:
+                  raise SystemExit(f'gateway replacement target missing: {old_part!r}')
+              text = text.replace(old_part, new_part, 1)
+          gateway.write_text(text)
+
+          runtime_mod = Path('rust/crates/phenix-acp/src/runtime/mod.rs')
+          text = runtime_mod.read_text()
+          old = 'pub use gateway::{PhenixAcpGateway, PhenixAcpGatewayBuilder};'
+          new = 'pub use gateway::{PhenixAcpGateway, PhenixAcpGatewayBuilder, WorkflowNodeAttach};'
+          if old not in text:
+              raise SystemExit('runtime gateway export not found')
+          runtime_mod.write_text(text.replace(old, new, 1))
+
+          conductor = Path('rust/crates/phenix-acp/src/conductor.rs')
+          text = conductor.read_text()
+          old = 'SessionTreeGet, SessionTreeId, SessionTreeList, WorkflowAction, WorkflowGraph, WorkflowId,\n    WorkflowStart, WorkflowStartParams, WorkflowStartResult,'
+          new = 'SessionTreeGet, SessionTreeId, SessionTreeList, WorkflowAction, WorkflowGraph, WorkflowId,\n    WorkflowNodeAttach, WorkflowStart, WorkflowStartParams, WorkflowStartResult,'
+          if old not in text:
+              raise SystemExit('conductor import target not found')
+          text = text.replace(old, new, 1)
+          old = '''                        let node_id = self.gateway.attach_workflow_node(
+                              tree_id,
+                              &run.workflow_id,
+                              &run.objective_id,
+                              &run.root_node_id,
+                              role,
+                              Some(run.difficulty),
+                              objective.clone(),
+                          )?;
+          '''
+          new = '''                        let node_id = self.gateway.attach_workflow_node(
+                              tree_id,
+                              WorkflowNodeAttach {
+                                  workflow_id: run.workflow_id.clone(),
+                                  objective_id: run.objective_id.clone(),
+                                  parent_node: run.root_node_id.clone(),
+                                  role,
+                                  difficulty: Some(run.difficulty),
+                                  objective: objective.clone(),
+                              },
+                          )?;
+          '''
+          if old not in text:
+              raise SystemExit('conductor attach call not found')
+          conductor.write_text(text.replace(old, new, 1))
           PY
           cargo fmt --manifest-path rust/Cargo.toml --all
       - name: Strict Clippy
@@ -53,8 +155,8 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add rust/crates/phenix-acp/src/runtime/workflow.rs
-          git -c core.hooksPath=/dev/null -c commit.gpgSign=false commit --no-verify -m "fix: remove dead workflow terminal accessor"
+          git add rust/crates/phenix-acp/src/runtime/workflow.rs rust/crates/phenix-acp/src/runtime/gateway.rs rust/crates/phenix-acp/src/runtime/mod.rs rust/crates/phenix-acp/src/conductor.rs
+          git -c core.hooksPath=/dev/null -c commit.gpgSign=false commit --no-verify -m "fix: type workflow node attachment"
           git push origin HEAD:fix/workflow-ownership-issue-227
       - name: Upload diagnostics
         if: failure()
