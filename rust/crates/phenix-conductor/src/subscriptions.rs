@@ -6,8 +6,7 @@ use agent_client_protocol::{Client, ConnectionTo};
 use phenix_acp::{
     AcpMethod, AcpNotification, EmptyResult, GatewayEvent, NodeCancel, NodeEventNotification,
     NodeEventParams, NodeExecute, NodeExecuteResult, NodeSubscribe, NodeSubscriptionParams,
-    NodeUnsubscribe, SessionCommand, SessionTreeSnapshot, SessionTreeUpdatedNotification,
-    SessionTreeUpdatedParams,
+    NodeUnsubscribe, SessionTreeSnapshot, SessionTreeUpdatedNotification, SessionTreeUpdatedParams,
 };
 use serde::Serialize;
 use serde_json::value::to_raw_value;
@@ -140,28 +139,14 @@ impl SubscriptionHub {
                     if active_prompts.contains(&subscription.tree_id) {
                         continue;
                     }
-                    let polled = runtime
-                        .conductor_mut()
-                        .map_err(|_| ())?
-                        .gateway_mut()
-                        .execute(
-                            &subscription.tree_id,
-                            &subscription.node_id,
-                            SessionCommand::Poll,
-                        );
-                    match polled {
+                    match runtime.poll_node(&subscription.tree_id, &subscription.node_id) {
                         Ok(polled) => events.extend(polled),
                         Err(_) => {
                             invalid.push(subscription.clone());
                             continue;
                         }
                     }
-                    let snapshot = runtime
-                        .conductor()
-                        .map_err(|_| ())?
-                        .gateway()
-                        .snapshot(&subscription.tree_id);
-                    match snapshot {
+                    match runtime.snapshot_tree(&subscription.tree_id) {
                         Ok(snapshot) => {
                             snapshots.insert(subscription.tree_id.clone(), snapshot);
                         }
@@ -278,10 +263,7 @@ fn validate_subscription(
         .lock()
         .map_err(|_| agent_client_protocol::Error::internal_error())?;
     let snapshot = runtime
-        .conductor()
-        .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?
-        .gateway()
-        .snapshot(&subscription.tree_id)
+        .snapshot_tree(&subscription.tree_id)
         .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
     if snapshot
         .nodes
