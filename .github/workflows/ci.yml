@@ -15,51 +15,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  plan:
-    name: Discover maintenance stages
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      matrix: ${{ steps.matrix.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-
-      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
-        with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-            accept-flake-config = true
-            max-jobs = auto
-
-      - id: matrix
-        name: Read phenix-maintenance provider metadata
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          provider='.#packages.x86_64-linux.phenix-maintenance.phenixMaintenance'
-          schema="$(nix eval "$provider.ci.schemaVersion")"
-          if [[ "$schema" != 1 ]]; then
-            printf 'Unsupported phenix-maintenance schema version: %s\n' "$schema" >&2
-            exit 1
-          fi
-
-          stage_count="$(nix eval "$provider.ci.stageCount")"
-          if [[ "$stage_count" -eq 0 ]]; then
-            printf '%s\n' 'No maintenance commands are exposed to CI.' >&2
-            exit 1
-          fi
-
-          matrix="$(nix eval --json "$provider.ci.matrix")"
-          printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
-
-  maintenance:
-    needs: plan
-    name: Maintenance / ${{ matrix.name }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+  checks:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: Maintenance checks
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -76,31 +34,37 @@ jobs:
             accept-flake-config = true
             max-jobs = auto
 
-      - name: Run ${{ matrix.name }}
-        env:
-          MAINTENANCE_STAGE: ${{ matrix.id }}
-        run: nix run .#phenix-maintenance -- ci run "$MAINTENANCE_STAGE"
+      - name: Run declared maintenance stages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          provider='.#packages.x86_64-linux.phenix-maintenance.phenixMaintenance'
+          schema="$(nix eval "$provider.ci.schemaVersion")"
+          if [[ "$schema" != 1 ]]; then
+            printf 'Unsupported phenix-maintenance schema version: %s\n' "$schema" >&2
+            exit 1
+          fi
+
+          steps_json="$(nix eval --json "$provider.ci.steps")"
+          mapfile -t stages < <(
+            python3 -c 'import json,sys; [print(step["id"]) for step in json.load(sys.stdin)]' <<< "$steps_json"
+          )
+
+          if [[ ${#stages[@]} -eq 0 ]]; then
+            printf '%s\n' 'No maintenance stages are enabled.' >&2
+            exit 1
+          fi
+
+          for stage in "${stages[@]}"; do
+            printf '\n==> maintenance stage: %s\n' "$stage"
+            nix run .#phenix-maintenance -- ci run "$stage"
+          done
 
       - name: Repository remains clean
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           set -euo pipefail
           git diff --exit-code
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-
-  checks:
-    if: ${{ always() }}
-    needs:
-      - plan
-      - maintenance
-    name: Maintenance checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Require discovered maintenance stages
-        env:
-          PLAN_RESULT: ${{ needs.plan.result }}
-          MAINTENANCE_RESULT: ${{ needs.maintenance.result }}
-        run: |
-          test "$PLAN_RESULT" = success
-          test "$MAINTENANCE_RESULT" = success
