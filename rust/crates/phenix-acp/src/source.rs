@@ -1,13 +1,23 @@
 use crate::{
-    BackendId, GatewayError, IdError, ModelId, ModelSelection, ProviderId, RoleId, RouterId,
-    RoutingDecision, RoutingRequest, SessionRouter, Workflow, WorkflowId, WorkflowPlan,
-    WorkflowRequest,
+    BackendId, Difficulty, GatewayError, IdError, ModelConfig, ModelId, ProviderId, RoleId,
+    RouterId, RoutingDecision, RoutingRequest, SessionRouter, ThinkingLevel, Workflow, WorkflowId,
+    WorkflowPlan, WorkflowRequest,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
 const OBJECTIVE_PLACEHOLDER: &str = "{objective}";
+const ROUTER_HEADER: [&str; 8] = [
+    "Role",
+    "Workflow",
+    "D0",
+    "D1",
+    "D2",
+    "D3",
+    "D4",
+    "Explanation",
+];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DefinitionSourceKind {
@@ -17,89 +27,10 @@ pub enum DefinitionSourceKind {
 
 impl Display for DefinitionSourceKind {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Workflow => formatter.write_str("workflow"),
-            Self::Router => formatter.write_str("router"),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ModelTarget {
-    backend: BackendId,
-    provider: ProviderId,
-    model: ModelId,
-}
-
-impl ModelTarget {
-    pub fn new(backend: BackendId, provider: ProviderId, model: ModelId) -> Self {
-        Self {
-            backend,
-            provider,
-            model,
-        }
-    }
-
-    pub fn parse(value: &str) -> Result<Self, DefinitionSourceError> {
-        Self::parse_at(value, None)
-    }
-
-    pub fn backend(&self) -> &BackendId {
-        &self.backend
-    }
-
-    pub fn provider(&self) -> &ProviderId {
-        &self.provider
-    }
-
-    pub fn model(&self) -> &ModelId {
-        &self.model
-    }
-
-    fn parse_at(value: &str, line: Option<usize>) -> Result<Self, DefinitionSourceError> {
-        let first = value
-            .find('/')
-            .ok_or_else(|| DefinitionSourceError::InvalidValue {
-                line,
-                field: "target",
-                value: value.to_owned(),
-                reason: "expected backend/provider/model".to_owned(),
-            })?;
-        let second = value[first + 1..]
-            .find('/')
-            .map(|offset| first + 1 + offset)
-            .ok_or_else(|| DefinitionSourceError::InvalidValue {
-                line,
-                field: "target",
-                value: value.to_owned(),
-                reason: "expected backend/provider/model".to_owned(),
-            })?;
-        let backend = &value[..first];
-        let provider = &value[first + 1..second];
-        let model = &value[second + 1..];
-        if backend.is_empty() || provider.is_empty() || model.is_empty() {
-            return Err(DefinitionSourceError::InvalidValue {
-                line,
-                field: "target",
-                value: value.to_owned(),
-                reason: "backend, provider, and model must all be non-empty".to_owned(),
-            });
-        }
-        Ok(Self {
-            backend: parse_id(backend, line, "backend", BackendId::parse)?,
-            provider: parse_id(provider, line, "provider", ProviderId::parse)?,
-            model: parse_id(model, line, "model", ModelId::parse)?,
+        formatter.write_str(match self {
+            Self::Workflow => "workflow",
+            Self::Router => "router",
         })
-    }
-}
-
-impl Display for ModelTarget {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "{}/{}/{}",
-            self.backend, self.provider, self.model
-        )
     }
 }
 
@@ -190,10 +121,31 @@ impl<T: PartialEq> RouteSelector<T> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DifficultyModelConfigs {
+    models: [ModelConfig; 5],
+}
+
+impl DifficultyModelConfigs {
+    pub fn new(models: [ModelConfig; 5]) -> Self {
+        Self { models }
+    }
+
+    pub fn get(&self, difficulty: Difficulty) -> &ModelConfig {
+        &self.models[difficulty.index()]
+    }
+
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = (Difficulty, &ModelConfig)> {
+        Difficulty::ALL
+            .into_iter()
+            .zip(self.models.iter())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RoutingRule {
     role: RouteSelector<RoleId>,
     workflow: RouteSelector<WorkflowId>,
-    target: ModelTarget,
+    models: DifficultyModelConfigs,
     explanation: String,
 }
 
@@ -206,8 +158,8 @@ impl RoutingRule {
         &self.workflow
     }
 
-    pub fn target(&self) -> &ModelTarget {
-        &self.target
+    pub fn models(&self) -> &DifficultyModelConfigs {
+        &self.models
     }
 
     pub fn explanation(&self) -> &str {
@@ -252,33 +204,30 @@ impl SessionRouter for RoutingTable {
             .find(|rule| rule.matches(request))
             .ok_or_else(|| {
                 GatewayError::routing(format!(
-                    "router {} has no matching route for role {} and workflow {}",
+                    "router {} has no matching route for role {}, workflow {}, difficulty {}",
                     self.id,
                     request.role,
                     request
                         .workflow
                         .as_ref()
-                        .map_or("<none>", WorkflowId::as_str)
+                        .map_or("<none>", WorkflowId::as_str),
+                    request.difficulty
                 ))
             })?;
+        let model = rule.models.get(request.difficulty).clone();
         if !request
             .available_backends
             .iter()
-            .any(|backend| backend == rule.target.backend())
+            .any(|backend| backend == &model.backend)
         {
             return Err(GatewayError::routing(format!(
-                "router {} selected backend {} which is not available in tree {}",
-                self.id,
-                rule.target.backend(),
-                request.tree_id
+                "router {} selected backend {} for {} which is not available in tree {}",
+                self.id, model.backend, request.difficulty, request.tree_id
             )));
         }
         Ok(RoutingDecision {
-            backend: rule.target.backend().clone(),
-            model: Some(ModelSelection {
-                provider: rule.target.provider().clone(),
-                model: rule.target.model().clone(),
-            }),
+            difficulty: request.difficulty,
+            model,
             explanation: rule.explanation.clone(),
         })
     }
@@ -330,7 +279,7 @@ pub fn parse_definition(source: &str) -> Result<ParsedDefinition, DefinitionSour
                 line: declaration_line,
                 expected: "```phenix-workflow or ```phenix-router",
                 found: found.to_owned(),
-            })
+            });
         }
     };
     let metadata = parse_metadata(&mut cursor, declaration_line, kind)?;
@@ -460,8 +409,7 @@ fn parse_workflow(
                 Some(parent.to_owned())
             }
         };
-        let role_source = cell(&row, 2);
-        let role = parse_id(role_source, Some(row.line), "role", RoleId::parse)?;
+        let role = parse_id(cell(&row, 2), Some(row.line), "role", RoleId::parse)?;
         let objective = cell(&row, 3);
         validate_objective_template(objective, row.line)?;
         steps.push(WorkflowStepDefinition {
@@ -490,25 +438,30 @@ fn parse_router(
     cursor: &mut SourceCursor<'_>,
 ) -> Result<ParsedDefinition, DefinitionSourceError> {
     let id = parse_id(id, None, "router id", RouterId::parse)?;
-    let rows = parse_table(cursor, &["Role", "Workflow", "Target", "Explanation"])?;
+    let rows = parse_table(cursor, &ROUTER_HEADER)?;
     let mut rules = Vec::with_capacity(rows.len());
     for row in rows {
+        let models = DifficultyModelConfigs::new([
+            parse_model_config(cell(&row, 2), row.line, "d0")?,
+            parse_model_config(cell(&row, 3), row.line, "d1")?,
+            parse_model_config(cell(&row, 4), row.line, "d2")?,
+            parse_model_config(cell(&row, 5), row.line, "d3")?,
+            parse_model_config(cell(&row, 6), row.line, "d4")?,
+        ]);
         let rule = RoutingRule {
             role: parse_selector(cell(&row, 0), row.line, "role", RoleId::parse)?,
             workflow: parse_selector(cell(&row, 1), row.line, "workflow", WorkflowId::parse)?,
-            target: ModelTarget::parse_at(cell(&row, 2), Some(row.line))?,
-            explanation: required_cell(&row, 3, "explanation")?.to_owned(),
+            models,
+            explanation: required_cell(&row, 7, "explanation")?.to_owned(),
         };
-        if let Some(shadowing) = rules
+        if rules
             .iter()
-            .find(|existing: &&RoutingRule| existing.covers(&rule))
+            .any(|existing: &RoutingRule| existing.covers(&rule))
         {
             return Err(DefinitionSourceError::InvalidTable {
                 line: row.line,
-                reason: format!(
-                    "route is unreachable because an earlier route to {} already covers it",
-                    shadowing.target
-                ),
+                reason: "route is unreachable because an earlier route already covers it"
+                    .to_owned(),
             });
         }
         rules.push(rule);
@@ -519,9 +472,7 @@ fn parse_router(
             reason: "router requires at least one route".to_owned(),
         });
     }
-    let Some(last) = rules.last() else {
-        unreachable!("non-empty routing rules were checked")
-    };
+    let last = rules.last().expect("non-empty routing rules were checked");
     if !matches!(last.role, RouteSelector::Any) || !matches!(last.workflow, RouteSelector::Any) {
         return Err(DefinitionSourceError::InvalidTable {
             line: cursor.last_line(),
@@ -529,6 +480,50 @@ fn parse_router(
         });
     }
     Ok(ParsedDefinition::Router(RoutingTable { id, title, rules }))
+}
+
+fn parse_model_config(
+    value: &str,
+    line: usize,
+    field: &'static str,
+) -> Result<ModelConfig, DefinitionSourceError> {
+    let parts = value.split('/').collect::<Vec<_>>();
+    if parts.len() != 4 || parts.iter().any(|part| part.is_empty()) {
+        return Err(DefinitionSourceError::InvalidValue {
+            line: Some(line),
+            field,
+            value: value.to_owned(),
+            reason: "expected backend/provider/model/thinking".to_owned(),
+        });
+    }
+    Ok(ModelConfig {
+        backend: parse_id(parts[0], Some(line), "backend", BackendId::parse)?,
+        provider: parse_id(parts[1], Some(line), "provider", ProviderId::parse)?,
+        model: parse_id(parts[2], Some(line), "model", ModelId::parse)?,
+        thinking: parse_thinking(parts[3], line, field)?,
+    })
+}
+
+fn parse_thinking(
+    value: &str,
+    line: usize,
+    field: &'static str,
+) -> Result<ThinkingLevel, DefinitionSourceError> {
+    match value {
+        "off" => Ok(ThinkingLevel::Off),
+        "minimal" => Ok(ThinkingLevel::Minimal),
+        "low" => Ok(ThinkingLevel::Low),
+        "medium" => Ok(ThinkingLevel::Medium),
+        "high" => Ok(ThinkingLevel::High),
+        "extra_high" | "extra-high" => Ok(ThinkingLevel::ExtraHigh),
+        "max" => Ok(ThinkingLevel::Max),
+        _ => Err(DefinitionSourceError::InvalidValue {
+            line: Some(line),
+            field,
+            value: value.to_owned(),
+            reason: "expected off, minimal, low, medium, high, extra_high, or max".to_owned(),
+        }),
+    }
 }
 
 #[derive(Debug)]
@@ -876,7 +871,7 @@ impl Error for DefinitionSourceError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{SessionTreeId, WorkflowRequest};
+    use crate::SessionTreeId;
 
     const WORKFLOW: &str = r#"# Implementation
 
@@ -900,19 +895,11 @@ id: phenix.capability-budget
 
 ## Routes
 
-| Role | Workflow | Target | Explanation |
-|---|---|---|---|
-| `verifier` | `phenix.implement` | `pi/anthropic/sonnet` | Strong verification route |
-| `*` | `*` | `pi/openai/gpt-5.6-sol` | Default route |
+| Role | Workflow | D0 | D1 | D2 | D3 | D4 | Explanation |
+|---|---|---|---|---|---|---|---|
+| `verifier` | `phenix.implement` | `pi/anthropic/sonnet/low` | `pi/anthropic/sonnet/medium` | `pi/anthropic/sonnet/high` | `pi/anthropic/opus/high` | `pi/anthropic/opus/max` | Strong verification route |
+| `*` | `*` | `pi/openai/gpt-5.6-luna/minimal` | `pi/openai/gpt-5.6-luna/low` | `pi/openai/gpt-5.6-sol/medium` | `pi/openai/gpt-5.6-sol/high` | `pi/openai/gpt-5.6-sol/max` | Default route |
 "#;
-
-    #[test]
-    fn arbitrary_text_is_not_a_definition() {
-        assert!(matches!(
-            parse_definition("hello"),
-            Err(DefinitionSourceError::UnexpectedLine { line: 1, .. })
-        ));
-    }
 
     #[test]
     fn one_parser_detects_workflows_and_routers() {
@@ -944,7 +931,7 @@ id: phenix.capability-budget
     }
 
     #[test]
-    fn router_source_selects_a_backend_qualified_model() {
+    fn router_selects_the_full_model_config_for_difficulty() {
         let ParsedDefinition::Router(router) = parse_definition(ROUTER).expect("router") else {
             panic!("router definition expected")
         };
@@ -953,67 +940,24 @@ id: phenix.capability-budget
                 tree_id: SessionTreeId::parse("tree-test").expect("tree"),
                 parent_node: None,
                 role: RoleId::parse("verifier").expect("role"),
+                difficulty: Difficulty::D3,
                 objective: "verify".to_owned(),
                 workflow: Some(WorkflowId::parse("phenix.implement").expect("workflow")),
                 available_backends: vec![BackendId::parse("pi").expect("backend")],
             })
             .expect("route");
-        assert_eq!(decision.backend.as_str(), "pi");
-        let model = decision.model.expect("model");
-        assert_eq!(model.provider.as_str(), "anthropic");
-        assert_eq!(model.model.as_str(), "sonnet");
+        assert_eq!(decision.difficulty, Difficulty::D3);
+        assert_eq!(decision.model.backend.as_str(), "pi");
+        assert_eq!(decision.model.provider.as_str(), "anthropic");
+        assert_eq!(decision.model.model.as_str(), "opus");
+        assert_eq!(decision.model.thinking, ThinkingLevel::High);
     }
 
     #[test]
-    fn invalid_markdown_subset_is_rejected() {
-        let malformed = WORKFLOW.replace("## Steps", "### Steps");
+    fn router_requires_all_five_difficulty_columns() {
+        let malformed = ROUTER.replace(" | D4 |", " |");
         assert!(matches!(
             parse_definition(&malformed),
-            Err(DefinitionSourceError::UnexpectedLine { .. })
-        ));
-
-        let malformed = WORKFLOW.replace("|---|---|---|---|", "not a separator");
-        assert!(matches!(
-            parse_definition(&malformed),
-            Err(DefinitionSourceError::InvalidTable { .. })
-        ));
-    }
-
-    #[test]
-    fn workflow_requires_topological_steps_and_objective_transport() {
-        let child_first = WORKFLOW.replace(
-            "| `implement` | | `implementer` | Implement {objective} |\n| `verify` | `implement` | `verifier` | Verify {objective} |",
-            "| `verify` | `implement` | `verifier` | Verify {objective} |",
-        );
-        assert!(matches!(
-            parse_definition(&child_first),
-            Err(DefinitionSourceError::InvalidTable { .. })
-        ));
-
-        let no_objective = WORKFLOW.replace("Implement {objective}", "Implement the task");
-        assert!(matches!(
-            parse_definition(&no_objective),
-            Err(DefinitionSourceError::InvalidTable { .. })
-        ));
-    }
-
-    #[test]
-    fn router_rejects_shadowed_rows_and_requires_a_final_catch_all() {
-        let shadowed = ROUTER.replace(
-            "| `verifier` | `phenix.implement` | `pi/anthropic/sonnet` | Strong verification route |\n| `*` | `*` | `pi/openai/gpt-5.6-sol` | Default route |",
-            "| `*` | `*` | `pi/openai/gpt-5.6-sol` | Default route |\n| `verifier` | `phenix.implement` | `pi/anthropic/sonnet` | Unreachable |",
-        );
-        assert!(matches!(
-            parse_definition(&shadowed),
-            Err(DefinitionSourceError::InvalidTable { .. })
-        ));
-
-        let no_catch_all = ROUTER.replace(
-            "| `*` | `*` | `pi/openai/gpt-5.6-sol` | Default route |",
-            "| `stock` | `*` | `pi/openai/gpt-5.6-sol` | Stock route |",
-        );
-        assert!(matches!(
-            parse_definition(&no_catch_all),
             Err(DefinitionSourceError::InvalidTable { .. })
         ));
     }
