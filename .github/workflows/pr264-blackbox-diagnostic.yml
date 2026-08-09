@@ -31,7 +31,7 @@ jobs:
           Path('/tmp/apply-pr264-fixes.sh').write_text(script)
           PY
           bash /tmp/apply-pr264-fixes.sh
-      - name: Make configuration failure explicit
+      - name: Migrate and diagnose black-box configuration
         shell: bash
         run: |
           set -euo pipefail
@@ -39,6 +39,11 @@ jobs:
           from pathlib import Path
           path = Path('rust/crates/phenix-conductor/tests/black_box_model_tool_loop.rs')
           text = path.read_text()
+          old_routes = '''| Role | Workflow | Target | Explanation |\n|---|---|---|---|\n| `coordinator` | `*` | `coordinator/mock/coordinator` | deterministic coordinator |\n| `specialist` | `*` | `specialist/mock/specialist` | deterministic specialist |\n| `*` | `*` | `coordinator/mock/coordinator` | fallback coordinator |\n'''
+          new_routes = '''| Role | Workflow | D0 | D1 | D2 | D3 | D4 | Explanation |\n|---|---|---|---|---|---|---|---|\n| `coordinator` | `*` | `coordinator/mock/coordinator` | `coordinator/mock/coordinator` | `coordinator/mock/coordinator` | `coordinator/mock/coordinator` | `coordinator/mock/coordinator` | deterministic coordinator |\n| `specialist` | `*` | `specialist/mock/specialist` | `specialist/mock/specialist` | `specialist/mock/specialist` | `specialist/mock/specialist` | `specialist/mock/specialist` | deterministic specialist |\n| `*` | `*` | `coordinator/mock/coordinator` | `coordinator/mock/coordinator` | `coordinator/mock/coordinator` | `coordinator/mock/coordinator` | `coordinator/mock/coordinator` | fallback coordinator |\n'''
+          if old_routes not in text:
+              raise SystemExit('expected legacy black-box routing table not found')
+          text = text.replace(old_routes, new_routes, 1)
           old = '    assert_eq!(configured["result"]["revision"], 1);\n'
           new = '''    assert_eq!(\n        configured["result"]["revision"],\n        1,\n        "configuration apply failed: {configured}"\n    );\n'''
           if old not in text:
@@ -47,6 +52,9 @@ jobs:
           PY
           cd rust
           cargo fmt --all
+      - name: Refresh dependency lock metadata
+        run: cargo check -p phenix-conductor --test black_box_model_tool_loop
+        working-directory: rust
       - name: Run black-box regression with response diagnostics
         run: cargo test -p phenix-conductor --test black_box_model_tool_loop --locked -- --nocapture
         working-directory: rust
