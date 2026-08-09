@@ -114,6 +114,14 @@ jobs:
               raise SystemExit('runtime gateway export not found')
           runtime_mod.write_text(text.replace(before, after, 1))
 
+          lib = Path('rust/crates/phenix-acp/src/lib.rs')
+          text = lib.read_text()
+          before = '    PhenixAcpGatewayBuilder, RoutingDecision, RoutingRequest, SessionCommand, SessionEvent,\n'
+          after = '    PhenixAcpGatewayBuilder, RoutingDecision, RoutingRequest, SessionCommand, SessionEvent,\n    WorkflowNodeAttach,\n'
+          if before not in text:
+              raise SystemExit('crate runtime export target not found')
+          lib.write_text(text.replace(before, after, 1))
+
           conductor = Path('rust/crates/phenix-acp/src/conductor.rs')
           text = conductor.read_text()
           before = 'SessionTreeGet, SessionTreeId, SessionTreeList, WorkflowAction, WorkflowGraph, WorkflowId,\n    WorkflowStart, WorkflowStartParams, WorkflowStartResult,'
@@ -167,7 +175,7 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add rust/crates/phenix-acp/src/runtime/workflow.rs rust/crates/phenix-acp/src/runtime/gateway.rs rust/crates/phenix-acp/src/runtime/mod.rs rust/crates/phenix-acp/src/conductor.rs
+          git add rust/crates/phenix-acp/src/runtime/workflow.rs rust/crates/phenix-acp/src/runtime/gateway.rs rust/crates/phenix-acp/src/runtime/mod.rs rust/crates/phenix-acp/src/lib.rs rust/crates/phenix-acp/src/conductor.rs
           git -c core.hooksPath=/dev/null -c commit.gpgSign=false commit --no-verify -m "fix: type workflow node attachment"
           git push origin HEAD:fix/workflow-ownership-issue-227
       - name: Upload diagnostics
