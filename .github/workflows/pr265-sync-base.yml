@@ -18,34 +18,38 @@ jobs:
           ref: fix/workflow-ownership-issue-227
           fetch-depth: 0
       - name: Merge green PR 264 base
-        id: merge
         shell: bash
         run: |
-          set -uo pipefail
+          set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git fetch origin refactor/phenix-acp-boundaries-routing-d0-d4
           test "$(git rev-parse origin/refactor/phenix-acp-boundaries-routing-d0-d4)" = "5e9d3a74d42c6b5c61e1424392f9ce2012fa5fc8"
-          if git -c core.hooksPath=/dev/null -c commit.gpgSign=false merge --no-edit --no-verify origin/refactor/phenix-acp-boundaries-routing-d0-d4; then
-            git push origin HEAD:fix/workflow-ownership-issue-227
-            exit 0
+          if ! git -c core.hooksPath=/dev/null -c commit.gpgSign=false merge --no-edit --no-verify origin/refactor/phenix-acp-boundaries-routing-d0-d4; then
+            conflicts="$(git diff --name-only --diff-filter=U)"
+            test "$conflicts" = $'rust/crates/phenix-acp-presets/src/bin/phenix-acp-smoke.rs\nrust/crates/phenix-conductor/src/lib.rs'
+
+            # The green base owns the ACP v2 typed config conversion.
+            git checkout --theirs -- rust/crates/phenix-acp-presets/src/bin/phenix-acp-smoke.rs
+
+            # The conductor needs both the green base's non-conflicting changes
+            # and PR 265's workflow graph types. Resolve only the import hunk.
+            python3 - <<'PY'
+          from pathlib import Path
+          path = Path('rust/crates/phenix-conductor/src/lib.rs')
+          text = path.read_text()
+          old = '''<<<<<<< HEAD
+              SessionTreeId, ToolConfiguration, WorkflowGraph, WorkflowId,
+          =======
+              SessionTreeId, ToolConfiguration,
+          >>>>>>> origin/refactor/phenix-acp-boundaries-routing-d0-d4
+          '''
+          if old not in text:
+              raise SystemExit('expected conductor import conflict not found')
+          path.write_text(text.replace(old, '    SessionTreeId, ToolConfiguration, WorkflowGraph, WorkflowId,\n'))
+          PY
+            git add rust/crates/phenix-acp-presets/src/bin/phenix-acp-smoke.rs rust/crates/phenix-conductor/src/lib.rs
+            test -z "$(git diff --name-only --diff-filter=U)"
+            git -c core.hooksPath=/dev/null -c commit.gpgSign=false commit --no-verify -m "Merge green PR 264 base into workflow ownership"
           fi
-          mkdir -p "$RUNNER_TEMP/pr265-conflicts"
-          git status --porcelain=v1 > "$RUNNER_TEMP/pr265-conflicts/status.txt"
-          git diff --name-only --diff-filter=U > "$RUNNER_TEMP/pr265-conflicts/conflicts.txt"
-          git diff --cc > "$RUNNER_TEMP/pr265-conflicts/conflict.diff"
-          while IFS= read -r file; do
-            [ -n "$file" ] || continue
-            safe="${file//\//__}"
-            git show ":1:$file" > "$RUNNER_TEMP/pr265-conflicts/${safe}.base" 2>/dev/null || true
-            git show ":2:$file" > "$RUNNER_TEMP/pr265-conflicts/${safe}.ours" 2>/dev/null || true
-            git show ":3:$file" > "$RUNNER_TEMP/pr265-conflicts/${safe}.theirs" 2>/dev/null || true
-          done < "$RUNNER_TEMP/pr265-conflicts/conflicts.txt"
-          exit 1
-      - name: Upload merge conflicts
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: pr265-merge-conflicts
-          path: ${{ runner.temp }}/pr265-conflicts
-          if-no-files-found: error
+          git push origin HEAD:fix/workflow-ownership-issue-227
