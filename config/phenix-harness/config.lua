@@ -19,7 +19,7 @@ phenix.acp.backend({
 local agents = {
   coordinator = {
     role = "coordinator",
-    contract = "Coordinate bounded specialist work and preserve explicit decisions.",
+    contract = "Coordinate bounded specialist work and preserve explicit decisions without editing the codebase.",
   },
   scout = {
     role = "scout",
@@ -35,27 +35,27 @@ local agents = {
   },
   implementer = {
     role = "implementer",
-    contract = "Make the smallest coherent code change that satisfies the settled objective.",
+    contract = "Own bounded code, test, and instrumentation mutations needed to satisfy the settled objective.",
   },
   tester = {
     role = "tester",
-    contract = "Establish executable feedback and distinguish observations from hypotheses.",
+    contract = "Act as a read-only evidence analyst: run existing feedback, reproduce behavior, and distinguish observations from hypotheses without editing files.",
   },
   critic = {
     role = "critic",
-    contract = "Challenge engineering quality, architecture, and evidence independently.",
+    contract = "Challenge engineering quality, architecture, and evidence independently without editing the codebase.",
   },
   verifier = {
     role = "verifier",
-    contract = "Verify conformance to requested behavior and acceptance evidence independently.",
+    contract = "Verify conformance to requested behavior and acceptance evidence independently without editing the codebase.",
   },
   finalizer = {
     role = "finalizer",
-    contract = "Synthesize established evidence without inventing new findings.",
+    contract = "Synthesize established evidence without inventing new findings or editing implementation files.",
   },
   qa_synthesizer = {
     role = "qa-synthesizer",
-    contract = "Synthesize independent QA evidence while preserving provenance and disagreement.",
+    contract = "Synthesize independent QA evidence while preserving provenance and disagreement without editing implementation files.",
   },
 }
 
@@ -159,7 +159,7 @@ workflow("workflow.ui-change", "Phenix UI change", {
   step("inspect", nil, agents.scout, "Inspect interaction, rendering, focus, input, and state-update paths"),
   step("design", "inspect", agents.architect, "Specify layout, focus, input, feedback, and update invariants before implementation"),
   step("implement", "design", agents.implementer, "Implement the UI change using the highest appropriate existing UI abstractions"),
-  step("scenarios", "implement", agents.tester, "Exercise framework-appropriate UI scenarios and interaction regressions"),
+  step("scenarios", "implement", agents.tester, "Exercise existing framework-appropriate UI scenarios and interaction regressions"),
   step("critique", "scenarios", agents.critic, "Review interaction quality, predictability, hierarchy, and state consistency"),
   step("finalize", "critique", agents.finalizer, "Produce the UI change handoff with scenario evidence"),
 })
@@ -167,12 +167,14 @@ workflow("workflow.ui-change", "Phenix UI change", {
 -- Overlapping native workflows use the strongest structures from Matt Pocock's
 -- skills while retaining Phenix roles, routing, and workflow ownership.
 workflow("workflow.debug", "Evidence-driven diagnosis", {
-  step("reproduce", nil, agents.tester, "Build the smallest reliable reproducer and capture the exact observable failure"),
-  step("minimize", "reproduce", agents.tester, "Minimize the reproducer while preserving the failure"),
-  step("hypothesize", "minimize", agents.critic, "Rank falsifiable root-cause hypotheses and state discriminating evidence"),
-  step("instrument", "hypothesize", agents.tester, "Run the narrowest experiment needed to discriminate the leading hypotheses"),
-  step("fix", "instrument", agents.implementer, "Apply the smallest root-cause repair justified by the evidence"),
-  step("regression", "fix", agents.verifier, "Re-run the reproducer and relevant regressions and preserve durable regression coverage"),
+  step("reproduce", nil, agents.tester, "Reproduce the failure with the narrowest existing feedback path and capture the exact observable evidence"),
+  step("minimize", "reproduce", agents.tester, "Derive the smallest reproducing scenario without editing production or test files"),
+  step("hypothesize", "minimize", agents.critic, "Rank falsifiable root-cause hypotheses and state the evidence that would discriminate them"),
+  step("instrument-plan", "hypothesize", agents.tester, "Design the narrowest diagnostic experiment or instrumentation needed to discriminate the leading hypotheses"),
+  step("instrument", "instrument-plan", agents.implementer, "Add only the bounded diagnostic instrumentation or harness change required by the experiment"),
+  step("evidence", "instrument", agents.tester, "Run the diagnostic experiment and determine which hypotheses the resulting evidence supports or rejects"),
+  step("fix", "evidence", agents.implementer, "Remove temporary diagnostics as appropriate and apply the smallest root-cause repair justified by the evidence"),
+  step("regression", "fix", agents.verifier, "Re-run the reproducer and relevant regressions and verify durable regression coverage exists where appropriate"),
   step("finalize", "regression", agents.finalizer, "Summarize reproduction, causal evidence, repair, and residual uncertainty"),
 })
 
@@ -213,8 +215,9 @@ workflow("workflow.tickets", "Tracer-bullet decomposition", {
 })
 
 workflow("workflow.tdd", "Test-driven development", {
-  step("red", nil, agents.tester, "Create the smallest durable failing test and prove it fails for the intended missing behavior"),
-  step("green", "red", agents.implementer, "Make the smallest coherent implementation that turns the focused test green"),
+  step("red-plan", nil, agents.tester, "Identify the smallest durable test seam, expected assertion, and intended failing reason without editing files"),
+  step("red", "red-plan", agents.implementer, "Add the focused regression test and prove it fails for the intended missing behavior before changing production behavior"),
+  step("green", "red", agents.implementer, "Make the smallest coherent production change that turns the focused test green without weakening the test"),
   step("refactor", "green", agents.implementer, "Improve boundaries and remove duplication while keeping focused feedback green"),
   step("verify", "refactor", agents.verifier, "Run focused and surrounding validation and verify requested behavior without regression"),
 })
