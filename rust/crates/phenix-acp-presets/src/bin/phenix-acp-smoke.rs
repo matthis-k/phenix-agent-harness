@@ -132,7 +132,7 @@ fn run_smoke() -> Result<(), Box<dyn Error>> {
         shell_words::quote(executable.to_string_lossy().as_ref())
     );
     let config = AcpBackendConfig::new(fixture_command, env::current_dir()?)?;
-    let factory = AcpAgentBackend::gateway_factory(config, CHANNEL_CAPACITY);
+    let factory = AcpAgentBackend::gateway_transport(config, CHANNEL_CAPACITY)?;
     let mut gateway = smoke_gateway(factory)?;
 
     let definition = DefinitionId::parse("phenix.smoke")?;
