@@ -274,7 +274,7 @@ fn definition_function(
     kind: DefinitionInputKind,
 ) -> Result<mlua::Function, phenix_frontend_config::FrontendProviderError> {
     lua.create_function(move |_, value: Value| {
-        let source = parse_definition_source(value)?;
+        let source = parse_definition_source(value, kind)?;
         let input = match kind {
             DefinitionInputKind::Workflow => AcpDefinitionInput::Workflow(source),
             DefinitionInputKind::RoutingTable => AcpDefinitionInput::RoutingTable(source),
@@ -285,53 +285,203 @@ fn definition_function(
     .map_err(runtime_error)
 }
 
-fn parse_definition_source(value: Value) -> mlua::Result<AcpDefinitionSource> {
+fn parse_definition_source(
+    value: Value,
+    kind: DefinitionInputKind,
+) -> mlua::Result<AcpDefinitionSource> {
     match value {
-        Value::String(path) => {
-            let path = path.to_str()?.trim().to_owned();
-            if path.is_empty() {
-                return Err(configuration_error("definition path must not be empty"));
-            }
-            Ok(AcpDefinitionSource::Path(PathBuf::from(path)))
-        }
+        Value::String(path) => parse_path_definition(path.to_str()?.as_ref()),
         Value::Table(table) => {
-            deny_unknown_fields(&table, &["path", "source", "format"], "definition")?;
             let path = table.get::<Option<String>>("path")?;
             let source = table.get::<Option<String>>("source")?;
-            match (path, source) {
-                (Some(path), None) => {
-                    if table.get::<Option<String>>("format")?.is_some() {
-                        return Err(configuration_error(
-                            "path definitions infer their format from the extension",
-                        ));
-                    }
-                    if path.trim().is_empty() {
-                        return Err(configuration_error("definition path must not be empty"));
-                    }
-                    Ok(AcpDefinitionSource::Path(PathBuf::from(path)))
-                }
-                (None, Some(source)) => {
-                    if source.trim().is_empty() {
-                        return Err(configuration_error("definition source must not be empty"));
-                    }
-                    let format = table
-                        .get::<Option<String>>("format")?
-                        .map(|format| parse_format(&format))
-                        .transpose()?;
-                    Ok(AcpDefinitionSource::Inline { source, format })
-                }
-                (Some(_), Some(_)) => Err(configuration_error(
-                    "definition input must contain either path or source, not both",
-                )),
-                (None, None) => Err(configuration_error(
-                    "definition input must contain path or source",
-                )),
+            if path.is_some() || source.is_some() {
+                return parse_source_descriptor(table, path, source);
+            }
+            match kind {
+                DefinitionInputKind::Workflow => parse_structured_workflow(table),
+                DefinitionInputKind::RoutingTable => parse_structured_routing_table(table),
             }
         }
         _ => Err(configuration_error(
             "definition input must be a relative path string or a table",
         )),
     }
+}
+
+fn parse_path_definition(path: &str) -> mlua::Result<AcpDefinitionSource> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Err(configuration_error("definition path must not be empty"));
+    }
+    Ok(AcpDefinitionSource::Path(PathBuf::from(path)))
+}
+
+fn parse_source_descriptor(
+    table: Table,
+    path: Option<String>,
+    source: Option<String>,
+) -> mlua::Result<AcpDefinitionSource> {
+    deny_unknown_fields(&table, &["path", "source", "format"], "definition")?;
+    match (path, source) {
+        (Some(path), None) => {
+            if table.get::<Option<String>>("format")?.is_some() {
+                return Err(configuration_error(
+                    "path definitions infer their format from the extension",
+                ));
+            }
+            parse_path_definition(&path)
+        }
+        (None, Some(source)) => {
+            if source.trim().is_empty() {
+                return Err(configuration_error("definition source must not be empty"));
+            }
+            let format = table
+                .get::<Option<String>>("format")?
+                .map(|format| parse_format(&format))
+                .transpose()?;
+            Ok(AcpDefinitionSource::Inline { source, format })
+        }
+        (Some(_), Some(_)) => Err(configuration_error(
+            "definition input must contain either path or source, not both",
+        )),
+        (None, None) => unreachable!("descriptor parsing requires path or source"),
+    }
+}
+
+fn parse_structured_workflow(table: Table) -> mlua::Result<AcpDefinitionSource> {
+    deny_unknown_fields(&table, &["id", "title", "steps"], "workflow definition")?;
+    let id = authoring_atom(&table.get::<String>("id")?, "workflow.id")?;
+    let title = authoring_title(&table.get::<String>("title")?, "workflow.title")?;
+    let steps: Table = table.get("steps")?;
+
+    let mut rows = Vec::new();
+    for step in steps.sequence_values::<Table>() {
+        let step = step?;
+        deny_unknown_fields(
+            &step,
+            &["key", "parent", "role", "objective"],
+            "workflow step",
+        )?;
+        let key = authoring_cell(&step.get::<String>("key")?, "workflow step.key")?;
+        let parent = step
+            .get::<Option<String>>("parent")?
+            .map(|parent| authoring_cell(&parent, "workflow step.parent"))
+            .transpose()?
+            .unwrap_or_else(|| "-".to_owned());
+        let role = authoring_cell(&step.get::<String>("role")?, "workflow step.role")?;
+        let objective = authoring_cell(
+            &step.get::<String>("objective")?,
+            "workflow step.objective",
+        )?;
+        rows.push(format!("| {key} | {parent} | {role} | {objective} |"));
+    }
+    if rows.is_empty() {
+        return Err(configuration_error(
+            "workflow definition requires at least one step",
+        ));
+    }
+
+    Ok(inline_markdown(format!(
+        "# {title}\n\n```phenix-workflow\nid: {id}\n```\n\n## Steps\n\n| Key | Parent | Role | Objective |\n|---|---|---|---|\n{}\n",
+        rows.join("\n")
+    )))
+}
+
+fn parse_structured_routing_table(table: Table) -> mlua::Result<AcpDefinitionSource> {
+    deny_unknown_fields(
+        &table,
+        &["id", "title", "routes"],
+        "routing table definition",
+    )?;
+    let id = authoring_atom(&table.get::<String>("id")?, "routing_table.id")?;
+    let title = authoring_title(&table.get::<String>("title")?, "routing_table.title")?;
+    let routes: Table = table.get("routes")?;
+
+    let mut rows = Vec::new();
+    for route in routes.sequence_values::<Table>() {
+        let route = route?;
+        deny_unknown_fields(
+            &route,
+            &[
+                "role",
+                "workflow",
+                "d0",
+                "d1",
+                "d2",
+                "d3",
+                "d4",
+                "explanation",
+            ],
+            "routing rule",
+        )?;
+        rows.push(format!(
+            "| {} | {} | {} | {} | {} | {} | {} | {} |",
+            authoring_cell(&route.get::<String>("role")?, "routing rule.role")?,
+            authoring_cell(
+                &route.get::<String>("workflow")?,
+                "routing rule.workflow"
+            )?,
+            authoring_cell(&route.get::<String>("d0")?, "routing rule.d0")?,
+            authoring_cell(&route.get::<String>("d1")?, "routing rule.d1")?,
+            authoring_cell(&route.get::<String>("d2")?, "routing rule.d2")?,
+            authoring_cell(&route.get::<String>("d3")?, "routing rule.d3")?,
+            authoring_cell(&route.get::<String>("d4")?, "routing rule.d4")?,
+            authoring_cell(
+                &route.get::<String>("explanation")?,
+                "routing rule.explanation"
+            )?,
+        ));
+    }
+    if rows.is_empty() {
+        return Err(configuration_error(
+            "routing table definition requires at least one route",
+        ));
+    }
+
+    Ok(inline_markdown(format!(
+        "# {title}\n\n```phenix-router\nid: {id}\n```\n\n## Routes\n\n| Role | Workflow | D0 | D1 | D2 | D3 | D4 | Explanation |\n|---|---|---|---|---|---|---|---|\n{}\n",
+        rows.join("\n")
+    )))
+}
+
+fn inline_markdown(source: String) -> AcpDefinitionSource {
+    AcpDefinitionSource::Inline {
+        source,
+        format: Some(DefinitionFormat::Markdown),
+    }
+}
+
+fn authoring_atom(value: &str, field: &str) -> mlua::Result<String> {
+    let value = authoring_cell(value, field)?;
+    if value.chars().any(char::is_whitespace) {
+        return Err(configuration_error(format!(
+            "{field} must not contain whitespace"
+        )));
+    }
+    Ok(value)
+}
+
+fn authoring_title(value: &str, field: &str) -> mlua::Result<String> {
+    let value = value.trim();
+    if value.is_empty() || value.starts_with('#') || value.contains(['\r', '\n']) {
+        return Err(configuration_error(format!(
+            "{field} must be a non-empty single-line heading without a leading '#'"
+        )));
+    }
+    Ok(value.to_owned())
+}
+
+fn authoring_cell(value: &str, field: &str) -> mlua::Result<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(configuration_error(format!("{field} must not be empty")));
+    }
+    if value.contains('|') || value.contains(['\r', '\n']) || value.chars().any(char::is_control) {
+        return Err(configuration_error(format!(
+            "{field} must be a single Markdown-table-safe line"
+        )));
+    }
+    Ok(value.to_owned())
 }
 
 fn parse_format(value: &str) -> mlua::Result<DefinitionFormat> {
@@ -383,4 +533,96 @@ fn configuration_error(message: impl Into<String>) -> mlua::Error {
 
 fn runtime_error(error: mlua::Error) -> phenix_frontend_config::FrontendProviderError {
     phenix_frontend_config::FrontendProviderError::runtime(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use phenix_acp::{parse_routing_table_with_format, parse_workflow_with_format};
+
+    #[test]
+    fn structured_lua_workflow_is_a_first_class_definition_source() {
+        let lua = Lua::new();
+        let table: Table = lua
+            .load(
+                r#"
+return {
+  id = "workflow.test",
+  title = "Test workflow",
+  steps = {
+    {
+      key = "inspect",
+      role = "scout",
+      objective = "Inspect {objective}",
+    },
+    {
+      key = "verify",
+      parent = "inspect",
+      role = "verifier",
+      objective = "Verify {objective}",
+    },
+  },
+}
+"#,
+            )
+            .eval()
+            .expect("workflow table");
+        let source = parse_definition_source(Value::Table(table), DefinitionInputKind::Workflow)
+            .expect("structured workflow source");
+        let AcpDefinitionSource::Inline {
+            source,
+            format: Some(DefinitionFormat::Markdown),
+        } = source
+        else {
+            panic!("structured workflow must become inline markdown")
+        };
+        let workflow = parse_workflow_with_format(&source, DefinitionFormat::Markdown)
+            .expect("canonical workflow parser");
+        assert_eq!(workflow.id().as_str(), "workflow.test");
+        assert_eq!(workflow.steps().len(), 2);
+    }
+
+    #[test]
+    fn structured_lua_routing_table_carries_all_difficulties() {
+        let lua = Lua::new();
+        let table: Table = lua
+            .load(
+                r#"
+return {
+  id = "router.test",
+  title = "Test router",
+  routes = {
+    {
+      role = "*",
+      workflow = "*",
+      d0 = "pi/provider/model/minimal",
+      d1 = "pi/provider/model/low",
+      d2 = "pi/provider/model/medium",
+      d3 = "pi/provider/model/high",
+      d4 = "pi/provider/model/max",
+      explanation = "fallback",
+    },
+  },
+}
+"#,
+            )
+            .eval()
+            .expect("routing table");
+        let source = parse_definition_source(
+            Value::Table(table),
+            DefinitionInputKind::RoutingTable,
+        )
+        .expect("structured routing source");
+        let AcpDefinitionSource::Inline {
+            source,
+            format: Some(DefinitionFormat::Markdown),
+        } = source
+        else {
+            panic!("structured routing table must become inline markdown")
+        };
+        let routing = parse_routing_table_with_format(&source, DefinitionFormat::Markdown)
+            .expect("canonical routing parser");
+        assert_eq!(routing.id().as_str(), "router.test");
+        assert_eq!(routing.rules().len(), 1);
+    }
 }
