@@ -50,11 +50,14 @@ jobs:
           PY
           cd rust
           cargo fmt --all
-      - name: Rust check
-        run: cargo check --workspace --all-targets --locked
+      - name: Rust check and refresh lockfile
+        run: cargo check --workspace --all-targets
         working-directory: rust
-      - name: Rust clippy
+      - name: Rust clippy with committed dependency graph
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        working-directory: rust
+      - name: Rust tests
+        run: cargo test --workspace --all-targets --locked
         working-directory: rust
       - name: Commit fixup
         shell: bash
