@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
-pub mod backend;
-pub mod id;
-pub mod protocol;
+mod backend;
+mod id;
+mod protocol;
 
 pub use backend::{
     AgentBackend, BackendClient, BackendError, BackendOutput, BackendOutputSender, BackendRequest,
