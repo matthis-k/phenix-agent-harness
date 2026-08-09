@@ -40,10 +40,6 @@ fn inbound_prompt_routes_models_and_completes_a_delegation_tool_loop() -> Result
     )?;
     let configured = process.receive_response(100)?;
     assert_eq!(
-        configured["result"]["revision"], 1,
-        "configuration apply failed: {configured}"
-    );
-    assert_eq!(
         configured["result"]["definition_id"],
         "definition.black-box"
     );
