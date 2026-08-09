@@ -40,6 +40,11 @@ let
     inherit (maintenance) name;
     inherit runtimeInputs;
     text = maintenance.script;
+
+    # Provider metadata may intentionally contain literal GitHub expressions such
+    # as `${{ runner.temp }}`. They are emitted from single-quoted shell strings
+    # specifically so the generated dispatcher does not expand them.
+    excludeShellChecks = [ "SC2016" ];
   };
 
   package = basePackage.overrideAttrs (old: {
