@@ -152,12 +152,6 @@ _:
         default = pkgs.lib.mkForce phenix;
       };
 
-      legacyPackages.phenixFrontend = {
-        inherit mkPhenixWrapper;
-        defaultLua = ../rust/crates/phenix-ui-lua/default.lua;
-        exampleConfig = ../config/phenix-harness;
-      };
-
       apps.phenix.program = pkgs.lib.getExe phenix;
       apps.default.program = pkgs.lib.getExe phenix;
 
