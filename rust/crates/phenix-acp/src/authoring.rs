@@ -2,7 +2,7 @@ use crate::source;
 use crate::{
     GatewayError, PhenixAcpGatewayBuilder, RouterId, RoutingTable, WorkflowDefinition, WorkflowId,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -14,7 +14,7 @@ const FORMATS: [DefinitionFormat; 4] = [
     DefinitionFormat::Ron,
 ];
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DefinitionFormat {
     Markdown,
