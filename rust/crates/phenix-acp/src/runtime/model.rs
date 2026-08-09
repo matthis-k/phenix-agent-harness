@@ -54,8 +54,6 @@ pub struct WorkflowStep {
     pub key: String,
     pub parent: Option<String>,
     pub role: RoleId,
-    #[serde(default)]
-    pub difficulty: Option<Difficulty>,
     pub objective: String,
 }
 
@@ -86,24 +84,10 @@ pub struct WorkflowPlanBuilder {
 
 impl WorkflowPlanBuilder {
     pub fn step<P>(
-        self,
-        key: impl Into<String>,
-        parent: Option<P>,
-        role: RoleId,
-        objective: impl Into<String>,
-    ) -> Result<Self, GatewayError>
-    where
-        P: Into<String>,
-    {
-        self.step_with_difficulty(key, parent, role, None, objective)
-    }
-
-    pub fn step_with_difficulty<P>(
         mut self,
         key: impl Into<String>,
         parent: Option<P>,
         role: RoleId,
-        difficulty: Option<Difficulty>,
         objective: impl Into<String>,
     ) -> Result<Self, GatewayError>
     where
@@ -113,7 +97,6 @@ impl WorkflowPlanBuilder {
             key: key.into(),
             parent: parent.map(Into::into),
             role,
-            difficulty,
             objective: objective.into(),
         });
         validate_steps(&self.steps)?;
