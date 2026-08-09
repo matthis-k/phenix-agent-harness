@@ -13,7 +13,7 @@ use phenix_acp::{
     ExtensionUiCapabilities, GatewayError, GatewayEvent, ModelCapabilities, ModelId,
     PhenixAcpGateway, PhenixConductor, PromptCapabilities, ProviderId, ResourceCapabilities,
     RoleId, RouterId, SessionCapabilities, SessionCommand, SessionNodeId, SessionTreeDefinition,
-    SessionTreeId, ToolConfiguration,
+    SessionTreeId, ToolConfiguration, WorkflowGraph, WorkflowId,
 };
 use phenix_acp_backend::{
     AcpAgentBackend, AcpBackendConfig, AcpGatewayTransport, ConfigError as BackendConfigError,
@@ -190,8 +190,7 @@ impl ConductorRuntime {
     ) -> Result<Vec<GatewayEvent>, RuntimeError> {
         let binding = self.standard_session(session_id)?;
         self.conductor
-            .gateway_mut()
-            .execute(&binding.tree_id, &binding.root_node_id, command)
+            .execute_node(&binding.tree_id, &binding.root_node_id, command)
             .map_err(RuntimeError::Gateway)
     }
 
@@ -202,8 +201,7 @@ impl ConductorRuntime {
         let binding = self.standard_session(session_id)?;
         let events = self
             .conductor
-            .gateway_mut()
-            .cancel_subtree(&binding.tree_id, &binding.root_node_id)?;
+            .cancel_node(&binding.tree_id, &binding.root_node_id)?;
         self.cancelled_sessions.insert(session_id.to_owned());
         Ok(events)
     }
@@ -214,7 +212,7 @@ impl ConductorRuntime {
 
     pub fn close_standard_session(&mut self, session_id: &str) -> Result<(), RuntimeError> {
         let tree_id = parse_tree_id(session_id)?;
-        self.conductor.gateway_mut().close_tree(&tree_id)?;
+        self.conductor.close_tree(&tree_id)?;
         self.cancelled_sessions.remove(session_id);
         Ok(())
     }
@@ -402,6 +400,15 @@ impl ConductorBootstrap {
             }
         }
 
+        let workflow_graphs = definitions
+            .workflows()
+            .filter_map(|workflow| {
+                workflow
+                    .policy_graph()
+                    .cloned()
+                    .map(|graph| (workflow.id().clone(), graph))
+            })
+            .collect::<BTreeMap<WorkflowId, WorkflowGraph>>();
         let workflow_ids = definitions
             .workflows()
             .map(|workflow| workflow.id().clone())
@@ -434,7 +441,7 @@ impl ConductorBootstrap {
         }
         let gateway = definitions.register(builder)?.build()?;
         ConductorRuntime::new(
-            PhenixConductor::new(gateway),
+            PhenixConductor::with_workflow_graphs(gateway, workflow_graphs),
             self.definition_id,
             self.standard_session,
             transports,

@@ -20,7 +20,6 @@ phenix.acp.workflow("workflows/migrate.md")
 phenix.acp.workflow("workflows/qa.md")
 phenix.acp.workflow("workflows/refactor.md")
 phenix.acp.workflow("workflows/research.md")
-phenix.acp.workflow("workflows/review.md")
 phenix.acp.workflow("workflows/security.md")
 phenix.acp.workflow("workflows/ui-change.md")
 

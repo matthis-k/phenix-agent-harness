@@ -145,7 +145,8 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
         ),
     )?;
     let mut saw_echo = false;
-    let completed = loop {
+    let mut completed = None;
+    while !saw_echo || completed.is_none() {
         let message = process.receive()?;
         if message.get("method").and_then(Value::as_str) == Some("session/update")
             && message.to_string().contains("echo: hello")
@@ -153,9 +154,11 @@ fn standard_and_phenix_acp_share_one_conductor_aggregate() -> Result<(), Box<dyn
             saw_echo = true;
         }
         if message.get("id") == Some(&Value::from(11)) {
-            break message;
+            completed = Some(message);
         }
-    };
+    }
+    let completed = completed.expect("prompt response");
+
     assert!(
         saw_echo,
         "conductor did not forward the downstream ACP update"

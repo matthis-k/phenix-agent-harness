@@ -1,25 +1,57 @@
+use crate::runtime::WorkflowMachine;
 use crate::{
-    AcpMethod, EmptyResult, GatewayError, NodeAttachResult, NodeCancel, NodeDelegate, NodeExecute,
-    NodeExecuteResult, NodeFork, NodeLoad, NodeResume, ObjectiveMark, PhenixAcpGateway, RoleId,
-    RoutingExplain, RoutingExplainParams, SessionTreeClose, SessionTreeCreate,
-    SessionTreeCreateResult, SessionTreeGet, SessionTreeList, WorkflowStart,
+    AcpMethod, Difficulty, EmptyResult, GatewayError, GatewayEvent, NodeAttachResult, NodeCancel,
+    NodeDelegate, NodeExecute, NodeExecuteResult, NodeFork, NodeLoad, NodeResume, ObjectiveId,
+    ObjectiveMark, PhenixAcpGateway, RoleId, RoutingExplain, RoutingExplainParams, SessionCommand,
+    SessionEvent, SessionNodeId, SessionTreeClose, SessionTreeCreate, SessionTreeCreateResult,
+    SessionTreeGet, SessionTreeId, SessionTreeList, WorkflowAction, WorkflowGraph, WorkflowId,
+    WorkflowNodeAttach, WorkflowStart, WorkflowStartParams, WorkflowStartResult,
 };
 use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
 use serde::Serialize;
 use serde_json::value::to_raw_value;
+use std::collections::{BTreeMap, VecDeque};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 
 /// Owns the aggregate Phenix state and translates typed Phenix ACP extensions
 /// into operations over ordinary downstream ACP sessions.
+///
+/// Workflow policy is evaluated here, above the ACP session boundary. Downstream
+/// agents receive only the concrete invoke objective and already-settled typed
+/// context. They do not decide graph topology, joins, repairs, aliases or terminal
+/// workflow state.
 pub struct PhenixConductor {
     gateway: PhenixAcpGateway,
+    workflow_graphs: BTreeMap<WorkflowId, WorkflowGraph>,
+    workflow_runs: BTreeMap<SessionTreeId, ManagedWorkflowRun>,
+}
+
+struct ManagedWorkflowRun {
+    workflow_id: WorkflowId,
+    objective_id: ObjectiveId,
+    root_node_id: SessionNodeId,
+    difficulty: Difficulty,
+    machine: WorkflowMachine,
+    pending_events: BTreeMap<SessionNodeId, VecDeque<GatewayEvent>>,
+    finished: bool,
 }
 
 impl PhenixConductor {
     pub fn new(gateway: PhenixAcpGateway) -> Self {
-        Self { gateway }
+        Self::with_workflow_graphs(gateway, BTreeMap::new())
+    }
+
+    pub fn with_workflow_graphs(
+        gateway: PhenixAcpGateway,
+        workflow_graphs: BTreeMap<WorkflowId, WorkflowGraph>,
+    ) -> Self {
+        Self {
+            gateway,
+            workflow_graphs,
+            workflow_runs: BTreeMap::new(),
+        }
     }
 
     pub fn gateway(&self) -> &PhenixAcpGateway {
@@ -69,20 +101,14 @@ impl PhenixConductor {
                     Ok(gateway.list_trees())
                 }),
             SessionTreeClose::METHOD => {
-                self.dispatch::<SessionTreeClose, _>(&request, |gateway, params| {
-                    gateway.close_tree(&params.tree_id)?;
-                    Ok(EmptyResult {})
-                })
+                let params = self.decode::<SessionTreeClose>(&request)?;
+                self.close_tree(&params.tree_id)?;
+                encode_result(SessionTreeClose::METHOD, &EmptyResult {})
             }
             WorkflowStart::METHOD => {
-                self.dispatch::<WorkflowStart, _>(&request, |gateway, params| {
-                    gateway.start_workflow(
-                        &params.tree_id,
-                        &params.workflow,
-                        params.difficulty,
-                        params.objective,
-                    )
-                })
+                let params = self.decode::<WorkflowStart>(&request)?;
+                let result = self.start_workflow(params)?;
+                encode_result(WorkflowStart::METHOD, &result)
             }
             NodeDelegate::METHOD => {
                 self.dispatch::<NodeDelegate, _>(&request, |gateway, params| {
@@ -123,14 +149,16 @@ impl PhenixConductor {
                     gateway.fork_node(&params.tree_id, &params.node_id, params.objective)?;
                 Ok(NodeAttachResult { node_id })
             }),
-            NodeExecute::METHOD => self.dispatch::<NodeExecute, _>(&request, |gateway, params| {
-                let events = gateway.execute(&params.tree_id, &params.node_id, params.command)?;
-                Ok(NodeExecuteResult { events })
-            }),
-            NodeCancel::METHOD => self.dispatch::<NodeCancel, _>(&request, |gateway, params| {
-                let events = gateway.cancel_subtree(&params.tree_id, &params.node_id)?;
-                Ok(NodeExecuteResult { events })
-            }),
+            NodeExecute::METHOD => {
+                let params = self.decode::<NodeExecute>(&request)?;
+                let events = self.execute_node(&params.tree_id, &params.node_id, params.command)?;
+                encode_result(NodeExecute::METHOD, &NodeExecuteResult { events })
+            }
+            NodeCancel::METHOD => {
+                let params = self.decode::<NodeCancel>(&request)?;
+                let events = self.cancel_node(&params.tree_id, &params.node_id)?;
+                encode_result(NodeCancel::METHOD, &NodeExecuteResult { events })
+            }
             ObjectiveMark::METHOD => {
                 self.dispatch::<ObjectiveMark, _>(&request, |gateway, params| {
                     gateway.mark_objective(&params.tree_id, &params.objective_id, params.state)?;
@@ -152,6 +180,292 @@ impl PhenixConductor {
         }
     }
 
+    /// Poll a node while also advancing any conductor-owned workflow in its tree.
+    ///
+    /// A root subscription is sufficient to keep a workflow moving: all running
+    /// invoke states are polled once, while events remain queued under their
+    /// actual node IDs until that node is requested/subscribed.
+    pub fn poll_node(
+        &mut self,
+        tree_id: &SessionTreeId,
+        node_id: &SessionNodeId,
+    ) -> Result<Vec<GatewayEvent>, GatewayError> {
+        if !self.workflow_runs.contains_key(tree_id) {
+            return self.gateway.execute(tree_id, node_id, SessionCommand::Poll);
+        }
+
+        self.with_managed_run(tree_id, |conductor, run| {
+            conductor.poll_running_states(tree_id, run)?;
+            conductor.drive_managed_workflow(tree_id, run)?;
+            Ok(drain_pending(run, node_id))
+        })
+    }
+
+    fn start_workflow(
+        &mut self,
+        params: WorkflowStartParams,
+    ) -> Result<WorkflowStartResult, GatewayError> {
+        if self
+            .workflow_runs
+            .get(&params.tree_id)
+            .is_some_and(|run| !run.finished)
+        {
+            return Err(GatewayError::workflow(format!(
+                "tree {} already has a conductor-managed workflow",
+                params.tree_id
+            )));
+        }
+        self.workflow_runs.remove(&params.tree_id);
+
+        let Some(graph) = self.workflow_graphs.get(&params.workflow).cloned() else {
+            return self.gateway.start_workflow(
+                &params.tree_id,
+                &params.workflow,
+                params.difficulty,
+                params.objective,
+            );
+        };
+
+        let (objective_id, root_node_id, root_difficulty) = self.gateway.begin_workflow(
+            &params.tree_id,
+            &params.workflow,
+            params.objective.clone(),
+        )?;
+        let difficulty = params.difficulty.unwrap_or(root_difficulty);
+        let machine = match WorkflowMachine::new(graph, params.objective, params.input) {
+            Ok(machine) => machine,
+            Err(error) => {
+                let _ = self.gateway.finish_workflow(
+                    &params.tree_id,
+                    &params.workflow,
+                    &objective_id,
+                    false,
+                );
+                return Err(error);
+            }
+        };
+        let mut run = ManagedWorkflowRun {
+            workflow_id: params.workflow,
+            objective_id: objective_id.clone(),
+            root_node_id: root_node_id.clone(),
+            difficulty,
+            machine,
+            pending_events: BTreeMap::new(),
+            finished: false,
+        };
+        if let Err(error) = self.drive_managed_workflow(&params.tree_id, &mut run) {
+            for node_id in run.machine.running_nodes() {
+                let _ = self.gateway.cancel_subtree(&params.tree_id, &node_id);
+            }
+            let _ = self.gateway.finish_workflow(
+                &params.tree_id,
+                &run.workflow_id,
+                &run.objective_id,
+                false,
+            );
+            return Err(error);
+        }
+        let first_node = run
+            .machine
+            .first_bound_node()
+            .unwrap_or_else(|| root_node_id.clone());
+        self.workflow_runs.insert(params.tree_id, run);
+        Ok(WorkflowStartResult {
+            objective_id,
+            root_node_id: first_node,
+        })
+    }
+
+    pub fn execute_node(
+        &mut self,
+        tree_id: &SessionTreeId,
+        node_id: &SessionNodeId,
+        command: SessionCommand,
+    ) -> Result<Vec<GatewayEvent>, GatewayError> {
+        if !self.workflow_runs.contains_key(tree_id) {
+            return self.gateway.execute(tree_id, node_id, command);
+        }
+        self.with_managed_run(tree_id, |conductor, run| {
+            let events = conductor.gateway.execute(tree_id, node_id, command)?;
+            conductor.observe_if_running(run, node_id, &events)?;
+            conductor.drive_managed_workflow(tree_id, run)?;
+            Ok(events)
+        })
+    }
+
+    pub fn cancel_node(
+        &mut self,
+        tree_id: &SessionTreeId,
+        node_id: &SessionNodeId,
+    ) -> Result<Vec<GatewayEvent>, GatewayError> {
+        if !self.workflow_runs.contains_key(tree_id) {
+            return self.gateway.cancel_subtree(tree_id, node_id);
+        }
+        self.with_managed_run(tree_id, |conductor, run| {
+            let events = conductor.gateway.cancel_subtree(tree_id, node_id)?;
+            for event in &events {
+                conductor.observe_if_running(run, &event.node_id, std::slice::from_ref(event))?;
+            }
+            conductor.drive_managed_workflow(tree_id, run)?;
+            Ok(events)
+        })
+    }
+
+    pub fn close_tree(&mut self, tree_id: &SessionTreeId) -> Result<(), GatewayError> {
+        self.gateway.close_tree(tree_id)?;
+        self.workflow_runs.remove(tree_id);
+        Ok(())
+    }
+
+    fn with_managed_run<T>(
+        &mut self,
+        tree_id: &SessionTreeId,
+        operation: impl FnOnce(&mut Self, &mut ManagedWorkflowRun) -> Result<T, GatewayError>,
+    ) -> Result<T, GatewayError> {
+        let mut run = self
+            .workflow_runs
+            .remove(tree_id)
+            .ok_or_else(|| GatewayError::Invariant("managed workflow disappeared".to_owned()))?;
+        let result = operation(self, &mut run);
+        self.workflow_runs.insert(tree_id.clone(), run);
+        result
+    }
+
+    fn poll_running_states(
+        &mut self,
+        tree_id: &SessionTreeId,
+        run: &mut ManagedWorkflowRun,
+    ) -> Result<(), GatewayError> {
+        if run.finished {
+            return Ok(());
+        }
+        let nodes = run.machine.running_nodes();
+        for node_id in nodes {
+            let events = self
+                .gateway
+                .execute(tree_id, &node_id, SessionCommand::Poll)?;
+            self.observe_if_running(run, &node_id, &events)?;
+            queue_events(run, events);
+        }
+        Ok(())
+    }
+
+    fn observe_if_running(
+        &self,
+        run: &mut ManagedWorkflowRun,
+        node_id: &SessionNodeId,
+        events: &[GatewayEvent],
+    ) -> Result<(), GatewayError> {
+        if !run
+            .machine
+            .running_nodes()
+            .iter()
+            .any(|running| running == node_id)
+        {
+            return Ok(());
+        }
+        let session_events = events
+            .iter()
+            .map(|event| event.event.clone())
+            .collect::<Vec<_>>();
+        run.machine.observe(node_id, &session_events)
+    }
+
+    fn drive_managed_workflow(
+        &mut self,
+        tree_id: &SessionTreeId,
+        run: &mut ManagedWorkflowRun,
+    ) -> Result<(), GatewayError> {
+        if run.finished {
+            return Ok(());
+        }
+        loop {
+            let actions = run.machine.next_actions()?;
+            if actions.is_empty() {
+                return Ok(());
+            }
+            for action in actions {
+                match action {
+                    WorkflowAction::Invoke {
+                        key,
+                        role,
+                        objective,
+                        required: _,
+                        context,
+                    } => {
+                        let node_id = self.gateway.attach_workflow_node(
+                            tree_id,
+                            WorkflowNodeAttach {
+                                workflow_id: run.workflow_id.clone(),
+                                objective_id: run.objective_id.clone(),
+                                parent_node: run.root_node_id.clone(),
+                                role,
+                                difficulty: Some(run.difficulty),
+                                objective: objective.clone(),
+                            },
+                        )?;
+                        run.machine.bind_invoke(&key, node_id.clone())?;
+                        let prompt = workflow_prompt(&objective, &context)?;
+                        let events = self.gateway.execute(
+                            tree_id,
+                            &node_id,
+                            SessionCommand::Prompt {
+                                text: prompt,
+                                images: Vec::new(),
+                            },
+                        )?;
+                        self.observe_if_running(run, &node_id, &events)?;
+                        queue_events(run, events);
+                    }
+                    WorkflowAction::Complete(terminal) => {
+                        self.gateway.finish_workflow(
+                            tree_id,
+                            &run.workflow_id,
+                            &run.objective_id,
+                            terminal.success,
+                        )?;
+                        let snapshot = self.gateway.snapshot(tree_id)?;
+                        let root = snapshot
+                            .nodes
+                            .iter()
+                            .find(|node| node.id == run.root_node_id)
+                            .ok_or_else(|| {
+                                GatewayError::Invariant(
+                                    "managed workflow root node is missing".to_owned(),
+                                )
+                            })?;
+                        if let Some(session_id) = &root.downstream_session {
+                            run.pending_events
+                                .entry(run.root_node_id.clone())
+                                .or_default()
+                                .push_back(GatewayEvent {
+                                    tree_id: tree_id.clone(),
+                                    node_id: run.root_node_id.clone(),
+                                    session_id: session_id.clone(),
+                                    event: SessionEvent::Text {
+                                        text: terminal.summary,
+                                    },
+                                });
+                        }
+                        run.finished = true;
+                    }
+                }
+            }
+            if run.finished || !run.machine.running_nodes().is_empty() {
+                return Ok(());
+            }
+        }
+    }
+
+    fn decode<M: AcpMethod>(&self, request: &ExtRequest) -> Result<M::Params, ConductorError> {
+        serde_json::from_str::<M::Params>(request.params.get()).map_err(|source| {
+            ConductorError::Decode {
+                method: M::METHOD,
+                source,
+            }
+        })
+    }
+
     fn dispatch<M, F>(
         &mut self,
         request: &ExtRequest,
@@ -161,15 +475,35 @@ impl PhenixConductor {
         M: AcpMethod,
         F: FnOnce(&mut PhenixAcpGateway, M::Params) -> Result<M::Result, GatewayError>,
     {
-        let params = serde_json::from_str::<M::Params>(request.params.get()).map_err(|source| {
-            ConductorError::Decode {
-                method: M::METHOD,
-                source,
-            }
-        })?;
+        let params = self.decode::<M>(request)?;
         let result = handler(&mut self.gateway, params)?;
         encode_result(M::METHOD, &result)
     }
+}
+
+fn workflow_prompt(objective: &str, context: &serde_json::Value) -> Result<String, GatewayError> {
+    let context = serde_json::to_string_pretty(context).map_err(|error| {
+        GatewayError::workflow(format!("failed to encode workflow context: {error}"))
+    })?;
+    Ok(format!(
+        "{objective}\n\nPhenix workflow context follows. Treat supplied input and predecessor artifacts as authoritative; do not redo an upstream planning or classification step unless this state's objective explicitly asks for it. When the objective specifies a decision/status contract, return a JSON object matching it.\n\n```json\n{context}\n```"
+    ))
+}
+
+fn queue_events(run: &mut ManagedWorkflowRun, events: Vec<GatewayEvent>) {
+    for event in events {
+        run.pending_events
+            .entry(event.node_id.clone())
+            .or_default()
+            .push_back(event);
+    }
+}
+
+fn drain_pending(run: &mut ManagedWorkflowRun, node_id: &SessionNodeId) -> Vec<GatewayEvent> {
+    run.pending_events
+        .get_mut(node_id)
+        .map(|events| events.drain(..).collect())
+        .unwrap_or_default()
 }
 
 fn route_role(
@@ -253,22 +587,24 @@ mod tests {
     use super::*;
     use crate::{
         decode_extension_response, encode_extension_request, AcpEndpoint, AcpSession,
-        AcpSessionFactory, AcpSessionId, BackendDefinition, BackendId, DefinitionId, Difficulty,
-        FixedRouter, ModelConfig, ModelId, NodeExecuteParams, ProviderId, RoleId, RouterId,
-        SessionCommand, SessionEvent, SessionOpenRequest, SessionTreeCreateParams,
-        SessionTreeDefinition, ThinkingLevel,
+        AcpSessionFactory, AcpSessionId, BackendDefinition, BackendId, DefinitionId, FixedRouter,
+        ModelConfig, ModelId, NodeExecuteParams, ProviderId, RouterId, SessionOpenRequest,
+        SessionTreeCreateParams, SessionTreeDefinition, ThinkingLevel, WorkflowCondition,
+        WorkflowGraphState, WorkflowJoin, WorkflowStateKind, WorkflowTransition,
     };
     use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
     struct TestFactory {
         next: Arc<AtomicU64>,
+        opens: Arc<Mutex<Vec<SessionOpenRequest>>>,
     }
 
     impl AcpSessionFactory for TestFactory {
-        fn open(&self, _request: SessionOpenRequest) -> Result<Box<dyn AcpSession>, GatewayError> {
+        fn open(&self, request: SessionOpenRequest) -> Result<Box<dyn AcpSession>, GatewayError> {
+            self.opens.lock().expect("opens").push(request);
             let sequence = self.next.fetch_add(1, Ordering::Relaxed) + 1;
             Ok(Box::new(TestSession {
                 id: AcpSessionId::parse(format!("session-{sequence}"))
@@ -289,7 +625,15 @@ mod tests {
         fn execute(&mut self, command: SessionCommand) -> Result<Vec<SessionEvent>, GatewayError> {
             Ok(match command {
                 SessionCommand::Prompt { text, .. } => {
-                    vec![SessionEvent::Text { text }, SessionEvent::Completed]
+                    let response = if text.contains("review the change") {
+                        r#"{"decision":"accept"}"#.to_owned()
+                    } else {
+                        "done".to_owned()
+                    };
+                    vec![
+                        SessionEvent::Text { text: response },
+                        SessionEvent::Completed,
+                    ]
                 }
                 SessionCommand::Cancel => vec![SessionEvent::Cancelled {
                     reason: "cancelled by test".to_owned(),
@@ -299,39 +643,63 @@ mod tests {
         }
     }
 
-    fn conductor() -> PhenixConductor {
+    fn configured_conductor(
+        workflows: Vec<WorkflowId>,
+        graphs: BTreeMap<WorkflowId, WorkflowGraph>,
+    ) -> (PhenixConductor, TestFactory) {
         let backend = BackendId::parse("test").expect("backend");
         let router = RouterId::parse("test.router").expect("router");
         let definition_id = DefinitionId::parse("test.definition").expect("definition");
-        let definition = SessionTreeDefinition::builder(definition_id, router.clone())
+        let mut definition = SessionTreeDefinition::builder(definition_id, router.clone())
             .backend(BackendDefinition::new(
                 backend.clone(),
                 AcpEndpoint::stdio("test-agent", Vec::new(), BTreeMap::new()).expect("endpoint"),
             ))
-            .expect("backend definition")
-            .build()
-            .expect("tree definition");
+            .expect("backend definition");
+        for workflow in workflows {
+            definition = definition.workflow(workflow).expect("workflow");
+        }
+        let definition = definition.build().expect("tree definition");
         let model = ModelConfig {
             backend: backend.clone(),
             provider: ProviderId::parse("test-provider").expect("provider"),
             model: ModelId::parse("test-model").expect("model"),
             thinking: ThinkingLevel::Low,
         };
-        let gateway = PhenixAcpGateway::builder()
+        let factory = TestFactory::default();
+        let mut builder = PhenixAcpGateway::builder()
             .definition(definition)
             .expect("definition")
             .router(router, FixedRouter::new(model))
             .expect("router")
-            .backend(backend, TestFactory::default())
-            .expect("backend")
-            .build()
-            .expect("gateway");
-        PhenixConductor::new(gateway)
+            .backend(backend, factory.clone())
+            .expect("backend");
+        for workflow in graphs.keys() {
+            let plan = crate::WorkflowPlan::builder()
+                .step(
+                    "compat",
+                    None::<String>,
+                    RoleId::parse("implementer").expect("role"),
+                    "compat",
+                )
+                .expect("step")
+                .build()
+                .expect("plan");
+            builder = builder
+                .workflow(
+                    workflow.clone(),
+                    crate::StaticWorkflow::new(plan).expect("workflow"),
+                )
+                .expect("register workflow");
+        }
+        let gateway = builder.build().expect("gateway");
+        (
+            PhenixConductor::with_workflow_graphs(gateway, graphs),
+            factory,
+        )
     }
 
-    #[test]
-    fn typed_extension_requests_drive_the_same_gateway_used_for_downstream_acp() {
-        let mut conductor = conductor();
+    fn create_tree(conductor: &mut PhenixConductor) -> crate::SessionTreeCreateResult {
         let create = encode_extension_request::<SessionTreeCreate>(&SessionTreeCreateParams {
             tree_id: None,
             definition_id: DefinitionId::parse("test.definition").expect("definition"),
@@ -340,11 +708,16 @@ mod tests {
             objective: "coordinate the test".to_owned(),
         })
         .expect("create request");
-        let created = decode_extension_response::<SessionTreeCreate>(
+        decode_extension_response::<SessionTreeCreate>(
             conductor.handle_extension(create).expect("create response"),
         )
-        .expect("create result");
+        .expect("create result")
+    }
 
+    #[test]
+    fn typed_extension_requests_drive_the_same_gateway_used_for_downstream_acp() {
+        let (mut conductor, _) = configured_conductor(Vec::new(), BTreeMap::new());
+        let created = create_tree(&mut conductor);
         let execute = encode_extension_request::<NodeExecute>(&NodeExecuteParams {
             tree_id: created.tree_id.clone(),
             node_id: created.root_node_id,
@@ -360,8 +733,101 @@ mod tests {
                 .expect("execute response"),
         )
         .expect("execute result");
-
         assert_eq!(executed.events.len(), 2);
         assert_eq!(conductor.gateway().list_trees().trees.len(), 1);
+    }
+
+    #[test]
+    fn managed_workflow_skips_planner_when_caller_supplies_plan() {
+        let workflow = WorkflowId::parse("workflow.implement").expect("workflow");
+        let graph = WorkflowGraph {
+            entry: "route-plan".to_owned(),
+            states: vec![
+                WorkflowGraphState {
+                    key: "route-plan".to_owned(),
+                    join: WorkflowJoin::Any,
+                    required: false,
+                    kind: WorkflowStateKind::Decision,
+                },
+                WorkflowGraphState {
+                    key: "plan".to_owned(),
+                    join: WorkflowJoin::Any,
+                    required: true,
+                    kind: WorkflowStateKind::Invoke {
+                        role: RoleId::parse("planner").expect("role"),
+                        objective: "plan the change".to_owned(),
+                    },
+                },
+                WorkflowGraphState {
+                    key: "implement".to_owned(),
+                    join: WorkflowJoin::Any,
+                    required: true,
+                    kind: WorkflowStateKind::Invoke {
+                        role: RoleId::parse("implementer").expect("role"),
+                        objective: "implement the change".to_owned(),
+                    },
+                },
+                WorkflowGraphState {
+                    key: "return".to_owned(),
+                    join: WorkflowJoin::Any,
+                    required: false,
+                    kind: WorkflowStateKind::Return {
+                        summary: "done".to_owned(),
+                    },
+                },
+            ],
+            transitions: vec![
+                WorkflowTransition {
+                    from: "route-plan".to_owned(),
+                    to: "plan".to_owned(),
+                    when: WorkflowCondition::InputMissing {
+                        path: "plan".to_owned(),
+                    },
+                },
+                WorkflowTransition {
+                    from: "route-plan".to_owned(),
+                    to: "implement".to_owned(),
+                    when: WorkflowCondition::InputExists {
+                        path: "plan".to_owned(),
+                    },
+                },
+                WorkflowTransition {
+                    from: "plan".to_owned(),
+                    to: "implement".to_owned(),
+                    when: WorkflowCondition::Always,
+                },
+                WorkflowTransition {
+                    from: "implement".to_owned(),
+                    to: "return".to_owned(),
+                    when: WorkflowCondition::Always,
+                },
+            ],
+        };
+        let (mut conductor, factory) = configured_conductor(
+            vec![workflow.clone()],
+            BTreeMap::from([(workflow.clone(), graph)]),
+        );
+        let created = create_tree(&mut conductor);
+        let request = encode_extension_request::<WorkflowStart>(&WorkflowStartParams {
+            tree_id: created.tree_id,
+            workflow,
+            difficulty: None,
+            objective: "ship change".to_owned(),
+            input: serde_json::json!({"plan": {"steps": ["edit", "test"]}}),
+        })
+        .expect("workflow start");
+        conductor
+            .handle_extension(request)
+            .expect("workflow response");
+        let roles = factory
+            .opens
+            .lock()
+            .expect("opens")
+            .iter()
+            .map(|request| request.role.as_str().to_owned())
+            .collect::<Vec<_>>();
+        assert!(roles.contains(&"coordinator".to_owned()));
+        assert!(roles.contains(&"implementer".to_owned()));
+        assert!(!roles.contains(&"planner".to_owned()));
     }
 }

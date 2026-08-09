@@ -1,0 +1,2 @@
+rust/crates/phenix-acp-presets/src/bin/phenix-acp-smoke.rs
+rust/crates/phenix-conductor/src/lib.rs

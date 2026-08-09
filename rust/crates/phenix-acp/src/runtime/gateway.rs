@@ -12,6 +12,16 @@ use crate::{
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkflowNodeAttach {
+    pub workflow_id: WorkflowId,
+    pub objective_id: ObjectiveId,
+    pub parent_node: SessionNodeId,
+    pub role: RoleId,
+    pub difficulty: Option<Difficulty>,
+    pub objective: String,
+}
+
 #[derive(Clone, Default)]
 pub struct PhenixAcpGatewayBuilder {
     definitions: BTreeMap<DefinitionId, SessionTreeDefinition>,
@@ -215,6 +225,185 @@ impl PhenixAcpGateway {
         })
     }
 
+    /// Begin a conductor-managed workflow without inventing a controller ACP session.
+    ///
+    /// The returned root node is the existing tree root. Individual policy states
+    /// are attached later through `attach_workflow_node`, which keeps workflow
+    /// routing explicit while the conductor owns decisions, joins and repair flow.
+    pub fn begin_workflow(
+        &mut self,
+        tree_id: &SessionTreeId,
+        workflow_id: &WorkflowId,
+        objective: impl Into<String>,
+    ) -> Result<(ObjectiveId, SessionNodeId, Difficulty), GatewayError> {
+        let objective = objective.into();
+        let objective_id = self.allocate_objective_id()?;
+        let (root_node, root_objective, difficulty) = {
+            let tree = self.tree(tree_id)?;
+            if !tree
+                .definition
+                .workflows()
+                .any(|allowed| allowed == workflow_id)
+            {
+                return Err(GatewayError::WorkflowNotAllowed {
+                    definition: tree.definition.definition_id().clone(),
+                    workflow: workflow_id.clone(),
+                });
+            }
+            if !self.workflows.contains_key(workflow_id) {
+                return Err(GatewayError::MissingWorkflow(workflow_id.clone()));
+            }
+            if let Some(active) = &tree.active_workflow {
+                return Err(GatewayError::workflow(format!(
+                    "tree {tree_id} already has active workflow {active}"
+                )));
+            }
+            let root = tree.nodes.get(&tree.root).ok_or_else(|| {
+                GatewayError::Invariant("session tree root node is missing".to_owned())
+            })?;
+            (
+                tree.root.clone(),
+                root.objective_id.clone(),
+                root.difficulty,
+            )
+        };
+        let tree = self.tree_mut(tree_id)?;
+        tree.objectives.insert(
+            objective_id.clone(),
+            ObjectiveSnapshot {
+                id: objective_id.clone(),
+                parent: Some(root_objective),
+                title: objective,
+                state: ObjectiveState::WorkInProgress,
+            },
+        );
+        tree.active_workflow = Some(workflow_id.clone());
+        Ok((objective_id, root_node, difficulty))
+    }
+
+    pub fn attach_workflow_node(
+        &mut self,
+        tree_id: &SessionTreeId,
+        request: WorkflowNodeAttach,
+    ) -> Result<SessionNodeId, GatewayError> {
+        let WorkflowNodeAttach {
+            workflow_id,
+            objective_id: workflow_objective,
+            parent_node,
+            role,
+            difficulty,
+            objective,
+        } = request;
+        let (definition, root_node, parent_session, parent_objective, parent_difficulty) = {
+            let tree = self.tree(tree_id)?;
+            if tree.active_workflow.as_ref() != Some(&workflow_id) {
+                return Err(GatewayError::workflow(format!(
+                    "workflow {workflow_id} is not active in tree {tree_id}"
+                )));
+            }
+            if !tree.objectives.contains_key(&workflow_objective) {
+                return Err(GatewayError::UnknownObjective(workflow_objective.clone()));
+            }
+            let parent = tree
+                .nodes
+                .get(&parent_node)
+                .ok_or_else(|| GatewayError::UnknownNode(parent_node.clone()))?;
+            (
+                tree.definition.clone(),
+                tree.root.clone(),
+                parent.session.id().clone(),
+                parent.objective_id.clone(),
+                parent.difficulty,
+            )
+        };
+        let difficulty = difficulty.unwrap_or(parent_difficulty);
+        let node_id = self.allocate_node_id()?;
+        let objective_id = self.allocate_objective_id()?;
+        let routing = self.route(
+            &definition,
+            RoutingRequest {
+                tree_id: tree_id.clone(),
+                parent_node: Some(parent_node.clone()),
+                role: role.clone(),
+                difficulty,
+                objective: objective.clone(),
+                workflow: Some(workflow_id.clone()),
+                available_backends: backend_ids(&definition),
+            },
+        )?;
+        let request = SessionOpenRequest {
+            tree_id: tree_id.clone(),
+            node_id: node_id.clone(),
+            role: role.clone(),
+            difficulty,
+            objective: objective.clone(),
+            model: routing.model.clone(),
+            open: SessionOpenKind::New {
+                parent: Some(parent_session),
+            },
+        };
+        let mut session = self.open_session(request)?;
+        if let Err(error) = self.ensure_unique_session(session.id(), &[]) {
+            let _ = session.execute(SessionCommand::Close);
+            return Err(error);
+        }
+        let objective_parent = if parent_node == root_node {
+            workflow_objective.clone()
+        } else {
+            parent_objective
+        };
+        let tree = self.tree_mut(tree_id)?;
+        tree.objectives.insert(
+            objective_id.clone(),
+            ObjectiveSnapshot {
+                id: objective_id.clone(),
+                parent: Some(objective_parent),
+                title: objective,
+                state: ObjectiveState::WorkInProgress,
+            },
+        );
+        tree.nodes.insert(
+            node_id.clone(),
+            NodeRuntime {
+                id: node_id.clone(),
+                parent: Some(parent_node.clone()),
+                role,
+                difficulty,
+                state: SessionNodeState::Running,
+                model: routing.model,
+                objective_id,
+                session,
+            },
+        );
+        Ok(node_id)
+    }
+
+    pub fn finish_workflow(
+        &mut self,
+        tree_id: &SessionTreeId,
+        workflow_id: &WorkflowId,
+        objective_id: &ObjectiveId,
+        success: bool,
+    ) -> Result<(), GatewayError> {
+        let tree = self.tree_mut(tree_id)?;
+        if tree.active_workflow.as_ref() != Some(workflow_id) {
+            return Err(GatewayError::workflow(format!(
+                "workflow {workflow_id} is not active in tree {tree_id}"
+            )));
+        }
+        let objective = tree
+            .objectives
+            .get_mut(objective_id)
+            .ok_or_else(|| GatewayError::UnknownObjective(objective_id.clone()))?;
+        objective.state = if success {
+            ObjectiveState::Done
+        } else {
+            ObjectiveState::Blocked
+        };
+        tree.active_workflow = None;
+        Ok(())
+    }
+
     pub fn start_workflow(
         &mut self,
         tree_id: &SessionTreeId,
@@ -234,6 +423,11 @@ impl PhenixAcpGateway {
                     definition: tree.definition.definition_id().clone(),
                     workflow: workflow_id.clone(),
                 });
+            }
+            if let Some(active) = &tree.active_workflow {
+                return Err(GatewayError::workflow(format!(
+                    "tree {tree_id} already has active workflow {active}"
+                )));
             }
             let root = tree.nodes.get(&tree.root).ok_or_else(|| {
                 GatewayError::Invariant("session tree root node is missing".to_owned())

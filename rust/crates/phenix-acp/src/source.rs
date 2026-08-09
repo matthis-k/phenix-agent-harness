@@ -1,13 +1,24 @@
 use crate::{
     BackendId, Difficulty, GatewayError, IdError, ModelConfig, ModelId, ProviderId, RoleId,
-    RouterId, RoutingDecision, RoutingRequest, SessionRouter, ThinkingLevel, Workflow, WorkflowId,
-    WorkflowPlan, WorkflowRequest,
+    RouterId, RoutingDecision, RoutingRequest, SessionRouter, ThinkingLevel, Workflow,
+    WorkflowCondition, WorkflowGraph, WorkflowGraphState, WorkflowId, WorkflowJoin,
+    WorkflowOutcomeStatus, WorkflowPlan, WorkflowRequest, WorkflowStateKind, WorkflowTransition,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
 const OBJECTIVE_PLACEHOLDER: &str = "{objective}";
+const STATIC_WORKFLOW_HEADER: [&str; 4] = ["Key", "Parent", "Role", "Objective"];
+const GRAPH_WORKFLOW_HEADER: [&str; 7] = [
+    "Key",
+    "Kind",
+    "Role",
+    "Required",
+    "Join",
+    "Objective",
+    "Next",
+];
 const ROUTER_HEADER: [&str; 8] = [
     "Role",
     "Workflow",
@@ -65,6 +76,7 @@ pub struct WorkflowDefinition {
     id: WorkflowId,
     title: String,
     steps: Vec<WorkflowStepDefinition>,
+    graph: Option<WorkflowGraph>,
 }
 
 impl WorkflowDefinition {
@@ -76,8 +88,13 @@ impl WorkflowDefinition {
         &self.title
     }
 
+    /// Invoke-state projection retained for catalog/introspection compatibility.
     pub fn steps(&self) -> &[WorkflowStepDefinition] {
         &self.steps
+    }
+
+    pub fn policy_graph(&self) -> Option<&WorkflowGraph> {
+        self.graph.as_ref()
     }
 }
 
@@ -94,6 +111,10 @@ impl Workflow for WorkflowDefinition {
             )?;
         }
         plan.build()
+    }
+
+    fn graph(&self) -> Option<WorkflowGraph> {
+        self.graph.clone()
     }
 }
 
@@ -288,25 +309,37 @@ pub fn parse_definition(source: &str) -> Result<ParsedDefinition, DefinitionSour
             .next_nonblank()
             .ok_or(DefinitionSourceError::UnexpectedEnd {
                 expected: match kind {
-                    DefinitionSourceKind::Workflow => "the ## Steps section",
+                    DefinitionSourceKind::Workflow => "the ## Steps or ## States section",
                     DefinitionSourceKind::Router => "the ## Routes section",
                 },
             })?;
-    let expected_section = match kind {
-        DefinitionSourceKind::Workflow => "## Steps",
-        DefinitionSourceKind::Router => "## Routes",
-    };
-    if section_source.trim() != expected_section {
-        return Err(DefinitionSourceError::UnexpectedLine {
-            line: section_line,
-            expected: expected_section,
-            found: section_source.to_owned(),
-        });
-    }
 
     match kind {
-        DefinitionSourceKind::Workflow => parse_workflow(title, id, &mut cursor),
-        DefinitionSourceKind::Router => parse_router(title, id, &mut cursor),
+        DefinitionSourceKind::Workflow => match section_source.trim() {
+            "## Steps" => parse_static_workflow(title, id, &mut cursor),
+            "## States" => parse_graph_workflow(
+                title,
+                id,
+                metadata.get("entry").map(String::as_str),
+                section_line,
+                &mut cursor,
+            ),
+            found => Err(DefinitionSourceError::UnexpectedLine {
+                line: section_line,
+                expected: "## Steps or ## States",
+                found: found.to_owned(),
+            }),
+        },
+        DefinitionSourceKind::Router => {
+            if section_source.trim() != "## Routes" {
+                return Err(DefinitionSourceError::UnexpectedLine {
+                    line: section_line,
+                    expected: "## Routes",
+                    found: section_source.to_owned(),
+                });
+            }
+            parse_router(title, id, &mut cursor)
+        }
     }
 }
 
@@ -337,7 +370,8 @@ fn parse_metadata(
         };
         let key = key.trim();
         let value = value.trim();
-        if key != "id" {
+        let allowed = key == "id" || (kind == DefinitionSourceKind::Workflow && key == "entry");
+        if !allowed {
             return Err(DefinitionSourceError::UnknownField {
                 line,
                 declaration: kind,
@@ -374,13 +408,13 @@ fn required_metadata<'a>(
         })
 }
 
-fn parse_workflow(
+fn parse_static_workflow(
     title: String,
     id: &str,
     cursor: &mut SourceCursor<'_>,
 ) -> Result<ParsedDefinition, DefinitionSourceError> {
     let id = parse_id(id, None, "workflow id", WorkflowId::parse)?;
-    let rows = parse_table(cursor, &["Key", "Parent", "Role", "Objective"])?;
+    let rows = parse_table(cursor, &STATIC_WORKFLOW_HEADER)?;
     let mut seen = BTreeSet::new();
     let mut steps = Vec::with_capacity(rows.len());
     for row in rows {
@@ -427,7 +461,269 @@ fn parse_workflow(
         id,
         title,
         steps,
+        graph: None,
     }))
+}
+
+fn parse_graph_workflow(
+    title: String,
+    id: &str,
+    configured_entry: Option<&str>,
+    section_line: usize,
+    cursor: &mut SourceCursor<'_>,
+) -> Result<ParsedDefinition, DefinitionSourceError> {
+    let id = parse_id(id, None, "workflow id", WorkflowId::parse)?;
+    let rows = parse_table(cursor, &GRAPH_WORKFLOW_HEADER)?;
+    if rows.is_empty() {
+        return Err(DefinitionSourceError::InvalidTable {
+            line: section_line,
+            reason: "workflow policy graph requires at least one state".to_owned(),
+        });
+    }
+
+    let entry = configured_entry.unwrap_or_else(|| cell(&rows[0], 0));
+    validate_symbol(entry, section_line, "workflow entry state")?;
+    let mut graph_states = Vec::with_capacity(rows.len());
+    let mut transitions = Vec::new();
+    let mut steps = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    for row in &rows {
+        let key = required_cell(row, 0, "state key")?;
+        validate_symbol(key, row.line, "workflow state key")?;
+        if !seen.insert(key.to_owned()) {
+            return Err(DefinitionSourceError::InvalidTable {
+                line: row.line,
+                reason: format!("duplicate workflow state key {key}"),
+            });
+        }
+        let required = parse_required(cell(row, 3), row.line)?;
+        let join = parse_join(cell(row, 4), row.line)?;
+        let objective = cell(row, 5);
+        let kind = match cell(row, 1) {
+            "invoke" => {
+                let role = parse_id(
+                    required_cell(row, 2, "invoke role")?,
+                    Some(row.line),
+                    "role",
+                    RoleId::parse,
+                )?;
+                validate_objective_template(objective, row.line)?;
+                steps.push(WorkflowStepDefinition {
+                    key: key.to_owned(),
+                    parent: None,
+                    role: role.clone(),
+                    objective: objective.to_owned(),
+                });
+                WorkflowStateKind::Invoke {
+                    role,
+                    objective: objective.to_owned(),
+                }
+            }
+            "decision" => {
+                require_virtual_role_empty(row)?;
+                WorkflowStateKind::Decision
+            }
+            "return" => {
+                require_virtual_role_empty(row)?;
+                validate_terminal_text(objective, row.line, "return summary")?;
+                WorkflowStateKind::Return {
+                    summary: objective.to_owned(),
+                }
+            }
+            "fail" => {
+                require_virtual_role_empty(row)?;
+                validate_terminal_text(objective, row.line, "failure reason")?;
+                WorkflowStateKind::Fail {
+                    reason: objective.to_owned(),
+                }
+            }
+            value => {
+                return Err(DefinitionSourceError::InvalidValue {
+                    line: Some(row.line),
+                    field: "state kind",
+                    value: value.to_owned(),
+                    reason: "expected invoke, decision, return, or fail".to_owned(),
+                });
+            }
+        };
+        graph_states.push(WorkflowGraphState {
+            key: key.to_owned(),
+            join,
+            required,
+            kind,
+        });
+        transitions.extend(parse_transitions(key, cell(row, 6), row.line)?);
+    }
+
+    let graph = WorkflowGraph {
+        entry: entry.to_owned(),
+        states: graph_states,
+        transitions,
+    };
+    graph
+        .validate()
+        .map_err(|error| DefinitionSourceError::InvalidTable {
+            line: section_line,
+            reason: error.to_string(),
+        })?;
+    if steps.is_empty() {
+        return Err(DefinitionSourceError::InvalidTable {
+            line: section_line,
+            reason: "workflow policy graph requires at least one invoke state".to_owned(),
+        });
+    }
+    Ok(ParsedDefinition::Workflow(WorkflowDefinition {
+        id,
+        title,
+        steps,
+        graph: Some(graph),
+    }))
+}
+
+fn parse_required(value: &str, line: usize) -> Result<bool, DefinitionSourceError> {
+    match value {
+        "required" | "true" | "yes" => Ok(true),
+        "optional" | "false" | "no" | "" | "-" => Ok(false),
+        value => Err(DefinitionSourceError::InvalidValue {
+            line: Some(line),
+            field: "required",
+            value: value.to_owned(),
+            reason: "expected required/optional or true/false".to_owned(),
+        }),
+    }
+}
+
+fn parse_join(value: &str, line: usize) -> Result<WorkflowJoin, DefinitionSourceError> {
+    match value {
+        "" | "-" | "any" => Ok(WorkflowJoin::Any),
+        "all-settled" | "all_settled" => Ok(WorkflowJoin::AllSettled),
+        value => Err(DefinitionSourceError::InvalidValue {
+            line: Some(line),
+            field: "join",
+            value: value.to_owned(),
+            reason: "expected any or all-settled".to_owned(),
+        }),
+    }
+}
+
+fn require_virtual_role_empty(row: &TableRow) -> Result<(), DefinitionSourceError> {
+    if matches!(cell(row, 2), "" | "-") {
+        Ok(())
+    } else {
+        Err(DefinitionSourceError::InvalidTable {
+            line: row.line,
+            reason: "decision/return/fail states must not declare a role".to_owned(),
+        })
+    }
+}
+
+fn validate_terminal_text(
+    value: &str,
+    line: usize,
+    field: &'static str,
+) -> Result<(), DefinitionSourceError> {
+    if value.trim().is_empty() {
+        return Err(DefinitionSourceError::InvalidValue {
+            line: Some(line),
+            field,
+            value: value.to_owned(),
+            reason: "must not be empty".to_owned(),
+        });
+    }
+    let without_objective = value.replace(OBJECTIVE_PLACEHOLDER, "");
+    if without_objective.contains('{') || without_objective.contains('}') {
+        return Err(DefinitionSourceError::InvalidValue {
+            line: Some(line),
+            field,
+            value: value.to_owned(),
+            reason: "{objective} is the only supported template placeholder".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn parse_transitions(
+    from: &str,
+    source: &str,
+    line: usize,
+) -> Result<Vec<WorkflowTransition>, DefinitionSourceError> {
+    if source.trim().is_empty() || source == "-" {
+        return Ok(Vec::new());
+    }
+    source
+        .split(';')
+        .map(str::trim)
+        .filter(|transition| !transition.is_empty())
+        .map(|transition| {
+            let (to, when) = match transition.split_once(" if ") {
+                Some((to, condition)) => (to.trim(), parse_condition(condition.trim(), line)?),
+                None => (transition, WorkflowCondition::Always),
+            };
+            validate_symbol(to, line, "workflow transition target")?;
+            Ok(WorkflowTransition {
+                from: from.to_owned(),
+                to: to.to_owned(),
+                when,
+            })
+        })
+        .collect()
+}
+
+fn parse_condition(source: &str, line: usize) -> Result<WorkflowCondition, DefinitionSourceError> {
+    if let Some(path) = source
+        .strip_prefix("input.")
+        .and_then(|rest| rest.strip_suffix(" exists"))
+    {
+        return Ok(WorkflowCondition::InputExists {
+            path: path.trim().to_owned(),
+        });
+    }
+    if let Some(path) = source
+        .strip_prefix("input.")
+        .and_then(|rest| rest.strip_suffix(" missing"))
+    {
+        return Ok(WorkflowCondition::InputMissing {
+            path: path.trim().to_owned(),
+        });
+    }
+    if let Some(rest) = source.strip_prefix("output.") {
+        if let Some((path, value)) = rest.split_once(" contains ") {
+            return Ok(WorkflowCondition::OutputContains {
+                path: path.trim().to_owned(),
+                value: value.trim().to_owned(),
+            });
+        }
+        if let Some((path, value)) = rest.split_once(" = ") {
+            return Ok(WorkflowCondition::OutputEquals {
+                path: path.trim().to_owned(),
+                value: value.trim().to_owned(),
+            });
+        }
+    }
+    if let Some(value) = source.strip_prefix("outcome = ") {
+        let status = match value.trim() {
+            "success" => WorkflowOutcomeStatus::Success,
+            "failure" => WorkflowOutcomeStatus::Failure,
+            "cancelled" => WorkflowOutcomeStatus::Cancelled,
+            "skipped" => WorkflowOutcomeStatus::Skipped,
+            other => {
+                return Err(DefinitionSourceError::InvalidValue {
+                    line: Some(line),
+                    field: "transition condition",
+                    value: other.to_owned(),
+                    reason: "outcome must be success, failure, cancelled, or skipped".to_owned(),
+                });
+            }
+        };
+        return Ok(WorkflowCondition::Outcome { status });
+    }
+    Err(DefinitionSourceError::InvalidValue {
+        line: Some(line),
+        field: "transition condition",
+        value: source.to_owned(),
+        reason: "expected input.<path> exists/missing, output.<path> = <value>, output.<path> contains <value>, or outcome = <status>".to_owned(),
+    })
 }
 
 fn parse_router(
@@ -885,6 +1181,23 @@ id: phenix.implement
 | `verify` | `implement` | `verifier` | Verify {objective} |
 "#;
 
+    const GRAPH_WORKFLOW: &str = r#"# Managed implementation
+
+```phenix-workflow
+id: phenix.managed
+entry: route-plan
+```
+
+## States
+
+| Key | Kind | Role | Required | Join | Objective | Next |
+|---|---|---|---|---|---|---|
+| `route-plan` | `decision` | | `optional` | `any` | | `plan if input.plan missing; implement if input.plan exists` |
+| `plan` | `invoke` | `planner` | `required` | `any` | Plan {objective} | `implement` |
+| `implement` | `invoke` | `implementer` | `required` | `any` | Implement {objective} | `return` |
+| `return` | `return` | | `optional` | `any` | Implemented {objective} | |
+"#;
+
     const ROUTER: &str = r#"# Default routing
 
 ```phenix-router
@@ -912,7 +1225,7 @@ id: phenix.capability-budget
     }
 
     #[test]
-    fn workflow_source_compiles_to_a_typed_plan() {
+    fn static_workflow_source_compiles_to_a_typed_plan() {
         let ParsedDefinition::Workflow(workflow) = parse_definition(WORKFLOW).expect("workflow")
         else {
             panic!("workflow definition expected")
@@ -926,6 +1239,22 @@ id: phenix.capability-budget
         assert_eq!(plan.steps.len(), 2);
         assert_eq!(plan.steps[1].parent.as_deref(), Some("implement"));
         assert_eq!(plan.steps[0].objective, "Implement ship the feature");
+    }
+
+    #[test]
+    fn graph_workflow_source_preserves_explicit_policy() {
+        let ParsedDefinition::Workflow(workflow) =
+            parse_definition(GRAPH_WORKFLOW).expect("graph workflow")
+        else {
+            panic!("workflow definition expected")
+        };
+        let graph = workflow.policy_graph().expect("policy graph");
+        assert_eq!(graph.entry, "route-plan");
+        assert_eq!(workflow.steps().len(), 2);
+        assert!(graph.transitions.iter().any(|transition| matches!(
+            transition.when,
+            WorkflowCondition::InputExists { ref path } if path == "plan"
+        )));
     }
 
     #[test]

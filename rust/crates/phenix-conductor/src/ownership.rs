@@ -177,8 +177,7 @@ impl ConductorOwner {
     ) -> Result<Vec<GatewayEvent>, ConductorOwnerError> {
         self.runtime_for_tree_mut(tree_id)?
             .conductor_mut()
-            .gateway_mut()
-            .execute(tree_id, node_id, SessionCommand::Poll)
+            .poll_node(tree_id, node_id)
             .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))
     }
 

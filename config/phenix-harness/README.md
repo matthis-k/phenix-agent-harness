@@ -19,6 +19,41 @@ future session trees pin that revision
 
 Files below `workflows/` and `routing/` are source documents referenced by this example. Their content becomes authoritative only after a conductor accepts the corresponding configuration request.
 
+## Workflow ownership
+
+Managed workflows use a deterministic policy graph evaluated by `phenix-conductor`. ACP agents execute `invoke` states; they do not own graph topology, branching, joins, repair budgets, aliases, or terminal workflow state.
+
+```text
+| Key | Kind | Role | Required | Join | Objective | Next |
+```
+
+The supported state kinds are `invoke`, `decision`, `return`, and `fail`. `decision`, `return`, and `fail` are conductor operations and therefore do not create an ACP session. `return` and `fail` are terminal.
+
+`Required` distinguishes mandatory evidence from optional evidence. `Join` is either `any` or `all-settled`; `all-settled` preserves successful, failed, cancelled, and skipped predecessor outcomes so synthesis can reason over partial evidence rather than collapsing the whole fanout into a generic failure.
+
+`Next` is a semicolon-separated set of deterministic transitions. Conditions may inspect caller input, typed predecessor output, or predecessor outcome:
+
+```text
+implement if input.plan exists
+plan if input.plan missing
+repair if output.decision = repair
+repository if output.domains contains repository
+fallback if outcome = failure
+```
+
+Workflow invoke outputs are parsed as JSON when possible and are passed to downstream states in the conductor-created workflow context. Graph cycles are rejected; bounded repair therefore uses explicit `repair` and `recheck` states instead of an unbounded retry loop.
+
+The example workflows apply these ownership rules:
+
+- `workflow.implement` treats a caller-supplied `input.plan` as authoritative and skips its planner.
+- Debugging cannot mutate after an inconclusive reproduction.
+- Post-implementation reviewers return explicit accept/repair/fail decisions with one bounded repair/recheck path.
+- QA waits for all evidence branches to settle and distinguishes mandatory from optional evidence.
+- Research classifies relevant evidence domains before spawning research branches.
+- Refactor architecture ownership and independent acceptance review use different roles.
+- Deterministic terminal mapping uses `return`/`fail`; model finalizers remain only where semantic synthesis is actually required.
+- `workflow.qa` is the canonical general review policy; there is no wrapper `workflow.review` that would add a redundant run-tree node.
+
 ## Routing format
 
 Routing tables select a complete model configuration for each difficulty:

@@ -1,0 +1,37 @@
+name: PR 265 stack diagnostic
+
+on:
+  push:
+    branches:
+      - fix/workflow-ownership-issue-227
+    paths:
+      - .github/workflows/pr265-rebase-diagnostic.yml
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: fix/workflow-ownership-issue-227
+          fetch-depth: 0
+      - name: Record stack conflicts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin refactor/phenix-acp-boundaries-routing-d0-d4
+          if git merge --no-edit origin/refactor/phenix-acp-boundaries-routing-d0-d4; then
+            printf 'clean\n' > .pr265-stack-conflicts
+          else
+            git diff --name-only --diff-filter=U > /tmp/conflicts
+            git merge --abort
+            cp /tmp/conflicts .pr265-stack-conflicts
+          fi
+          git add .pr265-stack-conflicts
+          git commit -m 'ci: record PR 265 stack conflicts'
+          git push origin HEAD:fix/workflow-ownership-issue-227
