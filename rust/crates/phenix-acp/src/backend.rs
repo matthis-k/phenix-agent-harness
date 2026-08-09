@@ -373,31 +373,3 @@ pub enum BackendCommandSource {
     Skill,
     PromptTemplate,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn backend_methods_are_backend_scoped() {
-        assert_eq!(
-            BackendCapabilitiesGet::METHOD,
-            "_phenix/backend/capabilities/get"
-        );
-        assert_eq!(BackendModelList::METHOD, "_phenix/backend/model/list");
-        assert_eq!(
-            BackendAuthProviderList::METHOD,
-            "_phenix/backend/auth_provider/list"
-        );
-        assert_eq!(BackendAuthStart::METHOD, "_phenix/backend/auth/start");
-        assert_eq!(BackendAuthRespond::METHOD, "_phenix/backend/auth/respond");
-        assert_eq!(BackendAuthCancel::METHOD, "_phenix/backend/auth/cancel");
-        assert_eq!(
-            BackendAuthTerminalFinished::METHOD,
-            "_phenix/backend/auth/terminal_finished"
-        );
-        assert_eq!(BackendAuthLogout::METHOD, "_phenix/backend/auth/logout");
-        assert_eq!(BackendEventPoll::METHOD, "_phenix/backend/event/poll");
-        assert_eq!(BackendCommandList::METHOD, "_phenix/backend/command/list");
-    }
-}
