@@ -1,0 +1,28 @@
+name: PR 265 sync green base
+
+on:
+  push:
+    branches:
+      - fix/workflow-ownership-issue-227
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: fix/workflow-ownership-issue-227
+          fetch-depth: 0
+      - name: Merge green PR 264 base
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch origin refactor/phenix-acp-boundaries-routing-d0-d4
+          test "$(git rev-parse origin/refactor/phenix-acp-boundaries-routing-d0-d4)" = "5e9d3a74d42c6b5c61e1424392f9ce2012fa5fc8"
+          git -c core.hooksPath=/dev/null -c commit.gpgSign=false merge --no-edit --no-verify origin/refactor/phenix-acp-boundaries-routing-d0-d4
+          git push origin HEAD:fix/workflow-ownership-issue-227
