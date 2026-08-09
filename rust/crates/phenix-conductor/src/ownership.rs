@@ -2,10 +2,10 @@ use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
 use phenix_acp::{
     decode_extension_response, encode_extension_request, AcpMethod, ConfigurationApply,
     ConfigurationApplyParams, ConfigurationApplyResult, ConfigurationDefinitionInput,
-    ConfigurationFormat, ConfigurationGet, ConfigurationGetResult, ConfigurationSnapshot,
-    ConfigurationSourceError, DefinitionFormat, GatewayEvent, SessionCommand, SessionNodeId,
-    SessionTreeClose, SessionTreeCreate, SessionTreeCreateParams, SessionTreeId, SessionTreeList,
-    SessionTreeListResult, SessionTreeSnapshot,
+    ConfigurationGet, ConfigurationGetResult, ConfigurationSnapshot, ConfigurationSourceError,
+    GatewayEvent, SessionCommand, SessionNodeId, SessionTreeClose, SessionTreeCreate,
+    SessionTreeCreateParams, SessionTreeId, SessionTreeList, SessionTreeListResult,
+    SessionTreeSnapshot,
 };
 use phenix_conductor::{
     BootstrapBackend, BootstrapDefinition, BootstrapStandardSession, ConductorBootstrap,
@@ -403,7 +403,7 @@ fn build_bootstrap(
                     .map_err(ConductorOwnerError::Source)?;
                 BootstrapDefinition::Workflow {
                     source: loaded.source,
-                    format: loaded.format.map(map_format),
+                    format: loaded.format,
                 }
             }
             ConfigurationDefinitionInput::RoutingTable { source } => {
@@ -413,7 +413,7 @@ fn build_bootstrap(
                     .map_err(ConductorOwnerError::Source)?;
                 BootstrapDefinition::RoutingTable {
                     source: loaded.source,
-                    format: loaded.format.map(map_format),
+                    format: loaded.format,
                 }
             }
         };
@@ -473,15 +473,6 @@ fn command_with_environment(
 
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
-}
-
-fn map_format(format: ConfigurationFormat) -> DefinitionFormat {
-    match format {
-        ConfigurationFormat::Markdown => DefinitionFormat::Markdown,
-        ConfigurationFormat::Json => DefinitionFormat::Json,
-        ConfigurationFormat::Toml => DefinitionFormat::Toml,
-        ConfigurationFormat::Ron => DefinitionFormat::Ron,
-    }
 }
 
 fn encode_response<T: Serialize>(value: &T) -> Result<ExtResponse, ConductorOwnerError> {
