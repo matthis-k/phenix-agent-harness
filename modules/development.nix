@@ -44,12 +44,6 @@ _: {
 
       integrationTargets = [
         {
-          id = "phenix-acp-legacy-definitions";
-          package = "phenix-acp";
-          test = "legacy_definitions";
-          label = "phenix-acp / legacy_definitions";
-        }
-        {
           id = "phenix-acp-repeated-prompts";
           package = "phenix-acp";
           test = "repeated_prompts";
@@ -68,10 +62,10 @@ _: {
           label = "phenix-ui-core / editor_modes";
         }
         {
-          id = "phenix-ui-core-functional-parity";
+          id = "phenix-ui-core-runtime-controls";
           package = "phenix-ui-core";
-          test = "functional_parity";
-          label = "phenix-ui-core / functional_parity";
+          test = "runtime_controls";
+          label = "phenix-ui-core / runtime_controls";
         }
         {
           id = "phenix-ui-runtime-multiline-input";
@@ -317,7 +311,6 @@ _: {
                       system="$(nix eval --impure --raw --expr builtins.currentSystem)"
                       generated="$(mktemp)"
                       trap 'rm -f "$generated"' EXIT
-
                       nix eval --raw \
                         ".#packages.$system.phenix-maintenance.phenixMaintenance.ci.github.workflow" \
                         > "$generated"
