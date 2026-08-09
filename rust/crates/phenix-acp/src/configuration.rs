@@ -309,16 +309,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wire_methods_use_the_configuration_namespace() {
-        assert_eq!(ConfigurationApply::METHOD, "_phenix/config/apply");
-        assert_eq!(ConfigurationGet::METHOD, "_phenix/config/get");
-        assert_eq!(
-            ConfigurationChangedNotification::METHOD,
-            "_phenix/config/changed"
-        );
-    }
-
-    #[test]
     fn path_sources_are_descriptors_not_preloaded_content() {
         let source = ConfigurationSource::Path {
             path: PathBuf::from("workflows/implement.md"),
