@@ -24,27 +24,27 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
           path = Path('rust/crates/phenix-acp/src/runtime/workflow.rs')
           text = path.read_text()
-          old = '''    pub fn terminal(&self) -> Option<&WorkflowTerminal> {
-              self.terminal.as_ref()
-          }
-
-          '''
-          if old not in text:
-              raise SystemExit('expected dead terminal method not found')
-          path.write_text(text.replace(old, '', 1))
+          text, count = re.subn(
+              r'\n    pub fn terminal\(&self\) -> Option<&WorkflowTerminal> \{\n        self\.terminal\.as_ref\(\)\n    \}\n',
+              '\n',
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit(f'expected one dead terminal method, removed {count}')
+          path.write_text(text)
           PY
           cargo fmt --manifest-path rust/Cargo.toml --all
       - name: Strict Clippy
-        id: clippy
         shell: bash
         run: |
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/pr265-diagnostics"
           cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings 2>&1 | tee "$RUNNER_TEMP/pr265-diagnostics/clippy.log"
       - name: Full Rust tests
-        id: tests
         shell: bash
         run: |
           set -o pipefail
