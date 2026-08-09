@@ -35,6 +35,7 @@ jobs:
           bash /tmp/apply-pr264-final.sh
           python3 - <<'PY'
           from pathlib import Path
+
           path = Path('rust/crates/phenix-conductor/tests/black_box_model_tool_loop.rs')
           text = path.read_text()
           replacements = {
@@ -48,6 +49,14 @@ jobs:
                   raise SystemExit(f'expected stale backend assertion not found: {old.strip()}')
               text = text.replace(old, new, 1)
           path.write_text(text)
+
+          path = Path('rust/crates/phenix-tui/src/acp_config.rs')
+          text = path.read_text()
+          old = '        assert!(!include_str!("acp_config.rs").contains("PHENIX_CONFIGURATION_FILE"));\n'
+          new = '        assert!(!include_str!("acp_config.rs").contains(concat!("PHENIX_CONFIGURATION_", "FILE")));\n'
+          if old not in text:
+              raise SystemExit('expected self-matching temporary-file assertion not found')
+          path.write_text(text.replace(old, new, 1))
           PY
           cd rust
           cargo fmt --all
