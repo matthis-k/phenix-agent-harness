@@ -33,9 +33,8 @@ pub(crate) fn theme_style(theme: &ThemeConfig, group: &str) -> Style {
 
 /// Resolve a style for an actual rectangular surface.
 ///
-/// Rich transcript blocks use semantic surface names even when an older theme has
-/// not defined them yet. The fallback hierarchy is derived from existing theme
-/// colors rather than hardcoded RGB values:
+/// Rich transcript surfaces have canonical derived defaults when a theme does
+/// not override them explicitly:
 /// - `UserMessage`: raised surface using the border/surface0 color
 /// - `CodeBlock` / `MediaBlock`: crust-like canvas using `Normal`
 ///
@@ -57,7 +56,6 @@ pub(crate) fn surface_style(theme: &ThemeConfig, group: &str) -> Style {
 }
 
 fn raw_theme_style(theme: &ThemeConfig, group: &str) -> Style {
-    let group = resolved_group(theme, group);
     let HighlightStyle {
         foreground,
         background,
@@ -89,14 +87,6 @@ fn raw_theme_style(theme: &ThemeConfig, group: &str) -> Style {
     style.add_modifier(modifiers)
 }
 
-fn resolved_group<'a>(theme: &ThemeConfig, group: &'a str) -> &'a str {
-    if group == "SurfaceFocused" && !theme.highlights.contains_key(group) {
-        "Surface"
-    } else {
-        group
-    }
-}
-
 fn ratatui_color(color: ColorSpec) -> Color {
     match color {
         ColorSpec::Default => Color::Reset,
@@ -122,7 +112,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn semantic_text_styles_never_paint_their_legacy_background() {
+    fn semantic_text_styles_do_not_paint_surface_backgrounds() {
         let theme = ThemeConfig::default();
         assert_eq!(theme_style(&theme, "Accent").bg, None);
         assert_eq!(theme_style(&theme, "Normal").bg, None);
@@ -133,15 +123,6 @@ mod tests {
     fn explicit_surfaces_keep_their_background() {
         let style = surface_style(&ThemeConfig::default(), "Surface");
         assert!(style.bg.is_some());
-    }
-
-    #[test]
-    fn focused_surface_falls_back_to_surface_for_older_themes() {
-        let theme = ThemeConfig::default();
-        assert_eq!(
-            surface_style(&theme, "SurfaceFocused"),
-            surface_style(&theme, "Surface")
-        );
     }
 
     #[test]
