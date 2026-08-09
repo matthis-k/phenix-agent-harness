@@ -119,7 +119,10 @@ impl Display for DefinitionParseError {
                 Ok(())
             }
             Self::UnexpectedKind { expected, actual } => {
-                write!(formatter, "expected {expected} source, found {actual} source")
+                write!(
+                    formatter,
+                    "expected {expected} source, found {actual} source"
+                )
             }
             Self::DuplicateDefinition { kind, id } => {
                 write!(formatter, "duplicate {kind} definition {id}")

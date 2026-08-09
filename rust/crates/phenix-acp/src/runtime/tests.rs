@@ -212,12 +212,7 @@ fn workflow_plan_becomes_recursive_nodes_objectives_and_acp_sessions() {
         )
         .expect("tree");
     let started = gateway
-        .start_workflow(
-            &root.tree_id,
-            &workflow_id(),
-            None,
-            "implement and verify",
-        )
+        .start_workflow(&root.tree_id, &workflow_id(), None, "implement and verify")
         .expect("workflow");
     let snapshot = gateway.snapshot(&root.tree_id).expect("snapshot");
 

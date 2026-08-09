@@ -1,6 +1,4 @@
-use phenix_acp::{
-    parse_workflow, RoleId, WorkflowCondition, WorkflowJoin, WorkflowStateKind,
-};
+use phenix_acp::{parse_workflow, RoleId, WorkflowCondition, WorkflowJoin, WorkflowStateKind};
 
 const IMPLEMENT: &str = include_str!("../../../../config/phenix-harness/workflows/implement.md");
 const DEBUG: &str = include_str!("../../../../config/phenix-harness/workflows/debug.md");
@@ -50,7 +48,10 @@ fn debug_has_a_non_mutating_inconclusive_terminal() {
         .iter()
         .find(|state| state.key == "inconclusive")
         .expect("inconclusive state");
-    assert!(matches!(inconclusive.kind, WorkflowStateKind::Return { .. }));
+    assert!(matches!(
+        inconclusive.kind,
+        WorkflowStateKind::Return { .. }
+    ));
 }
 
 #[test]
@@ -63,20 +64,24 @@ fn qa_waits_for_settled_evidence_and_marks_optional_reviewers_explicitly() {
         .expect("synthesis state");
     assert_eq!(synthesize.join, WorkflowJoin::AllSettled);
     for key in ["architecture", "security"] {
-        assert!(!graph
-            .states
-            .iter()
-            .find(|state| state.key == key)
-            .expect("optional review state")
-            .required);
+        assert!(
+            !graph
+                .states
+                .iter()
+                .find(|state| state.key == key)
+                .expect("optional review state")
+                .required
+        );
     }
     for key in ["repository", "tests"] {
-        assert!(graph
-            .states
-            .iter()
-            .find(|state| state.key == key)
-            .expect("required evidence state")
-            .required);
+        assert!(
+            graph
+                .states
+                .iter()
+                .find(|state| state.key == key)
+                .expect("required evidence state")
+                .required
+        );
     }
 }
 
@@ -121,15 +126,24 @@ fn specialized_post_implementation_reviews_have_bounded_repair_rechecks() {
     ] {
         let graph = graph(source);
         assert!(
-            graph.states.iter().any(|state| state.key.contains("repair")),
+            graph
+                .states
+                .iter()
+                .any(|state| state.key.contains("repair")),
             "{name} lacks a repair state"
         );
         assert!(
-            graph.states.iter().any(|state| state.key.contains("recheck")),
+            graph
+                .states
+                .iter()
+                .any(|state| state.key.contains("recheck")),
             "{name} lacks a bounded recheck state"
         );
         assert!(
-            graph.states.iter().any(|state| matches!(state.kind, WorkflowStateKind::Fail { .. })),
+            graph
+                .states
+                .iter()
+                .any(|state| matches!(state.kind, WorkflowStateKind::Fail { .. })),
             "{name} lacks an explicit failure terminal"
         );
     }

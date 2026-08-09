@@ -60,10 +60,10 @@ async fn run_fixture() -> AcpResult<()> {
                             request.value.as_ref(),
                         ),
                     }),
-                    ClientRequest::PromptRequest(_) => serde_json::to_value(
-                        PromptResponse::new(StopReason::EndTurn),
-                    )
-                    .map_err(phenix_acp::acp::Error::into_internal_error)?,
+                    ClientRequest::PromptRequest(_) => {
+                        serde_json::to_value(PromptResponse::new(StopReason::EndTurn))
+                            .map_err(phenix_acp::acp::Error::into_internal_error)?
+                    }
                     _ => return Err(phenix_acp::acp::Error::method_not_found()),
                 };
                 responder.respond(response)

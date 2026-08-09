@@ -1,10 +1,11 @@
+use crate::runtime::WorkflowMachine;
 use crate::{
     AcpMethod, Difficulty, EmptyResult, GatewayError, GatewayEvent, NodeAttachResult, NodeCancel,
     NodeDelegate, NodeExecute, NodeExecuteResult, NodeFork, NodeLoad, NodeResume, ObjectiveId,
     ObjectiveMark, PhenixAcpGateway, RoleId, RoutingExplain, RoutingExplainParams, SessionCommand,
     SessionEvent, SessionNodeId, SessionTreeClose, SessionTreeCreate, SessionTreeCreateResult,
     SessionTreeGet, SessionTreeId, SessionTreeList, WorkflowAction, WorkflowGraph, WorkflowId,
-    WorkflowMachine, WorkflowStart, WorkflowStartParams, WorkflowStartResult,
+    WorkflowStart, WorkflowStartParams, WorkflowStartResult,
 };
 use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
 use serde::Serialize;
@@ -314,7 +315,9 @@ impl PhenixConductor {
         }
         let nodes = run.machine.running_nodes();
         for node_id in nodes {
-            let events = self.gateway.execute(tree_id, &node_id, SessionCommand::Poll)?;
+            let events = self
+                .gateway
+                .execute(tree_id, &node_id, SessionCommand::Poll)?;
             self.observe_if_running(run, &node_id, &events)?;
             queue_events(run, events);
         }
@@ -451,8 +454,9 @@ impl PhenixConductor {
 }
 
 fn workflow_prompt(objective: &str, context: &serde_json::Value) -> Result<String, GatewayError> {
-    let context = serde_json::to_string_pretty(context)
-        .map_err(|error| GatewayError::workflow(format!("failed to encode workflow context: {error}")))?;
+    let context = serde_json::to_string_pretty(context).map_err(|error| {
+        GatewayError::workflow(format!("failed to encode workflow context: {error}"))
+    })?;
     Ok(format!(
         "{objective}\n\nPhenix workflow context follows. Treat supplied input and predecessor artifacts as authoritative; do not redo an upstream planning or classification step unless this state's objective explicitly asks for it. When the objective specifies a decision/status contract, return a JSON object matching it.\n\n```json\n{context}\n```"
     ))
@@ -654,7 +658,10 @@ mod tests {
                 .build()
                 .expect("plan");
             builder = builder
-                .workflow(workflow.clone(), crate::StaticWorkflow::new(plan).expect("workflow"))
+                .workflow(
+                    workflow.clone(),
+                    crate::StaticWorkflow::new(plan).expect("workflow"),
+                )
                 .expect("register workflow");
         }
         let gateway = builder.build().expect("gateway");
@@ -781,7 +788,9 @@ mod tests {
             input: serde_json::json!({"plan": {"steps": ["edit", "test"]}}),
         })
         .expect("workflow start");
-        conductor.handle_extension(request).expect("workflow response");
+        conductor
+            .handle_extension(request)
+            .expect("workflow response");
         let roles = factory
             .opens
             .lock()

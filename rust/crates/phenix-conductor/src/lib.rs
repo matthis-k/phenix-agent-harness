@@ -6,14 +6,14 @@ use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
 use phenix_acp::{
     AcpEndpoint, AcpMethod, AuthenticationCapabilities, BackendAuthMethod, BackendAuthProviderList,
     BackendAuthProviderListResult, BackendAuthProviderSummary, BackendCapabilities,
-    BackendCapabilitiesGet, BackendCapabilitiesResult, BackendCommandList, BackendCommandListResult,
-    BackendCommandSource, BackendCommandSummary, BackendDefinition, BackendId, BackendModelList,
-    BackendModelListResult, BackendModelSummary, BackendTargetParams, DefinitionError,
-    DefinitionFormat, DefinitionParseError, Definitions, Difficulty, ExtensionUiCapabilities,
-    GatewayError, GatewayEvent, ModelCapabilities, ModelId, PhenixAcpGateway, PhenixConductor,
-    PromptCapabilities, ProviderId, ResourceCapabilities, RoleId, RouterId, SessionCapabilities,
-    SessionCommand, SessionNodeId, SessionTreeDefinition, SessionTreeId, ToolConfiguration,
-    WorkflowGraph, WorkflowId,
+    BackendCapabilitiesGet, BackendCapabilitiesResult, BackendCommandList,
+    BackendCommandListResult, BackendCommandSource, BackendCommandSummary, BackendDefinition,
+    BackendId, BackendModelList, BackendModelListResult, BackendModelSummary, BackendTargetParams,
+    DefinitionError, DefinitionFormat, DefinitionParseError, Definitions, Difficulty,
+    ExtensionUiCapabilities, GatewayError, GatewayEvent, ModelCapabilities, ModelId,
+    PhenixAcpGateway, PhenixConductor, PromptCapabilities, ProviderId, ResourceCapabilities,
+    RoleId, RouterId, SessionCapabilities, SessionCommand, SessionNodeId, SessionTreeDefinition,
+    SessionTreeId, ToolConfiguration, WorkflowGraph, WorkflowId,
 };
 use phenix_acp_backend::{
     AcpAgentBackend, AcpBackendConfig, AcpGatewayTransport, ConfigError as BackendConfigError,

@@ -72,7 +72,12 @@ impl WorkflowGraph {
         for state in &self.states {
             match state.kind {
                 WorkflowStateKind::Return { .. } | WorkflowStateKind::Fail { .. } => {
-                    if outgoing.get(state.key.as_str()).copied().unwrap_or_default() != 0 {
+                    if outgoing
+                        .get(state.key.as_str())
+                        .copied()
+                        .unwrap_or_default()
+                        != 0
+                    {
                         return Err(GatewayError::InvalidWorkflowPlan(format!(
                             "terminal workflow state {} must not have outgoing transitions",
                             state.key
@@ -80,7 +85,12 @@ impl WorkflowGraph {
                     }
                 }
                 WorkflowStateKind::Invoke { .. } | WorkflowStateKind::Decision => {
-                    if outgoing.get(state.key.as_str()).copied().unwrap_or_default() == 0 {
+                    if outgoing
+                        .get(state.key.as_str())
+                        .copied()
+                        .unwrap_or_default()
+                        == 0
+                    {
                         return Err(GatewayError::InvalidWorkflowPlan(format!(
                             "workflow state {} has no outgoing transition",
                             state.key
@@ -147,11 +157,23 @@ pub struct WorkflowTransition {
 pub enum WorkflowCondition {
     #[default]
     Always,
-    InputExists { path: String },
-    InputMissing { path: String },
-    OutputEquals { path: String, value: String },
-    OutputContains { path: String, value: String },
-    Outcome { status: WorkflowOutcomeStatus },
+    InputExists {
+        path: String,
+    },
+    InputMissing {
+        path: String,
+    },
+    OutputEquals {
+        path: String,
+        value: String,
+    },
+    OutputContains {
+        path: String,
+        value: String,
+    },
+    Outcome {
+        status: WorkflowOutcomeStatus,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -376,11 +398,7 @@ impl WorkflowMachine {
         Ok(actions)
     }
 
-    pub fn bind_invoke(
-        &mut self,
-        key: &str,
-        node_id: SessionNodeId,
-    ) -> Result<(), GatewayError> {
+    pub fn bind_invoke(&mut self, key: &str, node_id: SessionNodeId) -> Result<(), GatewayError> {
         let status = self.statuses.get_mut(key).ok_or_else(|| {
             GatewayError::InvalidWorkflowPlan(format!("unknown workflow state {key}"))
         })?;
@@ -406,9 +424,7 @@ impl WorkflowMachine {
             .iter()
             .find_map(|(key, status)| (status.node_id() == Some(node_id)).then(|| key.clone()))
             .ok_or_else(|| {
-                GatewayError::Invariant(format!(
-                    "workflow has no running state for node {node_id}"
-                ))
+                GatewayError::Invariant(format!("workflow has no running state for node {node_id}"))
             })?;
         let status = self.statuses.get_mut(&key).expect("workflow state exists");
         let StateStatus::Running {
@@ -574,13 +590,15 @@ impl WorkflowMachine {
             if let Some(outcome) = status.outcome() {
                 value.insert(
                     "outcome".to_owned(),
-                    Value::String(match outcome {
-                        WorkflowOutcomeStatus::Success => "success",
-                        WorkflowOutcomeStatus::Failure => "failure",
-                        WorkflowOutcomeStatus::Cancelled => "cancelled",
-                        WorkflowOutcomeStatus::Skipped => "skipped",
-                    }
-                    .to_owned()),
+                    Value::String(
+                        match outcome {
+                            WorkflowOutcomeStatus::Success => "success",
+                            WorkflowOutcomeStatus::Failure => "failure",
+                            WorkflowOutcomeStatus::Cancelled => "cancelled",
+                            WorkflowOutcomeStatus::Skipped => "skipped",
+                        }
+                        .to_owned(),
+                    ),
                 );
             }
             if let Some(output) = status.output() {
@@ -763,12 +781,7 @@ mod tests {
         }
     }
 
-    fn bind_and_complete(
-        machine: &mut WorkflowMachine,
-        key: &str,
-        sequence: u64,
-        output: &str,
-    ) {
+    fn bind_and_complete(machine: &mut WorkflowMachine, key: &str, sequence: u64, output: &str) {
         let node = SessionNodeId::parse(format!("node-{sequence}")).expect("node");
         machine.bind_invoke(key, node.clone()).expect("bind");
         machine
@@ -900,8 +913,12 @@ mod tests {
         assert_eq!(actions.len(), 2);
         let required = SessionNodeId::parse("node-required").expect("node");
         let optional = SessionNodeId::parse("node-optional").expect("node");
-        machine.bind_invoke("required", required.clone()).expect("bind");
-        machine.bind_invoke("optional", optional.clone()).expect("bind");
+        machine
+            .bind_invoke("required", required.clone())
+            .expect("bind");
+        machine
+            .bind_invoke("optional", optional.clone())
+            .expect("bind");
         machine
             .observe(
                 &required,
@@ -996,7 +1013,10 @@ mod tests {
         )));
         assert!(matches!(
             actions.last(),
-            Some(WorkflowAction::Complete(WorkflowTerminal { success: true, .. }))
+            Some(WorkflowAction::Complete(WorkflowTerminal {
+                success: true,
+                ..
+            }))
         ));
     }
 
@@ -1110,7 +1130,10 @@ mod tests {
         let actions = machine.next_actions().expect("terminal");
         assert!(matches!(
             actions.last(),
-            Some(WorkflowAction::Complete(WorkflowTerminal { success: false, .. }))
+            Some(WorkflowAction::Complete(WorkflowTerminal {
+                success: false,
+                ..
+            }))
         ));
     }
 
@@ -1184,12 +1207,7 @@ mod tests {
         };
         let mut machine = WorkflowMachine::new(graph, "question", Value::Null).expect("machine");
         let _ = machine.next_actions().expect("classify");
-        bind_and_complete(
-            &mut machine,
-            "classify",
-            1,
-            r#"{"domains":["repository"]}"#,
-        );
+        bind_and_complete(&mut machine, "classify", 1, r#"{"domains":["repository"]}"#);
         let actions = machine.next_actions().expect("domain");
         assert_eq!(actions.len(), 1);
         assert!(matches!(
