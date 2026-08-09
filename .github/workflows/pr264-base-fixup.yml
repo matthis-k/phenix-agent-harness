@@ -83,6 +83,37 @@ jobs:
           if old_assert not in text:
               raise SystemExit('expected singular backend assertion not found')
           provider.write_text(text.replace(old_assert, new_assert, 1))
+
+          gateway = Path('rust/crates/phenix-acp/src/runtime/gateway.rs')
+          text = gateway.read_text()
+          old_parameter = '        workflow: Option<WorkflowId>,\n        mode: AttachMode,\n'
+          if text.count(old_parameter) != 1:
+              raise SystemExit('expected one generic attachment workflow parameter')
+          text = text.replace(old_parameter, '        mode: AttachMode,\n', 1)
+          old_call = '            objective.into(),\n            None,\n            AttachMode::'
+          if text.count(old_call) != 4:
+              raise SystemExit(f'expected four generic attachment callers, found {text.count(old_call)}')
+          text = text.replace(old_call, '            objective.into(),\n            AttachMode::')
+          old_route = '''                objective: objective.clone(),\n                workflow,\n                available_backends: backend_ids(&definition),\n'''
+          if text.count(old_route) != 1:
+              raise SystemExit('expected generic attachment routing workflow field')
+          text = text.replace(
+              old_route,
+              '''                objective: objective.clone(),\n                workflow: None,\n                available_backends: backend_ids(&definition),\n''',
+              1,
+          )
+          old_backend = '''        let factory = self\n            .backends\n            .get(&backend)\n            .ok_or_else(|| GatewayError::MissingBackend(backend))?;\n'''
+          new_backend = '''        let factory = self\n            .backends\n            .get(&backend)\n            .ok_or(GatewayError::MissingBackend(backend))?;\n'''
+          if old_backend not in text:
+              raise SystemExit('expected lazy missing-backend lookup')
+          gateway.write_text(text.replace(old_backend, new_backend, 1))
+
+          tui_config = Path('rust/crates/phenix-tui/src/acp_config.rs')
+          text = tui_config.read_text()
+          old_test_import = '''#[cfg(test)]\nmod tests {\n    use super::*;\n\n'''
+          if old_test_import not in text:
+              raise SystemExit('expected unused ACP config test import')
+          tui_config.write_text(text.replace(old_test_import, '#[cfg(test)]\nmod tests {\n', 1))
           PY
           cd rust
           cargo fmt --all
