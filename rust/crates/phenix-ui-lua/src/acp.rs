@@ -1,7 +1,8 @@
 use crate::provider::LuaState;
 use mlua::{Lua, Table, Value};
-use phenix_acp::{BackendId, DefinitionFormat, DefinitionId, RoleId, RouterId, SessionTreeId};
+use phenix_acp::{BackendId, DefinitionFormat, DefinitionId, Difficulty, RoleId, RouterId};
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -9,8 +10,8 @@ use std::rc::Rc;
 pub struct AcpApplicationConfig {
     definition_id: DefinitionId,
     router: RouterId,
-    backend: AcpBackendConfig,
-    root: AcpRootConfig,
+    backends: Vec<AcpBackendConfig>,
+    standard_session: Option<AcpStandardSessionConfig>,
     definitions: Vec<AcpDefinitionInput>,
 }
 
@@ -23,12 +24,12 @@ impl AcpApplicationConfig {
         &self.router
     }
 
-    pub fn backend(&self) -> &AcpBackendConfig {
-        &self.backend
+    pub fn backends(&self) -> &[AcpBackendConfig] {
+        &self.backends
     }
 
-    pub fn root(&self) -> &AcpRootConfig {
-        &self.root
+    pub fn standard_session(&self) -> Option<&AcpStandardSessionConfig> {
+        self.standard_session.as_ref()
     }
 
     pub fn definitions(&self) -> &[AcpDefinitionInput] {
@@ -40,6 +41,7 @@ impl AcpApplicationConfig {
 pub struct AcpBackendConfig {
     id: BackendId,
     command: String,
+    environment: BTreeMap<String, String>,
 }
 
 impl AcpBackendConfig {
@@ -50,22 +52,26 @@ impl AcpBackendConfig {
     pub fn command(&self) -> &str {
         &self.command
     }
+
+    pub fn environment(&self) -> &BTreeMap<String, String> {
+        &self.environment
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AcpRootConfig {
-    tree_id: SessionTreeId,
+pub struct AcpStandardSessionConfig {
     role: RoleId,
+    difficulty: Difficulty,
     objective: String,
 }
 
-impl AcpRootConfig {
-    pub fn tree_id(&self) -> &SessionTreeId {
-        &self.tree_id
-    }
-
+impl AcpStandardSessionConfig {
     pub fn role(&self) -> &RoleId {
         &self.role
+    }
+
+    pub fn difficulty(&self) -> Difficulty {
+        self.difficulty
     }
 
     pub fn objective(&self) -> &str {
@@ -91,6 +97,7 @@ pub enum AcpDefinitionSource {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct AcpConfigurationState {
     base: Option<AcpConfigurationBase>,
+    backends: Vec<AcpBackendConfig>,
     definitions: Vec<AcpDefinitionInput>,
 }
 
@@ -98,8 +105,7 @@ pub(crate) struct AcpConfigurationState {
 struct AcpConfigurationBase {
     definition_id: DefinitionId,
     router: RouterId,
-    backend: AcpBackendConfig,
-    root: AcpRootConfig,
+    standard_session: Option<AcpStandardSessionConfig>,
 }
 
 impl AcpConfigurationState {
@@ -107,8 +113,8 @@ impl AcpConfigurationState {
         self.base.as_ref().map(|base| AcpApplicationConfig {
             definition_id: base.definition_id.clone(),
             router: base.router.clone(),
-            backend: base.backend.clone(),
-            root: base.root.clone(),
+            backends: self.backends.clone(),
+            standard_session: base.standard_session.clone(),
             definitions: self.definitions.clone(),
         })
     }
@@ -126,48 +132,61 @@ pub(crate) fn install_acp_api(
         lua.create_function(move |_, table: Table| {
             deny_unknown_fields(
                 &table,
-                &["definition_id", "router", "backend", "root"],
+                &["definition_id", "router", "standard_session"],
                 "phenix.acp.configure",
             )?;
-            let backend: Table = table.get("backend")?;
-            deny_unknown_fields(&backend, &["id", "command"], "backend")?;
-            let root: Table = table.get("root")?;
-            deny_unknown_fields(&root, &["tree_id", "role", "objective"], "root")?;
-
-            let command: String = backend.get("command")?;
-            if command.trim().is_empty() {
-                return Err(configuration_error("backend.command must not be empty"));
-            }
-            let objective: String = root.get("objective")?;
-            if objective.trim().is_empty() {
-                return Err(configuration_error("root.objective must not be empty"));
-            }
-
+            let standard_session = table
+                .get::<Option<Table>>("standard_session")?
+                .map(parse_standard_session)
+                .transpose()?;
             let base = AcpConfigurationBase {
                 definition_id: DefinitionId::parse(table.get::<String>("definition_id")?)
                     .map_err(mlua::Error::external)?,
                 router: RouterId::parse(table.get::<String>("router")?)
                     .map_err(mlua::Error::external)?,
-                backend: AcpBackendConfig {
-                    id: BackendId::parse(backend.get::<String>("id")?)
-                        .map_err(mlua::Error::external)?,
-                    command,
-                },
-                root: AcpRootConfig {
-                    tree_id: SessionTreeId::parse(root.get::<String>("tree_id")?)
-                        .map_err(mlua::Error::external)?,
-                    role: RoleId::parse(root.get::<String>("role")?)
-                        .map_err(mlua::Error::external)?,
-                    objective,
-                },
+                standard_session,
             };
 
             let mut state = configure_state.borrow_mut();
             if state.acp.base.replace(base).is_some() {
                 return Err(configuration_error(
-                    "phenix.acp.configure may only be called once",
+                    "phenix.acp.configure may only be called once per authoring evaluation",
                 ));
             }
+            Ok(())
+        })
+        .map_err(runtime_error)?,
+    )
+    .map_err(runtime_error)?;
+
+    let backend_state = Rc::clone(&state);
+    api.set(
+        "backend",
+        lua.create_function(move |_, table: Table| {
+            deny_unknown_fields(&table, &["id", "command", "environment"], "backend")?;
+            let command: String = table.get("command")?;
+            if command.trim().is_empty() {
+                return Err(configuration_error("backend.command must not be empty"));
+            }
+            let environment = table
+                .get::<Option<Table>>("environment")?
+                .map(parse_environment)
+                .transpose()?
+                .unwrap_or_default();
+            let backend = AcpBackendConfig {
+                id: BackendId::parse(table.get::<String>("id")?)
+                    .map_err(mlua::Error::external)?,
+                command,
+                environment,
+            };
+            let mut state = backend_state.borrow_mut();
+            if state.acp.backends.iter().any(|existing| existing.id == backend.id) {
+                return Err(configuration_error(format!(
+                    "duplicate ACP backend {}",
+                    backend.id
+                )));
+            }
+            state.acp.backends.push(backend);
             Ok(())
         })
         .map_err(runtime_error)?,
@@ -187,6 +206,52 @@ pub(crate) fn install_acp_api(
 
     let phenix: Table = lua.globals().get("phenix").map_err(runtime_error)?;
     phenix.set("acp", api).map_err(runtime_error)
+}
+
+fn parse_standard_session(table: Table) -> mlua::Result<AcpStandardSessionConfig> {
+    deny_unknown_fields(
+        &table,
+        &["role", "difficulty", "objective"],
+        "standard_session",
+    )?;
+    let objective: String = table.get("objective")?;
+    if objective.trim().is_empty() {
+        return Err(configuration_error(
+            "standard_session.objective must not be empty",
+        ));
+    }
+    Ok(AcpStandardSessionConfig {
+        role: RoleId::parse(table.get::<String>("role")?).map_err(mlua::Error::external)?,
+        difficulty: parse_difficulty(&table.get::<String>("difficulty")?)?,
+        objective,
+    })
+}
+
+fn parse_environment(table: Table) -> mlua::Result<BTreeMap<String, String>> {
+    let mut environment = BTreeMap::new();
+    for pair in table.pairs::<Value, Value>() {
+        let (key, value) = pair?;
+        let Value::String(key) = key else {
+            return Err(configuration_error("backend.environment keys must be strings"));
+        };
+        let Value::String(value) = value else {
+            return Err(configuration_error("backend.environment values must be strings"));
+        };
+        let key = key.to_str()?.to_owned();
+        if key.is_empty() || key.contains('=') || key.contains('\0') {
+            return Err(configuration_error(format!(
+                "invalid backend.environment key {key:?}"
+            )));
+        }
+        let value = value.to_str()?.to_owned();
+        if value.contains('\0') {
+            return Err(configuration_error(format!(
+                "backend.environment value for {key:?} contains a NUL byte"
+            )));
+        }
+        environment.insert(key, value);
+    }
+    Ok(environment)
 }
 
 #[derive(Clone, Copy)]
@@ -269,6 +334,19 @@ fn parse_format(value: &str) -> mlua::Result<DefinitionFormat> {
         "ron" => Ok(DefinitionFormat::Ron),
         _ => Err(configuration_error(format!(
             "unsupported definition format {value:?}; expected markdown, json, toml, or ron"
+        ))),
+    }
+}
+
+fn parse_difficulty(value: &str) -> mlua::Result<Difficulty> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "d0" => Ok(Difficulty::D0),
+        "d1" => Ok(Difficulty::D1),
+        "d2" => Ok(Difficulty::D2),
+        "d3" => Ok(Difficulty::D3),
+        "d4" => Ok(Difficulty::D4),
+        _ => Err(configuration_error(format!(
+            "unsupported difficulty {value:?}; expected d0, d1, d2, d3, or d4"
         ))),
     }
 }
