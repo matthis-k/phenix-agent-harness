@@ -5,7 +5,7 @@ use phenix_acp::acp::schema::v1::{
     NewSessionResponse, PromptRequest, PromptResponse, StopReason,
 };
 use phenix_acp::acp::{Agent, Result as AcpResult, Stdio};
-use phenix_acp::{DefinitionId, RoleId, SessionCommand, SessionEvent};
+use phenix_acp::{DefinitionId, Difficulty, RoleId, SessionCommand, SessionEvent};
 use phenix_acp_backend::{AcpAgentBackend, AcpBackendConfig};
 use phenix_acp_presets::standard_gateway;
 use std::env;
@@ -79,7 +79,12 @@ fn run_smoke() -> Result<(), Box<dyn Error>> {
 
     let definition = DefinitionId::parse("phenix.standard")?;
     let role = RoleId::parse("coordinator")?;
-    let started = gateway.create_tree(&definition, role, "verify packaged ACP gateway")?;
+    let started = gateway.create_tree(
+        &definition,
+        role,
+        Difficulty::D2,
+        "verify packaged ACP gateway",
+    )?;
     let snapshot = gateway.snapshot(&started.tree_id)?;
     let root = snapshot
         .nodes
