@@ -217,15 +217,15 @@ impl<R: UiRenderer> UiRuntime<R> {
         let reactions = match message {
             UiMessage::Content(envelope) => self.router.route_content(&self.state, &envelope),
             UiMessage::Ui(mut envelope) => {
-            if matches!(&envelope.target, RouteTarget::Focused) {
-                if let UiEvent::Input(UiInput::Mouse(mouse)) = &envelope.event {
-                    if let Some(element) = self.renderer.hit_test(mouse.column, mouse.row) {
-                        envelope.target = RouteTarget::Bubble(element);
+                if matches!(&envelope.target, RouteTarget::Focused) {
+                    if let UiEvent::Input(UiInput::Mouse(mouse)) = &envelope.event {
+                        if let Some(element) = self.renderer.hit_test(mouse.column, mouse.row) {
+                            envelope.target = RouteTarget::Bubble(element);
+                        }
                     }
                 }
+                self.router.route_ui(&self.state, &envelope)
             }
-            self.router.route_ui(&self.state, &envelope)
-        }
             UiMessage::App(event) => vec![BusReaction::App(event)],
         };
         self.apply_reactions(reactions)

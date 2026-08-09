@@ -89,6 +89,10 @@ impl KeyChord {
         self.strokes.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.strokes.is_empty()
+    }
+
     pub fn matches(&self, input: KeyInput) -> bool {
         self.strokes.len() == 1 && self.strokes[0].matches(input)
     }
