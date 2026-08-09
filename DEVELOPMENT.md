@@ -2,7 +2,7 @@
 
 The flake is the single owner of the development toolchain, maintenance provider, Nix package checks, and shipped products. There is no separate devenv environment or lockfile.
 
-Repository maintenance is declared once in Nix through Phenix Flake Maintenance and materialized as the namespaced flake provider `packages.<system>.phenix-maintenance`. The generated executable is `maintenance`; CI discovers its stages from the package's `phenixMaintenance.ci` metadata rather than duplicating the command graph in workflow YAML.
+Repository maintenance is declared once in Nix through Phenix Flake Maintenance and materialized as the namespaced flake provider `packages.<system>.phenix-maintenance`. The generated executable is `maintenance`; local development and CI invoke the same command implementations.
 
 ## Development shell
 
@@ -65,25 +65,30 @@ Product derivations must not rerun the Rust unit/integration/system suites. Carg
 
 ## CI provider
 
-Commands opt into CI in the Nix declaration with `ci = true` or structured CI metadata. The generated provider exposes a JSON-evaluable matrix at:
+Commands remain declared and implemented by the Nix maintenance provider. GitHub Actions owns only CI scheduling and presentation, so architectural boundaries are visible as real jobs/steps instead of being hidden inside one runtime-discovered shell step.
+
+The workflow is intentionally chunked as:
 
 ```text
-packages.x86_64-linux.phenix-maintenance.phenixMaintenance.ci.matrix
+Source
+  └─ Source validation
+
+Rust
+  ├─ Clippy
+  ├─ Unit tests
+  ├─ Integration tests
+  └─ System tests
+
+Product
+  └─ Product tests
+
+Maintenance checks
+  └─ aggregate required status
 ```
 
-GitHub Actions evaluates that matrix and runs each stage through:
+The Rust commands stay in one job and share `CARGO_HOME` and `CARGO_TARGET_DIR`, preserving incremental Cargo artifacts while retaining separate GitHub step timing and failure attribution.
 
-```sh
-nix run .#phenix-maintenance -- ci run <stage-id>
-```
-
-The provider currently emits three CI stages:
-
-- `source` — source/static validation;
-- `rust` — Clippy, unit, integration, and system commands run sequentially in one job so Cargo artifacts are reused;
-- `product` — Nix-installed package/product smoke checks.
-
-Unit, integration, and system remain distinct maintenance commands and are labelled separately in the Rust stage logs. Adding, removing, or regrouping a CI command is a Nix declaration change; the workflow does not maintain a second stage list.
+The workflow does not duplicate Cargo/Nix implementation details: each visible step invokes the corresponding generated `phenix-maintenance` command. The provider's `phenixMaintenance.ci` metadata remains available to other CI integrations, but GitHub step topology is static because Actions must know jobs and steps before runtime evaluation begins.
 
 The final `Maintenance checks` job remains the aggregate required status.
 
