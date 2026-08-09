@@ -1,0 +1,54 @@
+name: PR 265 fixup
+
+on:
+  push:
+    branches:
+      - fix/workflow-ownership-issue-227
+    paths:
+      - .github/workflows/pr-265-fixup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fixup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: fix/workflow-ownership-issue-227
+      - name: Install rustfmt
+        run: rustup component add rustfmt
+      - name: Fix workflow import and format Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('rust/crates/phenix-acp/src/conductor.rs')
+          text = path.read_text()
+          old = '    WorkflowMachine, WorkflowStart, WorkflowStartParams, WorkflowStartResult,\n'
+          if old not in text:
+              raise SystemExit('expected WorkflowMachine root import not found')
+          text = text.replace(old, '    WorkflowStart, WorkflowStartParams, WorkflowStartResult,\n', 1)
+          marker = 'use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};\n'
+          if marker not in text:
+              raise SystemExit('expected ACP import marker not found')
+          text = text.replace(marker, 'use crate::runtime::WorkflowMachine;\n' + marker, 1)
+          path.write_text(text)
+          PY
+          cd rust
+          cargo fmt --all
+      - name: Commit fixup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add rust
+          if git diff --cached --quiet; then
+            echo 'No changes to commit'
+            exit 0
+          fi
+          git commit -m 'fix: restore workflow CI'
+          git push origin HEAD:fix/workflow-ownership-issue-227
