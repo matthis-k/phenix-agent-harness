@@ -21,8 +21,11 @@ jobs:
         with:
           components: clippy,rustfmt
       - name: Apply typed workflow attach API
+        shell: bash
         run: |
-          python3 - <<'PY'
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/pr265-diagnostics"
+          python3 - <<'PY' 2>&1 | tee "$RUNNER_TEMP/pr265-diagnostics/patch.log"
           from pathlib import Path
           import re
 
@@ -41,110 +44,119 @@ jobs:
           gateway = Path('rust/crates/phenix-acp/src/runtime/gateway.rs')
           text = gateway.read_text()
           marker = '#[derive(Clone, Default)]\npub struct PhenixAcpGatewayBuilder {'
-          struct = '''#[derive(Clone, Debug, Eq, PartialEq)]
-          pub struct WorkflowNodeAttach {
-              pub workflow_id: WorkflowId,
-              pub objective_id: ObjectiveId,
-              pub parent_node: SessionNodeId,
-              pub role: RoleId,
-              pub difficulty: Option<Difficulty>,
-              pub objective: String,
-          }
-
-          #[derive(Clone, Default)]
-          pub struct PhenixAcpGatewayBuilder {'''
+          attach_struct = '\n'.join([
+              '#[derive(Clone, Debug, Eq, PartialEq)]',
+              'pub struct WorkflowNodeAttach {',
+              '    pub workflow_id: WorkflowId,',
+              '    pub objective_id: ObjectiveId,',
+              '    pub parent_node: SessionNodeId,',
+              '    pub role: RoleId,',
+              '    pub difficulty: Option<Difficulty>,',
+              '    pub objective: String,',
+              '}',
+              '',
+              '#[derive(Clone, Default)]',
+              'pub struct PhenixAcpGatewayBuilder {',
+          ])
           if marker not in text:
               raise SystemExit('gateway builder marker not found')
-          text = text.replace(marker, struct, 1)
-          old = '''    pub fn attach_workflow_node(
-              &mut self,
-              tree_id: &SessionTreeId,
-              workflow_id: &WorkflowId,
-              workflow_objective: &ObjectiveId,
-              parent_node: &SessionNodeId,
-              role: RoleId,
-              difficulty: Option<Difficulty>,
-              objective: impl Into<String>,
-          ) -> Result<SessionNodeId, GatewayError> {
-              let objective = objective.into();
-          '''
-          new = '''    pub fn attach_workflow_node(
-              &mut self,
-              tree_id: &SessionTreeId,
-              request: WorkflowNodeAttach,
-          ) -> Result<SessionNodeId, GatewayError> {
-              let WorkflowNodeAttach {
-                  workflow_id,
-                  objective_id: workflow_objective,
-                  parent_node,
-                  role,
-                  difficulty,
-                  objective,
-              } = request;
-          '''
-          if old not in text:
+          text = text.replace(marker, attach_struct, 1)
+
+          old_signature = '\n'.join([
+              '    pub fn attach_workflow_node(',
+              '        &mut self,',
+              '        tree_id: &SessionTreeId,',
+              '        workflow_id: &WorkflowId,',
+              '        workflow_objective: &ObjectiveId,',
+              '        parent_node: &SessionNodeId,',
+              '        role: RoleId,',
+              '        difficulty: Option<Difficulty>,',
+              '        objective: impl Into<String>,',
+              '    ) -> Result<SessionNodeId, GatewayError> {',
+              '        let objective = objective.into();',
+          ])
+          new_signature = '\n'.join([
+              '    pub fn attach_workflow_node(',
+              '        &mut self,',
+              '        tree_id: &SessionTreeId,',
+              '        request: WorkflowNodeAttach,',
+              '    ) -> Result<SessionNodeId, GatewayError> {',
+              '        let WorkflowNodeAttach {',
+              '            workflow_id,',
+              '            objective_id: workflow_objective,',
+              '            parent_node,',
+              '            role,',
+              '            difficulty,',
+              '            objective,',
+              '        } = request;',
+          ])
+          if old_signature not in text:
               raise SystemExit('old attach_workflow_node signature not found')
-          text = text.replace(old, new, 1)
-          replacements = [
+          text = text.replace(old_signature, new_signature, 1)
+
+          edits = [
               ('tree.active_workflow.as_ref() != Some(workflow_id)', 'tree.active_workflow.as_ref() != Some(&workflow_id)'),
               ('tree.objectives.contains_key(workflow_objective)', 'tree.objectives.contains_key(&workflow_objective)'),
-              ('tree.nodes\n                .get(parent_node)', 'tree.nodes\n                .get(&parent_node)'),
-              ('parent_node: Some(parent_node.clone())', 'parent_node: Some(parent_node.clone())'),
+              ('.get(parent_node)', '.get(&parent_node)'),
               ('if parent_node == &root_node {', 'if parent_node == root_node {'),
           ]
-          for old_part, new_part in replacements:
-              if old_part not in text:
-                  raise SystemExit(f'gateway replacement target missing: {old_part!r}')
-              text = text.replace(old_part, new_part, 1)
+          for before, after in edits:
+              if before not in text:
+                  raise SystemExit(f'gateway edit target missing: {before!r}')
+              text = text.replace(before, after, 1)
           gateway.write_text(text)
 
           runtime_mod = Path('rust/crates/phenix-acp/src/runtime/mod.rs')
           text = runtime_mod.read_text()
-          old = 'pub use gateway::{PhenixAcpGateway, PhenixAcpGatewayBuilder};'
-          new = 'pub use gateway::{PhenixAcpGateway, PhenixAcpGatewayBuilder, WorkflowNodeAttach};'
-          if old not in text:
+          before = 'pub use gateway::{PhenixAcpGateway, PhenixAcpGatewayBuilder};'
+          after = 'pub use gateway::{PhenixAcpGateway, PhenixAcpGatewayBuilder, WorkflowNodeAttach};'
+          if before not in text:
               raise SystemExit('runtime gateway export not found')
-          runtime_mod.write_text(text.replace(old, new, 1))
+          runtime_mod.write_text(text.replace(before, after, 1))
 
           conductor = Path('rust/crates/phenix-acp/src/conductor.rs')
           text = conductor.read_text()
-          old = 'SessionTreeGet, SessionTreeId, SessionTreeList, WorkflowAction, WorkflowGraph, WorkflowId,\n    WorkflowStart, WorkflowStartParams, WorkflowStartResult,'
-          new = 'SessionTreeGet, SessionTreeId, SessionTreeList, WorkflowAction, WorkflowGraph, WorkflowId,\n    WorkflowNodeAttach, WorkflowStart, WorkflowStartParams, WorkflowStartResult,'
-          if old not in text:
+          before = 'SessionTreeGet, SessionTreeId, SessionTreeList, WorkflowAction, WorkflowGraph, WorkflowId,\n    WorkflowStart, WorkflowStartParams, WorkflowStartResult,'
+          after = 'SessionTreeGet, SessionTreeId, SessionTreeList, WorkflowAction, WorkflowGraph, WorkflowId,\n    WorkflowNodeAttach, WorkflowStart, WorkflowStartParams, WorkflowStartResult,'
+          if before not in text:
               raise SystemExit('conductor import target not found')
-          text = text.replace(old, new, 1)
-          old = '''                        let node_id = self.gateway.attach_workflow_node(
-                              tree_id,
-                              &run.workflow_id,
-                              &run.objective_id,
-                              &run.root_node_id,
-                              role,
-                              Some(run.difficulty),
-                              objective.clone(),
-                          )?;
-          '''
-          new = '''                        let node_id = self.gateway.attach_workflow_node(
-                              tree_id,
-                              WorkflowNodeAttach {
-                                  workflow_id: run.workflow_id.clone(),
-                                  objective_id: run.objective_id.clone(),
-                                  parent_node: run.root_node_id.clone(),
-                                  role,
-                                  difficulty: Some(run.difficulty),
-                                  objective: objective.clone(),
-                              },
-                          )?;
-          '''
-          if old not in text:
+          text = text.replace(before, after, 1)
+
+          old_call = '\n'.join([
+              '                        let node_id = self.gateway.attach_workflow_node(',
+              '                            tree_id,',
+              '                            &run.workflow_id,',
+              '                            &run.objective_id,',
+              '                            &run.root_node_id,',
+              '                            role,',
+              '                            Some(run.difficulty),',
+              '                            objective.clone(),',
+              '                        )?;',
+          ])
+          new_call = '\n'.join([
+              '                        let node_id = self.gateway.attach_workflow_node(',
+              '                            tree_id,',
+              '                            WorkflowNodeAttach {',
+              '                                workflow_id: run.workflow_id.clone(),',
+              '                                objective_id: run.objective_id.clone(),',
+              '                                parent_node: run.root_node_id.clone(),',
+              '                                role,',
+              '                                difficulty: Some(run.difficulty),',
+              '                                objective: objective.clone(),',
+              '                            },',
+              '                        )?;',
+          ])
+          if old_call not in text:
               raise SystemExit('conductor attach call not found')
-          conductor.write_text(text.replace(old, new, 1))
+          conductor.write_text(text.replace(old_call, new_call, 1))
           PY
+          patch_status=${PIPESTATUS[0]}
+          if [ "$patch_status" -ne 0 ]; then exit "$patch_status"; fi
           cargo fmt --manifest-path rust/Cargo.toml --all
       - name: Strict Clippy
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p "$RUNNER_TEMP/pr265-diagnostics"
           cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings 2>&1 | tee "$RUNNER_TEMP/pr265-diagnostics/clippy.log"
       - name: Full Rust tests
         shell: bash
