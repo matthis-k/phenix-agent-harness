@@ -1,7 +1,8 @@
 use super::*;
 use crate::{
-    AcpEndpoint, AcpSessionId, BackendDefinition, BackendId, DefinitionId, IdError, RoleId,
-    RouterId, SessionTreeDefinition, WorkflowId,
+    AcpEndpoint, AcpSessionId, BackendDefinition, BackendId, DefinitionId, Difficulty, IdError,
+    ModelConfig, ModelId, ProviderId, RoleId, RouterId, SessionTreeDefinition, ThinkingLevel,
+    WorkflowId,
 };
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -101,6 +102,15 @@ fn definition_id() -> DefinitionId {
     id("phenix.standard", DefinitionId::parse)
 }
 
+fn model_config() -> ModelConfig {
+    ModelConfig {
+        backend: backend_id(),
+        provider: ProviderId::parse("test-provider").expect("provider"),
+        model: ModelId::parse("test-model").expect("model"),
+        thinking: ThinkingLevel::Medium,
+    }
+}
+
 fn definition() -> SessionTreeDefinition {
     SessionTreeDefinition::builder(definition_id(), router_id())
         .backend(BackendDefinition::new(
@@ -139,7 +149,7 @@ fn gateway(factory: RecordingFactory) -> PhenixAcpGateway {
     PhenixAcpGateway::builder()
         .definition(definition())
         .expect("definition")
-        .router(router_id(), FixedRouter::new(backend_id()))
+        .router(router_id(), FixedRouter::new(model_config()))
         .expect("router")
         .workflow(workflow_id(), workflow())
         .expect("workflow")
@@ -168,6 +178,7 @@ fn separately_configured_trees_own_distinct_downstream_sessions() {
         .create_tree(
             &definition_id(),
             RoleId::parse("root").expect("role"),
+            Difficulty::D1,
             "first objective",
         )
         .expect("first tree");
@@ -175,6 +186,7 @@ fn separately_configured_trees_own_distinct_downstream_sessions() {
         .create_tree(
             &definition_id(),
             RoleId::parse("root").expect("role"),
+            Difficulty::D3,
             "second objective",
         )
         .expect("second tree");
@@ -195,11 +207,17 @@ fn workflow_plan_becomes_recursive_nodes_objectives_and_acp_sessions() {
         .create_tree(
             &definition_id(),
             RoleId::parse("root").expect("role"),
+            Difficulty::D2,
             "ship ACP",
         )
         .expect("tree");
     let started = gateway
-        .start_workflow(&root.tree_id, &workflow_id(), "implement and verify")
+        .start_workflow(
+            &root.tree_id,
+            &workflow_id(),
+            None,
+            "implement and verify",
+        )
         .expect("workflow");
     let snapshot = gateway.snapshot(&root.tree_id).expect("snapshot");
 
@@ -211,12 +229,14 @@ fn workflow_plan_becomes_recursive_nodes_objectives_and_acp_sessions() {
         .find(|node| node.id == started.root_node_id)
         .expect("implement node");
     assert_eq!(implement.parent, Some(root.root_node_id));
+    assert_eq!(implement.difficulty, Difficulty::D2);
     let verify = snapshot
         .nodes
         .iter()
         .find(|node| node.role.as_str() == "verifier")
         .expect("verify node");
     assert_eq!(verify.parent, Some(implement.id.clone()));
+    assert_eq!(verify.model, model_config());
     assert!(snapshot
         .nodes
         .iter()
@@ -242,6 +262,7 @@ fn persistent_session_operations_are_explicit_open_modes() {
         .create_tree(
             &definition_id(),
             RoleId::parse("root").expect("role"),
+            Difficulty::D2,
             "persistent sessions",
         )
         .expect("tree");
@@ -251,6 +272,7 @@ fn persistent_session_operations_are_explicit_open_modes() {
             &root.tree_id,
             &root.root_node_id,
             RoleId::parse("loader").expect("role"),
+            None,
             "load",
             persistent.clone(),
         )
@@ -260,6 +282,7 @@ fn persistent_session_operations_are_explicit_open_modes() {
             &root.tree_id,
             &root.root_node_id,
             RoleId::parse("resumer").expect("role"),
+            Some(Difficulty::D4),
             "resume",
             persistent,
         )
@@ -270,8 +293,11 @@ fn persistent_session_operations_are_explicit_open_modes() {
 
     let opens = factory.opens.lock().expect("open log");
     assert!(matches!(&opens[1].open, SessionOpenKind::Load { .. }));
+    assert_eq!(opens[1].difficulty, Difficulty::D2);
     assert!(matches!(&opens[2].open, SessionOpenKind::Resume { .. }));
+    assert_eq!(opens[2].difficulty, Difficulty::D4);
     assert!(matches!(&opens[3].open, SessionOpenKind::Fork { .. }));
+    assert_eq!(opens[3].difficulty, Difficulty::D2);
 }
 
 #[test]
@@ -282,6 +308,7 @@ fn live_session_controls_and_images_are_routed_to_the_selected_node() {
         .create_tree(
             &definition_id(),
             RoleId::parse("root").expect("role"),
+            Difficulty::D2,
             "exercise session controls",
         )
         .expect("tree");
@@ -352,6 +379,7 @@ fn json_host_surface_is_typed_and_returns_structured_errors() {
     let input = serde_json::to_string(&GatewayCommand::CreateTree {
         definition_id: definition_id(),
         root_role: RoleId::parse("root").expect("role"),
+        difficulty: Difficulty::D2,
         objective: "host-created tree".to_owned(),
     })
     .expect("command JSON");
