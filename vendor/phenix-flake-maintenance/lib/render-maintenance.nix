@@ -78,10 +78,23 @@ let
       fail "`${displayPath path}`: ci.stage must be a simple stage identifier"
     else if hasAttr "name" ci && !isString ci.name then
       fail "`${displayPath path}`: ci.name must be a string"
+    else if hasAttr "stepName" ci && !isString ci.stepName then
+      fail "`${displayPath path}`: ci.stepName must be a string"
     else if hasAttr "runner" ci && !isString ci.runner then
       fail "`${displayPath path}`: ci.runner must be a string"
     else if hasAttr "timeoutMinutes" ci && (!isInt ci.timeoutMinutes || ci.timeoutMinutes <= 0) then
       fail "`${displayPath path}`: ci.timeoutMinutes must be a positive integer"
+    else if hasAttr "needs" ci && (!isList ci.needs || !(builtins.all validStageName ci.needs)) then
+      fail "`${displayPath path}`: ci.needs must be a list of simple stage identifiers"
+    else if hasAttr "env" ci && !isAttrs ci.env then
+      fail "`${displayPath path}`: ci.env must be an attribute set"
+    else if
+      hasAttr "env" ci
+      && !(builtins.all (name: match "^[A-Za-z_][A-Za-z0-9_]*$" name != null && isString ci.env.${name}) (
+        attrNames ci.env
+      ))
+    then
+      fail "`${displayPath path}`: ci.env keys must be environment variable names and values must be strings"
     else
       true;
 
@@ -159,16 +172,24 @@ let
       commandId = pathId entry.path;
       descriptionValue = entry.node.description or "";
       stageId = ci.stage or commandId;
-      fallbackName = if descriptionValue == "" then stageId else descriptionValue;
+      fallbackName = if descriptionValue == "" then commandId else descriptionValue;
+      jobName = ci.name or (if hasAttr "stage" ci then stageId else fallbackName);
+      stepName = ci.stepName or fallbackName;
     in
     {
       id = stageId;
       meta = {
-        name = ci.name or fallbackName;
+        name = jobName;
         runner = ci.runner or "ubuntu-latest";
         timeout = ci.timeoutMinutes or 30;
+        needs = ci.needs or [ ];
+        env = ci.env or { };
       };
-      inherit commandId;
+      command = {
+        id = commandId;
+        inherit (entry) path;
+        name = stepName;
+      };
       inherit entry;
     };
 
@@ -189,45 +210,67 @@ let
         ${staged.id} = {
           inherit (staged) meta;
           entries = [ staged.entry ];
-          commands = [ staged.commandId ];
+          commands = [ staged.command ];
         };
       }
     else if existing.meta != staged.meta then
-      fail "CI stage `${staged.id}` has conflicting name/runner/timeout metadata"
+      fail "CI stage `${staged.id}` has conflicting name/runner/timeout/needs/env metadata"
     else
       acc
       // {
         ${staged.id} = existing // {
           entries = existing.entries ++ [ staged.entry ];
-          commands = existing.commands ++ [ staged.commandId ];
+          commands = existing.commands ++ [ staged.command ];
         };
       }
   ) { } stagedEntries;
 
-  stages = map (
+  jobs = map (
     stageId:
     let
       stage = stageMap.${stageId};
     in
     {
       id = stageId;
-      inherit (stage.meta) name runner timeout;
+      inherit (stage.meta)
+        name
+        runner
+        timeout
+        needs
+        env
+        ;
       inherit (stage) commands entries;
     }
   ) stageOrder;
 
-  steps = map (stage: {
-    inherit (stage)
+  jobsValid = builtins.all (
+    job:
+    builtins.all (
+      need:
+      if need == job.id then
+        fail "CI stage `${job.id}` cannot depend on itself"
+      else if !(elem need stageOrder) then
+        fail "CI stage `${job.id}` depends on unknown stage `${need}`"
+      else
+        true
+    ) job.needs
+  ) jobs;
+
+  matrixJobs = map (job: {
+    inherit (job)
       id
       name
       runner
       timeout
+      needs
+      env
       commands
       ;
-  }) stages;
+  }) jobs;
 
+  publicJobs = matrixJobs;
   matrix = {
-    include = steps;
+    include = publicJobs;
   };
   matrixJson = toJSON matrix;
 
@@ -374,11 +417,11 @@ let
           ${runs}
           ;;
       ''
-    ) stages
+    ) jobs
   );
 
   ciListRows = concatStringsSep "\n" (
-    map (stage: "  printf '%-24s %s\\n' ${shellQuote stage.id} ${shellQuote stage.name}") stages
+    map (stage: "  printf '%-24s %s\\n' ${shellQuote stage.id} ${shellQuote stage.name}") jobs
   );
 
   script = ''
@@ -407,7 +450,7 @@ let
           printf '%s\n' ${shellQuote matrixJson}
           ;;
         list)
-          ${if stages == [ ] then "printf '%s\\n' 'No CI stages are enabled.'" else ciListRows}
+          ${if jobs == [ ] then "printf '%s\\n' 'No CI stages are enabled.'" else ciListRows}
           ;;
         run)
           if [[ $# -ne 2 ]]; then
@@ -455,6 +498,12 @@ let
   '';
 in
 assert validated;
+assert jobsValid;
 {
-  inherit script matrix steps;
+  inherit
+    script
+    matrix
+    jobs
+    publicJobs
+    ;
 }

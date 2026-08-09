@@ -52,7 +52,7 @@ There is one supported frontend-to-agent path. Do not add a second process proto
 
 The flake owns the development shell, product packages, package smoke checks, and a single declarative maintenance provider. Do not add a second development-environment lock or task graph.
 
-The provider is exposed as `packages.<system>.phenix-maintenance`; its generated executable is `maintenance`. The Nix command tree is authoritative for local execution and CI stage discovery.
+The provider is exposed as `packages.<system>.phenix-maintenance`; its generated executable is `maintenance`. The Nix command tree is authoritative for command behavior and CI topology. The committed GitHub workflow is generated from that declaration and must stay synchronized with it.
 
 Enter the repository environment with:
 
@@ -74,14 +74,17 @@ maintenance all
 
 Validation is intentionally separated by boundary:
 
-- `maintenance check source`: formatting, Nix static analysis, workflow syntax, flake evaluation;
+- `maintenance check source`: formatting, Nix static analysis, workflow syntax/synchronization, target classification, and flake evaluation;
 - `maintenance check rust`: Clippy/static Rust gate;
-- `maintenance test unit`: in-crate and doc tests;
+- `maintenance test unit`: in-crate tests;
+- `maintenance test doc`: Rust documentation tests;
 - `maintenance test integration`: crate/API integration targets;
 - `maintenance test system`: black-box Phenix process/protocol tests;
 - `maintenance test product`: Nix-built installed-product/package smoke tests.
 
-Keep a behavior in one canonical execution layer. In particular, product derivations must not rerun the Cargo behavioral suites.
+CI granularity is declarative. A CI-enabled maintenance command is a visible step; commands with the same `ci.stage` share a GitHub job, while distinct stages become distinct jobs. Prefer leaf commands when individual failure attribution is useful. Aggregate commands remain appropriate when the underlying distinction has no operational value.
+
+Every Cargo integration-test target must be explicitly classified under integration or system maintenance commands. Keep a behavior in one canonical execution layer; product derivations must not rerun the Cargo behavioral suites.
 
 Compiler errors, judgment-bearing lint findings, test failures, runtime failures, and Nix evaluation/build failures are never auto-repaired.
 

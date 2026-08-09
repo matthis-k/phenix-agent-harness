@@ -17,16 +17,143 @@ _: {
         cd rust
       '';
 
+      sourceCi = {
+        enable = true;
+        stage = "source";
+        name = "Source";
+        timeoutMinutes = 20;
+      };
       rustCi = {
         enable = true;
         stage = "rust";
         name = "Rust";
         timeoutMinutes = 60;
+        needs = [ "source" ];
+        env = {
+          CARGO_HOME = "\${{ runner.temp }}/phenix-cargo-home";
+          CARGO_TARGET_DIR = "\${{ runner.temp }}/phenix-cargo-target";
+        };
       };
+      productCi = {
+        enable = true;
+        stage = "product";
+        name = "Product";
+        timeoutMinutes = 60;
+        needs = [ "source" ];
+      };
+
+      integrationTargets = [
+        {
+          id = "phenix-acp-legacy-definitions";
+          package = "phenix-acp";
+          test = "legacy_definitions";
+          label = "phenix-acp / legacy_definitions";
+        }
+        {
+          id = "phenix-acp-repeated-prompts";
+          package = "phenix-acp";
+          test = "repeated_prompts";
+          label = "phenix-acp / repeated_prompts";
+        }
+        {
+          id = "phenix-tui-configuration-ownership";
+          package = "phenix-tui";
+          test = "configuration_ownership";
+          label = "phenix-tui / configuration_ownership";
+        }
+        {
+          id = "phenix-ui-core-editor-modes";
+          package = "phenix-ui-core";
+          test = "editor_modes";
+          label = "phenix-ui-core / editor_modes";
+        }
+        {
+          id = "phenix-ui-core-functional-parity";
+          package = "phenix-ui-core";
+          test = "functional_parity";
+          label = "phenix-ui-core / functional_parity";
+        }
+        {
+          id = "phenix-ui-runtime-multiline-input";
+          package = "phenix-ui-runtime";
+          test = "multiline_input";
+          label = "phenix-ui-runtime / multiline_input";
+        }
+      ];
+
+      systemTargets = [
+        {
+          id = "conductor-model-tool-loop";
+          package = "phenix-conductor";
+          test = "black_box_model_tool_loop";
+          label = "conductor / black_box_model_tool_loop";
+        }
+        {
+          id = "conductor-stdio-roundtrip";
+          package = "phenix-conductor";
+          test = "stdio_roundtrip";
+          label = "conductor / stdio_roundtrip";
+        }
+      ];
+
+      cargoTestTargets = integrationTargets ++ systemTargets;
+
+      mkCargoTestCommands =
+        targets:
+        builtins.listToAttrs (
+          builtins.map (target: {
+            name = target.id;
+            value = {
+              description = target.label;
+              ci = rustCi // {
+                stepName = target.label;
+              };
+              runtimeInputs = pkgs: [
+                pkgs.cargo
+                pkgs.git
+                pkgs.rustc
+              ];
+              exec = ''
+                ${rustRoot}
+                cargo test --locked -p ${target.package} --test ${target.test}
+              '';
+            };
+          }) targets
+        );
+
+      expectedCargoTargetLines = builtins.concatStringsSep "\n" (
+        builtins.map (target: "printf '%s\\t%s\\n' '${target.package}' '${target.test}'") cargoTestTargets
+      );
+
+      mkProductCommand =
+        {
+          check,
+          description,
+          stepName,
+        }:
+        {
+          inherit description;
+          ci = productCi // {
+            inherit stepName;
+          };
+          runtimeInputs = pkgs: [
+            pkgs.git
+            pkgs.nix
+          ];
+          exec = ''
+            ${repositoryRoot}
+            system="$(nix eval --impure --raw --expr builtins.currentSystem)"
+            nix build --no-link --print-build-logs ".#checks.$system.${check}"
+          '';
+        };
 
       maintenance = maintenanceLib.mkMaintenance {
         name = "maintenance";
         description = "Phenix agent harness maintenance";
+        ci.github = {
+          enable = true;
+          outputName = "phenix-maintenance";
+        };
 
         commands = {
           all = {
@@ -45,48 +172,166 @@ _: {
             ];
             commands = {
               source = {
-                description = "Formatting, Nix analysis, workflow syntax, and flake evaluation";
-                ci = {
-                  enable = true;
-                  stage = "source";
-                  name = "Source";
-                  timeoutMinutes = 20;
-                };
-                runtimeInputs = pkgs: [
-                  pkgs.actionlint
-                  pkgs.cargo
-                  pkgs.findutils
-                  pkgs.git
-                  pkgs.nix
-                  pkgs.nixfmt
-                  pkgs.rustfmt
-                  pkgs.statix
+                description = "Formatting, source analysis, workflow consistency, and flake evaluation";
+                order = [
+                  "nix-format"
+                  "rust-format"
+                  "statix"
+                  "actionlint"
+                  "test-targets"
+                  "flake-eval"
+                  "workflow-sync"
                 ];
-                exec = ''
-                  ${repositoryRoot}
+                commands = {
+                  nix-format = {
+                    description = "Nix formatting";
+                    ci = sourceCi // {
+                      stepName = "Nix formatting";
+                    };
+                    runtimeInputs = pkgs: [
+                      pkgs.findutils
+                      pkgs.git
+                      pkgs.nixfmt
+                    ];
+                    exec = ''
+                      ${repositoryRoot}
+                      find . -type f -name '*.nix' \
+                        -not -path './.git/*' \
+                        -print0 |
+                        xargs -0 -r nixfmt --check
+                    '';
+                  };
 
-                  find . -type f -name '*.nix' \
-                    -not -path './.git/*' \
-                    -print0 |
-                    xargs -0 -r nixfmt --check
+                  rust-format = {
+                    description = "Rust formatting";
+                    ci = sourceCi // {
+                      stepName = "Rust formatting";
+                    };
+                    runtimeInputs = pkgs: [
+                      pkgs.cargo
+                      pkgs.git
+                      pkgs.rustfmt
+                    ];
+                    exec = ''
+                      ${rustRoot}
+                      cargo fmt --all --check
+                    '';
+                  };
 
-                  (
-                    cd rust
-                    cargo fmt --all --check
-                  )
+                  statix = {
+                    description = "Nix static analysis";
+                    ci = sourceCi // {
+                      stepName = "Statix";
+                    };
+                    runtimeInputs = pkgs: [
+                      pkgs.git
+                      pkgs.statix
+                    ];
+                    exec = ''
+                      ${repositoryRoot}
+                      statix check --ignore '.git/**'
+                    '';
+                  };
 
-                  statix check --ignore '.git/**'
+                  actionlint = {
+                    description = "GitHub Actions syntax";
+                    ci = sourceCi // {
+                      stepName = "Actionlint";
+                    };
+                    runtimeInputs = pkgs: [
+                      pkgs.actionlint
+                      pkgs.findutils
+                      pkgs.git
+                    ];
+                    exec = ''
+                      ${repositoryRoot}
+                      find .github/workflows -type f \
+                        \( -name '*.yml' -o -name '*.yaml' \) -print0 |
+                        xargs -0 -r actionlint
+                    '';
+                  };
 
-                  find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 |
-                    xargs -0 -r actionlint
+                  test-targets = {
+                    description = "Every Cargo integration target has an explicit test boundary";
+                    ci = sourceCi // {
+                      stepName = "Test target classification";
+                    };
+                    runtimeInputs = pkgs: [
+                      pkgs.cargo
+                      pkgs.coreutils
+                      pkgs.git
+                      pkgs.jq
+                    ];
+                    exec = ''
+                      ${rustRoot}
+                      expected="$(mktemp)"
+                      actual="$(mktemp)"
+                      trap 'rm -f "$expected" "$actual"' EXIT
 
-                  nix flake check --no-build --print-build-logs
-                '';
+                      {
+                        ${expectedCargoTargetLines}
+                      } | sort > "$expected"
+
+                      cargo metadata --format-version 1 --no-deps |
+                        jq -r '
+                          .packages[]
+                          | . as $package
+                          | .targets[]
+                          | select(.kind == ["test"])
+                          | [$package.name, .name]
+                          | @tsv
+                        ' |
+                        sort > "$actual"
+
+                      diff -u "$expected" "$actual"
+                    '';
+                  };
+
+                  flake-eval = {
+                    description = "Flake output and check evaluation";
+                    ci = sourceCi // {
+                      stepName = "Flake evaluation";
+                    };
+                    runtimeInputs = pkgs: [
+                      pkgs.git
+                      pkgs.nix
+                    ];
+                    exec = ''
+                      ${repositoryRoot}
+                      nix flake check --no-build --print-build-logs
+                    '';
+                  };
+
+                  workflow-sync = {
+                    description = "Committed GitHub workflow matches the Nix CI declaration";
+                    ci = sourceCi // {
+                      stepName = "Generated workflow";
+                    };
+                    runtimeInputs = pkgs: [
+                      pkgs.diffutils
+                      pkgs.git
+                      pkgs.nix
+                    ];
+                    exec = ''
+                      ${repositoryRoot}
+                      system="$(nix eval --impure --raw --expr builtins.currentSystem)"
+                      generated="$(mktemp)"
+                      trap 'rm -f "$generated"' EXIT
+
+                      nix eval --raw \
+                        ".#packages.$system.phenix-maintenance.phenixMaintenance.ci.github.workflow" \
+                        > "$generated"
+                      diff -u .github/workflows/ci.yml "$generated"
+                    '';
+                  };
+                };
               };
 
               rust = {
                 description = "Rust static analysis with Clippy";
-                ci = rustCi;
+                ci = rustCi // {
+                  stepName = "Clippy";
+                };
                 runtimeInputs = pkgs: [
                   pkgs.cargo
                   pkgs.clippy
@@ -105,14 +350,17 @@ _: {
             description = "Run tests by architectural boundary";
             order = [
               "unit"
+              "doc"
               "integration"
               "system"
               "product"
             ];
             commands = {
               unit = {
-                description = "In-crate library/binary tests and Rust doc tests";
-                ci = rustCi;
+                description = "In-crate library and binary tests";
+                ci = rustCi // {
+                  stepName = "Unit tests";
+                };
                 runtimeInputs = pkgs: [
                   pkgs.cargo
                   pkgs.git
@@ -121,83 +369,61 @@ _: {
                 exec = ''
                   ${rustRoot}
                   cargo test --workspace --lib --bins --locked
+                '';
+              };
+
+              doc = {
+                description = "Rust documentation tests";
+                ci = rustCi // {
+                  stepName = "Doc tests";
+                };
+                runtimeInputs = pkgs: [
+                  pkgs.cargo
+                  pkgs.git
+                  pkgs.rustc
+                ];
+                exec = ''
+                  ${rustRoot}
                   cargo test --workspace --doc --locked
                 '';
               };
 
               integration = {
-                description = "Cargo integration targets excluding black-box system tests";
-                ci = rustCi;
-                runtimeInputs = pkgs: [
-                  pkgs.cargo
-                  pkgs.git
-                  pkgs.jq
-                  pkgs.rustc
-                ];
-                exec = ''
-                  ${rustRoot}
-
-                  mapfile -t integration_targets < <(
-                    cargo metadata --format-version 1 --no-deps |
-                      jq -r '
-                        .packages[]
-                        | . as $package
-                        | .targets[]
-                        | select(.kind == ["test"])
-                        | select(
-                            ($package.name != "phenix-conductor")
-                            or (.name != "black_box_model_tool_loop" and .name != "stdio_roundtrip")
-                          )
-                        | [$package.name, .name]
-                        | @tsv
-                      '
-                  )
-
-                  for target in "''${integration_targets[@]}"; do
-                    IFS=$'\t' read -r package test_name <<< "$target"
-                    cargo test --locked -p "$package" --test "$test_name"
-                  done
-                '';
+                description = "Crate/API integration targets";
+                order = builtins.map (target: target.id) integrationTargets;
+                commands = mkCargoTestCommands integrationTargets;
               };
 
               system = {
-                description = "Black-box conductor/process/protocol tests";
-                ci = rustCi;
-                runtimeInputs = pkgs: [
-                  pkgs.cargo
-                  pkgs.git
-                  pkgs.rustc
-                ];
-                exec = ''
-                  ${rustRoot}
-                  cargo test --locked \
-                    -p phenix-conductor \
-                    --test black_box_model_tool_loop \
-                    --test stdio_roundtrip
-                '';
+                description = "Black-box conductor/process/protocol targets";
+                order = builtins.map (target: target.id) systemTargets;
+                commands = mkCargoTestCommands systemTargets;
               };
 
               product = {
                 description = "Nix-installed product/package smoke checks";
-                ci = {
-                  enable = true;
-                  stage = "product";
-                  name = "Product";
-                  timeoutMinutes = 60;
-                };
-                runtimeInputs = pkgs: [
-                  pkgs.git
-                  pkgs.nix
+                order = [
+                  "phenix"
+                  "stitch-runtime"
+                  "stitch-mcp"
                 ];
-                exec = ''
-                  ${repositoryRoot}
-                  system="$(nix eval --impure --raw --expr builtins.currentSystem)"
-
-                  nix build --no-link --print-build-logs \
-                    ".#checks.$system.phenix-product-smoke" \
-                    ".#checks.$system.stitch-runtime-smoke" \
-                    ".#checks.$system.stitch-mcp-package"
-                '';
+                commands = {
+                  phenix = mkProductCommand {
+                    check = "phenix-product-smoke";
+                    description = "Installed Phenix product smoke";
+                    stepName = "Phenix product smoke";
+                  };
+                  stitch-runtime = mkProductCommand {
+                    check = "stitch-runtime-smoke";
+                    description = "Installed Stitch runtime smoke";
+                    stepName = "Stitch runtime smoke";
+                  };
+                  stitch-mcp = mkProductCommand {
+                    check = "stitch-mcp-package";
+                    description = "Stitch MCP package build";
+                    stepName = "Stitch MCP package";
+                  };
+                };
               };
             };
           };

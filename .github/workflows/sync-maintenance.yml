@@ -1,0 +1,41 @@
+name: Maintenance projection sync
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Format Nix and regenerate workflow
+        run: |
+          set -euo pipefail
+          nix develop --command bash -c \
+            'find . -type f -name "*.nix" -not -path "./.git/*" -print0 | xargs -0 -r nixfmt'
+
+          system="$(nix eval --impure --raw --expr builtins.currentSystem)"
+          nix eval --raw \
+            ".#packages.$system.phenix-maintenance.phenixMaintenance.ci.github.workflow" \
+            > .github/workflows/ci.yml
+
+          tar -czf maintenance-projection.tar.gz \
+            .github/workflows/ci.yml \
+            modules/development.nix \
+            vendor/phenix-flake-maintenance/lib
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: maintenance-projection
+          path: maintenance-projection.tar.gz
