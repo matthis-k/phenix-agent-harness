@@ -20,9 +20,6 @@ jobs:
     name: Maintenance checks
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    env:
-      CARGO_HOME: ${{ runner.temp }}/phenix-cargo-home
-      CARGO_TARGET_DIR: ${{ runner.temp }}/phenix-cargo-target
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
@@ -38,6 +35,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export CARGO_HOME="$RUNNER_TEMP/phenix-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/phenix-cargo-target"
 
           provider='.#packages.x86_64-linux.phenix-maintenance.phenixMaintenance'
           schema="$(nix eval "$provider.ci.schemaVersion")"
