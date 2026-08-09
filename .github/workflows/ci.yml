@@ -16,7 +16,6 @@ concurrency:
 
 jobs:
   plan:
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: Discover maintenance stages
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -56,14 +55,13 @@ jobs:
           printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
 
   maintenance:
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     needs: plan
     name: Maintenance / ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ matrix.timeout }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
     env:
       CARGO_HOME: ${{ runner.temp }}/phenix-cargo-home
       CARGO_TARGET_DIR: ${{ runner.temp }}/phenix-cargo-target
@@ -91,7 +89,7 @@ jobs:
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
 
   checks:
-    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    if: ${{ always() }}
     needs:
       - plan
       - maintenance
