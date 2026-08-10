@@ -1,25 +1,70 @@
-# Lua frontend configuration
+# Neovim frontend and Lua authoring
 
-Lua is a first-class **authoring surface** for the native frontend and the policy submitted to the Phenix conductor. It does not own conductor runtime state, downstream ACP sessions, or Ratatui widgets.
+`phenix.nvim` is the interactive Phenix frontend. It uses Neovim's native buffers, windows, editing, navigation, folds, and keymaps and communicates with `phenix-conductor` over ACP stdio.
 
-The architectural boundary is described in the root [`README.md`](../README.md). This document is only the user-facing Lua API reference.
+Lua has two distinct roles:
 
-## Loading
+1. ordinary Neovim/plugin configuration through `require("phenix").setup(...)`;
+2. Phenix orchestration **authoring** through `phenix.acp.*` in the selected Phenix configuration file.
 
-The native frontend loads built-in Lua defaults first unless `--no-default-config` is used, then evaluates `init.lua` from the selected configuration directory.
+Neither role owns conductor runtime state, routing execution, workflows, or downstream ACP sessions.
 
-Configuration is discovered under the Phenix Harness XDG config directory or selected explicitly with `-c/--config DIR`. In either case, the entry point is `<DIR>/init.lua`.
+## Plugin setup
 
-```sh
-phenix --config /nix/store/...-phenix-config
-phenix --print-default-config
+A minimal existing-Neovim setup is:
+
+```lua
+require("phenix").setup({})
 ```
 
-`--print-default-config` prints the built-in Lua defaults.
+The packaged `phenix` executable already supplies the packaged conductor, `nui.nvim`, plugin runtime path, and example configuration.
+
+Supported setup overrides currently include:
+
+```lua
+require("phenix").setup({
+  conductor_command = "phenix-conductor",
+  config_file = "/path/to/phenix-harness/init.lua",
+})
+```
+
+Without `config_file`, the plugin checks `PHENIX_CONFIG_DIR/init.lua`, then `$XDG_CONFIG_HOME/phenix-harness/init.lua` (or `~/.config/phenix-harness/init.lua`). A missing configuration is allowed, but `session/new` will only succeed when the conductor has enough configuration to create its standard session projection.
+
+## Commands
+
+```vim
+:PhenixOpen [cwd]
+:PhenixNew [cwd]
+:PhenixPrompt [text]
+:PhenixConfig
+:PhenixCancel
+:PhenixClose
+```
+
+`PhenixOpen` creates a Phenix tab containing a transcript and composer. The transcript is a normal Markdown buffer. The composer is a normal editable buffer in a split.
+
+The frontend intentionally does not define a replacement navigation vocabulary. Use normal Neovim motions, scrolling, search, selection, registers, marks, and window commands. Thinking/tool sections are native folds, so ordinary fold commands such as `zo` and `zc` apply.
+
+The only default composer actions are semantic Phenix actions: normal-mode `<CR>` submits and insert-mode `<C-s>` submits. Users may remap these or call the Lua API directly.
+
+## Lua plugin API
+
+```lua
+local phenix = require("phenix")
+
+phenix.open({ cwd = vim.fn.getcwd() })
+phenix.new({ cwd = "/path/to/repo" })
+phenix.prompt("inspect this repository")
+phenix.config()
+phenix.cancel()
+phenix.close()
+```
+
+`phenix.current()` returns the current tab's active Phenix session when one exists.
 
 ## ACP authoring
 
-Lua may describe the application configuration submitted through `_phenix/config/apply`:
+The selected Phenix `init.lua` is evaluated in an authoring environment containing `phenix.acp`. It describes the application configuration that the plugin submits through `_phenix/config/apply`.
 
 ```lua
 phenix.acp.configure({
@@ -69,7 +114,7 @@ phenix.acp.workflow("workflows/custom.md")
 phenix.acp.routing_table({ source = source, format = "markdown" })
 ```
 
-Structured and external sources converge through the same canonical Phenix definition parser. Lua does not maintain separate workflow semantics.
+Structured definitions are converted into canonical definition sources and parsed/validated by the conductor-side Phenix domain boundary. Lua does not maintain separate workflow execution semantics.
 
 ### Routing tables
 
@@ -96,107 +141,16 @@ phenix.acp.routing_table({
 
 Difficulty is typed runtime policy, not prompt text. Routing policy belongs to the conductor after configuration is applied.
 
-## Keymaps
+## Session configuration
 
-```lua
-phenix.keymap.set("sidebar", ">", function()
-  phenix.ui.pane.resize("ui.sidebar", "horizontal", 2)
-end, { desc = "Grow sidebar" })
+ACP session configuration options returned by `session/new` are shown by `:PhenixConfig`. The frontend uses NUI menus for this transient choice surface and submits the selected value through `session/set_config_option`.
 
-phenix.keymap.del("global", "<C-q>")
-phenix.keymap.clear("transcript")
-```
+Model, mode, thinking-level, and future ACP configuration categories therefore do not require dedicated permanent frontend pages when the ACP option model already represents the interaction.
 
-Scopes are semantic frontend contexts. Neovim-style notation and explicit modifier notation are accepted, for example:
+## UI boundary
 
-```lua
-"<C-d>"
-"<M-CR>"
-"<S-Tab>"
-"ctrl+d"
-"alt+enter"
-```
+There is deliberately no `phenix.keymap`, `phenix.theme`, `phenix.layout`, `phenix.input`, or generic pane API.
 
-Unmapped printable input falls through to the native input editor when appropriate.
+Those previous frontend abstractions existed to recreate editor behavior inside Ratatui. In the Neovim frontend they would duplicate native facilities. Configure Neovim directly for presentation and editor behavior; keep `phenix.nvim` APIs semantic and agent-specific.
 
-## Application actions
-
-Application actions emit semantic frontend/runtime intents:
-
-```lua
-phenix.action.submit()
-phenix.action.steer()
-phenix.action.follow_up()
-phenix.action.abort()
-phenix.action.quit()
-phenix.action.login()
-phenix.action.models()
-phenix.action.sessions()
-phenix.action.toggle_details()
-phenix.action.close_overlay()
-```
-
-They do not invoke a particular downstream agent directly.
-
-## UI commands
-
-Lua may manipulate existing typed frontend state:
-
-```lua
-phenix.ui.focus.set("ui.input")
-phenix.ui.focus.move("left")
-phenix.ui.focus.move("next")
-
-phenix.ui.pane.resize("ui.sidebar", "horizontal", 4)
-phenix.ui.pane.set_size("ui.sidebar", "horizontal", 32)
-phenix.ui.pane.show("ui.sidebar")
-phenix.ui.pane.hide("ui.sidebar")
-phenix.ui.pane.toggle("ui.sidebar")
-phenix.ui.pane.scroll("ui.transcript", 10)
-
-phenix.ui.invalidate()
-```
-
-These commands act on Rust-owned panes. Lua does not own the pane tree or renderer.
-
-## Input and overlays
-
-```lua
-phenix.input.insert("text")
-phenix.input.backspace()
-phenix.input.delete()
-phenix.input.move_left()
-phenix.input.move_right()
-phenix.input.history_previous()
-phenix.input.history_next()
-
-phenix.overlay.next()
-phenix.overlay.previous()
-phenix.overlay.accept()
-phenix.overlay.cancel()
-```
-
-Overlay acceptance is semantic; the frontend resolves it against the active model picker, authentication flow, session picker, or extension dialog.
-
-## Theme
-
-Themes use semantic highlight groups rather than Ratatui-specific style values:
-
-```lua
-phenix.theme.set("Accent", {
-  fg = "#89b4fa",
-  bg = "#1e1e2e",
-  bold = true,
-})
-
-phenix.theme.del("Tool")
-phenix.theme.reset()
-```
-
-Colors may be `#RRGGBB`, named terminal colors, palette indices, or RGB tables.
-
-## Window composition
-
-Window composition is currently Rust-owned. There is deliberately no `phenix.layout.*` constructor API.
-
-If a more general window API is introduced, it should operate on stable typed pane/window identities and remain renderer-neutral. The TUI should continue to consume that shared model rather than becoming a special-case layout runtime.
+NUI is currently used for bounded menus/dialogs. It should not grow into a parallel editor, renderer, or authoritative layout model.
