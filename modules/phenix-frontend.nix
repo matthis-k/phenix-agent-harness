@@ -75,9 +75,7 @@ _:
         }:
         let
           configArgument = pkgs.lib.optionalString (configDir != null) ''--config "${configDir}"'';
-          wrapperArguments =
-            (pkgs.lib.optional (!loadDefaults) "--no-default-config")
-            ++ extraArgs;
+          wrapperArguments = (pkgs.lib.optional (!loadDefaults) "--no-default-config") ++ extraArgs;
         in
         pkgs.writeShellApplication {
           inherit name;
