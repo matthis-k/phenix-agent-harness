@@ -1,8 +1,0 @@
-[package]
-name = "phenix-frontend-config"
-version = "0.1.0"
-edition = "2021"
-publish = false
-
-[dependencies]
-phenix-ui-core = { path = "../phenix-ui-core" }
