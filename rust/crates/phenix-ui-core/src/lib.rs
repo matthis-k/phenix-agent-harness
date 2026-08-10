@@ -27,7 +27,7 @@ pub use state::{
     TranscriptState, VisibleRun,
 };
 pub use transcript::{
-    group_transcript_turns, TranscriptDetailKind, TranscriptTurn, TranscriptTurnDetail,
+    group_transcript_turns, TranscriptTurn, TranscriptTurnItem, TranscriptTurnItemKind,
 };
 pub use view::{
     FocusTarget, InputEditor, OverlayState, PaneViewState, RichBlockViewport, ScrollState,
