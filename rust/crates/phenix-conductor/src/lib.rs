@@ -81,7 +81,7 @@ pub struct ConductorRuntime {
 }
 
 impl ConductorRuntime {
-    pub fn new(
+    pub(crate) fn new(
         conductor: PhenixConductor,
         definition_id: phenix_acp::DefinitionId,
         standard_session: Option<BootstrapStandardSession>,
