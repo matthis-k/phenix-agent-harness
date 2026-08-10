@@ -2,6 +2,7 @@
 
 mod gateway;
 mod permission;
+mod process_transport;
 mod projection;
 mod state;
 mod terminal;
@@ -25,20 +26,20 @@ use phenix_acp::acp::schema::v1::{
     WaitForTerminalExitRequest,
 };
 use phenix_acp::acp::schema::ProtocolVersion;
-use phenix_acp::acp::{AcpAgent, Agent, Client, ConnectionTo};
+use phenix_acp::acp::{Agent, Client, ConnectionTo};
 use phenix_runtime_api::{
     AgentBackend, AuthFlowId, BackendCommand, BackendError, BackendEvent, BackendOutputSender,
     BackendReply, BackendRequest, CommandSource, CommandSummary, ExternalCommand,
     NotificationLevel, PersistedSessionTreeSnapshot, RunId, RunState, SessionEntrySummary,
     SessionId, StreamingBehavior, TranscriptBlock, TranscriptRole,
 };
+use process_transport::BlockingAcpAgent;
 use projection::{apply_session_notification, apply_terminal_event, finish_prompt};
 use state::{thinking_level_value, AdapterState, PendingPrompt};
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::Arc;
@@ -115,7 +116,7 @@ impl AgentBackend for AcpAgentBackend {
             config,
             startup_requests,
         } = *self;
-        let agent = AcpAgent::from_str(&config.command)
+        let agent = BlockingAcpAgent::from_command(&config.command, config.cwd.clone())
             .map_err(|error| BackendError::Start(error.to_string()))?;
         let (request_tx, request_rx) = mpsc::unbounded();
         let stop_relay = Arc::new(AtomicBool::new(false));
@@ -188,7 +189,7 @@ impl RuntimeState {
 }
 
 async fn run_connection(
-    agent: AcpAgent,
+    agent: BlockingAcpAgent,
     config: AcpBackendConfig,
     startup_requests: Vec<ExtRequest>,
     requests: mpsc::UnboundedReceiver<BackendRequest>,
