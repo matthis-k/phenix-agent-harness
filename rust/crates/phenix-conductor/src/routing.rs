@@ -1,6 +1,6 @@
 use phenix_acp::{
-    BackendId, GatewayError, ModelConfig, RouterId, RoutingDecision, RoutingRequest, RoutingTable,
-    SessionRouter, SessionTreeId, ThinkingLevel,
+    BackendId, Difficulty, GatewayError, ModelConfig, RoleId, RouterId, RoutingDecision,
+    RoutingRequest, RoutingTable, SessionRouter, SessionTreeId, ThinkingLevel,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
@@ -35,6 +35,7 @@ struct RoutingCatalog {
     default_router: RouterId,
     routers: BTreeMap<RouterId, RoutingTable>,
     models: Vec<ModelConfig>,
+    available_backends: Vec<BackendId>,
 }
 
 impl SessionPolicyRouter {
@@ -51,10 +52,12 @@ impl SessionPolicyRouter {
         }
 
         let mut seen = BTreeSet::new();
+        let mut backend_ids = BTreeSet::new();
         let mut models = Vec::new();
         for router in routers.values() {
             for rule in router.rules() {
                 for (_, model) in rule.models().iter() {
+                    backend_ids.insert(model.backend.clone());
                     let key = model_value(model);
                     if seen.insert(key) {
                         models.push(model.clone());
@@ -68,6 +71,7 @@ impl SessionPolicyRouter {
                 default_router,
                 routers,
                 models,
+                available_backends: backend_ids.into_iter().collect(),
             }),
             selections: Arc::new(Mutex::new(BTreeMap::new())),
         })
@@ -150,6 +154,32 @@ impl SessionPolicyRouter {
         }))
     }
 
+    pub(crate) fn resolve_root_model(
+        &self,
+        tree_id: &SessionTreeId,
+        selection: &SessionRoutingSelection,
+        role: RoleId,
+        difficulty: Difficulty,
+        objective: String,
+        thinking: ThinkingLevel,
+    ) -> Result<ModelConfig, GatewayError> {
+        let request = RoutingRequest {
+            tree_id: tree_id.clone(),
+            parent_node: None,
+            role,
+            difficulty,
+            objective,
+            workflow: None,
+            available_backends: self.catalog.available_backends.clone(),
+        };
+        let mut model = self.route_selection(selection.clone(), &request)?.model;
+        // Thinking remains independently controlled by the session. Selecting a
+        // routing profile chooses backend/provider/model, while the current
+        // thinking setting is preserved.
+        model.thinking = thinking;
+        Ok(model)
+    }
+
     pub(crate) fn set_selection(
         &self,
         tree_id: &SessionTreeId,
@@ -169,20 +199,12 @@ impl SessionPolicyRouter {
             .remove(tree_id);
         Ok(())
     }
-}
 
-impl SessionRouter for SessionPolicyRouter {
-    fn route(&self, request: &RoutingRequest) -> Result<RoutingDecision, GatewayError> {
-        let selection = self
-            .selections
-            .lock()
-            .map_err(|_| GatewayError::routing("session routing selection lock poisoned"))?
-            .get(&request.tree_id)
-            .cloned()
-            .unwrap_or_else(|| {
-                SessionRoutingSelection::Routing(self.catalog.default_router.clone())
-            });
-
+    fn route_selection(
+        &self,
+        selection: SessionRoutingSelection,
+        request: &RoutingRequest,
+    ) -> Result<RoutingDecision, GatewayError> {
         match selection {
             SessionRoutingSelection::Routing(router_id) => self
                 .catalog
@@ -212,6 +234,21 @@ impl SessionRouter for SessionPolicyRouter {
     }
 }
 
+impl SessionRouter for SessionPolicyRouter {
+    fn route(&self, request: &RoutingRequest) -> Result<RoutingDecision, GatewayError> {
+        let selection = self
+            .selections
+            .lock()
+            .map_err(|_| GatewayError::routing("session routing selection lock poisoned"))?
+            .get(&request.tree_id)
+            .cloned()
+            .unwrap_or_else(|| {
+                SessionRoutingSelection::Routing(self.catalog.default_router.clone())
+            });
+        self.route_selection(selection, request)
+    }
+}
+
 fn selection_value(selection: &SessionRoutingSelection) -> String {
     match selection {
         SessionRoutingSelection::Routing(router) => format!("routing/{router}"),
@@ -226,7 +263,7 @@ fn model_value(model: &ModelConfig) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_acp::{parse_routing_table, Difficulty, RoleId, SessionTreeId, WorkflowId};
+    use phenix_acp::{parse_routing_table, SessionTreeId, WorkflowId};
 
     const ROUTER_A: &str = r#"
 # Router A
@@ -298,6 +335,34 @@ id: router.b
         let decision = policy.route(&request(&tree_id)).expect("route");
         assert_eq!(decision.model.model.as_str(), "model-b");
         assert_eq!(policy.current_value(&tree_id).unwrap(), "routing/router.b");
+    }
+
+    #[test]
+    fn selected_routing_profile_resolves_the_root_model_immediately() {
+        let policy = policy();
+        let tree_id = SessionTreeId::parse("tree-root-routing").expect("tree id");
+        let backend = BackendId::parse("test").expect("backend id");
+        let selection = policy
+            .resolve_selection(
+                &tree_id,
+                "routing/router.b",
+                &backend,
+                ThinkingLevel::High,
+            )
+            .expect("selection");
+
+        let model = policy
+            .resolve_root_model(
+                &tree_id,
+                &selection,
+                RoleId::parse("coordinator").expect("role id"),
+                Difficulty::D2,
+                "root objective".to_owned(),
+                ThinkingLevel::High,
+            )
+            .expect("root model");
+        assert_eq!(model.model.as_str(), "model-b");
+        assert_eq!(model.thinking, ThinkingLevel::High);
     }
 
     #[test]
