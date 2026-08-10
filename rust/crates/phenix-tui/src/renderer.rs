@@ -4,7 +4,7 @@ use crate::terminal_media::{TerminalImagePlacement, TerminalMediaRenderer};
 use crate::theme::{panel, surface_style, theme_style};
 use crate::transcript::{transcript_document, TranscriptDocument};
 use phenix_frontend_config::{FrontendConfig, FrontendProviderRef, ThemeConfig};
-use phenix_runtime_api::{AuthPrompt, ExtensionUiRequest, ObjectiveState, RunSummary};
+use phenix_runtime_api::{AuthPrompt, ExtensionUiRequest, ObjectiveState, RunState, RunSummary};
 use phenix_ui_core::{
     command_completions, AppState, ElementId, FocusTarget, InputEditor, OverlayState,
 };
@@ -13,7 +13,7 @@ use ratatui::crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
     execute,
 };
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Margin, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
@@ -193,10 +193,20 @@ fn workspace_pane(focused: bool, theme: &ThemeConfig) -> Block<'static> {
             if focused { "BorderFocused" } else { "Border" },
         ))
         .style(surface_style(theme, "Surface"))
+        .padding(ratatui::widgets::Padding::horizontal(1))
 }
 
 fn flat_surface(theme: &ThemeConfig) -> Block<'static> {
-    Block::new().style(surface_style(theme, "Surface"))
+    Block::new()
+        .style(surface_style(theme, "Surface"))
+        .padding(ratatui::widgets::Padding::horizontal(1))
+}
+
+fn common_field_area(area: Rect) -> Rect {
+    area.inner(Margin {
+        horizontal: 1,
+        vertical: 0,
+    })
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
@@ -209,12 +219,12 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &Th
         .map_or_else(|| "no run".to_owned(), ToString::to_string);
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(" Phenix ", theme_style(theme, "Accent")),
+            Span::styled("Phenix", theme_style(theme, "Accent")),
             Span::styled(format!("  {session}"), theme_style(theme, "Normal")),
             Span::styled(format!("  → {target}"), theme_style(theme, "Muted")),
         ]))
         .style(surface_style(theme, "Normal")),
-        area,
+        common_field_area(area),
     );
 }
 
@@ -330,32 +340,15 @@ fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &T
         .constraints([
             Constraint::Length(3),
             Constraint::Length(1),
-            Constraint::Length(3),
-            Constraint::Length(1),
             Constraint::Fill(2),
             Constraint::Length(1),
             Constraint::Fill(1),
         ])
         .split(area);
 
-    render_health_section(frame, sections[0], state, theme);
-    render_session_section(frame, sections[2], state, theme);
-    render_runs_section(frame, sections[4], state, theme);
-    render_objectives_section(frame, sections[6], state, theme);
-}
-
-fn render_health_section(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
-    frame.render_widget(flat_surface(theme), area);
-    frame.render_widget(
-        Paragraph::new(vec![
-            section_heading("Health", theme),
-            Line::styled(
-                format!("  {:?}", state.connection),
-                connection_style(state, theme),
-            ),
-        ]),
-        area,
-    );
+    render_session_section(frame, sections[0], state, theme);
+    render_runs_section(frame, sections[2], state, theme);
+    render_objectives_section(frame, sections[4], state, theme);
 }
 
 fn render_session_section(
@@ -367,16 +360,16 @@ fn render_session_section(
     frame.render_widget(flat_surface(theme), area);
     frame.render_widget(
         Paragraph::new(vec![
-            section_heading("Session", theme),
+            section_heading("Session tree", theme),
             Line::styled(
                 state
                     .active_session
                     .as_ref()
-                    .map_or_else(|| "  —".to_owned(), |session| format!("  {session}")),
+                    .map_or_else(|| "—".to_owned(), ToString::to_string),
                 theme_style(theme, "Normal"),
             ),
         ]),
-        area,
+        common_field_area(area),
     );
 }
 
@@ -385,7 +378,7 @@ fn render_runs_section(frame: &mut Frame<'_>, area: Rect, state: &AppState, them
     let mut lines = vec![section_heading("Runs", theme)];
     let visible = state.visible_runs();
     if visible.is_empty() {
-        lines.push(Line::styled("  none", theme_style(theme, "Muted")));
+        lines.push(Line::styled("none", theme_style(theme, "Muted")));
     } else {
         for (index, entry) in visible.iter().enumerate() {
             let Some(run) = state.run(&entry.id) else {
@@ -437,7 +430,7 @@ fn render_runs_section(frame: &mut Frame<'_>, area: Rect, state: &AppState, them
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
             .scroll((scroll, 0)),
-        area,
+        common_field_area(area),
     );
 }
 
@@ -461,9 +454,12 @@ fn render_objectives_section(
                 ])
             }));
         }
-        _ => lines.push(Line::styled("  none", theme_style(theme, "Muted"))),
+        _ => lines.push(Line::styled("none", theme_style(theme, "Muted"))),
     }
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
+    frame.render_widget(
+        Paragraph::new(lines).wrap(Wrap { trim: false }),
+        common_field_area(area),
+    );
 }
 
 fn render_inspector(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &ThemeConfig) {
@@ -472,11 +468,6 @@ fn render_inspector(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: 
     frame.render_widget(block, area);
 
     let mut lines = vec![section_heading("Runtime", theme)];
-    lines.push(key_value_line(
-        "connection",
-        format!("{:?}", state.connection),
-        theme,
-    ));
     if let Some(session) = &state.active_session {
         lines.push(key_value_line("session", session.to_string(), theme));
     }
@@ -605,16 +596,6 @@ fn key_value_line(key: &str, value: String, theme: &ThemeConfig) -> Line<'static
         Span::styled(format!("  {key}: "), theme_style(theme, "Muted")),
         Span::styled(value, theme_style(theme, "Normal")),
     ])
-}
-
-fn connection_style(state: &AppState, theme: &ThemeConfig) -> ratatui::style::Style {
-    match &state.connection {
-        phenix_ui_core::RuntimeConnectionState::Ready => theme_style(theme, "Success"),
-        phenix_ui_core::RuntimeConnectionState::Starting => theme_style(theme, "Warning"),
-        phenix_ui_core::RuntimeConnectionState::Degraded(_) => theme_style(theme, "Warning"),
-        phenix_ui_core::RuntimeConnectionState::Failed(_) => theme_style(theme, "Error"),
-        phenix_ui_core::RuntimeConnectionState::Stopped => theme_style(theme, "Muted"),
-    }
 }
 
 fn objective_marker(state: &ObjectiveState) -> &'static str {
@@ -796,30 +777,55 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &Th
     let thinking = selected_run
         .and_then(|run| run.thinking_level.as_ref())
         .map(|level| format!("thinking: {level:?}"));
-    let run_state = selected_run.map(|run| format!("run: {:?}", run.state));
     let statuses = state
         .statuses
         .values()
         .cloned()
         .collect::<Vec<_>>()
         .join(" · ");
-    let line = [
-        format!("{:?}", state.connection),
-        model,
-        thinking.unwrap_or_default(),
-        run_state.unwrap_or_default(),
-        statuses,
-    ]
-    .into_iter()
-    .filter(|part| !part.is_empty())
-    .collect::<Vec<_>>()
-    .join("  ·  ");
+    let mut spans = vec![
+        Span::styled("model: ", theme_style(theme, "Muted")),
+        Span::styled(model, theme_style(theme, "Accent")),
+    ];
+    if let Some(thinking) = thinking {
+        spans.extend([
+            Span::styled("  ·  thinking: ", theme_style(theme, "Muted")),
+            Span::styled(thinking, theme_style(theme, "Warning")),
+        ]);
+    }
+    if let Some(run) = selected_run {
+        spans.extend([
+            Span::styled("  ·  run: ", theme_style(theme, "Muted")),
+            Span::styled(
+                format!("{:?}", run.state),
+                run_state_style(&run.state, theme),
+            ),
+        ]);
+    }
+    if !statuses.is_empty() {
+        spans.extend([
+            Span::styled("  ·  ", theme_style(theme, "Muted")),
+            Span::styled(statuses, theme_style(theme, "Normal")),
+        ]);
+    }
     frame.render_widget(
-        Paragraph::new(line)
+        Paragraph::new(Line::from(spans))
+            .alignment(Alignment::Right)
             .style(surface_style(theme, "Surface"))
             .wrap(Wrap { trim: true }),
-        area,
+        common_field_area(area),
     );
+}
+
+fn run_state_style(state: &RunState, theme: &ThemeConfig) -> ratatui::style::Style {
+    match state {
+        RunState::Completed => theme_style(theme, "Success"),
+        RunState::Failed | RunState::Cancelled | RunState::Orphaned => theme_style(theme, "Error"),
+        RunState::Created | RunState::Starting | RunState::Waiting | RunState::Completing => {
+            theme_style(theme, "Warning")
+        }
+        RunState::Running => theme_style(theme, "Accent"),
+    }
 }
 
 fn render_unknown_pane(

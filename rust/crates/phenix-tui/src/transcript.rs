@@ -132,6 +132,15 @@ fn render_turn(
         state,
         theme,
     } = context;
+    if selected {
+        lines.push(Line::from(vec![
+            Span::styled("▸ ", theme_style(theme, "Accent")),
+            Span::styled(
+                "Selected turn",
+                theme_style(theme, "Accent").add_modifier(Modifier::BOLD),
+            ),
+        ]));
+    }
     if let Some(user) = &turn.user {
         lines.extend(user_message_lines(user, width, theme));
         lines.push(Line::default());
@@ -569,6 +578,24 @@ mod tests {
         let document = transcript_document(&state, &ThemeConfig::default(), 50);
         assert_eq!(document.turn_ranges.len(), 2);
         assert!(document.turn_ranges[1].start >= document.turn_ranges[0].end + TURN_GAP_LINES);
+    }
+
+    #[test]
+    fn selected_turn_has_visible_transcript_feedback() {
+        let run_id = RunId::parse("run-1").expect("run id");
+        let mut state = AppState {
+            root_run: Some(run_id.clone()),
+            selected_run: Some(run_id.clone()),
+            ..AppState::default()
+        };
+        state.view.focus = phenix_ui_core::FocusTarget::Transcript;
+        state.view.transcript_selected_turn = Some(0);
+        let transcript = state.transcript_mut(run_id);
+        transcript.append(block("u1", TranscriptRole::User, "question"));
+        transcript.append(block("a1", TranscriptRole::Assistant, "answer"));
+
+        let document = transcript_document(&state, &ThemeConfig::default(), 50);
+        assert_eq!(line_text(&document.lines[0]), "▸ Selected turn");
     }
 
     #[test]
