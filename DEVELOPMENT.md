@@ -2,7 +2,7 @@
 
 The flake is the single owner of the development toolchain, maintenance provider, Nix package checks, and shipped products. There is no separate devenv environment or lockfile.
 
-Repository maintenance is declared once in Nix through Phenix Flake Maintenance and materialized as the namespaced flake provider `packages.<system>.phenix-maintenance`. The generated executable is `maintenance`; local development and CI invoke the same command implementations.
+Repository maintenance is declared once in Nix through `phenix-flake-ci` and materialized as the namespaced flake provider `packages.<system>.phenix-maintenance`. The generated executable is `maintenance`; local development, git hooks, and CI invoke the same command implementations.
 
 ## Development shell
 
@@ -68,7 +68,7 @@ Product derivations must not rerun the Rust unit/integration/system suites. Carg
 
 ## CI provider
 
-The Nix maintenance declaration controls both **what runs** and **how granularly it is presented** in CI.
+The Nix maintenance declaration controls both **what runs** and **how granularly it is presented** in CI. The reusable command/rendering machinery comes from the `phenix-flake-ci` input; the harness keeps its own source, Rust, integration, system, and product policy in `modules/development.nix`.
 
 A command opts into CI with `ci.enable`. An enabled command is one visible CI step. `ci.stage` assigns that step to a job; commands with the same stage share a job, while different stages become different jobs. Job-level metadata such as runner, timeout, dependencies, and shared environment is declared alongside that stage metadata.
 
@@ -82,13 +82,15 @@ This makes granularity a repository choice rather than a framework constant:
 
 The harness currently keeps Rust leaves in one `Rust` job so they share `CARGO_HOME` and `CARGO_TARGET_DIR`, while Clippy, unit tests, doc tests, every declared Cargo integration/system target, and product checks appear as distinct GitHub steps.
 
-GitHub Actions must know its step topology before runtime execution, so Phenix Flake Maintenance renders `.github/workflows/ci.yml` from the Nix declaration. The committed YAML is a generated projection, not a second command graph. `maintenance check source workflow-sync` evaluates the generated workflow and fails if the committed file differs.
+GitHub Actions must know its step topology before runtime execution, so `phenix-flake-ci` renders `.github/workflows/ci.yml` from the Nix declaration. The committed YAML is a generated projection, not a second command graph. `maintenance check source workflow-sync` evaluates the generated workflow and fails if the committed file differs.
 
 The final `Maintenance checks` job remains the aggregate required status.
 
 ## Pre-commit
 
-The repository hook applies only deterministic mechanical normalization and re-stages paths that were already staged. Inside `nix develop` it calls `maintenance fix`; outside the shell it falls back to:
+The maintenance declaration enables the shared `phenix-flake-ci` pre-commit integration with `gitHooks.preCommit = [ "fix" ]`. Entering `nix develop` installs that generated hook into the repository's Git directory and configures the repository-local `core.hooksPath`; the harness does not carry a second `.githooks` implementation.
+
+The hook records the paths staged before `maintenance fix`, applies deterministic normalization, re-stages only those original paths, and runs `git diff --cached --check`. Outside the development shell it falls back to:
 
 ```sh
 nix develop --command maintenance fix
