@@ -119,6 +119,28 @@ impl ConductorOwner {
         Ok(session)
     }
 
+    pub fn standard_session_config_options(
+        &self,
+        session_id: &str,
+    ) -> Result<serde_json::Value, ConductorOwnerError> {
+        let tree_id = parse_tree_id(session_id)?;
+        self.runtime_for_tree(&tree_id)?
+            .standard_session_config_options(session_id)
+            .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))
+    }
+
+    pub fn set_standard_session_config_option(
+        &mut self,
+        session_id: &str,
+        config_id: &str,
+        value: &serde_json::Value,
+    ) -> Result<serde_json::Value, ConductorOwnerError> {
+        let tree_id = parse_tree_id(session_id)?;
+        self.runtime_for_tree_mut(&tree_id)?
+            .set_standard_session_config_option(session_id, config_id, value)
+            .map_err(|error| ConductorOwnerError::Runtime(error.to_string()))
+    }
+
     pub fn execute_standard_session(
         &mut self,
         session_id: &str,
