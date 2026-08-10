@@ -165,7 +165,7 @@ fn append_chunk(
     if text.is_empty() {
         return Ok(());
     }
-    let key = transcript_stream_key(role, chunk.message_id.as_ref().map(ToString::to_string));
+    let key = transcript_stream_key(&role, chunk.message_id.as_ref().map(ToString::to_string));
     if !session.transcript_blocks.contains_key(&key) && !session.transcript_blocks.is_empty() {
         close_active_transcript_segment(session, outputs)?;
     }
@@ -197,7 +197,7 @@ fn append_chunk(
     Ok(())
 }
 
-fn transcript_stream_key(role: TranscriptRole, message_id: Option<String>) -> String {
+fn transcript_stream_key(role: &TranscriptRole, message_id: Option<String>) -> String {
     message_id.map_or_else(
         || format!("active-{role:?}"),
         |message_id| format!("message-{role:?}-{message_id}"),
@@ -387,8 +387,8 @@ mod tests {
     #[test]
     fn stream_keys_include_role_even_with_message_ids() {
         assert_ne!(
-            transcript_stream_key(TranscriptRole::Thinking, Some("message-1".to_owned())),
-            transcript_stream_key(TranscriptRole::Assistant, Some("message-1".to_owned()))
+            transcript_stream_key(&TranscriptRole::Thinking, Some("message-1".to_owned())),
+            transcript_stream_key(&TranscriptRole::Assistant, Some("message-1".to_owned()))
         );
     }
 
